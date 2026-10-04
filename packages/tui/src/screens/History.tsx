@@ -13,7 +13,7 @@ import type { AppData } from '@agentistics/core'
 import { fmt, fmtCost } from '@agentistics/core'
 import { sessionRows, type SessionRow } from '../selectors'
 import { DataTable, Empty, Pager, type Column } from '../components/Primitives'
-import { COLORS, HARNESS_COLOR, HARNESS_LABEL } from '../theme'
+import { COLORS, harnessColor, harnessLabel } from '../theme'
 import { listPlan, pageWindow } from '../dashboard/view'
 import type { TuiStrings } from '../i18n'
 
@@ -48,7 +48,7 @@ export function History({ data, s, width, height, page }: {
       render: r => (r.live ? `● ${r.label || r.id.slice(0, 8)}` : r.label || r.id.slice(0, 8)),
       color: r => (r.live ? COLORS.success : COLORS.text),
     },
-    { key: 'harness', header: s.harness, width: 13, render: r => HARNESS_LABEL[r.harness], color: r => HARNESS_COLOR[r.harness] },
+    { key: 'harness', header: s.harness, width: 13, render: r => harnessLabel(r.harness), color: r => harnessColor(r.harness) },
     { key: 'project', header: s.project, width: 16, render: r => r.project },
     { key: 'cost', header: s.cost, width: 13, align: 'right', render: r => fmtCost(r.costUSD), color: () => COLORS.accent },
     { key: 'tokens', header: s.tokens, width: 9, align: 'right', render: r => fmt(r.tokens) },

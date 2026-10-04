@@ -79,6 +79,8 @@ export type SessionCommand =
   | { kind: 'open'; task: string; json?: boolean; force?: boolean }
   | { kind: 'attach'; ref: string }
   | { kind: 'kill'; ref: string }
+  /** NATIVE sessions only (`ses_…`): file an ended one away, bring it back, or delete it. */
+  | { kind: 'archive' | 'unarchive' | 'delete'; ref: string }
   | { kind: 'rename'; ref: string; label: string }
   | { kind: 'note'; ref: string; text: string }
   | { kind: 'help' }
@@ -146,6 +148,12 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
     return { kind: head, ref }
   }
 
+  if (head === 'archive' || head === 'unarchive' || head === 'delete') {
+    const ref = argv[1]
+    if (!ref) return { kind: 'error', message: `Usage: agentop session ${head} <ses_…>  (native Agentistics sessions)` }
+    return { kind: head, ref }
+  }
+
   if (head === 'rename') {
     const ref = argv[1]
     const label = argv.slice(2).join(' ').trim()
@@ -163,7 +171,7 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
   if (!isHarness(head)) {
     return {
       kind: 'error',
-      message: `Unknown harness or action: ${head}. Expected one of ${HARNESS_ORDER.join(', ')} — or ls, list, attach, kill, rename, note.`,
+      message: `Unknown harness or action: ${head}. Expected one of ${HARNESS_ORDER.join(', ')} — or ls, list, attach, kill, rename, note, archive, unarchive, delete.`,
     }
   }
 

@@ -41,7 +41,10 @@ export function rowMenuEntries(
 ): MenuEntry[] {
   const find = (a: string) => verbs.find(v => v.action === a)
   const stop = MID_TURN.has(state) ? find('interrupt') : find('kill')
-  const fleet = [find('rename'), stop, find('resume')].filter((v): v is RowVerb => v !== undefined)
+  // `archive` exists only on a NATIVE row (the server offers it nowhere else). `delete` is deliberately
+  // NOT here: it is permanent and this menu acts on a click with no confirmation — it lives in the
+  // session's own menu (`SessionActions`), which asks first.
+  const fleet = [find('rename'), stop, find('resume'), find('archive')].filter((v): v is RowVerb => v !== undefined)
   return [...fleet, ...extra]
 }
 

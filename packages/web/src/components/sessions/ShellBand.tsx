@@ -231,6 +231,11 @@ export interface ShellBandProps {
    */
   fixedTarget?: TerminalTarget
   /**
+   * The session HAS a harness screen. Absent reads as true; `false` for a NATIVE Agentistics
+   * session (UI.UNIFY) — the phone's segment then offers no CLI pane, never one streaming nothing.
+   */
+  cliAvailable?: boolean
+  /**
    * Offered only when there is somewhere to go: the band's "take the whole screen" control.
    *
    * Takes the TARGET this band is showing right now (`cli`/`shell`) — never a bare callback. It
@@ -358,7 +363,7 @@ export interface ShellBandProps {
 }
 
 export function ShellBand({
-  sessionId, cwd, lang, theme, harness, placement = 'docked', onOpenFullscreen, fixedTarget,
+  sessionId, cwd, lang, theme, harness, placement = 'docked', onOpenFullscreen, fixedTarget, cliAvailable,
   barEntries, onBarPick, onBarDrop, onBarMove, studioSeen = true, bottomOccupant = null, shellEnabled = true,
   shellCapable = true, onShellEnabledChange,
   columnHeight = 0, open: openSeed, onOpenChange,
@@ -831,7 +836,7 @@ export function ShellBand({
    */
   const targetSwitch = (
     <BandSegment label={t.whichTerminal} isMobile={isMobile}>
-      {bandSegmentEntries(target, { cli: true, shell: shellEnabled, studio: false }).map(({ id, on }) => (
+      {bandSegmentEntries(target, { cli: cliAvailable !== false, shell: shellEnabled, studio: false }).map(({ id, on }) => (
         <BandSegmentTab
           key={id}
           on={on}

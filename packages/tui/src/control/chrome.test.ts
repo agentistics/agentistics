@@ -44,6 +44,13 @@ import {
   tabUnderline,
   type CockpitContent,
   type TabSpec,
+  attentionCell as attentionCellGL02,
+  attentionRings as attentionRingsGL02,
+  narrowTerminal as narrowTerminalGL07,
+  NARROW_WIDTH as NARROW_WIDTH_GL07,
+  paneStrip as paneStripGL07,
+  stripAt as stripAtGL07,
+  STRIP_ROWS as STRIP_ROWS_GL07,
 } from './chrome.ts'
 import { TAB_ORDER, type ControlService, type ServiceRuntimeState } from './types'
 import { truncate } from '../components/Primitives'
@@ -71,11 +78,27 @@ describe('fitTabs', () => {
     expect(layout.cells[0]!.width).toBe('Help'.length + 2)
   })
 
-  test('the full strip is kept at exactly its measured width and collapses one column below it', () => {
+  test('the full strip is kept at exactly its measured width; one column below it becomes a WINDOW', () => {
     const t = tabs()
     const exact = tabStripWidth(t)
-    expect(fitTabs(t, 'services', exact).kind).toBe('full')
-    expect(fitTabs(t, 'services', exact - 1).kind).toBe('collapsed')
+    const whole = fitTabs(t, 'services', exact)
+    expect(whole.kind === 'full' && whole.window).toBeUndefined()
+    const below = fitTabs(t, 'services', exact - 1)
+    if (below.kind !== 'full' || !below.window) throw new Error('expected a window')
+    // the active tab is always in the window, and the window is a contiguous run of the strip
+    expect(below.cells.some(c => c.id === 'services' && c.active)).toBe(true)
+    const ids = t.map(x => x.id)
+    const at = ids.indexOf(below.cells[0]!.id)
+    expect(below.cells.map(c => c.id)).toEqual(ids.slice(at, at + below.cells.length))
+  })
+
+  test('GL-01: at 106 columns the window shows most of the twelve tabs and says there is more', () => {
+    const w = fitTabs(tabs(), 'home', 106)
+    if (w.kind !== 'full' || !w.window) throw new Error('expected a window')
+    expect(w.cells.map(c => c.id).slice(0, 6)).toEqual(['home', 'code', 'sessions', 'tasks', 'dashboard', 'services'])
+    expect(w.window).toEqual({ prev: false, next: true })
+    // the drawn row (arrows included) fits
+    expect(2 + w.cells.reduce((n, c) => n + c.width + 1, 0) + 2).toBeLessThanOrEqual(106)
   })
 
   test('the threshold follows the translated labels rather than a fixed column count', () => {
@@ -84,8 +107,8 @@ describe('fitTabs', () => {
     expect(tabStripWidth(tabs('pt'))).not.toBe(tabStripWidth(tabs('en')))
   })
 
-  test('the collapsed form names the ACTIVE tab', () => {
-    const layout = fitTabs(tabs(), 'contribute', 30)
+  test('the collapsed form (only one name fits) names the ACTIVE tab', () => {
+    const layout = fitTabs(tabs(), 'contribute', 16)
     expect(layout.kind).toBe('collapsed')
     if (layout.kind !== 'collapsed') throw new Error('unreachable')
     expect(layout.id).toBe('contribute')
@@ -93,9 +116,11 @@ describe('fitTabs', () => {
   })
 
   test('collapsed affordances report the position in the strip', () => {
-    const first = fitTabs(tabs(), 'services', 30)
-    const middle = fitTabs(tabs(), 'logs', 30)
-    const last = fitTabs(tabs(), 'contribute', 30)
+    // The FIRST tab is whatever leads `TAB_ORDER` — named through it, so reordering the strip does
+    // not turn this into a test of which tab happens to be first today.
+    const first = fitTabs(tabs(), TAB_ORDER[0]!, 12)
+    const middle = fitTabs(tabs(), 'logs', 12)
+    const last = fitTabs(tabs(), 'contribute', 16)
     if (first.kind !== 'collapsed' || middle.kind !== 'collapsed' || last.kind !== 'collapsed') {
       throw new Error('expected collapsed')
     }
@@ -111,9 +136,9 @@ describe('fitTabs', () => {
   })
 
   test('an unknown active id still names a tab instead of rendering nameless', () => {
-    const layout = fitTabs(tabs(), 'nope' as never, 20)
+    const layout = fitTabs(tabs(), 'nope' as never, 10)
     if (layout.kind !== 'collapsed') throw new Error('expected collapsed')
-    expect(layout.id).toBe('services')
+    expect(layout.id).toBe(TAB_ORDER[0]!)
   })
 
   test('an empty tab list is a full strip with nothing in it', () => {
@@ -167,9 +192,21 @@ describe('tabUnderline', () => {
   })
 
   test('collapsed, it underlines the one name on the row and not its affordances', () => {
-    const layout = fitTabs(t, 'contribute', 30)
+    const layout = fitTabs(t, 'contribute', 16)
     if (layout.kind !== 'collapsed') throw new Error('expected collapsed')
     expect(tabUnderline(layout)).toBe('  ' + '━'.repeat(layout.label.length))
+  })
+
+  test('windowed, the rule starts after the reserved `‹ ` and still sits under the active cell', () => {
+    const layout = fitTabs(t, 'tasks', 60)
+    if (layout.kind !== 'full' || !layout.window) throw new Error('expected a window')
+    const rule = tabUnderline(layout)
+    let x = 2
+    for (const c of layout.cells) {
+      if (c.active) { expect(rule.slice(x, x + c.width)).toBe('━'.repeat(c.width)); expect(tabAtColumn(layout, x)).toEqual({ kind: 'tab', id: 'tasks' }) }
+      x += c.width + 1
+    }
+    expect(tabAtColumn(layout, 0)).toEqual(layout.window.prev ? { kind: 'prev' } : null)
   })
 
   test('a strip with no tabs underlines nothing rather than throwing', () => {
@@ -289,11 +326,12 @@ describe('headerMeta', () => {
     // Widened with the cell: it now carries the percentage too, so the row it has to survive on is
     // wider than it was. The ASSERTION is the ordering, not the number of columns.
     // Wider than before, because the cell now carries a bar too. The ASSERTION is the ordering.
-    const red = headerMeta({ ...narrow, memory: { used: 14, max: 15, red: true, percent: 91 }, width: 44 })
+    // Wider again for the counter's WORDS (`● 2 need you`).
+    const red = headerMeta({ ...narrow, memory: { used: 14, max: 15, red: true, percent: 91 }, width: 53 })
     expect(red.memory).toContain('91%')
     expect(red.text).toBe('solo')            // the version went first
     // …while a calm budget gives way instead, because it is only informational.
-    const calm = headerMeta({ ...narrow, memory: { used: 3, max: 17, red: false, percent: 62 }, width: 44 })
+    const calm = headerMeta({ ...narrow, memory: { used: 3, max: 17, red: false, percent: 62 }, width: 53 })
     expect(calm.memory).toBe('')
   })
 
@@ -304,7 +342,8 @@ describe('headerMeta', () => {
       mode: 'solo', version: '1.7.4', latestVersion: '1.9.0', attention: 2,
       memory: { used: 3, max: 17, red: false, percent: 62 }, width: 12,
     })
-    expect(meta.alert).toBe('⏳ 2')
+    // At twelve columns the WORDS have gone and the count keeps its dot — the last form it takes.
+    expect(meta.alert).toBe('● 2')
     expect(meta.memory).toBe('')
     expect(meta.update).toBe('')
   })
@@ -1451,5 +1490,122 @@ describe('headerMeta — the central pill survives a missing machineName', () =>
     const meta = headerMeta({ mode: 'solo', version: '1.18.2', width: 200 })
     expect(meta.machine).toBe('')
     expect(meta.machineState).toBeUndefined()
+  })
+})
+
+
+// ---------------------------------------------------------------------------
+// GL-02 — the attention counter's words
+// ---------------------------------------------------------------------------
+
+describe('attentionCell (GL-02)', () => {
+  test('says how many need you, plural-correct in both languages', () => {
+    expect(attentionCellGL02(1, 'en')).toBe('● 1 needs you')
+    expect(attentionCellGL02(2, 'en')).toBe('● 2 need you')
+    expect(attentionCellGL02(1, 'pt')).toBe('● 1 precisa de você')
+    expect(attentionCellGL02(3, 'pt')).toBe('● 3 precisam de você')
+  })
+
+  test('the bell rings on the TRANSITION into waiting, never on the level', () => {
+    expect(attentionRingsGL02(0, 1)).toBe(true)
+    expect(attentionRingsGL02(0, 3)).toBe(true)
+    expect(attentionRingsGL02(1, 1)).toBe(false)
+    expect(attentionRingsGL02(2, 1)).toBe(false)
+    expect(attentionRingsGL02(1, 0)).toBe(false)
+    expect(attentionRingsGL02(0, 0)).toBe(false)
+  })
+
+  test('draws NOTHING at zero — absence is the calm state, never "0 need you"', () => {
+    expect(attentionCellGL02(0, 'en')).toBe('')
+    expect(attentionCellGL02(0, 'pt')).toBe('')
+    expect(headerMeta({ mode: 'solo', version: '1.7.4', attention: 0, width: 80 }).alert).toBe('')
+  })
+
+  test('the header carries the words in the chosen language', () => {
+    expect(headerMeta({ mode: 'solo', version: '1.7.4', attention: 2, width: 80 }).alert).toBe('● 2 need you')
+    expect(headerMeta({ mode: 'solo', version: '1.7.4', attention: 2, lang: 'pt', width: 80 }).alert)
+      .toBe('● 2 precisam de você')
+  })
+
+  test('under width pressure the WORDS go before the number, and the number before the mode', () => {
+    const tight = headerMeta({ mode: 'solo', version: '1.7.4', attention: 4, lang: 'pt', width: 12 })
+    expect(tight.alert).toBe('● 4')
+    expect(tight.text).toBe('solo')
+    for (let width = 0; width <= 90; width++) {
+      for (const lang of ['en', 'pt'] as const) {
+        const meta = headerMeta({ mode: 'member', version: '1.7.3', latestVersion: '1.7.4', attention: 9, lang, width })
+        expect(headerMetaWidth(meta)).toBeLessThanOrEqual(width)
+      }
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// GL-07 — one pane at a time on a narrow terminal
+// ---------------------------------------------------------------------------
+
+describe('narrow cockpit (GL-07)', () => {
+  const content = { services: 30, config: 30, serviceRows: 2, configRows: 4, detailRows: 12 }
+
+  test('the threshold is 100 columns of body, the one the code tab uses too', () => {
+    expect(NARROW_WIDTH_GL07).toBe(100)
+    expect(narrowTerminalGL07(78)).toBe(true)
+    expect(narrowTerminalGL07(99)).toBe(true)
+    expect(narrowTerminalGL07(100)).toBe(false)
+  })
+
+  test('draws exactly ONE pane, under the strip, and never overflows the body', () => {
+    for (const single of ['services', 'config', 'detail'] as const) {
+      for (let height = 1; height <= 40; height++) {
+        const layout = cockpitLayout(78, height, content, { single })
+        expect(layout.kind).toBe('single')
+        const drawn = Object.values(layout.heights).filter(h => h > 0)
+        expect(drawn.length).toBe(1)
+        expect((layout.strip ?? 0) + drawn[0]!).toBeLessThanOrEqual(Math.max(height, 1 + (layout.strip ?? 0)))
+        if (height >= 2) expect((layout.strip ?? 0) + drawn[0]!).toBe(height)
+        expect(layout.leftWidth).toBe(78)
+      }
+    }
+    expect(cockpitLayout(78, 22, content, { single: 'config' }).shown).toBe('config')
+    expect(cockpitLayout(78, 22, content, { single: 'config' }).strip).toBe(STRIP_ROWS_GL07)
+  })
+
+  test('a question or a running task takes the detail pane, whichever pane was asked for', () => {
+    const layout = cockpitLayout(78, 22, content, { single: 'services', question: true })
+    expect(layout.shown).toBe('detail')
+    expect(layout.heights.detail).toBe(21)
+    expect(layout.heights.services).toBe(0)
+  })
+
+  test('only the drawn pane has a rectangle, and it sits under the strip', () => {
+    const layout = cockpitLayout(78, 22, content, { single: 'config' })
+    const rects = cockpitRects(layout)
+    expect(rects.config).toEqual({ x: 0, y: 1, width: 78, height: 21 })
+    expect(rects.detail).toBeNull()
+    expect(rects.services.width * rects.services.height).toBe(0)
+  })
+
+  test('the strip names every pane and marks the shown one; a column resolves back to its pane', () => {
+    const labels = ['services', 'config', 'detail']
+    const cells = paneStripGL07(labels, 1, 78)
+    expect(cells.map(c => c.label)).toEqual(labels)
+    expect(cells.filter(c => c.active).map(c => c.label)).toEqual(['config'])
+    expect(stripAtGL07(cells, labels, cells[2]!.x)).toBe(2)
+    expect(stripAtGL07(cells, labels, 0)).toBe(-1)
+    // Too narrow for all three: the shown one survives, and nothing is wider than the row.
+    const tight = paneStripGL07(labels, 2, 10)
+    expect(tight).toHaveLength(1)
+    expect(tight[0]!.label).toBe('detail')
+  })
+
+  test('the footer names esc on the narrow config pane, and no verb keys on a verbless detail', () => {
+    const s = controlStrings('en')
+    const base = { canAct: true, canStop: true, canOpen: false, panes: 3 }
+    expect(cockpitHints('config', s, { ...base, narrow: true })).toContain(s.keyBack)
+    expect(cockpitHints('config', s, base)).not.toContain(s.keyBack)
+    const verbless = cockpitHints('actions', s, { ...base, canAct: false, narrow: true })
+    expect(verbless).not.toContain(s.keyRun)
+    expect(verbless).not.toContain(s.keyActionMove)
+    expect(verbless).toContain(s.keyBack)
   })
 })

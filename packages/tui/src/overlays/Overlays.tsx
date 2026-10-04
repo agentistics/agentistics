@@ -1,7 +1,7 @@
 import React from 'react'
 import { Box, Text } from 'ink'
-import type { HarnessId } from '@agentistics/core'
-import { COLORS, HARNESS_COLOR, HARNESS_LABEL } from '../theme'
+import type { SurfaceHarnessId } from '@agentistics/core'
+import { COLORS, harnessColor, harnessLabel } from '../theme'
 import { windowOffset } from '../control/nav'
 import type { TuiStrings } from '../i18n'
 
@@ -23,7 +23,7 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 export function FilterOverlay({ s, options, selected, max = Number.MAX_SAFE_INTEGER }: {
   s: TuiStrings
   /** null is the "all harnesses" entry, always first. */
-  options: (HarnessId | null)[]
+  options: (SurfaceHarnessId | null)[]
   selected: number
   /**
    * How many rows the list may draw.
@@ -42,10 +42,10 @@ export function FilterOverlay({ s, options, selected, max = Number.MAX_SAFE_INTE
     <Panel title={s.filterTitle}>
       {shown.map((h, n) => {
         const i = from + n
-        const label = h === null ? s.filterAll : HARNESS_LABEL[h]
+        const label = h === null ? s.filterAll : harnessLabel(h)
         const active = i === selected
         return (
-          <Text key={h ?? '__all__'} color={h ? HARNESS_COLOR[h] : undefined} inverse={active}>
+          <Text key={h ?? '__all__'} color={h ? harnessColor(h) : undefined} inverse={active}>
             {active ? '❯ ' : '  '}{label}
           </Text>
         )

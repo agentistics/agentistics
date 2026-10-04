@@ -122,6 +122,21 @@ const realScheduleCheckpoint = (run: () => void, delayMs: number): (() => void) 
  */
 const INSERT_SQL =
   `INSERT OR IGNORE INTO events (${STORED_COLUMNS.join(', ')}) VALUES (${STORED_COLUMNS.map(() => '?').join(', ')})`
+/**
+ * B6.6: the RARE event types — a vocabulary of a few rows in a journal of millions (memory). v2 keeps
+ * no secondary index on purpose (A1.7: every index costs every append), so a type read would walk the
+ * whole table. Instead each rare event's rowid is ALSO written to `rare_events`, in the SAME
+ * transaction as the event (it cannot drift from the table), and `readTypes` reads through it. Created
+ * on open, outside the numbered migrations: an older build ignores an extra table, while a
+ * `user_version` bump would make it refuse the whole journal.
+ */
+export const RARE_EVENT_TYPES: readonly string[] = [
+  'memory.noted', 'memory.forgotten',
+  // ART.2: the artifact store's metadata — a handful per session, read back by kind.
+  'artifact.created', 'artifact.versioned', 'artifact.blocked', 'artifact.pinned', 'artifact.unpinned', 'artifact.expired',
+]
+const RARE_DDL = 'CREATE TABLE IF NOT EXISTS rare_events (rowid INTEGER PRIMARY KEY, type TEXT NOT NULL)'
+
 const PAGE_SQL =
   `SELECT rowid AS cursor_rowid, ${STORED_COLUMNS.join(', ')} FROM events WHERE rowid > ? ORDER BY rowid LIMIT ?`
 
@@ -211,6 +226,10 @@ function disabledJournal(where: Where, reason: JournalDisabledReason): Journal {
       return { written: 0, duplicates: 0, rejected: plan.rejected }
     },
     async readFrom(cursor) {
+      assertCursor(cursor)
+      return { events: [], cursor }
+    },
+    async readTypes(_types, cursor) {
       assertCursor(cursor)
       return { events: [], cursor }
     },
@@ -332,6 +351,9 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
     let headStmt: ReturnType<Database['query']>
     try {
       const insert = db.prepare(INSERT_SQL) as unknown as InsertStmt
+      db.exec(RARE_DDL)
+      const addRare = db.prepare('INSERT OR IGNORE INTO rare_events (rowid, type) VALUES (last_insert_rowid(), ?)')
+      const rare = new Set(RARE_EVENT_TYPES)
       const findString = db.prepare('SELECT id FROM event_strings WHERE s = ?')
       const addString = db.prepare('INSERT INTO event_strings (s) VALUES (?)')
       insertTx = db.transaction((rows: JournalRow[]) => {
@@ -349,8 +371,10 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
         let written = 0
         let duplicates = 0
         for (const row of rows) {
-          if (insertRow(insert, encodeRow(row, intern)) === 1) written++
-          else duplicates++
+          if (insertRow(insert, encodeRow(row, intern)) === 1) {
+            written++
+            if (rare.has(row.type)) addRare.run(row.type)
+          } else duplicates++
         }
         return { written, duplicates, fresh }
       }) as unknown as typeof insertTx
@@ -451,6 +475,28 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
           // A read that fails (an I/O error) is an empty page with the cursor unchanged — a poller
           // retries from the same place rather than skipping ahead — and is COUNTED, because the
           // page alone reads exactly like "nothing new".
+          counters.failedReads++
+          return { events: [], cursor }
+        }
+      },
+
+      async readTypes(types, cursor, limit): Promise<ReadPage> {
+        assertCursor(cursor)
+        const n = clampLimit(limit)
+        // Only the rare types are recorded aside; asking for another would read nothing, silently.
+        const wanted = [...new Set(types)].filter(t => RARE_EVENT_TYPES.includes(t))
+        if (n === 0 || wanted.length === 0 || state === 'closed') return { events: [], cursor }
+        try {
+          const cols = STORED_COLUMNS.map(c => `e.${c}`).join(', ')
+          const sql = `SELECT e.rowid AS cursor_rowid, ${cols} FROM rare_events r JOIN events e ON e.rowid = r.rowid WHERE r.type IN (${wanted.map(() => '?').join(', ')}) AND r.rowid > ? ORDER BY r.rowid LIMIT ?`
+          const raw = db.query(sql).all(...wanted, cursor, n) as (StoredRow & { cursor_rowid: number })[]
+          if (raw.length === 0) return { events: [], cursor }
+          const events = raw.map(r => {
+            const { cursor_rowid: _rowid, ...row } = r
+            return rowToEvent(decodeRow(row as StoredRow, lookup))
+          })
+          return { events, cursor: Number(raw[raw.length - 1]!.cursor_rowid) }
+        } catch {
           counters.failedReads++
           return { events: [], cursor }
         }

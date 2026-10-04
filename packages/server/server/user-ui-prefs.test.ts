@@ -60,8 +60,8 @@ describe('reading', () => {
   })
 
   test('an account document keeps known keys with any JSON value', () => {
-    expect(readUserUiPrefs({ theme: 'light', fleetOpen: false, centralMachine: null, cardOrder: ['a'], other: 1 }))
-      .toEqual({ theme: 'light', fleetOpen: false, centralMachine: null, cardOrder: ['a'] })
+    expect(readUserUiPrefs({ theme: 'light', textScale: 2, fleetOpen: false, centralMachine: null, cardOrder: ['a'], other: 1 }))
+      .toEqual({ theme: 'light', textScale: 1.5, fleetOpen: false, centralMachine: null, cardOrder: ['a'] })
   })
 
   test('junk yields an empty document instead of throwing', () => {
@@ -84,6 +84,11 @@ describe('writing on a machine', () => {
 })
 
 describe('parseUserUiPut', () => {
+  test('textScale is numeric, clamped, and round-trips through the preference patch', () => {
+    expect(parseUserUiPut({ textScale: 2 })).toEqual({ ok: true, patch: { textScale: 1.5 } })
+    expect(parseUserUiPut({ textScale: 0.5 })).toEqual({ ok: true, patch: { textScale: 0.85 } })
+    expect(parseUserUiPut({ textScale: 'large' })).toEqual({ ok: false, error: 'bad_value', key: 'textScale' })
+  })
   test('any JSON value is accepted for a known key', () => {
     expect(parseUserUiPut({ theme: 'light', fleetOpen: true, monthlyBudgetUSD: null, cardOrder: ['x'], taskBoard: { view: 'table' } }).ok).toBe(true)
   })

@@ -57,6 +57,8 @@ import {
   BAND_CONTROL_H, BandResizeHandle, PanelBar, PanelFixedControls, PanelPinButton, useBandDrag, useBandDropTarget,
   type BandOverflowEntry,
 } from './bandControls'
+import { NativeChatHost } from './NativeChatHost'
+import { isNativeSessionId } from '../../lib/sessionRoute'
 import { PanelGapDots } from './PanelGap'
 import { PANEL_FULLSCREEN_Z } from '../../lib/zLayers'
 
@@ -84,8 +86,8 @@ export interface SessionPanelProps {
   row?: FleetRow
   lang: 'pt' | 'en'
   theme: 'dark' | 'light'
-  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; occurrence?: number })
-    => Promise<{ ok: boolean; message: string; id?: string }>
+  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; occurrence?: number; confirm?: boolean })
+    => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean }>
   authorName?: string
   /** Called after a verb that removes the row — the panel has nothing left to show. */
   onGone?: () => void
@@ -219,6 +221,19 @@ export function SessionPanel({
    * toggle must give one answer, and this is the one place that could quietly disagree.
    */
   const chattable = session.conversationBlind === undefined && !relayed
+  /**
+   * A NATIVE Agentistics session (UI.UNIFY) opens in THIS shell like every harness. What it lacks is
+   * a SCREEN — the runtime is no process in a pane — so the one view and the one tab that are a
+   * screen (`terminal` here, `cli` in the bottom bar) are absent rather than present and dead; the
+   * conversation comes through the chat's `ChatSource` seam (`NativeChatHost`).
+   */
+  const native = isNativeSessionId(session.id)
+  /**
+   * NO SCREEN agentop can show: a native session (no process in a pane) and an EXTERNAL one (EXT.OPEN
+   * — its pane, if any, is somebody else's terminal). Its conversation reads like any other; the
+   * screen-only parts are absent until a write continues it here, where it gets one.
+   */
+  const screenless = native || session.id.startsWith('external:')
 
   // Uncontrolled (mobile, self-contained) unless the caller hands in `onViewChange` — see the
   // module header. The local state is still declared unconditionally (hooks can't be), it is just
@@ -227,7 +242,7 @@ export function SessionPanel({
   const controlled = onViewChange !== undefined
   const view = controlled ? (viewProp ?? 'chat') : localView
   const setView = controlled ? onViewChange! : setLocalView
-  const active: SessionView = chattable ? view : 'terminal'
+  const active: SessionView = screenless && chattable ? 'chat' : chattable ? view : 'terminal'
 
   /**
    * WHERE THE STUDIO SITS — `lib/panelSlots.ts`, design §1. Read through `resolveForViewport` with
@@ -278,6 +293,7 @@ export function SessionPanel({
     shellEnabled: shellEnabled === true,
     relayed,
     hardwareOffered: hardwareOffered === true,
+    screen: !screenless,
   }
   const bottomIds = bottomPanels(slotLayout)
   // GATED — a stale `bottom: 'shell'` left over from before the switch turned off reads as `'cli'`
@@ -422,7 +438,15 @@ export function SessionPanel({
             was sent into ANOTHER after switching rows mid-request, with every button in the new
             session's composer stuck on a spinner that belonged to the old one. Per-session state
             must not outlive the session, and a `key` is how React is told that. */}
-        {active === 'chat' ? (
+        {active === 'chat' && native ? (
+          <NativeChatHost
+            key={session.id}
+            session={session} {...(row ? { row } : {})} lang={lang} act={act}
+            {...(onArtifacts ? { onArtifacts } : {})}
+            {...(metrics ? { metrics } : {})}
+            {...(onOpened ? { onReopened: onOpened } : {})}
+          />
+        ) : active === 'chat' ? (
           <SessionChat
             key={session.id}
             session={session} {...(row ? { row } : {})} lang={lang} act={act}
@@ -502,6 +526,8 @@ export function SessionPanel({
         <ShellBand
           key={session.id}
           sessionId={session.id}
+          // No harness SCREEN behind a native session: the band holds its shell only.
+          {...(screenless ? { fixedTarget: 'shell' as const, cliAvailable: false } : {})}
           {...(session.cwd ? { cwd: session.cwd } : {})}
           {...(onOpenShellFullscreen ? { onOpenFullscreen: onOpenShellFullscreen } : {})}
           {...(session.harness ? { harness: session.harness } : {})}

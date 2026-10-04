@@ -21,9 +21,9 @@
  */
 
 /**
- * A NATIVE Agentistics session (`ses_` + 32 hex, minted by the engine). It is not a fleet row — no
- * process, no tmux — so the route sends it to its own chat (`NativeSessionPage`) rather than through
- * the fleet's page, which would wait for a row that never comes.
+ * A NATIVE Agentistics session (`ses_` + 32 hex, minted by the engine). It opens in the same
+ * workspace as every harness (UI.UNIFY); the id decides only where its row verbs and its chat are
+ * read from (`nativeFleet.ts`, `NativeChatHost`) and that it has no terminal screen.
  */
 export function isNativeSessionId(id: string | undefined): boolean {
   return id !== undefined && /^ses_[0-9a-f]{32}$/.test(id)

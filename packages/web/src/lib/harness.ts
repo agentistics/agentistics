@@ -1,11 +1,11 @@
-import type { HarnessId, HarnessCapabilities } from '@agentistics/core'
+import type { SurfaceHarnessId, HarnessCapabilities } from '@agentistics/core'
 import { HARNESS_CAPABILITIES } from '@agentistics/core'
 
 /** Anthropic doc explaining Dynamic Workflows (Claude Code's multi-agent orchestration / subagents).
  *  Surfaced as a "what is this?" doc link next to the Dynamic Workflows headings. */
 export const DYNAMIC_WORKFLOWS_DOC = 'https://code.claude.com/docs/en/workflows'
 
-export const HARNESS_LABELS: Record<HarnessId, string> = {
+export const HARNESS_LABELS: Record<SurfaceHarnessId, string> = {
   claude: 'Claude Code',
   codex: 'Codex CLI',
   gemini: 'Gemini CLI',
@@ -13,9 +13,10 @@ export const HARNESS_LABELS: Record<HarnessId, string> = {
   antigravity: 'Antigravity',
   kimi: 'Kimi Code',
   opencode: 'opencode',
+  agentistics: 'Agentistics',
 }
 
-export const HARNESS_COLORS: Record<HarnessId, string> = {
+export const HARNESS_COLORS: Record<SurfaceHarnessId, string> = {
   claude: '#D97706',
   codex: '#10a37f',
   gemini: '#4285f4',
@@ -29,10 +30,12 @@ export const HARNESS_COLORS: Record<HarnessId, string> = {
   // never contributes a real session (see HARNESS_INFO.opencode below), so this colour has no chart
   // to appear in today; it exists because the Record requires an entry.
   opencode: '#06b6d4',
+  // Agentistics' own brand amber-orange, a step off Claude's amber so the two never read as one series.
+  agentistics: '#f97316',
 }
 
 /** Provider name shown in pricing links. */
-export const HARNESS_PROVIDERS: Record<HarnessId, string> = {
+export const HARNESS_PROVIDERS: Record<SurfaceHarnessId, string> = {
   claude: 'Anthropic',
   codex: 'OpenAI',
   gemini: 'Google',
@@ -44,9 +47,11 @@ export const HARNESS_PROVIDERS: Record<HarnessId, string> = {
   // and it can equally run Anthropic/OpenAI/Google models depending on the user's own config. There
   // is no single pricing page to point at, so this names the shape rather than inventing a vendor.
   opencode: 'Multiple providers (opencode routes per model)',
+  // The native harness is a client for ANY provider the person configured, so the page links to none.
+  agentistics: 'Any configured provider (Anthropic, OpenAI-compatible endpoints, Ollama…)',
 }
 
-export function capable(harness: HarnessId, metric: keyof HarnessCapabilities): boolean {
+export function capable(harness: SurfaceHarnessId, metric: keyof HarnessCapabilities): boolean {
   return HARNESS_CAPABILITIES[harness][metric]
 }
 
@@ -71,7 +76,7 @@ export interface HarnessInfo {
   pricingUrl?: string
 }
 
-export const HARNESS_INFO: Record<HarnessId, HarnessInfo> = {
+export const HARNESS_INFO: Record<SurfaceHarnessId, HarnessInfo> = {
   claude: {
     blurb: {
       en: 'The richest source — full token, cost, model, tool, sub-agent and git data, with aggregate history that outlives transcript cleanup.',
@@ -273,8 +278,8 @@ export const HARNESS_INFO: Record<HarnessId, HarnessInfo> = {
       {
         item: { en: 'Prices for Kimi\'s own models', pt: 'Preços dos modelos próprios do Kimi' },
         why: {
-          en: 'Routed provider models (google/…, etc.) price correctly. Kimi-native `kimi-*` ids are not in the pricing table yet, so — like any unknown id on any harness — they would take the shared fallback rate until verified prices are added.',
-          pt: 'Modelos roteados de provedores (google/…, etc.) são precificados corretamente. Os ids nativos `kimi-*` ainda não estão na tabela, então — como qualquer id desconhecido em qualquer harness — usariam a tarifa padrão até que preços verificados sejam adicionados.',
+          en: 'Routed provider models (google/…, etc.) price correctly. Kimi-native `kimi-*` ids are not in the pricing table yet, so — like any unknown id on any harness — their cost shows as unknown (never guessed) until verified prices are added.',
+          pt: 'Modelos roteados de provedores (google/…, etc.) são precificados corretamente. Os ids nativos `kimi-*` ainda não estão na tabela, então — como qualquer id desconhecido em qualquer harness — têm o custo mostrado como desconhecido (nunca estimado) até que preços verificados sejam adicionados.',
         },
       },
       {
@@ -393,6 +398,43 @@ export const HARNESS_INFO: Record<HarnessId, HarnessInfo> = {
     note: {
       en: 'A separate opencode-local.db file exists on some machines (a per-project store from an earlier opencode version); this integration reads only the current global opencode.db and does not merge the two.',
       pt: 'Em algumas máquinas existe também um opencode-local.db separado (um banco por projeto de uma versão anterior do opencode); esta integração lê apenas o opencode.db global atual e não mescla os dois.',
+    },
+  },
+  agentistics: {
+    blurb: {
+      en: 'The native Agentistics harness: sessions run by Agentistics itself (agentop code, the web chat) on the provider you configured. Its figures come from its own journal — every billed model call, counted as it happened.',
+      pt: 'O harness nativo do Agentistics: sessões executadas pelo próprio Agentistics (agentop code, o chat da web) no provedor que você configurou. Os números vêm do próprio diário — cada chamada de modelo cobrada, contada quando aconteceu.',
+    },
+    format: {
+      en: 'No transcript file to parse: the runtime writes canonical events to the Agentistics journal (model.completed, tool.requested, run.started…), and the session store keeps the conversation.',
+      pt: 'Não há arquivo de transcrição para ler: o runtime grava eventos canônicos no diário do Agentistics (model.completed, tool.requested, run.started…) e o armazenamento de sessões guarda a conversa.',
+    },
+    retention: {
+      en: 'Kept until you delete the session (or the journal). Nothing is cleaned up behind your back.',
+      pt: 'Mantido até você apagar a sessão (ou o diário). Nada é limpo pelas suas costas.',
+    },
+    source: [
+      '~/.agentistics/runtime/sessions.db (the session store)',
+      '~/.agentistics/journal (the canonical event journal)',
+    ],
+    contains: [
+      { en: 'Tokens per model call (input, output, cache read, cache write) as the provider reported them', pt: 'Tokens por chamada de modelo (entrada, saída, leitura e escrita de cache) como o provedor informou' },
+      { en: 'Cost — the provider\'s own figure when it stated one, else the pricing table; a model with no price is shown as unknown, never guessed', pt: 'Custo — o valor do próprio provedor quando ele informou, senão a tabela de preços; um modelo sem preço aparece como desconhecido, nunca estimado' },
+      { en: 'Model and provider of every call, the project and repository, the task a session is filed under', pt: 'Modelo e provedor de cada chamada, o projeto e o repositório, a tarefa em que a sessão está arquivada' },
+      { en: 'Tool calls by name, with their errors', pt: 'Chamadas de ferramenta por nome, com os erros' },
+    ],
+    missing: [
+      {
+        item: { en: 'Git line counters, per-turn active time, context gauge', pt: 'Contadores de linhas do Git, tempo ativo por turno, medidor de contexto' },
+        why: {
+          en: 'The journal does not carry them for native sessions yet, so they show as not measured rather than as zero.',
+          pt: 'O diário ainda não os traz para sessões nativas, então aparecem como não medidos em vez de zero.',
+        },
+      },
+    ],
+    note: {
+      en: 'Experimental: the native harness only shows where `agentop experimental enable` is on.',
+      pt: 'Experimental: o harness nativo só aparece onde `agentop experimental enable` está ligado.',
     },
   },
 }

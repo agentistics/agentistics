@@ -7,7 +7,7 @@ import {
   EyeOff, ClipboardList,
 } from 'lucide-react'
 import type { AppContext, } from '../lib/app-context'
-import type { SessionMeta, MemberPresence, HarnessId, WorkflowRun, WorkflowAgent } from '@agentistics/core'
+import type { SessionMeta, MemberPresence, SurfaceHarnessId, WorkflowRun, WorkflowAgent } from '@agentistics/core'
 import { repoShortName, fmt, fmtCost, fmtDuration, formatProjectName, formatModel, calcCost, sessionCostUSD, sessionLabel, workflowTokens, NO_REPO_KEY, sessionTokenTotal, totalTokens, totalTokensExplained } from '@agentistics/core'
 import { TokenBreakdownLine } from '../components/TokenBreakdownLine'
 import { capable, HARNESS_LABELS, HARNESS_COLORS, DYNAMIC_WORKFLOWS_DOC } from '../lib/harness'
@@ -82,7 +82,7 @@ export default function RepoDetailPage() {
   const sessions = scoped.filteredSessions
   const ciSessions = sessions.filter(s => s.ci)
   const workflows = (data.workflows ?? []).filter(w => sessionIds.has(w.sessionId))
-  const harnessOf = (w: WorkflowRun): HarnessId => sessionByIdWf.get(w.sessionId)?.harness ?? 'claude'
+  const harnessOf = (w: WorkflowRun): SurfaceHarnessId => sessionByIdWf.get(w.sessionId)?.harness ?? 'claude'
 
   const title = linked ? repoShortName(remote) : (folderPath.split('/').filter(Boolean).pop() || (pt ? 'Sem repositório' : 'No repository'))
   const host = linked ? remote.split('/')[0]! : ''
@@ -445,7 +445,7 @@ interface MemberAgg {
   commits: number; linesAdded: number; linesRemoved: number; files: number
   agents: number; durationMin: number; durationUnmeasured: number
   interruptions: number; errors: number
-  models: Set<string>; harnesses: Set<HarnessId>; firstActive: string; lastActive: string
+  models: Set<string>; harnesses: Set<SurfaceHarnessId>; firstActive: string; lastActive: string
   byDay: Record<string, number>; byHour: Record<number, number>
 }
 

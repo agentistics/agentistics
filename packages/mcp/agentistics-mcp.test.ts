@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { HARNESS_ORDER, type HarnessId } from "@agentistics/core";
+import { HARNESS_ORDER, SURFACE_HARNESS_ORDER, type HarnessId } from "@agentistics/core";
 import { harnessParam, HARNESS_IDS } from "./session-tokens.js";
 
 /**
@@ -11,8 +11,9 @@ import { harnessParam, HARNESS_IDS } from "./session-tokens.js";
 test("All HarnessIds from core must be in the MCP HARNESS_IDS", () => {
   const expectedHarnesses: HarnessId[] = ["claude", "codex", "gemini", "copilot", "antigravity", "kimi", "opencode"];
 
-  // HARNESS_IDS should be the same as HARNESS_ORDER
-  expect(HARNESS_IDS).toEqual(HARNESS_ORDER);
+  // HARNESS_IDS is every SURFACE harness: the adapters (HARNESS_ORDER) plus the native one.
+  expect(HARNESS_IDS).toEqual(SURFACE_HARNESS_ORDER);
+  expect(HARNESS_IDS).toContain("agentistics");
 
   // HARNESS_ORDER should include all expected harnesses
   expect(HARNESS_ORDER).toContain("kimi");
@@ -37,8 +38,8 @@ test("harnessParam() includes all harnesses and 'all'", () => {
   // Should include kimi
   expect(param.enum).toContain("kimi");
 
-  // Should include all harnesses from HARNESS_ORDER
-  for (const harness of HARNESS_ORDER) {
+  // Should include every surface harness, the native one included
+  for (const harness of SURFACE_HARNESS_ORDER) {
     expect(param.enum).toContain(harness);
   }
 });

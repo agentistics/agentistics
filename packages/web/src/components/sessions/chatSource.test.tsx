@@ -1,0 +1,109 @@
+/**
+ * THE SEAM (UI.UNIFY): the standard `SessionChat`, handed a `ChatSource`, draws the source's
+ * conversation inside its OWN shell — the same composer every harness gets — plus the two slots.
+ */
+import { afterAll, describe, expect, test } from 'bun:test'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { MemoryRouter } from 'react-router-dom'
+import { SessionChat } from './SessionChat'
+import type { ChatSource } from './chatSource'
+import type { ControlSession } from '@agentistics/tui/control/session-fleet'
+
+// Render-to-string only: `useIsMobile` reads `window.innerWidth` in an initializer, effects never run
+// (the RepoSearchView.test.tsx pattern) — and the window this file made is removed when it is done.
+const env = globalThis as unknown as { window?: unknown }
+const windowIsOurs = env.window === undefined
+env.window ??= { innerWidth: 1280, location: { protocol: 'http:', hostname: 'localhost' } }
+afterAll(() => { if (windowIsOurs) delete env.window })
+
+const SID = 'ses_' + 'a'.repeat(32)
+const session = {
+  id: SID, title: 'Fix the parser', harness: 'agentistics', cwd: '/w', project: 'w', state: 'working', stateLabel: 'working',
+  actionable: true, attached: false, conversationId: SID,
+  searchFields: { name: '', folder: '', harness: '', note: '', task: '', prompt: '' },
+} as ControlSession
+const noAct = async () => ({ ok: true, message: '' })
+
+function render(source?: ChatSource): string {
+  return renderToStaticMarkup(
+    <MemoryRouter><SessionChat session={session} lang="en" act={noAct} {...(source ? { source } : {})} /></MemoryRouter>,
+  )
+}
+
+describe('SessionChat with a ChatSource', () => {
+  test('the source\'s turns, live text and slots render inside the standard composer shell', () => {
+    const html = render({
+      turns: [{ role: 'user', text: 'please fix it' }, { role: 'assistant', text: 'on it' }],
+      working: true, liveText: 'streaming words', act: noAct, canStop: true,
+      approvals: <div data-testid="slot-approval">ask</div>,
+      status: <div data-testid="slot-status">run line</div>,
+    })
+    expect(html).toContain('please fix it')
+    expect(html).toContain('on it')
+    expect(html).toContain('streaming words')
+    expect(html).toContain('slot-approval')
+    expect(html).toContain('slot-status')
+    // The standard composer, not a second one: the field and its toolbar's attach control.
+    expect(html).toContain('<textarea')
+    expect(html).toContain('Attach file')
+  })
+  test('a source still reading shows the chat\'s own loading state, never an empty conversation', () => {
+    const html = render({ turns: null, working: false, liveText: null, act: noAct, canStop: false })
+    expect(html).not.toContain('please fix it')
+  })
+  test('no source: the CLI path — no source slots, no source turns, the transcript feed decides', () => {
+    const html = render()
+    expect(html).not.toContain('slot-approval')
+    expect(html).not.toContain('streaming words')
+  })
+})
+
+describe('ReasoningBlock — the native reasoning, collapsed above the answer', () => {
+  test('closed by default: the label shows, the reasoning text does not, the answer does', async () => {
+    const { ChatBubble } = await import('./ChatBubble')
+    const html = renderToStaticMarkup(<MemoryRouter><ChatBubble turn={{ role: 'assistant', text: 'The answer.', reasoning: 'secret plan' }} lang="pt" harness="agentistics" /></MemoryRouter>)
+    expect(html).toContain('Raciocínio')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain('secret plan')
+    expect(html).toContain('The answer.')
+  })
+  test('the CLI transcript\'s `thinking` is still not drawn (that decision is untouched)', async () => {
+    const { ChatBubble } = await import('./ChatBubble')
+    const html = renderToStaticMarkup(<MemoryRouter><ChatBubble turn={{ role: 'assistant', text: 'ok', thinking: 'claude thought' }} lang="en" harness="claude" /></MemoryRouter>)
+    expect(html).not.toContain('reasoning-block')
+  })
+})
+
+describe('EXT.OPEN — an external session opens with a working composer', () => {
+  const external = { ...session, id: 'external:claude:c-1', harness: 'claude', state: 'unknown', stateLabel: 'external', actionable: false, conversationId: 'c-1' } as ControlSession
+  const rowWith = (enabled: boolean) => ({
+    id: external.id, title: 't', harness: 'claude', cwd: '/w', project: 'w', state: 'unknown', stateLabel: 'external', actionable: false,
+    conversationId: 'c-1', attachCommand: '',
+    verbs: [{ action: 'prompt', label: 'Send a prompt', enabled }, { action: 'resume', label: 'Reopen', enabled: true }],
+  }) as never
+  const src = { turns: [{ role: 'user' as const, text: 'hello from the terminal' }], working: false, liveText: null, act: noAct, canStop: false }
+  test('prompt enabled on the row: the field is offered, not the Reopen button', () => {
+    const html = renderToStaticMarkup(<MemoryRouter><SessionChat session={external} row={rowWith(true)} lang="en" act={noAct} source={src} /></MemoryRouter>)
+    expect(html).toContain('hello from the terminal')
+    expect(html).not.toContain('>Reopen<')
+  })
+})
+
+describe('the composer context ring for a NATIVE session (from the engine usage)', () => {
+  const stats = {
+    sessionId: 'ses_x', harness: 'agentistics', tokens: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+    conversation: { input: 1, output: 1 }, costUSD: 0.01, context: { fraction: 0.42, used: 84_000, window: 200_000 },
+    messages: { user: 1, assistant: 1 }, subagents: null, git: null, activeMinutes: null, model: 'claude-sonnet-4.6',
+  } as never
+  const metrics = { meta: undefined, currency: 'USD' as const, brlRate: 5, costBasis: 'api' as const, planFactor: null, stats }
+  const src = { turns: [{ role: 'user' as const, text: 'hi' }], working: false, liveText: null, act: noAct, canStop: false }
+  test('the ring draws the engine\'s measured fraction', () => {
+    const html = renderToStaticMarkup(<MemoryRouter><SessionChat session={session} lang="en" act={noAct} metrics={metrics} source={src} /></MemoryRouter>)
+    expect(html).toContain('context at 42%')
+  })
+  test('no measured context: no ring, never 0%', () => {
+    const none = { ...metrics, stats: { ...(stats as object), context: null } as never }
+    const html = renderToStaticMarkup(<MemoryRouter><SessionChat session={session} lang="en" act={noAct} metrics={none} source={src} /></MemoryRouter>)
+    expect(html).not.toContain('context at')
+  })
+})

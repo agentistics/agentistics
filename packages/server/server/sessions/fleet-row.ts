@@ -18,6 +18,9 @@ import type { SessionConversationLink } from '@agentistics/core'
 import { actionWords, sessionActions, type SessionAction } from '@agentistics/tui/control/session-verbs'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import type { ControlStrings } from '@agentistics/tui/control/i18n'
+import type { HarnessId } from '@agentistics/core'
+import { isExternalRowId } from './external-continue'
+import { SPAWN_SPECS } from './spawn-spec'
 
 /**
  * Verbs the WEB cannot perform, whatever the row says.
@@ -38,7 +41,26 @@ const NOT_IN_BROWSER: ReadonlySet<SessionAction> = new Set<SessionAction>([
  * pane to press a key into, so the row carries it explicitly, offered exactly when it can work: on
  * a row agentop hosts that is measurably working.
  */
+/** A NATIVE Agentistics row (`native-fleet.ts`) — the engine's session, not a pane. */
+const isNativeRow = (v: Pick<ControlSession, 'harness'>): boolean => v.harness === 'agentistics'
+
+/**
+ * The two verbs only a NATIVE row takes: archive and delete. Offered only once the session has
+ * ENDED (the engine refuses to delete a session with a run in progress, and archiving a live one
+ * would hide it while it works), with that reason while it has not.
+ */
+function nativeStoreVerbs(v: ControlSession, s: ControlStrings): FleetVerb[] {
+  const ended = v.state === 'closed'
+  const off = ended ? {} : { reason: s.sessionsEndFirst }
+  return [
+    { action: 'archive' as SessionAction, label: s.sessionsArchive, enabled: ended, ...off },
+    { action: 'delete' as SessionAction, label: s.sessionsDelete, enabled: ended, ...off },
+  ]
+}
+
 function interruptVerb(v: ControlSession, s: ControlStrings): FleetVerb {
+  // A native turn is stopped by the chat's own stop button, which knows the run id; the row has none.
+  if (isNativeRow(v)) return { action: 'interrupt' as SessionAction, label: s.sessionsInterrupt, enabled: false, reason: s.sessionsNativeNote }
   const enabled = v.actionable && v.state === 'working'
   return {
     action: 'interrupt' as SessionAction,
@@ -95,6 +117,13 @@ export type FleetActionId =
    * subject comes from `text`.
    */
   | 'reopenFell' | 'deleteTask' | 'broadcast'
+  /**
+   * NATIVE-only (`native-fleet.ts`): file an ended native session away, or delete it. Only a native row
+   * offers them — a pane session has no store of its own to archive or delete from — and both need
+   * the session ENDED first, so neither can remove work that is still running. Deliberately absent
+   * from `machineActions.ts`'s closed list: a central never reaches them.
+   */
+  | 'archive' | 'delete'
 
 export interface FleetActionRequest {
   id: string
@@ -118,6 +147,11 @@ export interface FleetActionRequest {
    * deliberately different; see `selectFell`.
    */
   ids?: string[]
+  /**
+   * EXT.OPEN: the person said YES to ending an external process so its conversation continues here.
+   * Without it a `prompt` to an external row answers `confirm` and changes nothing.
+   */
+  confirm?: boolean
 }
 
 /** How a verb is offered to the page: performable, present-but-refused, or absent. */
@@ -208,6 +242,8 @@ export function verbReason(
   action: SessionAction,
   s: ControlStrings,
 ): string | undefined {
+  // A native row's dimmed verbs are not "started outside agentop" — it is the engine's own session.
+  if (isNativeRow(row)) return action === 'resume' || action === 'kill' ? undefined : s.sessionsNativeNote
   if (row.state === 'unknown' && action !== 'resume') return s.sessionsExternalNote
   if (action === 'approve') return row.dialogBlind ?? row.chooseBlind ?? row.approveBlind ?? row.approvalBlind
   if (action === 'resume' && !row.resume) return row.conversationBlind
@@ -228,9 +264,17 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
         ...(reason ? { reason } : {}),
       }
     })
+  // EXT.OPEN: an EXTERNAL row that named its conversation, on a harness that resumes by id, TAKES a
+  // prompt — the first write continues it here (`external-continue.ts`, `continueExternal`). Every
+  // other external row keeps its refusal: read-only live.
+  if (externalContinuable(row)) {
+    const i = verbs.findIndex(v => v.action === 'prompt')
+    if (i >= 0) verbs[i] = { action: 'prompt', label: verbs[i]!.label, enabled: true }
+  }
   // Appended rather than folded into `sessionActions`: the cockpit answers "stop" with the Escape
   // key inside an attached pane, so it never needed a listed verb. The browser has no pane.
   verbs.push(interruptVerb(row, s))
+  if (isNativeRow(row)) verbs.push(...nativeStoreVerbs(row, s))
   return {
     id: row.id,
     title: row.title,
@@ -255,7 +299,14 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
     ...(row.chooseBlind ? { chooseBlind: row.chooseBlind } : {}),
     ...(row.dialogBlind ? { dialogBlind: row.dialogBlind } : {}),
     ...(row.conversationBlind ? { conversationBlind: row.conversationBlind } : {}),
-    attachCommand: `agentop session attach ${sessionHandleOf(row.id)}`,
+    // A native session has no terminal to attach to — its chat is the way in.
+    attachCommand: isNativeRow(row) ? '' : `agentop session attach ${sessionHandleOf(row.id)}`,
     verbs,
   }
+}
+
+/** EXT.OPEN: an external row a write can CONTINUE here — an exact conversation, a harness that resumes by id. */
+export function externalContinuable(row: Pick<ControlSession, 'id' | 'state' | 'harness' | 'conversationId'>): boolean {
+  return row.state === 'unknown' && isExternalRowId(row.id) && row.conversationId !== undefined
+    && SPAWN_SPECS[row.harness as HarnessId]?.resume !== undefined
 }

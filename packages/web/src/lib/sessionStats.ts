@@ -24,13 +24,13 @@
 
 import {
   HARNESS_CAPABILITIES, calcCost, contextFraction, resolveContextWindow, sessionTokens,
-  type HarnessId, type SessionMeta, type TokenBreakdown,
+  type SurfaceHarnessId, type SessionMeta, type TokenBreakdown,
 } from '@agentistics/core'
 
 export interface SessionStats {
   /** The conversation these numbers are FOR, so a stale panel can be spotted. */
   sessionId: string
-  harness: HarnessId
+  harness: SurfaceHarnessId
   /** All four counters. `null` when the harness reports none. */
   tokens: TokenBreakdown | null
   /** The conversational pair alone — what "sem cache" means on screen. */
@@ -61,7 +61,7 @@ const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v)
  * caller says which of the two it is.
  */
 export function sessionStats(
-  harness: HarnessId,
+  harness: SurfaceHarnessId,
   sessionId: string,
   meta: SessionMeta | undefined,
 ): SessionStats {
@@ -162,8 +162,8 @@ export function sessionStats(
  * one "—".
  */
 export function statReason(
-  harness: HarnessId,
-  metric: keyof (typeof HARNESS_CAPABILITIES)[HarnessId],
+  harness: SurfaceHarnessId,
+  metric: keyof (typeof HARNESS_CAPABILITIES)[SurfaceHarnessId],
 ): StatReason {
   return HARNESS_CAPABILITIES[harness]?.[metric] ? 'unrecorded' : 'harness'
 }

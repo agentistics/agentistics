@@ -15,7 +15,7 @@
 
 import React from 'react'
 import { Box, Text } from 'ink'
-import type { AppData, HarnessId } from '@agentistics/core'
+import type { AppData, SurfaceHarnessId } from '@agentistics/core'
 import { calcStreak } from '@agentistics/core'
 import { Overview } from '../screens/Overview'
 import { Projects } from '../screens/Projects'
@@ -38,6 +38,7 @@ import type { DashboardNav } from './useDashboardNav'
  */
 export { applyHarnessFilter } from './view'
 import type { DashboardFigures } from '../projected-figures'
+import type { CostByTask } from '../control/types'
 
 export interface DashboardViewProps {
   /** `null` while nothing has been read yet — a different sentence from "there is nothing". */
@@ -59,9 +60,11 @@ export interface DashboardViewProps {
    * figure screens draw these instead of the selectors over `data`. `History` always reads `data`.
    */
   figures?: DashboardFigures | null
+  /** EX-01: today's cost by task, for the Overview's panel. */
+  byTask?: CostByTask | null
 }
 
-export function DashboardView({ data, s, width, height, nav, connection, notice, figures = null }: DashboardViewProps) {
+export function DashboardView({ data, s, width, height, nav, connection, notice, figures = null, byTask = null }: DashboardViewProps) {
   const rows = dashboardRows(height)
   const fit = stripFit(s, nav.screen, width)
 
@@ -77,7 +80,7 @@ export function DashboardView({ data, s, width, height, nav, connection, notice,
       ? <Box marginTop={1}><Text color={COLORS.muted}>{notice}</Text></Box>
       : !view
         ? <Box marginTop={1}><Text color={COLORS.accent}>{s.loading}…</Text></Box>
-        : <Screen id={nav.screen} data={view} figures={figures} s={s} width={width} height={rows.body} streak={streak} page={nav.page} />
+        : <Screen id={nav.screen} data={view} figures={figures} s={s} width={width} height={rows.body} streak={streak} page={nav.page} byTask={byTask} filtered={nav.harness !== null} />
 
   return (
     // `flexShrink={0}`: the budget above is this view's contract with whatever frames it, and a Box
@@ -102,7 +105,7 @@ export function DashboardView({ data, s, width, height, nav, connection, notice,
   )
 }
 
-function Screen({ id, data, figures, s, width, height, streak, page }: {
+function Screen({ id, data, figures, s, width, height, streak, page, byTask, filtered }: {
   id: DashboardNav['screen']
   data: AppData
   figures: DashboardFigures | null
@@ -110,11 +113,13 @@ function Screen({ id, data, figures, s, width, height, streak, page }: {
   width: number
   height: number
   streak: number
+  byTask: CostByTask | null
+  filtered: boolean
   /** The page the three LIST screens are on. The others draw no list and ignore it. */
   page: number
 }) {
   switch (id) {
-    case 'overview': return <Overview data={data} figures={figures} s={s} width={width} height={height} streak={streak} />
+    case 'overview': return <Overview data={data} figures={figures} s={s} width={width} height={height} streak={streak} byTask={byTask} filtered={filtered} />
     case 'projects': return <Projects data={data} figures={figures} s={s} width={width} height={height} page={page} />
     case 'history': return <History data={data} s={s} width={width} height={height} page={page} />
     case 'costs': return <Costs data={data} figures={figures} s={s} width={width} height={height} page={page} />

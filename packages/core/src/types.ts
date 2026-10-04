@@ -55,6 +55,11 @@ export interface StatsCache {
 
 export type HarnessId = 'claude' | 'codex' | 'gemini' | 'copilot' | 'antigravity' | 'kimi' | 'opencode'
 
+/** The NATIVE Agentistics harness: a harness on every surface, but with no adapter (no transcript, no spawn spec). */
+export const NATIVE_HARNESS_ID = 'agentistics' as const
+/** Every harness a SURFACE may show: the adapters plus the native one. `HarnessId` stays the ADAPTER set. */
+export type SurfaceHarnessId = HarnessId | typeof NATIVE_HARNESS_ID
+
 export interface HarnessCapabilities {
   tokens: boolean
   cost: boolean
@@ -112,7 +117,7 @@ export interface HarnessCapabilities {
 
 /** Single source of truth for which metrics each harness can produce.
  *  Drives "N/A vs real 0" rendering and what the unified view aggregates. */
-export const HARNESS_CAPABILITIES: Record<HarnessId, HarnessCapabilities> = {
+export const HARNESS_CAPABILITIES: Record<SurfaceHarnessId, HarnessCapabilities> = {
   // `activeTime` — where each harness's per-turn time comes from (docs/harness-contract.md):
   //   claude  → `system`/`turn_duration`.durationMs when present, timestamps otherwise
   //   codex   → `task_complete`.duration_ms (measured by Codex itself)
@@ -165,6 +170,13 @@ export const HARNESS_CAPABILITIES: Record<HarnessId, HarnessCapabilities> = {
   // `canonical/capabilities.ts`, where those same metrics are honestly upgraded to `partial` in the
   // CANONICAL vocabulary (the one gate that is not tied to a legacy adapter existing).
   opencode: { tokens: false, cost: false, model: false, tools: false, agents: false, gitLines: false, dynamicWorkflows: false, activeTime: false, contextWindow: false, compaction: false, skills: false, mcpServers: false },
+  // The NATIVE Agentistics harness (`agentistics`): its sessions are SYNTHESIZED from the journal's
+  // projection facts (`server/native-sessions.ts`), not parsed from a transcript, so a metric is `true`
+  // only where the facts carry it. Tokens, cost and model are real (every billed response is a
+  // `model.completed`; a model with no price is `costUSD: null`, 'desconhecido', never a guess), tool
+  // calls are counted by canonical name. Nothing else is claimed: no git line counters, no agents rollup,
+  // no per-turn timestamps, no context gauge / compaction / skills / MCP-server read-back in a SessionMeta.
+  agentistics: { tokens: true, cost: true, model: true, tools: true, agents: false, gitLines: false, dynamicWorkflows: false, activeTime: false, contextWindow: false, compaction: false, skills: false, mcpServers: false },
 }
 
 /** Display order for harness lists, and the single source of truth for "every harness".
@@ -177,8 +189,25 @@ const HARNESS_SORT: Record<HarnessId, number> = {
   claude: 0, codex: 1, gemini: 2, copilot: 3, antigravity: 4, kimi: 5, opencode: 6,
 }
 
+/** The ADAPTER harnesses, in display order — what has a transcript, a spawn spec, a backup directory and
+ *  a consolidate store. Loops over adapters (backup, journal import, consolidate, spawn) use THIS. */
 export const HARNESS_ORDER: HarnessId[] = (Object.keys(HARNESS_SORT) as HarnessId[])
   .sort((a, b) => HARNESS_SORT[a] - HARNESS_SORT[b])
+
+/** Every harness a SURFACE enumerates (filters, Compare, a harness page, the MCP enums): the adapters,
+ *  then the native one. A surface that lists harnesses uses THIS, never `HARNESS_ORDER` — which is why
+ *  `harnessRegistry.lint.test.ts` fails a surface that reaches for the adapter list. */
+export const SURFACE_HARNESS_ORDER: SurfaceHarnessId[] = [...HARNESS_ORDER, NATIVE_HARNESS_ID]
+
+/** Narrows a surface harness to an ADAPTER one — the only kind with a transcript, a spawn spec or a backup directory. */
+export function isAdapterHarness(h: SurfaceHarnessId | null | undefined): h is HarnessId {
+  return h !== null && h !== undefined && h !== NATIVE_HARNESS_ID
+}
+
+/** Whether this is the native Agentistics harness. */
+export function isNativeHarness(h: SurfaceHarnessId | null | undefined): h is typeof NATIVE_HARNESS_ID {
+  return h === NATIVE_HARNESS_ID
+}
 
 /** One day's share of a session. The four counters plus what a day series needs to be drawn. */
 export interface SessionDayUsage {
@@ -364,7 +393,7 @@ export interface SessionMeta {
    *  dominant model (a single label for a multi-model session is a display convenience only).
    *  Absent for single-model sessions: then `model` alone prices the session. */
   model_usage?: Record<string, ModelUsage>
-  harness: HarnessId
+  harness: SurfaceHarnessId
   /** Owning user in team mode. Undefined for local/Solo sessions. */
   user?: string
   /** Normalized git remote of the session's repo (`host/org/repo`, no protocol) — the
@@ -696,7 +725,7 @@ export interface AppData {
   allSessions: SessionIndex[]
   healthIssues?: HealthIssue[]
   homeDir?: string
-  harnesses: HarnessId[]
+  harnesses: SurfaceHarnessId[]
   /** Team/central only: each member's own raw statsCache, keyed by resolved display name.
    *  Lets the central reproduce the member's authoritative totals (deep Claude history that
    *  only exists aggregated in statsCache, never as individual sessions). Absent on solo. */
@@ -849,8 +878,8 @@ export interface Filters {
   machines?: string[]  // central: empty/undefined = all machines; matches session.memberId (token hash)
   tags?: string[]      // central: empty/undefined = all; a tag narrows to its resolved sessions (tag ids)
   models: string[]     // empty = all models
-  harness?: HarnessId
-  harnesses?: HarnessId[]  // multi-select harness filter; empty/undefined = all harnesses
+  harness?: SurfaceHarnessId
+  harnesses?: SurfaceHarnessId[]  // multi-select harness filter; empty/undefined = all harnesses
   presence?: 'online' | 'offline'  // team/central: filter members by live status; undefined = policy default
 }
 
@@ -1014,16 +1043,12 @@ export interface ModelPrice { input: number; output: number; cacheRead: number; 
 export const UNPRICED_PRICE: Readonly<ModelPrice> = Object.freeze({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0 })
 
 /**
- * The price of a model. **Never a guess** (PRICE.UNKNOWN, owner rule): a model outside the table is UNPRICED
- * on every harness — {@link UNPRICED_PRICE} — its tokens are counted, its cost is `null` through
- * {@link modelCostUSD}, and a surface shows it as {@link UNPRICED_MODEL_LABEL}. (It used to fall back to a
- * Sonnet-class price, which invented spending for every new or third-party model.)
+ * The `MODEL_PRICING` row a model id is priced by — exact, then the longest prefix, then a truncated
+ * id (the resolution `getModelPrice` documents) — or `null` when the table does not know it. Local
+ * models are not table rows and read `null` here too (`isLocalModelId` says why they cost nothing).
  */
-export function getModelPrice(modelId: string): ModelPrice {
-  if (MODEL_PRICING[modelId]) return MODEL_PRICING[modelId]
-  // A model served off the user's own machine costs nothing — a known fact, not a guess. Checked BEFORE
-  // the table so no partial-prefix match can price it. See local-models.ts.
-  if (isLocalModelId(modelId)) return LOCAL_MODEL_PRICE
+export function pricingKey(modelId: string): string | null {
+  if (MODEL_PRICING[modelId]) return modelId
   const id = String(modelId ?? '')
   let forwardKey = ''
   let reverseKey = ''
@@ -1036,7 +1061,21 @@ export function getModelPrice(modelId: string): ModelPrice {
       if (!reverseKey || key.length < reverseKey.length) reverseKey = key
     }
   }
-  const hit = forwardKey || reverseKey
+  return forwardKey || reverseKey || null
+}
+
+/**
+ * The price of a model. **Never a guess** (PRICE.UNKNOWN, owner rule): a model outside the table is UNPRICED
+ * on every harness — {@link UNPRICED_PRICE} — its tokens are counted, its cost is `null` through
+ * {@link modelCostUSD}, and a surface shows it as {@link UNPRICED_MODEL_LABEL}. (It used to fall back to a
+ * Sonnet-class price, which invented spending for every new or third-party model.)
+ */
+export function getModelPrice(modelId: string): ModelPrice {
+  if (MODEL_PRICING[modelId]) return MODEL_PRICING[modelId]
+  // A model served off the user's own machine costs nothing — a known fact, not a guess. Checked BEFORE
+  // the table so no partial-prefix match can price it. See local-models.ts.
+  if (isLocalModelId(modelId)) return LOCAL_MODEL_PRICE
+  const hit = pricingKey(modelId)
   return hit ? MODEL_PRICING[hit]! : UNPRICED_PRICE
 }
 

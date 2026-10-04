@@ -6,9 +6,9 @@
  * same values the web app uses rather than approximated 256-color indices.
  */
 
-import type { HarnessId } from '@agentistics/core'
+import type { SurfaceHarnessId } from '@agentistics/core'
 
-export const COLORS = {
+const DARK = {
   /** Primary accent (Anthropic amber, #f59e0b in the web app). */
   accent: '#f59e0b',
   secondary: '#6366f1',
@@ -34,10 +34,48 @@ export const COLORS = {
    */
   label: '#a1a1aa',
   border: '#3f3f46',
-} as const
+}
+
+export type Palette = { [K in keyof typeof DARK]: string }
+
+/** ST-04: the themes the terminal draws. `dark` is the web dashboard's dark mode (the default). */
+export type ThemeId = 'dark' | 'light' | 'contrast'
+export const THEME_IDS: readonly ThemeId[] = ['dark', 'light', 'contrast']
+
+const PALETTES: Record<ThemeId, Palette> = {
+  dark: DARK,
+  // For a LIGHT terminal background: the web's light-mode inks, dark enough to read on white.
+  light: {
+    accent: '#b45309', secondary: '#4338ca', success: '#047857', running: '#15803d', danger: '#be123c',
+    info: '#0369a1', text: '#18181b', muted: '#52525b', label: '#3f3f46', border: '#a1a1aa',
+  },
+  // Every colour lifted toward the background's opposite: no grey a dim terminal halves into nothing.
+  contrast: {
+    accent: '#fbbf24', secondary: '#a5b4fc', success: '#34d399', running: '#4ade80', danger: '#fb7185',
+    info: '#7dd3fc', text: '#ffffff', muted: '#d4d4d8', label: '#e4e4e7', border: '#a1a1aa',
+  },
+}
+
+/**
+ * The palette every screen reads. ONE object, mutated in place by `applyTheme`, so every
+ * `COLORS.accent` read at render time follows the theme without each screen taking it as a prop —
+ * the shell re-renders after a switch and the whole frame is drawn in the new palette.
+ */
+export const COLORS: Palette = { ...DARK }
+
+let current: ThemeId = 'dark'
+
+export function applyTheme(id: ThemeId): void {
+  current = PALETTES[id] ? id : 'dark'
+  Object.assign(COLORS, PALETTES[current])
+}
+
+export function currentTheme(): ThemeId {
+  return current
+}
 
 /** Mirrors HARNESS_COLORS in packages/web/src/lib/harness.ts — keep the two in step. */
-export const HARNESS_COLOR: Record<HarnessId, string> = {
+export const HARNESS_COLOR: Record<SurfaceHarnessId, string> = {
   claude: '#D97706',
   codex: '#10a37f',
   gemini: '#4285f4',
@@ -48,9 +86,11 @@ export const HARNESS_COLOR: Record<HarnessId, string> = {
   kimi: '#e11d48',
   // Mirrors HARNESS_COLORS.opencode in packages/web/src/lib/harness.ts.
   opencode: '#06b6d4',
+  // Mirrors HARNESS_COLORS.agentistics in packages/web/src/lib/harness.ts.
+  agentistics: '#f97316',
 }
 
-export const HARNESS_LABEL: Record<HarnessId, string> = {
+export const HARNESS_LABEL: Record<SurfaceHarnessId, string> = {
   claude: 'Claude',
   codex: 'Codex',
   gemini: 'Gemini',
@@ -58,4 +98,22 @@ export const HARNESS_LABEL: Record<HarnessId, string> = {
   antigravity: 'Antigravity',
   kimi: 'Kimi',
   opencode: 'opencode',
+  agentistics: 'Agentistics',
+}
+
+/**
+ * A harness's name and colour for ANY id the data carries — the table above, plus the native
+ * harness (`agentistics`, present in the figures once the experimental flag is on) and, for an id
+ * nobody listed yet, the id itself. Indexing the tables directly handed `undefined` to a renderer
+ * that called `.length` on it: the dashboard died the first day native usage reached the figures.
+ */
+export function harnessLabel(id: string | null | undefined): string {
+  if (!id) return 'N/A'
+  if (id === 'agentistics') return 'Agentistics'
+  return (HARNESS_LABEL as Record<string, string>)[id] ?? id
+}
+
+export function harnessColor(id: string | null | undefined): string {
+  if (id === 'agentistics') return COLORS.accent
+  return (id ? (HARNESS_COLOR as Record<string, string>)[id] : undefined) ?? COLORS.label
 }

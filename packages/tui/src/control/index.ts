@@ -16,6 +16,7 @@ import { strings } from '../i18n'
 import type { MouseReport } from './mouse'
 import type { CliLang } from './lang'
 import type { ControlExit, ControlHost, TabId } from './types'
+import type { CodeLaunch } from './code-types'
 
 export interface ControlCenterOptions {
   lang: CliLang
@@ -30,6 +31,12 @@ export interface ControlCenterOptions {
    * every other question. The caller still gets to say "start there", which is what it always meant.
    */
   setup?: boolean
+  /**
+   * How `agentop code …` opened the app: a first prompt (the wizard opens at the task step carrying
+   * it) or a session to resume. A FIRST-MOUNT instruction — the caller drops it before a remount, or
+   * detaching from an attached session would restart the wizard.
+   */
+  code?: CodeLaunch
 }
 
 /**
@@ -61,7 +68,7 @@ function inkStdout(): NodeJS.WriteStream {
 }
 
 export async function runControlCenter(opts: ControlCenterOptions): Promise<ControlExit> {
-  const { lang, host, tab, setup } = opts
+  const { lang, host, tab, setup, code } = opts
 
   // Ink needs raw mode, which a pipe or a systemd unit cannot give it; it would throw from inside
   // a React effect and surface as a reconciler stack. One sentence and a non-zero code instead.
@@ -111,7 +118,7 @@ export async function runControlCenter(opts: ControlCenterOptions): Promise<Cont
   // `createElement` rather than JSX so this entry can stay a `.ts` file: it is imported by the
   // server, and a `.tsx` extension there would drag JSX settings into a module that renders nothing.
   const app = render(
-    React.createElement(ControlCenter, { host, lang, initial: { tab, setup }, onExit, mouse }),
+    React.createElement(ControlCenter, { host, lang, initial: { tab, setup, ...(code ? { code } : {}) }, onExit, mouse }),
     {
       stdin: input.stdin,
       // THE FRAME MUST NOT GO THROUGH `process.stdout.write` — see `inkStdout`.
@@ -128,9 +135,12 @@ export async function runControlCenter(opts: ControlCenterOptions): Promise<Cont
   // Ink rejects its OWN exit promise when a tab throws during render, and `exited` is settled only
   // by `onExit` — so without racing the two, a crash would leave the process alive on an empty
   // alternate buffer with no prompt, which reads as a hang rather than as a failure.
+  // The crash's error is KEPT and printed once the primary screen is back: a render error used to
+  // end the process with code 1 and not one word, which reads as the app quitting on its own.
+  let crash: unknown = null
   const crashed: Promise<ControlExit> = app.waitUntilExit().then(
     () => ({ kind: 'quit', code: 0 }),
-    () => ({ kind: 'quit', code: 1 }),
+    (err: unknown) => { crash = err; return { kind: 'quit', code: 1 } },
   )
 
   try {
@@ -148,6 +158,7 @@ export async function runControlCenter(opts: ControlCenterOptions): Promise<Cont
     // Disables tracking as well as restoring the buffer — see `altScreen.leave`. A process that
     // returned from here with the mouse still on would leave the user's shell typing `<35;40;12M`.
     altScreen.leave()
+    if (crash) process.stderr.write(`agentop: the control center stopped on an error — ${crash instanceof Error ? (crash.stack ?? crash.message) : String(crash)}\n`)
   }
 }
 
@@ -205,3 +216,17 @@ export { TAB_ORDER, DEFAULT_SESSION_VIEW } from './types'
 // which persists whichever one was chosen — names that type rather than keeping a copy of the list.
 export type { SessionGroupingId } from './session-dimensions'
 export type { CliLang } from './lang'
+export type {
+  CodeAsk,
+  CodeAvailability,
+  CodeDefaults,
+  CodeEvent,
+  CodeHost,
+  CodeLaunch,
+  CodeResult,
+  CodeSessionFacts,
+  CodeStartInput,
+  CodeTaskOption,
+  CodeToolCall,
+  CodeUsage,
+} from './code-types'

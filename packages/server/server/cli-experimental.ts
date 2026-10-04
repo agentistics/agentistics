@@ -30,6 +30,8 @@ const T = {
     back: 'The server is back and reports the new state.',
     notBack: 'The service was restarted but the server did not answer with the new state in time. Check `agentop status`.',
     failed: (m: string) => `The restart failed: ${m}`,
+    already: (on: boolean) => `Experimental is already ${on ? 'enabled' : 'disabled'}: nothing changed, so nothing was restarted.`,
+    alreadyButServer: (on: boolean) => `The preference is already ${on ? 'enabled' : 'disabled'}, but the running server reports ${on ? 'off' : 'on'} (an environment override, or a server started before the change). Nothing was restarted; run \`agentop restart server\` to apply it.`,
   },
   pt: {
     usage: 'Uso: agentop experimental <enable|disable|status>',
@@ -46,6 +48,8 @@ const T = {
     back: 'O servidor voltou e informa o novo estado.',
     notBack: 'O serviço foi reiniciado, mas o servidor não respondeu com o novo estado a tempo. Veja `agentop status`.',
     failed: (m: string) => `O reinício falhou: ${m}`,
+    already: (on: boolean) => `O modo experimental já está ${on ? 'ligado' : 'desligado'}: nada mudou, então nada foi reiniciado.`,
+    alreadyButServer: (on: boolean) => `A preferência já está ${on ? 'ligada' : 'desligada'}, mas o servidor em execução informa ${on ? 'desligado' : 'ligado'} (uma variável de ambiente, ou um servidor iniciado antes da mudança). Nada foi reiniciado; rode \`agentop restart server\` para aplicar.`,
   },
 } as const
 
@@ -65,8 +69,7 @@ export function statusLines(pref: boolean | undefined, rows: ExperimentalStatus[
 }
 
 /** The running server's own answer, when there is one (`GET /api/experimental`). */
-async function askServer(): Promise<{ enabled: boolean; features: ExperimentalStatus[] } | null> {
-  const port = process.env.PORT ?? '47291'
+async function askServer(port: string | number = process.env.PORT ?? '47291'): Promise<{ enabled: boolean; features: ExperimentalStatus[] } | null> {
   try {
     const res = await fetch(`http://127.0.0.1:${port}/api/experimental`, { signal: AbortSignal.timeout(2000) })
     if (!res.ok) return null
@@ -74,18 +77,46 @@ async function askServer(): Promise<{ enabled: boolean; features: ExperimentalSt
   } catch { return null }
 }
 
-async function waitForState(enabled: boolean, timeoutMs = 25000): Promise<boolean> {
+/** The port THIS data dir's server listens on (its recorded ports, while it holds the lock), else `PORT`. */
+async function ownServerPort(): Promise<number> {
+  const { AGENTISTICS_DATA_DIR, PORT, WEB_PORT, serverLockFile } = await import('./config')
+  const { probeInstanceLock } = await import('./single-instance')
+  const { bounceTarget, readServerPorts } = await import('./server-ports')
+  const t = bounceTarget({
+    lockHolder: await probeInstanceLock(serverLockFile()).catch(() => null),
+    recorded: await readServerPorts(AGENTISTICS_DATA_DIR), cliPort: PORT, cliWebPort: WEB_PORT,
+  })
+  return t.kind === 'server' ? t.port : PORT
+}
+
+async function waitForState(enabled: boolean, port: number, timeoutMs = 25000): Promise<boolean> {
   const end = Date.now() + timeoutMs
   while (Date.now() < end) {
-    const r = await askServer()
+    const r = await askServer(port)
     if (r && r.enabled === enabled) return true
     await new Promise(res => setTimeout(res, 1000))
   }
   return false
 }
 
-export async function runExperimental(args: string[]): Promise<number> {
-  const lang = await resolveLang()
+/** What `runExperimental` touches outside itself — injectable, so a test never reaches a real unit. */
+export interface ExperimentalDeps {
+  lang?: () => Promise<CliLang>
+  readPrefs?: () => Promise<{ experimental?: boolean }>
+  writePrefs?: (patch: { experimental: boolean }) => Promise<unknown>
+  restart?: () => Promise<{ state: 'nothing-running' | 'restarted' | 'failed'; message: string; port?: number }>
+  askServer?: () => Promise<{ enabled: boolean; features: ExperimentalStatus[] } | null>
+  waitForState?: (enabled: boolean, port: number) => Promise<boolean>
+  log?: (line: string) => void
+  error?: (line: string) => void
+}
+
+export async function runExperimental(args: string[], deps: ExperimentalDeps = {}): Promise<number> {
+  const log = deps.log ?? ((l: string) => console.log(l))
+  const error = deps.error ?? ((l: string) => console.error(l))
+  // THIS data dir's server (its recorded port), never whatever answers on the default one.
+  const ask = deps.askServer ?? (async () => askServer(await ownServerPort()))
+  const lang = await (deps.lang ?? resolveLang)()
   const t = T[lang]
   const verb = args.find(a => !a.startsWith('-'))
   if (verb !== 'enable' && verb !== 'disable' && verb !== 'status') {
@@ -93,7 +124,7 @@ export async function runExperimental(args: string[]): Promise<number> {
     return 1
   }
   if (verb === 'status') {
-    const live = await askServer()
+    const live = await askServer(await ownServerPort())
     if (live) {
       console.log(statusLines(live.enabled, live.features, lang).join('\n'))
       return 0
@@ -104,15 +135,24 @@ export async function runExperimental(args: string[]): Promise<number> {
     return 0
   }
   const enabled = verb === 'enable'
-  await readPreferencesOrExit()
-  await writePreferences({ experimental: enabled })
-  console.log(t.saved(enabled))
-  const { restartForConfigChange } = await import('./cli-start')
-  const r = await restartForConfigChange()
-  if (r.state === 'nothing-running') { console.log(t.nothingRunning); return 0 }
-  if (r.state === 'failed') { console.error(t.failed(r.message)); return 1 }
-  console.log(t.restarting)
-  if (await waitForState(enabled)) { console.log(t.back); return 0 }
-  console.error(t.notBack)
+  const prefs = await (deps.readPrefs ?? readPreferencesOrExit)()
+  // ALREADY in that state: nothing to apply, so nothing is restarted. A repeated `enable` — typed
+  // again, or run by accident (a backquoted `agentop experimental enable` inside a double-quoted
+  // shell string is EXECUTED by the shell) — must never bounce a production server for no change.
+  if ((prefs.experimental === true) === enabled) {
+    const live = await ask()
+    if (live && live.enabled !== enabled) { log(t.alreadyButServer(enabled)); return 0 }
+    log(t.already(enabled))
+    return 0
+  }
+  await (deps.writePrefs ?? writePreferences)({ experimental: enabled })
+  log(t.saved(enabled))
+  const restart = deps.restart ?? (async () => (await import('./cli-start')).restartForConfigChange())
+  const r = await restart()
+  if (r.state === 'nothing-running') { log(t.nothingRunning); return 0 }
+  if (r.state === 'failed') { error(t.failed(r.message)); return 1 }
+  log(t.restarting)
+  if (await (deps.waitForState ?? waitForState)(enabled, r.port ?? await ownServerPort())) { log(t.back); return 0 }
+  error(t.notBack)
   return 1
 }

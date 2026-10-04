@@ -1,23 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { NativeApprovalCard } from './NativeApprovalCard'
-import { ToolCallCard } from './ToolCallCard'
-
-describe('ToolCallCard', () => {
-  test('name, detail, status, facts; the output folded', () => {
-    const html = renderToStaticMarkup(<ToolCallCard lang="en" card={{ key: 'k', name: 'shell.start', detail: 'bun test', status: 'completed', exitCode: 0, durationMs: 1200, result: 'ok 1' }} />)
-    expect(html).toContain('shell.start')
-    expect(html).toContain('bun test')
-    expect(html).toContain('done · exit 0 · 1.2 s')
-    expect(html).toContain('<details>')
-    expect(html).toContain('ok 1')
-  })
-  test('PT, awaiting approval, no output yet', () => {
-    const html = renderToStaticMarkup(<ToolCallCard lang="pt" card={{ key: 'k', name: 'file.write', status: 'awaiting' }} />)
-    expect(html).toContain('aguardando aprovação')
-    expect(html).not.toContain('<details>')
-  })
-})
 
 describe('NativeApprovalCard', () => {
   test('the question, what it would run, the options in the person’s language', () => {

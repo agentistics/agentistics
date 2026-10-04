@@ -1,5 +1,5 @@
 /**
- * projections/catalog.ts — PURE. The six materialised projections of P3 §2, each with what the store
+ * projections/catalog.ts — PURE. The materialised projections of P3 §2 (six) and LIVE.2 (`SESSION_SURFACE`), each with what the store
  * needs to hold it (its KEY and its OUTPUT rows), plus the rebuild-or-resume decision.
  *
  * A `Projection` (core `projection.ts`) is only `empty`/`fold`/`finish` + a version; materialising one
@@ -19,6 +19,7 @@ import { agentMetricsProjection } from './agent-metrics'
 import { costByDimensionProjection } from './cost-by-dimension'
 import { runMetricsProjection } from './run-metrics'
 import { sessionMetaProjection } from './session-meta'
+import { sessionSurfaceProjection } from './session-surface'
 import { taskRollupProjection } from './task-rollup'
 import { toolMetricsProjection } from './tool-metrics'
 import { utcDay } from './kit'
@@ -65,10 +66,16 @@ export const AGENT_METRICS = stored(agentMetricsProjection, byRun, r => [{ day: 
 export const TOOL_METRICS = stored(toolMetricsProjection, byRun, r => [{ day: '', data: r }])
 export const COST_BY_DIMENSION = stored(costByDimensionProjection, bySession, r => r.facts.map(f => ({ day: f.day, data: f })))
 export const TASK_ROLLUP = stored(taskRollupProjection, byTask, r => [{ day: '', data: r }])
+/**
+ * LIVE.2. One row per session, filed in `day` under its conversation key (`sessionSurfaceKey`) — the
+ * public side knows the conversation but cannot derive the canonical session id (each integration
+ * hashes its own). A session that never named its conversation files nothing.
+ */
+export const SESSION_SURFACE = stored(sessionSurfaceProjection, bySession, r => (r && r.key ? [{ day: r.key, data: r }] : []))
 
 /** Every materialised projection, in a fixed order. */
 export const STORED_PROJECTIONS: readonly StoredProjection[] = [
-  SESSION_META, RUN_METRICS, AGENT_METRICS, TOOL_METRICS, COST_BY_DIMENSION, TASK_ROLLUP,
+  SESSION_META, RUN_METRICS, AGENT_METRICS, TOOL_METRICS, COST_BY_DIMENSION, TASK_ROLLUP, SESSION_SURFACE,
 ]
 
 // ── Rebuild or resume ───────────────────────────────────────────────────────────────────────────

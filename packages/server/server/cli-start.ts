@@ -28,12 +28,17 @@
  * then starts the in-process server and does not exit).
  */
 
+import { loadNativeFleet, runNativeVerb, isNativeSessionId } from './sessions/native-fleet'
 import { spawn } from 'node:child_process'
 import { rekeyMutedSession } from './sessions/session-notify-web'
 import { randomUUID } from 'node:crypto'
 import { existsSync, writeSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve as resolvePath } from 'node:path'
+import type { CodeHostPort } from '@agentistics/engine-api'
+import type { CodeLaunch } from '@agentistics/tui/control/code-types'
+import type { CodeStartLaunch } from './code-launch'
 import { homedir, platform } from 'node:os'
+import { accountHome } from './account-home'
 import {
   DEFAULT_TEAM, HARNESS_ORDER, repoShortName, sendNowDelivered,
   type HarnessId, type TeamConnection,
@@ -985,9 +990,12 @@ function serverReinvocation(): string {
 }
 
 /** Detach a server into the background. Silent: the caller is the one that knows whether it may
- *  print (the control center reports through the status line instead). Returns the log path. */
-function startBackground(): string {
-  const child = spawn('sh', ['-c', `nohup ${serverReinvocation()} >> "${SERVER_LOG}" 2>&1 &`], { stdio: 'ignore', detached: true })
+ *  print (the control center reports through the status line instead). Returns the log path.
+ *  `env` overrides (the ports of the data dir's own server, `bounceOwnServer`) join this process's. */
+function startBackground(env?: Record<string, string>): string {
+  const child = spawn('sh', ['-c', `nohup ${serverReinvocation()} >> "${SERVER_LOG}" 2>&1 &`], {
+    stdio: 'ignore', detached: true, ...(env ? { env: { ...process.env, ...env } } : {}),
+  })
   child.unref()
   return SERVER_LOG
 }
@@ -1305,22 +1313,66 @@ export async function restartNativeServer(
  * answer — the caller persisted a preference and there is no process to apply it to, which is not a
  * failure and must not be reported as a restart that never happened.
  */
-export async function restartForConfigChange(): Promise<{ state: 'nothing-running' | 'restarted' | 'failed'; message: string }> {
+export async function restartForConfigChange(): Promise<{ state: 'nothing-running' | 'restarted' | 'failed'; message: string; port: number }> {
   const s = cliStrings(await resolveLang())
   const { unitInstalled } = await import('./autostart')
-  const targets = await runningRuntimes()
-  const unit = await unitInstalled('server')
-  if (targets.length === 0 && !unit) return { state: 'nothing-running', message: s.nothingRunning }
+  const { bounceTarget, isOwnersStore, readServerPorts } = await import('./server-ports')
+  // THIS data dir's server — the holder of its lock, on the ports it recorded — never whatever
+  // answers on the default port. The service unit is the OWNER's store's; no other data dir bounces it.
+  const owners = isOwnersStore(AGENTISTICS_DATA_DIR, ownerHome())
+  const unit = owners && await unitInstalled('server')
+  const target = bounceTarget({
+    lockHolder: await probeInstanceLock(serverLockFile()).catch(() => null),
+    recorded: await readServerPorts(AGENTISTICS_DATA_DIR),
+    cliPort: PORT, cliWebPort: WEB_PORT,
+  })
+  const docker = owners ? (await runningRuntimes()).filter(t => t !== 'local') : []
+  if (target.kind === 'none' && !unit && docker.length === 0) return { state: 'nothing-running', message: s.nothingRunning, port: PORT }
   let ok = true
   let message = s.restartedDone
-  if (targets.includes('local') || unit) {
+  let port = PORT
+  if (unit || (target.kind === 'server' && target.port === PORT)) {
     const r = await restartNativeServer(false)
     ok = r.ok && ok
     message = r.message
+  } else if (target.kind === 'server') {
+    const r = await bounceOwnServer(target)
+    ok = r.ok && ok
+    message = r.ok ? s.restartedDone : s.localStartFailed
+    port = target.port
   }
-  const docker = targets.filter(t => t !== 'local')
   if (docker.length > 0) ok = (await restartRuntimes(s, docker, {})) && ok
-  return { state: ok ? 'restarted' : 'failed', message }
+  return { state: ok ? 'restarted' : 'failed', message, port }
+}
+
+/** The account's own home, which an overridden `HOME` does not move (`account-home.ts`). */
+function ownerHome(): string {
+  return accountHome()
+}
+
+/**
+ * Bounce the data dir's own server when it listens on other ports than this CLI's: signal ONLY the
+ * lock holder, start a new server with ITS ports, and wait until a different process answers there.
+ */
+async function bounceOwnServer(t: { pid: number; port: number; webPort: number }): Promise<{ ok: boolean }> {
+  await sh(['kill', String(t.pid)])
+  for (let i = 0; i < 40; i++) {
+    const held = await probeInstanceLock(serverLockFile()).catch(() => null)
+    if (held !== t.pid) break
+    await sleep(150)
+  }
+  startBackground({ PORT: String(t.port), WEB_PORT: String(t.webPort) })
+  for (let i = 0; i < 60; i++) {
+    const held = await probeInstanceLock(serverLockFile()).catch(() => null)
+    if (held !== null && held !== t.pid) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${t.port}/api/health`, { signal: AbortSignal.timeout(600) })
+        if (res.ok) return { ok: true }
+      } catch { /* still booting */ }
+    }
+    await sleep(250)
+  }
+  return { ok: false }
 }
 
 export async function restartAllServices(rebuild = false, flags: RebuildFlags = {}): Promise<number> {
@@ -1489,6 +1541,29 @@ function makeSuspend(altScreen: Suspendable, strings: () => CliStrings): Suspend
           await pauseForEnter(strings().pauseMsg)
         }
       }))
+    } finally {
+      if (wasRaw) stdin.setRawMode(true)
+      for (const listener of listeners) stdin.on('data', listener)
+    }
+  }
+}
+
+/**
+ * The suspend an EDITOR gets (CD-17, `code-editor.ts`): `makeSuspend` without the pause. An editor
+ * is interactive and returns on its own when the person saves and quits, so a "press Enter" after it
+ * would be one keypress too many; everything else — Ink's stdin listeners detached, raw mode off,
+ * the alternate screen left, JS-level stdout muted so Ink frames cannot land on the editor's screen —
+ * is the same, and restored in `finally`.
+ */
+function makeEditorSuspend(altScreen: Suspendable): Suspend {
+  return async function suspend<T>(fn: () => Promise<T>): Promise<T> {
+    const stdin = process.stdin
+    const listeners = stdin.rawListeners('data') as Array<(chunk: Buffer) => void>
+    stdin.removeAllListeners('data')
+    const wasRaw = stdin.isRaw === true
+    if (wasRaw) stdin.setRawMode(false)
+    try {
+      return await altScreen.suspend(() => muteStdout(fn))
     } finally {
       if (wasRaw) stdin.setRawMode(true)
       for (const listener of listeners) stdin.on('data', listener)
@@ -2757,6 +2832,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       harness: req.harness as HarnessId,
       cwd: req.cwd,
       resumeId: req.sessionId,
+      ...(req.prompt ? { prompt: req.prompt } : {}),
       ...(req.label ? { label: req.label } : {}),
       ...(previous ? { inherit: previous } : {}),
       attach: req.attach,
@@ -3133,6 +3209,91 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * to go: on a headless box every candidate fails, we say so in one line, and the cockpit stops
      * offering the action rather than leaving a key that does nothing.
      */
+    /**
+     * HM-05 / TK-01: "your tasks" (spec §5) — the tasks you claimed or that one of your sessions is
+     * filed under, read in-process from the same board the web reads (`listTasks`). On a solo box
+     * every session on the board is yours, so "filed by your sessions" is "has a session". Status
+     * labels and order are the board's own vocabulary; the cost is the rollup's, N/A when none.
+     */
+    async homeTasks() {
+      try {
+        const [{ listTasks }, { loadTaskBoard }, { sortTaskStatuses }] = await Promise.all([
+          import('./sessions/task-web'), import('./sessions/task-source'), import('@agentistics/core'),
+        ])
+        const [reply, board] = await Promise.all([listTasks(), loadTaskBoard()])
+        const statuses = sortTaskStatuses(board.book.statuses)
+        const label = new Map(statuses.map(st => [st.id, st.label]))
+        const rank = new Map(statuses.map((st, i) => [st.id, i]))
+        const mine = reply.tasks.filter(r => r.task.claim !== undefined || r.rollup.sessionsUsed > 0)
+        const active = (st: string) => (st === 'in_progress' ? 0 : st === 'blocked' ? 1 : 2)
+        const tasks = mine
+          .sort((a, b) => (rank.get(a.task.status) ?? 99) - (rank.get(b.task.status) ?? 99) || active(a.task.status) - active(b.task.status))
+          .map(r => {
+            const closed = r.task.status === 'done' || r.task.status === 'abandoned'
+            const m = /^t-([0-9a-f]{4})/.exec(r.task.id)
+            const cost = r.rollup.costUSD
+            return {
+              id: r.task.id,
+              ref: m ? `t-${m[1]}` : r.task.id,
+              title: r.task.title,
+              status: r.task.status,
+              statusLabel: label.get(r.task.status) ?? r.task.status,
+              ...(r.counts.subtasks > 0 ? { progress: { done: r.counts.subtasksDone, total: r.counts.subtasks } } : {}),
+              cost: cost === null ? 'N/A' : cost > 0 && cost < 0.01 ? '<$0.01' : `$${cost.toFixed(2)}`,
+              ...(closed ? { closed: true } : {}),
+            }
+          })
+        return { tasks }
+      } catch {
+        return { unavailable: S().lang === 'pt' ? 'O board de tarefas não pôde ser lido.' : 'The task board could not be read.' }
+      }
+    },
+
+    /**
+     * HM-06: the providers this machine has a credential for, from the ENGINE's own provider route
+     * (called in-process — the same answer the web's settings read). A community build has none.
+     */
+    async homeProviders() {
+      const pt = S().lang === 'pt'
+      // Providers are EXPERIMENTAL with the native harness (`native-gate.ts`).
+      const { nativeExperimentalOn, EXPERIMENTAL_SENTENCE } = await import('./native-gate')
+      if (!nativeExperimentalOn()) return { unavailable: EXPERIMENTAL_SENTENCE[pt ? 'pt' : 'en'] }
+      type ProviderBody = { enabled?: boolean; sentence?: string; providers?: { id: string; label: string; state: string; keyless?: boolean; last4?: string; storedAt?: string }[] }
+      // The SERVICE first: provider keys are sealed in the vault, and the vault opens only inside the
+      // running agentop service — this process can read who is configured only by asking it. Without
+      // a service, the engine in this process answers (keyless endpoints still read as configured).
+      const fromService = await fetch(`http://127.0.0.1:${PORT}/api/provider`, { signal: AbortSignal.timeout(1500) })
+        .then(r => (r.ok ? r.json() as Promise<ProviderBody> : null)).catch(() => null)
+      if (fromService) {
+        if (fromService.enabled === false) return { unavailable: fromService.sentence ?? (pt ? 'O runtime nativo está desligado (BETA).' : 'The native runtime is off (BETA).') }
+        const providers = (fromService.providers ?? [])
+          .filter(p => p.state === 'present')
+          .map(p => ({ id: p.id, label: p.label, state: 'ready' as const, source: p.keyless ? 'keyless' : p.last4 ? `…${p.last4}` : 'stored' }))
+        return providers.length > 0
+          ? { providers }
+          : { unavailable: pt ? 'Nenhum provedor configurado — /providers (ctrl+p) adiciona.' : 'No provider configured — /providers (ctrl+p) adds one.' }
+      }
+      try {
+        const { loadEngine, engine } = await import('./engine/load')
+        await loadEngine()
+        const route = engine()?.routes.find(r => r.prefix === '/api/provider')
+        if (!route) return { unavailable: pt ? 'Esta versão não tem provedores nativos.' : 'This build has no native providers.' }
+        const url = new URL('http://127.0.0.1/api/provider')
+        const res = await route.handle(new Request(url), url, { clientIp: '127.0.0.1' })
+        const body = (res ? await res.json() : null) as { enabled?: boolean; sentence?: string; providers?: { id: string; label: string; state: string; keyless?: boolean; last4?: string }[] } | null
+        if (!body) return { unavailable: pt ? 'Os provedores não responderam.' : 'The providers did not answer.' }
+        if (body.enabled === false) return { unavailable: body.sentence ?? (pt ? 'O runtime nativo está desligado (BETA).' : 'The native runtime is off (BETA).') }
+        const providers = (body.providers ?? [])
+          .filter(p => p.state === 'present')
+          .map(p => ({ id: p.id, label: p.label, state: 'ready' as const, source: p.keyless ? 'keyless' : p.last4 ? `…${p.last4}` : 'stored' }))
+        return providers.length > 0
+          ? { providers }
+          : { unavailable: pt ? 'Nenhum provedor configurado — /providers (ctrl+p) adiciona.' : 'No provider configured — /providers (ctrl+p) adds one.' }
+      } catch {
+        return { unavailable: pt ? 'Os provedores não puderam ser lidos.' : 'The providers could not be read.' }
+      }
+    },
+
     async openUrl(url: string): Promise<ActionResult> {
       const s = S()
       const candidates: string[][] = [
@@ -3489,10 +3650,17 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const restorable = answered
         ? []
         : await timeFleetPhase('sessions: restorableSessions', () => restorableSessions(snap.fell?.entries ?? []))
+      // NATIVE.LIFE: the engine's own sessions join as ordinary rows (`native-fleet.ts`) — no pane, no
+      // registry record, so the poller never sees them. A failed read is an empty native half.
+      const native = await timeFleetPhase('sessions: loadNativeFleet', () => loadNativeFleet(lang)).catch(() => [])
+      const managedIds = new Set(snap.sessions.map(v => v.id))
+      const nativeRows = native.filter(n => !managedIds.has(n.id))
+      // Only a MEASURED wait counts toward "N waiting on you" — an unmeasured open session is `unknown`.
+      const nativeAttention = nativeRows.filter(n => n.state === 'waiting' || n.state === 'waiting-approval').length
       return {
         ...(restorable.length > 0 ? { restorable } : {}),
-        sessions: snap.sessions.map((v, i) => toControlSession(v, s, facts[i])),
-        attention: snap.attention,
+        sessions: [...snap.sessions.map((v, i) => toControlSession(v, s, facts[i])), ...nativeRows],
+        attention: snap.attention + nativeAttention,
         rang: snap.rang,
         // Only the COUNT and the instant travel: the rows themselves are already in `sessions`,
         // marked `fell`, and shipping the set twice is two things that can disagree about it.
@@ -3631,6 +3799,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
     },
 
     async killSession(id: string): Promise<ActionResult> {
+      // A NATIVE session has no pane to kill: ENDING it is the engine's verb (`native-fleet.ts`).
+      if (isNativeSessionId(id)) return runNativeVerb(id, 'kill', lang)
       const s = S()
       const backend = await resolveBackend()
       const blocked = await backend.unavailable()
@@ -3765,6 +3935,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * whatever became of it is SAID — see `renameMessage`.
      */
     async renameSession(id: string, label: string): Promise<ActionResult> {
+      // A NATIVE session is named in ONE place, the engine's store — there is no harness half to type into.
+      if (isNativeSessionId(id)) return runNativeVerb(id, 'rename', lang, { title: label })
       const s = S()
       const managed = (await readRegistry()).find(m => m.id === id)
       // The INSTANT goes down with the name. A session can also be renamed from inside the harness,
@@ -3787,6 +3959,11 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
 
     async noteSession(id: string, text: string): Promise<ActionResult> {
       const s = S()
+      // A NATIVE session has no registry record: its note lives beside it (`native-notes.ts`).
+      if (isNativeSessionId(id)) {
+        const { writeNativeNote } = await import('./sessions/native-notes')
+        try { await writeNativeNote(AGENTISTICS_DATA_DIR, id, text); return { ok: true, message: s.sessNoted } } catch { return { ok: false, message: s.sessNoRegistryEntry } }
+      }
       const ok = await patchSession(id, { note: text })
       return ok ? { ok: true, message: s.sessNoted } : { ok: false, message: s.sessNoRegistryEntry }
     },
@@ -3805,6 +3982,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
 
     async taskSession(id: string, task: string): Promise<ActionResult> {
       const s = S()
+      // A NATIVE session is filed on the board through the engine that owns it.
+      if (isNativeSessionId(id)) return runNativeVerb(id, 'file', lang, { title: task })
       const ok = await patchSession(id, { task })
       return ok ? { ok: true, message: s.sessTasked } : { ok: false, message: s.sessNoRegistryEntry }
     },
@@ -3825,6 +4004,11 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // spawn. Measured on a real machine: two `claude --resume <same-id>` processes, 62ms apart,
       // both writing into one transcript. The lock serialises the whole check-and-spawn sequence
       // per conversation id, so the second caller's check only runs once the first has settled.
+      // A NATIVE session is reopened by the engine, which keeps its id: nothing is spawned, nothing replaced.
+      if (isNativeSessionId(req.sessionId)) {
+        const out = await runNativeVerb(req.sessionId, 'resume', lang)
+        return { ...out, ...(out.ok ? { id: req.sessionId } : {}) }
+      }
       return withResumeLock(req.sessionId, () => resumeSessionLocked(req))
     },
 
@@ -4255,6 +4439,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         detail: candidatePath(c, homedir()),
         source: c.source,
         ...(c.worktree ? { worktree: true } : {}),
+        // `cwd`/`history`/`typed` rows carry no proof of a repository in `source`; one stat each says.
+        ...(c.remote || c.source === 'repo' || c.worktree || (c.source !== 'folder' && existsSync(join(c.path, '.git'))) ? { git: true } : {}),
       })) }
     },
 
@@ -4275,7 +4461,14 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.label ? { label: req.label } : {}),
         ...(req.task ? { task: req.task } : {}),
         ...(req.force ? { force: true } : {}),
-      }, S(), lang)
+      }, S(), lang).then(async r => {
+        // NW-02: a session started for a BOARD task is filed there by id, not only named after it.
+        if (r.ok && r.id && req.taskId) {
+          const { attachSession } = await import('./sessions/task-web')
+          await attachSession(req.taskId, r.id).catch(() => null)
+        }
+        return r
+      })
     },
   }
 }
@@ -4312,7 +4505,18 @@ export async function readRawFleetSnapshot(): Promise<SessionSnapshot> {
   return snap
 }
 
-export async function runStart(): Promise<StartResult> {
+/**
+ * What `agentop code` hands the control center when it opens on the `code` tab (`code-launch.ts`): the parsed
+ * launch plus the code port the ENGINE offers (`engine.codeHost`, engine-api 1.8) — without one the tab is not
+ * offered here and `agentop code` stays the engine's line mode (`bin/cli.ts` decides before getting here).
+ */
+export interface CodeStart extends CodeStartLaunch {
+  code: CodeHostPort
+  /** Releases the engine's handle (leases, readers) when the control center closes. */
+  dispose(): Promise<void>
+}
+
+export async function runStart(codeStart?: CodeStart): Promise<StartResult> {
   if (!process.stdin.isTTY) return 'foreground'
 
   const lang = await resolveLang()
@@ -4321,18 +4525,442 @@ export async function runStart(): Promise<StartResult> {
     import('@agentistics/tui/control/altScreen'),
   ])
 
-  const host = createControlHost(lang, altScreen)
+  const host: StartHost & { code?: CodeHostPort } = createControlHost(lang, altScreen)
 
+  // The `code` tab is driven through the ENGINE's typed code host (`engine.codeHost`, read by `asCodePort()`,
+  // engine-api 1.8); a community build has none and the tab says so. ONE port for the whole process: the loop
+  // below REMOUNTS the app after every attach/detach, and a port built per mount would drop a session's lease
+  // and its reader between two visits to the tab.
+  const { loadEngine, engine } = await import('./engine/load')
+  await loadEngine()
+  // EX-01: the dashboard's "cost by task · today" — sessions that STARTED today (UTC, the home's today
+  // rule), priced by the board's own `costOf`, grouped by the task each is filed under; what nobody
+  // filed is its own bucket, never folded into a task.
+  host.costByTaskToday = async () => {
+    try {
+      const [{ loadTaskWorld }, { sessionDay }] = await Promise.all([import('./sessions/task-source'), import('@agentistics/core')])
+      const w = await loadTaskWorld()
+      const today = new Date().toISOString().slice(0, 10)
+      const filed = new Map<string, string>()
+      for (const r of w.rollupRows) if (r.conversationId && r.taskId) filed.set(r.conversationId, r.taskId)
+      const byTask = new Map<string, number>()
+      let notFiled = 0
+      let sessions = 0
+      for (const [id, meta] of w.metas) {
+        if (sessionDay(meta.start_time) !== today) continue
+        sessions++
+        const cost = w.costOf(meta)
+        const task = filed.get(id) ?? (meta.session_id ? filed.get(meta.session_id) : undefined)
+        if (task) byTask.set(task, (byTask.get(task) ?? 0) + cost)
+        else notFiled += cost
+      }
+      const title = new Map(w.book.tasks.map(t => [t.id, t.title]))
+      const ref = (tid: string) => { const m = /^t-([0-9a-f]{4})/.exec(tid); return m ? `t-${m[1]}` : tid }
+      return {
+        day: today, sessions,
+        tasks: [...byTask].sort((a, b) => b[1] - a[1]).map(([id, cost]) => ({ ref: ref(id), title: title.get(id) ?? id, cost })),
+        notFiled,
+      }
+    } catch {
+      return null
+    }
+  }
+
+  // TK-02…TK-07: a task's detail, its sessions' state read from the fleet this screen already shows.
+  host.taskDetail = async (id) => {
+    const pt = host.lang === 'pt'
+    try {
+      const [tw, { loadTaskBoard }, { sortTaskStatuses }] = await Promise.all([
+        import('./sessions/task-web'), import('./sessions/task-source'), import('@agentistics/core'),
+      ])
+      const [reply, board, events, fleet] = await Promise.all([
+        tw.showTask(id), loadTaskBoard(), tw.taskActivity({ ref: id, limit: 4 }),
+        host.sessions ? host.sessions().catch(() => null) : Promise.resolve(null),
+      ])
+      if (!reply) return { unavailable: pt ? 'Essa tarefa não está mais no board.' : 'That task is no longer on the board.' }
+      const d = reply.task
+      const t = d.task
+      const label = new Map(sortTaskStatuses(board.book.statuses).map(st => [st.id, st.label]))
+      const lbl = (st: string) => label.get(st) ?? st
+      const money = (n: number | null | undefined) => (n === null || n === undefined ? undefined : n > 0 && n < 0.01 ? '<$0.01' : `$${n.toFixed(2)}`)
+      const tok = (n: number | null) => (n === null ? null : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n))
+      const ref = (tid: string) => { const m = /^t-([0-9a-f]{4})/.exec(tid); return m ? `t-${m[1]}` : tid }
+      // TK-05: the task's own reason first, then what it waits on — by name and status, in words.
+      const waits = (t.blockedBy ?? []).map(b => board.book.tasks.find(x => x.id === b))
+        .filter((x): x is NonNullable<typeof x> => Boolean(x) && x!.status !== 'done')
+        .map(x => `${ref(x.id)} ${x.title} (${lbl(x.status)})`)
+      const blockedParts = [t.blockedReason?.trim(), waits.length ? (pt ? `espera ${waits.join(', ')}` : `waits on ${waits.join(', ')}`) : ''].filter(Boolean)
+      const live = new Map((fleet?.sessions ?? []).map(s => [s.id, s]))
+      const perSub = new Map(d.subtaskRollups.filter(r => r.id).map(r => [r.id!, r.rollup.sessionsUsed]))
+      return {
+        id: t.id, ref: ref(t.id), title: t.title, status: t.status, statusLabel: lbl(t.status),
+        ...(t.priority ? { priority: String(t.priority) } : {}),
+        ...(t.dueDate ? { due: t.dueDate.slice(0, 10) } : {}),
+        ...(t.repo ? { repo: t.repo } : {}),
+        ...(t.status === 'blocked' || blockedParts.length ? { blocked: blockedParts.join(' — ') || (pt ? 'sem motivo registrado' : 'no reason recorded') } : {}),
+        ...(d.subtasks.length ? { progress: { done: d.subtasks.filter(s => s.done).length, total: d.subtasks.length } } : {}),
+        rollup: { cost: money(d.rollup.costUSD) ?? null, tokens: tok(d.rollup.tokens), rounds: d.rollup.rounds, sessions: d.rollup.sessionsUsed },
+        subtasks: d.subtasks.map(s => ({ id: s.id, title: s.title, statusLabel: lbl(s.status), done: s.done, sessions: perSub.get(s.id) ?? 0 })),
+        sessions: d.sessions.map(r => {
+          const f = live.get(r.id)
+          const state = f?.state ?? 'closed'
+          return {
+            id: r.id, title: f?.title ?? r.label ?? r.id, harness: r.harness, state,
+            stateLabel: f?.stateLabel ?? (pt ? 'encerrada' : 'ended'),
+            ...(money(r.costUSD) ? { cost: money(r.costUSD)! } : {}),
+            live: state === 'working' || state === 'waiting' || state === 'waiting-approval',
+          }
+        }),
+        activity: events.map(e => `${e.at.slice(0, 16).replace('T', ' ')}  ${e.kind}${e.detail ? ` · ${e.detail}` : e.to ? ` · ${e.to}` : ''}  ${e.actor}`),
+        closed: t.status === 'done' || t.status === 'abandoned',
+      }
+    } catch {
+      return { unavailable: pt ? 'O board de tarefas não pôde ser lido.' : 'The task board could not be read.' }
+    }
+  }
+
+  // NW-03: the native assistant's models, per provider, with price and window and their provenance.
+  // The provider list and each live model list come from the SERVICE (keys are sealed in its vault);
+  // price and window from the shared tables (`@agentistics/core`) — N/A, with the reason, when unknown.
+  host.nativeModels = async () => {
+    const pt = host.lang === 'pt'
+    const { nativeExperimentalOn, EXPERIMENTAL_SENTENCE } = await import('./native-gate')
+    if (!nativeExperimentalOn()) return { sentence: EXPERIMENTAL_SENTENCE[pt ? 'pt' : 'en'] }
+    const { hasModelPrice, getModelPrice, resolveContextWindow } = await import('@agentistics/core')
+    type P = { id: string; label: string; state: string; kind?: string; baseUrl?: string; keyless?: boolean }
+    const get = async <T,>(path: string, ms: number): Promise<T | null> =>
+      fetch(`http://127.0.0.1:${PORT}${path}`, { signal: AbortSignal.timeout(ms) })
+        .then(r => (r.ok ? r.json() as Promise<T> : null)).catch(() => null)
+    const list = await get<{ enabled?: boolean; sentence?: string; providers?: P[] }>('/api/provider', 2000)
+    if (!list) return { sentence: pt ? 'O serviço do agentop não respondeu — os provedores vêm dele (inicie em serviços).' : 'The agentop service did not answer — providers come from it (start it in services).' }
+    if (list.enabled === false) return { sentence: list.sentence ?? EXPERIMENTAL_SENTENCE[pt ? 'pt' : 'en'] }
+    const money = (n: number) => (n === 0 ? '$0' : n < 1 ? `$${n.toFixed(2)}` : `$${Number.isInteger(n) ? n : n.toFixed(2)}`)
+    const detailOf = (id: string, ctxLen?: number, local = false): string => {
+      // A LOCAL provider's model runs on this machine: it costs nothing, whatever the table knows.
+      const price = local ? (pt ? '$0 (roda nesta máquina)' : '$0 (runs on this machine)') : hasModelPrice(id)
+        ? (() => { const p = getModelPrice(id); return `${money(p.input)} / ${money(p.output)} per MTok` })()
+        : (pt ? 'preço N/A (não verificado)' : 'price N/A (unverified)')
+      const win = resolveContextWindow(id)
+      const k = (n: number) => (n >= 1e6 ? `${n / 1e6}M` : `${Math.round(n / 1e3)}k`)
+      const window = win ? `${k(win.tokens)} · ${win.source.split('/')[0]} ${win.verifiedAt}`
+        : ctxLen ? `${k(ctxLen)} (${pt ? 'do provedor' : 'from the provider'})`
+        : (pt ? 'janela N/A' : 'window N/A')
+      return `${price} · ${window}`
+    }
+    const models: { id: string; label: string; detail: string; disabled?: string; provider?: string }[] = []
+    // The model the code tab would use anyway (flag / last session). Its provider is NOT taken from
+    // the defaults — they name Anthropic for a model the last session ran on Ollama — but from the
+    // provider that actually lists it below; the row it lands on is marked and moved first.
+    const d = host.code ? await host.code.defaults().catch(() => null) : null
+    const fromWhere = d?.model ? (d.model.source === 'flag' ? (pt ? 'da flag --model' : 'from --model') : (pt ? 'da sua última sessão' : 'from your last session')) : ''
+    for (const p of list.providers ?? []) {
+      if (p.state !== 'present') {
+        models.push({ id: '', provider: p.id, label: p.label, detail: '', disabled: pt ? 'não configurado — /providers (ctrl+p) adiciona a chave' : 'not configured — /providers (ctrl+p) adds a key' })
+        continue
+      }
+      const r = await get<{ ok: boolean; models?: { id: string; contextLength?: number }[]; sentence?: string }>(`/api/provider/${encodeURIComponent(p.id)}/models`, 4000)
+      if (!r || !r.ok || !r.models) {
+        // The provider's own sentence, without repeating its name (the row already says it).
+        const why = r?.sentence?.replace(new RegExp(`^${p.id}:\\s*`, 'i'), '')
+        models.push({ id: '', provider: p.id, label: p.label, detail: '', disabled: why ?? (pt ? `não respondeu${p.baseUrl ? ` em ${p.baseUrl}` : ''}` : `did not answer${p.baseUrl ? ` at ${p.baseUrl}` : ''}`) })
+        continue
+      }
+      for (const m of r.models.slice(0, 8)) {
+        if (models.some(x => x.id === m.id && x.provider === p.id)) continue
+        models.push({ id: m.id, provider: p.id, label: `${p.id} · ${m.id}`, detail: detailOf(m.id, m.contextLength, p.kind === 'local') })
+      }
+    }
+    if (d?.model) {
+      const at = models.findIndex(m => m.id === d.model!.id && !m.disabled)
+      if (at >= 0) {
+        const [row] = models.splice(at, 1)
+        models.unshift({ ...row!, detail: `${row!.detail} · ${fromWhere}` })
+      } else {
+        // Offered by no configured provider: still the model the tab would use, on the provider the
+        // defaults name — said as such, so the person can see where it would run.
+        models.unshift({ id: d.model.id, provider: d.provider, label: `${d.provider} · ${d.model.id}`, detail: `${detailOf(d.model.id)} · ${fromWhere}` })
+      }
+    }
+    return { models }
+  }
+
+  // ── settings (ST-01…ST-07): the same routes and preferences the web's Settings uses ──────────────
+  const api = async (path: string, init: RequestInit = {}, ms = 8000): Promise<{ status: number; body: Record<string, unknown> | null }> => {
+    try {
+      const r = await fetch(`http://127.0.0.1:${PORT}${path}`, { ...init, signal: AbortSignal.timeout(ms) })
+      const body = await r.json().catch(() => null) as Record<string, unknown> | null
+      return { status: r.status, body }
+    } catch {
+      return { status: 0, body: null }
+    }
+  }
+  const serviceDown = () => (host.lang === 'pt'
+    ? 'O serviço do agentop não respondeu — os provedores vêm dele (inicie em serviços).'
+    : 'The agentop service did not answer — providers come from it (start it in services).')
+
+  // ST-01: `GET /api/provider` — status and the key's last 4, never the key.
+  host.settingsProviders = async () => {
+    const pt = host.lang === 'pt'
+    const { nativeExperimentalOn, EXPERIMENTAL_SENTENCE } = await import('./native-gate')
+    if (!nativeExperimentalOn()) return { ok: false, sentence: EXPERIMENTAL_SENTENCE[pt ? 'pt' : 'en'] }
+    const r = await api('/api/provider', {}, 3000)
+    if (!r.body) return { ok: false, sentence: serviceDown() }
+    if (r.body.enabled === false) return { ok: false, sentence: String((pt ? r.body.sentencePt : null) ?? r.body.sentence ?? EXPERIMENTAL_SENTENCE[pt ? 'pt' : 'en']) }
+    const list = Array.isArray(r.body.providers) ? r.body.providers as Record<string, unknown>[] : []
+    return {
+      ok: true,
+      providers: list.map(p => ({
+        id: String(p.id), label: String(p.label ?? p.id),
+        kind: (p.kind === 'router' || p.kind === 'local' ? p.kind : 'direct') as 'direct' | 'router' | 'local',
+        state: (['absent', 'present', 'unreadable', 'permissions-too-open'].includes(String(p.state)) ? p.state : 'absent') as 'absent' | 'present' | 'unreadable' | 'permissions-too-open',
+        keyOptional: p.keyOptional === true,
+        ...(p.keyless === true ? { keyless: true } : {}),
+        ...(typeof p.last4 === 'string' ? { last4: p.last4 } : {}),
+        ...(typeof p.baseUrl === 'string' ? { baseUrl: p.baseUrl } : {}),
+      })),
+    }
+  }
+
+  // ST-01: `POST /api/provider/:id/test` — the web's "test connection", worded the same way.
+  host.testProvider = async (id) => {
+    const pt = host.lang === 'pt'
+    const r = await api(`/api/provider/${encodeURIComponent(id)}/test`, { method: 'POST' }, 15000)
+    const b = r.body
+    if (!b) return { ok: false, sentence: serviceDown() }
+    if (b.ok === true) {
+      const n = Number(b.modelCount ?? 0)
+      const ms = Number(b.latencyMs ?? 0)
+      const count = pt ? `${n} ${n === 1 ? 'modelo' : 'modelos'}` : `${n} ${n === 1 ? 'model' : 'models'}`
+      const checked = b.keyChecked === 'yes' ? (pt ? ' · chave aceita' : ' · key accepted')
+        : b.keyChecked === 'no' ? (pt ? ' · a chave só é validada na primeira chamada real' : ' · the key is validated on the first real call')
+        : b.keyChecked === 'keyless' ? (pt ? ' · sem chave' : ' · no key') : ''
+      return { ok: true, sentence: `${pt ? 'conectado' : 'connected'} · ${ms}ms · ${count}${checked}` }
+    }
+    return { ok: false, sentence: String((pt ? b.sentencePt : null) ?? b.sentence ?? `HTTP ${r.status}`) }
+  }
+
+  // ST-01: `PUT /api/provider/:id` — the key goes straight to the service's vault; a key of the wrong
+  // vendor comes back refused in the service's own sentence.
+  host.setProviderKey = async (id, key) => {
+    const pt = host.lang === 'pt'
+    const r = await api(`/api/provider/${encodeURIComponent(id)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }),
+    })
+    const b = r.body
+    if (!b) return { ok: false, sentence: serviceDown() }
+    const prov = b.provider as Record<string, unknown> | undefined
+    if (r.status >= 200 && r.status < 300 && prov) {
+      const end = typeof prov.last4 === 'string' ? ` (…${prov.last4})` : ''
+      return { ok: true, sentence: pt ? `Chave de ${String(prov.label ?? id)} guardada${end}. t testa.` : `${String(prov.label ?? id)} key stored${end}. t tests it.` }
+    }
+    return { ok: false, sentence: String((pt ? b.sentencePt : null) ?? b.sentence ?? `HTTP ${r.status}`) }
+  }
+
+  // ST-02: every priced row with its provenance and window, then what the configured providers offer
+  // that no source prices (N/A, never the fallback rate).
+  host.priceTable = async () => {
+    const core = await import('@agentistics/core')
+    const rows: { model: string; price: { input: number; output: number; cacheRead: number; cacheWrite: number } | null; priceSource: { source: string; verifiedAt: string | null } | 'local' | null; window: { tokens: number; source: string; verifiedAt: string } | null; offered?: string }[] = []
+    const windowOf = (id: string) => {
+      const w = core.resolveContextWindow(id)
+      return w ? { tokens: w.tokens, source: w.source, verifiedAt: w.verifiedAt } : null
+    }
+    for (const id of Object.keys(core.MODEL_PRICING)) {
+      const p = core.MODEL_PRICING[id]!
+      rows.push({ model: id, price: { input: p.input, output: p.output, cacheRead: p.cacheRead, cacheWrite: p.cacheWrite }, priceSource: core.priceProvenance(id), window: windowOf(id) })
+    }
+    const list = await host.settingsProviders!().catch(() => null)
+    if (list?.ok) {
+      for (const pv of list.providers.filter(x => x.state === 'present')) {
+        const r = await api(`/api/provider/${encodeURIComponent(pv.id)}/models`, {}, 4000)
+        const models = Array.isArray(r.body?.models) ? r.body!.models as { id: string; contextLength?: number }[] : []
+        for (const m of models.slice(0, 12)) {
+          if (rows.some(x => x.model === m.id)) continue
+          const local = pv.kind === 'local'
+          const priced = local || core.hasModelPrice(m.id)
+          const src = local ? 'local' as const : core.priceProvenance(m.id)
+          const pr = priced && !local ? core.getModelPrice(m.id) : null
+          rows.push({
+            model: m.id, offered: `(${pv.id})`,
+            price: local ? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } : pr ? { input: pr.input, output: pr.output, cacheRead: pr.cacheRead, cacheWrite: pr.cacheWrite } : null,
+            priceSource: src,
+            window: windowOf(m.id) ?? (m.contextLength ? { tokens: m.contextLength, source: pv.id, verifiedAt: 'live' } : null),
+          })
+        }
+      }
+    }
+    return rows
+  }
+
+  // ST-03: the machine's floor, the SAME globs every engine is handed (`hostFloor`).
+  host.policyFloor = async () => {
+    const [{ hostFloor }, { omittedSecrets }, config] = await Promise.all([import('./engine/load'), import('./backup/backup-plan'), import('./config')])
+    return [...hostFloor(omittedSecrets(), config.HOME_DIR).globs]
+  }
+
+  // ST-04 / ST-05: the terminal's own preferences, read once here and written back on each change.
+  {
+    const prefs = await readPreferences().catch(() => ({} as Awaited<ReturnType<typeof readPreferences>>))
+    const theme = prefs.tuiTheme
+    host.tuiTheme = theme === 'light' || theme === 'contrast' ? theme : 'dark'
+    host.shellKeys = prefs.tuiKeys && typeof prefs.tuiKeys === 'object' ? { ...prefs.tuiKeys } : {}
+  }
+  host.setTheme = async (id) => {
+    host.tuiTheme = id
+    try { await writePreferences({ tuiTheme: id }) } catch { /* best-effort, like the language */ }
+  }
+  host.setShellKeys = async (keys) => {
+    host.shellKeys = { ...keys }
+    // Only what differs from the defaults arrives here (`changedShellKeys`); `{}` clears the table.
+    try { await writePreferences({ tuiKeys: { ...keys } }) } catch { /* best-effort */ }
+  }
+
+  // NW-04: a new worktree of a repository for this task — `<repo>/.worktrees/<name>` on a new branch.
+  host.createWorktree = async (repo, name) => {
+    const pt = host.lang === 'pt'
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'work'
+    const path = `${repo.replace(/\/$/, '')}/.worktrees/${slug}`
+    const p = Bun.spawn(['git', '-C', repo, 'worktree', 'add', '-b', slug, path], { stdout: 'pipe', stderr: 'pipe' })
+    const [err, code] = await Promise.all([new Response(p.stderr).text(), p.exited])
+    if (code !== 0) return { ok: false, sentence: pt ? `A worktree não foi criada: ${err.trim().split('\n').pop()}` : `The worktree was not created: ${err.trim().split('\n').pop()}` }
+    return { ok: true, path, sentence: pt ? `Worktree criada em ${path} (branch ${slug}).` : `Worktree created at ${path} (branch ${slug}).` }
+  }
+
+  // The native harness is EXPERIMENTAL (owner decision 2026-10-03, `native-gate.ts`): with the flag
+  // off there is no code host at all — the tab, the palette and the home say the gate's sentence.
+  const { nativeExperimentalOn, EXPERIMENTAL_SENTENCE } = await import('./native-gate')
+  let disposeCode: (() => Promise<void>) | undefined
+  if (codeStart) {
+    // `agentop code` (bin/cli.ts) already took the engine's port and checked the gate.
+    codeStart.code.configure?.({ ...(codeStart.model ? { model: codeStart.model } : {}), ...(codeStart.cwd ? { cwd: resolvePath(codeStart.cwd) } : {}) })
+    host.code = codeStart.code
+    disposeCode = codeStart.dispose
+  } else {
+    const e = engine()
+    if (e?.codeHost && !nativeExperimentalOn()) {
+      host.nativeGate = () => EXPERIMENTAL_SENTENCE[host.lang === 'pt' ? 'pt' : 'en']
+    } else if (e?.codeHost) {
+      const taken = await takeCodePort(e.codeHost)
+      if (taken) {
+        host.code = taken.code
+        disposeCode = taken.dispose
+      }
+    }
+  }
+  // SS-09: file any row under a BOARD task — native, agentop-started, or external by conversation.
+  host.fileSession = async (row, taskId) => {
+    const L = cliStrings(host.lang === 'pt' ? 'pt' : 'en')
+    const tw = await import('./sessions/task-web')
+    const task = (await tw.listTasks()).tasks.find(t => t.task.id === taskId)?.task
+    const name = task ? `${taskId.slice(0, 6)} ${task.title}` : taskId
+    const reasonOf = (r: { ok: false; reason: string; blockedBy?: readonly string[] }) =>
+      r.reason === 'blocked' && r.blockedBy?.length ? `blocked by ${r.blockedBy.join(', ')}` : r.reason.replace(/_/g, ' ')
+    let r: { ok: true } | { ok: false; reason: string; blockedBy?: readonly string[] }
+    if (row.id.startsWith('ses_')) {
+      r = await tw.fileNativeSession({ sessionId: row.id, taskId, label: row.title, ...(row.cwd ? { cwd: row.cwd } : {}) })
+    } else if ((await readRegistry()).some(m => m.id === row.id)) {
+      r = await tw.attachSession(taskId, row.id)
+    } else {
+      const conv = row.resume?.sessionId ?? row.conversationId
+      if (!conv) return { ok: false, message: L.sessFileNoConversation }
+      r = await tw.attachConversation(taskId, conv, { harness: row.harness })
+    }
+    return r.ok ? { ok: true, message: L.sessFiled(name) } : { ok: false, message: L.sessFileRefused(reasonOf(r)) }
+  }
+  if (host.code) {
+    // CD-17: the `$EDITOR` door is the HOST's (it owns the tty), beside the engine's port.
+    const { createDraftEditor } = await import('./code-editor')
+    host.editDraft = createDraftEditor({ suspend: makeEditorSuspend(altScreen), lang: () => host.lang })
+    // SS-01: the fleet lists this machine's NATIVE sessions too — they live in the engine's store,
+    // not in any process the poller sees, so they are appended from the code host's own list.
+    const code = host.code
+    const fleetOf = host.sessions?.bind(host)
+    if (fleetOf && code.recentSessions) {
+      host.sessions = async () => {
+        const [snap, recent] = await Promise.all([fleetOf(), code.recentSessions!(20).catch(() => null)])
+        if (!recent || !recent.ok || recent.sessions.length === 0) return snap
+        const { nativeFleetRows } = await import('@agentistics/tui/control/session-native')
+        const pt = host.lang === 'pt'
+        const rows = nativeFleetRows(recent.sessions, pt
+          ? { working: 'trabalhando', idle: 'encerrada', ended: 'encerrada', approve: 'aprovar' }
+          : { working: 'working', idle: 'ended', ended: 'ended', approve: 'approve' })
+        return { ...snap, sessions: [...snap.sessions, ...rows] }
+      }
+    }
+    // SS-08: a NATIVE session has one name — its title in the engine's store — renamed there.
+    const renameTmux = host.renameSession?.bind(host)
+    host.renameSession = async (id, label) => {
+      if (!id.startsWith('ses_')) {
+        return renameTmux ? renameTmux(id, label) : { ok: false, message: cliStrings(host.lang === 'pt' ? 'pt' : 'en').sessNoRegistryEntry }
+      }
+      if (!code.rename) return { ok: false, message: cliStrings(host.lang === 'pt' ? 'pt' : 'en').sessNoRegistryEntry }
+      const r = await code.rename(id, label)
+      return r.ok ? { ok: true, message: r.sentence } : { ok: false, message: r.sentence }
+    }
+    // SS-06: a NATIVE session's question is the policy's, answered through the code host — after
+    // re-reading that the SAME question is still pending (a stale list must not answer a new one).
+    const answerTmux = host.answerSession?.bind(host)
+    host.answerSession = async (id, choice, text) => {
+      if (!id.startsWith('ses_')) {
+        return answerTmux ? answerTmux(id, choice, text) : { ok: false, message: cliStrings(host.lang === "pt" ? "pt" : "en").sessChoiceGone }
+      }
+      const recent = await code.recentSessions?.(20).catch(() => null)
+      const ask = recent && recent.ok ? recent.sessions.find(r => r.sessionId === id)?.ask : undefined
+      const label = choice !== undefined ? ask?.options[choice - 1] : undefined
+      if (!ask || label === undefined) return { ok: false, message: cliStrings(host.lang === "pt" ? "pt" : "en").sessChoiceGone }
+      const r = code.answer(id, ask.questionId, choice! - 1, text)
+      return r.ok ? { ok: true, message: cliStrings(host.lang === "pt" ? "pt" : "en").sessAnswered(label) } : { ok: false, message: r.sentence }
+    }
+  }
+  try {
+    return await runControlLoop(host, runControlCenter, codeStart)
+  } finally {
+    await disposeCode?.().catch(() => {})
+  }
+}
+
+/**
+ * The engine's typed code port for a plain `agentop` (GL-01: the `code` tab, the home's resume card and the
+ * fleet's native rows all read it). The tab answers `ask` events itself, so the host-side asker refuses — the
+ * engine ignores it in port mode. A handle that is not a port (a 1.7 engine) is released at once and the tab
+ * says the machine cannot drive a session; a throw is the same answer, never a crash of the control center.
+ */
+async function takeCodePort(
+  codeHost: NonNullable<NonNullable<ReturnType<typeof import('./engine/load')['engine']>>['codeHost']>,
+): Promise<{ code: CodeHostPort; dispose(): Promise<void> } | null> {
+  try {
+    const { asCodePort } = await import('@agentistics/engine-api')
+    const handle = await codeHost(() => ({ ask: async () => ({ answered: false as const }) }) as never)
+    const code = asCodePort(handle)
+    if (code) return { code, dispose: () => handle.dispose() }
+    await handle.dispose().catch(() => {})
+    return null
+  } catch {
+    return null
+  }
+}
+
+async function runControlLoop(
+  host: StartHost & { code?: CodeHostPort },
+  runControlCenter: (typeof import('@agentistics/tui/control'))['runControlCenter'],
+  codeStart: CodeStartLaunch | undefined,
+): Promise<StartResult> {
   // A machine that has never been configured still opens on the WIZARD — it is just no longer a tab
   // of its own. Setup is a question the cockpit asks, drawn in the detail region like every other
   // one, so "open on setup" is now "open the cockpit with the question up": `initial.setup`. Landing
   // an unconfigured user on a list of services to start would still leave the mode and the
   // history-preservation consent behind something they have no reason to look for.
-  const setup = await isUnconfigured()
+  // An explicit `agentop code` is not a request to configure the machine: it goes straight to the tab.
+  const setup = codeStart ? false : await isUnconfigured()
   // RES.1 — a self-restart lands on the tab the user was on (see the `restart` exit below).
   const startTab = process.env.AGENTISTICS_START_TAB
-  let tab: TabId | undefined = startTab && (TAB_ORDER as readonly string[]).includes(startTab) ? startTab as TabId : undefined
+  // `home` is the default (GL-01), but a machine that has never been configured opens where the setup
+  // question is asked — `services` — or the question would wait on a tab nobody is looking at.
+  let tab: TabId | undefined = codeStart && host.code
+    ? 'code'
+    : startTab && (TAB_ORDER as readonly string[]).includes(startTab) ? startTab as TabId : setup ? 'services' : undefined
   delete process.env.AGENTISTICS_START_TAB
+  let launch: CodeLaunch | undefined = codeStart?.launch
 
   // Attach and detach are two halves of ONE gesture, so this is a loop rather than an exit. The Ink
   // app never execs anything: it unmounts, the session gets the real tty here, and when the user
@@ -4348,9 +4976,12 @@ export async function runStart(): Promise<StartResult> {
     // detaching was enough to put the whole cockpit back into the previous language, with nothing
     // on screen to explain it and nothing to do about it but restart the application, which is how
     // it was reported. `execAttachTicket` below already read it correctly.
-    const exit = await runControlCenter({ lang: host.lang, host, tab, setup: opening })
+    const exit = await runControlCenter({ lang: host.lang, host, tab, setup: opening, ...(launch ? { code: launch } : {}) })
     opening = false
-    if (exit.kind === 'foreground') break
+    // The launch is a first-mount instruction: a remount after an attach must not restart the wizard or
+    // resume the session a second time.
+    launch = undefined
+    if (exit.kind === 'foreground') { if (codeStart) return 0; break }
     if (exit.kind === 'quit') return exit.code
     // RES.1 — the self-guard's two exits. A reload is the attach loop without the session: drop the
     // caches, remount on the same tab. A restart hands the terminal to the NEW binary an upgrade put

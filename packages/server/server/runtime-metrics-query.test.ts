@@ -314,10 +314,8 @@ describe('the §37 questions over a small fact set', () => {
     const g = r.groups[0]!
     expect(g.metrics.sessions!.count).toBe(1)
     expect(g.metrics.responses!.count).toBe(1)
-    // CAPABILITY_STATES has no 'agentistics' entry yet: stated, not guessed.
-    expect(g.metrics.cost).toBeUndefined()
-    expect(g.absent.cost!.excluded[0]!.harness).toBe('agentistics')
-    expect(g.absent.cost!.excluded[0]!.reason).toContain('no capability recorded')
+    // NATIVE.SURF declared the native harness's capabilities: its cost is counted, and only its own.
+    expect(g.metrics.cost!.usd).toBe(7)
   })
   it('Claude through the native harness, once its capability is declared', async () => {
     const caps = structuredClone(CAPABILITY_STATES) as CapabilityTable & Record<string, unknown>

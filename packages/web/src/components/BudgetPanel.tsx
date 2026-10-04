@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { Target, TrendingUp, AlertTriangle, CheckCircle2, Pencil, Check, X } from 'lucide-react'
 import { parseISO } from 'date-fns'
-import type { StatsCache, Lang, HarnessId } from '@agentistics/core'
+import type { StatsCache, Lang, SurfaceHarnessId } from '@agentistics/core'
 import { getModelPrice, fmtCost } from '@agentistics/core'
 import { NAtag } from './NAtag'
 
@@ -30,7 +30,7 @@ interface Props {
    * When a non-claude harness is active we show N/A instead of surfacing
    * Claude's spend as if it were the selected harness's spend.
    */
-  harness?: HarnessId
+  harness?: SurfaceHarnessId
 }
 
 

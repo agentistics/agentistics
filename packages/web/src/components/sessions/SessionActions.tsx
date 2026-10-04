@@ -87,7 +87,9 @@ const TEXT_VERBS = new Set<string>(['rename', 'note'])
 // `openTask` and `finishTask` are GONE from this menu and from the fleet's verbs: they asked about
 // a delivery at a moment nobody was thinking about one. The question moved to the stop confirmation
 // — see `StopSessionConfirm` — which is when somebody actually knows the answer.
-const MENU_ORDER: string[] = ['rename', 'note', 'task', 'resume', 'kill']
+// `archive` / `delete` arrive only on a NATIVE row (the server offers them nowhere else), after `kill`
+// because both need the session ended first.
+const MENU_ORDER: string[] = ['rename', 'note', 'task', 'resume', 'kill', 'archive', 'delete']
 
 /** The verbs that belong to the delivery board rather than to the session itself. */
 const TASK_VERBS = new Set<string>(['task'])
@@ -102,13 +104,15 @@ export function SessionActions({
   const [asking, setAsking] = useState<FleetVerb | null>(null)
   const [draft, setDraft] = useState('')
   const [confirming, setConfirming] = useState(false)
+  /** `delete` is PERMANENT, so it asks once more, in words, before it runs. */
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   // A different row is a different set of answers: an in-flight rename must not carry across.
   useEffect(() => {
-    setOpen(false); setAsking(null); setDraft(''); setConfirming(false); setNotice(null)
+    setOpen(false); setAsking(null); setDraft(''); setConfirming(false); setConfirmingDelete(false); setNotice(null)
   }, [row.id])
 
   useEffect(() => { if (asking) inputRef.current?.focus() }, [asking])
@@ -124,8 +128,9 @@ export function SessionActions({
     setBusy(false)
     setNotice(out.message)
     if (!out.ok) return
-    setAsking(null); setDraft(''); setConfirming(false); setOpen(false)
-    if (action === 'kill') onGone?.()
+    setAsking(null); setDraft(''); setConfirming(false); setConfirmingDelete(false); setOpen(false)
+    // An archived or deleted session leaves the list exactly as an ended one does.
+    if (action === 'kill' || action === 'archive' || action === 'delete') onGone?.()
     // A REOPEN LANDS SOMEWHERE. It mints a NEW row and retires the one it was asked about, so
     // staying put leaves the reader on a dead session with a success message over it — reported as
     // "the reopen did nothing". The server hands back the new id precisely so this can follow it.
@@ -144,6 +149,7 @@ export function SessionActions({
       return
     }
     if (v.action === 'kill') { setConfirming(true); return }
+    if (v.action === 'delete') { setConfirmingDelete(true); return }
     void run(v.action as FleetActionId)
   }
 
@@ -191,11 +197,11 @@ export function SessionActions({
             {/* THE SURFACE'S OWN CONTROLS, first: they are what the bar gave up to make room for the
                 title, and burying them under the row's verbs would make the trade a bad one. A rule
                 separates them because they act on THIS SCREEN while the verbs act on the SESSION. */}
-            {!asking && !confirming && extraTop && (
+            {!asking && !confirming && !confirmingDelete && extraTop && (
               <div style={{ padding: '2px 2px 6px' }}>{extraTop(() => setOpen(false))}</div>
             )}
 
-            {!asking && !confirming && extra.length > 0 && (
+            {!asking && !confirming && !confirmingDelete && extra.length > 0 && (
               <div style={{
                 display: 'flex', flexDirection: 'column',
                 marginBottom: 4, paddingBottom: 4, borderBottom: '1px solid var(--border-subtle)',
@@ -263,6 +269,22 @@ export function SessionActions({
                   </button>
                 </div>
               </form>
+            ) : confirmingDelete ? (
+              <div role="alertdialog" aria-label={pt ? 'Apagar sessão' : 'Delete session'} style={{ padding: '6px 6px 4px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <span style={{ fontSize: 12.5, lineHeight: 1.45, color: 'var(--text-primary)' }}>
+                  {pt
+                    ? `Apagar "${row.title}"? A conversa some de vez — isto não pode ser desfeito. Arquivar a guarda fora da lista.`
+                    : `Delete "${row.title}"? The conversation is gone for good — this cannot be undone. Archiving keeps it out of the list instead.`}
+                </span>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                  <button type="button" style={ghostBtn} disabled={busy} onClick={() => setConfirmingDelete(false)}>
+                    {pt ? 'Cancelar' : 'Cancel'}
+                  </button>
+                  <button type="button" style={{ ...primaryBtn, background: 'var(--accent-red)' }} disabled={busy} onClick={() => { void run('delete') }}>
+                    {pt ? 'Apagar' : 'Delete'}
+                  </button>
+                </div>
+              </div>
             ) : confirming ? (
               <StopSessionConfirm
                 title={row.title}
@@ -288,7 +310,7 @@ export function SessionActions({
                       width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 8,
                       border: 'none', background: 'transparent',
                       color: v.enabled
-                        ? (v.action === 'kill' ? 'var(--accent-red)' : 'var(--text-primary)')
+                        ? (v.action === 'kill' || v.action === 'delete' ? 'var(--accent-red)' : 'var(--text-primary)')
                         : 'var(--text-tertiary)',
                       cursor: v.enabled ? 'pointer' : 'default',
                       opacity: v.enabled ? 1 : 0.6,
@@ -315,8 +337,9 @@ export function SessionActions({
                   </button>
                 ))}
                 {/* Attaching hands over a real terminal, which a browser tab does not have. The
-                    command is offered instead of a button that cannot work. */}
-                <div style={{
+                    command is offered instead of a button that cannot work. A native session has
+                    no terminal at all (`attachCommand` is empty), so the block is left out. */}
+                {row.attachCommand && <div style={{
                   margin: '5px 5px 3px', paddingTop: 8, borderTop: '1px solid var(--border-subtle)',
                   display: 'flex', flexDirection: 'column', gap: 4,
                 }}>
@@ -336,7 +359,7 @@ export function SessionActions({
                   >
                     {row.attachCommand}
                   </code>
-                </div>
+                </div>}
               </>
             )}
 

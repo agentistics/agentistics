@@ -1,7 +1,8 @@
 import { join } from 'path'
 import { randomBytes } from 'node:crypto'
 import { mkdtempSync } from 'node:fs'
-import { tmpdir, userInfo } from 'node:os'
+import { tmpdir } from 'node:os'
+import { accountHome } from './account-home'
 import { resolveDataDir } from './data-dir'
 import { loadEnvConfig } from './env-config'
 import { featureOn } from '@agentistics/core'
@@ -61,7 +62,8 @@ export const DEFAULT_AGENTISTICS_DATA_DIR = join(HOME_DIR, '.agentistics')
 const _dataDir = resolveDataDir({
   env: process.env,
   home: HOME_DIR,
-  ownerHome: (() => { try { return userInfo().homedir } catch { return HOME_DIR } })(),
+  // The ACCOUNT's home: under Bun `os.userInfo().homedir` follows `$HOME` (`account-home.ts`).
+  ownerHome: (() => { try { return accountHome() || HOME_DIR } catch { return HOME_DIR } })(),
   makeTemp: () => mkdtempSync(join(tmpdir(), 'agentistics-test-data-')),
 })
 if (_dataDir.isolated) process.env.AGENTISTICS_DIR = _dataDir.dir

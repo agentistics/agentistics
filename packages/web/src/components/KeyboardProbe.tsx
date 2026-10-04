@@ -48,6 +48,9 @@ export function KeyboardProbe({ pt }: { pt: boolean }) {
         vvTop: vv ? vv.offsetTop : 0,
         vvH: vv ? vv.height : window.innerHeight,
         innerH: window.innerHeight,
+        screenH: window.innerWidth > window.innerHeight
+          ? Math.min(window.screen.width, window.screen.height)
+          : Math.max(window.screen.width, window.screen.height),
         rootTop: root ? root.getBoundingClientRect().top : 0,
         composerTop: composer ? composer.getBoundingClientRect().top : null,
         focused: editable(document.activeElement),

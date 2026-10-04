@@ -79,3 +79,17 @@ describe('taskMenuEntries', () => {
     expect(e.every(x => x.enabled)).toBe(true)
   })
 })
+
+describe('rowMenuEntries — native store verbs', () => {
+  test('archive joins the row menu when the row carries it; delete never does (no confirm there)', () => {
+    const verbs = [
+      { action: 'rename', label: 'Rename', enabled: true },
+      { action: 'kill', label: 'End', enabled: false },
+      { action: 'resume', label: 'Reopen', enabled: true },
+      { action: 'archive', label: 'Archive', enabled: true },
+      { action: 'delete', label: 'Delete', enabled: true },
+    ]
+    const actions = rowMenuEntries(verbs, 'closed').map(e => e.action)
+    expect(actions).toEqual(['rename', 'kill', 'resume', 'archive'])
+  })
+})

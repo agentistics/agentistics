@@ -1,4 +1,4 @@
-import type { HarnessId, SessionMeta } from '@agentistics/core'
+import type { SurfaceHarnessId, SessionMeta } from '@agentistics/core'
 
 /** How each CLI resumes a session by id, verified against each tool's own `--help`:
  *   claude  → `claude --resume <uuid>`
@@ -11,7 +11,7 @@ import type { HarnessId, SessionMeta } from '@agentistics/core'
  * (`--session-id` starts a NEW session with that id), so there is no command that reopens a
  * specific past session. Emitting a plausible-looking command that does the wrong thing is worse
  * than saying it is unavailable. */
-const RESUME_BY_HARNESS: Partial<Record<HarnessId, (id: string) => string>> = {
+const RESUME_BY_HARNESS: Partial<Record<SurfaceHarnessId, (id: string) => string>> = {
   claude: id => `claude --resume ${id}`,
   antigravity: id => `agy --conversation ${id}`,
   codex: id => `codex resume ${id}`,

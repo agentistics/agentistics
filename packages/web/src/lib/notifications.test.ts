@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import type { AppNotification } from './notifications'
 
 /**
@@ -37,6 +37,10 @@ const note = (id: string, over: Partial<AppNotification> = {}): AppNotification 
   id, type: 'info', code: `code-${id}`, ts: 1000, read: false, ...over,
 })
 
+// The REAL fetch goes back once this file is done: the stub has no `status`, and a file that runs
+// after this one in the same process (any order: `bun test --randomize`) read `res.status` as undefined.
+const realFetch = globalThis.fetch
+afterAll(() => { globalThis.fetch = realFetch })
 beforeEach(() => { stubFetch(); respond = () => [] })
 
 describe('loading from the server', () => {

@@ -10,11 +10,11 @@
  * numbers silently, so each aggregation below picks its source explicitly.
  */
 
-import type { AppData, HarnessId, ModelUsage, SessionMeta, StatsCache } from '@agentistics/core'
-import { calcCost, isUnpricedModel, unpricedTokens, canonicalProjectPath, sessionCostUSD, sessionModelUsage, sessionLabel, sessionTokenTotal, usageTokenTotal, HARNESS_ORDER } from '@agentistics/core'
+import type { AppData, SurfaceHarnessId, ModelUsage, SessionMeta, StatsCache } from '@agentistics/core'
+import { calcCost, isUnpricedModel, unpricedTokens, canonicalProjectPath, sessionCostUSD, sessionModelUsage, sessionLabel, sessionTokenTotal, usageTokenTotal, SURFACE_HARNESS_ORDER } from '@agentistics/core'
 
 export interface HarnessRow {
-  harness: HarnessId
+  harness: SurfaceHarnessId
   sessions: number
   /** `null` on the projected path: the journal counts the person's turns, not transcript lines. */
   messages: number | null
@@ -57,7 +57,7 @@ export interface ModelRow {
 export interface SessionRow {
   id: string
   label: string
-  harness: HarnessId
+  harness: SurfaceHarnessId
   project: string
   tokens: number
   costUSD: number
@@ -66,8 +66,8 @@ export interface SessionRow {
 }
 
 /** A session's harness, defaulting legacy/untagged rows to claude (same rule as the web app). */
-export function sessionHarness(s: SessionMeta): HarnessId {
-  return (s.harness as HarnessId | undefined) ?? 'claude'
+export function sessionHarness(s: SessionMeta): SurfaceHarnessId {
+  return (s.harness as SurfaceHarnessId | undefined) ?? 'claude'
 }
 
 /**
@@ -138,7 +138,7 @@ function sessionTotals(sessions: SessionMeta[]): Omit<HarnessRow, 'harness'> & {
 
 export function harnessRows(data: AppData): HarnessRow[] {
   const present = new Set(data.harnesses ?? [])
-  return HARNESS_ORDER.filter(h => present.has(h)).map(harness => {
+  return SURFACE_HARNESS_ORDER.filter(h => present.has(h)).map(harness => {
     const own = (data.sessions ?? []).filter(s => sessionHarness(s) === harness)
     if (harness === 'claude') return { harness, ...claudeTotals(data.statsCache, own) }
     return { harness, ...sessionTotals(own) }

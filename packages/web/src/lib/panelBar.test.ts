@@ -127,3 +127,13 @@ describe('resolvePanelBarPick', () => {
     expect(resolvePanelBarPick({ id: 'studio', activeBottom: 'studio', bottomOpen: false }).kind).toBe('restore')
   })
 })
+
+describe('panelBarEntries — a session with no SCREEN (UI.UNIFY, native)', () => {
+  test('the cli tab is absent, the shell and every other panel stay', () => {
+    const ids = panelBarEntries(['cli', 'shell'], 'shell', { ...OPEN, screen: false }).map(e => e.id)
+    expect(ids).toEqual(['shell'])
+  })
+  test('absent `screen` reads as a session that has one — the CLI path is unchanged', () => {
+    expect(panelBarEntries(['cli', 'shell'], 'cli', OPEN).map(e => e.id)).toEqual(['cli', 'shell'])
+  })
+})

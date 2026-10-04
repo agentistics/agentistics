@@ -32,6 +32,8 @@ import type { ChatTurn } from '../components/sessions/ChatBubble'
 
 export type NativePart =
   | { type: 'text'; text: string }
+  /** B9.1: the model's reasoning (an Anthropic thinking block, a router's trace); redacted = no text. */
+  | { type: 'reasoning'; text: string; signature?: string; redactedData?: string }
   | { type: 'tool_use'; id: string; name: string; input: unknown }
   | { type: 'tool_result'; toolUseId: string; content: string; isError?: boolean }
   /** UI follow-up 3: an attachment the person sent — the window carries its REF, never its bytes. */
@@ -54,8 +56,9 @@ export interface NativeToolCallRef {
 }
 
 export interface NativeWindow {
-  session: { sessionId: string; model: string; provider: string; status: string; title?: string; cwd?: string; credential?: { provider: string; id: string } }
-  messages: { seq: number; message: NativeMessage }[]
+  session: { sessionId: string; model: string; provider: string; status: string; title?: string; cwd?: string; credential?: { provider: string; id: string }; effort?: 'low' | 'medium' | 'high'; extraDirs?: string[]; browser?: boolean }
+  /** `createdAt`: when the engine's store took the message (ISO). Absent from an older engine. */
+  messages: { seq: number; createdAt?: string; message: NativeMessage }[]
   nextBefore?: number
   latestRun?: { runId: string; status: string; toolCalls: NativeToolCallRef[] }
 }
@@ -72,13 +75,16 @@ export interface NativeQuestion {
 export type NativeFrame =
   | { kind: 'hello'; sessionId: string; cursor: number; protocol: number }
   | { kind: 'event'; seq: number; event: { type: string; runId?: string; data?: Record<string, unknown> } }
-  | { kind: 'delta'; seq: number; runId?: string; text: string }
+  /** `channel: 'reasoning'` (B9.1): a piece of the model's reasoning, never of its answer. */
+  | { kind: 'delta'; seq: number; runId?: string; text: string; channel?: 'reasoning' }
+  /** TOOLS-NATIVE item 5: the model's reasoning, on its own channel — never answer text. */
+  | { kind: 'reasoning'; seq: number; runId?: string; text: string }
   | { kind: 'ask'; seq: number; question: NativeQuestion }
   | { kind: 'ask-closed'; seq: number; questionId: string; outcome: string }
   | { kind: 'gap'; missed: number; resumeAt: number }
   | { kind: 'closed'; reason: string }
 
-const KINDS = new Set(['hello', 'event', 'delta', 'ask', 'ask-closed', 'gap', 'closed'])
+const KINDS = new Set(['hello', 'event', 'delta', 'reasoning', 'ask', 'ask-closed', 'gap', 'closed'])
 
 export function parseNativeFrame(raw: string): NativeFrame | null {
   try {
@@ -113,6 +119,12 @@ export interface NativeChatState {
   runId?: string
   /** Text streamed by the model call in flight. */
   liveText: string
+  /**
+   * The REASONING streamed by the latest run (the `reasoning` channel). Not persisted by the engine,
+   * so it is the latest run's only, for as long as this page holds it; a fresh read has none — never
+   * invented back.
+   */
+  reasoning?: { runId?: string; text: string }
   calls: Record<string, LiveCall>
   /** toolUseId → toolExecutionId, ACCUMULATED from every window read (each names only its latest run). */
   execByUse: Record<string, string>
@@ -168,7 +180,12 @@ function applyFrame(s: NativeChatState, f: NativeFrame): NativeChatState {
   if (s.lastSeq !== null && f.seq <= s.lastSeq) return s
   const next: NativeChatState = { ...s, lastSeq: f.seq }
 
-  if (f.kind === 'delta') return { ...next, liveText: next.liveText + f.text }
+  if (f.kind === 'delta' && f.channel !== 'reasoning') return { ...next, liveText: next.liveText + f.text }
+  // The reasoning frame, or a B9.1 `delta` on the reasoning channel: the same collapsed block.
+  if (f.kind === 'reasoning' || f.kind === 'delta') {
+    const same = next.reasoning && next.reasoning.runId === f.runId
+    return { ...next, reasoning: { ...(f.runId ? { runId: f.runId } : {}), text: (same ? next.reasoning!.text : '') + f.text } }
+  }
 
   if (f.kind === 'ask') return { ...next, asks: { ...next.asks, [f.question.id]: f.question } }
   if (f.kind === 'ask-closed') {
@@ -181,7 +198,7 @@ function applyFrame(s: NativeChatState, f: NativeFrame): NativeChatState {
   const tx = typeof data.toolExecutionId === 'string' ? data.toolExecutionId : undefined
   switch (type) {
     case 'run.started': {
-      const { stopped: _s, ...rest } = next
+      const { stopped: _s, reasoning: _r, ...rest } = next
       return { ...rest, running: true, ...(runId ? { runId } : {}), liveText: '' }
     }
     case 'run.ended': {
@@ -367,25 +384,38 @@ export function nativeChatItems(s: NativeChatState): NativeChatItem[] {
 
   for (const m of w?.messages ?? []) {
     const msg = m.message
+    // The bubble's time — the store's own, never "now": an engine that sends none draws none.
+    const at = typeof m.createdAt === 'string' && m.createdAt !== '' ? { at: m.createdAt } : {}
     if (msg.role === 'user') {
       const text = userText(msg)
       const atts = attachmentViews(w?.session.sessionId, msg)
       if (text.trim() !== '' || atts.length > 0) {
-        items.push({ kind: 'turn', key: `m${m.seq}`, turn: { role: 'user', text }, ...(atts.length ? { attachments: atts } : {}) })
+        items.push({ kind: 'turn', key: `m${m.seq}`, turn: { role: 'user', text, ...at }, ...(atts.length ? { attachments: atts } : {}) })
       }
       continue
     }
     if (typeof msg.content === 'string') {
-      if (msg.content.trim() !== '') items.push({ kind: 'turn', key: `m${m.seq}`, turn: { role: 'assistant', text: msg.content } })
+      if (msg.content.trim() !== '') items.push({ kind: 'turn', key: `m${m.seq}`, turn: { role: 'assistant', text: msg.content, ...at } })
       continue
     }
     let text = ''
+    // B9.1: a persisted reasoning part folds above the answer text that follows it (the standard
+    // shell's collapsed reasoning block), never into the answer.
+    let thought = ''
     const flush = (i: number) => {
-      if (text.trim() !== '') items.push({ kind: 'turn', key: `m${m.seq}.${i}`, turn: { role: 'assistant', text } })
+      if (text.trim() !== '' || thought.trim() !== '') {
+        items.push({ kind: 'turn', key: `m${m.seq}.${i}`, turn: { role: 'assistant', text, ...at, ...(thought.trim() !== '' ? { reasoning: thought } : {}) } })
+      }
       text = ''
+      thought = ''
     }
     msg.content.forEach((p, i) => {
       if (p.type === 'text') { text += (text ? '\n\n' : '') + p.text; return }
+      if (p.type === 'reasoning') {
+        if (text.trim() !== '') flush(i)
+        thought += (thought ? '\n\n' : '') + p.text
+        return
+      }
       if (p.type !== 'tool_use') return
       flush(i)
       const tx = execByUse.get(p.id)
@@ -432,8 +462,21 @@ export function nativeChatItems(s: NativeChatState): NativeChatItem[] {
 
   if (s.stopped !== undefined) items.push({ kind: 'turn', key: 'stopped', stopped: true, turn: { role: 'assistant', text: s.stopped } })
 
+  const reasoning = s.reasoning?.text.trim() ? s.reasoning.text : undefined
   if (s.liveText !== '' && !persisted(w, s.liveText)) {
-    items.push({ kind: 'turn', key: 'live', turn: { role: 'assistant', text: s.liveText, pending: true } })
+    items.push({ kind: 'turn', key: 'live', turn: { role: 'assistant', text: s.liveText, pending: true, ...(reasoning ? { reasoning } : {}) } })
+  } else if (reasoning) {
+    // The latest run's answer is persisted (or not written yet): its reasoning folds above the LAST
+    // assistant text after the person's latest message — that run's answer. While the run is still
+    // thinking and nothing is written, it is the live turn on its own.
+    const lastUser = items.findLastIndex(i => i.kind === 'turn' && i.turn.role === 'user')
+    const at = items.findLastIndex((i, n) => n > lastUser && i.kind === 'turn' && i.turn.role === 'assistant' && i.key !== 'stopped')
+    if (at >= 0) {
+      const it = items[at] as Extract<NativeChatItem, { kind: 'turn' }>
+      items[at] = { ...it, turn: { ...it.turn, reasoning } }
+    } else if (s.running) {
+      items.push({ kind: 'turn', key: 'live', turn: { role: 'assistant', text: '', pending: true, reasoning } })
+    }
   }
 
   for (const q of asks) if (!usedAsks.has(q.id)) items.push({ kind: 'approval', key: `q${q.id}`, ask: toAsk(q) })

@@ -14,7 +14,7 @@ import { planAllocation, projectFolder, t } from '@agentistics/core'
 import { widerValue } from '../lib/statCardSize'
 import { fmt, fmtFull, fmtDuration, fmtCost, totalTokens, UNPRICED_TOTAL_MARKER } from '@agentistics/core'
 import type { Lang } from '@agentistics/core'
-import type { HarnessId } from '@agentistics/core'
+import type { SurfaceHarnessId } from '@agentistics/core'
 import { Section } from '../components/Section'
 import { StatCard } from '../components/StatCard'
 import { TokenStatCard } from '../components/TokenStatCard'
@@ -53,7 +53,7 @@ export default function HomePage() {
   const d = derived
   const isMobile = useIsMobile()
 
-  function costCardSub(activeLang: Lang, harness: HarnessId | undefined): string {
+  function costCardSub(activeLang: Lang, harness: SurfaceHarnessId | undefined): string {
     if (!harness) return t('card.est_cost_sub_generic', activeLang)
     const provider = HARNESS_PROVIDERS[harness] ?? 'Anthropic'
     return t('card.est_cost_sub_with_provider', activeLang).replace('{provider}', provider)

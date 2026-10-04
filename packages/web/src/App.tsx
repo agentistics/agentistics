@@ -30,9 +30,9 @@ import { useIsMobile } from './hooks/useIsMobile'
 import { useAccessibility } from './hooks/useAccessibility'
 import type { TagDef } from './lib/tagMatch'
 import { canCreateTagFromFilters, filtersToTagDraft } from './lib/filtersToTag'
-import type { BillingSettings, CostBasis, Filters, HarnessId, HealthIssue, SavedComparison, SessionPreset, TeamConfig } from '@agentistics/core'
+import type { BillingSettings, CostBasis, Filters, SurfaceHarnessId, HealthIssue, SavedComparison, SessionPreset, TeamConfig } from '@agentistics/core'
 import type { Lang, Theme } from '@agentistics/core'
-import { billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, normalizeSessionPresets, planAllocation, formatProjectName, MODEL_PRICING, distinctUsers, distinctHarnesses, filterByUsers, fmtCost, HARNESS_ORDER, readTeamConnections, fmt, totalTokens, totalTokensExplained } from '@agentistics/core'
+import { isAdapterHarness, billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, normalizeSessionPresets, planAllocation, formatProjectName, MODEL_PRICING, distinctUsers, distinctHarnesses, filterByUsers, fmtCost, SURFACE_HARNESS_ORDER, readTeamConnections, fmt, totalTokens, totalTokensExplained } from '@agentistics/core'
 import { buildDeniedRepoLabels } from './lib/shareRepos'
 import { StatCard } from './components/StatCard'
 import { StreakBreakdownButton } from './components/StreakBreakdownButton'
@@ -47,6 +47,7 @@ import { VaultUnlockHost } from './components/vault/VaultUnlockHost'
 import { BetaTag } from './components/BetaTag'
 import { KeyboardProbe, keyboardProbeOn } from './components/KeyboardProbe'
 import { shouldNudgeViewport, shouldResetDocumentScroll } from './lib/viewportReset'
+import { useStandaloneHeight } from './hooks/useStandaloneHeight'
 import { MagnifierLayer } from './components/a11y/MagnifierLayer'
 import { HideLensesButton } from './components/a11y/HideLensesButton'
 import { MagnifierButton } from './components/a11y/MagnifierButton'
@@ -89,6 +90,7 @@ import { SessionsRail } from './components/nav/SessionsRail'
 import { AsideHeader } from './components/nav/AsideHeader'
 import { getPinnedIds } from './lib/pinnedSessions'
 import { loadSharedPrefs, loadPersonalPrefs, putPersonal, migrateLocalOnce } from './lib/sharedPref'
+import { applyTextScale, clampTextScale } from './lib/textScale'
 import { fleetOpenStore, sessionsFiltersOpenStore, studioSeenStore } from './lib/appFlags'
 import { pageMaxWidth } from './lib/pageWidth'
 import {
@@ -262,10 +264,10 @@ function LoadingScreen({ lang, loadProgress }: { lang: string; loadProgress: Loa
 
       {/* Title + subtitle */}
       <div style={{ textAlign: 'center', animation: 'loadFadeUp 0.35s ease-out 0.08s both' }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 5, letterSpacing: '-0.01em' }}>
+        <div style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 5, letterSpacing: '-0.01em' }}>
           agentistics
         </div>
-        <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
           {lang === 'pt' ? 'Carregando seus dados...' : 'Loading your data...'}
         </div>
       </div>
@@ -280,7 +282,7 @@ function LoadingScreen({ lang, loadProgress }: { lang: string; loadProgress: Loa
       }}>
         {/* Phase label */}
         {phase1Done < 3 && (
-          <div style={{ fontSize: 10, color: 'var(--text-tertiary)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 2 }}>
+          <div style={{ fontSize: '0.625rem', color: 'var(--text-tertiary)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 2 }}>
             {lang === 'pt' ? '⇉ Paralelo' : '⇉ Parallel'}
           </div>
         )}
@@ -318,7 +320,7 @@ function LoadingScreen({ lang, loadProgress }: { lang: string; loadProgress: Loa
                     <span style={{ opacity: status === 'pending' ? 0.35 : 0.8, display: 'flex', transition: 'opacity 0.25s' }}>
                       {stage.icon}
                     </span>
-                    <span style={{ fontSize: 12, fontWeight: 500 }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 500 }}>
                       {label}
                       {detailStr && status === 'done' && (
                         <span style={{ color: 'var(--text-tertiary)', fontWeight: 400, marginLeft: 7, fontSize: 11 }}>
@@ -328,7 +330,7 @@ function LoadingScreen({ lang, loadProgress }: { lang: string; loadProgress: Loa
                     </span>
                   </div>
                   <span style={{
-                    fontSize: 11,
+                    fontSize: '0.6875rem',
                     fontWeight: 600,
                     color: status === 'done' ? 'var(--anthropic-orange)' : status === 'active' ? 'var(--text-secondary)' : 'var(--text-tertiary)',
                     transition: 'color 0.25s',
@@ -403,7 +405,7 @@ function Section({ title, children, action, onExpand, flashId, style: extraStyle
         justifyContent: 'space-between',
         marginBottom: 18,
       }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
           {title}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -482,7 +484,7 @@ function ChartModal({ title, onClose, children }: {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           marginBottom: 20,
         }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
             {title}
           </div>
           <button
@@ -569,7 +571,7 @@ function LiveSettingsModal({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Settings size={14} style={{ color: 'var(--text-secondary)' }} />
-            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
+            <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)' }}>
               {lang === 'pt' ? 'Configurações de live' : 'Live update settings'}
             </span>
           </div>
@@ -588,10 +590,10 @@ function LiveSettingsModal({
         {/* Live on/off */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>
+            <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>
               {lang === 'pt' ? 'Atualização em tempo real' : 'Live updates'}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+            <div style={{ fontSize: '0.6875rem', color: 'var(--text-tertiary)' }}>
               {lang === 'pt' ? 'Monitora mudanças automaticamente' : 'Automatically polls for changes'}
             </div>
           </div>
@@ -602,7 +604,7 @@ function LiveSettingsModal({
 
         {/* Update interval */}
         <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
             {lang === 'pt' ? 'Intervalo de atualização' : 'Update interval'}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -625,7 +627,7 @@ function LiveSettingsModal({
                     color: active
                       ? isRisky ? '#ef4444' : 'var(--anthropic-orange)'
                       : 'var(--text-secondary)',
-                    fontSize: 12, fontWeight: active ? 700 : 500,
+                    fontSize: '0.75rem', fontWeight: active ? 700 : 500,
                     cursor: 'pointer', fontFamily: 'inherit',
                     transition: 'all 0.1s',
                   }}
@@ -644,11 +646,11 @@ function LiveSettingsModal({
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
               <Zap size={12} style={{ color: riskyMode ? '#ef4444' : 'var(--text-tertiary)' }} fill={riskyMode ? '#ef4444' : 'none'} />
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+              <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)' }}>
                 {lang === 'pt' ? 'Modo arriscado' : 'Risky mode'}
               </span>
             </div>
-            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+            <div style={{ fontSize: '0.6875rem', color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
               {lang === 'pt'
                 ? 'Desbloqueia intervalos abaixo de 10s (até 1s). Pode aumentar o uso de CPU e I/O.'
                 : 'Unlocks sub-10s intervals (down to 1s). May increase CPU and I/O load.'}
@@ -671,11 +673,11 @@ function LiveSettingsModal({
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
               <Sparkles size={12} style={{ color: highlightUpdates ? 'var(--anthropic-orange)' : 'var(--text-tertiary)' }} />
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+              <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)' }}>
                 {lang === 'pt' ? 'Destaques de atualização' : 'Update highlights'}
               </span>
             </div>
-            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+            <div style={{ fontSize: '0.6875rem', color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
               {lang === 'pt'
                 ? 'Destaca visualmente as seções que mudaram na última atualização.'
                 : 'Briefly glows sections that changed on the last data update.'}
@@ -709,7 +711,7 @@ function MobileBottomNav({
   principal, theme, onToggleTheme, onToggleLang, a11yEnabled,
 }: {
   lang: Lang
-  harnesses?: HarnessId[]
+  harnesses?: SurfaceHarnessId[]
   onRefresh: () => void
   /** Hardware is a modal, not a destination — on mobile its entry point is a tile in this sheet. */
   onOpenHardware: () => void
@@ -833,7 +835,7 @@ function MobileBottomNav({
     display: 'flex', alignItems: 'center', gap: 10, width: '100%', minHeight: 44,
     padding: '0 14px', borderRadius: 12, border: '1px solid var(--border)',
     background: 'var(--bg-elevated)', color: 'var(--text-primary)',
-    fontSize: 13.5, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left',
+    fontSize: '0.8438rem', fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left',
   }
 
   return (
@@ -881,11 +883,11 @@ function MobileBottomNav({
             <span style={{
               width: 32, height: 32, borderRadius: '50%', background: 'var(--bg-surface)',
               border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', flexShrink: 0,
+              fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', flexShrink: 0,
             }}>{principal.name.slice(0, 2)}</span>
             <span style={{ minWidth: 0, flex: 1 }}>
-              <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</span>
-              <span style={{ display: 'block', fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</span>
+              <span style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</span>
+              <span style={{ display: 'block', fontSize: '0.625rem', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</span>
               {!isCentral && <span style={{ display: 'block', marginTop: 3 }}><MemberConnectionStatus lang={lang} compact /></span>}
             </span>
             <ChevronDown size={16} style={{ flexShrink: 0, color: 'var(--text-tertiary)', transform: accountOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
@@ -940,7 +942,7 @@ function MobileBottomNav({
                   background: lit ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
                   color: lit ? orange : 'var(--text-primary)',
                   cursor: 'pointer', fontFamily: 'inherit',
-                  fontSize: 11, fontWeight: 600,
+                  fontSize: '0.6875rem', fontWeight: 600,
                   transition: 'all 0.15s',
                 }}
               >
@@ -953,7 +955,7 @@ function MobileBottomNav({
                     position: 'absolute', top: 4, right: 5,
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                     minWidth: 15, height: 15, padding: '0 4px', borderRadius: 8,
-                    background: orange, color: '#fff', fontSize: 9, fontWeight: 700,
+                    background: orange, color: '#fff', fontSize: '0.5625rem', fontWeight: 700,
                   }}>
                     {tile.badge}
                   </span>
@@ -1023,7 +1025,7 @@ function CollapsedTip({ label, show, children }: { label: string; show: boolean;
           position: 'fixed', top: pos.top, left: pos.left, transform: 'translateY(-50%)',
           background: 'var(--bg-card)', color: 'var(--text-primary)',
           border: '1px solid var(--border)', borderRadius: 7, padding: '5px 10px',
-          fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+          fontSize: '0.75rem', fontWeight: 600, whiteSpace: 'nowrap',
           boxShadow: '0 6px 20px rgba(0,0,0,0.35)', zIndex: 500, pointerEvents: 'none',
         }}>{label}</div>,
         document.body,
@@ -1037,7 +1039,7 @@ function SideNav({
   theme, onToggleTheme, onToggleLang, onExport, principal, sessionsFilters, sessionsActiveOnly,
   filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
 }: {
-  lang: Lang; harnesses?: HarnessId[]; isCentral?: boolean; hasWorkflows?: boolean
+  lang: Lang; harnesses?: SurfaceHarnessId[]; isCentral?: boolean; hasWorkflows?: boolean
   collapsed: boolean; onToggle: () => void
   /** The width in force. Fixed in the dashboard workspace, user-set in the sessions one. */
   width: number
@@ -1176,11 +1178,11 @@ function SideNav({
               }}
               onMouseEnter={e => { if (!menuOpen) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-elevated)' }}
               onMouseLeave={e => { if (!menuOpen) (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}>
-              <span style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--bg-elevated)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', flexShrink: 0 }}>{principal.name.slice(0, 2)}</span>
+              <span style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--bg-elevated)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7188rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', flexShrink: 0 }}>{principal.name.slice(0, 2)}</span>
               {!collapsed && (
                 <span style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
-                  <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</span>
-                  <span style={{ display: 'block', fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</span>
+                  <span style={{ display: 'block', fontSize: '0.7812rem', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</span>
+                  <span style={{ display: 'block', fontSize: '0.625rem', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</span>
                 </span>
               )}
               {!collapsed && <ChevronDown size={14} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />}
@@ -1198,24 +1200,24 @@ function SideNav({
             boxShadow: '0 10px 30px rgba(0,0,0,0.35)', zIndex: 600, padding: 6,
           }}>
           <div style={{ padding: '8px 10px 10px', borderBottom: '1px solid var(--border)', marginBottom: 6 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</div>
-            <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.email}</div>
-            <div style={{ marginTop: 4, fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</div>
+            <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</div>
+            <div style={{ fontSize: '0.7188rem', color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.email}</div>
+            <div style={{ marginTop: 4, fontSize: '0.625rem', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</div>
           </div>
           <button role="menuitem" onClick={() => { setMenuOpen(false); setPwOpen(true) }}
-            style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: '0.8125rem', fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
             onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'var(--bg-elevated)'; t.style.color = 'var(--text-primary)' }}
             onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'transparent'; t.style.color = 'var(--text-secondary)' }}>
             <KeyRound size={15} /> {pt ? 'Trocar senha' : 'Change password'}
           </button>
           <button role="menuitem" onClick={() => { setMenuOpen(false); setMfaOpen(true) }}
-            style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: '0.8125rem', fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
             onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'var(--bg-elevated)'; t.style.color = 'var(--text-primary)' }}
             onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'transparent'; t.style.color = 'var(--text-secondary)' }}>
             <ShieldCheck size={15} /> {pt ? 'Duas etapas' : 'Two-factor'}
           </button>
           <button role="menuitem" onClick={() => { setMenuOpen(false); logout() }}
-            style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: '0.8125rem', fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
             onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'var(--bg-elevated)'; t.style.color = 'var(--text-primary)' }}
             onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'transparent'; t.style.color = 'var(--text-secondary)' }}>
             <LogOut size={15} /> {pt ? 'Sair' : 'Log out'}
@@ -1241,7 +1243,7 @@ function SideNav({
           </button>
         </CollapsedTip>
         <CollapsedTip label={pt ? 'Idioma' : 'Language'} show={collapsed}>
-          <button onClick={onToggleLang} aria-label={pt ? 'Idioma' : 'Language'} title={collapsed ? undefined : (pt ? 'Switch to English' : 'Mudar para Português')} style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1, gap: 5, fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}
+          <button onClick={onToggleLang} aria-label={pt ? 'Idioma' : 'Language'} title={collapsed ? undefined : (pt ? 'Switch to English' : 'Mudar para Português')} style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1, gap: 5, fontSize: '0.75rem', fontWeight: 600, fontFamily: 'inherit' }}
             onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-primary)' }}
             onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-secondary)' }}>
             <Globe size={14} />{!collapsed && (pt ? 'EN' : 'PT')}
@@ -1415,7 +1417,7 @@ function SideNav({
                   // — a nav item is a target as well as a label, and 36px is the floor for one.
                   padding: collapsed ? '11px 0' : '11px 12px', justifyContent: collapsed ? 'center' : 'flex-start',
                   borderRadius: 10, textDecoration: 'none',
-                  fontSize: 13.5, fontWeight: active ? 700 : 500, fontFamily: 'inherit', whiteSpace: 'nowrap',
+                  fontSize: '0.8438rem', fontWeight: active ? 700 : 500, fontFamily: 'inherit', whiteSpace: 'nowrap',
                   color: active ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
                   background: active ? 'var(--anthropic-orange-dim)' : 'transparent',
                   transition: 'background 0.15s, color 0.15s',
@@ -1469,7 +1471,7 @@ export const STUDIO_SEEN_KEY = 'agentistics.studio.seen'
  * file is somebody else's and is never read.
  */
 export const APP_CHOICE_KEYS = [
-  'lang', 'theme', 'currency', 'cardOrder', 'cardPrecision', 'monthlyBudgetUSD',
+  'lang', 'theme', 'currency', 'textScale', 'cardOrder', 'cardPrecision', 'monthlyBudgetUSD',
   'chatModel', 'chatSoundEnabled', 'chatSoundId',
 ] as const
 
@@ -1622,6 +1624,14 @@ export default function AppLayout() {
     try { return localStorage.getItem('agentistics-theme') === 'light' ? 'light' : 'dark' } catch { return 'dark' }
   })
   const [currency, setCurrencyState] = useState<'USD' | 'BRL'>('USD')
+  const [textScale, setTextScaleState] = useState(1)
+  const setTextScale = useCallback((scale: number) => {
+    const next = clampTextScale(scale)
+    setTextScaleState(next)
+    applyTextScale(document.documentElement, next)
+    putPersonal({ textScale: next })
+  }, [])
+  useEffect(() => { applyTextScale(document.documentElement, textScale) }, [textScale])
 
   // Surface server-pushed notifications (member connection/auth errors) as toasts + bell.
   useNotificationStream(lang)
@@ -1827,6 +1837,7 @@ export default function AppLayout() {
    */
   // Read once — a query string does not change under the app.
   const [probeOn] = useState(keyboardProbeOn)
+  const standaloneH = useStandaloneHeight(isMobile && inSessionsWorkspace)
 
   const lockViewport = isMobile && inSessionsWorkspace
   useEffect(() => {
@@ -2610,7 +2621,7 @@ export default function AppLayout() {
     // only a real 200 response with no archiveMode may set it. On failure we retry with
     // backoff and leave state at `undefined` (neutral loading bg) so nothing false-gates.
     let cancelled = false
-    const apply = (prefs: { cardPrecision?: Record<string, boolean>; lang?: Lang; theme?: Theme; currency?: 'USD' | 'BRL'; cardOrder?: string[]; monthlyBudgetUSD?: number | null; chatModel?: string; chatSoundEnabled?: boolean; editorAutosave?: boolean; archiveMode?: ArchiveMode; archiveSessions?: boolean; installDismissed?: boolean; team?: TeamConfig; billing?: unknown }) => {
+    const apply = (prefs: { cardPrecision?: Record<string, boolean>; lang?: Lang; theme?: Theme; currency?: 'USD' | 'BRL'; textScale?: number; cardOrder?: string[]; monthlyBudgetUSD?: number | null; chatModel?: string; chatSoundEnabled?: boolean; editorAutosave?: boolean; archiveMode?: ArchiveMode; archiveSessions?: boolean; installDismissed?: boolean; team?: TeamConfig; billing?: unknown }) => {
       if (prefs.cardPrecision) setCardPrecisionState(prefs.cardPrecision)
       // Total and never throws: a hand-edited preferences.json must not blank the dashboard.
       const nextBilling = normalizeBillingSettings(prefs.billing)
@@ -2625,6 +2636,7 @@ export default function AppLayout() {
         try { localStorage.setItem('agentistics-theme', prefs.theme) } catch { /* private mode */ }
       }
       if (prefs.currency) setCurrencyState(prefs.currency)
+      if (prefs.textScale !== undefined) setTextScaleState(clampTextScale(prefs.textScale))
       if (prefs.cardOrder) setCardOrder(migrateCardOrder(prefs.cardOrder))
       if ('monthlyBudgetUSD' in prefs) {
         const v = typeof prefs.monthlyBudgetUSD === 'number' && Number.isFinite(prefs.monthlyBudgetUSD) ? prefs.monthlyBudgetUSD : null
@@ -2891,7 +2903,7 @@ export default function AppLayout() {
     central: isCentral,
   })
   const billingReady = useMemo(
-    () => billingReadiness(billing, data?.harnesses?.length ? data.harnesses : ['claude']),
+    () => billingReadiness(billing, data?.harnesses?.length ? data.harnesses.filter(isAdapterHarness) : ['claude']),
     [billing, data?.harnesses],
   )
   // A central aggregates many machines; pricing a whole fleet from its operator's own timeline
@@ -3020,13 +3032,13 @@ export default function AppLayout() {
   // Models grouped by the harness that actually used them (NOT by prefix — Copilot
   // also uses gpt-* models). When a harness filter is active, only that harness's
   // models are offered; in the unified view all harnesses are shown as sections.
-  const modelGroups = useMemo<{ harness: HarnessId; models: string[] }[]>(() => {
+  const modelGroups = useMemo<{ harness: SurfaceHarnessId; models: string[] }[]>(() => {
     if (!data) return []
-    const order: HarnessId[] = HARNESS_ORDER
-    const byH: Partial<Record<HarnessId, Set<string>>> = {}
-    const add = (h: HarnessId, m?: string) => { if (!m) return; (byH[h] ??= new Set<string>()).add(m) }
+    const order: SurfaceHarnessId[] = SURFACE_HARNESS_ORDER
+    const byH: Partial<Record<SurfaceHarnessId, Set<string>>> = {}
+    const add = (h: SurfaceHarnessId, m?: string) => { if (!m) return; (byH[h] ??= new Set<string>()).add(m) }
     for (const id of Object.keys(data.statsCache.modelUsage ?? {})) add('claude', id)
-    for (const s of data.sessions) add((s.harness ?? 'claude') as HarnessId, s.model)
+    for (const s of data.sessions) add((s.harness ?? 'claude') as SurfaceHarnessId, s.model)
     // When the harness filter is active, only the selected harnesses' models are offered;
     // in the unified view all harnesses are shown as sections.
     const sel = filters.harnesses ?? []
@@ -3186,7 +3198,7 @@ export default function AppLayout() {
   // users). So picking one member narrows the harness options to the harnesses that member
   // actually used; "All members" shows the union. Falls back to all harnesses in the data
   // when the scoped slice is empty (e.g. a selected member has no sessions yet).
-  const availableHarnesses = useMemo<HarnessId[]>(() => {
+  const availableHarnesses = useMemo<SurfaceHarnessId[]>(() => {
     if (!data) return []
     const scoped = filterByUsers(data.sessions, filters.users ?? [])
     const present = distinctHarnesses(scoped)
@@ -3230,7 +3242,7 @@ export default function AppLayout() {
   // When exactly one harness is selected, the header mirrors the old per-harness view
   // (derived first/last dates + harness label). With 0 or >1 selected it uses the
   // statsCache (Claude-canonical) dates, matching the unified dashboard.
-  const singleHarness: HarnessId | undefined =
+  const singleHarness: SurfaceHarnessId | undefined =
     (filters.harnesses?.length === 1) ? filters.harnesses[0] : undefined
 
   // Info items for all 8 stat cards
@@ -3492,13 +3504,13 @@ export default function AppLayout() {
         textAlign: 'center',
       }}>
         <div style={{ fontSize: 40 }}>⚠️</div>
-        <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)' }}>
+        <div style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)' }}>
           {lang === 'pt' ? 'Falha ao carregar dados' : 'Failed to load data'}
         </div>
-        <div style={{ fontSize: 13, color: 'var(--text-secondary)', fontFamily: 'monospace', background: 'var(--bg-card)', padding: '10px 16px', borderRadius: 8, maxWidth: 500 }}>
+        <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', fontFamily: 'monospace', background: 'var(--bg-card)', padding: '10px 16px', borderRadius: 8, maxWidth: 500 }}>
           {error}
         </div>
-        <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
           {lang === 'pt' ? 'Certifique-se de que o servidor está rodando:' : 'Make sure the API server is running:'}{' '}
           <code style={{ background: 'var(--bg-elevated)', padding: '2px 6px', borderRadius: 4 }}>bun run server.ts</code>
         </div>
@@ -3510,7 +3522,7 @@ export default function AppLayout() {
           color: 'var(--anthropic-orange)',
           cursor: 'pointer',
           fontFamily: 'inherit',
-          fontSize: 13,
+          fontSize: '0.8125rem',
           fontWeight: 600,
         }}>
           {lang === 'pt' ? 'Tentar novamente' : 'Retry'}
@@ -3583,7 +3595,7 @@ export default function AppLayout() {
   // come from /api/data until it completes (the server refuses the projections until then).
   const backfillText = journalBackfillText(teamSession?.journalBackfill, lang)
   const backfillNote = backfillText
-    ? <div role="status" style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.4 }}>{backfillText}</div>
+    ? <div role="status" style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', lineHeight: 1.4 }}>{backfillText}</div>
     : null
 
   // Built once so the magnifier layer (Task 8) can be handed the exact same object the pages get
@@ -3594,7 +3606,7 @@ export default function AppLayout() {
     statsCache,
     filters, setFilters, activeOnly, setActiveOnly,
     availableProjects, availableHarnesses,
-    lang, theme, currency, setCurrency, brlRate,
+    lang, theme, currency, setCurrency, textScale, setTextScale, brlRate,
     billing, saveBilling, costBasis, setCostBasis, planBasis, billingReady, openBillingSetup,
     comparisons, saveComparisons,
     sessionPresets, saveSessionPresets,
@@ -3676,7 +3688,7 @@ export default function AppLayout() {
       {headerSession && (
         <div style={{ minWidth: 0, flexShrink: 1, display: 'flex', alignItems: 'baseline', gap: 7 }}>
           <span style={{
-            fontSize: 13.5, fontWeight: 650, color: 'var(--text-primary)',
+            fontSize: '0.8438rem', fontWeight: 650, color: 'var(--text-primary)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
           }}>
             {headerSession.title}
@@ -3699,7 +3711,7 @@ export default function AppLayout() {
           {/* Gives up before the title does: the name is what identifies the session, and the state
               is repeated on its own row in the aside two centimetres away. */}
           <span style={{
-            fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 1000000,
+            fontSize: '0.6875rem', color: 'var(--text-tertiary)', flexShrink: 1000000,
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
           }}>
             {headerSession.stateLabel}
@@ -3961,7 +3973,7 @@ export default function AppLayout() {
       display: 'flex', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', gap: '2px 9px',
       padding: '7px 12px', borderRadius: 'var(--radius-md)', maxWidth: '100%', boxSizing: 'border-box',
       border: '1px solid var(--border)', background: 'var(--bg-card)',
-      fontSize: 11, color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums',
+      fontSize: '0.6875rem', color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums',
     }}>
       {/* WHAT IS ON SCREEN, first — the totals the filters actually produced. They
           lead because they are the numbers that move when you touch a filter;
@@ -3973,7 +3985,7 @@ export default function AppLayout() {
           from they happened to be the same number, which is exactly the coincidence
           that makes an unlabelled pair impossible to tell apart later. */}
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ textTransform: 'uppercase', fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, opacity: 0.75 }}>
+        <span style={{ textTransform: 'uppercase', fontSize: '0.5938rem', fontWeight: 700, letterSpacing: 0.4, opacity: 0.75 }}>
           {lang === 'pt' ? 'No filtro' : 'In view'}
         </span>
         <span><strong style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{derived.totalSessions.toLocaleString()}</strong> {lang === 'pt' ? (derived.totalSessions === 1 ? 'sessão' : 'sessões') : (derived.totalSessions === 1 ? 'session' : 'sessions')}</span>
@@ -4128,7 +4140,7 @@ export default function AppLayout() {
             borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-secondary)',
           }}>
             <Activity size={12} style={{ color: liveUpdates ? 'var(--anthropic-orange)' : 'var(--text-tertiary)', flexShrink: 0, transition: 'color 0.2s' }} />
-            <span style={{ fontSize: 11, fontWeight: 500, color: liveUpdates ? 'var(--text-primary)' : 'var(--text-tertiary)', whiteSpace: 'nowrap', userSelect: 'none' }}>Live</span>
+            <span style={{ fontSize: '0.6875rem', fontWeight: 500, color: liveUpdates ? 'var(--text-primary)' : 'var(--text-tertiary)', whiteSpace: 'nowrap', userSelect: 'none' }}>Live</span>
             <button
               onClick={() => setLiveUpdates(v => !v)}
               title={liveUpdates ? 'Pause live updates' : 'Enable live updates'}
@@ -4137,7 +4149,7 @@ export default function AppLayout() {
               <span style={{ position: 'absolute', top: 2, left: liveUpdates ? 14 : 2, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
             </button>
             {liveUpdates && (
-              <span style={{ fontSize: 10, fontWeight: 700, color: riskyMode && updateInterval < 10 ? '#ef4444' : 'var(--anthropic-orange)', userSelect: 'none' }}>
+              <span style={{ fontSize: '0.625rem', fontWeight: 700, color: riskyMode && updateInterval < 10 ? '#ef4444' : 'var(--anthropic-orange)', userSelect: 'none' }}>
                 {riskyMode && updateInterval < 10 ? `⚡ ${updateInterval}s` : `${updateInterval >= 60 ? `${updateInterval / 60}m` : `${updateInterval}s`}`}
               </span>
             )}
@@ -4177,7 +4189,7 @@ export default function AppLayout() {
                     display: 'flex', alignItems: 'center', gap: 5, padding: '2px 10px 3px',
                     border: '1px solid var(--border)', borderTop: 'none',
                     borderRadius: '0 0 7px 7px', background: 'var(--bg-surface)',
-                    color: 'var(--text-tertiary)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5,
+                    color: 'var(--text-tertiary)', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.6562rem',
                   }}
                 >
                   {lang === 'pt' ? 'Estatísticas' : 'Stats'}
@@ -4235,7 +4247,7 @@ export default function AppLayout() {
 
             {/* Description + stats + version — middle */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, flex: '1 1 200px' }}>
-              <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.7, margin: 0 }}>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', lineHeight: 1.7, margin: 0 }}>
                 {lang === 'pt'
                   ? 'Dashboard local de uso do Claude Code. Seus dados ficam no seu computador — sem servidores, sem rastreamento.'
                   : 'Local Claude Code usage dashboard. Your data stays on your machine — no servers, no tracking.'}
@@ -4251,7 +4263,7 @@ export default function AppLayout() {
                     width: 6, height: 6, borderRadius: '50%',
                     background: 'var(--accent-green)', boxShadow: '0 0 8px var(--accent-green)',
                   }} />
-                  <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                  <span style={{ fontSize: '0.6875rem', color: 'var(--text-secondary)' }}>
                     {derived.totalSessions.toLocaleString()} {lang === 'pt' ? 'sessões' : 'sessions'}
                     {' · '}
                     {derived.totalMessages.toLocaleString()} {lang === 'pt' ? 'mensagens' : 'messages'}
@@ -4266,7 +4278,7 @@ export default function AppLayout() {
                     padding: '4px 10px', borderRadius: 20,
                     background: 'var(--anthropic-orange-dim)',
                     border: '1px solid var(--anthropic-orange-dim)',
-                    fontSize: 11, color: 'var(--anthropic-orange-light)',
+                    fontSize: '0.6875rem', color: 'var(--anthropic-orange-light)',
                     textDecoration: 'none', fontWeight: 600,
                     transition: 'opacity 0.15s',
                   }}
@@ -4313,12 +4325,12 @@ export default function AppLayout() {
                 },
               ] as { title: string; links: { href: string; label: string }[] }[]).map(({ title, links }) => (
                 <div key={title} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                  <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
                     {title}
                   </span>
                   {links.map(({ href, label }) => (
                     <a key={href} href={href} target="_blank" rel="noreferrer" style={{
-                      fontSize: 13, color: 'var(--text-tertiary)', textDecoration: 'none',
+                      fontSize: '0.8125rem', color: 'var(--text-tertiary)', textDecoration: 'none',
                       transition: 'color 0.15s',
                     }}
                       onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-primary)')}
@@ -4338,7 +4350,7 @@ export default function AppLayout() {
             flexWrap: 'wrap', gap: 12, paddingTop: 24,
             borderTop: '1px solid var(--border-subtle)',
           }}>
-            <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+            <span style={{ fontSize: '0.6875rem', color: 'var(--text-tertiary)' }}>
               {lang === 'pt' ? 'Feito com' : 'Made with'}{' '}
               <span style={{ color: 'var(--anthropic-orange)', fontWeight: 700 }}>♥</span>
               {' '}{lang === 'pt' ? 'por' : 'by'}{' '}
@@ -4450,7 +4462,10 @@ export default function AppLayout() {
       // There is no cost on a desktop: with no dynamic toolbars `dvh` and `vh` are the same number.
       // A rule that holds on every screen does not need a breakpoint, and the breakpoint was the
       // whole defect.
-      height: inSessionsWorkspace || !isMobile ? '100dvh' : undefined,
+      // A home-screen app on iOS can come back from the keyboard with `100dvh` short by about the
+      // status bar, leaving a black band under the bottom bar (owner, 2026-10-04). Held at the
+      // screen's height then — `useStandaloneHeight` / `lib/standaloneHeight.ts`.
+      height: inSessionsWorkspace || !isMobile ? (standaloneH !== null ? `${standaloneH}px` : '100dvh') : undefined,
       // Only on the LIST. With a session open the bar is not rendered at all (see its own note),
       // so reserving its band would leave a strip of nothing under the composer — the same
       // mismatch the old subtraction made, seen from the other side.
@@ -4588,7 +4603,7 @@ export default function AppLayout() {
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8, width: '100%',
                   padding: '9px 14px', background: 'transparent', border: 'none',
-                  color: 'var(--text-secondary)', fontFamily: 'inherit', fontSize: 13,
+                  color: 'var(--text-secondary)', fontFamily: 'inherit', fontSize: '0.8125rem',
                   fontWeight: 600, cursor: 'pointer',
                 }}
               >
@@ -4599,7 +4614,7 @@ export default function AppLayout() {
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                     minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9,
                     background: 'var(--anthropic-orange)', color: '#fff',
-                    fontSize: 11, fontWeight: 700,
+                    fontSize: '0.6875rem', fontWeight: 700,
                   }}>
                     {activeFilterCount}
                   </span>
@@ -4650,7 +4665,7 @@ export default function AppLayout() {
                   style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
                     width: '100%', padding: '5px 0 7px', background: 'transparent', border: 'none',
-                    color: 'var(--text-tertiary)', fontFamily: 'inherit', fontSize: 12,
+                    color: 'var(--text-tertiary)', fontFamily: 'inherit', fontSize: '0.75rem',
                     fontWeight: 600, cursor: 'pointer',
                   }}
                 >
@@ -4669,7 +4684,7 @@ export default function AppLayout() {
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8, width: '100%', minHeight: 40,
                   padding: '0 14px', background: 'transparent', border: 'none',
-                  fontFamily: 'inherit', fontSize: 12, cursor: 'pointer',
+                  fontFamily: 'inherit', fontSize: '0.75rem', cursor: 'pointer',
                   color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums',
                 }}
               >
@@ -4689,14 +4704,14 @@ export default function AppLayout() {
                 return (
                   <div style={{
                     display: 'flex', flexWrap: 'wrap', gap: 6, padding: '2px 14px 10px',
-                    fontSize: 11, color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums',
+                    fontSize: '0.6875rem', color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums',
                   }}>
                     {/* The same "what is on screen" group the desktop strip leads with, as one
                         chip. Parity is the point: the totals moved OUT of the desktop header into
                         this strip, and a phone that never got them would be the one layout where
                         the filters produce no readable total at all. */}
                     <span style={chip}>
-                      <span style={{ textTransform: 'uppercase', fontSize: 9, fontWeight: 700, letterSpacing: 0.4, opacity: 0.75 }}>
+                      <span style={{ textTransform: 'uppercase', fontSize: '0.5625rem', fontWeight: 700, letterSpacing: 0.4, opacity: 0.75 }}>
                         {lang === 'pt' ? 'No filtro' : 'In view'}
                       </span>
                       <span style={val}>{derived.totalSessions.toLocaleString()}</span>
@@ -5016,7 +5031,7 @@ function TagCloud({ data, color }: { data: Record<string, number>; color: string
 
   if (entries.length === 0) {
     return (
-      <div style={{ color: 'var(--text-tertiary)', fontSize: 13, textAlign: 'center', padding: 16 }}>
+      <div style={{ color: 'var(--text-tertiary)', fontSize: '0.8125rem', textAlign: 'center', padding: 16 }}>
         No data
       </div>
     )

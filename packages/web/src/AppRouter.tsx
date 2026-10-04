@@ -17,8 +17,8 @@ const ToolsPage = lazy(() => import('./pages/ToolsPage'))
 const CustomPage = lazy(() => import('./pages/CustomPage'))
 const ComparePage = lazy(() => import('./pages/ComparePage'))
 const ExportPage = lazy(() => import('./pages/ExportPage'))
-// Every /sessions route renders through `SessionRoute`, which sends a NATIVE session id to its own
-// page (UI.3) and everything else to `SessionsPage` — one component type at all three, so the
+// Every /sessions route renders through `SessionRoute`: ONE shell for every harness, native included
+// (UI.UNIFY) — `SessionsPage` at all three, one component type, so the
 // workspace's aside stays mounted across selections exactly as before.
 const SessionRoute = lazy(() => import('./pages/SessionRoute'))
 const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'))
@@ -36,6 +36,7 @@ const LiveSettings = lazy(() => import('./pages/settings/LiveSettings'))
 const ChatSettings = lazy(() => import('./pages/settings/ChatSettings'))
 const VaultSettings = lazy(() => import('./pages/settings/VaultSettings'))
 const ProvidersSettings = lazy(() => import('./pages/settings/ProvidersSettings'))
+const MemorySettings = lazy(() => import('./pages/settings/MemorySettings'))
 const UsersSettings = lazy(() => import('./pages/settings/UsersSettings'))
 const TeamsSettings = lazy(() => import('./pages/settings/TeamsSettings'))
 const MachinesSettings = lazy(() => import('./pages/settings/MachinesSettings'))
@@ -116,6 +117,7 @@ export default function AppRouter() {
             <Route path="chat" element={<Suspense fallback={<PageFallback />}><ChatSettings /></Suspense>} />
             <Route path="vault" element={<Suspense fallback={<PageFallback />}><VaultSettings /></Suspense>} />
             <Route path="providers" element={<Suspense fallback={<PageFallback />}><ProvidersSettings /></Suspense>} />
+            <Route path="memory" element={<Suspense fallback={<PageFallback />}><MemorySettings /></Suspense>} />
             <Route path="users" element={<Suspense fallback={<PageFallback />}><UsersSettings /></Suspense>} />
             <Route path="teams" element={<Suspense fallback={<PageFallback />}><TeamsSettings /></Suspense>} />
             <Route path="machines" element={<Suspense fallback={<PageFallback />}><MachinesSettings /></Suspense>} />

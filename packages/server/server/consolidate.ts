@@ -30,6 +30,9 @@ export async function writeConsolidated(sessions: SessionMeta[]): Promise<number
   if (sessions.length === 0) return 0
   const counts = await Promise.all(sessions.map(s => writeLimit(async () => {
     if (!s.session_id) return 0
+    // A native session is SYNTHESIZED from the journal on every read (`native-sessions.ts`): a stored copy
+    // would go stale the moment a run ends, and has no adapter directory to live in.
+    if (s.harness === 'agentistics') return 0
     const harness = s.harness ?? 'claude'
     await ensureDir(harness)
     const dest = consolidatedPath(harness, s.session_id)
