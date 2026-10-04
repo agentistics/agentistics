@@ -30,6 +30,8 @@ const T = {
     back: 'The server is back and reports the new state.',
     notBack: 'The service was restarted but the server did not answer with the new state in time. Check `agentop status`.',
     failed: (m: string) => `The restart failed: ${m}`,
+    already: (on: boolean) => `Experimental is already ${on ? 'enabled' : 'disabled'}: nothing changed, so nothing was restarted.`,
+    alreadyButServer: (on: boolean) => `The preference is already ${on ? 'enabled' : 'disabled'}, but the running server reports ${on ? 'off' : 'on'} (an environment override, or a server started before the change). Nothing was restarted; run \`agentop restart server\` to apply it.`,
   },
   pt: {
     usage: 'Uso: agentop experimental <enable|disable|status>',
@@ -46,6 +48,8 @@ const T = {
     back: 'O servidor voltou e informa o novo estado.',
     notBack: 'O serviço foi reiniciado, mas o servidor não respondeu com o novo estado a tempo. Veja `agentop status`.',
     failed: (m: string) => `O reinício falhou: ${m}`,
+    already: (on: boolean) => `O modo experimental já está ${on ? 'ligado' : 'desligado'}: nada mudou, então nada foi reiniciado.`,
+    alreadyButServer: (on: boolean) => `A preferência já está ${on ? 'ligada' : 'desligada'}, mas o servidor em execução informa ${on ? 'desligado' : 'ligado'} (uma variável de ambiente, ou um servidor iniciado antes da mudança). Nada foi reiniciado; rode \`agentop restart server\` para aplicar.`,
   },
 } as const
 
@@ -84,8 +88,23 @@ async function waitForState(enabled: boolean, timeoutMs = 25000): Promise<boolea
   return false
 }
 
-export async function runExperimental(args: string[]): Promise<number> {
-  const lang = await resolveLang()
+/** What `runExperimental` touches outside itself — injectable, so a test never reaches a real unit. */
+export interface ExperimentalDeps {
+  lang?: () => Promise<CliLang>
+  readPrefs?: () => Promise<{ experimental?: boolean }>
+  writePrefs?: (patch: { experimental: boolean }) => Promise<unknown>
+  restart?: () => Promise<{ state: 'nothing-running' | 'restarted' | 'failed'; message: string }>
+  askServer?: () => Promise<{ enabled: boolean; features: ExperimentalStatus[] } | null>
+  waitForState?: (enabled: boolean) => Promise<boolean>
+  log?: (line: string) => void
+  error?: (line: string) => void
+}
+
+export async function runExperimental(args: string[], deps: ExperimentalDeps = {}): Promise<number> {
+  const log = deps.log ?? ((l: string) => console.log(l))
+  const error = deps.error ?? ((l: string) => console.error(l))
+  const ask = deps.askServer ?? askServer
+  const lang = await (deps.lang ?? resolveLang)()
   const t = T[lang]
   const verb = args.find(a => !a.startsWith('-'))
   if (verb !== 'enable' && verb !== 'disable' && verb !== 'status') {
@@ -104,15 +123,24 @@ export async function runExperimental(args: string[]): Promise<number> {
     return 0
   }
   const enabled = verb === 'enable'
-  await readPreferencesOrExit()
-  await writePreferences({ experimental: enabled })
-  console.log(t.saved(enabled))
-  const { restartForConfigChange } = await import('./cli-start')
-  const r = await restartForConfigChange()
-  if (r.state === 'nothing-running') { console.log(t.nothingRunning); return 0 }
-  if (r.state === 'failed') { console.error(t.failed(r.message)); return 1 }
-  console.log(t.restarting)
-  if (await waitForState(enabled)) { console.log(t.back); return 0 }
-  console.error(t.notBack)
+  const prefs = await (deps.readPrefs ?? readPreferencesOrExit)()
+  // ALREADY in that state: nothing to apply, so nothing is restarted. A repeated `enable` — typed
+  // again, or run by accident (a backquoted `agentop experimental enable` inside a double-quoted
+  // shell string is EXECUTED by the shell) — must never bounce a production server for no change.
+  if ((prefs.experimental === true) === enabled) {
+    const live = await ask()
+    if (live && live.enabled !== enabled) { log(t.alreadyButServer(enabled)); return 0 }
+    log(t.already(enabled))
+    return 0
+  }
+  await (deps.writePrefs ?? writePreferences)({ experimental: enabled })
+  log(t.saved(enabled))
+  const restart = deps.restart ?? (async () => (await import('./cli-start')).restartForConfigChange())
+  const r = await restart()
+  if (r.state === 'nothing-running') { log(t.nothingRunning); return 0 }
+  if (r.state === 'failed') { error(t.failed(r.message)); return 1 }
+  log(t.restarting)
+  if (await (deps.waitForState ?? waitForState)(enabled)) { log(t.back); return 0 }
+  error(t.notBack)
   return 1
 }
