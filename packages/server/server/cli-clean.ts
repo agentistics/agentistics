@@ -30,9 +30,9 @@ async function knownProjectPaths(): Promise<string[]> {
   } catch { return [] }
 }
 
-export async function collectCleanFacts(repos: readonly string[]): Promise<WorktreeFacts[]> {
+export async function collectCleanFacts(repos: readonly string[], o: { lowPriority?: boolean } = {}): Promise<WorktreeFacts[]> {
   const all: WorktreeFacts[] = []
-  for (const r of repos) all.push(...(await worktreeFacts(r)))
+  for (const r of repos) all.push(...(await worktreeFacts(r, o)))
   return all
 }
 

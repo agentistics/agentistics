@@ -233,6 +233,12 @@ await import('./team-migrate').then(m => m.migrateTeamStateOnce()).catch(err =>
 
 enableRebuildOnChange()
 void import('./mem-log').then(m => m.startMemLog())
+// PERF.1: at most once a week, say what `agentop clean` would free (never removes anything itself).
+if (!TEAM_CENTRAL) {
+  void Promise.all([import('./clean/clean-suggest'), import('./cli-lang')])
+    .then(async ([m, l]) => m.startCleanSuggestions(AGENTISTICS_DATA_DIR, await l.resolveLang()))
+    .catch(() => {})
+}
 void setupFileWatcher()
 if (TEAM_CENTRAL) {
   import('./team-watch').then(m => m.startTeamWatch()).catch(err => console.error('[team-watch] failed to start:', err))

@@ -7,10 +7,22 @@ import { existsSync, rmSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import type { CleanItem, WorktreeFacts } from './clean-plan'
 
-export interface CleanIoOpts { env?: Record<string, string | undefined> }
+export interface CleanIoOpts {
+  env?: Record<string, string | undefined>
+  /** Run git and du at the lowest CPU and I/O priority (the server's weekly look). */
+  lowPriority?: boolean
+}
+
+let prio: string[] | null = null
+function priority(): string[] {
+  if (prio) return prio
+  const nice = Bun.which('nice'), ionice = Bun.which('ionice')
+  prio = [...(nice ? [nice, '-n', '19'] : []), ...(ionice ? [ionice, '-c', '3'] : [])]
+  return prio
+}
 
 async function run(argv: string[], o: CleanIoOpts & { cwd?: string } = {}): Promise<{ code: number; out: string }> {
-  const p = Bun.spawn(argv, { cwd: o.cwd, env: (o.env ?? process.env) as Record<string, string>, stdout: 'pipe', stderr: 'ignore' })
+  const p = Bun.spawn(o.lowPriority ? [...priority(), ...argv] : argv, { cwd: o.cwd, env: (o.env ?? process.env) as Record<string, string>, stdout: 'pipe', stderr: 'ignore' })
   const out = await new Response(p.stdout).text()
   return { code: await p.exited, out }
 }
