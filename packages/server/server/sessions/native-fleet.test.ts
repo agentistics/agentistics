@@ -3,7 +3,7 @@ import { sessionActions } from '@agentistics/tui/control/session-verbs'
 import { controlStrings } from '@agentistics/tui/control/i18n'
 import { fleetRow } from './fleet-row'
 import {
-  isNativeSessionId, loadNativeFleet, nativeControlSessions, nativeState, nativeVerbCall, nativeVerbResult,
+  isNativeSessionId, loadNativeFleet, withNativeUsage, nativeControlSessions, nativeState, nativeVerbCall, nativeVerbResult,
   resolveNativeRef, runNativeVerb, type NativeListRecord,
 } from './native-fleet'
 
@@ -127,9 +127,12 @@ describe('the I/O seam', () => {
     expect((await loadNativeFleet('en', { on: true, central: false, ask: ok })).map(r => r.id)).toEqual([ID])
   })
   test('loadNativeFleet asks for archived sessions only when told to', async () => {
-    let asked = ''
-    await loadNativeFleet('en', { on: true, central: false, includeArchived: true, ask: async p => { asked = p; return null } })
-    expect(asked).toContain('archived=all')
+    const asked: string[] = []
+    await loadNativeFleet('en', { on: true, central: false, includeArchived: true, ask: async p => { asked.push(p); return null } })
+    expect(asked.some(p => p.includes('archived=all'))).toBe(true)
+    asked.length = 0
+    await loadNativeFleet('en', { on: true, central: false, ask: async p => { asked.push(p); return null } })
+    expect(asked.some(p => p.includes('archived='))).toBe(false)
   })
   test('runNativeVerb: every refusal is a sentence', async () => {
     expect((await runNativeVerb(ID, 'kill', 'en', { central: true })).message).toContain('central')
@@ -154,5 +157,27 @@ describe('fleetRow on a native row', () => {
     for (const v of off) expect(v.reason).toBe(c.sessionsNativeNote)
     expect(row.verbs.find(v => v.action === 'kill')!.enabled).toBe(true)
     expect(row.verbs.find(v => v.action === 'rename')!.enabled).toBe(true)
+  })
+})
+
+describe('withNativeUsage', () => {
+  const meta = (model: string) => ({
+    session_id: ID, harness: 'agentistics', model, input_tokens: 1000, output_tokens: 500,
+    cache_read_input_tokens: 2000, cache_creation_input_tokens: 0,
+    model_usage: { [model]: { inputTokens: 1000, outputTokens: 500, cacheReadInputTokens: 2000, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 0 } },
+  }) as never
+  test('all four counters; a priced model gets a cost', () => {
+    const [row] = withNativeUsage(nativeControlSessions([rec()], 'en'), [meta('claude-sonnet-4-6')])
+    expect(row!.tokens).toBe('3.5K')
+    expect(row!.cost).toBeDefined()
+  })
+  test('an UNPRICED model leaves the cost cell empty — never $0 — while its tokens still count', () => {
+    const [row] = withNativeUsage(nativeControlSessions([rec()], 'en'), [meta('aion-labs/aion-2.0')])
+    expect(row!.tokens).toBe('3.5K')
+    expect(row!.cost).toBeUndefined()
+  })
+  test('a session the facts do not carry is left as it was', () => {
+    const rows = nativeControlSessions([rec()], 'en')
+    expect(withNativeUsage(rows, [])).toEqual(rows)
   })
 })

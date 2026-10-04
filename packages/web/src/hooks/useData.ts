@@ -696,6 +696,12 @@ export interface HarnessSummary {
    * cache rather than by what they cost. `null` when tokens are 0 or the harness has no cost.
    */
   costPerMTokens: number | null
+  /**
+   * Tokens of models the pricing table cannot price (PRICE.UNKNOWN). They count in `tokens` and are
+   * NOT in `costUSD`, so a harness whose usage is all unpriced has a `costUSD` of 0 that must read
+   * "unknown", never a confident zero, and one with some unpriced usage has a cost that is a FLOOR.
+   */
+  unpricedTokens: number
 }
 
 function peakIndex(arr: number[]): number | null {
@@ -738,6 +744,7 @@ export function summarizeSessions(list: SessionMeta[], hasCost: boolean, hasToke
   let outputTokens = 0
   let tokens: TokenBreakdown = EMPTY_TOKENS
   let costUSD = 0
+  let unpriced = 0
 
   const hourCounts = Array.from({ length: 24 }, () => 0)
   const dowCounts = Array.from({ length: 7 }, () => 0)
@@ -789,6 +796,7 @@ export function summarizeSessions(list: SessionMeta[], hasCost: boolean, hasToke
     }
 
     // cost — priced per model, so a session spanning several models stays exact
+    if (hasCost) unpriced += unpricedTokens(s)
     if (hasCost && perModel.length > 0) {
       const sessionCost = perModel.reduce((sum, [model, u]) => sum + calcCost(u, model), 0)
       costUSD += sessionCost
@@ -826,7 +834,9 @@ export function summarizeSessions(list: SessionMeta[], hasCost: boolean, hasToke
     .sort((a, b) => b.costUSD - a.costUSD)
 
   // Blended cost per 1M tokens over EVERY billed counter — see `costPerMTokens` on the interface.
-  const tokensM = totalTokens(tokens) / 1e6
+  // Over the PRICED tokens only: dividing a cost that excludes unpriced usage by a volume that includes
+  // it would understate the rate of the models that were priced.
+  const tokensM = (totalTokens(tokens) - unpriced) / 1e6
   const costPerMTokens = hasCost && tokensM > 0 ? costUSD / tokensM : null
 
   return {
@@ -845,6 +855,7 @@ export function summarizeSessions(list: SessionMeta[], hasCost: boolean, hasToke
     peakSessionCost: hasCost ? peakSessionCost : null,
     models,
     costPerMTokens,
+    unpricedTokens: unpriced,
   }
 }
 
@@ -979,6 +990,7 @@ export function claudeSummaryFromStatsCache(
     peakSessionCost: null,  // statsCache has no per-session cost breakdown
     models: claudeModels,
     costPerMTokens: claudeCostPerMTokens,
+    unpricedTokens: unpricedTokens(Object.entries(modelUsage)),
   }
 }
 

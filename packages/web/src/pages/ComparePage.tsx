@@ -3,7 +3,7 @@ import { useOutletContext, useSearchParams } from 'react-router-dom'
 import { GitCompare } from 'lucide-react'
 import type { AppContext } from '../lib/app-context'
 import type { SurfaceHarnessId, Lang, TokenBreakdown } from '@agentistics/core'
-import { EMPTY_TOKENS, TOKEN_PARTS, fmt, fmtCost, formatModel, t, tokenLabel, tokenSharePct, totalTokens } from '@agentistics/core'
+import { EMPTY_TOKENS, TOKEN_PARTS, UNPRICED_MODEL_LABEL, UNPRICED_TOTAL_MARKER, fmt, fmtCost, formatModel, isUnpricedModel, t, tokenLabel, tokenSharePct, totalTokens } from '@agentistics/core'
 import { HARNESS_LABELS, HARNESS_COLORS, capable } from '../lib/harness'
 import { computeFilteredHarnessSummaries } from '../hooks/useData'
 import { fmtDateLocalized } from '../lib/dateFormat'
@@ -19,7 +19,18 @@ interface HarnessAgg {
   /** All four billed counters — what the "Tokens" row compares. See `tokens.ts` in the core. */
   tokens: TokenBreakdown
   costUSD: number
+  /** Tokens no price covers (PRICE.UNKNOWN) — see `HarnessSummary.unpricedTokens`. */
+  unpricedTokens: number
   lastActive: string | null
+}
+
+/** "unknown" — the cell for a figure that exists but cannot be priced. Distinct from N/A (cannot be measured). */
+function UnknownCell({ lang }: { lang: Lang }) {
+  return (
+    <span data-unpriced style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
+      {UNPRICED_MODEL_LABEL[lang === 'pt' ? 'pt' : 'en']}
+    </span>
+  )
 }
 
 function NACell({ lang }: { lang: Lang }) {
@@ -59,7 +70,9 @@ function MetricBar({ value, max, color }: { value: number; max: number; color: s
 
 interface MetricRowProps {
   label: string
-  values: { harness: SurfaceHarnessId; value: number | null }[]
+  /** `unknown`: a figure that exists and cannot be priced (drawn as "unknown", never as 0 or N/A);
+   *  `note`: a qualifier under the value (e.g. "+ unpriced usage" on a cost that is a floor). */
+  values: { harness: SurfaceHarnessId; value: number | null; unknown?: boolean; note?: string }[]
   format: (v: number) => string
   colors: Record<SurfaceHarnessId, string>
   lang: Lang
@@ -80,13 +93,15 @@ function MetricRow({ label, values, format: formatFn, colors, lang }: MetricRowP
       }}>
         {label}
       </td>
-      {values.map(({ harness, value }) => (
+      {values.map(({ harness, value, unknown, note }) => (
         <td key={harness} style={{
           padding: '12px 16px',
           borderBottom: '1px solid var(--border)',
           verticalAlign: 'top',
         }}>
-          {value === null ? (
+          {unknown ? (
+            <UnknownCell lang={lang} />
+          ) : value === null ? (
             <NACell lang={lang} />
           ) : (
             <>
@@ -98,6 +113,7 @@ function MetricRow({ label, values, format: formatFn, colors, lang }: MetricRowP
               }}>
                 {formatFn(value)}
               </div>
+              {note && <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>{note}</div>}
               <MetricBar value={value} max={maxVal} color={colors[harness]} />
             </>
           )}
@@ -311,7 +327,7 @@ function CompareByHarness() {
   const aggs = useMemo<HarnessAgg[]>(() => {
     return activeHarnesses.map(harness => {
       const s = summaries[harness]
-        ?? { sessions: 0, messages: 0, inputTokens: 0, outputTokens: 0, tokens: EMPTY_TOKENS, costUSD: 0 }
+        ?? { sessions: 0, messages: 0, inputTokens: 0, outputTokens: 0, tokens: EMPTY_TOKENS, costUSD: 0, unpricedTokens: 0 }
       return {
         harness,
         sessions: s.sessions,
@@ -320,6 +336,7 @@ function CompareByHarness() {
         outputTokens: capable(harness, 'tokens') ? s.outputTokens : 0,
         tokens: capable(harness, 'tokens') ? s.tokens : EMPTY_TOKENS,
         costUSD: capable(harness, 'cost') ? s.costUSD : 0,
+        unpricedTokens: capable(harness, 'cost') ? s.unpricedTokens : 0,
         lastActive: lastActive[harness] ?? null,
       }
     })
@@ -346,10 +363,19 @@ function CompareByHarness() {
     harness: a.harness,
     value: capable(a.harness, 'tokens') ? totalTokens(a.tokens) : null,
   }))
-  const costValues = aggs.map(a => ({
-    harness: a.harness,
-    value: capable(a.harness, 'cost') ? a.costUSD : null,
-  }))
+  // PRICE.UNKNOWN: a harness whose every token is unpriced has NO cost ("unknown", never R$0,00), and one
+  // with some unpriced usage shows a cost that is a floor and says so.
+  const unpricedLabel = UNPRICED_TOTAL_MARKER[lang === 'pt' ? 'pt' : 'en']
+  const costValues = aggs.map(a => {
+    const capableCost = capable(a.harness, 'cost')
+    const allUnpriced = capableCost && a.unpricedTokens > 0 && a.unpricedTokens >= totalTokens(a.tokens)
+    return {
+      harness: a.harness,
+      value: capableCost && !allUnpriced ? a.costUSD : null,
+      ...(allUnpriced ? { unknown: true } : {}),
+      ...(capableCost && !allUnpriced && a.unpricedTokens > 0 ? { note: unpricedLabel } : {}),
+    }
+  })
   const sessionValues = aggs.map(a => ({ harness: a.harness, value: a.sessions }))
   const messageValues = aggs.map(a => ({ harness: a.harness, value: a.messages }))
 
@@ -522,6 +548,7 @@ function CompareByHarness() {
         }}>
           {costPerMValues.map(({ harness, value }) => {
             const isCheapest = harness === cheapestHarness && value !== null
+            const unknownRate = value === null && capable(harness, 'cost') && (summaries[harness]?.unpricedTokens ?? 0) > 0
             return (
               <div key={harness} style={{
                 background: 'var(--bg-elevated)',
@@ -532,7 +559,9 @@ function CompareByHarness() {
                 <div style={{ fontSize: 11, fontWeight: 700, color: colors[harness], marginBottom: 8 }}>
                   {HARNESS_LABELS[harness]}
                 </div>
-                {value === null ? (
+                {unknownRate ? (
+                  <UnknownCell lang={lang} />
+                ) : value === null ? (
                   <NACell lang={lang} />
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
@@ -587,7 +616,8 @@ function CompareByHarness() {
                       // Every billed counter: a rate per million computed over the non-cached 4 %
                       // of the volume reads tens of times higher than what is actually charged.
                       const totalTok = totalTokens(m.tokens)
-                      const perM = totalTok > 0 ? m.costUSD / (totalTok / 1e6) : null
+                      const unpricedModel = isUnpricedModel(m.model)
+                      const perM = totalTok > 0 && !unpricedModel ? m.costUSD / (totalTok / 1e6) : null
                       return (
                         <div key={m.model} style={{
                           display: 'flex',
@@ -601,7 +631,7 @@ function CompareByHarness() {
                               {modelLabel(m.model)}
                             </span>
                             <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
-                              {fmtCost(m.costUSD, currency, brlRate)}
+                              {unpricedModel ? UNPRICED_MODEL_LABEL[lang === 'pt' ? 'pt' : 'en'] : fmtCost(m.costUSD, currency, brlRate)}
                             </span>
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>

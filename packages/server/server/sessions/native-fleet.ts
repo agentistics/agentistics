@@ -23,8 +23,10 @@
  * (`engineFetch`), injected so the tests need no engine.
  */
 import type { ControlSession, SessionState } from '@agentistics/tui/control'
+import { fmt, fmtCost, sessionCostUSD, sessionTokenTotal, type SessionMeta } from '@agentistics/core'
 import type { CliLang } from '../cli-lang'
 import { cliStrings } from '../cli-i18n'
+import { NATIVE_FACTS_PATH, nativeSessionsFrom } from '../native-sessions'
 
 /** The engine's native session id (`ses_` + 32 hex). Nothing else on this machine has that shape. */
 export function isNativeSessionId(id: string | undefined | null): id is string {
@@ -120,6 +122,27 @@ export function nativeControlSessions(list: readonly NativeListRecord[], lang: C
   return out
 }
 
+/**
+ * PURE. The usage cells, from the engine's per-session facts (`native-sessions.ts` maps them to the same
+ * `SessionMeta` every dashboard reads), formatted by the helpers every other row uses. Tokens are all
+ * four counters; cost is the shared table's — a model it cannot price leaves the cell EMPTY
+ * (`sessionCostUSD` → null), never a confident `$0`. A session the facts do not carry gets no cells.
+ */
+export function withNativeUsage(rows: readonly ControlSession[], metas: readonly SessionMeta[]): ControlSession[] {
+  const byId = new Map(metas.map(m => [m.session_id, m]))
+  return rows.map(r => {
+    const m = byId.get(r.id)
+    if (!m) return r
+    const tokens = sessionTokenTotal(m)
+    const cost = sessionCostUSD(m)
+    return {
+      ...r,
+      ...(tokens > 0 ? { tokens: fmt(tokens) } : {}),
+      ...(cost !== null ? { cost: fmtCost(cost) } : {}),
+    }
+  })
+}
+
 /** The lifecycle verbs a native session takes. `kill` is the fleet's word for END. */
 export type NativeVerb = 'kill' | 'resume' | 'rename' | 'archive' | 'unarchive' | 'delete'
 
@@ -207,12 +230,18 @@ export async function loadNativeFleet(
   const central = opts.central ?? (await import('../config')).TEAM_CENTRAL
   if (!(await gateOpen({ central, ...(opts.on !== undefined ? { on: opts.on } : {}) }))) return []
   try {
-    const res = await (opts.ask ?? defaultAsk)(`${NATIVE_LIST_PATH}?limit=${NATIVE_LIST_LIMIT}${opts.includeArchived ? '&archived=all' : ''}`)
+    const ask = opts.ask ?? defaultAsk
+    // The facts are asked beside the list: an engine older than that route still lists its sessions,
+    // with empty usage cells rather than none at all.
+    const [res, facts] = await Promise.all([
+      ask(`${NATIVE_LIST_PATH}?limit=${NATIVE_LIST_LIMIT}${opts.includeArchived ? '&archived=all' : ''}`),
+      ask(NATIVE_FACTS_PATH).then(r => (r && r.ok ? r.json() : null)).catch(() => null),
+    ])
     if (!res || !res.ok) return []
     const body = await res.json() as { sessions?: unknown }
-    return Array.isArray(body?.sessions)
-      ? nativeControlSessions(body.sessions as NativeListRecord[], lang, opts.includeArchived ? { includeArchived: true } : {})
-      : []
+    if (!Array.isArray(body?.sessions)) return []
+    const rows = nativeControlSessions(body.sessions as NativeListRecord[], lang, opts.includeArchived ? { includeArchived: true } : {})
+    return withNativeUsage(rows, nativeSessionsFrom(facts))
   } catch {
     return []
   }
