@@ -128,7 +128,7 @@ import { reopenedSessionRoute, sessionPath } from './lib/sessionRoute'
 import { SessionTitleFlag } from './components/sessions/SessionTitleFlag'
 import { ChatSelectionOverlay } from './components/sessions/ChatSelectionBar'
 import { brandAsset } from './lib/brand'
-import { promptExit, shouldShowToast, type PromptExit, type VersionAnswer } from './lib/updateToast'
+import { promptDismissedFor, promptExit, shouldShowToast, versionRefetchDue, type PromptExit, type VersionAnswer } from './lib/updateToast'
 import { consumeRestore, snoozeUpdate, startUpgrade, useUpdateSnooze, useUpgradeFlow } from './lib/upgradeFlow'
 import { NayUpdateCard, type UpdateCardPlacement } from './components/nay/NayUpdateCard'
 import { UpgradeOverlay } from './components/UpgradeOverlay'
@@ -2464,7 +2464,7 @@ export default function AppLayout() {
   // so it opens only from the bell entry (see the 'agentistics:open-update-modal' listener).
   const [showUpdateModal, setShowUpdateModal] = useState(false)
   // The popup left this page (closed, timed out, installed): it does not come back until a reload.
-  const [promptGone, setPromptGone] = useState(false)
+  const [promptGone, setPromptGone] = useState<string | null>(null)
   const updateSnooze = useUpdateSnooze()
   const upgradeFlow = useUpgradeFlow()
   const [finaleVersion, setFinaleVersion] = useState<string | null>(null)
@@ -2688,33 +2688,58 @@ export default function AppLayout() {
     return () => { cancelled = true }
   }, [])
 
+  // UPD.NOTIFY: the page asks `/api/version` at load, every 5 minutes while visible, and when the tab regains
+  // focus (`versionRefetchDue`) — it used to read it once, so a tab open when a release shipped never
+  // heard of it. Only the FIRST answer may restore the page state after an in-place upgrade.
   useEffect(() => {
-    fetch('/api/version', { cache: 'no-store' })
-      .then(r => r.ok ? r.json() : null)
-      .then((info: VersionAnswer | null) => {
-        if (!info) return
-        setVersionAnswer(info)
-        // Back from an in-place upgrade on the bundle it was for: put the person where they were
-        // and play the finale. `consumeRestore` refuses an old bundle, an expired or foreign snapshot.
-        const back = consumeRestore(info.current)
-        if (!back) return
-        const here = `${window.location.pathname}${window.location.search}${window.location.hash}`
-        if (back.url !== here) navigate(back.url, { replace: true })
-        if (back.scrollY > 0) window.setTimeout(() => window.scrollTo({ top: back.scrollY }), 120)
-        setFinaleFrom(back.from ?? '')
-        setFinaleVersion(info.current)
-      })
-      .catch(() => {})
+    let lastAt: number | null = null
+    let first = true
+    let cancelled = false
+    const check = (trigger: 'interval' | 'focus') => {
+      const now = Date.now()
+      if (!versionRefetchDue({ now, lastAt, trigger, visible: document.visibilityState === 'visible' })) return
+      lastAt = now
+      const isFirst = first
+      first = false
+      fetch('/api/version', { cache: 'no-store' })
+        .then(r => r.ok ? r.json() : null)
+        .then((info: VersionAnswer | null) => {
+          if (!info || cancelled) return
+          setVersionAnswer(info)
+          if (!isFirst) return
+          // Back from an in-place upgrade on the bundle it was for: put the person where they were
+          // and play the finale. `consumeRestore` refuses an old bundle, an expired or foreign snapshot.
+          const back = consumeRestore(info.current)
+          if (!back) return
+          const here = `${window.location.pathname}${window.location.search}${window.location.hash}`
+          if (back.url !== here) navigate(back.url, { replace: true })
+          if (back.scrollY > 0) window.setTimeout(() => window.scrollTo({ top: back.scrollY }), 120)
+          setFinaleFrom(back.from ?? '')
+          setFinaleVersion(info.current)
+        })
+        .catch(() => {})
+    }
+    check('interval')
+    const tick = window.setInterval(() => check('interval'), 60_000)
+    const onVisible = () => check('focus')
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    return () => {
+      cancelled = true
+      window.clearInterval(tick)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+    }
   }, [])
 
   // May this machine be offered the update at all, and is it snoozed? (`shouldShowToast`)
   const updateVerdict = shouldShowToast({ info: versionAnswer, snooze: updateSnooze, now: Date.now(), central: isCentral })
   const updateInstallable = updateVerdict.show || (updateVerdict.show === false && updateVerdict.why === 'snoozed')
-  const promptVisible = updateVerdict.show && !promptGone && !showUpdateModal && upgradeFlow.phase === 'idle'
+  const promptVisible = updateVerdict.show && !promptDismissedFor(promptGone, versionAnswer?.latest ?? '') && !showUpdateModal && upgradeFlow.phase === 'idle'
   const onPromptExit = useCallback((exit: PromptExit) => {
     if (!versionAnswer) return
     const o = promptExit(exit, versionAnswer, Date.now())
-    setPromptGone(true)
+    setPromptGone(versionAnswer.latest)
     if (o.snooze) snoozeUpdate(o.snooze.version, versionAnswer.critical === true)
     if (o.bell) pushNotification(o.bell)
     if (o.install) void startUpgrade(versionAnswer.latest, lang === 'pt' ? 'pt' : 'en')
