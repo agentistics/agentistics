@@ -9,7 +9,7 @@
 
 import { pieceTimes, spanOf, type PieceTimes, type SessionSpan } from './task-times'
 import type { SessionMeta, TaskProgress } from '@agentistics/core'
-import { commentCounts, commentsByTarget, groupProgress, sessionTokenTotal, threadAttention, threadComments, type CommentTarget } from '@agentistics/core'
+import { commentCounts, commentsByTarget, groupProgress, sessionTokenTotal, type CommentTarget } from '@agentistics/core'
 import type {
   Attempt, AttemptStatus, Subtask, Task, TaskComment, TaskFile, TaskThread,
 } from './task-model'
@@ -92,9 +92,8 @@ export interface TaskListRow {
      */
     commentsBySubtask: Record<string, number>
     subtasks: number; subtasksDone: number; files: number
-    /** Threads on the task, and how many of them have a session's word after the person's last one. */
+    /** Threads on the task — a record, so a count and nothing that implies a pending answer. */
     threads: number
-    threadsAwaiting: number
   }
   /** Distinct harnesses of this task's sessions, in first-seen order. */
   harnesses: string[]
@@ -499,12 +498,8 @@ export function reposOfRows(
   return out
 }
 
-/** The board card's thread figures — the same `threadAttention` the task page draws. */
-function threadCounts(taskId: string, threads: readonly TaskThread[], comments: readonly TaskComment[]): { threads: number; threadsAwaiting: number } {
-  const mine = threads.filter(t => t.taskId === taskId)
-  let awaiting = 0
-  for (const t of mine) if (threadAttention(t, threadComments(comments, t.id)) === 'awaiting') awaiting++
-  return { threads: mine.length, threadsAwaiting: awaiting }
+function threadCounts(taskId: string, threads: readonly TaskThread[]): { threads: number } {
+  return { threads: threads.filter(t => t.taskId === taskId).length }
 }
 
 export function buildTaskList(o: {
@@ -534,7 +529,7 @@ export function buildTaskList(o: {
         subtasks: subs.length,
         subtasksDone: subs.filter(t => t.done).length,
         files: (o.files ?? []).filter(f => f.taskId === task.id).length,
-        ...threadCounts(task.id, o.threads ?? [], o.comments ?? []),
+        ...threadCounts(task.id, o.threads ?? []),
       },
       harnesses: [...new Set(mine.map(r => r.harness))],
       repos: reposOfRows(mine, o.metas),

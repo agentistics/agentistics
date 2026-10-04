@@ -14,7 +14,7 @@ import {
 import { getDateRangeFilter } from '../hooks/useData'
 import { filingUrl } from './nativeSession'
 import { isNativeSessionId } from './sessionRoute'
-import type { ChatAttachmentRef, CommentTarget, TaskThreadRecord, ThreadDelivery } from '@agentistics/core'
+import type { ChatAttachmentRef, CommentKind, CommentTarget, TaskThreadRecord, ThreadDelivery } from '@agentistics/core'
 export type { ThreadDelivery } from '@agentistics/core'
 
 export type LinkProvenance = 'assigned' | 'observed' | 'none'
@@ -188,10 +188,8 @@ export interface TaskListRow {
   counts: {
     comments: number; subtasks: number; subtasksDone: number; files: number
     commentsBySubtask?: Record<string, number>
-    /** Threads on the task, and how many have a session's word after the person's last one.
-     *  Optional: an older server does not send them — read as "not known", never as 0. */
+    /** Threads on the task. Optional: an older server does not send it — "not known", never 0. */
     threads?: number
-    threadsAwaiting?: number
   }
   harnesses: string[]
   /**
@@ -260,10 +258,9 @@ export interface TaskComment {
   /** `session` only when the poster PROVED its identity; `owner` = the person wrote it. */
   role?: 'owner' | 'session'
   sessionId?: string
-  /** An owner answer to ONE participant's mirrored question. */
-  answerTo?: string
-  /** Where an owner answer was typed. */
-  via?: 'thread' | 'session'
+  /** What the record is — handback, block, decision. Absent = a note. */
+  kind?: CommentKind
+  /** Present ONLY when the person explicitly sent this to the thread's sessions. */
   deliveries?: ThreadDelivery[]
 }
 
@@ -632,6 +629,7 @@ export const editTask = (ref: string, patch: TaskFieldPatch) =>
 export async function addComment(
   ref: string, author: string, body: string, subtaskId?: string | null,
   attachments?: readonly ChatAttachmentRef[],
+  o: { threadId?: string; kind?: CommentKind } = {},
 ): Promise<{ ok: true } | { ok: false; message: string | null }> {
   try {
     const res = await fetch(`/api/tasks/${encodeURIComponent(ref)}/comments`, {
@@ -641,7 +639,8 @@ export async function addComment(
         author, body,
         // The board is the PERSON's surface — a session comments through the MCP, with its identity.
         owner: true,
-        ...(subtaskId ? { subtaskId } : {}),
+        ...(o.threadId ? { threadId: o.threadId } : subtaskId ? { subtaskId } : {}),
+        ...(o.kind && o.kind !== 'note' ? { kind: o.kind } : {}),
         ...(attachments && attachments.length > 0 ? { attachments } : {}),
       }),
     })
@@ -675,15 +674,16 @@ export const openThread = (ref: string, title: string, subtaskId?: string | null
   threadPost<{ thread: TaskThread }>(ref, { action: 'open', title, author: 'you', ...(subtaskId ? { subtaskId } : {}) })
 
 /**
- * The person's reply: ONE message delivered to every participant (or to `answerTo` alone, when it
- * answers a session's mirrored question). The answer says what happened to each delivery.
+ * The person's EXPLICIT send: the text is recorded in the thread AND delivered into every
+ * participant's own chat. The answer says what happened to each delivery. (An ordinary comment —
+ * `addComment` with `threadId` — reaches no session.)
  */
-export const replyThread = (
+export const sendThread = (
   ref: string, threadId: string, body: string, lang: string,
-  o: { answerTo?: string; attachments?: readonly ChatAttachmentRef[] } = {},
+  o: { kind?: CommentKind; attachments?: readonly ChatAttachmentRef[] } = {},
 ) => threadPost<{ id: string; deliveries: ThreadDelivery[] }>(ref, {
-  action: 'reply', threadId, body, author: 'you',
-  ...(o.answerTo ? { answerTo: o.answerTo } : {}),
+  action: 'send', threadId, body, author: 'you',
+  ...(o.kind && o.kind !== 'note' ? { kind: o.kind } : {}),
   ...(o.attachments && o.attachments.length > 0 ? { attachments: o.attachments } : {}),
 }, lang)
 

@@ -326,7 +326,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_comment",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Leave a comment on a task — or on ONE of its subtasks or subtask GROUPS by passing `subtaskId` (a group's own id is allowed; omit it to comment on the task itself). `body` may be empty when `attachments` is given. Comments carry attachments as REFERENCES into the chat's own attachment store (`{name, path}`; agentistics_task returns them on each comment with a `url` that serves the file) — there is no second store. Use it to tell the person and the other assistants what you did, what you found, or what you are blocked on; comment where the work is (the subtask you are on) rather than on the whole task. An unknown, deleted or other task's `subtaskId` is REFUSED with a sentence (422, `no_such_subtask` / `wrong_delivery`) — never silently filed on the task. Threads read downward: a subtask's thread is its own comments, a group's thread is its own plus its members', the task's is everything. The activity log names the target. `author` is free text — say who you are (e.g. 'claude:3f5f'). THREADS: a thread is a topic on the task; post into one with `threadId`, or open one with `threadTitle` (sessions: handbacks and blocks only). When you post in a thread you join it, and the person's reply in that thread is typed into your session as a message starting `[Agentask · … · reply from the owner]` — extra context, never a gate: keep working. If you need an ANSWER from the person, ask in your own chat as always; the thread mirrors it.",
+      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Leave a comment on a task — or on ONE of its subtasks or subtask GROUPS by passing `subtaskId` (a group's own id is allowed; omit it to comment on the task itself). `body` may be empty when `attachments` is given. Comments carry attachments as REFERENCES into the chat's own attachment store (`{name, path}`; agentistics_task returns them on each comment with a `url` that serves the file) — there is no second store. Use it to tell the person and the other assistants what you did, what you found, or what you are blocked on; comment where the work is (the subtask you are on) rather than on the whole task. An unknown, deleted or other task's `subtaskId` is REFUSED with a sentence (422, `no_such_subtask` / `wrong_delivery`) — never silently filed on the task. Threads read downward: a subtask's thread is its own comments, a group's thread is its own plus its members', the task's is everything. The activity log names the target. `author` is free text — say who you are (e.g. 'claude:3f5f'). THREADS: a thread is a topic on the task; post into one with `threadId`, or open one with `threadTitle` (sessions: handbacks and blocks only). A thread is a RECORD, not a chat: a comment there reaches nobody by itself, so never wait for an answer in a thread. When you post in a thread you join it; the person may explicitly SEND a message from it, which arrives in your own chat starting `[Agentask · … · sent by the owner]` — answer there, in your chat, which is where conversations live. If you need something from the person, ask in your own chat as always.",
     inputSchema: {
       type: "object",
       properties: {
@@ -349,6 +349,11 @@ const TOOLS: Tool[] = [
           type: "string",
           enum: ["handback", "block"],
           description: "The kind of the thread opened with `threadTitle`. Default handback.",
+        },
+        kind: {
+          type: "string",
+          enum: ["handback", "block"],
+          description: "Optional tag on THIS comment: a handback (you delivered something) or a block (you are stuck on something). Omit for a plain note.",
         },
         attachments: {
           type: "array",

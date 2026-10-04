@@ -17,6 +17,8 @@ export function taskCommentRequest(
   const threadId = typeof a.threadId === "string" && a.threadId.trim() ? a.threadId.trim() : undefined
   const threadTitle = typeof a.threadTitle === "string" && a.threadTitle.trim() ? a.threadTitle.trim() : undefined
   const threadKind = a.threadKind === "handback" || a.threadKind === "block" ? a.threadKind : undefined
+  // A session tags its record as a handback or a block; anything else stays a plain note.
+  const kind = a.kind === "handback" || a.kind === "block" ? a.kind : undefined
   return {
     path: `/api/tasks/${encodeURIComponent(String(a.ref))}/comments`,
     payload: {
@@ -30,6 +32,7 @@ export function taskCommentRequest(
       // the server refuses anything else in words). `threadId` wins when both are given.
       ...(threadId ? { threadId } : threadTitle ? { newThread: { title: threadTitle, kind: threadKind ?? "handback" } } : {}),
       ...(session ? { session } : {}),
+      ...(kind ? { kind } : {}),
     },
   }
 }

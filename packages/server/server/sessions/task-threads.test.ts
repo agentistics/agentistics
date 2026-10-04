@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test'
 import { addComment, createTask, showTask as getTaskDetail } from './task-web'
-import { openThread, recordSessionChatAnswer, replyToThread, threadAction } from './task-threads'
+import { openThread, sendFromThread, threadAction } from './task-threads'
 import { loadTaskBoard } from './task-source'
 
 async function freshTask(title: string) {
@@ -74,39 +74,33 @@ describe('posting into a thread', () => {
   })
 })
 
-describe('the reply', () => {
-  test('a request carrying a session identity can never fan out', async () => {
+describe('a thread is a record; sending is explicit', () => {
+  test('an ordinary comment in a thread carries no deliveries — it reached nobody', async () => {
+    const t = await freshTask('th-record')
+    const o = await openThread(t.id, { title: 'T', openedBy: 'me' })
+    if (!o.ok) throw new Error('open')
+    await addComment(t.id, { author: 's', body: 'H done', threadId: o.thread.id, session: 'sess-r', kind: 'handback' })
+    await addComment(t.id, { author: 'me', body: 'noted, decided', threadId: o.thread.id, owner: true, kind: 'decision' })
+    const w = await loadTaskBoard()
+    const cs = w.book.comments.filter(c => c.threadId === o.thread.id)
+    expect(cs.map(c => c.kind)).toEqual(['handback', 'decision'])
+    expect(cs.every(c => c.deliveries === undefined)).toBe(true)
+  })
+  test('a request carrying a session identity can never send', async () => {
     const t = await freshTask('th-fanout')
     const o = await openThread(t.id, { title: 'T', openedBy: 'me' })
     if (!o.ok) throw new Error('open')
-    const r = await replyToThread(t.id, o.thread.id, { body: 'hi', author: 's', fromSession: true }, 'en')
+    const r = await sendFromThread(t.id, o.thread.id, { body: 'hi', author: 's', fromSession: true }, 'en')
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.reason).toBe('session_fanout')
   })
-  test('a reply to a thread with nobody in it is recorded with no deliveries', async () => {
+  test('a send to a thread with nobody in it is recorded with no deliveries; an empty send is refused', async () => {
     const t = await freshTask('th-empty')
     const o = await openThread(t.id, { title: 'T', openedBy: 'me' })
     if (!o.ok) throw new Error('open')
-    const r = await replyToThread(t.id, o.thread.id, { body: 'note to self', author: 'me' }, 'en')
+    const r = await sendFromThread(t.id, o.thread.id, { body: 'note to self', author: 'me' }, 'en')
     expect(r.ok && r.deliveries).toEqual([])
-  })
-})
-
-describe('answering in the session chat shows in the thread — once', () => {
-  test('only a session that posted and awaits the person gets the answer mirrored', async () => {
-    const t = await freshTask('th-mirror')
-    const o = await openThread(t.id, { title: 'Q', openedBy: 'me' })
-    if (!o.ok) throw new Error('open')
-    await addComment(t.id, { author: 's', body: 'which one?', threadId: o.thread.id, session: 'sess-q' })
-    expect(await recordSessionChatAnswer('sess-q', undefined, 'the second')).toBe(1)
-    // Answered now — a second prompt to the same session is ordinary chat, not mirrored.
-    expect(await recordSessionChatAnswer('sess-q', undefined, 'and thanks')).toBe(0)
-    // A session that never posted in a thread is never mirrored.
-    expect(await recordSessionChatAnswer('sess-other', undefined, 'hello')).toBe(0)
-    const w = await loadTaskBoard()
-    const ans = w.book.comments.find(c => c.threadId === o.thread.id && c.via === 'session')
-    expect(ans).toMatchObject({ role: 'owner', answerTo: 'sess-q', body: 'the second' })
-    expect(ans?.deliveries?.[0]?.state).toBe('delivered')
+    expect((await sendFromThread(t.id, o.thread.id, { body: '  ', author: 'me' }, 'en')).ok).toBe(false)
   })
 })
 

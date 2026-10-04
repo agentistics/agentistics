@@ -46,7 +46,7 @@ export function daysSince(iso: string | undefined, nowMs: number): number | null
   return Math.max(0, Math.floor((nowMs - t) / 86_400_000))
 }
 
-/** What the reply composer can promise before it is sent: how many it goes to, and how many wait. */
+/** What the explicit send can promise before it is pressed: how many get it now, how many on reopen. */
 export function replyReach(
   participants: readonly ThreadParticipant[],
   rows: readonly FleetRowLike[],
@@ -61,14 +61,4 @@ export function replyReach(
 /** A participant's live state word key, or `null` when nothing in the fleet stands for it. */
 export function participantState(p: ThreadParticipant, rows: readonly FleetRowLike[]): string | null {
   return rowForParticipant(p, rows)?.state ?? null
-}
-
-/** The last assistant words of a session's own chat — what a mirrored question shows. */
-export function lastAssistantText(turns: readonly { role: 'user' | 'assistant'; text: string }[] | undefined): string | null {
-  if (!turns) return null
-  for (let i = turns.length - 1; i >= 0; i--) {
-    const t = turns[i]!
-    if (t.role === 'assistant' && t.text.trim()) return t.text.trim()
-  }
-  return null
 }

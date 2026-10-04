@@ -13,7 +13,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { PRIORITY_ORDER, type ChatAttachmentRef, type TaskPriorityId, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
 import type { HarnessId, StagedSessionDraft } from '@agentistics/core'
-import type { TaskThreadRecord, ThreadDelivery } from '@agentistics/core'
+import type { CommentKind, TaskThreadRecord, ThreadDelivery } from '@agentistics/core'
 
 /**
  * Where the work stands.
@@ -433,11 +433,13 @@ export interface TaskComment {
   role?: 'owner' | 'session'
   /** The verified session that posted it (`role: 'session'`). */
   sessionId?: string
-  /** An owner answer written to ONE participant (a mirrored question) — that session's id. */
-  answerTo?: string
-  /** Where an owner answer was typed: the thread, or the session's own chat (mirrored here). */
-  via?: 'thread' | 'session'
-  /** What happened to an owner reply, per participant — see `ThreadDelivery`. */
+  /** What the record IS: a note, a handback, a block, a decision. Absent = a note. */
+  kind?: CommentKind
+  /**
+   * Set ONLY when the person explicitly SENT this comment to the thread's sessions: what happened,
+   * per session (see `ThreadDelivery`). Absent = a comment that stayed in the record, which is the
+   * default — posting is history, delivering is a separate act.
+   */
   deliveries?: ThreadDelivery[]
 }
 
