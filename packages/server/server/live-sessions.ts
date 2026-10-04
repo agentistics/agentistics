@@ -1,5 +1,6 @@
 import { readdir, readlink, readFile } from 'fs/promises'
 import type { HarnessId, LiveUnavailableReason, SessionMeta } from '@agentistics/core'
+import { AGENTISTICS_DATA_DIR, HOME_DIR } from './config'
 
 export type { LiveUnavailableReason }
 
@@ -16,6 +17,11 @@ export const LIVE_ACTIVITY_WINDOW_MIN = Number(process.env.AGENTISTICS_LIVE_WIND
 export const LIVE_STARTUP_GRACE_MIN = Number(process.env.AGENTISTICS_LIVE_STARTUP_MIN) > 0
   ? Number(process.env.AGENTISTICS_LIVE_STARTUP_MIN)
   : 30
+
+/** An unmatched process is an external row only after it has survived one complete poll interval. */
+export const EXTERNAL_MIN_LIFETIME_MS = 5_000
+/** Keep an external row briefly across a process-table race, but never indefinitely. */
+export const EXTERNAL_GONE_GRACE_MS = 5_000
 
 /** Epoch ms of a session's last activity: end_time → last user timestamp → start_time. 0 if none. */
 function lastActivityMs(s: SessionMeta): number {
@@ -128,6 +134,57 @@ export function harnessOfPath(exePath: string): HarnessId | undefined {
     if (re && re.test(exePath)) return id
   }
   return undefined
+}
+
+/** Known installation layouts. A basename alone is not an installation: test stubs commonly use
+ * exactly `claude`, `codex`, or `agy` as their executable name. */
+export function installedHarnessAt(exePath: string, harness?: HarnessId): HarnessId | undefined {
+  const normal = exePath.replaceAll('\\', '/')
+  const base = normal.slice(normal.lastIndexOf('/') + 1)
+  const known: ReadonlyArray<readonly [RegExp, HarnessId | 'path-bin']> = [
+    [/\/(?:\.vscode|\.vscode-server)\/extensions\/[^/]*anthropic\.claude-code[^/]*\/.*\/claude$/, 'claude'],
+    [/\/\.local\/share\/claude\/versions\/[^/]+$/, 'claude'],
+    [/\/(?:node_modules\/)?@openai\/codex(?:[-/]|$)/, 'codex'],
+    [/\/(?:node_modules\/)?@google\/gemini-cli(?:[-/]|$)/, 'gemini'],
+    [/\/(?:node_modules\/)?@github\/copilot(?:[-/]|$)/, 'copilot'],
+    [/\/(?:node_modules\/)?(?:@moonshotai\/kimi|kimi-code)(?:[-/]|$)/, 'kimi'],
+    [/\/(?:antigravity-cli|agy)(?:[-/]|$)/, 'antigravity'],
+    [/\/\.local\/share\/gh\/copilot\/copilot$/, 'copilot'],
+    [/^(?:\/usr\/local|\/opt\/homebrew|\/home\/[^/]+\/\.local)\/bin\/(claude|codex|gemini|copilot|agy|antigravity|kimi)$/, 'path-bin'],
+  ]
+  for (const [pattern, id] of known) {
+    if (!pattern.test(normal)) continue
+    const resolved = id === 'path-bin'
+      ? ({ claude: 'claude', codex: 'codex', gemini: 'gemini', copilot: 'copilot', agy: 'antigravity', antigravity: 'antigravity', kimi: 'kimi' } as const)[base]
+      : id
+    if (resolved && (!harness || harness === resolved)) return resolved
+  }
+  // Keep the versioned-install helper as a separately testable identity rule.
+  const versioned = harnessOfPath(normal)
+  return versioned && (!harness || harness === versioned) ? versioned : undefined
+}
+
+/** Parse the NUL-separated environment exposed by Linux procfs. */
+export function parseProcEnviron(raw: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const item of raw.split('\0')) {
+    const at = item.indexOf('=')
+    if (at > 0) out[item.slice(0, at)] = item.slice(at + 1)
+  }
+  return out
+}
+
+/** A process belongs to this server only when it inherited this server's profile. */
+export function belongsToServerEnvironment(env: Record<string, string | undefined>, home = HOME_DIR, dataDir = AGENTISTICS_DATA_DIR): boolean {
+  if (env.HOME !== home) return false
+  return env.AGENTISTICS_DIR === undefined || env.AGENTISTICS_DIR === '' || env.AGENTISTICS_DIR === dataDir
+}
+
+/** Management/one-shot invocations cannot own an interactive external session. */
+export function isNonInteractiveInvocation(_harness: HarnessId, argv: readonly string[], stdinIsTty?: boolean): boolean {
+  if (argv.some(a => a === '-p' || a === '--print' || a.startsWith('--print=') || a === '--version' || a === '-V')) return true
+  if (argv.slice(1, 4).some(a => a === 'exec' || a === 'run')) return true
+  return stdinIsTty === false
 }
 
 /**
@@ -296,7 +353,10 @@ export function harnessOfProcess(
   // that was invisible and brought its plumbing with it — the daemon and the pty hosts run the same
   // binary. See `isHarnessInfrastructure` for why the gate is on the subcommand and not on the
   // session id the plumbing also carries.
-  if (direct) return isHarnessInfrastructure(direct, argv) ? undefined : direct
+  if (direct) {
+    if (!exePath || !installedHarnessAt(exePath, direct)) return undefined
+    return isHarnessInfrastructure(direct, argv) ? undefined : direct
+  }
   const exeBase = exePath ? exePath.slice(exePath.lastIndexOf('/') + 1) : ''
   if (!JS_RUNTIMES.has(comm) && !JS_RUNTIMES.has(exeBase)) return undefined
   // argv[0] is the runtime; the script is what follows. Scan the rest so a `node --flag script`
@@ -304,7 +364,7 @@ export function harnessOfProcess(
   for (const arg of argv.slice(1)) {
     if (arg.startsWith('-')) continue
     for (const [fragment, harness] of SCRIPT_HARNESS) {
-      if (arg.includes(fragment)) return harness
+      if (arg.includes(fragment) && installedHarnessAt(arg, harness)) return harness
     }
   }
   return undefined
@@ -350,13 +410,14 @@ const FD_SESSION_PATTERNS: Partial<Record<HarnessId, RegExp>> = {
 }
 
 /** Boot time in epoch seconds, read once — it cannot change while the process runs. */
-let _btime: number | null = null
-async function bootTimeSec(): Promise<number> {
-  if (_btime !== null) return _btime
-  const stat = await readFile('/proc/stat', 'utf-8').catch(() => '')
+const bootTimes = new Map<string, number>()
+async function bootTimeSec(procRoot = '/proc'): Promise<number> {
+  if (bootTimes.has(procRoot)) return bootTimes.get(procRoot)!
+  const stat = await readFile(`${procRoot}/stat`, 'utf-8').catch(() => '')
   const line = stat.split('\n').find(l => l.startsWith('btime '))
-  _btime = line ? Number(line.slice(6).trim()) : 0
-  return _btime
+  const value = line ? Number(line.slice(6).trim()) : 0
+  bootTimes.set(procRoot, value)
+  return value
 }
 
 /**
@@ -367,8 +428,8 @@ async function bootTimeSec(): Promise<number> {
  * a session's activity against when its process launched. Field 22 of /proc/<pid>/stat is the
  * kernel's own start time in clock ticks since boot and never moves.
  */
-async function processStartMs(pid: string, btimeSec: number, hz: number): Promise<number | undefined> {
-  const raw = await readFile(`/proc/${pid}/stat`, 'utf-8').catch(() => '')
+async function processStartMs(pid: string, btimeSec: number, hz: number, procRoot = '/proc'): Promise<number | undefined> {
+  const raw = await readFile(`${procRoot}/${pid}/stat`, 'utf-8').catch(() => '')
   // comm sits in parentheses and may itself contain spaces/parens, so split after the LAST ')'.
   const close = raw.lastIndexOf(')')
   if (close < 0) return undefined
@@ -390,10 +451,10 @@ export function sessionIdFromFdPaths(paths: string[], harness: HarnessId): strin
 }
 
 /** Session id from an open file descriptor, when the harness keeps its session file open. */
-async function sessionIdFromFds(pid: string, harness: HarnessId): Promise<string | undefined> {
+async function sessionIdFromFds(pid: string, harness: HarnessId, procRoot = '/proc'): Promise<string | undefined> {
   if (!FD_SESSION_PATTERNS[harness]) return undefined
-  const fds = await readdir(`/proc/${pid}/fd`).catch(() => [] as string[])
-  const paths = await Promise.all(fds.map(fd => readlink(`/proc/${pid}/fd/${fd}`).catch(() => '')))
+  const fds = await readdir(`${procRoot}/${pid}/fd`).catch(() => [] as string[])
+  const paths = await Promise.all(fds.map(fd => readlink(`${procRoot}/${pid}/fd/${fd}`).catch(() => '')))
   return sessionIdFromFdPaths(paths.filter(Boolean), harness)
 }
 
@@ -415,6 +476,8 @@ export interface HarnessProcess {
    * other correlation in this area has had to guess by harness-and-directory.
    */
   pid?: number
+  /** Whether stdin is a terminal; false is conclusive evidence of a one-shot invocation. */
+  stdinIsTty?: boolean
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -498,8 +561,16 @@ export async function scanProcesses(): Promise<{
   if (process.platform !== 'linux') {
     return { procs: [], unavailable: detectionUnavailable({ platform: process.platform, procReadable: false, foreignPids: 0, cwdDenied: false }) }
   }
+  return scanLinuxProcesses()
+}
+
+/** Linux reader with an injectable procfs root so every process rule can be tested with fixtures. */
+export async function scanLinuxProcesses(procRoot = '/proc'): Promise<{
+  procs: HarnessProcess[]
+  unavailable: LiveUnavailableReason | null
+}> {
   let pids: string[]
-  try { pids = await readdir('/proc') } catch {
+  try { pids = await readdir(procRoot) } catch {
     return { procs: [], unavailable: 'no-proc' }
   }
   let harnessIndex: Awaited<ReturnType<typeof import('./sessions/harness-sessions').loadHarnessSessions>> | null = null
@@ -508,7 +579,7 @@ export async function scanProcesses(): Promise<{
     harnessIndex = await loadHarnessSessions()
   } catch { /* best-effort */ }
 
-  const btimeSec = await bootTimeSec()
+  const btimeSec = await bootTimeSec(procRoot)
   const hz = 100 // USER_HZ is 100 on every Linux this runs on; only used to scale start ticks.
   const procs: HarnessProcess[] = []
   const numeric = pids.filter(p => /^\d+$/.test(p))
@@ -519,27 +590,33 @@ export async function scanProcesses(): Promise<{
   let cwdDenied = false
   await Promise.all(numeric.map(async pid => {
     try {
-      const comm = (await readFile(`/proc/${pid}/comm`, 'utf-8')).trim()
-      const exePath = await readlink(`/proc/${pid}/exe`).catch(() => undefined)
+      const comm = (await readFile(`${procRoot}/${pid}/comm`, 'utf-8')).trim()
+      const exePath = await readlink(`${procRoot}/${pid}/exe`).catch(() => undefined)
       // argv is NUL-separated; a trailing NUL yields an empty last element. Read BEFORE the
       // harness test now, because a script-installed harness is identified from argv.
-      const argv = (await readFile(`/proc/${pid}/cmdline`, 'utf-8').catch(() => ''))
+      const argv = (await readFile(`${procRoot}/${pid}/cmdline`, 'utf-8').catch(() => ''))
         .split('\0').filter(Boolean)
+      const envRaw = await readFile(`${procRoot}/${pid}/environ`, 'utf-8').catch(() => '')
+      if (!envRaw || !belongsToServerEnvironment(parseProcEnviron(envRaw))) return
       const harness = harnessOfProcess(comm, exePath, argv)
       if (!harness) return
+      if (isNonInteractiveInvocation(harness, argv)) return
       // A harness we could identify but whose cwd we may not read is the signature of a container
       // running under a uid that cannot ptrace the host user — record it rather than skipping in
       // silence, or the panel reports an empty, confident zero.
-      const cwd = await readlink(`/proc/${pid}/cwd`).catch(() => { cwdDenied = true; return '' })
+      const cwd = await readlink(`${procRoot}/${pid}/cwd`).catch(() => { cwdDenied = true; return '' })
       if (!cwd) return
-      const startedMs = await processStartMs(pid, btimeSec, hz)
+      const stdinPath = await readlink(`${procRoot}/${pid}/fd/0`).catch(() => '')
+      const stdinIsTty = /^\/dev\/(pts\/|tty(?:$|\d))/.test(stdinPath)
+      if (isNonInteractiveInvocation(harness, argv, stdinIsTty)) return
+      const startedMs = await processStartMs(pid, btimeSec, hz, procRoot)
       const pidNum = Number(pid)
       const harnessRecord = harnessIndex?.byPid.get(pidNum)
       // Harness session file beats fd and argv: it is what the harness explicitly wrote for this pid.
       const sessionId = harnessRecord?.sessionId
-        ?? (await sessionIdFromFds(pid, harness))
+        ?? (await sessionIdFromFds(pid, harness, procRoot))
         ?? sessionIdFromArgv(argv)
-      procs.push({ harness, cwd, sessionId, startedMs, pid: pidNum })
+      procs.push({ harness, cwd, sessionId, startedMs, pid: pidNum, stdinIsTty })
     } catch { /* process exited or not ours — ignore */ }
   }))
   const unavailable = procs.length > 0
@@ -664,6 +741,7 @@ export interface UnmatchedProcess {
   startedMs?: number
   /** Set when the process named a session we have no record of (deleted or not yet written). */
   sessionId?: string
+  pid?: number
 }
 
 export interface LiveSnapshot {
@@ -716,7 +794,11 @@ export function resolveLiveSnapshot(
     }
     // Nothing on disk to attribute. That is only believable while the assistant is still starting
     // up; a process running for hours with no conversation to show is idle or leaked, not warming up.
-    if ((p.startedMs ?? 0) < graceFloor) continue
+    // A process younger than five seconds is almost always a probe, `-p` wrapper, or a test
+    // executable. The scan also rejects unknown start times: without a kernel start time there is
+    // no honest way to satisfy the debounce rule.
+    if (p.startedMs === undefined || nowMs - p.startedMs < EXTERNAL_MIN_LIFETIME_MS) continue
+    if (p.startedMs < graceFloor) continue
     unmatched.push({
       harness: p.harness,
       cwd: p.cwd,
@@ -728,6 +810,28 @@ export function resolveLiveSnapshot(
     })
   }
   return { liveSessionIds: [...open], liveProcesses: unmatched }
+}
+
+type ExternalRowState = { row: UnmatchedProcess; lastSeenMs: number; visible: boolean }
+const externalRows = new Map<number, ExternalRowState>()
+
+/** Apply the five-second disappearance debounce to unmatched process rows. */
+function debounceExternalRows(rows: UnmatchedProcess[], nowMs: number): UnmatchedProcess[] {
+  const current = new Map<number, UnmatchedProcess>()
+  for (const row of rows) if (row.pid !== undefined) current.set(row.pid, row)
+  const out: UnmatchedProcess[] = []
+  for (const [pid, row] of current) {
+    const previous = externalRows.get(pid)
+    const visible = previous?.visible || row.startedMs !== undefined && nowMs - row.startedMs >= EXTERNAL_MIN_LIFETIME_MS
+    externalRows.set(pid, { row, lastSeenMs: nowMs, visible })
+    if (visible) out.push(row)
+  }
+  for (const [pid, state] of externalRows) {
+    if (current.has(pid)) continue
+    if (state.visible && nowMs - state.lastSeenMs < EXTERNAL_GONE_GRACE_MS) out.push(state.row)
+    else externalRows.delete(pid)
+  }
+  return out
 }
 
 /** Read the processes and produce the full snapshot in one call. */
@@ -761,6 +865,6 @@ export async function getLiveSnapshot(sessions: SessionMeta[]): Promise<LiveSnap
     }
   }
 
-  const result: LiveSnapshot = { ...snap, liveSessionActivities }
+  const result: LiveSnapshot = { ...snap, liveProcesses: debounceExternalRows(snap.liveProcesses, Date.now()), liveSessionActivities }
   return unavailable ? { ...result, liveUnavailable: unavailable } : result
 }
