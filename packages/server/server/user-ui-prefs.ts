@@ -51,6 +51,7 @@ export const USER_UI_PREF_REGISTRY = {
   theme: { machine: 'top', maxBytes: SMALL },
   lang: { machine: 'top', maxBytes: SMALL },
   currency: { machine: 'top', maxBytes: SMALL },
+  textScale: { machine: 'top', maxBytes: SMALL },
   cardOrder: { machine: 'top', maxBytes: SMALL },
   cardPrecision: { machine: 'top', maxBytes: SMALL },
   monthlyBudgetUSD: { machine: 'top', maxBytes: SMALL },
@@ -111,6 +112,9 @@ const isJsonValue = (v: unknown): boolean =>
 
 const byteLength = (v: unknown): number => new TextEncoder().encode(JSON.stringify(v)).length
 
+const clampTextScale = (v: unknown): number =>
+  typeof v === 'number' && Number.isFinite(v) ? Math.min(1.5, Math.max(0.85, v)) : 1
+
 /**
  * PURE: what a stored PER-ACCOUNT document (`userPrefs.ui`) may be read back as. Total — a document
  * written by a later build yields only the keys this build knows.
@@ -118,7 +122,10 @@ const byteLength = (v: unknown): number => new TextEncoder().encode(JSON.stringi
 export function readUserUiPrefs(stored: unknown): UserUiPrefs {
   if (!isPlainObject(stored)) return {}
   const out: UserUiPrefs = {}
-  for (const [k, v] of Object.entries(stored)) if (isUserUiPrefKey(k) && isJsonValue(v)) out[k] = v
+  for (const [k, v] of Object.entries(stored)) {
+    if (!isUserUiPrefKey(k) || !isJsonValue(v)) continue
+    out[k] = k === 'textScale' ? clampTextScale(v) : v
+  }
   return out
 }
 
@@ -170,8 +177,11 @@ export function parseUserUiPut(body: unknown): UserUiPut {
   for (const [k, v] of Object.entries(body)) {
     if (!isUserUiPrefKey(k)) return { ok: false, error: 'unknown_key', key: k }
     if (!isJsonValue(v)) return { ok: false, error: 'bad_value', key: k }
+    if (k === 'textScale' && (typeof v !== 'number' || !Number.isFinite(v))) {
+      return { ok: false, error: 'bad_value', key: k }
+    }
     if (byteLength(v) > USER_UI_PREF_REGISTRY[k].maxBytes) return { ok: false, error: 'too_large', key: k }
-    patch[k] = v
+    patch[k] = k === 'textScale' ? clampTextScale(v) : v
   }
   return { ok: true, patch }
 }

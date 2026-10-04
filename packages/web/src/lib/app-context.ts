@@ -70,6 +70,8 @@ export interface AppContext {
   theme: Theme
   currency: 'USD' | 'BRL'
   setCurrency: (c: 'USD' | 'BRL') => void
+  textScale: number
+  setTextScale: (scale: number) => void
   brlRate: number
 
   /** How this machine is actually billed — the timeline the plan cost basis is computed from.
