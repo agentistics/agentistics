@@ -68,8 +68,12 @@
  * Absent on every host today, and then every call is simply made.
  * Also (H17): `events.nativeSession` (optional) — a native session's own state change (asked the
  * person / a run ended / a run started) into the host's event channel and its desktop delivery.
+ * 1.8.0 — ES.6h: the `code` tab's contract. `CodeHost` (opaque until now) gains OPTIONAL typed members (`CodeHostPort`:
+ * availability, defaults, tasks, start/resume, an event subscription, submit/answer/cancel/end; `code-host.ts`) and
+ * `asCodePort()` reads them. An engine built against 1.7 still loads (its handle is simply not a port: the tab says
+ * so); a 1.8 engine on an older host is offered no `code` tab.
  */
-export const ENGINE_API_VERSION = '1.7.0'
+export const ENGINE_API_VERSION = '1.8.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

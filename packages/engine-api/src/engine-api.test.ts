@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, test } from 'bun:test'
 import {
   ENGINE_API_VERSION,
+  asCodePort,
+  type CodeHost,
   RESERVED_PREFIXES,
   apiCompatible,
   checkEngine,
@@ -127,5 +129,30 @@ describe('the reuse surface (1.2)', () => {
     const offered: Record<string, unknown> = Object.fromEntries(REUSE_SURFACE_MEMBERS.map(k => [k, () => {}]))
     offered.MAX_STATES = 0
     expect(missingReuseMembers(offered)).toEqual([])
+  })
+})
+
+describe('ES.6h — the typed code host (1.8)', () => {
+  const port = () => ({
+    kind: 'code-host' as const, dispose: async () => {},
+    availability: () => ({ ok: true as const }), defaults: async () => ({}), openTasks: async () => ({ ok: true as const, tasks: [] }),
+    createTask: async () => ({ ok: false as const, sentence: 'x' }), start: async () => ({ ok: false as const, sentence: 'x' }),
+    resume: async () => ({ ok: false as const, sentence: 'x' }), subscribe: () => () => {}, submit: () => ({ ok: true as const }),
+    answer: () => ({ ok: false as const, sentence: 'x' }), cancel: () => ({ ok: false as const, sentence: 'x' }), end: async () => {},
+  })
+  test('the engine-api is 1.8 and a 1.7 engine\'s opaque handle still satisfies CodeHost but is not a port', () => {
+    expect(ENGINE_API_VERSION).toBe('1.8.0')
+    const opaque: CodeHost = { kind: 'code-host', dispose: async () => {} }
+    expect(asCodePort(opaque)).toBeNull()
+    expect(asCodePort(null)).toBeNull()
+  })
+  test('a handle carrying every member is the port; a missing member is not', () => {
+    expect(asCodePort(port() as unknown as CodeHost)).not.toBeNull()
+    const { end: _e, ...rest } = port()
+    expect(asCodePort(rest as unknown as CodeHost)).toBeNull()
+  })
+  test('apiCompatible: an engine built against 1.7 loads on a 1.8 host, and the reverse is refused', () => {
+    expect(apiCompatible('1.8.0', '1.7.0')).toBe(true)
+    expect(apiCompatible('1.7.0', '1.8.0')).toBe(false)
   })
 })
