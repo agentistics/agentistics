@@ -29,6 +29,8 @@
 
 import { reopeningLabel, withReopening } from '../../lib/reopeningStore'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
+import { GROW_AT_PX, GROW_TURNS, INITIAL_TURNS, shownToInclude, windowStart } from '../../lib/turnWindow'
 import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerSendButton, ComposerShell, ComposerToolbar } from '../chat/ComposerShell'
 import { mutedTooltip, useMutedKeys } from '../../lib/notifyMenu'
 import { toggleSessionMuted } from '../../lib/mutedSessions'
@@ -1145,6 +1147,14 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
    * See `promptHistory.ts`.
    */
   const turnAnchors = useMemo(() => turnAnchorIds(session.id, turns), [session.id, turns])
+  // PERF.1: a long conversation renders its END first and grows as the reader scrolls up.
+  const [shownTurns, setShownTurns] = useState(INITIAL_TURNS)
+  useEffect(() => { setShownTurns(INITIAL_TURNS) }, [session.id])
+  const firstShown = windowStart(turns.length, shownTurns)
+  const turnsLenRef = useRef(turns.length)
+  turnsLenRef.current = turns.length
+  /** scrollHeight before an older block was added — restored after it renders, so nothing jumps. */
+  const growFrom = useRef<number | null>(null)
 
 
 
@@ -1419,6 +1429,8 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
   const jumpToQuote = useCallback((id: string) => {
     const target = quoteState.current.replyTo.find(r => r.id === id)
     const i = target?.key === undefined ? -1 : turns.findIndex(t => turnKeyOf(t) === target.key)
+    // A turn above the rendered window is rendered first, so the jump lands on it.
+    if (i >= 0 && i < windowStart(turns.length, shownTurns)) flushSync(() => setShownTurns(shownToInclude(turns.length, i)))
     const el = i >= 0 && turnAnchors[i] ? document.getElementById(turnAnchors[i]!) : null
     if (!el) {
       setNotice(pt
@@ -1448,7 +1460,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
     void body.offsetWidth
     body.style.animation = ROW_FLASH
     body.addEventListener('animationend', () => { body.style.animation = '' }, { once: true })
-  }, [turns, turnAnchors, pt])
+  }, [turns, turnAnchors, pt, shownTurns])
 
   /** The card's ✕: remove the card, and with it the quote. */
   const dropQuote = useCallback((id: string) => {
@@ -1526,10 +1538,25 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
     if (tailFollows(atTail, holdTailUntil.current, Date.now())) el.scrollTop = el.scrollHeight
   }, [turns.length, live, payload, atTail, echo.length])
 
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el || growFrom.current === null) return
+    el.scrollTop += el.scrollHeight - growFrom.current
+    growFrom.current = null
+  }, [shownTurns])
+
   const onScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < TAIL_SLACK
+    // Near the top with older turns not rendered yet: render the next block (position kept below).
+    if (el.scrollTop < GROW_AT_PX && growFrom.current === null) {
+      setShownTurns(n => {
+        if (windowStart(turnsLenRef.current, n) === 0) return n
+        growFrom.current = el.scrollHeight
+        return n + GROW_TURNS
+      })
+    }
     // Right after a jump the view can still be near the bottom while it scrolls away; reading that
     // as "at the tail" would re-arm the follow and pull the reader back. See `holdTailUntil`.
     if (near && Date.now() < holdTailUntil.current) return
@@ -2150,7 +2177,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
             }}>{payload.older}</p>
           )}
 
-          {turns.map((t, i) => (
+          {turns.slice(firstShown).map((t, j) => { const i = firstShown + j; return (
             <ChatBubble
               key={i}
               turn={t}
@@ -2181,7 +2208,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                 ...(canPrompt && t.role === 'assistant' ? { onReplyExcerpt: onReplyToExcerpt } : {})
               }
             />
-          ))}
+          )})}
 
           {/* An echo IS an unread message by definition — it is retired the instant the transcript
               carries the same text — so it is drawn as one: faded, with the wait said in words

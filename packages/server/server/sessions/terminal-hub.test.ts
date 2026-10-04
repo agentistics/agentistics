@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { createTerminalHub, type TerminalSink } from './terminal-hub'
+import { FOLLOW_MS, createTerminalHub, type TerminalSink } from './terminal-hub'
 import type { TerminalFrame } from './terminal-stream'
 import type { PaneInfo, TerminalCapture } from './types'
 
@@ -28,6 +28,7 @@ function harness(opts: { managed?: boolean } = {}) {
   let intervalFn: (() => void) | null = null
   let cleared = false
   let captureCalls = 0
+  const follows: { fn: () => void; ms: number }[] = []
 
   const hub = createTerminalHub({
     capture: async () => { captureCalls++; return next },
@@ -37,6 +38,7 @@ function harness(opts: { managed?: boolean } = {}) {
     pollMs: 500,
     setInterval: fn => { intervalFn = fn; return 1 as unknown as ReturnType<typeof setInterval> },
     clearInterval: () => { cleared = true },
+    setTimeout: (fn, ms) => { follows.push({ fn, ms }) },
   })
 
   return {
@@ -46,6 +48,7 @@ function harness(opts: { managed?: boolean } = {}) {
     intervalStarted: () => intervalFn !== null,
     cleared: () => cleared,
     captureCalls: () => captureCalls,
+    follows,
   }
 }
 
@@ -169,5 +172,25 @@ describe('createTerminalHub', () => {
     off()
     off() // must not throw or double-count
     expect(h.hub.activeLoops()).toBe(0)
+  })
+
+  it('follows a CHANGING screen faster than the interval (an answer being written), and stops when it settles', async () => {
+    const h = harness()
+    const a = sink()
+    await h.hub.subscribe('s1', a.s)
+    await flush()
+    // the first frame armed a follow-up; the screen has not changed since, so it arms nothing more
+    while (h.follows.length) { h.follows.shift()!.fn(); await flush() }
+    h.set(cap(['writing 1']))
+    await h.tick()
+    // a changed frame arms ONE quick follow-up capture
+    expect(h.follows.map(f => f.ms)).toEqual([FOLLOW_MS])
+    expect(FOLLOW_MS).toBeLessThan(500)
+    h.set(cap(['writing 2']))
+    h.follows.shift()!.fn(); await flush()
+    expect(JSON.stringify(a.frames.at(-1))).toContain('writing 2')
+    expect(h.follows.length).toBe(1) // still changing: keeps following
+    h.follows.shift()!.fn(); await flush() // unchanged now
+    expect(h.follows.length).toBe(0) // settled: back to the interval alone
   })
 })

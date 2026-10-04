@@ -140,6 +140,9 @@ __ENGINE_VERBS__
   autostart     Start a mode with the system (systemd user service on Linux)
   check-update  Print a notice if a newer version is available (else silent);
                 a release marked [critical] says so louder (auto-install is opt-in)
+  clean         List worktrees agentop's projects accumulated, with sizes: merged and clean
+                ones, and node_modules untouched for 30 days, are removed on confirmation
+                (--yes). Uncommitted work and branches are never touched. --json, --repo <path>.
   doctor        Run the exposure preflight; add --exposed to check against the
                 strict public bar before opening a tunnel
   setup-token   Reissue the one-time OWNER setup token (central only; run it where the
@@ -998,6 +1001,9 @@ if (command === 'server' || command === 'start' || !command) {
 } else if (command === 'watch') {
   checkVersionAndWarn() // fire-and-forget
   await import('../server/otel-watcher.ts')
+} else if (command === 'clean') {
+  const { runClean } = await import('../server/cli-clean.ts')
+  await runClean(args)
 } else if (command === 'doctor') {
   const { runDoctor } = await import('../server/cli-doctor.ts')
   await runDoctor(args)

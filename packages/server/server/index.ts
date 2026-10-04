@@ -9,7 +9,7 @@ import type { LiveProcess, LiveUnavailableReason, SessionMeta } from '@agentisti
 import { getRates } from './rates'
 import { getVersionInfo, startVersionRecheck } from './version'
 import { handleUpgradeRoute, upgradableHint } from './upgrade-web'
-import { buildApiResponse, buildApiResponseStream, invalidateCache } from './data'
+import { buildApiResponse, buildApiResponseStream, invalidateCache, serializedData } from './data'
 import { readPreferences, writePreferences, redactPreferences, guardTeamConnectionsWipe, PreferencesLockTimeoutError, type Preferences } from './preferences'
 import {
   readStoredNotifications, addStoredNotification, markStoredNotificationsRead,
@@ -120,6 +120,7 @@ import {
   sseClients,
   sseEncoder,
   setupFileWatcher,
+  enableRebuildOnChange,
   maybeSpawnWatcher,
   serveStatic,
   SERVE_STATIC,
@@ -230,6 +231,14 @@ void (async () => {
 await import('./team-migrate').then(m => m.migrateTeamStateOnce()).catch(err =>
   console.warn('[team-migrate] state migration failed (will retry next boot):', err instanceof Error ? err.message : String(err)))
 
+enableRebuildOnChange()
+void import('./mem-log').then(m => m.startMemLog())
+// PERF.1: at most once a week, say what `agentop clean` would free (never removes anything itself).
+if (!TEAM_CENTRAL) {
+  void Promise.all([import('./clean/clean-suggest'), import('./cli-lang')])
+    .then(async ([m, l]) => m.startCleanSuggestions(AGENTISTICS_DATA_DIR, await l.resolveLang()))
+    .catch(() => {})
+}
 void setupFileWatcher()
 if (TEAM_CENTRAL) {
   import('./team-watch').then(m => m.startTeamWatch()).catch(err => console.error('[team-watch] failed to start:', err))
@@ -1442,6 +1451,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       if (!encodedDir || !id) {
         return new Response(JSON.stringify({ error: 'encodedDir and id required' }), {
           status: 400, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+      // PERF.1: `limit` asks for a PAGE from the end (`before` = index for older ones); without it the
+      // whole conversation, as before, for any reader that has not moved to pages.
+      const limit = Number(url.searchParams.get('limit'))
+      if (Number.isInteger(limit) && limit > 0) {
+        const { getClaudeSessionPage } = await import('./claude-sessions')
+        const beforeRaw = url.searchParams.get('before')
+        const before = beforeRaw !== null && Number.isInteger(Number(beforeRaw)) ? Number(beforeRaw) : undefined
+        return new Response(JSON.stringify(await getClaudeSessionPage(encodedDir, id, Math.min(limit, 1000), before)), {
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
       const msgs: ClaudeSessionMessage[] = await getClaudeSessionMessages(encodedDir, id)
@@ -2829,6 +2849,45 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // One hosted session's conversation, for the workspace's chat view. Which harnesses can be read
     // is `harness-transcript.ts`; the module refuses IN WORDS wherever the conversation link is not
     // exact or nothing here parses that harness's transcript format.
+    // The same conversation, PUSHED (PERF.1): the payload once, then deltas as the transcript file
+    // changes. 503 past the stream cap — the client then reads `/api/fleet/chat` on its interval.
+    if (url.pathname === '/api/fleet/chat-stream' && req.method === 'GET') {
+      const id = url.searchParams.get('id')
+      if (!id) {
+        return new Response(JSON.stringify({ error: 'bad_request' }), {
+          status: 400,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+      const { readSessionChat } = await import('./sessions/chat-web')
+      const { hostForFleet, fleetLang } = await import('./sessions/fleet-web')
+      const { chatStreamResponse, ROW_TTL_MS } = await import('./sessions/chat-stream')
+      const lang = fleetLang(url.searchParams.get('lang'))
+      const host = await hostForFleet(lang)
+      // The row is reused between changes: a transcript append does not move the session in the
+      // fleet, and re-walking every pane per appended line is the cost being removed.
+      const memo = Object.create(host) as typeof host
+      let rowAt = 0
+      let rows: ReturnType<NonNullable<typeof host.sessions>> | null = null
+      if (host.sessions) {
+        memo.sessions = () => {
+          if (!rows || Date.now() - rowAt >= ROW_TTL_MS) { rowAt = Date.now(); rows = host.sessions!.call(host); void rows.catch(() => { rows = null }) }
+          return rows
+        }
+      }
+      const res = chatStreamResponse(id, {
+        read: (fresh, onPath) => { if (fresh) rows = null; return readSessionChat(memo, lang, id, undefined, onPath) },
+      }, req.signal)
+      if (!res) {
+        return new Response(JSON.stringify({ error: 'too_many_streams' }), {
+          status: 503,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+      for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v)
+      return res
+    }
+
     if (url.pathname === '/api/fleet/chat' && req.method === 'GET') {
       const id = url.searchParams.get('id')
       if (!id) {
@@ -3527,10 +3586,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             liveProcesses = [...liveProcesses, ...team.liveProcesses]
           } catch { /* best-effort — the local snapshot still stands */ }
         }
-        return new Response(JSON.stringify({
-          ...data, liveSessionIds, liveProcesses,
-          ...(liveUnavailable ? { liveUnavailable } : {}), ...extra,
-        }), {
+        // The build is serialized once (`serializedData`); only the live fields are added per request.
+        // A central's response is scoped per principal, so it keeps the plain path.
+        const live = { liveSessionIds, liveProcesses, ...(liveUnavailable ? { liveUnavailable } : {}), ...extra }
+        const body = TEAM_CENTRAL || !data.sessions
+          ? JSON.stringify({ ...data, ...live })
+          : `${serializedData(data).slice(0, -1)},${JSON.stringify(live).slice(1)}`
+        return new Response(body, {
           status: 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })

@@ -5,7 +5,8 @@ import { stat } from 'fs/promises'
 import chokidar from 'chokidar'
 import { SESSION_META_DIR, PROJECTS_DIR, STATS_CACHE_FILE, PORT, TEAM_CENTRAL, CODEX_SESSIONS_DIR, GEMINI_DIR, COPILOT_DIR, ANTIGRAVITY_BRAIN_DIR, ANTIGRAVITY_CONVERSATIONS_DIR } from './config'
 import { centralManifest, centralHtml } from './central-branding'
-import { invalidateCache } from './data'
+import { invalidateCache, rebuildNow } from './data'
+import { createRebuildScheduler } from './rebuild-scheduler'
 import { mirrorFile } from './archive'
 import { getEnabledAdapters } from './adapters/types'
 import { addStoredNotification } from './notifications-store'
@@ -62,12 +63,33 @@ export function broadcastNotification(n: {
   }
 }
 
+// PERF.1: a change REBUILDS the data, and clients hear `change` only once the new data exists — not
+// two seconds after the write, when their refetch was answered from the stale cache and the fresh
+// build that followed was never announced (every dashboard sat one change behind).
+const rebuilds = createRebuildScheduler({
+  build: rebuildNow,
+  onRebuilt: notifySseClients,
+  debounceMs: 300,
+  minGapMs: 2000,
+})
+
+let rebuildOnChange = false
 let sseDebounce: ReturnType<typeof setTimeout> | null = null
 
+/**
+ * Turned on by the SERVER at boot: only a process that serves `/api/data` rebuilds it eagerly. Other
+ * callers of `triggerSseNotification` (the team modules, their tests, the CLI) keep the cheap path —
+ * mark the cache stale, nudge listeners — rather than starting a full build in the background.
+ */
+export function enableRebuildOnChange(): void { rebuildOnChange = true }
+
 export function triggerSseNotification() {
-  invalidateCache()
-  if (sseDebounce) clearTimeout(sseDebounce)
-  sseDebounce = setTimeout(notifySseClients, 2000)
+  if (rebuildOnChange) rebuilds.changed()
+  else {
+    invalidateCache()
+    if (sseDebounce) clearTimeout(sseDebounce)
+    sseDebounce = setTimeout(notifySseClients, 2000)
+  }
   // Member push-on-change: local data changed → nudge a debounced push to the central so its
   // aggregate stays fresh while you work. No-op on a central/solo instance.
   import('./team-uploader').then(m => m.notifyDataChanged()).catch(() => {})

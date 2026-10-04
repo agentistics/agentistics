@@ -323,6 +323,9 @@ export async function runFleetAction(
             const carried = attachmentMessageOf(conv ?? '', sentAtMs, text)
             if (carried) await recordAttachmentMessage(carried)
           } catch { /* the message went; the queue is a view of it, not the record */ }
+          // The pushed chat (PERF.1) hears about the send now, not on its next safety read.
+          const { wakeChat } = await import('./chat-stream')
+          wakeChat(req.id)
         })()
       }
       return out
