@@ -52,6 +52,7 @@ import type { HarnessId } from '@agentistics/core'
 import { countPerKind, projectKind } from '@agentistics/core'
 import { GROUPINGS, type SessionGroupingId } from '../src/control/sessions'
 import type { CliLang } from '../src/control/lang'
+import type { CodeAsk, CodeDiff, CodeEvent, CodeHost, CodeLaunch, CodeSessionFacts, CodeTaskOption } from '../src/control/code-types'
 // The real string table, not a copy of it. Every label on this screen arrives from the host already
 // localized, so a preview that invented its own words would be previewing a different screen —
 // and `--lang pt` would prove nothing. `cli-i18n.ts` is a dependency-free table of strings; reading
@@ -121,7 +122,18 @@ interface Options {
    * to check would be the only one anybody could ever see.
    */
   restore: boolean
+  /** Give the host a scripted native-runtime fake, in one of these states — see `CODE_SCENARIOS`. */
+  code?: CodeScenario
 }
+
+/**
+ * The `code` tab's states worth looking at. None of them runs a model: the fake emits a scripted
+ * sequence of `CodeEvent`s the way `code-host.ts` translates the runtime's frames, so the frame is
+ * the one the real fold of those events produces.
+ */
+type CodeScenario = 'empty' | 'wizard' | 'review' | 'streaming' | 'ask-patch' | 'ask-shell' | 'full-diff'
+
+const CODE_SCENARIOS: readonly CodeScenario[] = ['empty', 'wizard', 'review', 'streaming', 'ask-patch', 'ask-shell', 'full-diff'] as const
 
 const USAGE = `
   preview — render one control-center frame to stdout
@@ -152,11 +164,20 @@ const USAGE = `
                             path is drawn: --fail-spawn --keys a,enter,enter,enter,enter,enter,enter
     --restore               the machine lost its fleet, so the "start these again?"
                             offer is drawn in front of the list
+    --tab    <screen>       an alias for --screen
+    --code   ${CODE_SCENARIOS.join('|')}
+                            give the host a scripted native-runtime fake in that state
+                            (opens on --tab code unless another screen is named):
+                            empty = no session; wizard = \`agentop code "…"\` at the task
+                            step; review = its review step; streaming = mid-answer with
+                            tool rows and an inline diff; ask-patch / ask-shell = the
+                            permission card; full-diff = the patch's whole diff
     --group <arrangement>   open the sessions list already arranged this way, e.g.
                             \`--screen sessions --group tree\` for the cascade
 `
 
 function parseArgs(argv: string[]): Options {
+  let screenNamed = false
   const opts: Options = {
     cols: 100, rows: 34, lang: 'en', screen: 'services', mode: 'solo', keys: [], task: 'off',
     pending: false, failSpawn: false, refuseMemory: false, restore: false,
@@ -194,6 +215,17 @@ function parseArgs(argv: string[]): Options {
         opts.mode = CASES.find(c => c === value) ?? 'solo'
         i++
         break
+      case '--code': {
+        const found = CODE_SCENARIOS.find(c => c === value)
+        if (!found) {
+          process.stderr.write(`unknown code scenario: ${value} (${CODE_SCENARIOS.join(', ')})\n${USAGE}`)
+          process.exit(2)
+        }
+        opts.code = found
+        i++
+        break
+      }
+      case '--tab':
       case '--screen': {
         const tab = TAB_ORDER.find(t => t === value)
         if (!tab) {
@@ -201,6 +233,7 @@ function parseArgs(argv: string[]): Options {
           process.exit(2)
         }
         opts.screen = tab
+        screenNamed = true
         i++
         break
       }
@@ -214,6 +247,11 @@ function parseArgs(argv: string[]): Options {
         process.exit(2)
     }
   }
+  // `--code` is about the code tab; asking for it and then looking at services would be a mistake.
+  if (opts.code && !screenNamed) opts.screen = 'code'
+  // The review and the full diff are one keypress past what the host opens on.
+  if (opts.code === 'review') opts.keys = ['enter', ...opts.keys]
+  if (opts.code === 'full-diff') opts.keys = ['d', ...opts.keys]
   return opts
 }
 
@@ -437,6 +475,7 @@ function fakeHost(opts: Options, apiUrl?: string): ControlHost {
   })
 
   return {
+    ...(opts.code ? { code: fakeCodeHost(opts.code) } : {}),
     refresh: async () => fakeStatus(opts, apiUrl),
     start: act,
     connect: done,
@@ -954,6 +993,180 @@ const KEYS: Record<string, string> = {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
+// ---------------------------------------------------------------------------
+// the fake native runtime (`--code`)
+// ---------------------------------------------------------------------------
+
+const CODE_TASKS: CodeTaskOption[] = [
+  { id: 'task-0539', ref: 't-0539', title: 'Parser: off-by-one on the last byte', status: 'in_progress', statusLabel: 'In progress' },
+  { id: 'task-0412', ref: 't-0412', title: 'Sessions aside: floating panels', status: 'in_progress', statusLabel: 'In progress' },
+  { id: 'task-0601', ref: 't-0601', title: 'Billing export as CSV', status: 'todo', statusLabel: 'To do' },
+]
+
+const CODE_FACTS: CodeSessionFacts = {
+  sessionId: 'ses_3f5f9a21c0',
+  shortId: '3f5f',
+  title: 'parser fix',
+  task: { id: 'task-0539', ref: 't-0539', title: 'Parser: off-by-one on the last byte' },
+  cwd: '~/agentistics/.claude/worktrees/parser-fix',
+  workspaceRoot: '~/agentistics',
+  model: 'claude-sonnet-5',
+  provider: 'anthropic',
+  mode: 'ask',
+}
+
+const CODE_DIFF: CodeDiff = {
+  files: [{
+    path: 'packages/core/src/tokens.ts',
+    op: 'update',
+    added: 3,
+    removed: 1,
+    hunks: [{
+      header: '@@ -39,7 +39,9 @@ export function slice',
+      lines: [
+        { op: ' ', text: 'export function slice(buf, start, len) {' },
+        { op: ' ', text: '  if (len <= 0) return []' },
+        { op: ' ', text: '  const end = start + len' },
+        { op: '-', text: '  if (end > buf.length - 1) return null' },
+        { op: '+', text: '  if (end > buf.length) return null' },
+        { op: '+', text: '  // end is exclusive: a slice ending on the last byte is valid' },
+        { op: '+', text: '  // (regression: tokens.test.ts "last byte")' },
+        { op: ' ', text: '  return buf.subarray(start, end)' },
+      ],
+    }],
+  }],
+}
+
+const TEST_DIFF: CodeDiff = {
+  files: [{
+    path: 'packages/core/src/tokens.test.ts',
+    op: 'update',
+    added: 15,
+    removed: 3,
+    hunks: [{ lines: [
+      { op: '-', text: "test('slice', () => {" },
+      { op: '+', text: "test('a slice ending on the last byte is valid', () => {" },
+      { op: '+', text: '  expect(slice(buf, 0, buf.length)).toEqual(buf)' },
+      { op: '+', text: '  expect(slice(buf, 2, buf.length - 2)).not.toBeNull()' },
+      { op: '+', text: '})' },
+    ] }],
+  }],
+}
+
+/** What the runtime said up to the point each scenario is captured at. */
+function codeScript(scenario: CodeScenario): CodeEvent[] {
+  const at = '2026-09-28T14:02:00.000Z'
+  const base: CodeEvent[] = [
+    { kind: 'history', turns: [
+      { role: 'user', text: 'why does the parser drop the last byte of a buffer?', tools: [] },
+      { role: 'assistant', text: 'sliceEnd treats the end as inclusive, so a slice that ends on the last byte is rejected. That is the off-by-one.', tools: [
+        { name: 'file.read', verb: 'read', target: 'core/src/tokens.ts' },
+        { name: 'file.read', verb: 'read', target: 'core/src/tokens.test.ts' },
+      ] },
+    ] },
+    { kind: 'user', text: 'add a failing test first, then fix it and run the core tests', at },
+    { kind: 'run-started', runId: 'run-7', at },
+    { kind: 'delta', runId: 'run-7', text: "I'll add the regression test, " },
+    { kind: 'delta', runId: 'run-7', text: 'patch the boundary check, then run the core tests.' },
+    { kind: 'tool', call: { id: 't1', name: 'file.read', verb: 'read', target: 'core/src/tokens.ts', state: 'done', durationMs: 40, result: '212 lines' } },
+    { kind: 'tool', call: { id: 't2', name: 'grep', verb: 'grep', target: '"sliceEnd" in packages/core', state: 'done', durationMs: 18, result: '3 matches' } },
+    { kind: 'tool', call: { id: 't3', name: 'file.patch', verb: 'patch', target: 'core/src/tokens.test.ts', state: 'done', durationMs: 14, diff: TEST_DIFF } },
+    { kind: 'tool', call: { id: 't4', name: 'shell', verb: 'shell', target: 'bun test tokens.test.ts', state: 'failed', durationMs: 2400, failure: 'exit 1 — 1 test failed: "a slice ending on the last byte is valid"' } },
+    { kind: 'usage', usage: { runId: 'run-7', model: 'claude-sonnet-5', input: 12_300, output: 8_900, cacheRead: 61_000, cacheWrite: 4_200, costUSD: 0.38, contextTokens: 82_000, contextWindow: 200_000 } },
+    { kind: 'plan', items: [
+      { text: 'add a failing regression test', status: 'done' },
+      { text: 'patch the boundary check', status: 'active' },
+      { text: 'run the core tests', status: 'todo' },
+      { text: 'summarize', status: 'todo' },
+    ] },
+  ]
+  if (scenario === 'streaming') {
+    return [...base,
+      { kind: 'tool', call: { id: 't5', name: 'file.patch', verb: 'patch', target: 'core/src/tokens.ts', state: 'done', durationMs: 12, diff: CODE_DIFF } },
+      { kind: 'delta', runId: 'run-7', text: 'The test fails as expected. The patch makes the end exclusive; running the core suite now so the other 213 tests confirm nothing else relied on the old boundary' },
+    ]
+  }
+  if (scenario === 'ask-shell') {
+    const ask: CodeAsk = {
+      id: 'q-shell',
+      kind: 'permission',
+      toolId: 't6',
+      toolName: 'shell',
+      title: 'Allow this command to run?',
+      why: ['no allow rule matches "bun test"'],
+      command: { command: 'bun test packages/core --timeout 20000', cwd: '~/agentistics/.claude/worktrees/parser-fix' },
+      checkpoint: false,
+      options: [
+        { label: 'Allow once' },
+        { label: 'Allow bun test * for this session' },
+        { label: 'Deny' },
+      ],
+      denyIndex: 2,
+    }
+    return [...base,
+      { kind: 'tool', call: { id: 't5', name: 'file.patch', verb: 'patch', target: 'core/src/tokens.ts', state: 'done', durationMs: 12, diff: CODE_DIFF } },
+      { kind: 'tool', call: { id: 't6', name: 'shell', verb: 'shell', target: 'bun test packages/core', state: 'asking' } },
+      { kind: 'ask', ask },
+    ]
+  }
+  if (scenario === 'ask-patch' || scenario === 'full-diff') {
+    const ask: CodeAsk = {
+      id: 'q-patch',
+      kind: 'permission',
+      toolId: 't5',
+      toolName: 'file.patch',
+      title: 'Allow this patch to be applied?',
+      why: ['mode ask and no allow rule covers file.patch'],
+      diff: CODE_DIFF,
+      // Always false in P1: the runtime records its checkpoint AFTER the write, so no note is drawn.
+      checkpoint: false,
+      options: [
+        { label: 'Apply once' },
+        { label: 'Apply, and allow patches under packages/core/ for this session' },
+        { label: 'Reject' },
+      ],
+      denyIndex: 2,
+    }
+    return [...base,
+      { kind: 'tool', call: { id: 't5', name: 'file.patch', verb: 'patch', target: 'core/src/tokens.ts', state: 'asking' } },
+      { kind: 'ask', ask },
+    ]
+  }
+  return base
+}
+
+/** How the scenario was "launched" — the tab acts on this exactly once, like `agentop code …`. */
+function codeLaunch(scenario: CodeScenario): CodeLaunch | undefined {
+  if (scenario === 'empty') return undefined
+  if (scenario === 'wizard' || scenario === 'review') return { prompt: 'fix the off-by-one in the parser and run the core tests' }
+  return { resume: CODE_FACTS.sessionId }
+}
+
+function fakeCodeHost(scenario: CodeScenario): CodeHost {
+  const nothing = { ok: true as const, sentence: 'preview — nothing was performed' }
+  return {
+    availability: () => ({ ok: true }),
+    defaults: async () => ({
+      model: { id: 'claude-sonnet-5', source: 'flag' },
+      cwd: '~/agentistics/.claude/worktrees/parser-fix',
+      workspaceRoot: '~/agentistics',
+      provider: 'anthropic',
+    }),
+    openTasks: async () => ({ ok: true, tasks: CODE_TASKS }),
+    createTask: async title => ({ ok: true, task: { id: 'task-new', ref: 't-0700', title, status: 'todo', statusLabel: 'To do' } }),
+    start: async () => ({ ok: true, facts: CODE_FACTS, sentence: 'preview — started nothing' }),
+    resume: async () => ({ ok: true, facts: CODE_FACTS, sentence: 'Resumed "parser fix" (t-0539).' }),
+    subscribe: (_id, listener) => {
+      for (const e of codeScript(scenario)) listener(e)
+      return () => {}
+    },
+    submit: () => ({ ok: true }),
+    answer: () => nothing,
+    cancel: () => nothing,
+    end: async () => {},
+  }
+}
+
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2))
 
@@ -971,7 +1184,7 @@ async function main(): Promise<void> {
     <ControlCenter
       host={fakeHost(opts, fixture?.apiBase)}
       lang={opts.lang}
-      initial={{ tab: opts.screen }}
+      initial={{ tab: opts.screen, ...(opts.code ? { code: codeLaunch(opts.code) } : {}) }}
       onExit={() => {}}
     />
   )
@@ -1013,7 +1226,7 @@ async function main(): Promise<void> {
   const tall = lines.length - opts.rows
 
   const out = [
-    `  ${opts.mode} · ${opts.screen} · ${opts.lang} · ${opts.cols}x${opts.rows}`,
+    `  ${opts.mode} · ${opts.screen}${opts.code ? ` (${opts.code})` : ''} · ${opts.lang} · ${opts.cols}x${opts.rows}`,
     tens,
     units,
     ...lines,

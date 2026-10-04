@@ -5,6 +5,7 @@
  * is a DECLARED absence in its manifest, never a crash, and a failed or mismatched engine never
  * takes the product down: the host logs it and runs as a community build (`EngineStatus`).
  */
+import type { CodeHostPort } from './code-host'
 import type { HarnessId, ProviderId, CapabilityName, EngineEvent, EngineHealthIssue } from './mirrors'
 import type { IntegrationRegistry } from './integration'
 import type { EngineHostServices, PersonAsker } from './host'
@@ -70,12 +71,20 @@ export interface EngineCommand {
 }
 
 /**
- * The control center's `code` tab. Opaque in this version: its event types join the contract when
- * the tab does (a minor bump). The host only ever passes it back to the renderer it came with.
+ * The control center's `code` tab. Opaque in 1.7; typed in 1.8 (ES.6h): the port's methods are OPTIONAL
+ * members (`CodeHostPort`, `code-host.ts`), so a 1.7 engine's bare `{ kind, dispose }` still satisfies it
+ * and the renderer asks `asCodePort()` whether this engine can drive a session at all.
  */
-export interface CodeHost {
+export interface CodeHost extends Partial<CodeHostPort> {
   readonly kind: 'code-host'
   dispose(): Promise<void>
+}
+
+/** The typed port, or `null` when the engine returned only the opaque 1.7 handle (a member is missing). */
+export function asCodePort(h: CodeHost | null | undefined): CodeHostPort | null {
+  if (!h) return null
+  const need = ['availability', 'defaults', 'openTasks', 'createTask', 'start', 'resume', 'subscribe', 'submit', 'answer', 'cancel', 'end'] as const
+  return need.every(k => typeof (h as unknown as Record<string, unknown>)[k] === 'function') ? (h as unknown as CodeHostPort) : null
 }
 
 /** One harness session driven over ACP for the host's fleet (1.7, A5.4). */

@@ -11,6 +11,7 @@ import type { Baseline, HarnessId, ProjectKind, SessionConversationLink } from '
 import type { CliLang } from './lang'
 import type { GithubSection } from './backup'
 import type { SearchFields, SearchScope } from './search-scope'
+import type { CodeHost } from './code-types'
 // The default ARRANGEMENT is derived from the dimension vocabulary rather than written out beside
 // it. `session-dimensions.ts` imports this file for TYPES only, so this is the one value direction.
 import {
@@ -19,6 +20,8 @@ import {
 } from './session-dimensions'
 
 export type TabId =
+  /** The native session — see `tabs/Code.tsx` and docs/superpowers/specs/2026-09-28-harness-tui-design.md. */
+  | 'code'
   | 'services'
   | 'sessions'
   /** Configure, run, and watch a backup — see `control/backup.ts`. Between sessions and the
@@ -42,7 +45,13 @@ export type TabId =
 // wizard is a QUESTION the cockpit asks, drawn in the detail region like every other one, reached
 // from the config pane's mode row. `agentop setup` still exists as the non-interactive command —
 // one implementation, two entrances.
+//
+// `code` leads (GL-01: the spec's order is `home code sessions tasks dashboard services`, and `home`
+// and `tasks` are later phases — no placeholder tabs stand in for them). Leading the ORDER is not
+// leading the LAUNCH: bare `agentop` still opens on `services` (`ControlCenter`'s default), and
+// `agentop code` asks for `tab: 'code'` explicitly.
 export const TAB_ORDER: readonly TabId[] = [
+  'code',
   'services',
   'sessions',
   'backup',
@@ -1303,6 +1312,12 @@ export type SelfCheck =
   | { action: 'reload' | 'restart' | 'alert'; message: string }
 
 export interface ControlHost {
+  /**
+   * Drives native runtime sessions for the `code` tab (`code-types.ts`). Optional: a host without
+   * one — the preview, a build with no runtime — gets a tab that says so in words.
+   */
+  code?: CodeHost
+
   /** Re-detect config + services. Must never throw; failures come back as `unknown` services. */
   refresh(): Promise<ControlStatus>
   /**

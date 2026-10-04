@@ -819,6 +819,7 @@ const EN: ControlStrings = {
   tagline: 'AI coding-assistant analytics',
 
   tabs: {
+    code: 'Code',
     services: 'Services',
     sessions: 'Sessions',
     backup: 'Backup',
@@ -831,6 +832,7 @@ const EN: ControlStrings = {
   },
 
   tabsShort: {
+    code: 'code',
     services: 'services',
     sessions: 'sessions',
     backup: 'backup',
@@ -1410,6 +1412,7 @@ const PT: ControlStrings = {
   tagline: 'Analytics de assistentes de código IA',
 
   tabs: {
+    code: 'Código',
     services: 'Serviços',
     sessions: 'Sessões',
     backup: 'Backup',
@@ -1422,6 +1425,7 @@ const PT: ControlStrings = {
   },
 
   tabsShort: {
+    code: 'código',
     services: 'serviços',
     sessions: 'sessões',
     backup: 'backup',

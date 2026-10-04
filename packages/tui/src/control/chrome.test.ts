@@ -93,7 +93,9 @@ describe('fitTabs', () => {
   })
 
   test('collapsed affordances report the position in the strip', () => {
-    const first = fitTabs(tabs(), 'services', 30)
+    // The FIRST tab is whatever leads `TAB_ORDER` — named through it, so reordering the strip does
+    // not turn this into a test of which tab happens to be first today.
+    const first = fitTabs(tabs(), TAB_ORDER[0]!, 30)
     const middle = fitTabs(tabs(), 'logs', 30)
     const last = fitTabs(tabs(), 'contribute', 30)
     if (first.kind !== 'collapsed' || middle.kind !== 'collapsed' || last.kind !== 'collapsed') {
@@ -113,7 +115,7 @@ describe('fitTabs', () => {
   test('an unknown active id still names a tab instead of rendering nameless', () => {
     const layout = fitTabs(tabs(), 'nope' as never, 20)
     if (layout.kind !== 'collapsed') throw new Error('expected collapsed')
-    expect(layout.id).toBe('services')
+    expect(layout.id).toBe(TAB_ORDER[0]!)
   })
 
   test('an empty tab list is a full strip with nothing in it', () => {
