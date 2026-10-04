@@ -100,7 +100,7 @@ beforeEach(async () => {
   const r = await http('POST', '/api/vault/recovery/begin')
   await http('POST', '/api/vault/recovery/confirm', { typed: (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!) }); next()
 })
-afterAll(() => { __resetVaultForTests({ dir: join(tmpdir(), 'agentistics-phone-done', 'vault') }) })
+afterAll(async () => { __resetVaultForTests({ dir: join(await mkdtemp(join(tmpdir(), 'agentistics-phone-done-')), 'vault') }) })
 
 const lock = async () => { const r = await http('POST', '/api/vault/lock', { code: codeAt() }); next(); expect(r.json.ok).toBe(true) }
 const state = async () => (await http('GET', '/api/vault/phone', undefined, PHONE)).json

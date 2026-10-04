@@ -96,7 +96,7 @@ async function enrolOverHttp(): Promise<string[]> {
   return r.json.words as string[]
 }
 
-afterAll(() => { __resetVaultForTests({ dir: join(tmpdir(), 'agentistics-http-done', 'vault') }) })
+afterAll(async () => { __resetVaultForTests({ dir: join(await mkdtemp(join(tmpdir(), 'agentistics-http-done-')), 'vault') }) })
 beforeEach(async () => { await fresh() })
 
 describe('GET /api/vault — the payload the sections read', () => {

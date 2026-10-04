@@ -89,7 +89,7 @@ async function ownerMachine(): Promise<{ words: string[] }> {
   return { words: r.words }
 }
 
-afterAll(() => { __resetVaultForTests({ dir: join(tmpdir(), 'agentistics-gate-done', 'vault') }) })
+afterAll(async () => { __resetVaultForTests({ dir: join(await mkdtemp(join(tmpdir(), 'agentistics-gate-done-')), 'vault') }) })
 
 describe('the owner flow, then a restart (§1.2, §2.2)', () => {
   test('enrolment leaves presence + recovery and NO silent wrapper; a restart is locked without a dialog', async () => {

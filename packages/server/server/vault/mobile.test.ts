@@ -98,7 +98,7 @@ beforeEach(async () => {
   itemId = (await http('POST', '/api/vault/personal', { item: { kind: 'login', name: 'Banco', fields: { login: 'me', password: 'MARKER-pw' } }, code: codeAt() })).json.meta.id
   next()
 })
-afterAll(() => { __resetVaultForTests({ dir: join(tmpdir(), 'agentistics-mobile-done', 'vault') }) })
+afterAll(async () => { __resetVaultForTests({ dir: join(await mkdtemp(join(tmpdir(), 'agentistics-mobile-done-')), 'vault') }) })
 
 async function registerPhone(p = phone()) {
   // §10: the phone asks with the code, the computer approves with Hello, then the passkey is created.
