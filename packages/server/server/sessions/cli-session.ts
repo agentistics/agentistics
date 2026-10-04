@@ -112,8 +112,10 @@ Orchestrating several at once — the form an assistant should use:
 Harnesses that can be started: ${STARTABLE.join(', ')}
 
 Memory gate: before starting (or reopening) a session, agentop checks whether this machine has
-room for it — a refusal names how many WOULD fit and exits non-zero without starting anything.
-\`--force\` starts anyway; a machine that cannot be measured (no /proc) is never refused.`
+room for it (available memory, minus room kept for one heavy job, and the CPU load) — a refusal
+names how many WOULD fit and the biggest consumer, and exits non-zero without starting anything.
+\`--wait\` waits for room instead and starts once it frees; \`--force\` starts anyway; a machine
+that cannot be measured (no /proc) is never refused.`
 
 /**
  * A reconciled row as `resolveSessionRef` needs it. Unlike the registry alone, this includes
@@ -154,7 +156,38 @@ function reportAdmission(admission: Admission, lang: CliLang, json: boolean): bo
   return false
 }
 
+/**
+ * RES.1 — `--wait` on `session start` / `batch` / `open`: a memory refusal WAITS for room instead of
+ * failing. Stripped before parsing so every subcommand takes it the same way.
+ */
+let waitForRoom = false
+
+/**
+ * Ask the gate; with `--wait`, keep asking every `WAIT_TICK_MS` until it admits — saying why it is
+ * waiting once, then only when the number that would fit changes. Ctrl-C leaves, nothing started.
+ */
+const WAIT_TICK_MS = 10_000
+async function admitOrWait(requested: number, force: boolean, lang: CliLang, json: boolean): Promise<Admission> {
+  let a = admitSpawn(await readSpawnBudget(), requested, { force })
+  if (a.admit || !waitForRoom) return a
+  let lastFits = -1
+  console.error(lang === 'pt'
+    ? `${admissionMessage(a.refusal, lang)}\nAguardando memória (--wait) — Ctrl-C cancela.`
+    : `${admissionMessage(a.refusal, lang)}\nWaiting for memory (--wait) — Ctrl-C cancels.`)
+  while (!a.admit) {
+    if (!json && a.refusal.fits !== lastFits) {
+      lastFits = a.refusal.fits
+      console.error(lang === 'pt' ? `  … cabem ${a.refusal.fits} de ${requested}` : `  … ${a.refusal.fits} of ${requested} fit`)
+    }
+    await Bun.sleep(WAIT_TICK_MS)
+    a = admitSpawn(await readSpawnBudget(), requested, { force })
+  }
+  return a
+}
+
 export async function runSession(argv: string[]): Promise<number> {
+  waitForRoom = argv.includes('--wait')
+  argv = argv.filter(a => a !== '--wait')
   const cmd = parseSessionArgs(argv)
   if (cmd.kind === 'help') { console.log(USAGE); return 0 }
   if (cmd.kind === 'error') { console.error(cmd.message); console.error(`\n${USAGE}`); return 1 }
@@ -244,7 +277,7 @@ async function start(
   // is printed from the SAME place a plain refusal would have been.
   const lang = await resolveLang()
   if (reportAdmission(
-    admitSpawn(await readSpawnBudget(), 1, { force: cmd.force ?? false }), lang, cmd.json ?? false,
+    await admitOrWait(1, cmd.force ?? false, lang, cmd.json ?? false), lang, cmd.json ?? false,
   )) return 1
 
   const id = newSessionId()
@@ -417,7 +450,7 @@ async function batch(
   // creates no task, no attempt, and spawns nothing.
   const lang = await resolveLang()
   if (reportAdmission(
-    admitSpawn(await readSpawnBudget(), cmd.specs.length, { force: cmd.force ?? false }),
+    await admitOrWait(cmd.specs.length, cmd.force ?? false, lang, cmd.json ?? false),
     lang, cmd.json ?? false,
   )) return 1
 
@@ -566,7 +599,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
   if (plan.reopen.length > 0) {
     const lang = await resolveLang()
     if (reportAdmission(
-      admitSpawn(await readSpawnBudget(), plan.reopen.length, { force }), lang, json,
+      await admitOrWait(plan.reopen.length, force, lang, json), lang, json,
     )) return 1
   }
 

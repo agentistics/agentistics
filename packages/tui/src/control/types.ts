@@ -1297,6 +1297,11 @@ export interface ActionResult {
   message: string
 }
 
+/** What `ControlHost.selfCheck` answered. `message` is localized and present on every non-`none`. */
+export type SelfCheck =
+  | { action: 'none' }
+  | { action: 'reload' | 'restart' | 'alert'; message: string }
+
 export interface ControlHost {
   /** Re-detect config + services. Must never throw; failures come back as `unknown` services. */
   refresh(): Promise<ControlStatus>
@@ -1315,6 +1320,20 @@ export interface ControlHost {
    * the only place this can live.
    */
   lastStatus?(): ControlStatus | null
+
+  /**
+   * RES.1 — is this long-lived process still healthy? Asked every minute by the shell.
+   *
+   * `reload` and `restart` are acted on by the shell (an exit with the current tab); `alert` is
+   * shown on the status line, already localized. The host decides — see `self-guard.ts`.
+   */
+  selfCheck?(): Promise<SelfCheck>
+
+  /**
+   * RES.1 — a sentence left for the NEXT mount (a self-reload or self-restart says why it happened
+   * on the screen it lands on). Returned once, then cleared.
+   */
+  takeNotice?(): string | null
 
   /**
    * Start one runtime — normally a `StartOption` handed straight back.
@@ -1864,6 +1883,11 @@ export interface SpawnSessionResult {
   ok: boolean
   /** Already-localized outcome for the status line. */
   message: string
+  /**
+   * RES.1 — refused by the memory gate and QUEUED instead: it starts by itself when room frees
+   * (`spawn-queue.ts`). `ok` stays false — nothing has started yet — and `message` says so.
+   */
+  queued?: { id: string; position: number }
   /** Present only on a successful ATTACHED start — the shell reports it as `ControlExit.attach`. */
   ticket?: AttachTicket
   /**
@@ -1902,7 +1926,7 @@ export interface SpawnSessionResult {
  * `fleet-spawn.ts` documents for the reverse direction.
  */
 export interface AdmissionRefusal {
-  reason: 'swap' | 'no-room'
+  reason: 'swap' | 'no-room' | 'cpu'
   /** How many sessions were asked for. */
   requested: number
   /** How many WOULD fit right now. Always 0 for `swap`; the room left for `no-room`. */
@@ -1959,3 +1983,13 @@ export type ControlExit =
    * makes attach and detach feel like two halves of one gesture rather than an exit.
    */
   | { kind: 'attach'; ticket: AttachTicket }
+  /**
+   * RES.1 — the self-guard asked for a fresh start of THIS process's state: the host drops its
+   * caches and `runStart` remounts the app on `tab`, the same loop an attach/detach takes.
+   */
+  | { kind: 'reload'; tab: TabId }
+  /**
+   * RES.1 — the binary this process runs was replaced on disk (an upgrade landed while the cockpit
+   * was open). `runStart` re-executes the new one in place, on `tab`.
+   */
+  | { kind: 'restart'; tab: TabId }

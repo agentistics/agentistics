@@ -382,6 +382,16 @@ void (async () => {
 // spawns sessions nor chats, so it asks no CLI anything.
 if (!TEAM_CENTRAL) void import('./model-catalog').then(m => m.warmModelCatalogs())
 
+// RES.1 — the process governor: one inventory of every agentop-owned process, kills only what
+// provably serves nobody (orphaned MCPs, helpers whose owner ended or that sat idle past their own
+// timeout) and alerts on the rest. A central is a container watching nobody's processes.
+if (!TEAM_CENTRAL && process.env.SERVE_STATIC === '1') {
+  void Promise.all([import('./resources/governor-daemon'), import('./sse')]).then(([g, sse]) => g.startGovernor({
+    notify: n => sse.broadcastNotification(n),
+    log: line => console.log(line),
+  }))
+}
+
 
 // ---------------------------------------------------------------------------
 // CORS is computed per request from the caller's Origin against an explicit allowlist
@@ -749,6 +759,14 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
+    }
+
+    // RES.1 — the governor's snapshot, the one-click fix, and the helper registration API.
+    // Registered as a PREFIX in capability-guard.ts (`localShell`): a kill is host power.
+    if (url.pathname === '/api/resources' || url.pathname.startsWith('/api/resources/')) {
+      const { handleResources } = await import('./resources/routes')
+      const res = await handleResources(req, url, CORS_HEADERS)
+      if (res) return res
     }
 
     if (url.pathname === '/api/hardware-resources' && req.method === 'GET') {

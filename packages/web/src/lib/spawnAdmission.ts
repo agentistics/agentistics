@@ -20,7 +20,7 @@
  */
 
 /** Why a spawn was refused — see `spawn-admission.ts`'s `AdmissionReason`. */
-export type AdmissionReason = 'swap' | 'no-room'
+export type AdmissionReason = 'swap' | 'no-room' | 'cpu'
 
 /** The refusal's own numbers — every figure the server's sentence is built from. */
 export interface AdmissionRefusal {
@@ -45,7 +45,7 @@ export interface SpawnAdmissionRefusal {
 }
 
 function isAdmissionReason(v: unknown): v is AdmissionReason {
-  return v === 'swap' || v === 'no-room'
+  return v === 'swap' || v === 'no-room' || v === 'cpu'
 }
 
 function isCostBasis(v: unknown): v is 'measured' | 'assumed' {

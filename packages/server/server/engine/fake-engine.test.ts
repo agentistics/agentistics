@@ -310,12 +310,19 @@ describe('engineSpawnBudget — the same measurement admitSpawn decides from', (
     expect(admitSpawn(null, 1)).toMatchObject({ admit: true, unmeasured: true })
   })
 
-  it('a tripped swap alarm is carried, and admitSpawn refuses on the very same read', () => {
+  it('a full swap is NOT passed to the engine and admitSpawn admits on the very same read (RES.1)', () => {
     const read = measured(Math.round(3.9 * GiB))
     const e = engineSpawnBudget(read)
-    expect(e).toMatchObject({ unmeasured: false, budget: { alarm: 'swap' } })
+    expect(e.budget.alarm).toBeUndefined()
     expect(e.budget.left).toBeGreaterThan(0)
-    expect(admitSpawn(read, 1)).toMatchObject({ admit: false, refusal: { reason: 'swap' } })
+    expect(admitSpawn(read, 1)).toMatchObject({ admit: true })
+  })
+
+  it('a saturated CPU reaches the engine as no room, matching admitSpawn on the same read', () => {
+    const read = { ...measured(0), load: { load1: 20, cores: 8 } }
+    const e = engineSpawnBudget(read)
+    expect(e.budget).toMatchObject({ left: 0, alarm: 'sessions' })
+    expect(admitSpawn(read, 1)).toMatchObject({ admit: false, refusal: { reason: 'cpu' } })
   })
 
   it('a calm machine carries no alarm and the same numbers admitSpawn reads', () => {
