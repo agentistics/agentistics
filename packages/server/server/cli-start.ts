@@ -28,6 +28,7 @@
  * then starts the in-process server and does not exit).
  */
 
+import { loadNativeFleet, runNativeVerb, isNativeSessionId } from './sessions/native-fleet'
 import { spawn } from 'node:child_process'
 import { rekeyMutedSession } from './sessions/session-notify-web'
 import { randomUUID } from 'node:crypto'
@@ -3333,10 +3334,17 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const restorable = answered
         ? []
         : await timeFleetPhase('sessions: restorableSessions', () => restorableSessions(snap.fell?.entries ?? []))
+      // NATIVE.LIFE: the engine's own sessions join as ordinary rows (`native-fleet.ts`) — no pane, no
+      // registry record, so the poller never sees them. A failed read is an empty native half.
+      const native = await timeFleetPhase('sessions: loadNativeFleet', () => loadNativeFleet(lang)).catch(() => [])
+      const managedIds = new Set(snap.sessions.map(v => v.id))
+      const nativeRows = native.filter(n => !managedIds.has(n.id))
+      // Only a MEASURED wait counts toward "N waiting on you" — an unmeasured open session is `unknown`.
+      const nativeAttention = nativeRows.filter(n => n.state === 'waiting' || n.state === 'waiting-approval').length
       return {
         ...(restorable.length > 0 ? { restorable } : {}),
-        sessions: snap.sessions.map((v, i) => toControlSession(v, s, facts[i])),
-        attention: snap.attention,
+        sessions: [...snap.sessions.map((v, i) => toControlSession(v, s, facts[i])), ...nativeRows],
+        attention: snap.attention + nativeAttention,
         rang: snap.rang,
         // Only the COUNT and the instant travel: the rows themselves are already in `sessions`,
         // marked `fell`, and shipping the set twice is two things that can disagree about it.
@@ -3475,6 +3483,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
     },
 
     async killSession(id: string): Promise<ActionResult> {
+      // A NATIVE session has no pane to kill: ENDING it is the engine's verb (`native-fleet.ts`).
+      if (isNativeSessionId(id)) return runNativeVerb(id, 'kill', lang)
       const s = S()
       const backend = await resolveBackend()
       const blocked = await backend.unavailable()
@@ -3609,6 +3619,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * whatever became of it is SAID — see `renameMessage`.
      */
     async renameSession(id: string, label: string): Promise<ActionResult> {
+      // A NATIVE session is named in ONE place, the engine's store — there is no harness half to type into.
+      if (isNativeSessionId(id)) return runNativeVerb(id, 'rename', lang, { title: label })
       const s = S()
       const managed = (await readRegistry()).find(m => m.id === id)
       // The INSTANT goes down with the name. A session can also be renamed from inside the harness,
@@ -3669,6 +3681,11 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // spawn. Measured on a real machine: two `claude --resume <same-id>` processes, 62ms apart,
       // both writing into one transcript. The lock serialises the whole check-and-spawn sequence
       // per conversation id, so the second caller's check only runs once the first has settled.
+      // A NATIVE session is reopened by the engine, which keeps its id: nothing is spawned, nothing replaced.
+      if (isNativeSessionId(req.sessionId)) {
+        const out = await runNativeVerb(req.sessionId, 'resume', lang)
+        return { ...out, ...(out.ok ? { id: req.sessionId } : {}) }
+      }
       return withResumeLock(req.sessionId, () => resumeSessionLocked(req))
     },
 
