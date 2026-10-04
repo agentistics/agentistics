@@ -4414,9 +4414,11 @@ export async function runStart(codeLaunch?: CodeStartLaunch): Promise<StartResul
       return `${price} · ${window}`
     }
     const models: { id: string; label: string; detail: string; disabled?: string; provider?: string }[] = []
-    // The model the code tab would use anyway (flag / last session) first, on its own provider.
+    // The model the code tab would use anyway (flag / last session). Its provider is NOT taken from
+    // the defaults — they name Anthropic for a model the last session ran on Ollama — but from the
+    // provider that actually lists it below; the row it lands on is marked and moved first.
     const d = host.code ? await host.code.defaults().catch(() => null) : null
-    if (d?.model) models.push({ id: d.model.id, provider: d.provider, label: `${d.provider} · ${d.model.id}`, detail: `${detailOf(d.model.id)} · ${d.model.source === 'flag' ? (pt ? 'da flag --model' : 'from --model') : (pt ? 'da sua última sessão' : 'from your last session')}` })
+    const fromWhere = d?.model ? (d.model.source === 'flag' ? (pt ? 'da flag --model' : 'from --model') : (pt ? 'da sua última sessão' : 'from your last session')) : ''
     for (const p of list.providers ?? []) {
       if (p.state !== 'present') {
         models.push({ id: '', provider: p.id, label: p.label, detail: '', disabled: pt ? 'não configurado — /providers (ctrl+p) adiciona a chave' : 'not configured — /providers (ctrl+p) adds a key' })
@@ -4432,6 +4434,17 @@ export async function runStart(codeLaunch?: CodeStartLaunch): Promise<StartResul
       for (const m of r.models.slice(0, 8)) {
         if (models.some(x => x.id === m.id && x.provider === p.id)) continue
         models.push({ id: m.id, provider: p.id, label: `${p.id} · ${m.id}`, detail: detailOf(m.id, m.contextLength, p.kind === 'local') })
+      }
+    }
+    if (d?.model) {
+      const at = models.findIndex(m => m.id === d.model!.id && !m.disabled)
+      if (at >= 0) {
+        const [row] = models.splice(at, 1)
+        models.unshift({ ...row!, detail: `${row!.detail} · ${fromWhere}` })
+      } else {
+        // Offered by no configured provider: still the model the tab would use, on the provider the
+        // defaults name — said as such, so the person can see where it would run.
+        models.unshift({ id: d.model.id, provider: d.provider, label: `${d.provider} · ${d.model.id}`, detail: `${detailOf(d.model.id)} · ${fromWhere}` })
       }
     }
     return { models }
