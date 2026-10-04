@@ -8,6 +8,7 @@
  */
 import type { CodeIntent } from './code'
 import type { TabId } from './types'
+import type { SettingsSectionId } from './settings'
 
 type W = { en: string; pt: string }
 const w = (en: string, pt: string): W => ({ en, pt })
@@ -19,8 +20,10 @@ export type PaletteRun =
   | { kind: 'lang' }
   /** A `code` tab intent: the palette switches to `code` and the tab performs it. */
   | { kind: 'code'; intent: CodeIntent; needs?: 'session' | 'ask-diff' | 'running' }
-  /** A command whose screen is not built yet (settings, P5): listed, refused in words. */
+  /** A command whose screen is not built yet: listed, refused in words. */
   | { kind: 'later'; why: W }
+  /** ST-01…07: the settings overlay, opened on a section. */
+  | { kind: 'settings'; section: SettingsSectionId }
 
 export interface PaletteCommand {
   id: string
@@ -32,11 +35,6 @@ export interface PaletteCommand {
   /** Offered by the `code` tab's `/` popup too. */
   code?: boolean
 }
-
-const SETTINGS_LATER = w(
-  'the settings screen arrives with ST-01…ST-07 (P5) — not in this build yet',
-  'a tela de configurações chega com ST-01…ST-07 (P5) — ainda não está nesta versão',
-)
 
 export const PALETTE_COMMANDS: readonly PaletteCommand[] = [
   { id: 'new', label: '/new', description: w('start a session (a task is required)', 'iniciar uma sessão (a tarefa é obrigatória)'), keys: 'n', run: { kind: 'code', intent: { kind: 'open-wizard' } }, code: true },
@@ -54,8 +52,12 @@ export const PALETTE_COMMANDS: readonly PaletteCommand[] = [
   { id: 'editor', label: '/editor', description: w('compose the prompt in $EDITOR', 'escrever o prompt no $EDITOR'), keys: 'ctrl+g', run: { kind: 'code', intent: { kind: 'open-editor' }, needs: 'session' }, code: true },
   { id: 'history', label: '/history', description: w('search your earlier prompts', 'buscar seus prompts anteriores'), keys: 'ctrl+r', run: { kind: 'code', intent: { kind: 'open-history' }, needs: 'session' }, code: true },
   { id: 'copy', label: '/copy', description: w('copy the last answer (OSC 52, works over SSH)', 'copiar a última resposta (OSC 52, funciona via SSH)'), keys: '', run: { kind: 'code', intent: { kind: 'copy' }, needs: 'session' }, code: true },
-  { id: 'providers', label: '/providers', description: w('keys, models and prices', 'chaves, modelos e preços'), keys: 'ctrl+,', run: { kind: 'later', why: SETTINGS_LATER } },
-  { id: 'permissions', label: '/permissions', description: w('allow / ask / deny rules', 'regras allow / ask / deny'), keys: '', run: { kind: 'later', why: SETTINGS_LATER } },
+  { id: 'settings', label: '/settings', description: w('providers, models, permissions, appearance, keys, language', 'provedores, modelos, permissões, aparência, teclas, idioma'), keys: 'S', run: { kind: 'settings', section: 'providers' } },
+  { id: 'providers', label: '/providers', description: w('keys, status and a connection test', 'chaves, estado e teste de conexão'), keys: 'S', run: { kind: 'settings', section: 'providers' } },
+  { id: 'model', label: '/model', description: w('models and prices, with their source', 'modelos e preços, com a fonte'), keys: '', run: { kind: 'settings', section: 'models' } },
+  { id: 'permissions', label: '/permissions', description: w('allow / ask / deny rules and the floor', 'regras allow / ask / deny e o piso'), keys: '', run: { kind: 'settings', section: 'permissions' } },
+  { id: 'theme', label: '/theme', description: w('appearance: theme and density', 'aparência: tema e densidade'), keys: '', run: { kind: 'settings', section: 'appearance' } },
+  { id: 'keys', label: '/keys', description: w('rebind the app\'s keys', 'trocar as teclas do app'), keys: '', run: { kind: 'settings', section: 'keys' } },
   { id: 'lang', label: '/lang', description: w('english · português', 'english · português'), keys: '', run: { kind: 'lang' } },
   { id: 'dashboard', label: '/dashboard', description: w('metrics (existing screen)', 'métricas (tela existente)'), keys: '[ ]', run: { kind: 'tab', tab: 'dashboard' } },
   { id: 'services', label: '/services', description: w('server, central, logs (existing)', 'servidor, central, logs (existente)'), keys: '[ ]', run: { kind: 'tab', tab: 'services' } },

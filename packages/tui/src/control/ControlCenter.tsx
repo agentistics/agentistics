@@ -23,7 +23,7 @@ import type { WizardServices } from './code-wizard'
 import { wizardPlaces } from './wizard-places'
 import { Box, useInput } from 'ink'
 import { useTerminalSize } from '../useTerminalSize'
-import { bodyHeight, isQuitChord, resolveScrollKey, resolveShellKey, scrollBy, type NavKey } from './nav'
+import { bodyHeight, changedShellKeys, isQuitChord, pressMatches, rebindHint, resolveScrollKey, resolveShellKey, scrollBy, shellKeys, type NavKey, type ShellKeys } from './nav'
 import { attentionRings, fitTabs, headerLayout, tabAtColumn } from './chrome.ts'
 import { helpLines } from './keymap'
 import { HelpOverlay, helpMaxTop } from './HelpOverlay'
@@ -48,6 +48,9 @@ import { Code } from './tabs/Code'
 import { Home } from './tabs/Home'
 import { Tasks } from './tabs/Tasks'
 import { Palette } from './PaletteOverlay'
+import { SettingsOverlay } from './SettingsOverlay'
+import { openSettings, settingsHints, settingsKey, type SettingsData, type SettingsEffect, type SettingsSectionId, type SettingsState } from './settings'
+import { applyTheme, type ThemeId } from '../theme'
 import { PALETTE_COMMANDS, filterCommands, whyNot, type PaletteCommand, type PaletteContext } from './palette'
 import type { CodeIntent } from './code'
 import type { CodeLaunch } from './code-types'
@@ -497,15 +500,44 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
   // GL-03: the command palette. It owns the keyboard while open, like the help overlay.
   const [palette, setPalette] = useState<{ query: string; sel: number } | null>(null)
   const openPalette = useCallback(() => setPalette({ query: '', sel: 0 }), [])
-  /** Help or palette: either owns the body and the keyboard while it is up. */
-  const overlayOpen = helpOpen || palette !== null
+  // ST-01…07: the settings overlay. Like the palette it owns the body and the keyboard while open;
+  // its facts are read from the host when it opens, never cached across openings.
+  const [settings, setSettings] = useState<SettingsState | null>(null)
+  const [settingsFacts, setSettingsFacts] = useState<Pick<SettingsData, 'providers' | 'defaultModel' | 'prices' | 'floor'>>({ providers: null, defaultModel: null, prices: null, floor: null })
+  const [providerTests, setProviderTests] = useState<SettingsData['tests']>({})
+  // ST-04: applied BEFORE the first frame, so a light terminal never flashes the dark palette.
+  const [theme, setThemeState] = useState<ThemeId>(() => { const t = host.tuiTheme ?? 'dark'; applyTheme(t); return t })
+  // ST-05: the shell's keys, the person's table over the defaults.
+  const [binds, setBinds] = useState<ShellKeys>(() => shellKeys(host.shellKeys))
+  // ST-04: a density change the `sessions` tab applies (a new object each time, acted on once).
+  const [layoutRequest, setLayoutRequest] = useState<{ layout: 'list' | 'cards' } | undefined>(undefined)
+  const [density, setDensity] = useState<'comfortable' | 'compact'>('compact')
+  const loadSettingsFacts = useCallback(() => {
+    void (host.settingsProviders?.() ?? Promise.resolve(null)).then(providers => setSettingsFacts(f => ({ ...f, providers })))
+    void (host.code ? host.code.defaults().catch(() => null) : Promise.resolve(null)).then(d => setSettingsFacts(f => ({
+      ...f, defaultModel: d?.model ? { provider: d.provider, model: d.model.id, source: d.model.source === 'flag' ? 'flag' : 'last-session' } : null,
+    })))
+    void (host.priceTable?.() ?? Promise.resolve(null)).then(prices => setSettingsFacts(f => ({ ...f, prices })))
+    void (host.policyFloor?.() ?? Promise.resolve(null)).then(floor => setSettingsFacts(f => ({ ...f, floor })))
+  }, [host])
+  // EX-01: stable, so the dashboard's read effect does not re-run on every render.
+  const costByTaskRead = useCallback(() => host.costByTaskToday?.() ?? Promise.resolve(null), [host])
+  const openSettingsAt = useCallback((section: SettingsSectionId = 'providers') => {
+    setSettingsFacts({ providers: null, defaultModel: null, prices: null, floor: null })
+    const layout = host.lastStatus?.()?.sessionView?.layout
+    setDensity(layout === 'cards' ? 'comfortable' : 'compact')
+    setSettings(openSettings(section))
+    loadSettingsFacts()
+  }, [host, loadSettingsFacts])
+  /** Help, palette or settings: each owns the body and the keyboard while it is up. */
+  const overlayOpen = helpOpen || palette !== null || settings !== null
   const [paletteCtx, setPaletteCtx] = useState<Omit<PaletteContext, 'hasCode'>>({ sessionOpen: false, running: false, askWithDiff: false })
   // A command the palette sends to the `code` tab — a new object each time, so the tab performs it once.
   const [codeCommand, setCodeCommand] = useState<{ intent: CodeIntent } | undefined>(undefined)
   const [helpTop, setHelpTop] = useState(0)
   const openHelp = useCallback(() => { setHelpTop(0); setHelpOpen(true) }, [])
 
-  const capturing = (chrome.capture && reports) || helpOpen || palette !== null
+  const capturing = (chrome.capture && reports) || helpOpen || palette !== null || settings !== null
   const arrowsClaimed = Boolean(chrome.claimArrows) && reports
   const claimedKeys = reports ? (chrome.claimKeys ?? []) : []
 
@@ -527,7 +559,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
     // `tab` belongs to the panes and the digits belong to the screens' own lists; changing screen
     // is `[`/`]` always and `←`/`→` unless a pane claims them. Which key means what is the pure
     // `resolveShellKey`, which the help overlay's EVERYWHERE table is tested against.
-    const intent = resolveShellKey({ ...nav, ctrl: key.ctrl }, { tab, arrows: !arrowsClaimed, mouse: Boolean(mouse) })
+    const intent = resolveShellKey({ ...nav, ctrl: key.ctrl }, { tab, arrows: !arrowsClaimed, mouse: Boolean(mouse), binds })
     if (intent && intent.kind !== 'tab' && claimedKeys.includes(input)) return
     if (intent) {
       switch (intent.kind) {
@@ -537,6 +569,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
         case 'mouse': return toggleMouse()
         case 'help': return openHelp()
         case 'palette': return openPalette()
+        case 'settings': return openSettingsAt()
       }
     }
 
@@ -553,12 +586,12 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
 
   // The overlay's lines, at the width its pane gives them. `helpTop` is clamped against them on
   // every read, so a resize can never leave the page scrolled past its own end.
-  const help = helpOpen ? helpLines(lang, tab, paneBody(width)) : []
+  const help = helpOpen ? helpLines(lang, tab, paneBody(width), binds) : []
   const helpMax = helpMaxTop(help.length, paneRows(height))
 
   useInput((input, key) => {
     // `esc` and `?` close it — the key that opened it closes it, like every toggle here.
-    if (key.escape || input === '?') { setHelpOpen(false); return }
+    if (key.escape || input === '?' || pressMatches(binds.help, { input, ctrl: key.ctrl })) { setHelpOpen(false); return }
     if (key.ctrl) return
     const next = resolveScrollKey(
       { input, upArrow: key.upArrow, downArrow: key.downArrow, pageUp: key.pageUp, pageDown: key.pageDown, home: key.home, end: key.end },
@@ -585,6 +618,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
       case 'quit': onExit({ kind: 'quit', code: 0 }); return
       case 'lang': switchLang(lang === 'pt' ? 'en' : 'pt'); return
       case 'code': setCodeCommand({ intent: r.intent }); setTab('code'); return
+      case 'settings': openSettingsAt(r.section); return
       case 'later': return
     }
   }
@@ -597,6 +631,69 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
     if (key.backspace || key.delete) { setPalette(p => p && { query: p.query.slice(0, -1), sel: 0 }); return }
     if (input && !key.ctrl && !key.meta && !key.tab) setPalette(p => p && { query: p.query + input, sel: 0 })
   }, { isActive: palette !== null })
+
+  const settingsData: SettingsData = {
+    ...settingsFacts, tests: providerTests, sessionOpen: paletteCtx.sessionOpen, theme, density, binds, lang,
+  }
+  const performSettings = (e: SettingsEffect) => {
+    switch (e.kind) {
+      case 'none': return
+      case 'close': setSettings(null); return
+      case 'say': say({ ok: e.ok, message: e.sentence }); return
+      case 'test': {
+        if (!host.testProvider) { say({ ok: false, message: lang === 'pt' ? 'esta versão não testa provedores' : 'this build cannot test providers' }); return }
+        say({ ok: true, message: lang === 'pt' ? `testando ${e.provider}…` : `testing ${e.provider}…` })
+        void host.testProvider(e.provider).then(r => {
+          const at = new Date().toTimeString().slice(0, 5)
+          setProviderTests(t => ({ ...t, [e.provider]: { ok: r.ok, sentence: r.sentence, at } }))
+          say({ ok: r.ok, message: `${e.provider}: ${r.sentence}` })
+        })
+        return
+      }
+      case 'set-key': {
+        if (!host.setProviderKey) { say({ ok: false, message: lang === 'pt' ? 'esta versão não grava chaves' : 'this build cannot store keys' }); return }
+        void host.setProviderKey(e.provider, e.key).then(r => {
+          say({ ok: r.ok, message: r.sentence })
+          if (r.ok) {
+            setProviderTests(t => { const n = { ...t }; delete n[e.provider]; return n })
+            void host.settingsProviders?.().then(providers => setSettingsFacts(f => ({ ...f, providers })))
+          }
+        })
+        return
+      }
+      case 'theme':
+        applyTheme(e.theme)
+        setThemeState(e.theme)
+        void host.setTheme?.(e.theme)
+        say({ ok: true, message: lang === 'pt' ? `tema: ${e.theme} — lembrado` : `theme: ${e.theme} — remembered` })
+        return
+      case 'density':
+        setDensity(e.density)
+        setLayoutRequest({ layout: e.density === 'comfortable' ? 'cards' : 'list' })
+        say({ ok: true, message: lang === 'pt'
+          ? `densidade ${e.density === 'compact' ? 'compacta: sessões em lista' : 'confortável: sessões em cartões'} — lembrada`
+          : `density ${e.density === 'compact' ? 'compact: sessions as a list' : 'comfortable: sessions as cards'} — remembered` })
+        return
+      case 'lang':
+        switchLang(e.lang)
+        say({ ok: true, message: e.lang === 'pt' ? 'idioma: Português (Brasil) — lembrado' : 'language: English — remembered' })
+        return
+      case 'bind':
+        setBinds(e.binds)
+        void host.setShellKeys?.(changedShellKeys(e.binds) as Record<string, string>)
+        say({ ok: true, message: e.sentence })
+        return
+    }
+  }
+  useInput((input, key) => {
+    if (!settings) return
+    const r = settingsKey(settings, {
+      input, return: key.return, escape: key.escape, backspace: key.backspace, delete: key.delete, ctrl: key.ctrl,
+      meta: key.meta, tab: key.tab, upArrow: key.upArrow, downArrow: key.downArrow, leftArrow: key.leftArrow, rightArrow: key.rightArrow,
+    }, settingsData, width < 100)
+    if (r.effect.kind !== 'close') setSettings(r.state)
+    performSettings(r.effect)
+  }, { isActive: settings !== null })
 
   const tabs = tabBarTabs(TAB_ORDER, s.tabsShort)
   // Computed HERE and handed to the bar, rather than measured again inside it: the strip's cell
@@ -708,14 +805,18 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
   const mouseHints = mouse ? (mouseOn ? [s.keyMouseCopy, s.keyMouse] : [s.keyMouse]) : []
   // While the key reference is up the footer names ITS keys and nothing else — every other key on
   // this frame stands down, and a hint for one of them would be the lie the footer exists to avoid.
-  const hints = palette
+  const hints = settings
+    ? settingsHints(settings, settingsData, width < 100)
+    : palette
     ? [lang === 'pt' ? 'digite filtra' : 'type filter', '↑↓ move', lang === 'pt' ? 'enter executa' : 'enter run', lang === 'pt' ? 'esc fecha' : 'esc close']
     : helpOpen
-    ? [s.keyHelpClose, s.keyScroll, s.keyEnds]
+    ? [binds.help === '?' ? s.keyHelpClose : s.keyHelpClose.replace('?', binds.help), s.keyScroll, s.keyEnds]
     : [...(isStatic ? [...staticHints, s.keyHelp] : chrome.hints), ...mouseHints]
   // Same correction on the read-only screens' own footer: while the mouse reports, "select with the
   // mouse to copy" is no longer true on its own.
   const copyHint = mouse && mouseOn ? s.copyHintShift : s.copyHint
+  // ST-05: only the SHELL's own hints follow a rebinding — a screen's `r rename` is not the shell's `r`.
+  const shellHints = new Set([s.keyQuit, s.keyHelp, s.keyTabsAlt, s.keyMouse, s.keyRefresh])
 
   /**
    * Everything that is not the cockpit is framed by the shell rather than by the screen.
@@ -865,6 +966,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
               onOpenCode={openCode}
               lang={lang}
               {...(sessionsFocus ? { focus: sessionsFocus } : {})}
+              {...(layoutRequest ? { layoutRequest } : {})}
             />
         </Screen>
 
@@ -902,6 +1004,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
               isActive={tab === 'dashboard' && !overlayOpen}
               nonce={nonce}
               onChrome={reportChrome}
+              {...(host.costByTaskToday ? { costByTask: costByTaskRead } : {})}
             />
           </Pane>
         </Screen>
@@ -968,6 +1071,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
           </Pane>
         </Screen>
 
+        {settings ? <SettingsOverlay state={settings} data={settingsData} width={width} height={height} /> : null}
         {palette ? (
           <Palette list={paletteList} total={PALETTE_COMMANDS.length} query={palette.query} sel={palette.sel} ctx={fullCtx} lang={lang} width={width} height={height} />
         ) : null}
@@ -1000,7 +1104,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
       {busy
         ? <Spinner label={s.working} />
         : <StatusLine message={result?.message} ok={result?.ok} width={width} />}
-      <Footer hints={hints} width={width} />
+      <Footer hints={hints.map(h => (shellHints.has(h) ? rebindHint(h, binds) : h))} width={width} />
     </Box>
     </PointerProvider>
   )

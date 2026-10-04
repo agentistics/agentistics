@@ -314,6 +314,10 @@ export interface Preferences {
    *  Absent = on, which is the default the control center assumes. Turned off with `m` in the app
    *  by anyone who would rather keep their terminal's own click-drag text selection. */
   mouse?: boolean
+  /** ST-04: the control center's palette. Absent = `dark` (the web dashboard's dark mode). */
+  tuiTheme?: 'dark' | 'light' | 'contrast'
+  /** ST-05: the control center's rebound shell keys, action → key (`ctrl+p`, `,`…). Absent = defaults. */
+  tuiKeys?: Record<string, string>
 }
 
 export type ArchiveMode = 'off' | 'consolidate' | 'full'

@@ -22,7 +22,7 @@ describe('command palette (GL-03)', () => {
     expect(filterCommands('/sess', 'en')[0]!.id).toBe('sessions')
     expect(filterCommands('/sess', 'en').map(c => c.id)).toContain('new') // "start a session"
     expect(filterCommands('diff', 'en').map(c => c.id)).toContain('diff')
-    expect(filterCommands('idioma', 'pt').map(c => c.id)).toEqual([])
+    expect(filterCommands('idioma', 'pt').map(c => c.id)).toEqual(['settings'])
     expect(filterCommands('tarefas', 'pt').map(c => c.id)).toContain('tasks')
     expect(filterCommands('zzz', 'en')).toEqual([])
   })
@@ -33,7 +33,8 @@ describe('command palette (GL-03)', () => {
     expect(whyNot(byId('diff'), ctx({ sessionOpen: true }), 'en')).toContain('nothing waits on you with a diff')
     expect(whyNot(byId('cancel'), ctx({ sessionOpen: true }), 'pt')).toBe('nada está rodando')
     expect(whyNot(byId('new'), ctx({ hasCode: false }), 'en')).toBe('this build has no native harness')
-    expect(whyNot(byId('providers'), ctx(), 'en')).toContain('P5')
+    // ST-01…07: the settings commands open the overlay — they run anywhere.
+    expect(whyNot(byId('providers'), ctx(), 'en')).toBeNull()
     expect(whyNot(byId('sessions'), ctx(), 'en')).toBeNull()
   })
   test('ctrl+p is the shell\'s palette key on every tab', () => {

@@ -4,10 +4,11 @@ import { Box, Text } from 'ink'
 import type { AppData } from '@agentistics/core'
 import { fmt, fmtCost } from '@agentistics/core'
 import { harnessRows, overviewTotals, activitySeries } from '../selectors'
-import { Kpi, KpiRow, BarRow, Section, Empty } from '../components/Primitives'
+import { Kpi, KpiRow, BarRow, Section, Empty, truncate } from '../components/Primitives'
 import { Sparkline } from '../components/Sparkline'
-import { COLORS, HARNESS_COLOR, HARNESS_LABEL } from '../theme'
-import { overviewPlan } from '../dashboard/view'
+import { COLORS, harnessColor, harnessLabel } from '../theme'
+import { costByTaskLines, costByTaskRows, overviewPlan } from '../dashboard/view'
+import type { CostByTask } from '../control/types'
 import type { TuiStrings } from '../i18n'
 
 const ACTIVITY_DAYS = 30
@@ -40,7 +41,7 @@ export function fitKpis(kpis: KpiSpec[], width: number): KpiSpec[] {
   return out
 }
 
-export function Overview({ data, figures = null, s, width, height, streak }: {
+export function Overview({ data, figures = null, s, width, height, streak, byTask = null, filtered = false }: {
   data: AppData
   /** Projected figures (A4.6); absent → the selectors over `data`. */
   figures?: DashboardFigures | null
@@ -49,6 +50,10 @@ export function Overview({ data, figures = null, s, width, height, streak }: {
   /** Rows this screen may use. It is drawn inside a pane now, so it is not the terminal's. */
   height: number
   streak: number
+  /** EX-01: today's cost by task, from the host; `null` = not read (the panel is not drawn). */
+  byTask?: CostByTask | null
+  /** A harness filter is on — the panel is NOT filtered, and its title says so. */
+  filtered?: boolean
 }) {
   const totals = figures?.totals ?? overviewTotals(data)
   const rows = figures?.harnesses ?? harnessRows(data)
@@ -77,7 +82,11 @@ export function Overview({ data, figures = null, s, width, height, streak }: {
 
   // What this screen can afford: the KPI row stays, the sparkline is the first thing to go, and the
   // harness bars are trimmed last. See `overviewPlan` for why that order and not another.
-  const plan = overviewPlan(height, rows.length)
+  const plan = overviewPlan(height, rows.length, costByTaskRows(byTask))
+  const taskLines = byTask ? costByTaskLines(byTask, plan.tasks) : []
+  const taskMax = taskLines.reduce((n, l) => Math.max(n, l.cost), 0)
+  const TASK_LABEL_W = Math.min(32, Math.max(14, Math.floor(width / 3)))
+  const taskBarW = Math.max(6, Math.min(30, width - TASK_LABEL_W - 12))
   const bars = rows.slice(0, plan.bars)
 
   return (
@@ -104,8 +113,8 @@ export function Overview({ data, figures = null, s, width, height, streak }: {
           bars.map((r, i) => (
             <BarRow
               key={r.harness}
-              label={HARNESS_LABEL[r.harness]}
-              color={HARNESS_COLOR[r.harness]}
+              label={harnessLabel(r.harness)}
+              color={harnessColor(r.harness)}
               pct={totalCost > 0 ? r.costUSD / totalCost : 0}
               value={barValues[i] ?? ''}
               labelWidth={LABEL_W}
@@ -114,6 +123,24 @@ export function Overview({ data, figures = null, s, width, height, streak }: {
           ))
         )}
       </Section>
+      )}
+
+      {plan.tasks > 0 && byTask && (
+        <Section title={truncate(filtered ? s.costByTaskAll : s.costByTaskToday, width)}>
+          {taskLines.map((l, i) => l.kind === 'none'
+            ? <Text key={i} dimColor>{s.noSessionToday}</Text>
+            : (
+              <BarRow
+                key={i}
+                label={l.kind === 'not-filed' ? s.notFiled : l.label}
+                color={l.kind === 'not-filed' ? COLORS.danger : COLORS.accent}
+                pct={taskMax > 0 ? l.cost / taskMax : 0}
+                value={fmtCost(l.cost)}
+                labelWidth={TASK_LABEL_W}
+                barWidth={taskBarW}
+              />
+            ))}
+        </Section>
       )}
     </Box>
   )

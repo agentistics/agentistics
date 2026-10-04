@@ -3063,7 +3063,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
           .map(p => ({ id: p.id, label: p.label, state: 'ready' as const, source: p.keyless ? 'keyless' : p.last4 ? `…${p.last4}` : 'stored' }))
         return providers.length > 0
           ? { providers }
-          : { unavailable: pt ? 'Nenhum provedor configurado — ctrl+, para adicionar.' : 'No provider configured — ctrl+, adds one.' }
+          : { unavailable: pt ? 'Nenhum provedor configurado — /providers (ctrl+p) adiciona.' : 'No provider configured — /providers (ctrl+p) adds one.' }
       }
       try {
         const { loadEngine, engine } = await import('./engine/load')
@@ -3080,7 +3080,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
           .map(p => ({ id: p.id, label: p.label, state: 'ready' as const, source: p.keyless ? 'keyless' : p.last4 ? `…${p.last4}` : 'stored' }))
         return providers.length > 0
           ? { providers }
-          : { unavailable: pt ? 'Nenhum provedor configurado — ctrl+, para adicionar.' : 'No provider configured — ctrl+, adds one.' }
+          : { unavailable: pt ? 'Nenhum provedor configurado — /providers (ctrl+p) adiciona.' : 'No provider configured — /providers (ctrl+p) adds one.' }
       } catch {
         return { unavailable: pt ? 'Os provedores não puderam ser lidos.' : 'The providers could not be read.' }
       }
@@ -4299,6 +4299,39 @@ export async function runStart(codeLaunch?: CodeStartLaunch): Promise<StartResul
   // language is a closure variable the in-app toggle reassigns.
   const { loadEngine, engine } = await import('./engine/load')
   await loadEngine()
+  // EX-01: the dashboard's "cost by task · today" — sessions that STARTED today (UTC, the home's today
+  // rule), priced by the board's own `costOf`, grouped by the task each is filed under; what nobody
+  // filed is its own bucket, never folded into a task.
+  host.costByTaskToday = async () => {
+    try {
+      const [{ loadTaskWorld }, { sessionDay }] = await Promise.all([import('./sessions/task-source'), import('@agentistics/core')])
+      const w = await loadTaskWorld()
+      const today = new Date().toISOString().slice(0, 10)
+      const filed = new Map<string, string>()
+      for (const r of w.rollupRows) if (r.conversationId && r.taskId) filed.set(r.conversationId, r.taskId)
+      const byTask = new Map<string, number>()
+      let notFiled = 0
+      let sessions = 0
+      for (const [id, meta] of w.metas) {
+        if (sessionDay(meta.start_time) !== today) continue
+        sessions++
+        const cost = w.costOf(meta)
+        const task = filed.get(id) ?? (meta.session_id ? filed.get(meta.session_id) : undefined)
+        if (task) byTask.set(task, (byTask.get(task) ?? 0) + cost)
+        else notFiled += cost
+      }
+      const title = new Map(w.book.tasks.map(t => [t.id, t.title]))
+      const ref = (tid: string) => { const m = /^t-([0-9a-f]{4})/.exec(tid); return m ? `t-${m[1]}` : tid }
+      return {
+        day: today, sessions,
+        tasks: [...byTask].sort((a, b) => b[1] - a[1]).map(([id, cost]) => ({ ref: ref(id), title: title.get(id) ?? id, cost })),
+        notFiled,
+      }
+    } catch {
+      return null
+    }
+  }
+
   // TK-02…TK-07: a task's detail, its sessions' state read from the fleet this screen already shows.
   host.taskDetail = async (id) => {
     const pt = host.lang === 'pt'
@@ -4386,7 +4419,7 @@ export async function runStart(codeLaunch?: CodeStartLaunch): Promise<StartResul
     if (d?.model) models.push({ id: d.model.id, provider: d.provider, label: `${d.provider} · ${d.model.id}`, detail: `${detailOf(d.model.id)} · ${d.model.source === 'flag' ? (pt ? 'da flag --model' : 'from --model') : (pt ? 'da sua última sessão' : 'from your last session')}` })
     for (const p of list.providers ?? []) {
       if (p.state !== 'present') {
-        models.push({ id: '', provider: p.id, label: p.label, detail: '', disabled: pt ? 'não configurado — ctrl+, adiciona a chave (Configurações → Provedores)' : 'not configured — ctrl+, adds a key (Settings → Providers)' })
+        models.push({ id: '', provider: p.id, label: p.label, detail: '', disabled: pt ? 'não configurado — /providers (ctrl+p) adiciona a chave' : 'not configured — /providers (ctrl+p) adds a key' })
         continue
       }
       const r = await get<{ ok: boolean; models?: { id: string; contextLength?: number }[]; sentence?: string }>(`/api/provider/${encodeURIComponent(p.id)}/models`, 4000)
@@ -4402,6 +4435,137 @@ export async function runStart(codeLaunch?: CodeStartLaunch): Promise<StartResul
       }
     }
     return { models }
+  }
+
+  // ── settings (ST-01…ST-07): the same routes and preferences the web's Settings uses ──────────────
+  const api = async (path: string, init: RequestInit = {}, ms = 8000): Promise<{ status: number; body: Record<string, unknown> | null }> => {
+    try {
+      const r = await fetch(`http://127.0.0.1:${PORT}${path}`, { ...init, signal: AbortSignal.timeout(ms) })
+      const body = await r.json().catch(() => null) as Record<string, unknown> | null
+      return { status: r.status, body }
+    } catch {
+      return { status: 0, body: null }
+    }
+  }
+  const serviceDown = () => (host.lang === 'pt'
+    ? 'O serviço do agentop não respondeu — os provedores vêm dele (inicie em serviços).'
+    : 'The agentop service did not answer — providers come from it (start it in services).')
+
+  // ST-01: `GET /api/provider` — status and the key's last 4, never the key.
+  host.settingsProviders = async () => {
+    const pt = host.lang === 'pt'
+    const { nativeExperimentalOn, EXPERIMENTAL_SENTENCE } = await import('./native-gate')
+    if (!nativeExperimentalOn()) return { ok: false, sentence: EXPERIMENTAL_SENTENCE[pt ? 'pt' : 'en'] }
+    const r = await api('/api/provider', {}, 3000)
+    if (!r.body) return { ok: false, sentence: serviceDown() }
+    if (r.body.enabled === false) return { ok: false, sentence: String((pt ? r.body.sentencePt : null) ?? r.body.sentence ?? EXPERIMENTAL_SENTENCE[pt ? 'pt' : 'en']) }
+    const list = Array.isArray(r.body.providers) ? r.body.providers as Record<string, unknown>[] : []
+    return {
+      ok: true,
+      providers: list.map(p => ({
+        id: String(p.id), label: String(p.label ?? p.id),
+        kind: (p.kind === 'router' || p.kind === 'local' ? p.kind : 'direct') as 'direct' | 'router' | 'local',
+        state: (['absent', 'present', 'unreadable', 'permissions-too-open'].includes(String(p.state)) ? p.state : 'absent') as 'absent' | 'present' | 'unreadable' | 'permissions-too-open',
+        keyOptional: p.keyOptional === true,
+        ...(p.keyless === true ? { keyless: true } : {}),
+        ...(typeof p.last4 === 'string' ? { last4: p.last4 } : {}),
+        ...(typeof p.baseUrl === 'string' ? { baseUrl: p.baseUrl } : {}),
+      })),
+    }
+  }
+
+  // ST-01: `POST /api/provider/:id/test` — the web's "test connection", worded the same way.
+  host.testProvider = async (id) => {
+    const pt = host.lang === 'pt'
+    const r = await api(`/api/provider/${encodeURIComponent(id)}/test`, { method: 'POST' }, 15000)
+    const b = r.body
+    if (!b) return { ok: false, sentence: serviceDown() }
+    if (b.ok === true) {
+      const n = Number(b.modelCount ?? 0)
+      const ms = Number(b.latencyMs ?? 0)
+      const count = pt ? `${n} ${n === 1 ? 'modelo' : 'modelos'}` : `${n} ${n === 1 ? 'model' : 'models'}`
+      const checked = b.keyChecked === 'yes' ? (pt ? ' · chave aceita' : ' · key accepted')
+        : b.keyChecked === 'no' ? (pt ? ' · a chave só é validada na primeira chamada real' : ' · the key is validated on the first real call')
+        : b.keyChecked === 'keyless' ? (pt ? ' · sem chave' : ' · no key') : ''
+      return { ok: true, sentence: `${pt ? 'conectado' : 'connected'} · ${ms}ms · ${count}${checked}` }
+    }
+    return { ok: false, sentence: String((pt ? b.sentencePt : null) ?? b.sentence ?? `HTTP ${r.status}`) }
+  }
+
+  // ST-01: `PUT /api/provider/:id` — the key goes straight to the service's vault; a key of the wrong
+  // vendor comes back refused in the service's own sentence.
+  host.setProviderKey = async (id, key) => {
+    const pt = host.lang === 'pt'
+    const r = await api(`/api/provider/${encodeURIComponent(id)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }),
+    })
+    const b = r.body
+    if (!b) return { ok: false, sentence: serviceDown() }
+    const prov = b.provider as Record<string, unknown> | undefined
+    if (r.status >= 200 && r.status < 300 && prov) {
+      const end = typeof prov.last4 === 'string' ? ` (…${prov.last4})` : ''
+      return { ok: true, sentence: pt ? `Chave de ${String(prov.label ?? id)} guardada${end}. t testa.` : `${String(prov.label ?? id)} key stored${end}. t tests it.` }
+    }
+    return { ok: false, sentence: String((pt ? b.sentencePt : null) ?? b.sentence ?? `HTTP ${r.status}`) }
+  }
+
+  // ST-02: every priced row with its provenance and window, then what the configured providers offer
+  // that no source prices (N/A, never the fallback rate).
+  host.priceTable = async () => {
+    const core = await import('@agentistics/core')
+    const rows: { model: string; price: { input: number; output: number; cacheRead: number; cacheWrite: number } | null; priceSource: { source: string; verifiedAt: string | null } | 'local' | null; window: { tokens: number; source: string; verifiedAt: string } | null; offered?: string }[] = []
+    const windowOf = (id: string) => {
+      const w = core.resolveContextWindow(id)
+      return w ? { tokens: w.tokens, source: w.source, verifiedAt: w.verifiedAt } : null
+    }
+    for (const id of Object.keys(core.MODEL_PRICING)) {
+      const p = core.MODEL_PRICING[id]!
+      rows.push({ model: id, price: { input: p.input, output: p.output, cacheRead: p.cacheRead, cacheWrite: p.cacheWrite }, priceSource: core.priceProvenance(id), window: windowOf(id) })
+    }
+    const list = await host.settingsProviders!().catch(() => null)
+    if (list?.ok) {
+      for (const pv of list.providers.filter(x => x.state === 'present')) {
+        const r = await api(`/api/provider/${encodeURIComponent(pv.id)}/models`, {}, 4000)
+        const models = Array.isArray(r.body?.models) ? r.body!.models as { id: string; contextLength?: number }[] : []
+        for (const m of models.slice(0, 12)) {
+          if (rows.some(x => x.model === m.id)) continue
+          const local = pv.kind === 'local'
+          const priced = local || core.hasModelPrice(m.id)
+          const src = local ? 'local' as const : core.priceProvenance(m.id)
+          const pr = priced && !local ? core.getModelPrice(m.id) : null
+          rows.push({
+            model: m.id, offered: `(${pv.id})`,
+            price: local ? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } : pr ? { input: pr.input, output: pr.output, cacheRead: pr.cacheRead, cacheWrite: pr.cacheWrite } : null,
+            priceSource: src,
+            window: windowOf(m.id) ?? (m.contextLength ? { tokens: m.contextLength, source: pv.id, verifiedAt: 'live' } : null),
+          })
+        }
+      }
+    }
+    return rows
+  }
+
+  // ST-03: the machine's floor, the SAME globs every engine is handed (`hostFloor`).
+  host.policyFloor = async () => {
+    const [{ hostFloor }, { omittedSecrets }, config] = await Promise.all([import('./engine/load'), import('./backup/backup-plan'), import('./config')])
+    return [...hostFloor(omittedSecrets(), config.HOME_DIR).globs]
+  }
+
+  // ST-04 / ST-05: the terminal's own preferences, read once here and written back on each change.
+  {
+    const prefs = await readPreferences().catch(() => ({} as Awaited<ReturnType<typeof readPreferences>>))
+    const theme = prefs.tuiTheme
+    host.tuiTheme = theme === 'light' || theme === 'contrast' ? theme : 'dark'
+    host.shellKeys = prefs.tuiKeys && typeof prefs.tuiKeys === 'object' ? { ...prefs.tuiKeys } : {}
+  }
+  host.setTheme = async (id) => {
+    host.tuiTheme = id
+    try { await writePreferences({ tuiTheme: id }) } catch { /* best-effort, like the language */ }
+  }
+  host.setShellKeys = async (keys) => {
+    host.shellKeys = { ...keys }
+    // Only what differs from the defaults arrives here (`changedShellKeys`); `{}` clears the table.
+    try { await writePreferences({ tuiKeys: { ...keys } }) } catch { /* best-effort */ }
   }
 
   // NW-04: a new worktree of a repository for this task — `<repo>/.worktrees/<name>` on a new branch.

@@ -224,7 +224,7 @@ const TRANSCRIPT_DEBOUNCE_MS = 300
 
 export function Sessions({
   host, fleet, strings: s, width, height, isActive, run, onChrome, onExit, onRefreshFleet,
-  view, onView, onOpenCode, lang = 'en', focus: focusRequest,
+  view, onView, onOpenCode, lang = 'en', focus: focusRequest, layoutRequest,
 }: {
   host: ControlHost
   /** `null` until the first poll lands, `undefined` when the host has no fleet at all. The two are
@@ -251,6 +251,8 @@ export function Sessions({
   lang?: CliLang
   /** TK-04: select this session (a new object each time the `tasks` tab asks). */
   focus?: { id: string }
+  /** ST-04: the settings' density, as a layout to switch to (a new object each time, acted on once). */
+  layoutRequest?: { layout: SessionLayout }
 }) {
   // A stored `grouping: 'tree'` predates the cascade being a view: it meant "no bands, cascade on",
   // which is exactly `none` + cascade. Rewritten on the way in rather than left as a grouping the
@@ -593,6 +595,7 @@ export function Sessions({
   // TK-04: the `tasks` tab asked for a session — select it once it is on screen (each request is a
   // new object, acted on once).
   const focusDone = useRef<{ id: string } | undefined>(undefined)
+  useEffect(() => { if (layoutRequest) setLayout(layoutRequest.layout) }, [layoutRequest])
   useEffect(() => {
     if (!focusRequest || focusDone.current === focusRequest) return
     const i = selectable.findIndex(r => {

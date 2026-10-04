@@ -43,6 +43,11 @@ export interface TuiStrings {
   harness: string
   lastActivity: string
   activity30d: string
+  /** EX-01 */
+  costByTaskToday: string
+  costByTaskAll: string
+  notFiled: string
+  noSessionToday: string
   share: string
   started: string
   agents: string
@@ -100,6 +105,10 @@ const en: TuiStrings = {
   harness: 'harness',
   lastActivity: 'last activity',
   activity30d: 'activity · last 30 days',
+  costByTaskToday: 'cost by task · today (UTC)',
+  costByTaskAll: 'cost by task · today (UTC) · all harnesses, unfiltered',
+  notFiled: 'not filed',
+  noSessionToday: 'no session started today (UTC) — nothing to divide',
   share: 'share',
   started: 'started',
   agents: 'agents',
@@ -145,6 +154,10 @@ const pt: TuiStrings = {
   harness: 'assistente',
   lastActivity: 'última atividade',
   activity30d: 'atividade · últimos 30 dias',
+  costByTaskToday: 'custo por tarefa · hoje (UTC)',
+  costByTaskAll: 'custo por tarefa · hoje (UTC) · todos, sem filtro',
+  notFiled: 'sem tarefa',
+  noSessionToday: 'nenhuma sessão começou hoje (UTC) — nada a dividir',
   share: 'participação',
   started: 'início',
   agents: 'agentes',

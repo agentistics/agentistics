@@ -225,10 +225,15 @@ export interface OverviewPlan {
    * to spare. "Nothing is tracked" costs rows like anything else.
    */
   empty: boolean
+  /** EX-01: rows of the "cost by task · today" panel (`0` = the panel is not drawn). */
+  tasks: number
 }
 
 /**
  * Divides the Overview between its three parts.
+
+ * EX-01 adds a FOURTH, the "cost by task · today" panel (`taskRows` = the rows it wants). It gives
+ * way right after the sparkline, rows first: the harness bars are still the screen's substance.
  *
  * THE ORDER THINGS GIVE WAY, and it is the one thing here worth arguing about:
  *
@@ -239,21 +244,48 @@ export interface OverviewPlan {
  *  3. the HARNESS bars are trimmed last, and never below one: the breakdown is the substance, and a
  *     section reduced to its heading says nothing the heading did not.
  */
-export function overviewPlan(height: number, harnesses: number): OverviewPlan {
-  const none = { kpis: false, activity: false, bars: 0, empty: false }
+export function overviewPlan(height: number, harnesses: number, taskRows = 0): OverviewPlan {
+  const none = { kpis: false, activity: false, bars: 0, empty: false, tasks: 0 }
   if (height < KPI_ROWS) return none
 
   const rest = height - KPI_ROWS
   // With no harness at all the section still draws its empty state, which costs rows of its own.
   const want = harnesses > 0 ? harnesses : EMPTY_ROWS
   const section = SECTION_CHROME + want
+  const panel = taskRows > 0 ? SECTION_CHROME + taskRows : 0
   const whole = { kpis: true, bars: harnesses, empty: harnesses === 0 }
 
-  if (rest >= ACTIVITY_ROWS + section) return { ...whole, activity: true }
-  if (rest >= section) return { ...whole, activity: false }
+  if (rest >= ACTIVITY_ROWS + section + panel) return { ...whole, activity: true, tasks: taskRows }
+  if (rest >= section + panel) return { ...whole, activity: false, tasks: taskRows }
+  // The panel gives up rows, but never down to a heading with nothing under it.
+  const panelRoom = rest - section - SECTION_CHROME
+  if (taskRows > 0 && panelRoom >= 1) return { ...whole, activity: false, tasks: panelRoom }
+  if (rest >= section) return { ...whole, activity: false, tasks: 0 }
   const bars = rest - SECTION_CHROME
-  if (harnesses > 0 && bars >= 1) return { kpis: true, activity: false, bars, empty: false }
-  return { kpis: true, activity: false, bars: 0, empty: false }
+  if (harnesses > 0 && bars >= 1) return { kpis: true, activity: false, bars, empty: false, tasks: 0 }
+  return { kpis: true, activity: false, bars: 0, empty: false, tasks: 0 }
+}
+
+/**
+ * EX-01: the panel's lines, most expensive task first, "not filed" LAST and never dropped while it
+ * holds money (it is the line that says how much work nobody tracked). `rows` is what the plan gave.
+ */
+export function costByTaskLines(
+  d: { sessions: number; tasks: readonly { ref: string; title: string; cost: number }[]; notFiled: number },
+  rows: number,
+): { kind: 'task' | 'not-filed' | 'none'; label: string; cost: number }[] {
+  if (rows <= 0) return []
+  if (d.sessions === 0) return [{ kind: 'none', label: '', cost: 0 }]
+  const tail = d.notFiled > 0 || d.tasks.length === 0 ? [{ kind: 'not-filed' as const, label: '', cost: d.notFiled }] : []
+  const room = Math.max(0, rows - tail.length)
+  return [...d.tasks.slice(0, room).map(t => ({ kind: 'task' as const, label: `${t.ref} ${t.title}`, cost: t.cost })), ...tail].slice(0, rows)
+}
+
+/** EX-01: rows the panel would like — its lines at full length (tasks capped at five). */
+export function costByTaskRows(d: { sessions: number; tasks: readonly unknown[]; notFiled: number } | null | undefined): number {
+  if (!d) return 0
+  if (d.sessions === 0) return 1
+  return Math.min(5, d.tasks.length) + (d.notFiled > 0 || d.tasks.length === 0 ? 1 : 0)
 }
 
 export interface CostsPlan {

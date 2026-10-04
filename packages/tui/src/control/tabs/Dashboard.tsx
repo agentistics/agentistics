@@ -21,7 +21,7 @@
 
 import React, { useEffect, useMemo } from 'react'
 import type { HarnessId } from '@agentistics/core'
-import type { ControlStatus } from '../types'
+import type { ControlStatus, CostByTask } from '../types'
 import type { CliLang } from '../lang'
 import type { ControlStrings } from '../i18n'
 import type { TabChrome } from '../ControlCenter'
@@ -35,7 +35,7 @@ import { isActivation } from '../mouse'
 import { usePointer } from '../pointer'
 import { strings } from '../../i18n'
 
-export function Dashboard({ status, strings: s, lang, width, height, isActive, nonce, onChrome }: {
+export function Dashboard({ status, strings: s, lang, width, height, isActive, nonce, onChrome, costByTask }: {
   /** `null` until the first refresh lands — "not asked yet", never "nothing is running". */
   status: ControlStatus | null
   strings: ControlStrings
@@ -46,6 +46,8 @@ export function Dashboard({ status, strings: s, lang, width, height, isActive, n
   /** Bumped by the shell's `r`, so one key means one thing on every screen: re-read what is shown. */
   nonce: number
   onChrome: (chrome: TabChrome) => void
+  /** EX-01: the host's reading of today's cost by task. */
+  costByTask?: () => Promise<CostByTask | null>
 }) {
   // The dashboard's OWN words (screen names, column headers, empty states) come from the TUI's
   // string table (`src/i18n.ts`); the chrome around them is the control center's.
@@ -65,6 +67,15 @@ export function Dashboard({ status, strings: s, lang, width, height, isActive, n
   })
   const nav = useDashboardNav({ isActive, harnesses: data?.harnesses, data, figures, height })
   useEffect(() => { setHarness(nav.harness) }, [nav.harness])
+
+  // EX-01: read while the tab is visible, again on `r` and whenever the data stream moves.
+  const [byTask, setByTask] = React.useState<CostByTask | null>(null)
+  useEffect(() => {
+    if (!isActive || !costByTask) return
+    let live = true
+    void costByTask().then(r => { if (live) setByTask(r) })
+    return () => { live = false }
+  }, [isActive, costByTask, nonce, data])
 
   useEffect(() => {
     if (!isActive) return
@@ -96,6 +107,7 @@ export function Dashboard({ status, strings: s, lang, width, height, isActive, n
       connection={connection}
       figures={figures}
       notice={notice(source.kind, s)}
+      byTask={byTask}
     />
   )
 }

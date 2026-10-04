@@ -12,6 +12,8 @@ import type { CliLang } from './lang'
 import type { GithubSection } from './backup'
 import type { SearchFields, SearchScope } from './search-scope'
 import type { CodeHost } from './code-types'
+import type { SettingsPriceRow, SettingsProviders } from './settings'
+import type { ThemeId } from '../theme'
 import type { HomeProvider, HomeTask } from './home'
 // The default ARRANGEMENT is derived from the dimension vocabulary rather than written out beside
 // it. `session-dimensions.ts` imports this file for TYPES only, so this is the one value direction.
@@ -1350,6 +1352,27 @@ export interface ControlHost {
   nativeModels?(): Promise<{ models: { id: string; label: string; detail: string; disabled?: string }[] } | { sentence: string }>
   /** NW-04: create a worktree of `repo` for this task; the folder it made, or why not. */
   createWorktree?(repo: string, name: string): Promise<{ ok: true; path: string; sentence: string } | { ok: false; sentence: string }>
+  /**
+   * EX-01: today's cost (UTC day, sessions that started today, api-equivalent) per task they are filed
+   * under, plus what nobody filed. `null` when the board or the store cannot be read.
+   */
+  costByTaskToday?(): Promise<CostByTask | null>
+  /** ST-01: every provider with its status and the stored key's end, as the service lists them (the host reads it). */
+  settingsProviders?(): Promise<SettingsProviders>
+  /** ST-01: the web's "test connection", run by the host, as one localized sentence with its latency. */
+  testProvider?(id: string): Promise<{ ok: boolean; sentence: string }>
+  /** ST-01: store a key through the service (the host sends it); a wrong-vendor key comes back refused in the service's words. */
+  setProviderKey?(id: string, key: string): Promise<{ ok: boolean; sentence: string }>
+  /** ST-02: each priced model with its provenance and window, plus what configured providers offer. */
+  priceTable?(): Promise<SettingsPriceRow[]>
+  /** ST-03: the machine's policy floor as globs — never liftable. */
+  policyFloor?(): Promise<string[]>
+  /** ST-04: the theme read from the preferences at start (written back by `setTheme`). */
+  tuiTheme?: ThemeId
+  setTheme?(id: ThemeId): Promise<void>
+  /** ST-05: the person's rebound shell keys, action → key (unknown or malformed entries are ignored). */
+  shellKeys?: Partial<Record<string, string>>
+  setShellKeys?(keys: Record<string, string>): Promise<void>
   /** TK-02…TK-07: one task's detail — rollup, subtasks, its sessions (with live state), activity. */
   taskDetail?(id: string): Promise<import('./task-detail').TaskDetailView | { unavailable: string }>
 
@@ -1797,6 +1820,15 @@ export interface ControlHost {
 }
 
 /** One search of the places a session could start: what to show, and how much there is. */
+/** EX-01: one day's cost by task. */
+export interface CostByTask {
+  day: string
+  /** Sessions that started that day — 0 is a fact, and the panel says so. */
+  sessions: number
+  tasks: { ref: string; title: string; cost: number }[]
+  notFiled: number
+}
+
 export interface ProjectSearchResult {
   options: ProjectOption[]
   /** Matches per kind BEFORE the cap — see `countPerKind`. */
