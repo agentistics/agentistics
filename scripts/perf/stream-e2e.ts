@@ -34,7 +34,8 @@ const s = await startPerfServer(home, { env: { PATH: `${join(import.meta.dir, 'f
 const apiPort = Number(new URL(s.base).port)
 // The server itself binds port+1 (WEB_PORT); the dev UI goes beside it.
 const webPort = apiPort + 3
-const vite = spawn(['bunx', 'vite', '--port', String(webPort), '--strictPort'], {
+// The vite binary itself, not `bunx vite`: killing the `bunx` wrapper left its node child serving.
+const vite = spawn([join(REPO, 'packages/web/node_modules/.bin/vite'), '--port', String(webPort), '--strictPort'], {
   cwd: join(REPO, 'packages/web'), env: { ...process.env, PORT: String(apiPort), WEB_PORT: String(webPort) }, stdout: 'ignore', stderr: 'ignore',
 })
 const browser = await chromium.launch(process.env.PLAYWRIGHT_CHROMIUM ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM } : {})
