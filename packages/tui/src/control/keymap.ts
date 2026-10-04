@@ -19,7 +19,7 @@
  */
 
 import type { CliLang } from './lang'
-import type { KeyPress } from './nav'
+import { rebindKeys, type KeyPress, type ShellKeys } from './nav'
 import type { TabId } from './types'
 import { CODE_KEY_TABLE } from './code'
 import { DASHBOARD_SCREENS } from '../dashboard/view'
@@ -64,6 +64,7 @@ export const EVERYWHERE: KeySection = {
     { keys: '← →', action: w('previous / next screen, where the screen does not use the arrows', 'tela anterior / seguinte, onde a tela não usa as setas') },
     { keys: '?', action: w('this help — every key, by screen', 'esta ajuda — todas as teclas, por tela') },
     { keys: 'ctrl+p', action: w('the command palette — every command, with its shortcut', 'a paleta de comandos — todos os comandos, com o atalho') },
+    { keys: 'S', action: w('settings — providers, models, permissions, appearance, keys, language, tracking', 'configurações — provedores, modelos, permissões, aparência, teclas, idioma, rastreio') },
     { keys: 'q', action: w('quit', 'sair') },
     { keys: 'ctrl+c', action: w('quit, even from a question or the code composer', 'sair, mesmo de uma pergunta ou do compositor do code') },
     { keys: 'r', action: w('re-read what is on screen', 'reler o que está na tela') },
@@ -331,8 +332,11 @@ export function helpKeyColumn(sections: readonly KeySection[]): number {
  * description column (never under the keys, so the keystroke column is written once per key). A
  * keys cell wider than the column gets its own line.
  */
-export function helpLines(lang: CliLang, current: TabId, width: number): HelpLine[] {
-  const sections = helpSections(current)
+export function helpLines(lang: CliLang, current: TabId, width: number, binds?: ShellKeys): HelpLine[] {
+  // ST-05: the EVERYWHERE table names the keys as the person bound them.
+  const sections = helpSections(current).map(sec => (sec.id === 'everywhere' && binds
+    ? { ...sec, entries: sec.entries.map(e => ({ ...e, keys: rebindKeys(e.keys, binds) })) }
+    : sec))
   const keyCol = helpKeyWidth(current, width)
   const room = Math.max(1, width - keyCol - 2)
   const out: HelpLine[] = []

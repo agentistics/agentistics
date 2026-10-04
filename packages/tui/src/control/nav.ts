@@ -73,7 +73,7 @@ export type NavAction =
  * horizontal list, so while it has focus the arrows move between verbs and the footer stops saying
  * `←→ screens`. `esc` is the way back out, one keypress from every screen again.
  */
-export function resolveTabKey(key: NavKey, current: TabId, arrows = true): TabId | null {
+export function resolveTabKey(key: NavKey & { ctrl?: boolean }, current: TabId, arrows = true, binds: ShellKeys = DEFAULT_SHELL_KEYS): TabId | null {
   const i = TAB_ORDER.indexOf(current)
   const at = (n: number) => TAB_ORDER[(n + TAB_ORDER.length) % TAB_ORDER.length]!
 
@@ -82,8 +82,8 @@ export function resolveTabKey(key: NavKey, current: TabId, arrows = true): TabId
   // belong to its list and its menu, and leaving a tab by accident while reading a list was the
   // single most reported annoyance of that screen. The brackets are also what the active tab now
   // wears, so the key and the mark on the target are the same two characters.
-  if (key.input === '[') return at(i - 1)
-  if (key.input === ']') return at(i + 1)
+  if (pressMatches(binds['prev-tab'], key)) return at(i - 1)
+  if (pressMatches(binds['next-tab'], key)) return at(i + 1)
 
   if (!arrows) return null
   if (key.leftArrow) return at(i - 1)
@@ -302,6 +302,83 @@ export function bodyHeight(rows: number, headerRows = 1): number {
 // the SHELL's keys — what works on every screen that is not capturing
 // ---------------------------------------------------------------------------
 
+/**
+ * ST-05: the shell's keys are REBINDABLE — each action has a binding, a single character (`q`) or a
+ * chord (`ctrl+p`), and the person's own table (persisted by the host) replaces the defaults. The
+ * screens' own keys are read off `keymap.ts` to refuse a binding that would collide with one of them
+ * (`bindingConflict` in `settings.ts`).
+ */
+export type ShellAction = 'prev-tab' | 'next-tab' | 'palette' | 'settings' | 'help' | 'quit' | 'refresh' | 'mouse'
+export type ShellKeys = Record<ShellAction, string>
+
+export const SHELL_ACTIONS: readonly ShellAction[] = ['prev-tab', 'next-tab', 'palette', 'settings', 'help', 'quit', 'refresh', 'mouse']
+
+export const DEFAULT_SHELL_KEYS: ShellKeys = {
+  // `S` for settings: `,` (what most terminals send for ctrl+,) pages the dashboard.
+  'prev-tab': '[', 'next-tab': ']', palette: 'ctrl+p', settings: 'S', help: '?', quit: 'q', refresh: 'r', mouse: 'm',
+}
+
+/** A stored table over the defaults: an unknown action or a malformed key is ignored, never applied. */
+export function shellKeys(stored: Partial<Record<string, unknown>> | undefined | null): ShellKeys {
+  const out: ShellKeys = { ...DEFAULT_SHELL_KEYS }
+  if (!stored) return out
+  for (const a of SHELL_ACTIONS) {
+    const v = stored[a]
+    if (typeof v === 'string' && isBindableKey(v)) out[a] = v
+  }
+  return out
+}
+
+/**
+ * What to STORE: only the keys a person changed. Storing the whole table would freeze today's
+ * defaults into every preferences file, so a default that moves later (it did: settings left `,`,
+ * which pages the dashboard) would never reach anyone who once rebound anything.
+ */
+export function changedShellKeys(binds: ShellKeys): Partial<ShellKeys> {
+  const out: Partial<ShellKeys> = {}
+  for (const a of SHELL_ACTIONS) if (binds[a] !== DEFAULT_SHELL_KEYS[a]) out[a] = binds[a]
+  return out
+}
+
+/** One printable character, or `ctrl+` and one lowercase letter. */
+export function isBindableKey(k: string): boolean {
+  if (/^ctrl\+[a-z]$/.test(k)) return true
+  return [...k].length === 1 && k > ' ' && k !== '\x7f'
+}
+
+/** Does `key` press `binding`? */
+export function pressMatches(binding: string, key: { input: string; ctrl?: boolean }): boolean {
+  if (binding.startsWith('ctrl+')) return Boolean(key.ctrl) && key.input === binding.slice(5)
+  return !key.ctrl && key.input === binding
+}
+
+/** The binding a press would become (`null`: not a key a binding can hold — arrows, enter, esc…). */
+export function bindingOf(key: { input: string; ctrl?: boolean }): string | null {
+  const k = key.ctrl ? `ctrl+${key.input}` : key.input
+  return isBindableKey(k) ? k : null
+}
+
+/**
+ * ST-05 / GL-05: a footer hint or a help-table key cell, with the shell's DEFAULT keys replaced by the
+ * person's own — the footer names the key that works, never the one that used to. Only a hint whose
+ * key part IS a default shell key changes (`q quit`, `? keys`, `[ ] screens`); every screen's own
+ * keys pass through untouched.
+ */
+export function rebindKeys(keys: string, binds: ShellKeys): string {
+  if (keys === '[ ]') return `${binds['prev-tab']} ${binds['next-tab']}`
+  for (const a of SHELL_ACTIONS) if (keys === DEFAULT_SHELL_KEYS[a]) return binds[a]
+  return keys
+}
+
+export function rebindHint(hint: string, binds: ShellKeys): string {
+  if (hint.startsWith('[ ] ')) return `${rebindKeys('[ ]', binds)} ${hint.slice(4)}`
+  const sp = hint.indexOf(' ')
+  if (sp <= 0) return hint
+  const head = hint.slice(0, sp)
+  const swapped = rebindKeys(head, binds)
+  return swapped === head ? hint : `${swapped}${hint.slice(sp)}`
+}
+
 /** What a keypress means to the shell itself, before any screen sees it. */
 export type ShellIntent =
   | { kind: 'tab'; tab: TabId }
@@ -311,6 +388,8 @@ export type ShellIntent =
   | { kind: 'help' }
   /** GL-03: `ctrl+p` — the command palette. */
   | { kind: 'palette' }
+  /** ST-01…07: `S` — the settings overlay. */
+  | { kind: 'settings' }
 
 /**
  * The shell's own keys — PURE, and the ONE place they are decided.
@@ -321,16 +400,17 @@ export type ShellIntent =
  */
 export function resolveShellKey(
   key: KeyPress,
-  ctx: { tab: TabId; arrows: boolean; mouse: boolean },
+  ctx: { tab: TabId; arrows: boolean; mouse: boolean; binds?: ShellKeys },
 ): ShellIntent | null {
-  const next = resolveTabKey(key, ctx.tab, ctx.arrows)
+  const b = ctx.binds ?? DEFAULT_SHELL_KEYS
+  const next = resolveTabKey(key, ctx.tab, ctx.arrows, b)
   if (next && next !== ctx.tab) return { kind: 'tab', tab: next }
-  if (key.ctrl && key.input === 'p') return { kind: 'palette' }
-  if (key.ctrl) return null
-  if (key.input === 'q') return { kind: 'quit' }
-  if (key.input === 'r') return { kind: 'refresh' }
-  if (key.input === 'm' && ctx.mouse) return { kind: 'mouse' }
-  if (key.input === '?') return { kind: 'help' }
+  if (pressMatches(b.palette, key)) return { kind: 'palette' }
+  if (pressMatches(b.settings, key)) return { kind: 'settings' }
+  if (pressMatches(b.quit, key)) return { kind: 'quit' }
+  if (pressMatches(b.refresh, key)) return { kind: 'refresh' }
+  if (pressMatches(b.mouse, key) && ctx.mouse) return { kind: 'mouse' }
+  if (pressMatches(b.help, key)) return { kind: 'help' }
   return null
 }
 
