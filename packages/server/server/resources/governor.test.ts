@@ -51,17 +51,19 @@ describe('planGovernor — kills', () => {
     expect(plan.kills).toEqual([])
     expect(plan.alerts[0]).toMatchObject({ reason: 'stale-binary', fix: { action: 'reconnect-session' } })
   })
-  test('a test leftover (isolated HOME, orphaned or owner gone) is killed; the main HOME never is', () => {
+  test('a test leftover is killed ONLY when its recorded owner is gone; the main HOME never is', () => {
     const iso = { HOME: '/tmp/tuicheck.x', CLAUDE_PID: '700' }
     const i = inv([
+      // ownerless + orphaned + old: NOT killed any more — no evidence anybody abandoned it
       entry({ pid: 20, ppid: 1, argv: ['agentop'], env: { HOME: '/tmp/tuicheck.a' }, rssBytes: 350 * MB, ageSec: 3 * 3600 }),
-      entry({ pid: 24, ppid: 1, argv: ['agentop'], env: { HOME: '/tmp/tuicheck.b' }, ageSec: 600 }),
+      // owner recorded (CLAUDE_PID 700) and dead: killed
       entry({ pid: 21, ppid: 40, argv: ['agentop', 'server'], env: iso }),
       entry({ pid: 22, ppid: 1, argv: ['agentop'], env: { HOME } }),
       entry({ pid: 23, ppid: 1, argv: ['agentop', 'server'], env: {} }),
+      entry({ pid: 24, ppid: 1, argv: ['agentop'], env: { HOME: '/tmp/tuicheck.b' }, ageSec: 600 }),
     ], [700])
     const kills = planGovernor({ inventory: i, helpers: [], nowMs: 0 }).kills.map(k => [k.pid, k.reason])
-    expect(kills).toEqual([[20, 'test-leftover'], [21, 'test-leftover']])
+    expect(kills).toEqual([[21, 'test-leftover']])
   })
   test('an isolated instance whose owner is ALIVE is left alone, even orphaned and old', () => {
     const i = inv([entry({ pid: 21, ppid: 1, ageSec: 99_999, argv: ['agentop', 'server'], env: { HOME: '/tmp/p', CLAUDE_PID: '700' } })])
@@ -87,7 +89,7 @@ describe('planGovernor — kills', () => {
       entry({ pid: 2, ppid: 1, argv: ['agentop', 'server'], env: { HOME: '/tmp/x' }, rssBytes: 9 * GB, ageSec: 3 * 3600 }),
     ], { selfPid: 1, home: HOME, alive: () => true, helpers: new Map() })
     const plan = planGovernor({ inventory: i, helpers: [], nowMs: 0 })
-    expect(plan.kills.map(k => k.pid)).toEqual([2]) // isolated orphan server = test leftover; self (1) never
+    expect(plan.kills).toEqual([]) // self (1) never; an ownerless isolated server is not evidence of a leftover
     expect(killAllowed(i, 1)).toBe(false)
     expect(killAllowed(i, 2)).toBe(false)
   })

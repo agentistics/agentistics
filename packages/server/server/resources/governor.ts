@@ -15,11 +15,11 @@
  *    client is gone even if something still holds its stdin.
  *  - **a registered helper whose owner ended, or that sat idle past its own declared timeout** — the
  *    helper SAID who it serves and for how long (helpers.ts); the governor holds it to that.
- *  - **a TEST LEFTOVER**: an agentop (cockpit, server, cli) running under a HOME other than this
- *    server's — the isolated-HOME instance every check here is required to use — that is orphaned or
- *    whose owner session has ended. Found 2026-10-03: six `tuicheck` cockpits at 350 MB each,
- *    nobody's. The main HOME is never touched by this rule, so the user's own server and cockpit
- *    cannot match it; an unreadable HOME never counts as isolated.
+ *  - **a TEST LEFTOVER**: an agentop (cockpit, server, cli) running under a throwaway HOME (one made
+ *    under a temp root) whose RECORDED owner session has ended — the assistant named in its process
+ *    card, checked by pid AND start time, or its `CLAUDE_PID`. Found 2026-10-03: six `tuicheck`
+ *    cockpits at 350 MB each, nobody's. No owner on record means NOT stopped, ever: being orphaned
+ *    or old is not evidence that nobody is using it. The real HOME never matches.
  *
  * Everything else is an ALERT, never a silent kill: a live process over its budget, an old binary
  * still running, a heavy job. Each alert names the culprit and the one-click fix the UI offers.
@@ -43,9 +43,6 @@ export const KIND_BUDGET_BYTES: Record<AgentopProcess['kind'], number> = {
 
 /** A live process using this much CPU for a whole tick, with no owner alive, is spinning. */
 export const SPIN_CPU_PERCENT = 90
-
-/** An isolated-HOME orphan with no recorded owner is only a leftover after this long. */
-export const LEFTOVER_MIN_AGE_SEC = 2 * 3600
 
 export type KillReason = 'orphan-mcp' | 'owner-ended' | 'helper-idle' | 'helper-owner-ended' | 'test-leftover'
 export type AlertReason = 'over-budget' | 'stale-binary' | 'spinning'
@@ -108,13 +105,12 @@ export function planGovernor(o: {
       if (p.owner && !p.owner.alive) { kill('owner-ended'); continue }
     }
     if ((p.kind === 'cockpit' || p.kind === 'server' || p.kind === 'cli' || p.kind === 'watch') && p.isolatedHome) {
-      // A KNOWN owner decides alone: a live session that backgrounded its preview (`cmd &` leaves it
-      // reparented to init) still owns it. With no owner on record, an orphan is a leftover only once
-      // it is old enough that no check could still be using it.
-      const leftover = p.owner !== null
-        ? !p.owner.alive
-        : p.orphan && p.ageSec >= LEFTOVER_MIN_AGE_SEC
-      if (leftover) { kill('test-leftover'); continue }
+      // ONLY a known owner that is provably gone. A process with no owner on record is never stopped
+      // by this rule, however old or orphaned: a codex or gemini session sets no CLAUDE_PID, and its
+      // backgrounded preview would otherwise be killed while the session that started it was still
+      // working (release-0410 review: "never a live session's preview/test server"). Age and orphan
+      // status are not evidence of abandonment — `cmd &` reparents to init immediately.
+      if (p.owner !== null && !p.owner.alive) { kill('test-leftover'); continue }
     }
     if (p.kind === 'helper') {
       const h = helpers.get(p.pid)
