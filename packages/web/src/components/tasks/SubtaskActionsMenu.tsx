@@ -30,7 +30,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  Ban, ChevronLeft, Eye, Plus, Rocket, Settings, SquarePen, Trash2, Users, XCircle,
+  Ban, ChevronLeft, Eye, MoreHorizontal, Plus, Rocket, SquarePen, Trash2, Users, XCircle,
 } from 'lucide-react'
 import type { TaskStatusDef } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -98,7 +98,7 @@ function refusalText(pt: boolean, reason: StatusRefusalReason | undefined): stri
 
 type Step = 'menu' | 'blocked-by' | 'pick-member' | 'pick-group'
 
-const rowButtonStyle = (mobile: boolean, danger = false): React.CSSProperties => ({
+export const rowButtonStyle = (mobile: boolean, danger = false): React.CSSProperties => ({
   display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-start',
   background: 'none', border: 'none', borderRadius: 6,
   padding: '7px 8px', textAlign: 'left',
@@ -227,7 +227,7 @@ export function SubtaskActionsMenu(p: SubtaskActionsMenuProps) {
           border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-tertiary)',
           borderRadius: 5, padding: '4px 5px', cursor: 'pointer', flexShrink: 0,
         }}
-      ><Settings size={13} /></button>
+      ><MoreHorizontal size={13} /></button>
 
       {open && at && createPortal(
         <div
