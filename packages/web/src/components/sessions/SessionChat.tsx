@@ -2074,7 +2074,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     setAttached(restore.attached)
     sessionScratch.writeAttachments(scratchId, restore.attached)
     editReply(restore.replyTo)
-    setNotice(out.message)
+    // A question is asked in its dialog, once — not again as a line under the field.
+    if (!out.confirm) setNotice(out.message)
   }
 
   if (payload?.unavailable) {
