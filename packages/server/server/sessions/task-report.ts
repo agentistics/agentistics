@@ -9,9 +9,9 @@
 
 import { pieceTimes, spanOf, type PieceTimes, type SessionSpan } from './task-times'
 import type { SessionMeta, TaskProgress } from '@agentistics/core'
-import { commentCounts, commentsByTarget, groupProgress, sessionTokenTotal, type CommentTarget } from '@agentistics/core'
+import { commentCounts, commentsByTarget, groupProgress, sessionTokenTotal, threadAttention, threadComments, type CommentTarget } from '@agentistics/core'
 import type {
-  Attempt, AttemptStatus, Subtask, Task, TaskComment, TaskFile,
+  Attempt, AttemptStatus, Subtask, Task, TaskComment, TaskFile, TaskThread,
 } from './task-model'
 import { groupMembers, isGroupMember, isGroupSubtask, legacyTaskId } from './task-model'
 import { conversationOwners, distinctConversations } from './task-conversations'
@@ -92,6 +92,9 @@ export interface TaskListRow {
      */
     commentsBySubtask: Record<string, number>
     subtasks: number; subtasksDone: number; files: number
+    /** Threads on the task, and how many of them have a session's word after the person's last one. */
+    threads: number
+    threadsAwaiting: number
   }
   /** Distinct harnesses of this task's sessions, in first-seen order. */
   harnesses: string[]
@@ -126,6 +129,8 @@ export interface TaskDetail {
    * assistant reads; a surface wanting a group's aggregated thread uses `commentThread`.
    */
   commentThreads: { target: CommentTarget; comments: TaskComment[] }[]
+  /** The task's TOPIC threads (`TaskThread`), oldest first. Their comments are in `comments`. */
+  threads: TaskThread[]
   subtasks: Subtask[]
   files: TaskFile[]
   subtaskRollups: SubtaskView[]
@@ -494,6 +499,14 @@ export function reposOfRows(
   return out
 }
 
+/** The board card's thread figures — the same `threadAttention` the task page draws. */
+function threadCounts(taskId: string, threads: readonly TaskThread[], comments: readonly TaskComment[]): { threads: number; threadsAwaiting: number } {
+  const mine = threads.filter(t => t.taskId === taskId)
+  let awaiting = 0
+  for (const t of mine) if (threadAttention(t, threadComments(comments, t.id)) === 'awaiting') awaiting++
+  return { threads: mine.length, threadsAwaiting: awaiting }
+}
+
 export function buildTaskList(o: {
   tasks: readonly Task[]
   attempts: readonly Attempt[]
@@ -501,6 +514,7 @@ export function buildTaskList(o: {
   metas: ReadonlyMap<string, SessionMeta>
   costOf: (m: SessionMeta) => number
   comments?: readonly TaskComment[]
+  threads?: readonly TaskThread[]
   subtasks?: readonly Subtask[]
   files?: readonly TaskFile[]
 }): TaskListRow[] {
@@ -520,6 +534,7 @@ export function buildTaskList(o: {
         subtasks: subs.length,
         subtasksDone: subs.filter(t => t.done).length,
         files: (o.files ?? []).filter(f => f.taskId === task.id).length,
+        ...threadCounts(task.id, o.threads ?? [], o.comments ?? []),
       },
       harnesses: [...new Set(mine.map(r => r.harness))],
       repos: reposOfRows(mine, o.metas),
@@ -534,6 +549,7 @@ export function buildTaskDetail(o: {
   metas: ReadonlyMap<string, SessionMeta>
   costOf: (m: SessionMeta) => number
   comments?: readonly TaskComment[]
+  threads?: readonly TaskThread[]
   subtasks?: readonly Subtask[]
   files?: readonly TaskFile[]
 }): TaskDetail {
@@ -609,6 +625,7 @@ export function buildTaskDetail(o: {
       o.comments ?? [],
       [...(o.subtasks ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     ),
+    threads: [...(o.threads ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     subtasks: [...(o.subtasks ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     files: [...(o.files ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     subtaskRollups: subtaskViews(o.task, o.subtasks ?? [], mine, o.metas, o.costOf),
