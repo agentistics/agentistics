@@ -4888,17 +4888,11 @@ export async function runStart(codeStart?: CodeStart): Promise<StartResult> {
     codeStart.code.configure?.({ ...(codeStart.model ? { model: codeStart.model } : {}), ...(codeStart.cwd ? { cwd: resolvePath(codeStart.cwd) } : {}) })
     host.code = codeStart.code
     disposeCode = codeStart.dispose
-  } else {
-    const e = engine()
-    if (e?.codeHost && !nativeExperimentalOn()) {
-      host.nativeGate = () => EXPERIMENTAL_SENTENCE[host.lang === 'pt' ? 'pt' : 'en']
-    } else if (e?.codeHost) {
-      const taken = await takeCodePort(e.codeHost)
-      if (taken) {
-        host.code = taken.code
-        disposeCode = taken.dispose
-      }
-    }
+  } else if (engine()?.codeHost && !nativeExperimentalOn()) {
+    // The existing gate still supplies the sentence to callers that explicitly ask about the
+    // native harness, but a plain `agentop` never acquires or exposes the code host. The code TUI
+    // is an explicit CLI entry point, not another dashboard tab.
+    host.nativeGate = () => EXPERIMENTAL_SENTENCE[host.lang === 'pt' ? 'pt' : 'en']
   }
   // SS-09: file any row under a BOARD task — native, agentop-started, or external by conversation.
   host.fileSession = async (row, taskId) => {
@@ -5007,11 +5001,12 @@ async function runControlLoop(
   const setup = codeStart ? false : await isUnconfigured()
   // RES.1 — a self-restart lands on the tab the user was on (see the `restart` exit below).
   const startTab = process.env.AGENTISTICS_START_TAB
+  const visibleTabs = codeStart ? TAB_ORDER : TAB_ORDER.filter(id => id !== 'code')
   // `home` is the default (GL-01), but a machine that has never been configured opens where the setup
   // question is asked — `services` — or the question would wait on a tab nobody is looking at.
   let tab: TabId | undefined = codeStart && host.code
     ? 'code'
-    : startTab && (TAB_ORDER as readonly string[]).includes(startTab) ? startTab as TabId : setup ? 'services' : undefined
+    : startTab && (visibleTabs as readonly string[]).includes(startTab) ? startTab as TabId : setup ? 'services' : undefined
   delete process.env.AGENTISTICS_START_TAB
   let launch: CodeLaunch | undefined = codeStart?.launch
 
@@ -5029,7 +5024,14 @@ async function runControlLoop(
     // detaching was enough to put the whole cockpit back into the previous language, with nothing
     // on screen to explain it and nothing to do about it but restart the application, which is how
     // it was reported. `execAttachTicket` below already read it correctly.
-    const exit = await runControlCenter({ lang: host.lang, host, tab, setup: opening, ...(launch ? { code: launch } : {}) })
+    const exit = await runControlCenter({
+      lang: host.lang,
+      host,
+      tab,
+      setup: opening,
+      codeTab: Boolean(codeStart),
+      ...(launch ? { code: launch } : {}),
+    })
     opening = false
     // The launch is a first-mount instruction: a remount after an attach must not restart the wizard or
     // resume the session a second time.

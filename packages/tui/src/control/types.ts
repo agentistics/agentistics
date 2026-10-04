@@ -72,6 +72,11 @@ export const TAB_ORDER: readonly TabId[] = [
   'contribute',
 ] as const
 
+/** The ordinary cockpit has no native code entry; `agentop code` opts into the code tab explicitly. */
+export function tabOrderFor(codeEntry: boolean): readonly TabId[] {
+  return codeEntry ? TAB_ORDER : TAB_ORDER.filter(id => id !== 'code')
+}
+
 /** A service is `unknown` when detection itself failed (no docker, no lsof) — never assume down. */
 export type ServiceState = 'up' | 'down' | 'unknown'
 

@@ -557,8 +557,12 @@ if (command === 'code' || command === 'provider' || command === 'ingest') {
   if (command === 'code') {
     const { opensCockpit, parseCodeLaunch } = await import('../server/code-launch.ts')
     if (opensCockpit(args, { stdin: Boolean(process.stdin.isTTY), stdout: Boolean(process.stdout.isTTY) })) {
-      const { engine, engineStatus, loadEngine } = await import('../server/engine/load.ts')
       const { nativeExperimentalOn, EXPERIMENTAL_SENTENCE } = await import('../server/native-gate.ts')
+      if (!nativeExperimentalOn()) {
+        process.stderr.write(`${EXPERIMENTAL_SENTENCE[await resolveCliLang()]}\n`)
+        process.exit(2)
+      }
+      const { engine, engineStatus, loadEngine } = await import('../server/engine/load.ts')
       await loadEngine()
       const e = engineStatus().present ? engine() : null
       if (e?.codeHost && nativeExperimentalOn()) {
@@ -577,9 +581,6 @@ if (command === 'code' || command === 'provider' || command === 'ingest') {
           process.exit(result === 'foreground' ? 0 : result)
         }
         await handle.dispose().catch(() => {})
-      } else if (e?.codeHost && !nativeExperimentalOn()) {
-        process.stderr.write(`${EXPERIMENTAL_SENTENCE[await resolveCliLang()]}\n`)
-        process.exit(2)
       }
     }
   }
