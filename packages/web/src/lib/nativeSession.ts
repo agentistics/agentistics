@@ -18,6 +18,7 @@
  * community build has none, and an entry that can only fail is not an option.
  */
 
+import { nativeVisibleFrom } from '@agentistics/core'
 import type { HarnessAnswer } from './wizardSteps'
 
 export const NATIVE_HARNESS_ID = 'agentistics'
@@ -29,9 +30,7 @@ export const NATIVE_HARNESS_LABEL = 'Agentistics'
  * `native-gate.ts`; owner decision 2026-10-03). Either one missing hides every native surface.
  */
 export function nativeRuntimeFrom(status: unknown): boolean {
-  if (!status || typeof status !== 'object') return false
-  const s = status as { present?: unknown; nativeExperimental?: unknown; manifest?: { provides?: { nativeRuntime?: unknown } } }
-  return s.present === true && s.manifest?.provides?.nativeRuntime === true && s.nativeExperimental === true
+  return nativeVisibleFrom(status)
 }
 
 /** The sentence every hidden native surface points to (the server's `EXPERIMENTAL_SENTENCE`). */

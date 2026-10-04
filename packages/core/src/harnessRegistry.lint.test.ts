@@ -20,7 +20,13 @@ import { join, relative } from 'node:path'
  *     a surface enumerates `SURFACE_HARNESS_ORDER` and keys its tables by `SurfaceHarnessId`.
  *  2. Anywhere, an array LITERAL of two or more harness ids is refused — the registry is the list.
  *
- * Both have an escape hatch, because both are sometimes right: a surface that genuinely talks about
+ *  3. In a SURFACE package, `SURFACE_HARNESS_ORDER` BARE is refused — it names the native harness
+ *     unconditionally, and v2.103 shipped exactly that: with the experimental flag OFF the native
+ *     harness appeared on every metrics surface. A surface lists through `surfaceHarnesses(nativeVisible)`
+ *     (core), which drops the native harness unless the gate says it may be seen. A use that is only an
+ *     ORDER over rows a gated source already returned says so with `@native-gated` and a reason.
+ *
+ * The first two have an escape hatch, because both are sometimes right: a surface that genuinely talks about
  * ADAPTERS (the backup harness picker, a transcript reader table, a subscription plan) says so with
  * `@harness-adapters-only` and a reason, on the line or in the comment just above it.
  */
@@ -29,6 +35,7 @@ const ROOT = join(import.meta.dir, '..', '..', '..')
 const SURFACES = ['packages/web/src', 'packages/tui/src', 'packages/mcp']
 const EVERYWHERE = ['packages/core/src', 'packages/server/server', ...SURFACES]
 const MARKER = '@harness-adapters-only'
+const NATIVE_MARKER = '@native-gated'
 const IDS = '(?:claude|codex|gemini|copilot|antigravity|kimi|opencode|agentistics)'
 
 function sourceFiles(dir: string): string[] {
@@ -59,8 +66,8 @@ function lineAt(src: string, index: number): number {
 }
 
 /** The marker on the line or within the six above it (a reason is prose, and prose wraps). */
-function excused(lines: string[], n: number): boolean {
-  return lines.slice(Math.max(0, n - 7), n).some(l => l.includes(MARKER))
+function excused(lines: string[], n: number, marker = MARKER): boolean {
+  return lines.slice(Math.max(0, n - 7), n).some(l => l.includes(marker))
 }
 
 function isComment(line: string): boolean {
@@ -70,7 +77,7 @@ function isComment(line: string): boolean {
 
 interface Hit { file: string; line: number; text: string }
 
-function scan(dirs: readonly string[], pattern: RegExp): Hit[] {
+function scan(dirs: readonly string[], pattern: RegExp, marker = MARKER): Hit[] {
   const hits: Hit[] = []
   for (const dir of dirs) {
     for (const file of sourceFiles(dir)) {
@@ -79,7 +86,7 @@ function scan(dirs: readonly string[], pattern: RegExp): Hit[] {
       for (const m of src.matchAll(pattern)) {
         const n = lineAt(src, m.index ?? 0)
         const text = lines[n - 1] ?? ''
-        if (isComment(text) || excused(lines, n)) continue
+        if (isComment(text) || excused(lines, n, marker)) continue
         hits.push({ file: relative(ROOT, file), line: n, text: text.trim() })
       }
     }
@@ -107,7 +114,14 @@ describe('harness registry — no surface forgets a harness', () => {
     expect(fmt(hits)).toBe('')
   })
 
+  it('a surface package never lists the native harness without the gate (bare SURFACE_HARNESS_ORDER)', () => {
+    const hits = scan(SURFACES, /\bSURFACE_HARNESS_ORDER\b/g, NATIVE_MARKER)
+    expect(fmt(hits)).toBe('')
+  })
+
   it('the guard can see: a planted breach in each shape is caught', () => {
+    expect(/\bSURFACE_HARNESS_ORDER\b/.test('const order = SURFACE_HARNESS_ORDER')).toBe(true)
+    expect(/\bSURFACE_HARNESS_ORDER\b/.test('const order = surfaceHarnesses(nativeVisible)')).toBe(false)
     // A guard that matches nothing passes forever. These are the three shapes, as the scanner reads them.
     expect(/(?<![A-Z_])HARNESS_ORDER\b/.test('for (const h of HARNESS_ORDER)')).toBe(true)
     expect(/(?<![A-Z_])HARNESS_ORDER\b/.test('for (const h of SURFACE_HARNESS_ORDER)')).toBe(false)

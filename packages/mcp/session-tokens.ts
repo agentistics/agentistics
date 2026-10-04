@@ -1,6 +1,6 @@
 import {
   calcCost, sessionCostUSD, unpricedTokens, sumTokens, totalTokens, usageTokens, usageTokenTotal, type ModelUsage,
-  SURFACE_HARNESS_ORDER,
+  surfaceHarnesses, type SurfaceHarnessId,
 } from "@agentistics/core";
 
 export type AnySession = Record<string, any>;
@@ -79,14 +79,28 @@ export function statsCacheTotals(sc: { modelUsage?: Record<string, Partial<Model
   return { ...b, tokens: totalTokens(b), cost, topModel: top?.model ?? null };
 }
 
-/** Every harness a surface may name — the adapters plus the native `agentistics` one. Its sessions only
- *  exist in the server's answers while the experimental flag is on, so naming it here opens nothing. */
-export const HARNESS_IDS = SURFACE_HARNESS_ORDER;
+/** Every harness the MCP may name — the adapters, plus the native `agentistics` one ONLY while the native
+ *  runtime is visible (`nativeVisibleFrom` over the server's `GET /api/engine`). The native harness is
+ *  experimental: with the flag off the tools must not offer it, exactly as before v2.103. */
+export function harnessIds(nativeVisible: boolean): SurfaceHarnessId[] {
+  return surfaceHarnesses(nativeVisible);
+}
 
-export function harnessParam() {
+export function harnessParam(nativeVisible: boolean) {
+  const ids = harnessIds(nativeVisible);
   return {
     type: "string",
-    enum: ["all", ...SURFACE_HARNESS_ORDER],
-    description: `Scope to one harness (${SURFACE_HARNESS_ORDER.join(" | ")}), or 'all' (default) for the unified view across every harness.`,
-  } as const;
+    enum: ["all", ...ids],
+    description: `Scope to one harness (${ids.join(" | ")}), or 'all' (default) for the unified view across every harness.`,
+  };
+}
+
+/** The tool list with every `harness` parameter re-derived for this gate answer. Pure: never mutates `tools`. */
+export function toolsForGate<T extends { inputSchema: { properties?: Record<string, unknown> } }>(tools: readonly T[], nativeVisible: boolean): T[] {
+  const param = harnessParam(nativeVisible);
+  return tools.map(t => {
+    const props = t.inputSchema.properties;
+    if (!props || !("harness" in props)) return t;
+    return { ...t, inputSchema: { ...t.inputSchema, properties: { ...props, harness: param } } };
+  });
 }

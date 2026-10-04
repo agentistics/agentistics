@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { activeInDays, activeInWindow, dayKey, daysBetween, expandHours, MAX_RANGE_DAYS, sliceSession, type DayUsage } from '../lib/sessionDaySlice'
 import type { AppData, Filters, DateRange, AgentInvocation, SurfaceHarnessId, SessionMeta, TokenBreakdown } from '@agentistics/core'
-import { calcStreak, calcCost, canonicalProjectPath, cutSessionUsage, sessionModelUsage, sessionCostUSD, unpricedTokens, getModelPrice, MODEL_PRICING, HARNESS_CAPABILITIES, filterByUsers, filterByHarnesses, filterByTeams, filterByMachines, resolveMachineCacheScope, distinctHarnesses, mergeStatsCaches, repoShortName, SURFACE_HARNESS_ORDER, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
+import { calcStreak, calcCost, canonicalProjectPath, cutSessionUsage, sessionModelUsage, sessionCostUSD, unpricedTokens, getModelPrice, MODEL_PRICING, withoutHiddenNative, surfaceHarnesses, NATIVE_HARNESS_ID, HARNESS_CAPABILITIES, filterByUsers, filterByHarnesses, filterByTeams, filterByMachines, resolveMachineCacheScope, distinctHarnesses, mergeStatsCaches, repoShortName, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
 import { subDays, isAfter, isBefore, parseISO, format, differenceInCalendarDays, addDays, getDay } from 'date-fns'
 import { makeTagFilter, type TagDef } from '../lib/tagMatch'
 import { subscribeEvent } from '../lib/eventStream'
 import { isUsableDataCache } from '../lib/dataCache'
 import { cacheFiguresOf } from '../lib/cacheFigures'
+import { useNativeVisible } from './useEngineCaps'
 
 /**
  * True only for a non-empty string. `start_time`/`end_time`/`date` fields are typed as `string`
@@ -475,7 +476,12 @@ export function useData() {
 
   const refetch = useCallback(() => startStreamLoad(), [startStreamLoad])
 
-  return { data, loading, loadProgress, error, refetch, liveUpdates, setLiveUpdates, updateInterval, setUpdateInterval }
+  // The ONE place the web receives AppData — the server's answer AND the localStorage cache, which can hold
+  // a native harness recorded while the experimental flag was on. Hidden here, every surface downstream
+  // (filters, Compare, Home, Costs, settings, the PDF) inherits it.
+  const nativeVisible = useNativeVisible()
+  const shown = useMemo(() => (data ? withoutHiddenNative(data, nativeVisible) : data), [data, nativeVisible])
+  return { data: shown, loading, loadProgress, error, refetch, liveUpdates, setLiveUpdates, updateInterval, setUpdateInterval }
 }
 
 /** Start (00:00:00.000) of a Date's UTC calendar day. */
@@ -1055,7 +1061,8 @@ export function computeFilteredHarnessSummaries(data: AppData, filters: Filters)
 
   // Columns: the explicitly selected harnesses, else the harnesses the selected users used
   // (so picking a member narrows the columns), else every harness in the data.
-  const order: SurfaceHarnessId[] = SURFACE_HARNESS_ORDER
+  // `data` is already gated (`useData` → `withoutHiddenNative`), so the native column exists only when it may be seen.
+  const order: SurfaceHarnessId[] = surfaceHarnesses(data.harnesses.includes(NATIVE_HARNESS_ID))
   const userScoped = filterByUsers(data.sessions, usersSel)
   const scopedHarnesses = distinctHarnesses(userScoped)
   const cols: SurfaceHarnessId[] = harnessSel.length > 0

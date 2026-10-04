@@ -17,6 +17,15 @@ function readNativeRuntime(): Promise<boolean> {
   return cached
 }
 
+/**
+ * THE web gate for every native surface: true only once `GET /api/engine` has said the engine provides the
+ * native runtime AND the experimental flag is on. Unknown reads as HIDDEN — a native row must never flash
+ * on a machine where the runtime is off (v2.103 leaked it onto every metrics surface).
+ */
+export function useNativeVisible(): boolean {
+  return useEngineCaps().nativeRuntime === true
+}
+
 export function useEngineCaps(): { nativeRuntime: boolean | null } {
   const [nativeRuntime, setNativeRuntime] = useState<boolean | null>(null)
   useEffect(() => {
