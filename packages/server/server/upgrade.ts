@@ -332,6 +332,18 @@ async function probeBinaryVersion(bin: string, timeoutMs = 20_000): Promise<stri
   }
 }
 
+/** What the server answering THIS machine's port says it runs, or null when nothing answers. */
+async function runningServerVersion(): Promise<string | null> {
+  try {
+    const r = await fetch(`http://127.0.0.1:${PORT}/api/version`, { signal: AbortSignal.timeout(2_000) })
+    if (!r.ok) return null
+    const v = (await r.json() as { current?: unknown }).current
+    return typeof v === 'string' && v ? v : null
+  } catch {
+    return null
+  }
+}
+
 export type RestartOutcome = {
   ok: boolean
   failures: string[]
@@ -425,10 +437,21 @@ async function restartRunningServices(newBin: string): Promise<RestartOutcome> {
       )
       didSomething = true
     } else if (serverPlan.kind === 'outside-service') {
-      failures.push(
-        `agentop server pid ${serverPlan.pids.join(', ')} runs OUTSIDE the agentop-server service — ` +
-        'it was left alone. Stop it (`kill <pid>`), then `systemctl --user restart agentop-server`.',
-      )
+      // The unit owns this data dir. A stray that is provably its own `agentop server` (it holds
+      // our lock — `server-ownership.ts`) is stopped and the UNIT started on the new binary; this
+      // is the 2026-10-04 case, which used to end in "it was left alone" and two hours on the old
+      // version. Only what cannot be proven ours is still left alone.
+      const { startServerUnit } = await import('./server-ownership-io.ts')
+      process.stdout.write(`  agentop server pid ${serverPlan.pids.join(', ')} runs outside the agentop-server service — handing it over to the service…\n`)
+      const res = await startServerUnit()
+      process.stdout.write(`    ${res.message}\n`)
+      if (!res.ok) {
+        failures.push(
+          `agentop server pid ${serverPlan.pids.join(', ')} runs OUTSIDE the agentop-server service and could not be handed over: ${res.message}`,
+        )
+      }
+      // The unit answers on PORT once it is up, so the version poll below has something to confirm.
+      restartedServer = res.ok
       didSomething = true
     } else if (serverPlan.kind === 'detached') {
       const res = await handOverUnmanagedServers(serverPlan.pids, newBin)
@@ -995,6 +1018,18 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
 
   if (!info.hasUpdate) {
     console.log(`Already on the latest version (${_GR}${_B}v${info.current}${_R}).`)
+    // The BINARY is current; the running SERVER may not be (2026-10-04: v2.103.1 installed, a
+    // v2.101.2 server outside the unit kept serving). Then the restart is the whole job, not a
+    // needless one — and it is the only one this branch ever does.
+    const running = await runningServerVersion()
+    if (running && compareVersions(running, info.current) < 0) {
+      process.stdout.write(`  The running server is v${running} — moving it onto the installed v${info.current}…\n`)
+      const outcome = await restartRunningServices(process.execPath)
+      for (const f of outcome.failures) process.stderr.write(`  ${_Y}${f}${_R}\n`)
+      writeProgress({ stage: outcome.ok ? 'done' : 'failed', version: info.current, ...(outcome.ok ? {} : { reason: outcome.failures[0] ?? 'restart failed' }) })
+      clearUpgradeFailure()
+      return outcome.ok ? 0 : 1
+    }
     writeProgress({ stage: 'done', version: info.current })
     clearUpgradeFailure()
     return 0

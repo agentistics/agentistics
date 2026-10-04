@@ -131,8 +131,9 @@ import { reopenedSessionRoute, sessionPath } from './lib/sessionRoute'
 import { SessionTitleFlag } from './components/sessions/SessionTitleFlag'
 import { ChatSelectionOverlay } from './components/sessions/ChatSelectionBar'
 import { brandAsset } from './lib/brand'
+import { healStaleBundle, takeUpdatedToast } from './lib/bundleVersion'
 import { promptDismissedFor, promptExit, shouldShowToast, versionRefetchDue, type PromptExit, type VersionAnswer } from './lib/updateToast'
-import { consumeRestore, snoozeUpdate, startUpgrade, useUpdateSnooze, useUpgradeFlow } from './lib/upgradeFlow'
+import { consumeRestore, snoozeUpdate, startUpgrade, upgradeInFlight, useUpdateSnooze, useUpgradeFlow } from './lib/upgradeFlow'
 import { NayUpdateCard, type UpdateCardPlacement } from './components/nay/NayUpdateCard'
 import { UpgradeOverlay } from './components/UpgradeOverlay'
 import { UpdateFinale } from './components/UpdateFinale'
@@ -2719,8 +2720,12 @@ export default function AppLayout() {
       first = false
       fetch('/api/version', { cache: 'no-store' })
         .then(r => r.ok ? r.json() : null)
-        .then((info: VersionAnswer | null) => {
+        .then(async (info: VersionAnswer | null) => {
           if (!info || cancelled) return
+          // A bundle the server is not running (a service worker's precached copy of a previous
+          // release) drops the worker + caches and reloads ONCE onto the server's own version
+          // (`bundleVersion.ts`). Checked on load, on every poll, on focus and on reconnect.
+          if (!upgradeInFlight() && (await healStaleBundle(info.current)).kind === 'reload') return
           setVersionAnswer(info)
           if (!isFirst) return
           // Back from an in-place upgrade on the bundle it was for: put the person where they were
@@ -2735,16 +2740,23 @@ export default function AppLayout() {
         })
         .catch(() => {})
     }
+    // The reload above leaves one line behind it: "Agentistics atualizado para vX".
+    const updatedTo = takeUpdatedToast()
+    if (updatedTo) pushNotification({ type: 'success', code: 'app.updated', meta: { version: updatedTo } })
     check('interval')
     const tick = window.setInterval(() => check('interval'), 60_000)
     const onVisible = () => check('focus')
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', onVisible)
+    // Back online (a phone that lost the server while it restarted) is the moment a stale bundle
+    // is most likely: ask at once.
+    window.addEventListener('online', onVisible)
     return () => {
       cancelled = true
       window.clearInterval(tick)
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
+      window.removeEventListener('online', onVisible)
     }
   }, [])
 

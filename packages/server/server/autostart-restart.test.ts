@@ -53,6 +53,9 @@ function fake(world: World) {
     },
     observe: async () => world.serving(restarts),
     parentOf: async () => null,
+    // NEVER the real `reclaimStrayServer`: it probes the real data dir's lock and could stop the
+    // machine's own server. The default here proves nothing, so nothing is taken back.
+    reclaim: async () => ({ kind: 'unproven', pid: 0 }),
     strings: cliStrings('en'),
     unitDir,
     timeoutMs: 5_000,
@@ -184,6 +187,7 @@ describe('restartAutostart — the claim is verified by observation', () => {
         if (cmd.includes('restart')) restarts += 1
         return { code: 0, stdout: '', stderr: '' }
       },
+      reclaim: async () => ({ kind: 'none' }),
       strings: cliStrings('en'),
       unitDir,
       sleep: async (ms) => { clock += ms },
@@ -195,5 +199,36 @@ describe('restartAutostart — the claim is verified by observation', () => {
     expect(res.ok).toBe(true)
     expect(res.message).toContain('40')
     expect(res.message).toContain('41')
+  })
+
+  test('a server outside the unit that is PROVABLY ours is stopped, and the unit is restarted onto it (2026-10-04)', async () => {
+    let stopped = false
+    const w = fake({
+      show: showOk(0, 'failed'),
+      restartCode: 0,
+      serving: (n) => n === 0 ? (stopped ? { pid: null, answering: false } : { pid: 555, answering: true }) : { pid: 600, answering: true },
+    })
+    w.deps.reclaim = async () => { stopped = true; return { kind: 'reclaimed', pid: 555 } }
+    const res = await restartAutostart('server', w.deps)
+    expect(res.ok).toBe(true)
+    expect(res.message).toContain('Stopped agentop server pid 555')
+    expect(res.message).toContain('Started agentop-server')
+    // A unit left failed by the refused start is cleared before the restart, or it never retries.
+    const verbs = w.verbs()
+    expect(verbs.indexOf('reset-failed')).toBeGreaterThan(-1)
+    expect(verbs.indexOf('reset-failed')).toBeLessThan(verbs.indexOf('restart'))
+  })
+
+  test('a reclaim that stopped a DIFFERENT pid than the listener proves nothing → still refused', async () => {
+    const w = fake({
+      show: showOk(0, 'inactive'),
+      restartCode: 0,
+      serving: () => ({ pid: 555, answering: true }),
+    })
+    w.deps.reclaim = async () => ({ kind: 'reclaimed', pid: 777 })
+    const res = await restartAutostart('server', w.deps)
+    expect(res.ok).toBe(false)
+    expect(res.message).toContain('pid 555')
+    expect(w.verbs()).not.toContain('restart')
   })
 })

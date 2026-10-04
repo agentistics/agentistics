@@ -91,3 +91,30 @@ export function isServerCommand(command: string): boolean {
   if (i === 2 && isRuntime(argv[0]!) && isScript(argv[1]!)) return true
   return false
 }
+
+/**
+ * The data directory a process would use, from its own environment — PURE. Mirrors `config.ts`'s
+ * rule (`AGENTISTICS_DIR`, else `$HOME/.agentistics`). `null` when the environment does not say.
+ */
+export function dataDirOfEnv(environ: string): string | null {
+  const env = new Map<string, string>()
+  for (const kv of environ.split('\0')) {
+    const i = kv.indexOf('=')
+    if (i > 0) env.set(kv.slice(0, i), kv.slice(i + 1))
+  }
+  const explicit = env.get('AGENTISTICS_DIR')
+  if (explicit) return explicit.replace(/\/+$/, '')
+  const home = env.get('HOME')
+  return home ? `${home.replace(/\/+$/, '')}/.agentistics` : null
+}
+
+/**
+ * Which idle servers a "stop extra copies" may signal — PURE. Only those of THIS data dir (another
+ * HOME's preview or test server is somebody else's work, and the planLocalStop incident was exactly
+ * a stop that reached them), never the lock holder (the one that actually serves), never ourselves.
+ */
+export function stoppableIdle(o: { idle: readonly number[]; dataDirOf: (pid: number) => string | null; ours: string; lockHolder: number | null; self: number }): number[] {
+  const ours = o.ours.replace(/\/+$/, '')
+  return o.idle.filter(pid => pid !== o.self && pid !== o.lockHolder && o.dataDirOf(pid) === ours)
+}
+

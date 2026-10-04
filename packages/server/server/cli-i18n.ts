@@ -138,6 +138,9 @@ export interface CliStrings {
   svcConflict: (runtimes: string[]) => string
   /** A second copy under the SAME runtime, serving nothing. Names the pid — see ControlService.idle. */
   svcIdleServer: (pids: number[]) => string
+  actStopIdle: string
+  idleStopped: (n: number) => string
+  idleNoneLeft: string
   /** A stop/restart named something that is not running. */
   svcNotRunning: string
 
@@ -631,8 +634,11 @@ const EN: CliStrings = {
   svcCentral: 'agentistics central',
   svcConflict: (runtimes) => `conflict: ${runtimes.join(' + ')} both running — stop one`,
   svcIdleServer: pids => pids.length === 1
-    ? `a second server (pid ${pids[0]}) is running and serving nothing — kill ${pids[0]}`
-    : `${pids.length} extra servers are running and serving nothing — kill ${pids.join(' ')}`,
+    ? `a second server (pid ${pids[0]}) is running and serving nothing — "Stop extra copies" removes it`
+    : `${pids.length} extra servers (pids ${pids.join(', ')}) are running and serving nothing — "Stop extra copies" removes them`,
+  actStopIdle: 'Stop extra copies',
+  idleStopped: n => n === 1 ? 'stopped the extra server.' : `stopped ${n} extra servers.`,
+  idleNoneLeft: 'no extra servers are running any more.',
   svcNotRunning: 'that service is not running.',
 
   sessState: {
@@ -1078,8 +1084,11 @@ const PT: CliStrings = {
   svcCentral: 'agentistics central',
   svcConflict: (runtimes) => `conflito: ${runtimes.join(' + ')} rodando juntos — pare um`,
   svcIdleServer: pids => pids.length === 1
-    ? `um segundo servidor (pid ${pids[0]}) está rodando sem servir nada — encerre ${pids[0]}`
-    : `${pids.length} servidores extras rodando sem servir nada — encerre ${pids.join(' ')}`,
+    ? `um segundo servidor (pid ${pids[0]}) está rodando sem servir nada — "Parar cópias extras" o encerra`
+    : `${pids.length} servidores extras (pids ${pids.join(', ')}) rodando sem servir nada — "Parar cópias extras" os encerra`,
+  actStopIdle: 'Parar cópias extras',
+  idleStopped: n => n === 1 ? 'o servidor extra foi encerrado.' : `${n} servidores extras foram encerrados.`,
+  idleNoneLeft: 'não há mais servidores extras rodando.',
   svcNotRunning: 'esse serviço não está rodando.',
 
   sessState: {

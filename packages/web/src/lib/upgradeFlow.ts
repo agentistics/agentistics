@@ -103,6 +103,20 @@ function rememberWhereIAm(target: string, from: string): void {
   } catch { /* storage blocked: the reload keeps the URL anyway, only the scroll is lost */ }
 }
 
+/** "Já está atualizado": no install ran, so no finale — the page simply reloads onto a fresh
+ *  bundle. The restore snapshot taken above is dropped so a later reload does not replay one. */
+async function reloadOntoCurrent(): Promise<void> {
+  try { sessionStorage.removeItem(RESTORE_KEY) } catch { /* blocked */ }
+  set({ phase: 'idle' })
+  await clearAppCaches(browserReloadEnv())
+  window.location.reload()
+}
+
+/** Is an in-app upgrade in flight? It reloads the page itself when the new version arrives. */
+export function upgradeInFlight(): boolean {
+  return state.phase === 'running' || state.phase === 'arrived'
+}
+
 /**
  * Start the install. Idempotent while one is running. `lang` picks the language of the server's
  * refusal sentence.
@@ -113,13 +127,18 @@ export async function startUpgrade(target: string, lang: 'pt' | 'en'): Promise<v
   const startedAt = Date.now()
   const before = await getJson<{ current?: string }>('/api/version')
   const from = typeof before?.current === 'string' ? before.current : ''
+  // A stale popup offering the version this server ALREADY runs: nothing to install and nothing to
+  // restart (two needless restarts on 2026-10-04 took the app and the phone offline). The page is
+  // the stale thing — drop its cached bundle and reload onto the server's.
+  if (from && upgradeArrived(before, target)) { await reloadOntoCurrent(); return }
   set({ phase: 'running', target, from, startedAt, view: rawStep({ startedAt, progress: null, quietPolls: 0, arrived: false }), bytes: null, rate: null, message: null })
   rememberWhereIAm(target, from)
 
   try {
     const res = await fetch(`/api/upgrade?lang=${lang}`, { method: 'POST' })
-    const body = await res.json().catch(() => ({})) as { ok?: boolean; message?: string }
+    const body = await res.json().catch(() => ({})) as { ok?: boolean; message?: string; alreadyCurrent?: boolean }
     if (!res.ok || !body.ok) { if (id === runId) set({ phase: 'failed', message: body.message ?? null }); return }
+    if (body.alreadyCurrent) { await reloadOntoCurrent(); return }
   } catch {
     if (id === runId) set({ phase: 'failed', message: null })
     return

@@ -73,6 +73,11 @@ export function upgradableHint(info: { hasUpdate: boolean; latest: string } | nu
   return upgradeBinary(process.execPath) ? null : 'not-a-binary'
 }
 
+/** The sentence for a press on a version this server already runs. */
+export function alreadyCurrentMessage(version: string, lang: CliLang): string {
+  return lang === 'pt' ? `Já está atualizado (v${version}).` : `Already up to date (v${version}).`
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -115,6 +120,12 @@ export async function handleUpgradeRoute(
     hasUpdate: info?.hasUpdate === true,
     latest: info?.latest ?? null,
   })
+  // ALREADY ON IT: a stale popup (a page still running an older bundle) offers the version this
+  // server already runs. Spawning the upgrade there restarted the server for nothing — twice on
+  // 2026-10-04, taking the app and the phone offline. Answer it, start nothing; the page reloads.
+  if (!decision.ok && decision.reason === 'up-to-date' && info?.current) {
+    return json({ ok: true, alreadyCurrent: true, version: info.current, message: alreadyCurrentMessage(info.current, lang) })
+  }
   if (!decision.ok) return refuse(decision.reason, lang, ip)
 
   const bin = upgradeBinary(process.execPath)
