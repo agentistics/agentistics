@@ -15,5 +15,8 @@
   "stormCpuPct": 60,
   "stormFleetP95Ms": 1000,
   "stormDataP95Ms": 500,
-  "stormEchoP95Ms": 2000
+  "stormEchoP95Ms": 2000,
+  "_comment_inflight": "STREAM.FIX: keys ending in Min are FLOORS. The fake claude prints its answer word by word over 1.5 s; the chat's live-answer reader must see it grow at least this many times before the finished turn arrives, and must have something to draw this soon after the send.",
+  "inflightGrowthStepsMin": 3,
+  "sendToLiveAnswerP95Ms": 1500
 }
