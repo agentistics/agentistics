@@ -268,6 +268,130 @@ fn spawn_sidecar(
     Ok(())
 }
 
+// ── Who runs the server ───────────────────────────────────────────────────────
+//
+// 2026-10-04 (docs/incidents/2026-10-04-server-outside-unit.md): a server started beside the WSL
+// `agentop-server` systemd unit holds the data directory, the unit is refused and stays failed, and
+// the machine keeps serving whatever version that copy was. So this app never starts a server of
+// its own when one already answers, and for a WSL source whose distro has the unit installed it
+// starts THE UNIT (through wsl.exe) and waits for it. Only a source with neither gets the sidecar.
+
+const SERVER_UNIT: &str = "agentop-server";
+
+/// The distro a `\\wsl.localhost\<distro>\…` or `\\wsl$\<distro>\…` path lives in.
+fn wsl_distro_of(path: &str) -> Option<String> {
+    let p = path.replace('/', "\\");
+    let lower = p.to_ascii_lowercase();
+    let rest = if lower.starts_with("\\\\wsl.localhost\\") {
+        &p["\\\\wsl.localhost\\".len()..]
+    } else if lower.starts_with("\\\\wsl$\\") {
+        &p["\\\\wsl$\\".len()..]
+    } else {
+        return None;
+    };
+    let distro = rest.split('\\').next().unwrap_or("");
+    // The same closed alphabet the server's autostart validates a distro name against.
+    if !distro.is_empty() && distro.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c)) {
+        Some(distro.to_string())
+    } else {
+        None
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum LaunchPlan {
+    /// Something already answers on the API port — use it, start nothing.
+    AlreadyServing,
+    /// The source's distro has the `agentop-server` unit: start it, never a second server.
+    StartWslUnit(String),
+    /// No server, no unit: the bundled sidecar is the only way to get one.
+    Sidecar,
+}
+
+fn plan_launch(serving: bool, distro: Option<&str>, unit_installed: bool) -> LaunchPlan {
+    if serving {
+        return LaunchPlan::AlreadyServing;
+    }
+    match distro {
+        Some(d) if unit_installed => LaunchPlan::StartWslUnit(d.to_string()),
+        _ => LaunchPlan::Sidecar,
+    }
+}
+
+/// A `wsl.exe -d <distro> --exec /bin/sh -c <script>` that runs hidden. `--exec` skips the login
+/// shell, so the user bus is pointed at explicitly — without XDG_RUNTIME_DIR `systemctl --user`
+/// cannot reach the manager at all.
+fn wsl_sh(distro: &str, script: &str) -> std::process::Command {
+    let mut cmd = std::process::Command::new("wsl.exe");
+    let full = format!(
+        "export XDG_RUNTIME_DIR=\"${{XDG_RUNTIME_DIR:-/run/user/$(id -u)}}\"; {script}"
+    );
+    cmd.args(["-d", distro, "--exec", "/bin/sh", "-c", &full]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    cmd
+}
+
+fn wsl_unit_installed(distro: &str) -> bool {
+    wsl_sh(distro, &format!("test -f \"$HOME/.config/systemd/user/{SERVER_UNIT}.service\""))
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// `reset-failed` first: a unit refused while a stray held the data dir stays failed otherwise.
+/// The unit's own start takes back a stray that is provably its own server (`server-ownership.ts`).
+fn start_wsl_unit(distro: &str) -> Result<(), String> {
+    let out = wsl_sh(
+        distro,
+        &format!("systemctl --user reset-failed {SERVER_UNIT} 2>/dev/null; systemctl --user start {SERVER_UNIT}"),
+    )
+    .output()
+    .map_err(|e| format!("could not run wsl.exe: {e}"))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "systemctl --user start {SERVER_UNIT} failed in {distro}: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ))
+    }
+}
+
+async fn server_answers() -> bool {
+    let Ok(client) = reqwest::Client::builder().timeout(Duration::from_millis(800)).build() else {
+        return false;
+    };
+    client.get(HEALTH_URL).send().await.map(|r| r.status().is_success()).unwrap_or(false)
+}
+
+/// Bring a server up the one right way for this source, then navigate once it answers.
+async fn launch(
+    app: AppHandle,
+    child_handle: Arc<Mutex<Option<Child>>>,
+    claude_dir: String,
+    config_path: PathBuf,
+) -> Result<(), String> {
+    let serving = server_answers().await;
+    let distro = wsl_distro_of(&claude_dir);
+    let unit = match (&distro, serving) {
+        (Some(d), false) => wsl_unit_installed(d),
+        _ => false,
+    };
+    let plan = plan_launch(serving, distro.as_deref(), unit);
+    log_error(&format!("launch plan: {plan:?}"));
+    match plan {
+        LaunchPlan::AlreadyServing => {}
+        LaunchPlan::StartWslUnit(d) => start_wsl_unit(&d)?,
+        LaunchPlan::Sidecar => spawn_sidecar(&app, &child_handle, &claude_dir)?,
+    }
+    navigate_after_ready(app, config_path);
+    Ok(())
+}
+
 fn navigate_after_ready(app: AppHandle, config_path: PathBuf) {
     tauri::async_runtime::spawn(async move {
         let ready = wait_for_server().await;
@@ -324,9 +448,8 @@ async fn launch_with_config(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
-    spawn_sidecar(&app, &state.child_handle, &claude_dir)?;
-    write_config(&state.config_path, &Config { claude_dir: claude_dir.clone() })?;
-    navigate_after_ready(app, state.config_path.clone());
+    launch(app, state.child_handle.clone(), claude_dir.clone(), state.config_path.clone()).await?;
+    write_config(&state.config_path, &Config { claude_dir })?;
     Ok(())
 }
 
@@ -444,12 +567,14 @@ fn main() {
             // If already configured, start the sidecar right away.
             let cfg_path = config_path();
             if let Some(config) = read_config(&cfg_path) {
-                if spawn_sidecar(&handle, &child_handle, &config.claude_dir).is_ok() {
-                    navigate_after_ready(handle, cfg_path);
-                } else {
-                    // Sidecar failed — clear config so onboarding shows on next launch
-                    let _ = std::fs::remove_file(&cfg_path);
-                }
+                let child_handle = child_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = launch(handle, child_handle, config.claude_dir, cfg_path.clone()).await {
+                        log_error(&format!("launch failed: {e}"));
+                        // Clear config so onboarding shows on next launch
+                        let _ = std::fs::remove_file(&cfg_path);
+                    }
+                });
             }
             // Otherwise the JS onboarding calls launch_with_config.
             Ok(())
@@ -467,4 +592,35 @@ fn main() {
             log_error(&msg);
             show_error_dialog("Agentistics — Fatal Error", &msg);
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn distro_is_read_off_both_unc_spellings() {
+        assert_eq!(wsl_distro_of("\\\\wsl.localhost\\Ubuntu-22.04\\home\\u\\.claude").as_deref(), Some("Ubuntu-22.04"));
+        assert_eq!(wsl_distro_of("\\\\wsl$\\Debian\\root\\.claude").as_deref(), Some("Debian"));
+        assert_eq!(wsl_distro_of("//wsl.localhost/Ubuntu/home/u/.claude").as_deref(), Some("Ubuntu"));
+        assert_eq!(wsl_distro_of("C:\\Users\\u\\.claude"), None);
+        assert_eq!(wsl_distro_of("\\\\wsl.localhost\\bad;name\\x"), None);
+    }
+
+    #[test]
+    fn a_server_that_answers_is_used_never_duplicated() {
+        assert_eq!(plan_launch(true, Some("Ubuntu"), true), LaunchPlan::AlreadyServing);
+        assert_eq!(plan_launch(true, None, false), LaunchPlan::AlreadyServing);
+    }
+
+    #[test]
+    fn a_wsl_source_with_the_unit_starts_the_unit() {
+        assert_eq!(plan_launch(false, Some("Ubuntu"), true), LaunchPlan::StartWslUnit("Ubuntu".into()));
+    }
+
+    #[test]
+    fn the_sidecar_only_without_server_or_unit() {
+        assert_eq!(plan_launch(false, Some("Ubuntu"), false), LaunchPlan::Sidecar);
+        assert_eq!(plan_launch(false, None, false), LaunchPlan::Sidecar);
+    }
 }
