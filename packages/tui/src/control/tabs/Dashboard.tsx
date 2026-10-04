@@ -20,7 +20,7 @@
  */
 
 import React, { useEffect, useMemo } from 'react'
-import type { HarnessId } from '@agentistics/core'
+import type { SurfaceHarnessId } from '@agentistics/core'
 import type { ControlStatus } from '../types'
 import type { CliLang } from '../lang'
 import type { ControlStrings } from '../i18n'
@@ -59,7 +59,7 @@ export function Dashboard({ status, strings: s, lang, width, height, isActive, n
 
   // Before the nav, because the pager counts the rows the screens actually draw. The harness filter
   // is read from the nav one render late: a re-render follows the nav's own change anyway.
-  const [harness, setHarness] = React.useState<HarnessId | null>(null)
+  const [harness, setHarness] = React.useState<SurfaceHarnessId | null>(null)
   const figures = useProjectedFigures(source.kind === 'api' ? source.apiBase : null, {
     enabled: isActive, harness, stamp: data, nonce,
   })

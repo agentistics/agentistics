@@ -40,6 +40,7 @@ import { resolveBackend } from './index'
 import { scanProcesses } from '../live-sessions'
 import { loadHarnessSessions } from './harness-sessions'
 import { createSessionsPoller, type SessionSnapshot } from './sessions-host'
+import { loadNativeFleet, resolveNativeRef, runNativeVerb } from './native-fleet'
 import { isServerProcess, readServerSnapshot } from './shared-snapshot'
 import { needsAttention, type SessionView } from './session-view'
 import { planTaskReopen, taskReopenSucceeded } from './task-reopen'
@@ -76,6 +77,11 @@ const USAGE = `Usage:
   agentop session kill   <id|name>
   agentop session rename <id|name> "label"
   agentop session note   <id|name> "text"
+  agentop session archive|unarchive|delete <ses_…>
+
+  A NATIVE Agentistics session (\`ses_…\`, the engine's own) takes \`kill\` (end), \`rename\`, and the
+  three above; a prefix is enough when it is unique. \`archive\` and \`delete\` need it ended first —
+  \`delete\` is permanent.
 
   \`ls\` is the table a PERSON reads: aligned columns, one section per project, and only what is
   running — \`--all\` adds the finished, lost and closed conversations, \`--group\` changes the
@@ -192,6 +198,20 @@ export async function runSession(argv: string[]): Promise<number> {
   if (cmd.kind === 'help') { console.log(USAGE); return 0 }
   if (cmd.kind === 'error') { console.error(cmd.message); console.error(`\n${USAGE}`); return 1 }
 
+  // A NATIVE session (`ses_…`) is the engine's: no pane, no registry record, no tmux — so it is
+  // answered BEFORE the backend is asked, and a machine without tmux can still end or rename one.
+  if ((cmd.kind === 'kill' || cmd.kind === 'rename') && cmd.ref.startsWith('ses_')) {
+    return nativeCliVerb(cmd.kind, cmd.ref, cmd.kind === 'rename' ? cmd.label : undefined)
+  }
+  // The store verbs exist ONLY for native sessions; a managed handle is refused in words, before tmux.
+  if (cmd.kind === 'archive' || cmd.kind === 'unarchive' || cmd.kind === 'delete') {
+    if (!cmd.ref.startsWith('ses_')) {
+      console.error(`\`${cmd.kind}\` is for native Agentistics sessions (ids starting with ses_). For a terminal session use \`agentop session kill\`.`)
+      return 1
+    }
+    return nativeCliVerb(cmd.kind, cmd.ref)
+  }
+
   const backend = await resolveBackend()
   const blocked = await backend.unavailable()
   if (blocked) { console.error(blocked); return 1 }
@@ -242,6 +262,23 @@ export async function runSession(argv: string[]): Promise<number> {
  * between 1.5s and 3s, so that check would have reported "started" for the very session it exists
  * to catch.
  */
+/** `agentop session kill|rename ses_…` — the engine's lifecycle, through `native-fleet.ts`. */
+async function nativeCliVerb(kind: 'kill' | 'rename' | 'archive' | 'unarchive' | 'delete', ref: string, label?: string): Promise<number> {
+  const lang = await resolveLang()
+  const rows = await loadNativeFleet(lang, { includeArchived: true })
+  const found = resolveNativeRef(rows, ref)
+  if (!found.ok) {
+    console.error(found.reason === 'ambiguous'
+      ? `"${ref}" matches several native sessions: ${found.matches.join(', ')}.`
+      : `No native session matches "${ref}". (Is the native harness enabled? \`agentop experimental status\`)`)
+    return 1
+  }
+  const out = await runNativeVerb(found.id, kind, lang, label !== undefined ? { title: label } : {})
+  if (!out.ok) { console.error(out.message); return 1 }
+  console.log(`${found.id} — ${out.message}`)
+  return 0
+}
+
 async function spawnFailure(backend: SessionBackend, id: string, bin?: string): Promise<string | undefined> {
   const outcome = await spawnDeath(backend, id)
   if (!outcome) return undefined
@@ -762,7 +799,7 @@ async function ls(
   backend: SessionBackend,
 ): Promise<number> {
   const snap = await pollFleet(backend)
-  if (cmd.json) { console.log(JSON.stringify(fleetJson(snap), null, 2)); return 0 }
+  if (cmd.json) { console.log(JSON.stringify(await withNativeJson(fleetJson(snap)), null, 2)); return 0 }
 
   const lang = await resolveLang()
   const s = cliStrings(lang)
@@ -781,7 +818,8 @@ async function ls(
   // A preferences file that cannot be read costs the "finished" mark on a task heading, never the
   // table: the fleet is what the command is for.
   const finishedTasks = await readPreferences().then(p => p.finishedTasks ?? []).catch(() => [])
-  const fleet = snap.sessions.map((v, i) => toControlSession(v, s, facts[i]))
+  // NATIVE.LIFE: the engine's own sessions are rows of the same table (`native-fleet.ts`).
+  const fleet = [...snap.sessions.map((v, i) => toControlSession(v, s, facts[i])), ...await loadNativeFleet(lang)]
   // `sessionRunning` rather than a state list of our own: an EXTERNAL row is running — it exists
   // because `/proc` found a live assistant — and what cannot be read there is its activity, never
   // whether it is alive.
@@ -849,12 +887,17 @@ async function list(backend: SessionBackend, json = false): Promise<number> {
   const snap = await pollFleet(backend)
 
   if (json) {
-    console.log(JSON.stringify(fleetJson(snap), null, 2))
+    console.log(JSON.stringify(await withNativeJson(fleetJson(snap)), null, 2))
     return 0
   }
 
+  const native = await loadNativeFleet(await resolveLang())
   if (snap.unavailable) console.error(snap.unavailable)
+  // The native sessions are the engine's; tab-separated in the same five columns, so a script reading
+  // `list` needs no second parser. Printed first because the managed list below may be empty.
+  for (const n of native) console.log(`${n.id}\t${n.stateLabel}\t${n.harness}\t${n.named ? n.title : ''}\t${n.cwd}`)
   if (snap.sessions.length === 0) {
+    if (native.length > 0) return 0
     // Only claim "nothing is running" when the poll actually succeeded — an unavailable backend has
     // not established that, and saying so would be a confident zero.
     if (!snap.unavailable) console.log('No sessions.')
@@ -887,6 +930,14 @@ async function list(backend: SessionBackend, json = false): Promise<number> {
     console.log(`Approval detection is not available for: ${blind.join(', ')} — those sessions show as "waiting" either way.`)
   }
   return 0
+}
+
+/** The `--json` fleet plus the native sessions, as their own key so an existing reader is untouched. */
+async function withNativeJson(json: unknown): Promise<unknown> {
+  const native = await loadNativeFleet(await resolveLang())
+  return native.length > 0
+    ? { ...(json as object), native: native.map(n => ({ id: n.id, harness: n.harness, state: n.state, title: n.title, cwd: n.cwd, model: n.model ?? null })) }
+    : json
 }
 
 async function attach(ref: string, backend: SessionBackend): Promise<number> {

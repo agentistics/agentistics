@@ -27,7 +27,7 @@ import {
   CAPABILITY_STATES,
   capabilityReason,
   capabilitySupported,
-  HARNESS_ORDER,
+  SURFACE_HARNESS_ORDER,
   totalTokens,
   type CapabilityMetric,
   type CapabilityState,
@@ -95,7 +95,8 @@ const KNOWN_PROVIDERS: Record<ProviderId, true> = {
   anthropic: true, openai: true, google: true, moonshot: true, 'openai-compatible': true, other: true,
 }
 /** Every harness a fact can carry: the adapter harnesses plus the native runtime. */
-export const RUN_HARNESS_ORDER: readonly RunHarness[] = [...HARNESS_ORDER, 'agentistics']
+/** Every harness a run can name — the surface registry (adapters + the native one), never a second list. */
+export const RUN_HARNESS_ORDER: readonly RunHarness[] = SURFACE_HARNESS_ORDER
 const KNOWN_HARNESSES = new Set<string>(RUN_HARNESS_ORDER)
 
 /**
@@ -214,7 +215,7 @@ export function parseMetricsQuery(params: URLSearchParams): ParseResult {
     }
     for (const v of values) {
       if (dim === 'harness' && !KNOWN_HARNESSES.has(v)) {
-        return refuse('unknown_harness', `"${v}" is not a harness this product knows (${HARNESS_ORDER.join(', ')}).`, dim, v)
+        return refuse('unknown_harness', `"${v}" is not a harness this product knows (${RUN_HARNESS_ORDER.join(', ')}).`, dim, v)
       }
       if (dim === 'provider' && v !== '' && !(v in KNOWN_PROVIDERS)) {
         return refuse('unknown_provider', `"${v}" is not a provider id (${Object.keys(KNOWN_PROVIDERS).join(', ')}); an empty value selects rows that named no provider.`, dim, v)

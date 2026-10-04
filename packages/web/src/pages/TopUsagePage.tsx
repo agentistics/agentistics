@@ -8,7 +8,7 @@ import { MetricNote } from '../components/MetricNote'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../lib/harness'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { rankTop, rankTopFromCaches, cacheTotalsUsable, shareOf, type TopDimension, type TopMetric, type TopEntry } from '../lib/topUsage'
-import type { HarnessId } from '@agentistics/core'
+import type { SurfaceHarnessId } from '@agentistics/core'
 
 const METRICS: Array<{ id: TopMetric; en: string; pt: string }> = [
   { id: 'cost', en: 'Cost', pt: 'Custo' },
@@ -68,7 +68,7 @@ export default function TopUsagePage() {
 
   const labelFor = (dim: TopDimension, key: string): string => {
     switch (dim) {
-      case 'harness': return HARNESS_LABELS[key as HarnessId] ?? key
+      case 'harness': return HARNESS_LABELS[key as SurfaceHarnessId] ?? key
       case 'project': return formatProjectName(key)
       case 'repo': return repoShortName(key)
       case 'machine': return machineName(key)
@@ -77,7 +77,7 @@ export default function TopUsagePage() {
   }
 
   const colourFor = (dim: TopDimension, key: string): string | null =>
-    dim === 'harness' ? (HARNESS_COLORS[key as HarnessId] ?? null) : null
+    dim === 'harness' ? (HARNESS_COLORS[key as SurfaceHarnessId] ?? null) : null
 
   // One factor for the whole page. The RANKING is unaffected — a linear rescale cannot reorder
   // anything — so what changes is the magnitude, and the note below says these are shares of a

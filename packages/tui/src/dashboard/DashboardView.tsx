@@ -15,7 +15,7 @@
 
 import React from 'react'
 import { Box, Text } from 'ink'
-import type { AppData, HarnessId } from '@agentistics/core'
+import type { AppData, SurfaceHarnessId } from '@agentistics/core'
 import { calcStreak } from '@agentistics/core'
 import { Overview } from '../screens/Overview'
 import { Projects } from '../screens/Projects'

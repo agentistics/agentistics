@@ -24,7 +24,7 @@
  */
 
 import { format, parseISO } from 'date-fns'
-import type { HarnessId, SessionMeta } from '@agentistics/core'
+import type { SurfaceHarnessId, SessionMeta } from '@agentistics/core'
 import { canonicalProjectPath, sessionCostUSD, sessionModelUsage, calcCost, sessionTokenTotal, totalTokens, usageTokens } from '@agentistics/core'
 
 /** What a board is ranked by. The same three `topUsage.ts` offers, and for the same reason. */
@@ -154,7 +154,7 @@ export function rankModels(sessions: readonly SessionMeta[], metric: TopMetric, 
 export function rankHarnesses(sessions: readonly SessionMeta[], metric: TopMetric, limit = 5): Board {
   const acc = new Map<string, Leader>()
   for (const s of sessions) {
-    const key: HarnessId = s.harness ?? 'claude'
+    const key: SurfaceHarnessId = s.harness ?? 'claude'
     const e = acc.get(key) ?? blank(key)
     e.cost += sessionCostUSD(s) ?? 0
     e.tokens += sessionTokenTotal(s)

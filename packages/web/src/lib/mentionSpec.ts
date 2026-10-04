@@ -66,6 +66,7 @@ export const PLAIN_MENTION_SPEC: MentionSpec = {
   verified: 'unverified — plain backtick form, safe for any harness',
 }
 
+// @harness-adapters-only: how a CLI's composer spells a file mention; the native chat has its own composer.
 export const MENTION_SPECS: Record<HarnessId, MentionSpec | null> = {
   claude: {
     file: path => `@${path}`,

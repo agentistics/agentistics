@@ -1,6 +1,6 @@
 import React from 'react'
 import { Box, Text } from 'ink'
-import type { HarnessId } from '@agentistics/core'
+import type { SurfaceHarnessId } from '@agentistics/core'
 import { COLORS, HARNESS_COLOR, HARNESS_LABEL } from '../theme'
 import { windowOffset } from '../control/nav'
 import type { TuiStrings } from '../i18n'
@@ -23,7 +23,7 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 export function FilterOverlay({ s, options, selected, max = Number.MAX_SAFE_INTEGER }: {
   s: TuiStrings
   /** null is the "all harnesses" entry, always first. */
-  options: (HarnessId | null)[]
+  options: (SurfaceHarnessId | null)[]
   selected: number
   /**
    * How many rows the list may draw.

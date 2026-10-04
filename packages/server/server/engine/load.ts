@@ -130,6 +130,27 @@ export function engine(): HostEngine | null {
   return loaded?.engine ?? null
 }
 
+/**
+ * Ask the engine one of its own routes IN-PROCESS — what a host surface (the data build, the fleet, the
+ * CLI) does when it needs the engine's answer without going back out through its own HTTP door. The same
+ * route list the HTTP door walks, so a path is reachable here exactly when it is reachable there. `null`:
+ * no engine (a community build, switched off, refused), or no route of its owns that path. The CALLER
+ * decides whether the native gate (`native-gate.ts`) allows asking; the engine's own `central` and
+ * `flag-off` refusals still apply.
+ */
+export async function engineFetch(path: string, init?: RequestInit): Promise<Response | null> {
+  await loadEngine()
+  const live = engine()
+  if (!live) return null
+  const url = new URL(path, 'http://127.0.0.1')
+  for (const route of live.routes) {
+    if (url.pathname !== route.prefix && !url.pathname.startsWith(route.prefix + '/')) continue
+    const res = await route.handle(new Request(url, init), url, { clientIp: '127.0.0.1' })
+    if (res !== null) return res
+  }
+  return null
+}
+
 /** The engine's integrations, or `{}`. What the journal is fed from — `{}` feeds it nothing. */
 export function engineIntegrations(): HostIntegrations {
   return loaded?.engine?.integrations ?? {}

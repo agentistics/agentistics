@@ -30,9 +30,9 @@ import { useIsMobile } from './hooks/useIsMobile'
 import { useAccessibility } from './hooks/useAccessibility'
 import type { TagDef } from './lib/tagMatch'
 import { canCreateTagFromFilters, filtersToTagDraft } from './lib/filtersToTag'
-import type { BillingSettings, CostBasis, Filters, HarnessId, HealthIssue, SavedComparison, SessionPreset, TeamConfig } from '@agentistics/core'
+import type { BillingSettings, CostBasis, Filters, SurfaceHarnessId, HealthIssue, SavedComparison, SessionPreset, TeamConfig } from '@agentistics/core'
 import type { Lang, Theme } from '@agentistics/core'
-import { billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, normalizeSessionPresets, planAllocation, formatProjectName, MODEL_PRICING, distinctUsers, distinctHarnesses, filterByUsers, fmtCost, HARNESS_ORDER, readTeamConnections, fmt, totalTokens, totalTokensExplained } from '@agentistics/core'
+import { isAdapterHarness, billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, normalizeSessionPresets, planAllocation, formatProjectName, MODEL_PRICING, distinctUsers, distinctHarnesses, filterByUsers, fmtCost, SURFACE_HARNESS_ORDER, readTeamConnections, fmt, totalTokens, totalTokensExplained } from '@agentistics/core'
 import { buildDeniedRepoLabels } from './lib/shareRepos'
 import { StatCard } from './components/StatCard'
 import { StreakBreakdownButton } from './components/StreakBreakdownButton'
@@ -709,7 +709,7 @@ function MobileBottomNav({
   principal, theme, onToggleTheme, onToggleLang, a11yEnabled,
 }: {
   lang: Lang
-  harnesses?: HarnessId[]
+  harnesses?: SurfaceHarnessId[]
   onRefresh: () => void
   /** Hardware is a modal, not a destination — on mobile its entry point is a tile in this sheet. */
   onOpenHardware: () => void
@@ -1037,7 +1037,7 @@ function SideNav({
   theme, onToggleTheme, onToggleLang, onExport, principal, sessionsFilters, sessionsActiveOnly,
   filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
 }: {
-  lang: Lang; harnesses?: HarnessId[]; isCentral?: boolean; hasWorkflows?: boolean
+  lang: Lang; harnesses?: SurfaceHarnessId[]; isCentral?: boolean; hasWorkflows?: boolean
   collapsed: boolean; onToggle: () => void
   /** The width in force. Fixed in the dashboard workspace, user-set in the sessions one. */
   width: number
@@ -2891,7 +2891,7 @@ export default function AppLayout() {
     central: isCentral,
   })
   const billingReady = useMemo(
-    () => billingReadiness(billing, data?.harnesses?.length ? data.harnesses : ['claude']),
+    () => billingReadiness(billing, data?.harnesses?.length ? data.harnesses.filter(isAdapterHarness) : ['claude']),
     [billing, data?.harnesses],
   )
   // A central aggregates many machines; pricing a whole fleet from its operator's own timeline
@@ -3020,13 +3020,13 @@ export default function AppLayout() {
   // Models grouped by the harness that actually used them (NOT by prefix — Copilot
   // also uses gpt-* models). When a harness filter is active, only that harness's
   // models are offered; in the unified view all harnesses are shown as sections.
-  const modelGroups = useMemo<{ harness: HarnessId; models: string[] }[]>(() => {
+  const modelGroups = useMemo<{ harness: SurfaceHarnessId; models: string[] }[]>(() => {
     if (!data) return []
-    const order: HarnessId[] = HARNESS_ORDER
-    const byH: Partial<Record<HarnessId, Set<string>>> = {}
-    const add = (h: HarnessId, m?: string) => { if (!m) return; (byH[h] ??= new Set<string>()).add(m) }
+    const order: SurfaceHarnessId[] = SURFACE_HARNESS_ORDER
+    const byH: Partial<Record<SurfaceHarnessId, Set<string>>> = {}
+    const add = (h: SurfaceHarnessId, m?: string) => { if (!m) return; (byH[h] ??= new Set<string>()).add(m) }
     for (const id of Object.keys(data.statsCache.modelUsage ?? {})) add('claude', id)
-    for (const s of data.sessions) add((s.harness ?? 'claude') as HarnessId, s.model)
+    for (const s of data.sessions) add((s.harness ?? 'claude') as SurfaceHarnessId, s.model)
     // When the harness filter is active, only the selected harnesses' models are offered;
     // in the unified view all harnesses are shown as sections.
     const sel = filters.harnesses ?? []
@@ -3186,7 +3186,7 @@ export default function AppLayout() {
   // users). So picking one member narrows the harness options to the harnesses that member
   // actually used; "All members" shows the union. Falls back to all harnesses in the data
   // when the scoped slice is empty (e.g. a selected member has no sessions yet).
-  const availableHarnesses = useMemo<HarnessId[]>(() => {
+  const availableHarnesses = useMemo<SurfaceHarnessId[]>(() => {
     if (!data) return []
     const scoped = filterByUsers(data.sessions, filters.users ?? [])
     const present = distinctHarnesses(scoped)
@@ -3230,7 +3230,7 @@ export default function AppLayout() {
   // When exactly one harness is selected, the header mirrors the old per-harness view
   // (derived first/last dates + harness label). With 0 or >1 selected it uses the
   // statsCache (Claude-canonical) dates, matching the unified dashboard.
-  const singleHarness: HarnessId | undefined =
+  const singleHarness: SurfaceHarnessId | undefined =
     (filters.harnesses?.length === 1) ? filters.harnesses[0] : undefined
 
   // Info items for all 8 stat cards

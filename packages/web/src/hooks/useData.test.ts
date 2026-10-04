@@ -394,6 +394,48 @@ describe('computeHarnessSummaries', () => {
     expect('codex' in summaries).toBe(false)
   })
 
+  test('the NATIVE harness is a column like any other, summed from its sessions — never from the Claude-only cache', () => {
+    const base = makeAppData()
+    const native = {
+      ...base.sessions[0]!,
+      session_id: 'ses_n1', harness: 'agentistics' as const, model: 'claude-sonnet-4-6',
+      input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 2000, cache_creation_input_tokens: 0,
+      user_message_count: 3, assistant_message_count: 3,
+    }
+    const data = makeAppData({ sessions: [...base.sessions, native], harnesses: ['claude', 'codex', 'agentistics'] })
+    const summaries = computeHarnessSummaries(data)
+    expect(summaries['agentistics'].sessions).toBe(1)
+    expect(summaries['agentistics'].messages).toBe(6)
+    expect(totalTokens(summaries['agentistics'].tokens)).toBe(3500)
+    expect(summaries['agentistics'].costUSD).toBeGreaterThan(0)
+    // Claude's figures are untouched by a native session that ran a Claude model.
+    expect(summaries['claude'].sessions).toBe(computeHarnessSummaries(makeAppData()).claude.sessions)
+    // The harness filter selects it.
+    const filtered = computeFilteredHarnessSummaries(data, { dateRange: 'all', projects: [], models: [], harnesses: ['agentistics'] } as never)
+    expect(filtered.activeHarnesses).toEqual(['agentistics'])
+    expect(filterByHarness(data.sessions, 'agentistics').map(s => s.session_id)).toEqual(['ses_n1'])
+  })
+
+  test('PRICE.UNKNOWN: a harness whose only model has no price carries its tokens as UNPRICED — cost 0 is not a figure', () => {
+    const base = makeAppData()
+    const unpriced = {
+      ...base.sessions[0]!,
+      session_id: 'ses_u', harness: 'agentistics' as const, model: 'aion-labs/aion-2.0',
+      input_tokens: 600, output_tokens: 400, cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+    }
+    const priced = { ...unpriced, session_id: 'ses_p', model: 'claude-sonnet-4-6' }
+    const only = computeHarnessSummaries(makeAppData({ sessions: [...base.sessions, unpriced], harnesses: ['claude', 'codex', 'agentistics'] }))
+    expect(only['agentistics'].unpricedTokens).toBe(1000)
+    expect(only['agentistics'].costUSD).toBe(0)
+    expect(only['agentistics'].costPerMTokens).toBeNull()
+    const mixed = computeHarnessSummaries(makeAppData({ sessions: [...base.sessions, unpriced, priced], harnesses: ['claude', 'codex', 'agentistics'] }))
+    expect(mixed['agentistics'].unpricedTokens).toBe(1000)
+    expect(mixed['agentistics'].costUSD).toBeGreaterThan(0)
+    // the rate is over the PRICED tokens only
+    expect(mixed['agentistics'].costPerMTokens).toBeCloseTo(mixed['agentistics'].costUSD / (1000 / 1e6), 6)
+    expect(only['codex'].unpricedTokens).toBe(computeHarnessSummaries(base).codex.unpricedTokens)
+  })
+
   test('claude costUSD uses calcCost on statsCache.modelUsage (no inline math)', () => {
     const data = makeAppData()
     const summaries = computeHarnessSummaries(data)

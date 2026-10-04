@@ -8,6 +8,8 @@
  * and `chrome.ts`'s cockpit helpers do for their own screens.
  */
 
+// @harness-adapters-only: a backup copies each ADAPTER's own directory; the native harness's store
+// rides the `metrics` layer under ~/.agentistics, so it has no harness row here.
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { SERVICE_MARKER, type DetailLine } from './chrome.ts'
 import { wrapText } from './surface.ts'
@@ -104,7 +106,8 @@ export interface HarnessRow {
 /**
  * The harness rows, in `HARNESS_ORDER` — never in whatever order the host happened to report
  * them, and never a literal array. A host that reported a harness twice, or left one out, still
- * yields one row per `HARNESS_ORDER` member the host actually covered.
+ * yields one row per `HARNESS_ORDER` member the host actually covered. @harness-adapters-only (backup
+ * rows are per adapter directory).
  */
 export function harnessRows(harnesses: ControlBackupHarness[], now: number, s: ControlStrings): HarnessRow[] {
   const byId = new Map(harnesses.map(h => [h.id, h]))

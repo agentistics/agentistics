@@ -6,7 +6,7 @@
  * same values the web app uses rather than approximated 256-color indices.
  */
 
-import type { HarnessId } from '@agentistics/core'
+import type { SurfaceHarnessId } from '@agentistics/core'
 
 export const COLORS = {
   /** Primary accent (Anthropic amber, #f59e0b in the web app). */
@@ -37,7 +37,7 @@ export const COLORS = {
 } as const
 
 /** Mirrors HARNESS_COLORS in packages/web/src/lib/harness.ts — keep the two in step. */
-export const HARNESS_COLOR: Record<HarnessId, string> = {
+export const HARNESS_COLOR: Record<SurfaceHarnessId, string> = {
   claude: '#D97706',
   codex: '#10a37f',
   gemini: '#4285f4',
@@ -48,9 +48,11 @@ export const HARNESS_COLOR: Record<HarnessId, string> = {
   kimi: '#e11d48',
   // Mirrors HARNESS_COLORS.opencode in packages/web/src/lib/harness.ts.
   opencode: '#06b6d4',
+  // Mirrors HARNESS_COLORS.agentistics in packages/web/src/lib/harness.ts.
+  agentistics: '#f97316',
 }
 
-export const HARNESS_LABEL: Record<HarnessId, string> = {
+export const HARNESS_LABEL: Record<SurfaceHarnessId, string> = {
   claude: 'Claude',
   codex: 'Codex',
   gemini: 'Gemini',
@@ -58,4 +60,5 @@ export const HARNESS_LABEL: Record<HarnessId, string> = {
   antigravity: 'Antigravity',
   kimi: 'Kimi',
   opencode: 'opencode',
+  agentistics: 'Agentistics',
 }

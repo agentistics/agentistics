@@ -33,6 +33,7 @@ export type TranscriptSource =
  * message reader on this server, so the panel must say that rather than draw the same blank space a
  * session with nothing in it would draw.
  */
+// @harness-adapters-only: transcript readers exist per adapter; a native session's chat is the engine's own.
 const READABLE: Record<HarnessId, boolean> = {
   claude: true,
   codex: true,

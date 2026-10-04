@@ -51,10 +51,12 @@ export type FleetActionId =
   | 'rewind'
   /** Submit every message claude is holding in its OWN queue right now, in order (claude only). */
   | 'sendNow'
+  /** NATIVE sessions only, once ended: file it away, or delete it (permanent). See the server's union. */
+  | 'archive' | 'delete'
 
 /** The verbs this page can PERFORM. The rest are shown, dimmed, with their reason. */
 export const PERFORMABLE: ReadonlySet<FleetActionId> = new Set<FleetActionId>([
-  'resume', 'approve', 'prompt', 'rename', 'note', 'task', 'kill',
+  'resume', 'approve', 'prompt', 'rename', 'note', 'task', 'kill', 'archive', 'delete',
 ])
 
 /** The verbs that take a line of text before they can run. */

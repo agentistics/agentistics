@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Clock, Download, Upload, MessageSquare, Wrench, FolderOpen } from 'lucide-react'
-import type { SessionMeta, Project, HarnessId } from '@agentistics/core'
+import type { SessionMeta, Project, SurfaceHarnessId } from '@agentistics/core'
 import { fmt, formatProjectName, sessionLabel } from '@agentistics/core'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { NAtag } from './NAtag'
@@ -37,7 +37,7 @@ interface HighlightsBoardProps {
    * "Most tool calls" card is hidden for harnesses where tools=false.
    * In the unified view (harness undefined) all cards are shown.
    */
-  harness?: HarnessId
+  harness?: SurfaceHarnessId
 }
 
 export function HighlightsBoard({ sessions, projects, lang, harness }: HighlightsBoardProps) {

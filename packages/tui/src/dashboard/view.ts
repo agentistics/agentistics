@@ -15,7 +15,7 @@
  * give way.
  */
 
-import type { AppData, HarnessId } from '@agentistics/core'
+import type { AppData, SurfaceHarnessId } from '@agentistics/core'
 import type { NavKey } from '../control/nav'
 import type { ControlService } from '../control/types'
 import { sourceRowFit, type SourceRowFit } from '../control/surface.ts'
@@ -379,7 +379,7 @@ function clampInt(n: number, lo: number, hi: number): number {
  * page count is the count of what the filter left standing, and a page can never name a row the
  * filter removed.
  */
-export function applyHarnessFilter(data: AppData, harness: HarnessId | null): AppData {
+export function applyHarnessFilter(data: AppData, harness: SurfaceHarnessId | null): AppData {
   if (!harness) return data
   return {
     ...data,

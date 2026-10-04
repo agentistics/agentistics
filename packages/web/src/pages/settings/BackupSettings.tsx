@@ -16,6 +16,8 @@ import { useOutletContext } from 'react-router-dom'
 // — the version this repo installs — carries no brand icons, so the GitHub mark is the local
 // `GithubMark` SVG below rather than a new dependency for one glyph.
 import { PlayCircle, Loader2, AlertTriangle, CheckCircle2, Clock, ChevronLeft, ChevronRight, RotateCcw, Pencil, Trash2 } from 'lucide-react'
+// @harness-adapters-only: a backup copies each ADAPTER's own directory; the native harness's store
+// rides the `metrics` layer under ~/.agentistics, so it has no harness row here.
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import type { AppContext } from '../../lib/app-context'
 import { HARNESS_LABELS, HARNESS_COLORS } from '../../lib/harness'
@@ -921,7 +923,7 @@ export default function BackupSettings() {
 
   const byId = new Map((status?.harnesses ?? []).map(h => [h.id, h]))
   // HARNESS_ORDER, never the server array's own order — the same discipline every other surface
-  // that lists harnesses follows.
+  // that lists harnesses follows. @harness-adapters-only: backup rows are per adapter directory.
   const harnessRows = HARNESS_ORDER.filter(id => byId.has(id)).map(id => byId.get(id)!)
 
   // The history page — clamped rather than trusted, so a page left pointing past the end after

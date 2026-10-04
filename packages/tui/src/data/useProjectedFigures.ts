@@ -12,13 +12,13 @@
  */
 
 import { useEffect, useState } from 'react'
-import { httpMetricsQuery, projectionSurfaceOn, ProjectionUnavailable, type HarnessId } from '@agentistics/core'
+import { httpMetricsQuery, projectionSurfaceOn, ProjectionUnavailable, type SurfaceHarnessId } from '@agentistics/core'
 import { projectedFigures, type DashboardFigures } from '../projected-figures'
 
 /** One read. `null` on a refusal, which sends the screens back to the legacy figures. */
 export async function loadProjectedFigures(
   apiBase: string,
-  harness: HarnessId | null,
+  harness: SurfaceHarnessId | null,
   fetchFn: typeof fetch = fetch,
 ): Promise<DashboardFigures | null> {
   try {
@@ -31,7 +31,7 @@ export async function loadProjectedFigures(
 
 export function useProjectedFigures(apiBase: string | null, opts: {
   enabled: boolean
-  harness: HarnessId | null
+  harness: SurfaceHarnessId | null
   /** Any value that changes when `/api/data` was re-read: the snapshot object itself. */
   stamp: unknown
   nonce?: number

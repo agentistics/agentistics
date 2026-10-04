@@ -68,6 +68,12 @@ export function sessionActions(
   /** Facts about the FLEET rather than the row — what the fleet-level verbs need. */
   fleet: { fell?: number } = {},
 ): OfferedAction[] {
+  // A NATIVE Agentistics session (`harness: 'agentistics'`) is the ENGINE's, not a pane's: there is
+  // nothing to attach to and no screen to answer or type into from this menu (its own chat does
+  // that), and no registry record for a note or a task. What it does take is the engine's lifecycle:
+  // rename, end (`kill`), reopen — `native-fleet.ts` routes each one. The SHAPE stays constant, as for
+  // every row; the verbs it cannot take are dimmed, never dropped.
+  if (selected?.harness === NATIVE_HARNESS_ID) return nativeActions(selected, fleet)
   // A row agentop still HOSTS: it has a registry entry, so it can be renamed, filed and stopped.
   // `exited` and `lost` are hosted — a reboot loses every backend session while the registry keeps
   // every name, and losing the verbs that edit those names is how a rename disappears.
@@ -115,6 +121,26 @@ export function sessionActions(
     { action: 'reopenFell', enabled: (fleet.fell ?? 0) > 0 },
     { action: 'kill', enabled: hosted },
     // These three need no selection at all and are therefore never dim.
+    { action: 'new', enabled: true },
+    { action: 'search', enabled: true },
+    { action: 'group', enabled: true },
+  ]
+}
+
+/** The native Agentistics harness id — the one harness whose rows are the engine's, not a pane's. */
+const NATIVE_HARNESS_ID = 'agentistics'
+
+function nativeActions(selected: ControlSession, fleet: { fell?: number }): OfferedAction[] {
+  const open = selected.state !== 'closed'
+  return [
+    { action: 'resume', enabled: !open && Boolean(selected.resume) },
+    { action: 'approve', enabled: false },
+    { action: 'prompt', enabled: false },
+    { action: 'rename', enabled: true },
+    { action: 'note', enabled: false },
+    { action: 'task', enabled: false },
+    { action: 'reopenFell', enabled: (fleet.fell ?? 0) > 0 },
+    { action: 'kill', enabled: open },
     { action: 'new', enabled: true },
     { action: 'search', enabled: true },
     { action: 'group', enabled: true },

@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Cpu, Check, ChevronDown } from 'lucide-react'
-import type { HarnessId } from '@agentistics/core'
+import type { SurfaceHarnessId } from '@agentistics/core'
 import { HARNESS_LABELS } from '../lib/harness'
 
 interface Props {
-  harnesses: HarnessId[]
-  selected: HarnessId[]
-  onChange: (harnesses: HarnessId[]) => void
+  harnesses: SurfaceHarnessId[]
+  selected: SurfaceHarnessId[]
+  onChange: (harnesses: SurfaceHarnessId[]) => void
   lang: 'pt' | 'en'
 }
 
@@ -32,7 +32,7 @@ export function HarnessFilter({ harnesses, selected, onChange, lang }: Props) {
   // Only show when there are multiple harnesses in the data
   if (harnesses.length <= 1) return null
 
-  function toggle(harness: HarnessId) {
+  function toggle(harness: SurfaceHarnessId) {
     if (selected.includes(harness)) onChange(selected.filter(h => h !== harness))
     else onChange([...selected, harness])
   }

@@ -445,6 +445,14 @@ export interface ControlStrings {
   sessionsAgo: (seconds: number) => string
   /** The external row's own sentence, in the detail pane. */
   sessionsExternalNote: string
+  /** Why a verb is off on a NATIVE Agentistics row: it is the engine's session, driven from its own chat. */
+  sessionsNativeNote: string
+  /** The two native-only verbs, and why they wait for the session to end. */
+  sessionsArchive: string
+  sessionsDelete: string
+  sessionsEndFirst: string
+  /** Archive/delete asked of a session that is not a native one. */
+  sessionsNativeOnly: string
   sessionsClosedNote: string
   /**
    * This build cannot run session verbs at all — no backend on this platform, or a host that does
@@ -1174,6 +1182,11 @@ const EN: ControlStrings = {
     return `${Math.floor(min / 60)}h ${min % 60}m ago`
   },
   sessionsExternalNote: 'started outside agentop — listed, but it cannot be attached or stopped here.',
+  sessionsNativeNote: 'a native Agentistics session — talk to it in its own chat; from here it can be renamed, ended or reopened.',
+  sessionsArchive: 'Archive',
+  sessionsDelete: 'Delete',
+  sessionsEndFirst: 'End the session first.',
+  sessionsNativeOnly: 'Only a native Agentistics session can be archived or deleted.',
   sessionsClosedNote: 'not running — reopen it to pick this conversation back up.',
   sessionsNoHost: 'session control is not available on this machine.',
   sessionsReopenNone: 'no conversation to reopen — nothing on this machine resolves this row.',
@@ -1745,6 +1758,11 @@ const PT: ControlStrings = {
     return `há ${Math.floor(min / 60)}h ${min % 60}min`
   },
   sessionsExternalNote: 'iniciada fora do agentop — listada, mas não dá para anexar nem parar por aqui.',
+  sessionsNativeNote: 'uma sessão nativa do Agentistics — converse com ela no próprio chat; daqui dá para renomear, encerrar ou reabrir.',
+  sessionsArchive: 'Arquivar',
+  sessionsDelete: 'Apagar',
+  sessionsEndFirst: 'Encerre a sessão antes.',
+  sessionsNativeOnly: 'Só uma sessão nativa do Agentistics pode ser arquivada ou apagada.',
   sessionsClosedNote: 'não está rodando — reabra para retomar esta conversa.',
   sessionsNoHost: 'o controle de sessões não está disponível nesta máquina.',
   sessionsReopenNone: 'nenhuma conversa para reabrir — nada nesta máquina resolve esta linha.',
