@@ -30,6 +30,8 @@ import {
   Checkbox, ConfirmModal, RecordCard, RecordCardAction, Select, StatusDot,
 } from './primitives'
 import { Drawer } from './Drawer'
+import { ensureVaultOpen } from '../../components/vault/VaultUnlockHost'
+import { isVaultLockedRefusal } from '../../lib/phoneVault'
 
 const inputStyle: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box', padding: '7px 10px',
@@ -175,12 +177,25 @@ function ProvidersSettingsBody() {
         baseUrl: baseUrlDraft, baseUrlEditable: configuring.baseUrlEditable,
         keyTyped, noKey: noKeyDraft, keyOptional: configuring.keyOptional,
       })
-      const r = await fetch(`/api/provider/${configureId}`, {
+      // VAULT.PERSONAL §10: a key is sealed in the vault, so a locked vault is unlocked RIGHT HERE (the
+      // same flow as Settings → Vault, or the phone's own) and the save carries on by itself. The key
+      // stays in this local variable across the wait — never in state, never in storage.
+      if (keyTyped && !(await ensureVaultOpen())) {
+        setFormErr({ code: 'vault-locked', sentence: pt ? 'O cofre continua trancado, então a chave não foi salva. Destranque e salve de novo.' : 'The vault is still locked, so the key was not saved. Unlock it and save again.' })
+        return
+      }
+      const put = () => fetch(`/api/provider/${configureId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
-      const json = await readJson(r)
+      let r = await put()
+      let json = await readJson(r)
+      // The vault locked itself between the check and the save (auto-lock): unlock and retry ONCE.
+      if (!r.ok && isVaultLockedRefusal(json?.code) && await ensureVaultOpen()) {
+        r = await put()
+        json = await readJson(r)
+      }
       if (r.ok && json?.provider) {
         setState(s => ({
           ...s,

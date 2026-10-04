@@ -83,8 +83,8 @@ export const VAULT_TEXT = {
   },
   how_backup_h: { en: 'Backups', pt: 'Backups' },
   how_backup: {
-    en: 'A backup never carries the key, wrapped or not. A restored machine starts with no vault and creates a new one on first use; the secrets that were left out are entered again.',
-    pt: 'O backup nunca leva a chave, nem cifrada. Uma máquina restaurada começa sem cofre e cria um novo no primeiro uso; os segredos que ficaram de fora são cadastrados de novo.',
+    en: 'A backup carries the vault as ONE sealed bundle: the secrets still encrypted, and the key only wrapped under your 24 words — nothing tied to this computer. On another machine, the restore brings it back and the 24 words open it; without them it opens nothing.',
+    pt: 'O backup leva o cofre como UM pacote selado: os segredos ainda criptografados e a chave só embrulhada nas suas 24 palavras — nada preso a este computador. Em outra máquina, a restauração traz o pacote e as 24 palavras o abrem; sem elas, ele não abre nada.',
   },
 
   // ── SECRETS.4 S4.8: unlock, step-up, the sections and the wizard ──────────────────────────────
@@ -124,7 +124,7 @@ export const VAULT_TEXT = {
   gate_dialog_code: { en: 'Type your current authenticator code to continue.', pt: 'Digite o código atual do seu autenticador para continuar.' },
   gate_dialog_presence: { en: '{presence} will ask you to confirm on the device.', pt: '{presence} vai pedir a sua confirmação no dispositivo.' },
   gate_continue: { en: 'Continue', pt: 'Continuar' },
-  ultraTitle: { en: 'Make your vault ultra secure (2 min)', pt: 'Deixe o seu cofre ultra seguro (2 min)' },
+  ultraTitle: { en: 'Protect your vault (2 min)', pt: 'Proteja o seu cofre (2 min)' },
   ultraBody: {
     en: 'Add an authenticator code, a 24-word recovery key and, where this machine has it, Windows Hello or a security key. Until then the vault keeps working exactly as before.',
     pt: 'Adicione um código de autenticador, uma chave de recuperação de 24 palavras e, onde esta máquina tiver, o Windows Hello ou uma chave de segurança. Até lá o cofre continua funcionando exatamente como antes.',
@@ -184,7 +184,7 @@ export const VAULT_TEXT = {
   auto_saved: { en: 'Saved.', pt: 'Salvo.' },
   auto_invalid: { en: 'Whole minutes from 5 to 480.', pt: 'Minutos inteiros de 5 a 480.' },
   hard_unknown: { en: 'Not reported by the service yet.', pt: 'O serviço ainda não informou.' },
-  wiz_title: { en: 'Make your vault ultra secure', pt: 'Deixe o seu cofre ultra seguro' },
+  wiz_title: { en: 'Protect your vault', pt: 'Proteger o cofre' },
   wiz_step: { en: 'Step {i} of {n}', pt: 'Passo {i} de {n}' },
   wiz_safe: {
     en: 'Nothing is lost if you stop now: the vault keeps working as before until the last step.',

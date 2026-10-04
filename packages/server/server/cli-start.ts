@@ -74,8 +74,9 @@ import type {
   StartRequest,
   RestoreCandidate,
 } from '@agentistics/tui/control'
-import { DEFAULT_SESSION_VIEW } from '@agentistics/tui/control'
-import { AGENTISTICS_DATA_DIR, PORT, WEB_PORT } from './config'
+import { DEFAULT_SESSION_VIEW, TAB_ORDER } from '@agentistics/tui/control'
+import { AGENTISTICS_DATA_DIR, PORT, WEB_PORT, serverLockFile } from './config'
+import { probeInstanceLock } from './single-instance'
 import {
   readPreferences, writePreferences, resolveArchiveMode, type ArchiveMode,
   clampSessionPollMs, sessionPollMsOrDefault, SESSION_POLL_DEFAULT_MS,
@@ -90,7 +91,7 @@ import { formatBytes, layerTotal, retainedTotal } from './backup/backup-size'
 import { lastBackup, lastPerHarness, lastBackupRun, loadBackupHistory } from './backup/backup-store'
 import { scheduleStatus } from './backup/schedule'
 import { loadConsolidated } from './consolidate'
-import { cachedBaseline } from './sessions/fleet-baseline'
+import { cachedBaseline, resetBaselineCache } from './sessions/fleet-baseline'
 import { centralRuntimeChoices, centralStartPlan, runCentral, type CentralStartPlan } from './cli-central'
 import { flagFor, type CentralRuntimeId, type CentralRuntimeOption } from './central-runtime'
 import { onOutputLine, publishLines, streamCommand } from './cli-stream'
@@ -113,7 +114,10 @@ import {
   type AutostartMode,
 } from './autostart'
 import { confirm } from './cli-ui'
-import { CURRENT_VERSION, getVersionInfo } from './version'
+import { compareVersions, CURRENT_VERSION, getVersionInfo } from './version'
+import { budgetFromEnv, decideSelfGuard, exeWasReplaced, parseProcStatusMemory, planRestartArgv, selfGuardMessage, type SelfSample } from './self-guard'
+import { readlink, readFile as readFileText } from 'node:fs/promises'
+import { execInPlace } from './exec-in-place'
 import { cliStrings, type CliLang, type CliStrings } from './cli-i18n'
 import { awaitReplacement, type RestartVerdict, type ServingObservation } from './service-manager'
 import { resolveLang } from './cli-lang'
@@ -129,7 +133,8 @@ import { execFailed, LAUNCH_SETTLE_MS } from './sessions/spawn-outcome'
 import { planTakeover } from './sessions/takeover'
 import { findProjects } from './sessions/project-source'
 import { candidatePath } from './sessions/project-search'
-import { recordedRepo, repoFacts } from './sessions/repo-facts'
+import { forgetRepoFacts, recordedRepo, repoFacts } from './sessions/repo-facts'
+import { createSpawnQueue, registerSpawnQueue } from './sessions/spawn-queue'
 import { markFleetPhase, timeFleetPhase } from './sessions/fleet-profile'
 // The `SessionView` -> `ControlSession` mapping, extracted so `agentop session ls` draws the same
 // rows from the same decision rather than mapping the fleet a second time.
@@ -927,10 +932,42 @@ async function idleServerPids(): Promise<number[]> {
 
 async function stopLocal(s: CliStrings): Promise<void> {
   process.stdout.write(`  ${D}${s.stoppingLocal}${R}\n`)
-  const pids = await listeningServerPids()
-  if (pids.length) { for (const pid of pids) await sh(['kill', pid]) }
-  else await sh(['pkill', '-f', 'agentop server'])
+  const targets = planLocalStop({
+    listeners: await listeningServerPids(),
+    lockHolder: await probeInstanceLock(serverLockFile()).catch(() => null),
+    self: process.pid,
+  })
+  if (targets.length === 0) {
+    // Nothing on record to stop. NEVER widen to a pattern: see `planLocalStop`.
+    process.stdout.write(`  ${YE}${s.stopNoTarget}${R}\n`)
+    return
+  }
+  for (const pid of targets) await sh(['kill', String(pid)])
   for (let i = 0; i < 20; i++) { if (!(await isServerRunning())) return; await sleep(150) }
+}
+
+/**
+ * WHICH processes "stop the local server" may signal — PURE. The port's listener (when `lsof` can
+ * name it) and the holder of THIS data dir's `server.lock`, never ourselves, deduplicated.
+ *
+ * There is deliberately NO fallback. It used to be `pkill -f 'agentop server'`, and on Linux it ran
+ * on EVERY stop: Bun marks its processes non-dumpable, so `lsof`/`ss` cannot see the listener's
+ * socket (measured 2026-10-04: `lsof -ti tcp:47291 -sTCP:LISTEN` empty while pid 1770369 held the
+ * port). The pattern then matched every process whose command line contained "agentop server" — every
+ * other HOME's preview and test server on the machine, the shell wrappers around them, and any tmux
+ * server whose stored command said those words. One `agentop restart server` (or the cockpit's
+ * Stop/Restart, or a foreground start clearing the port) in ANY instance, preview copies included,
+ * SIGTERMed all of them. The lock names exactly the server of this data dir, by pid AND start time.
+ */
+export function planLocalStop(o: { listeners: readonly string[]; lockHolder: number | null; self: number }): number[] {
+  const out = new Set<number>()
+  for (const raw of o.listeners) {
+    const n = Number(raw)
+    if (Number.isInteger(n) && n > 1) out.add(n)
+  }
+  if (o.lockHolder !== null && Number.isInteger(o.lockHolder) && o.lockHolder > 1) out.add(o.lockHolder)
+  out.delete(o.self)
+  return [...out]
 }
 
 async function stopContainers(filter: string, msg: string): Promise<void> {
@@ -1773,6 +1810,32 @@ async function spawnRow(a: {
     ...(await recordedRepo(req.cwd)),
   }
 }
+/**
+ * RES.1 — this process's spawn queue (`spawn-queue.ts`), created on first use. In the server it is
+ * also registered for `/api/resources`, where the panel lists it and can cancel an entry.
+ */
+type QueuedSpawnRequest = { req: Parameters<typeof spawnManaged>[0]; lang: CliLang }
+let queueSingleton: ReturnType<typeof createSpawnQueue<QueuedSpawnRequest>> | null = null
+function spawnQueue(): ReturnType<typeof createSpawnQueue<QueuedSpawnRequest>> {
+  if (queueSingleton) return queueSingleton
+  queueSingleton = createSpawnQueue<QueuedSpawnRequest>({
+    admit: async () => admitSpawn(await readSpawnBudget(), 1).admit,
+    start: async q => spawnManaged(q.req, cliStrings(q.lang), q.lang),
+    notify: n => {
+      if (!isServerProcess()) return
+      void import('./sse').then(m => m.broadcastNotification(n)).catch(() => {})
+    },
+  })
+  registerSpawnQueue(queueSingleton)
+  return queueSingleton
+}
+
+function queuedSentence(position: number, lang: CliLang): string {
+  return lang === 'pt'
+    ? `Sem espaço agora — a sessão entrou na fila (posição ${position}) e inicia sozinha quando houver memória; cancele em Hardware → Recursos.`
+    : `No room right now — the session is queued (position ${position}) and starts by itself when memory frees; cancel it in Hardware → Resources.`
+}
+
 async function spawnManaged(req: {
   harness: HarnessId
   cwd: string
@@ -1793,6 +1856,12 @@ async function spawnManaged(req: {
    * (`overridden`/`note`) — nothing is admitted silently. See `spawn-admission.ts`.
    */
   force?: boolean
+  /**
+   * RES.1 — on a memory refusal, QUEUE the spawn to start by itself when room frees (the default)
+   * rather than failing. `false` keeps the old refusal; a caller that is itself a batch or a reopen
+   * gates the whole set and never queues one row of it.
+   */
+  queue?: boolean
   /**
    * Set ONLY by a caller that already accounted for this spawn's cost in its OWN admission check:
    * `reopenEntries` gates the WHOLE set it is about to spawn before this is ever called (so
@@ -1816,6 +1885,20 @@ async function spawnManaged(req: {
     const admission = admitSpawn(await readSpawnBudget(), 1, { force: req.force })
     if (!admission.admit) {
       const refusal = admission.refusal
+      // RES.1 — wait for room instead of failing. A queued spawn never attaches (nobody is waiting
+      // at a terminal when it finally starts) and skips the gate when it runs, because the queue's
+      // own tick has just asked it.
+      const queued = req.queue !== false
+        ? spawnQueue().enqueue(`${req.harness} · ${req.cwd}`, { req: { ...req, attach: false, skipAdmission: true, queue: false }, lang })
+        : null
+      if (queued) {
+        return {
+          ok: false,
+          message: `${queuedSentence(queued.position, lang)} ${admissionMessage(refusal, lang)}`,
+          admission: admissionRefusalBody(refusal, lang),
+          queued,
+        }
+      }
       return {
         ok: false,
         message: admissionMessage(refusal, lang),
@@ -2221,6 +2304,59 @@ async function waitRunning(
     if (Date.now() >= until) return null
     await new Promise(r => setTimeout(r, REOPEN_POLL_MS))
   }
+}
+
+/**
+ * RES.1 — when this process last reloaded itself, so the self-guard can refuse to loop. Module-level
+ * because the host is created once and the reload happens in `runStart`'s loop around it.
+ */
+let lastSelfReloadMs: number | null = null
+
+/** RES.1 — the sentence the next mount shows (a self-restart carries it over in the environment). */
+let pendingNotice: string | null = process.env.AGENTISTICS_START_NOTICE || null
+delete process.env.AGENTISTICS_START_NOTICE
+
+/** RES.1 — this process's own memory, whether its binary was replaced, and the server's version. */
+export async function readSelfSample(): Promise<SelfSample> {
+  const status = await readFileText('/proc/self/status', 'utf8').catch(() => null)
+  const { rssBytes, swapBytes } = status ? parseProcStatusMemory(status) : { rssBytes: null, swapBytes: null }
+  const exe = await readlink('/proc/self/exe').catch(() => null)
+  let serverVersion: string | null = null
+  if (!isServerProcess()) {
+    const ctl = new AbortController()
+    const timer = setTimeout(() => ctl.abort(), 1500)
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT}/api/version`, { signal: ctl.signal })
+      if (res.ok) serverVersion = ((await res.json()) as { current?: string }).current ?? null
+    } catch { /* no server — nothing to compare against */ } finally { clearTimeout(timer) }
+  }
+  return {
+    rssBytes, swapBytes,
+    usedBytes: rssBytes === null ? null : rssBytes + (swapBytes ?? 0),
+    exeReplaced: exeWasReplaced(exe),
+    ownVersion: CURRENT_VERSION,
+    serverVersion,
+  }
+}
+
+/** RES.1 — what a self-reload drops: the process-wide memos the cockpit's poll fills. */
+export function dropProcessCaches(): void {
+  forgetRepoFacts()
+  resetBaselineCache()
+  Bun.gc(true)
+  lastSelfReloadMs = Date.now()
+}
+
+/**
+ * RES.1 — the command line to re-run after an upgrade replaced our binary. `/proc/self/exe` names the
+ * DELETED file, so the path we were STARTED as is read from argv[0] (`/proc/self/cmdline`), resolved
+ * on the PATH when it is bare, and the original arguments are kept as they were (`agentop`,
+ * `agentop start`, `agentop tui`, or `bun cli.ts start` from a checkout). `null` when the path no
+ * longer resolves to a file — there is nothing to restart onto.
+ */
+export async function restartArgv(): Promise<string[] | null> {
+  const cmdline = await readFileText('/proc/self/cmdline', 'utf8').catch(() => '')
+  return planRestartArgv(cmdline, cmd => Bun.which(cmd), existsSync)
 }
 
 export function createControlHost(initialLang: CliLang, altScreen: Suspendable): StartHost {
@@ -2662,6 +2798,26 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
     get lang() { return lang },
 
     lastStatus: () => lastStatus,
+
+    async selfCheck() {
+      const decision = decideSelfGuard({
+        sample: await readSelfSample(),
+        budgetBytes: budgetFromEnv(process.env.AGENTISTICS_TUI_BUDGET_MB),
+        lastReloadMs: lastSelfReloadMs,
+        nowMs: Date.now(),
+        compare: compareVersions,
+      })
+      const message = selfGuardMessage(decision, lang === 'pt' ? 'pt' : 'en')
+      if (decision.action === 'none' || !message) return { action: 'none' as const }
+      if (decision.action !== 'alert') pendingNotice = message
+      return { action: decision.action, message }
+    },
+
+    takeNotice() {
+      const n = pendingNotice
+      pendingNotice = null
+      return n
+    },
 
     async refresh(): Promise<ControlStatus> {
       const s = S()
@@ -4173,7 +4329,10 @@ export async function runStart(): Promise<StartResult> {
   // an unconfigured user on a list of services to start would still leave the mode and the
   // history-preservation consent behind something they have no reason to look for.
   const setup = await isUnconfigured()
-  let tab: TabId | undefined
+  // RES.1 — a self-restart lands on the tab the user was on (see the `restart` exit below).
+  const startTab = process.env.AGENTISTICS_START_TAB
+  let tab: TabId | undefined = startTab && (TAB_ORDER as readonly string[]).includes(startTab) ? startTab as TabId : undefined
+  delete process.env.AGENTISTICS_START_TAB
 
   // Attach and detach are two halves of ONE gesture, so this is a loop rather than an exit. The Ink
   // app never execs anything: it unmounts, the session gets the real tty here, and when the user
@@ -4193,6 +4352,20 @@ export async function runStart(): Promise<StartResult> {
     opening = false
     if (exit.kind === 'foreground') break
     if (exit.kind === 'quit') return exit.code
+    // RES.1 — the self-guard's two exits. A reload is the attach loop without the session: drop the
+    // caches, remount on the same tab. A restart hands the terminal to the NEW binary an upgrade put
+    // at our path, on the same tab, and leaves with its exit code.
+    if (exit.kind === 'reload') { dropProcessCaches(); tab = exit.tab; continue }
+    if (exit.kind === 'restart') {
+      const argv = await restartArgv()
+      if (!argv) { tab = exit.tab; continue }
+      const env = { ...process.env, AGENTISTICS_START_TAB: exit.tab, AGENTISTICS_START_NOTICE: host.takeNotice?.() ?? '' }
+      // Replace this process outright, so the memory it grew is handed back; spawning is the
+      // fallback where `execve` is not reachable, and then this process waits holding what it has.
+      await execInPlace(argv, env)
+      const child = Bun.spawn(argv, { stdio: ['inherit', 'inherit', 'inherit'], env })
+      return await child.exited
+    }
     await execAttachTicket(exit.ticket, cliStrings(host.lang))
     tab = 'sessions'
   }

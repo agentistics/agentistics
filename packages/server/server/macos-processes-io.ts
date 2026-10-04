@@ -16,7 +16,7 @@
 
 import type { HarnessId } from '@agentistics/core'
 import {
-  harnessOfProcess, sessionIdFromArgv, sessionIdFromFdPaths, type HarnessProcess,
+  harnessOfProcess, isNonInteractiveInvocation, sessionIdFromArgv, sessionIdFromFdPaths, type HarnessProcess,
 } from './live-sessions'
 import {
   cwdFromLsof, parseLsofFields, parsePsList, processStartFromEtime, splitPsCommand,
@@ -60,6 +60,12 @@ function cwdsFor(pids: number[]): Map<number, string[]> {
   return ok ? parseLsofFields(stdout) : new Map()
 }
 
+function stdinsFor(pids: number[]): Map<number, string[]> {
+  if (pids.length === 0) return new Map()
+  const { ok, stdout } = run(['lsof', '-a', '-d', '0', '-p', pids.join(','), '-Fpn'])
+  return ok ? parseLsofFields(stdout) : new Map()
+}
+
 export interface MacScanResult {
   procs: HarnessProcess[]
   /** `ps` itself could not be run at all (missing from PATH, or exited non-zero) — the bulk scan
@@ -94,6 +100,7 @@ export function scanMacProcesses(nowMs: number = Date.now()): MacScanResult {
 
   const pids = candidates.map(c => c.pid)
   const cwds = cwdsFor(pids)
+  const stdins = stdinsFor(pids)
   let cwdDenied = false
   const procs: HarnessProcess[] = []
 
@@ -103,6 +110,9 @@ export function scanMacProcesses(nowMs: number = Date.now()): MacScanResult {
     const comm = entry.comm.slice(entry.comm.lastIndexOf('/') + 1)
     const harness: HarnessId | undefined = harnessOfProcess(comm, entry.comm, argv)
     if (!harness) continue
+    const stdinPath = cwdFromLsof(stdins, entry.pid)
+    const stdinIsTty = stdinPath === undefined ? undefined : /^\/dev\/(ttys?\d*|pts\/)/.test(stdinPath)
+    if (isNonInteractiveInvocation(harness, argv, stdinIsTty)) continue
     const cwd = cwdFromLsof(cwds, entry.pid)
     if (cwd === undefined) { cwdDenied = true; continue }
     const startedMs = processStartFromEtime(entry.etime, nowMs)
@@ -110,7 +120,7 @@ export function scanMacProcesses(nowMs: number = Date.now()): MacScanResult {
     // fd-derived id below, both stronger) — kept as the fallback here, overwritten below in that
     // priority order, matching the `??` chain the Linux reader uses.
     const sessionId = sessionIdFromArgv(argv)
-    procs.push({ harness, cwd, startedMs, pid: entry.pid, ...(sessionId ? { sessionId } : {}) })
+    procs.push({ harness, cwd, startedMs, pid: entry.pid, stdinIsTty, ...(sessionId ? { sessionId } : {}) })
   }
 
   // Session ids from open files (the macOS equivalent of reading /proc/<pid>/fd/* symlinks) —

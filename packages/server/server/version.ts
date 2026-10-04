@@ -6,7 +6,6 @@ import { fetchFirstOk, releasesApiUrls } from './release-source.ts'
 
 export { CURRENT_VERSION }
 
-const CACHE_TTL_MS = 60 * 60 * 1000 // 1 hour (in-process)
 
 // ---------------------------------------------------------------------------
 // On-disk version cache
@@ -45,10 +44,10 @@ export const VERSION_CACHE_TTL_MS = 3 * 60 * 60 * 1000 // 3 hours
  * shorter negative TTL can never turn into hammering — at most one attempt per retry window per
  * machine, and never in front of a shell prompt.
  */
-export const VERSION_NEGATIVE_TTL_MS = 30 * 60 * 1000 // 30 minutes
+export const VERSION_NEGATIVE_TTL_MS = 10 * 60 * 1000 // 10 minutes (UPD.NOTIFY: a release is noticed within minutes)
 /** Minimum spacing between refresh ATTEMPTS — stops 20 shells opening at once (or an
  *  offline machine) from firing 20 GitHub calls. */
-export const VERSION_RETRY_MS = 15 * 60 * 1000 // 15 minutes
+export const VERSION_RETRY_MS = 5 * 60 * 1000 // 5 minutes
 
 /**
  * The TTL that applies to THIS entry — PURE.
@@ -95,6 +94,15 @@ export function parseVersionCache(raw: string): VersionCacheEntry | null {
   } catch {
     return null
   }
+}
+
+/**
+ * Pure: may the IN-PROCESS answer still be served? The same rule as the disk cache (`ttlFor`): a known
+ * update keeps the long TTL, "you are up to date" only the short negative one. The in-process layer used to
+ * have its own 1-hour number, so a long-running server kept saying "up to date" for an hour after a release.
+ */
+export function isInProcessFresh(entry: VersionCacheEntry | null, now: number, current: string): boolean {
+  return isVersionCacheFresh(entry, now, current)
 }
 
 /** Pure: is the entry a still-authoritative answer for `current`? */
@@ -297,12 +305,12 @@ export function resolveLatestRelease(
 export async function getVersionInfo(opts: { force?: boolean } = {}): Promise<VersionInfo> {
   const now = Date.now()
   if (!opts.force) {
-    if (_cache && _cache.current === CURRENT_VERSION && now - _cache.fetchedAt < CACHE_TTL_MS) {
+    if (isInProcessFresh(_cache, now, CURRENT_VERSION)) {
       return {
         current: CURRENT_VERSION,
-        latest: _cache.latest,
-        hasUpdate: _cache.hasUpdate,
-        critical: _cache.critical,
+        latest: _cache!.latest,
+        hasUpdate: _cache!.hasUpdate,
+        critical: _cache!.critical,
       }
     }
     const disk = readVersionCache()

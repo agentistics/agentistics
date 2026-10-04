@@ -33,10 +33,12 @@ import {
 } from '@agentistics/engine-api'
 import type { AgentisticsEvent } from '@agentistics/core'
 import type { SpawnBudget } from '../sessions/spawn-admission'
+import { CPU_REFUSE_PER_CORE } from '../sessions/spawn-admission'
 import { createEngine as slotEngine } from '../engine-slot.generated'
 import { engineSecrets, routeEngineVaultAudit } from '../vault/engine-secrets'
 import { hostEngineBoard } from './engine-board'
 import { hostDelegateMembers } from './engine-delegate'
+import { nativeVaultRefs } from '../vault/grants'
 
 export type HostEngine = Engine<AgentisticsEvent>
 export type HostIntegrations = IntegrationRegistry<AgentisticsEvent>
@@ -187,8 +189,17 @@ export function hostFloor(
 export function engineSpawnBudget(read: SpawnBudget | null): EngineSpawnBudget {
   if (!read) return { budget: { max: 0, used: 0, left: 0, percent: 0 }, unmeasured: true }
   const b = read.budget
+  // RES.1 — the HOST's rule, expressed through the fields the engine API already has, so an engine
+  // built against it decides exactly as `admitSpawn` does without an API change: `left` already holds
+  // back the heavy-job reserve, a saturated CPU makes it 0, and the swap alarm is no longer passed —
+  // the host stopped refusing on swap %, and an engine that kept refusing on it would be a second
+  // rule for one question.
+  const saturated = read.load !== undefined && read.load.cores > 0
+    && read.load.load1 / read.load.cores >= CPU_REFUSE_PER_CORE
+  const left = saturated ? 0 : b.left
+  const alarm = b.alarm === 'sessions' || saturated ? 'sessions' as const : undefined
   return {
-    budget: { max: b.max, used: b.used, left: b.left, percent: b.percent, ...(b.alarm ? { alarm: b.alarm } : {}) },
+    budget: { max: b.max, used: b.used, left, percent: b.percent, ...(alarm ? { alarm } : {}) },
     unmeasured: false,
   }
 }
@@ -325,5 +336,9 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     fleet: { subscribe: cb => fleetHub.subscribe(cb), ...hostDelegateMembers(() => lang) },
     // 1.7 (A5.2): the API port, for an engine to write into a harness's OTel exporter config.
     serverPort: () => config.PORT,
+    // 1.8 — VAULT.PERSONAL §8.3: a native session's granted secrets, as an env overlay per tool call and
+    // a scrubber for its outputs. Grants of native sessions are keyed `native:<runtime session id>`, so a
+    // managed (CLI) session's grant can never be read by a native session that happens to share an id.
+    vaultRefs: nativeVaultRefs,
   }
 }

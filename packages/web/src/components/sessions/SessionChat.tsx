@@ -29,6 +29,8 @@
 
 import { reopeningLabel, withReopening } from '../../lib/reopeningStore'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
+import { GROW_AT_PX, GROW_TURNS, INITIAL_TURNS, shownToInclude, windowStart } from '../../lib/turnWindow'
 import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerSendButton, ComposerShell, ComposerToolbar } from '../chat/ComposerShell'
 import { mutedTooltip, useMutedKeys } from '../../lib/notifyMenu'
 import { toggleSessionMuted } from '../../lib/mutedSessions'
@@ -113,6 +115,10 @@ import { buildPickRows } from '../../lib/sessionPick'
 import { sessionPath } from '../../lib/sessionRoute'
 import { copyText } from '../../lib/clipboard'
 import { SessionPickModal } from './SessionPickModal'
+import { VaultCodeAsk, VaultPicker } from '../vault/VaultPicker'
+import { applyVaultChip, expandVaultChip, hasVaultChip, removeVaultChip, vaultChipTokens, vaultTrigger, type VaultSelection } from '../../lib/vaultChip'
+import { grantSession, withStepUp } from '../../lib/vaultPersonal'
+import { hasPasskeyHere, mobileState, passkeySupport, phoneGesture } from '../../lib/passkey'
 
 import type { AttachmentMessage, AttachmentSend, CostBasis, HarnessId, SessionMeta } from '@agentistics/core'
 import { SessionStatsMenu } from './SessionStatsMenu'
@@ -616,9 +622,38 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
     // Session chips (`#«title · id»`, `sessionMention.ts`) are references too, and are painted by
     // the same mirror as the MCP ones. They need no list to vouch for them: the chip carries its
     // own id, and an edited chip simply stops matching.
-    () => [...mentionTokens(draft, knownServers(mcpServers)), ...sessionMentionTokens(draft)],
+    () => [...mentionTokens(draft, knownServers(mcpServers)), ...sessionMentionTokens(draft), ...vaultChipTokens(draft)],
     [draft, mcpServers],
   )
+
+  /**
+   * VAULT.PERSONAL §8.5 — the `:vault` chip. Typing `:vault` opens the picker; "Confirm" writes ONE chip
+   * carrying names only, and the ids stay here. Clicking the chip reopens the picker. On send the
+   * session is granted exactly this selection (the gesture, fresh) and the chip becomes the granted
+   * `vault://` references plus a briefing — never a value.
+   */
+  const [vaultSel, setVaultSel] = useState<VaultSelection | null>(null)
+  const [vaultPickerOpen, setVaultPickerOpen] = useState(false)
+  const [vaultTriggerSeen, setVaultTriggerSeen] = useState<number | null>(null)
+  const [vaultCodeAsk, setVaultCodeAsk] = useState<null | ((c: string | null) => void)>(null)
+  const askVaultCode = useCallback(() => new Promise<string | null>(res => setVaultCodeAsk(() => (c: string | null) => { setVaultCodeAsk(null); res(c) })), [])
+  useEffect(() => {
+    const at = vaultTrigger(draft.slice(0, caret))
+    if (at !== null && at !== vaultTriggerSeen) { setVaultTriggerSeen(at); setVaultPickerOpen(true) }
+    if (at === null && vaultTriggerSeen !== null) setVaultTriggerSeen(null)
+  }, [draft, caret, vaultTriggerSeen])
+  useEffect(() => { if (!hasVaultChip(draft) && vaultSel && !vaultPickerOpen) setVaultSel(null) }, [draft, vaultSel, vaultPickerOpen])
+  /** The grant for THIS session: on a phone with its passkey the gesture is the passkey; otherwise the service asks (Windows Hello). */
+  async function grantVault(sel: VaultSelection) {
+    const ids = sel.items.map(i => i.id), gids = sel.groups.map(g => g.id)
+    const ms = await mobileState()
+    if (ms.ok && !ms.loopback && passkeySupport(window) === 'ok' && hasPasskeyHere(ms, window.location.hostname)) {
+      const g = await withStepUp(c => phoneGesture('personal-grant', session.id, c), askVaultCode)
+      if (!g.ok) return g
+      return withStepUp(c => grantSession(session.id, ids, gids, c, g.gestureToken), askVaultCode)
+    }
+    return withStepUp(c => grantSession(session.id, ids, gids, c), askVaultCode)
+  }
   /** Escape closes the picker while the `@word` it was triggered by is still on screen — see `slashDismissed`. */
   const [atDismissed, setAtDismissed] = useState(false)
   const [atIndex, setAtIndex] = useState(0)
@@ -1112,6 +1147,14 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
    * See `promptHistory.ts`.
    */
   const turnAnchors = useMemo(() => turnAnchorIds(session.id, turns), [session.id, turns])
+  // PERF.1: a long conversation renders its END first and grows as the reader scrolls up.
+  const [shownTurns, setShownTurns] = useState(INITIAL_TURNS)
+  useEffect(() => { setShownTurns(INITIAL_TURNS) }, [session.id])
+  const firstShown = windowStart(turns.length, shownTurns)
+  const turnsLenRef = useRef(turns.length)
+  turnsLenRef.current = turns.length
+  /** scrollHeight before an older block was added — restored after it renders, so nothing jumps. */
+  const growFrom = useRef<number | null>(null)
 
 
 
@@ -1386,6 +1429,8 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
   const jumpToQuote = useCallback((id: string) => {
     const target = quoteState.current.replyTo.find(r => r.id === id)
     const i = target?.key === undefined ? -1 : turns.findIndex(t => turnKeyOf(t) === target.key)
+    // A turn above the rendered window is rendered first, so the jump lands on it.
+    if (i >= 0 && i < windowStart(turns.length, shownTurns)) flushSync(() => setShownTurns(shownToInclude(turns.length, i)))
     const el = i >= 0 && turnAnchors[i] ? document.getElementById(turnAnchors[i]!) : null
     if (!el) {
       setNotice(pt
@@ -1415,7 +1460,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
     void body.offsetWidth
     body.style.animation = ROW_FLASH
     body.addEventListener('animationend', () => { body.style.animation = '' }, { once: true })
-  }, [turns, turnAnchors, pt])
+  }, [turns, turnAnchors, pt, shownTurns])
 
   /** The card's ✕: remove the card, and with it the quote. */
   const dropQuote = useCallback((id: string) => {
@@ -1493,10 +1538,25 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
     if (tailFollows(atTail, holdTailUntil.current, Date.now())) el.scrollTop = el.scrollHeight
   }, [turns.length, live, payload, atTail, echo.length])
 
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el || growFrom.current === null) return
+    el.scrollTop += el.scrollHeight - growFrom.current
+    growFrom.current = null
+  }, [shownTurns])
+
   const onScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < TAIL_SLACK
+    // Near the top with older turns not rendered yet: render the next block (position kept below).
+    if (el.scrollTop < GROW_AT_PX && growFrom.current === null) {
+      setShownTurns(n => {
+        if (windowStart(turnsLenRef.current, n) === 0) return n
+        growFrom.current = el.scrollHeight
+        return n + GROW_TURNS
+      })
+    }
     // Right after a jump the view can still be near the bottom while it scrolls away; reading that
     // as "at the tail" would re-arm the follow and pull the reader back. See `holdTailUntil`.
     if (near && Date.now() < holdTailUntil.current) return
@@ -1943,7 +2003,18 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
     // `composeReply` puts a BLANK LINE between the blocks, and that is not formatting: joined with a
     // single newline, CommonMark's lazy continuation pulls what was typed into the blockquote, and
     // the person's own words render inside the grey bar as if the session had said them.
-    const composed = composeReply({ quote, paths: attached.map(a => a.path), text })
+    let composed = composeReply({ quote, paths: attached.map(a => a.path), text })
+    // The `:vault` chip: grant first (the gesture), then the chip becomes references + a briefing. A
+    // grant that is refused stops the send and keeps the draft — a message pointing at secrets the
+    // session cannot use would only fail later, at the command.
+    if (hasVaultChip(composed)) {
+      if (!vaultSel) { setNotice(pt ? 'Escolha de novo os segredos do chip 🔐 (clique nele).' : 'Choose the 🔐 chip\'s secrets again (click it).'); return }
+      setNotice(pt ? 'Confirme neste computador (Windows Hello) para liberar os segredos…' : 'Confirm on this computer (Windows Hello) to grant the secrets…')
+      const g = await grantVault(vaultSel)
+      if (!g.ok) { setNotice(g.sentence || (pt ? 'Os segredos não foram liberados; nada foi enviado.' : 'The secrets were not granted; nothing was sent.')); return }
+      setNotice(null)
+      composed = expandVaultChip(composed, g.refs.map(r => r.ref), g.briefing)
+    }
     // Dictated? The model is told in one short trailing line — see `dictationMark.ts`. Taken and
     // cleared here, so the NEXT message starts undictated unless the microphone is used again.
     const full = dictatedRef.current ? markDictated(composed) : composed
@@ -2106,7 +2177,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
             }}>{payload.older}</p>
           )}
 
-          {turns.map((t, i) => (
+          {turns.slice(firstShown).map((t, j) => { const i = firstShown + j; return (
             <ChatBubble
               key={i}
               turn={t}
@@ -2137,7 +2208,7 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                 ...(canPrompt && t.role === 'assistant' ? { onReplyExcerpt: onReplyToExcerpt } : {})
               }
             />
-          ))}
+          )})}
 
           {/* An echo IS an unread message by definition — it is retired the instant the transcript
               carries the same text — so it is drawn as one: faded, with the wait said in words
@@ -2853,6 +2924,11 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
                   // Every caret move, not only every keystroke: clicking into the middle of a
                   // written prompt changes whether the caret is inside a `/command`, and a picker
                   // that only listened to typing would answer for wherever the caret used to be.
+                  onClick={e => {
+                    // Clicking the 🔐 chip reopens the vault picker (view, add, remove).
+                    const c = e.currentTarget.selectionStart
+                    if (vaultChipTokens(draft).some(r => c > r.start && c < r.end)) setVaultPickerOpen(true)
+                  }}
                   onSelect={e => {
                     // The caret never rests INSIDE a quote card — it walks over it.
                     const node = e.currentTarget
@@ -3516,6 +3592,22 @@ export function SessionChat({ session, row, lang, act, onArtifacts, onReopened, 
           lang={lang}
         />
       )}
+
+      {/* VAULT.PERSONAL §8.5 — the `:vault` picker and the code the grant may ask at send. */}
+      {vaultPickerOpen && (
+        <VaultPicker
+          lang={pt ? 'pt' : 'en'} isMobile={isMobile} initial={vaultSel}
+          onClose={() => setVaultPickerOpen(false)}
+          onClear={() => { setVaultSel(null); editDraft(removeVaultChip(draft)); setVaultPickerOpen(false) }}
+          onConfirm={sel => {
+            setVaultSel(sel); setVaultPickerOpen(false)
+            const out = applyVaultChip(draft, textareaRef.current?.selectionStart ?? caret, sel, pt)
+            editDraft(out.text); setCaret(out.caret)
+            requestAnimationFrame(() => { const n = textareaRef.current; if (n) { n.focus(); n.setSelectionRange(out.caret, out.caret) } })
+          }}
+        />
+      )}
+      {vaultCodeAsk && <VaultCodeAsk lang={pt ? 'pt' : 'en'} isMobile={isMobile} onDone={vaultCodeAsk} />}
 
       {/* FORWARD — the fleet picker as its third feature: pick one or more sessions, then an
           optional comment and where it lands (the draft by default). See `chatForward.ts`. */}

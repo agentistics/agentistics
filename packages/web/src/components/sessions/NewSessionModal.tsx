@@ -26,7 +26,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, Check, ClipboardList, Loader, Paperclip, X } from 'lucide-react'
+import { unlockIfLocked } from '../vault/VaultUnlockHost'
+import { ChevronDown, ChevronLeft, ChevronRight, Check, ClipboardList, Loader, Lock, Paperclip, X } from 'lucide-react'
 import { attachmentRoom, MAX_ATTACHMENTS, planPaste } from '../../lib/pastePlan'
 import { Field, inputStyle } from './formBits'
 import { HarnessPicker } from './HarnessPicker'
@@ -594,7 +595,7 @@ export function NewSessionModal({
           ...(force ? { force: true as const } : {}),
         }),
       })
-      const json = await res.json() as { ok: boolean; message: string; id?: string }
+      const json = await res.json() as { ok: boolean; message: string; id?: string; queued?: { id: string; position: number } }
       if (json.ok) {
         // Forced through despite the budget — surfaced through the persisted notification store
         // (never silently), the same "already-localized sentence, meta-carried" pattern
@@ -639,7 +640,10 @@ export function NewSessionModal({
       }
       setBusy(false)
       setNotice(json.message)
-      setForceable(isAdmissionRefusal(json))
+      const queued = json.queued !== undefined
+      // RES.1 — a QUEUED spawn starts by itself when room frees. "Start anyway" is withheld: it would
+      // start this session now AND leave the queued copy to start a second one later.
+      setForceable(!queued && isAdmissionRefusal(json))
     } catch {
       setBusy(false)
       setNotice(pt ? 'Erro de rede ao falar com esta máquina.' : 'Network error talking to this machine.')
@@ -810,6 +814,13 @@ export function NewSessionModal({
                 options={nativeOptions.providers ?? []}
                 unsetLabel={nativeOptions.providers === null ? (pt ? 'Carregando…' : 'Loading…') : (pt ? 'Nenhum' : 'None')}
               />
+              {/* VAULT.PERSONAL §10: a key the locked vault keeps unreadable — unlock right here. */}
+              {nativeOptions.locked && (
+                <button type="button" onClick={() => { void unlockIfLocked().then(ok => { if (ok) nativeOptions.reload() }) }}
+                  style={{ marginTop: 8, padding: isMobile ? '10px 14px' : '6px 12px', minHeight: isMobile ? 44 : undefined, borderRadius: 8, fontSize: 12.5, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'inherit' }}>
+                  <Lock size={13} /> {pt ? 'O cofre está trancado — destrancar para usar as chaves guardadas' : 'The vault is locked — unlock to use the stored keys'}
+                </button>
+              )}
             </Field>
           )}
 

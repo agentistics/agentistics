@@ -24,6 +24,7 @@
  * on it saying why. The link was never the problem; there was no reader.
  */
 
+import { anyGrant, scrubDeep } from '../vault/grants'
 import type { StartHost } from '../cli-start'
 import { applyPendingRewind, forgetRewind, pendingRewindFor } from './rewind-pending'
 import type { CliLang } from '../cli-lang'
@@ -129,6 +130,8 @@ async function readSessionChatCore(
   // untested long enough to become a blank pane in front of a user.
   readerFor: typeof transcriptReaderFor = transcriptReaderFor,
   onRow: (row: { link?: SessionConversationLink | null }) => void = () => undefined,
+  /** The transcript file this read resolved (the chat stream watches it). */
+  onPath: (path: string) => void = () => undefined,
 ): Promise<ChatPayload> {
   const s = controlStrings(lang)
   if (!host.sessions) return { turns: [], unavailable: s.sessionsNoHost, live: false }
@@ -272,6 +275,7 @@ async function readSessionChatCore(
   // one step later than the link and format refusals above. The cause behind the report was the
   // stale memo in `transcript-path-memo.ts`; this is the symptom guard beside it, so the next cause
   // says something instead of drawing a blank pane.
+  onPath(path)
   const read = await reader.read(path, MAX_TURNS).catch(() => null)
   if (read === null) {
     const availability = transcriptAvailability({
@@ -295,11 +299,17 @@ async function readSessionChatCore(
   // What is still waiting, judged against the user turns THIS read returned. The window matters and
   // is the right one: a message queued a minute ago cannot be older than the last 400 turns, and
   // comparing against a wider slice would cost a second read to learn nothing.
-  const pending = pendingFor(conversationId, read.turns.filter(t => t.role === 'user').map(t => t.text))
+  let pending = pendingFor(conversationId, read.turns.filter(t => t.role === 'user').map(t => t.text))
   // Read once per chat load, not per turn: the log is one small append-only file and the view
   // resolves against it locally. Omitted when there is nothing recorded, so a machine that never
   // attached anything carries no field at all.
   const { sends, messages } = await readAttachmentLog({ sessionId: id, conversationId })
+  // VAULT.PERSONAL §8.4: a session granted vault secrets is served with every value — and its
+  // base64/url/hex forms — replaced by «vault:NAME». No grant, no work: the same objects come back.
+  if (anyGrant()) {
+    read.turns = await scrubDeep(id, read.turns)
+    pending = await scrubDeep(id, pending)
+  }
   return {
     turns: read.turns,
     attachmentsDir: ATTACHMENT_DIR,
@@ -326,9 +336,10 @@ export async function readSessionChat(
   lang: CliLang,
   id: string,
   readerFor: typeof transcriptReaderFor = transcriptReaderFor,
+  onPath?: (path: string) => void,
 ): Promise<ChatPayload> {
   let link: SessionConversationLink | null | undefined
-  const p = await readSessionChatCore(host, lang, id, readerFor, r => { link = r.link })
+  const p = await readSessionChatCore(host, lang, id, readerFor, r => { link = r.link }, onPath)
   const transcript: TranscriptAvailability | undefined = p.transcript
     ?? (p.unavailable === undefined && p.turns.length > 0 ? { state: 'present', reason: 'resolved' } : undefined)
   return {

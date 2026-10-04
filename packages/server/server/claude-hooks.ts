@@ -38,7 +38,7 @@
  * v2 added the `Stop` hook: an install that predates it carries only `SessionStart`, so it is
  * stale by exactly the definition above and `install` brings it up to both.
  */
-export const HOOK_VERSION = 2
+export const HOOK_VERSION = 3
 
 /**
  * The two Claude Code events agentop registers on, and why there are two.
@@ -64,6 +64,8 @@ export interface HookSpec {
   verb: readonly [string, string]
   /** Seconds. A hook that hangs holds up the session it was supposed to serve. */
   timeoutSec: number
+  /** Claude Code's tool matcher, for the tool events. Absent = every tool (or the event has none). */
+  matcher?: string
 }
 
 export const HOOK_SPECS: readonly HookSpec[] = [
@@ -72,6 +74,13 @@ export const HOOK_SPECS: readonly HookSpec[] = [
   // Appends one line to a local file. Five is already an eternity for that, and this one runs at
   // the end of EVERY turn — the budget has to be small enough that it is never felt.
   { event: 'Stop', verb: ['events', 'emit'], timeoutSec: 5 },
+  // VAULT.PERSONAL §8.3. Both exit at once, printing nothing, in a session agentop did not start
+  // (no AGENTOP_MANAGED_ID) or one with no grant — a quiet machine pays one process start per call.
+  // PreToolUse turns a granted `vault://key` into a call that fetches the value when the command RUNS.
+  { event: 'PreToolUse', verb: ['vault', 'pretool'], timeoutSec: 5, matcher: 'Bash' },
+  // PostToolUse sends EVERY tool's output through the scrubber (a Read of a file holding the value is
+  // as much a leak as a Bash echo), replacing it only when something was found.
+  { event: 'PostToolUse', verb: ['vault', 'posttool'], timeoutSec: 5 },
 ]
 
 export function hookSpecFor(event: string): HookSpec | undefined {
@@ -250,6 +259,7 @@ export function planHookInstall(settings: unknown, command: string, event = HOOK
       // No `matcher`: every SessionStart source is one where the facts that hook reports are worth
       // having — a fresh start, a resume and a compact have all just lost or never had them — and
       // Stop has no matcher dimension at all.
+      ...(hookSpecFor(event)?.matcher ? { matcher: hookSpecFor(event)!.matcher } : {}),
       hooks: [{ type: 'command', command, timeout: hookSpecFor(event)?.timeoutSec ?? HOOK_TIMEOUT_SEC }],
     })
     changed = true

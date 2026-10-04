@@ -223,8 +223,10 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
     restoreWith: 'agentop vault init (runs on first use)',
     why: 'The wrapped data key that opens every sealed secret on this machine (vault/service.ts). '
       + 'Useless off this machine except the passphrase wrapper, which is an offline brute-force '
-      + 'target beside the files it opens — so it never travels. A restore creates a new vault on '
-      + 'first use, and the secrets are re-entered with the commands this list prints.',
+      + 'target beside the files it opens — so the DIRECTORY never travels. The vault goes instead as '
+      + 'ONE sealed bundle beside the archive (vault-bundle.json, VAULT.PERSONAL): every record still '
+      + 'sealed, the key only under the 24-word recovery wrapper, no machine-bound wrapper. A restore '
+      + 'stages it and the 24 words open it; without a bundle, a new vault is created on first use.',
   },
   {
     pattern: '.agentistics/central', match: 'prefix', reason: 'secret',
@@ -401,6 +403,15 @@ const REGENERABLE: ExcludeRule[] = [
 ]
 
 const RUNTIME: ExcludeRule[] = [
+  // RES.1 — the process governor's state. Both name PIDS on this machine.
+  {
+    pattern: '.agentistics/helpers.json', match: 'prefix', reason: 'runtime',
+    why: 'Registered helper processes, by pid. Those processes do not exist on the new machine.',
+  },
+  {
+    pattern: '.agentistics/heavy', match: 'prefix', reason: 'runtime',
+    why: 'The heavy-job queue: one file per waiting or running job, by pid. Nothing in it outlives its process.',
+  },
   {
     pattern: '.agentistics/managed-sessions.json', match: 'prefix', reason: 'runtime',
     why: 'Names tmux sessions that will not exist on the new machine. Restoring it yields rows pointing at nothing.',

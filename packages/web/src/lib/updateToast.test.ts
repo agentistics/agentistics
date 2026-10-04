@@ -3,6 +3,7 @@ import {
   CRITICAL_SNOOZE_MS, RESTORE_TTL_MS, SNOOZE_MS, decodeRestore, encodeRestore, isNewer, parseSnooze,
   safeAppUrl, shouldShowToast, snapshotRestore, snoozeActive, snoozeFor, type VersionAnswer,
   UPDATE_NOTICE_CODE, promptExit, promptTimeoutMs,
+  VERSION_POLL_MS, VERSION_FOCUS_MIN_MS, versionRefetchDue, promptDismissedFor,
 } from './updateToast'
 
 const info = (o: Partial<VersionAnswer> = {}): VersionAnswer =>
@@ -109,5 +110,32 @@ describe('the popup hands itself to the bell', () => {
   })
   test('the bell code is the one the existing bell entry already uses', () => {
     expect(UPDATE_NOTICE_CODE).toBe('app.update_available')
+  })
+})
+
+
+// UPD.NOTIFY — the page read /api/version ONCE, so a tab open when a release shipped never heard of it.
+describe('UPD.NOTIFY: the page keeps asking, and a snooze is bounded', () => {
+  const T = 1_000_000
+  test('an interval check is due every 5 minutes while the tab is visible, never while hidden', () => {
+    expect(VERSION_POLL_MS).toBe(5 * 60_000)
+    expect(versionRefetchDue({ now: T + VERSION_POLL_MS - 1, lastAt: T, trigger: 'interval', visible: true })).toBe(false)
+    expect(versionRefetchDue({ now: T + VERSION_POLL_MS, lastAt: T, trigger: 'interval', visible: true })).toBe(true)
+    expect(versionRefetchDue({ now: T + 10 * VERSION_POLL_MS, lastAt: T, trigger: 'interval', visible: false })).toBe(false)
+  })
+  test('regaining focus checks again after 30 s (not on every alt-tab); the first check always runs', () => {
+    expect(versionRefetchDue({ now: T + VERSION_FOCUS_MIN_MS - 1, lastAt: T, trigger: 'focus', visible: true })).toBe(false)
+    expect(versionRefetchDue({ now: T + VERSION_FOCUS_MIN_MS, lastAt: T, trigger: 'focus', visible: true })).toBe(true)
+    expect(versionRefetchDue({ now: T, lastAt: null, trigger: 'focus', visible: true })).toBe(true)
+  })
+  test('"remind me later" lasts a bounded few hours (a day was long enough to forget a release), critical sooner', () => {
+    expect(SNOOZE_MS).toBe(4 * 60 * 60_000)
+    expect(SNOOZE_MS).toBeLessThanOrEqual(24 * 60 * 60_000)
+    expect(CRITICAL_SNOOZE_MS).toBe(60 * 60_000)
+  })
+  test('closing the popup hides ONE version: a newer release shows it again without a reload', () => {
+    expect(promptDismissedFor('2.101.1', '2.101.1')).toBe(true)
+    expect(promptDismissedFor('2.101.1', '2.102.0')).toBe(false)
+    expect(promptDismissedFor(null, '2.102.0')).toBe(false)
   })
 })

@@ -34,13 +34,18 @@ export function UpdateFinale({ lang, version, from = '', onDone, isMobile = fals
   const result = useRef<HTMLDivElement | null>(null)
   const refs = useStageRefs()
 
+  // The caller passes a fresh arrow every render. As an effect dependency it RESET both timers on every
+  // re-render of the page (a poll, a version answer…), so the finale never closed (UPD.ANIM). Held in a ref,
+  // the timers start once.
+  const doneRef = useRef(onDone)
+  doneRef.current = onDone
   useEffect(() => {
     const t1 = window.setTimeout(() => setLeaving(true), FINALE_MS - 450)
-    const t2 = window.setTimeout(onDone, FINALE_MS)
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onDone() }
+    const t2 = window.setTimeout(() => doneRef.current(), FINALE_MS)
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') doneRef.current() }
     window.addEventListener('keydown', key)
     return () => { window.clearTimeout(t1); window.clearTimeout(t2); window.removeEventListener('keydown', key) }
-  }, [onDone])
+  }, [])
 
   useEffect(() => {
     const cv = canvas.current

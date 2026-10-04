@@ -1,0 +1,12 @@
+{
+  "_comment": "PERF.1 step 6: ceilings checked by budget.ts in CI over a synthetic home at --scale 0.1. Generous on purpose (shared CI runners); a regression of the kind PERF.1 removed (a 3 s poll, a whole-file read per open, a 9 MB history response, a stale first frame) lands far above them.",
+  "bootListeningMs": 5000,
+  "firstDataFreshMs": 15000,
+  "dataWarmP95Ms": 300,
+  "historyOpenPagedP95Ms": 250,
+  "historyPagedResponseKB": 400,
+  "liveOpenFirstFrameMs": 1000,
+  "sendToEchoP95Ms": 2000,
+  "answerShownP95Ms": 800,
+  "changeAfterAppendP95Ms": 3000
+}

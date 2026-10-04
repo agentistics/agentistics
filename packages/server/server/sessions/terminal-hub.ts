@@ -43,7 +43,18 @@ export interface TerminalHubDeps {
   /** Injectable so a test drives the loop by hand instead of by wall-clock. */
   setInterval?: (fn: () => void, ms: number) => TimerHandle
   clearInterval?: (h: TimerHandle) => void
+  /** Injectable for the quick follow-up capture (`FOLLOW_MS`). */
+  setTimeout?: (fn: () => void, ms: number) => void
 }
+
+/**
+ * While the screen is CHANGING, the next capture comes this soon instead of at the interval (PERF.1).
+ *
+ * An answer being written changes the pane many times a second, and at the plain 500 ms cadence its
+ * text reached the chat a quarter of a second late on average. A changed frame arms one follow-up
+ * capture this soon; an unchanged one arms nothing, so a still screen costs exactly what it did.
+ */
+export const FOLLOW_MS = 150
 
 interface Entry {
   sinks: Set<TerminalSink>
@@ -53,6 +64,8 @@ interface Entry {
   lastDigest: string | null
   lastFrame: TerminalFrame | null
   seq: number
+  /** A follow-up capture is already scheduled. */
+  following: boolean
 }
 
 export interface TerminalHub {
@@ -74,6 +87,7 @@ export function createTerminalHub(deps: TerminalHubDeps): TerminalHub {
     deps.setInterval ?? ((fn, ms) => setInterval(fn, ms) as TimerHandle)
   const clearIv: (h: TimerHandle) => void = deps.clearInterval ?? clearInterval
   const entries = new Map<string, Entry>()
+  const setTo: (fn: () => void, ms: number) => void = deps.setTimeout ?? ((fn, ms) => { setTimeout(fn, ms) })
 
   function stop(id: string, entry: Entry): void {
     if (entry.handle !== null) { clearIv(entry.handle); entry.handle = null }
@@ -107,6 +121,10 @@ export function createTerminalHub(deps: TerminalHubDeps): TerminalHub {
       still.lastDigest = digest
       still.lastFrame = frame
       for (const s of [...still.sinks]) { try { s.onFrame(frame) } catch { /* sink is done */ } }
+      if (!still.following) {
+        still.following = true
+        setTo(() => { const e = entries.get(id); if (e) { e.following = false; void tick(id) } }, FOLLOW_MS)
+      }
     } finally {
       const e = entries.get(id)
       if (e) e.busy = false
@@ -143,7 +161,7 @@ export function createTerminalHub(deps: TerminalHubDeps): TerminalHub {
       }
       let entry = entries.get(id)
       if (!entry) {
-        entry = { sinks: new Set(), handle: null, busy: false, lastDigest: null, lastFrame: null, seq: 0 }
+        entry = { sinks: new Set(), handle: null, busy: false, lastDigest: null, lastFrame: null, seq: 0, following: false }
         entries.set(id, entry)
         // First tick immediately so the first reader is not waiting a whole interval for a screen
         // that already exists, then on the cadence.

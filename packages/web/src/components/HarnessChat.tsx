@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useLayoutEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -44,6 +44,14 @@ export type TranscriptMessage = {
   content: string
   timestamp?: number
   tools?: string[]
+}
+
+/** How many messages a Claude conversation opens with (its END); older pages load on demand. */
+export const HISTORY_PAGE = 150
+interface ClaudePage { messages: TranscriptMessage[]; start: number; total: number }
+const EMPTY_PAGE: ClaudePage = { messages: [], start: 0, total: 0 }
+function claudePageUrl(id: string, encodedDir: string, before?: number): string {
+  return `/api/claude-sessions/${encodeURIComponent(id)}?encodedDir=${encodeURIComponent(encodedDir)}&limit=${HISTORY_PAGE}${before !== undefined ? `&before=${before}` : ''}`
 }
 
 function ToolsBlock({ tools, pt }: { tools: string[]; pt: boolean }) {
@@ -161,6 +169,12 @@ export function HarnessChat({ harness, lang, initialProject, initialSessionId, o
   // Transcript state
   const [transcript, setTranscript] = useState<TranscriptMessage[]>([])
   const transcriptRef = useRef<HTMLDivElement>(null)
+  // PERF.1 step 3: a Claude conversation opens at its END (`HISTORY_PAGE` messages); older pages load
+  // on demand. `olderStart` is the index of the first loaded message — above 0, there is more.
+  const [olderStart, setOlderStart] = useState(0)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  /** scrollHeight before older messages were prepended, so the view stays where the reader was. */
+  const prependFrom = useRef<number | null>(null)
 
   // Initial deep-link handling
   useEffect(() => {
@@ -170,11 +184,12 @@ export function HarnessChat({ harness, lang, initialProject, initialSessionId, o
         const proj: ProjectItem = { name: initialProject.name, path: initialProject.path, encodedDir: initialProject.encodedDir }
         setSelectedProject(proj)
         setLoading(true)
-        fetch(`/api/claude-sessions/${encodeURIComponent(initialSessionId)}?encodedDir=${encodeURIComponent(initialProject.encodedDir)}`)
-          .then(r => r.ok ? r.json() : [])
-          .then((msgs: TranscriptMessage[]) => {
-            setTranscript(msgs)
-            setSelectedSession({ id: initialSessionId, title: initialSessionId, messageCount: msgs.length })
+        fetch(claudePageUrl(initialSessionId, initialProject.encodedDir))
+          .then(r => r.ok ? r.json() : EMPTY_PAGE)
+          .then((page: ClaudePage) => {
+            setTranscript(page.messages)
+            setOlderStart(page.start)
+            setSelectedSession({ id: initialSessionId, title: initialSessionId, messageCount: page.total })
             setView('transcript')
           })
           .catch(() => { setView('transcript') })
@@ -212,12 +227,27 @@ export function HarnessChat({ harness, lang, initialProject, initialSessionId, o
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Scroll transcript to bottom
-  useEffect(() => {
-    if (view === 'transcript' && transcriptRef.current) {
-      transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
-    }
+  // Scroll transcript to bottom — except after older messages were PREPENDED, where the reader's
+  // place is kept instead.
+  useLayoutEffect(() => {
+    const el = transcriptRef.current
+    if (view !== 'transcript' || !el) return
+    if (prependFrom.current !== null) { el.scrollTop += el.scrollHeight - prependFrom.current; prependFrom.current = null; return }
+    el.scrollTop = el.scrollHeight
   }, [transcript, view])
+
+  const loadOlder = useCallback(async () => {
+    if (loadingOlder || olderStart <= 0 || !selectedSession || !selectedProject) return
+    setLoadingOlder(true)
+    try {
+      const r = await fetch(claudePageUrl(selectedSession.id, selectedProject.encodedDir, olderStart))
+      if (!r.ok) return
+      const page = await r.json() as ClaudePage
+      prependFrom.current = transcriptRef.current?.scrollHeight ?? null
+      setTranscript(t => [...page.messages, ...t])
+      setOlderStart(page.start)
+    } catch { /* the loaded part stays; the button is still there */ } finally { setLoadingOlder(false) }
+  }, [loadingOlder, olderStart, selectedSession, selectedProject])
 
   // Load projects
   useEffect(() => {
@@ -282,14 +312,18 @@ export function HarnessChat({ harness, lang, initialProject, initialSessionId, o
     try {
       let url: string
       if (harness === 'claude' && selectedProject) {
-        url = `/api/claude-sessions/${encodeURIComponent(sess.id)}?encodedDir=${encodeURIComponent(selectedProject.encodedDir)}`
+        const r = await fetch(claudePageUrl(sess.id, selectedProject.encodedDir))
+        const page: ClaudePage = r.ok ? await r.json() : EMPTY_PAGE
+        setTranscript(page.messages)
+        setOlderStart(page.start)
       } else {
         url = `/api/${harness}-sessions/${encodeURIComponent(sess.id)}`
+        const r = await fetch(url)
+        const msgs: TranscriptMessage[] = r.ok ? await r.json() : []
+        setTranscript(msgs)
+        setOlderStart(0)
       }
-      const r = await fetch(url)
-      const msgs: TranscriptMessage[] = r.ok ? await r.json() : []
-      setTranscript(msgs)
-    } catch { setTranscript([]) }
+    } catch { setTranscript([]); setOlderStart(0) }
     finally { setLoading(false) }
     setView('transcript')
     onStateChange?.({
@@ -499,7 +533,14 @@ export function HarnessChat({ harness, lang, initialProject, initialSessionId, o
           </span>
         )}
       </div>
-      <div ref={transcriptRef} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '10px 10px' : '12px 14px', overflowX: 'hidden' }}>
+      <div ref={transcriptRef} onScroll={e => { if (e.currentTarget.scrollTop < 300) void loadOlder() }} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '10px 10px' : '12px 14px', overflowX: 'hidden' }}>
+        {!loading && olderStart > 0 && (
+          <div style={{ textAlign: 'center', padding: '4px 0 10px' }}>
+            <button type="button" onClick={() => void loadOlder()} disabled={loadingOlder} style={{ fontSize: 11, color: 'var(--text-tertiary)', background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '3px 10px', cursor: 'pointer' }}>
+              {loadingOlder ? (pt ? 'Carregando…' : 'Loading…') : (pt ? `Carregar mensagens anteriores (${olderStart})` : `Load earlier messages (${olderStart})`)}
+            </button>
+          </div>
+        )}
         {loading && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
             <Loader size={14} style={{ animation: 'ttyChatSpin 1s linear infinite', color }} />

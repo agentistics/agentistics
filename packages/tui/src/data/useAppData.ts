@@ -53,7 +53,30 @@ export function useAppData(apiBase: string | null, opts: AppDataOptions = {}): A
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   const alive = useRef(true)
 
-  const fetchOnce = useCallback(async () => {
+  /**
+   * RES.1 — ONE `/api/data` read in flight, plus at most one queued behind it. The payload is ~5 MB
+   * and every SSE event asked for a fresh copy, so a burst of events stacked several full reads and
+   * parses in memory at once. Events that land while a read is running collapse into one re-read.
+   */
+  const inFlight = useRef(false)
+  const again = useRef(false)
+
+  const fetchOnce = useCallback(async (): Promise<void> => {
+    if (!apiBase) return
+    if (inFlight.current) { again.current = true; return }
+    inFlight.current = true
+    try {
+      await fetchNow()
+    } finally {
+      inFlight.current = false
+    }
+    if (again.current && alive.current) {
+      again.current = false
+      void fetchOnce()
+    }
+  }, [apiBase])
+
+  const fetchNow = async () => {
     if (!apiBase) return
     try {
       const res = await fetch(`${apiBase}/api/data`)
@@ -67,7 +90,7 @@ export function useAppData(apiBase: string | null, opts: AppDataOptions = {}): A
       setError(e instanceof Error ? e.message : String(e))
       setConnection('offline')
     }
-  }, [apiBase])
+  }
 
   useEffect(() => {
     alive.current = true

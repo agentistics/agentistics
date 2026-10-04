@@ -12,6 +12,7 @@
  *   the engine's own sentence, kept in `state.notice`.
  */
 import { uploadPreviewUrl } from '../lib/nativeAttachments'
+import { unlockIfLocked } from '../components/vault/VaultUnlockHost'
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import {
   INITIAL_NATIVE_CHAT,
@@ -126,11 +127,18 @@ export function useNativeSession(id: string, lang: 'pt' | 'en'): NativeSession {
       ...(attachments.length ? { attachments: attachments.map(a => ({ url: uploadPreviewUrl(a.name), mediaType: a.mediaType, name: a.name })) } : {}),
     })
     try {
-      const res = await fetch(messagesUrl(id), {
+      const post = () => fetch(messagesUrl(id), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clientRef, text, ...(attachments.length ? { attachments: attachments.map(a => a.name) } : {}) }),
       })
-      const body = await res.json().catch(() => null) as { status?: string; sentence?: string } | null
+      let res = await post()
+      let body = await res.json().catch(() => null) as { status?: string; sentence?: string } | null
+      // VAULT.PERSONAL §10: the provider key lives in the vault. A refusal while it is locked unlocks
+      // RIGHT HERE (the shared modal) and the same message goes again — once, by itself.
+      if ((!res.ok || body?.status === 'refused') && await unlockIfLocked()) {
+        res = await post()
+        body = await res.json().catch(() => null) as { status?: string; sentence?: string } | null
+      }
       if (!res.ok || body?.status === 'refused') {
         dispatch({ type: 'send-failed', clientRef, sentence: refusalSentence(body, res.status, lang) })
         return false

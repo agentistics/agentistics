@@ -1,7 +1,8 @@
 import { describe, it, test, expect } from 'bun:test'
 import {
   resolveOpenSessionIds, resolveLiveSnapshot, sessionIdFromArgv, harnessOf, sessionIdFromFdPaths,
-  LIVE_ACTIVITY_WINDOW_MIN, LIVE_STARTUP_GRACE_MIN, harnessOfProcess, detectionUnavailable, isHarnessInfrastructure
+  LIVE_ACTIVITY_WINDOW_MIN, LIVE_STARTUP_GRACE_MIN, harnessOfProcess, detectionUnavailable, isHarnessInfrastructure,
+  belongsToServerEnvironment, installedHarnessAt, isNonInteractiveInvocation, EXTERNAL_MIN_LIFETIME_MS,
 } from './live-sessions'
 import type { HarnessId, SessionMeta } from '@agentistics/core'
 
@@ -412,6 +413,34 @@ test('an ordinary node process is not mistaken for a harness', () => {
   expect(harnessOfProcess('node', '/usr/bin/node', ['node', '/srv/app/server.js'])).toBeUndefined()
   expect(harnessOfProcess('node', '/usr/bin/node', ['node'])).toBeUndefined()
   expect(harnessOfProcess('bash', '/usr/bin/bash', ['bash'])).toBeUndefined()
+})
+
+describe('phantom external-process gates', () => {
+  test('an isolated HOME or data dir is not this server\'s session', () => {
+    expect(belongsToServerEnvironment({ HOME: '/tmp/preview', AGENTISTICS_DIR: '/tmp/preview/.agentistics' }, '/home/u', '/home/u/.agentistics')).toBe(false)
+    expect(belongsToServerEnvironment({ HOME: '/home/u', AGENTISTICS_DIR: '/tmp/preview' }, '/home/u', '/home/u/.agentistics')).toBe(false)
+    expect(belongsToServerEnvironment({ HOME: '/home/u', AGENTISTICS_DIR: '/home/u/.agentistics' }, '/home/u', '/home/u/.agentistics')).toBe(true)
+  })
+
+  test('a temp executable named claude is not a harness install', () => {
+    expect(installedHarnessAt('/tmp/tui/bin/claude', 'claude')).toBeUndefined()
+    expect(harnessOfProcess('claude', '/tmp/tui/bin/claude', ['claude'])).toBeUndefined()
+    expect(installedHarnessAt('/home/u/.local/share/claude/versions/2.1.233', 'claude')).toBe('claude')
+  })
+
+  test('one-shot and non-TTY invocations are not sessions', () => {
+    expect(isNonInteractiveInvocation('claude', ['claude', '-p', 'hello'], true)).toBe(true)
+    expect(isNonInteractiveInvocation('claude', ['claude', '--version'], true)).toBe(true)
+    expect(isNonInteractiveInvocation('codex', ['codex', 'exec', 'hello'], true)).toBe(true)
+    expect(isNonInteractiveInvocation('claude', ['claude'], false)).toBe(true)
+    expect(isNonInteractiveInvocation('claude', ['claude'], true)).toBe(false)
+  })
+
+  test('external rows stay hidden until five seconds old', () => {
+    const started = NOW - EXTERNAL_MIN_LIFETIME_MS + 1
+    expect(resolveLiveSnapshot([{ harness: 'claude', cwd: '/proj', startedMs: started, pid: 99 }], [], NOW).liveProcesses).toEqual([])
+    expect(resolveLiveSnapshot([{ harness: 'claude', cwd: '/proj', startedMs: NOW - EXTERNAL_MIN_LIFETIME_MS, pid: 99 }], [], NOW).liveProcesses).toHaveLength(1)
+  })
 })
 
 // --- honest unavailability ----------------------------------------------------------------------
