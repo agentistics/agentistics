@@ -47,6 +47,7 @@ import { VaultUnlockHost } from './components/vault/VaultUnlockHost'
 import { BetaTag } from './components/BetaTag'
 import { KeyboardProbe, keyboardProbeOn } from './components/KeyboardProbe'
 import { shouldNudgeViewport, shouldResetDocumentScroll } from './lib/viewportReset'
+import { useStandaloneHeight } from './hooks/useStandaloneHeight'
 import { MagnifierLayer } from './components/a11y/MagnifierLayer'
 import { HideLensesButton } from './components/a11y/HideLensesButton'
 import { MagnifierButton } from './components/a11y/MagnifierButton'
@@ -1827,6 +1828,7 @@ export default function AppLayout() {
    */
   // Read once — a query string does not change under the app.
   const [probeOn] = useState(keyboardProbeOn)
+  const standaloneH = useStandaloneHeight(isMobile && inSessionsWorkspace)
 
   const lockViewport = isMobile && inSessionsWorkspace
   useEffect(() => {
@@ -4450,7 +4452,10 @@ export default function AppLayout() {
       // There is no cost on a desktop: with no dynamic toolbars `dvh` and `vh` are the same number.
       // A rule that holds on every screen does not need a breakpoint, and the breakpoint was the
       // whole defect.
-      height: inSessionsWorkspace || !isMobile ? '100dvh' : undefined,
+      // A home-screen app on iOS can come back from the keyboard with `100dvh` short by about the
+      // status bar, leaving a black band under the bottom bar (owner, 2026-10-04). Held at the
+      // screen's height then — `useStandaloneHeight` / `lib/standaloneHeight.ts`.
+      height: inSessionsWorkspace || !isMobile ? (standaloneH !== null ? `${standaloneH}px` : '100dvh') : undefined,
       // Only on the LIST. With a session open the bar is not rendered at all (see its own note),
       // so reserving its band would leave a strip of nothing under the composer — the same
       // mismatch the old subtraction made, seen from the other side.

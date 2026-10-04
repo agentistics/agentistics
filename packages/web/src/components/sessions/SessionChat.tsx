@@ -127,6 +127,7 @@ import { SessionStatsMenu } from './SessionStatsMenu'
 import type { SessionStats } from '../../lib/sessionStats'
 import type { ChatSource } from './chatSource'
 import { ConfirmModal } from '../../pages/settings/primitives'
+import { caretOfSelection } from '../../lib/selectionCaret'
 
 /** How long a successful "send now" keeps its sentence on screen. */
 const SEND_NOW_RESULT_MS = 6000
@@ -3013,8 +3014,12 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     // person was writing, so it is not recorded.
                     const anchor = document.getSelection()?.anchorNode
                     if (anchor && node.parentElement && !node.parentElement.contains(anchor)) return
-                    const from = node.selectionStart ?? 0
-                    if (cards.length > 0 && node.selectionStart === node.selectionEnd) {
+                    // A RANGED selection writes no state: re-rendering the whole chat on every
+                    // `select` while iOS selection handles are dragged stalled the gesture and its
+                    // Copy menu (`selectionCaret.ts`).
+                    const from = caretOfSelection(node.selectionStart, node.selectionEnd)
+                    if (from === null) return
+                    if (cards.length > 0) {
                       const to = snapCaret(draft, from, caret)
                       if (to !== from) { node.setSelectionRange(to, to); setCaret(to); return }
                     }
@@ -3161,6 +3166,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     lineHeight: 1.5, maxHeight: maxComposerH, overflowY: 'auto', padding: '6px 6px',
                     // Above the mirror.
                     position: 'relative', zIndex: 1,
+                    // Native selection and the iOS Copy callout, said explicitly so no ancestor rule
+                    // can take them away from the one place text is written.
+                    userSelect: 'text', WebkitUserSelect: 'text', WebkitTouchCallout: 'default',
                   }}
                   onScroll={e => {
                     const u = underlayRef.current
