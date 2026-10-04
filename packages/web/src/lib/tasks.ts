@@ -14,7 +14,8 @@ import {
 import { getDateRangeFilter } from '../hooks/useData'
 import { filingUrl } from './nativeSession'
 import { isNativeSessionId } from './sessionRoute'
-import type { ChatAttachmentRef, CommentTarget } from '@agentistics/core'
+import type { ChatAttachmentRef, CommentTarget, TaskThreadRecord, ThreadDelivery } from '@agentistics/core'
+export type { ThreadDelivery } from '@agentistics/core'
 
 export type LinkProvenance = 'assigned' | 'observed' | 'none'
 /**
@@ -187,6 +188,10 @@ export interface TaskListRow {
   counts: {
     comments: number; subtasks: number; subtasksDone: number; files: number
     commentsBySubtask?: Record<string, number>
+    /** Threads on the task, and how many have a session's word after the person's last one.
+     *  Optional: an older server does not send them — read as "not known", never as 0. */
+    threads?: number
+    threadsAwaiting?: number
   }
   harnesses: string[]
   /**
@@ -250,7 +255,19 @@ export interface TaskComment {
   /** Files left with the comment — references into the chat's attachment store (`url` is added by
    *  the detail reply for assistants; the UI builds its own from `path`). */
   attachments?: ChatAttachmentRef[]
+  /** The THREAD it was posted in; absent = a loose comment (every pre-thread one). */
+  threadId?: string
+  /** `session` only when the poster PROVED its identity; `owner` = the person wrote it. */
+  role?: 'owner' | 'session'
+  sessionId?: string
+  /** An owner answer to ONE participant's mirrored question. */
+  answerTo?: string
+  /** Where an owner answer was typed. */
+  via?: 'thread' | 'session'
+  deliveries?: ThreadDelivery[]
 }
+
+export type TaskThread = TaskThreadRecord
 export interface Subtask {
   id: string
   taskId: string
@@ -358,6 +375,8 @@ export interface TaskDetail {
   /** The same comments grouped by their own target — the API's shape for assistants. The UI reads
    *  threads through `commentThread` instead, which also aggregates a group's members. */
   commentThreads?: { target: CommentTarget; comments: TaskComment[] }[]
+  /** Topic threads. Optional: an older server does not send them. */
+  threads?: TaskThread[]
   subtasks: Subtask[]
   files: TaskFile[]
   subtaskRollups: SubtaskView[]
@@ -620,6 +639,8 @@ export async function addComment(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         author, body,
+        // The board is the PERSON's surface — a session comments through the MCP, with its identity.
+        owner: true,
         ...(subtaskId ? { subtaskId } : {}),
         ...(attachments && attachments.length > 0 ? { attachments } : {}),
       }),
@@ -631,6 +652,45 @@ export async function addComment(
     return { ok: false, message: null }
   }
 }
+
+async function threadPost<T>(ref: string, body: Record<string, unknown>, lang?: string): Promise<
+  ({ ok: true } & T) | { ok: false; message: string | null }
+> {
+  try {
+    const res = await fetch(`/api/tasks/${encodeURIComponent(ref)}/threads${lang ? `?lang=${lang}` : ''}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const out = await res.json().catch(() => null) as ({ ok?: boolean; message?: string } & T) | null
+    if (res.ok && out?.ok) return { ...out, ok: true } as { ok: true } & T
+    return { ok: false, message: typeof out?.message === 'string' ? out.message : null }
+  } catch {
+    return { ok: false, message: null }
+  }
+}
+
+/** Open a topic thread on the task, or on one of its subtasks/groups. */
+export const openThread = (ref: string, title: string, subtaskId?: string | null) =>
+  threadPost<{ thread: TaskThread }>(ref, { action: 'open', title, author: 'you', ...(subtaskId ? { subtaskId } : {}) })
+
+/**
+ * The person's reply: ONE message delivered to every participant (or to `answerTo` alone, when it
+ * answers a session's mirrored question). The answer says what happened to each delivery.
+ */
+export const replyThread = (
+  ref: string, threadId: string, body: string, lang: string,
+  o: { answerTo?: string; attachments?: readonly ChatAttachmentRef[] } = {},
+) => threadPost<{ id: string; deliveries: ThreadDelivery[] }>(ref, {
+  action: 'reply', threadId, body, author: 'you',
+  ...(o.answerTo ? { answerTo: o.answerTo } : {}),
+  ...(o.attachments && o.attachments.length > 0 ? { attachments: o.attachments } : {}),
+}, lang)
+
+export const threadVerb = (
+  ref: string, threadId: string, action: 'resolve' | 'reopen' | 'mute' | 'unmute' | 'rename',
+  o: { sessionId?: string; title?: string } = {},
+) => threadPost<object>(ref, { action, threadId, ...o })
 
 /**
  * Add a subtask — loose by default, or a GROUP (§F.1) when `isGroup` is true — and return its new
