@@ -35,7 +35,7 @@ const HELP = `Usage: agentop vault <command>
   rekey --protector <id>   move the vault to another protector (keychain|dpapi|libsecret|systemd-creds|passphrase)
   add-passphrase           add a passphrase wrapper beside the system one (how a Docker machine opens it)
   reset [--yes]            delete the vault and every sealed file — the secrets are then re-entered
-  enroll                   make the vault ultra secure: authenticator, recovery key, presence (what is still missing)
+  enroll                   protect the vault: authenticator, recovery key, presence (what is still missing)
         [--authenticator] [--recovery] [--presence hello|fido2] [--require-presence]
   recover                  open the vault with your 24-word recovery key (terminal only)
   setup-code               print the one-time code the dashboard asks for its FIRST vault setup
