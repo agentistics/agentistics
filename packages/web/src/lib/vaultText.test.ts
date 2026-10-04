@@ -21,7 +21,7 @@ test('every code the server can send resolves to a key', () => {
 test('how-it-works says the limit in both languages', () => {
   expect(vt('how_not', 'en')).toContain('while the vault is open')
   expect(vt('how_not', 'pt')).toContain('enquanto o cofre está aberto')
-  expect(vt('how_backup', 'en')).toContain('never carries the key')
+  expect(vt('how_backup', 'en')).toContain('only wrapped under your 24 words')
 })
 
 test('pending leads, then unreadable, then sealed', () => {

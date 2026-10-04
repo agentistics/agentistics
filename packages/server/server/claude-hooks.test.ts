@@ -319,7 +319,18 @@ describe('the Stop hook alongside SessionStart', () => {
   })
 
   test('an event agentop has no hook for is refused rather than fabricated', () => {
-    expect(() => hookCommand('agentop', HOOK_VERSION, 'PreToolUse')).toThrow()
+    expect(() => hookCommand('agentop', HOOK_VERSION, 'Notification')).toThrow()
+  })
+})
+
+describe('VAULT.PERSONAL §8.3 — the two tool hooks', () => {
+  test('PreToolUse matches Bash only and runs `vault pretool`; PostToolUse runs `vault posttool` on every tool', () => {
+    expect(hookCommand('agentop', HOOK_VERSION, 'PreToolUse')).toBe(`agentop vault pretool --hook-version ${HOOK_VERSION}`)
+    expect(hookCommand('agentop', HOOK_VERSION, 'PostToolUse')).toBe(`agentop vault posttool --hook-version ${HOOK_VERSION}`)
+    const plan = planHookInstall({}, hookCommand('agentop', HOOK_VERSION, 'PreToolUse'), 'PreToolUse')
+    expect(plan.ok && (plan.settings as { hooks: { PreToolUse: { matcher?: string }[] } }).hooks.PreToolUse[0]!.matcher).toBe('Bash')
+    const post = planHookInstall({}, hookCommand('agentop', HOOK_VERSION, 'PostToolUse'), 'PostToolUse')
+    expect(post.ok && (post.settings as { hooks: { PostToolUse: { matcher?: string }[] } }).hooks.PostToolUse[0]!.matcher).toBeUndefined()
   })
 })
 

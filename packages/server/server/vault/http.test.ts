@@ -55,8 +55,11 @@ type J = Record<string, any>
 async function http(method: 'GET' | 'POST', path: string, body?: unknown, grant?: string): Promise<{ status: number; json: J; headers: Headers }> {
   // What the dashboard sends: same-origin, JSON (M1 refuses anything else on a POST).
   const headers: Record<string, string> = { 'sec-fetch-site': 'same-origin', ...(method === 'POST' ? { 'content-type': 'application/json' } : {}), ...(grant ? { 'x-vault-grant': grant } : {}) }
-  const req = new Request(`http://local${path}`, { method, headers, ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}) })
-  const res = await handleVaultHttp(req, new URL(req.url), { cors: {}, session: 'session-A' })
+  // VAULT.PERSONAL §10: the gesture unlock answers ONLY the page on this computer, so it is sent as one.
+  const local = path === '/api/vault/unlock'
+  if (local) Object.assign(headers, { host: 'localhost:47292', origin: 'http://localhost:47292' })
+  const req = new Request(`${local ? 'http://localhost:47292' : 'http://local'}${path}`, { method, headers, ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}) })
+  const res = await handleVaultHttp(req, new URL(req.url), { cors: {}, session: 'session-A', ...(local ? { peer: '127.0.0.1' } : {}) })
   if (!res) return { status: 404, json: {}, headers: new Headers() }
   const text = await res.text()
   return { status: res.status, json: text.startsWith('{') ? JSON.parse(text) : {}, headers: res.headers }
@@ -381,12 +384,12 @@ describe('§11 — fresh owner machine → enrol → restart → locked → gest
     expect((await http('GET', '/api/vault')).json).toMatchObject({ pendingStepup: true, state: 'locked' })
     expect((await openFromFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup')).ok).toBe(false)
 
-    // the code → open; a grant for the list
-    expect((await http('POST', '/api/vault/unlock/code', { code: codeAt() })).status).toBe(200)
-    next()
-    expect((await http('GET', '/api/vault')).status).toBe(401) // the inventory still wants its own step-up
-    const g = await http('POST', '/api/vault/stepup', { code: codeAt() })
-    const open = await http('GET', '/api/vault', undefined, g.json.grant)
+    // the code → open AND the grant for the list: ONE code (owner 2026-10-03 — it was asked twice)
+    const uc = await http('POST', '/api/vault/unlock/code', { code: codeAt() })
+    expect(uc.status).toBe(200)
+    expect(typeof uc.json.grant).toBe('string')
+    expect((await http('GET', '/api/vault')).status).toBe(401) // without the grant: still its own step-up
+    const open = await http('GET', '/api/vault', undefined, uc.json.grant)
     expect(open.json).toMatchObject({ state: 'open', presence: true, autoLockMinutes: 30 })
     expect(Array.isArray(open.json.items)).toBe(true)
     expect(open.json.autoLockInMs).toBeGreaterThan(0)

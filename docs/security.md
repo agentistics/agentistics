@@ -452,7 +452,7 @@ it on. A vault set up under §7a keeps working unchanged until you do.
 |---|---|---|---|
 | unlock | per the unlock policy (below) | yes (the gesture opens it; when the code is owed it must follow within 120 s, and a wrong code drops the key) | — |
 | change the unlock policy | yes | yes | none, asked every time |
-| list the vault, lock it from the dashboard, change auto-lock | yes | no | one code covers 5 minutes. The grant lives only in the memory of the page that typed the code and travels in a header, never in a cookie. |
+| list the vault, lock it from the dashboard, change auto-lock | yes | no | one code covers 5 minutes. The grant lives only in the memory of the page that typed the code and travels in a header, never in a cookie. **The code that completes an unlock IS that step-up** (owner decision, 2026-10-03): `POST /api/vault/unlock/code` and the phone's `/api/vault/phone/unlock` hand back the same 5-minute grant, bound to the session that typed it, so the list right behind an unlock never asks a second code. An unlock that asked NO code (gesture only, or inside the per-day window) mints nothing — its list still asks, inline in the vault's own header, never as a second card. |
 | rekey, reset, add a passphrase, enrol or turn off presence, a new recovery key, replace the authenticator | yes | yes | none, asked every time |
 | lock from a terminal on this machine, auto-lock, shutdown | no | no | — |
 
@@ -604,6 +604,141 @@ vault in its own process.
 A machine paired as an unattended runner will keep its runner credentials in a **separate vault**,
 with its own key, that can never read your personal secrets. The storage for it exists. Pairing, the
 unattended open at service start, and the `agentop vault runner` commands are **not built yet**.
+
+## 7c. Personal secrets — the person's own passwords, logins, keys and notes
+
+Settings → Vault protects the secrets Agentistics needs; `/vault` holds the ones the PERSON keeps
+(spec: engine repo `docs/superpowers/specs/2026-10-03-vault-personal.md`). It changes no cryptography
+of §7a/§7b: every record is sealed in the human scope, under the one purpose `vault/personal`.
+
+- **Names are sealed too.** Each secret is a directory named by an opaque id, holding one sealed
+  METADATA record and one sealed VALUE record per version. The disk, a backup or a future Cloud sees
+  ids, sizes, version counters and times — never a name (Cloud decision C36). The sealed name binds
+  each file to its id and version, so a file moved between secrets does not open.
+- **The list never decrypts a value.** Only `POST /api/vault/personal/reveal` returns one; a test seals
+  a marker value, drives every route, and fails if the marker appears in any other body, in
+  `audit.jsonl`, on stdout/stderr, or anywhere on disk in the clear. The audit records the ACT and the
+  opaque id — never the name or the value.
+- **What each action asks** (rows in `VAULT_ACTION_ROWS`, every one tested server-side): listing,
+  creating, groups and the `.env` import ride the 5-minute read grant (the code once). **Revealing asks
+  the gesture every time** (Windows Hello) and the code too when the unlock policy is "always"; with no
+  presence enrolled it asks the code, fresh; with neither it is refused. **Editing, moving to the trash
+  and restoring ask the gesture fresh** (owner rule: they are dangerous). **Restoring a version and
+  deleting for good ask code and gesture, fresh.**
+- **Versions** are append-only (the newest 10 kept) with a version counter: an edit based on an old
+  version is refused as a conflict. **The trash** keeps an item 30 days, then removes it from disk.
+- **The `.env` import** sends the file text once; the server parses it, holds the pairs in memory for
+  10 minutes under a single-use token bound to the session, and answers the KEYS only. A name that
+  already exists is never overwritten unless the person picks "replace" (a new version).
+- **Key rotation carries them**: enrolling presence re-seals every `*.sealed` under the data dir, these
+  included (tested).
+
+**Limits, stated:** a revealed value is in the browser's memory and the page's DOM for 30 seconds; a
+copy is in the clipboard for 30 seconds, readable by any program of yours, and longer in a clipboard
+history tool — the page says so. Names and notes are metadata: shown in the list without a gesture,
+sealed at rest.
+
+**The backup** carries the vault as ONE sealed bundle per backup (`packages/vault/src/bundle.ts`):
+every sealed record still sealed, wrapped once more under a subkey of the data key so the backup shows
+neither the names nor the count, plus `dek.recovery` — the data key wrapped under the 24 words — and a
+`vault.json` holding only that wrapper. Nothing tied to this computer travels (no Windows Hello, DPAPI or
+security-key wrapper), so on another machine the 24 words are the only way in; a restore lands in
+recovery mode (new authenticator, personal confirmation, new words). The bundle sits beside the archive
+and, on GitHub, is a second asset of the same release. **A backup is not a deletion:** older releases keep
+older bundles — ciphertext under the key of their time. After a data-key rotation, the next confirmed
+upload erases this machine's older bundle assets by itself; "Erase the vault's history in the backup" on
+the vault page does it on demand (code + Windows Hello). Restoring never applies a bundle over a vault that
+holds secrets; an empty first-use vault is set aside (renamed, not deleted). Tested end to end on a fresh
+data dir: personal secrets and the GitHub token come back with the 24 words, and nothing else opens them.
+**Limit:** a release deleted by hand outside agentop, or a copy of an archive made elsewhere, is outside
+what the wipe can reach.
+
+**Agents use a secret without seeing it** (spec §8). The person picks credentials or groups with the
+`:vault` chip in a session's composer; sending GRANTS exactly those to that session — the gesture,
+fresh — and the message carries `vault://` references plus a briefing, never a value. A grant lives in
+memory only, dies when the vault locks or the person revokes it, and holds ids and reference names.
+- **Native sessions** (the engine, engine-api 1.7 `vaultRefs`): after the policy allows a tool call, the
+  session's granted values reach THAT call's process as `VAULT_<KEY>` env (a shell call carrying them
+  runs in its own bash, never the shared one), and every tool output is scrubbed before the content
+  store, the history, the journal, the stream or the model sees it.
+- **Claude Code** (hooks, installed by `agentop hooks install`): `PreToolUse` rewrites a granted
+  `vault://key` in a Bash command into `$(agentop vault ref key)`, which fetches the value over
+  `vault.sock` when the command runs — the one op that returns a personal value, only for a granted
+  reference, audited per use; `PostToolUse` replaces every tool output through the scrubber.
+  **Unverified:** the Claude Code docs do not say whether the transcript JSONL keeps the hook-replaced
+  output or the original; treat the on-disk transcript as possibly holding the value.
+- **Other harnesses**: no hook to rewrite or scrub — only the copies agentop SERVES are scrubbed.
+- **Every copy agentop serves** of a granted session — chat turns, pending prompts, terminal frames, the
+  fleet's tails — has the value and its base64 / url / hex forms replaced by `«vault:NAME»`.
+
+**What scrubbing is NOT:** containment. A process that holds the value can print it in pieces, encode
+it twice, hash it, or send it over the network; scrubbing stops the accidental exposure (a program
+printing its config, `env`, `curl -v`, an error that echoes a key), not a determined exfiltration. A
+value shorter than 6 characters is not scrubbed (it would blank ordinary words). The session id a hook
+uses is a non-secret env var set at spawn; another process running as the user could claim it — the
+same-user limit of SECRETS.4 §0, and every use is audited.
+
+**The phone** (spec §7). A request that is not loopback never makes the service raise Windows Hello
+for a personal-secret action — a prompt on an empty desk, approved later by whoever sits down, is the
+worst of both. The phone proves the gesture with a **passkey** (WebAuthn, `userVerification:
+required`), verified by the service with no third-party library (`packages/vault/src/webauthn.ts`,
+ES256/RS256; refuses at the first failed check: challenge, origin, rpId, UP/UV, signature, a counter that
+does not move forward). A verified assertion mints a **gesture token: 60 s, single use, bound to the
+session and to exactly one action on one target** — a reveal of one field cannot edit anything.
+**Registering** a phone is an escalation in two halves on two devices: the phone asks with the code (the
+vault open), a pending request with a two-number match code appears on the computer, and the person
+approves it there with Windows Hello (loopback only, gate row `phone-enrol-approve`). The approval is
+single use, bound to the phone's session and kind, and expires in five minutes, so a stolen code alone
+enrols nothing. The passkeys live in a sealed record, so a plain file write cannot add one. WebAuthn needs a secure context:
+over plain `http://` the page says how to get an https address instead of offering something that cannot
+work. The owner's alternative, **"accept my code on the phone"**, is off by default, turned on only from
+the computer (code + Windows Hello), and opens a **30-second reveal window** per fresh code — reveals
+only; editing and deleting from the phone always need the passkey. Over plain http that option sends the
+code and the value unencrypted on the local network, and the switch says so.
+
+**Opening the vault from the phone** (spec §10). Once presence is enrolled every silent wrapper is
+retired, so a locked vault opens only with Windows Hello, a security key or the 24 words — none of which a
+phone can give — and `POST /api/vault/unlock` now REFUSES off loopback instead of raising Hello on an
+empty desk. A phone therefore gets a copy of the data key of its own, and the secret behind it lives ON
+THE PHONE, never on the computer (`packages/vault/src/phone-wrap.ts`, `vault/phone-unlock.json`, 0600,
+holding ids, the kid, salts, ciphertext and a passkey's PUBLIC key — no label, no secret):
+- **Passkey**: the WebAuthn **PRF** extension turns a per-copy salt into 32 bytes only after the phone's
+  biometrics; that is the KEK. Opening = a verified assertion (fresh challenge, origin, rpId, UV, counter)
+  carrying the PRF output, PLUS the authenticator code. A phone without PRF keeps its passkey for
+  confirming actions and is told, in a sentence, that it cannot open a locked vault.
+- **Device key** (only while "code alone from the phone" is on): 32 random bytes handed to the phone's
+  browser once, at approval. Opening = that key PLUS the code. Turning the switch off deletes every
+  device copy and forgets the devices.
+In both cases the code is asked BEFORE anything is unwrapped and checked by the same `completeUnlock`
+the computer uses, with the unwrapped key — so the phone's unlock lands in the same auto-lock window, a
+wrong code zeroes the key, the freeze counts it, and it is audited as `vault.unlock` with `device` (the
+owner's label for that phone). A copy someone writes into the file with a key of their own opens nothing
+real: the key it yields must then open the authenticator seed sealed under the REAL key before anything
+is adopted. A data-key rotation leaves every phone copy stale (it cannot be re-wrapped: the computer does
+not hold the phone's secret); the page says those phones must be approved again and offers to clear
+them. **Stated limit**: the device key sits in the phone browser's storage, so anyone who can run script
+on the Agentistics origin in that browser can read it — the same reach that could already drive the page.
+
+**When Windows Hello FAILS on the computer** (owner decision, 2026-10-03). A failure is not a cancel:
+`presence-unavailable` / `presence-timeout` mean Hello broke, `presence-cancelled` means the person said
+no. Only the first two open a fallback (`web/src/lib/helloFallback.ts`, pure, a test per row):
+
+| Row | When | What it opens | Factors |
+|---|---|---|---|
+| A — approve on the phone (**default**) | Hello errored and a phone with biometrics is registered | The computer's page says so and WAITS (polls the vault state, 5 min); the phone opens the vault through the phone path above — passkey + PRF **and** the code. Nothing new on the server: it is the same `stagePhoneUnlock` + `completeUnlock`. | 2 (passkey, code) |
+| A, no phone | Hello errored, no phone registered | A sentence: try Hello again, register a phone; nothing else is offered. | — |
+| Cancel | `presence-cancelled` | Nothing extra, whatever is registered or turned on — a fallback is never a way around saying no. | — |
+| Recovery | always, on this computer only | The 24 words, the last resort. | — |
+| C — the code alone (**opt-in, off**) | **NOT SHIPPED.** | — | — |
+
+**Why C is not in this release, stated as a limit.** The authenticator code is a CHECK, not a KEY: it
+proves a person holds the seed, it unwraps nothing. Once presence is enrolled every silent wrapper is
+retired (§7b), so the only things that can produce the data key are Hello, a security key, a phone's
+secret and the 24 words. A "code alone" unlock on the computer therefore needs a gesture-less wrapper of
+the data key to exist ON DISK again — exactly the copy §7b removes so that a stolen disk, backup or
+snapshot opens nothing. That is a change to the at-rest model, not a fallback screen, and it needs its own
+design and the owner's decision on that trade; until then the setting does not exist and the pure rule
+offers it only when the server says it is on (`codeOnlyAfterHelloError`), which no server does.
 
 ## 8. Per-connection sharing rules — the guarantee, stated precisely
 

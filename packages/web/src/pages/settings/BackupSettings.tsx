@@ -9,6 +9,7 @@
  * machines and has no local harness directories of its own to back up.
  */
 import React, { useCallback, useEffect, useState } from 'react'
+import { ensureVaultOpen } from '../../components/vault/VaultUnlockHost'
 import { useOutletContext } from 'react-router-dom'
 // `RotateCcw` is the restore verb's glyph; `Pencil` and `Trash2` are the repository row's two
 // verbs. There is deliberately no `Github` here: lucide-react v1
@@ -615,6 +616,8 @@ export default function BackupSettings() {
     setConnecting(true)
     setConnectError(null)
     try {
+      // VAULT.PERSONAL §10: the token is sealed in the vault — unlock it right here, then carry on.
+      if (!(await ensureVaultOpen())) { setConnectError(pt ? 'O cofre continua trancado — o acesso ao GitHub é guardado nele. Destranque e tente de novo.' : 'The vault is still locked — the GitHub access is kept in it. Unlock it and try again.'); return }
       const r = await fetch('/api/backup/github/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -733,6 +736,7 @@ export default function BackupSettings() {
     setGithubSaving(field)
     setGithubResult(null)
     try {
+      if (!(await ensureVaultOpen())) { setGithubResult({ field, ok: false, text: pt ? 'O cofre continua trancado — o acesso ao GitHub é guardado nele. Destranque e tente de novo.' : 'The vault is still locked — the GitHub access is kept in it. Unlock it and try again.' }); return }
       const r = await fetch('/api/backup/github', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
       })

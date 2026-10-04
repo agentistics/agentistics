@@ -17,6 +17,7 @@
  * terminal is shell access with extra steps.
  */
 
+import { anyGrant, scrubTerminalLine } from '../vault/grants'
 import { resolveBackend } from './index'
 import { readRegistry } from './registry'
 import { createTerminalHub, type TerminalHub } from './terminal-hub'
@@ -49,7 +50,11 @@ async function getHub(): Promise<TerminalHub> {
   // Resolved once: `resolveBackend` returns a constant object, and the hub then holds it.
   const backend = await resolveBackend()
   hub = createTerminalHub({
-    capture: id => backend.captureTerminal(id, TERMINAL_VIEW_LINES),
+    // VAULT.PERSONAL §8.4: a granted session's frame is scrubbed before it becomes a frame at all.
+    capture: async id => {
+      const cap = await backend.captureTerminal(id, TERMINAL_VIEW_LINES)
+      return cap && anyGrant() ? { ...cap, lines: cap.lines.map(l => scrubTerminalLine(id, l)) } : cap
+    },
     isManaged: async id => (await readRegistry()).some(m => m.id === id),
     historyLimit: HISTORY_LIMIT,
     viewLines: TERMINAL_VIEW_LINES,

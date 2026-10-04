@@ -444,7 +444,10 @@ export const tmuxBackend: SessionBackend = {
     const profile = await terminalProfile()
     // Re-resolved from the login shell (60 s memo) so a tool installed a minute ago is found with
     // no restart. See `login-env.ts`.
-    const env = await sessionEnv()
+    // VAULT.PERSONAL §8.3: the session's OWN id, so a Claude Code hook inside it can name the grant it
+    // acts under. Not a secret (the id is on every fleet row); a value never travels this way — tmux
+    // `-e` is visible in `ps`.
+    const env: Record<string, string> = { ...(await sessionEnv()) as Record<string, string>, AGENTOP_MANAGED_ID: req.id }
     // The first session of a cold socket also starts the tmux SERVER — in a scope of its own, so the
     // fleet does not live and die with this service's cgroup. See `coldStartArgv`.
     const { code, out } = await tmuxStartingServer(

@@ -83,8 +83,8 @@ export const VAULT_TEXT = {
   },
   how_backup_h: { en: 'Backups', pt: 'Backups' },
   how_backup: {
-    en: 'A backup never carries the key, wrapped or not. A restored machine starts with no vault and creates a new one on first use; the secrets that were left out are entered again.',
-    pt: 'O backup nunca leva a chave, nem cifrada. Uma máquina restaurada começa sem cofre e cria um novo no primeiro uso; os segredos que ficaram de fora são cadastrados de novo.',
+    en: 'A backup carries the vault as ONE sealed bundle: the secrets still encrypted, and the key only wrapped under your 24 words — nothing tied to this computer. On another machine, the restore brings it back and the 24 words open it; without them it opens nothing.',
+    pt: 'O backup leva o cofre como UM pacote selado: os segredos ainda criptografados e a chave só embrulhada nas suas 24 palavras — nada preso a este computador. Em outra máquina, a restauração traz o pacote e as 24 palavras o abrem; sem elas, ele não abre nada.',
   },
 
   // ── SECRETS.4 S4.8: unlock, step-up, the sections and the wizard ──────────────────────────────

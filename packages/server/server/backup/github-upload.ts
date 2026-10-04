@@ -21,6 +21,7 @@
  * is never touched past that point. Nothing here retries — a caller (the CLI, the daemon) decides
  * whether to try again on its own next run.
  */
+import { uploadBundleAsset, vaultBundlePathFor, wipeBundleHistory } from './vault-bundle-github'
 import { createHash } from 'crypto'
 import { hostname } from 'os'
 import { readFile, unlink } from 'fs/promises'
@@ -224,9 +225,30 @@ export async function uploadBackupToGithub(
   }
   log('github backup: confirmed byte-for-byte.')
 
+  // VAULT.PERSONAL: the vault's one sealed bundle rides as a second asset of THIS release. A failed
+  // bundle upload is said and never fails the backup (the archive is already confirmed); the local
+  // bundle is then kept. After a data-key rotation, a confirmed bundle under the new key erases the
+  // older bundles of this machine (owner decision).
+  const bundlePath = vaultBundlePathFor(record.path)
+  const bundleBytes = await readFile(bundlePath).catch(() => null)
+  let bundleOk = false
+  if (bundleBytes) {
+    const b = await uploadBundleAsset({ owner: config.owner, repo: config.repo, token, uploadUrl: created.data.upload_url, releaseId: created.data.id, bytes: new Uint8Array(bundleBytes), fetchImpl, log })
+    if (!b.ok) log(`github backup: ${b.reason} — the local vault bundle is kept`)
+    bundleOk = b.ok
+    if (b.ok) {
+      const { bundleWipePending, clearBundleWipePending } = await import('../vault/bundle-io')
+      if (await bundleWipePending().catch(() => false)) {
+        const w = await wipeBundleHistory({ owner: config.owner, repo: config.repo, token, keepTag: tag, label: config.label ?? manifest.hostname, fetchImpl, log })
+        if (w.ok && w.failed === 0) await clearBundleWipePending()
+      }
+    }
+  }
+
   let deletedLocal = false
   if (config.deleteLocalAfterUpload) {
     await unlink(record.path)
+    if (bundleOk) await unlink(bundlePath).catch(() => {})
     await recordPrune(record.path, deps.recordFile)
     deletedLocal = true
     log(`github backup: deleted the local copy (confirmed on ${config.owner}/${config.repo}@${tag}): ${record.path}`)

@@ -38,6 +38,7 @@ import { createEngine as slotEngine } from '../engine-slot.generated'
 import { engineSecrets, routeEngineVaultAudit } from '../vault/engine-secrets'
 import { hostEngineBoard } from './engine-board'
 import { hostDelegateMembers } from './engine-delegate'
+import { nativeVaultRefs } from '../vault/grants'
 
 export type HostEngine = Engine<AgentisticsEvent>
 export type HostIntegrations = IntegrationRegistry<AgentisticsEvent>
@@ -335,5 +336,9 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     fleet: { subscribe: cb => fleetHub.subscribe(cb), ...hostDelegateMembers(() => lang) },
     // 1.7 (A5.2): the API port, for an engine to write into a harness's OTel exporter config.
     serverPort: () => config.PORT,
+    // 1.8 — VAULT.PERSONAL §8.3: a native session's granted secrets, as an env overlay per tool call and
+    // a scrubber for its outputs. Grants of native sessions are keyed `native:<runtime session id>`, so a
+    // managed (CLI) session's grant can never be read by a native session that happens to share an id.
+    vaultRefs: nativeVaultRefs,
   }
 }
