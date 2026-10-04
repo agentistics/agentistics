@@ -6,6 +6,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { stripComments } from './stripComments'
 
 const ROOT = join(import.meta.dir, '..')
 const BANNED = [/default rate/i, /fallback rate/i, /tarifa padrão/i, /ultra[ -]secure/i, /ultra[ -]segur[oa]/i]
@@ -19,11 +20,14 @@ function files(dir: string): string[] {
 }
 /** The text inside string and template literals only — code comments say what they like. */
 function literals(src: string): string[] {
-  const noComments = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1')
-  return [...noComments.matchAll(/'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`/g)].map(m => m[0])
+  return [...stripComments(src).matchAll(/'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`/g)].map(m => m[0])
 }
 
 describe('copy the web must not show', () => {
+  test('the scan can see a banned sentence (the assertion below is not vacuous)', () => {
+    const planted = `const a = 1 // the default rate\nconst s = 'they fall back to the default rate'\n`
+    expect(literals(planted).filter(l => BANNED.some(re => re.test(l)))).toEqual(["'they fall back to the default rate'"])
+  })
   test('no "default rate" for an unpriced model, no "ultra secure" vault, in any web string', () => {
     const hits: string[] = []
     for (const f of files(ROOT)) for (const lit of literals(readFileSync(f, 'utf8'))) {
