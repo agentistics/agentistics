@@ -95,6 +95,8 @@ export interface Preferences {
   lang?: 'pt' | 'en'
   theme?: 'dark' | 'light'
   currency?: 'USD' | 'BRL'
+  /** Personal root text scale, stored server-side so it follows the account. */
+  textScale?: number
   cardPrecision?: Record<string, boolean>
   chatModel?: string
   /** The harness a new Nay conversation starts with (Settings -> Chat). Absent means Claude Code.

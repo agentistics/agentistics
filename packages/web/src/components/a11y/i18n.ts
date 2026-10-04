@@ -2,6 +2,14 @@ import { fmtZoom } from '../../lib/magnifier'
 
 /** EN/PT strings for the magnifier feature, resolved at render like the rest of the app. */
 export interface A11yText {
+  textSize: string
+  textSizeHelp: string
+  textSizePreview: string
+  textSizeDefault: string
+  textSizeSmall: string
+  textSizeMedium: string
+  textSizeLarge: string
+  textSizeVeryLarge: string
   tab: string
   enable: string
   enableHelp: string
@@ -76,6 +84,14 @@ export interface A11yText {
 export function a11yText(lang: 'pt' | 'en'): A11yText {
   const pt = lang === 'pt'
   return {
+    textSize: pt ? 'Tamanho do texto' : 'Text size',
+    textSizeHelp: pt ? 'Ajuste o tamanho de todo o texto do aplicativo.' : 'Adjust the size of all text in the app.',
+    textSizePreview: pt ? 'Aa — Assim fica o texto' : 'Aa — This is how text looks',
+    textSizeDefault: pt ? 'Padrão 100%' : 'Default 100%',
+    textSizeSmall: pt ? 'Pequeno 90%' : 'Small 90%',
+    textSizeMedium: pt ? 'Médio 112%' : 'Medium 112%',
+    textSizeLarge: pt ? 'Grande 125%' : 'Large 125%',
+    textSizeVeryLarge: pt ? 'Muito grande 140%' : 'Very large 140%',
     tab: pt ? 'Acessibilidade' : 'Accessibility',
     enable: pt ? 'Ativar lupas' : 'Enable magnifiers',
     enableHelp: pt
