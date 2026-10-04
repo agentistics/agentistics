@@ -29,6 +29,7 @@ import { dashboardSource } from '../../dashboard/view'
 import {
   compactTokens, homeLayout, money, providerTone, resumeRows, statusGlyph, todayFigures,
   type HomeProvider, type HomeTask, type NativeRecent,
+  homeRows,
 } from '../home'
 import { homeStrings } from '../home-i18n'
 
@@ -172,7 +173,7 @@ export function Home(p: HomeProps) {
   const logoCols = logoRows * 2
   const logo = useMemo(() => logoArt(LOGO_SVG, logoCols, logoRows), [logoCols, logoRows])
   const infoW = Math.max(10, p.width - logoCols - (layout.narrow ? 3 : 12))
-  const info = [
+  const fullInfo = [
     '',
     ...(infoW >= WORDMARK_ART[0]!.length ? WORDMARK_ART : ['agentistics']),
     '',
@@ -180,9 +181,12 @@ export function Home(p: HomeProps) {
     t.noSandbox,
     t.filedRule,
   ]
+  // GL-07: a short frame gives up pieces in order, never overlapping one row on another.
+  const rowsPlan = homeRows(p.height, { logoRows, infoLines: fullInfo.length, infoBlanks: 2 })
+  const info = rowsPlan.dropBlanks ? fullInfo.filter(l => l !== '') : fullInfo
   const cw = layout.cardWidth
   const iw = cw - 4
-  const cardH = 9
+  const cardH = rowsPlan.cardH
 
   const todayLines: { text: string; color?: string }[] = today
     ? [
@@ -225,7 +229,8 @@ export function Home(p: HomeProps) {
           text: lr(`● ${v.label}`, v.state === 'ready' ? (v.source ?? t.providerState.ready) : t.providerState[v.state], iw),
           color: TONE[providerTone(v.state)],
         })),
-        { text: lr('ctrl+,', t.providersManage, iw), color: COLORS.muted },
+        // ST-01: the home's prompt takes every printable key, so the palette is the way in from here.
+        { text: lr(t.providersManage, '/providers', iw), color: COLORS.muted },
       ]
 
   const cards: Record<string, { title: string; lines: { text: string; color?: string }[] }> = {
@@ -248,7 +253,7 @@ export function Home(p: HomeProps) {
         </Box>
         <Box flexDirection="column" width={infoW}>
           {info.map((l, i) => (
-            <Text key={i} color={i <= WORDMARK_ART.length ? COLORS.accent : i === info.length - 2 ? COLORS.accent : i === info.length - 3 ? COLORS.text : COLORS.muted} bold={i === info.length - 3}>
+            <Text key={i} color={l === t.harnessLine ? COLORS.text : l === t.filedRule ? COLORS.muted : COLORS.accent} bold={l === t.harnessLine}>
               {fit(l, infoW)}
             </Text>
           ))}
@@ -274,7 +279,7 @@ export function Home(p: HomeProps) {
           </Box>
         ))}
       </Box>
-      <Box marginTop={1} marginLeft={2}>
+      <Box marginTop={rowsPlan.machineGap} marginLeft={2}>
         <Text>
           <Text color={COLORS.muted}>{p.lang === 'pt' ? 'esta máquina: ' : 'this machine: '}</Text>
           <Text>{t.machine(others, need)}</Text>

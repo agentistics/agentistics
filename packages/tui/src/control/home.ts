@@ -229,3 +229,25 @@ export function machineLine(fleet: readonly ControlSession[]): { others: number;
   const need = fleet.filter(f => f.state === 'waiting-approval' || f.state === 'waiting').length
   return { others, need }
 }
+
+/**
+ * GL-07: what the home gives up when the frame is short, in order — the blank lines of the info
+ * column, then the gap above the machine line, then card rows (never below 5: a title, its rule and
+ * three lines). PURE; `homeRows.test` holds the sum to the height for every height from 24 up.
+ */
+export function homeRows(height: number, o: { logoRows: number; infoLines: number; infoBlanks: number }): {
+  dropBlanks: boolean
+  machineGap: 0 | 1
+  cardH: number
+} {
+  const PROMPT = 1 + 3
+  const used = (info: number, gap: number, card: number) => Math.max(o.logoRows, info) + PROMPT + 1 + card + gap + 1
+  let info = o.infoLines
+  let gap: 0 | 1 = 1
+  let cardH = 9
+  let dropBlanks = false
+  if (used(info, gap, cardH) > height) { dropBlanks = true; info -= o.infoBlanks }
+  if (used(info, gap, cardH) > height) gap = 0
+  while (used(info, gap, cardH) > height && cardH > 5) cardH--
+  return { dropBlanks, machineGap: gap, cardH }
+}

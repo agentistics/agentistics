@@ -100,3 +100,20 @@ describe('tasks tab rows (TK-01)', () => {
     expect(rows.map(r => (r.kind === 'head' ? `#${r.label}:${r.count}` : r.task.id))).toEqual(['#In progress:2', 'a', 'b', '#To do:1', 'c'])
   })
 })
+
+describe('GL-07 — the home fits every height from 24 up', () => {
+  test('the rows it spends never exceed the frame', async () => {
+    const { homeRows } = await import('./home')
+    // The body of a 24-row terminal is 20 rows (header, bar, status, footer).
+    for (let h = 20; h <= 60; h++) {
+      const logoRows = Math.max(6, Math.min(11, h - 16))
+      const r = homeRows(h, { logoRows, infoLines: 8, infoBlanks: 2 })
+      const used = Math.max(logoRows, r.dropBlanks ? 6 : 8) + 4 + 1 + r.cardH + r.machineGap + 1
+      expect(used).toBeLessThanOrEqual(h)
+    }
+  })
+  test('a tall frame gives up nothing', async () => {
+    const { homeRows } = await import('./home')
+    expect(homeRows(40, { logoRows: 11, infoLines: 8, infoBlanks: 2 })).toEqual({ dropBlanks: false, machineGap: 1, cardH: 9 })
+  })
+})
