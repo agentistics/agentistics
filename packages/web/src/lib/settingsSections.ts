@@ -2,7 +2,7 @@
 export type SettingsSectionId =
   | 'preferences' | 'accessibility' | 'sessions' | 'data-sources' | 'harnesses' | 'pricing' | 'billing' | 'install' | 'connection' | 'live'
   | 'chat' | 'providers' | 'memory' | 'notifications' | 'backup' | 'vault'
-  | 'users' | 'teams' | 'machines' | 'repositories'
+  | 'help' | 'users' | 'teams' | 'machines' | 'repositories'
 
 export type SettingsGroup = 'personal' | 'governance'
 
@@ -42,6 +42,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   // Ollama) — a machine-local secret store, same reason `connection`/`live`/`chat` are host-only.
   { id: 'providers', labelEn: 'Providers', labelPt: 'Provedores', group: 'personal' },
   { id: 'memory', labelEn: 'Memory', labelPt: 'Memória', group: 'personal' },
+  { id: 'help', labelEn: 'Help & feedback', labelPt: 'Ajuda e feedback', group: 'personal' },
   { id: 'users', labelEn: 'Users', labelPt: 'Usuários', group: 'governance' },
   { id: 'teams', labelEn: 'Teams', labelPt: 'Times', group: 'governance' },
   { id: 'machines', labelEn: 'Machines', labelPt: 'Máquinas', group: 'governance' },

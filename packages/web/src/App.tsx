@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { setFeedbackContext } from './lib/feedbackStore'
 import { Outlet, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { version } from '../../../package.json'
@@ -1537,6 +1538,8 @@ export default function AppLayout() {
   const { data, loading, loadProgress, error, refetch, liveUpdates, setLiveUpdates, updateInterval, setUpdateInterval } = useData()
   const [riskyMode, setRiskyMode] = useState(false)
   const [lang, setLangState] = useState<Lang>('en')
+  // The feedback dialog lives outside the app (main.tsx, so it survives a crash) and is told what it needs.
+  useEffect(() => { setFeedbackContext(data?.harnesses ?? [], lang === 'pt') }, [data?.harnesses, lang])
 
   // Team session gate
   // undefined = not yet fetched, TeamSessionState after fetch

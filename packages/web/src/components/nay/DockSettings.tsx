@@ -6,7 +6,8 @@
 
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, ArrowUpRight, Settings2 } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, Bug, Settings2 } from 'lucide-react'
+import { openFeedback } from '../../lib/feedbackStore'
 import { NaySettingsPanel, type ChatSoundCtx } from './NaySettingsPanel'
 
 export interface DockSettingsProps {
@@ -83,6 +84,14 @@ export function DockSettingsScreen({ pt, isMobile, chat, onLeave, onBack }: Dock
       </div>
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', padding: isMobile ? 12 : 10, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <NaySettingsPanel pt={pt} isMobile={isMobile} layout="stack" chat={chat} />
+        <button type="button" onClick={() => openFeedback()}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4, alignSelf: 'flex-start', border: 'none', padding: 0,
+            minHeight: isMobile ? 44 : undefined,
+            background: 'transparent', color: 'var(--text-secondary)', fontFamily: 'inherit', fontSize: 12, cursor: 'pointer',
+          }}>
+          <Bug size={13} />{pt ? 'Encontrou um bug ou tem uma sugestão?' : 'Found a bug or have a suggestion?'}
+        </button>
         <button type="button" onClick={() => { onBack(); onLeave(); navigate('/settings/chat') }}
           style={{
             display: 'flex', alignItems: 'center', gap: 4, alignSelf: 'flex-start', border: 'none', padding: 0,

@@ -1,5 +1,6 @@
 import React from 'react'
 import { clearDataCache } from '../hooks/useData'
+import { openFeedback } from '../lib/feedbackStore'
 
 interface Props {
   children: React.ReactNode
@@ -79,6 +80,14 @@ export class RootErrorBoundary extends React.Component<Props, State> {
           >
             {pt ? 'Recarregar' : 'Reload'}
           </button>
+          <div style={{ marginBottom: 16 }}>
+            <button
+              onClick={() => openFeedback({ kind: 'bug', title: this.state.error ? `${this.state.error.name}: ${this.state.error.message}`.slice(0, 120) : '' })}
+              style={{ background: 'none', border: 'none', padding: 0, color: 'rgba(255,255,255,0.55)', fontSize: 12, textDecoration: 'underline', cursor: 'pointer', fontFamily: 'inherit' }}
+            >
+              {pt ? 'Relatar este erro' : 'Report this error'}
+            </button>
+          </div>
           <details style={{ textAlign: 'left', fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>
             <summary style={{ cursor: 'pointer', marginBottom: 6 }}>
               {pt ? 'Detalhes técnicos' : 'Technical details'}

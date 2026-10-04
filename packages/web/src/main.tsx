@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import AppRouter from './AppRouter'
 import { RootErrorBoundary } from './components/RootErrorBoundary'
+import { FeedbackHost } from './components/FeedbackDialog'
 import { installHistoryPopGuard } from './lib/historyPopGuard'
 import './index.css'
 import './styles/cursors.css'
@@ -77,5 +78,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <RootErrorBoundary>
       <AppRouter />
     </RootErrorBoundary>
+    {/* Outside the boundary on purpose: "report this error" must still open after a crash. */}
+    <FeedbackHost />
   </React.StrictMode>
 )

@@ -34,6 +34,7 @@ const InstallSettings = lazy(() => import('./pages/settings/InstallSettings'))
 const ConnectionSettings = lazy(() => import('./pages/settings/ConnectionSettings'))
 const LiveSettings = lazy(() => import('./pages/settings/LiveSettings'))
 const ChatSettings = lazy(() => import('./pages/settings/ChatSettings'))
+const HelpSettings = lazy(() => import('./pages/settings/HelpSettings'))
 const VaultSettings = lazy(() => import('./pages/settings/VaultSettings'))
 const ProvidersSettings = lazy(() => import('./pages/settings/ProvidersSettings'))
 const MemorySettings = lazy(() => import('./pages/settings/MemorySettings'))
@@ -116,6 +117,7 @@ export default function AppRouter() {
             <Route path="live" element={<Suspense fallback={<PageFallback />}><LiveSettings /></Suspense>} />
             <Route path="chat" element={<Suspense fallback={<PageFallback />}><ChatSettings /></Suspense>} />
             <Route path="vault" element={<Suspense fallback={<PageFallback />}><VaultSettings /></Suspense>} />
+            <Route path="help" element={<Suspense fallback={<PageFallback />}><HelpSettings /></Suspense>} />
             <Route path="providers" element={<Suspense fallback={<PageFallback />}><ProvidersSettings /></Suspense>} />
             <Route path="memory" element={<Suspense fallback={<PageFallback />}><MemorySettings /></Suspense>} />
             <Route path="users" element={<Suspense fallback={<PageFallback />}><UsersSettings /></Suspense>} />
