@@ -2886,8 +2886,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           return rows
         }
       }
+      // LIVE.2: the pushed payload carries the same surface marks as the GET (absent = legacy).
+      const { liveSessionSurfaceDeps } = await import('./sessions/session-surface-deps')
+      const surface = await liveSessionSurfaceDeps(process.env, () => engineStatus().present)
       const res = chatStreamResponse(id, {
-        read: (fresh, onPath) => { if (fresh) rows = null; return readSessionChat(memo, lang, id, undefined, onPath) },
+        read: (fresh, onPath) => { if (fresh) rows = null; return readSessionChat(memo, lang, id, undefined, onPath, surface) },
       }, req.signal)
       if (!res) {
         return new Response(JSON.stringify({ error: 'too_many_streams' }), {
@@ -2910,10 +2913,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       try {
         const { readSessionChat } = await import('./sessions/chat-web')
         const { hostForFleet, fleetLang } = await import('./sessions/fleet-web')
+        // LIVE.2: the journal's word on this conversation, only with an engine present AND the opt-in
+        // `sessions` surface on; otherwise `undefined` and the payload is the legacy one, byte for byte.
+        const { liveSessionSurfaceDeps } = await import('./sessions/session-surface-deps')
+        const surface = await liveSessionSurfaceDeps(process.env, () => engineStatus().present)
         const payload = await readSessionChat(
           await hostForFleet(fleetLang(url.searchParams.get('lang'))),
           fleetLang(url.searchParams.get('lang')),
           id,
+          undefined,
+          undefined,
+          surface,
         )
         return new Response(JSON.stringify(payload), {
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },

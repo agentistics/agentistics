@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { PROJECTION_SURFACES_ENV, projectionSurfaceOn, projectionSurfaces } from './projection-surfaces'
+import { PROJECTION_SURFACES_ENV, projectionSurfaceOn, projectionSurfaces, sessionsSurfaceOn } from './projection-surfaces'
 
 describe('projection surfaces (per-surface rollout of the projected read path)', () => {
   test('absent or blank: every surface reads the projections (the default since the backfill item)', () => {
@@ -34,6 +34,19 @@ describe('projection surfaces (per-surface rollout of the projected read path)',
 })
 
 import { metricsSearchParams } from './projection-client'
+
+describe('the `sessions` token (LIVE.2) is opt-in, unlike the four metric surfaces', () => {
+  const on = (v: string | undefined) => sessionsSurfaceOn(v === undefined ? {} : { AGENTISTICS_PROJECTIONS_SURFACES: v })
+  test('absent, blank, "all", "legacy" and a list without it: OFF — the default-on call is the owner\'s (LIVE.4)', () => {
+    for (const v of [undefined, '', ' ', 'all', 'legacy', 'none', 'mcp,web']) expect(on(v)).toBe(false)
+  })
+  test('named explicitly (trimmed, any case, among others): ON; it moves no metric surface', () => {
+    expect(on('sessions')).toBe(true)
+    expect(on(' Sessions ')).toBe(true)
+    expect(on('mcp, sessions')).toBe(true)
+    expect(projectionSurfaces({ AGENTISTICS_PROJECTIONS_SURFACES: 'sessions' })).toEqual([])
+  })
+})
 
 describe('metrics query parameters', () => {
   test('an array is a repeated parameter, never joined with a comma', () => {
