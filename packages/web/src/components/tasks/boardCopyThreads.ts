@@ -3,11 +3,13 @@
  */
 export type ThreadsLang = 'pt' | 'en'
 
-/** "💬 3 threads esperam você" — VISUAL only; `n` ≤ 0 yields `null` (nothing is drawn). */
-export function threadsAwaitingText(n: number | undefined, lang: ThreadsLang): string | null {
+/**
+ * "💬 3 threads" — a COUNT of the task's records, nothing more. A thread is history, not a chat, so
+ * the card never says one is waiting on anybody. `n` ≤ 0 or unknown yields `null` (nothing drawn).
+ */
+export function threadsCountText(n: number | undefined, lang: ThreadsLang): string | null {
   if (!n || n <= 0) return null
-  if (lang === 'pt') return `💬 ${n} ${n === 1 ? 'thread espera' : 'threads esperam'} você`
-  return `💬 ${n} ${n === 1 ? 'thread' : 'threads'} waiting on you`
+  return `💬 ${n} ${n === 1 ? 'thread' : 'threads'}`
 }
 
 export function mobileBoardCopy(lang: ThreadsLang) {

@@ -1,8 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  canSessionOpenThread, deliverySummary, looseComments, planQueuedFlush, planThreadFanout,
-  rowForParticipant, sessionAwaitsOwner, threadAttention, threadDeliveryText, threadInbox,
-  threadMirrors, withParticipant,
+  canSessionOpenThread, deliverySummary, isCommentKind, looseComments, planQueuedFlush, planThreadFanout,
+  rowForParticipant, threadDeliveryText, threadInbox, withParticipant,
   type FleetRowLike, type TaskThreadRecord, type ThreadCommentLike, type ThreadParticipant,
 } from './taskThreads'
 
@@ -35,7 +34,7 @@ describe('rowForParticipant', () => {
   })
 })
 
-describe('planThreadFanout — one message to N sessions', () => {
+describe('planThreadFanout — the explicit send to N sessions', () => {
   const rows = [
     R('a', 'working'),
     R('b', 'waiting'),
@@ -76,42 +75,8 @@ describe('planQueuedFlush', () => {
   })
 })
 
-describe('attention is visual, derived, and per session', () => {
-  const s1 = C({ createdAt: '2026-10-04T01:00:00Z', role: 'session', sessionId: 's1' })
-  test('a session posting after the owner makes the thread await', () => {
-    expect(threadAttention(T(), [s1])).toBe('awaiting')
-    expect(threadAttention(T(), [s1, C({ createdAt: '2026-10-04T02:00:00Z', role: 'owner' })])).toBe('open')
-  })
-  test('an owner answer to ANOTHER session does not settle this one', () => {
-    const toOther = C({ createdAt: '2026-10-04T02:00:00Z', role: 'owner', answerTo: 's2' })
-    expect(sessionAwaitsOwner('s1', [s1, toOther])).toBe(true)
-    expect(sessionAwaitsOwner('s1', [s1, { ...toOther, answerTo: 's1' }])).toBe(false)
-  })
-  test('resolved wins; a muted poster does not make it await', () => {
-    expect(threadAttention(T({ resolvedAt: 'x' }), [s1])).toBe('resolved')
-    expect(threadAttention(T({ mutedSessions: ['s1'] }), [s1])).toBe('open')
-  })
-  test('a comment with no verified session never makes a thread await', () => {
-    expect(threadAttention(T(), [C({ createdAt: '2026-10-04T01:00:00Z' })])).toBe('open')
-  })
-})
-
-describe('threadMirrors — the session asks in its own chat; the thread mirrors it', () => {
-  const comments = [C({ createdAt: '2026-10-04T01:00:00Z', role: 'session', sessionId: 's1' })]
-  test('a participant that posted and now waits in its chat is mirrored', () => {
-    expect(threadMirrors(T({ participants: [P('s1')] }), comments, [R('s1', 'waiting')]))
-      .toEqual([{ sessionId: 's1', rowId: 's1', approval: false }])
-    expect(threadMirrors(T({ participants: [P('s1')] }), comments, [R('s1', 'waiting-approval')])[0]?.approval).toBe(true)
-  })
-  test('a working participant, or one already answered, is not', () => {
-    expect(threadMirrors(T({ participants: [P('s1')] }), comments, [R('s1', 'working')])).toEqual([])
-    const answered = [...comments, C({ createdAt: '2026-10-04T02:00:00Z', role: 'owner', answerTo: 's1' })]
-    expect(threadMirrors(T({ participants: [P('s1')] }), answered, [R('s1', 'waiting')])).toEqual([])
-  })
-})
-
 describe('inbox, loose comments, summary, header', () => {
-  test('groups by state, newest first', () => {
+  test('open then resolved, newest activity first — and nothing ever "awaits" an answer', () => {
     const threads = [T({ id: 'a' }), T({ id: 'b' }), T({ id: 'c', resolvedAt: 'x' })]
     const cs = [
       C({ createdAt: '2026-10-04T01:00:00Z', threadId: 'a', role: 'session', sessionId: 's' }),
@@ -119,10 +84,15 @@ describe('inbox, loose comments, summary, header', () => {
       C({ createdAt: '2026-10-04T02:00:00Z' }),
     ]
     const inbox = threadInbox(threads, cs)
-    expect(inbox.awaiting.map(s => s.thread.id)).toEqual(['a'])
-    expect(inbox.open.map(s => s.thread.id)).toEqual(['b'])
+    expect(Object.keys(inbox)).toEqual(['open', 'resolved'])
+    expect(inbox.open.map(s => s.thread.id)).toEqual(['b', 'a'])
     expect(inbox.resolved.map(s => s.thread.id)).toEqual(['c'])
     expect(looseComments(cs)).toHaveLength(1)
+  })
+  test('comment kinds', () => {
+    expect(isCommentKind('decision')).toBe(true)
+    expect(isCommentKind('handback')).toBe(true)
+    expect(isCommentKind('question')).toBe(false)
   })
   test('deliverySummary counts each state', () => {
     const s = deliverySummary([
@@ -133,7 +103,7 @@ describe('inbox, loose comments, summary, header', () => {
   })
   test('the delivered text names its origin on one line', () => {
     const t = threadDeliveryText({ taskTitle: 'Runtime', threadTitle: 'Release', body: 'Pode.' })
-    expect(t.split('\n')[0]).toBe('[Agentask · Runtime · thread "Release" · reply from the owner]')
+    expect(t.split('\n')[0]).toBe('[Agentask · Runtime · thread "Release" · sent by the owner]')
     expect(t.endsWith('\nPode.')).toBe(true)
   })
   test('withParticipant is idempotent and fills a missing conversation', () => {

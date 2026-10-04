@@ -26,11 +26,10 @@ export function threadCopy(lang: Lang) {
     noMix: pt ? 'nenhuma sessão medida ainda' : 'no session measured yet',
     about: pt ? 'Sobre' : 'About',
     // tabs
-    tabThreads: pt ? 'Conversas' : 'Conversations',
+    tabThreads: 'Threads',
     tabAbout: pt ? 'Sobre' : 'About',
     tabMetrics: pt ? 'Métricas' : 'Metrics',
     // inbox
-    awaiting: pt ? 'Esperam você' : 'Waiting on you',
     open: pt ? 'Abertas' : 'Open',
     resolved: pt ? 'Resolvidas' : 'Resolved',
     loose: pt ? 'Comentários avulsos' : 'Loose comments',
@@ -40,55 +39,50 @@ export function threadCopy(lang: Lang) {
     create: pt ? 'Criar' : 'Create',
     cancel: pt ? 'Cancelar' : 'Cancel',
     noThreads: pt
-      ? 'Nenhuma thread ainda. Abra uma para falar com várias sessões de uma vez; as sessões abrem as suas ao entregar ou ao travar.'
-      : 'No threads yet. Open one to talk to several sessions at once; sessions open their own when they hand back or get blocked.',
+      ? 'Nenhuma thread ainda. Uma thread é o registro de um assunto da tarefa — entregas, bloqueios, decisões. As sessões abrem as suas ao entregar ou ao travar.'
+      : 'No threads yet. A thread is the record of one subject of the task — handbacks, blocks, decisions. Sessions open their own when they hand back or get blocked.',
     sessionsCount: (n: number) => pt ? `${n} ${n === 1 ? 'sessão' : 'sessões'}` : `${n} ${n === 1 ? 'session' : 'sessions'}`,
     onTask: pt ? 'na tarefa' : 'on the task',
     onTarget: (title: string) => pt ? `em ${title}` : `on ${title}`,
-    kind: { topic: '', handback: 'HANDBACK', block: pt ? 'BLOQUEIO' : 'BLOCK' } as Record<string, string>,
+    threadKind: { topic: '', handback: 'HANDBACK', block: pt ? 'BLOQUEIO' : 'BLOCK' } as Record<string, string>,
+    commentKind: {
+      note: pt ? 'Nota' : 'Note',
+      handback: 'Handback',
+      block: pt ? 'Bloqueio' : 'Block',
+      decision: pt ? 'Decisão' : 'Decision',
+    } as Record<string, string>,
     // thread view
-    participants: pt ? 'Participam' : 'Participants',
-    noParticipants: pt ? 'Nenhuma sessão participa ainda — uma sessão entra quando comenta aqui.' : 'No session takes part yet — a session joins when it comments here.',
+    sessionsInThread: pt ? 'Sessões nesta thread' : 'Sessions in this thread',
+    noParticipants: pt ? 'Nenhuma sessão nesta thread ainda — uma sessão entra quando comenta aqui.' : 'No session in this thread yet — a session joins when it comments here.',
     openedBy: (who: string, when: string) => pt ? `aberta por ${who} · ${when}` : `opened by ${who} · ${when}`,
     resolve: pt ? 'Resolver' : 'Resolve',
     reopen: pt ? 'Reabrir' : 'Reopen',
-    mute: pt ? 'Silenciar esta sessão aqui' : 'Mute this session here',
-    unmute: pt ? 'Voltar a entregar a esta sessão' : 'Deliver to this session again',
-    muted: pt ? 'silenciada' : 'muted',
+    mute: pt ? 'Não enviar a esta sessão' : 'Do not send to this session',
+    unmute: pt ? 'Voltar a enviar a esta sessão' : 'Send to this session again',
+    muted: pt ? 'não recebe envios' : 'excluded from sends',
     you: pt ? 'Você' : 'You',
-    viaSessionChat: pt ? 'respondido no chat da sessão' : 'answered in the session chat',
-    replyAll: (n: number) => n === 0
-      ? (pt ? 'Escrever na thread…' : 'Write in the thread…')
-      : (pt ? `Responder às ${n} sessões desta thread…` : `Reply to the ${n} sessions in this thread…`),
-    replyOne: pt ? 'Responder a todos' : 'Reply to all',
-    goesTo: (n: number, queued: number) => {
-      if (n === 0) return pt ? 'fica registrado na thread — nenhuma sessão participa ainda' : 'kept in the thread — no session takes part yet'
-      const base = pt ? `→ ${n} ${n === 1 ? 'sessão' : 'sessões'}` : `→ ${n} ${n === 1 ? 'session' : 'sessions'}`
-      return queued > 0 ? (pt ? `${base} (${queued} recebe${queued === 1 ? '' : 'm'} ao reabrir)` : `${base} (${queued} on reopen)`) : base
+    openChat: pt ? 'Abrir o chat da sessão' : "Open the session's chat",
+    placeholder: pt ? 'Comentar nesta thread (fica no registro)…' : 'Comment in this thread (kept in the record)…',
+    comment: pt ? 'Comentar' : 'Comment',
+    asDecision: pt ? 'Marcar como decisão' : 'Mark as a decision',
+    sendTo: (n: number) => pt ? `Enviar para ${n === 1 ? 'a sessão' : `as ${n} sessões`}` : `Send to the ${n === 1 ? 'session' : `${n} sessions`}`,
+    sendHint: (queued: number) => {
+      const base = pt
+        ? 'Comentar fica só no registro. Enviar entrega o texto no chat de cada sessão — as respostas ficam lá.'
+        : 'Comment stays in the record. Send delivers the text into each session\'s chat — answers stay there.'
+      if (queued === 0) return base
+      return pt ? `${base} ${queued} recebe${queued === 1 ? '' : 'm'} ao reabrir.` : `${base} ${queued} on reopen.`
     },
-    send: pt ? 'Enviar' : 'Send',
-    notGate: pt
-      ? 'A resposta chega às sessões como contexto extra. Nenhuma sessão espera por esta thread.'
-      : 'The reply reaches the sessions as extra context. No session waits on this thread.',
-    // mirror — the session asks in its own chat; the thread mirrors it
-    mirrorTitle: (who: string) => pt ? `${who} perguntou no próprio chat` : `${who} asked in its own chat`,
-    mirrorApproval: pt
-      ? 'Está num diálogo de aprovação — responda na sessão, onde as opções estão.'
-      : 'It is on an approval dialog — answer in the session, where the options are.',
-    mirrorAnswer: pt ? 'Responder só a esta sessão' : 'Answer this session only',
-    mirrorOpen: pt ? 'Abrir a sessão' : 'Open the session',
-    mirrorHint: pt
-      ? 'Responder aqui ou no chat da sessão é a mesma resposta — entregue uma vez, mostrada nos dois lugares.'
-      : 'Answering here or in the session chat is the same answer — delivered once, shown in both places.',
+    noRecipients: pt ? 'Nenhuma sessão para receber um envio.' : 'No session to send to.',
     // deliveries
-    deliveredTo: (n: number, of: number) => n === of
-      ? (pt ? `entregue a ${n} ${n === 1 ? 'sessão' : 'sessões'}` : `delivered to ${n} ${n === 1 ? 'session' : 'sessions'}`)
-      : (pt ? `entregue a ${n} de ${of} sessões` : `delivered to ${n} of ${of} sessions`),
+    sentTo: (n: number, of: number) => n === of
+      ? (pt ? `enviado para ${n} ${n === 1 ? 'sessão' : 'sessões'}` : `sent to ${n} ${n === 1 ? 'session' : 'sessions'}`)
+      : (pt ? `enviado para ${n} de ${of} sessões` : `sent to ${n} of ${of} sessions`),
     state: {
       delivered: pt ? 'entregue' : 'delivered',
       queued: pt ? 'na fila' : 'queued',
       undeliverable: pt ? 'não entregável' : 'undeliverable',
-      muted: pt ? 'silenciada' : 'muted',
+      muted: pt ? 'excluída' : 'excluded',
       failed: pt ? 'recusada' : 'refused',
     } satisfies Record<DeliveryState, string>,
     reason: {
@@ -96,10 +90,10 @@ export function threadCopy(lang: Lang) {
       'dialog-open': pt ? 'depois do diálogo' : 'after the dialog',
       external: pt ? 'sessão externa' : 'external session',
       'unknown-session': pt ? 'sessão desconhecida' : 'unknown session',
-      muted: pt ? 'silenciada' : 'muted',
+      muted: pt ? 'excluída do envio' : 'excluded from the send',
       refused: pt ? 'a sessão recusou' : 'the session refused it',
     } satisfies Record<DeliveryReason, string>,
     loading: pt ? 'Carregando…' : 'Loading…',
-    failed: pt ? 'Não foi possível enviar.' : 'Could not send.',
+    failed: pt ? 'Não foi possível salvar.' : 'Could not save.',
   }
 }

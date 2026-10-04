@@ -6,16 +6,16 @@
  * comment with no `threadId` is a "loose" comment, which is how every comment written before threads
  * existed reads — the migration is additive, a missing field and nothing else.
  *
- * ## The owner's rules (2026-10-04), and what each one means here
+ * ## The owner's rules (2026-10-04, as approved)
  *
- * 1. A session that needs an answer asks in ITS OWN chat, as it always did. The thread only MIRRORS
- *    that: `threadMirrors` names the participants that posted here and are now waiting in their own
- *    chat, so the page can show the question beside the thread. Answering in either place answers
- *    both — the answer is ONE fleet prompt, delivered once, and recorded once in the thread.
- * 2. A thread never blocks a session. Nothing here gates anything; a reply is extra context.
- * 3. There is NO bell for threads. `threadAttention` is a VISUAL state the page draws, never a
- *    notification — the only attention signal stays the session's own.
- * 4. The 1:N reply is the convenience: ONE message to N sessions (`planThreadFanout`).
+ * 1. A thread is a RECORD, not a chat. Comments are notes (author, time, kind, text) and nothing in
+ *    a thread implies a pending answer — there is no "waiting on you" state.
+ * 2. Posting a comment is HISTORY: it reaches no session. Delivering is a separate, visible act — the
+ *    person presses "send to the N sessions" — and the text then lands INTO each session's own chat,
+ *    the one place conversations live. The thread records only that it was sent, and to whom.
+ * 3. A session's reply stays in its chat; the thread never mirrors chat back.
+ * 4. The delivery machinery (verified identity, queue on reopen, refusal on an open dialog) sits
+ *    behind that explicit send.
  *
  * ## Delivery is honest
  *
@@ -101,9 +101,9 @@ export interface ThreadCommentLike {
   sessionId?: string
   /** `owner` = the person wrote it; `session` = a verified session did. Absent = unknown (legacy). */
   role?: 'owner' | 'session'
-  /** For an owner comment written to ONE session (a mirror answer) — the session it went to. */
-  answerTo?: string
   deliveries?: ThreadDelivery[]
+  /** What the record is — a note, a handback, a block, a decision. Absent = a note. */
+  kind?: CommentKind
   body: string
   author: string
 }
@@ -213,10 +213,20 @@ export function planQueuedFlush(
   return out
 }
 
-/** The text a participant receives: one header line naming where it came from, then the reply. */
+/**
+ * The text a session receives when the person SENDS from a thread: one header line naming where it
+ * came from, then the message. It arrives in the session's own chat, where any answer stays.
+ */
 export function threadDeliveryText(o: { taskTitle: string; threadTitle: string; body: string }): string {
   const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
-  return `[Agentask · ${clip(o.taskTitle, 60)} · thread "${clip(o.threadTitle, 60)}" · reply from the owner]\n${o.body}`
+  return `[Agentask · ${clip(o.taskTitle, 60)} · thread "${clip(o.threadTitle, 60)}" · sent by the owner]\n${o.body}`
+}
+
+/** What a comment IS — the tag a record carries. Absent reads as a plain note. */
+export type CommentKind = 'note' | 'handback' | 'block' | 'decision'
+export const COMMENT_KINDS: readonly CommentKind[] = ['note', 'handback', 'block', 'decision']
+export function isCommentKind(v: unknown): v is CommentKind {
+  return typeof v === 'string' && (COMMENT_KINDS as readonly string[]).includes(v)
 }
 
 /** Counts per delivery state — the "entregue a N sessões" line. */
@@ -236,77 +246,30 @@ export function looseComments<C extends ThreadCommentLike>(comments: readonly C[
   return comments.filter(c => !c.threadId)
 }
 
-/**
- * The participants that posted in this thread and are now WAITING in their own chat, with nothing
- * from the owner since their last post here — the questions the thread mirrors. The page shows each
- * one's own question (read from its chat) and lets it be answered once, in either place.
- */
-export function threadMirrors(
-  thread: Pick<TaskThreadRecord, 'participants' | 'resolvedAt'>,
-  comments: readonly ThreadCommentLike[],
-  rows: readonly FleetRowLike[],
-): { sessionId: string; rowId: string; approval: boolean }[] {
-  if (thread.resolvedAt) return []
-  const out: { sessionId: string; rowId: string; approval: boolean }[] = []
-  for (const p of thread.participants) {
-    const row = rowForParticipant(p, rows)
-    if (!row || (row.state !== 'waiting' && row.state !== 'waiting-approval')) continue
-    if (!sessionAwaitsOwner(p.sessionId, comments)) continue
-    out.push({ sessionId: p.sessionId, rowId: row.id, approval: row.state === 'waiting-approval' })
-  }
-  return out
-}
-
-/** Has `sessionId` posted here more recently than the owner wrote to it (a reply to all, or to it)? */
-export function sessionAwaitsOwner(sessionId: string, comments: readonly ThreadCommentLike[]): boolean {
-  let lastSession = ''
-  let lastOwner = ''
-  for (const c of comments) {
-    if (c.role === 'session' && c.sessionId === sessionId && c.createdAt > lastSession) lastSession = c.createdAt
-    if (c.role === 'owner' && (!c.answerTo || c.answerTo === sessionId) && c.createdAt > lastOwner) lastOwner = c.createdAt
-  }
-  return lastSession !== '' && lastSession > lastOwner
-}
-
-export type ThreadAttention = 'awaiting' | 'open' | 'resolved'
-
-/**
- * The thread's VISUAL state — never a notification. `awaiting`: some participant posted after the
- * owner's last word to it. A muted participant does not make a thread await anything.
- */
-export function threadAttention(
-  thread: Pick<TaskThreadRecord, 'participants' | 'resolvedAt' | 'mutedSessions'>,
-  comments: readonly ThreadCommentLike[],
-): ThreadAttention {
-  if (thread.resolvedAt) return 'resolved'
-  const muted = new Set(thread.mutedSessions ?? [])
-  const posters = new Set(comments.filter(c => c.role === 'session' && c.sessionId).map(c => c.sessionId!))
-  for (const s of posters) if (!muted.has(s) && sessionAwaitsOwner(s, comments)) return 'awaiting'
-  return 'open'
-}
+export type ThreadState = 'open' | 'resolved'
 
 export interface ThreadSummary<C extends ThreadCommentLike> {
   thread: TaskThreadRecord
-  attention: ThreadAttention
+  state: ThreadState
   count: number
   last?: C
 }
 
-/** The inbox: every thread with its state, newest activity first inside each state. */
+/** The inbox: open threads, then resolved ones, newest activity first inside each. No "awaiting". */
 export function threadInbox<C extends ThreadCommentLike>(
   threads: readonly TaskThreadRecord[],
   comments: readonly C[],
-): { awaiting: ThreadSummary<C>[]; open: ThreadSummary<C>[]; resolved: ThreadSummary<C>[] } {
+): { open: ThreadSummary<C>[]; resolved: ThreadSummary<C>[] } {
   const rows = threads.map(t => {
     const cs = threadComments(comments, t.id)
-    return { thread: t, attention: threadAttention(t, cs), count: cs.length, ...(cs.length ? { last: cs[cs.length - 1] } : {}) }
+    const state: ThreadState = t.resolvedAt ? 'resolved' : 'open'
+    return { thread: t, state, count: cs.length, ...(cs.length ? { last: cs[cs.length - 1] } : {}) }
   })
   const at = (s: ThreadSummary<C>) => s.last?.createdAt ?? s.thread.createdAt
   const by = (a: ThreadSummary<C>, b: ThreadSummary<C>) => at(b).localeCompare(at(a)) || a.thread.id.localeCompare(b.thread.id)
   return {
-    awaiting: rows.filter(r => r.attention === 'awaiting').sort(by),
-    open: rows.filter(r => r.attention === 'open').sort(by),
-    resolved: rows.filter(r => r.attention === 'resolved').sort(by),
+    open: rows.filter(r => r.state === 'open').sort(by),
+    resolved: rows.filter(r => r.state === 'resolved').sort(by),
   }
 }
 
