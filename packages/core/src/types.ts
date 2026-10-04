@@ -1004,25 +1004,33 @@ export function normalizeSessionTimes<T extends { start_time?: unknown; end_time
   return s
 }
 
+/**
+ * The `MODEL_PRICING` row a model id is priced by — exact, then the longest prefix, then a truncated
+ * id (the resolution `getModelPrice` documents) — or `null` when the table does not know it. Local
+ * models are not table rows and read `null` here too (`isLocalModelId` says why they cost nothing).
+ */
+export function pricingKey(modelId: string): string | null {
+  if (MODEL_PRICING[modelId]) return modelId
+  const id = String(modelId ?? '')
+  let forwardKey = ''
+  let reverseKey = ''
+  for (const key of Object.keys(MODEL_PRICING)) {
+    if (id.startsWith(key)) {
+      if (key.length > forwardKey.length) forwardKey = key
+    } else if (id && key.startsWith(id) && key[id.length] === '-') {
+      if (!reverseKey || key.length < reverseKey.length) reverseKey = key
+    }
+  }
+  return forwardKey || reverseKey || null
+}
+
 export function getModelPrice(modelId: string) {
   if (MODEL_PRICING[modelId]) return MODEL_PRICING[modelId]
   // A model served off the user's own machine costs nothing. Checked BEFORE the table so no
   // partial-prefix match can price it, and before the fallback, which would otherwise invent
   // spending that grows with every local session. See local-models.ts.
   if (isLocalModelId(modelId)) return LOCAL_MODEL_PRICE
-  const id = String(modelId ?? '')
-  let forwardKey = ''
-  let reverseKey = ''
-  for (const key of Object.keys(MODEL_PRICING)) {
-    if (id.startsWith(key)) {
-      // Most specific (longest) prefix wins.
-      if (key.length > forwardKey.length) forwardKey = key
-    } else if (id && key.startsWith(id) && key[id.length] === '-') {
-      // Truncated id: least specific (shortest) candidate wins — never a `-lite`/variant price.
-      if (!reverseKey || key.length < reverseKey.length) reverseKey = key
-    }
-  }
-  const hit = forwardKey || reverseKey
+  const hit = pricingKey(modelId)
   if (hit) return MODEL_PRICING[hit]!
   // Sonnet-class fallback — an ESTIMATE for a model the table does not know. A caller that must not
   // invent a figure (a provider call journaled by the native runtime, e.g. an OpenRouter model) asks
