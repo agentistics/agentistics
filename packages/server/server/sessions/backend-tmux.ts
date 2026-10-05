@@ -22,6 +22,7 @@ import { sessionEnv } from './login-env'
 import { planPromptDelivery } from './initial-prompt'
 import { frameChanged, needsSecondReturn } from './submit-check'
 import { writeToPane } from './pane-writer'
+import { NEWLINE_GAP_MS, typingSteps } from './typing-plan'
 import {
   SEND_NOW_FIRM_MS, SEND_NOW_GENTLE_MS, SEND_NOW_POLL_MS, hasQueuedMessages, sanitizePasteText,
   type SendNowOutcome,
@@ -303,8 +304,13 @@ async function queueDrains(id: string, budgetMs: number): Promise<boolean> {
 
 async function typeAndSubmit(id: string, text: string): Promise<boolean> {
   if (!(await focusInput(id))) return false
-  const typed = await tmux(sendKeysLiteralArgs(id, text))
-  if (typed.code !== 0) return false
+  // Typed, not pasted: a message with line breaks goes line by line (see `typing-plan.ts`), so the
+  // harness never mistakes it for a paste and wraps it in `<pasted_content>`.
+  for (const step of typingSteps(text)) {
+    const r = await tmux(step.kind === 'literal' ? sendKeysLiteralArgs(id, step.text) : sendKeysNamedArgs(id, 'C-j'))
+    if (r.code !== 0) return false
+    if (step.kind === 'newline') await sleep(NEWLINE_GAP_MS)
+  }
 
   // Let the burst end before the return key, then look at what the typing produced — that frame is
   // the thing the submit has to change. See `submit-check.ts` for why the check is the SCREEN and
