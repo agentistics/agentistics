@@ -172,7 +172,7 @@ export function nativeVerbCall(id: string, verb: NativeVerb, title?: string): { 
 const SENTENCES = {
   en: {
     absent: 'The native Agentistics runtime is not available on this machine.',
-    gated: 'The native Agentistics harness is experimental — turn it on with `agentop experimental enable`.',
+    gated: 'The native Agentistics harness is still in development and is not available in this version.',
     central: 'Native sessions do not run on a central.',
     ended: 'Session ended.',
     reopened: 'Session reopened.',
@@ -186,7 +186,7 @@ const SENTENCES = {
   },
   pt: {
     absent: 'O runtime nativo do Agentistics não está disponível nesta máquina.',
-    gated: 'O harness nativo do Agentistics é experimental — ative com `agentop experimental enable`.',
+    gated: 'O harness nativo do Agentistics ainda está em desenvolvimento e não está disponível nesta versão.',
     central: 'Sessões nativas não rodam num central.',
     ended: 'Sessão encerrada.',
     reopened: 'Sessão reaberta.',

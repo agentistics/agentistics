@@ -13,12 +13,12 @@ import { createMemoryService, type MemoryService } from './memory-service'
 import { providerFlagOn } from './config'
 
 // The native gate's rule and sentence (`native-gate.ts` on fix/native-experimental-gate, which this
-// branch predates): ONE flag, the one `agentop experimental enable` writes. When both branches meet,
+// branch predates): ONE flag, the one `agentop experimental` command writes. When both branches meet,
 // this becomes `import { EXPERIMENTAL_REFUSAL, nativeExperimentalOn } from './native-gate'`.
 const EXPERIMENTAL_REFUSAL = {
   error: 'experimental',
-  sentence: 'The native Agentistics harness and model providers are experimental — turn them on with `agentop experimental enable`.',
-  sentencePt: 'O harness nativo do Agentistics e os provedores de modelo são experimentais — ative com `agentop experimental enable`.',
+  sentence: 'The native Agentistics harness is still in development and is not available in this version.',
+  sentencePt: 'O harness nativo do Agentistics ainda está em desenvolvimento e não está disponível nesta versão.',
 } as const
 const nativeExperimentalOn = () => providerFlagOn()
 

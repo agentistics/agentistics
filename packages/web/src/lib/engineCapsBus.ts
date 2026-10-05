@@ -1,7 +1,7 @@
 /**
  * engineCapsBus — "what the engine says is on" is read once per page load (`useEngineCaps`,
  * `nativeFleet`), because it only changed with a server restart. The experimental switch
- * (Settings → Experimental) changes it without one, so whoever flips it calls `invalidateEngineCaps`
+ * (the `agentop experimental` command) changes it without one, so whoever flips it calls `invalidateEngineCaps`
  * and every reader that cached the answer asks again. No fetch here — a registry of "forget" callbacks.
  */
 const listeners = new Set<() => void>()

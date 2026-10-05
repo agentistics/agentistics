@@ -433,8 +433,8 @@ export const HARNESS_INFO: Record<SurfaceHarnessId, HarnessInfo> = {
       },
     ],
     note: {
-      en: 'Experimental: the native harness only shows where `agentop experimental enable` is on.',
-      pt: 'Experimental: o harness nativo só aparece onde `agentop experimental enable` está ligado.',
+      en: 'The native Agentistics harness is still in development and is not available in this version.',
+      pt: 'O harness nativo do Agentistics ainda está em desenvolvimento e não está disponível nesta versão.',
     },
   },
 }
