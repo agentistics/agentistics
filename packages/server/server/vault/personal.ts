@@ -14,7 +14,7 @@
 import { readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
-  GROUP_ID, ITEM_ID, KIND_FIELDS, PERSONAL_DIR, PERSONAL_PURPOSE, newPersonalId, parseDotEnv, parseVersionFile, recordName,
+  GROUP_ID, ITEM_ID, KIND_FIELDS, PERSONAL_DIR, PERSONAL_PURPOSE, newPersonalId, parseImportText, parseVersionFile, recordName,
   trashExpired, versionTag, versionsToPrune,
   type PersonalGroup, type PersonalInput, type PersonalMeta, type PersonalValue,
 } from '@agentistics/vault'
@@ -24,7 +24,7 @@ let _now: () => number = () => Date.now()
 const iso = () => new Date(_now()).toISOString()
 const enc = (o: unknown) => new TextEncoder().encode(JSON.stringify(o))
 
-export type StoreFail = { ok: false; code: 'not-found' | 'version-conflict' | 'locked' | 'record-unreadable' | 'clash' | 'no-import'; version?: number }
+export type StoreFail = { ok: false; code: 'not-found' | 'version-conflict' | 'locked' | 'record-unreadable' | 'clash' | 'no-import' | 'import-format'; version?: number; reason?: string }
 export function personalRoot(): string { return join(vaultDir(), PERSONAL_DIR) }
 const itemDir = (id: string) => join(personalRoot(), 'items', id)
 const groupDir = (id: string) => join(personalRoot(), 'groups', id)
@@ -228,9 +228,10 @@ export interface ImportPreviewKey { key: string; clash: { id: string; version: n
  * only (with the existing item of the same name, if any), never a value. The text is the caller's
  * string and is dropped with the request.
  */
-export async function importPreview(text: string, session: string): Promise<{ ok: true; token: string; keys: ImportPreviewKey[]; skipped: number }> {
+export async function importPreview(text: string, session: string): Promise<{ ok: true; token: string; keys: ImportPreviewKey[]; skipped: number } | StoreFail> {
   dropExpiredImports()
-  const parsed = parseDotEnv(text)
+  const parsed = parseImportText(text)
+  if (!parsed.ok) return { ok: false, code: 'import-format', reason: parsed.reason }
   const live = (await listItems()).filter(m => !m.deletedAt)
   const keys = parsed.pairs.map(p => {
     const c = live.find(m => m.name === p.key)
