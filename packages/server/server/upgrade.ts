@@ -9,7 +9,7 @@ import { restartAutostart } from './autostart.ts'
 import { AGENTISTICS_DATA_DIR, PORT } from './config.ts'
 import { cliStrings, type CliLang, type CliStrings } from './cli-i18n.ts'
 import { PRIMARY_REPO, fetchFirstOk, releaseAssetUrls } from './release-source.ts'
-import { shouldWriteDownload, type UpgradeProgress } from './upgrade-progress.ts'
+import { parseUpgradeProgress, shouldWriteDownload, type UpgradeProgress } from './upgrade-progress.ts'
 
 /** Where a running upgrade narrates itself for the page that started it (`upgrade-progress.ts`). */
 export const UPGRADE_PROGRESS_FILE = join(AGENTISTICS_DATA_DIR, 'upgrade-progress.json')
@@ -281,6 +281,33 @@ function clearUpgradeFailure(): void {
   try { unlinkSync(UPGRADE_FAILURE_FILE) } catch { /* nothing recorded */ }
 }
 
+/**
+ * The running server reports `current`: any failure recorded for exactly that version is stale (the
+ * target is installed and answering) and is dropped, and a `failed` progress record for it is
+ * rewritten as `done`. Never touches a failure for ANOTHER version. Best-effort, never throws.
+ */
+export function staleUpgradeState(
+  failure: UpgradeFailure | null,
+  progress: UpgradeProgress | null,
+  current: string,
+): { clearFailure: boolean; rewriteProgress: boolean } {
+  return {
+    clearFailure: !!failure && failure.version === current,
+    rewriteProgress: !!progress && progress.stage === 'failed' && progress.version === current,
+  }
+}
+
+export function reconcileUpgradeState(current: string): void {
+  try {
+    const f = readUpgradeFailure()
+    let p: UpgradeProgress | null = null
+    try { p = parseUpgradeProgress(readFileSync(UPGRADE_PROGRESS_FILE, 'utf8')) } catch { /* none */ }
+    const stale = staleUpgradeState(f, p, current)
+    if (stale.clearFailure) clearUpgradeFailure()
+    if (stale.rewriteProgress) writeProgress({ stage: 'done', version: current })
+  } catch { /* nothing recorded */ }
+}
+
 /** Run a command, capturing trimmed stdout (stderr discarded). Never throws. */
 async function sh(cmd: string[]): Promise<{ code: number; out: string }> {
   try {
@@ -400,7 +427,7 @@ async function handOverUnmanagedServers(pids: readonly number[], newBin: string)
   })
 }
 
-async function restartRunningServices(newBin: string): Promise<RestartOutcome> {
+async function restartRunningServices(newBin: string, wantVersion?: string): Promise<RestartOutcome> {
   let didSomething = false
   let restartedServer = false
   const failures: string[] = []
@@ -422,6 +449,7 @@ async function restartRunningServices(newBin: string): Promise<RestartOutcome> {
     if (serverPlan.kind === 'service') {
       process.stdout.write('  Restarting the agentop-server service…\n')
       const res = await restartAutostart('server', {
+        ...(wantVersion ? { wantVersion } : {}),
         // A heavy service can take a while to bind; say we are still waiting rather than go quiet.
         onWait: sec => { if (sec >= 5 && sec % 5 === 0) process.stdout.write(`    …still waiting for agentop-server to answer (${sec}s)\n`) },
       })
@@ -1024,7 +1052,7 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
     const running = await runningServerVersion()
     if (running && compareVersions(running, info.current) < 0) {
       process.stdout.write(`  The running server is v${running} — moving it onto the installed v${info.current}…\n`)
-      const outcome = await restartRunningServices(process.execPath)
+      const outcome = await restartRunningServices(process.execPath, info.current)
       for (const f of outcome.failures) process.stderr.write(`  ${_Y}${f}${_R}\n`)
       writeProgress({ stage: outcome.ok ? 'done' : 'failed', version: info.current, ...(outcome.ok ? {} : { reason: outcome.failures[0] ?? 'restart failed' }) })
       clearUpgradeFailure()
@@ -1127,12 +1155,24 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
   writeProgress({ stage: 'restarting', version: info.latest })
   let restart: RestartOutcome
   try {
-    restart = await restartRunningServices(currentBin)
+    restart = await restartRunningServices(currentBin, info.latest)
   } catch (err: any) {
     restart = { ok: false, failures: [`unexpected error: ${err?.message ?? String(err)}`], restartedServer: false }
   }
 
+  // THE SERVER ITSELF IS THE FINAL WORD. A restart verdict is built from side facts (a pid read with
+  // lsof/ss, a unit state), and any of them can be wrong or unobtainable while the new version is
+  // already answering — 2026-10-05, 2.104.0 → 2.104.1: the service came back and answered /api/version
+  // in about a second, the pid lookup returned nothing, and the upgrade recorded `failed` over a
+  // healthy server (and the page said "the update did not finish"). So before any failure is
+  // recorded, ask the port what it runs: exactly the target version means the upgrade succeeded.
+  let rescued = false
   if (!restart.ok) {
+    const seen = await pollRunningVersion(PORT, info.latest, { timeoutMs: 8_000, maxMs: 8_000 })
+    rescued = seen.ok
+  }
+
+  if (!restart.ok && !rescued) {
     // The binary IS installed — but claiming "Done, now running vX" while a service still runs
     // the old code is the lie that hides a failed critical update.
     process.stderr.write(
@@ -1154,7 +1194,9 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
   // broken build, missing dependency, a fatal startup error) leaves `observed === null` too, which
   // used to be treated as "nothing runs here to confirm" and printed "Done" over a service that was
   // actually down. `restart.restartedServer` is what tells the two apart.
-  const verified = await pollRunningVersion(PORT, info.latest)
+  const verified = rescued
+    ? { ok: true, observed: info.latest, state: 'matched' as const }
+    : await pollRunningVersion(PORT, info.latest)
   const decision = decideVersionVerification(verified, restart.restartedServer)
   if (!decision.ok) {
     const facts = await portHolderFacts(PORT)
@@ -1183,6 +1225,8 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
     if (line) process.stdout.write(`  ${line}\n`)
   } catch { /* the upgrade itself succeeded; autostart repair is best-effort */ }
 
+  // Success is recorded explicitly, and any failure memory of THIS version is dropped with it.
+  clearUpgradeFailure()
   writeProgress({ stage: 'done', version: info.latest })
   process.stdout.write(`\n${_GR}${_B}Done — now running v${info.latest}.${_R}\n\n`)
   return 0
