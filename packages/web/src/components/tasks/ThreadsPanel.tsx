@@ -32,6 +32,7 @@ import { SESSION_STATE, button, field, fmtStamp } from './board'
 import { threadCopy, type Lang } from './threadCopy'
 import { participantState, replyReach } from './threadView'
 import { RESOLVED_FLASH_MS, resolveView } from './resolveFlow'
+import { commentAnchor, commentCandidates, commentIdFromHref, sessionCandidates } from './commentMention'
 
 /** Today: the time. Otherwise: day and month. An inbox row has room for one short stamp. */
 function shortWhen(iso: string, lang: Lang): string {
@@ -48,6 +49,18 @@ const KIND_COLOR: Record<string, { color: string; dim: string }> = {
   handback: { color: 'var(--accent-cyan)', dim: 'var(--accent-cyan-dim)' },
   block: { color: 'var(--accent-red)', dim: 'var(--accent-red-dim)' },
   decision: { color: 'var(--accent-green)', dim: 'var(--accent-green-dim)' },
+}
+
+/** A `#comment-ID` link written by the `^` picker scrolls to that comment instead of navigating. */
+function followCommentLink(e: React.MouseEvent): void {
+  const a = (e.target as HTMLElement).closest?.('a')
+  const cid = commentIdFromHref(a?.getAttribute('href'))
+  if (!cid) return
+  e.preventDefault()
+  const el = document.getElementById(commentAnchor(cid))
+  if (!el) return
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  el.animate([{ background: 'var(--anthropic-orange-dim)' }, { background: 'transparent' }], { duration: 1600 })
 }
 
 export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
@@ -189,7 +202,7 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
 
   if (isMobile) {
     return (
-      <>
+      <div onClickCapture={followCommentLink}>
         <div style={{ background: 'var(--bg-card)', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
           {inboxPane}
         </div>
@@ -210,11 +223,11 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
             <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{right}</div>
           </div>
         )}
-      </>
+      </div>
     )
   }
   return (
-    <div style={{
+    <div onClickCapture={followCommentLink} style={{
       display: 'grid', gridTemplateColumns: '280px minmax(0, 1fr)', minHeight: 520, height: 'min(72vh, 820px)',
       background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
     }}>
@@ -349,7 +362,7 @@ function ThreadRecord({ id, thread, detail, rows, lang, reload, renderBody, wher
           const mine = c.role === 'owner'
           const sum = deliverySummary(c.deliveries)
           return (
-            <article key={c.id} style={{
+            <article key={c.id} id={commentAnchor(c.id)} style={{
               display: 'grid', gridTemplateColumns: '26px minmax(0, 1fr)', gap: 10, padding: '12px 0',
               borderBottom: '1px solid var(--border-subtle)',
             }}>
@@ -414,6 +427,7 @@ function ThreadRecord({ id, thread, detail, rows, lang, reload, renderBody, wher
           onChange={setDraft}
           attachments={attached}
           onAttachments={setAttached}
+          mentions={{ sessions: sessionCandidates(detail.sessions), comments: commentCandidates(detail.comments) }}
           ariaLabel={t.placeholder}
           placeholder={t.placeholder}
           submitLabel={t.comment}
