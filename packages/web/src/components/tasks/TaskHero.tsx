@@ -9,13 +9,17 @@
  * live count comes from the fleet poll the page already runs. A figure nobody measured renders
  * N/A — never a confident 0 — and a task nobody broke up draws no ring at all.
  */
-import { ArrowLeft } from 'lucide-react'
+import { useState } from 'react'
+import { ArrowLeft, Pencil } from 'lucide-react'
 import type { TaskStatusDef } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import type { TaskDetail } from '../../lib/tasks'
 import { BetaTag } from '../BetaTag'
 import { NA, button, fmtInt, fmtTokens, harnessColor } from './board'
 import { TaskChips, TaskMoreMenu } from './TaskChips'
+import { RenameInput } from './RenameInput'
+import { editTask } from '../../lib/tasks'
+import { boardCopy } from './copy'
 import { useMoney } from './money'
 import { threadCopy, type Lang } from './threadCopy'
 import { mixOf } from './threadView'
@@ -67,6 +71,8 @@ export function TaskHero({ detail, lang, statuses, live, reload, onBack, onAbout
 }) {
   const isMobile = useIsMobile()
   const t = threadCopy(lang)
+  const [renaming, setRenaming] = useState(false)
+  const rename = boardCopy(lang).header.renameTask
   const money = useMoney()
   const task = detail.task
   const subsDone = detail.subtasks.filter(s => s.done).length
@@ -97,7 +103,7 @@ export function TaskHero({ detail, lang, statuses, live, reload, onBack, onAbout
           style={{ ...button(isMobile), height: isMobile ? 36 : 32, background: 'var(--ag-tint-2)', color: 'var(--text-primary)' }}
         >{t.about}</button>
       )}
-      {onDeleted && <TaskMoreMenu id={task.id} task={task} lang={lang} onDeleted={onDeleted} />}
+      {onDeleted && <TaskMoreMenu id={task.id} task={task} lang={lang} onDeleted={onDeleted} onRename={() => setRenaming(true)} />}
     </div>
   )
 
@@ -133,8 +139,31 @@ export function TaskHero({ detail, lang, statuses, live, reload, onBack, onAbout
             margin: '6px 0 0', fontSize: isMobile ? 17 : 21, lineHeight: 1.2, fontWeight: 700, letterSpacing: '-0.01em',
             display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
           }}>
-            <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{task.title}</span>
-            <BetaTag what="Agentask" />
+            {renaming ? (
+              <span style={{ flex: '1 1 260px', minWidth: 0 }}>
+                <RenameInput
+                  value={task.title} ariaLabel={rename}
+                  onCancel={() => setRenaming(false)}
+                  onSave={async title => { await editTask(task.id, { title, actor: 'you' }); setRenaming(false); await reload() }}
+                  style={{ fontSize: 'inherit', fontWeight: 'inherit' }}
+                />
+              </span>
+            ) : (
+              <>
+                <span
+                  data-task-title
+                  title={rename}
+                  onDoubleClick={() => setRenaming(true)}
+                  style={{ minWidth: 0, overflowWrap: 'anywhere' }}
+                >{task.title}</span>
+                <button
+                  type="button" data-rename-button onClick={() => setRenaming(true)} title={rename} aria-label={rename}
+                  className="ag-tap-icon"
+                  style={{ display: 'grid', placeItems: 'center', width: isMobile ? 32 : 22, height: isMobile ? 32 : 22, borderRadius: 6, border: 'none', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer', flex: '0 0 auto' }}
+                ><Pencil size={13} /></button>
+                <BetaTag what="Agentask" />
+              </>
+            )}
           </h1>
           <div style={{ marginTop: 8 }}>
             <TaskChips

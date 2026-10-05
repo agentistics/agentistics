@@ -17,7 +17,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Ban, BellRing, Check, MessageSquarePlus, RotateCcw, Send, ExternalLink } from 'lucide-react'
+import { ArrowLeft, Ban, BellRing, Check, ChevronRight, MessageSquarePlus, RotateCcw, Send, ExternalLink } from 'lucide-react'
 import {
   deliverySummary, rowForParticipant, threadComments, threadInbox,
   type ChatAttachmentRef, type FleetRowLike, type ThreadParticipant, type ThreadSummary,
@@ -31,6 +31,9 @@ import { CommentAttachments, CommentComposer } from './CommentComposer'
 import { SESSION_STATE, button, field, fmtStamp } from './board'
 import { threadCopy, type Lang } from './threadCopy'
 import { participantState, replyReach } from './threadView'
+import { RESOLVED_FLASH_MS, resolveView } from './resolveFlow'
+import { focusComposer } from './focusComposer'
+import { commentAnchor, commentCandidates, commentIdFromHref, sessionCandidates } from './commentMention'
 
 /** Today: the time. Otherwise: day and month. An inbox row has room for one short stamp. */
 function shortWhen(iso: string, lang: Lang): string {
@@ -47,6 +50,32 @@ const KIND_COLOR: Record<string, { color: string; dim: string }> = {
   handback: { color: 'var(--accent-cyan)', dim: 'var(--accent-cyan-dim)' },
   block: { color: 'var(--accent-red)', dim: 'var(--accent-red-dim)' },
   decision: { color: 'var(--accent-green)', dim: 'var(--accent-green-dim)' },
+}
+
+/**
+ * The inbox's rows are BUTTONS and must look like it: a hover wash, a pointer, a chevron that leans in on
+ * hover, and a keyboard focus ring. (Hover does not exist on a touch screen; the chevron is always drawn,
+ * which is what tells a thumb the row opens something.)
+ */
+export const INBOX_CSS = `
+.ag-inbox-row{cursor:pointer;transition:background .15s}
+.ag-inbox-row .ag-inbox-chev{color:var(--text-tertiary);transition:transform .15s,color .15s}
+.ag-inbox-row:hover{background:var(--ag-tint-3)!important}
+.ag-inbox-row:hover .ag-inbox-chev{color:var(--anthropic-orange);transform:translateX(2px)}
+.ag-inbox-row[data-selected="true"] .ag-inbox-chev{color:var(--anthropic-orange)}
+.ag-inbox-row:focus-visible{outline:2px solid var(--anthropic-orange);outline-offset:-2px}
+`
+
+/** A `#comment-ID` link written by the `^` picker scrolls to that comment instead of navigating. */
+function followCommentLink(e: React.MouseEvent): void {
+  const a = (e.target as HTMLElement).closest?.('a')
+  const cid = commentIdFromHref(a?.getAttribute('href'))
+  if (!cid) return
+  e.preventDefault()
+  const el = document.getElementById(commentAnchor(cid))
+  if (!el) return
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  el.animate([{ background: 'var(--anthropic-orange-dim)' }, { background: 'transparent' }], { duration: 1600 })
 }
 
 export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
@@ -79,6 +108,7 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
     return title ? t.onTarget(title) : t.onTask
   }
 
+  const looseRef = useRef<HTMLDivElement>(null)
   const [creating, setCreating] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const create = async () => {
@@ -98,9 +128,10 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
     return (
       <button
         key={s.thread.id}
+        className="ag-inbox-row" data-inbox-row data-selected={on ? 'true' : 'false'}
         onClick={() => setPicked(s.thread.id)}
         style={{
-          display: 'grid', gap: 3, width: '100%', textAlign: 'left',
+          position: 'relative', display: 'grid', gap: 3, width: '100%', textAlign: 'left', paddingRight: 30,
           padding: isMobile ? '12px 16px' : '10px 14px', minHeight: isMobile ? 64 : undefined,
           border: 'none', borderLeft: `2px solid ${on ? 'var(--anthropic-orange)' : 'transparent'}`,
           background: on ? 'var(--anthropic-orange-glow)' : 'transparent', cursor: 'pointer', fontFamily: 'inherit', color: 'inherit',
@@ -125,6 +156,7 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
           </span>
           <span style={{ marginLeft: 'auto', flex: '0 0 auto', whiteSpace: 'nowrap' }}>{shortWhen(s.last?.createdAt ?? s.thread.createdAt, lang)}</span>
         </span>
+        <ChevronRight className="ag-inbox-chev" size={15} aria-hidden style={{ position: 'absolute', right: 10, top: '50%', marginTop: -7 }} />
       </button>
     )
   }
@@ -137,6 +169,7 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
 
   const inboxPane = (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' }}>
+      <style>{INBOX_CSS}</style>
       <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
         {threads.length === 0 && (
           <div style={{ padding: 14, fontSize: 12.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>{t.noThreads}</div>
@@ -147,14 +180,16 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
           <div>
             {heading(t.loose, looseCount)}
             <button
+              className="ag-inbox-row" data-inbox-row data-selected={selected === 'loose' ? 'true' : 'false'}
               onClick={() => setPicked('loose')}
               style={{
-                width: '100%', textAlign: 'left', padding: isMobile ? '12px 16px' : '10px 14px', minHeight: isMobile ? 52 : undefined,
+                position: 'relative', paddingRight: 30,
+                width: '100%', textAlign: 'left', padding: isMobile ? '12px 30px 12px 16px' : '10px 30px 10px 14px', minHeight: isMobile ? 52 : undefined,
                 border: 'none', borderLeft: `2px solid ${selected === 'loose' ? 'var(--anthropic-orange)' : 'transparent'}`,
                 background: selected === 'loose' ? 'var(--anthropic-orange-glow)' : 'transparent', color: 'var(--text-secondary)',
                 fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
               }}
-            >{t.looseHint}</button>
+            >{t.looseHint}<ChevronRight className="ag-inbox-chev" size={15} aria-hidden style={{ position: 'absolute', right: 10, top: '50%', marginTop: -7 }} /></button>
           </div>
         )}
       </div>
@@ -171,16 +206,36 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
             </div>
           </form>
         ) : (
-          <button style={{ ...button(isMobile), width: '100%', justifyContent: 'center' }} onClick={() => setCreating(true)}>
-            <MessageSquarePlus size={14} /> {t.newThread}
-          </button>
+          <div style={{ display: 'grid', gap: 6 }}>
+            <button style={{ ...button(isMobile), width: '100%', justifyContent: 'center' }} onClick={() => setCreating(true)}>
+              <MessageSquarePlus size={14} /> {t.newThread}
+            </button>
+            <span style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.45, textAlign: 'center' }}>{t.newThreadHint}</span>
+          </div>
         )}
       </div>
     </div>
   )
 
   const right = selected === 'loose'
-    ? <div style={{ padding: isMobile ? 12 : 14, overflowY: 'auto', height: '100%' }}>{loose}</div>
+    ? (
+      <div ref={looseRef} data-loose-pane style={{ overflowY: 'auto', height: '100%', overscrollBehavior: 'contain' }}>
+        {/* Reachable from the top: a long list must not make "write a comment" a scroll to the end. */}
+        <div style={{
+          position: 'sticky', top: 0, zIndex: 3, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          padding: isMobile ? '10px 12px' : '10px 14px', background: 'var(--bg-card)', borderBottom: '1px solid var(--border)',
+        }}>
+          <div style={{ minWidth: 0, flex: '1 1 200px' }}>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>{t.commentOnTask}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{t.commentOnTaskHint}</div>
+          </div>
+          <button data-comment-top style={{ ...button(isMobile, 'primary'), flex: '0 0 auto' }} onClick={() => focusComposer(looseRef.current)}>
+            <MessageSquarePlus size={14} /> {t.commentAction}
+          </button>
+        </div>
+        <div style={{ padding: isMobile ? '10px 12px 0' : '12px 14px 0' }}>{loose}</div>
+      </div>
+    )
     : thread
       ? <ThreadRecord key={thread.id} id={id} thread={thread} detail={detail} rows={rows} lang={lang}
           reload={reload} renderBody={renderBody} where={where(thread)} onBack={isMobile ? () => setPicked(null) : undefined} />
@@ -188,7 +243,7 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
 
   if (isMobile) {
     return (
-      <>
+      <div onClickCapture={followCommentLink}>
         <div style={{ background: 'var(--bg-card)', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
           {inboxPane}
         </div>
@@ -209,11 +264,11 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
             <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{right}</div>
           </div>
         )}
-      </>
+      </div>
     )
   }
   return (
-    <div style={{
+    <div onClickCapture={followCommentLink} style={{
       display: 'grid', gridTemplateColumns: '280px minmax(0, 1fr)', minHeight: 520, height: 'min(72vh, 820px)',
       background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
     }}>
@@ -257,6 +312,13 @@ function ThreadRecord({ id, thread, detail, rows, lang, reload, renderBody, wher
   const [decision, setDecision] = useState(false)
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
+  const [verbPending, setVerbPending] = useState(false)
+  const [flashing, setFlashing] = useState(false)
+  useEffect(() => {
+    if (!flashing) return
+    const h = setTimeout(() => setFlashing(false), RESOLVED_FLASH_MS)
+    return () => clearTimeout(h)
+  }, [flashing])
   // A record reads oldest first; open on the newest entry, and follow a new one.
   const scroller = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -294,9 +356,12 @@ function ThreadRecord({ id, thread, detail, rows, lang, reload, renderBody, wher
     done(); await reload()
   }
   const verb = async (action: 'resolve' | 'reopen' | 'mute' | 'unmute', sessionId?: string) => {
+    if (action === 'resolve') setVerbPending(true)
     await threadVerb(id, thread.id, action, sessionId ? { sessionId } : {})
     await reload()
+    if (action === 'resolve') { setVerbPending(false); setFlashing(true) }
   }
+  const rv = resolveView({ resolvedAt: thread.resolvedAt, pending: verbPending, flashing })
   const cantSend = busy || !draft.trim() || reach.total === 0
 
   return (
@@ -311,21 +376,34 @@ function ThreadRecord({ id, thread, detail, rows, lang, reload, renderBody, wher
           <div style={{ fontSize: 15, fontWeight: 700, overflowWrap: 'anywhere' }}>{thread.title}</div>
           {!isMobile && <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{where} · {t.openedBy(thread.openedBy, fmtStamp(thread.createdAt, lang))}</div>}
         </div>
+        {thread.resolvedAt && rv !== 'done' && (
+          <span data-resolved-badge style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-green)', background: 'var(--accent-green-dim)', borderRadius: 999, padding: '2px 9px', flex: '0 0 auto' }}>{t.resolvedBadge}</span>
+        )}
         <button
+          data-resolve-button data-resolve-view={rv}
+          disabled={rv === 'working' || rv === 'done'}
           onClick={() => void verb(thread.resolvedAt ? 'reopen' : 'resolve')}
-          style={{ ...button(isMobile), flex: '0 0 auto' }}
-          title={thread.resolvedAt ? t.reopen : t.resolve} aria-label={thread.resolvedAt ? t.reopen : t.resolve}
+          style={{
+            ...button(isMobile), flex: '0 0 auto', transition: 'background .25s, color .25s, border-color .25s',
+            ...(rv === 'done' ? { background: 'var(--accent-green-dim)', color: 'var(--accent-green)', borderColor: 'var(--accent-green)' } : {}),
+            ...(rv === 'working' ? { opacity: 0.7 } : {}),
+          }}
+          title={rv === 'reopen' ? t.reopen : t.resolve} aria-label={rv === 'done' ? t.resolvedNow : rv === 'reopen' ? t.reopen : t.resolve}
         >
-          {thread.resolvedAt ? <RotateCcw size={14} /> : <Check size={14} />}{!isMobile && (thread.resolvedAt ? t.reopen : t.resolve)}
+          {rv === 'reopen' ? <RotateCcw size={14} /> : <Check size={14} />}
+          {(!isMobile || rv === 'done') && (rv === 'done' ? t.resolvedNow : rv === 'reopen' ? t.reopen : t.resolve)}
         </button>
       </div>
 
+      {rv === 'done' && (
+        <div role="status" data-resolved-note style={{ padding: '6px 16px', fontSize: 12, color: 'var(--accent-green)', background: 'var(--accent-green-dim)' }}>{t.movedToResolved}</div>
+      )}
       <div ref={scroller} style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', padding: isMobile ? '6px 12px' : '6px 16px' }}>
         {comments.map(c => {
           const mine = c.role === 'owner'
           const sum = deliverySummary(c.deliveries)
           return (
-            <article key={c.id} style={{
+            <article key={c.id} id={commentAnchor(c.id)} style={{
               display: 'grid', gridTemplateColumns: '26px minmax(0, 1fr)', gap: 10, padding: '12px 0',
               borderBottom: '1px solid var(--border-subtle)',
             }}>
@@ -390,6 +468,7 @@ function ThreadRecord({ id, thread, detail, rows, lang, reload, renderBody, wher
           onChange={setDraft}
           attachments={attached}
           onAttachments={setAttached}
+          mentions={{ sessions: sessionCandidates(detail.sessions), comments: commentCandidates(detail.comments) }}
           ariaLabel={t.placeholder}
           placeholder={t.placeholder}
           submitLabel={t.comment}

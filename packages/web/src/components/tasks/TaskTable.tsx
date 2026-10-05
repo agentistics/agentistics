@@ -25,7 +25,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   Bot, CheckSquare, ChevronDown, ChevronRight, Columns3, MessageSquare, Paperclip, Plus,
-  Rows3, RotateCcw, SquareArrowOutUpRight, Trash2, X,
+  Pencil, Rows3, RotateCcw, SquareArrowOutUpRight, Trash2, X,
 } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import {
@@ -42,7 +42,11 @@ import { DEFAULT_PREFS, useBoardPref } from './boardPrefs'
 import { ColResizeHandle } from './ColResizeHandle'
 import { contentWidthOf, fitContentWidth, hasCustomWidths, resolveWidths, tableMinWidth } from './columnWidths'
 import { SortTh } from './SortHeader'
+import { dropEmpty } from './emptyGroups'
+import { EmptyGroupsMenu } from './EmptyGroupsMenu'
 import { moveColumn } from './columnOrder'
+import { RenameInput } from './RenameInput'
+import { IdCell } from './IdCell'
 import {
   clearTicks, escapeLeavesMode, groupCheck, leaveMode, NO_SELECTION, selectedVisible, setRows,
   toggleMode, toggleRow, type Selection,
@@ -143,6 +147,8 @@ export const COLUMNS: ColumnDef[] = [
   { id: 'blockedBy', numeric: true, width: 92 },
   { id: 'created', width: 104, sort: 'created' },
   { id: 'updated', width: 104, sort: 'updated' },
+  // Optional (not in DEFAULT_COLUMNS): the delivery's own id, monospace, one click copies it.
+  { id: 'id', width: 128 },
 ]
 
 export const DEFAULT_COLUMNS: ColumnId[] =
@@ -330,6 +336,7 @@ function cellFor(
         ? <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
         : <span style={pill('var(--accent-red)')}>{n}</span>
     }
+    case 'id': return <IdCell id={row.task.id} lang={lang} />
     case 'created': return (
       <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>
         {new Date(row.task.createdAt).toLocaleDateString()}
@@ -643,7 +650,12 @@ export interface TaskTableProps {
   onPriority?: (ref: string, priority: TaskPriorityId) => void
   /** Set a task's type; an empty string clears it. */
   onType?: (ref: string, type: string) => void
+  /** Rename a task in place (the row's pencil or a double-click on its name). Absent = no rename offered. */
+  onRename?: (ref: string, title: string) => void | Promise<void>
   onCreate: (title: string, status: TaskStatus, type?: string) => void
+  /** When set, "+ Add" opens the create form (title, type, status, description) with the group's status and
+   *  type preselected, instead of the one-line inline input. */
+  onRequestCreate?: (init: { status: string; type?: string }) => void
   onExpand: (id: string) => void
   onAddSubtask: (ref: string, title: string) => void
   /** Returns the write's outcome — the group-forming gestures (§F.1) need it to show
@@ -711,6 +723,7 @@ export function TaskTable(p: TaskTableProps) {
   // stored `groups`) is DERIVED from the list on every render rather than frozen.
   const [storedGroups, setGroups] = useBoardPref('groups')
   const [groupBy, setGroupBy] = useBoardPref('groupBy')
+  const [hideEmpty, setHideEmpty] = useBoardPref('hideEmpty')
   const [storedTypeGroups, setTypeGroups] = useBoardPref('typeGroups')
   const [storedCollapsed, setStoredCollapsed] = useBoardPref('collapsed')
   const collapsed = useMemo(() => new Set<string>(storedCollapsed), [storedCollapsed])
@@ -732,6 +745,7 @@ export function TaskTable(p: TaskTableProps) {
   /** Which subtask is being given a session — `taskId/subtaskId`, so the patch knows both. */
   const [linkingSub, setLinkingSub] = useState<{ task: string; sub: string } | null>(null)
   /** The comment thread open over the table, if any — a task's (`target: null`), a group's or a subtask's. */
+  const [renamingId, setRenamingId] = useState<string | null>(null)
   const [thread, setThread] = useState<{ taskId: string; target: string | null; title: string } | null>(null)
   // The board's own dialog, never `window.confirm` — see the note on the detail page's delete.
   const [confirmBatch, setConfirmBatch] = useState(false)
@@ -900,9 +914,12 @@ export function TaskTable(p: TaskTableProps) {
   }
 
   // In the CHOSEN order, not the canonical one — see the chooser's note.
-  const visible = groupsShown
-    .map(st => groups.find(g => g.key === st))
-    .filter((g): g is typeof groups[number] => g !== undefined)
+  const visible = dropEmpty(
+    groupsShown
+      .map(st => groups.find(g => g.key === st))
+      .filter((g): g is typeof groups[number] => g !== undefined),
+    g => g.rows.length, hideEmpty,
+  )
 
   // The selection that ACTS is the one on screen: a row in a hidden or folded group, filtered out by
   // the search box or deleted since, is not something the bar's count or a batch verb reaches.
@@ -993,6 +1010,7 @@ export function TaskTable(p: TaskTableProps) {
             {copy.viewBar.group}: {groupBy === 'type' ? copy.types.groupByType : copy.types.groupByStatus}
             <span style={{ ...microLabel, fontSize: 10.5 }}>{visible.length}/{groups.length}</span>
           </PickerMenu>
+          <EmptyGroupsMenu hide={hideEmpty} onChange={setHideEmpty} lang={p.lang ?? 'en'} />
           <PickerMenu
             title={copy.pickers.columnsTitle}
             lang={p.lang ?? 'en'}
@@ -1327,8 +1345,17 @@ export function TaskTable(p: TaskTableProps) {
                                 pointer convenience over the chevron's button, not a second tab stop. */}
                             <td style={{ ...cellBox }}>
                               <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                              {renamingId === row.task.id ? (
+                                <RenameInput
+                                  value={row.task.title} ariaLabel={copy.header.renameTask}
+                                  onCancel={() => setRenamingId(null)}
+                                  onSave={async title => { await p.onRename?.(row.task.id, title); setRenamingId(null) }}
+                                />
+                              ) : (<>
                               <span
                                 role="presentation"
+                                data-task-title
+                                onDoubleClick={p.onRename ? () => setRenamingId(row.task.id) : undefined}
                                 onClick={() => {
                                   toggleIn(expanded, row.task.id, setExpanded)
                                   if (!open) p.onExpand(row.task.id)
@@ -1342,6 +1369,14 @@ export function TaskTable(p: TaskTableProps) {
                               >
                                 {row.task.title}
                               </span>
+                              {p.onRename && (
+                                <button
+                                  type="button" data-rename-button onClick={e => { e.stopPropagation(); setRenamingId(row.task.id) }}
+                                  title={copy.header.renameTask} aria-label={`${copy.header.renameTask}: ${row.task.title}`}
+                                  style={openBtn}
+                                ><Pencil size={12} /></button>
+                              )}
+                              </>)}
                               {/* The task's thread, from its own row — in the title cell like every
                                   subtask row's, because the Comments column is off by default and a
                                   hidden column is no way in. */}
@@ -1410,7 +1445,7 @@ export function TaskTable(p: TaskTableProps) {
                     <tr style={{ borderTop: '1px solid var(--border)' }}>
                       <td style={{ ...cellBox }} />
                       <td colSpan={cols.length + 1} style={{ ...cellBox }}>
-                        {adding === g.key ? (
+                        {adding === g.key && !p.onRequestCreate ? (
                           <input
                             autoFocus value={draft} placeholder="Task name, then Enter"
                             onChange={e => setDraft(e.target.value)}
@@ -1430,7 +1465,10 @@ export function TaskTable(p: TaskTableProps) {
                           />
                         ) : (
                           <button
-                            onClick={() => { setAdding(g.key); setDraft('') }}
+                            onClick={() => {
+                              if (p.onRequestCreate) { p.onRequestCreate({ status: g.createStatus, ...(g.createType ? { type: g.createType } : {}) }); return }
+                              setAdding(g.key); setDraft('')
+                            }}
                             style={{
                               background: 'none', border: 'none', cursor: 'pointer', padding: 0,
                               color: 'var(--text-tertiary)', fontSize: 12,
