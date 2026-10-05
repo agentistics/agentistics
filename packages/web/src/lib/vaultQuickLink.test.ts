@@ -33,3 +33,11 @@ describe('the header button', () => {
     expect(btn).not.toContain('bottom: -5')
   })
 })
+
+describe('the locked /vault page', () => {
+  test('has no page header — the safe in the centre is the title', () => {
+    const branch = src.slice(src.indexOf("if (state.kind === 'locked') {"), src.indexOf("if (state.kind === 'code')"))
+    expect(branch).toContain('<VaultStage')
+    expect(branch).not.toContain('{header}')
+  })
+})

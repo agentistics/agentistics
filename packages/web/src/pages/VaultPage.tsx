@@ -141,7 +141,8 @@ export default function VaultPage() {
     // §10: unlock RIGHT HERE — Hello on this computer, the phone's own ways on a phone — under a centred
     // safe whose dial turns while it happens and whose door opens before the content appears.
     return (
-      <div style={pageWrap}>{header}
+      // No page header here: the safe in the centre IS the title (owner, 2026-10-05).
+      <div style={pageWrap}>
         <VaultStage lang={lang} isMobile={isMobile} fromOpen={wasReady.current} onOpened={() => { wasReady.current = false; void load() }} />
       </div>
     )
