@@ -341,7 +341,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
             note={copy.pickers.columnsNote}
           >
             {copy.viewBar.columns}
-            {shownCols.length !== SUBTASK_COLUMNS.length && (
+            {(shownCols.length !== DEFAULT_SUBTASK_COLUMNS.length || shownCols.some(c => !DEFAULT_SUBTASK_COLUMNS.includes(c))) && (
               <span style={segmentBadge}>{shownCols.length}</span>
             )}
           </PickerMenu>

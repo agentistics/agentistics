@@ -202,6 +202,9 @@ export interface BoardCopy {
     desc: string
     groupNone: string
     groupStatus: string
+    emptyGroups: string
+    showAll: string
+    hideEmpty: string
     /** Under the sort list: unpriced work sorts last either way. */
     sortNote: string
   }
@@ -220,6 +223,7 @@ export interface BoardCopy {
     noBlockers: string
     openRows: string
     deleteTask: string
+    renameTask: string
     pasteLink: string
     pickTask: string
     searchTasks: string
@@ -425,6 +429,7 @@ const EN: BoardCopy = {
   showAllDescription: 'Show all',
   showLessDescription: 'Show less',
   columns: {
+    id: 'ID',
     status: 'Status',
     type: 'Type',
     priority: 'Priority',
@@ -456,6 +461,9 @@ const EN: BoardCopy = {
     desc: 'Descending',
     groupNone: 'No grouping',
     groupStatus: 'By status',
+    emptyGroups: 'Empty groups',
+    showAll: 'Show all',
+    hideEmpty: 'Hide empty groups',
     sortNote: 'A row nothing could price sorts last whichever way the arrow points.',
   },
   header: {
@@ -472,12 +480,14 @@ const EN: BoardCopy = {
     noBlockers: 'Nothing is blocking this.',
     openRows: '{n} open',
     deleteTask: 'Delete this task',
+    renameTask: 'Rename',
     pasteLink: 'Paste a PR or doc URL, then Enter',
     pickTask: 'Pick a task…',
     searchTasks: 'Search…',
     remove: 'Remove',
   },
   subtaskColumns: {
+    id: 'ID',
     progress: 'Progress',
     status: 'Status',
     started: 'Started',
@@ -691,6 +701,7 @@ const PT: BoardCopy = {
   showAllDescription: 'Mostrar tudo',
   showLessDescription: 'Mostrar menos',
   columns: {
+    id: 'ID',
     status: 'Status',
     type: 'Tipo',
     priority: 'Prioridade',
@@ -722,6 +733,9 @@ const PT: BoardCopy = {
     desc: 'Decrescente',
     groupNone: 'Sem agrupamento',
     groupStatus: 'Por status',
+    emptyGroups: 'Grupos vazios',
+    showAll: 'Mostrar todos',
+    hideEmpty: 'Ocultar grupos vazios',
     sortNote: 'Uma linha que nada conseguiu precificar fica por último, para qualquer lado da seta.',
   },
   header: {
@@ -738,12 +752,14 @@ const PT: BoardCopy = {
     noBlockers: 'Nada está bloqueando esta tarefa.',
     openRows: '{n} em aberto',
     deleteTask: 'Excluir esta tarefa',
+    renameTask: 'Renomear',
     pasteLink: 'Cole a URL de um PR ou documento e tecle Enter',
     pickTask: 'Escolher uma tarefa…',
     searchTasks: 'Buscar…',
     remove: 'Remover',
   },
   subtaskColumns: {
+    id: 'ID',
     progress: 'Progresso',
     status: 'Status',
     started: 'Início',

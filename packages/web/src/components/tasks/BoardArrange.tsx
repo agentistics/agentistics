@@ -19,6 +19,7 @@ import {
 } from './board'
 import { boardCopy, type Lang } from './copy'
 import { PanelMenu, PickerMenu, menuRowStyle } from './PickerMenu'
+import { EmptyGroupsMenu } from './EmptyGroupsMenu'
 import { ViewBar, ViewSortMenu, segmentBadge, viewSegment } from './ViewBar'
 import { LANE_KEYS, type LaneKey } from './boardPrefs'
 import type { ColumnSorts } from './columnSort'
@@ -63,6 +64,8 @@ export interface BoardArrangeProps {
   /** Which columns the board draws, in order. The same stored set the table's groups use. */
   columns: readonly BoardStatus[]
   onColumns: (next: BoardStatus[]) => void
+  hideEmpty?: boolean
+  onHideEmpty?: (hide: boolean) => void
   /** How many cards sit in each status, so a HIDDEN column still says what it holds. */
   counts: Record<string, number>
   /** The board's LIVE status list (`lib/tasks.ts`'s `useTaskStatuses`) — `null` while it loads. */
@@ -136,6 +139,8 @@ export function BoardArrange(p: BoardArrangeProps) {
           {copy.viewBar.columns}
           {p.columns.length !== statusOrder.length && <span style={segmentBadge}>{p.columns.length}</span>}
         </PickerMenu>
+
+        {p.onHideEmpty && <EmptyGroupsMenu hide={p.hideEmpty === true} onChange={p.onHideEmpty} lang={p.lang ?? 'en'} />}
 
         {/* SORT — the table's sort, one field written by both. Hand order is the board's resting
             order, so it is the "default" row rather than a key. */}

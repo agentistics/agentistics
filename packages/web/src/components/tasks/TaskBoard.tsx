@@ -20,6 +20,7 @@ import { TaskProgressBar } from './TaskProgressBar'
 import { HarnessBadges } from './HarnessBadges'
 import { boardCopy, statusLabel } from './copy'
 import { BOARD_SORT_KEYS } from './BoardArrange'
+import { emptyColumns } from './emptyGroups'
 import { ColumnSortMenu } from './ColumnSortMenu'
 import {
   clearColumnSort, effectiveSort, hasOverride, pickColumnSort, withColumnSort, type ColumnSorts,
@@ -240,6 +241,8 @@ export interface BoardViewProps {
   wip: Record<string, number>
   /** Which columns to draw, in order. Absent = the whole pipeline. */
   columns?: readonly BoardStatus[]
+  /** Hide columns with no card in any lane (a view choice; the picked columns are untouched). */
+  hideEmpty?: boolean
   /** The board's LIVE status list (`lib/tasks.ts`'s `useTaskStatuses`) — `null` while it loads. */
   statuses: readonly TaskStatusDef[] | null
 }
@@ -310,6 +313,10 @@ export function BoardView(p: BoardViewProps) {
       })),
     }))
   }, [rows, p.lanes, p.sort, p.columnSort, p.columns, p.statuses])
+  const hiddenCols = useMemo(
+    () => (p.hideEmpty ? emptyColumns(lanes, lanes.flatMap(l => l.columns.map(c => c.status))) : new Set<string>()),
+    [p.hideEmpty, lanes],
+  )
 
   /** May a card be moved to a new POSITION in this column? Only under hand order — see `canReorderBy`. */
   const reorderable = (status: BoardStatus) =>
@@ -366,7 +373,7 @@ export function BoardView(p: BoardViewProps) {
               scrollSnapType: 'x proximity',
             }}
           >
-            {lane.columns.map(col => {
+            {lane.columns.filter(col => !hiddenCols.has(col.status)).map(col => {
               const s = statusStyle(p.statuses, col.status)
               const limit = p.wip[col.status]
               const over_ = limit !== undefined && col.rows.length > limit
