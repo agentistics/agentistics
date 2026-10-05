@@ -30,7 +30,7 @@ import { HelpOverlay, helpMaxTop } from './HelpOverlay'
 import { paneHit, shellHit } from './hit'
 import { isActivation, trackClick, wheelDelta, type ClickTrack, type MouseReport, type Pointer } from './mouse'
 import { createPointerBus, PointerProvider, type MouseChannel } from './pointer'
-import { TAB_ORDER, type ActionResult, type ControlExit, type ControlHost, type ControlSessions, type ControlStatus, type TabId } from './types'
+import { startTabFor, tabOrderFor, type ActionResult, type ControlExit, type ControlHost, type ControlSessions, type ControlStatus, type TabId } from './types'
 import { appendLines } from './stream'
 import type { CliLang } from './lang'
 import { controlStrings } from './i18n'
@@ -152,6 +152,7 @@ export interface ControlCenterProps {
     setup?: boolean
     /** `agentop code …`'s launch, handed to the `code` tab on its first mount. */
     code?: CodeLaunch
+    codeTab?: boolean
   }
   onExit: (exit: ControlExit) => void
   /**
@@ -169,7 +170,8 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
   const s = controlStrings(lang)
 
   // GL-01: bare `agentop` opens on `home`; `agentop code` asks for `code` explicitly.
-  const [tab, setTab] = useState<TabId>(initial?.tab ?? 'home')
+  const tabOrder = tabOrderFor(Boolean(initial?.codeTab))
+  const [tab, setTab] = useState<TabId>(startTabFor(initial?.tab, Boolean(initial?.codeTab)))
   // The `code` tab's launch: `agentop code …` on the first mount, then whatever `home` asks for
   // (HM-02 the first prompt, HM-04 a session to resume). A NEW object each time, so the tab acts on it.
   const [codeLaunch, setCodeLaunch] = useState<CodeLaunch | undefined>(initial?.code)
@@ -437,8 +439,8 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
    * own `[`/`]` stand down with every other global key, so the screen forwards them itself.
    */
   const stepTab = useCallback((step: 1 | -1) => {
-    setTab(prev => TAB_ORDER[(TAB_ORDER.indexOf(prev) + step + TAB_ORDER.length) % TAB_ORDER.length]!)
-  }, [])
+    setTab(prev => tabOrder[(tabOrder.indexOf(prev) + step + tabOrder.length) % tabOrder.length]!)
+  }, [tabOrder])
 
   const switchLang = useCallback((next: CliLang) => {
     setLang(next)
@@ -634,7 +636,10 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
     if (next !== null) setHelpTop(next)
   }, { isActive: helpOpen })
 
-  const paletteList = palette ? filterCommands(palette.query, lang) : []
+  // The ordinary cockpit has no native entry point. The explicit `agentop code` mount is the only
+  // place where native commands are offered to the palette.
+  const paletteCommands = host.code ? PALETTE_COMMANDS : PALETTE_COMMANDS.filter(c => !c.code && c.id !== 'code' && c.id !== 'home' && c.id !== 'resume')
+  const paletteList = palette ? filterCommands(palette.query, lang, paletteCommands) : []
   const fullCtx: PaletteContext = {
     hasCode: Boolean(host.code), ...paletteCtx,
     ...(host.nativeGate ? { gate: host.nativeGate() } : {}),
@@ -729,7 +734,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
     performSettings(r.effect)
   }, { isActive: settings !== null })
 
-  const tabs = tabBarTabs(TAB_ORDER, s.tabsShort)
+  const tabs = tabBarTabs(tabOrder, s.tabsShort)
   // Computed HERE and handed to the bar, rather than measured again inside it: the strip's cell
   // widths are what a click on it is resolved against, and two measurements of the same row would
   // agree until the day one of them changed.
@@ -788,10 +793,10 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
       if (capturing || !isActivation({ ...local, x: hit.x, y: 0 })) return
       const target = tabAtColumn(tabLayout, hit.x)
       if (!target) return
-      const at = TAB_ORDER.indexOf(tab)
+      const at = tabOrder.indexOf(tab)
       if (target.kind === 'tab') return setTab(target.id)
       const step = target.kind === 'prev' ? -1 : 1
-      return setTab(TAB_ORDER[(at + step + TAB_ORDER.length) % TAB_ORDER.length]!)
+      return setTab(tabOrder[(at + step + tabOrder.length) % tabOrder.length]!)
     }
 
     if (isStatic) {

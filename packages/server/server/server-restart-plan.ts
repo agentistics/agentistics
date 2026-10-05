@@ -116,8 +116,8 @@ export function serviceFindings(o: {
       status: 'warn',
       label: 'an agentop server is running OUTSIDE the agentop-server service',
       detail: `pid ${o.holder.pid} holds the data directory, so the service cannot start` +
-        `${o.unitActive === false ? ' (it is stopped)' : ''}. Stop that process (\`kill ${o.holder.pid}\`), ` +
-        'then `systemctl --user restart agentop-server`.',
+        `${o.unitActive === false ? ' (it is stopped)' : ''}. \`agentop restart server\` hands it over to the service ` +
+        '(it stops that process when it is provably this data directory\'s own agentop server, then starts the service).',
     })
   } else if (o.holder) {
     out.push({ status: 'pass', label: 'agentop server runs under its service', detail: `pid ${o.holder.pid}, inside agentop-server.service` })

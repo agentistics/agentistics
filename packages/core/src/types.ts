@@ -199,6 +199,50 @@ export const HARNESS_ORDER: HarnessId[] = (Object.keys(HARNESS_SORT) as HarnessI
  *  `harnessRegistry.lint.test.ts` fails a surface that reaches for the adapter list. */
 export const SURFACE_HARNESS_ORDER: SurfaceHarnessId[] = [...HARNESS_ORDER, NATIVE_HARNESS_ID]
 
+/**
+ * The surface registry as a person may SEE it. The native harness is EXPERIMENTAL (owner decision
+ * 2026-10-03): while the runtime is not on — the provider flag off, or no engine providing
+ * `nativeRuntime` — it is INVISIBLE on every surface, exactly as before v2.103. `nativeVisible` is that
+ * gate's answer, read by each surface from its own source of truth (the web's `GET /api/engine`, the
+ * server's `native-gate.ts`); a surface lists harnesses through THIS, never `SURFACE_HARNESS_ORDER`
+ * bare — `harnessRegistry.lint.test.ts` refuses the bare form in web, tui and mcp.
+ */
+export function surfaceHarnesses(nativeVisible: boolean): SurfaceHarnessId[] {
+  return nativeVisible ? SURFACE_HARNESS_ORDER : SURFACE_HARNESS_ORDER.filter(h => h !== NATIVE_HARNESS_ID)
+}
+
+/**
+ * The gate's answer read off `GET /api/engine`: an engine is present, provides the native runtime, AND
+ * the server says the experimental flag is on (`nativeExperimental`, `native-gate.ts`). Anything else —
+ * a community build, a refused or malformed answer, the flag off — is HIDDEN. Pure; the web, the MCP and
+ * the VS Code extension all read the same answer through this.
+ */
+export function nativeVisibleFrom(status: unknown): boolean {
+  if (!status || typeof status !== 'object') return false
+  const s = status as { present?: unknown; nativeExperimental?: unknown; manifest?: { provides?: { nativeRuntime?: unknown } } }
+  return s.present === true && s.manifest?.provides?.nativeRuntime === true && s.nativeExperimental === true
+}
+
+/**
+ * An answer with the native harness removed when it may not be seen: its sessions, its entry in
+ * `harnesses`. Pure and total; the input is returned untouched when `nativeVisible` (or when it holds
+ * nothing native), so a flag that is on costs nothing.
+ */
+export function withoutHiddenNative<T extends { sessions?: { harness?: SurfaceHarnessId }[]; harnesses?: SurfaceHarnessId[] }>(
+  data: T,
+  nativeVisible: boolean,
+): T {
+  if (nativeVisible) return data
+  const hasSession = data.sessions?.some(s => s.harness === NATIVE_HARNESS_ID) ?? false
+  const hasHarness = data.harnesses?.includes(NATIVE_HARNESS_ID) ?? false
+  if (!hasSession && !hasHarness) return data
+  return {
+    ...data,
+    ...(data.sessions ? { sessions: data.sessions.filter(s => s.harness !== NATIVE_HARNESS_ID) } : {}),
+    ...(data.harnesses ? { harnesses: data.harnesses.filter(h => h !== NATIVE_HARNESS_ID) } : {}),
+  }
+}
+
 /** Narrows a surface harness to an ADAPTER one — the only kind with a transcript, a spawn spec or a backup directory. */
 export function isAdapterHarness(h: SurfaceHarnessId | null | undefined): h is HarnessId {
   return h !== null && h !== undefined && h !== NATIVE_HARNESS_ID
@@ -756,6 +800,15 @@ export interface AppData {
    *  know" rather than "nobody is working", and the UI must say which — the same
    *  N/A-versus-a-confident-0 rule `HARNESS_CAPABILITIES` applies to metrics. */
   liveUnavailable?: LiveUnavailableReason
+  /** The server answered before its first full build finished (`/api/data?partial=1`): `quick` is
+   *  the cheap subset (stats cache + stored sessions, no project scan, no git), `snapshot` the
+   *  previous run's full data read back from disk. Render it, and keep asking until an answer
+   *  arrives without this flag. Absent on every full answer. */
+  partial?: boolean
+  partialReason?: 'quick' | 'snapshot'
+  /** Project paths whose git facts were slower than the build's soft deadline; their numbers follow
+   *  in a later build. Absent when every project answered in time. */
+  deferredRepos?: string[]
 }
 
 /** Why live-session detection cannot work in this configuration. */

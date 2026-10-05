@@ -75,6 +75,10 @@ try {
       measured.liveOpenFirstFrameMs = push?.firstFrameMs ?? null
       measured.sendToEchoP95Ms = push?.sendToEcho.n ? push.sendToEcho.p95 : null
       measured.answerShownP95Ms = push?.harnessWriteToShown.n ? push.harnessWriteToShown.p95 : null
+      // STREAM.FIX: the answer must be seen GROWING, not land whole — the fewest growth steps any
+      // round had, so one round where it arrived at once fails the budget.
+      measured.inflightGrowthStepsMin = push?.inflightGrowthSteps.length ? Math.min(...push.inflightGrowthSteps) : null
+      measured.sendToLiveAnswerP95Ms = push?.sendToLiveAnswer.n ? push.sendToLiveAnswer.p95 : null
       await fetch(`${s.base}/api/fleet/act`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, action: 'kill' }) }).catch(() => {})
     }
   }
@@ -87,10 +91,14 @@ const rows: string[] = []
 for (const [k, ceiling] of Object.entries(budgets)) {
   if (k.startsWith('_')) continue
   const v = measured[k]
-  const verdict = v === undefined || v === null ? 'SKIPPED' : v <= ceiling ? 'ok' : 'OVER'
-  if (verdict === 'OVER') failed++
-  if (verdict === 'SKIPPED' && !Bun.which('tmux') && /Echo|answer|liveOpen/.test(k) === false) failed++
-  rows.push(`${verdict.padEnd(7)} ${k.padEnd(24)} ${String(v ?? '—').padStart(7)}  ≤ ${ceiling}`)
+  // A key ending in `Min` is a FLOOR (the in-flight growth), every other one a ceiling.
+  const floor = k.endsWith('Min')
+  const verdict = v === undefined || v === null ? 'SKIPPED' : (floor ? v >= ceiling : v <= ceiling) ? 'ok' : floor ? 'UNDER' : 'OVER'
+  if (verdict === 'OVER' || verdict === 'UNDER') failed++
+  if (verdict === 'SKIPPED' && !Bun.which('tmux') && /Echo|answer|liveOpen|inflight|LiveAnswer/.test(k) === false) failed++
+  // With tmux present a live figure that could not be measured is a failure, not a pass.
+  if (verdict === 'SKIPPED' && Bun.which('tmux') && /inflight|LiveAnswer/.test(k)) failed++
+  rows.push(`${verdict.padEnd(7)} ${k.padEnd(24)} ${String(v ?? '—').padStart(7)}  ${floor ? '≥' : '≤'} ${ceiling}`)
 }
 console.log(rows.join('\n'))
 if (failed) { console.error(`\n${failed} budget(s) exceeded.`); process.exit(1) }

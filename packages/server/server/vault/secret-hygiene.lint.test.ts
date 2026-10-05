@@ -37,6 +37,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
   'server/server/vault/ops.ts': { _gate: 'the step-up gate function (S4.7)', GH_HEADERS_IN: 'header names', GH_METHODS: 'HTTP methods', _installed: 'a flag' },
   'server/server/vault/service.ts': {
     _lockHooks: 'callbacks run on lock (they DROP key material, they hold none)',
+    _fresh: 'the SHA-256 of the single-use fresh-unlock proof + the session and action it is bound to + a timestamp (review H2); the token itself goes only to the page that unlocked; no key material',
     _unlockWindowAnchorMs: 'a timestamp (ms) of the last gesture+code unlock — the per-day window; no key material',
     _vaultDir: 'a path', _role: 'holder|client', _lang: 'a language reader', _io: 'the IO adapter', _fs: 'the fs adapter',
     _scryptForTests: 'KDF cost parameters', _override: 'test protectors', _autoInit: 'test init policy', _soonForTests: 'test presence kinds reported as coming soon',
@@ -85,7 +86,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
     _imports: 'a parsed .env import between its preview and its commit (VAULT.PERSONAL): <= 10 min, bound to one session, single use, every value blanked on commit/expiry',
   },
   'server/server/vault/rekey.ts': { SKIP_DIRS: 'directory names the rotation scan skips', _crashAt: 'a test seam: the name of a point to inject a crash at' },
-  'server/server/vault/sleep-watch.ts': { _proc: 'the gdbus monitor child process handle' },
+  'server/server/vault/sleep-watch.ts': { _proc: 'the gdbus monitor child process handle', _winProc: 'the powershell.exe session-event child process handle (WSL)' },
   'server/server/vault/socket.ts': { _handler: 'the op dispatcher', _server: 'the listening socket' },
   'server/server/envelope-keys.ts': { _cachedPublic: 'the PUBLIC half only — the private key is opened per use' },
   'server/server/preferences.ts': {

@@ -12,9 +12,14 @@
  * transcripts, 1.8 GB, size p50 1.9 MB / p90 8.3 MB / max 71 MB. Each session draws a target size from
  * a log-normal with that p50 and p90 (capped at 40 MB), plus `--big` sessions of `--big-mb`.
  * `--scale 0.1` builds a tenth of it (the CI budgets).
+ *
+ * `--git` puts each project in a REAL git repository under `<dest>/repos/` (one commit, an `origin`
+ * remote), so what a build spends on git per project is measured too — the rebuild storm's load test
+ * (`storm.ts`) needs it; without it every git call fails at once and costs nothing.
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { execFileSync } from 'node:child_process'
 
 const args = process.argv.slice(2)
 const dest = args[0]
@@ -22,6 +27,7 @@ if (!dest || dest.startsWith('-')) { console.error('usage: synth-home.ts <dest> 
 const opt = (name: string, d: number) => { const i = args.indexOf(`--${name}`); return i >= 0 ? Number(args[i + 1]) : d }
 const SCALE = opt('scale', 1)
 const PROJECTS = Math.max(1, Math.round(opt('projects', 160) * Math.min(1, SCALE * 2))), SESSIONS = Math.max(2, Math.round(opt('sessions', 480) * SCALE)), BIG = opt('big', 2), BIG_MB = opt('big-mb', 70) * Math.min(1, SCALE * 2)
+const GIT = args.includes('--git')
 const MB = 1024 * 1024
 const gauss = () => Math.sqrt(-2 * Math.log(1 - rnd())) * Math.cos(2 * Math.PI * rnd())
 /** Log-normal: median 1.9 MB, p90 8.3 MB (σ = ln(8.3/1.9)/1.2816). */
@@ -71,7 +77,15 @@ let files = 0, bytes = 0
 const bigTargets = new Set(Array.from({ length: BIG }, (_, i) => Math.floor((i + 0.5) * (SESSIONS / Math.max(1, BIG)))))
 for (let s = 0; s < SESSIONS; s++) {
   const p = s % PROJECTS
-  const cwd = `/home/perf/work/project-${String(p).padStart(3, '0')}`
+  const cwd = GIT ? join(dest, 'repos', `project-${String(p).padStart(3, '0')}`) : `/home/perf/work/project-${String(p).padStart(3, '0')}`
+  if (GIT && s < PROJECTS) {
+    await mkdir(cwd, { recursive: true })
+    const env = { ...process.env, GIT_AUTHOR_NAME: 'perf', GIT_AUTHOR_EMAIL: 'perf@x', GIT_COMMITTER_NAME: 'perf', GIT_COMMITTER_EMAIL: 'perf@x' }
+    delete env.GIT_DIR
+    const g = (...a: string[]) => execFileSync('git', ['-C', cwd, ...a], { env, stdio: 'ignore' })
+    await writeFile(join(cwd, 'README.md'), `project ${p}\n`)
+    g('init', '-q', '-b', 'main'); g('add', '.'); g('commit', '-qm', 'init'); g('remote', 'add', 'origin', `https://github.com/perf/project-${p}.git`)
+  }
   const dir = join(projectsDir, cwd.replace(/[^a-zA-Z0-9]/g, '-'))
   await mkdir(dir, { recursive: true })
   const id = uuid()

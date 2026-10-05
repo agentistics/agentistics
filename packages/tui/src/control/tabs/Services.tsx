@@ -563,6 +563,14 @@ export function Services({
       } else {
         out.push({ label: s.actStop, run: () => stopService(selected, s.actStop) })
       }
+      // Extra copies holding no port: the sentence names them, this verb removes them — never a
+      // `kill` the person has to type (2026-10-04).
+      if (selected.idle && selected.idleStopLabel && host.stopIdle) {
+        const stopIdle = host.stopIdle.bind(host)
+        const label = selected.idleStopLabel
+        const id = selected.id
+        out.push({ label, run: () => { void run(() => stopIdle(id), label).then(back) } })
+      }
       const url = selected.active?.webUrl
       if (host.openUrl && url) out.push({ label: s.actOpen, run: () => open(url) })
     } else {

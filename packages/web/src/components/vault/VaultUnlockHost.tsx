@@ -14,7 +14,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import type React from 'react'
 import { X } from 'lucide-react'
 import { card, overlay } from '../MfaSetup'
-import { loadVault } from '../../lib/vaultApi'
+import { loadVault, unlockFor } from '../../lib/vaultApi'
 import { phoneFacts } from '../../lib/phoneVault'
 import { PhoneRequests, VaultUnlock, usePhoneRequests } from './VaultUnlock'
 
@@ -25,13 +25,18 @@ const listeners = new Set<() => void>()
 const emit = () => { for (const l of listeners) l() }
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l) } }
 
-/** Open the vault if it is locked (asking the person), then resolve whether it is open. */
-export async function ensureVaultOpen(): Promise<boolean> {
+/**
+ * Open the vault if it is locked (asking the person), then resolve whether it is open. `forAction`
+ * (`personal-grant:<sid>`) names the ONE action this unlock is for: its Hello then also covers that
+ * action, for this page only (review H2) — never prompting twice for one act.
+ */
+export async function ensureVaultOpen(forAction?: string): Promise<boolean> {
   const v = await loadVault()
   // Only a LOCKED vault is asked about. Open is open; an uninitialized one creates itself on first
   // use, and anything else (unreachable, broken) is the action's own error to report, in its words.
   if (v.kind === 'failed' || v.view.state !== 'locked') return true
   if (_hosted === 0) return false
+  unlockFor(forAction ?? null)
   if (_ask) { const prev = _ask; return new Promise<boolean>(res => { _ask = { resolve: ok => { prev.resolve(ok); res(ok) } }; emit() }) }
   return new Promise<boolean>(res => { _ask = { resolve: res }; emit() })
 }
@@ -45,7 +50,7 @@ export async function unlockIfLocked(): Promise<boolean> {
   if (v.kind === 'failed' || v.view.state !== 'locked') return false
   return ensureVaultOpen()
 }
-function answer(ok: boolean): void { const a = _ask; _ask = null; emit(); a?.resolve(ok) }
+function answer(ok: boolean): void { const a = _ask; _ask = null; unlockFor(null); emit(); a?.resolve(ok) }
 
 export function VaultUnlockHost({ lang, isMobile, enabled }: { lang: 'en' | 'pt'; isMobile: boolean; enabled: boolean }) {
   const ask = useSyncExternalStore(subscribe, () => _ask, () => null)

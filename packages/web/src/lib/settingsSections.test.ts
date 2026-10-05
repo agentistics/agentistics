@@ -4,7 +4,7 @@ import { visibleSettingsSections, SETTINGS_SECTIONS } from './settingsSections'
 const ids = (v: Parameters<typeof visibleSettingsSections>[0]) => visibleSettingsSections(v).map(s => s.id)
 
 test('solo/member: personal sections + live, no governance', () => {
-  expect(ids({ central: false })).toEqual(['preferences', 'accessibility', 'notifications', 'sessions', 'data-sources', 'backup', 'vault', 'harnesses', 'pricing', 'billing', 'install', 'connection', 'live', 'chat'])
+  expect(ids({ central: false })).toEqual(['preferences', 'accessibility', 'notifications', 'sessions', 'data-sources', 'backup', 'vault', 'harnesses', 'pricing', 'billing', 'install', 'connection', 'live', 'chat', 'experimental'])
 })
 
 test('central owner: personal (no live) + all governance sections', () => {
@@ -85,4 +85,12 @@ test('providers is experimental: hidden unless the native runtime may be shown (
   expect(ids({ central: false })).not.toContain('providers')
   expect(ids({ central: false, nativeRuntime: false })).not.toContain('providers')
   expect(ids({ central: false, nativeRuntime: true })).toContain('providers')
+})
+
+test('experimental is a machine section: shown on a machine, absent on a central (same rule as vault)', () => {
+  expect(ids({ central: false })).toContain('experimental')
+  expect(ids({ central: false, nativeRuntime: false })).toContain('experimental')
+  expect(ids({ central: true, role: 'owner' })).not.toContain('experimental')
+  expect(ids({ central: true, role: 'member', isManager: true })).not.toContain('experimental')
+  expect(SETTINGS_SECTIONS.find(s => s.id === 'experimental')).toMatchObject({ labelEn: 'Experimental', labelPt: 'Experimental', group: 'personal' })
 })

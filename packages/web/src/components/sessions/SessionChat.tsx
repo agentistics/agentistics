@@ -55,6 +55,7 @@ import { splitImageAttachments } from '../../lib/attachmentPreview'
 import { attachmentUrl } from '../../lib/attachmentUrl'
 import { AttachmentLightbox } from './AttachmentLightbox'
 import { detectCompacting, liveTurnText, stripAnsi } from '../../lib/liveTurn'
+import { liveAnswerText, holdLiveAnswer, HOLD_MAX_MS, type HeldLive } from '../../lib/liveAnswer'
 import { scratchKey, sessionScratch } from '../../lib/sessionScratch'
 import { chatReadAt, firstFrameStale, refreshChat, subscribeChat } from '../../lib/chatFeed'
 import { composerMaxHeight } from '../../lib/composerHeight'
@@ -118,6 +119,9 @@ import { sessionPath } from '../../lib/sessionRoute'
 import { copyText } from '../../lib/clipboard'
 import { SessionPickModal } from './SessionPickModal'
 import { VaultCodeAsk, VaultPicker } from '../vault/VaultPicker'
+import { loadVault } from '../../lib/vaultApi'
+import { grantStep, UNLOCK_FIRST_LINE } from '../../lib/vaultGrantFlow'
+import { ensureVaultOpen } from '../vault/VaultUnlockHost'
 import { applyVaultChip, expandVaultChip, hasVaultChip, removeVaultChip, vaultChipTokens, vaultTrigger, type VaultSelection } from '../../lib/vaultChip'
 import { grantSession, withStepUp } from '../../lib/vaultPersonal'
 import { hasPasskeyHere, mobileState, passkeySupport, phoneGesture } from '../../lib/passkey'
@@ -132,6 +136,8 @@ import { SourceSettings } from './SourceSettings'
 
 /** How long a successful "send now" keeps its sentence on screen. */
 const SEND_NOW_RESULT_MS = 6000
+/** How long after the screen last changed it still counts as being drawn (`liveAnswer`). */
+const SCREEN_MOVING_MS = 1500
 
 interface ChatPayload {
   turns: ChatTurn[]
@@ -685,6 +691,16 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   async function grantVault(sel: VaultSelection) {
     const ids = sel.items.map(i => i.id), gids = sel.groups.map(g => g.id)
     const ms = await mobileState()
+    // VAULT.UI2: open + this computer → no gesture; locked → say why, unlock ONCE, then no more prompts.
+    const here = ms.ok && ms.loopback
+    if (here) {
+      const v = await loadVault()
+      if (grantStep({ loopback: true, locked: v.kind !== 'failed' && v.view.state === 'locked' }) === 'unlock-first') {
+        setNotice(UNLOCK_FIRST_LINE[pt ? 'pt' : 'en'])
+        if (!(await ensureVaultOpen(`personal-grant:${session.id}`))) return { ok: false as const, code: 'locked', sentence: pt ? 'O cofre continua trancado; nada foi enviado.' : 'The vault is still locked; nothing was sent.', status: 423 }
+      }
+      return withStepUp(c => grantSession(session.id, ids, gids, c), askVaultCode)
+    }
     if (ms.ok && !ms.loopback && passkeySupport(window) === 'ok' && hasPasskeyHere(ms, window.location.hostname)) {
       const g = await withStepUp(c => phoneGesture('personal-grant', session.id, c), askVaultCode)
       if (!g.ok) return g
@@ -1315,6 +1331,56 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [term.frame, lastAssistant, working, source?.liveText])
+
+  /**
+   * The answer being WRITTEN, drawn as the bubble it will become (STREAM.FIX). `live` above reads the
+   * whole screen and only steers the scroll; this reads just the harness's own answer block
+   * (`liveAnswer.ts`), so it is safe to draw — and it is the only place a CLI answer can be seen
+   * growing, because the transcript (and the chat-stream pushing it) only ever holds it finished.
+   */
+  // `working` is the fleet row's, polled every few seconds and settled over two polls — an answer
+  // shorter than that is written and finished before the row ever says so, and the live bubble
+  // missed it whole. The screen MOVING is the immediate signal: the hub sends a frame only when the
+  // pane changed, so a new frame other than the first means something is being drawn right now.
+  const [screenMoving, setScreenMoving] = useState(false)
+  const lastSeq = useRef<number | null>(null)
+  useEffect(() => {
+    const seq = term.frame?.seq ?? null
+    const prev = lastSeq.current
+    lastSeq.current = seq
+    if (seq === null || prev === null || seq === prev) return
+    setScreenMoving(true)
+    const t = setTimeout(() => setScreenMoving(false), SCREEN_MOVING_MS)
+    return () => clearTimeout(t)
+  }, [term.frame?.seq])
+  useEffect(() => { lastSeq.current = null; setScreenMoving(false) }, [session.id])
+
+  const liveRead = useMemo(() => {
+    if (source || !term.frame) return null
+    return liveAnswerText({
+      harness: session.harness,
+      lines: stripAnsi(term.frame.content).split('\n'),
+      ...(lastAssistant ? { lastCommitted: lastAssistant.text } : {}),
+      working: working || screenMoving,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [term.frame, lastAssistant, working, screenMoving, source, session.harness])
+
+  // The bubble STAYS until the finished turn is on screen (`holdLiveAnswer`): the screen moves on the
+  // instant the answer is done, the transcript's turn can land seconds later, and the gap was an
+  // answer on no screen at all.
+  const heldLive = useRef<HeldLive | null>(null)
+  const [, bumpHold] = useState(0)
+  const turnCount = turns.length
+  const heldNow = holdLiveAnswer(heldLive.current, liveRead, turnCount, lastAssistant?.text, Date.now())
+  heldLive.current = heldNow.held
+  const liveAnswer = heldNow.text
+  useEffect(() => { heldLive.current = null }, [session.id])
+  useEffect(() => {
+    if (!heldNow.held || liveRead) return
+    const t = setTimeout(() => bumpHold(n => n + 1), Math.max(0, HOLD_MAX_MS - (Date.now() - heldNow.held.seenAt)) + 50)
+    return () => clearTimeout(t)
+  }, [heldNow.held, liveRead])
 
   /**
    * Whether the frame is showing Claude Code's OWN compaction screen right now — see
@@ -2083,7 +2149,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // session cannot use would only fail later, at the command.
     if (hasVaultChip(composed)) {
       if (!vaultSel) { setNotice(pt ? 'Escolha de novo os segredos do chip 🔐 (clique nele).' : 'Choose the 🔐 chip\'s secrets again (click it).'); return }
-      setNotice(pt ? 'Confirme neste computador (Windows Hello) para liberar os segredos…' : 'Confirm on this computer (Windows Hello) to grant the secrets…')
       const g = await grantVault(vaultSel)
       if (!g.ok) { setNotice(g.sentence || (pt ? 'Os segredos não foram liberados; nada foi enviado.' : 'The secrets were not granted; nothing was sent.')); return }
       setNotice(null)
@@ -2329,7 +2394,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               screen block was both the wrong SIZE for a "something is happening" signal and the
               wrong PLACE for whatever chrome slipped through. `live` still drives the follow-the-
               tail effect below (new screen content is a sign to keep scrolling), and `WorkingNote`
-              is the one and only "the session is busy" indicator now — small, grey, no raw text. */}
+              is the one and only "the session is busy" indicator now — small, grey, no raw text.
+              What IS drawn is `liveAnswer` below: only the harness's own answer block, read
+              narrowly enough to carry no chrome (`liveAnswer.ts`). */}
 
           {/* The conversation on screen is one this tab cached before you left, and the current one
               is on its way. AT THE TAIL rather than the top: the view lands at the end, which is
@@ -2346,6 +2413,13 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               those as chat entries buried the sentences actually addressed to the user. */}
           {/* A SOURCE's live text is the model's own stream — exact, unlike a screen read — so it
               is drawn as the bubble it will become (`chatSource.ts`). */}
+          {/* A CLI's answer being written, read off its screen — the same bubble, marked live. */}
+          {liveAnswer && (
+            <div data-live-answer="" aria-live="polite">
+              <ChatBubble turn={{ role: 'assistant', text: liveAnswer }} lang={lang} harness={session.harness} />
+            </div>
+          )}
+
           {(source?.liveText || source?.liveReasoning) && (
             <ChatBubble turn={{ role: 'assistant', text: source.liveText ?? '', ...(source.liveReasoning ? { reasoning: source.liveReasoning } : {}) }} lang={lang} harness={session.harness} />
           )}

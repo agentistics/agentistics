@@ -22,7 +22,7 @@ import { join } from 'node:path'
 import { homedir, platform as osPlatform } from 'node:os'
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { open as openFile, readFile as readFileP, stat as statP, unlink as unlinkP, mkdir as mkdirP } from 'node:fs/promises'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import {
   VaultRefusalError, bytesEqual, chooseProtector, checkedList, destroyVault, detectionOrder, initVault, isModeTooOpen,
   dpapiProtector, keychainProtector, libsecretProtector, systemdCredsProtector, passphraseProtector,
@@ -528,6 +528,18 @@ export function autoLockTick(nowMs: number): boolean {
 /** Human interaction (dashboard/TUI heartbeat, an `agentop` verb): resets the idle clock. */
 export function noteVaultActivity(): void { _autoClock?.use(_now()) }
 
+/**
+ * VAULT.UI2: the person ANSWERED the "locks in 5 min" warning — keep it open for one more window. It
+ * only ever moves the idle clock of an OPEN vault, and says so in the audit; it never runs silently
+ * (the caller is a click, gated by the route). Returns the new remaining ms, or null when nothing was open.
+ */
+export function extendAutoLock(): number | null {
+  if (!_opened || !_autoClock) return null
+  _autoClock.use(_now())
+  vaultAudit({ type: 'vault.auto-lock-extended' })
+  return _autoClock.remainingMs(_now())
+}
+
 /** Change the idle period of the OPEN vault (persisted by the caller in vault.json). */
 export function setAutoLockPeriod(minutes: number): void { _autoClock?.setMinutes(minutes) }
 export function autoLockRemainingMs(): number | null { return _opened && _autoClock ? _autoClock.remainingMs(_now()) : null }
@@ -557,8 +569,8 @@ function presenceRefusal(s: Extract<OpenState, { state: 'locked' | 'protector-lo
 }
 
 export type GestureUnlock =
-  | { ok: true; state: 'open' }
-  | { ok: true; state: 'pending-stepup'; expiresInMs: number }
+  | { ok: true; state: 'open'; fresh?: string }
+  | { ok: true; state: 'pending-stepup'; expiresInMs: number; fresh?: string }
   | { ok: false; code: string; sentence: string }
 
 /**
@@ -566,19 +578,56 @@ export type GestureUnlock =
  * when the vault has no presence). When the authenticator is enrolled AND the vault has presence, the
  * DEK goes to the PENDING slot and `completeUnlock` (gate.ts) checks the code; otherwise it opens.
  */
-export async function unlockWithGesture(passphrase?: string): Promise<GestureUnlock> {
+/**
+ * The Hello gesture that just OPENED the vault is also the proof for the ONE send/reveal that follows it
+ * (owner, 2026-10-04: opening and then sending asked Hello twice for a single act). Single-use and short:
+ * `consumeFreshPresence` hands it out once, within `FRESH_PRESENCE_MS`, and a lock forgets it.
+ *
+ * Review H2: it is NOT a free reveal for whoever asks next. A loopback request is only "a page on this
+ * computer" by headers any local process can set, so the proof is a random TOKEN handed back ONLY in the
+ * reply to the request that raised the gesture (another process cannot read that reply), bound to that
+ * request's HTTP session AND to the action it declared it was unlocking for (`personal-grant:<sid>`,
+ * `personal-reveal:<id>:<field>`). A caller without the token, from another session, or for another
+ * action gets the normal gesture. Only the token's hash is held.
+ */
+export const FRESH_PRESENCE_MS = 90_000
+/** What a fresh-unlock proof may be declared for: one send to one session, or one reveal of one field. */
+export const FRESH_BINDING = /^personal-(grant|reveal):[A-Za-z0-9_:.-]{1,200}$/
+let _fresh: { hash: string; session: string; binding: string; atMs: number } | null = null
+const freshHash = (token: string): string => createHash('sha256').update(`agentistics-vault-fresh/v1.${token}`).digest('hex')
+export function consumeFreshPresence(proof: { session: string; token?: string | null; binding: string }): boolean {
+  const f = _fresh
+  if (!f || !proof.token || proof.token.length > 128) return false
+  if (_now() - f.atMs > FRESH_PRESENCE_MS) { _fresh = null; return false }
+  const a = Buffer.from(freshHash(proof.token)), b = Buffer.from(f.hash)
+  if (!timingSafeEqual(a, b) || f.session !== proof.session || f.binding !== proof.binding) return false
+  _fresh = null
+  return true
+}
+/** Mint the proof for the gesture that just happened, for this session and this action — or none. */
+function mintFresh(fresh: { session: string; binding: string } | undefined): string | undefined {
+  _fresh = null
+  if (!fresh || !FRESH_BINDING.test(fresh.binding)) return undefined
+  const token = randomBytes(32).toString('base64url')
+  _fresh = { hash: freshHash(token), session: fresh.session, binding: fresh.binding, atMs: _now() }
+  return token
+}
+
+export async function unlockWithGesture(passphrase?: string, fresh?: { session: string; binding: string }): Promise<GestureUnlock> {
   if (_opened) return { ok: true, state: 'open' }
   if (_role !== 'holder') return refused('service-only', sentence('service-only'))
   if ((await hardenThisProcess()).state === 'failed') return refused('hardening-failed', sentence('hardening-failed', { reason: _hardening?.reason ?? '' }))
   abandonPending()
   const s = await tryOpen(passphrase, { presence: true })
   if (s.state === 'open') {
+    const freshToken = mintFresh(hasPresence(s.vault) ? fresh : undefined)
+    const withFresh = freshToken ? { fresh: freshToken } : {}
     if (hasPresence(s.vault) && s.vault.stepup && unlockNeedsCode(effectiveUnlockPolicy(s.vault.unlockPolicy), _unlockWindowAnchorMs, _now())) {
       const opened: Opened = { kid: s.kid, dek: s.dek, vault: s.vault, via: s.via }
       const timer = setTimeout(() => abandonPending(), PENDING_STEPUP_MS)
       ;(timer as { unref?: () => void }).unref?.()
       _pending = { opened, expiresMs: _now() + PENDING_STEPUP_MS, timer }
-      return { ok: true, state: 'pending-stepup', expiresInMs: PENDING_STEPUP_MS }
+      return { ok: true, state: 'pending-stepup', expiresInMs: PENDING_STEPUP_MS, ...withFresh }
     }
     adopt(s)
     _lockedBy = 'start'
@@ -586,7 +635,7 @@ export async function unlockWithGesture(passphrase?: string): Promise<GestureUnl
     void runMigrations()
     // The gesture alone opened it under the unlock policy ("Hello only", or inside the per-day window).
     if (hasPresence(s.vault) && s.vault.stepup) vaultAudit({ type: 'vault.unlock' })
-    return { ok: true, state: 'open' }
+    return { ok: true, state: 'open', ...withFresh }
   }
   _last = s
   if (s.state === 'uninitialized') return refused('uninitialized', sentence('uninitialized'))
@@ -644,6 +693,7 @@ export function adoptPending(): boolean {
 /** §2.2: a wrong code, an expiry, or a new attempt — the pending key is ZEROED. */
 export function abandonPending(): void {
   if (!_pending) return
+  _fresh = null // an unlock that never completed proves nothing for the next action
   if (_pending.timer) clearTimeout(_pending.timer)
   _pending.opened.dek.fill(0)
   _pending = null
@@ -767,6 +817,7 @@ export function lockVault(reason: LockedBy = 'user'): void {
   const was = _opened !== null
   if (_opened) _opened.dek.fill(0)
   _opened = null
+  _fresh = null
   _last = null
   _autoClock = null
   _lockedBy = reason
@@ -972,7 +1023,7 @@ export async function openFromFile(path: string, purpose: string, name: string):
 export type VaultAuditType =
   | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
   | 'vault.init' | 'vault.rekey' | 'vault.reset' | 'vault.add-passphrase'
-  | 'vault.stepup-failed' | 'vault.stepup-frozen' | 'vault.auto-locked' | 'vault.recovered' | 'vault.recover-failed'
+  | 'vault.stepup-failed' | 'vault.stepup-frozen' | 'vault.auto-locked' | 'vault.auto-lock-extended' | 'vault.recovered' | 'vault.recover-failed'
   | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.presence-held' | 'vault.local-proof' | 'vault.recover-page' | 'vault.set-auto-lock' | 'vault.set-unlock-policy' | 'vault.unlock' | 'vault.personal-create' | 'vault.personal-edit' | 'vault.personal-reveal' | 'vault.personal-trash' | 'vault.personal-restore' | 'vault.personal-restore-version' | 'vault.personal-purge' | 'vault.personal-group' | 'vault.personal-import' | 'vault.personal-passkey-add' | 'vault.personal-passkey-remove' | 'vault.personal-code-reveal' | 'vault.personal-grant' | 'vault.personal-use' | 'vault.bundle-staged' | 'vault.bundle-restored' | 'vault.bundle-built' | 'vault.bundle-wiped'
   | 'vault.phone-enrol-request' | 'vault.phone-enrol-approve' | 'vault.phone-enrol-deny' | 'vault.phone-key-add' | 'vault.phone-key-remove' | 'vault.phone-unlock-failed'
 

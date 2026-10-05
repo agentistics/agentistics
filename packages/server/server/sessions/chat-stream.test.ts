@@ -99,3 +99,35 @@ describe('chat stream (PERF.1 step 2)', () => {
     expect(chatStreamCount()).toBe(before)
   })
 })
+
+describe('a turn in flight is re-read on a timer, whether or not the file watcher fires', () => {
+  test('the watcher NEVER fires: the finished turn still arrives within ~1-2 s, and the fast re-read stops once it is committed', async () => {
+    const s = setup()
+    const ctl = new AbortController()
+    const res = chatStreamResponse('s-inflight', { ...s.deps, watchFile: () => ({ close() {} }) }, ctl.signal)!
+    const first = await events(res, e => e.length >= 1)
+    expect(first[0]!.event).toBe('chat') // the person's message, unanswered: in flight
+    s.setTurns([{ role: 'user', text: 'hi' }, { role: 'assistant', text: 'hello' }]) // written, but nothing wakes the stream
+    const t = performance.now()
+    const next = await events(res, e => e.some(x => x.event === 'chat-delta'), 3000)
+    const took = performance.now() - t
+    expect(next.some(x => x.event === 'chat-delta')).toBe(true)
+    expect(took).toBeLessThan(2000)
+    // committed: no more fast reads
+    const before = s.counts().reads
+    await Bun.sleep(2500)
+    expect(s.counts().reads - before).toBeLessThanOrEqual(1)
+    ctl.abort()
+  })
+})
+
+describe('turnInFlight', () => {
+  test('unanswered user turn or a pending echo is in flight; an answered one, an ended session, an empty chat are not', async () => {
+    const { turnInFlight } = await import('./chat-stream')
+    expect(turnInFlight({ turns: [{ role: 'user', text: 'x' }] })).toBe(true)
+    expect(turnInFlight({ turns: [{ role: 'user', text: 'x' }, { role: 'assistant', text: 'y' }], pending: [{}] })).toBe(true)
+    expect(turnInFlight({ turns: [{ role: 'user', text: 'x' }, { role: 'assistant', text: 'y' }] })).toBe(false)
+    expect(turnInFlight({ turns: [{ role: 'user', text: 'x' }], live: false })).toBe(false)
+    expect(turnInFlight({ turns: [] })).toBe(false)
+  })
+})

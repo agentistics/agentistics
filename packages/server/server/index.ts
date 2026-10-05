@@ -9,7 +9,7 @@ import type { LiveProcess, LiveUnavailableReason, SessionMeta } from '@agentisti
 import { getRates } from './rates'
 import { getVersionInfo, startVersionRecheck } from './version'
 import { handleUpgradeRoute, upgradableHint } from './upgrade-web'
-import { buildApiResponse, buildApiResponseStream, invalidateCache, serializedData } from './data'
+import { buildApiResponse, buildApiResponseForClient, buildApiResponseStream, invalidateCache, loadDataSnapshot, prepareQuickPayload, serializedData } from './data'
 import { readPreferences, writePreferences, redactPreferences, guardTeamConnectionsWipe, PreferencesLockTimeoutError, type Preferences } from './preferences'
 import {
   readStoredNotifications, addStoredNotification, markStoredNotificationsRead,
@@ -221,6 +221,12 @@ void (async () => {
   // the full cold build (tens of seconds on a busy central). Runs for every mode — non-'off' modes
   // also persist the consolidated per-session store as a side effect; 'off' just warms the cache.
   const warmStart = performance.now()
+  // Read the previous run's snapshot NOW, so the first `/api/data?partial=1` finds it parsed — and
+  // when there is none (a fresh install), have the quick subset ready before the full build starts
+  // occupying the event loop. Both are awaited before the full build is kicked: together they cost
+  // tens of milliseconds, and started after it they would queue behind its transcript parsing.
+  const snapshot = await loadDataSnapshot()
+  if (!snapshot) prepareQuickPayload()
   buildApiResponse()
     .then(() => console.log(`[boot] +${Math.round(performance.now())} ms first /api/data built (${Math.round(performance.now() - warmStart)} ms)`))
     .catch(err => console.warn('[startup] cache warm-up failed:', String(err)))
@@ -1068,13 +1074,25 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const out = await handleMemoryRequest(req, url, await liveMemoryDeps(TEAM_CENTRAL))
       return json(out.body, out.status)
     }
-    if (url.pathname === '/api/experimental' && req.method === 'GET') {
-      // Read-only: `agentop experimental status` and the post-restart confirmation ask the RUNNING
-      // server what it booted with. There is deliberately no write route and no Settings switch.
+    if (url.pathname === '/api/experimental' && (req.method === 'GET' || req.method === 'PUT')) {
+      // GET: what this server booted with. PUT `{ enabled }`: Settings → Experimental's switch — it
+      // persists the preference and applies it to this process WITHOUT a restart (`experimental-web.ts`).
+      // `capability-guard.ts` has already refused both on an exposed profile; a central answers 404.
       if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
       try {
-        const { readExperimentalReport } = await import('./experimental-web')
-        return new Response(JSON.stringify(await readExperimentalReport()), {
+        const web = await import('./experimental-web')
+        if (req.method === 'PUT') {
+          const body = await readJsonLimited<{ enabled?: unknown }>(req, LIMITS.bodyBytes)
+          if (!body.ok || typeof body.value.enabled !== 'boolean') {
+            return new Response(JSON.stringify({ error: 'bad_request' }), {
+              status: 400, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+            })
+          }
+          return new Response(JSON.stringify(await web.setExperimental(body.value.enabled)), {
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        }
+        return new Response(JSON.stringify(await web.readExperimentalReport()), {
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
@@ -3585,7 +3603,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 
     if (url.pathname === '/api/data' && req.method === 'GET') {
       try {
-        let data = await buildApiResponse()
+        // `?partial=1` (the web app): answer within about a second, with a partial payload marked as
+        // such when the first build is still running. Without it — the MCP, the VS Code extension,
+        // anything older — the answer is the full build, exactly as before.
+        let data = url.searchParams.get('partial') === '1' ? await buildApiResponseForClient() : await buildApiResponse()
         // Presence is live (in-memory sockets + heartbeat) — merge it in AFTER the cached
         // build so online/offline + latency stay fresh without recomputing the whole response.
         let extra: { presence?: unknown; includeOfflineData?: boolean } = {}

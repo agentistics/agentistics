@@ -728,6 +728,8 @@ export interface RestartDeps {
   now?: () => number
   /** Seconds waited so far on an unanswered tick; absent = print nothing. */
   onWait?: (elapsedSec: number) => void
+  /** Take back a server running outside the unit (default `reclaimStrayServer`). */
+  reclaim?: () => Promise<import('./server-ownership-io.ts').ReclaimResult>
 }
 
 export type Exec = NonNullable<RestartDeps['run']>
@@ -833,11 +835,22 @@ export async function restartAutostart(mode: AutostartMode, deps: RestartDeps = 
   const observe = deps.observe ?? ((m: AutostartMode) => observeServing(m, exec))
   // `machine` is a oneshot that runs `docker compose up -d`: no pid of its own to compare.
   const verifiable = mode === 'server' || mode === 'watch'
-  const before: ServingObservation = verifiable ? await observe(mode) : { pid: null, answering: false }
+  let before: ServingObservation = verifiable ? await observe(mode) : { pid: null, answering: false }
+  const reclaimNotes: string[] = []
   if (mode === 'server' && before.pid !== null) {
     const owned = await pidUnderUnit(before.pid, facts.mainPid, deps.parentOf ?? procParent)
     if (!owned) {
-      return { ok: false, message: t.restartNotManaged(`the server on :${PORT}`, before.pid, unit, facts.state) }
+      // A server OUTSIDE the unit is taken back when it is provably this data dir's own (it holds
+      // our lock and its argv is `agentop server`, `server-ownership.ts`) — the unit is the owner,
+      // and refusing here is what left a machine on the old version for two hours (2026-10-04).
+      // Anything that cannot be proven ours is still only reported.
+      const reclaim = deps.reclaim ?? (async () => (await import('./server-ownership-io.ts')).reclaimStrayServer())
+      const r = await reclaim()
+      if (r.kind !== 'reclaimed' || r.pid !== before.pid) {
+        return { ok: false, message: t.restartNotManaged(`the server on :${PORT}`, before.pid, unit, facts.state) }
+      }
+      reclaimNotes.push(`Stopped agentop server pid ${r.pid}, which ran outside ${unit} and held the data directory.`)
+      before = { pid: null, answering: false }
     }
   }
   const subject = mode === 'server' ? `the server on :${PORT}` : unit
@@ -852,7 +865,7 @@ export async function restartAutostart(mode: AutostartMode, deps: RestartDeps = 
   // shell's for `agentop restart` / `agentop upgrade` / the cockpit — and is skipped outright when
   // this process is itself a systemd service (`INVOCATION_ID`), whose PATH is the minimal one the
   // repair exists to replace. See `migrateUnitPath`.
-  const notes: string[] = []
+  const notes: string[] = [...reclaimNotes]
   const done: string[] = []
   let next = unitText
   const killMode = migrateUnitKillMode(next)
@@ -874,6 +887,9 @@ export async function restartAutostart(mode: AutostartMode, deps: RestartDeps = 
     }
   }
 
+  // A unit left `failed` by a refused start (exit 75 behind `RestartPreventExitStatus`) has spent
+  // its start budget too; clearing it first is what lets this restart actually happen.
+  await exec(['systemctl', '--user', 'reset-failed', `agentop-${mode}`])
   const res = await exec(['systemctl', '--user', 'restart', `agentop-${mode}`])
   if (res.code !== 0) {
     return {
