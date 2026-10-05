@@ -465,7 +465,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
               <td style={{ ...cell, width: 1, padding: 0, ...tint, ...clusterBarStyle(clustered) }} />
               {/* A MEMBER is indented one level under its group's header — the visual nesting that
                   replaces the old "parte do grupo" caption for every properly clustered row. */}
-              <td style={{ ...cell, minWidth: 150, ...tint, ...(depth === 1 ? { paddingLeft: 30 } : {}) }}>
+              <td style={{ ...cell, minWidth: isMobile ? 150 : 280, width: isMobile ? undefined : '100%', ...tint, ...(depth === 1 ? { paddingLeft: 30 } : {}) }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   {/* The accordion toggle — collapsed by default (product feedback, 2026-09-21),
                       the same chevron interaction `TaskTable`'s own task-row expansion already
@@ -611,7 +611,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
             <tr>
               {/* No gear here — this bucket is not a subtask, it has nothing a menu could act on. */}
               <td style={cell} />
-              <td style={{ ...cell, minWidth: 150, color: 'var(--text-tertiary)', fontStyle: 'italic', fontSize: 12 }}>
+              <td style={{ ...cell, minWidth: isMobile ? 150 : 280, color: 'var(--text-tertiary)', fontStyle: 'italic', fontSize: 12 }}>
                 {copy.directSessions}
               </td>
               {shownCols.map(id => {

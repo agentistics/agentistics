@@ -1094,7 +1094,7 @@ export function TaskTable(p: TaskTableProps) {
               <div style={{ overflowX: 'auto' }}>
                 <table style={{
                   width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed',
-                  minWidth: g.rows.length === 0 ? 0 : tableMinWidth(leadWidth, 240, widths, cols.map(c => c.id)),
+                  minWidth: g.rows.length === 0 ? 0 : tableMinWidth(leadWidth, 280, widths, cols.map(c => c.id)),
                 }}>
                   {/* One width per column, the SAME in every group's table, so the bands line up and
                       a dragged border moves the whole column. The title column takes the rest. */}
@@ -1124,7 +1124,7 @@ export function TaskTable(p: TaskTableProps) {
                           label={L.taskColumn} sortKey="title" current={sort} mobile={isMobile}
                           onSort={k => setSort(nextSort(sort, k))}
                           title={L.sortByColumn.replace('{column}', L.keys.title!)}
-                          style={{ ...th, minWidth: 240 }}
+                          style={{ ...th, minWidth: 280 }}
                         />
                         {cols.map(c => (
                           // A column with no `sort` carries NO affordance — a header that looks

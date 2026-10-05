@@ -590,7 +590,7 @@ function TaskDetailView({ id }: { id: string }) {
   const { statuses } = useTaskStatuses()
   const navigate = useNavigate()
   const isMobile = useIsMobile()
-  const [tab, setTab] = useState<DeliveryTab>('threads')
+  const [tab, setTab] = useState<DeliveryTab>('subtasks')
   // The fleet poll is module-level and shared — this subscribes to the same snapshot the sessions
   // workspace reads, so the hero's "N live" costs no request of its own.
   const { fleet, loading: fleetLoading } = useFleet(lang)
