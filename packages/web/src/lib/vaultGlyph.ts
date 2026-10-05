@@ -6,7 +6,7 @@
  */
 export type VaultIconName = 'vault' | 'lock-keyhole' | 'key-round'
 
-export const VAULT_ICON: VaultIconName = 'vault'
+export const VAULT_ICON: VaultIconName = 'lock-keyhole'
 
 /** Lock state as the header icon shows it: a dot, never a colour alone (the tooltip says it too). */
 export type VaultLockState = 'open' | 'locked' | 'unknown'
