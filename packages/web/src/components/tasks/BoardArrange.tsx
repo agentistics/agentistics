@@ -18,7 +18,7 @@ import {
   button, field, liveStatusMap, liveStatusOrder, microLabel, pill, type BoardStatus,
 } from './board'
 import { boardCopy, type Lang } from './copy'
-import { PanelMenu, PickerMenu } from './PickerMenu'
+import { PanelMenu, PickerMenu, menuRowStyle } from './PickerMenu'
 import { ViewBar, ViewSortMenu, segmentBadge, viewSegment } from './ViewBar'
 import { LANE_KEYS, type LaneKey } from './boardPrefs'
 import type { ColumnSorts } from './columnSort'
@@ -43,11 +43,9 @@ const BOARD_SORTS: Array<{ key: SortKey; label: string }> = [
 /** The keys alone, for a surface that words them itself (the column titles' sort menu). */
 export const BOARD_SORT_KEYS: readonly SortKey[] = BOARD_SORTS.map(s => s.key)
 
-const LANE_LABEL: Record<LaneKey, string> = {
-  none: 'No swimlanes',
-  repo: 'Repository',
-  harness: 'Harness',
-  priority: 'Priority',
+const LANE_LABELS: Record<Lang, Record<LaneKey, string>> = {
+  en: { none: 'No swimlanes', repo: 'Repository', harness: 'Harness', priority: 'Priority' },
+  pt: { none: 'Sem raias', repo: 'Repositório', harness: 'Harness', priority: 'Prioridade' },
 }
 
 export interface BoardArrangeProps {
@@ -79,16 +77,10 @@ export function BoardArrange(p: BoardArrangeProps) {
   const copy = boardCopy(p.lang ?? 'en')
   const statusOrder = liveStatusOrder(p.statuses)
   const statusMap = liveStatusMap(p.statuses)
+  const LANE_LABEL = LANE_LABELS[p.lang ?? 'en']
   const limited = Object.keys(p.wip).length
 
-  const row = (on: boolean): React.CSSProperties => ({
-    display: 'flex', gap: 8, alignItems: 'center', textAlign: 'left', width: '100%',
-    padding: '6px 8px', borderRadius: 5, cursor: 'pointer', fontSize: 12, fontFamily: 'inherit',
-    border: `1px solid ${on ? 'var(--anthropic-orange)' : 'transparent'}`,
-    background: on ? 'var(--anthropic-orange-dim)' : 'transparent',
-    color: on ? 'var(--text-primary)' : 'var(--text-secondary)',
-    minHeight: isMobile ? 44 : 28,
-  })
+  const row = (on: boolean): React.CSSProperties => menuRowStyle(isMobile, on)
   const note: React.CSSProperties = {
     ...microLabel, textTransform: 'none', letterSpacing: 0, padding: '4px 8px', lineHeight: 1.5,
   }
@@ -109,8 +101,9 @@ export function BoardArrange(p: BoardArrangeProps) {
                 </button>
               ))}
               <div style={note}>
-                A lane per value, each holding the whole pipeline — which repository, which agent,
-                which harness is doing what.
+                {(p.lang ?? 'en') === 'pt'
+                  ? 'Uma raia por valor, cada uma com o fluxo inteiro — qual repositório, qual agente, qual harness está fazendo o quê.'
+                  : 'A lane per value, each holding the whole pipeline — which repository, which agent, which harness is doing what.'}
               </div>
             </>
           )}
