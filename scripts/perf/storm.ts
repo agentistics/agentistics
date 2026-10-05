@@ -44,6 +44,7 @@ const builds = (): number[] => [...s.log().matchAll(/\[data\] built in (\d+) ms/
 const timed = async (path: string) => { const t = performance.now(); const r = await fetch(`${s.base}${path}`); await r.arrayBuffer(); return performance.now() - t }
 
 let out: Record<string, unknown> = {}
+let serverTail = ''
 try {
   await fetch(`${s.base}/api/data`).then(r => r.arrayBuffer())
   // A live session to measure the chat on, while the others write.
@@ -88,10 +89,14 @@ try {
     buildDutyPct: Math.round(during.reduce((a, b) => a + b, 0) / 1000 / wall * 100),
     fleet: quantiles(fleet), data: quantiles(data),
     sendToEcho: push?.sendToEcho ?? null,
+    echoByRound: push?.echoByRound ?? null,
+    answerByRound: push?.answerByRound ?? null,
     answerShown: push?.harnessWriteToShown ?? null,
   }
   if (sp.id) await fetch(`${s.base}/api/fleet/act`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: sp.id, action: 'kill' }) }).catch(() => {})
 } finally {
+  // Kept so a failing budget can say what the server was doing, not only that a number was over.
+  serverTail = s.log().split('\n').slice(-60).join('\n')
   await s.stop()
 }
 const json = JSON.stringify(out, null, 2)
@@ -116,7 +121,7 @@ if (args.includes('--budget')) {
     if (verdict !== 'ok') failed++
     console.log(`${verdict.padEnd(7)} ${k.padEnd(22)} ${String(v ?? '—').padStart(7)}  ≤ ${ceiling}`)
   }
-  if (failed) { console.error(`\n${failed} storm budget(s) not met.`); process.exit(1) }
+  if (failed) { console.error(`\n${failed} storm budget(s) not met.\n--- server log tail ---\n${serverTail}`); process.exit(1) }
   console.log('\nThe storm budgets hold.')
 }
 log('done')

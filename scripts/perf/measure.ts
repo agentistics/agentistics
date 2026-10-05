@@ -107,12 +107,15 @@ export async function measurePush(s: PerfServer, id: string, rounds = 6): Promis
     await Bun.sleep(300)
   }
   ctl.abort()
-  return { firstFrameMs: Math.round(first), sendToEcho: quantiles(echo), harnessWriteToShown: quantiles(answer), inflightTextShown: quantiles(inflight), inflightGrowthSteps: growth, sendToLiveAnswer: quantiles(liveFirst) }
+  return { firstFrameMs: Math.round(first), echoByRound: echo, answerByRound: answer, sendToEcho: quantiles(echo), harnessWriteToShown: quantiles(answer), inflightTextShown: quantiles(inflight), inflightGrowthSteps: growth, sendToLiveAnswer: quantiles(liveFirst) }
 }
 
 
 export interface PushNumbers {
   firstFrameMs: number
+  /** Every round's own figure, in order, so a slow one is visible as a round and not hidden in a p95 of three. */
+  echoByRound: number[]
+  answerByRound: number[]
   sendToEcho: ReturnType<typeof quantiles>
   harnessWriteToShown: ReturnType<typeof quantiles>
   inflightTextShown: ReturnType<typeof quantiles>
