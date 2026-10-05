@@ -886,7 +886,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted, tab
   const navigate = useNavigate()
   // The full page opens on the CONVERSATIONS (owner's choice, 2026-10-04); the dense panel in the
   // session aside keeps opening on the figures, which is what it is read for.
-  const [innerTab, setInnerTab] = useState<DeliveryTab>(dense ? 'overview' : 'threads')
+  const [innerTab, setInnerTab] = useState<DeliveryTab>(dense ? 'overview' : 'subtasks')
   const tab = tabProp ?? innerTab
   const setTab = onTabChange ?? setInnerTab
   const [, setBusy] = useState(false)
@@ -927,8 +927,8 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted, tab
       ['activity', copy.tabs.activity, 0],
     ]
     : [
-      ['threads', tc.tabThreads, threadInboxCount],
       ['subtasks', copy.tabs.subtasks, detail.subtasks.length],
+      ['threads', tc.tabThreads, threadInboxCount],
       ['sessions', copy.tabs.sessions, detail.sessions.length],
       ['overview', tc.tabMetrics, 0],
       ['files', copy.tabs.files, detail.files.length],
