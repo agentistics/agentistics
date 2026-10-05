@@ -31,6 +31,7 @@ import {
 } from 'lucide-react'
 import { commentThread, type ChatAttachmentRef } from '@agentistics/core'
 import { CommentAttachments, CommentComposer } from './CommentComposer'
+import { commentAnchor, commentCandidates, sessionCandidates } from './commentMention'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useFleet } from '../../lib/fleet'
 import { sessionPath } from '../../lib/sessionRoute'
@@ -738,7 +739,7 @@ export function CommentsTab({ id, detail, onChanged, target, lang = 'en', looseO
         // hide your own draft the moment you started it.
         const open = mine || expandedComments.has(c.id)
         return (
-          <div key={c.id} style={{ ...surface, padding: 13 }}>
+          <div key={c.id} id={commentAnchor(c.id)} style={{ ...surface, padding: 13 }}>
             {/* The collapsed row IS the toggle: who commented and when, nothing else, until it is
                 opened. A `<div>` rather than a `<button>` — the Edit/Delete controls sit inside it
                 and a button may not nest inside another button. */}
@@ -834,6 +835,8 @@ export function CommentsTab({ id, detail, onChanged, target, lang = 'en', looseO
         onAttachments={setAttached}
         busy={busy}
         refusal={refusal}
+        sticky
+        mentions={{ sessions: sessionCandidates(detail.sessions), comments: commentCandidates(detail.comments) }}
         ariaLabel={owner ? (pt ? `Comentar em ${owner.title}` : `Comment on ${owner.title}`) : (pt ? 'Comentar na tarefa' : 'Comment on the task')}
         placeholder={owner
           ? (pt ? `Comentar em “${owner.title}” — ou colar um arquivo` : `Comment on “${owner.title}” — or paste a file`)

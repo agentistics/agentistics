@@ -24,9 +24,14 @@ import { AttachmentLightbox } from '../sessions/AttachmentLightbox'
 import { MAX_ATTACHMENTS, attachmentRoom, planPaste } from '../../lib/pastePlan'
 import { useDictation } from '../../lib/useDictation'
 import { surface } from './board'
+import {
+  applyCommentMention, applySessionMention, filterComments, filterMentionCandidates, triggerAt,
+  type CommentCandidate,
+} from './commentMention'
+import type { MentionCandidate } from '../../lib/sessionMention'
 import type { Lang } from './copy'
 
-export function CommentComposer({ lang, value, onChange, attachments, onAttachments, ariaLabel, placeholder, submitLabel, busy, onSubmit, refusal }: {
+export function CommentComposer({ lang, value, onChange, attachments, onAttachments, ariaLabel, placeholder, submitLabel, busy, onSubmit, refusal, mentions, sticky }: {
   lang: Lang
   value: string
   onChange: (v: string) => void
@@ -38,6 +43,10 @@ export function CommentComposer({ lang, value, onChange, attachments, onAttachme
   busy: boolean
   onSubmit: () => void
   refusal?: string | null
+  /** The task's own sessions (`#`) and comments (`^`) the field can point at. Absent = no pickers. */
+  mentions?: { sessions: readonly MentionCandidate[]; comments: readonly CommentCandidate[] }
+  /** Keep the field at the foot of the scrolling pane it sits in, so writing never needs a scroll to the end. */
+  sticky?: boolean
 }) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
@@ -103,6 +112,28 @@ export function CommentComposer({ lang, value, onChange, attachments, onAttachme
   const images = attachments.filter(a => isImageAttachment(a.path)).map(a => a.path)
   const [lightbox, setLightbox] = useState<number | null>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
+  // THE PICKERS. `#` lists the task's sessions, `^` its comments; the trigger is read from the text before
+  // the caret, Escape closes it while the word is still there, a pick writes into the draft and sends nothing.
+  const [caret, setCaret] = useState(0)
+  const [dismissed, setDismissed] = useState(false)
+  const [pickIndex, setPickIndex] = useState(0)
+  const trigger = mentions ? triggerAt(value.slice(0, caret)) : null
+  const triggerKey = trigger ? `${trigger.kind}:${trigger.query}` : ''
+  useEffect(() => { setDismissed(false); setPickIndex(0) }, [triggerKey])
+  const sessionRows = trigger?.kind === 'session' && mentions ? filterMentionCandidates(mentions.sessions, trigger.query) : []
+  const commentRows = trigger?.kind === 'comment' && mentions ? filterComments(mentions.comments, trigger.query) : []
+  const pickerRows = trigger?.kind === 'session' ? sessionRows.length : commentRows.length
+  const pickerOpen = !!trigger && !dismissed && (pickerRows > 0 || !/\s/.test(trigger.query))
+  const choose = (i: number) => {
+    const at = taRef.current?.selectionStart ?? caret
+    const out = trigger?.kind === 'session'
+      ? (sessionRows[i] ? applySessionMention(value, at, sessionRows[i]!, pt) : null)
+      : (commentRows[i] ? applyCommentMention(value, at, commentRows[i]!) : null)
+    if (!out) return
+    onChange(out.text)
+    setCaret(out.caret)
+    requestAnimationFrame(() => { const n = taRef.current; if (n) { n.focus(); n.setSelectionRange(out.caret, out.caret) } })
+  }
   // Auto-grow, the way the session composer's field does (capped, then it scrolls).
   useEffect(() => {
     const t = taRef.current
@@ -113,7 +144,11 @@ export function CommentComposer({ lang, value, onChange, attachments, onAttachme
 
   return (
     <div
-      style={{ outline: dropping ? '1px dashed var(--anthropic-orange)' : 'none', borderRadius: 14, display: 'grid', gap: 6 }}
+      data-comment-composer
+      style={{
+        outline: dropping ? '1px dashed var(--anthropic-orange)' : 'none', borderRadius: 14, display: 'grid', gap: 6,
+        ...(sticky ? { position: 'sticky', bottom: 0, zIndex: 2, background: 'var(--bg-card)', paddingTop: 8, paddingBottom: isMobile ? 'calc(env(safe-area-inset-bottom, 0px) + 6px)' : 6 } : {}),
+      }}
       onDragOver={e => { e.preventDefault(); setDropping(true) }}
       onDragLeave={() => setDropping(false)}
       onDrop={e => {
@@ -121,6 +156,35 @@ export function CommentComposer({ lang, value, onChange, attachments, onAttachme
         pick(Array.from(e.dataTransfer?.files ?? []))
       }}
     >
+      {pickerOpen && trigger && (
+        <div
+          role="listbox" data-mention-picker={trigger.kind}
+          aria-label={trigger.kind === 'session' ? (pt ? 'Sessões da tarefa' : 'Sessions of the task') : (pt ? 'Comentários da tarefa' : 'Comments of the task')}
+          style={{ ...surface, background: 'var(--bg-card)', padding: 4, display: 'grid', gap: 2, maxHeight: 220, overflowY: 'auto' }}
+        >
+          {pickerRows === 0 && (
+            <div style={{ padding: '8px 10px', fontSize: 12, color: 'var(--text-tertiary)' }}>
+              {trigger.kind === 'session' ? (pt ? 'Nenhuma sessão desta tarefa combina.' : 'No session of this task matches.') : (pt ? 'Nenhum comentário combina.' : 'No comment matches.')}
+            </div>
+          )}
+          {trigger.kind === 'session' && sessionRows.map((s, i) => (
+            <button key={s.id} type="button" role="option" aria-selected={i === pickIndex} data-pick-index={i}
+              onMouseDown={e => e.preventDefault()} onClick={() => choose(i)}
+              style={{ display: 'flex', gap: 8, alignItems: 'center', textAlign: 'left', padding: '7px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, minHeight: isMobile ? 44 : undefined, color: 'var(--text-primary)', background: i === pickIndex ? 'var(--anthropic-orange-dim)' : 'transparent' }}>
+              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title}</span>
+              <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{s.harness}</span>
+            </button>
+          ))}
+          {trigger.kind === 'comment' && commentRows.map((c, i) => (
+            <button key={c.id} type="button" role="option" aria-selected={i === pickIndex} data-pick-index={i}
+              onMouseDown={e => e.preventDefault()} onClick={() => choose(i)}
+              style={{ display: 'grid', gap: 1, textAlign: 'left', padding: '7px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, minHeight: isMobile ? 44 : undefined, color: 'var(--text-primary)', background: i === pickIndex ? 'var(--anthropic-orange-dim)' : 'transparent' }}>
+              <b style={{ fontSize: 11.5, fontWeight: 600 }}>{c.author}</b>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>{c.snippet}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <ComposerShell dimmed={busy}>
         <input
           ref={fileRef} type="file" multiple style={{ display: 'none' }}
@@ -140,9 +204,16 @@ export function CommentComposer({ lang, value, onChange, attachments, onAttachme
           value={value}
           aria-label={ariaLabel}
           placeholder={placeholder}
-          onChange={e => onChange(e.target.value)}
+          onChange={e => { onChange(e.target.value); setCaret(e.target.selectionStart ?? e.target.value.length) }}
+          onSelect={e => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
           onPaste={onPaste}
           onKeyDown={e => {
+            if (pickerOpen && pickerRows > 0) {
+              if (e.key === 'ArrowDown') { e.preventDefault(); setPickIndex(i => (i + 1) % pickerRows); return }
+              if (e.key === 'ArrowUp') { e.preventDefault(); setPickIndex(i => (i - 1 + pickerRows) % pickerRows); return }
+              if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); choose(pickIndex); return }
+            }
+            if (pickerOpen && e.key === 'Escape') { e.preventDefault(); setDismissed(true); return }
             // Same rule as the session composer: Enter breaks the line on a phone, sends elsewhere.
             if (e.key === 'Enter' && !e.shiftKey && !isMobile && !e.nativeEvent.isComposing) { e.preventDefault(); send() }
           }}

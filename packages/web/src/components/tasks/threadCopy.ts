@@ -26,17 +26,22 @@ export function threadCopy(lang: Lang) {
     noMix: pt ? 'nenhuma sessão medida ainda' : 'no session measured yet',
     about: pt ? 'Sobre' : 'About',
     // tabs
-    tabThreads: pt ? 'Tópicos' : 'Threads',
+    // The tab holds BOTH the topics and the plain comments, so its name covers both.
+    tabThreads: pt ? 'Conversa' : 'Discussion',
     tabAbout: pt ? 'Sobre' : 'About',
     tabMetrics: pt ? 'Métricas' : 'Metrics',
     // inbox
     open: pt ? 'Abertos' : 'Open',
     resolved: pt ? 'Resolvidos' : 'Resolved',
     loose: pt ? 'Comentários avulsos' : 'Loose comments',
-    looseHint: pt ? 'Comentários de antes dos tópicos, ou deixados fora de um' : 'Comments from before threads, or left outside one',
-    newThread: pt ? 'Novo tópico' : 'New thread',
-    newThreadTitle: pt ? 'Título do tópico' : 'Thread title',
-    create: pt ? 'Criar' : 'Create',
+    looseHint: pt ? 'Comentários sem tópico' : 'Comments with no topic',
+    newThread: pt ? 'Abrir tópico' : 'Open a topic',
+    newThreadHint: pt ? 'Um tópico é um assunto com a sua própria conversa e registro.' : 'A topic is one subject with its own conversation and record.',
+    commentOnTask: pt ? 'Comentar na tarefa' : 'Comment on the task',
+    commentOnTaskHint: pt ? 'Um comentário simples, sem tópico — fica no registro da tarefa.' : 'A plain comment, no topic — it stays in the task\'s record.',
+    commentAction: pt ? 'Comentar' : 'Comment',
+    newThreadTitle: pt ? 'Título do tópico' : 'Topic title',
+    create: pt ? 'Abrir' : 'Open',
     cancel: pt ? 'Cancelar' : 'Cancel',
     noThreads: pt
       ? 'Nenhum tópico ainda. Um tópico é o registro de um assunto da tarefa — entregas, bloqueios, decisões. As sessões abrem as suas ao entregar ou ao travar.'
@@ -57,6 +62,9 @@ export function threadCopy(lang: Lang) {
     openedBy: (who: string, when: string) => pt ? `aberto por ${who} · ${when}` : `opened by ${who} · ${when}`,
     resolve: pt ? 'Resolver' : 'Resolve',
     reopen: pt ? 'Reabrir' : 'Reopen',
+    resolvedNow: pt ? 'Resolvido ✓' : 'Resolved ✓',
+    resolvedBadge: pt ? 'Resolvido' : 'Resolved',
+    movedToResolved: pt ? 'Movido para Resolvidos — você pode reabrir quando quiser.' : 'Moved to Resolved — you can reopen it any time.',
     mute: pt ? 'Não enviar a esta sessão' : 'Do not send to this session',
     unmute: pt ? 'Voltar a enviar a esta sessão' : 'Send to this session again',
     muted: pt ? 'não recebe envios' : 'excluded from sends',

@@ -177,6 +177,7 @@ function TaskList() {
   // The live list resolves asynchronously, so the fallback is derived on every render rather than
   // frozen at whatever the first render saw.
   const [storedGroups, setBoardColumns] = useBoardPref('groups')
+  const [hideEmpty, setHideEmpty] = useBoardPref('hideEmpty')
   const boardColumns = useMemo(() => storedGroups ?? liveStatusOrder(statuses), [storedGroups, statuses])
   /**
    * The tasks on their way to `blocked`, waiting on the dialog's answer.
@@ -252,6 +253,8 @@ function TaskList() {
             // and letting each remember its own would mean hiding a status twice.
             columns={boardColumns}
             onColumns={setBoardColumns}
+            hideEmpty={hideEmpty}
+            onHideEmpty={setHideEmpty}
             statuses={statuses}
             counts={Object.fromEntries(liveStatusOrder(statuses).map(st => [
               st, shown.filter(r => r.task.status === st).length,
@@ -511,6 +514,7 @@ function TaskList() {
             lanes={lanes}
             wip={wip}
             columns={boardColumns}
+            hideEmpty={hideEmpty}
             statuses={statuses}
             sessions={fleet.sessions}
             onOpen={id => navigate(`/tasks/${encodeURIComponent(id)}`)}

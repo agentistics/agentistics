@@ -202,6 +202,9 @@ export interface BoardCopy {
     desc: string
     groupNone: string
     groupStatus: string
+    emptyGroups: string
+    showAll: string
+    hideEmpty: string
     /** Under the sort list: unpriced work sorts last either way. */
     sortNote: string
   }
@@ -458,6 +461,9 @@ const EN: BoardCopy = {
     desc: 'Descending',
     groupNone: 'No grouping',
     groupStatus: 'By status',
+    emptyGroups: 'Empty groups',
+    showAll: 'Show all',
+    hideEmpty: 'Hide empty groups',
     sortNote: 'A row nothing could price sorts last whichever way the arrow points.',
   },
   header: {
@@ -727,6 +733,9 @@ const PT: BoardCopy = {
     desc: 'Decrescente',
     groupNone: 'Sem agrupamento',
     groupStatus: 'Por status',
+    emptyGroups: 'Grupos vazios',
+    showAll: 'Mostrar todos',
+    hideEmpty: 'Ocultar grupos vazios',
     sortNote: 'Uma linha que nada conseguiu precificar fica por último, para qualquer lado da seta.',
   },
   header: {
