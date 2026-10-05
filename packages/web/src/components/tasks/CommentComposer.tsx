@@ -31,7 +31,7 @@ import {
 import type { MentionCandidate } from '../../lib/sessionMention'
 import type { Lang } from './copy'
 
-export function CommentComposer({ lang, value, onChange, attachments, onAttachments, ariaLabel, placeholder, submitLabel, busy, onSubmit, refusal, mentions }: {
+export function CommentComposer({ lang, value, onChange, attachments, onAttachments, ariaLabel, placeholder, submitLabel, busy, onSubmit, refusal, mentions, sticky }: {
   lang: Lang
   value: string
   onChange: (v: string) => void
@@ -45,6 +45,8 @@ export function CommentComposer({ lang, value, onChange, attachments, onAttachme
   refusal?: string | null
   /** The task's own sessions (`#`) and comments (`^`) the field can point at. Absent = no pickers. */
   mentions?: { sessions: readonly MentionCandidate[]; comments: readonly CommentCandidate[] }
+  /** Keep the field at the foot of the scrolling pane it sits in, so writing never needs a scroll to the end. */
+  sticky?: boolean
 }) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
@@ -142,7 +144,11 @@ export function CommentComposer({ lang, value, onChange, attachments, onAttachme
 
   return (
     <div
-      style={{ outline: dropping ? '1px dashed var(--anthropic-orange)' : 'none', borderRadius: 14, display: 'grid', gap: 6 }}
+      data-comment-composer
+      style={{
+        outline: dropping ? '1px dashed var(--anthropic-orange)' : 'none', borderRadius: 14, display: 'grid', gap: 6,
+        ...(sticky ? { position: 'sticky', bottom: 0, zIndex: 2, background: 'var(--bg-card)', paddingTop: 8, paddingBottom: isMobile ? 'calc(env(safe-area-inset-bottom, 0px) + 6px)' : 6 } : {}),
+      }}
       onDragOver={e => { e.preventDefault(); setDropping(true) }}
       onDragLeave={() => setDropping(false)}
       onDrop={e => {

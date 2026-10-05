@@ -32,6 +32,7 @@ import { SESSION_STATE, button, field, fmtStamp } from './board'
 import { threadCopy, type Lang } from './threadCopy'
 import { participantState, replyReach } from './threadView'
 import { RESOLVED_FLASH_MS, resolveView } from './resolveFlow'
+import { focusComposer } from './focusComposer'
 import { commentAnchor, commentCandidates, commentIdFromHref, sessionCandidates } from './commentMention'
 
 /** Today: the time. Otherwise: day and month. An inbox row has room for one short stamp. */
@@ -107,6 +108,7 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
     return title ? t.onTarget(title) : t.onTask
   }
 
+  const looseRef = useRef<HTMLDivElement>(null)
   const [creating, setCreating] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const create = async () => {
@@ -216,7 +218,24 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
   )
 
   const right = selected === 'loose'
-    ? <div style={{ padding: isMobile ? 12 : 14, overflowY: 'auto', height: '100%' }}>{loose}</div>
+    ? (
+      <div ref={looseRef} data-loose-pane style={{ overflowY: 'auto', height: '100%', overscrollBehavior: 'contain' }}>
+        {/* Reachable from the top: a long list must not make "write a comment" a scroll to the end. */}
+        <div style={{
+          position: 'sticky', top: 0, zIndex: 3, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          padding: isMobile ? '10px 12px' : '10px 14px', background: 'var(--bg-card)', borderBottom: '1px solid var(--border)',
+        }}>
+          <div style={{ minWidth: 0, flex: '1 1 200px' }}>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>{t.commentOnTask}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{t.commentOnTaskHint}</div>
+          </div>
+          <button data-comment-top style={{ ...button(isMobile, 'primary'), flex: '0 0 auto' }} onClick={() => focusComposer(looseRef.current)}>
+            <MessageSquarePlus size={14} /> {t.commentAction}
+          </button>
+        </div>
+        <div style={{ padding: isMobile ? '10px 12px 0' : '12px 14px 0' }}>{loose}</div>
+      </div>
+    )
     : thread
       ? <ThreadRecord key={thread.id} id={id} thread={thread} detail={detail} rows={rows} lang={lang}
           reload={reload} renderBody={renderBody} where={where(thread)} onBack={isMobile ? () => setPicked(null) : undefined} />

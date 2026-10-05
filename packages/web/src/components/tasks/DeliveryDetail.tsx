@@ -835,6 +835,7 @@ export function CommentsTab({ id, detail, onChanged, target, lang = 'en', looseO
         onAttachments={setAttached}
         busy={busy}
         refusal={refusal}
+        sticky
         mentions={{ sessions: sessionCandidates(detail.sessions), comments: commentCandidates(detail.comments) }}
         ariaLabel={owner ? (pt ? `Comentar em ${owner.title}` : `Comment on ${owner.title}`) : (pt ? 'Comentar na tarefa' : 'Comment on the task')}
         placeholder={owner
