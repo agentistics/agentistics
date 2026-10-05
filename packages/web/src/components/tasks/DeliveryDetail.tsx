@@ -26,10 +26,10 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import {
-  ChevronDown, ChevronRight, ExternalLink, FileText, FileVideo, Link2, MessageSquare, Paperclip,
-  Pencil, Plus, Trash2, X, XCircle,
+  ChevronDown, ChevronRight, ExternalLink, FileText, FileVideo, Paperclip,
+  Pencil, Plus, Trash2, X,
 } from 'lucide-react'
-import { PRIORITY_ORDER, commentThread, type ChatAttachmentRef, type TaskPriorityId } from '@agentistics/core'
+import { commentThread, type ChatAttachmentRef } from '@agentistics/core'
 import { CommentAttachments, CommentComposer } from './CommentComposer'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useFleet } from '../../lib/fleet'
@@ -39,31 +39,28 @@ import {
   type CommentAttachment, type CommentPart,
 } from '../../lib/commentBody'
 import {
-  NA, PRIORITY, SESSION_STATE, button, field, fmtDateTime, fmtInt, fmtStamp, fmtTokens,
-  harnessColor, microLabel, numeric, pill, statusStyle, surface,
+  NA, SESSION_STATE, button, field, fmtInt, fmtTokens,
+  harnessColor, microLabel, numeric, pill, surface,
 } from './board'
 import { useMoney } from './money'
-import { boardCopy, statusLabel, type Lang } from './copy'
-import { BetaTag } from '../BetaTag'
-import { BlockedDialog } from './BlockedDialog'
-import { DoneNeedsSessionDialog } from './DoneNeedsSessionDialog'
+import { boardCopy, type Lang } from './copy'
 import { RailSection } from './RailSection'
-import { StatusChip } from './StatusChip'
-import { DurationCellView } from './SubtaskDurationCell'
+import { TaskChips, TaskMoreMenu } from './TaskChips'
 import { SubtaskTable } from './SubtaskTable'
 import { BlockedSubtaskResolve } from './BlockedSubtaskResolve'
 import { useStagedFire } from './useStagedFire'
 import { TaskFiles } from './TaskFiles'
-import { TaskProgressBar } from './TaskProgressBar'
-import { ConfirmModal, Select } from '../../pages/settings/primitives'
+import { ConfirmModal } from '../../pages/settings/primitives'
 import { CommentThreadDialog } from './CommentThreadDialog'
+import { ThreadsPanel } from './ThreadsPanel'
+import { threadCopy } from './threadCopy'
 import {
-  addComment, addLink, addSubtask, attachSession, clearStagedSession, deleteFile,
-  deleteTask, detachSession, editComment, editTask, fileUrl, fmtDuration,
-  markTask, patchSubtask, removeComment, removeLink, removeSubtask, saveStagedSession, setBlockedBy,
-  uploadFile, useTaskActivity, useTaskDetail, useTaskList, useTaskStatuses,
-  type AttemptRollup, type AttemptView, type PieceTimes, type Subtask, type TaskDetail, type TaskFieldPatch,
-  type TaskFile, type TaskListRow, type TaskRecord, type TaskStatus,
+  addComment, addSubtask, attachSession, clearStagedSession, deleteFile,
+  detachSession, editComment, editTask, fileUrl, fmtDuration,
+  patchSubtask, removeComment, removeSubtask, saveStagedSession,
+  uploadFile, useTaskActivity, useTaskStatuses,
+  type AttemptRollup, type AttemptView, type Subtask, type TaskDetail,
+  type TaskFile, type TaskListRow,
 } from '../../lib/tasks'
 
 /**
@@ -117,184 +114,6 @@ function ActivityTab({ id }: { id: string }) {
           </span>
         </div>
       ))}
-    </div>
-  )
-}
-
-/** `startedAt`/`deliveredAt` are system facts, not a date somebody typed — see their own note on
- *  `Task.startedAt` — so they are read as a full moment (date AND time), the same way the activity
- *  log already reads `TaskEvent.at`, never as a bare `yyyy-MM-dd` day. */
-function PlanCard({ task, times, busy, lang, statuses, onPatch, onStatus }: {
-  task: TaskRecord
-  /** Session-derived times (`TaskDetail.times`); absent from an older server, then the stamps answer. */
-  times?: PieceTimes
-  busy: boolean
-  onPatch: (patch: TaskFieldPatch) => void | Promise<void>
-  lang: 'pt' | 'en'
-  /** The board's LIVE status list (`lib/tasks.ts`'s `useTaskStatuses`) — `null` while it loads. */
-  statuses: ReturnType<typeof useTaskStatuses>['statuses']
-  onStatus: (s: TaskStatus) => void | Promise<void>
-}) {
-  const copy = boardCopy(lang)
-  const startedAt = times ? times.startedAt ?? undefined : task.startedAt
-  const completedAt = times ? times.completedAt ?? undefined : task.deliveredAt
-
-  return (
-    <div style={{ ...surface, padding: 14, display: 'grid', gap: 11 }}>
-      {/*
-       * Status and priority as two PICKERS on one row, not two grids of chips.
-       *
-       * Seven statuses and five priorities as buttons wrapped to four rows and pushed the claim —
-       * the control people actually reach for — below the fold. A picker states the current value
-       * in one row and costs one click to change, which is the same number of clicks a chip grid
-       * costs once you have found it.
-       */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <div style={{ flex: '1 1 120px', display: 'grid', gap: 5, minWidth: 0 }}>
-          <span style={{ ...microLabel, fontSize: 9 }}>Status</span>
-          {/* The SAME chip the table cell and the card draw — see `StatusChip`. This rail used to
-              have a private copy of the control, which is how one feature came to have two status
-              dropdowns that looked and behaved differently. */}
-          <StatusChip
-            value={task.status}
-            lang={lang}
-            statuses={statuses}
-            {...(busy ? { disabled: true } : {})}
-            onPick={(st: string) => void onStatus(st as TaskStatus)}
-          />
-        </div>
-        <div style={{ flex: '1 1 120px', display: 'grid', gap: 5, minWidth: 0 }}>
-          <span style={{ ...microLabel, fontSize: 9 }}>{copy.priority}</span>
-          <ChipSelect
-            value={!task.priority || task.priority === 'none' ? 'low' : task.priority}
-            disabled={busy}
-            options={PRIORITY_ORDER.map(id => ({
-              value: id, label: PRIORITY[id]!.label, color: PRIORITY[id]!.color, dim: PRIORITY[id]!.dim,
-            }))}
-            onPick={v => void onPatch({ priority: v as TaskPriorityId })}
-          />
-        </div>
-      </div>
-
-      {/*
-       * `startedAt`/`deliveredAt` are SYSTEM facts, never a date somebody typed — see
-       * `Task.startedAt`'s own note. There is no picker and no clear button here: a product owner
-       * asked for these two to be observed, not scheduled, so the card only ever READS them.
-       */}
-      <div style={{ display: 'grid', gap: 5 }}>
-        <span style={{ ...microLabel, fontSize: 9 }}>{copy.dates}</span>
-        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-          <span style={{ minWidth: 0 }}>
-            <span style={{ ...microLabel, fontSize: 8, display: 'block' }}>{copy.started}</span>
-            <span
-              title={startedAt ? fmtStamp(startedAt, lang) : undefined}
-              style={{
-                fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
-                color: startedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
-              }}
-            >{fmtDateTime(startedAt, lang, Date.now())}</span>
-          </span>
-          <span style={{ minWidth: 0 }}>
-            <span style={{ ...microLabel, fontSize: 8, display: 'block' }}>{copy.completed}</span>
-            <span
-              title={completedAt ? fmtStamp(completedAt, lang) : undefined}
-              style={{
-                fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
-                color: completedAt ? 'var(--text-secondary)' : 'var(--text-tertiary)',
-              }}
-            >{fmtDateTime(completedAt, lang, Date.now())}</span>
-          </span>
-          {(startedAt && completedAt) || (times && times.activeMinutes !== null) ? (
-            <span style={{ minWidth: 0 }}>
-              <span style={{ ...microLabel, fontSize: 8, display: 'block' }}>{copy.duration}</span>
-              <DurationCellView startedAt={startedAt} deliveredAt={completedAt} activeMinutes={times?.activeMinutes ?? null} lang={lang} />
-            </span>
-          ) : null}
-        </div>
-      </div>
-
-      {task.status === 'blocked' && task.blockedReason && (() => {
-        // Asking for the reason and then not showing it would be theatre. It sits under the status
-        // it belongs to, in the status's own colour, and goes when the task leaves `blocked`.
-        const blockedStyle = statusStyle(statuses, 'blocked')
-        return (
-          <div style={{
-            fontSize: 12, lineHeight: 1.5, padding: '8px 10px', borderRadius: 7,
-            background: blockedStyle.dim, color: 'var(--text-secondary)',
-            border: `1px solid ${blockedStyle.color}`,
-          }}>
-            <span style={{ ...microLabel, fontSize: 9, display: 'block', marginBottom: 3, color: blockedStyle.color }}>
-              {copy.waitingOn}
-            </span>
-            {task.blockedReason}
-          </div>
-        )
-      })()}
-
-    </div>
-  )
-}
-
-/**
- * A value that is a COLOURED WORD, chosen from a short closed list.
- *
- * Not the settings screens' `Select`: this one carries the status/priority colour into the trigger,
- * which is the whole legibility trick the board rests on — you learn a colour once and then read it
- * everywhere without reading the word.
- */
-function ChipSelect({ value, options, disabled, onPick }: {
-  value: string
-  options: Array<{ value: string; label: string; color: string; dim: string }>
-  disabled?: boolean
-  onPick: (v: string) => void
-}) {
-  const isMobile = useIsMobile()
-  const [open, setOpen] = useState(false)
-  const current = options.find(o => o.value === value) ?? options[options.length - 1]!
-  return (
-    <div style={{ position: 'relative' }}>
-      <button
-        disabled={disabled}
-        onClick={() => setOpen(v => !v)}
-        style={{
-          width: '100%', boxSizing: 'border-box', cursor: disabled ? 'default' : 'pointer',
-          display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'space-between',
-          padding: isMobile ? '10px 11px' : '6px 10px', borderRadius: 7,
-          border: `1px solid ${current.color}`, background: current.dim, color: current.color,
-          fontSize: 12, fontWeight: 600, minHeight: isMobile ? 44 : undefined,
-        }}
-      >
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {current.label}
-        </span>
-        <ChevronDown size={12} style={{ flexShrink: 0, opacity: 0.8 }} />
-      </button>
-      {open && (
-        <>
-          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
-          <div style={{
-            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 61, marginTop: 4,
-            ...surface, background: 'var(--bg-elevated)', padding: 4, display: 'grid', gap: 2,
-            boxShadow: 'var(--shadow-elevated)',
-          }}>
-            {options.map(o => (
-              <button
-                  // A MENU ROW pays its 44px in PAINT. `.ag-tap` is for controls whose smallness
-                  // is their meaning; these sit in a `gap: 2` list, where a projected box covers
-                  // the row above and its bottom band selects the row below.
-                key={o.value}
-                onClick={() => { setOpen(false); if (o.value !== value) onPick(o.value) }}
-                style={{
-                  border: 'none', cursor: 'pointer', textAlign: 'left', padding: '6px 9px',
-                  minHeight: isMobile ? 44 : undefined,
-                  borderRadius: 5, background: o.value === value ? o.dim : 'transparent',
-                  color: o.color, fontSize: 11.5, fontWeight: 600,
-                }}
-              >{o.label}</button>
-            ))}
-          </div>
-        </>
-      )}
     </div>
   )
 }
@@ -387,153 +206,6 @@ function AttemptCard({ a, lang }: { a: AttemptView; lang: Lang }) {
       </div>
       {cfg && <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{cfg}</div>}
       <Rollup r={a.rollup} lang={lang} />
-    </div>
-  )
-}
-
-/** Links out — a PR, an issue, a doc. Only http(s) reaches here; the server refuses the rest. */
-function LinksPanel({ id, task, onChanged, bare }: {
-  id: string
-  task: TaskListRow['task']
-  onChanged: () => Promise<void> | void
-  /** Drawn inside a `RailSection`, which already supplies the card and the heading. */
-  bare?: boolean
-}) {
-  const isMobile = useIsMobile()
-  const [url, setUrl] = useState('')
-  const links = task.links ?? []
-  const add = async () => {
-    if (!url.trim()) return
-    // A GitHub PR/issue URL names its own kind — nobody should have to say it twice.
-    const kind = /\/pull\/\d+/.test(url) ? 'pr' : /\/issues\/\d+/.test(url) ? 'issue' : undefined
-    await addLink(id, url.trim(), undefined, kind)
-    setUrl('')
-    await onChanged()
-  }
-  return (
-    <div style={bare ? { display: 'grid', gap: 9 } : { ...surface, padding: 14, display: 'grid', gap: 9 }}>
-      {!bare && <div style={microLabel}>Links</div>}
-      {links.length === 0 && (
-        <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>No PR or document linked.</div>
-      )}
-      {links.map(l => (
-        <div key={l.id} style={{ display: 'flex', gap: 7, alignItems: 'center', minHeight: isMobile ? 34 : 22 }}>
-          <Link2 size={13} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
-          <a
-            href={l.url} target="_blank" rel="noreferrer"
-            style={{
-              fontSize: 11.5, color: 'var(--anthropic-orange)', textDecoration: 'none',
-              flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}
-          >{l.label ?? l.url.replace(/^https?:\/\//, '')}</a>
-          {l.kind && <span style={pill()}>{l.kind}</span>}
-          <button
-            onClick={() => void removeLink(id, l.id).then(onChanged)}
-            style={{ background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', display: 'flex' }}
-            title="Remove"
-          ><XCircle size={13} /></button>
-        </div>
-      ))}
-      <input
-        style={field(isMobile)} value={url} placeholder="Paste a PR or doc URL, then Enter"
-        onChange={e => setUrl(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter') void add() }}
-      />
-    </div>
-  )
-}
-
-/**
- * The blockers, Jira's "is blocked by".
- *
- * A blocker that is already closed is struck through rather than removed: the record of what held
- * the work up is part of the delivery's story, and silently dropping it rewrites that story.
- */
-function BlockedBy({ id, task, lang, statuses, onChanged, bare }: {
-  id: string
-  task: TaskListRow['task']
-  lang: Lang
-  /** The board's LIVE status list (`lib/tasks.ts`'s `useTaskStatuses`) — `null` while it loads. */
-  statuses: ReturnType<typeof useTaskStatuses>['statuses']
-  onChanged: () => Promise<void> | void
-  /** See `LinksPanel`. */
-  bare?: boolean
-}) {
-  const isMobile = useIsMobile()
-  const pt = lang === 'pt'
-  const { rows } = useTaskList()
-  const [picking, setPicking] = useState(false)
-  const blockers = (task.blockedBy ?? [])
-    .map(bid => rows?.find(r => r.task.id === bid))
-    .filter((r): r is TaskListRow => r !== undefined)
-  const openBlockers = blockers.filter(b => b.task.status !== 'done' && b.task.status !== 'abandoned')
-
-  const set = async (ids: string[]) => { await setBlockedBy(id, ids); await onChanged() }
-
-  return (
-    <div style={bare ? { display: 'grid', gap: 9 } : { ...surface, padding: 14, display: 'grid', gap: 9 }}>
-      {(!bare || openBlockers.length > 0) && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {!bare && <span style={microLabel}>Blocked by</span>}
-          {openBlockers.length > 0 && (
-            <span style={pill('var(--accent-red)')}>{openBlockers.length} open</span>
-          )}
-        </div>
-      )}
-      {blockers.length === 0 && (
-        <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>Nothing is blocking this.</div>
-      )}
-      {blockers.map(b => {
-        const closed = b.task.status === 'done' || b.task.status === 'abandoned'
-        return (
-          <div key={b.task.id} style={{ display: 'flex', gap: 8, alignItems: 'center', minHeight: isMobile ? 34 : 22 }}>
-            <span style={{
-              fontSize: 11.5, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              textDecoration: closed ? 'line-through' : 'none',
-              color: closed ? 'var(--text-tertiary)' : 'var(--text-secondary)',
-            }}>{b.task.title}</span>
-            <span style={pill(statusStyle(statuses, b.task.status).color)}>
-              {statusLabel(b.task.status, lang, statuses)}
-            </span>
-            <button
-              onClick={() => void set((task.blockedBy ?? []).filter(x => x !== b.task.id))}
-              style={{ background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', display: 'flex' }}
-              title="Remove"
-            ><XCircle size={13} /></button>
-          </div>
-        )
-      })}
-      {picking
-        ? (
-          // The APPLICATION's picker, not the browser's. A bare `<select>` draws the OS menu: it
-          // ignores this palette in both themes, it cannot search, and on a phone it is the one
-          // control here that misses the 44px target. `Select` is the same control every settings
-          // screen uses — searchable once the board has more than a handful of deliveries, which
-          // is exactly when picking a blocker by scrolling stops working.
-          <Select
-            value=""
-            placeholder={pt ? 'Escolher uma tarefa…' : 'Pick a task…'}
-            searchPlaceholder={pt ? 'Buscar…' : 'Search…'}
-            options={(rows ?? [])
-              // A task never blocks itself, and one already listed is not offered twice.
-              .filter(r => r.task.id !== id && !(task.blockedBy ?? []).includes(r.task.id))
-              .map(r => ({
-                value: r.task.id,
-                label: r.task.title,
-                hint: statusLabel(r.task.status, lang, statuses),
-              }))}
-            onChange={v => {
-              if (v) void set([...(task.blockedBy ?? []), v])
-              setPicking(false)
-            }}
-          />
-        )
-        : (
-          <button style={{ ...button(isMobile), justifySelf: 'start' }} onClick={() => setPicking(true)}>
-            <Plus size={13} /> Add blocker
-          </button>
-        )}
     </div>
   )
 }
@@ -1008,18 +680,20 @@ function DescriptionEditor({ id, task, files, lang, onSaved }: {
  * Writing always lands on THIS thread's own target, so a reply typed in a group's thread is a
  * comment on the group; the label on a member's comment is what keeps that from misleading anyone.
  */
-export function CommentsTab({ id, detail, onChanged, target, lang = 'en' }: {
+export function CommentsTab({ id, detail, onChanged, target, lang = 'en', looseOnly }: {
   id: string
   detail: TaskDetail
   onChanged: () => Promise<void> | void
   /** The subtask or group whose thread this is; absent/null = the task. */
   target?: string | null
   lang?: Lang
+  /** Only comments in NO topic thread — the "loose comments" bucket beside the thread inbox. */
+  looseOnly?: boolean
 }) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const threadId = target ?? null
-  const entries = commentThread(detail.comments, detail.subtasks, threadId)
+  const entries = commentThread(looseOnly ? detail.comments.filter(c => !c.threadId) : detail.comments, detail.subtasks, threadId)
   const owner = threadId ? detail.subtasks.find(s => s.id === threadId) : undefined
   /** The server's own sentence when a write was refused (e.g. the subtask was deleted meanwhile). */
   const [refusal, setRefusal] = useState<string | null>(null)
@@ -1190,7 +864,7 @@ export function CommentsTab({ id, detail, onChanged, target, lang = 'en' }: {
   )
 }
 
-export type DeliveryTab = 'overview' | 'sessions' | 'comments' | 'subtasks' | 'files' | 'activity'
+export type DeliveryTab = 'threads' | 'overview' | 'sessions' | 'comments' | 'subtasks' | 'files' | 'activity' | 'about'
 
 export interface DeliveryDetailProps {
   id: string
@@ -1202,32 +876,28 @@ export interface DeliveryDetailProps {
   dense?: boolean
   /** Deleting the delivery leaves the caller with nothing to draw. Absent = no delete offered. */
   onDeleted?: () => void
+  /** Controlled tab — the page's hero has an "About" button that must reach the same state. */
+  tab?: DeliveryTab
+  onTabChange?: (t: DeliveryTab) => void
 }
 
-export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: DeliveryDetailProps) {
+export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted, tab: tabProp, onTabChange }: DeliveryDetailProps) {
   const isMobile = useIsMobile()
   const navigate = useNavigate()
-  const [tab, setTab] = useState<DeliveryTab>('overview')
-  const [busy, setBusy] = useState(false)
-  // The board's own dialog, never `window.confirm`: the browser's box carries the page's URL and
-  // none of the app's words, and on a phone it is a system sheet that reads as a site error.
-  const [confirmDelete, setConfirmDelete] = useState(false)
+  // The full page opens on the CONVERSATIONS (owner's choice, 2026-10-04); the dense panel in the
+  // session aside keeps opening on the figures, which is what it is read for.
+  const [innerTab, setInnerTab] = useState<DeliveryTab>(dense ? 'overview' : 'subtasks')
+  const tab = tabProp ?? innerTab
+  const setTab = onTabChange ?? setInnerTab
+  const [, setBusy] = useState(false)
   /** A subtask's or group's comment thread, opened from its row in the Subtasks tab. */
   const [subThread, setSubThread] = useState<{ id: string; title: string } | null>(null)
-  /** Set while the task is on its way to `blocked` — see the list view's `toStatus`. */
-  const [blocking, setBlocking] = useState(false)
-  /** Set when a `done` write refused for having no session filed under this delivery yet. */
-  const [doneRefusal, setDoneRefusal] = useState(false)
   /** Set when a subtask's own `blockedBy` refused an attach — see `task-attach.ts`. */
   const [subtaskBlocked, setSubtaskBlocked] = useState<
     { subtaskId: string; sessionId: string; blockedBy: string[] } | null
   >(null)
-  // The other tasks, to offer as blockers. The board is small enough that this is the same list the
-  // page already loads; a second endpoint for "what could block this" would be a second answer.
-  const { rows: boardRows } = useTaskList()
   // The board's LIVE status list — fetched here rather than threaded from every caller (the page
-  // and the session aside's Task tab both mount this component fresh), same pattern as `boardRows`
-  // just above.
+  // and the session aside's Task tab both mount this component fresh).
   const { statuses } = useTaskStatuses()
 
   // FIRING a staged session — the one shared implementation (`useStagedFire`); a refused filing
@@ -1243,47 +913,70 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
   const oneColumn = dense === true || isMobile
 
   const copy = boardCopy(lang)
-  const TABS: Array<[DeliveryTab, string, number]> = [
-    ['overview', copy.tabs.overview, 0],
-    ['sessions', copy.tabs.sessions, detail.sessions.length],
-    ['comments', copy.tabs.comments, detail.comments.length],
-    ['subtasks', copy.tabs.subtasks, detail.subtasks.length],
-    ['files', copy.tabs.files, detail.files.length],
-    ['activity', copy.tabs.activity, 0],
-  ]
+  const tc = threadCopy(lang)
+  const threadInboxCount = (detail.threads ?? []).length
+  // The full page: conversations first, the description and the plan behind "About". The dense
+  // panel keeps its old shape plus the loose comments tab, since it has no room for a thread view.
+  const TABS: Array<[DeliveryTab, string, number]> = dense
+    ? [
+      ['overview', copy.tabs.overview, 0],
+      ['sessions', copy.tabs.sessions, detail.sessions.length],
+      ['comments', copy.tabs.comments, detail.comments.length],
+      ['subtasks', copy.tabs.subtasks, detail.subtasks.length],
+      ['files', copy.tabs.files, detail.files.length],
+      ['activity', copy.tabs.activity, 0],
+    ]
+    : [
+      ['subtasks', copy.tabs.subtasks, detail.subtasks.length],
+      ['threads', tc.tabThreads, threadInboxCount],
+      ['sessions', copy.tabs.sessions, detail.sessions.length],
+      ['overview', tc.tabMetrics, 0],
+      ['files', copy.tabs.files, detail.files.length],
+      ['activity', copy.tabs.activity, 0],
+      ['about', tc.tabAbout, 0],
+    ]
+  const descriptionEditor = (
+    <DescriptionEditor
+      id={id}
+      task={detail.task}
+      files={detail.files}
+      lang={lang}
+      onSaved={next => run(() => editTask(id, { detail: next }))}
+    />
+  )
 
   return (
     <>
-      <div style={{
-        display: 'grid', gap: 14,
-        // Jira's split: the work on the left, the facts on the right. One column on a phone.
-        gridTemplateColumns: oneColumn ? '1fr' : 'minmax(0, 1fr) 280px',
-        alignItems: 'start',
-      }}>
-        <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
-          <DescriptionEditor
-            id={id}
-            task={detail.task}
-            files={detail.files}
-            lang={lang}
-            onSaved={next => run(() => editTask(id, { detail: next }))}
-          />
+      <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
+          {dense && descriptionEditor}
 
           {/*
-           * A TAB-MENU, not an underline row — a filled pill for the active tab (the same
-           * segmented-control shape the Chat/Terminal toggle uses elsewhere in the app), except the
-           * active fill is the brand accent rather than a neutral one: this is the ONE place on the
-           * board a person picks which part of a delivery they are looking at, so it earns the
-           * loudest state in the app's palette. The text on it is the same near-black
-           * `button(mobile, 'primary')` already uses on orange, not white — that pairing is the
-           * app's own answer to "what reads best on this orange" and a second one here would be a
-           * second answer to the same question.
+           * The session aside has no hero, so the task's header chips (status, priority, dates,
+           * links, blockers, delete) stand above its tabs. On the page they are in `TaskHero`.
+           */}
+          {dense && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <TaskChips
+                  id={id} detail={detail} lang={lang} statuses={statuses} reload={reload}
+                  onFileSession={() => setTab('subtasks')}
+                />
+              </div>
+              {onDeleted && <TaskMoreMenu id={id} task={detail.task} lang={lang} onDeleted={onDeleted} />}
+            </div>
+          )}
+
+          {/*
+           * UNDERLINE tabs (owner's choice, 2026-10-04): transparent, quiet text, and the brand
+           * accent ONLY on the active tab's bottom edge — the orange-filled bar made the page's
+           * loudest colour the one thing that never changes what you are looking at. The count is a
+           * badge, not a suffix. On a phone the row scrolls sideways and each tab is a 44px target.
            */}
           <div
             role="tablist"
             style={{
-              display: 'flex', gap: 3, padding: 3, borderRadius: 10, overflowX: 'auto',
-              background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+              display: 'flex', gap: 2, overflowX: 'auto', borderBottom: '1px solid var(--border)',
+              scrollbarWidth: 'none',
             }}
           >
             {TABS.map(([key, label, count]) => {
@@ -1292,16 +985,23 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
                 <button
                   key={key} role="tab" aria-selected={active} onClick={() => setTab(key)}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0,
-                    height: isMobile ? 44 : 32, padding: '0 12px', border: 'none', borderRadius: 8,
-                    cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5,
-                    fontWeight: active ? 700 : 500, whiteSpace: 'nowrap',
-                    background: active ? 'var(--anthropic-orange)' : 'transparent',
-                    color: active ? '#1a1008' : 'var(--text-tertiary)',
-                    transition: 'background 0.15s, color 0.15s',
+                    display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
+                    height: isMobile ? 44 : 36, padding: '0 12px', border: 'none',
+                    borderBottom: `2px solid ${active ? 'var(--anthropic-orange)' : 'transparent'}`,
+                    marginBottom: -1, background: 'transparent',
+                    cursor: 'pointer', fontFamily: 'inherit', fontSize: 13,
+                    fontWeight: active ? 600 : 500, whiteSpace: 'nowrap',
+                    color: active ? 'var(--text-primary)' : 'var(--text-tertiary)',
+                    transition: 'color 0.15s, border-color 0.15s',
                   }}
                 >
-                  {label}{count > 0 ? ` ${count}` : ''}
+                  {label}
+                  {count > 0 && (
+                    <span style={{
+                      borderRadius: 999, background: 'var(--ag-tint-3)', color: 'var(--text-secondary)',
+                      fontSize: 10.5, fontWeight: 600, padding: '1px 7px', fontVariantNumeric: 'tabular-nums',
+                    }}>{count}</span>
+                  )}
                 </button>
               )
             })}
@@ -1379,6 +1079,21 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
             </>
           )}
 
+          {tab === 'threads' && (
+            <div style={isMobile ? { margin: '0 -12px' } : undefined}>
+              <ThreadsPanel
+                id={id}
+                detail={detail}
+                lang={lang}
+                reload={reload}
+                renderBody={c => <CommentBody body={c.body} files={detail.files} />}
+                loose={<CommentsTab id={id} detail={detail} onChanged={reload} lang={lang} looseOnly />}
+              />
+            </div>
+          )}
+
+          {tab === 'about' && descriptionEditor}
+
           {tab === 'sessions' && <SessionsTab detail={detail} />}
 
           {tab === 'comments' && <CommentsTab id={id} detail={detail} onChanged={reload} lang={lang} />}
@@ -1449,91 +1164,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
               onRemove={fid => run(() => deleteFile(fid))}
             />
           )}
-        </div>
-
-        {/*
-         * The facts column — Jira's right rail, FOLDED.
-         *
-         * Seven cards all open at once made the page a scroll whose bottom half you learn to skip,
-         * and put the two controls people actually reach for (status, claim) below the fold. Plan
-         * stays open because it is what you came to change; the rest state their name and their
-         * count shut, and remember which of them you opened.
-         */}
-        <aside style={{ display: 'grid', gap: 10, minWidth: 0 }}>
-          <PlanCard
-            task={detail.task}
-            {...(detail.times ? { times: detail.times } : {})}
-            busy={busy}
-            lang={lang}
-            statuses={statuses}
-            onPatch={async patch => { await run(() => editTask(id, patch)) }}
-            onStatus={async st => {
-              if (st === 'blocked') { setBlocking(true); return }
-              setBusy(true)
-              const result = await markTask(id, st)
-              setBusy(false)
-              if (!result.ok && result.reason === 'done_needs_session') { setDoneRefusal(true); return }
-              await reload()
-            }}
-          />
-
-          <RailSection id="links" title={copy.links} badge={detail.task.links?.length ?? 0}>
-            <LinksPanel id={id} task={detail.task} onChanged={reload} bare />
-          </RailSection>
-
-          <RailSection id="blocked" title={copy.blockedBy} badge={detail.task.blockedBy?.length ?? 0}>
-            <BlockedBy id={id} task={detail.task} lang={lang} statuses={statuses} onChanged={reload} bare />
-          </RailSection>
-
-          {/*
-            * `Mark delivered` and `Mark abandoned` used to live HERE, as two buttons doing what two
-            * rows of the status chip above already did — a second place to set a status, in a
-            * panel called Actions, three sections away from the chip. They are gone: the chip is
-            * the one control, and it is at the top of this rail on every screen.
-            */}
-          {/* DELETING is offered only where the caller has somewhere to go afterwards. In the
-              session aside there is nowhere: the task this panel is a view OF would be gone,
-              and the panel would sit on a record that no longer answers. The board's own page
-              navigates back to the list, which is why it passes `onDeleted`. */}
-          {onDeleted && (
-            <RailSection id="actions" title={copy.actions}>
-              <button
-                style={{ ...button(isMobile), color: 'var(--accent-red)' }} disabled={busy}
-                onClick={() => setConfirmDelete(true)}
-              >
-                <Trash2 size={14} /> {copy.deleteDelivery}
-              </button>
-            </RailSection>
-          )}
-        </aside>
       </div>
-      {blocking && (
-        <BlockedDialog
-          titles={[detail.task.title]}
-          rows={(boardRows ?? []).filter(r => r.task.id !== id)}
-          already={detail.task.blockedBy ?? []}
-          onCancel={() => setBlocking(false)}
-          onConfirm={async ({ reason, blockedBy }) => {
-            setBlocking(false)
-            await run(() => markTask(id, 'blocked', { reason, blockedBy }))
-          }}
-        />
-      )}
-
-      {doneRefusal && (
-        <DoneNeedsSessionDialog
-          title={detail.task.title}
-          scope="task"
-          lang={lang}
-          onCancel={() => setDoneRefusal(false)}
-          onFile={() => {
-            // Every filing control this delivery owns lives on the Subtasks tab — there is no
-            // second, separate "file a session" surface here to jump to instead.
-            setDoneRefusal(false)
-            setTab('subtasks')
-          }}
-        />
-      )}
 
       {subThread && (
         <CommentThreadDialog
@@ -1545,19 +1176,6 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted }: D
           onChanged={reload}
         />
       )}
-
-      <ConfirmModal
-        open={confirmDelete}
-        title="Delete this task?"
-        message={`"${detail.task.title}" and its comments, subtasks, files and links go. The SESSIONS filed under it are kept — deleting a board entry never deletes work.`}
-        confirmLabel="Delete task"
-        cancelLabel="Keep it"
-        onCancel={() => setConfirmDelete(false)}
-        onConfirm={() => {
-          setConfirmDelete(false)
-          void run(async () => { await deleteTask(id); onDeleted?.() })
-        }}
-      />
 
       {subtaskBlocked && (
         <BlockedSubtaskResolve

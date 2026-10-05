@@ -29,7 +29,7 @@ interface Option { value: string; label: string; color: string }
 
 const WIDTH = 300
 
-export function SubtaskFilterMenu({ value, onChange, sessions, statuses, lang, label, triggerStyle }: {
+export function SubtaskFilterMenu({ value, onChange, sessions, statuses, lang, label, triggerStyle, activeTriggerStyle, noIcon }: {
   value: SubtaskFilterState
   onChange: (next: SubtaskFilterState) => void
   /** The sessions the filtered rows can carry — the assistant/model options come from what is
@@ -40,6 +40,11 @@ export function SubtaskFilterMenu({ value, onChange, sessions, statuses, lang, l
   /** The trigger's words; defaults to the plain "Filter". */
   label?: string
   triggerStyle?: React.CSSProperties
+  /** What the trigger wears while a dimension is narrowed; absent = the orange outline. The unified
+   *  view bar passes its own selected-segment style so the filter reads like the other segments. */
+  activeTriggerStyle?: React.CSSProperties
+  /** Hide the leading funnel icon (a segment of the view bar names itself in words). */
+  noIcon?: boolean
 }) {
   const isMobile = useIsMobile()
   const copy = boardCopy(lang).subtaskFilter
@@ -88,10 +93,10 @@ export function SubtaskFilterMenu({ value, onChange, sessions, statuses, lang, l
         aria-expanded={open}
         style={{
           ...triggerStyle,
-          ...(active > 0 ? {
+          ...(active > 0 ? (activeTriggerStyle ?? {
             color: 'var(--anthropic-orange)', border: '1px solid var(--anthropic-orange)',
             background: 'var(--anthropic-orange-dim)',
-          } : {}),
+          }) : {}),
         }}
         onClick={() => {
           if (open) { setOpen(false); return }
@@ -101,7 +106,7 @@ export function SubtaskFilterMenu({ value, onChange, sessions, statuses, lang, l
           setOpen(true)
         }}
       >
-        <Filter size={13} /> {label ?? copy.trigger}
+        {!noIcon && <Filter size={13} />} {label ?? copy.trigger}
         {active > 0 && (
           <span style={{
             marginLeft: 2, minWidth: 16, height: 16, padding: '0 4px', borderRadius: 8, fontSize: 10,

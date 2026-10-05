@@ -2073,7 +2073,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const slash = rest.lastIndexOf('/')
       const verb = slash === -1 ? '' : rest.slice(slash + 1)
       const known = verb === 'comments' || verb === 'subtasks' || verb === 'files'
-        || verb === 'links' || verb === 'sessions' || verb === 'claim' || verb === 'move'
+        || verb === 'links' || verb === 'sessions' || verb === 'claim' || verb === 'move' || verb === 'threads'
       const ref = known ? rest.slice(0, slash) : rest
       const mod = await import('./sessions/task-web')
 
@@ -2101,15 +2101,73 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         }
         // `subtaskId` (optional) names the subtask or GROUP the comment is left on; absent = the
         // task. A target that names nothing is refused with a sentence, never filed on the task.
+        //
+        // `session: {id, token}` is a session PROVING who it is (the agentistics MCP sends it from
+        // the pane's AGENTOP_MANAGED_ID plus a key-file HMAC, `session-proof.ts`). Unverified, it is ignored: the comment
+        // keeps its free-text `author` and the poster never becomes a thread participant.
+        const { verifySessionIdentity } = await import('./sessions/session-identity')
+        const claimed = body.session as { id?: unknown; token?: unknown } | undefined
+        const session = claimed ? await verifySessionIdentity(claimed.id, claimed.token) : null
+        const nt = body.newThread as { title?: unknown; kind?: unknown } | undefined
+        const { isCommentKind } = await import('@agentistics/core')
         const res = await mod.addComment(ref, {
           author: String(body.author ?? 'unknown'),
           body: String(body.body ?? ''),
           ...(typeof body.subtaskId === 'string' && body.subtaskId ? { subtaskId: body.subtaskId } : {}),
           ...(Array.isArray(body.attachments) ? { attachments: body.attachments } : {}),
+          ...(typeof body.threadId === 'string' && body.threadId ? { threadId: body.threadId } : {}),
+          ...(nt && typeof nt.title === 'string'
+            ? { newThread: { title: nt.title, ...(nt.kind === 'topic' || nt.kind === 'handback' || nt.kind === 'block' ? { kind: nt.kind } : {}) } }
+            : {}),
+          ...(session ? { session } : body.owner === true ? { owner: true } : {}),
+          ...(isCommentKind(body.kind) ? { kind: body.kind } : {}),
         })
-        if (res.ok) return json({ ok: true, id: res.id })
+        if (res.ok) return json({ ok: true, id: res.id, ...(res.threadId ? { threadId: res.threadId } : {}) })
         const status = res.reason === 'no_such_task' ? 404 : res.reason === 'empty' ? 400 : 422
         return json({ ok: false, reason: res.reason, message: res.message }, status)
+      }
+      if (verb === 'threads') {
+        // Agentask THREADS (`task-threads.ts`). `action` picks the verb; `threadId` names the thread
+        // for every verb but `open`. A thread is a RECORD: an ordinary comment goes through
+        // `/comments` and reaches no session. `send` is the person's EXPLICIT delivery into the
+        // sessions' own chats — refused outright when the request carries a session identity.
+        const th = await import('./sessions/task-threads')
+        const action = String(body.action ?? '')
+        const threadId = typeof body.threadId === 'string' ? body.threadId : ''
+        if (action === 'open') {
+          const kind = body.kind === 'handback' || body.kind === 'block' || body.kind === 'topic' ? body.kind : undefined
+          const res = await th.openThread(ref, {
+            title: String(body.title ?? ''), openedBy: String(body.author ?? 'owner'),
+            ...(kind ? { kind } : {}),
+            ...(typeof body.subtaskId === 'string' && body.subtaskId ? { subtaskId: body.subtaskId } : {}),
+          })
+          if (res.ok) return json({ ok: true, thread: res.thread })
+          return json({ ok: false, reason: res.reason, message: res.message }, res.reason === 'no_such_task' ? 404 : 422)
+        }
+        if (action === 'send') {
+          const { fleetLang } = await import('./sessions/fleet-web')
+          const { sanitizeCommentAttachments } = await import('@agentistics/core')
+          const { resolveAttachmentRead } = await import('./sessions/attachment-web')
+          const attachments = sanitizeCommentAttachments(body.attachments, resolveAttachmentRead)
+          const { isCommentKind } = await import('@agentistics/core')
+          const res = await th.sendFromThread(ref, threadId, {
+            body: String(body.body ?? ''), author: String(body.author ?? 'owner'),
+            ...(isCommentKind(body.kind) ? { kind: body.kind } : {}),
+            ...(attachments.length ? { attachments } : {}),
+            fromSession: body.session !== undefined,
+          }, fleetLang(url.searchParams.get('lang')))
+          if (res.ok) return json(res)
+          const status = res.reason === 'no_such_task' || res.reason === 'no_such_thread' ? 404 : res.reason === 'session_fanout' ? 403 : 400
+          return json(res, status)
+        }
+        if (action === 'resolve' || action === 'reopen' || action === 'mute' || action === 'unmute' || action === 'rename') {
+          const ok = await th.threadAction(ref, threadId, action, {
+            ...(typeof body.sessionId === 'string' ? { sessionId: body.sessionId } : {}),
+            ...(typeof body.title === 'string' ? { title: body.title } : {}),
+          })
+          return json({ ok }, ok ? 200 : 404)
+        }
+        return json({ ok: false, reason: 'unknown_action' }, 400)
       }
       if (verb === 'sessions') {
         if (typeof body.detach === 'string') {
@@ -4648,6 +4706,24 @@ if (!TEAM_CENTRAL) {
 }
 setTimeout(scheduleBackfillCheck, 120_000).unref()
 setInterval(scheduleBackfillCheck, 30 * 60_000).unref()
+// Agentask thread replies QUEUED for a session that was not running (or sat on a dialog) are typed
+// in once it can take a prompt — a reopen, a dialog answered. Never on a central (it hosts no
+// sessions) nor where the profile denies host power. One book read per tick when nothing is queued;
+// the fleet is read only when something is. See `task-threads.ts`.
+if (!TEAM_CENTRAL && CAPS.localShell) {
+  let flushing = false
+  setInterval(() => {
+    if (flushing) return
+    flushing = true
+    void (async () => {
+      const [{ flushQueuedDeliveries }, { readPreferences }] = await Promise.all([import('./sessions/task-threads'), import('./preferences')])
+      const prefs = await readPreferences().catch(() => ({} as { lang?: string }))
+      const n = await flushQueuedDeliveries((prefs as { lang?: string }).lang === 'pt' ? 'pt' : 'en')
+      if (n > 0) console.log(`[agentask] delivered ${n} queued thread repl${n === 1 ? 'y' : 'ies'}`)
+    })().catch(err => console.error('[agentask] queued thread replies:', err instanceof Error ? err.message : String(err)))
+      .finally(() => { flushing = false })
+  }, 30_000).unref()
+}
 } catch (err: unknown) {
   const { isAddressInUse, EXIT_INSTANCE_HELD } = await import('./service-exit')
   if (isAddressInUse(err)) {
