@@ -526,7 +526,15 @@ export function createSessionsPoller(o: {
         )
 
         for (const m of registry) {
-          if (m.conversationId || !HARNESS_PROCESS_LOGS[m.harness]) continue
+          if (!HARNESS_PROCESS_LOGS[m.harness]) continue
+          // A link the process log itself produced is not final: the SAME process can go on to
+          // create another conversation (agy after a model switch, a /clear, a resume), and the pane
+          // then shows answers that the old, "exact" link never will — the web chat sat on
+          // "delivered, not read" while the terminal answered. So a row linked this way keeps being
+          // asked, and a DIFFERENT id the log now names re-links it. Any other link (spawn-assigned,
+          // reopened by id) stays untouched.
+          const relink = Boolean(m.conversationId) && (m.conversationLinkVia === 'process-log' || m.conversationLinkVia === 'first-sighting')
+          if (m.conversationId && !relink) continue
           const pid = panePids?.get(m.id)
           if (!pid) continue
           // REFUSE rather than read a log another live process also has open — see the header
@@ -536,7 +544,9 @@ export function createSessionsPoller(o: {
           const linked = await linkProcessConversation({
             id: m.id, harness: m.harness, pid,
             knownLog: logByPid.get(String(pid)),
-            readProcessConversation: o.readProcessConversation,
+            readProcessConversation: relink
+              ? async (h, p, k) => { const f = await o.readProcessConversation!(h, p, k); return f && f !== m.conversationId ? f : null }
+              : o.readProcessConversation,
             recordConversation: o.recordConversation,
           })
           if (linked) procLinkWrites++
