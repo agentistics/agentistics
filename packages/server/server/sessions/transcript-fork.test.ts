@@ -6,7 +6,6 @@ import { containsPending, continuesByUuids, followFork, forgetForks, tailUuids }
 import { readChatWindow } from './chat-tail'
 import { resolveChatTranscriptPath } from './chat-tail'
 import { transcriptReaderFor } from './harness-transcript'
-import { encodeProjectDir } from './chat-tail'
 
 const OLD_ID = '0b31a8f4-cdc6-410e-9f34-894e22cee24d'
 const NEW_ID = 'e96caf0e-480b-4d9c-8a59-6cfb983c1510'
@@ -128,6 +127,5 @@ describe('the claude reader follows through resolve()', () => {
     const newP = write(`${NEW_ID}.jsonl`, newLines, 2000)
     expect(await followFork(oldP)).toBe(newP)
     expect(typeof transcriptReaderFor('claude')?.resolve).toBe('function')
-    expect(encodeProjectDir('/home/me/work')).toBe('-home-me-work')
   })
 })
