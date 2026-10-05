@@ -59,15 +59,8 @@ export function forgetChatTailPaths(): void {
   pathMemo.clear()
 }
 
-/**
- * The directory Claude Code files a cwd's transcripts under: EVERY character that is not a letter or a
- * digit becomes `-` (`/home/u/my_proj x` -> `-home-u-my-proj-x`). This used to replace only `/` and `.`,
- * so a cwd containing `_`, a space or any other character missed the direct path, fell through to the
- * scan, and a miss is remembered for 30 s — a new session in such a directory had an empty chat for the
- * first half-minute (the CI runner's `_temp` showed it: the finished turn came at ~5-7 s or not at all).
- */
-export function encodeProjectDir(cwd: string): string {
-  return cwd.replace(/[^a-zA-Z0-9]/g, '-')
+function encodeProjectDir(cwd: string): string {
+  return cwd.replace(/[/.]/g, '-')
 }
 
 async function exists(path: string): Promise<boolean> {

@@ -504,13 +504,7 @@ export function useData() {
     const probe = async () => {
       if (stopped || (typeof document !== 'undefined' && document.hidden)) return
       let answered = false
-      try {
-        const r = await fetchWithTimeout('/api/health', LIVENESS_TIMEOUT_MS)
-        // The body is never read: cancel it, so the probe does not hold one of the browser's six
-        // connections to this origin every 2 s (the live streams and the chat's own reads share them).
-        void r.body?.cancel().catch(() => {})
-        answered = r.ok
-      } catch { answered = false }
+      try { answered = (await fetchWithTimeout('/api/health', LIVENESS_TIMEOUT_MS)).ok } catch { answered = false }
       if (stopped) return
       const step = livenessStep(down, answered)
       if (step === 'mark-offline') {
