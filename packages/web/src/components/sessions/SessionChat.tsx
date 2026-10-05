@@ -55,7 +55,7 @@ import { splitImageAttachments } from '../../lib/attachmentPreview'
 import { attachmentUrl } from '../../lib/attachmentUrl'
 import { AttachmentLightbox } from './AttachmentLightbox'
 import { detectCompacting, liveTurnText, stripAnsi } from '../../lib/liveTurn'
-import { liveAnswerText } from '../../lib/liveAnswer'
+import { liveAnswerText, holdLiveAnswer, HOLD_MAX_MS, type HeldLive } from '../../lib/liveAnswer'
 import { scratchKey, sessionScratch } from '../../lib/sessionScratch'
 import { chatReadAt, firstFrameStale, refreshChat, subscribeChat } from '../../lib/chatFeed'
 import { composerMaxHeight } from '../../lib/composerHeight'
@@ -1355,7 +1355,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   }, [term.frame?.seq])
   useEffect(() => { lastSeq.current = null; setScreenMoving(false) }, [session.id])
 
-  const liveAnswer = useMemo(() => {
+  const liveRead = useMemo(() => {
     if (source || !term.frame) return null
     return liveAnswerText({
       harness: session.harness,
@@ -1365,6 +1365,22 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [term.frame, lastAssistant, working, screenMoving, source, session.harness])
+
+  // The bubble STAYS until the finished turn is on screen (`holdLiveAnswer`): the screen moves on the
+  // instant the answer is done, the transcript's turn can land seconds later, and the gap was an
+  // answer on no screen at all.
+  const heldLive = useRef<HeldLive | null>(null)
+  const [, bumpHold] = useState(0)
+  const turnCount = turns.length
+  const heldNow = holdLiveAnswer(heldLive.current, liveRead, turnCount, lastAssistant?.text, Date.now())
+  heldLive.current = heldNow.held
+  const liveAnswer = heldNow.text
+  useEffect(() => { heldLive.current = null }, [session.id])
+  useEffect(() => {
+    if (!heldNow.held || liveRead) return
+    const t = setTimeout(() => bumpHold(n => n + 1), Math.max(0, HOLD_MAX_MS - (Date.now() - heldNow.held.seenAt)) + 50)
+    return () => clearTimeout(t)
+  }, [heldNow.held, liveRead])
 
   /**
    * Whether the frame is showing Claude Code's OWN compaction screen right now — see

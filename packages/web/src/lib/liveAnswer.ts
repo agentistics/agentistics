@@ -79,3 +79,34 @@ export function liveAnswerText(input: LiveAnswerInput): string | null {
 function collapse(s: string): string {
   return s.replace(/[*_`#]/g, '').replace(/\s+/g, '')
 }
+
+/**
+ * HOLDING the live answer until the finished turn is on screen.
+ *
+ * The live bubble is read off the screen, and the screen moves on first: the caret and the next
+ * prompt are drawn the instant the answer is done, so `liveAnswerText` goes `null` — while the
+ * finished turn travels another road (the transcript, its watcher, the chat-stream) and can land
+ * seconds later on a loaded machine. Between the two the answer was ON NO SCREEN: it vanished and
+ * came back (a CI browser measured the gap at ~3.7 s, or past its 8 s window). So once an answer
+ * has been shown, it STAYS until the conversation says it has it — the committed answer starts with
+ * the held text (same comparison as `liveAnswerText`'s own `lastCommitted`), or the turn list
+ * changed (a turn landed, the person wrote something) — and never longer than `HOLD_MAX_MS` after
+ * the screen last showed it, so an interrupted answer cannot stay forever.
+ */
+export const HOLD_MAX_MS = 20_000
+
+export interface HeldLive { text: string; turns: number; seenAt: number }
+
+export function holdLiveAnswer(
+  held: HeldLive | null,
+  live: string | null,
+  turns: number,
+  lastCommitted: string | undefined,
+  now: number,
+): { held: HeldLive | null; text: string | null } {
+  if (live) { const h = { text: live, turns, seenAt: now }; return { held: h, text: live } }
+  if (!held) return { held: null, text: null }
+  const landed = !!lastCommitted && collapse(lastCommitted).startsWith(collapse(held.text))
+  if (landed || turns !== held.turns || now - held.seenAt >= HOLD_MAX_MS) return { held: null, text: null }
+  return { held, text: held.text }
+}

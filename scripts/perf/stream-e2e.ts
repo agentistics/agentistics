@@ -40,7 +40,7 @@ const vite = spawn([join(REPO, 'packages/web/node_modules/.bin/vite'), '--port',
 })
 const browser = await chromium.launch(process.env.PLAYWRIGHT_CHROMIUM ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM } : {})
 let failed = false
-const report: { round: number; timeline: { t: number; live: number; done: number }[]; growthSteps: number; firstLiveMs: number | null; doneMs: number | null; doubled: number }[] = []
+const report: { round: number; timeline: { t: number; live: number; done: number }[]; growthSteps: number; firstLiveMs: number | null; doneMs: number | null; doubled: number; gap: number }[] = []
 try {
   const post = (path: string, body: unknown) => fetch(`${s.base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
   await fetch(`${s.base}/api/preferences`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ archiveMode: 'off' }) })
@@ -83,9 +83,13 @@ try {
     // The same answer drawn twice — live AND finished — is the defect the live bubble was once
     // removed for; once the finished turn is on the page the live one must be gone.
     const doubled = timeline.filter(x => x.live > 0 && x.done > 0).length
-    report.push({ round, timeline: changes, growthSteps: steps, firstLiveMs, doneMs: doneAt, doubled })
-    log(`round ${round}: grew ${steps}x, first live ${firstLiveMs} ms, finished turn ${doneAt} ms, drawn twice in ${doubled} samples`)
-    if (steps < MIN_GROWTH_STEPS || doneAt === null || doubled > 0) failed = true
+    // The answer must never be on NO screen: once it has been seen live, every sample until the
+    // finished turn is there shows one of the two. (The live bubble is held until the turn lands.)
+    const firstLiveAt = timeline.findIndex(x => x.live > 0)
+    const gap = firstLiveAt < 0 ? 0 : timeline.slice(firstLiveAt).filter(x => x.live === 0 && x.done === 0).length
+    report.push({ round, timeline: changes, growthSteps: steps, firstLiveMs, doneMs: doneAt, doubled, gap })
+    log(`round ${round}: grew ${steps}x, first live ${firstLiveMs} ms, finished turn ${doneAt} ms, drawn twice in ${doubled} samples, empty gap in ${gap} samples`)
+    if (steps < MIN_GROWTH_STEPS || doneAt === null || doubled > 0 || gap > 0) failed = true
     await Bun.sleep(1500)
   }
   await post('/api/fleet/act', { id, action: 'kill' }).catch(() => {})
