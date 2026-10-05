@@ -50,9 +50,22 @@ export interface PersonalMeta {
    * `false` is itself an edit, which asks the gesture).
    */
   confirmEach?: boolean
+  /**
+   * "Só uso" — write-only (owner-approved 2026-10-05, VAULT.UX-R2 item 11). Sessions and providers can USE
+   * the value (a grant's env, `agentop vault ref`, a provider key) but nobody can SEE or COPY it — not the
+   * owner, not from a page, the CLI or MCP: the one value route (`reveal`) refuses it. IRREVERSIBLE: once
+   * a record is sealed so, every later version stays so (an edit cannot lift it, restoring a version from
+   * before the seal cannot either). Changing the value is "replace", which never needs to read the old one.
+   * ABSENT READS AS OFF — every existing secret stays revealable exactly as before.
+   */
+  useOnly?: boolean
 }
 /** One reading of the flag, so "absent" can never be interpreted two ways. */
 export const needsConfirm = (m: Pick<PersonalMeta, 'confirmEach'>): boolean => m.confirmEach !== false
+/** One reading of "só uso": only an explicit `true` seals; absent is an ordinary, revealable secret. */
+export const isUseOnly = (m: Pick<PersonalMeta, 'useOnly'>): boolean => m.useOnly === true
+/** Where "só uso" starts ON in the creation form (owner: API keys). Everywhere else it starts OFF. */
+export const USE_ONLY_DEFAULT: Readonly<Record<PersonalKind, boolean>> = { password: false, login: false, 'api-key': true, env: false, note: false }
 export interface PersonalValue { v: 1; fields: Record<string, string> }
 export interface PersonalGroup { v: 1; id: string; name: string; createdAt: string; updatedAt: string; version: number }
 
@@ -102,6 +115,8 @@ export interface PersonalInput {
   url?: string
   fields?: Record<string, string>
   confirmEach?: boolean
+  /** "Só uso". Only `true` is meaningful; `false` never lifts a record already sealed (personal.ts store). */
+  useOnly?: boolean
 }
 
 export type Invalid = { ok: false; field: string; reason: 'required' | 'too-long' | 'bad-kind' | 'bad-field' | 'bad-group' | 'too-many' }
@@ -153,7 +168,8 @@ export function validateInput(x: unknown, opts: { requireFields: boolean }): { o
     for (const k of main) if (!f[k]) return { ok: false, field: `fields.${k}`, reason: 'required' }
   }
   if (o.confirmEach !== undefined && typeof o.confirmEach !== 'boolean') return { ok: false, field: 'confirmEach', reason: 'bad-field' }
-  return { ok: true, value: { kind, name, groupId, tags, notes, url, ...(fields ? { fields } : {}), ...(typeof o.confirmEach === 'boolean' ? { confirmEach: o.confirmEach } : {}) } }
+  if (o.useOnly !== undefined && typeof o.useOnly !== 'boolean') return { ok: false, field: 'useOnly', reason: 'bad-field' }
+  return { ok: true, value: { kind, name, groupId, tags, notes, url, ...(fields ? { fields } : {}), ...(typeof o.confirmEach === 'boolean' ? { confirmEach: o.confirmEach } : {}), ...(o.useOnly === true ? { useOnly: true } : {}) } }
 }
 
 export function validGroupName(x: unknown): string | null {
