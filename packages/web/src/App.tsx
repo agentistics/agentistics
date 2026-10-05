@@ -10,7 +10,7 @@ import {
   GitCommit, GitCompare, Globe, Home, KeyRound, Layers,
   LogOut, Maximize2, MessageSquare, MessagesSquare, Moon, MoreHorizontal,
   PanelLeft, RefreshCw, Server, Settings, Shield, ShieldCheck,
-  SlidersHorizontal, Sparkles, Sun, Tag as TagIcon, Vault as VaultNavIcon, Target, TerminalSquare,
+  SlidersHorizontal, Sparkles, Sun, Tag as TagIcon, Target, TerminalSquare,
   TrendingUp, Trophy, Users, Wrench, X, Zap,
   ZoomIn, ClipboardList, BellOff,
 } from 'lucide-react'
@@ -52,6 +52,7 @@ import { MagnifierLayer } from './components/a11y/MagnifierLayer'
 import { HideLensesButton } from './components/a11y/HideLensesButton'
 import { MagnifierButton } from './components/a11y/MagnifierButton'
 import { NotificationBell } from './components/NotificationBell'
+import { VaultHeaderButton } from './components/vault/VaultHeaderButton'
 import { HardwareModal } from './components/HardwareModal'
 import { useNotificationStream } from './hooks/useNotificationStream'
 import { pushNotification } from './lib/notifications'
@@ -859,7 +860,6 @@ function MobileBottomNav({
     { key: 'top', label: pt ? 'Top' : 'Top', icon: Trophy, onClick: () => { closeSheet(); navigate('/top') }, active: location.pathname.startsWith('/top') },
     { key: 'tasks', label: 'Agentask', icon: ClipboardList, onClick: () => { closeSheet(); navigate('/tasks') }, active: location.pathname.startsWith('/tasks'), beta: true },
     { key: 'tags', label: 'Tags', icon: TagIcon, onClick: () => { closeSheet(); navigate('/tags') }, active: location.pathname.startsWith('/tags') },
-    ...(isCentral ? [] : [{ key: 'vault', label: pt ? 'Cofre' : 'Vault', icon: VaultNavIcon, onClick: () => { closeSheet(); navigate('/vault') }, active: location.pathname.startsWith('/vault') } as Tile]),
     { key: 'custom', label: pt ? 'Personalizado' : 'Custom', icon: Layers, onClick: () => { closeSheet(); navigate('/custom') }, active: location.pathname.startsWith('/custom') },
     { key: 'export', label: pt ? 'Exportar' : 'Export', icon: FileDown, onClick: () => { closeSheet(); navigate('/export') }, active: location.pathname.startsWith('/export') },
     // Unconditional: the page's filter mode compares two SCOPES and needs no second harness.
@@ -1215,8 +1215,7 @@ function SideNav({
     ...(isCentral ? [{ to: '/members', labelPt: 'Membros', labelEn: 'Members', icon: <Users size={17} /> }] : []),
     { to: '/tasks',     labelPt: 'Agentask',  labelEn: 'Agentask',    icon: <ClipboardList size={17} />, beta: true },
     { to: '/tags',      labelPt: 'Tags',         labelEn: 'Tags',         icon: <TagIcon size={17} /> },
-    // VAULT.PERSONAL: the person's own secrets live on THEIR machine — never on a central (its /api/vault is 404).
-    ...(isCentral ? [] : [{ to: '/vault', labelPt: 'Cofre', labelEn: 'Vault', icon: <VaultNavIcon size={17} /> }]),
+    // Cofre is NOT here: it lives in the fixed header's action group (VaultHeaderButton), owner 2026-10-04. The route stays.
     { to: '/tools',     labelPt: 'Ferramentas',  labelEn: 'Tools',        icon: <Wrench size={17} /> },
     { to: '/custom',    labelPt: 'Personalizado',labelEn: 'Custom',       icon: <Layers size={17} /> },
     // Unconditional — see the mobile tile: comparing two filter scopes needs no second harness.
@@ -3817,6 +3816,7 @@ export default function AppLayout() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         <MagnifierButton ctx={appCtx} />
         <HideLensesButton ctx={appCtx} />
+        <VaultHeaderButton lang={lang} enabled={!isCentral} buttonStyle={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }} />
         <NotificationBell lang={lang} buttonStyle={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           width: 32, height: 32, borderRadius: 8,
@@ -4210,6 +4210,7 @@ export default function AppLayout() {
         >
           <Cpu size={14} />
         </button>
+        <VaultHeaderButton lang={lang} enabled={!isCentral} buttonStyle={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }} />
         <NotificationBell lang={lang} buttonStyle={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           width: 32, height: 32, borderRadius: 8,
@@ -4660,6 +4661,7 @@ export default function AppLayout() {
               {data?.healthIssues && data.healthIssues.length > 0 && (
                 <HealthWarnings issues={data.healthIssues} lang={lang} />
               )}
+              <VaultHeaderButton lang={lang} enabled={!isCentral} buttonStyle={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }} />
               <NotificationBell lang={lang} buttonStyle={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 width: 32, height: 32, borderRadius: 8,
