@@ -245,7 +245,7 @@ function useBootWatchdog(): BootVerdict {
     const tick = () => { if (!cancelled) setVerdict(bootWatchdog(Date.now() - t0, health)) }
     const probe = () => {
       fetchWithTimeout('/api/health', 4000, { cache: 'no-store' })
-        .then(r => { void r.body?.cancel().catch(() => {}); health = r.ok ? 'ok' : 'down' })
+        .then(r => { health = r.ok ? 'ok' : 'down' })
         .catch(() => { health = 'down' })
         .finally(tick)
     }
