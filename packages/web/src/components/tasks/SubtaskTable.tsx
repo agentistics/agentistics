@@ -88,6 +88,7 @@ import { PickerMenu } from './PickerMenu'
 import { StatusChip } from './StatusChip'
 import { ViewBar, ViewSortMenu, segmentBadge, viewSegment } from './ViewBar'
 import { useBoardPref } from './boardPrefs'
+import { moveColumn } from './columnOrder'
 import { DEFAULT_SUBTASK_COLUMNS, SUBTASK_COLUMNS, type SubtaskColumnId } from './subtaskColumnDefs'
 import { subtaskColumnCell } from './subtaskColumnCell'
 import { EMPTY_SUBTASK_FILTER, filterSubtaskRows, type SubtaskFilterState } from './subtaskFilter'
@@ -401,6 +402,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
                   onSort={k => setSort(cycleSort(sort, k))}
                   title={L.sortByColumn.replace('{column}', boardCopy(p.lang).subtaskColumns[id])}
                   align={def.numeric ? 'right' : 'left'}
+                  reorder={{ scope: 'subtask-columns', id, onMove: (d, t) => setColumns(moveColumn(shownCols, d as SubtaskColumnId, t as SubtaskColumnId)) }}
                   style={{
                     ...microLabel, padding: '6px 9px', fontWeight: 600, whiteSpace: 'nowrap',
                     textAlign: def.numeric ? 'right' : 'left', ...stickyHead,
