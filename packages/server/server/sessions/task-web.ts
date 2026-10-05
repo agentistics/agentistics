@@ -1461,6 +1461,12 @@ export async function editStatus(id: string, patch: { label?: string; color?: st
   return { ok: true }
 }
 
+export async function reorderStatuses(ids: readonly string[]): Promise<boolean> {
+  const w = await loadTaskWorld(); const known = new Set(w.book.statuses.map(s => s.id))
+  if (ids.length !== known.size || ids.some(id => !known.has(id))) return false
+  await w.store.reorderStatuses(ids); return true
+}
+
 /**
  * Delete a NON-protected, UNUSED status. Refused (422, via the route) for either reason — never a
  * silent no-op — and NAMES which reason: a caller cannot fix "in use" the same way it fixes
@@ -1527,6 +1533,12 @@ export async function editType(id: string, patch: { label?: string; color?: stri
     ...(patch.color !== undefined ? { color: patch.color } : {}),
   })
   return { ok: true }
+}
+
+export async function reorderTypes(ids: readonly string[]): Promise<boolean> {
+  const w = await loadTaskWorld(); const known = new Set(w.book.types.map(t => t.id))
+  if (ids.length !== known.size || ids.some(id => !known.has(id))) return false
+  await w.store.reorderTypes(ids); return true
 }
 
 export async function deleteType(id: string): Promise<

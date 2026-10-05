@@ -55,7 +55,7 @@ export interface CentralTaskRow {
   comments: TaskComment[]
   subtasks: Subtask[]
   files: TaskFile[]
-  counts: { comments: number; subtasks: number; subtasksDone: number; files: number }
+  counts: { comments: number; subtasks: number; subtasksDone: number; subtasksInProgress?: number; files: number }
   rollup: AttemptRollup
   harnesses: string[]
   repos: string[]
@@ -186,7 +186,7 @@ export interface TaskListRow {
   /** `commentsBySubtask` is each subtask's/group's THREAD size (a group includes its members');
    *  optional because an older server does not send it — read it as "no per-row count known". */
   counts: {
-    comments: number; subtasks: number; subtasksDone: number; files: number
+    comments: number; subtasks: number; subtasksDone: number; subtasksInProgress?: number; files: number
     commentsBySubtask?: Record<string, number>
     /** Threads on the task. Optional: an older server does not send it — "not known", never 0. */
     threads?: number
@@ -1156,6 +1156,10 @@ export async function editTaskStatus(
   }
 }
 
+export async function reorderTaskStatuses(ids: string[]): Promise<boolean> {
+  try { return (await fetch('/api/tasks/statuses/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) })).ok } catch { return false }
+}
+
 /**
  * Delete a status. Refused (422) with a NAMED reason — `protected` (todo/in_progress/blocked/done,
  * regardless of usage) or `in_use` (any other status still referenced by at least one task or
@@ -1245,6 +1249,10 @@ export async function editTaskType(id: string, patch: { label?: string; color?: 
   } catch {
     return false
   }
+}
+
+export async function reorderTaskTypes(ids: string[]): Promise<boolean> {
+  try { return (await fetch('/api/tasks/types/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) })).ok } catch { return false }
 }
 
 export async function deleteTaskType(id: string): Promise<

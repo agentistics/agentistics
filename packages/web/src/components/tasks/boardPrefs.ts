@@ -69,6 +69,8 @@ export interface BoardPrefs {
   collapsed: BoardStatus[]
   /** Hide groups/columns with nothing in them (a view choice; the stored picks are untouched). */
   hideEmpty: boolean
+  /** Compose in-progress subtasks into the task progress bar. */
+  composeSubtaskProgress: boolean
   /** Which sections of the task detail's right rail are OPEN, by their stable id. */
   rail: Record<string, boolean>
 }
@@ -76,7 +78,7 @@ export interface BoardPrefs {
 /** The metrics view is the default, because "what did it cost" is the question the board answers. */
 export const DEFAULT_PREFS: BoardPrefs = {
   view: 'overview', sort: { key: 'priority', dir: 'asc' }, columnSort: {}, lanes: 'none', wip: {},
-  columns: null, subtaskColumns: null, columnWidths: {}, groups: null, groupBy: 'status', typeGroups: null, collapsed: [], hideEmpty: false, rail: {},
+  columns: null, subtaskColumns: null, columnWidths: {}, groups: null, groupBy: 'status', typeGroups: null, collapsed: [], hideEmpty: false, composeSubtaskProgress: true, rail: {},
 }
 
 /**
@@ -167,6 +169,7 @@ export function parseBoardPrefs(raw: unknown): BoardPrefs {
     typeGroups: Array.isArray(p.typeGroups) ? p.typeGroups.filter((x): x is string => typeof x === 'string') : null,
     collapsed: statuses(p.collapsed) ?? [],
     hideEmpty: p.hideEmpty === true,
+    composeSubtaskProgress: p.composeSubtaskProgress !== false,
     rail: p.rail && typeof p.rail === 'object'
       ? Object.fromEntries(Object.entries(p.rail as Record<string, unknown>)
         .filter(([, v]) => typeof v === 'boolean')) as Record<string, boolean>

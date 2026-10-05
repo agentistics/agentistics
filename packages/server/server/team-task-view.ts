@@ -27,7 +27,7 @@ export interface CentralTaskRow {
   comments: SharedTask['comments']
   subtasks: SharedTask['subtasks']
   files: SharedTask['files']
-  counts: { comments: number; subtasks: number; subtasksDone: number; files: number }
+  counts: { comments: number; subtasks: number; subtasksDone: number; subtasksInProgress?: number; files: number }
   /** Resolved through `task-rollup.ts`, over the sessions this central actually holds. */
   rollup: AttemptRollup
   harnesses: string[]
