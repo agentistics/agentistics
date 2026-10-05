@@ -42,3 +42,14 @@ describe('VaultSafe phases', () => {
     expect(renderToStaticMarkup(<VaultSafe phase="locked" />)).toContain('prefers-reduced-motion:reduce')
   })
 })
+
+import { SAFE_WIDTH_DESKTOP, SAFE_WIDTH_MOBILE } from './VaultSafe'
+describe('the big safe has a sensible size', () => {
+  const heightOf = (w: number) => (w * 150) / 140
+  test('about 120–160 px tall on a desktop and about 100 px at 390 px', () => {
+    expect(heightOf(SAFE_WIDTH_DESKTOP)).toBeGreaterThanOrEqual(120)
+    expect(heightOf(SAFE_WIDTH_DESKTOP)).toBeLessThanOrEqual(160)
+    expect(heightOf(SAFE_WIDTH_MOBILE)).toBeGreaterThanOrEqual(95)
+    expect(heightOf(SAFE_WIDTH_MOBILE)).toBeLessThanOrEqual(110)
+  })
+})

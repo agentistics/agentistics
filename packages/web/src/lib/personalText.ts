@@ -145,7 +145,8 @@ export const PERSONAL_TEXT = {
   // The FAB's quick vault (right-click / long-press on the chat button).
   fabOpen: { en: 'Open the vault', pt: 'Abrir o cofre' },
   quickTitle: { en: 'Vault', pt: 'Cofre' },
-  quickAll: { en: 'Open the Vault page', pt: 'Abrir a página do Cofre' },
+  // The quick views (Nay Cofre tab, header/FAB popover) never list every secret — the whole list lives on /vault.
+  quickAll: { en: 'See the full list of your secrets here', pt: 'Veja a listagem dos seus segredos aqui' },
   quickClose: { en: 'Close', pt: 'Fechar' },
 
 } as const satisfies Record<string, Pair>

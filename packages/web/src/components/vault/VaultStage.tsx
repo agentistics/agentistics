@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { VaultUnlock } from './VaultUnlock'
-import { VaultSafe, SAFE_OPEN_MS, type SafePhase } from './VaultSafe'
+import { VaultSafe, SAFE_OPEN_MS, SAFE_WIDTH_DESKTOP, SAFE_WIDTH_MOBILE, type SafePhase } from './VaultSafe'
 
 type Lang = 'pt' | 'en'
 
@@ -44,11 +44,12 @@ export function VaultStage({ lang, isMobile, fromOpen, onOpened }: { lang: Lang;
   return (
     <div data-vault-stage style={{
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', gap: 10,
-      minHeight: isMobile ? 'calc(100dvh - 210px)' : 'calc(100dvh - 170px)', padding: '12px 8px',
+      minHeight: isMobile ? 'calc(100dvh - 230px)' : 'calc(100dvh - 190px)', padding: '12px 8px',
     }}>
-      <VaultSafe phase={phase} {...(fromOpen ? { from: 'open' as const } : {})} width={isMobile ? 190 : 240} label={w('lockedTitle')} />
-      <div style={{ fontWeight: 700, fontSize: 19, marginTop: 6 }} role="status">{title}</div>
-      <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, maxWidth: 400 }}>{sub}</div>
+      {/* A composed block, nothing huge: the safe is ~140 px tall on a desktop, ~100 px at 390 px. */}
+      <VaultSafe phase={phase} {...(fromOpen ? { from: 'open' as const } : {})} width={isMobile ? SAFE_WIDTH_MOBILE : SAFE_WIDTH_DESKTOP} label={w('lockedTitle')} />
+      <div style={{ fontWeight: 700, fontSize: 18, marginTop: 14 }} role="status">{title}</div>
+      <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, maxWidth: 360, marginBottom: 4 }}>{sub}</div>
       {!opening && <div style={{ marginTop: 6, width: isMobile ? '100%' : undefined, maxWidth: 420 }}><VaultUnlock lang={lang} isMobile={isMobile} center onOpened={opened} onBusy={setBusy} /></div>}
     </div>
   )

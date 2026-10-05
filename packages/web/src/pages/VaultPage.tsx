@@ -343,7 +343,7 @@ export function QuickVaultBody({ lang, isMobile, onNavigate, onAsking }: { lang:
               )}
           </>
         )}
-        <button type="button" style={{ ...btn, marginTop: 14, background: 'transparent' }} onClick={() => { onNavigate?.(); navigate('/vault') }}>
+        <button type="button" data-vault-full-list style={{ ...btn, marginTop: 14, width: '100%', justifyContent: 'center', background: 'transparent', color: 'var(--anthropic-orange)', borderColor: 'var(--anthropic-orange)' }} onClick={() => { onNavigate?.(); navigate('/vault') }}>
           <VaultIcon size={14} /> {t('quickAll')}
         </button>
       {creating && (

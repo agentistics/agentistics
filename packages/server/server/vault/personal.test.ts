@@ -379,3 +379,19 @@ describe('JSON import — the same flow as .env, over a flat object', () => {
     expect(env.json.ok).toBe(true)
   })
 })
+
+describe('opening /vault while the vault is already unlocked asks nothing', () => {
+  test('the page\'s own requests (state, list, phone facts) cost no code and raise no Hello — even with presence on', async () => {
+    await presenceOn()
+    grant = undefined
+    const g0 = hello.gestures
+    const state = await http('GET', '/api/vault')
+    expect(state.json.state).toBe('open')
+    const list = await http('GET', '/api/vault/personal')
+    expect(list.status).toBe(200)
+    expect(list.json.ok).toBe(true)
+    expect(list.json.code).toBeUndefined()
+    expect((await http('GET', '/api/vault/personal/mobile')).status).toBe(200)
+    expect(hello.gestures).toBe(g0)
+  })
+})
