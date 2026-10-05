@@ -204,9 +204,12 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
             </div>
           </form>
         ) : (
-          <button style={{ ...button(isMobile), width: '100%', justifyContent: 'center' }} onClick={() => setCreating(true)}>
-            <MessageSquarePlus size={14} /> {t.newThread}
-          </button>
+          <div style={{ display: 'grid', gap: 6 }}>
+            <button style={{ ...button(isMobile), width: '100%', justifyContent: 'center' }} onClick={() => setCreating(true)}>
+              <MessageSquarePlus size={14} /> {t.newThread}
+            </button>
+            <span style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.45, textAlign: 'center' }}>{t.newThreadHint}</span>
+          </div>
         )}
       </div>
     </div>
