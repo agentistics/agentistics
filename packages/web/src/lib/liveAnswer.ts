@@ -33,14 +33,6 @@ const TOOL_CALL = /^[A-Za-z_][\w-]*\(/
 const RULE = /^[─━═╌┄┈╭╮╰╯┌┐└┘├┤│┃║]/
 /** Claude Code's spinner status line: a spinner glyph, then a verb with an ellipsis. */
 const SPINNER = /^[·✢✳✶✻✽✺⠁-⣿]\s.*…/
-/** The spinner glyph once the turn is DONE: `✻ Worked for 10s · done 8:27 AM · 1 monitor still running` has no ellipsis. */
-const STATUS_DONE = /^[✢✳✶✻✽✺*]\s+[A-Z][a-z]+(?:\s+for\s+\d|\b.*\b(?:done|still running)\b)/
-const MONITORS = /\b\d+\s+(?:monitors?|shells?|background (?:tasks?|shells?))\s+(?:still\s+)?running\b/i
-/** A collapsed tool group: `Running 1 shell command…`, `Reading 2 files…`. */
-const TOOL_GROUP = /^(?:Running|Reading|Searching|Editing|Writing|Fetching|Listing)\s+\d+\s.*…$/
-/** A collapsed tool header: `Bash cat >> /tmp/x …`. Needs the truncation mark so prose that opens with "Read" is untouched. */
-const TOOL_HEADER = /^(?:Bash|Read|Write|Edit|MultiEdit|Grep|Glob|Task|Agent|WebFetch|WebSearch|NotebookEdit|TodoWrite)\s.*…\s*$/
-const MODE_LINE = /^[⏵▶]{1,2}\s|^⏸\s/
 const CARET = /^[>❯](\s|$)/
 const HINT = /^\((?:esc|ctrl|shift|tab|enter)\b/i
 const RESULT = /^⎿/
@@ -54,7 +46,7 @@ export function liveAnswerText(input: LiveAnswerInput): string | null {
 
   const head = lines[start]!.trim().replace(BLOCK, '')
   if (TOOL_CALL.test(head)) return null
-  const kept: string[] = [head]  // continuation lines stay RAW: their indent says who wrapped them
+  const kept: string[] = [head]
   for (const line of lines.slice(start + 1)) {
     const t = line.trim()
     if (RESULT.test(t)) {
@@ -66,52 +58,15 @@ export function liveAnswerText(input: LiveAnswerInput): string | null {
     // first. A caret reached here is the person's NEXT prompt in the history — the block above it
     // is an answer already given, and the new one has not started.
     if (CARET.test(t)) return null
-    if (RULE.test(t) || SPINNER.test(t) || STATUS_DONE.test(t) || MONITORS.test(t) || TOOL_GROUP.test(t) ||
-        TOOL_HEADER.test(t) || MODE_LINE.test(t) || HINT.test(t) || BLOCK.test(t)) break
+    if (RULE.test(t) || SPINNER.test(t) || HINT.test(t) || BLOCK.test(t)) break
     // Claude indents a block's continuation by two; a raw-mode program wrapped by the pane does not.
-    kept.push(line)
+    kept.push(line.replace(/^ {1,2}/, ''))
   }
   while (kept.length > 0 && kept[kept.length - 1]!.trim() === '') kept.pop()
-  const text = unwrap(kept).trim()
+  const text = kept.join('\n').trim()
   if (text === '') return null
-  if (input.lastCommitted && sameAnswer(input.lastCommitted, text)) return null
+  if (input.lastCommitted && collapse(input.lastCommitted).startsWith(collapse(text))) return null
   return text
-}
-
-const STRUCTURAL = /^\s*(?:[-*+•]\s|\d+[.)]\s|#{1,6}\s|>|\||```)/
-
-/**
- * The pane breaks lines at ITS width; the transcript's text does not. A bubble that keeps those
- * breaks reads as a ragged poem, so lines of one paragraph are joined with a space. A blank line, a
- * list item, a heading, a quote, a table row or a fenced block keeps its own line.
- */
-function unwrap(lines: readonly string[]): string {
-  const out: string[] = []
-  let fenced = false
-  let joinable = false
-  for (const line of lines) {
-    const t = line.trim()
-    if (t.startsWith('```')) { fenced = !fenced; out.push(line.replace(/^ {1,2}/, '')); joinable = false; continue }
-    if (fenced || t === '') { out.push(line.replace(/^ {1,2}/, '')); joinable = false; continue }
-    // Only an INDENTED line is Claude's own wrapping at a word boundary; an unindented one comes
-    // from a program the pane wrapped, possibly mid-word, so its break is kept rather than guessed.
-    if (joinable && /^ {2}\S/.test(line) && !STRUCTURAL.test(line)) out[out.length - 1] += ' ' + t
-    else { out.push(line.replace(/^ {1,2}/, '')); joinable = true }
-  }
-  return out.join('\n')
-}
-
-/**
- * Is `text` (read off the screen) the answer the transcript already holds? Compared normalised, and
- * on the FIRST characters when the screen text is long: whatever the pane drew differently from the
- * markdown (a rendered list marker, a table) sits later than the opening, and a mismatch there kept
- * the live bubble beside the finished turn for the whole hold.
- */
-export function sameAnswer(committed: string, text: string): boolean {
-  const c = collapse(committed)
-  const t = collapse(text)
-  if (t === '') return false
-  return c.startsWith(t) || (t.length >= 40 && c.startsWith(t.slice(0, 40)))
 }
 
 /**
@@ -149,11 +104,9 @@ export function holdLiveAnswer(
   lastCommitted: string | undefined,
   now: number,
 ): { held: HeldLive | null; text: string | null } {
-  // The screen still shows the answer AND the finished turn is on screen: never both.
-  if (live && lastCommitted && sameAnswer(lastCommitted, live)) return { held: null, text: null }
   if (live) { const h = { text: live, turns, seenAt: now }; return { held: h, text: live } }
   if (!held) return { held: null, text: null }
-  const landed = !!lastCommitted && sameAnswer(lastCommitted, held.text)
+  const landed = !!lastCommitted && collapse(lastCommitted).startsWith(collapse(held.text))
   if (landed || turns !== held.turns || now - held.seenAt >= HOLD_MAX_MS) return { held: null, text: null }
   return { held, text: held.text }
 }
