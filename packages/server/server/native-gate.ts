@@ -23,8 +23,8 @@ export function nativeExperimentalOn(env: Record<string, string | undefined> = p
 }
 
 export const EXPERIMENTAL_SENTENCE = {
-  en: 'The native harness is experimental: turn it on in Settings → Experimental (or run `agentop experimental enable`).',
-  pt: 'O harness nativo é experimental: ligue em Configurações → Experimental (ou execute `agentop experimental enable`).',
+  en: 'The native Agentistics harness is still in development and is not available in this version.',
+  pt: 'O harness nativo do Agentistics ainda está em desenvolvimento e não está disponível nesta versão.',
 } as const
 
 export const EXPERIMENTAL_REFUSAL = { error: 'experimental', sentence: EXPERIMENTAL_SENTENCE.en, sentencePt: EXPERIMENTAL_SENTENCE.pt } as const

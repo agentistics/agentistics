@@ -137,9 +137,9 @@ describe('the engine verbs at the command line', () => {
     const cmds = [{ verb: 'code', run: async () => 0 }, { verb: 'provider', run: async () => 0 }, { verb: 'ingest', run: async () => 0 }] as never
     for (const verb of ['code', 'provider'] as const) {
       const en = resolveEngineVerb(verb, present, cmds, 'en', false)
-      expect('refuse' in en && en.refuse).toContain('agentop experimental enable')
+      expect('refuse' in en && en.refuse).toContain('not available in this version')
       const pt = resolveEngineVerb(verb, present, cmds, 'pt', false)
-      expect('refuse' in pt && pt.refuse).toContain('agentop experimental enable')
+      expect('refuse' in pt && pt.refuse).toContain('não está disponível nesta versão')
       expect('run' in resolveEngineVerb(verb, present, cmds, 'en', true)).toBe(true)
     }
     expect('run' in resolveEngineVerb('ingest', present, cmds, 'en', false)).toBe(true)
