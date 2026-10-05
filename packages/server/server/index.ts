@@ -9,7 +9,8 @@ import type { LiveProcess, LiveUnavailableReason, SessionMeta } from '@agentisti
 import { getRates } from './rates'
 import { getVersionInfo, startVersionRecheck } from './version'
 import { handleUpgradeRoute, upgradableHint } from './upgrade-web'
-import { compressResponse } from './http-compress'
+import { compressResponse, negotiateEncoding } from './http-compress'
+import { encodedBody, etagMatches, versionOf } from './data-response-cache'
 import { slimApiResponse, slimSerialized } from './data-slim'
 import { buildApiResponse, buildApiResponseForClient, buildApiResponseStream, invalidateCache, loadDataSnapshot, prepareQuickPayload, serializedData } from './data'
 import { readPreferences, writePreferences, redactPreferences, guardTeamConnectionsWipe, PreferencesLockTimeoutError, type Preferences } from './preferences'
@@ -1077,7 +1078,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(out.body, out.status)
     }
     if (url.pathname === '/api/experimental' && (req.method === 'GET' || req.method === 'PUT')) {
-      // GET: what this server booted with. PUT `{ enabled }`: Settings → Experimental's switch — it
+      // GET: what this server booted with. PUT `{ enabled }`: the switch used by the `agentop experimental` command — it
       // persists the preference and applies it to this process WITHOUT a restart (`experimental-web.ts`).
       // `capability-guard.ts` has already refused both on an exposed profile; a central answers 404.
       if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
@@ -3663,9 +3664,22 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // The build is serialized once (`serializedData`); only the live fields are added per request.
         // A central's response is scoped per principal, so it keeps the plain path.
         const live = { liveSessionIds, liveProcesses, ...(liveUnavailable ? { liveUnavailable } : {}), ...extra }
-        const body = TEAM_CENTRAL || !data.sessions
-          ? JSON.stringify({ ...(wantSlim && data.sessions ? slimApiResponse(data) : data), ...live })
-          : `${(wantSlim ? slimSerialized(unscoped) : serializedData(data)).slice(0, -1)},${JSON.stringify(live).slice(1)}`
+        if (!TEAM_CENTRAL && data.sessions) {
+          // ONE encoding of this build for every client (data-response-cache.ts): a validator the
+          // client can revalidate with, a 304 when its copy is current, and the same bytes otherwise.
+          const liveJson = JSON.stringify(live)
+          const enc = negotiateEncoding(req.headers.get('Accept-Encoding'))
+          const { etag, bytes } = encodedBody(versionOf(unscoped), liveJson, enc, wantSlim, () =>
+            `${(wantSlim ? slimSerialized(unscoped) : serializedData(data)).slice(0, -1)},${liveJson.slice(1)}`)
+          const baseHeaders = { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', ETag: etag, Vary: [CORS_HEADERS['Vary' as keyof typeof CORS_HEADERS], 'Accept-Encoding'].filter(Boolean).join(', ') }
+          if (etagMatches(req.headers.get('If-None-Match'), etag)) return new Response(null, { status: 304, headers: baseHeaders })
+          const out = await bytes
+          return new Response(out as BodyInit, {
+            status: 200,
+            headers: { ...baseHeaders, ...(enc ? { 'Content-Encoding': enc } : {}), 'Content-Length': String(out.byteLength) },
+          })
+        }
+        const body = JSON.stringify({ ...(wantSlim && data.sessions ? slimApiResponse(data) : data), ...live })
         return new Response(body, {
           status: 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },

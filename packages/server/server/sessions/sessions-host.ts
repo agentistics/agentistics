@@ -526,7 +526,15 @@ export function createSessionsPoller(o: {
         )
 
         for (const m of registry) {
-          if (m.conversationId || !HARNESS_PROCESS_LOGS[m.harness]) continue
+          if (!HARNESS_PROCESS_LOGS[m.harness]) continue
+          // A link the process log itself produced is not final: the SAME process can go on to
+          // create another conversation (agy after a model switch, a /clear, a resume), and the pane
+          // then shows answers that the old, "exact" link never will — the web chat sat on
+          // "delivered, not read" while the terminal answered. So a row linked this way keeps being
+          // asked, and a DIFFERENT id the log now names re-links it. Any other link (spawn-assigned,
+          // reopened by id) stays untouched.
+          const relink = Boolean(m.conversationId) && (m.conversationLinkVia === 'process-log' || m.conversationLinkVia === 'first-sighting')
+          if (m.conversationId && !relink) continue
           const pid = panePids?.get(m.id)
           if (!pid) continue
           // REFUSE rather than read a log another live process also has open — see the header
@@ -536,7 +544,9 @@ export function createSessionsPoller(o: {
           const linked = await linkProcessConversation({
             id: m.id, harness: m.harness, pid,
             knownLog: logByPid.get(String(pid)),
-            readProcessConversation: o.readProcessConversation,
+            readProcessConversation: relink
+              ? async (h, p, k) => { const f = await o.readProcessConversation!(h, p, k); return f && f !== m.conversationId ? f : null }
+              : o.readProcessConversation,
             recordConversation: o.recordConversation,
           })
           if (linked) procLinkWrites++
@@ -650,7 +660,12 @@ export function createSessionsPoller(o: {
           const own = harnessSessions.byManagedId.get(r.id)
           const harness = r.managed?.harness
           const cwd = r.managed?.cwd
-          const liveProc = processes.find(
+          // A harness record whose process is KNOWN dead (`alive === false`) names no pid worth
+          // sampling: hundreds of them pile up (the harness never removes a dead process's file), and
+          // each cost two failed /proc reads on every poll.
+          const ownPid = own && own.alive !== false ? own.pid : undefined
+          const paneOwn = panePids?.get(r.id)
+          const liveProc = ownPid !== undefined || paneOwn !== undefined ? undefined : processes.find(
             p =>
               p.sessionId === r.id ||
               (Boolean(harness) &&
@@ -658,7 +673,7 @@ export function createSessionsPoller(o: {
                 p.harness === harness &&
                 (p.cwd === cwd || p.cwd.startsWith(cwd! + '/') || cwd!.startsWith(p.cwd + '/'))),
           )
-          const pid = own?.pid ?? panePids?.get(r.id) ?? liveProc?.pid
+          const pid = ownPid ?? paneOwn ?? liveProc?.pid
           if (pid && Number.isFinite(pid) && pid > 0) {
             const currStat = await readProcStat(pid, nowMs)
             const rssBytes = await readProcRss(pid)

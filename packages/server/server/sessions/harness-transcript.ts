@@ -35,6 +35,7 @@ import { parseKimiChat } from './kimi-chat'
 import type { ChatTurn } from './chat-turn'
 import { readChatWindow, readRecentChatTurns, resolveChatTranscriptPath } from './chat-tail'
 import { readTailWindow } from './transcript-window'
+import { followFork } from './transcript-fork'
 import { createTranscriptPathMemo, resolveMemoizedPath } from './transcript-path-memo'
 
 /** Everything a reader is told about the session whose conversation is wanted. */
@@ -43,6 +44,8 @@ export interface TranscriptRef {
   conversationId: string
   /** The session's working directory. Some harnesses key their store on it; agy does not. */
   cwd?: string
+  /** Prompts this session was sent that may not be in the linked file yet — the proof a forked file is ours. */
+  pending?: string[]
 }
 
 /**
@@ -329,9 +332,15 @@ const KIMI: HarnessTranscript = {
 }
 
 const CLAUDE: HarnessTranscript = {
-  resolve: ref => (ref.cwd === undefined
-    ? Promise.resolve(null)
-    : resolveChatTranscriptPath(ref.cwd, ref.conversationId)),
+  // The linked file, then wherever the conversation went on from it (`/login`, `/resume` write a NEW
+  // file in the same directory while the process stays) — see `transcript-fork.ts`. Other harnesses
+  // are not listed: nobody has measured how their transcripts fork, and a guessed rule would link
+  // one session to another's file.
+  resolve: async ref => {
+    if (ref.cwd === undefined) return null
+    const linked = await resolveChatTranscriptPath(ref.cwd, ref.conversationId)
+    return linked ? followFork(linked, ref.pending ? { pending: ref.pending } : {}) : null
+  },
   read: (path, max) => readChatWindow(path, max),
   readRecent: (path, max) => readRecentChatTurns(path, max),
 }

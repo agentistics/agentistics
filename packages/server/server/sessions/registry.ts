@@ -147,6 +147,15 @@ function sanitize(raw: unknown): ManagedSession | null {
       : {}),
     // A number, and finite: this is a hand-editable file, and `lastSeenMs: "yesterday"` reaching
     // `crash-group.ts` would put a NaN comparison in charge of which sessions get reopened.
+    // THE NAME A SESSION WAS RENAMED TO. Missing here, it was written by `recordHarnessName` and read
+    // back as absent, so the poller saw "name changed" on EVERY poll and rewrote the registry again —
+    // a locked read-modify-write of the whole file per renamed session (101 of them x ~11 ms = 1.1 s on
+    // a real machine), which is most of why `/api/fleet` took ~2 s, and the persisted title never
+    // outlived its process either. The same silent drop `conversationId` and `subtaskId` suffered.
+    ...(typeof s.harnessName === 'string' && s.harnessName ? { harnessName: s.harnessName } : {}),
+    ...(typeof s.harnessNameSince === 'number' && Number.isFinite(s.harnessNameSince)
+      ? { harnessNameSince: s.harnessNameSince }
+      : {}),
     ...(typeof s.lastSeenMs === 'number' && Number.isFinite(s.lastSeenMs)
       ? { lastSeenMs: s.lastSeenMs }
       : {}),
