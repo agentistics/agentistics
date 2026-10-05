@@ -14,7 +14,7 @@
  */
 
 import { useState } from 'react'
-import { Link2, MoreHorizontal, Plus, Trash2, XCircle } from 'lucide-react'
+import { Link2, MoreHorizontal, Pencil, Plus, Trash2, XCircle } from 'lucide-react'
 import { PRIORITY_ORDER, type TaskPriorityId, type TaskStatusDef } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { Select, ConfirmModal } from '../../pages/settings/primitives'
@@ -351,11 +351,13 @@ export function TaskChips({ id, detail, lang, statuses, reload, onFileSession, c
 }
 
 /** The ⋯ at the header's right: today only Delete, behind the confirmation it always had. */
-export function TaskMoreMenu({ id, task, lang, onDeleted }: {
+export function TaskMoreMenu({ id, task, lang, onDeleted, onRename }: {
   id: string
   task: TaskRecord
   lang: Lang
   onDeleted: () => void
+  /** Start renaming in place (the page's heading). Absent = no Rename row. */
+  onRename?: () => void
 }) {
   const isMobile = useIsMobile()
   const h = boardCopy(lang).header
@@ -373,11 +375,19 @@ export function TaskMoreMenu({ id, task, lang, onDeleted }: {
           background: 'var(--ag-tint-2)',
         }}
         render={close => (
-          <button
-            disabled={busy}
-            onClick={() => { close(); setConfirm(true) }}
-            style={rowButtonStyle(isMobile, true)}
-          ><Trash2 size={13} /> {h.deleteTask}</button>
+          <>
+            {onRename && (
+              <button
+                onClick={() => { close(); onRename() }}
+                style={rowButtonStyle(isMobile, false)}
+              ><Pencil size={13} /> {h.renameTask}</button>
+            )}
+            <button
+              disabled={busy}
+              onClick={() => { close(); setConfirm(true) }}
+              style={rowButtonStyle(isMobile, true)}
+            ><Trash2 size={13} /> {h.deleteTask}</button>
+          </>
         )}
       ><MoreHorizontal size={15} /></PanelMenu>
       <ConfirmModal
