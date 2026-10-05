@@ -650,7 +650,12 @@ export function createSessionsPoller(o: {
           const own = harnessSessions.byManagedId.get(r.id)
           const harness = r.managed?.harness
           const cwd = r.managed?.cwd
-          const liveProc = processes.find(
+          // A harness record whose process is KNOWN dead (`alive === false`) names no pid worth
+          // sampling: hundreds of them pile up (the harness never removes a dead process's file), and
+          // each cost two failed /proc reads on every poll.
+          const ownPid = own && own.alive !== false ? own.pid : undefined
+          const paneOwn = panePids?.get(r.id)
+          const liveProc = ownPid !== undefined || paneOwn !== undefined ? undefined : processes.find(
             p =>
               p.sessionId === r.id ||
               (Boolean(harness) &&
@@ -658,7 +663,7 @@ export function createSessionsPoller(o: {
                 p.harness === harness &&
                 (p.cwd === cwd || p.cwd.startsWith(cwd! + '/') || cwd!.startsWith(p.cwd + '/'))),
           )
-          const pid = own?.pid ?? panePids?.get(r.id) ?? liveProc?.pid
+          const pid = ownPid ?? paneOwn ?? liveProc?.pid
           if (pid && Number.isFinite(pid) && pid > 0) {
             const currStat = await readProcStat(pid, nowMs)
             const rssBytes = await readProcRss(pid)
