@@ -77,7 +77,7 @@ export interface ApiResponse {
    *  the previous run's full build read back from disk. The web app renders it and keeps asking
    *  until an answer arrives without this flag. A full build never carries it. */
   partial?: boolean
-  partialReason?: 'quick' | 'snapshot'
+  partialReason?: 'quick' | 'snapshot' | 'slim'
   /** Project paths whose git facts did not answer within the build's soft deadline. Their walk
    *  keeps running and lands in git.ts's cache; a rebuild follows when it does. */
   deferredRepos?: string[]

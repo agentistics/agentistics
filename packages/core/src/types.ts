@@ -805,7 +805,7 @@ export interface AppData {
    *  previous run's full data read back from disk. Render it, and keep asking until an answer
    *  arrives without this flag. Absent on every full answer. */
   partial?: boolean
-  partialReason?: 'quick' | 'snapshot'
+  partialReason?: 'quick' | 'snapshot' | 'slim'
   /** Project paths whose git facts were slower than the build's soft deadline; their numbers follow
    *  in a later build. Absent when every project answered in time. */
   deferredRepos?: string[]

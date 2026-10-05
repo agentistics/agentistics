@@ -6,7 +6,7 @@ import { subDays, isAfter, isBefore, parseISO, format, differenceInCalendarDays,
 import { makeTagFilter, type TagDef } from '../lib/tagMatch'
 import { subscribeEvent } from '../lib/eventStream'
 import { isUsableDataCache } from '../lib/dataCache'
-import { acceptPayload, classifyLoadError, DATA_TIMEOUT_MS, fetchWithTimeout, LIVENESS_MS, LIVENESS_TIMEOUT_MS, livenessStep, partialPollMs, retryDelayMs, type LoadError, type StartupStripState } from '../lib/startupLoad'
+import { acceptPayload, classifyLoadError, DATA_TIMEOUT_MS, fetchWithTimeout, LIVENESS_MS, LIVENESS_TIMEOUT_MS, livenessStep, partialPollMs, retryDelayMs, dataUrl, SLIM_FOLLOWUP_MS, type LoadError, type StartupStripState } from '../lib/startupLoad'
 import { cacheFiguresOf } from '../lib/cacheFigures'
 import { useNativeVisible } from './useEngineCaps'
 
@@ -428,7 +428,7 @@ export function useData() {
   const refresh = useCallback(async () => {
     try {
       let res: Response
-      try { res = await fetchWithTimeout('/api/data?partial=1', DATA_TIMEOUT_MS) } catch (err) { throw classifyLoadError(err) }
+      try { res = await fetchWithTimeout(dataUrl(dataRef.current !== null), DATA_TIMEOUT_MS) } catch (err) { throw classifyLoadError(err) }
       if (!res.ok) throw classifyLoadError(null, res.status)
       let fresh: unknown
       try { fresh = await res.json() } catch (err) { throw classifyLoadError(err) }
@@ -443,7 +443,7 @@ export function useData() {
       pollRef.current.failures = 0
       if (next.partial) {
         openProgress()
-        schedule(partialPollMs(pollRef.current.partial++))
+        schedule(next.partialReason === 'slim' ? SLIM_FOLLOWUP_MS : partialPollMs(pollRef.current.partial++))
       } else {
         pollRef.current.partial = 0
         writeDataCache(next)
