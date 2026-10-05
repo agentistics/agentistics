@@ -220,6 +220,7 @@ export interface BoardCopy {
     noBlockers: string
     openRows: string
     deleteTask: string
+    renameTask: string
     pasteLink: string
     pickTask: string
     searchTasks: string
@@ -472,6 +473,7 @@ const EN: BoardCopy = {
     noBlockers: 'Nothing is blocking this.',
     openRows: '{n} open',
     deleteTask: 'Delete this task',
+    renameTask: 'Rename',
     pasteLink: 'Paste a PR or doc URL, then Enter',
     pickTask: 'Pick a task…',
     searchTasks: 'Search…',
@@ -738,6 +740,7 @@ const PT: BoardCopy = {
     noBlockers: 'Nada está bloqueando esta tarefa.',
     openRows: '{n} em aberto',
     deleteTask: 'Excluir esta tarefa',
+    renameTask: 'Renomear',
     pasteLink: 'Cole a URL de um PR ou documento e tecle Enter',
     pickTask: 'Escolher uma tarefa…',
     searchTasks: 'Buscar…',

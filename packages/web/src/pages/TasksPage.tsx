@@ -507,6 +507,7 @@ function TaskList() {
           onStatus={(ref, status) => void toStatus([ref], status)}
           onPriority={async (ref, priority) => { await editTask(ref, { priority }); await reload() }}
           onType={async (ref, type) => { await editTask(ref, { type }); await reload() }}
+          onRename={async (ref, title) => { await editTask(ref, { title, actor: 'you' }); await reload() }}
           onCreate={async (title, status, type) => {
             const made = await createTask(title, undefined, type)
             // Created straight into the group it was typed in — the "+ Add" row of a status column
