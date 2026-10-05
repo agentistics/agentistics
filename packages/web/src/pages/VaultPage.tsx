@@ -1,3 +1,4 @@
+import { AgentisticsLoader } from '../components/AgentisticsLoader'
 /**
  * /vault — VAULT.PERSONAL (spec `2026-10-03-vault-personal.md`). The person's OWN secrets: a paginated
  * list with a reactive search over METADATA, groups, a trash, versions, a `.env` import, and a reveal
@@ -11,7 +12,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
-import { Copy, Eye, EyeOff, FileUp, FolderPlus, History, KeyRound, Loader2, Pencil, Plus, RotateCcw, Search, Trash2, X } from 'lucide-react'
+import { Copy, Eye, EyeOff, FileUp, FolderPlus, History, KeyRound, Pencil, Plus, RotateCcw, Search, Trash2, X } from 'lucide-react'
 import { VaultGlyph as VaultIcon } from '../components/vault/VaultGlyph'
 import { Checkbox } from './settings/primitives'
 import type { AppContext } from '../lib/app-context'
@@ -131,7 +132,7 @@ export default function VaultPage() {
     </div>
   )
 
-  if (state.kind === 'loading') return <div style={pageWrap}>{header}<div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}><Loader2 size={14} className="ag-spin" /></div></div>
+  if (state.kind === 'loading') return <div style={pageWrap}>{header}<div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}><AgentisticsLoader size={14} /></div></div>
   if (state.kind === 'failed') return <div style={pageWrap}>{header}<Err text={t('network')} /></div>
   if (state.kind === 'locked') {
     return (
@@ -189,7 +190,7 @@ export default function VaultPage() {
       </div>
       {filter.trash && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 10 }}>{t('trashNote')}</div>}
 
-      {busyHello && <div role="status" aria-live="polite" style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600, marginBottom: 10 }}><Loader2 size={14} className="ag-spin" /> {t('confirmHello')}</div>}
+      {busyHello && <div role="status" aria-live="polite" style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600, marginBottom: 10 }}><AgentisticsLoader size={14} /> {t('confirmHello')}</div>}
       {toast && <div role="status" style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 10 }}>{toast}</div>}
 
       {rows.length === 0 ? (
@@ -307,7 +308,7 @@ export function QuickVaultBody({ lang, isMobile, onNavigate, onAsking }: { lang:
   }
   return (
     <>
-        {state.kind === 'loading' && <Loader2 size={14} className="ag-spin" />}
+        {state.kind === 'loading' && <AgentisticsLoader size={14} />}
         {state.kind === 'failed' && <Err text={t('network')} />}
         {state.kind === 'locked' && <LockedVaultInline lang={lang} isMobile={isMobile} onOpened={() => { void load() }} />}
         {state.kind === 'code' && (
@@ -325,7 +326,7 @@ export function QuickVaultBody({ lang, isMobile, onNavigate, onAsking }: { lang:
                 style={{ ...input, marginBottom: 0, paddingLeft: 30, letterSpacing: 'normal', width: '100%', boxSizing: 'border-box', minHeight: isMobile ? 44 : undefined }} />
             </label>
             <button type="button" data-quick-new style={{ ...btn, ...primaryBtn, marginBottom: 10 }} onClick={() => setCreating(true)}><Plus size={14} /> {t('new')}</button>
-            {busyHello && <div role="status" aria-live="polite" style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600, marginBottom: 10 }}><Loader2 size={14} className="ag-spin" /> {t('confirmHello')}</div>}
+            {busyHello && <div role="status" aria-live="polite" style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600, marginBottom: 10 }}><AgentisticsLoader size={14} /> {t('confirmHello')}</div>}
             {toast && <div role="status" style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 10 }}>{toast}</div>}
             {shown.length === 0
               ? <div style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '12px 0' }}>{items.filter(i => !i.deletedAt).length === 0 ? t('empty') : t('noMatch')}</div>
@@ -562,7 +563,7 @@ function VersionsDialog({ lang, isMobile, item, gated, onClose, onRestored }: { 
   return (
     <Sheet isMobile={isMobile} title={t('versionsTitle', { name: item.name })} onClose={onClose}>
       <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10, lineHeight: 1.6 }}>{t('versionsNote')}</div>
-      {!list && !error && <Loader2 size={14} className="ag-spin" />}
+      {!list && !error && <AgentisticsLoader size={14} />}
       {list?.map(v => (
         <div key={v.version} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}>
           <strong style={{ fontSize: 13 }}>{t('version', { n: v.version })}</strong>

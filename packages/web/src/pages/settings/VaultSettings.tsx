@@ -1,3 +1,4 @@
+import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 /**
  * Settings → Vault (SECRETS.4 §7.1). What is sealed on this machine and in what state — METADATA ONLY —
  * plus the vault's own controls: unlock (a gesture, then a code), the authenticator, presence, the
@@ -12,7 +13,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { FingerprintPattern, KeyRound, List, Loader2, Lock, LockOpen, Printer, ShieldCheck, Smartphone, Timer, Vault } from 'lucide-react'
+import { FingerprintPattern, KeyRound, List, Lock, LockOpen, Printer, ShieldCheck, Smartphone, Timer, Vault } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { SectionHeader, Divider, PrefRow, StatusDot } from './primitives'
@@ -792,7 +793,7 @@ function EnrolWizard({ lang, isMobile, initial, steps, onClose, fixedKind, onAct
   const enrolGestures = view.gestures?.enroll ?? 2
   const gestureLine = gestureNow && (
     <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 10 }}>
-      <Loader2 size={14} className="ag-spin" /> {vtf('wiz_gesture_progress', lang, { i: gestureNow.i, n: gestureNow.n })}
+      <AgentisticsLoader size={14} /> {vtf('wiz_gesture_progress', lang, { i: gestureNow.i, n: gestureNow.n })}
     </div>
   )
 

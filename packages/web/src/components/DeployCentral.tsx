@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Server, Copy, CheckCheck, AlertTriangle, Terminal, RefreshCw } from 'lucide-react'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { AgentisticsLoader } from './AgentisticsLoader'
 
 // Types
 
@@ -286,7 +287,7 @@ export function DeployCentral({ pt }: { pt: boolean }) {
           marginBottom: result || error ? 16 : 0,
         }}
       >
-        <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+        {loading ? <AgentisticsLoader size={13} /> : <RefreshCw size={13} />}
         {loading
           ? (pt ? 'Gerando…' : 'Generating…')
           : result
@@ -408,10 +409,6 @@ export function DeployCentral({ pt }: { pt: boolean }) {
         </div>
         )
       })()}
-
-      <style>{`
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      `}</style>
     </div>
   )
 }

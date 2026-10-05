@@ -1,5 +1,5 @@
+import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 import React, { useEffect, useRef, useState } from 'react'
-import { Loader2 } from 'lucide-react'
 import { COPY } from './copy'
 
 export interface ProbedIdentity {
@@ -78,7 +78,7 @@ export function ConnectionIdentity({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
       {loading && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-tertiary)' }}>
-          <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+          <AgentisticsLoader size={12} />
           {COPY.checking[lang]}
         </div>
       )}
@@ -115,7 +115,6 @@ export function ConnectionIdentity({
           </button>
         </div>
       )}
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }

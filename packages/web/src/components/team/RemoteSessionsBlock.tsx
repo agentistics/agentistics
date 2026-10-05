@@ -1,3 +1,4 @@
+import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 /**
  * RemoteSessionsBlock.tsx — the connection card's "let this central manage my sessions" block.
  *
@@ -11,7 +12,7 @@
  */
 
 import { useState } from 'react'
-import { Loader2, MonitorSmartphone, ShieldCheck, Terminal } from 'lucide-react'
+import { MonitorSmartphone, ShieldCheck, Terminal } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { ToggleSwitch } from '../ToggleSwitch'
 import { remotePanelView, consentPatchFor } from './remoteSessionsState'
@@ -339,7 +340,7 @@ function SwitchRow({ icon, label, help, on, busy, disabled, isMobile, onToggle }
       opacity: disabled ? 0.55 : 1,
     }}>
       <span style={{ display: 'flex', alignItems: 'center', flexShrink: 0, marginTop: 1, color: on ? 'var(--accent-green)' : 'var(--text-secondary)' }}>
-        {busy ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : icon}
+        {busy ? <AgentisticsLoader size={13} /> : icon}
       </span>
       <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
         <span style={{ fontSize: 12, fontWeight: 600 }}>{label}</span>

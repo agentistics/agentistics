@@ -1,3 +1,4 @@
+import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 /**
  * ShellBand — a real shell, in the selected session's own folder, docked as the LAST band of the
  * session panel.
@@ -41,8 +42,7 @@
 
 import { Suspense, lazy, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import {
-  ChevronLeft, Loader2,
-  RotateCcw, TerminalSquare, Trash2, X,
+  ChevronLeft, RotateCcw, TerminalSquare, Trash2, X,
 } from 'lucide-react'
 import { useDocumentVisible } from '../../hooks/useDocumentVisible'
 import { useElementWidth } from '../../hooks/useElementWidth'
@@ -1395,7 +1395,7 @@ export function ShellBand({
           />
         )}
         {panelBar}
-        {busy && <Loader2 size={13} className="ag-spin" style={{ color: 'var(--text-tertiary)' }} />}
+        {busy && <AgentisticsLoader size={13} style={{ color: 'var(--text-tertiary)' }} />}
         <span style={{ flex: 1 }} />
         <ShellCloseStatus sessionId={sessionId} lang={lang} />
         <PanelFixedControls
