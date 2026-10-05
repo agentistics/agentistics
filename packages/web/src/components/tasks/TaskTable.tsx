@@ -644,6 +644,9 @@ export interface TaskTableProps {
   /** Set a task's type; an empty string clears it. */
   onType?: (ref: string, type: string) => void
   onCreate: (title: string, status: TaskStatus, type?: string) => void
+  /** When set, "+ Add" opens the create form (title, type, status, description) with the group's status and
+   *  type preselected, instead of the one-line inline input. */
+  onRequestCreate?: (init: { status: string; type?: string }) => void
   onExpand: (id: string) => void
   onAddSubtask: (ref: string, title: string) => void
   /** Returns the write's outcome — the group-forming gestures (§F.1) need it to show
@@ -1410,7 +1413,7 @@ export function TaskTable(p: TaskTableProps) {
                     <tr style={{ borderTop: '1px solid var(--border)' }}>
                       <td style={{ ...cellBox }} />
                       <td colSpan={cols.length + 1} style={{ ...cellBox }}>
-                        {adding === g.key ? (
+                        {adding === g.key && !p.onRequestCreate ? (
                           <input
                             autoFocus value={draft} placeholder="Task name, then Enter"
                             onChange={e => setDraft(e.target.value)}
@@ -1430,7 +1433,10 @@ export function TaskTable(p: TaskTableProps) {
                           />
                         ) : (
                           <button
-                            onClick={() => { setAdding(g.key); setDraft('') }}
+                            onClick={() => {
+                              if (p.onRequestCreate) { p.onRequestCreate({ status: g.createStatus, ...(g.createType ? { type: g.createType } : {}) }); return }
+                              setAdding(g.key); setDraft('')
+                            }}
                             style={{
                               background: 'none', border: 'none', cursor: 'pointer', padding: 0,
                               color: 'var(--text-tertiary)', fontSize: 12,
