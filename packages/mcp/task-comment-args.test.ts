@@ -25,3 +25,21 @@ describe("agentistics_task_comment → REST", () => {
     expect("attachments" in taskCommentRequest({ ref: "t", body: "x", attachments: [] }).payload).toBe(false);
   });
 });
+
+describe('threads and session identity', () => {
+  test('threadId posts into a thread; threadTitle opens one (handback by default)', () => {
+    expect(taskCommentRequest({ ref: 't', body: 'x', threadId: 'th-1' }).payload.threadId).toBe('th-1')
+    expect(taskCommentRequest({ ref: 't', body: 'x', threadTitle: 'Release' }).payload.newThread)
+      .toEqual({ title: 'Release', kind: 'handback' })
+    expect(taskCommentRequest({ ref: 't', body: 'x', threadTitle: 'B', threadKind: 'block' }).payload.newThread)
+      .toEqual({ title: 'B', kind: 'block' })
+    // A kind a session may not use is not forwarded as such — the default applies, the server decides.
+    expect(taskCommentRequest({ ref: 't', body: 'x', threadTitle: 'T', threadKind: 'topic' }).payload.newThread)
+      .toEqual({ title: 'T', kind: 'handback' })
+  })
+  test('the session proof is forwarded as given, and only when there is one', () => {
+    const proof = { id: 's1', token: 'a'.repeat(64) }
+    expect(taskCommentRequest({ ref: 't', body: 'x' }, proof).payload.session).toEqual(proof)
+    expect(taskCommentRequest({ ref: 't', body: 'x' }).payload.session).toBeUndefined()
+  })
+})
