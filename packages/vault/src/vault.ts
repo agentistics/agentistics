@@ -50,7 +50,7 @@ export interface VaultJson {
   stepup?: { enrolledAt: string; digits: 6; period: 30 }
   /** SECRETS.4 §5.1: the human scope's idle lock, in minutes (5–480). Absent = the default 30. v2 only. */
   autoLock?: { minutes: number }
-  /** Owner decision 2026-10-02: what an unlock asks besides the gesture (unlock-policy.ts). Absent = per day, 12 h. v2 only. */
+  /** Owner decision 2026-10-02: what an unlock asks besides the gesture (unlock-policy.ts). Absent = per day, 24 h. v2 only. */
   unlockPolicy?: UnlockPolicy
   /** SECRETS.4 §7.4: the owner's machine — presence cannot be turned off without the recovery key. */
   requirePresence?: true

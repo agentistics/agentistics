@@ -454,7 +454,8 @@ describe('§5.1 / §12.5 auto-lock', () => {
 
 // ── the unlock policy (owner decision 2026-10-02): always / hello-only / daily (the default) ─────
 
-import { autoLockRemainingMs, extendAutoLock, lockVault, unlockWindowAnchor } from './service'
+import { autoLockRemainingMs, extendAutoLock, lockVault, unlockWindowAnchor, unlockWindowSettled, UNLOCK_WINDOW_FILE } from './service'
+import { writeFileSync } from 'node:fs'
 import { setUnlockPolicy, unlockPolicyView } from './gate'
 
 const H = 3_600_000
@@ -468,11 +469,11 @@ async function coldUnlock(): Promise<void> {
 const autoLock = () => lockVault('auto-lock')
 
 describe('unlock policy — per day (the DEFAULT): code on the first unlock, Hello alone inside the window', () => {
-  test('absent from vault.json reads as daily / 12 h, and the first unlock after start owes the code', async () => {
+  test('absent from vault.json reads as daily / 24 h, and the first unlock after start owes the code', async () => {
     await ownerMachine()
     restart()
     expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.unlockPolicy).toBeUndefined()
-    expect(unlockPolicyView(null)).toMatchObject({ mode: 'daily', hours: 12, chosen: false, codeNextUnlock: true })
+    expect(unlockPolicyView(null)).toMatchObject({ mode: 'daily', hours: 24, chosen: false, codeNextUnlock: true })
     await coldUnlock()
     expect(unlockWindowAnchor()).not.toBeNull()
   })
@@ -491,17 +492,45 @@ describe('unlock policy — per day (the DEFAULT): code on the first unlock, Hel
     await ownerMachine()
     restart()
     await coldUnlock()
-    autoLock(); T += 11 * H
+    autoLock(); T += 23 * H
     expect(await unlockWithGesture()).toMatchObject({ state: 'open' }) // Hello alone, does NOT move the anchor
-    autoLock(); T += 1 * H + 1_000                                     // 12 h after the code unlock
+    autoLock(); T += 1 * H + 1_000                                     // 24 h after the code unlock
     expect(await unlockWithGesture()).toMatchObject({ state: 'pending-stepup' })
   })
-  test('a reboot / service restart drops the window: the code again', async () => {
+  test('VAULT.UX-R2: a MANUAL lock counts the same as an auto-lock — Hello alone inside 24 h, the code at 24 h', async () => {
     await ownerMachine()
     restart()
     await coldUnlock()
+    lockVault('user'); T += 5 * H
+    expect(await unlockWithGesture()).toMatchObject({ state: 'open' })
+    lockVault('user'); T += 18 * H + 59 * 60_000                       // 23 h 59 min after the code
+    expect(await unlockWithGesture()).toMatchObject({ state: 'open' })
+    lockVault('user'); T += 60_000                                      // exactly 24 h
+    expect(await unlockWithGesture()).toMatchObject({ state: 'pending-stepup' })
+  })
+  test('VAULT.UX-R2: the window SURVIVES a service restart (it is per machine, in the vault directory)', async () => {
+    await ownerMachine()
+    restart()
+    await coldUnlock()
+    await unlockWindowSettled()
+    expect(existsSync(join(vaultDir(), UNLOCK_WINDOW_FILE))).toBe(true)
     restart() // the service process is new
-    expect(unlockWindowAnchor()).toBeNull()
+    expect(unlockWindowAnchor()).toBeNull() // memory starts empty …
+    T += 6 * H
+    expect(await unlockWithGesture()).toMatchObject({ state: 'open' }) // … and the file restores it after the gesture
+    expect(unlockWindowAnchor()).not.toBeNull()
+    lockVault('user'); restart(); T += 18 * H
+    expect(await unlockWithGesture()).toMatchObject({ state: 'pending-stepup' }) // 24 h: the code again
+  })
+  test('VAULT.UX-R2: a window file that does not verify under the vault key is ignored — the code is asked', async () => {
+    await ownerMachine()
+    restart()
+    await coldUnlock()
+    await unlockWindowSettled()
+    const path = join(vaultDir(), UNLOCK_WINDOW_FILE)
+    const j = JSON.parse(readFileSync(path, 'utf8'))
+    writeFileSync(path, JSON.stringify({ ...j, atMs: j.atMs + 3 * H })) // moved forward by hand: MAC no longer matches
+    restart(); T += 22 * H
     expect(await unlockWithGesture()).toMatchObject({ state: 'pending-stepup' })
   })
   test('ANY failed code drops the window', async () => {
@@ -513,6 +542,8 @@ describe('unlock policy — per day (the DEFAULT): code on the first unlock, Hel
     expect(unlockWindowAnchor()).toBeNull()
     autoLock()
     expect(await unlockWithGesture()).toMatchObject({ state: 'pending-stepup' })
+    await unlockWindowSettled()
+    expect(existsSync(join(vaultDir(), UNLOCK_WINDOW_FILE))).toBe(false) // and off disk: a restart cannot bring it back
   })
   test('recovery drops the window', async () => {
     const { words } = await ownerMachine()

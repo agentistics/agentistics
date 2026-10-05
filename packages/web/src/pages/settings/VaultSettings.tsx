@@ -625,7 +625,7 @@ function UnlockPolicyRow({ view, lang, isMobile, gate, btn, onSave }: {
   view: VaultView; lang: 'en' | 'pt'; isMobile: boolean; gate: { code: boolean; gesture: boolean }; btn: React.CSSProperties
   onSave: (p: { mode: UnlockMode; hours: number }) => void
 }) {
-  const cur = view.unlockPolicy ?? { mode: 'daily' as const, hours: 12, chosen: false, codeNextUnlock: true, windowEndsAt: null }
+  const cur = view.unlockPolicy ?? { mode: 'daily' as const, hours: 24, chosen: false, codeNextUnlock: true, windowEndsAt: null }
   const pres = presWordOf(view, lang)
   const [mode, setMode] = useState<UnlockMode>(cur.mode)
   const [hoursText, setHoursText] = useState(String(cur.hours))

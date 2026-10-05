@@ -179,7 +179,7 @@ export const VAULT_TEXT = {
   unlock_save: { en: 'Save', pt: 'Salvar' },
   unlock_now_code: { en: 'The next unlock asks for the code.', pt: 'A próxima abertura pede o código.' },
   unlock_now_window: { en: 'Until {time}, re-opening asks only {presence}.', pt: 'Até {time}, reabrir pede só {presence}.' },
-  unlock_reset: { en: 'The window restarts with the computer or agentop, and after a wrong code, a recovery or a reset.', pt: 'A janela recomeça quando o computador ou o agentop reinicia, e depois de um código errado, de uma recuperação ou de um reset.' },
+  unlock_reset: { en: 'The window survives locking the vault and restarting the computer or agentop. It starts over after a wrong code, a recovery or a reset.', pt: 'A janela continua valendo se o cofre for trancado ou se o computador ou o agentop reiniciar. Ela recomeça depois de um código errado, de uma recuperação ou de um reset.' },
   auto_save: { en: 'Save', pt: 'Salvar' },
   auto_saved: { en: 'Saved.', pt: 'Salvo.' },
   auto_invalid: { en: 'Whole minutes from 5 to 480.', pt: 'Minutos inteiros de 5 a 480.' },
