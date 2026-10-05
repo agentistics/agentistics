@@ -449,6 +449,8 @@ export function bootCaveat(id: ServiceManagerId): 'linger' | 'login-only' | 'pm2
 export interface ServingObservation {
   pid: number | null
   answering: boolean
+  /** The `current` the answering server reported on `/api/version`, when it said one. */
+  version?: string | null
 }
 
 /** `systemctl --user` could not reach a manager at all (no bus, no systemd, no binary). */
@@ -494,7 +496,8 @@ export function nextBackoff(current: number, base: number): number {
 }
 
 export type RestartVerdict =
-  | { kind: 'replaced'; before: number | null; after: number }
+  /** `after` is null when the pid could not be observed and the NEW VERSION answering is the proof. */
+  | { kind: 'replaced'; before: number | null; after: number | null; byVersion?: string }
   | { kind: 'unchanged'; pid: number }
   | { kind: 'silent'; before: number | null }
 
@@ -517,6 +520,14 @@ export async function awaitReplacement(
     /** Called after each unanswered tick with the seconds waited so far — the caller decides
      *  whether a person is watching (a progress line) or not (the cockpit must print nothing). */
     onWait?: (elapsedSec: number) => void
+    /**
+     * The version the restart is meant to bring up (an upgrade knows it). A server answering exactly
+     * this has been replaced, WHATEVER the pid observation said: the pid is read with lsof/ss, and a
+     * machine where neither can name the listener (a sandbox, another namespace, WSL) reported "nothing
+     * answered" for a server that was answering — measured 2026-10-05, the upgrade failed over a
+     * healthy v2.104.1.
+     */
+    wantVersion?: string
   } = {},
 ): Promise<RestartVerdict> {
   const timeoutMs = opts.timeoutMs ?? RESTART_WINDOW_MS
@@ -531,6 +542,9 @@ export async function awaitReplacement(
     last = await observe()
     if (last.answering && last.pid !== null && last.pid !== before.pid) {
       return { kind: 'replaced', before: before.pid, after: last.pid }
+    }
+    if (last.answering && opts.wantVersion && last.version === opts.wantVersion) {
+      return { kind: 'replaced', before: before.pid, after: last.pid, byVersion: opts.wantVersion }
     }
     if (now() >= deadline) break
     opts.onWait?.(Math.round((now() - started) / 1000))

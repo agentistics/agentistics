@@ -25,11 +25,11 @@ import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { CAPS } from './exposure'
 import { TEAM_CENTRAL, IN_CONTAINER } from './config'
-import { getVersionInfo } from './version'
+import { getVersionInfo, CURRENT_VERSION } from './version'
 import { upgradeFromUiDecision, UPGRADE_REFUSALS, type UpgradeRefusal } from './upgrade-gate'
 import { writeAudit } from './audit'
 import type { CliLang } from './cli-lang'
-import { UPGRADE_PROGRESS_FILE } from './upgrade'
+import { UPGRADE_PROGRESS_FILE, reconcileUpgradeState } from './upgrade'
 import { parseUpgradeProgress, progressForWire } from './upgrade-progress'
 
 /** Set while a detached upgrade is in flight, so a second press is refused rather than racing. */
@@ -102,7 +102,10 @@ export async function handleUpgradeRoute(
   if (url.pathname === '/api/upgrade/status' && req.method === 'GET') {
     let raw: string | null = null
     try { raw = readFileSync(UPGRADE_PROGRESS_FILE, 'utf8') } catch { /* no upgrade has run */ }
-    return json({ progress: progressForWire(parseUpgradeProgress(raw), Date.now()) })
+    // The server answering this IS running `CURRENT_VERSION`: a failure recorded for that very version
+    // is stale, so it is dropped here rather than shown (and rewritten, so the next reader agrees).
+    reconcileUpgradeState(CURRENT_VERSION)
+    return json({ progress: progressForWire(parseUpgradeProgress(raw), Date.now(), CURRENT_VERSION) })
   }
   if (url.pathname !== '/api/upgrade' || req.method !== 'POST') return null
 

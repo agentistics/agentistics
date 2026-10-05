@@ -56,8 +56,12 @@ export function parseUpgradeProgress(raw: string | null | undefined): UpgradePro
  * "in progress"), and `reason` is DROPPED: it is the CLI's own text and can name local paths, so
  * the page shows its own sentence for a failure rather than the child's.
  */
-export function progressForWire(p: UpgradeProgress | null, now: number): Omit<UpgradeProgress, 'reason'> | null {
+export function progressForWire(p: UpgradeProgress | null, now: number, current?: string): Omit<UpgradeProgress, 'reason'> | null {
   if (!p) return null
+  // A `failed` record for the very version this server RUNS is not a failure the page can act on:
+  // whatever went wrong, the thing it tried to install is installed and answering. Showing "the
+  // update did not finish" over it contradicts the version number on the same screen.
+  if (p.stage === 'failed' && current !== undefined && p.version === current) return null
   if (now - p.at > PROGRESS_STALE_MS || p.at - now > 60_000) return null
   const { reason: _drop, ...rest } = p
   return rest
