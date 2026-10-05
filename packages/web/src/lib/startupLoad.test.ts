@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { acceptPayload, dataUrl, livenessStep, bootWatchdog, classifyLoadError, loadErrorText, partialPollMs, retryDelayMs, startupStripText, SLOW_AFTER_MS, UNREACHABLE_AFTER_MS } from './startupLoad'
+import { acceptPayload, dataUrl, takeEarlySlim, livenessStep, bootWatchdog, classifyLoadError, loadErrorText, partialPollMs, retryDelayMs, startupStripText, SLOW_AFTER_MS, UNREACHABLE_AFTER_MS } from './startupLoad'
 
 describe('classifyLoadError', () => {
   test('a status is a server error and keeps the HTTP detail the auth gates read', () => {
@@ -86,5 +86,25 @@ describe('dataUrl', () => {
   test('the first load asks for the slim payload, later ones for the full build', () => {
     expect(dataUrl(false)).toBe('/api/data?partial=1&slim=1')
     expect(dataUrl(true)).toBe('/api/data?partial=1')
+  })
+})
+
+describe('takeEarlySlim', () => {
+  const w = globalThis as { __agEarlySlim?: Promise<Response | null> }
+  test('is null when nothing was started', async () => {
+    w.__agEarlySlim = undefined
+    expect(await takeEarlySlim(50)).toBeNull()
+  })
+  test('hands out the started request once', async () => {
+    const r = new Response('{}')
+    w.__agEarlySlim = Promise.resolve(r)
+    expect(await takeEarlySlim(50)).toBe(r)
+    expect(await takeEarlySlim(50)).toBeNull()
+  })
+  test('a request that is too late is dropped, and a failed one is null', async () => {
+    w.__agEarlySlim = new Promise(() => {})
+    expect(await takeEarlySlim(20)).toBeNull()
+    w.__agEarlySlim = Promise.resolve(null)
+    expect(await takeEarlySlim(20)).toBeNull()
   })
 })

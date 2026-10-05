@@ -31,10 +31,12 @@
  * "open this tab of the aside," rather than navigating away from the conversation.
  */
 
-import { useState } from 'react'
+import { Suspense, lazy, useState } from 'react'
 import { ClipboardList } from 'lucide-react'
 import { openArtifacts } from '../../lib/artifactsStore'
-import { NewTaskWizard } from '../tasks/NewTaskWizard'
+// Lazy: the wizard is 230 KB and this flag is in the boot graph (App.tsx), so a static import put it
+// on every page load, including a phone's first one. It is only drawn once the flag is pressed.
+const NewTaskWizard = lazy(() => import('../tasks/NewTaskWizard').then(m => ({ default: m.NewTaskWizard })))
 
 export interface SessionTitleFlagProps {
   session: { id: string; title: string; harness?: string; task?: string }
@@ -101,6 +103,7 @@ export function SessionTitleFlag({ session, lang, onLinked, size = 22 }: Session
       </button>
 
       {creating && (
+        <Suspense fallback={null}>
         <NewTaskWizard
           session={{
             id: session.id, title: session.title,
@@ -109,6 +112,7 @@ export function SessionTitleFlag({ session, lang, onLinked, size = 22 }: Session
           onClose={() => setCreating(false)}
           onDone={() => { setCreating(false); onLinked?.() }}
         />
+        </Suspense>
       )}
     </>
   )

@@ -58,6 +58,17 @@ export function dataUrl(haveData: boolean): string {
   return haveData ? '/api/data?partial=1' : '/api/data?partial=1&slim=1'
 }
 
+/** The slim request `public/early-data.js` started before the bundle arrived — handed out ONCE (a
+ *  second reader would be reading a consumed body) and only if it answers within `ms`; otherwise null
+ *  and the caller asks for itself. */
+export async function takeEarlySlim(ms: number): Promise<Response | null> {
+  const w = globalThis as { __agEarlySlim?: Promise<Response | null> }
+  const p = w.__agEarlySlim
+  if (!p) return null
+  w.__agEarlySlim = undefined
+  return Promise.race([p, new Promise<null>(r => setTimeout(() => r(null), ms))])
+}
+
 /** After a slim answer the full payload is wanted at once — the page is already painted. */
 export const SLIM_FOLLOWUP_MS = 150
 

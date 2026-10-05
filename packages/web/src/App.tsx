@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import React, { Suspense, lazy, useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { Outlet, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { version } from '../../../package.json'
@@ -36,10 +36,10 @@ import { isAdapterHarness, billingReadiness, monthlyCommitment, normalizeBilling
 import { buildDeniedRepoLabels } from './lib/shareRepos'
 import { StatCard } from './components/StatCard'
 import { StreakBreakdownButton } from './components/StreakBreakdownButton'
-import { ActivityHeatmap } from './components/ActivityHeatmap'
-import { ActivityChart } from './components/ActivityChart'
-import { HourChart } from './components/HourChart'
-import { ModelBreakdown } from './components/ModelBreakdown'
+const ActivityHeatmap = lazy(() => import('./components/ActivityHeatmap').then(m => ({ default: m.ActivityHeatmap })))
+const ActivityChart = lazy(() => import('./components/ActivityChart').then(m => ({ default: m.ActivityChart })))
+const HourChart = lazy(() => import('./components/HourChart').then(m => ({ default: m.HourChart })))
+const ModelBreakdown = lazy(() => import('./components/ModelBreakdown').then(m => ({ default: m.ModelBreakdown })))
 import { ProjectsList } from './components/ProjectsList'
 import { FiltersBar } from './components/FiltersBar'
 import { NotificationToasts } from './components/NotificationToasts'
@@ -56,15 +56,14 @@ import { HardwareModal } from './components/HardwareModal'
 import { useNotificationStream } from './hooks/useNotificationStream'
 import { pushNotification } from './lib/notifications'
 import { RecentSessions } from './components/RecentSessions'
-import { HighlightsBoard } from './components/HighlightsBoard'
 import { InfoModal } from './components/InfoModal'
-import { PDFDirectExporter } from './components/PDFExportModal'
+// Lazy: PDF export (jspdf + its chart renderers) is only needed once an export is asked for.
+const PDFDirectExporter = lazy(() => import('./components/PDFExportModal').then(m => ({ default: m.PDFDirectExporter })))
 import { HealthWarnings } from './components/HealthWarnings'
 import { ToolMetricsPanel } from './components/ToolMetricsPanel'
 import { AgentMetricsPanel } from './components/AgentMetricsPanel'
 import { CacheHitRatePanel } from './components/CacheHitRatePanel'
-import { BudgetPanel } from './components/BudgetPanel'
-import { SessionDrilldownModal } from './components/SessionDrilldownModal'
+const SessionDrilldownModal = lazy(() => import('./components/SessionDrilldownModal').then(m => ({ default: m.SessionDrilldownModal })))
 import { TranscriptModal } from './components/TranscriptModal'
 import type { PrefsDraft, AppContext } from './lib/app-context'
 import { NayDock } from './components/nay/NayDock'
@@ -4966,7 +4965,7 @@ export default function AppLayout() {
           title={<><BarChart2 size={14} /> {lang === 'pt' ? 'Atividade ao longo do tempo' : 'Activity over time'}</>}
           onClose={() => setExpandedChart(null)}
         >
-          <ActivityChart data={derived.heatmapData} height={480} theme={theme} />
+          <Suspense fallback={null}><ActivityChart data={derived.heatmapData} height={480} theme={theme} /></Suspense>
         </ChartModal>
       )}
       {expandedChart === 'heatmap' && (
@@ -4974,7 +4973,7 @@ export default function AppLayout() {
           title={lang === 'pt' ? 'Heatmap de atividade' : 'Activity heatmap'}
           onClose={() => setExpandedChart(null)}
         >
-          <ActivityHeatmap data={derived.heatmapData} weeks={52} />
+          <Suspense fallback={null}><ActivityHeatmap data={derived.heatmapData} weeks={52} /></Suspense>
         </ChartModal>
       )}
       {expandedChart === 'hours' && (
@@ -4982,7 +4981,7 @@ export default function AppLayout() {
           title={lang === 'pt' ? 'Uso por hora do dia' : 'Usage by hour'}
           onClose={() => setExpandedChart(null)}
         >
-          <HourChart hourCounts={derived.hourCounts} hourMeta={derived.hourMeta} height={520} />
+          <Suspense fallback={null}><HourChart hourCounts={derived.hourCounts} hourMeta={derived.hourMeta} height={520} /></Suspense>
         </ChartModal>
       )}
       {expandedChart === 'models' && (
@@ -4990,20 +4989,20 @@ export default function AppLayout() {
           title={<><TrendingUp size={14} /> {lang === 'pt' ? 'Uso por modelo' : 'Model usage & cost'}</>}
           onClose={() => setExpandedChart(null)}
         >
-          <ModelBreakdown
+          <Suspense fallback={null}><ModelBreakdown
             modelUsage={derived.modelUsage}
             currency={currency}
             brlRate={brlRate}
             fallbackInputTokens={filters.projects.length > 0 ? derived.inputTokens : undefined}
             fallbackOutputTokens={filters.projects.length > 0 ? derived.outputTokens : undefined}
             fallbackCostUSD={filters.projects.length > 0 ? derived.totalCostUSD : undefined}
-          />
+          /></Suspense>
         </ChartModal>
       )}
 
       {/* Session drilldown modal */}
       {selectedSession && (
-        <SessionDrilldownModal
+        <Suspense fallback={null}><SessionDrilldownModal
           session={selectedSession}
           globalModelUsage={data.statsCache.modelUsage ?? {}}
           currency={currency}
@@ -5011,13 +5010,14 @@ export default function AppLayout() {
           lang={lang}
           workflows={data.workflows}
           onClose={() => setSelectedSession(null)}
-        />
+        /></Suspense>
       )}
 
       <TranscriptModal lang={lang} />
 
       {/* PDF Direct Export — triggered from chat, no modal */}
       {pdfDirectExportRange !== null && (
+        <Suspense fallback={null}>
         <PDFDirectExporter
           data={data}
           range={pdfDirectExportRange}
@@ -5027,6 +5027,7 @@ export default function AppLayout() {
           brlRate={brlRate}
           onDone={() => setPdfDirectExportRange(null)}
         />
+        </Suspense>
       )}
 
       {hardwareOpen && <HardwareModal lang={lang} onClose={() => setHardwareOpen(false)} />}

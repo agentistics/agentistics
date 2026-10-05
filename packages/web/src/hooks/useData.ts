@@ -6,7 +6,7 @@ import { subDays, isAfter, isBefore, parseISO, format, differenceInCalendarDays,
 import { makeTagFilter, type TagDef } from '../lib/tagMatch'
 import { subscribeEvent } from '../lib/eventStream'
 import { isUsableDataCache } from '../lib/dataCache'
-import { acceptPayload, classifyLoadError, DATA_TIMEOUT_MS, fetchWithTimeout, LIVENESS_MS, LIVENESS_TIMEOUT_MS, livenessStep, partialPollMs, retryDelayMs, dataUrl, SLIM_FOLLOWUP_MS, type LoadError, type StartupStripState } from '../lib/startupLoad'
+import { acceptPayload, classifyLoadError, DATA_TIMEOUT_MS, fetchWithTimeout, LIVENESS_MS, LIVENESS_TIMEOUT_MS, livenessStep, partialPollMs, retryDelayMs, dataUrl, takeEarlySlim, SLIM_FOLLOWUP_MS, type LoadError, type StartupStripState } from '../lib/startupLoad'
 import { cacheFiguresOf } from '../lib/cacheFigures'
 import { useNativeVisible } from './useEngineCaps'
 
@@ -428,7 +428,9 @@ export function useData() {
   const refresh = useCallback(async () => {
     try {
       let res: Response
-      try { res = await fetchWithTimeout(dataUrl(dataRef.current !== null), DATA_TIMEOUT_MS) } catch (err) { throw classifyLoadError(err) }
+      const early = dataRef.current === null ? await takeEarlySlim(DATA_TIMEOUT_MS) : null
+      if (early) res = early
+      else try { res = await fetchWithTimeout(dataUrl(dataRef.current !== null), DATA_TIMEOUT_MS) } catch (err) { throw classifyLoadError(err) }
       if (!res.ok) throw classifyLoadError(null, res.status)
       let fresh: unknown
       try { fresh = await res.json() } catch (err) { throw classifyLoadError(err) }

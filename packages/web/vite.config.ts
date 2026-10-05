@@ -145,7 +145,14 @@ export default defineConfig({
         // release the phone kept loading the OLD index, whose hashed chunks the new server no
         // longer has, and sat on the loading screen (2026-10-04). Navigations go to the network
         // first (`runtimeCaching` below) and the server serves the shell `no-store`.
-        globPatterns: ['**/*.{js,css,ico,png,svg,woff2}'],
+        // **Nothing but the favicons is precached** (2026-10-05). The precache used to be every `.js`/
+        // `.css`/font/image the build emitted — 270 entries, ~6 MB — fetched by the worker's `install`
+        // on the FIRST visit, in parallel with the data the page was waiting for: on a phone behind a
+        // relay (1.5 Mbps, 300 ms) that was most of the boot's bandwidth, spent on routes nobody had
+        // opened. The shell never needed it (navigations go network-first, below). Hashed assets are
+        // instead cached ON DEMAND by the `ag-assets` rule below, so what a person actually uses is
+        // kept and works offline; what they never open is never downloaded.
+        globPatterns: ['favicon.ico', 'apple-touch-icon.png'],
         // ...EXCEPT Monaco. `globPatterns` above is `**/*.js`, and **a precache manifest is the one
         // place a lazy chunk stops being lazy**: workbox would download the editor, its ~160 KB of
         // stylesheet and its five workers on every first visit, for every user, including everyone
@@ -167,6 +174,13 @@ export default defineConfig({
         importScripts: ['sw-reload-on-update.js'],
         clientsClaim: true,
         runtimeCaching: [
+          {
+            // Content-hashed bundles and the self-hosted fonts: a URL names its bytes forever, so
+            // cache-first is safe, and the first visit pays only for what it renders.
+            urlPattern: ({ url }) => /^\/(assets|fonts)\//.test(url.pathname),
+            handler: 'CacheFirst',
+            options: { cacheName: 'ag-assets', expiration: { maxEntries: 400, maxAgeSeconds: 60 * 60 * 24 * 30 }, cacheableResponse: { statuses: [200] } },
+          },
           {
             urlPattern: /^\/api\//,
             handler: 'NetworkOnly',
@@ -191,6 +205,13 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
+        // The boot graph used to be ~150 modulepreloaded chunks, 109 of them under 3 KB — almost all
+        // of them ONE lucide icon each. Over a relay every chunk is a round trip (six at a time), so
+        // 150 requests cost ~7 s of pure latency for 1,8 MB. Icons are merged into one chunk; the
+        // payload is unchanged and the request count drops by ~60.
+        advancedChunks: {
+          groups: [{ name: 'icons', test: /node_modules\/lucide-react\//, priority: 20 }],
+        },
         // Everything Monaco emits goes under `assets/monaco/`, so `workbox.globIgnores` above can
         // exclude it by PATH. **`manualChunks` was tried first and is wrong**: collapsing Monaco
         // into one named chunk also put a `<link rel="modulepreload" href="…monaco…">` and a
