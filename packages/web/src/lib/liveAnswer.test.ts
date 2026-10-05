@@ -10,7 +10,7 @@ describe('liveAnswerText', () => {
     expect(liveAnswerText({
       harness: 'claude', working: true,
       lines: ['> what is the port?', '', '● The port is 47291 because the api and', '  the mcp share it.', '', '✻ Pondering… (3s · esc to interrupt)', '', ...box],
-    })).toBe('The port is 47291 because the api and\nthe mcp share it.')
+    })).toBe('The port is 47291 because the api and the mcp share it.')
   })
 
   test('grows with the frame — each capture yields a longer text', () => {
