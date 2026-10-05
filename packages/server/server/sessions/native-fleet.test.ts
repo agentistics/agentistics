@@ -109,7 +109,8 @@ describe('nativeVerbResult', () => {
       .toEqual({ ok: true, message: 'Session x is already ended.' })
     expect(nativeVerbResult('delete', 409, { code: 'run_in_progress', sentence: 'A run of this session is in progress; end the session first.' }, 'en'))
       .toEqual({ ok: false, message: 'A run of this session is in progress; end the session first.' })
-    expect(nativeVerbResult('rename', 403, { error: 'experimental' }, 'pt').message).toContain('experimental')
+    expect(nativeVerbResult('rename', 403, { error: 'experimental' }, 'pt').message)
+      .toBe('O harness nativo do Agentistics ainda está em desenvolvimento e não está disponível nesta versão.')
     expect(nativeVerbResult('resume', 500, null, 'en')).toEqual({ ok: false, message: 'The native runtime refused this (HTTP 500).' })
   })
 })
@@ -154,7 +155,8 @@ describe('the I/O seam', () => {
   })
   test('runNativeVerb: every refusal is a sentence', async () => {
     expect((await runNativeVerb(ID, 'kill', 'en', { central: true })).message).toContain('central')
-    expect((await runNativeVerb(ID, 'kill', 'en', { central: false, on: false })).message).toContain('experimental')
+    expect((await runNativeVerb(ID, 'kill', 'en', { central: false, on: false })).message)
+      .toBe('The native Agentistics harness is still in development and is not available in this version.')
     expect((await runNativeVerb(ID, 'rename', 'en', { central: false, on: true, title: '  ' })).message).toBe('A name is required.')
     expect((await runNativeVerb(ID, 'kill', 'en', { central: false, on: true, ask: async () => null })).message).toContain('not available')
     let call: { path: string; method?: string } | null = null

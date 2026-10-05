@@ -4,7 +4,7 @@ import { visibleSettingsSections, SETTINGS_SECTIONS } from './settingsSections'
 const ids = (v: Parameters<typeof visibleSettingsSections>[0]) => visibleSettingsSections(v).map(s => s.id)
 
 test('solo/member: personal sections + live, no governance', () => {
-  expect(ids({ central: false })).toEqual(['preferences', 'accessibility', 'notifications', 'sessions', 'data-sources', 'backup', 'vault', 'harnesses', 'pricing', 'billing', 'install', 'connection', 'live', 'chat', 'experimental'])
+  expect(ids({ central: false })).toEqual(['preferences', 'accessibility', 'notifications', 'sessions', 'data-sources', 'backup', 'vault', 'harnesses', 'pricing', 'billing', 'install', 'connection', 'live', 'chat'])
 })
 
 test('central owner: personal (no live) + all governance sections', () => {
@@ -79,6 +79,8 @@ test('providers is hidden on a community build (no engine, no native runtime) â€
 test('the other sections are unaffected by the new field', () => {
   expect(ids({ central: false, localChat: false })).toContain('preferences')
   expect(ids({ central: false, localChat: false })).toContain('notifications')
+  expect(ids({ central: false })).not.toContain('experimental')
+  expect(ids({ central: true, role: 'owner' })).not.toContain('experimental')
 })
 
 test('providers is experimental: hidden unless the native runtime may be shown (the flag on), and while unknown', () => {
@@ -87,10 +89,14 @@ test('providers is experimental: hidden unless the native runtime may be shown (
   expect(ids({ central: false, nativeRuntime: true })).toContain('providers')
 })
 
-test('experimental is a machine section: shown on a machine, absent on a central (same rule as vault)', () => {
-  expect(ids({ central: false })).toContain('experimental')
-  expect(ids({ central: false, nativeRuntime: false })).toContain('experimental')
-  expect(ids({ central: true, role: 'owner' })).not.toContain('experimental')
-  expect(ids({ central: true, role: 'member', isManager: true })).not.toContain('experimental')
-  expect(SETTINGS_SECTIONS.find(s => s.id === 'experimental')).toMatchObject({ labelEn: 'Experimental', labelPt: 'Experimental', group: 'personal' })
+test('experimental is not a settings section in any viewer mode', () => {
+  expect(SETTINGS_SECTIONS.some(s => String(s.id) === 'experimental')).toBe(false)
+  for (const viewer of [
+    { central: false },
+    { central: false, nativeRuntime: false },
+    { central: true, role: 'owner' as const },
+    { central: true, role: 'member' as const, isManager: true },
+  ]) {
+    expect(ids(viewer)).not.toContain('experimental')
+  }
 })

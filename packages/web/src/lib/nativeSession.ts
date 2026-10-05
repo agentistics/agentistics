@@ -35,8 +35,8 @@ export function nativeRuntimeFrom(status: unknown): boolean {
 
 /** The sentence every hidden native surface points to (the server's `EXPERIMENTAL_SENTENCE`). */
 export const NATIVE_EXPERIMENTAL_SENTENCE = {
-  en: 'The native Agentistics harness and model providers are experimental — turn them on with `agentop experimental enable`.',
-  pt: 'O harness nativo do Agentistics e os provedores de modelo são experimentais — ative com `agentop experimental enable`.',
+  en: 'The native Agentistics harness is still in development and is not available in this version.',
+  pt: 'O harness nativo do Agentistics ainda está em desenvolvimento e não está disponível nesta versão.',
 } as const
 
 export function nativeHarnessAnswer(models: { id: string; label: string }[]): HarnessAnswer {
