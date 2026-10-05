@@ -57,6 +57,7 @@ import { TaskSharing } from '../components/tasks/TaskSharing'
 import { BoardOverviewView } from '../components/tasks/BoardOverviewView'
 import { CentralTaskBoard } from '../components/tasks/CentralTaskBoard'
 import { CreateTaskDialog } from '../components/tasks/CreateTaskDialog'
+import { fileExtras } from '../components/tasks/createFiling'
 import { ManageStatusesModal } from '../components/tasks/ManageStatusesModal'
 import { NewSessionModal } from '../components/sessions/NewSessionModal'
 import { markSessionPending } from '../lib/pendingSessionStore'
@@ -425,6 +426,7 @@ function TaskList() {
           onCreate={async plan => {
             const made = await createTask(plan.title, plan.detail, plan.type)
             if (made && plan.status !== 'todo') await markTask(made.id, plan.status as TaskStatus)
+            if (made) await fileExtras(made.id, plan.subtasks, plan.sessions)
             setCreateInit(null)
             await reload()
           }}
@@ -442,6 +444,7 @@ function TaskList() {
           onCreate={async plan => {
             const made = await createTask(plan.title, plan.detail, plan.type)
             if (made && plan.status !== 'todo') await markTask(made.id, plan.status as TaskStatus)
+            if (made) await fileExtras(made.id, plan.subtasks, plan.sessions)
             setOpen(false)
             await reload()
             if (made) navigate(`/tasks/${encodeURIComponent(made.id)}`)

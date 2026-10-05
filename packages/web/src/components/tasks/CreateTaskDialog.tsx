@@ -8,6 +8,7 @@ import { overlayPadding } from '../../lib/mobileOverlay'
 import { NO_TYPE_KEY, button, field, liveStatusMap, liveStatusOrder, microLabel, surface, typeStyle } from './board'
 import { ChipSelect, statusOptions } from './ChipSelect'
 import { DEFAULT_CREATE_STATUS, planCreate, TITLE_MAX } from './createPlan'
+import { CreateExtras } from './CreateExtras'
 import type { Lang } from './copy'
 
 // The editor (TipTap + ProseMirror) is the heavy part and only a person creating a task needs it.
@@ -42,7 +43,7 @@ export function CreateTaskDialog(p: {
   initialStatus?: string
   initialType?: string
   onCancel: () => void
-  onCreate: (plan: { title: string; detail?: string; type?: string; status: string }) => Promise<void>
+  onCreate: (plan: { title: string; detail?: string; type?: string; status: string; subtasks: string[]; sessions: Map<string, number> }) => Promise<void>
 }) {
   const isMobile = useIsMobile()
   const dismiss = useDismissOverlay(() => p.onCancel())
@@ -50,6 +51,8 @@ export function CreateTaskDialog(p: {
   const [type, setType] = useState(p.initialType ?? '')
   const [status, setStatus] = useState(p.initialStatus ?? DEFAULT_CREATE_STATUS)
   const [detail, setDetail] = useState('')
+  const [subs, setSubs] = useState<string[]>([])
+  const [picked, setPicked] = useState<Map<string, number>>(() => new Map())
   const [tried, setTried] = useState(false)
   const [busy, setBusy] = useState(false)
   const t = <K extends keyof typeof W>(k: K) => W[k][p.lang]
@@ -59,7 +62,7 @@ export function CreateTaskDialog(p: {
     setTried(true)
     if (!plan.ok || busy) return
     setBusy(true)
-    try { await p.onCreate(plan) } finally { setBusy(false) }
+    try { await p.onCreate({ ...plan, subtasks: subs, sessions: picked }) } finally { setBusy(false) }
   }
 
   return createPortal(
@@ -128,6 +131,8 @@ export function CreateTaskDialog(p: {
           </Suspense>
           <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>{t('detailHint')}</span>
         </div>
+
+        <CreateExtras lang={p.lang} subs={subs} setSubs={setSubs} picked={picked} setPicked={setPicked} />
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
           <button type="button" style={button(isMobile)} onClick={p.onCancel}>{t('cancel')}</button>

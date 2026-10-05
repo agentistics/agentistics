@@ -65,3 +65,23 @@ describe('the top "+ New task" uses the same dialog', () => {
     expect(page).toMatch(/createTask\(plan\.title, plan\.detail, plan\.type\)[\s\S]{0,300}navigate\(`\/tasks\/\$\{encodeURIComponent\(made\.id\)\}`\)/)
   })
 })
+
+import { filablePicks } from './createFiling'
+describe('the collapsed "link sessions / subtasks" section keeps what the wizard offered', () => {
+  test('it exists, collapsed, in both languages, inside the dialog', () => {
+    const x = src('CreateExtras.tsx')
+    expect(x).toContain('<details')
+    expect(x).not.toMatch(/<details[^>]*\bopen\b/)
+    expect(x).toContain('Vincular sessões e quebrar em subtarefas')
+    expect(x).toContain('Link sessions and break it into subtasks')
+    expect(src('CreateTaskDialog.tsx')).toContain('<CreateExtras')
+  })
+  test('only picks whose part exists are filed — a session is never filed under the task itself', () => {
+    expect(filablePicks(['a'], new Map([['s1', 0], ['s2', 3]]))).toEqual([['s1', 0]])
+    expect(filablePicks([], new Map([['s1', 0]]))).toEqual([])
+  })
+  test('both creators file the extras after creating (top button and + Add)', () => {
+    const page = readFileSync(join(import.meta.dir, '..', '..', 'pages', 'TasksPage.tsx'), 'utf8')
+    expect((page.match(/fileExtras\(made\.id, plan\.subtasks, plan\.sessions\)/g) ?? []).length).toBe(2)
+  })
+})
