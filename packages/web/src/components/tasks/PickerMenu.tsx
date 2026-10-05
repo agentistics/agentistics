@@ -160,6 +160,20 @@ export function PanelMenu({
   )
 }
 
+/**
+ * The ONE menu row: what every row in a task-screen popover looks like (the Columns list, the lane
+ * choice, the row actions). `on` is the ticked/selected look; `color` overrides the text colour.
+ */
+export const menuRowStyle = (
+  mobile: boolean, on = true, color?: string,
+): React.CSSProperties => ({
+  display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', width: '100%',
+  padding: '6px 8px', borderRadius: 6, fontSize: 12, fontFamily: 'inherit', textAlign: 'left',
+  border: 'none', minHeight: mobile ? 44 : 28,
+  background: on ? 'var(--bg-card-hover)' : 'transparent',
+  color: color ?? (on ? 'var(--text-primary)' : 'var(--text-tertiary)'),
+})
+
 export function PickerMenu(props: PickerMenuProps) {
   const isMobile = useIsMobile()
   const copy = boardCopy(props.lang ?? 'en')
@@ -267,14 +281,10 @@ export function PickerMenu(props: PickerMenuProps) {
               }}
               onClick={() => toggle(item.value)}
               style={{
-                display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
-                padding: '6px 8px', borderRadius: 6, fontSize: 12,
-                minHeight: isMobile ? 44 : 28,
-                background: on ? 'var(--bg-card-hover)' : 'transparent',
-                color: on ? 'var(--text-primary)' : 'var(--text-tertiary)',
+                ...menuRowStyle(isMobile, on),
+                width: undefined,
                 opacity: drag === item.value ? 0.45 : 1,
-              }}
-            >
+              }}            >
               {p.orderable && (
                 <GripVertical
                   size={12}

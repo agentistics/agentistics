@@ -38,6 +38,7 @@ import { Select } from '../../pages/settings/primitives'
 import { microLabel, pill, statusStyle, surface } from './board'
 import { statusLabel, type Lang } from './copy'
 import { createGroupCandidates, groupMembers, groupOf, joinGroupCandidates } from './subtaskGroups'
+import { menuRowStyle } from './PickerMenu'
 import { planSubtaskActions } from './subtaskActionsPlan'
 import type { StatusRefusalReason, StatusWriteResult, Subtask, SubtaskPatch } from '../../lib/tasks'
 
@@ -99,12 +100,8 @@ function refusalText(pt: boolean, reason: StatusRefusalReason | undefined): stri
 type Step = 'menu' | 'blocked-by' | 'pick-member' | 'pick-group'
 
 export const rowButtonStyle = (mobile: boolean, danger = false): React.CSSProperties => ({
-  display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-start',
-  background: 'none', border: 'none', borderRadius: 6,
-  padding: '7px 8px', textAlign: 'left',
-  color: danger ? 'var(--accent-red)' : 'var(--text-primary)',
-  cursor: 'pointer', fontSize: 12, fontFamily: 'inherit',
-  minHeight: mobile ? 44 : undefined, width: '100%',
+  ...menuRowStyle(mobile, false, danger ? 'var(--accent-red)' : 'var(--text-primary)'),
+  justifyContent: 'flex-start',
 })
 
 const sectionStyle: React.CSSProperties = {
