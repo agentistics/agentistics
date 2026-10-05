@@ -29,6 +29,7 @@ import { versionedAsset } from '../../lib/brand'
 import { sessionCardStyle } from '../../lib/sessionCardStyle'
 import { readAsideGroupPrefs, subscribeAsideGroupPrefs } from '../../lib/sessionsAsidePrefs'
 import { VaultExpiryCard } from '../vault/VaultExpiryCard'
+import { AgentisticsLoader } from '../AgentisticsLoader'
 import { VaultGlyph } from '../vault/VaultGlyph'
 import { SessionFacts } from '../sessions/SessionFacts'
 import { SessionRowMenu } from '../sessions/SessionRowMenu'
@@ -577,7 +578,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
             : tab === 'vault'
             ? (
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: isMobile ? '6px 10px' : '8px 12px' }} data-nay-vault>
-                <Suspense fallback={<Loader2 size={14} className="ag-spin" />}>
+                <Suspense fallback={<AgentisticsLoader size={14} />}>
                   <QuickVaultBody lang={lang} isMobile={isMobile} />
                 </Suspense>
               </div>

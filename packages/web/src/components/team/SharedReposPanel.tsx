@@ -1,5 +1,6 @@
+import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 import React, { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { Loader2, Check, ChevronDown, ChevronRight } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight } from 'lucide-react'
 import type { SessionMeta, ModelUsage, ShareSource, SiblingRuleFact } from '@agentistics/core'
 import { NO_REPO_KEY, fmtCost } from '@agentistics/core'
 import type { ShareTarget, ProjectTarget } from '../../lib/shareRepos'
@@ -587,7 +588,7 @@ function ApplyBanner({ banner, status, lang }: { banner: 'progress' | 'done' | '
         : COPY.applyingPush[lang]
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11.5, color: 'var(--text-tertiary)' }}>
-        <span><Loader2 size={11} style={{ verticalAlign: '-1px', animation: 'spin 1s linear infinite', marginRight: 4 }} />{text}</span>
+        <span><AgentisticsLoader size={11} style={{ verticalAlign: '-1px', marginRight: 4 }} />{text}</span>
         <span>{COPY.applyingSafeToLeave[lang]}</span>
       </div>
     )

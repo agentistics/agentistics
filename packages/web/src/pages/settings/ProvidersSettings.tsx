@@ -1,3 +1,4 @@
+import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 /**
  * Settings → Providers — the credential store for the native runtime's model providers
  * (`GET/PUT/DELETE /api/provider*`). Always all 7 providers, in the server's own order; never
@@ -16,7 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type React from 'react'
 import { NativeGate } from '../../components/NativeGate'
 import { useOutletContext } from 'react-router-dom'
-import { Beaker, Check, CheckCheck, Copy, Cpu, Loader2, Pencil, Search, Trash2 } from 'lucide-react'
+import { Beaker, Check, CheckCheck, Copy, Cpu, Pencil, Search, Trash2 } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { RevealButton, REVEAL_PAD } from '../../components/PasswordReveal'
@@ -394,7 +395,7 @@ function ProvidersSettingsBody() {
                               disabled={t?.loading}
                               onClick={() => void runTest(entry.id)}
                             >
-                              {t?.loading ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Beaker size={12} />}
+                              {t?.loading ? <AgentisticsLoader size={12} /> : <Beaker size={12} />}
                             </button>
                             <button style={{ ...ghostBtn, padding: '4px 8px' }} title={pt ? 'Modelos' : 'Models'} onClick={() => void openModels(entry)}>
                               <Cpu size={12} />
@@ -436,7 +437,7 @@ function ProvidersSettingsBody() {
               disabled={saving}
             >
               {saving
-                ? <><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> {pt ? 'Salvando…' : 'Saving…'}</>
+                ? <><AgentisticsLoader size={13} /> {pt ? 'Salvando…' : 'Saving…'}</>
                 : <><Check size={13} /> {pt ? 'Salvar' : 'Save'}</>}
             </button>
           </>
@@ -713,7 +714,7 @@ function ProviderCard({ entry, pt, test, onConfigure, onTest, onModels, onRemove
             <>
               <RecordCardAction label={pt ? 'Testar conexão' : 'Test connection'} disabled={test?.loading} onClick={onTest}>
                 {test?.loading
-                  ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> {pt ? 'Testando…' : 'Testing…'}</>
+                  ? <><AgentisticsLoader size={14} /> {pt ? 'Testando…' : 'Testing…'}</>
                   : <><Beaker size={14} /> {pt ? 'Testar' : 'Test'}</>}
               </RecordCardAction>
               <RecordCardAction label={pt ? 'Modelos' : 'Models'} onClick={onModels}>

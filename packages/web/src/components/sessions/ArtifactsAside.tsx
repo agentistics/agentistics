@@ -1,3 +1,4 @@
+import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 /**
  * ArtifactsAside — the session's `contents` panel: what it is doing, and what it produced.
  *
@@ -718,7 +719,7 @@ export function ArtifactsAside({
   const workflowsBody = (): React.ReactNode => {
     const st = wfState
     if (st === null || st.phase === 'loading') {
-      return <Note icon={<Spinner />} text={pt
+      return <Note icon={<AgentisticsLoader />} text={pt
         ? 'Lendo os workflows desta conversa… isso abre a transcrição de cada agente.'
         : 'Reading this conversation’s workflows… this opens each agent’s transcript.'} />
     }
@@ -757,7 +758,7 @@ export function ArtifactsAside({
     }
     const st = agentsState
     if (st === null || st.phase === 'loading') {
-      return <Note icon={<Spinner />} text={pt
+      return <Note icon={<AgentisticsLoader />} text={pt
         ? 'Lendo os subagentes desta conversa… isso lê a transcrição de cada um.'
         : 'Reading this conversation’s subagents… this opens each one’s transcript.'} />
     }
@@ -797,7 +798,7 @@ export function ArtifactsAside({
               border: '1px dashed var(--border)', background: 'transparent', color: 'var(--text-secondary)',
             }}
           >
-            {agentsMore ? <Spinner size={13} /> : null}
+            {agentsMore ? <AgentisticsLoader size={13} /> : null}
             {agentsMore
               ? (pt ? 'Lendo mais…' : 'Reading more…')
               : (pt ? `Carregar mais ${Math.min(SUBAGENT_PAGE, st.total - st.rows.length)}` : `Load ${Math.min(SUBAGENT_PAGE, st.total - st.rows.length)} more`)}
@@ -1813,7 +1814,7 @@ function WorkflowAgentLine({ sessionId, runId, agent, pt, runLive }: {
         <div style={{ margin: '3px 0 5px 18px', minWidth: 0 }}>
           {detail === null || detail.phase === 'loading' ? (
             <p style={{ margin: 0, fontSize: 10, color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: 5 }}>
-              <Spinner size={11} />{pt ? 'Lendo a transcrição deste agente…' : 'Reading this agent’s transcript…'}
+              <AgentisticsLoader size={11} />{pt ? 'Lendo a transcrição deste agente…' : 'Reading this agent’s transcript…'}
             </p>
           ) : detail.phase === 'failed' ? (
             <p style={{ margin: 0, fontSize: 10, color: 'var(--text-tertiary)', fontStyle: 'italic' }}>{detail.message}</p>
@@ -2208,7 +2209,7 @@ function SubagentActivity({ sessionId, row, pt, now, onBack }: {
       {failed !== null ? (
         <Note text={failed} />
       ) : turns === null ? (
-        <Note icon={<Loader size={16} />} text={pt ? 'Lendo…' : 'Reading…'} />
+        <Note icon={<AgentisticsLoader size={16} />} text={pt ? 'Lendo…' : 'Reading…'} />
       ) : feed.length === 0 ? (
         <Note icon={<Bot size={16} />} text={row.status === 'running'
           ? (pt ? 'Este subagente começou e ainda não fez nada.' : 'This subagent has started and has not done anything yet.')
@@ -2361,7 +2362,7 @@ function McpTab({ lang, list, error, cwd, onChanged }: {
   }
 
   if (error !== null) return <Note icon={<Plug size={16} />} text={error} />
-  if (list === null) return <Note icon={<Spinner />} text={pt ? 'Lendo os MCPs…' : 'Reading the MCP servers…'} />
+  if (list === null) return <Note icon={<AgentisticsLoader />} text={pt ? 'Lendo os MCPs…' : 'Reading the MCP servers…'} />
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', padding: '6px 6px 10px' }}>
@@ -2646,7 +2647,7 @@ function McpEditor({ entry, pt, busy, onCancel, onApply }: {
             border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange)', color: '#fff',
           }}
         >
-          {busy ? <Spinner size={12} /> : null}
+          {busy ? <AgentisticsLoader size={12} /> : null}
           {busy ? (pt ? 'Salvando…' : 'Saving…') : (pt ? 'Salvar' : 'Save')}
         </button>
         <button className="ag-tap"
@@ -2727,7 +2728,7 @@ function McpRow({ entry, pt, canWrite, busy, working, check, onCheck, onRemove, 
             >
               {/* The wait is SHOWN. `claude mcp remove` takes a second or two, and a button that
                   did nothing visible for that long reads as one that did not work. */}
-              {working ? <Spinner size={11} /> : <Trash2 size={11} />}
+              {working ? <AgentisticsLoader size={11} /> : <Trash2 size={11} />}
             </button>
           </>
         )}
@@ -2748,7 +2749,7 @@ function McpRow({ entry, pt, canWrite, busy, working, check, onCheck, onRemove, 
             color: 'var(--text-secondary)', fontFamily: 'inherit', fontSize: 10.5,
           }}
         >
-          {check === 'running' ? <Spinner size={11} /> : <Plug size={11} />}
+          {check === 'running' ? <AgentisticsLoader size={11} /> : <Plug size={11} />}
           {pt ? 'Testar' : 'Check'}
         </button>
         {check !== null && check !== 'running' && (() => {
