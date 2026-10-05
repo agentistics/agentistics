@@ -10,14 +10,20 @@ import { vaultGet, vaultPost, type Reply } from './vaultApi'
 export type PersonalKind = 'password' | 'login' | 'api-key' | 'env' | 'note'
 export const PERSONAL_KINDS: readonly PersonalKind[] = ['login', 'password', 'api-key', 'env', 'note']
 export const KIND_FIELDS: Record<PersonalKind, readonly string[]> = { password: ['password'], login: ['login', 'password'], 'api-key': ['value'], env: ['value'], note: ['value'] }
+/** Where "só uso" starts ON in the creation form (owner, 2026-10-05: API keys) — mirrors @agentistics/vault's USE_ONLY_DEFAULT. */
+export const USE_ONLY_DEFAULT: Readonly<Record<PersonalKind, boolean>> = { password: false, login: false, 'api-key': true, env: false, note: false }
+/** One reading of the flag: only an explicit `true` is sealed. */
+export const isUseOnly = (m: Pick<PersonalMeta, 'useOnly'>): boolean => m.useOnly === true
 
 export interface PersonalMeta {
   confirmEach?: boolean
+  /** "Só uso": sessions use it, nobody sees or copies it (the server refuses `reveal`). Absent = off. Irreversible. */
+  useOnly?: boolean
   id: string; kind: PersonalKind; name: string; groupId: string | null; tags: string[]; notes: string; url: string
   fields: string[]; createdAt: string; updatedAt: string; version: number; deletedAt: string | null
 }
 export interface PersonalGroup { id: string; name: string; version: number; createdAt: string; updatedAt: string }
-export interface PersonalItemInput { confirmEach?: boolean; kind: PersonalKind; name: string; groupId?: string | null; tags?: string[]; notes?: string; url?: string; fields?: Record<string, string> }
+export interface PersonalItemInput { confirmEach?: boolean; useOnly?: boolean; kind: PersonalKind; name: string; groupId?: string | null; tags?: string[]; notes?: string; url?: string; fields?: Record<string, string> }
 export interface ImportKey { key: string; clash: { id: string; version: number } | null; empty: boolean }
 export type ImportAction = 'import' | 'skip' | 'replace' | 'rename'
 export interface ImportChoice { key: string; action: ImportAction; name?: string }

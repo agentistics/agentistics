@@ -28,6 +28,8 @@ export const VAULT_TEXT = {
   state_corrupt: { en: 'Unreadable', pt: 'Ilegível' },
   secretsHeader: { en: 'Registered secrets', pt: 'Segredos registrados' },
   secretsEmpty: { en: 'No secret is stored on this machine yet.', pt: 'Nenhum segredo está guardado nesta máquina ainda.' },
+  secretsOnVault: { en: '{n} secret(s) kept by Agentistics itself. They are listed with yours on the Vault page, under "System" — names, files, dates and states, never a value.', pt: '{n} segredo(s) guardado(s) pelo próprio Agentistics. Eles aparecem junto com os seus na página Cofre, em "Do sistema" — nome, arquivo, data e estado, nunca o valor.' },
+  secretsOpenVault: { en: 'See them in the Vault', pt: 'Ver no Cofre' },
   sealedAt: { en: 'Sealed', pt: 'Cifrado em' },
   howToReenter: { en: 'How to enter it again', pt: 'Como cadastrar de novo' },
   pendingTitle: { en: 'Waiting to be encrypted', pt: 'Aguardando criptografia' },
