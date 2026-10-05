@@ -347,3 +347,35 @@ describe('§8 grants over HTTP', () => {
     expect((await http('POST', '/api/vault/personal/grants/revoke', { sessionId: 'abc123' })).json.revoked).toBe(true)
   })
 })
+
+describe('JSON import — the same flow as .env, over a flat object', () => {
+  test('a flat {"key":"value"} object previews keys only (clash marked), commits like a .env, replace is an edit', async () => {
+    await http('POST', '/api/vault/personal', { item: { kind: 'env', name: 'API_KEY', fields: { value: 'old' } }, code: codeAt() })
+    const p = await http('POST', '/api/vault/personal/import/preview', { text: '{"API_KEY":"MARKER-new","DB_URL":"postgres://u:MARKER-pw@h/db","OTHER":"1"}' })
+    expect(p.json.ok).toBe(true)
+    expect(p.json.keys.map((k: J) => k.key)).toEqual(['API_KEY', 'DB_URL', 'OTHER'])
+    expect(p.json.keys[0].clash).not.toBeNull()
+    expect(JSON.stringify(p.json)).not.toContain('MARKER')
+    const c = await http('POST', '/api/vault/personal/import/commit', {
+      token: p.json.token,
+      choices: [{ key: 'API_KEY', action: 'replace' }, { key: 'DB_URL', action: 'import' }, { key: 'OTHER', action: 'skip' }],
+    })
+    expect(c.json).toMatchObject({ ok: true, created: 1, replaced: 1, skipped: 1 })
+    const items = (await http('GET', '/api/vault/personal')).json.items as J[]
+    expect(items.map(i => i.name).sort()).toEqual(['API_KEY', 'DB_URL'])
+    expect(items.find(i => i.name === 'API_KEY')!.version).toBe(2)
+  })
+  test('a JSON with nested objects or lists is refused in plain words, and nothing is held for commit', async () => {
+    const p = await http('POST', '/api/vault/personal/import/preview', { text: '{"A":"1","db":{"url":"x"}}' })
+    expect(p.json.ok).toBe(false)
+    expect(p.json.code).toBe('import-format')
+    expect(p.json.sentence).toMatch(/flat|simples|one level|um nível/i)
+    expect(p.json.token).toBeUndefined()
+  })
+  test('JSON that cannot be read says so, and a .env still works', async () => {
+    const bad = await http('POST', '/api/vault/personal/import/preview', { text: '{"A": "1",}' })
+    expect(bad.json).toMatchObject({ ok: false, code: 'import-format' })
+    const env = await http('POST', '/api/vault/personal/import/preview', { text: 'X=1' })
+    expect(env.json.ok).toBe(true)
+  })
+})

@@ -95,7 +95,7 @@ export function CodeField({ value, onChange, label, autoFocus, onEnter }: { valu
 }
 
 /** ON this computer: gesture first (the SERVICE raises the dialog), then the code field. */
-export function UnlockControl({ view, lang, onOpened, btn, isMobile, center, onAction, passkeys = 0 }: { view: VaultView; lang: Lang; onOpened: () => void; btn: React.CSSProperties; isMobile: boolean; center?: boolean; onAction?: (a: UiAction) => void; passkeys?: number }) {
+export function UnlockControl({ view, lang, onOpened, btn, isMobile, center, onAction, passkeys = 0, onBusy }: { view: VaultView; lang: Lang; onOpened: () => void; btn: React.CSSProperties; isMobile: boolean; center?: boolean; onAction?: (a: UiAction) => void; passkeys?: number; onBusy?: (busy: boolean) => void }) {
   // 'phone': Hello ERRORED and a phone with biometrics stands in (fallback A); this page waits for it.
   const [phase, setPhase] = useState<'idle' | 'gesture' | 'code' | 'phone'>(view.pendingStepup ? 'code' : 'idle')
   const [noPhone, setNoPhone] = useState(false)
@@ -103,6 +103,10 @@ export function UnlockControl({ view, lang, onOpened, btn, isMobile, center, onA
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [errAction, setErrAction] = useState<UiAction | null>(null)
+  // The page's safe turns its dial while an unlock is IN PROGRESS: Hello asked, the code being checked, or
+  // the phone being waited on. Reported as a level; the caller decides what to draw.
+  const inProgress = phase === 'gesture' || phase === 'phone' || busy
+  useEffect(() => { onBusy?.(inProgress) }, [inProgress, onBusy])
   const label: VaultKey = view.wrappers.includes('hello') ? 'unlockWith_hello' : view.wrappers.includes('fido2') ? 'unlockWith_fido2' : 'unlockPlain'
 
   const gesture = async () => {
@@ -225,7 +229,7 @@ function PhoneUnlock({ facts, lang, isMobile, onOpened }: { facts: PhoneFacts; l
  * The whole unlock, for any screen: reads the vault's state and where it is opened from, and calls
  * `onOpened` once the vault is open (at once, if it already is).
  */
-export function VaultUnlock({ lang, isMobile, onOpened, center, onAction, btn }: { lang: Lang; isMobile: boolean; onOpened: () => void; center?: boolean; onAction?: (a: UiAction) => void; btn?: React.CSSProperties }) {
+export function VaultUnlock({ lang, isMobile, onOpened, center, onAction, btn, onBusy }: { lang: Lang; isMobile: boolean; onOpened: () => void; center?: boolean; onAction?: (a: UiAction) => void; btn?: React.CSSProperties; onBusy?: (busy: boolean) => void }) {
   const [view, setView] = useState<VaultView | null>(null)
   const [facts, setFacts] = useState<PhoneFacts | null>(null)
   const [failed, setFailed] = useState(false)
@@ -248,7 +252,7 @@ export function VaultUnlock({ lang, isMobile, onOpened, center, onAction, btn }:
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: isMobile ? 'stretch' : center ? 'center' : 'flex-start' }}>
       {facts.loopback
-        ? <UnlockControl view={view} lang={lang} onOpened={done} btn={btn ?? hotBtn(isMobile)} isMobile={isMobile} center={center} onAction={onAction} passkeys={facts.passkeys} />
+        ? <UnlockControl view={view} lang={lang} onOpened={done} btn={btn ?? hotBtn(isMobile)} isMobile={isMobile} center={center} onAction={onAction} passkeys={facts.passkeys} {...(onBusy ? { onBusy } : {})} />
         : <PhoneUnlock facts={facts} lang={lang} isMobile={isMobile} onOpened={done} />}
     </div>
   )

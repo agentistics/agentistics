@@ -28,6 +28,7 @@ import {
 import { pt_, type PKey } from '../lib/personalText'
 import { hasPasskeyHere, mobileState, passkeySupport, phoneGesture, removePasskey, setCodeReveal, type MobileState } from '../lib/passkey'
 import { LockedVaultInline, PhoneEnrol } from '../components/vault/VaultUnlock'
+import { VaultStage } from '../components/vault/VaultStage'
 import { clearStalePhones, phoneFacts, readDeviceKey, removeDevice } from '../lib/phoneVault'
 
 type Lang = 'en' | 'pt'
@@ -102,7 +103,10 @@ export default function VaultPage() {
   const [importing, setImporting] = useState(false)
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+  // A vault that WAS open and is now locked (auto-lock, the Lock button) closes its safe on the way in.
+  const wasReady = useRef(false)
   const { state, setState, items, setItems, groups, busyHello, codeAsk, mobile, setMobile, isPhone, host, gated, load } = usePersonalVault()
+  useEffect(() => { if (state.kind === 'ready') wasReady.current = true }, [state.kind])
 
   // Reactive search: every keystroke, debounced 120 ms; page back to 1 whenever the filter changes.
   useEffect(() => { const id = setTimeout(() => setFilter(f => ({ ...f, q: qLive })), 120); return () => clearTimeout(id) }, [qLive])
@@ -134,12 +138,11 @@ export default function VaultPage() {
   if (state.kind === 'loading') return <div style={pageWrap}>{header}<div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}><Loader2 size={14} className="ag-spin" /></div></div>
   if (state.kind === 'failed') return <div style={pageWrap}>{header}<Err text={t('network')} /></div>
   if (state.kind === 'locked') {
+    // §10: unlock RIGHT HERE — Hello on this computer, the phone's own ways on a phone — under a centred
+    // safe whose dial turns while it happens and whose door opens before the content appears.
     return (
       <div style={pageWrap}>{header}
-        <div style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 20, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start' }}>
-          {/* §10: unlock RIGHT HERE — Hello on this computer, the phone's own ways on a phone. */}
-          <LockedVaultInline lang={lang} isMobile={isMobile} onOpened={() => { void load() }} />
-        </div>
+        <VaultStage lang={lang} isMobile={isMobile} fromOpen={wasReady.current} onOpened={() => { wasReady.current = false; void load() }} />
       </div>
     )
   }
@@ -611,7 +614,7 @@ function ImportDialog({ lang, isMobile, groups, gated, onClose, onDone }: { lang
       {!preview && (
         <label style={{ ...primaryBtn, display: 'inline-flex', alignItems: 'center', gap: 6, width: 'auto', cursor: 'pointer', minHeight: isMobile ? 44 : undefined }}>
           <FileUp size={14} /> {busy ? t('working') : t('chooseFile')}
-          <input type="file" accept=".env,text/plain,*/*" style={{ display: 'none' }} onChange={e => { void onFile(e.target.files?.[0]); e.target.value = '' }} />
+          <input type="file" accept=".env,.json,application/json,text/plain,*/*" style={{ display: 'none' }} onChange={e => { void onFile(e.target.files?.[0]); e.target.value = '' }} />
         </label>
       )}
       {preview && (

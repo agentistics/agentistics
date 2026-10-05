@@ -29,6 +29,7 @@ import { versionedAsset } from '../../lib/brand'
 import { sessionCardStyle } from '../../lib/sessionCardStyle'
 import { readAsideGroupPrefs, subscribeAsideGroupPrefs } from '../../lib/sessionsAsidePrefs'
 import { VaultExpiryCard } from '../vault/VaultExpiryCard'
+import { VaultGlyph } from '../vault/VaultGlyph'
 import { SessionFacts } from '../sessions/SessionFacts'
 import { TabStrip } from '../sessions/formBits'
 import { SessionRowMenu } from '../sessions/SessionRowMenu'
@@ -523,6 +524,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
               tabs={DOCK_TABS}
               value={tab}
               onPick={id => { setTab(id); setDock(d => ({ ...d, panelSession: null })) }}
+              icon={id => (id === 'vault' ? <VaultGlyph size={13} /> : null)}
               label={id => (id === 'nay' ? 'Nay' : id === 'vault' ? (pt ? 'Cofre' : 'Vault') : (pt ? 'Sessões' : 'Sessions'))}
               flush
               ariaLabel={pt ? 'Painel da Nay' : 'Nay panel'}
