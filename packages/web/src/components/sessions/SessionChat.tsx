@@ -55,7 +55,6 @@ import { splitImageAttachments } from '../../lib/attachmentPreview'
 import { attachmentUrl } from '../../lib/attachmentUrl'
 import { AttachmentLightbox } from './AttachmentLightbox'
 import { detectCompacting, liveTurnText, stripAnsi } from '../../lib/liveTurn'
-import { liveAnswerText } from '../../lib/liveAnswer'
 import { scratchKey, sessionScratch } from '../../lib/sessionScratch'
 import { chatReadAt, firstFrameStale, refreshChat, subscribeChat } from '../../lib/chatFeed'
 import { composerMaxHeight } from '../../lib/composerHeight'
@@ -136,8 +135,6 @@ import { SourceSettings } from './SourceSettings'
 
 /** How long a successful "send now" keeps its sentence on screen. */
 const SEND_NOW_RESULT_MS = 6000
-/** How long after the screen last changed it still counts as being drawn (`liveAnswer`). */
-const SCREEN_MOVING_MS = 1500
 
 interface ChatPayload {
   turns: ChatTurn[]
@@ -1333,40 +1330,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   }, [term.frame, lastAssistant, working, source?.liveText])
 
   /**
-   * The answer being WRITTEN, drawn as the bubble it will become (STREAM.FIX). `live` above reads the
-   * whole screen and only steers the scroll; this reads just the harness's own answer block
-   * (`liveAnswer.ts`), so it is safe to draw — and it is the only place a CLI answer can be seen
-   * growing, because the transcript (and the chat-stream pushing it) only ever holds it finished.
-   */
-  // `working` is the fleet row's, polled every few seconds and settled over two polls — an answer
-  // shorter than that is written and finished before the row ever says so, and the live bubble
-  // missed it whole. The screen MOVING is the immediate signal: the hub sends a frame only when the
-  // pane changed, so a new frame other than the first means something is being drawn right now.
-  const [screenMoving, setScreenMoving] = useState(false)
-  const lastSeq = useRef<number | null>(null)
-  useEffect(() => {
-    const seq = term.frame?.seq ?? null
-    const prev = lastSeq.current
-    lastSeq.current = seq
-    if (seq === null || prev === null || seq === prev) return
-    setScreenMoving(true)
-    const t = setTimeout(() => setScreenMoving(false), SCREEN_MOVING_MS)
-    return () => clearTimeout(t)
-  }, [term.frame?.seq])
-  useEffect(() => { lastSeq.current = null; setScreenMoving(false) }, [session.id])
-
-  const liveAnswer = useMemo(() => {
-    if (source || !term.frame) return null
-    return liveAnswerText({
-      harness: session.harness,
-      lines: stripAnsi(term.frame.content).split('\n'),
-      ...(lastAssistant ? { lastCommitted: lastAssistant.text } : {}),
-      working: working || screenMoving,
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [term.frame, lastAssistant, working, screenMoving, source, session.harness])
-
-  /**
    * Whether the frame is showing Claude Code's OWN compaction screen right now — see
    * `detectCompacting`. Read over the RAW frame lines rather than `live`'s filtered text: the
    * progress bar is exactly the kind of line `liveTurnText` strips out as chrome, and compaction
@@ -2378,9 +2341,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               screen block was both the wrong SIZE for a "something is happening" signal and the
               wrong PLACE for whatever chrome slipped through. `live` still drives the follow-the-
               tail effect below (new screen content is a sign to keep scrolling), and `WorkingNote`
-              is the one and only "the session is busy" indicator now — small, grey, no raw text.
-              What IS drawn is `liveAnswer` below: only the harness's own answer block, read
-              narrowly enough to carry no chrome (`liveAnswer.ts`). */}
+              is the one and only "the session is busy" indicator now — small, grey, no raw text. */}
 
           {/* The conversation on screen is one this tab cached before you left, and the current one
               is on its way. AT THE TAIL rather than the top: the view lands at the end, which is
@@ -2397,13 +2358,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               those as chat entries buried the sentences actually addressed to the user. */}
           {/* A SOURCE's live text is the model's own stream — exact, unlike a screen read — so it
               is drawn as the bubble it will become (`chatSource.ts`). */}
-          {/* A CLI's answer being written, read off its screen — the same bubble, marked live. */}
-          {liveAnswer && (
-            <div data-live-answer="" aria-live="polite">
-              <ChatBubble turn={{ role: 'assistant', text: liveAnswer }} lang={lang} harness={session.harness} />
-            </div>
-          )}
-
           {(source?.liveText || source?.liveReasoning) && (
             <ChatBubble turn={{ role: 'assistant', text: source.liveText ?? '', ...(source.liveReasoning ? { reasoning: source.liveReasoning } : {}) }} lang={lang} harness={session.harness} />
           )}

@@ -2,25 +2,6 @@
  * scripts/perf/measure.ts — measurements shared by `baseline.ts` and `budget.ts` (PERF.1).
  */
 import { quantiles, type PerfServer } from './server-harness.ts'
-import { liveAnswerText } from '../../packages/web/src/lib/liveAnswer.ts'
-import { stripAnsi } from '../../packages/web/src/lib/liveTurn.ts'
-
-/**
- * STREAM.FIX: what the CHAT would draw as the answer being written, frame by frame — the page's own
- * reader (`liveAnswerText`) over the terminal frames the page receives. Before this, the budgets
- * measured that frames reached the server's stream and never that the chat could make an answer
- * out of them, which is how "vem tudo de uma vez" passed every figure here.
- */
-export function inflightSteps(frames: readonly { at: number; content: string }[], marker: string, until: number): { steps: number; firstAt: number | null } {
-  let longest = 0, steps = 0, firstAt: number | null = null
-  for (const f of frames) {
-    if (f.at >= until) break
-    const t = liveAnswerText({ harness: 'claude', working: true, lines: stripAnsi(f.content).split('\n') })
-    if (!t || !t.includes(`answer to ${marker}`)) continue
-    if (t.length > longest) { longest = t.length; steps++; firstAt ??= f.at }
-  }
-  return { steps, firstAt }
-}
 
 /** Send → echo and harness write → shown, over the chat stream; null when the server has no stream. */
 export async function measurePush(s: PerfServer, id: string, rounds = 6): Promise<PushNumbers | null> {
@@ -50,32 +31,13 @@ export async function measurePush(s: PerfServer, id: string, rounds = 6): Promis
   for (let i = 0; i < 100 && Number.isNaN(first); i++) await Bun.sleep(20)
   // The in-flight text: the terminal stream the chat scrapes for the turn being written.
   const term: { at: number; data: string }[] = []
-  const termFrames: { at: number; content: string }[] = []
   const tres = await fetch(`${s.base}/api/fleet/stream?id=${id}`, { signal: ctl.signal }).catch(() => null)
   if (tres?.body) {
     const tr = tres.body.getReader()
     const td = new TextDecoder()
-    let tbuf = ''
-    void (async () => {
-      try {
-        for (;;) {
-          const r = await tr.read(); if (r.done) break
-          const chunk = td.decode(r.value)
-          const at = Date.now()
-          term.push({ at, data: chunk })
-          tbuf += chunk
-          let j: number
-          while ((j = tbuf.indexOf('\n\n')) >= 0) {
-            const block = tbuf.slice(0, j); tbuf = tbuf.slice(j + 2)
-            if (!/^event: frame$/m.test(block)) continue
-            const data = block.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trimStart()).join('\n')
-            try { const v = JSON.parse(data) as { content?: unknown }; if (typeof v.content === 'string') termFrames.push({ at, content: v.content }) } catch { /* partial */ }
-          }
-        }
-      } catch { /* aborted */ }
-    })()
+    void (async () => { try { for (;;) { const r = await tr.read(); if (r.done) break; term.push({ at: Date.now(), data: td.decode(r.value) }) } } catch { /* aborted */ } })()
   }
-  const echo: number[] = [], answer: number[] = [], inflight: number[] = [], growth: number[] = [], liveFirst: number[] = []
+  const echo: number[] = [], answer: number[] = [], inflight: number[] = []
   for (let k = 0; k < rounds; k++) {
     const marker = `pushmark${k}x${Date.now()}`
     const tSend = Date.now()
@@ -94,20 +56,14 @@ export async function measurePush(s: PerfServer, id: string, rounds = 6): Promis
           else if (userAt) void (async () => { for (let w = 0; w < 300; w++) { const t2 = term.find(t => t.data.includes(`answer to ${marker}`)); if (t2) { inflight.push(t2.at - userAt); return } await Bun.sleep(5) } })()
         }
         const m = f.data.match(new RegExp(`answer to ${marker}[^"]*writtenAt=(\\d+)`))
-        if (!a && m) {
-          answer.push(f.at - Number(m[1])); a = true
-          // How many times the chat's live answer GREW before the finished turn arrived.
-          const g = inflightSteps(termFrames, marker, f.at)
-          growth.push(g.steps)
-          if (g.firstAt !== null) liveFirst.push(g.firstAt - tSend)
-        }
+        if (!a && m) { answer.push(f.at - Number(m[1])); a = true }
       }
       await Bun.sleep(5)
     }
     await Bun.sleep(300)
   }
   ctl.abort()
-  return { firstFrameMs: Math.round(first), echoByRound: echo, answerByRound: answer, sendToEcho: quantiles(echo), harnessWriteToShown: quantiles(answer), inflightTextShown: quantiles(inflight), inflightGrowthSteps: growth, sendToLiveAnswer: quantiles(liveFirst) }
+  return { firstFrameMs: Math.round(first), echoByRound: echo, answerByRound: answer, sendToEcho: quantiles(echo), harnessWriteToShown: quantiles(answer), inflightTextShown: quantiles(inflight) }
 }
 
 
@@ -119,8 +75,4 @@ export interface PushNumbers {
   sendToEcho: ReturnType<typeof quantiles>
   harnessWriteToShown: ReturnType<typeof quantiles>
   inflightTextShown: ReturnType<typeof quantiles>
-  /** Per round: how many times the chat's live answer grew before the finished turn arrived. */
-  inflightGrowthSteps: number[]
-  /** Send → the chat first has a live answer to draw. */
-  sendToLiveAnswer: ReturnType<typeof quantiles>
 }
