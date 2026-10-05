@@ -9,6 +9,8 @@ import type { LiveProcess, LiveUnavailableReason, SessionMeta } from '@agentisti
 import { getRates } from './rates'
 import { getVersionInfo, startVersionRecheck } from './version'
 import { handleUpgradeRoute, upgradableHint } from './upgrade-web'
+import { compressResponse } from './http-compress'
+import { slimApiResponse, slimSerialized } from './data-slim'
 import { buildApiResponse, buildApiResponseForClient, buildApiResponseStream, invalidateCache, loadDataSnapshot, prepareQuickPayload, serializedData } from './data'
 import { readPreferences, writePreferences, redactPreferences, guardTeamConnectionsWipe, PreferencesLockTimeoutError, type Preferences } from './preferences'
 import {
@@ -3606,7 +3608,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // `?partial=1` (the web app): answer within about a second, with a partial payload marked as
         // such when the first build is still running. Without it — the MCP, the VS Code extension,
         // anything older — the answer is the full build, exactly as before.
-        let data = url.searchParams.get('partial') === '1' ? await buildApiResponseForClient() : await buildApiResponse()
+        const wantPartial = url.searchParams.get('partial') === '1'
+        // `slim=1` (only ever with `partial=1`): the first screen's payload, a fraction of the full one.
+        const wantSlim = wantPartial && url.searchParams.get('slim') === '1'
+        let data = wantPartial ? await buildApiResponseForClient() : await buildApiResponse()
+        const unscoped = data
         // Presence is live (in-memory sockets + heartbeat) — merge it in AFTER the cached
         // build so online/offline + latency stay fresh without recomputing the whole response.
         let extra: { presence?: unknown; includeOfflineData?: boolean } = {}
@@ -3658,8 +3664,8 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // A central's response is scoped per principal, so it keeps the plain path.
         const live = { liveSessionIds, liveProcesses, ...(liveUnavailable ? { liveUnavailable } : {}), ...extra }
         const body = TEAM_CENTRAL || !data.sessions
-          ? JSON.stringify({ ...data, ...live })
-          : `${serializedData(data).slice(0, -1)},${JSON.stringify(live).slice(1)}`
+          ? JSON.stringify({ ...(wantSlim && data.sessions ? slimApiResponse(data) : data), ...live })
+          : `${(wantSlim ? slimSerialized(unscoped) : serializedData(data)).slice(0, -1)},${JSON.stringify(live).slice(1)}`
         return new Response(body, {
           status: 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
@@ -4534,17 +4540,22 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     })
 }
 
+async function handleCompressed(req: Request, server: Server<WSData>): Promise<Response | undefined> {
+  const res = await handleRequest(req, server)
+  return res ? compressResponse(req, res) : res
+}
+
 try {
 // Build the DNS-rebinding allowlist before the first request can arrive, and keep it fresh (an
 // interface that comes up later — a VPN, a tailnet — joins within a minute). Never per request.
 startHostAllowlistRefresh()
 // PORT (47291) is always the api + mcp endpoint.
-Bun.serve<WSData>({ hostname: '0.0.0.0', port: PORT, idleTimeout: 60, maxRequestBodySize: LIMITS.ingestBodyBytes, websocket: _wsHandlers, fetch: handleRequest })
+Bun.serve<WSData>({ hostname: '0.0.0.0', port: PORT, idleTimeout: 60, maxRequestBodySize: LIMITS.ingestBodyBytes, websocket: _wsHandlers, fetch: handleCompressed })
 // Binary mode also serves the web dashboard on WEB_PORT (47292) — that's the URL you open.
 // Same handler → the SPA's same-origin `/api/*` calls resolve against 47292 and just work,
 // while 47291 stays the dedicated api + mcp port.
 if (SERVE_STATIC) {
-  Bun.serve<WSData>({ hostname: '0.0.0.0', port: WEB_PORT, idleTimeout: 60, maxRequestBodySize: LIMITS.ingestBodyBytes, websocket: _wsHandlers, fetch: handleRequest })
+  Bun.serve<WSData>({ hostname: '0.0.0.0', port: WEB_PORT, idleTimeout: 60, maxRequestBodySize: LIMITS.ingestBodyBytes, websocket: _wsHandlers, fetch: handleCompressed })
 }
 
 const _ESC = '\x1b'

@@ -52,6 +52,15 @@ export function partialPollMs(attempt: number): number {
   return Math.min(5000, 1000 + attempt * 500)
 }
 
+/** The URL of a load: the very first one asks for the SLIM payload (a phone behind a relay cannot wait
+ *  for 5 MB before painting anything); every later one asks for the full build. */
+export function dataUrl(haveData: boolean): string {
+  return haveData ? '/api/data?partial=1' : '/api/data?partial=1&slim=1'
+}
+
+/** After a slim answer the full payload is wanted at once — the page is already painted. */
+export const SLIM_FOLLOWUP_MS = 150
+
 /** How long to wait before retrying a failed first load: 2 s, 4 s, 8 s, then every 15 s. */
 export function retryDelayMs(attempt: number): number {
   return Math.min(15_000, 2000 * 2 ** Math.max(0, attempt))
@@ -94,7 +103,7 @@ export function bootWatchdog(elapsedMs: number, health: 'ok' | 'down' | 'unknown
 
 export interface StartupStripState {
   partial: boolean
-  partialReason?: 'quick' | 'snapshot'
+  partialReason?: 'quick' | 'snapshot' | 'slim'
   deferredRepos?: number
   /** 0..1 of the server's project scan, when it has reported one. */
   projects?: number
@@ -151,7 +160,8 @@ export function loadErrorText(e: LoadError, lang: 'pt' | 'en', origin: string): 
  *  full-shaped and is accepted; the poll that follows brings the fresh build either way. */
 export function acceptPayload(current: { partial?: boolean } | null, fresh: { partial?: boolean; partialReason?: string }): boolean {
   if (!current) return true
-  return !(fresh.partial && fresh.partialReason === 'quick' && !current.partial)
+  // A subset (quick, slim) never replaces a FULL payload already on screen.
+  return !(fresh.partial && (fresh.partialReason === 'quick' || fresh.partialReason === 'slim') && !current.partial)
 }
 
 /** The liveness probe: while data is on screen, ask `/api/health` this often with this deadline, so a
