@@ -53,7 +53,7 @@ const report: { round: number; timeline: { t: number; live: number; done: number
 try {
   const post = (path: string, body: unknown) => fetch(`${s.base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
   await fetch(`${s.base}/api/preferences`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ archiveMode: 'off' }) })
-  const cwd = join(home, '..', 'work', 'stream-e2e'); mkdirSync(cwd, { recursive: true })
+  const cwd = join(home, '..', 'work', 'stream_e2e live.1'); mkdirSync(cwd, { recursive: true })
   const sp = await (await post('/api/fleet/new', { harness: 'claude', cwd, force: true, label: 'stream-e2e' })).json() as { ok: boolean; id?: string; message?: string }
   if (!sp.ok || !sp.id) throw new Error(`spawn failed: ${sp.message}`)
   const id = sp.id
