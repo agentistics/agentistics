@@ -38,7 +38,7 @@ export type BoardStatus = string
 export type ColumnId =
   | 'status' | 'priority' | 'due' | 'claim' | 'progress' | 'attempts' | 'sessions'
   | 'rounds' | 'tokens' | 'cost' | 'harnesses' | 'subtasks' | 'comments' | 'files' | 'links'
-  | 'blockedBy' | 'created' | 'updated' | 'type'
+  | 'blockedBy' | 'created' | 'updated' | 'type' | 'id'
 
 /**
  * The fixed seven-status vocabulary the board shipped with — now the LOADING-STATE fallback and

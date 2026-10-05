@@ -12,7 +12,7 @@
  */
 
 export type SubtaskColumnId =
-  | 'status' | 'progress' | 'started' | 'completed' | 'duration' | 'sessions' | 'model' | 'cost' | 'tokens'
+  | 'status' | 'progress' | 'started' | 'completed' | 'duration' | 'sessions' | 'model' | 'cost' | 'tokens' | 'id'
 
 export interface SubtaskColumnDef {
   id: SubtaskColumnId
@@ -34,8 +34,10 @@ export const SUBTASK_COLUMNS: SubtaskColumnDef[] = [
   { id: 'model', width: 140 },
   { id: 'cost', numeric: true, width: 88 },
   { id: 'tokens', numeric: true, width: 84 },
+  // Optional: the subtask's own id, monospace, one click copies it — not in the default set.
+  { id: 'id', width: 128 },
 ]
 
-/** Every column shown, in the fixed order above — a fresh board must not lose the columns it had
+/** Every column shown EXCEPT the optional `id`, in the fixed order above — a fresh board must not lose the columns it had
  *  before this picker existed. */
-export const DEFAULT_SUBTASK_COLUMNS: SubtaskColumnId[] = SUBTASK_COLUMNS.map(c => c.id)
+export const DEFAULT_SUBTASK_COLUMNS: SubtaskColumnId[] = SUBTASK_COLUMNS.map(c => c.id).filter(id => id !== 'id')

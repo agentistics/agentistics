@@ -15,6 +15,7 @@ import { DurationCellView } from './SubtaskDurationCell'
 import { SubtaskSessions } from './SubtaskSessions'
 import { CostCellView, TokensCellView } from './SubtaskMoneyCells'
 import { ModelCellView } from './SubtaskModelCell'
+import { IdCell } from './IdCell'
 import { TaskProgressBar } from './TaskProgressBar'
 import { isGroupSubtask } from './subtaskGroups'
 import { costCellFor, effectiveTimes, subtaskRollupOf, tokensCellFor } from './subtaskRollup'
@@ -88,6 +89,8 @@ export function subtaskColumnCell(
           mobile={ctx.isMobile} onLink={ctx.onLink} onUnfile={ctx.onUnfile} onOpen={ctx.onOpenSession}
         />
       )
+    case 'id':
+      return <IdCell id={t.id} lang={ctx.lang} />
     case 'model':
       return <ModelCellView sessions={ctx.sessions.filter(s => s.subtaskId === t.id)} />
     case 'cost': {
