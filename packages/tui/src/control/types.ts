@@ -74,7 +74,20 @@ export const TAB_ORDER: readonly TabId[] = [
 
 /** The ordinary cockpit has no native code entry; `agentop code` opts into the code tab explicitly. */
 export function tabOrderFor(codeEntry: boolean): readonly TabId[] {
-  return codeEntry ? TAB_ORDER : TAB_ORDER.filter(id => id !== 'code')
+  // The `home` tab IS the native harness's front door (its hero, its "what are we building?" prompt),
+  // so it belongs to the explicit `agentop code` entry just like the `code` tab: a plain `agentop`
+  // must never open it (a user on a configured machine, experimental off, landed on it).
+  return codeEntry ? TAB_ORDER : TAB_ORDER.filter(id => id !== 'code' && id !== 'home')
+}
+
+/** The tab a plain `agentop` opens on. */
+export const PLAIN_START_TAB: TabId = 'services'
+
+/** The tab to open on: the requested one when this entry shows it, else the entry's own front door. */
+export function startTabFor(requested: TabId | undefined, codeEntry: boolean): TabId {
+  const order = tabOrderFor(codeEntry)
+  if (requested && order.includes(requested)) return requested
+  return codeEntry ? 'home' : PLAIN_START_TAB
 }
 
 /** A service is `unknown` when detection itself failed (no docker, no lsof) — never assume down. */

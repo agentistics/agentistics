@@ -30,7 +30,7 @@ import { HelpOverlay, helpMaxTop } from './HelpOverlay'
 import { paneHit, shellHit } from './hit'
 import { isActivation, trackClick, wheelDelta, type ClickTrack, type MouseReport, type Pointer } from './mouse'
 import { createPointerBus, PointerProvider, type MouseChannel } from './pointer'
-import { tabOrderFor, type ActionResult, type ControlExit, type ControlHost, type ControlSessions, type ControlStatus, type TabId } from './types'
+import { startTabFor, tabOrderFor, type ActionResult, type ControlExit, type ControlHost, type ControlSessions, type ControlStatus, type TabId } from './types'
 import { appendLines } from './stream'
 import type { CliLang } from './lang'
 import { controlStrings } from './i18n'
@@ -171,7 +171,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
 
   // GL-01: bare `agentop` opens on `home`; `agentop code` asks for `code` explicitly.
   const tabOrder = tabOrderFor(Boolean(initial?.codeTab))
-  const [tab, setTab] = useState<TabId>(initial?.tab === 'code' && !initial?.codeTab ? 'home' : (initial?.tab ?? 'home'))
+  const [tab, setTab] = useState<TabId>(startTabFor(initial?.tab, Boolean(initial?.codeTab)))
   // The `code` tab's launch: `agentop code …` on the first mount, then whatever `home` asks for
   // (HM-02 the first prompt, HM-04 a session to resume). A NEW object each time, so the tab acts on it.
   const [codeLaunch, setCodeLaunch] = useState<CodeLaunch | undefined>(initial?.code)
@@ -638,7 +638,7 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
 
   // The ordinary cockpit has no native entry point. The explicit `agentop code` mount is the only
   // place where native commands are offered to the palette.
-  const paletteCommands = host.code ? PALETTE_COMMANDS : PALETTE_COMMANDS.filter(c => !c.code && c.id !== 'code')
+  const paletteCommands = host.code ? PALETTE_COMMANDS : PALETTE_COMMANDS.filter(c => !c.code && c.id !== 'code' && c.id !== 'home' && c.id !== 'resume')
   const paletteList = palette ? filterCommands(palette.query, lang, paletteCommands) : []
   const fullCtx: PaletteContext = {
     hasCode: Boolean(host.code), ...paletteCtx,
