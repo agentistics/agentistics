@@ -105,7 +105,7 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // "lock now" action. It is about THIS host's key material, so it rides the host-power gate and is
   // refused on a central by `index.ts` as well.
   ['/api/vault', 'localShell'],
-  // The running server's experimental-feature state (GET) and its switch (PUT, Settings → Experimental).
+  // The running server's experimental-feature state (GET) and its switch (PUT, via the `agentop experimental` command).
   // It reports and changes which host features this machine runs, so it rides the same capability.
   ['/api/experimental', 'localShell'],
   // Reading and WRITING this machine's MCP server configuration. `/api/mcp/servers` reports what is

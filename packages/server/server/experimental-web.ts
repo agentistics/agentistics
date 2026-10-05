@@ -2,7 +2,7 @@
  * `/api/experimental` — what THIS server booted with, and the switch.
  *
  * GET reports the stored preference and each feature resolved against the environment it actually
- * has (`resolveExperimental`). PUT `{ enabled }` is the Settings → Experimental switch: it persists
+ * has (`resolveExperimental`). PUT `{ enabled }` is the switch used by the `agentop experimental` command: it persists
  * `preferences.experimental` and applies it to THIS process's environment, which is where every
  * gate reads it (`providerFlagOn`, `nativeExperimentalOn`, the engine's `flag('provider')` are all
  * functions of `process.env`, evaluated per request). It does NOT restart the server — the page
