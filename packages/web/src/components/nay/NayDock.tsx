@@ -31,7 +31,6 @@ import { readAsideGroupPrefs, subscribeAsideGroupPrefs } from '../../lib/session
 import { VaultExpiryCard } from '../vault/VaultExpiryCard'
 import { VaultGlyph } from '../vault/VaultGlyph'
 import { SessionFacts } from '../sessions/SessionFacts'
-import { TabStrip } from '../sessions/formBits'
 import { SessionRowMenu } from '../sessions/SessionRowMenu'
 import { SessionFiling } from '../tasks/SessionFiling'
 import { boardCopy } from '../tasks/copy'
@@ -518,18 +517,29 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
           )}
         </>) : (<>
           <img src={versionedAsset('/minimalistLogo.png')} alt="" style={{ width: 20, height: 20, borderRadius: 6, marginLeft: 4 }} />
-          {/* The site's shared tab strip (`TabStrip`), not a dock-only underline copy. */}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <TabStrip<Tab>
-              tabs={DOCK_TABS}
-              value={tab}
-              onPick={id => { setTab(id); setDock(d => ({ ...d, panelSession: null })) }}
-              icon={id => (id === 'vault' ? <VaultGlyph size={13} /> : null)}
-              label={id => (id === 'nay' ? 'Nay' : id === 'vault' ? (pt ? 'Cofre' : 'Vault') : (pt ? 'Sessões' : 'Sessions'))}
-              flush
-              ariaLabel={pt ? 'Painel da Nay' : 'Nay panel'}
-              {...(isMobile ? { tap: 44 } : {})}
-            />
+          {/* The dock's own underline tabs (owner, 2026-10-05: restored — no pill behind them; the selected
+              tab is orange text over an orange bar, exactly as before the shared strip replaced them). */}
+          <div role="tablist" aria-label={pt ? 'Painel da Nay' : 'Nay panel'} style={{ display: 'flex', flex: 1, minWidth: 0 }}>
+            {DOCK_TABS.map(id => {
+              const on = tab === id && !panelSession
+              return (
+                <button key={id} type="button" role="tab" aria-selected={on} data-dock-tab={id}
+                  onClick={() => { setTab(id); setDock(d => ({ ...d, panelSession: null })) }}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0,
+                    padding: isMobile ? '0 14px' : '6px 12px', minHeight: isMobile ? 44 : undefined,
+                    border: 'none', borderBottom: `2px solid ${on ? ORANGE : 'transparent'}`,
+                    background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5,
+                    fontWeight: on ? 700 : 500, color: on ? ORANGE : 'var(--text-secondary)',
+                  }}
+                >
+                  {id === 'vault' && <VaultGlyph size={13} />}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {id === 'nay' ? 'Nay' : id === 'vault' ? (pt ? 'Cofre' : 'Vault') : (pt ? 'Sessões' : 'Sessions')}
+                  </span>
+                </button>
+              )
+            })}
           </div>
         </>)}
         <DockSettings pt={pt} isMobile={isMobile} open={settingsOpen} onToggle={() => setSettingsOpen(o => !o)} />
