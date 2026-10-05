@@ -103,9 +103,11 @@ export function UnlockControl({ view, lang, onOpened, btn, isMobile, center, onA
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [errAction, setErrAction] = useState<UiAction | null>(null)
-  // The page's safe turns its dial while an unlock is IN PROGRESS: Hello asked, the code being checked, or
-  // the phone being waited on. Reported as a level; the caller decides what to draw.
-  const inProgress = phase === 'gesture' || phase === 'phone' || busy
+  // The page's safe turns its dial while an unlock is IN PROGRESS: Hello asked, the code ASKED or being
+  // checked (owner, 2026-10-05: Hello passed but the code is still owed is still "unlocking" — the door
+  // must not look idle, and must not open either), or the phone being waited on. Reported as a level; the
+  // caller decides what to draw. Only `onOpened` (the vault really open) lets the door move.
+  const inProgress = phase === 'gesture' || phase === 'code' || phase === 'phone' || busy
   useEffect(() => { onBusy?.(inProgress) }, [inProgress, onBusy])
   const label: VaultKey = view.wrappers.includes('hello') ? 'unlockWith_hello' : view.wrappers.includes('fido2') ? 'unlockWith_fido2' : 'unlockPlain'
 
