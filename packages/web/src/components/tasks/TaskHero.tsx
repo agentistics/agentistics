@@ -105,7 +105,7 @@ export function TaskHero({ detail, lang, statuses, live, reload, onBack, onAbout
     // The app's STANDARD card (`Section.tsx`): card background, 1px border, the large radius — no
     // glow, no coloured stripe. Status lives in the chip below, not in the frame.
     <section style={{
-      position: 'relative',
+      position: 'relative', minWidth: 0, boxSizing: 'border-box',
       border: isMobile ? 'none' : '1px solid var(--border)',
       borderBottom: '1px solid var(--border)',
       borderRadius: isMobile ? 0 : 'var(--radius-lg)',
