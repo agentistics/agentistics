@@ -730,6 +730,8 @@ export interface RestartDeps {
   onWait?: (elapsedSec: number) => void
   /** Take back a server running outside the unit (default `reclaimStrayServer`). */
   reclaim?: () => Promise<import('./server-ownership-io.ts').ReclaimResult>
+  /** The version this restart should bring up; a server answering it counts as replaced. */
+  wantVersion?: string
 }
 
 export type Exec = NonNullable<RestartDeps['run']>
@@ -754,13 +756,17 @@ async function unitFacts(mode: AutostartMode, exec: Exec) {
 async function observeServing(mode: AutostartMode, exec: Exec): Promise<ServingObservation> {
   if (mode === 'server') {
     const pid = await listenerPid(PORT, exec)
+    // Ask the PORT, not only the pid: where lsof/ss cannot name the listener `pid` is null while the
+    // server answers perfectly well, and the version it reports is the better proof anyway.
     let answering = false
-    if (pid !== null) {
-      try {
-        answering = (await fetch(`http://127.0.0.1:${PORT}/api/version`, { signal: AbortSignal.timeout(1_500) })).ok
-      } catch { /* not answering this tick */ }
-    }
-    return { pid, answering }
+    let version: string | null = null
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT}/api/version`, { signal: AbortSignal.timeout(3_000) })
+      answering = res.ok
+      const body = await res.json().catch(() => null) as { current?: unknown } | null
+      if (typeof body?.current === 'string') version = body.current
+    } catch { /* not answering this tick */ }
+    return { pid, answering, version }
   }
   const u = await unitFacts(mode, exec)
   return { pid: u.mainPid, answering: u.state === 'active' && u.mainPid !== null }
@@ -779,6 +785,10 @@ async function procParent(pid: number): Promise<number | null> {
 /** The one sentence a verdict earns — never "Restarted" for anything but a replaced process. */
 function verdictMessage(v: RestartVerdict, unit: string, subject: string, t: CliStrings): AutostartResult {
   if (v.kind === 'replaced') {
+    if (v.byVersion && (v.after === null || v.after === v.before)) {
+      return { ok: true, message: t.restartConfirmedByVersion(unit, v.byVersion) }
+    }
+    if (v.after === null) return { ok: true, message: t.restartConfirmedByVersion(unit, v.byVersion ?? '?') }
     return {
       ok: true,
       message: v.before === null ? t.restartStarted(unit, v.after) : t.restartRestarted(unit, v.before, v.after),
@@ -909,6 +919,7 @@ export async function restartAutostart(mode: AutostartMode, deps: RestartDeps = 
   const verdict = await awaitReplacement(before, () => observe(mode), {
     timeoutMs: deps.timeoutMs, intervalMs: deps.intervalMs, sleep: deps.sleep, now: deps.now,
     ...(deps.onWait ? { onWait: deps.onWait } : {}),
+    ...(deps.wantVersion ? { wantVersion: deps.wantVersion } : {}),
   })
   const outcome = verdictMessage(verdict, unit, subject, t)
   return { ok: outcome.ok, message: [...notes, outcome.message].join('\n') }
