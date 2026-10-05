@@ -9,7 +9,9 @@ export type ThreadsLang = 'pt' | 'en'
  */
 export function threadsCountText(n: number | undefined, lang: ThreadsLang): string | null {
   if (!n || n <= 0) return null
-  return `💬 ${n} ${n === 1 ? 'thread' : 'threads'}`
+  return lang === 'pt'
+    ? `💬 ${n} ${n === 1 ? 'tópico' : 'tópicos'}`
+    : `💬 ${n} ${n === 1 ? 'thread' : 'threads'}`
 }
 
 export function mobileBoardCopy(lang: ThreadsLang) {
