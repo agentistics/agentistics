@@ -40,6 +40,15 @@ const vite = spawn([join(REPO, 'packages/web/node_modules/.bin/vite'), '--port',
 })
 const browser = await chromium.launch(process.env.PLAYWRIGHT_CHROMIUM ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM } : {})
 let failed = false
+// The harness's own heartbeat (see the retry rule below) and the page's requests in flight, so a stalled
+// round says what the page was waiting on (the browser holds six connections per origin).
+const PAUSE_MS = 1000
+const pauses: number[] = []
+let beat = Date.now()
+const heartbeat = setInterval(() => { const n = Date.now(); if (n - beat > 250) pauses.push(n - beat); beat = n }, 50)
+const open = new Map<string, { url: string; at: number; got: boolean }>()
+const inflight: string[] = []
+let watchNet: ReturnType<typeof setInterval> | undefined
 const report: { round: number; timeline: { t: number; live: number; done: number }[]; growthSteps: number; firstLiveMs: number | null; doneMs: number | null; doubled: number; gap: number }[] = []
 try {
   const post = (path: string, body: unknown) => fetch(`${s.base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
@@ -50,6 +59,13 @@ try {
   const id = sp.id
   for (let i = 0; i < 120; i++) { try { if ((await fetch(`http://localhost:${webPort}/`)).ok) break } catch { /* not yet */ } await Bun.sleep(500) }
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Network.enable')
+  const short = (u: string) => u.replace(/^https?:\/\/[^/]+/, '').split('?')[0]!.slice(0, 50)
+  cdp.on('Network.requestWillBeSent', (e: { requestId: string; request: { url: string } }) => { open.set(e.requestId, { url: short(e.request.url), at: Date.now(), got: false }) })
+  cdp.on('Network.responseReceived', (e: { requestId: string }) => { const o = open.get(e.requestId); if (o) o.got = true })
+  for (const ev of ['Network.loadingFinished', 'Network.loadingFailed']) cdp.on(ev, (e: { requestId: string }) => { open.delete(e.requestId) })
+  watchNet = setInterval(() => { inflight.push(`${new Date().toISOString().slice(17, 23)} ${[...open.values()].filter(o => o.url.startsWith('/api')).map(o => o.url + (o.got ? '' : ' (waiting)')).join(', ')}`); if (inflight.length > 40) inflight.shift() }, 1000)
   await page.goto(`http://localhost:${webPort}/sessions/${id}`)
   // The chat is up once its composer is (the dev server's first load optimises deps — slow).
   await page.waitForSelector('textarea', { timeout: 120_000, state: 'attached' })
@@ -57,8 +73,10 @@ try {
   await Bun.sleep(3000)
 
   for (let round = 0; round < ROUNDS; round++) {
+  for (let attempt = 0; ; attempt++) {
     const marker = `streame2e${round}x${Date.now()}`
     const t0 = Date.now()
+    pauses.length = 0
     await post('/api/fleet/act', { id, action: 'prompt', text: marker })
     const timeline: { t: number; live: number; done: number }[] = []
     for (let i = 0; i < 80; i++) {
@@ -89,11 +107,21 @@ try {
     const gap = firstLiveAt < 0 ? 0 : timeline.slice(firstLiveAt).filter(x => x.live === 0 && x.done === 0).length
     report.push({ round, timeline: changes, growthSteps: steps, firstLiveMs, doneMs: doneAt, doubled, gap })
     log(`round ${round}: grew ${steps}x, first live ${firstLiveMs} ms, finished turn ${doneAt} ms, drawn twice in ${doubled} samples, empty gap in ${gap} samples`)
-    if (steps < MIN_GROWTH_STEPS || doneAt === null || doubled > 0 || gap > 0) failed = true
+    const bad = steps < MIN_GROWTH_STEPS || doneAt === null || doubled > 0 || gap > 0
+    // A round during which THIS PROCESS's own timer stalled for over a second measured the machine
+    // pausing, not the page: a plain timer outside the product stopped for 3.6 s about every 36 s on a
+    // WSL box with the product idle. Such a round is measured again (twice at most) and says so; a
+    // round that fails with the harness running normally still fails.
+    const paused = Math.max(0, ...pauses)
+    if (bad && paused >= PAUSE_MS && attempt < 2) { log(`round ${round}: the harness itself paused ${paused} ms — measuring it again (${attempt + 1}/2)`); report.pop(); await Bun.sleep(1500); continue }
+    if (bad) { failed = true; log(`round ${round}: in flight at the page during the round:\n${inflight.slice(-12).join('\n')}`) }
     await Bun.sleep(1500)
+    break
+  }
   }
   await post('/api/fleet/act', { id, action: 'kill' }).catch(() => {})
 } finally {
+  clearInterval(heartbeat); clearInterval(watchNet)
   await browser.close()
   vite.kill()
   await s.stop()
