@@ -93,3 +93,31 @@ describe('needsConfirm — "Sempre confirmar" absent reads as ON', () => {
     expect(validateInput({ ...base, confirmEach: 'no' }, { requireFields: true })).toMatchObject({ ok: false, field: 'confirmEach' })
   })
 })
+
+import { parseImportText } from './personal'
+
+describe('parseImportText — a .env file or a flat JSON object', () => {
+  test('a .env file still parses exactly as before', () => {
+    const r = parseImportText('A=1\nB="two words"\n')
+    expect(r).toEqual({ ok: true, pairs: [{ key: 'A', value: '1' }, { key: 'B', value: 'two words' }], skipped: 0 })
+  })
+  test('a flat JSON object becomes pairs, in order, with a UTF-8 BOM and leading space tolerated', () => {
+    const r = parseImportText('﻿  {"API_KEY":"sk-1","DB.URL":"postgres://x","note":"ola"}')
+    expect(r).toEqual({ ok: true, pairs: [{ key: 'API_KEY', value: 'sk-1' }, { key: 'DB.URL', value: 'postgres://x' }, { key: 'note', value: 'ola' }], skipped: 0 })
+  })
+  test('nested objects and arrays are REFUSED, never flattened', () => {
+    expect(parseImportText('{"a":"1","db":{"url":"x"}}')).toEqual({ ok: false, reason: 'json-nested' })
+    expect(parseImportText('{"list":["a","b"]}')).toEqual({ ok: false, reason: 'json-nested' })
+  })
+  test('non-string scalars and unusable names are skipped and counted', () => {
+    const r = parseImportText('{"OK":"v","N":5,"B":true,"Z":null,"bad key":"x","1ST":"x"}')
+    expect(r).toEqual({ ok: true, pairs: [{ key: 'OK', value: 'v' }], skipped: 5 })
+  })
+  test('broken JSON and a non-object are told apart', () => {
+    expect(parseImportText('{"a": "1",}')).toEqual({ ok: false, reason: 'json-invalid' })
+    expect(parseImportText('{')).toEqual({ ok: false, reason: 'json-invalid' })
+  })
+  test('empty values are kept (the preview marks them)', () => {
+    expect(parseImportText('{"E":""}')).toEqual({ ok: true, pairs: [{ key: 'E', value: '' }], skipped: 0 })
+  })
+})
