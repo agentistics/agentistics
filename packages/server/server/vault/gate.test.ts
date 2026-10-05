@@ -165,7 +165,8 @@ describe('§2.4 — every row of the table', () => {
       // A personal-secret row is the DESKTOP rule on a loopback page (off loopback the gesture is a phone
       // passkey token — tested in mobile.test.ts).
       if (action === 'personal-grant') return // VAULT.UI2: loopback needs no proof, a phone needs its passkey — see the dedicated describe below
-      const C = action.startsWith('personal-') ? { ...S, loopback: true } : S
+      // Review M3: a no-proof row is the rule for THIS computer (a remote caller owes the code — review-2-103-2.test.ts).
+      const C = action.startsWith('personal-') || (!row.code && !row.gesture) ? { ...S, loopback: true } : S
       if (!row.code && !row.gesture) {
         expect((await requireVaultStepUp(action, C)).ok).toBe(true)
         return
@@ -273,7 +274,7 @@ describe('VAULT.UI2 — the grant for a :vault chip, and the extension of an ope
   test('polling the list is not use: it does not postpone the auto-lock', async () => {
     const before = autoLockRemainingMs()!
     T += 10 * 60_000
-    expect((await requireVaultStepUp('list', S)).ok).toBe(true)
+    expect((await requireVaultStepUp('list', { ...S, loopback: true })).ok).toBe(true)
     expect(autoLockRemainingMs()!).toBeLessThan(before - 9 * 60_000)
   })
 
@@ -328,11 +329,14 @@ describe('VAULT.UI2 — a provider session start prompts at most ONCE (owner, 20
   test('opening and then sending a chip with "Sempre confirmar" ON costs ONE Hello, not two', async () => {
     await warmWindow()
     const g0 = hello.gestures
-    expect(await unlockWithGesture()).toMatchObject({ ok: true, state: 'open' })
-    expect((await requireVaultStepUp('personal-grant', { ...S, loopback: true })).ok).toBe(true) // covered by the unlock's Hello
+    // Review H2: the page declares the send its unlock is for, and gets the single-use proof in the reply.
+    const u = await unlockWithGesture(undefined, { session: S.session, binding: 'personal-grant:sess-1' })
+    expect(u).toMatchObject({ ok: true, state: 'open' })
+    const fresh = u.ok ? u.fresh : undefined
+    expect((await requireVaultStepUp('personal-grant', { ...S, loopback: true, fresh, binding: 'sess-1' })).ok).toBe(true) // covered by the unlock's Hello
     expect(hello.gestures - g0).toBe(1)
     // the cover is single-use: the NEXT send asks again
-    expect((await requireVaultStepUp('personal-grant', { ...S, loopback: true })).ok).toBe(true)
+    expect((await requireVaultStepUp('personal-grant', { ...S, loopback: true, fresh, binding: 'sess-1' })).ok).toBe(true)
     expect(hello.gestures - g0).toBe(2)
   })
 

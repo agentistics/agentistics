@@ -55,8 +55,9 @@ type J = Record<string, any>
 async function http(method: 'GET' | 'POST', path: string, body?: unknown, grant?: string): Promise<{ status: number; json: J; headers: Headers }> {
   // What the dashboard sends: same-origin, JSON (M1 refuses anything else on a POST).
   const headers: Record<string, string> = { 'sec-fetch-site': 'same-origin', ...(method === 'POST' ? { 'content-type': 'application/json' } : {}), ...(grant ? { 'x-vault-grant': grant } : {}) }
-  // VAULT.PERSONAL §10: the gesture unlock answers ONLY the page on this computer, so it is sent as one.
-  const local = path === '/api/vault/unlock'
+  // VAULT.PERSONAL §10: the gesture unlock answers ONLY the page on this computer, so it is sent as one —
+  // and so are the reads (review M3: the no-proof list is the rule for a page on this computer).
+  const local = path === '/api/vault/unlock' || method === 'GET'
   if (local) Object.assign(headers, { host: 'localhost:47292', origin: 'http://localhost:47292' })
   const req = new Request(`${local ? 'http://localhost:47292' : 'http://local'}${path}`, { method, headers, ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}) })
   const res = await handleVaultHttp(req, new URL(req.url), { cors: {}, session: 'session-A', ...(local ? { peer: '127.0.0.1' } : {}) })

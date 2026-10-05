@@ -16,7 +16,7 @@ import { readJsonLimited } from '../limits'
 import { originAllowed } from '../cors'
 import * as gate from './gate'
 import { readVaultView, lockVaultNow } from './inventory'
-import { extendAutoLock, noteVaultActivity, unlockWithGesture, vaultLang, vaultStatus } from './service'
+import { FRESH_BINDING, extendAutoLock, noteVaultActivity, unlockWithGesture, vaultLang, vaultStatus } from './service'
 import { isLoopbackAddress } from '../native-bind'
 import { uiReply } from './ui-sentence'
 import { handlePersonalHttp } from './personal-http'
@@ -100,6 +100,8 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   const json = { ...env.cors, 'Content-Type': 'application/json' }
   const noStore = { ...json, 'Cache-Control': 'no-store' }
   const grant = req.headers.get('x-vault-grant')
+  // Review H2: the single-use proof the reply to this page's own unlock carried (memory only, like the grant).
+  const fresh = req.headers.get('x-vault-fresh')
   // Namespaced so no cookie value can ever read as the local CLI's channel ('socket', gate.ts).
   const session = `http:${env.session}`
   const path = url.pathname
@@ -129,7 +131,7 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     // The inventory only after a step-up (`list`); the state alone is always readable.
     const s = await vaultStatus()
     if (s.state !== 'open') return send({ ...(await readVaultView([], async () => [], session, loopback)), locked: true }, 200, noStore)
-    const g = await gate.requireVaultStepUp('list', { grant, session })
+    const g = await gate.requireVaultStepUp('list', { grant, session, loopback })
     if (!g.ok) {
       return send({
         needsStepUp: true, code: g.code, sentence: g.sentence, state: s.state, lockedBy: s.lockedBy ?? null,
@@ -155,7 +157,7 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   if (path === '/api/vault/lock' && req.method === 'POST') {
     const b = await body()
     const r = await lockVaultNow({ grant, session, code: codeOf(b) })
-    return send(r.ok ? { ok: true, vault: await readVaultView([], async () => []) } : { error: r.error, code: r.code, sentence: r.error }, r.ok ? 200 : statusOf(r.code), noStore)
+    return send(r.ok ? { ok: true, vault: await readVaultView([], async () => [], session, loopback) } : { error: r.error, code: r.code, sentence: r.error }, r.ok ? 200 : statusOf(r.code), noStore)
   }
   if (path === '/api/vault/unlock' && req.method === 'POST') {
     // Raises the gesture IN THE SERVICE; the code follows on /unlock/code (§2.2). VAULT.PERSONAL §10:
@@ -167,8 +169,12 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
         ? 'Daqui não dá para usar o Windows Hello do computador. Abra o cofre com a digital deste celular ou com o código (se o computador permitir).'
         : 'This device cannot use the computer\'s Windows Hello. Open the vault with this phone\'s biometrics, or with the code if the computer allows it.' })
     }
-    const u = await unlockWithGesture()
-    return reply(u.ok ? { ok: true, state: u.state } : u)
+    // Review H2: the page may declare the ONE action this unlock is for (`personal-grant:<sid>`); the reply
+    // then carries a single-use proof for exactly that action, this session — and nobody else's request.
+    const b = await body()
+    const binding = typeof b.for === 'string' && FRESH_BINDING.test(b.for) ? b.for : null
+    const u = await unlockWithGesture(undefined, binding ? { session, binding } : undefined)
+    return reply(u.ok ? { ok: true, state: u.state, ...(u.fresh ? { fresh: u.fresh } : {}) } : u)
   }
   if (path === '/api/vault/unlock/code' && req.method === 'POST') {
     const b = await body()
@@ -272,7 +278,7 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   // VAULT.PERSONAL: answered through THIS module's `reply` (the one JSON exit, page filter included).
   const phoneRoute = await handlePhoneHttp({ req, path, url, session, grant, loopback, reply })
   if (phoneRoute) return phoneRoute
-  const personal = await handlePersonalHttp({ req, path, url, session, grant, loopback, reply })
+  const personal = await handlePersonalHttp({ req, path, url, session, grant, fresh, loopback, reply })
   if (personal) return personal
   return null
 }
