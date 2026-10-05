@@ -48,7 +48,7 @@ let serverTail = ''
 try {
   await fetch(`${s.base}/api/data`).then(r => r.arrayBuffer())
   // A live session to measure the chat on, while the others write.
-  const cwd = join(home, '..', 'work', 'storm_live x'); mkdirSync(cwd, { recursive: true })
+  const cwd = join(home, '..', 'work', 'storm-live'); mkdirSync(cwd, { recursive: true })
   // The chat is measured over a conversation that EXISTS, as `budget.ts` does (a seeded transcript, and
   // the chat read until it has loaded). Without it the first round paid for the first-ever read of a
   // transcript that the fake harness only creates at its first turn — an unresolved path scanned across

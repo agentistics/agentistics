@@ -24,8 +24,8 @@ export type NaySessionMessage = {
 }
 
 export function getNayChatProjectDir(): string {
-  // Claude encodes project dirs by replacing every non-alphanumeric character with '-'
-  const encoded = NAY_CHAT_DIR.replace(/[^a-zA-Z0-9]/g, '-')
+  // Claude encodes project dirs by replacing '/' and '.' with '-'
+  const encoded = NAY_CHAT_DIR.replace(/[/.]/g, '-')
   return path.join(PROJECTS_DIR, encoded)
 }
 
