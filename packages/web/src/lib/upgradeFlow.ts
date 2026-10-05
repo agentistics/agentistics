@@ -158,7 +158,10 @@ export async function startUpgrade(target: string, lang: 'pt' | 'en'): Promise<v
     if (status) progress = status.progress
     const arrived = upgradeArrived(info, target)
     const view = advance(state.view, rawStep({ startedAt, progress, quietPolls: quiet, arrived }))
-    if (view.failed) { set({ phase: 'failed', view, message: null }); return }
+    // `failed` is never the last word when the server ALREADY runs the target: a restart verdict can
+    // be wrong while the new version answers (2026-10-05) and the page then said "the update did not
+    // finish" beside the very version it had asked for. `arrived` outranks it, as in `rawStep`.
+    if (view.failed && !arrived) { set({ phase: 'failed', view, message: null }); return }
     let bytes = state.bytes, rate = state.rate
     if (progress?.stage === 'downloading' && progress.total && progress.received !== undefined) {
       const next: ByteSample = { received: progress.received, total: progress.total, at: Date.now() }

@@ -486,6 +486,7 @@ export interface CliStrings {
   restartSilent: (unit: string, subject: string) => string
   restartRestarted: (unit: string, before: number, after: number) => string
   restartStarted: (unit: string, pid: number) => string
+  restartConfirmedByVersion: (unit: string, version: string) => string
   restartNotStopped: (pid: number) => string
   centralStarted: string
   centralFailed: string
@@ -922,6 +923,7 @@ const EN: CliStrings = {
   restartRestarted: (unit, before, after) =>
     `Restarted ${unit} — pid ${before} → ${after}, it now runs the current code and config.`,
   restartStarted: (unit, pid) => `Started ${unit} (pid ${pid}) — it was not running.`,
+  restartConfirmedByVersion: (unit, version) => `Restarted ${unit} — the server answering now reports v${version}.`,
   restartNotStopped: (pid) =>
     `The old server (pid ${pid}) is still running — it did not stop, so nothing was restarted. ` +
     `Stop it yourself (\`kill ${pid}\`) and start it again with \`agentop server\`.`,
@@ -1359,6 +1361,7 @@ const PT: CliStrings = {
   restartRestarted: (unit, before, after) =>
     `${unit} reiniciado — pid ${before} → ${after}, agora roda o código e a config atuais.`,
   restartStarted: (unit, pid) => `${unit} iniciado (pid ${pid}) — não estava rodando.`,
+  restartConfirmedByVersion: (unit, version) => `${unit} reiniciado — o servidor que responde agora está na v${version}.`,
   restartNotStopped: (pid) =>
     `O server antigo (pid ${pid}) continua rodando — não parou, então nada foi reiniciado. ` +
     `Pare-o você mesmo (\`kill ${pid}\`) e inicie de novo com \`agentop server\`.`,

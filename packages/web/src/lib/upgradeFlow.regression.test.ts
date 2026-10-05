@@ -133,3 +133,18 @@ describe('Install on a version the server already runs restarts NOTHING (2026-10
     expect(versionAsks).toBe(1)
   })
 })
+
+describe('"the update did not finish" never shows beside the version it asked for', () => {
+  test('a failed progress record while /api/version already reports the target -> arrived, not failed', async () => {
+    let versionCalls = 0
+    install(async (url: string) => {
+      if (url.startsWith('/api/upgrade/status')) return json({ progress: { stage: 'failed', version: '9.9.9', at: Date.now() + 1000 } })
+      if (url.startsWith('/api/upgrade')) return json({ ok: true })
+      if (url.startsWith('/api/version')) return json({ current: ++versionCalls === 1 ? '9.9.8' : '9.9.9' })
+      return json({})
+    })
+    await startUpgrade('9.9.9', 'en')
+    expect(getFlow().phase).toBe('arrived')
+    expect(reloads).toBe(1)
+  })
+})
