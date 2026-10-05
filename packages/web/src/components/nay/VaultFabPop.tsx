@@ -14,7 +14,7 @@
 
 import { Suspense, lazy, useEffect, useReducer, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Vault } from 'lucide-react'
+import { VaultGlyph as Vault } from '../vault/VaultGlyph'
 import {
   VAULT_FAB_INITIAL, VAULT_LONG_PRESS_MS, VAULT_PRESS_SLOP, closeVaultPanel, isContextMenuKey, vaultFabMotion, vaultFabReduce, vaultIconMounted,
   type VaultFabEvent, type VaultFabState,

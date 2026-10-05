@@ -164,6 +164,36 @@ export function validGroupName(x: unknown): string | null {
 
 // ── the `.env` parser ─────────────────────────────────────────────────────────────────────────
 
+/** Why a secrets file could not be read — rendered by the route in plain words. */
+export type ImportParseFailure = 'json-invalid' | 'json-nested' | 'json-not-object'
+export type ImportParse = { ok: true; pairs: { key: string; value: string }[]; skipped: number } | { ok: false; reason: ImportParseFailure }
+
+const IMPORT_KEY = /^[A-Za-z_][A-Za-z0-9_.-]*$/
+
+/**
+ * What the import accepts: a `.env` file, OR a FLAT JSON object `{"KEY": "value"}`. The shape is told by
+ * the first character (`{`; a `.env` line can never start with one). A JSON value that is itself an
+ * object or an array is REFUSED with a reason (`json-nested`) rather than flattened or stringified —
+ * guessing how `{"db": {"url": …}}` should become names would store something nobody wrote. A scalar
+ * that is not a string (a number, a boolean, null) and a key that is not a usable name are skipped and
+ * counted, like a `.env` line that is not `KEY=value`. The rules after parsing are the `.env` import's.
+ */
+export function parseImportText(text: string): ImportParse {
+  const t = text.replace(/^﻿/, '').trimStart()
+  if (!t.startsWith('{')) return { ok: true, ...parseDotEnv(text) }
+  let obj: unknown
+  try { obj = JSON.parse(t) } catch { return { ok: false, reason: 'json-invalid' } }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return { ok: false, reason: 'json-not-object' }
+  const pairs: { key: string; value: string }[] = []
+  let skipped = 0
+  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+    if (value !== null && typeof value === 'object') return { ok: false, reason: 'json-nested' }
+    if (typeof value !== 'string' || !IMPORT_KEY.test(key)) { skipped++; continue }
+    pairs.push({ key, value })
+  }
+  return { ok: true, pairs, skipped }
+}
+
 /**
  * A `.env` file → ordered KEY/value pairs. Handles comments (whole-line and ` #` after an unquoted
  * value), an `export ` prefix, single quotes (literal), double quotes (with `\n \r \t \" \\` escapes)

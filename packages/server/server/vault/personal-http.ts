@@ -28,6 +28,12 @@ function storeFail(r: store.StoreFail) {
     case 'version-conflict': return { ...fail('version-conflict', 'This secret was changed somewhere else since you opened it. Reload and try again.', 'Este segredo foi alterado em outro lugar desde que você o abriu. Recarregue e tente de novo.'), version: r.version }
     case 'not-found': return fail('not-found', 'That secret no longer exists.', 'Esse segredo não existe mais.')
     case 'no-import': return fail('no-import', 'That import expired (10 minutes) or belongs to another window. Choose the file again.', 'Essa importação expirou (10 minutos) ou é de outra janela. Escolha o arquivo de novo.')
+    case 'import-format':
+      return r.reason === 'json-nested'
+        ? fail('import-format', 'This JSON has objects or lists inside it. The import takes one flat object — {"NAME": "value", …} — so flatten it (one level, text values) and try again.', 'Este JSON tem objetos ou listas dentro. A importação aceita um objeto simples — {"NOME": "valor", …} — então deixe-o em um nível só, com valores de texto, e tente de novo.')
+        : r.reason === 'json-not-object'
+          ? fail('import-format', 'This JSON is not an object. Use {"NAME": "value", …}.', 'Este JSON não é um objeto. Use {"NOME": "valor", …}.')
+          : fail('import-format', 'That file looks like JSON but cannot be read. Check for a missing quote or comma.', 'Esse arquivo parece JSON, mas não dá para ler. Confira se falta uma aspa ou vírgula.')
     default: return fail('record-unreadable', 'That secret could not be opened on this machine.', 'Esse segredo não pôde ser aberto nesta máquina.')
   }
 }
@@ -198,6 +204,7 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     if (!g.ok) return reply(g)
     const r = await store.importPreview(text, session)
     b.text = ''
+    if (!r.ok) return reply(storeFail(r))
     return reply({ ok: true, token: r.token, keys: r.keys, skipped: r.skipped, ...withGrant(g) })
   }
   if (path === '/api/vault/personal/import/commit') {

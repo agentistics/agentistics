@@ -12,7 +12,8 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { FingerprintPattern, KeyRound, List, Loader2, Lock, LockOpen, Printer, ShieldCheck, Smartphone, Timer, Vault } from 'lucide-react'
+import { VaultGlyph } from '../../components/vault/VaultGlyph'
+import { FingerprintPattern, KeyRound, List, Loader2, Lock, LockOpen, Printer, ShieldCheck, Smartphone, Timer } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { SectionHeader, Divider, PrefRow, StatusDot } from './primitives'
@@ -174,7 +175,7 @@ export default function VaultSettings() {
         // THE HERO: the empty state of a locked vault is the vault itself, with the one way in under it.
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 10, padding: isMobile ? '18px 4px 20px' : '26px 12px 28px', border: '1px solid var(--border)', borderRadius: 14, marginBottom: 18, background: 'var(--bg-surface, transparent)' }}>
           <span aria-hidden style={{ width: 88, height: 88, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)' }}>
-            <Vault size={46} strokeWidth={1.6} />
+            <VaultGlyph size={46} />
           </span>
           <strong style={{ fontSize: 17 }}>{t('hero_locked')}</strong>
           <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6, maxWidth: 440 }}>

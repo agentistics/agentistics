@@ -15,7 +15,9 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import { ariaSortOf, type SortDir } from '@agentistics/core'
+import { useState } from 'react'
 import { microLabel } from './board'
+import { columnDragType, isColumnDrag } from './columnOrder'
 
 /** The button inside a header — also the kanban column's sort trigger, so they cannot drift. */
 export function SortButton({ label, dir, onClick, title, mobile, align = 'left', expanded }: {
@@ -51,7 +53,7 @@ export function SortButton({ label, dir, onClick, title, mobile, align = 'left',
 }
 
 /** A `<th>` for one column: sortable when it names a key, plain text when it does not. */
-export function SortTh<K extends string>({ label, sortKey, current, onSort, style, mobile, title, align, handle, dataCol }: {
+export function SortTh<K extends string>({ label, sortKey, current, onSort, style, mobile, title, align, handle, dataCol, reorder }: {
   label: ReactNode
   /** Absent = the column is not sortable, and carries no affordance. */
   sortKey?: K
@@ -66,15 +68,53 @@ export function SortTh<K extends string>({ label, sortKey, current, onSort, styl
   handle?: ReactNode
   /** Marks the header so a double-click can measure the whole column. */
   dataCol?: string
+  /**
+   * Let this header be DRAGGED to reorder the table's columns. `scope` names the table (a drag from
+   * another table is not accepted), `id` is this column, `onMove(dragId, dropId)` writes the new order —
+   * the SAME array the "Columns" dropdown writes. The dropdown stays the keyboard/touch way: HTML5 drag
+   * does not exist on a touch screen, and this adds nothing a keyboard needs.
+   */
+  reorder?: { scope: string; id: string; onMove: (dragId: string, dropId: string) => void }
 }) {
+  const [dragging, setDragging] = useState(false)
+  const [over, setOver] = useState(false)
   const a = align ?? (style?.textAlign === 'right' ? 'right' : 'left')
   return (
     <th
       // `whiteSpace: 'nowrap'` by default — a header that wraps ("CONCLUÍDO EM" onto two lines) is
       // never worth breaking a column over; the table already scrolls inside its own container
       // (`overflow-x: auto`) rather than the page. Every caller may still override it explicitly.
-      style={{ whiteSpace: 'nowrap', ...(handle ? { position: 'relative', overflow: 'hidden', textOverflow: 'ellipsis' } : {}), ...style }}
+      style={{
+        whiteSpace: 'nowrap', ...(handle ? { position: 'relative', overflow: 'hidden', textOverflow: 'ellipsis' } : {}), ...style,
+        ...(dragging ? { opacity: 0.45 } : {}),
+        // The drop target is marked on its LEADING edge: the dragged column lands before it.
+        ...(over ? { boxShadow: 'inset 3px 0 0 var(--anthropic-orange)' } : {}),
+      }}
       {...(dataCol ? { 'data-col': dataCol } : {})}
+      {...(reorder ? {
+        draggable: true,
+        'data-col-draggable': reorder.id,
+        onDragStart: (e: React.DragEvent) => {
+          e.dataTransfer.effectAllowed = 'move'
+          e.dataTransfer.setData(columnDragType(reorder.scope), reorder.id)
+          setDragging(true)
+        },
+        onDragEnd: () => { setDragging(false); setOver(false) },
+        onDragOver: (e: React.DragEvent) => {
+          if (!isColumnDrag(e.dataTransfer.types, reorder.scope)) return
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'move'
+          if (!over) setOver(true)
+        },
+        onDragLeave: () => setOver(false),
+        onDrop: (e: React.DragEvent) => {
+          setOver(false)
+          if (!isColumnDrag(e.dataTransfer.types, reorder.scope)) return
+          e.preventDefault()
+          const dragId = e.dataTransfer.getData(columnDragType(reorder.scope))
+          if (dragId && dragId !== reorder.id) reorder.onMove(dragId, reorder.id)
+        },
+      } : {})}
       aria-sort={sortKey ? ariaSortOf(current, sortKey) : undefined}
     >
       {sortKey

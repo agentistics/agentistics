@@ -54,12 +54,14 @@ export function Muted({ text }: { text: string }) {
  * enough — this is the same lesson CLAUDE.md already states for the flex/grid item default: it must
  * be overridden at EVERY level of the ancestor chain, not only the deepest one.
  */
-export function TabStrip<T extends string>({ tabs, value, onPick, label, count, tap, flush, ariaLabel }: {
+export function TabStrip<T extends string>({ tabs, value, onPick, label, icon, count, tap, flush, ariaLabel }: {
   tabs: readonly T[]
   /** The selected tab, or null when none is (a surface showing something the tabs do not name). */
   value: T | null
   onPick: (t: T) => void
   label: (t: T) => string
+  /** An icon before a label (the Nay panel's Cofre tab). Absent = text only. */
+  icon?: (t: T) => React.ReactNode
   /** A count beside each label. Absent = the tabs carry no count, and no `0` is drawn in its place. */
   count?: (t: T) => number
   /** Minimum tab height on touch — 44 on mobile; absent keeps the desktop 30px. */
@@ -89,6 +91,7 @@ export function TabStrip<T extends string>({ tabs, value, onPick, label, count, 
               fontFamily: 'inherit', fontSize: 11.5, fontWeight: on ? 650 : 500,
             }}
           >
+            {icon && <span aria-hidden style={{ display: 'inline-flex', flexShrink: 0 }}>{icon(id)}</span>}
             <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {label(id)}
             </span>
