@@ -562,6 +562,14 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
                 ) : null}
               />
             </>)
+            : tab === 'vault'
+            ? (
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: isMobile ? '6px 10px' : '8px 12px' }} data-nay-vault>
+                <Suspense fallback={<Loader2 size={14} className="ag-spin" />}>
+                  <QuickVaultBody lang={lang} isMobile={isMobile} />
+                </Suspense>
+              </div>
+            )
             : (
               // Inner gutter, so the aside's cards and search do not run into the panel's edges.
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: isMobile ? '6px 10px' : '8px 12px' }}>
