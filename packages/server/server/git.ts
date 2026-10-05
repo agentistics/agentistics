@@ -240,6 +240,18 @@ async function gitDirsOf(path: string): Promise<GitDirs | null> {
 let fingerprintedSpawns = 0
 export function gitMetaSpawnCount(): number { return fingerprintedSpawns }
 
+/**
+ * Did `git config --get remote.origin.url` AUTHORITATIVELY say "there is no such key"? Exit code 1
+ * is exactly that. Anything else — a timeout (killed), EAGAIN on spawn, a lock, exit 128 — is a
+ * failure of the READ, not an answer about the repository, and must never be remembered as one:
+ * a remembered "no remote" strips `git_remote` from every session of the project, and a per-connection
+ * denylist naming that repository then classifies them as the `none` bucket and pushes them.
+ */
+export function isAuthoritativeNoRemote(err: unknown): boolean {
+  const e = err as { code?: unknown; killed?: unknown; signal?: unknown } | null
+  return !!e && e.code === 1 && !e.killed && !e.signal
+}
+
 const remoteMemo = createFingerprintMemo<string | undefined>()
 const headMemo = createFingerprintMemo<string | undefined>()
 
@@ -262,7 +274,9 @@ export async function getGitRemote(projectPath: string): Promise<string | undefi
       { timeout: 3000, maxBuffer: 1024 * 1024 }
     )
     value = normalizeGitRemote(stdout.trim()) || undefined
-  } catch {
+  } catch (err) {
+    // A failed read is returned UNCACHED (see `isAuthoritativeNoRemote`): the next build asks again.
+    if (!isAuthoritativeNoRemote(err)) return undefined
     value = undefined
   }
   remoteMemo.set(key, fp, value)
@@ -410,8 +424,10 @@ async function resolveHead(repoPath: string): Promise<string | undefined> {
     const stdout = await git(repoPath, ['rev-parse', 'HEAD'], { timeout: 3000, maxBuffer: 1024 * 1024 })
     value = stdout.trim() || undefined
   } catch {
-    // No HEAD: an empty repository. Nothing to walk, and nothing to cache under a commit.
-    value = undefined
+    // No HEAD (an empty repository) or a failed read — git's exit code cannot tell them apart, so
+    // neither is remembered: a transient failure cached here empties the project's stats until its
+    // next commit. Nothing to walk, and nothing to cache under a commit.
+    return undefined
   }
   headMemo.set(repoPath, fp, value)
   return value

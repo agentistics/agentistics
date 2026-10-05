@@ -361,11 +361,13 @@ async function scanProjectDir(
   // Resolve the repo's origin remote once per project. This is the local-machine source of
   // the group-by-repository key; it's stamped onto every session below so it survives being
   // pushed to a central (which has no filesystem access to the member's repos) and persisted
-  // to the consolidate store. Both reads are bounded by the build's SOFT deadline (`gitBounded`):
-  // one slow repository is reported and filled in by a later build, never waited out.
+  // to the consolidate store. Only the STATS walk is bounded by the build's SOFT deadline
+  // (`gitBounded`): one slow repository is reported and filled in by a later build, never waited out.
+  // The remote is a config read and is NOT — a session written without it would be classified as the
+  // `none` bucket by a per-connection denylist naming its repository, and pushed (H1, 2.103.2 review).
   const [git_stats, gitRemote] = await Promise.all([
     gitBounded(projectPath, getProjectGitStats(projectPath, earliestSession)),
-    gitBounded(projectPath, getGitRemote(projectPath)),
+    getGitRemote(projectPath),
   ])
 
   // Stamp the remote onto this project's sessions so the dimension travels with each session.

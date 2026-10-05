@@ -39,6 +39,21 @@ async function ensureDir(harness: HarnessId): Promise<void> {
   readyDirs.add(harness)
 }
 
+/**
+ * A session written WITHOUT `git_remote` keeps the one its stored record already had. The remote is
+ * read from git on every build and a read can fail or be late; the stored copy is what the team
+ * uploader pushes, and a record that lost its remote is classified as the `none` bucket by
+ * `sessionShared` — so a repository the user withheld would be pushed. "Not read this time" is not
+ * "not a repository": absence never overwrites a remote already recorded.
+ */
+export function keepStoredRemote(next: SessionMeta, storedJson: string | null): SessionMeta {
+  if (next.git_remote || !storedJson) return next
+  try {
+    const prev = JSON.parse(storedJson) as { git_remote?: unknown }
+    return typeof prev.git_remote === 'string' && prev.git_remote ? { ...next, git_remote: prev.git_remote } : next
+  } catch { return next }
+}
+
 /** Persist computed per-session metrics to ~/.agentistics/sessions/<harness>/<id>.json.
  *  Skips writes when the stored copy is byte-identical to avoid churn. Entries
  *  are never deleted, so sessions removed by Claude's cleanup survive here. */
@@ -52,14 +67,14 @@ export async function writeConsolidated(sessions: SessionMeta[]): Promise<number
     const harness = s.harness ?? 'claude'
     await ensureDir(harness)
     const dest = consolidatedPath(harness, s.session_id)
-    const next = JSON.stringify(s)
     const stamp = await stampOf(dest)
     const mem = lastWritten.get(dest)
-    if (stamp !== null && mem && mem.stamp === stamp) {
-      if (mem.text === next) return 0
-    } else {
-      const prev = await readFile(dest, 'utf-8').catch(() => null)
-      if (prev === next) { if (stamp) lastWritten.set(dest, { stamp, text: next }); return 0 }
+    const memHit = stamp !== null && !!mem && mem.stamp === stamp
+    const prev = memHit ? mem!.text : await readFile(dest, 'utf-8').catch(() => null)
+    const next = JSON.stringify(keepStoredRemote(s, prev))
+    if (prev === next) {
+      if (!memHit && stamp) lastWritten.set(dest, { stamp, text: next })
+      return 0
     }
     await writeFile(dest, next)
     const after = await stampOf(dest)
