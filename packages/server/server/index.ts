@@ -1077,7 +1077,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(out.body, out.status)
     }
     if (url.pathname === '/api/experimental' && (req.method === 'GET' || req.method === 'PUT')) {
-      // GET: what this server booted with. PUT `{ enabled }`: Settings → Experimental's switch — it
+      // GET: what this server booted with. PUT `{ enabled }`: the switch used by the `agentop experimental` command — it
       // persists the preference and applies it to this process WITHOUT a restart (`experimental-web.ts`).
       // `capability-guard.ts` has already refused both on an exposed profile; a central answers 404.
       if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
