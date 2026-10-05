@@ -42,6 +42,7 @@ import { DEFAULT_PREFS, useBoardPref } from './boardPrefs'
 import { ColResizeHandle } from './ColResizeHandle'
 import { contentWidthOf, fitContentWidth, hasCustomWidths, resolveWidths, tableMinWidth } from './columnWidths'
 import { SortTh } from './SortHeader'
+import { moveColumn } from './columnOrder'
 import {
   clearTicks, escapeLeavesMode, groupCheck, leaveMode, NO_SELECTION, selectedVisible, setRows,
   toggleMode, toggleRow, type Selection,
@@ -1136,6 +1137,7 @@ export function TaskTable(p: TaskTableProps) {
                             style={{ ...th, textAlign: c.numeric ? 'right' : 'left' }}
                             dataCol={c.id}
                             handle={resizeHandle(c.id)}
+                            reorder={{ scope: 'task-columns', id: c.id, onMove: (d, t) => setColumns(moveColumn(shown, d as ColumnId, t as ColumnId)) }}
                           />
                         ))}
                       </tr>
@@ -1194,6 +1196,7 @@ export function TaskTable(p: TaskTableProps) {
                                     { ...m, [row.task.id]: pickSubtaskSort(sort, m[row.task.id] ?? null, k) }
                                   ))}
                                   title={L.sortByColumn.replace('{column}', label)}
+                                  reorder={{ scope: 'subtask-columns', id, onMove: (d, t) => setSubtaskColumns(moveColumn(shownSubtaskCols, d as SubtaskColumnId, t as SubtaskColumnId)) }}
                                   style={{
                                     ...microLabel, fontWeight: 600, padding: '5px 10px', whiteSpace: 'nowrap',
                                     paddingLeft: 10,
