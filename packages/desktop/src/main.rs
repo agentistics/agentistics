@@ -318,6 +318,12 @@ fn plan_launch(serving: bool, distro: Option<&str>, unit_installed: bool) -> Lau
     }
 }
 
+/// What to do when the unit would not start: the sidecar. The config is NOT touched — only a failed
+/// sidecar (the last resort) clears it, so onboarding is never shown again for a transient WSL state.
+fn plan_after_unit_failure() -> LaunchPlan {
+    LaunchPlan::Sidecar
+}
+
 /// A `wsl.exe -d <distro> --exec /bin/sh -c <script>` that runs hidden. `--exec` skips the login
 /// shell, so the user bus is pointed at explicitly — without XDG_RUNTIME_DIR `systemctl --user`
 /// cannot reach the manager at all.
@@ -377,15 +383,37 @@ async fn launch(
 ) -> Result<(), String> {
     let serving = server_answers().await;
     let distro = wsl_distro_of(&claude_dir);
+    // `wsl.exe` is a blocking process and a cold one can take seconds: never on the async executor.
     let unit = match (&distro, serving) {
-        (Some(d), false) => wsl_unit_installed(d),
+        (Some(d), false) => {
+            let d = d.clone();
+            tauri::async_runtime::spawn_blocking(move || wsl_unit_installed(&d))
+                .await
+                .unwrap_or(false)
+        }
         _ => false,
     };
     let plan = plan_launch(serving, distro.as_deref(), unit);
     log_error(&format!("launch plan: {plan:?}"));
     match plan {
         LaunchPlan::AlreadyServing => {}
-        LaunchPlan::StartWslUnit(d) => start_wsl_unit(&d)?,
+        LaunchPlan::StartWslUnit(d) => {
+            let started = {
+                let d = d.clone();
+                tauri::async_runtime::spawn_blocking(move || start_wsl_unit(&d))
+                    .await
+                    .map_err(|e| format!("the wsl task did not finish: {e}"))
+                    .and_then(|r| r)
+            };
+            if let Err(e) = started {
+                // The user manager may simply not be up yet (distro still booting). That is the
+                // "unreachable" case the server side falls back on too: use the bundled sidecar, and
+                // never let a unit that would not start cost the user their saved data source.
+                log_error(&format!("wsl unit start failed, falling back to the sidecar: {e}"));
+                debug_assert_eq!(plan_after_unit_failure(), LaunchPlan::Sidecar);
+                spawn_sidecar(&app, &child_handle, &claude_dir)?;
+            }
+        }
         LaunchPlan::Sidecar => spawn_sidecar(&app, &child_handle, &claude_dir)?,
     }
     navigate_after_ready(app, config_path);
@@ -616,6 +644,11 @@ mod tests {
     #[test]
     fn a_wsl_source_with_the_unit_starts_the_unit() {
         assert_eq!(plan_launch(false, Some("Ubuntu"), true), LaunchPlan::StartWslUnit("Ubuntu".into()));
+    }
+
+    #[test]
+    fn a_unit_that_will_not_start_falls_back_to_the_sidecar() {
+        assert_eq!(plan_after_unit_failure(), LaunchPlan::Sidecar);
     }
 
     #[test]
