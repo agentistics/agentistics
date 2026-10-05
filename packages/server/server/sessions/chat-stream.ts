@@ -10,6 +10,11 @@
  *   changed (`chat-delta`, core's `chatDelta`): a turn appended, the last turn grown, the window slid;
  * - a send wakes it too (`wakeChat`, from the prompt route), so the server's `pending` echo shows at once;
  * - the fleet row (state, cwd, conversation) is reused for `ROW_TTL_MS` rather than re-walked per change;
+ * - WHILE A TURN IS IN FLIGHT (the person's message is not answered yet, or a pending echo is showing)
+ *   the transcript is re-read every `INFLIGHT_POLL_MS` whether or not the watcher fires — `fs.watch`
+ *   does not fire on every runner, filesystem or Windows path, and then the finished turn waited for the
+ *   10 s safety read (a CI browser saw it at ~5.5 s, or not within 8 s). It stops the moment the turn is
+ *   committed, and never runs longer than `INFLIGHT_MAX_MS` after it started;
  * - a slow safety re-read (`SAFETY_MS`) covers what the file does not say (the session ending, a
  *   transcript that appears only later), and resolves a path that did not exist yet;
  * - `ping` every `KEEPALIVE_MS`, so the client knows the stream is healthy and only then stops polling.
@@ -25,6 +30,17 @@ export const ROW_TTL_MS = 5_000
 export const SAFETY_MS = 10_000
 export const UNRESOLVED_RETRY_MS = 1_000
 export const KEEPALIVE_MS = 15_000
+/** The re-read cadence while a turn is in flight, watcher or no watcher. */
+export const INFLIGHT_POLL_MS = 1_000
+/** A turn that stays unanswered longer than this stops being polled fast (the safety read remains). */
+export const INFLIGHT_MAX_MS = 5 * 60_000
+
+/** Is a turn in flight: the last thing said is the person's, or a sent message is still pending? */
+export function turnInFlight(p: Pick<ChatPayload, 'turns'> & { live?: boolean; pending?: unknown[] }): boolean {
+  if (p.live === false) return false
+  if (p.pending && p.pending.length > 0) return true
+  return p.turns.length > 0 && p.turns[p.turns.length - 1]!.role === 'user'
+}
 /** Chat streams one server keeps at once; past it the client falls back to polling. */
 export const MAX_CHAT_STREAMS = 32
 
@@ -70,6 +86,8 @@ export function chatStreamResponse(id: string, deps: ChatStreamDeps, signal: Abo
   let debounce: unknown = null
   let safety: unknown = null
   let keepalive: unknown = null
+  let fast: unknown = null
+  let inflightSince = 0
   let lastFresh = 0
 
   let ctl!: ReadableStreamDefaultController<Uint8Array>
@@ -89,6 +107,13 @@ export function chatStreamResponse(id: string, deps: ChatStreamDeps, signal: Abo
         watcher?.close()
         path = resolved
         watcher = watchFile(resolved, () => schedule(false))
+      }
+      // In flight: keep re-reading on a timer of our own (see the header). Armed once, re-armed by each read.
+      if (turnInFlight(p)) {
+        if (inflightSince === 0) inflightSince = Date.now()
+        if (fast === null && Date.now() - inflightSince < INFLIGHT_MAX_MS) fast = setTimer(() => { fast = null; schedule(false) }, INFLIGHT_POLL_MS)
+      } else {
+        inflightSince = 0
       }
       const { turns, ...meta } = p
       const metaJson = JSON.stringify(meta)
@@ -121,7 +146,7 @@ export function chatStreamResponse(id: string, deps: ChatStreamDeps, signal: Abo
     closed = true
     open--
     watcher?.close()
-    for (const t of [debounce, safety, keepalive]) if (t !== null) clearTimer(t)
+    for (const t of [debounce, safety, keepalive, fast]) if (t !== null) clearTimer(t)
     const set = wakers.get(id)
     set?.delete(waker)
     if (set && set.size === 0) wakers.delete(id)
