@@ -509,6 +509,23 @@ export function dropUnlockWindow(): void {
   _windowIo = _windowIo.then(() => secretFs().unlink(unlockWindowPath())).then(() => {}, () => {})
 }
 export function unlockWindowAnchor(): number | null { return _unlockWindowAnchorMs }
+/**
+ * What the SCREEN may say about the window (the countdown), even on a cold service whose memory is empty
+ * and whose DEK is not open: the memory anchor, else the file's timestamp UNVERIFIED (its MAC needs the
+ * DEK). It decides nothing — the gate still verifies the MAC after a gesture — so a hand-edited file can
+ * at worst make a clock wrong, never skip the code.
+ */
+export async function unlockWindowHint(kid: string | null): Promise<number | null> {
+  if (_unlockWindowAnchorMs !== null) return _unlockWindowAnchorMs
+  if (!kid) return null
+  await _windowIo
+  try {
+    const raw = await secretFs().readFile(unlockWindowPath())
+    if (!raw) return null
+    const j = JSON.parse(new TextDecoder().decode(raw)) as { v?: unknown; kid?: unknown; atMs?: unknown }
+    return j.v === 1 && j.kid === kid && typeof j.atMs === 'number' && Number.isFinite(j.atMs) && j.atMs <= _now() ? j.atMs : null
+  } catch { return null }
+}
 /** Resolves once every pending window write/delete has landed (tests, and the restart path). */
 export function unlockWindowSettled(): Promise<void> { return _windowIo }
 /**
@@ -1071,7 +1088,7 @@ export type VaultAuditType =
   | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
   | 'vault.init' | 'vault.rekey' | 'vault.reset' | 'vault.add-passphrase'
   | 'vault.stepup-failed' | 'vault.stepup-frozen' | 'vault.auto-locked' | 'vault.auto-lock-extended' | 'vault.recovered' | 'vault.recover-failed'
-  | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.presence-held' | 'vault.local-proof' | 'vault.recover-page' | 'vault.set-auto-lock' | 'vault.set-unlock-policy' | 'vault.unlock' | 'vault.personal-create' | 'vault.personal-edit' | 'vault.personal-reveal' | 'vault.personal-trash' | 'vault.personal-restore' | 'vault.personal-restore-version' | 'vault.personal-purge' | 'vault.personal-group' | 'vault.personal-import' | 'vault.personal-passkey-add' | 'vault.personal-passkey-remove' | 'vault.personal-code-reveal' | 'vault.personal-grant' | 'vault.personal-use' | 'vault.bundle-staged' | 'vault.bundle-restored' | 'vault.bundle-built' | 'vault.bundle-wiped'
+  | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.presence-held' | 'vault.local-proof' | 'vault.recover-page' | 'vault.set-auto-lock' | 'vault.set-unlock-policy' | 'vault.unlock' | 'vault.personal-create' | 'vault.personal-edit' | 'vault.personal-reveal' | 'vault.personal-reveal-refused' | 'vault.personal-trash' | 'vault.personal-restore' | 'vault.personal-restore-version' | 'vault.personal-purge' | 'vault.personal-group' | 'vault.personal-import' | 'vault.personal-passkey-add' | 'vault.personal-passkey-remove' | 'vault.personal-code-reveal' | 'vault.personal-grant' | 'vault.personal-use' | 'vault.bundle-staged' | 'vault.bundle-restored' | 'vault.bundle-built' | 'vault.bundle-wiped'
   | 'vault.phone-enrol-request' | 'vault.phone-enrol-approve' | 'vault.phone-enrol-deny' | 'vault.phone-key-add' | 'vault.phone-key-remove' | 'vault.phone-unlock-failed'
 
 /** `device` is the label the owner gave a phone ('opened from Pixel') — never a key, an id or a secret. */

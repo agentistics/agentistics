@@ -454,7 +454,7 @@ describe('§5.1 / §12.5 auto-lock', () => {
 
 // ── the unlock policy (owner decision 2026-10-02): always / hello-only / daily (the default) ─────
 
-import { autoLockRemainingMs, extendAutoLock, lockVault, unlockWindowAnchor, unlockWindowSettled, UNLOCK_WINDOW_FILE } from './service'
+import { autoLockRemainingMs, extendAutoLock, lockVault, unlockWindowAnchor, unlockWindowHint, unlockWindowSettled, UNLOCK_WINDOW_FILE } from './service'
 import { writeFileSync } from 'node:fs'
 import { setUnlockPolicy, unlockPolicyView } from './gate'
 
@@ -521,6 +521,20 @@ describe('unlock policy — per day (the DEFAULT): code on the first unlock, Hel
     expect(unlockWindowAnchor()).not.toBeNull()
     lockVault('user'); restart(); T += 18 * H
     expect(await unlockWithGesture()).toMatchObject({ state: 'pending-stepup' }) // 24 h: the code again
+  })
+  test('VAULT.UX-R2: the countdown is stated on a COLD, LOCKED service (the hint reads the file; the gate still verifies)', async () => {
+    await ownerMachine()
+    restart()
+    await coldUnlock()
+    await unlockWindowSettled()
+    const kid = parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.kid
+    lockVault('user'); restart(); T += 5 * H
+    const hint = await unlockWindowHint(kid)
+    expect(hint).not.toBeNull()
+    const v = unlockPolicyView(null, hint)
+    expect(v.codeNextUnlock).toBe(false)
+    expect(Date.parse(v.windowEndsAt!)).toBe(hint! + 24 * H)
+    expect(await unlockWindowHint('0'.repeat(16))).toBeNull() // another vault's kid: no clock
   })
   test('VAULT.UX-R2: a window file that does not verify under the vault key is ignored — the code is asked', async () => {
     await ownerMachine()

@@ -14,7 +14,7 @@ import { sealedFiles } from './boot'
 import { VAULT_ACTION_ROWS, requireVaultStepUp, rowFor, type VaultAction, setupCodeOwed, localProofKind, stepUpState, unlockPolicyView, type GateContext } from './gate'
 import { hardeningLines } from './hardening'
 import {
-  displayPath, lockVault, pendingPlaintextFiles, presenceCandidates, presenceSoon, restoreWithFor, secretFs, vaultDir, vaultLang, vaultStatus,
+  displayPath, lockVault, pendingPlaintextFiles, presenceCandidates, presenceSoon, restoreWithFor, secretFs, unlockWindowHint, vaultDir, vaultLang, vaultStatus,
   type LockedBy, type RecoveryStep, type VaultState,
 } from './service'
 
@@ -150,7 +150,7 @@ export async function readVaultView(files: string[] = sealedFiles(), pendingFile
     recoveryTodo: s.recoveryTodo ?? null,
     gates: Object.fromEntries((Object.keys(VAULT_ACTION_ROWS) as VaultAction[]).map(k => { const r = rowFor(k, { session, loopback }); return [k, { code: r.code, gesture: r.gesture, grant: r.grant !== null }] })),
     gestures: { probe: PRESENCE_GESTURES.probe, enroll: PRESENCE_GESTURES.enroll },
-    unlockPolicy: unlockPolicyView(stored),
+    unlockPolicy: unlockPolicyView(stored, await unlockWindowHint(typeof kid === 'string' ? kid : null)),
     setupCode: {
       owed: setupCodeOwed(Boolean(stored?.stepup), { session, loopback }),
       command: setupCodeCommand(AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR),
