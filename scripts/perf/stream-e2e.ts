@@ -59,19 +59,6 @@ try {
   const id = sp.id
   for (let i = 0; i < 120; i++) { try { if ((await fetch(`http://localhost:${webPort}/`)).ok) break } catch { /* not yet */ } await Bun.sleep(500) }
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
-  // Every event the page's chat stream receives, with its page-clock time, so a round that never shows
-  // the finished turn says whether the stream delivered it (and the page dropped it) or never did.
-  await page.addInitScript(() => {
-    const w = window as unknown as { __sse: string[] }; w.__sse = []
-    const Orig = window.EventSource
-    window.EventSource = class extends Orig {
-      constructor(url: string | URL, init?: EventSourceInit) {
-        super(url, init)
-        const u = String(url).replace(/\?.*/, '')
-        for (const t of ['chat', 'chat-delta', 'frame', 'ping', 'error']) this.addEventListener(t, ev => { if (t !== 'frame' && t !== 'ping') w.__sse.push(`${Math.round(performance.now())} ${u} ${t} ${String((ev as MessageEvent).data ?? '').slice(0, 90)}`) })
-      }
-    } as typeof EventSource
-  })
   const cdp = await page.context().newCDPSession(page)
   await cdp.send('Network.enable')
   const short = (u: string) => u.replace(/^https?:\/\/[^/]+/, '').split('?')[0]!.slice(0, 50)
@@ -127,14 +114,7 @@ try {
     // round that fails with the harness running normally still fails.
     const paused = Math.max(0, ...pauses)
     if (bad && paused >= PAUSE_MS && attempt < 2) { log(`round ${round}: the harness itself paused ${paused} ms — measuring it again (${attempt + 1}/2)`); report.pop(); await Bun.sleep(1500); continue }
-    if (bad) {
-      failed = true
-      const sse = await page.evaluate(() => (window as unknown as { __sse: string[] }).__sse.slice(-12)).catch(() => [] as string[])
-      // What the SERVER's own chat read says now, straight (no browser, no proxy): is the finished turn there?
-      const direct = await (await fetch(`${s.base}/api/fleet/chat?id=${id}&lang=en`)).text().catch(() => '')
-      const serverHasIt = new RegExp(`answer to ${marker}[^"]*writtenAt=`).test(direct)
-      log(`round ${round}: server's own chat read has the finished turn: ${serverHasIt}; page chat-stream events (last 12):\n${sse.join('\n')}\nin flight at the page during the round:\n${inflight.slice(-6).join('\n')}`)
-    }
+    if (bad) { failed = true; log(`round ${round}: in flight at the page during the round:\n${inflight.slice(-12).join('\n')}`) }
     await Bun.sleep(1500)
     break
   }
