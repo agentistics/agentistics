@@ -1074,13 +1074,25 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const out = await handleMemoryRequest(req, url, await liveMemoryDeps(TEAM_CENTRAL))
       return json(out.body, out.status)
     }
-    if (url.pathname === '/api/experimental' && req.method === 'GET') {
-      // Read-only: `agentop experimental status` and the post-restart confirmation ask the RUNNING
-      // server what it booted with. There is deliberately no write route and no Settings switch.
+    if (url.pathname === '/api/experimental' && (req.method === 'GET' || req.method === 'PUT')) {
+      // GET: what this server booted with. PUT `{ enabled }`: Settings → Experimental's switch — it
+      // persists the preference and applies it to this process WITHOUT a restart (`experimental-web.ts`).
+      // `capability-guard.ts` has already refused both on an exposed profile; a central answers 404.
       if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
       try {
-        const { readExperimentalReport } = await import('./experimental-web')
-        return new Response(JSON.stringify(await readExperimentalReport()), {
+        const web = await import('./experimental-web')
+        if (req.method === 'PUT') {
+          const body = await readJsonLimited<{ enabled?: unknown }>(req, LIMITS.bodyBytes)
+          if (!body.ok || typeof body.value.enabled !== 'boolean') {
+            return new Response(JSON.stringify({ error: 'bad_request' }), {
+              status: 400, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+            })
+          }
+          return new Response(JSON.stringify(await web.setExperimental(body.value.enabled)), {
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        }
+        return new Response(JSON.stringify(await web.readExperimentalReport()), {
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
