@@ -17,7 +17,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Ban, BellRing, Check, MessageSquarePlus, RotateCcw, Send, ExternalLink } from 'lucide-react'
+import { ArrowLeft, Ban, BellRing, Check, ChevronRight, MessageSquarePlus, RotateCcw, Send, ExternalLink } from 'lucide-react'
 import {
   deliverySummary, rowForParticipant, threadComments, threadInbox,
   type ChatAttachmentRef, type FleetRowLike, type ThreadParticipant, type ThreadSummary,
@@ -50,6 +50,20 @@ const KIND_COLOR: Record<string, { color: string; dim: string }> = {
   block: { color: 'var(--accent-red)', dim: 'var(--accent-red-dim)' },
   decision: { color: 'var(--accent-green)', dim: 'var(--accent-green-dim)' },
 }
+
+/**
+ * The inbox's rows are BUTTONS and must look like it: a hover wash, a pointer, a chevron that leans in on
+ * hover, and a keyboard focus ring. (Hover does not exist on a touch screen; the chevron is always drawn,
+ * which is what tells a thumb the row opens something.)
+ */
+export const INBOX_CSS = `
+.ag-inbox-row{cursor:pointer;transition:background .15s}
+.ag-inbox-row .ag-inbox-chev{color:var(--text-tertiary);transition:transform .15s,color .15s}
+.ag-inbox-row:hover{background:var(--ag-tint-3)!important}
+.ag-inbox-row:hover .ag-inbox-chev{color:var(--anthropic-orange);transform:translateX(2px)}
+.ag-inbox-row[data-selected="true"] .ag-inbox-chev{color:var(--anthropic-orange)}
+.ag-inbox-row:focus-visible{outline:2px solid var(--anthropic-orange);outline-offset:-2px}
+`
 
 /** A `#comment-ID` link written by the `^` picker scrolls to that comment instead of navigating. */
 function followCommentLink(e: React.MouseEvent): void {
@@ -112,9 +126,10 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
     return (
       <button
         key={s.thread.id}
+        className="ag-inbox-row" data-inbox-row data-selected={on ? 'true' : 'false'}
         onClick={() => setPicked(s.thread.id)}
         style={{
-          display: 'grid', gap: 3, width: '100%', textAlign: 'left',
+          position: 'relative', display: 'grid', gap: 3, width: '100%', textAlign: 'left', paddingRight: 30,
           padding: isMobile ? '12px 16px' : '10px 14px', minHeight: isMobile ? 64 : undefined,
           border: 'none', borderLeft: `2px solid ${on ? 'var(--anthropic-orange)' : 'transparent'}`,
           background: on ? 'var(--anthropic-orange-glow)' : 'transparent', cursor: 'pointer', fontFamily: 'inherit', color: 'inherit',
@@ -139,6 +154,7 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
           </span>
           <span style={{ marginLeft: 'auto', flex: '0 0 auto', whiteSpace: 'nowrap' }}>{shortWhen(s.last?.createdAt ?? s.thread.createdAt, lang)}</span>
         </span>
+        <ChevronRight className="ag-inbox-chev" size={15} aria-hidden style={{ position: 'absolute', right: 10, top: '50%', marginTop: -7 }} />
       </button>
     )
   }
@@ -151,6 +167,7 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
 
   const inboxPane = (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' }}>
+      <style>{INBOX_CSS}</style>
       <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
         {threads.length === 0 && (
           <div style={{ padding: 14, fontSize: 12.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>{t.noThreads}</div>
@@ -161,14 +178,16 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
           <div>
             {heading(t.loose, looseCount)}
             <button
+              className="ag-inbox-row" data-inbox-row data-selected={selected === 'loose' ? 'true' : 'false'}
               onClick={() => setPicked('loose')}
               style={{
-                width: '100%', textAlign: 'left', padding: isMobile ? '12px 16px' : '10px 14px', minHeight: isMobile ? 52 : undefined,
+                position: 'relative', paddingRight: 30,
+                width: '100%', textAlign: 'left', padding: isMobile ? '12px 30px 12px 16px' : '10px 30px 10px 14px', minHeight: isMobile ? 52 : undefined,
                 border: 'none', borderLeft: `2px solid ${selected === 'loose' ? 'var(--anthropic-orange)' : 'transparent'}`,
                 background: selected === 'loose' ? 'var(--anthropic-orange-glow)' : 'transparent', color: 'var(--text-secondary)',
                 fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
               }}
-            >{t.looseHint}</button>
+            >{t.looseHint}<ChevronRight className="ag-inbox-chev" size={15} aria-hidden style={{ position: 'absolute', right: 10, top: '50%', marginTop: -7 }} /></button>
           </div>
         )}
       </div>
