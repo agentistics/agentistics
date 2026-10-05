@@ -31,6 +31,7 @@ import { CommentAttachments, CommentComposer } from './CommentComposer'
 import { SESSION_STATE, button, field, fmtStamp } from './board'
 import { threadCopy, type Lang } from './threadCopy'
 import { participantState, replyReach } from './threadView'
+import { RESOLVED_FLASH_MS, resolveView } from './resolveFlow'
 
 /** Today: the time. Otherwise: day and month. An inbox row has room for one short stamp. */
 function shortWhen(iso: string, lang: Lang): string {
@@ -257,6 +258,13 @@ function ThreadRecord({ id, thread, detail, rows, lang, reload, renderBody, wher
   const [decision, setDecision] = useState(false)
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
+  const [verbPending, setVerbPending] = useState(false)
+  const [flashing, setFlashing] = useState(false)
+  useEffect(() => {
+    if (!flashing) return
+    const h = setTimeout(() => setFlashing(false), RESOLVED_FLASH_MS)
+    return () => clearTimeout(h)
+  }, [flashing])
   // A record reads oldest first; open on the newest entry, and follow a new one.
   const scroller = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -294,9 +302,12 @@ function ThreadRecord({ id, thread, detail, rows, lang, reload, renderBody, wher
     done(); await reload()
   }
   const verb = async (action: 'resolve' | 'reopen' | 'mute' | 'unmute', sessionId?: string) => {
+    if (action === 'resolve') setVerbPending(true)
     await threadVerb(id, thread.id, action, sessionId ? { sessionId } : {})
     await reload()
+    if (action === 'resolve') { setVerbPending(false); setFlashing(true) }
   }
+  const rv = resolveView({ resolvedAt: thread.resolvedAt, pending: verbPending, flashing })
   const cantSend = busy || !draft.trim() || reach.total === 0
 
   return (
@@ -311,15 +322,28 @@ function ThreadRecord({ id, thread, detail, rows, lang, reload, renderBody, wher
           <div style={{ fontSize: 15, fontWeight: 700, overflowWrap: 'anywhere' }}>{thread.title}</div>
           {!isMobile && <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{where} · {t.openedBy(thread.openedBy, fmtStamp(thread.createdAt, lang))}</div>}
         </div>
+        {thread.resolvedAt && rv !== 'done' && (
+          <span data-resolved-badge style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-green)', background: 'var(--accent-green-dim)', borderRadius: 999, padding: '2px 9px', flex: '0 0 auto' }}>{t.resolvedBadge}</span>
+        )}
         <button
+          data-resolve-button data-resolve-view={rv}
+          disabled={rv === 'working' || rv === 'done'}
           onClick={() => void verb(thread.resolvedAt ? 'reopen' : 'resolve')}
-          style={{ ...button(isMobile), flex: '0 0 auto' }}
-          title={thread.resolvedAt ? t.reopen : t.resolve} aria-label={thread.resolvedAt ? t.reopen : t.resolve}
+          style={{
+            ...button(isMobile), flex: '0 0 auto', transition: 'background .25s, color .25s, border-color .25s',
+            ...(rv === 'done' ? { background: 'var(--accent-green-dim)', color: 'var(--accent-green)', borderColor: 'var(--accent-green)' } : {}),
+            ...(rv === 'working' ? { opacity: 0.7 } : {}),
+          }}
+          title={rv === 'reopen' ? t.reopen : t.resolve} aria-label={rv === 'done' ? t.resolvedNow : rv === 'reopen' ? t.reopen : t.resolve}
         >
-          {thread.resolvedAt ? <RotateCcw size={14} /> : <Check size={14} />}{!isMobile && (thread.resolvedAt ? t.reopen : t.resolve)}
+          {rv === 'reopen' ? <RotateCcw size={14} /> : <Check size={14} />}
+          {(!isMobile || rv === 'done') && (rv === 'done' ? t.resolvedNow : rv === 'reopen' ? t.reopen : t.resolve)}
         </button>
       </div>
 
+      {rv === 'done' && (
+        <div role="status" data-resolved-note style={{ padding: '6px 16px', fontSize: 12, color: 'var(--accent-green)', background: 'var(--accent-green-dim)' }}>{t.movedToResolved}</div>
+      )}
       <div ref={scroller} style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', padding: isMobile ? '6px 12px' : '6px 16px' }}>
         {comments.map(c => {
           const mine = c.role === 'owner'
