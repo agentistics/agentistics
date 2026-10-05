@@ -31,14 +31,18 @@ import {
   bodyWithAttachments, looksLikeImage, parseCommentBody,
   type CommentAttachment, type CommentPart,
 } from '../lib/commentBody'
-import { BoardView } from '../components/tasks/TaskBoard'
+import { BoardView, MobileLane } from '../components/tasks/TaskBoard'
+import { effectiveView, hasStoredView, resolveLane } from '../components/tasks/mobileLanes'
+import { mobileBoardCopy } from '../components/tasks/boardCopyThreads'
 import { TaskTable } from '../components/tasks/TaskTable'
 import { SubtaskTable } from '../components/tasks/SubtaskTable'
 import {
   useBoardPref,
 } from '../components/tasks/boardPrefs'
 import { BoardArrange } from '../components/tasks/BoardArrange'
-import { DeliveryDetail } from '../components/tasks/DeliveryDetail'
+import { DeliveryDetail, type DeliveryTab } from '../components/tasks/DeliveryDetail'
+import { TaskHero } from '../components/tasks/TaskHero'
+import { liveSessionsOf } from '../components/tasks/threadView'
 import { useMoney } from '../components/tasks/money'
 import { RailSection } from '../components/tasks/RailSection'
 import { ConfirmModal, Select } from './settings/primitives'
@@ -151,7 +155,12 @@ function TaskList() {
   // resets itself on every back-press is a view nobody can stay in.
   // Read LIVE from the per-person store (`boardPrefs.ts`), not seeded once: on a device that opens
   // the board before the server answers, the arrangement lands as soon as it does.
-  const [view, setView] = useBoardPref('view')
+  const [storedView, setView] = useBoardPref('view')
+  // A phone with no stored choice opens on the kanban, not on the metrics.
+  const view = effectiveView(storedView, isMobile, hasStoredView())
+  const [lane, setLane] = useState<string | null>(null)
+  const [sheet, setSheet] = useState(false)
+  const MB = mobileBoardCopy(lang)
   // The kanban's arrangement, persisted with everything else the board remembers. The SORT is
   // shared with the table on purpose: a board that ranks its cards one way in the grid and another
   // in the columns is two boards, and the reader has to hold both.
@@ -225,6 +234,28 @@ function TaskList() {
     color: active ? 'var(--text-primary)' : 'var(--text-tertiary)',
   })
 
+  const laneChips = liveStatusOrder(statuses)
+    .filter(st => boardColumns.includes(st))
+    .map(st => ({ status: st, count: shown.filter(r => r.task.status === st).length }))
+  const activeLane = resolveLane(lane, laneChips)
+  const arrange = (
+<BoardArrange
+            lang={lang}
+            sort={sort} onSort={setSort}
+            columnSorts={columnSort} onColumnSorts={setColumnSort}
+            lanes={lanes} onLanes={setLanes}
+            wip={wip} onWip={setWip}
+            // The board and the table share ONE set of visible columns: they are the LIVE statuses,
+            // and letting each remember its own would mean hiding a status twice.
+            columns={boardColumns}
+            onColumns={setBoardColumns}
+            statuses={statuses}
+            counts={Object.fromEntries(liveStatusOrder(statuses).map(st => [
+              st, shown.filter(r => r.task.status === st).length,
+            ]))}
+          />
+  )
+
   // The table draws this INSIDE its own toolbar row (`toolbarStart`); the board keeps it above.
   const searchBox = (
     <div style={{ position: 'relative', maxWidth: 380 }}>
@@ -243,7 +274,89 @@ function TaskList() {
       paddingBottom: isMobile ? 'calc(var(--mobile-nav-h) + 24px)' : 18,
       display: 'grid', gap: 14,
     }}>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
+      {isMobile && (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <h1 style={{ fontSize: 20, margin: 0, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+              Agentask
+              <BetaTag what="Agentask" />
+            </h1>
+            <button style={button(true, 'primary')} onClick={() => setOpen(v => !v)}>
+              <Plus size={15} /> New task
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>{searchBox}</div>
+            <button
+              style={{ ...button(true), flexShrink: 0, gap: 6 }}
+              onClick={() => setSheet(true)}
+              aria-label={MB.adjust}
+            ><Settings2 size={15} /> {MB.adjust}</button>
+          </div>
+          {view === 'board' && shown.length > 0 && (
+            <div
+              className="ag-noscroll" role="tablist" aria-label={MB.chips}
+              style={{
+                display: 'flex', gap: 6, overflowX: 'auto', margin: '0 -12px', padding: '0 12px',
+                scrollbarWidth: 'none',
+              }}
+            >
+              {laneChips.map(c => {
+                const on = c.status === activeLane
+                return (
+                  <button
+                    key={c.status} role="tab" aria-selected={on}
+                    onClick={() => setLane(c.status)}
+                    style={{
+                      flex: '0 0 auto', minHeight: 44, padding: '0 14px', borderRadius: 999,
+                      border: `1px solid ${on ? 'transparent' : 'var(--border)'}`, fontSize: 13,
+                      cursor: 'pointer', fontFamily: 'inherit',
+                      background: on ? 'var(--anthropic-orange-dim)' : 'var(--bg-card)',
+                      color: on ? 'var(--anthropic-orange-light)' : 'var(--text-secondary)',
+                      fontWeight: on ? 600 : 400,
+                    }}
+                  >{statusLabel(c.status, lang, statuses)} · {c.count}</button>
+                )
+              })}
+            </div>
+          )}
+        </>
+      )}
+      {sheet && isMobile && createPortal(
+        <>
+          <div onClick={() => setSheet(false)} style={{ position: 'fixed', inset: 0, zIndex: 1100, background: 'rgba(0,0,0,0.45)' }} />
+          <div role="dialog" aria-label={MB.adjustTitle} style={{
+            position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 1110, maxHeight: '80dvh', overflowY: 'auto',
+            background: 'var(--bg-surface)', borderTop: '1px solid var(--border)',
+            borderRadius: '16px 16px 0 0', boxShadow: '0 -8px 30px rgba(0,0,0,0.35)',
+            padding: '8px 12px calc(16px + env(safe-area-inset-bottom))', display: 'grid', gap: 14,
+          }}>
+            <div style={{ width: 36, height: 4, borderRadius: 2, background: 'var(--border)', margin: '4px auto 0' }} />
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <span style={{ flex: 1, fontWeight: 650, fontSize: 15 }}>{MB.adjustTitle}</span>
+              <button style={{ ...button(true), padding: '0 12px' }} onClick={() => setSheet(false)} aria-label={MB.close}><X size={15} /></button>
+            </div>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{MB.view}</span>
+              <div style={{ ...surface, display: 'flex', padding: 3, gap: 2 }}>
+                <button style={{ ...seg(view === 'overview'), flex: 1 }} onClick={() => setView('overview')}><BarChart3 size={14} /> Metrics</button>
+                <button style={{ ...seg(view === 'board'), flex: 1 }} onClick={() => setView('board')}><LayoutGrid size={14} /> Board</button>
+                <button style={{ ...seg(view === 'table'), flex: 1 }} onClick={() => setView('table')}><Rows3 size={14} /> Table</button>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{MB.manage}</span>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button style={{ ...button(true), gap: 6 }} onClick={() => { setSheet(false); setManagingStatuses(true) }}><Settings2 size={14} /> {MB.statuses}</button>
+                <button style={{ ...button(true), gap: 6 }} onClick={() => { setSheet(false); setManagingTypes(true) }}><Settings2 size={14} /> {MB.types}</button>
+              </div>
+            </div>
+            {view === 'board' && shown.length > 0 && arrange}
+          </div>
+        </>,
+        document.body,
+      )}
+      {!isMobile && <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 200 }}>
           <h1 style={{ fontSize: 19, margin: 0, fontWeight: 650, display: 'flex', alignItems: 'center', gap: 8 }}>
             Agentask
@@ -282,7 +395,7 @@ function TaskList() {
         <button style={button(isMobile, 'primary')} onClick={() => setOpen(v => !v)}>
           <Plus size={15} /> New task
         </button>
-      </div>
+      </div>}
 
       {managingStatuses && (
         <ManageStatusesModal
@@ -335,7 +448,7 @@ function TaskList() {
         />
       )}
 
-      {view === 'board' && searchBox}
+      {view === 'board' && !isMobile && searchBox}
 
       {rows === null && <div style={{ color: 'var(--text-tertiary)', fontSize: 12.5 }}>Loading…</div>}
 
@@ -359,22 +472,14 @@ function TaskList() {
       )}
       {view === 'board' && shown.length > 0 && (
         <>
-          <BoardArrange
-            lang={lang}
-            sort={sort} onSort={setSort}
-            columnSorts={columnSort} onColumnSorts={setColumnSort}
-            lanes={lanes} onLanes={setLanes}
-            wip={wip} onWip={setWip}
-            // The board and the table share ONE set of visible columns: they are the LIVE statuses,
-            // and letting each remember its own would mean hiding a status twice.
-            columns={boardColumns}
-            onColumns={setBoardColumns}
-            statuses={statuses}
-            counts={Object.fromEntries(liveStatusOrder(statuses).map(st => [
-              st, shown.filter(r => r.task.status === st).length,
-            ]))}
-          />
-          <BoardView
+          {!isMobile && arrange}
+          {isMobile ? (
+            <MobileLane
+              rows={shown} status={activeLane} lang={lang} sort={sort} columnSort={columnSort}
+              statuses={statuses} sessions={fleet.sessions}
+              onOpen={id => navigate(`/tasks/${encodeURIComponent(id)}`)}
+            />
+          ) : <BoardView
           lang={lang}
             rows={shown}
             sort={sort}
@@ -388,7 +493,7 @@ function TaskList() {
             onOpen={id => navigate(`/tasks/${encodeURIComponent(id)}`)}
             onStatus={(id, status) => void toStatus([id], status)}
             onMove={async (id, index) => { await moveTask(id, index); await reload() }}
-          />
+          />}
         </>
       )}
       {view === 'table' && (
@@ -418,7 +523,7 @@ function TaskList() {
           }}
           onRefreshDetail={refreshDetail}
           onCommentsChanged={async ref => { await reload(); await refreshDetail(ref) }}
-          toolbarStart={searchBox}
+          toolbarStart={isMobile ? undefined : searchBox}
           onAddSubtask={async (ref, title) => { await addSubtask(ref, title); await refreshDetail(ref) }}
           onPatchSubtask={async (ref, sid, patch) => {
             // The RESULT reaches the caller — the group-forming gestures (§F.1) need it to show
@@ -485,64 +590,57 @@ function TaskDetailView({ id }: { id: string }) {
   const { statuses } = useTaskStatuses()
   const navigate = useNavigate()
   const isMobile = useIsMobile()
+  const [tab, setTab] = useState<DeliveryTab>('subtasks')
+  // The fleet poll is module-level and shared — this subscribes to the same snapshot the sessions
+  // workspace reads, so the hero's "N live" costs no request of its own.
+  const { fleet, loading: fleetLoading } = useFleet(lang)
 
   if (error === 'missing') return <div style={{ padding: 18 }}><EmptyNotice error={null} /></div>
   if (error) return <div style={{ padding: 18 }}><EmptyNotice error={error} /></div>
   if (!detail) return <div style={{ padding: 18, color: 'var(--text-tertiary)', fontSize: 12.5 }}>Loading…</div>
 
-  const s = statusStyle(statuses, detail.task.status)
+  const live = fleetLoading ? null : liveSessionsOf(detail.sessions, fleet.sessions).length
 
   return (
     <div style={{
-      padding: isMobile ? 12 : 18,
+      padding: isMobile ? 0 : 18, // @overlay-intentional: the page, not an overlay — the hero runs edge to edge
       // The mobile bottom nav is FIXED, so the last thing on the page sits underneath it and cannot
       // be tapped — measured: "Delete task" was intercepted by `nav.mobile-bottom-nav` at every
       // scroll position. `--mobile-nav-h` is the token that already knows how tall that chrome is,
       // safe-area inset included.
       paddingBottom: isMobile ? 'calc(var(--mobile-nav-h) + 24px)' : 18,
-      display: 'grid', gap: 14,
+      display: 'grid', gap: isMobile ? 10 : 14,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <button onClick={() => navigate('/tasks')} style={{ ...button(isMobile), padding: '0 9px' }}>
-          <ArrowLeft size={14} />
-        </button>
-        <div style={{ flex: 1, minWidth: 150, display: 'grid', gap: 6 }}>
-          <h1 style={{ fontSize: 19, margin: 0, fontWeight: 650, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{detail.task.title}</span>
-            {/* A task page is reachable from a link with no nav on screen — the caveat has to
-                travel with the page, not only with the way in. */}
-            <BetaTag what="Agentask" />
-          </h1>
-          {/* The headline number for a broken-up task: how much of it is closed. Same arithmetic
-              and same rounding as the card and the table — one bar, four places. */}
-          <div style={{ maxWidth: 320 }}>
-            <TaskProgressBar
-              done={detail.subtasks.filter(t => t.done).length}
-              total={detail.subtasks.length}
-              height={5}
-            />
-          </div>
-        </div>
-        <span style={{
-          padding: '3px 11px', borderRadius: 6, fontSize: 11,
-          background: s.dim, color: s.color, border: `1px solid ${s.color}`,
-        }}>{statusLabel(detail.task.status, lang, statuses)}</span>
-      </div>
-
-      <DeliveryDetail
-        id={id}
+      {/* The task's IDENTITY (owner's choice 2026-10-04: A's cockpit on C's conversations). */}
+      <TaskHero
         detail={detail}
         lang={lang}
+        statuses={statuses}
+        live={live}
         reload={reload}
+        onBack={() => navigate('/tasks')}
+        onAbout={() => setTab('about')}
         onDeleted={() => navigate('/tasks')}
+        onFileSession={() => setTab('subtasks')}
       />
 
-      <p style={{ margin: 0, fontSize: 11, color: 'var(--text-tertiary)' }}>
-        {lang === 'pt'
-          ? 'Isso é custo, prompts e tempo. Se o trabalho ficou bom não é medido aqui.'
-          : 'These are cost, prompts and time. Whether the work is any good is not measured here.'}
-      </p>
+      <div style={{ padding: isMobile ? '0 12px' : 0, display: 'grid', gap: 14, minWidth: 0 }}>
+        <DeliveryDetail
+          id={id}
+          detail={detail}
+          lang={lang}
+          reload={reload}
+          tab={tab}
+          onTabChange={setTab}
+          onDeleted={() => navigate('/tasks')}
+        />
 
+        <p style={{ margin: 0, fontSize: 11, color: 'var(--text-tertiary)' }}>
+          {lang === 'pt'
+            ? 'Isso é custo, prompts e tempo. Se o trabalho ficou bom não é medido aqui.'
+            : 'These are cost, prompts and time. Whether the work is any good is not measured here.'}
+        </p>
+      </div>
     </div>
   )
 }

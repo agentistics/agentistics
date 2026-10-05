@@ -69,6 +69,111 @@ interface PickerMenuBase {
   lang?: Lang
 }
 
+/**
+ * PanelMenu — the ONE portal panel: a trigger and a `position: fixed` surface (bg-elevated,
+ * shadow-elevated) measured from it, clamped to the viewport and closed on outside scroll.
+ *
+ * `PickerMenu` is this panel holding a checkbox list; the task header's pills (links, blockers,
+ * dates), the unified view bar's sort segment and the row-actions menu hold other content in the
+ * SAME panel, so every popover on the task screens opens, flips and closes the same way.
+ */
+export function PanelMenu({
+  children, title, width = 250, triggerStyle, triggerClassName, ariaLabel, align = 'left', render, onOpenChange,
+}: {
+  /** The trigger's contents. */
+  children: React.ReactNode
+  /** A micro-label on top of the panel; absent draws none. */
+  title?: string
+  width?: number
+  triggerStyle?: React.CSSProperties
+  /** e.g. `ag-tap`, to project the 44px touch hit area around a small trigger. */
+  triggerClassName?: string
+  ariaLabel?: string
+  /** `right` opens the panel flush with the trigger's right edge (a trigger at a screen edge). */
+  align?: 'left' | 'right'
+  /** The panel's body. `close` shuts it (a menu row that acts, then leaves). */
+  render: (close: () => void) => React.ReactNode
+  onOpenChange?: (open: boolean) => void
+}) {
+  const [open, setOpenState] = useState(false)
+  const [at, setAt] = useState<{ left: number; top: number } | null>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const panel = useRef<HTMLDivElement>(null)
+  const setOpen = (v: boolean) => { setOpenState(v); onOpenChange?.(v) }
+
+  useEffect(() => {
+    if (!open) return
+    const close = () => { setOpenState(false); onOpenChange?.(false) }
+    const onScroll = (e: Event) => {
+      if (scrollIsOutside(panel.current, e.target)) close()
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', close)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', close)
+      window.removeEventListener('keydown', onKey)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  return (
+    <>
+      <button
+        ref={trigger}
+        type="button"
+        className={triggerClassName}
+        aria-label={ariaLabel}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        style={triggerStyle}
+        onClick={() => {
+          if (open) { setOpen(false); return }
+          const r = trigger.current?.getBoundingClientRect()
+          if (!r) return
+          const w = Math.min(width, window.innerWidth - 16)
+          const left = align === 'right' ? r.right - w : r.left
+          setAt({
+            left: Math.min(Math.max(8, left), window.innerWidth - w - 8),
+            top: r.bottom + 6,
+          })
+          setOpen(true)
+        }}
+      >{children}</button>
+      {open && at && createPortal(
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 1199 }} />
+          <div ref={panel} role="dialog" aria-label={title ?? ariaLabel} style={{
+            position: 'fixed', left: at.left, top: at.top, width: Math.min(width, window.innerWidth - 16), zIndex: 1200,
+            ...surface, background: 'var(--bg-elevated)', padding: 8, display: 'grid', gap: 2,
+            boxShadow: 'var(--shadow-elevated)', maxHeight: 380, overflowY: 'auto',
+          }}>
+            {title && <div style={{ ...microLabel, marginBottom: 3 }}>{title}</div>}
+            {render(() => setOpen(false))}
+          </div>
+        </>,
+        document.body,
+      )}
+    </>
+  )
+}
+
+/**
+ * The ONE menu row: what every row in a task-screen popover looks like (the Columns list, the lane
+ * choice, the row actions). `on` is the ticked/selected look; `color` overrides the text colour.
+ */
+export const menuRowStyle = (
+  mobile: boolean, on = true, color?: string,
+): React.CSSProperties => ({
+  display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', width: '100%',
+  padding: '6px 8px', borderRadius: 6, fontSize: 12, fontFamily: 'inherit', textAlign: 'left',
+  border: 'none', minHeight: mobile ? 44 : 28,
+  background: on ? 'var(--bg-card-hover)' : 'transparent',
+  color: color ?? (on ? 'var(--text-primary)' : 'var(--text-tertiary)'),
+})
+
 export function PickerMenu(props: PickerMenuProps) {
   const isMobile = useIsMobile()
   const copy = boardCopy(props.lang ?? 'en')
@@ -77,30 +182,8 @@ export function PickerMenu(props: PickerMenuProps) {
   const p: PickerMenuBase & PickerList = tabs
     ? { ...props, ...tabs[Math.min(tab, tabs.length - 1)]! }
     : props as PickerMenuBase & PickerList
-  const [open, setOpen] = useState(false)
-  const [at, setAt] = useState<{ left: number; top: number } | null>(null)
   const [drag, setDrag] = useState<string | null>(null)
-  const trigger = useRef<HTMLButtonElement>(null)
-  const panel = useRef<HTMLDivElement>(null)
   const width = p.width ?? 250
-
-  // The panel is portaled into `document.body`, so it is never a descendant of the trigger — a
-  // capture-phase scroll listener on `window` fires for the panel's OWN list scrolling too, and
-  // closing on that made every row past the fold unreachable. Only a scroll OUTSIDE the panel
-  // closes it; page/ancestor scroll still does, which is the point of listening at all.
-  useEffect(() => {
-    if (!open) return
-    const close = () => setOpen(false)
-    const onScroll = (e: Event) => {
-      if (scrollIsOutside(panel.current, e.target)) close()
-    }
-    window.addEventListener('scroll', onScroll, true)
-    window.addEventListener('resize', close)
-    return () => {
-      window.removeEventListener('scroll', onScroll, true)
-      window.removeEventListener('resize', close)
-    }
-  }, [open])
 
   // Ticked first and IN THEIR ORDER, then the rest. The list then reads as what the table looks
   // like, which is the only way a drag-to-reorder makes sense at a glance.
@@ -154,121 +237,97 @@ export function PickerMenu(props: PickerMenuProps) {
   )
 
   return (
-    <>
-      <button
-        ref={trigger}
-        style={p.triggerStyle}
-        onClick={() => {
-          if (open) { setOpen(false); return }
-          const r = trigger.current?.getBoundingClientRect()
-          if (!r) return
-          setAt({
-            left: Math.min(Math.max(8, r.left), window.innerWidth - width - 8),
-            top: r.bottom + 6,
-          })
-          setOpen(true)
-        }}
-      >{p.children}</button>
-      {open && at && createPortal(
+    <PanelMenu
+      title={p.title}
+      width={width}
+      {...(p.triggerStyle ? { triggerStyle: p.triggerStyle } : {})}
+      render={() => (
         <>
-          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 1199 }} />
-          <div ref={panel} style={{
-            position: 'fixed', left: at.left, top: at.top, width, zIndex: 1200,
-            ...surface, background: 'var(--bg-elevated)', padding: 8, display: 'grid', gap: 2,
-            boxShadow: 'var(--shadow-elevated)', maxHeight: 380, overflowY: 'auto',
+        {tabs && (
+          <div role="tablist" style={{
+            display: 'flex', gap: 2, padding: 2, marginBottom: 4, borderRadius: 7,
+            background: 'var(--bg-surface)', border: '1px solid var(--border)',
           }}>
-            <div style={{ ...microLabel, marginBottom: 3 }}>{p.title}</div>
-            {tabs && (
-              <div role="tablist" style={{
-                display: 'flex', gap: 2, padding: 2, marginBottom: 4, borderRadius: 7,
-                background: 'var(--bg-surface)', border: '1px solid var(--border)',
-              }}>
-                {tabs.map((t, i) => {
-                  const on = i === Math.min(tab, tabs.length - 1)
-                  return (
-                    <button
-                      key={t.id} type="button" role="tab" aria-selected={on}
-                      onClick={() => setTab(i)}
-                      style={{
-                        flex: 1, border: 'none', borderRadius: 5, cursor: 'pointer', fontFamily: 'inherit',
-                        fontSize: 11.5, fontWeight: 600, minHeight: isMobile ? 40 : 24,
-                        background: on ? 'var(--bg-card-hover)' : 'transparent',
-                        color: on ? 'var(--text-primary)' : 'var(--text-tertiary)',
-                      }}
-                    >{t.label}</button>
-                  )
-                })}
-              </div>
-            )}
-            {ordered.map(item => {
-              const on = p.value.includes(item.value)
+            {tabs.map((t, i) => {
+              const on = i === Math.min(tab, tabs.length - 1)
               return (
-                <div
-                  key={item.value}
-                  draggable={p.orderable === true && on}
-                  onDragStart={() => setDrag(item.value)}
-                  onDragEnd={() => setDrag(null)}
-                  onDragOver={e => { if (drag && on) e.preventDefault() }}
-                  onDrop={e => {
-                    e.preventDefault()
-                    if (drag) move(drag, item.value)
-                    setDrag(null)
-                  }}
-                  onClick={() => toggle(item.value)}
+                <button
+                  key={t.id} type="button" role="tab" aria-selected={on}
+                  onClick={() => setTab(i)}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
-                    padding: '6px 8px', borderRadius: 6, fontSize: 12,
-                    minHeight: isMobile ? 44 : 28,
+                    flex: 1, border: 'none', borderRadius: 5, cursor: 'pointer', fontFamily: 'inherit',
+                    fontSize: 11.5, fontWeight: 600, minHeight: isMobile ? 40 : 24,
                     background: on ? 'var(--bg-card-hover)' : 'transparent',
                     color: on ? 'var(--text-primary)' : 'var(--text-tertiary)',
-                    opacity: drag === item.value ? 0.45 : 1,
                   }}
-                >
-                  {p.orderable && (
-                    <GripVertical
-                      size={12}
-                      style={{
-                        flexShrink: 0,
-                        // Only a ticked row can be dragged, and only a ticked row shows the grip —
-                        // a handle that does nothing is worse than none.
-                        color: on ? 'var(--text-tertiary)' : 'transparent',
-                        cursor: on ? 'grab' : 'default',
-                      }}
-                    />
-                  )}
-                  <span style={{
-                    width: 14, height: 14, borderRadius: 4, flexShrink: 0,
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    border: `1px solid ${on ? 'var(--anthropic-orange)' : 'var(--border)'}`,
-                    background: on ? 'var(--anthropic-orange)' : 'transparent',
-                    color: '#fff',
-                  }}>{on && <Check size={10} />}</span>
-                  <span style={{
-                    flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap', color: item.color ?? undefined,
-                  }}>{item.label}</span>
-                  {item.hint !== undefined && (
-                    <span style={{ ...microLabel, fontSize: 10.5, flexShrink: 0 }}>{item.hint}</span>
-                  )}
-                  {p.orderable && on && (
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
-                      {stepButton(item.value, -1, p.value.indexOf(item.value) === 0)}
-                      {stepButton(item.value, 1, p.value.indexOf(item.value) === p.value.length - 1)}
-                    </span>
-                  )}
-                </div>
+                >{t.label}</button>
               )
             })}
-            {p.note && (
-              <div style={{
-                ...microLabel, textTransform: 'none', letterSpacing: 0, padding: '4px 8px',
-                lineHeight: 1.5,
-              }}>{p.note}</div>
-            )}
           </div>
-        </>,
-        document.body,
+        )}
+        {ordered.map(item => {
+          const on = p.value.includes(item.value)
+          return (
+            <div
+              key={item.value}
+              draggable={p.orderable === true && on}
+              onDragStart={() => setDrag(item.value)}
+              onDragEnd={() => setDrag(null)}
+              onDragOver={e => { if (drag && on) e.preventDefault() }}
+              onDrop={e => {
+                e.preventDefault()
+                if (drag) move(drag, item.value)
+                setDrag(null)
+              }}
+              onClick={() => toggle(item.value)}
+              style={{
+                ...menuRowStyle(isMobile, on),
+                width: undefined,
+                opacity: drag === item.value ? 0.45 : 1,
+              }}            >
+              {p.orderable && (
+                <GripVertical
+                  size={12}
+                  style={{
+                    flexShrink: 0,
+                    // Only a ticked row can be dragged, and only a ticked row shows the grip —
+                    // a handle that does nothing is worse than none.
+                    color: on ? 'var(--text-tertiary)' : 'transparent',
+                    cursor: on ? 'grab' : 'default',
+                  }}
+                />
+              )}
+              <span style={{
+                width: 14, height: 14, borderRadius: 4, flexShrink: 0,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                border: `1px solid ${on ? 'var(--anthropic-orange)' : 'var(--border)'}`,
+                background: on ? 'var(--anthropic-orange)' : 'transparent',
+                color: '#fff',
+              }}>{on && <Check size={10} />}</span>
+              <span style={{
+                flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap', color: item.color ?? undefined,
+              }}>{item.label}</span>
+              {item.hint !== undefined && (
+                <span style={{ ...microLabel, fontSize: 10.5, flexShrink: 0 }}>{item.hint}</span>
+              )}
+              {p.orderable && on && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
+                  {stepButton(item.value, -1, p.value.indexOf(item.value) === 0)}
+                  {stepButton(item.value, 1, p.value.indexOf(item.value) === p.value.length - 1)}
+                </span>
+              )}
+            </div>
+          )
+        })}
+        {p.note && (
+          <div style={{
+            ...microLabel, textTransform: 'none', letterSpacing: 0, padding: '4px 8px',
+            lineHeight: 1.5,
+          }}>{p.note}</div>
+        )}
+        </>
       )}
-    </>
+    >{p.children}</PanelMenu>
   )
 }

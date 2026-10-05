@@ -2829,6 +2829,32 @@ by the compiler.
   there is no session to open — never a link to `/sessions/hist:…`. Removing the task drops its links;
   removing a subtask sends its links back to the delivery. Both `attachSession` and `attachConversation`
   answer `movedFrom` when they displaced a filing.
+- **A THREAD is a RECORD of one subject of a task, never a chat (owner, 2026-10-04: "I don't want 2
+  chat sources confusing where the information is").** `TaskThread` + `TaskComment.threadId` (absent =
+  a LOOSE comment — every pre-thread one, additive like `subtaskId`) + `TaskComment.kind`
+  (`handback | block | decision`, absent = a note); rules in `@agentistics/core`'s `taskThreads.ts`
+  (pure), IO in `sessions/task-threads.ts`, route `POST /api/tasks/<ref>/threads` (`action: open |
+  send | resolve | reopen | mute | unmute | rename`). (1) Comments render as NOTES (author, time, kind
+  tag, text) — no bubbles, no chat composer, and no "waiting on you" state anywhere, the board card
+  included (it shows a neutral thread COUNT). (2) **Posting is HISTORY**: an ordinary comment
+  (`/comments` with `threadId`) reaches no session. **Delivering is a separate, visible act** —
+  `action: send`, the secondary "Send to the N sessions" button with its recipients listed — and the
+  text lands INTO each session's OWN chat through the same fleet `prompt` path its composer uses; the
+  thread records only that it was sent and to whom (`deliveries`, each linking to that session's
+  chat). (3) A session's answer STAYS in its chat: nothing reads a chat back into a thread (an earlier
+  cut mirrored it; removed). A session's own comment is a record with a link to its chat. (4) The
+  machinery sits behind the send: deliveries are `delivered` / `queued` / `undeliverable` / `muted` /
+  `failed` (no "read" receipt — nothing can observe one); `queued` (not running, or on a dialog) is
+  typed in by the server's 30 s flush once the conversation can take a prompt — matched by
+  CONVERSATION, so a reopen finds it — and nothing is ever reopened for it. **Recipients are only
+  VERIFIED sessions**: the agentistics MCP proves which pane it runs in with `HMAC(key,
+  AGENTOP_MANAGED_ID)` (`packages/mcp/session-proof.ts`), the key being `session-identity.key` (0600,
+  data dir, created by the tmux backend before a spawn), and the server recomputes it
+  (`session-identity.ts`; both tests pin one vector). No token is ever put on a command line — tmux
+  `-e` is visible in `ps`. It stops MIS-ATTRIBUTION, not a same-user process that reads the key; an
+  unverified poster keeps its free-text `author` and never becomes a recipient. A request carrying a
+  session identity can never send (`session_fanout`, 403) — only the person delivers to N. Sessions
+  may OPEN a thread only for a `handback` or a `block`.
 - **New `/api/tasks` sub-routes ride the existing `capability-guard.ts` entries** (`/api/tasks`,
   `/api/task-files` → `localShell`). `GET /api/tasks/next` and `/api/tasks/activity` are matched
   BEFORE the generic `<ref>` GET, or they resolve as task references and 404.

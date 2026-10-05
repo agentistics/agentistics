@@ -28,8 +28,9 @@ import { sanitizeNativeUsage } from './task-native'
 import type { NativeSessionLink, NativeSessionUsage } from './task-model'
 import type {
   Attempt, AttemptStatus, HistoricalSession, Subtask, Task, TaskBook, TaskClaim, TaskComment,
-  TaskEvent, TaskFile, TaskLink, TaskPriority, TaskStatus,
+  TaskEvent, TaskFile, TaskLink, TaskPriority, TaskStatus, TaskThread,
 } from './task-model'
+import { isCommentKind, type ThreadDelivery, type ThreadParticipant } from '@agentistics/core'
 
 export interface TaskPatch {
   title?: string
@@ -68,7 +69,7 @@ export interface AttemptPatch {
 }
 
 const EMPTY_BOOK = (): TaskBook => ({
-  tasks: [], attempts: [], comments: [], subtasks: [], files: [], tombstones: [], events: [],
+  tasks: [], attempts: [], comments: [], threads: [], subtasks: [], files: [], tombstones: [], events: [],
   historicalSessions: [],
   nativeSessions: [],
   // Absent/empty is exactly what `planStatusMigration` reads as "never seeded yet" — see
@@ -102,6 +103,14 @@ export interface TaskStore {
    */
   editComment(id: string, body: string): Promise<boolean>
   removeComment(id: string): Promise<boolean>
+  /**
+   * Thread writes (2026-10-04). `upsertThread` replaces by id; `updateThread` and `updateComment`
+   * run a pure updater INSIDE the store's lock, so a fan-out writing deliveries and a session
+   * joining the same thread cannot lose each other's change. False when nothing carries that id.
+   */
+  upsertThread(t: TaskThread): Promise<void>
+  updateThread(id: string, fn: (t: TaskThread) => TaskThread): Promise<boolean>
+  updateComment(id: string, fn: (c: TaskComment) => TaskComment): Promise<boolean>
   upsertSubtask(t: Subtask): Promise<void>
   removeSubtask(id: string): Promise<boolean>
   addFile(f: TaskFile): Promise<void>
@@ -345,6 +354,67 @@ function sanitizeComment(raw: unknown): TaskComment | null {
     ...(subtaskId ? { subtaskId } : {}),
     author: str(c.author) ?? 'unknown',
     createdAt: str(c.createdAt) ?? new Date(0).toISOString(),
+    // Thread fields (2026-10-04). Each is ABSENT on a comment written before threads existed, and
+    // this whitelist is what a value survives the next read through.
+    ...(str(c.threadId) ? { threadId: str(c.threadId)! } : {}),
+    ...(c.role === 'owner' || c.role === 'session' ? { role: c.role } : {}),
+    ...(str(c.sessionId) ? { sessionId: str(c.sessionId)! } : {}),
+    ...(isCommentKind(c.kind) && c.kind !== 'note' ? { kind: c.kind } : {}),
+    ...(Array.isArray(c.deliveries) ? { deliveries: c.deliveries.map(sanitizeDelivery).filter((d): d is ThreadDelivery => d !== null) } : {}),
+  }
+}
+
+const DELIVERY_STATES = new Set(['delivered', 'queued', 'undeliverable', 'muted', 'failed'])
+const DELIVERY_REASONS = new Set(['not-running', 'dialog-open', 'external', 'unknown-session', 'muted', 'refused'])
+
+function sanitizeDelivery(raw: unknown): ThreadDelivery | null {
+  if (!raw || typeof raw !== 'object') return null
+  const d = raw as Record<string, unknown>
+  const sessionId = str(d.sessionId)
+  if (!sessionId || typeof d.state !== 'string' || !DELIVERY_STATES.has(d.state)) return null
+  return {
+    sessionId,
+    state: d.state as ThreadDelivery['state'],
+    at: str(d.at) ?? new Date(0).toISOString(),
+    ...(str(d.conversationId) ? { conversationId: str(d.conversationId)! } : {}),
+    ...(typeof d.reason === 'string' && DELIVERY_REASONS.has(d.reason) ? { reason: d.reason as ThreadDelivery['reason'] } : {}),
+    ...(str(d.detail) ? { detail: str(d.detail)!.slice(0, 300) } : {}),
+  }
+}
+
+const THREAD_KINDS = new Set(['topic', 'handback', 'block'])
+
+function sanitizeThread(raw: unknown): TaskThread | null {
+  if (!raw || typeof raw !== 'object') return null
+  const t = raw as Record<string, unknown>
+  const id = str(t.id); const taskId = str(t.taskId); const title = str(t.title)
+  if (!id || !taskId || !title) return null
+  const participants = (Array.isArray(t.participants) ? t.participants : [])
+    .map((p): ThreadParticipant | null => {
+      if (!p || typeof p !== 'object') return null
+      const q = p as Record<string, unknown>
+      const sessionId = str(q.sessionId)
+      if (!sessionId) return null
+      return {
+        sessionId,
+        joinedAt: str(q.joinedAt) ?? new Date(0).toISOString(),
+        ...(str(q.conversationId) ? { conversationId: str(q.conversationId)! } : {}),
+        ...(str(q.label) ? { label: str(q.label)! } : {}),
+        ...(str(q.harness) ? { harness: str(q.harness)! } : {}),
+      }
+    })
+    .filter((p): p is ThreadParticipant => p !== null)
+  const muted = Array.isArray(t.mutedSessions) ? t.mutedSessions.filter((x): x is string => typeof x === 'string' && x.length > 0) : []
+  return {
+    id, taskId, title,
+    kind: typeof t.kind === 'string' && THREAD_KINDS.has(t.kind) ? t.kind as TaskThread['kind'] : 'topic',
+    openedBy: str(t.openedBy) ?? 'unknown',
+    createdAt: str(t.createdAt) ?? new Date(0).toISOString(),
+    participants,
+    ...(str(t.subtaskId) ? { subtaskId: str(t.subtaskId)! } : {}),
+    ...(str(t.openedBySession) ? { openedBySession: str(t.openedBySession)! } : {}),
+    ...(str(t.resolvedAt) ? { resolvedAt: str(t.resolvedAt)! } : {}),
+    ...(muted.length > 0 ? { mutedSessions: muted } : {}),
   }
 }
 
@@ -500,6 +570,7 @@ export function createTaskStore(file: string): TaskStore {
         // Absent on a book written before these existed, which is why every read goes through
         // `arr` rather than trusting the field to be there.
         comments: arr(raw.comments).map(sanitizeComment).filter((c): c is TaskComment => c !== null),
+        threads: arr(raw.threads).map(sanitizeThread).filter((t): t is TaskThread => t !== null),
         subtasks: arr(raw.subtasks).map(sanitizeSubtask).filter((t): t is Subtask => t !== null),
         files: arr(raw.files).map(sanitizeFile).filter((f): f is TaskFile => f !== null),
         // Absent on a book written before historical links existed. This whitelist is what a value
@@ -617,6 +688,32 @@ export function createTaskStore(file: string): TaskStore {
         return true
       })
     },
+    upsertThread(t) {
+      return enqueue(async () => {
+        const book = await read()
+        await write({ ...book, threads: [...book.threads.filter(x => x.id !== t.id), t] })
+      })
+    },
+    updateThread(id, fn) {
+      return enqueue(async () => {
+        const book = await read()
+        const target = book.threads.find(t => t.id === id)
+        if (!target) return false
+        const next = fn(target)
+        await write({ ...book, threads: book.threads.map(t => (t.id === id ? next : t)) })
+        return true
+      })
+    },
+    updateComment(id, fn) {
+      return enqueue(async () => {
+        const book = await read()
+        const target = book.comments.find(c => c.id === id)
+        if (!target) return false
+        const next = fn(target)
+        await write({ ...book, comments: book.comments.map(c => (c.id === id ? next : c)) })
+        return true
+      })
+    },
     upsertSubtask(t) {
       return enqueue(async () => {
         const book = await read()
@@ -647,6 +744,12 @@ export function createTaskStore(file: string): TaskStore {
           comments: book.comments.map(c => {
             if (c.subtaskId !== id) return c
             const { subtaskId: _gone, ...rest } = c
+            return rest
+          }),
+          // A thread opened on it is re-homed the same way: it becomes the task's.
+          threads: book.threads.map(t => {
+            if (t.subtaskId !== id) return t
+            const { subtaskId: _gone, ...rest } = t
             return rest
           }),
           // A conversation filed on the removed subtask falls back to its DELIVERY — the repair
@@ -688,6 +791,7 @@ export function createTaskStore(file: string): TaskStore {
           tasks: book.tasks.filter(t => t.id !== id),
           attempts: book.attempts.filter(a => a.taskId !== id),
           comments: book.comments.filter(c => c.taskId !== id),
+          threads: book.threads.filter(t => t.taskId !== id),
           subtasks: book.subtasks.filter(t => t.taskId !== id),
           files: book.files.filter(f => f.taskId !== id),
           // A historical link is board data hanging off the task, so it goes with it. The

@@ -10,7 +10,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Activity, Bot, CalendarClock, CircleCheck, ListChecks, MessageSquare, Paperclip, Terminal } from 'lucide-react'
-import { canReorderBy, DEFAULT_SORT, sortRows, type SortSpec, type TaskStatusDef } from '@agentistics/core'
+import { canReorderBy, DEFAULT_SORT, sortRows, taskProgress, type SortSpec, type TaskStatusDef } from '@agentistics/core'
 import {
   PRIORITY, cardStyle, claimLeft, fmtInt, fmtTokens, liveStatusOrder, microLabel,
   numeric, pill, statusStyle, surface, type BoardStatus,
@@ -27,38 +27,10 @@ import {
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useMoney } from './money'
 import type { TaskListRow } from '../../lib/tasks'
+import { threadsCountText, mobileBoardCopy } from './boardCopyThreads'
 
-function Facts({ row }: { row: TaskListRow }) {
-  const fmt = useMoney()
-  const r = row.rollup
-  const money = r.mixedCurrency || (r.credits !== null && r.costUSD === null)
-    ? `${r.credits!.premiumRequests} req`
-    : fmt(r.costUSD, r.costByHarness)
-  return (
-    <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-      <span style={{ minWidth: 0 }}>
-        <span style={{ ...microLabel, display: 'block' }}>Cost</span>
-        <span style={{ ...numeric, display: 'block', color: r.costUSD === null && r.credits === null ? 'var(--text-tertiary)' : 'var(--anthropic-orange)' }}>
-          {money}
-        </span>
-      </span>
-      <span title="How many times you prompted, across every session filed here">
-        <span style={{ ...microLabel, display: 'block' }}>Your prompts</span>
-        <span style={{ ...numeric, display: 'block' }}>{fmtInt(r.rounds)}</span>
-      </span>
-      <span>
-        <span style={{ ...microLabel, display: 'block' }}>Sessions</span>
-        <span style={{ ...numeric, display: 'block' }}>{r.sessionsUsed}</span>
-      </span>
-      <span>
-        <span style={{ ...microLabel, display: 'block' }}>Tokens</span>
-        <span style={{ ...numeric, display: 'block' }}>{fmtTokens(r.tokens)}</span>
-      </span>
-    </div>
-  )
-}
-
-function Card({ row, onOpen, live, nowMs, statuses }: {
+function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
+  lang?: 'pt' | 'en'
   row: TaskListRow
   onOpen: () => void
   live: readonly { id: string; state: string; harness: string; title: string }[]
@@ -73,6 +45,13 @@ function Card({ row, onOpen, live, nowMs, statuses }: {
   const dueMs = row.task.dueDate ? Date.parse(`${row.task.dueDate}T23:59:59`) : NaN
   const closed = row.task.status === 'done' || row.task.status === 'abandoned'
   const late = !closed && Number.isFinite(dueMs) && dueMs < nowMs
+  const fmt = useMoney()
+  const r = row.rollup
+  const cost = r.mixedCurrency || (r.credits !== null && r.costUSD === null)
+    ? `${r.credits!.premiumRequests} req`
+    : fmt(r.costUSD, r.costByHarness)
+  const pct = counts ? taskProgress(counts.subtasksDone, counts.subtasks).percent : null
+  const threadCount = threadsCountText(counts?.threads, lang)
   return (
     <button
       onClick={onOpen}
@@ -113,11 +92,30 @@ function Card({ row, onOpen, live, nowMs, statuses }: {
           }}>{row.task.detail}</div>
         )}
 
-        {counts && <TaskProgressBar done={counts.subtasksDone} total={counts.subtasks} />}
+        {counts && <TaskProgressBar done={counts.subtasksDone} total={counts.subtasks} showPercent={false} />}
+
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: 'var(--text-secondary)' }}
+          title={`${fmtInt(r.rounds)} prompts · ${r.sessionsUsed} sessions · ${fmtTokens(r.tokens)} tokens`}
+        >
+          {counts && pct !== null && (
+            <span style={{ fontVariantNumeric: 'tabular-nums' }}>{pct}% · {counts.subtasksDone}/{counts.subtasks}</span>
+          )}
+          <span style={{ flex: 1 }} />
+          <span style={{
+            ...numeric, fontSize: 12,
+            color: r.costUSD === null && r.credits === null ? 'var(--text-tertiary)' : 'var(--anthropic-orange)',
+          }}>{cost}</span>
+        </div>
+
+        {threadCount && (
+          <span style={{
+            justifySelf: 'start', display: 'inline-flex', alignItems: 'center', gap: 5,
+            fontSize: 11.5, color: 'var(--text-tertiary)',
+          }}>{threadCount}</span>
+        )}
 
         <Agents row={row} live={live} nowMs={nowMs} />
-
-        <Facts row={row} />
 
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           {row.harnesses.length > 0 && <HarnessBadges harnesses={row.harnesses} max={3} />}
@@ -509,6 +507,7 @@ export function BoardView(p: BoardViewProps) {
                           live={liveByTask.get(r.task.title) ?? []}
                           onOpen={() => onOpen(r.task.id)}
                           statuses={p.statuses}
+                          lang={p.lang}
                         />
                       </div>
                     ))}
@@ -517,6 +516,60 @@ export function BoardView(p: BoardViewProps) {
             })}
           </div>
         </div>
+      ))}
+    </div>
+  )
+}
+
+
+/**
+ * The phone's board: ONE status lane at a time, full width, chosen by the chips above it.
+ * Same Card, same ordering as a desktop column — only the container differs.
+ */
+export function MobileLane(p: {
+  rows: TaskListRow[]
+  status: string | null
+  lang?: 'pt' | 'en'
+  sort: SortSpec
+  columnSort: ColumnSorts
+  statuses: readonly TaskStatusDef[] | null
+  sessions?: BoardViewProps['sessions']
+  onOpen: (id: string) => void
+}) {
+  const lang = p.lang ?? 'en'
+  const [nowMs, setNowMs] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNowMs(Date.now()), 60_000)
+    return () => clearInterval(t)
+  }, [])
+  const list = useMemo(() => {
+    if (p.status === null) return []
+    return sortRows(
+      p.rows.filter(r => r.task.status === p.status),
+      effectiveSort(p.sort, p.columnSort, p.status),
+      { statusOrder: liveStatusOrder(p.statuses) },
+    )
+  }, [p.rows, p.status, p.sort, p.columnSort, p.statuses])
+  if (list.length === 0) {
+    return (
+      <div style={{
+        ...surface, padding: '14px 12px', fontSize: 12, color: 'var(--text-tertiary)',
+        borderStyle: 'dashed', textAlign: 'center',
+      }}>{mobileBoardCopy(lang).emptyLane}</div>
+    )
+  }
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      {list.map(r => (
+        <Card
+          key={r.task.id}
+          row={r}
+          lang={lang}
+          nowMs={nowMs}
+          live={(p.sessions ?? []).filter(s => s.task === r.task.title)}
+          onOpen={() => p.onOpen(r.task.id)}
+          statuses={p.statuses}
+        />
       ))}
     </div>
   )

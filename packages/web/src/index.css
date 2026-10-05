@@ -1104,3 +1104,13 @@ button:focus-within .ag-row-pin,
 /* The startup strip's dot (App.tsx): the data is still arriving. Motion-sensitive users get a still dot. */
 @keyframes agStartupPulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.25 } }
 @media (prefers-reduced-motion: reduce) { [style*="agStartupPulse"] { animation: none !important; } }
+
+/* --- .ag-row-actions: a table row's action buttons, shown on hover or keyboard focus ------------
+   Hidden at rest so a dense table is not a column of ⋯ buttons; revealed by the row's hover, by
+   focus anywhere in the row (a keyboard user tabs to it) and ALWAYS on a device with no hover —
+   a phone has no pointer to hover with, so "on hover" there would mean "never". */
+.ag-row-actions { opacity: 0; transition: opacity 0.12s; }
+tr:hover .ag-row-actions,
+tr:focus-within .ag-row-actions,
+.ag-row-actions:focus-within { opacity: 1; }
+@media (hover: none) { .ag-row-actions { opacity: 1; } }
