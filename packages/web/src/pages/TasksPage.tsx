@@ -56,7 +56,6 @@ import { TaskFiles } from '../components/tasks/TaskFiles'
 import { TaskSharing } from '../components/tasks/TaskSharing'
 import { BoardOverviewView } from '../components/tasks/BoardOverviewView'
 import { CentralTaskBoard } from '../components/tasks/CentralTaskBoard'
-import { NewTaskWizard } from '../components/tasks/NewTaskWizard'
 import { CreateTaskDialog } from '../components/tasks/CreateTaskDialog'
 import { ManageStatusesModal } from '../components/tasks/ManageStatusesModal'
 import { NewSessionModal } from '../components/sessions/NewSessionModal'
@@ -432,19 +431,20 @@ function TaskList() {
         />
       )}
 
+      {/* The top "+ New task": the SAME create form as a column's "+ Add" — title, type, status, markdown
+          description — and it lands on the new task's page, where sessions are filed. */}
       {open && (
-        <NewTaskWizard
-          onClose={() => setOpen(false)}
-          onDone={async taskId => {
+        <CreateTaskDialog
+          lang={lang}
+          statuses={statuses}
+          types={types}
+          onCancel={() => setOpen(false)}
+          onCreate={async plan => {
+            const made = await createTask(plan.title, plan.detail, plan.type)
+            if (made && plan.status !== 'todo') await markTask(made.id, plan.status as TaskStatus)
             setOpen(false)
             await reload()
-            navigate(`/tasks/${encodeURIComponent(taskId)}`)
-          }}
-          onCreateSession={(taskId, taskTitle) => {
-            // The session wizard that already exists, pre-filled with the task — a second spawn
-            // form would be a second set of spawn rules.
-            setOpen(false)
-            setStarting({ taskId, title: taskTitle })
+            if (made) navigate(`/tasks/${encodeURIComponent(made.id)}`)
           }}
         />
       )}

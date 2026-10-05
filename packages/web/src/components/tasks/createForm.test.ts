@@ -54,3 +54,14 @@ describe('the create form is what "+ Add" opens', () => {
     expect(page).toMatch(/plan\.status !== 'todo'/)
   })
 })
+
+describe('the top "+ New task" uses the same dialog', () => {
+  const page = readFileSync(join(import.meta.dir, '..', '..', 'pages', 'TasksPage.tsx'), 'utf8')
+  test('it opens CreateTaskDialog, not the wizard with its plain textarea', () => {
+    expect(page).toMatch(/\{open && \(\s*<CreateTaskDialog/)
+    expect(page).not.toMatch(/\{open && \(\s*<NewTaskWizard/)
+  })
+  test('it creates with title, detail, type and status, then opens the new task', () => {
+    expect(page).toMatch(/createTask\(plan\.title, plan\.detail, plan\.type\)[\s\S]{0,300}navigate\(`\/tasks\/\$\{encodeURIComponent\(made\.id\)\}`\)/)
+  })
+})
