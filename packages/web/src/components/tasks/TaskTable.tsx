@@ -42,6 +42,8 @@ import { DEFAULT_PREFS, useBoardPref } from './boardPrefs'
 import { ColResizeHandle } from './ColResizeHandle'
 import { contentWidthOf, fitContentWidth, hasCustomWidths, resolveWidths, tableMinWidth } from './columnWidths'
 import { SortTh } from './SortHeader'
+import { dropEmpty } from './emptyGroups'
+import { EmptyGroupsMenu } from './EmptyGroupsMenu'
 import { moveColumn } from './columnOrder'
 import {
   clearTicks, escapeLeavesMode, groupCheck, leaveMode, NO_SELECTION, selectedVisible, setRows,
@@ -711,6 +713,7 @@ export function TaskTable(p: TaskTableProps) {
   // stored `groups`) is DERIVED from the list on every render rather than frozen.
   const [storedGroups, setGroups] = useBoardPref('groups')
   const [groupBy, setGroupBy] = useBoardPref('groupBy')
+  const [hideEmpty, setHideEmpty] = useBoardPref('hideEmpty')
   const [storedTypeGroups, setTypeGroups] = useBoardPref('typeGroups')
   const [storedCollapsed, setStoredCollapsed] = useBoardPref('collapsed')
   const collapsed = useMemo(() => new Set<string>(storedCollapsed), [storedCollapsed])
@@ -900,9 +903,12 @@ export function TaskTable(p: TaskTableProps) {
   }
 
   // In the CHOSEN order, not the canonical one — see the chooser's note.
-  const visible = groupsShown
-    .map(st => groups.find(g => g.key === st))
-    .filter((g): g is typeof groups[number] => g !== undefined)
+  const visible = dropEmpty(
+    groupsShown
+      .map(st => groups.find(g => g.key === st))
+      .filter((g): g is typeof groups[number] => g !== undefined),
+    g => g.rows.length, hideEmpty,
+  )
 
   // The selection that ACTS is the one on screen: a row in a hidden or folded group, filtered out by
   // the search box or deleted since, is not something the bar's count or a batch verb reaches.
@@ -993,6 +999,7 @@ export function TaskTable(p: TaskTableProps) {
             {copy.viewBar.group}: {groupBy === 'type' ? copy.types.groupByType : copy.types.groupByStatus}
             <span style={{ ...microLabel, fontSize: 10.5 }}>{visible.length}/{groups.length}</span>
           </PickerMenu>
+          <EmptyGroupsMenu hide={hideEmpty} onChange={setHideEmpty} lang={p.lang ?? 'en'} />
           <PickerMenu
             title={copy.pickers.columnsTitle}
             lang={p.lang ?? 'en'}
