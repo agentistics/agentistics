@@ -56,7 +56,8 @@ import { TaskFiles } from '../components/tasks/TaskFiles'
 import { TaskSharing } from '../components/tasks/TaskSharing'
 import { BoardOverviewView } from '../components/tasks/BoardOverviewView'
 import { CentralTaskBoard } from '../components/tasks/CentralTaskBoard'
-import { NewTaskWizard } from '../components/tasks/NewTaskWizard'
+import { CreateTaskDialog } from '../components/tasks/CreateTaskDialog'
+import { fileExtras } from '../components/tasks/createFiling'
 import { ManageStatusesModal } from '../components/tasks/ManageStatusesModal'
 import { NewSessionModal } from '../components/sessions/NewSessionModal'
 import { markSessionPending } from '../lib/pendingSessionStore'
@@ -191,6 +192,8 @@ function TaskList() {
   const { fleet } = useFleet('en')
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(false)
+  /** The create form, opened by a column's "+ Add" with that column's status and type preselected. */
+  const [createInit, setCreateInit] = useState<{ status: string; type?: string } | null>(null)
   /** The status vocabulary editor (see its own docblock) — closing it reloads the live list, so a
    *  rename, a recolour or a new/deleted status reaches the board immediately without a page
    *  refresh. */
@@ -412,19 +415,39 @@ function TaskList() {
         />
       )}
 
+      {createInit && (
+        <CreateTaskDialog
+          lang={lang}
+          statuses={statuses}
+          types={types}
+          initialStatus={createInit.status}
+          {...(createInit.type ? { initialType: createInit.type } : {})}
+          onCancel={() => setCreateInit(null)}
+          onCreate={async plan => {
+            const made = await createTask(plan.title, plan.detail, plan.type)
+            if (made && plan.status !== 'todo') await markTask(made.id, plan.status as TaskStatus)
+            if (made) await fileExtras(made.id, plan.subtasks, plan.sessions)
+            setCreateInit(null)
+            await reload()
+          }}
+        />
+      )}
+
+      {/* The top "+ New task": the SAME create form as a column's "+ Add" — title, type, status, markdown
+          description — and it lands on the new task's page, where sessions are filed. */}
       {open && (
-        <NewTaskWizard
-          onClose={() => setOpen(false)}
-          onDone={async taskId => {
+        <CreateTaskDialog
+          lang={lang}
+          statuses={statuses}
+          types={types}
+          onCancel={() => setOpen(false)}
+          onCreate={async plan => {
+            const made = await createTask(plan.title, plan.detail, plan.type)
+            if (made && plan.status !== 'todo') await markTask(made.id, plan.status as TaskStatus)
+            if (made) await fileExtras(made.id, plan.subtasks, plan.sessions)
             setOpen(false)
             await reload()
-            navigate(`/tasks/${encodeURIComponent(taskId)}`)
-          }}
-          onCreateSession={(taskId, taskTitle) => {
-            // The session wizard that already exists, pre-filled with the task — a second spawn
-            // form would be a second set of spawn rules.
-            setOpen(false)
-            setStarting({ taskId, title: taskTitle })
+            if (made) navigate(`/tasks/${encodeURIComponent(made.id)}`)
           }}
         />
       )}
@@ -508,6 +531,7 @@ function TaskList() {
           onPriority={async (ref, priority) => { await editTask(ref, { priority }); await reload() }}
           onType={async (ref, type) => { await editTask(ref, { type }); await reload() }}
           onRename={async (ref, title) => { await editTask(ref, { title, actor: 'you' }); await reload() }}
+          onRequestCreate={init => setCreateInit(init)}
           onCreate={async (title, status, type) => {
             const made = await createTask(title, undefined, type)
             // Created straight into the group it was typed in — the "+ Add" row of a status column
