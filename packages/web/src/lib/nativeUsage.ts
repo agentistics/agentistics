@@ -9,6 +9,7 @@
  */
 import { useEffect, useState } from 'react'
 import { nativeRuntimeFrom } from './nativeSession'
+import { onEngineCapsInvalidated } from './engineCapsBus'
 
 export interface NativeUsageRow {
   model: string
@@ -112,7 +113,9 @@ export function useNativeUsage(): { show: boolean; usage: NativeUsage | null } {
     }
     void load()
     const t = window.setInterval(load, 60_000)
-    return () => { alive = false; window.clearInterval(t) }
+    // The experimental switch moves the answer without a restart: re-read now, not in a minute.
+    const off = onEngineCapsInvalidated(() => { void load() })
+    return () => { alive = false; window.clearInterval(t); off() }
   }, [])
   return nativeCard(state.engine, state.usage)
 }
