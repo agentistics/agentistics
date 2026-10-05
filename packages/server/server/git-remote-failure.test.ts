@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { SessionMeta } from '@agentistics/core'
+import { gitTestEnv } from '@agentistics/core/gitTestEnv'
 import { getGitRemote, isAuthoritativeNoRemote } from './git'
 import { keepStoredRemote, loadConsolidated, writeConsolidated } from './consolidate'
 import { sessionShared } from './share-rules'
@@ -17,17 +18,17 @@ import { sessionShared } from './share-rules'
 const run = promisify(execFile)
 
 // A git hook (pre-commit) exports GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE: a `git init` or `git -C dir`
-// run under them would act on the repository being committed, not on the temp one. Scrub every GIT_* var.
-const cleanEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')))
+// run under them would act on the repository being committed, not on the temp one. `gitTestEnv()` is the
+// repo's one scrub (gitTestEnv.lint.test.ts); `getGitRemote` runs in-process, so scrub process.env too.
 for (const k of Object.keys(process.env)) if (k.startsWith('GIT_')) delete process.env[k]
-const gitSync = (args: string[]) => execFileSync('git', args, { env: cleanEnv })
+const gitSync = (args: string[]) => execFileSync('git', args, { env: gitTestEnv() })
 
 describe('isAuthoritativeNoRemote — only git saying "no such key" is an answer', () => {
   test('exit 1 from `git config --get` on a repo with no origin is authoritative', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'h1-norem-'))
     try {
       gitSync(['init', '-q', dir])
-      const err = await run('git', ['-C', dir, 'config', '--get', 'remote.origin.url'], { env: cleanEnv }).catch(e => e)
+      const err = await run('git', ['-C', dir, 'config', '--get', 'remote.origin.url'], { env: gitTestEnv() }).catch(e => e)
       expect(isAuthoritativeNoRemote(err)).toBe(true)
       // …and the real function says undefined for it
       expect(await getGitRemote(dir)).toBeUndefined()
