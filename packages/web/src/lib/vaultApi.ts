@@ -82,6 +82,15 @@ export function rememberGrant(token: string | undefined, now = Date.now()): void
 export function forgetGrant(): void { _grant = null }
 export function grantAlive(now = Date.now()): boolean { return _grant !== null && now < _grant.until }
 
+// ── review H2: the unlock's single-use proof, for the ONE action it was declared for (memory only) ──
+
+const FRESH_MS = 90_000 - GRANT_MARGIN_MS
+let _fresh: { token: string; until: number } | null = null
+let _unlockFor: string | null = null
+/** The action the NEXT unlock is for (`personal-grant:<sid>`), so its Hello also covers that one action. */
+export function unlockFor(binding: string | null): void { _unlockFor = binding }
+function freshAlive(now = Date.now()): boolean { return _fresh !== null && now < _fresh.until }
+
 async function call(method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown> } | null> {
   try {
     const headers: Record<string, string> = {}
@@ -90,9 +99,11 @@ async function call(method: 'GET' | 'POST', path: string, body?: unknown): Promi
     const sent = method === 'POST' ? (body ?? {}) : body
     if (sent !== undefined) headers['Content-Type'] = 'application/json'
     if (grantAlive()) headers['x-vault-grant'] = _grant!.token
+    if (freshAlive()) headers['x-vault-fresh'] = _fresh!.token
     const r = await fetch(path, { method, headers, ...(sent !== undefined ? { body: JSON.stringify(sent) } : {}) })
     const json = await r.json().catch(() => ({})) as Record<string, unknown>
     if (typeof json.grant === 'string') rememberGrant(json.grant)
+    if (typeof json.fresh === 'string') _fresh = { token: json.fresh, until: Date.now() + FRESH_MS }
     if (r.status === 401 && json.code === 'stepup-required') forgetGrant()
     return { status: r.status, json }
   } catch { return null }
@@ -125,7 +136,7 @@ export async function loadVault(): Promise<LoadResult> {
 export const stepUp = (code: string) => call('POST', '/api/vault/stepup', { code }).then(r => reply<{ grant: string }>(r))
 export const lockNow = (code?: string) => call('POST', '/api/vault/lock', code ? { code } : {}).then(r => reply(r))
 /** Phase 1: raises the gesture IN THE SERVICE. `pending-stepup` = a code is owed (§2.2). */
-export const unlockGesture = () => call('POST', '/api/vault/unlock').then(r => reply<{ state: string }>(r))
+export const unlockGesture = () => call('POST', '/api/vault/unlock', _unlockFor ? { for: _unlockFor } : {}).then(r => reply<{ state: string }>(r))
 export const unlockCode = (code: string) => call('POST', '/api/vault/unlock/code', { code }).then(r => reply(r))
 /** Changing what an unlock asks: the code AND the gesture, fresh (the server's `set-unlock-policy` row). */
 export const setUnlockPolicy = (mode: UnlockMode, hours: number, code?: string) => call('POST', '/api/vault/unlock-policy', { mode, hours, ...(code ? { code } : {}) }).then(r => reply(r))

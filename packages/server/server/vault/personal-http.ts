@@ -15,7 +15,7 @@ import * as grants from './grants'
 import { vaultAudit, vaultLang } from './service'
 
 type Reply = (r: { ok: boolean } & Record<string, unknown>, extra?: Record<string, unknown>) => Response
-export interface PersonalHttpCtx { req: Request; path: string; url: URL; session: string; grant: string | null; loopback: boolean; reply: Reply }
+export interface PersonalHttpCtx { req: Request; path: string; url: URL; session: string; grant: string | null; loopback: boolean; reply: Reply; /** Review H2: the single-use proof from this page's own unlock reply. */ fresh?: string | null }
 
 /** Large enough for a 64 KiB value or a `.env` file; still bounded and read as a stream. */
 const BODY_LIMIT = 256 * 1024
@@ -35,6 +35,7 @@ const invalid = (field: string) => fail('invalid', `Check the field "${field}".`
 
 export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response | null> {
   const { req, path, session, grant, loopback, reply } = c
+  const fresh = c.fresh ?? null
   if (!path.startsWith('/api/vault/personal')) return null
   const body = async (): Promise<Record<string, unknown>> => {
     const r = await readJsonLimited<Record<string, unknown>>(req, BODY_LIMIT)
@@ -45,7 +46,7 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
   const tokenOf = (b: Record<string, unknown>) => (typeof b.gestureToken === 'string' && b.gestureToken.length <= 64 ? b.gestureToken : undefined)
   /** `binding` names the target a phone's gesture token was minted for (§7): a token for A never acts on B. */
   const step = (action: gate.VaultAction, b: Record<string, unknown>, binding = '') =>
-    gate.requireVaultStepUp(action, { grant, session, loopback, code: codeOf(b), gestureToken: tokenOf(b), binding })
+    gate.requireVaultStepUp(action, { grant, session, loopback, fresh, code: codeOf(b), gestureToken: tokenOf(b), binding })
   const withGrant = (g: gate.GateResult) => (g.ok && g.grant ? { grant: g.grant } : {})
 
   // ── list: metadata only ──
@@ -79,6 +80,12 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     if (!v.ok) return reply(invalid(v.field))
     const g = await step('personal-create', b)
     if (!g.ok) return reply(g)
+    // Review M2: a secret born with "Sempre confirmar" OFF is the same act as turning it off later — it
+    // costs the gesture once (personalText's "Turning it off needs Hello once"), never nothing.
+    if (v.value.confirmEach === false) {
+      const e = await step('personal-edit', b, 'new')
+      if (!e.ok) return reply(e)
+    }
     const r = await store.createItem(v.value)
     vaultAudit({ type: 'vault.personal-create', name: r.meta.id })
     return reply({ ok: true, meta: r.meta, ...withGrant(g) })
@@ -101,7 +108,7 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     const version = b.version === undefined ? undefined : ver(b.version)
     if (!ITEM_ID.test(id) || !field || version === null) return reply(bad())
     const meta = await store.latestMeta(id)
-    const g = await gate.requirePersonalReveal({ session, loopback, code: codeOf(b), gestureToken: tokenOf(b), binding: `${id}:${field}` }, { confirm: meta ? needsConfirm(meta) : true })
+    const g = await gate.requirePersonalReveal({ grant, session, loopback, fresh, code: codeOf(b), gestureToken: tokenOf(b), binding: `${id}:${field}` }, { confirm: meta ? needsConfirm(meta) : true })
     if (!g.ok) return reply(g)
     const r = await store.revealField(id, field, version)
     if (!r.ok) return reply(storeFail(r))
@@ -206,6 +213,12 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     if (!token) return reply(bad())
     const g = await step('personal-import-env', b)
     if (!g.ok) return reply(g)
+    // Review M1: "replace" overwrites a stored secret's value — an edit, so it costs the edit's gesture
+    // (once for the whole import). Importing new names and skipping still ask nothing more.
+    if (choices.some(x => x.action === 'replace')) {
+      const e = await step('personal-edit', b, 'import')
+      if (!e.ok) return reply(e)
+    }
     const r = await store.importCommit(token, session, choices, groupId, tags)
     if (!r.ok) return reply(storeFail(r))
     vaultAudit({ type: 'vault.personal-import' })

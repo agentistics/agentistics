@@ -128,6 +128,29 @@ export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
 }
 
 /**
+ * Review M3: the rows above that ask NOTHING (the open vault is the proof) are a decision about the
+ * person AT THIS COMPUTER. While the local server still listens beyond loopback (security S-1), a peer
+ * on the LAN / tailnet would otherwise read every name, note and grant — and import — on an open vault.
+ * So a caller that is neither a page on this computer (`ctx.loopback`) nor the local socket gets the row
+ * these actions had before (the code, riding the 5-minute 'read' grant). A phone that opened the vault
+ * already holds that grant (the unlock's code is its step-up), so an authenticated phone is not re-asked.
+ */
+export const REMOTE_ROWS: Readonly<Partial<Record<VaultAction, ActionRow>>> = {
+  list: { code: true, gesture: false, grant: 'read' },
+  'personal-list': { code: true, gesture: false, grant: 'read' },
+  'personal-create': { code: true, gesture: false, grant: 'read' },
+  'personal-group-write': { code: true, gesture: false, grant: 'read' },
+  'personal-import-env': { code: true, gesture: false, grant: 'read' },
+  'personal-grant-open': { code: true, gesture: false, grant: 'read' },
+}
+
+/** PURE. The row THIS caller is held to: the table's, or — off this computer — the remote one. */
+export function rowFor(action: VaultAction, ctx: { session: string; loopback?: boolean }): ActionRow {
+  const remote = !ctx.loopback && !fromSocket(ctx) ? REMOTE_ROWS[action] : undefined
+  return remote ?? VAULT_ACTION_ROWS[action]
+}
+
+/**
  * The local CLI's channel (vault.sock, 0600). An HTTP session is always namespaced `http:<…>` by
  * http.ts, so no cookie value can claim this one.
  */
@@ -278,6 +301,11 @@ export interface GateContext {
   /** VAULT.PERSONAL §7: a phone's single-use gesture token (from a verified passkey assertion), and the action target it is bound to. */
   gestureToken?: string
   binding?: string
+  /**
+   * Review H2: the single-use proof the reply to THIS page's unlock carried (`x-vault-fresh`). It stands
+   * for the gesture only for the same session and the action the unlock was declared for.
+   */
+  fresh?: string | null
   /** Review S7: the 24 words, typed on a TTY and passed ONLY by the socket — never read from an HTTP body. */
   words?: string
   /**
@@ -295,10 +323,10 @@ export type GateResult = { ok: true; grant?: string } | Refusal
  * (it is the two-phase flow) — asking for it is a programming error and refuses.
  */
 export async function requireVaultStepUp(action: VaultAction, ctx: GateContext): Promise<GateResult> {
-  const row = VAULT_ACTION_ROWS[action]
-  if (!row) return refused('bad-request', 'unknown vault action')
+  if (!VAULT_ACTION_ROWS[action]) return refused('bad-request', 'unknown vault action')
+  const row = rowFor(action, ctx)
   if (action === 'unlock') return refused('bad-request', 'unlock is the two-phase flow (completeUnlock)')
-  if (action === 'personal-grant-open') {
+  if (action === 'personal-grant-open' && !row.code && !row.gesture) {
     // No proof — but the vault must BE open (a locked one is the composer's one inline unlock, not a grant).
     if (recoveryTodo()) return refused('recovery-mode', sentence('recovery-mode'))
     if (!(await ensureVaultOpen({ create: false, migrate: false }))) return refused('locked', sentence('locked'))
@@ -378,8 +406,13 @@ export async function requirePersonalReveal(ctx: GateContext, opts: { confirm?: 
   if (state.frozen) return refused('stepup-frozen', sentence('stepup-frozen'))
   const o = await ensureVaultOpen({ create: false, migrate: false })
   if (!o) return refused('locked', sentence('locked'))
-  // "Sempre confirmar" OFF on this secret: the open vault is the proof (owner, 2026-10-04).
-  if (opts.confirm === false) { noteVaultActivity(); return { ok: true } }
+  // "Sempre confirmar" OFF on this secret: the open vault is the proof (owner, 2026-10-04) — at THIS
+  // computer. Off it, the remote row of the list applies (review M3): the code, or the 'read' grant.
+  if (opts.confirm === false) {
+    if (!ctx.loopback && !fromSocket(ctx)) return requireVaultStepUp('personal-list', ctx)
+    noteVaultActivity()
+    return { ok: true }
+  }
   // The authenticator code is never part of a reveal when a presence proof exists (Hello / passkey).
   const asks = revealAsks({ hasPresence: hasPresence(o.vault), hasAuthenticator: enrolled(o.vault), unlockMode: 'daily' })
   if (asks.blocked) {
@@ -409,7 +442,7 @@ export async function requirePersonalReveal(ctx: GateContext, opts: { confirm?: 
     const c = await checkCodeWith(o.dek, o.kid, ctx.code)
     if (!c.ok) return c
   }
-  if (asks.gesture && !(ctx.loopback && consumeFreshPresence())) { const g = await proveGesture(o); if (!g.ok) return g }
+  if (asks.gesture && !(ctx.loopback && consumeFreshPresence({ session: ctx.session, token: ctx.fresh, binding: `personal-reveal:${ctx.binding ?? ''}` }))) { const g = await proveGesture(o); if (!g.ok) return g }
   noteVaultActivity()
   return { ok: true }
 }
@@ -421,8 +454,9 @@ export async function requirePersonalReveal(ctx: GateContext, opts: { confirm?: 
  * and to exactly this action and target (VAULT.PERSONAL §7).
  */
 async function gestureFor(action: VaultAction, ctx: GateContext, o: { dek: Uint8Array; kid: string; vault: VaultJson }): Promise<{ ok: true } | Refusal> {
-  // The Hello that just opened the vault covers the ONE send that follows it (single-use, 90 s).
-  if (action === 'personal-grant' && ctx.loopback && consumeFreshPresence()) return { ok: true }
+  // The Hello that just opened the vault covers the ONE send that follows it (single-use, 90 s) — only for
+  // the page whose unlock reply carried the proof, in its session, for the session it declared (review H2).
+  if (action === 'personal-grant' && ctx.loopback && consumeFreshPresence({ session: ctx.session, token: ctx.fresh, binding: `personal-grant:${ctx.binding ?? ''}` })) return { ok: true }
   if (action.startsWith('personal-') && !ctx.loopback && !fromSocket(ctx)) {
     if (consumeGestureToken(ctx.session, ctx.gestureToken, `${action}:${ctx.binding ?? ''}`)) return { ok: true }
     return refused('mobile-gesture-required', vaultLang() === 'pt'

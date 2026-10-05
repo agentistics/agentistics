@@ -697,7 +697,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       const v = await loadVault()
       if (grantStep({ loopback: true, locked: v.kind !== 'failed' && v.view.state === 'locked' }) === 'unlock-first') {
         setNotice(UNLOCK_FIRST_LINE[pt ? 'pt' : 'en'])
-        if (!(await ensureVaultOpen())) return { ok: false as const, code: 'locked', sentence: pt ? 'O cofre continua trancado; nada foi enviado.' : 'The vault is still locked; nothing was sent.', status: 423 }
+        if (!(await ensureVaultOpen(`personal-grant:${session.id}`))) return { ok: false as const, code: 'locked', sentence: pt ? 'O cofre continua trancado; nada foi enviado.' : 'The vault is still locked; nothing was sent.', status: 423 }
       }
       return withStepUp(c => grantSession(session.id, ids, gids, c), askVaultCode)
     }

@@ -37,7 +37,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
   'server/server/vault/ops.ts': { _gate: 'the step-up gate function (S4.7)', GH_HEADERS_IN: 'header names', GH_METHODS: 'HTTP methods', _installed: 'a flag' },
   'server/server/vault/service.ts': {
     _lockHooks: 'callbacks run on lock (they DROP key material, they hold none)',
-    _freshPresenceMs: 'a timestamp (ms) of the Hello that just opened the vault — single-use proof for the next send; no key material',
+    _fresh: 'the SHA-256 of the single-use fresh-unlock proof + the session and action it is bound to + a timestamp (review H2); the token itself goes only to the page that unlocked; no key material',
     _unlockWindowAnchorMs: 'a timestamp (ms) of the last gesture+code unlock — the per-day window; no key material',
     _vaultDir: 'a path', _role: 'holder|client', _lang: 'a language reader', _io: 'the IO adapter', _fs: 'the fs adapter',
     _scryptForTests: 'KDF cost parameters', _override: 'test protectors', _autoInit: 'test init policy', _soonForTests: 'test presence kinds reported as coming soon',
