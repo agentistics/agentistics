@@ -397,3 +397,17 @@ describe('the registry write', () => {
     expect(list.length).toBe(12)
   })
 })
+
+describe('the renamed-session title survives a round trip through the file', () => {
+  it('harnessName and harnessNameSince are read back (they were dropped, so the poller rewrote them every poll)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'registry-name-'))
+    try {
+      const reg = createSessionRegistry(join(dir, 'managed-sessions.json'))
+      await reg.add({ id: 'a1', harness: 'claude', cwd: '/w', createdAt: '2026-10-05T00:00:00Z' } as never)
+      expect(await reg.patch('a1', { harnessName: 'Líder — sessão 2', harnessNameSince: 1791165758480 })).toBe(true)
+      const [row] = await reg.read()
+      expect(row!.harnessName).toBe('Líder — sessão 2')
+      expect(row!.harnessNameSince).toBe(1791165758480)
+    } finally { await rm(dir, { recursive: true, force: true }) }
+  })
+})
