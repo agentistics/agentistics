@@ -32,6 +32,7 @@ function brandTags(): Record<string, string> {
   return tags
 }
 const BRAND_TAGS = brandTags()
+const APP_VERSION: string = JSON.parse(readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8')).version ?? ''
 const tagged = (path: string): string => (BRAND_TAGS[path] ? `${path}?v=${BRAND_TAGS[path]}` : path)
 
 /**
@@ -95,7 +96,10 @@ function isMermaidOnlyChunk(chunk: Rollup.PreRenderedChunk | Rollup.RenderedChun
 
 export default defineConfig({
   // The app reads its brand tags through `versionedAsset()` (`src/lib/brand.ts`).
-  define: { __BRAND_TAGS__: JSON.stringify(BRAND_TAGS) },
+  // `__APP_VERSION__` is the ROOT package's version — the same one the server reports as
+  // `/api/version`'s `current` — so a page can tell it is running a bundle the server is not
+  // (`src/lib/bundleVersion.ts`).
+  define: { __BRAND_TAGS__: JSON.stringify(BRAND_TAGS), __APP_VERSION__: JSON.stringify(APP_VERSION) },
   plugins: [
     react(),
     {
@@ -136,7 +140,12 @@ export default defineConfig({
       },
       workbox: {
         // Cache only static assets; API calls always go to network
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // NO `html`: `index.html` is NOT precached. A precached shell is served for every
+        // navigation until the worker updates — which a PWA left open never asks for — so after a
+        // release the phone kept loading the OLD index, whose hashed chunks the new server no
+        // longer has, and sat on the loading screen (2026-10-04). Navigations go to the network
+        // first (`runtimeCaching` below) and the server serves the shell `no-store`.
+        globPatterns: ['**/*.{js,css,ico,png,svg,woff2}'],
         // ...EXCEPT Monaco. `globPatterns` above is `**/*.js`, and **a precache manifest is the one
         // place a lazy chunk stops being lazy**: workbox would download the editor, its ~160 KB of
         // stylesheet and its five workers on every first visit, for every user, including everyone
@@ -154,11 +163,19 @@ export default defineConfig({
         globIgnores: ['assets/monaco/**', 'assets/mermaid/**', '**/*.worker-*.js'],
         navigateFallback: null,
         skipWaiting: true,
+        // Reload the open windows when this worker replaces an older one (see the file).
+        importScripts: ['sw-reload-on-update.js'],
         clientsClaim: true,
         runtimeCaching: [
           {
             urlPattern: /^\/api\//,
             handler: 'NetworkOnly',
+          },
+          {
+            // The shell: always the server's current one; the last good copy only when offline.
+            urlPattern: ({ request }) => request.mode === 'navigate',
+            handler: 'NetworkFirst',
+            options: { cacheName: 'ag-shell', networkTimeoutSeconds: 4, expiration: { maxEntries: 4 } },
           },
         ],
       },

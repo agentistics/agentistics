@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { activeInDays, activeInWindow, dayKey, daysBetween, expandHours, MAX_RANGE_DAYS, sliceSession, type DayUsage } from '../lib/sessionDaySlice'
 import type { AppData, Filters, DateRange, AgentInvocation, SurfaceHarnessId, SessionMeta, TokenBreakdown } from '@agentistics/core'
-import { calcStreak, calcCost, canonicalProjectPath, cutSessionUsage, sessionModelUsage, sessionCostUSD, unpricedTokens, getModelPrice, MODEL_PRICING, HARNESS_CAPABILITIES, filterByUsers, filterByHarnesses, filterByTeams, filterByMachines, resolveMachineCacheScope, distinctHarnesses, mergeStatsCaches, repoShortName, SURFACE_HARNESS_ORDER, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
+import { calcStreak, calcCost, canonicalProjectPath, cutSessionUsage, sessionModelUsage, sessionCostUSD, unpricedTokens, getModelPrice, MODEL_PRICING, withoutHiddenNative, surfaceHarnesses, NATIVE_HARNESS_ID, HARNESS_CAPABILITIES, filterByUsers, filterByHarnesses, filterByTeams, filterByMachines, resolveMachineCacheScope, distinctHarnesses, mergeStatsCaches, repoShortName, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
 import { subDays, isAfter, isBefore, parseISO, format, differenceInCalendarDays, addDays, getDay } from 'date-fns'
 import { makeTagFilter, type TagDef } from '../lib/tagMatch'
 import { subscribeEvent } from '../lib/eventStream'
 import { isUsableDataCache } from '../lib/dataCache'
+import { acceptPayload, classifyLoadError, DATA_TIMEOUT_MS, fetchWithTimeout, LIVENESS_MS, LIVENESS_TIMEOUT_MS, livenessStep, partialPollMs, retryDelayMs, type LoadError, type StartupStripState } from '../lib/startupLoad'
 import { cacheFiguresOf } from '../lib/cacheFigures'
+import { useNativeVisible } from './useEngineCaps'
 
 /**
  * True only for a non-empty string. `start_time`/`end_time`/`date` fields are typed as `string`
@@ -382,77 +384,98 @@ export function useData() {
   const [loading, setLoading] = useState(() => readDataCache() === null)
   const [loadProgress, setLoadProgress] = useState<LoadProgress>({})
   const [error, setError] = useState<string | null>(null)
+  /** Why the last load failed, classified — set together with `error` when there is NO data to show. */
+  const [loadError, setLoadError] = useState<LoadError | null>(null)
+  /** The last refresh failed while data WAS on screen: the page stays, a line says the server is not
+   *  answering. Cleared by the next success. */
+  const [offline, setOffline] = useState<LoadError | null>(null)
   const [liveUpdates, setLiveUpdates] = useState(true)
   const [updateInterval, setUpdateInterval] = useState(30)
   const streamRef = useRef<EventSource | null>(null)
+  const dataRef = useRef<AppData | null>(data)
+  const pollRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; partial: number; failures: number }>({ timer: null, partial: 0, failures: 0 })
+  const refreshRef = useRef<() => Promise<void>>(async () => {})
 
-  // Silent background refresh — no loading screen, no progress bars
-  const fetchData = useCallback(async () => {
-    try {
-      const res = await fetch('/api/data')
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const fresh = (await res.json()) as AppData
-      setData(fresh)
-      writeDataCache(fresh)
-    } catch { /* ignore silent update errors */ }
-  }, [])
-
-  const startStreamLoad = useCallback(() => {
-    streamRef.current?.close()
-    streamRef.current = null
-
-    setLoading(true)
-    setError(null)
-    setLoadProgress({})
-
+  /** The server's own progress for its first build, for the non-blocking strip. Never gates anything:
+   *  a stream that errors is closed rather than left reconnecting. */
+  const openProgress = useCallback(() => {
+    if (streamRef.current || typeof EventSource === 'undefined') return
     const es = new EventSource('/api/data-stream')
     streamRef.current = es
-    let settled = false
-
-    const complete = async (isError?: string) => {
-      if (settled) return
-      settled = true
-      es.close()
-      streamRef.current = null
-      try {
-        const res = await fetch('/api/data')
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const fresh = (await res.json()) as AppData
-        setData(fresh)
-        writeDataCache(fresh)
-        if (isError) setError(null)
-      } catch (err) {
-        setError(String(err))
-      } finally {
-        setLoading(false)
-      }
-    }
-
     es.addEventListener('progress', (e: Event) => {
-      const ev = JSON.parse((e as MessageEvent).data) as { stage: string; progress: number; detail?: string }
-      setLoadProgress(prev => ({
-        ...prev,
-        [ev.stage]: {
-          progress: ev.progress,
-          detail: ev.detail,
-          status: ev.progress >= 1 ? 'done' : 'active',
-        },
-      }))
+      try {
+        const ev = JSON.parse((e as MessageEvent).data) as { stage: string; progress: number; detail?: string }
+        setLoadProgress(prev => ({ ...prev, [ev.stage]: { progress: ev.progress, detail: ev.detail, status: ev.progress >= 1 ? 'done' : 'active' } }))
+      } catch { /* a malformed event costs one bar update */ }
     })
-
-    es.addEventListener('done', () => { void complete() })
-    es.onerror = () => { void complete('stream error') }
+    const close = () => { es.close(); if (streamRef.current === es) streamRef.current = null }
+    es.addEventListener('done', close)
+    es.onerror = close
   }, [])
 
-  useEffect(() => {
-    // If we painted from cache, refresh quietly (no loading screen). Otherwise
-    // run the streamed first load with progress.
-    if (readDataCache()) {
-      void fetchData()
-    } else {
-      startStreamLoad()
+  const schedule = useCallback((ms: number) => {
+    const p = pollRef.current
+    if (p.timer) clearTimeout(p.timer)
+    p.timer = setTimeout(() => { p.timer = null; void refreshRef.current() }, ms)
+  }, [])
+
+  /**
+   * Ask for the data — `?partial=1`, so the server answers within about a second with whatever it
+   * has — and keep asking while the answer is partial or the request failed. A failure with data on
+   * screen keeps the data (`offline` says why); with nothing on screen it becomes the error screen,
+   * which retries on its own.
+   */
+  const refresh = useCallback(async () => {
+    try {
+      let res: Response
+      try { res = await fetchWithTimeout('/api/data?partial=1', DATA_TIMEOUT_MS) } catch (err) { throw classifyLoadError(err) }
+      if (!res.ok) throw classifyLoadError(null, res.status)
+      let fresh: unknown
+      try { fresh = await res.json() } catch (err) { throw classifyLoadError(err) }
+      if (!isUsableDataCache(fresh)) throw classifyLoadError(new Error("the answer is not this app's data"))
+      const next = fresh as AppData
+      if (acceptPayload(dataRef.current, next)) {
+        dataRef.current = next
+        setData(next)
+      }
+      setError(null); setLoadError(null); setOffline(null)
+      setLoading(false)
+      pollRef.current.failures = 0
+      if (next.partial) {
+        openProgress()
+        schedule(partialPollMs(pollRef.current.partial++))
+      } else {
+        pollRef.current.partial = 0
+        writeDataCache(next)
+        streamRef.current?.close()
+        streamRef.current = null
+      }
+    } catch (raw) {
+      const e = (raw && typeof raw === 'object' && 'kind' in raw) ? raw as LoadError : classifyLoadError(raw)
+      const attempt = pollRef.current.failures++
+      if (dataRef.current) {
+        setOffline(e)
+      } else {
+        setLoadError(e)
+        setError(e.detail)
+        setLoading(false)
+      }
+      // 401/403 are an AUTH state the app resolves (a login screen); asking again cannot change them.
+      if (!(e.kind === 'server' && (e.status === 401 || e.status === 403))) schedule(retryDelayMs(attempt))
     }
-    return () => { streamRef.current?.close() }
+  }, [openProgress, schedule])
+  refreshRef.current = refresh
+
+  // Silent background refresh (a `change` event, the live-updates interval).
+  const fetchData = useCallback(async () => { await refresh() }, [refresh])
+
+  useEffect(() => {
+    void refresh()
+    const p = pollRef.current
+    return () => {
+      if (p.timer) clearTimeout(p.timer)
+      streamRef.current?.close()
+    }
     // Run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -473,9 +496,58 @@ export function useData() {
     return () => { clearInterval(id) }
   }, [liveUpdates, updateInterval, fetchData])
 
-  const refetch = useCallback(() => startStreamLoad(), [startStreamLoad])
+  // Liveness: with data on screen, a stopped server is noticed in seconds (not at the next 30 s refresh),
+  // and when it answers again the data is refreshed by itself — no manual reload.
+  useEffect(() => {
+    let down = false
+    let stopped = false
+    const probe = async () => {
+      if (stopped || (typeof document !== 'undefined' && document.hidden)) return
+      let answered = false
+      try {
+        const r = await fetchWithTimeout('/api/health', LIVENESS_TIMEOUT_MS)
+        // The body is never read: cancel it, so the probe does not hold one of the browser's six
+        // connections to this origin every 2 s (the live streams and the chat's own reads share them).
+        void r.body?.cancel().catch(() => {})
+        answered = r.ok
+      } catch { answered = false }
+      if (stopped) return
+      const step = livenessStep(down, answered)
+      if (step === 'mark-offline') {
+        down = true
+        if (dataRef.current) setOffline(prev => prev ?? { kind: 'unreachable', detail: 'no answer from /api/health' })
+      } else if (step === 'recover') {
+        down = false
+        pollRef.current.failures = 0
+        void refreshRef.current()
+      }
+    }
+    const id = setInterval(() => { void probe() }, LIVENESS_MS)
+    return () => { stopped = true; clearInterval(id) }
+  }, [])
 
-  return { data, loading, loadProgress, error, refetch, liveUpdates, setLiveUpdates, updateInterval, setUpdateInterval }
+  // Retry / re-load on demand (the error screen's button, after a login). Shows the boot screen only
+  // when there is nothing on screen to keep.
+  const refetch = useCallback(() => {
+    if (!dataRef.current) { setLoading(true); setError(null); setLoadError(null) }
+    pollRef.current.failures = 0
+    void refresh()
+  }, [refresh])
+
+  // The ONE place the web receives AppData — the server's answer AND the localStorage cache, which can hold
+  // a native harness recorded while the experimental flag was on. Hidden here, every surface downstream
+  // (filters, Compare, Home, Costs, settings, the PDF) inherits it.
+  const nativeVisible = useNativeVisible()
+  const shown = useMemo(() => (data ? withoutHiddenNative(data, nativeVisible) : data), [data, nativeVisible])
+
+  const startup: StartupStripState = {
+    partial: data?.partial === true,
+    partialReason: data?.partialReason,
+    deferredRepos: data?.deferredRepos?.length,
+    projects: loadProgress.projects?.progress,
+  }
+
+  return { data: shown, loading, loadProgress, error, loadError, offline, startup, refetch, liveUpdates, setLiveUpdates, updateInterval, setUpdateInterval }
 }
 
 /** Start (00:00:00.000) of a Date's UTC calendar day. */
@@ -1055,7 +1127,8 @@ export function computeFilteredHarnessSummaries(data: AppData, filters: Filters)
 
   // Columns: the explicitly selected harnesses, else the harnesses the selected users used
   // (so picking a member narrows the columns), else every harness in the data.
-  const order: SurfaceHarnessId[] = SURFACE_HARNESS_ORDER
+  // `data` is already gated (`useData` → `withoutHiddenNative`), so the native column exists only when it may be seen.
+  const order: SurfaceHarnessId[] = surfaceHarnesses(data.harnesses.includes(NATIVE_HARNESS_ID))
   const userScoped = filterByUsers(data.sessions, usersSel)
   const scopedHarnesses = distinctHarnesses(userScoped)
   const cols: SurfaceHarnessId[] = harnessSel.length > 0

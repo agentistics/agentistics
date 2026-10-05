@@ -139,7 +139,7 @@ describe('the engine verbs at the command line', () => {
       const en = resolveEngineVerb(verb, present, cmds, 'en', false)
       expect('refuse' in en && en.refuse).toContain('agentop experimental enable')
       const pt = resolveEngineVerb(verb, present, cmds, 'pt', false)
-      expect('refuse' in pt && pt.refuse).toContain('experimentais')
+      expect('refuse' in pt && pt.refuse).toContain('agentop experimental enable')
       expect('run' in resolveEngineVerb(verb, present, cmds, 'en', true)).toBe(true)
     }
     expect('run' in resolveEngineVerb('ingest', present, cmds, 'en', false)).toBe(true)
@@ -171,6 +171,13 @@ describe('the engine verbs at the command line', () => {
     const some = engineHelpLines(e.commands).join('\n')
     expect(some).toContain('fake provider command')
     expect(some.match(/\(official build\)/g)?.length).toBe(2)
+  })
+
+  it('the help leaves the native verbs out while the experimental flag is off (the v2.103 leak)', () => {
+    const off = engineHelpLines(null, false).join('\n')
+    expect(off).not.toContain('  code')
+    expect(off).not.toContain('  provider')
+    expect(off).toContain('  ingest')
   })
 })
 

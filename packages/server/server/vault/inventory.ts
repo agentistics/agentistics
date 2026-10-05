@@ -11,7 +11,7 @@ import { basename } from 'node:path'
 import { isKid, isPresenceId, parseSealed, parseVaultJson, PRESENCE_GESTURES, setupCodeCommand, setupCodeWhere } from '@agentistics/vault'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import { sealedFiles } from './boot'
-import { VAULT_ACTION_ROWS, requireVaultStepUp, setupCodeOwed, localProofKind, stepUpState, unlockPolicyView, type GateContext } from './gate'
+import { VAULT_ACTION_ROWS, requireVaultStepUp, rowFor, type VaultAction, setupCodeOwed, localProofKind, stepUpState, unlockPolicyView, type GateContext } from './gate'
 import { hardeningLines } from './hardening'
 import {
   displayPath, lockVault, pendingPlaintextFiles, presenceCandidates, presenceSoon, restoreWithFor, secretFs, vaultDir, vaultLang, vaultStatus,
@@ -148,7 +148,7 @@ export async function readVaultView(files: string[] = sealedFiles(), pendingFile
     autoLockMinutes: stored?.autoLock?.minutes ?? 30,
     autoLockInMs: s.autoLockInMs ?? null, pendingStepup: s.pendingStepup === true, lockedBy: s.lockedBy ?? null,
     recoveryTodo: s.recoveryTodo ?? null,
-    gates: Object.fromEntries(Object.entries(VAULT_ACTION_ROWS).map(([k, r]) => [k, { code: r.code, gesture: r.gesture, grant: r.grant !== null }])),
+    gates: Object.fromEntries((Object.keys(VAULT_ACTION_ROWS) as VaultAction[]).map(k => { const r = rowFor(k, { session, loopback }); return [k, { code: r.code, gesture: r.gesture, grant: r.grant !== null }] })),
     gestures: { probe: PRESENCE_GESTURES.probe, enroll: PRESENCE_GESTURES.enroll },
     unlockPolicy: unlockPolicyView(stored),
     setupCode: {

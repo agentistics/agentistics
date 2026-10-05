@@ -212,12 +212,6 @@ export default function VaultSettings() {
           {view.sentence && view.state !== 'open' && (
             <div role="status" style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 14 }}>{view.sentence}</div>
           )}
-          {/* Owner 2026-10-03: while the vault is open there is ONE vault component. The unlock's code
-              already grants the list; when it still owes a code (an unlock that asked none), the field
-              lives here, under the state line — never as a second card. */}
-          {res.kind === 'needs-stepup' && open && (
-            <StepUpInline lang={lang} sentence={res.sentence} code={res.code} isMobile={isMobile} onDone={() => { void load() }} />
-          )}
         </>
       )}
 
@@ -561,28 +555,6 @@ function SetupCodeField({ value, onChange, label, why }: { value: string; onChan
         inputMode="numeric" autoComplete="off" autoFocus maxLength={9}
       />
     </label>
-  )
-}
-
-/** The open vault asks for a code before it lists anything (§2.4 `list`) — inline, inside the top component. */
-function StepUpInline({ lang, sentence, code: why, isMobile, onDone }: { lang: 'en' | 'pt'; sentence: string; code: string; isMobile: boolean; onDone: () => void }) {
-  const [code, setCode] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(why !== 'stepup-required' && sentence ? sentence : null)
-  const submit = async () => {
-    if (!codeComplete(code) || busy) return
-    setBusy(true); setError(null)
-    const r = await stepUp(code)
-    setBusy(false)
-    if (r.ok) { setCode(''); onDone() } else { setError(r.sentence || vt('network', lang)); setCode('') }
-  }
-  return (
-    <form onSubmit={e => { e.preventDefault(); void submit() }} aria-label={vt('stepupTitle', lang)} data-vault-stepup-inline style={{ marginBottom: 18, maxWidth: 420 }}>
-      <div style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 10px', lineHeight: 1.6 }}>{vt('stepupBody', lang)}</div>
-      <CodeField value={code} onChange={setCode} label={vt('codeLabel', lang)} autoFocus />
-      {error && <Err text={error} />}
-      <button type="submit" disabled={!codeComplete(code) || busy} style={{ ...primaryBtn, minHeight: isMobile ? 44 : undefined }}>{vt('codeConfirm', lang)}</button>
-    </form>
   )
 }
 

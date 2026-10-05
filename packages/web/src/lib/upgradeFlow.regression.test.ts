@@ -107,3 +107,29 @@ describe('the finale plays once', () => {
     expect(consumeRestore('2.0.0')).toBeNull()
   })
 })
+
+describe('Install on a version the server already runs restarts NOTHING (2026-10-04)', () => {
+  test('a stale popup: the server already runs the target → no POST, caches cleared, one reload', async () => {
+    const posts: string[] = []
+    install(async (url, init) => {
+      if (init?.method === 'POST') { posts.push(url); return json({ ok: true, started: true }) }
+      return json({ current: '2.103.1' })
+    })
+    await startUpgrade('2.103.1', 'pt')
+    expect(posts).toEqual([])
+    expect(reloads).toBe(1)
+    expect(cachesCleared).toBeGreaterThan(0)
+    expect(getFlow().phase).toBe('idle')
+  })
+  test('the server answers `alreadyCurrent` → reload at once, no waiting for a restart', async () => {
+    let versionAsks = 0
+    install(async (_url, init) => {
+      if (init?.method === 'POST') return json({ ok: true, alreadyCurrent: true, version: '2.103.1' })
+      versionAsks++
+      return json({ current: '2.103.0' })
+    })
+    await startUpgrade('2.103.1', 'en')
+    expect(reloads).toBe(1)
+    expect(versionAsks).toBe(1)
+  })
+})

@@ -72,6 +72,24 @@ export const TAB_ORDER: readonly TabId[] = [
   'contribute',
 ] as const
 
+/** The ordinary cockpit has no native code entry; `agentop code` opts into the code tab explicitly. */
+export function tabOrderFor(codeEntry: boolean): readonly TabId[] {
+  // The `home` tab IS the native harness's front door (its hero, its "what are we building?" prompt),
+  // so it belongs to the explicit `agentop code` entry just like the `code` tab: a plain `agentop`
+  // must never open it (a user on a configured machine, experimental off, landed on it).
+  return codeEntry ? TAB_ORDER : TAB_ORDER.filter(id => id !== 'code' && id !== 'home')
+}
+
+/** The tab a plain `agentop` opens on. */
+export const PLAIN_START_TAB: TabId = 'services'
+
+/** The tab to open on: the requested one when this entry shows it, else the entry's own front door. */
+export function startTabFor(requested: TabId | undefined, codeEntry: boolean): TabId {
+  const order = tabOrderFor(codeEntry)
+  if (requested && order.includes(requested)) return requested
+  return codeEntry ? 'home' : PLAIN_START_TAB
+}
+
 /** A service is `unknown` when detection itself failed (no docker, no lsof) — never assume down. */
 export type ServiceState = 'up' | 'down' | 'unknown'
 
@@ -370,6 +388,9 @@ export interface ControlService {
    * The pid is the point. "Something is wrong" that cannot be acted on is a worse message than none.
    */
   idle?: string
+  /** Already-localized verb that stops those extra copies (`ControlHost.stopIdle`). Present only
+   *  beside `idle`: the sentence states the problem, this is the button that fixes it. */
+  idleStopLabel?: string
   /** Why the state is `unknown`, already localized. */
   reason?: string
   /**
@@ -1441,6 +1462,9 @@ export interface ControlHost {
    */
   restart(target: ActionTarget, rebuild?: boolean): Promise<ActionResult>
   stop(target: ActionTarget): Promise<ActionResult>
+  /** Stop the extra copies of a service that hold no port (`ControlService.idle`). Optional: a host
+   *  that cannot identify them offers no verb rather than one that refuses. */
+  stopIdle?(service: ServiceRef): Promise<ActionResult>
 
   /** Persist a team mode from the Setup tab. `member` also needs `connect`. */
   setMode(mode: 'solo'): Promise<ActionResult>

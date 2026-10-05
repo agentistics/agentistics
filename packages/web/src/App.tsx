@@ -32,7 +32,7 @@ import type { TagDef } from './lib/tagMatch'
 import { canCreateTagFromFilters, filtersToTagDraft } from './lib/filtersToTag'
 import type { BillingSettings, CostBasis, Filters, SurfaceHarnessId, HealthIssue, SavedComparison, SessionPreset, TeamConfig } from '@agentistics/core'
 import type { Lang, Theme } from '@agentistics/core'
-import { isAdapterHarness, billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, normalizeSessionPresets, planAllocation, formatProjectName, MODEL_PRICING, distinctUsers, distinctHarnesses, filterByUsers, fmtCost, SURFACE_HARNESS_ORDER, readTeamConnections, fmt, totalTokens, totalTokensExplained } from '@agentistics/core'
+import { isAdapterHarness, billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, normalizeSessionPresets, planAllocation, formatProjectName, MODEL_PRICING, distinctUsers, distinctHarnesses, filterByUsers, fmtCost, surfaceHarnesses, NATIVE_HARNESS_ID, readTeamConnections, fmt, totalTokens, totalTokensExplained } from '@agentistics/core'
 import { buildDeniedRepoLabels } from './lib/shareRepos'
 import { StatCard } from './components/StatCard'
 import { StreakBreakdownButton } from './components/StreakBreakdownButton'
@@ -131,11 +131,13 @@ import { reopenedSessionRoute, sessionPath } from './lib/sessionRoute'
 import { SessionTitleFlag } from './components/sessions/SessionTitleFlag'
 import { ChatSelectionOverlay } from './components/sessions/ChatSelectionBar'
 import { brandAsset } from './lib/brand'
+import { healStaleBundle, takeUpdatedToast } from './lib/bundleVersion'
 import { promptDismissedFor, promptExit, shouldShowToast, versionRefetchDue, type PromptExit, type VersionAnswer } from './lib/updateToast'
-import { consumeRestore, snoozeUpdate, startUpgrade, useUpdateSnooze, useUpgradeFlow } from './lib/upgradeFlow'
+import { consumeRestore, snoozeUpdate, startUpgrade, upgradeInFlight, useUpdateSnooze, useUpgradeFlow } from './lib/upgradeFlow'
 import { NayUpdateCard, type UpdateCardPlacement } from './components/nay/NayUpdateCard'
 import { UpgradeOverlay } from './components/UpgradeOverlay'
 import { UpdateFinale } from './components/UpdateFinale'
+import { bootWatchdog, fetchWithTimeout, loadErrorText, SMALL_TIMEOUT_MS, startupStripText, type BootVerdict, type LoadError } from './lib/startupLoad'
 
 /**
  * What the SESSIONS filter bar may filter by — narrower than the dashboard's on purpose: a fleet
@@ -226,7 +228,68 @@ function formatStageDetail(key: string, detail: string, lang: string): string {
   return n.toLocaleString()
 }
 
+/**
+ * How long the boot screen has been up, and whether the server still answers. Every gate that holds
+ * the boot screen (the session check, the preferences, the data) is a request that could hang — on a
+ * phone whose computer is asleep, forever — so the screen watches itself: after a few seconds it
+ * probes `/api/health` (with its own deadline) and says "slow" when the server answers and
+ * "unreachable" when it does not. It never decides the app is ready; it only stops the screen from
+ * spinning without a word.
+ */
+function useBootWatchdog(): BootVerdict {
+  const [verdict, setVerdict] = useState<BootVerdict>('loading')
+  useEffect(() => {
+    const t0 = Date.now()
+    let health: 'ok' | 'down' | 'unknown' = 'unknown'
+    let cancelled = false
+    const tick = () => { if (!cancelled) setVerdict(bootWatchdog(Date.now() - t0, health)) }
+    const probe = () => {
+      fetchWithTimeout('/api/health', 4000, { cache: 'no-store' })
+        .then(r => { void r.body?.cancel().catch(() => {}); health = r.ok ? 'ok' : 'down' })
+        .catch(() => { health = 'down' })
+        .finally(tick)
+    }
+    const ticker = setInterval(tick, 1000)
+    const first = setTimeout(probe, 3000)
+    const prober = setInterval(probe, 5000)
+    return () => { cancelled = true; clearInterval(ticker); clearTimeout(first); clearInterval(prober) }
+  }, [])
+  return verdict
+}
+
+/** A failure, said in words a person can act on, with the way out: retry now, and a note that it is
+ *  already retrying by itself when it is. */
+function ServerProblem({ lang, problem, onRetry, autoRetry }: { lang: string; problem: LoadError; onRetry: () => void; autoRetry: boolean }) {
+  const { title, body } = loadErrorText(problem, lang === 'pt' ? 'pt' : 'en', typeof location !== 'undefined' ? location.host : '')
+  return (
+    <div role="alert" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '40px 16px', textAlign: 'center', background: 'var(--bg-base)', boxSizing: 'border-box' }}>
+      <img src={brandAsset('/minimalistLogo.png')} alt="" aria-hidden="true" style={{ width: 40, height: 40, objectFit: 'contain', opacity: 0.8 }} />
+      <div style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)', maxWidth: 460 }}>{title}</div>
+      <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', maxWidth: 460, lineHeight: 1.5 }}>{body}</div>
+      <button onClick={onRetry} style={{
+        minHeight: 44, padding: '8px 22px', marginTop: 4,
+        background: 'var(--anthropic-orange-dim)', border: '1px solid var(--anthropic-orange)60', borderRadius: 8,
+        color: 'var(--anthropic-orange)', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.8125rem', fontWeight: 600,
+      }}>
+        {lang === 'pt' ? 'Tentar novamente' : 'Try again'}
+      </button>
+      {autoRetry && (
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
+          {lang === 'pt' ? 'Tentando de novo sozinho a cada poucos segundos.' : 'Also retrying on its own every few seconds.'}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function LoadingScreen({ lang, loadProgress }: { lang: string; loadProgress: LoadProgress }) {
+  const verdict = useBootWatchdog()
+  // The server stopped answering while this screen was up: say so instead of spinning. The requests
+  // behind the boot keep retrying and the probe keeps running, so when the server answers again this
+  // goes back to loading by itself; the button reloads the page for whoever does not want to wait.
+  if (verdict === 'unreachable') {
+    return <ServerProblem lang={lang} problem={{ kind: 'unreachable', detail: '' }} onRetry={() => location.reload()} autoRetry />
+  }
   // Group phase 1 stages to show parallel badge
   const phase1Done = ['statsCache', 'sessions', 'health'].filter(k => loadProgress[k]?.status === 'done').length
 
@@ -270,6 +333,13 @@ function LoadingScreen({ lang, loadProgress }: { lang: string; loadProgress: Loa
         <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
           {lang === 'pt' ? 'Carregando seus dados...' : 'Loading your data...'}
         </div>
+        {verdict === 'slow' && (
+          <div role="status" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 8, maxWidth: 320, lineHeight: 1.45 }}>
+            {lang === 'pt'
+              ? 'Está demorando mais que o normal. O servidor está respondendo e continua trabalhando.'
+              : 'This is taking longer than usual. The server is answering and still working.'}
+          </div>
+        )}
       </div>
 
       {/* Stage progress bars */}
@@ -1534,7 +1604,7 @@ export default function AppLayout() {
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
-  const { data, loading, loadProgress, error, refetch, liveUpdates, setLiveUpdates, updateInterval, setUpdateInterval } = useData()
+  const { data, loading, loadProgress, error, loadError, offline, startup, refetch, liveUpdates, setLiveUpdates, updateInterval, setUpdateInterval } = useData()
   const [riskyMode, setRiskyMode] = useState(false)
   const [lang, setLangState] = useState<Lang>('en')
 
@@ -1591,7 +1661,9 @@ export default function AppLayout() {
    * known (`central`, `capabilities`, …) back to the bare boot default — see its own header.
    */
   const refreshTeamSession = useCallback(() => {
-    return fetch('/api/team/session')
+    // Bounded: the boot screen waits on this answer, and a request that never settles (a phone
+    // whose computer went to sleep mid-request) would otherwise hold it forever.
+    return fetchWithTimeout('/api/team/session', SMALL_TIMEOUT_MS)
       .then(r => r.ok ? (r.json() as Promise<TeamSessionState>) : null)
       .then(s => setTeamSession(prev => resolveTeamSessionRefresh(prev, s, { required: false, authed: true })))
       .catch(() => setTeamSession(prev => resolveTeamSessionRefresh(prev, null, { required: false, authed: true })))
@@ -2666,7 +2738,7 @@ export default function AppLayout() {
         // mode, team, billing, the gates); every CHOICE comes from `/api/user-prefs`, which is per
         // ACCOUNT on a central. The choice keys are stripped from the first one, so on a central
         // nobody reads the theme, language or card order somebody else saved in the shared file.
-        const [r, personal] = await Promise.all([fetch('/api/preferences'), loadPersonalPrefs()])
+        const [r, personal] = await Promise.all([fetchWithTimeout('/api/preferences', SMALL_TIMEOUT_MS), loadPersonalPrefs()])
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         if (personal === null) throw new Error('user-prefs unavailable')
         const prefs = await r.json() as Record<string, unknown>
@@ -2719,8 +2791,12 @@ export default function AppLayout() {
       first = false
       fetch('/api/version', { cache: 'no-store' })
         .then(r => r.ok ? r.json() : null)
-        .then((info: VersionAnswer | null) => {
+        .then(async (info: VersionAnswer | null) => {
           if (!info || cancelled) return
+          // A bundle the server is not running (a service worker's precached copy of a previous
+          // release) drops the worker + caches and reloads ONCE onto the server's own version
+          // (`bundleVersion.ts`). Checked on load, on every poll, on focus and on reconnect.
+          if (!upgradeInFlight() && (await healStaleBundle(info.current)).kind === 'reload') return
           setVersionAnswer(info)
           if (!isFirst) return
           // Back from an in-place upgrade on the bundle it was for: put the person where they were
@@ -2735,16 +2811,23 @@ export default function AppLayout() {
         })
         .catch(() => {})
     }
+    // The reload above leaves one line behind it: "Agentistics atualizado para vX".
+    const updatedTo = takeUpdatedToast()
+    if (updatedTo) pushNotification({ type: 'success', code: 'app.updated', meta: { version: updatedTo } })
     check('interval')
     const tick = window.setInterval(() => check('interval'), 60_000)
     const onVisible = () => check('focus')
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', onVisible)
+    // Back online (a phone that lost the server while it restarted) is the moment a stale bundle
+    // is most likely: ask at once.
+    window.addEventListener('online', onVisible)
     return () => {
       cancelled = true
       window.clearInterval(tick)
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
+      window.removeEventListener('online', onVisible)
     }
   }, [])
 
@@ -3034,7 +3117,8 @@ export default function AppLayout() {
   // models are offered; in the unified view all harnesses are shown as sections.
   const modelGroups = useMemo<{ harness: SurfaceHarnessId; models: string[] }[]>(() => {
     if (!data) return []
-    const order: SurfaceHarnessId[] = SURFACE_HARNESS_ORDER
+    // `data` comes gated from `useData` (`withoutHiddenNative`): the native section exists only when it may be seen.
+    const order: SurfaceHarnessId[] = surfaceHarnesses(data.harnesses.includes(NATIVE_HARNESS_ID))
     const byH: Partial<Record<SurfaceHarnessId, Set<string>>> = {}
     const add = (h: SurfaceHarnessId, m?: string) => { if (!m) return; (byH[h] ??= new Set<string>()).add(m) }
     for (const id of Object.keys(data.statsCache.modelUsage ?? {})) add('claude', id)
@@ -3492,43 +3576,12 @@ export default function AppLayout() {
   }
 
   if (error) {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 16,
-        padding: 40,
-        textAlign: 'center',
-      }}>
-        <div style={{ fontSize: 40 }}>⚠️</div>
-        <div style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-          {lang === 'pt' ? 'Falha ao carregar dados' : 'Failed to load data'}
-        </div>
-        <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', fontFamily: 'monospace', background: 'var(--bg-card)', padding: '10px 16px', borderRadius: 8, maxWidth: 500 }}>
-          {error}
-        </div>
-        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
-          {lang === 'pt' ? 'Certifique-se de que o servidor está rodando:' : 'Make sure the API server is running:'}{' '}
-          <code style={{ background: 'var(--bg-elevated)', padding: '2px 6px', borderRadius: 4 }}>bun run server.ts</code>
-        </div>
-        <button onClick={refetch} style={{
-          padding: '8px 20px',
-          background: 'var(--anthropic-orange-dim)',
-          border: '1px solid var(--anthropic-orange)60',
-          borderRadius: 8,
-          color: 'var(--anthropic-orange)',
-          cursor: 'pointer',
-          fontFamily: 'inherit',
-          fontSize: '0.8125rem',
-          fontWeight: 600,
-        }}>
-          {lang === 'pt' ? 'Tentar novamente' : 'Retry'}
-        </button>
-      </div>
-    )
+    // Said in plain words, by what actually happened — "can't reach the server" and "the server had a
+    // problem" send a person to different places — and it retries on its own (useData) except for an
+    // auth status, which the gates above resolve.
+    const problem: LoadError = loadError ?? { kind: 'server', detail: String(error) }
+    const autoRetry = !(problem.kind === 'server' && (problem.status === 401 || problem.status === 403))
+    return <ServerProblem lang={lang} problem={problem} onRetry={refetch} autoRetry={autoRetry} />
   }
 
   // The boot loader stays until the app can actually paint: data fetched, derived stats computed,
@@ -3594,8 +3647,37 @@ export default function AppLayout() {
   // The journal's first import, one muted line above the page while it runs: the figures on the page
   // come from /api/data until it completes (the server refuses the projections until then).
   const backfillText = journalBackfillText(teamSession?.journalBackfill, lang)
-  const backfillNote = backfillText
-    ? <div role="status" style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', lineHeight: 1.4 }}>{backfillText}</div>
+  // Plus the data still arriving (fast startup): the page is already usable, this line says what is
+  // still on its way — or that the server stopped answering while the page kept what it had.
+  const startupText = startupStripText(startup, lang === 'pt' ? 'pt' : 'en')
+  const offlineText = offline
+    ? (lang === 'pt'
+      ? `O servidor não está respondendo (${offline.kind === 'unreachable' ? 'inacessível' : offline.detail}). Mostrando o que já estava carregado; volta sozinho quando ele responder.`
+      : `The server is not answering (${offline.kind === 'unreachable' ? 'unreachable' : offline.detail}). Showing what was already loaded; it comes back by itself when the server answers.`)
+    : null
+  const noteLines = [offlineText, startupText, backfillText].filter((t): t is string => !!t)
+  const backfillNote = noteLines.length > 0
+    ? (
+      <div role="status" aria-live="polite" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {noteLines.map(t => (
+          <div key={t} style={{ fontSize: '0.75rem', color: t === offlineText ? 'var(--text-secondary)' : 'var(--text-tertiary)', lineHeight: 1.4, display: 'flex', alignItems: 'center', gap: 8 }}>
+            {t === startupText && startup.partial && (
+              <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--anthropic-orange)', flexShrink: 0, animation: 'agStartupPulse 1.4s ease-in-out infinite' }} />
+            )}
+            <span>{t}</span>
+            {t === offlineText && (
+              <button onClick={refetch} style={{
+                minHeight: isMobile ? 44 : 28, padding: '2px 12px',
+                background: 'var(--anthropic-orange-dim)', border: '1px solid var(--anthropic-orange)60', borderRadius: 8,
+                color: 'var(--anthropic-orange)', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.75rem', fontWeight: 600,
+              }}>
+                {lang === 'pt' ? 'Tentar de novo' : 'Try again'}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    )
     : null
 
   // Built once so the magnifier layer (Task 8) can be handed the exact same object the pages get

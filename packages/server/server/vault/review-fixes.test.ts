@@ -424,7 +424,7 @@ describe('S5 — onStateChange / lockedBy / autoLockInMs are fed by the vault', 
   })
   test('a frozen step-up is heard as stepup-frozen', async () => {
     const seen = await watching()
-    for (let i = 0; i < 20; i++) { T += 16 * 60_000; await requireVaultStepUp('list', { session: 'socket', code: '000000' }) }
+    for (let i = 0; i < 20; i++) { T += 16 * 60_000; await requireVaultStepUp('set-auto-lock', { session: 'socket', code: '000000' }) }
     expect(seen.at(-1)).toMatchObject({ state: 'locked', lockedBy: 'stepup-frozen' })
   })
 })

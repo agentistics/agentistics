@@ -118,3 +118,30 @@ jobs:
 
       - name: Perf budgets
         run: bun scripts/perf/budget.ts "$RUNNER_TEMP/perf-home"
+
+      # The rebuild storm: ten sessions writing every 500 ms must not keep /api/data rebuilding
+      # back to back (build duration, rebuild duty cycle, /api/fleet, /api/data, the chat echo).
+      - name: Synthetic home with git repositories
+        run: bun scripts/perf/synth-home.ts "$RUNNER_TEMP/storm-home" --scale 0.2 --projects 280 --big 0 --git
+
+      - name: Rebuild storm budgets
+        run: bun scripts/perf/storm.ts "$RUNNER_TEMP/storm-home" --seconds 45 --budget
+
+      # STREAM.FIX: the chat PAGE must show a CLI answer growing while it is written (every budget
+      # above held while the page drew it whole). A real browser over the dev UI and a fake claude.
+      - name: Chromium for the page-level stream check
+        run: bunx playwright install --with-deps chromium
+
+      - name: Chat page streams the answer as it is written
+        run: |
+          bun scripts/perf/synth-home.ts "$RUNNER_TEMP/stream-home" --scale 0.02 --big 0
+          bun scripts/perf/stream-e2e.ts "$RUNNER_TEMP/stream-home"
+
+      # Fast startup: the app must be usable within 2 s of the server answering — on a fresh, empty
+      # machine and on one whose repositories are slow to read (every `git log --numstat` held 20 s),
+      # cold and after a restart — and the full data must still arrive.
+      - name: Startup budget (fresh empty home)
+        run: bun scripts/perf/startup.ts --empty --budget
+
+      - name: Startup budget (slow git)
+        run: bun scripts/perf/startup.ts "$RUNNER_TEMP/storm-home" --slow-git 20000 --budget

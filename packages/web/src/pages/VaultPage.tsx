@@ -11,7 +11,9 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
-import { Copy, Eye, EyeOff, FileUp, FolderPlus, History, KeyRound, Loader2, Pencil, Plus, RotateCcw, Search, Trash2, Vault as VaultIcon, X } from 'lucide-react'
+import { Copy, Eye, EyeOff, FileUp, FolderPlus, History, KeyRound, Loader2, Pencil, Plus, RotateCcw, Search, Trash2, X } from 'lucide-react'
+import { VaultGlyph as VaultIcon } from '../components/vault/VaultGlyph'
+import { Checkbox } from './settings/primitives'
 import type { AppContext } from '../lib/app-context'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { Err, card, input, overlay, primaryBtn, dangerBtn } from '../components/MfaSetup'
@@ -255,25 +257,13 @@ export default function VaultPage() {
  */
 export function QuickVault({ lang, isMobile, onClose }: { lang: Lang; isMobile: boolean; onClose: () => void }) {
   const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
-  const navigate = useNavigate()
-  const { state, setState, items, setItems, groups, busyHello, codeAsk, gated, load } = usePersonalVault()
-  const [q, setQ] = useState('')
-  const [toast, setToast] = useState<string | null>(null)
-  const kindLabel = useCallback((k: PersonalKind) => pt_(`kind_${k}` as PKey, lang), [lang])
-  const shown = useMemo(() => filterPersonal(items, groups, { q, kind: 'all', groupId: 'all', trash: false }, kindLabel), [items, groups, q, kindLabel])
-  const groupName = (id: string | null) => (id ? groups.find(g => g.id === id)?.name ?? '' : '')
-  const flash = (s: string) => { setToast(s); setTimeout(() => setToast(cur => (cur === s ? null : cur)), 4000) }
-  const btn: React.CSSProperties = {
-    padding: isMobile ? '10px 14px' : '6px 12px', minHeight: isMobile ? 44 : undefined, borderRadius: 8, fontSize: 13,
-    border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', cursor: 'pointer',
-    display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'inherit',
-  }
+  const [asking, setAsking] = useState(false)
   // Escape closes the sheet — but not while a code dialog on top of it is the one being answered.
   useEffect(() => {
-    if (codeAsk) return
+    if (asking) return
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h)
-  }, [onClose, codeAsk])
+  }, [onClose, asking])
   const o: React.CSSProperties = isMobile ? { ...overlay, padding: 0, zIndex: 3000 } : { ...overlay, zIndex: 3000 }
   const c: React.CSSProperties = isMobile
     ? { ...card, maxWidth: 'none', width: '100%', height: '100dvh', maxHeight: '100dvh', borderRadius: 0, border: 'none', overflowY: 'auto', boxSizing: 'border-box' }
@@ -287,6 +277,36 @@ export function QuickVault({ lang, isMobile, onClose }: { lang: Lang; isMobile: 
           <button type="button" className="ag-tap-icon" aria-label={t('quickClose')} onClick={onClose}
             style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: 6 }}><X size={18} /></button>
         </div>
+        <QuickVaultBody lang={lang} isMobile={isMobile} onNavigate={onClose} onAsking={setAsking} />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The quick view itself — search, rows (reveal / copy), the inline unlock — WITHOUT a frame, so the
+ * FAB's sheet (`QuickVault`) and the Nay panel's "Cofre" tab draw exactly the same thing.
+ * `onNavigate` runs before "open the whole vault" navigates (the sheet closes; the tab has nothing to).
+ */
+export function QuickVaultBody({ lang, isMobile, onNavigate, onAsking }: { lang: Lang; isMobile: boolean; onNavigate?: () => void; onAsking?: (asking: boolean) => void }) {
+  const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
+  const navigate = useNavigate()
+  const { state, setState, items, setItems, groups, busyHello, codeAsk, gated, load } = usePersonalVault()
+  const [q, setQ] = useState('')
+  const [toast, setToast] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const kindLabel = useCallback((k: PersonalKind) => pt_(`kind_${k}` as PKey, lang), [lang])
+  const shown = useMemo(() => filterPersonal(items, groups, { q, kind: 'all', groupId: 'all', trash: false }, kindLabel), [items, groups, q, kindLabel])
+  const groupName = (id: string | null) => (id ? groups.find(g => g.id === id)?.name ?? '' : '')
+  const flash = (s: string) => { setToast(s); setTimeout(() => setToast(cur => (cur === s ? null : cur)), 4000) }
+  useEffect(() => { onAsking?.(!!codeAsk) }, [codeAsk, onAsking])
+  const btn: React.CSSProperties = {
+    padding: isMobile ? '10px 14px' : '6px 12px', minHeight: isMobile ? 44 : undefined, borderRadius: 8, fontSize: 13,
+    border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', cursor: 'pointer',
+    display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'inherit',
+  }
+  return (
+    <>
         {state.kind === 'loading' && <Loader2 size={14} className="ag-spin" />}
         {state.kind === 'failed' && <Err text={t('network')} />}
         {state.kind === 'locked' && <LockedVaultInline lang={lang} isMobile={isMobile} onOpened={() => { void load() }} />}
@@ -304,6 +324,7 @@ export function QuickVault({ lang, isMobile, onClose }: { lang: Lang; isMobile: 
               <input value={q} onChange={e => setQ(e.target.value)} placeholder={t('search')} aria-label={t('search')} autoFocus={!isMobile}
                 style={{ ...input, marginBottom: 0, paddingLeft: 30, letterSpacing: 'normal', width: '100%', boxSizing: 'border-box', minHeight: isMobile ? 44 : undefined }} />
             </label>
+            <button type="button" data-quick-new style={{ ...btn, ...primaryBtn, marginBottom: 10 }} onClick={() => setCreating(true)}><Plus size={14} /> {t('new')}</button>
             {busyHello && <div role="status" aria-live="polite" style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600, marginBottom: 10 }}><Loader2 size={14} className="ag-spin" /> {t('confirmHello')}</div>}
             {toast && <div role="status" style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 10 }}>{toast}</div>}
             {shown.length === 0
@@ -319,12 +340,15 @@ export function QuickVault({ lang, isMobile, onClose }: { lang: Lang; isMobile: 
               )}
           </>
         )}
-        <button type="button" style={{ ...btn, marginTop: 14, background: 'transparent' }} onClick={() => { onClose(); navigate('/vault') }}>
+        <button type="button" style={{ ...btn, marginTop: 14, background: 'transparent' }} onClick={() => { onNavigate?.(); navigate('/vault') }}>
           <VaultIcon size={14} /> {t('quickAll')}
         </button>
-      </div>
+      {creating && (
+        <EditDialog lang={lang} isMobile={isMobile} item={null} groups={groups} gated={gated} defaultGroup={null}
+          onClose={() => setCreating(false)} onSaved={m => { setItems(cur => [m, ...cur.filter(y => y.id !== m.id)]); setCreating(false) }} />
+      )}
       {codeAsk && <CodeDialog lang={lang} isMobile={isMobile} onDone={codeAsk} />}
-    </div>
+    </>
   )
 }
 
@@ -385,6 +409,7 @@ function ItemRow({ m, lang, isMobile, btn, group, groups, gated, onChanged, onRe
         <KeyRound size={14} style={{ color: 'var(--anthropic-orange)', flexShrink: 0, alignSelf: 'center' }} />
         <strong style={{ fontSize: 14, minWidth: 0, overflowWrap: 'anywhere' }}>{m.name}</strong>
         <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 999, border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>{t(`kind_${m.kind}` as PKey)}</span>
+        {m.confirmEach === false && <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{t('confirmEachOff')}</span>}
         {group && <span style={{ fontSize: 11.5, color: 'var(--anthropic-orange)' }}>▸ {group}</span>}
         {m.tags.map(tag => <span key={tag} style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>#{tag}</span>)}
         <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-tertiary)' }}>{t('updated', { date: fmt(m.updatedAt) })}</span>
@@ -458,6 +483,8 @@ function EditDialog({ lang, isMobile, item, groups, gated, defaultGroup, onClose
   const [groupId, setGroupId] = useState<string>(item?.groupId ?? defaultGroup ?? '')
   const [tags, setTags] = useState((item?.tags ?? []).join(', '))
   const [notes, setNotes] = useState(item?.notes ?? '')
+  // "Sempre confirmar": ON by default (absent on an older record reads ON).
+  const [confirmEach, setConfirmEach] = useState(item?.confirmEach !== false)
   // The values typed here live only in this dialog's state, until save or close.
   const [fields, setFields] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
@@ -470,7 +497,7 @@ function EditDialog({ lang, isMobile, item, groups, gated, defaultGroup, onClose
     setBusy(true); setError(null)
     const f: Record<string, string> = {}
     for (const k of KIND_FIELDS[kind]) if (fields[k]) f[k] = fields[k]!
-    const body = { kind, name: name.trim(), url, groupId: groupId || null, tags: parseTags(tags), notes, ...(Object.keys(f).length ? { fields: f } : {}) }
+    const body = { kind, name: name.trim(), url, groupId: groupId || null, tags: parseTags(tags), notes, confirmEach, ...(Object.keys(f).length ? { fields: f } : {}) }
     const r = editing ? await gated((c, tk) => editPersonal(item.id, item.version, body, c, tk), { action: 'personal-edit', target: item.id }) : await gated(c => createPersonal(body, c), false)
     setBusy(false)
     if (!r.ok) { setError(r.sentence || t('network')); return }
@@ -505,6 +532,10 @@ function EditDialog({ lang, isMobile, item, groups, gated, defaultGroup, onClose
         ))}
         {label(t('f_tags'), <input value={tags} onChange={e => setTags(e.target.value)} style={fieldStyle(isMobile)} />)}
         {label(t('f_notes'), <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} maxLength={4000} style={{ ...fieldStyle(isMobile), resize: 'vertical' }} />)}
+        <div style={{ marginBottom: 10 }}>
+          <Checkbox checked={confirmEach} onChange={setConfirmEach} label={t('confirmEach')} />
+          <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 2, lineHeight: 1.5 }}>{t('confirmEachHelp')}</div>
+        </div>
         {editing && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>{t('editAsks')}</div>}
         {error && <Err text={error} />}
         <div style={{ display: 'flex', gap: 8 }}>

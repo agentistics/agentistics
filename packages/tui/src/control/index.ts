@@ -37,6 +37,8 @@ export interface ControlCenterOptions {
    * detaching from an attached session would restart the wizard.
    */
   code?: CodeLaunch
+  /** The code tab is available only for the explicit `agentop code` entry point. */
+  codeTab?: boolean
 }
 
 /**
@@ -68,7 +70,7 @@ function inkStdout(): NodeJS.WriteStream {
 }
 
 export async function runControlCenter(opts: ControlCenterOptions): Promise<ControlExit> {
-  const { lang, host, tab, setup, code } = opts
+  const { lang, host, tab, setup, code, codeTab } = opts
 
   // Ink needs raw mode, which a pipe or a systemd unit cannot give it; it would throw from inside
   // a React effect and surface as a reconciler stack. One sentence and a non-zero code instead.
@@ -118,7 +120,13 @@ export async function runControlCenter(opts: ControlCenterOptions): Promise<Cont
   // `createElement` rather than JSX so this entry can stay a `.ts` file: it is imported by the
   // server, and a `.tsx` extension there would drag JSX settings into a module that renders nothing.
   const app = render(
-    React.createElement(ControlCenter, { host, lang, initial: { tab, setup, ...(code ? { code } : {}) }, onExit, mouse }),
+    React.createElement(ControlCenter, {
+      host,
+      lang,
+      initial: { tab, setup, codeTab, ...(code ? { code } : {}) },
+      onExit,
+      mouse,
+    }),
     {
       stdin: input.stdin,
       // THE FRAME MUST NOT GO THROUGH `process.stdout.write` — see `inkStdout`.

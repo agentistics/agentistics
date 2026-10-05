@@ -32,7 +32,7 @@ import { loadNativeFleet, runNativeVerb, isNativeSessionId } from './sessions/na
 import { spawn } from 'node:child_process'
 import { rekeyMutedSession } from './sessions/session-notify-web'
 import { randomUUID } from 'node:crypto'
-import { existsSync, writeSync } from 'node:fs'
+import { existsSync, readFileSync, writeSync } from 'node:fs'
 import { join, resolve as resolvePath } from 'node:path'
 import type { CodeHostPort } from '@agentistics/engine-api'
 import type { CodeLaunch } from '@agentistics/tui/control/code-types'
@@ -685,6 +685,7 @@ export function buildService(
     // Two processes of the ONE runtime — invisible to every runtime probe, because they all ask
     // which pid holds the port. See `idle-servers.ts` for the seventy-minute incident.
     idle: facts.idlePids?.length ? s.svcIdleServer(facts.idlePids) : undefined,
+    idleStopLabel: facts.idlePids?.length ? s.actStopIdle : undefined,
     reason,
     // The single most important line in the model: while anything is up there is nothing to start.
     startOptions: up.length > 0
@@ -937,6 +938,16 @@ async function idleServerPids(): Promise<number[]> {
 
 async function stopLocal(s: CliStrings): Promise<void> {
   process.stdout.write(`  ${D}${s.stoppingLocal}${R}\n`)
+  // The service owns this server: STOP THE UNIT. Signalling its process instead is a crash to
+  // systemd, which restarts it — racing whatever this caller starts next (2026-10-04 12:22: the
+  // cockpit's restart killed the unit's server and its own `nohup` copy won the data dir).
+  const { serviceOwnsServerHere, reclaimStrayServer, SERVER_UNIT } = await import('./server-ownership-io')
+  if (await serviceOwnsServerHere()) {
+    await sh(['systemctl', '--user', 'stop', SERVER_UNIT])
+    await reclaimStrayServer()
+    for (let i = 0; i < 20; i++) { if (!(await isServerRunning())) return; await sleep(150) }
+    return
+  }
   const targets = planLocalStop({
     listeners: await listeningServerPids(),
     lockHolder: await probeInstanceLock(serverLockFile()).catch(() => null),
@@ -1159,6 +1170,17 @@ async function restartLocalSvc(s: CliStrings, mode: RestartMode = {}): Promise<b
     else if (r === 'failed') process.stderr.write(`  ${YE}${s.localRebuildFailed}${R}\n`)
   }
   process.stdout.write(`  ${D}${s.restartingLocal}${R}\n`)
+  // The service owns this server: restart THROUGH it (taking back a stray first), never a
+  // stop + `nohup` of our own — that copy runs outside the unit and leaves the unit failed.
+  {
+    const { serviceOwnsServerHere } = await import('./server-ownership-io')
+    if (await serviceOwnsServerHere()) {
+      const { restartAutostart } = await import('./autostart')
+      const res = await restartAutostart('server')
+      if (!res.ok) { mode.failure = res.message.split('\n')[0]; process.stderr.write(`  ${YE}${mode.failure}${R}\n`) }
+      return res.ok
+    }
+  }
   // What was serving BEFORE, so "restarted" can mean "something else is serving now". The old check
   // was `isServerRunning()` alone, which the server being replaced also satisfies — a stop that did
   // not take (a permission, a supervisor respawning it) was reported as a successful restart.
@@ -3012,6 +3034,15 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         return { ok: false, message: `${s.alreadyRunning(`http://localhost:${WEB_PORT}`)} ${s.useRestartInstead}` }
       }
 
+      {
+        const { serviceOwnsServerHere, startServerUnit } = await import('./server-ownership-io')
+        if (await serviceOwnsServerHere()) {
+          const r = await startServerUnit()
+          if (!r.ok) return { ok: false, message: r.message }
+          const hint = (await archivePending()) ? ` · ${s.archiveUnsetHint}` : ''
+          return { ok: true, message: `${s.startedBg} http://localhost:${WEB_PORT}${hint}` }
+        }
+      }
       startBackground()
       const hint = (await archivePending()) ? ` · ${s.archiveUnsetHint}` : ''
       return { ok: true, message: `${s.startedBg} http://localhost:${WEB_PORT}${hint}` }
@@ -3073,6 +3104,28 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const ok = watchable ? await streamOutput(work) : (await captureOutput(work)).value
       if (!ok) return { ok: false, message: mode.failure ?? s.restartFailed }
       return { ok: true, message: target === 'all' ? s.restartedAll : s.restartedDone }
+    },
+
+    // The extra copies `idle-servers.ts` found: `agentop server` processes holding no port. They
+    // are re-identified HERE, at the moment of the press, never taken from a five-second-old
+    // snapshot — a pid named then may be somebody else's by now.
+    async stopIdle(): Promise<ActionResult> {
+      const s = S()
+      const { dataDirOfEnv, stoppableIdle } = await import('./idle-servers')
+      const pids = stoppableIdle({
+        idle: await idleServerPids(),
+        dataDirOf: pid => { try { return dataDirOfEnv(readFileSync(`/proc/${pid}/environ`, 'utf8')) } catch { return null } },
+        ours: AGENTISTICS_DATA_DIR,
+        lockHolder: await probeInstanceLock(serverLockFile()).catch(() => null),
+        self: process.pid,
+      })
+      if (pids.length === 0) return { ok: true, message: s.idleNoneLeft }
+      for (const pid of pids) await sh(['kill', String(pid)])
+      for (let i = 0; i < 20; i++) {
+        if ((await idleServerPids()).every(p => !pids.includes(p))) break
+        await sleep(150)
+      }
+      return { ok: true, message: s.idleStopped(pids.length) }
     },
 
     async stop(target: ActionTarget): Promise<ActionResult> {
@@ -4835,17 +4888,11 @@ export async function runStart(codeStart?: CodeStart): Promise<StartResult> {
     codeStart.code.configure?.({ ...(codeStart.model ? { model: codeStart.model } : {}), ...(codeStart.cwd ? { cwd: resolvePath(codeStart.cwd) } : {}) })
     host.code = codeStart.code
     disposeCode = codeStart.dispose
-  } else {
-    const e = engine()
-    if (e?.codeHost && !nativeExperimentalOn()) {
-      host.nativeGate = () => EXPERIMENTAL_SENTENCE[host.lang === 'pt' ? 'pt' : 'en']
-    } else if (e?.codeHost) {
-      const taken = await takeCodePort(e.codeHost)
-      if (taken) {
-        host.code = taken.code
-        disposeCode = taken.dispose
-      }
-    }
+  } else if (engine()?.codeHost && !nativeExperimentalOn()) {
+    // The existing gate still supplies the sentence to callers that explicitly ask about the
+    // native harness, but a plain `agentop` never acquires or exposes the code host. The code TUI
+    // is an explicit CLI entry point, not another dashboard tab.
+    host.nativeGate = () => EXPERIMENTAL_SENTENCE[host.lang === 'pt' ? 'pt' : 'en']
   }
   // SS-09: file any row under a BOARD task — native, agentop-started, or external by conversation.
   host.fileSession = async (row, taskId) => {
@@ -4954,11 +5001,12 @@ async function runControlLoop(
   const setup = codeStart ? false : await isUnconfigured()
   // RES.1 — a self-restart lands on the tab the user was on (see the `restart` exit below).
   const startTab = process.env.AGENTISTICS_START_TAB
+  const visibleTabs = codeStart ? TAB_ORDER : TAB_ORDER.filter(id => id !== 'code')
   // `home` is the default (GL-01), but a machine that has never been configured opens where the setup
   // question is asked — `services` — or the question would wait on a tab nobody is looking at.
   let tab: TabId | undefined = codeStart && host.code
     ? 'code'
-    : startTab && (TAB_ORDER as readonly string[]).includes(startTab) ? startTab as TabId : setup ? 'services' : undefined
+    : startTab && (visibleTabs as readonly string[]).includes(startTab) ? startTab as TabId : setup ? 'services' : undefined
   delete process.env.AGENTISTICS_START_TAB
   let launch: CodeLaunch | undefined = codeStart?.launch
 
@@ -4976,7 +5024,14 @@ async function runControlLoop(
     // detaching was enough to put the whole cockpit back into the previous language, with nothing
     // on screen to explain it and nothing to do about it but restart the application, which is how
     // it was reported. `execAttachTicket` below already read it correctly.
-    const exit = await runControlCenter({ lang: host.lang, host, tab, setup: opening, ...(launch ? { code: launch } : {}) })
+    const exit = await runControlCenter({
+      lang: host.lang,
+      host,
+      tab,
+      setup: opening,
+      codeTab: Boolean(codeStart),
+      ...(launch ? { code: launch } : {}),
+    })
     opening = false
     // The launch is a first-mount instruction: a remount after an attach must not restart the wizard or
     // resume the session a second time.

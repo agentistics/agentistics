@@ -193,6 +193,12 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Sessão alterada pela central', message: 'A central executou "{verb}" numa sessão desta máquina.' },
     en: { title: 'Session acted on from the central', message: 'The central performed "{verb}" on a session of this machine.' },
   },
+  // Shown once after the page dropped a stale service-worker bundle and reloaded onto the
+  // server's own version (`bundleVersion.ts`).
+  'app.updated': {
+    pt: { title: 'Agentistics atualizado para v{version}' },
+    en: { title: 'Agentistics updated to v{version}' },
+  },
   'app.update_available': {
     pt: { title: 'Atualização disponível', message: 'A versão {version} do Agentistics está pronta. Toque para instalar.' },
     en: { title: 'Update available', message: 'Agentistics {version} is ready. Tap to install.' },

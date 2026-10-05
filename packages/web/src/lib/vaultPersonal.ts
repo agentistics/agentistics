@@ -12,11 +12,12 @@ export const PERSONAL_KINDS: readonly PersonalKind[] = ['login', 'password', 'ap
 export const KIND_FIELDS: Record<PersonalKind, readonly string[]> = { password: ['password'], login: ['login', 'password'], 'api-key': ['value'], env: ['value'], note: ['value'] }
 
 export interface PersonalMeta {
+  confirmEach?: boolean
   id: string; kind: PersonalKind; name: string; groupId: string | null; tags: string[]; notes: string; url: string
   fields: string[]; createdAt: string; updatedAt: string; version: number; deletedAt: string | null
 }
 export interface PersonalGroup { id: string; name: string; version: number; createdAt: string; updatedAt: string }
-export interface PersonalItemInput { kind: PersonalKind; name: string; groupId?: string | null; tags?: string[]; notes?: string; url?: string; fields?: Record<string, string> }
+export interface PersonalItemInput { confirmEach?: boolean; kind: PersonalKind; name: string; groupId?: string | null; tags?: string[]; notes?: string; url?: string; fields?: Record<string, string> }
 export interface ImportKey { key: string; clash: { id: string; version: number } | null; empty: boolean }
 export type ImportAction = 'import' | 'skip' | 'replace' | 'rename'
 export interface ImportChoice { key: string; action: ImportAction; name?: string }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { idleServers, isServerCommand } from './idle-servers'
+import { dataDirOfEnv, idleServers, isServerCommand, stoppableIdle } from './idle-servers'
 
 describe('isServerCommand', () => {
   it('matches both forms that actually collided', () => {
@@ -51,5 +51,17 @@ describe('idleServers', () => {
     const r = idleServers({ processes: [orphan], listening: [], self: 999 })
     expect(r.idle.map(p => p.pid)).toEqual([3189270])
     expect(r.listener).toBeUndefined()
+  })
+})
+
+describe('stop extra copies — only THIS data dir, never the one serving', () => {
+  it('the data dir is read off the process environment, AGENTISTICS_DIR first', () => {
+    expect(dataDirOfEnv('HOME=/home/u\0PATH=/bin\0')).toBe('/home/u/.agentistics')
+    expect(dataDirOfEnv('HOME=/home/u\0AGENTISTICS_DIR=/tmp/x/\0')).toBe('/tmp/x')
+    expect(dataDirOfEnv('PATH=/bin\0')).toBeNull()
+  })
+  it('another HOME\'s preview, the lock holder and ourselves are never signalled', () => {
+    const dirs: Record<number, string | null> = { 10: '/home/u/.agentistics', 11: '/tmp/preview/.agentistics', 12: '/home/u/.agentistics', 13: null, 14: '/home/u/.agentistics' }
+    expect(stoppableIdle({ idle: [10, 11, 12, 13, 14], dataDirOf: p => dirs[p] ?? null, ours: '/home/u/.agentistics/', lockHolder: 12, self: 14 })).toEqual([10])
   })
 })

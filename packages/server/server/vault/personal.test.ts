@@ -84,9 +84,9 @@ afterAll(async () => { __resetVaultForTests({ dir: join(await mkdtemp(join(tmpdi
 beforeEach(async () => { await fresh() })
 
 describe('gate rows (spec §3)', () => {
-  test('list and create need the code once (5-min read grant); the list carries metadata only', async () => {
+  test('list and create ask nothing more of an OPEN vault (owner 2026-10-04); the list carries metadata only', async () => {
     grant = undefined
-    expect((await http('GET', '/api/vault/personal')).status).toBe(401)
+    expect((await http('GET', '/api/vault/personal')).status).toBe(200)
     const c = await http('POST', '/api/vault/personal', { item: login, code: codeAt() })
     expect(c.status).toBe(200)
     expect(c.json.meta).toMatchObject({ kind: 'login', name: 'Banco Exemplo', fields: ['login', 'password'], version: 1 })
@@ -168,7 +168,7 @@ describe('versions, CAS, trash, tamper, rotation', () => {
     await http('POST', '/api/vault/personal/trash', { id: m.id, expectedVersion: 3 })
     T += 31 * 24 * 60 * 60_000
     grant = undefined
-    expect((await http('GET', '/api/vault/personal', undefined)).status).toBe(401)
+    expect((await http('GET', '/api/vault/personal', undefined)).status).toBe(200)
     const l = await http('GET', `/api/vault/personal`)
     void l
     // a fresh code (the grant expired with the month)
@@ -281,6 +281,50 @@ describe('no value leaves except through reveal', () => {
     // and nothing on disk holds it in the clear
     const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)])
     for (const f of walk(dir)) expect(readFileSync(f).includes(Buffer.from('MARKER')), f).toBe(false)
+  })
+})
+
+describe('"Sempre confirmar" — the per-secret flag (owner, 2026-10-04)', () => {
+  const edit = (m: J, item: J) => http('POST', '/api/vault/personal/edit', { id: m.id, expectedVersion: m.version, item })
+
+  test('default ON: a new secret asks Hello on every reveal, never the code', async () => {
+    await presenceOn()
+    const m = (await http('POST', '/api/vault/personal', { item: login, code: codeAt() })).json.meta
+    expect(m.confirmEach).toBe(true)
+    const g0 = hello.gestures
+    expect((await http('POST', '/api/vault/personal/reveal', { id: m.id, field: 'password' })).json.ok).toBe(true)
+    expect((await http('POST', '/api/vault/personal/reveal', { id: m.id, field: 'password' })).json.ok).toBe(true)
+    expect(hello.gestures - g0).toBe(2)
+    hello.deny = true
+    expect((await http('POST', '/api/vault/personal/reveal', { id: m.id, field: 'password' })).json.ok).toBe(false)
+    hello.deny = false
+  })
+
+  test('turning it OFF is an edit and asks Hello; then reveal and send go without a prompt', async () => {
+    await presenceOn()
+    const m = (await http('POST', '/api/vault/personal', { item: login, code: codeAt() })).json.meta
+    hello.deny = true
+    expect((await edit(m, { ...login, confirmEach: false })).json.ok).toBe(false)
+    hello.deny = false
+    const e = await edit(m, { ...login, confirmEach: false })
+    expect(e.json.ok).toBe(true)
+    expect(e.json.meta.confirmEach).toBe(false)
+    const g0 = hello.gestures
+    expect((await http('POST', '/api/vault/personal/reveal', { id: m.id, field: 'password' })).json.ok).toBe(true)
+    expect((await http('POST', '/api/vault/personal/grants', { sessionId: 'abc123', itemIds: [m.id] })).json.ok).toBe(true)
+    expect(hello.gestures - g0).toBe(0)
+  })
+
+  test('a secret that keeps it ON among the chosen ones makes the whole send ask Hello', async () => {
+    await presenceOn()
+    const a = (await http('POST', '/api/vault/personal', { item: login, code: codeAt() })).json.meta
+    next()
+    const b = (await http('POST', '/api/vault/personal', { item: { ...login, name: 'Outro' }, code: codeAt() })).json.meta
+    const off = await edit(a, { ...login, confirmEach: false })
+    expect(off.json.ok).toBe(true)
+    const g0 = hello.gestures
+    expect((await http('POST', '/api/vault/personal/grants', { sessionId: 'abc123', itemIds: [a.id, b.id] })).json.ok).toBe(true)
+    expect(hello.gestures - g0).toBe(1)
   })
 })
 

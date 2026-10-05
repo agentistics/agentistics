@@ -16,7 +16,7 @@ import type { DashboardFigures } from '../projected-figures'
 import { useCallback, useMemo, useState } from 'react'
 import { useInput } from 'ink'
 import type { AppData, SurfaceHarnessId } from '@agentistics/core'
-import { SURFACE_HARNESS_ORDER } from '@agentistics/core'
+import { NATIVE_HARNESS_ID, surfaceHarnesses } from '@agentistics/core'
 import {
   applyHarnessFilter,
   dashboardRows,
@@ -75,7 +75,8 @@ export function useDashboardNav(opts: {
   const key = (opts.harnesses ?? []).join(',')
   const options = useMemo<(SurfaceHarnessId | null)[]>(() => {
     const present = new Set(key ? (key.split(',') as SurfaceHarnessId[]) : [])
-    return [null, ...SURFACE_HARNESS_ORDER.filter(h => present.has(h))]
+    // `opts.harnesses` comes from the server's gated /api/data: the native entry exists only when it may be seen.
+    return [null, ...surfaceHarnesses(present.has(NATIVE_HARNESS_ID)).filter(h => present.has(h))]
   }, [key])
 
   /**

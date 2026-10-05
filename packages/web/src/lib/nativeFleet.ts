@@ -10,11 +10,14 @@
 import { CREATE_URL, nativeRuntimeFrom, refusalSentence } from './nativeSession'
 import { nativeFleetEntries, type NativeFilingFacts, type NativeListRecord } from './nativeFleetRow'
 import type { FleetRow } from './fleet'
+import { onEngineCapsInvalidated } from './engineCapsBus'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 
 let gate: Promise<boolean> | null = null
 
-/** The engine's answer is fixed for a server's lifetime; asked once per page load. */
+onEngineCapsInvalidated(() => { gate = null })
+
+/** The engine's answer is fixed for a server's lifetime unless the experimental switch moves it; asked once per page load. */
 function nativeOn(): Promise<boolean> {
   gate ??= fetch('/api/engine')
     .then(r => (r.ok ? r.json() : null))
