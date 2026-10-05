@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { acceptPayload, livenessStep, bootWatchdog, classifyLoadError, loadErrorText, partialPollMs, retryDelayMs, startupStripText, SLOW_AFTER_MS, UNREACHABLE_AFTER_MS } from './startupLoad'
+import { acceptPayload, dataUrl, livenessStep, bootWatchdog, classifyLoadError, loadErrorText, partialPollMs, retryDelayMs, startupStripText, SLOW_AFTER_MS, UNREACHABLE_AFTER_MS } from './startupLoad'
 
 describe('classifyLoadError', () => {
   test('a status is a server error and keeps the HTTP detail the auth gates read', () => {
@@ -46,6 +46,9 @@ describe('acceptPayload', () => {
     expect(acceptPayload({}, { partial: true, partialReason: 'snapshot' })).toBe(true)
     expect(acceptPayload({ partial: true }, { partial: true, partialReason: 'quick' })).toBe(true)
     expect(acceptPayload(null, { partial: true, partialReason: 'quick' })).toBe(true)
+    expect(acceptPayload(null, { partial: true, partialReason: 'slim' })).toBe(true)
+    expect(acceptPayload({}, { partial: true, partialReason: 'slim' })).toBe(false)
+    expect(acceptPayload({ partial: true }, { partial: true, partialReason: 'slim' })).toBe(true)
     expect(acceptPayload({ partial: true }, {})).toBe(true)
   })
 })
@@ -76,5 +79,12 @@ describe('livenessStep', () => {
   test('an answer after being down means recover now; an answer while up changes nothing', () => {
     expect(livenessStep(true, true)).toBe('recover')
     expect(livenessStep(false, true)).toBe('none')
+  })
+})
+
+describe('dataUrl', () => {
+  test('the first load asks for the slim payload, later ones for the full build', () => {
+    expect(dataUrl(false)).toBe('/api/data?partial=1&slim=1')
+    expect(dataUrl(true)).toBe('/api/data?partial=1')
   })
 })
