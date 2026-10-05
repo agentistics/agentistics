@@ -425,6 +425,7 @@ const EN: BoardCopy = {
   showAllDescription: 'Show all',
   showLessDescription: 'Show less',
   columns: {
+    id: 'ID',
     status: 'Status',
     type: 'Type',
     priority: 'Priority',
@@ -478,6 +479,7 @@ const EN: BoardCopy = {
     remove: 'Remove',
   },
   subtaskColumns: {
+    id: 'ID',
     progress: 'Progress',
     status: 'Status',
     started: 'Started',
@@ -691,6 +693,7 @@ const PT: BoardCopy = {
   showAllDescription: 'Mostrar tudo',
   showLessDescription: 'Mostrar menos',
   columns: {
+    id: 'ID',
     status: 'Status',
     type: 'Tipo',
     priority: 'Prioridade',
@@ -744,6 +747,7 @@ const PT: BoardCopy = {
     remove: 'Remover',
   },
   subtaskColumns: {
+    id: 'ID',
     progress: 'Progresso',
     status: 'Status',
     started: 'Início',

@@ -42,6 +42,7 @@ import { DEFAULT_PREFS, useBoardPref } from './boardPrefs'
 import { ColResizeHandle } from './ColResizeHandle'
 import { contentWidthOf, fitContentWidth, hasCustomWidths, resolveWidths, tableMinWidth } from './columnWidths'
 import { SortTh } from './SortHeader'
+import { IdCell } from './IdCell'
 import {
   clearTicks, escapeLeavesMode, groupCheck, leaveMode, NO_SELECTION, selectedVisible, setRows,
   toggleMode, toggleRow, type Selection,
@@ -142,6 +143,8 @@ export const COLUMNS: ColumnDef[] = [
   { id: 'blockedBy', numeric: true, width: 92 },
   { id: 'created', width: 104, sort: 'created' },
   { id: 'updated', width: 104, sort: 'updated' },
+  // Optional (not in DEFAULT_COLUMNS): the delivery's own id, monospace, one click copies it.
+  { id: 'id', width: 128 },
 ]
 
 export const DEFAULT_COLUMNS: ColumnId[] =
@@ -329,6 +332,7 @@ function cellFor(
         ? <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
         : <span style={pill('var(--accent-red)')}>{n}</span>
     }
+    case 'id': return <IdCell id={row.task.id} lang={lang} />
     case 'created': return (
       <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>
         {new Date(row.task.createdAt).toLocaleDateString()}
