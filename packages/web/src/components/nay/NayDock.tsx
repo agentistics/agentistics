@@ -8,15 +8,16 @@
  * docs/superpowers/specs/2026-09-29-nay-as-sessions-design.md.
  *
  * Shape: one fixed button (it is ALWAYS the chat button, whatever is detached) opens a panel with
- * two tabs.
+ * three tabs.
  * - **Nay** lists the running Nay sessions and starts new ones.
  * - **Sessões** is the same `SessionsAside` the sidebar mounts, opening what you pick in the panel.
+ * - **Cofre** is the personal vault's quick view (`QuickVaultBody`): search, reveal/copy, new secret.
  *
  * A session can be detached into a window of its own. Picking one opens it WHERE IT IS (`openSession`
  * in `lib/nayDock.ts`), so the same session is never on screen twice.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { ArrowDownToLine, ArrowLeft, Loader2, Minus, MoreVertical, PictureInPicture2, Plus, Power, SquareArrowOutUpRight, X } from 'lucide-react'
 import { isNayCwd, nayPlacementRows, planNayPlacement, sessionIdentityKey, type Filters, type SessionMeta } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
@@ -27,6 +28,7 @@ import { sessionPlanFactor } from '../../lib/costBasis'
 import { versionedAsset } from '../../lib/brand'
 import { sessionCardStyle } from '../../lib/sessionCardStyle'
 import { readAsideGroupPrefs, subscribeAsideGroupPrefs } from '../../lib/sessionsAsidePrefs'
+import { VaultExpiryCard } from '../vault/VaultExpiryCard'
 import { SessionFacts } from '../sessions/SessionFacts'
 import { TabStrip } from '../sessions/formBits'
 import { SessionRowMenu } from '../sessions/SessionRowMenu'
@@ -67,9 +69,11 @@ import { cardStyleOf, clampFabPos, defaultFabPos, dockStyleOf, FAB_SIZE } from '
 import { setNayFabPrefs, useNayFabPrefs } from '../../lib/nayFabPrefsStore'
 import { createPersonalDoc, createSharedPref } from '../../lib/sharedPref'
 
+const QuickVaultBody = lazy(() => import('../../pages/VaultPage').then(m => ({ default: m.QuickVaultBody })))
+
 type Lang = 'pt' | 'en'
-type Tab = 'nay' | 'sessions'
-const DOCK_TABS: readonly Tab[] = ['nay', 'sessions']
+type Tab = 'nay' | 'sessions' | 'vault'
+const DOCK_TABS: readonly Tab[] = ['nay', 'sessions', 'vault']
 
 const ORANGE = 'var(--anthropic-orange)'
 const ORANGE_DIM = 'var(--anthropic-orange-dim)'
@@ -86,7 +90,7 @@ const ARRIVAL_BUDGET_MS = 20_000
 const windowsStore = createPersonalDoc(WINDOWS_KEY, 'nayDockWindows')
 const tabStore = createSharedPref<Tab>({
   key: TAB_KEY, prefKey: 'nayDockTab', fallback: 'nay', adoptLocalWhenAbsent: true,
-  parse: v => (v === 'sessions' || v === 'nay' ? v : null),
+  parse: v => (v === 'sessions' || v === 'nay' || v === 'vault' ? v : null),
 })
 
 /** Every storage touch is guarded: a private window makes the accessor itself throw. */
@@ -519,7 +523,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
               tabs={DOCK_TABS}
               value={tab}
               onPick={id => { setTab(id); setDock(d => ({ ...d, panelSession: null })) }}
-              label={id => (id === 'nay' ? 'Nay' : (pt ? 'Sessões' : 'Sessions'))}
+              label={id => (id === 'nay' ? 'Nay' : id === 'vault' ? (pt ? 'Cofre' : 'Vault') : (pt ? 'Sessões' : 'Sessions'))}
               flush
               ariaLabel={pt ? 'Painel da Nay' : 'Nay panel'}
               {...(isMobile ? { tap: 44 } : {})}
@@ -592,6 +596,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
       {/* The session notifications the button SPEAKS. Mounted whether or not the button itself is
           on screen: on a phone inside a session the button can be hidden, and the card then opens
           from the corner it would have occupied. */}
+      <VaultExpiryCard lang={lang} isMobile={isMobile} zIndex={dockZ + 1} />
       <NayNotifyCard lang={lang} isMobile={isMobile} rows={fleet.rows} finishedTasks={fleet.finishedTasks} act={act} fabStyle={cardStyleOf(fabPrefs)} onReply={open} zIndex={dockZ + 1} />
       {!dock.open && sessionAlerts.length === 0 && renderUpdatePrompt?.('float')}
       {/* The trail/comet outline echoes behind the following dock — drawn by the follow loop. */}
