@@ -877,3 +877,31 @@ describe('the post-mortem conversation link', () => {
     expect(calls).toEqual([])
   })
 })
+
+describe('a process-log link follows the conversation the process moves to', () => {
+  const run = async (managedOver: Record<string, unknown>, seen: string | null) => {
+    const calls: Array<[string, string, string]> = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [backendSession('m1')], frames: { m1: ['x'] }, panePids: { m1: 777 } }),
+      readRegistry: async () => [managed('m1', { harness: 'antigravity', ...managedOver })],
+      scanProcesses: async () => ({ procs: [] }),
+      now: () => NOW,
+      readProcessConversation: async () => seen,
+      recordConversation: async (id, cid, link) => { calls.push([id, cid, link]) },
+    })
+    await p.poll()
+    return calls
+  }
+  it('REPRODUCTION: linked via the log, the process now names ANOTHER conversation -> re-linked', async () => {
+    expect(await run({ conversationId: 'old', conversationLinkVia: 'process-log' }, 'new')).toEqual([['m1', 'new', 'assigned']])
+  })
+  it('the same conversation again writes nothing', async () => {
+    expect(await run({ conversationId: 'old', conversationLinkVia: 'process-log' }, 'old')).toEqual([])
+  })
+  it('a link that was not produced by the log (spawn-assigned) is never replaced', async () => {
+    expect(await run({ conversationId: 'old', conversationLinkVia: 'assigned-id' }, 'new')).toEqual([])
+  })
+  it('no conversation named yet changes nothing', async () => {
+    expect(await run({ conversationId: 'old', conversationLinkVia: 'first-sighting' }, null)).toEqual([])
+  })
+})

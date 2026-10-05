@@ -165,11 +165,25 @@ export async function loadHarnessSessions(
       continue // no such directory: this harness has never run here, which is not an error
     }
 
-    for (const name of names) {
-      // `<pid>.json` only. The directory also holds `<pid>.<hash>.key` files, which are not records.
-      if (!source.matches.test(name)) continue
-      const read = await readOne(join(dir, name))
-      if (!read) continue
+    // The files are READ concurrently (a machine accumulates hundreds — 741 here — because the harness
+    // never deletes a dead process's record, and reading them one after another was ~300 ms of every
+    // `/api/fleet`), and the indexing below still walks them in directory order, so what wins is
+    // unchanged.
+    const wanted = names.filter(n => source.matches.test(n))
+    const prefetched = new Map<string, { read: NonNullable<Awaited<ReturnType<typeof readOne>>>; procStart: Awaited<ReturnType<typeof readProcStart>> | undefined }>()
+    for (let i = 0; i < wanted.length; i += 32) {
+      await Promise.all(wanted.slice(i, i + 32).map(async name => {
+        const r = await readOne(join(dir, name))
+        if (!r) return
+        const pid = r.file.pid
+        prefetched.set(name, { read: r, procStart: canProbe && pid !== undefined ? await readProcStart(pid) : undefined })
+      }))
+    }
+
+    for (const name of wanted) {
+      const pre = prefetched.get(name)
+      if (!pre) continue
+      const read = pre.read
       const { mtimeMs } = read
       // Liveness is stamped here because this is the impure layer and the answer is about NOW.
       // Only asked where `/proc` exists at all, and only for a record that carries the
@@ -180,7 +194,7 @@ export async function loadHarnessSessions(
         ...read.file,
         harness,
         ...(canProbe && pid !== undefined
-          ? { alive: sameProcess(read.file.procStart, await readProcStart(pid)) }
+          ? { alive: sameProcess(read.file.procStart, pre.procStart) }
           : {}),
       }
       if (file.pid !== undefined) out.byPid.set(file.pid, file)

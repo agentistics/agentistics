@@ -256,7 +256,12 @@ async function readSessionChatCore(
     // `conversationId` and NOT `row.conversationId`: a CLOSED row names its conversation in its
     // id and carries no field, and reading only the field refused every finished conversation —
     // the row people open precisely to read one. See `row-conversation.ts`.
-    .resolve({ conversationId, ...(row.cwd ? { cwd: row.cwd } : {}) })
+    .resolve({
+      conversationId,
+      ...(row.cwd ? { cwd: row.cwd } : {}),
+      // What was sent and is not echoed yet: the proof a transcript the conversation moved to is ours.
+      pending: pendingFor(conversationId, []).map(p => p.text),
+    })
     .catch(() => null)
   if (!path) {
     // A LIVE session whose transcript is not on disk YET is an EMPTY conversation, not a missing
