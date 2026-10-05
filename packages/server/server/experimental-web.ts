@@ -66,6 +66,21 @@ export interface ExperimentalSetDeps {
   readPrefs?: () => Promise<{ experimental?: boolean }>
   writePrefs?: (patch: { experimental: boolean }) => Promise<unknown>
   env?: Env
+  /** What to tell the rest of the server once the state moved (default: drop the cached `/api/data`
+   *  and nudge the SSE clients). Injectable so a test never loads the whole data pipeline. */
+  onApplied?: () => void | Promise<void>
+}
+
+/**
+ * The gates read `process.env` per request, but `/api/data` is CACHED and carries native rows decided
+ * at its last build: after OFF the TUI / MCP / VS Code (which trust the server's gating) would keep
+ * showing them, and after ON they would appear only at the next rebuild — while the page says the
+ * change is immediate. Drop the cache and tell every SSE client to refetch.
+ */
+async function refreshAfterSwitch(): Promise<void> {
+  const [{ invalidateCache }, { triggerSseNotification }] = await Promise.all([import('./data'), import('./sse')])
+  invalidateCache()
+  triggerSseNotification()
 }
 
 /** The switch. Persists first, applies second, and answers with what the server now reports. */
@@ -74,5 +89,6 @@ export async function setExperimental(enabled: boolean, deps: ExperimentalSetDep
   const prefs = await (deps.readPrefs ?? readPreferences)()
   if ((prefs.experimental === true) !== enabled) await (deps.writePrefs ?? writePreferences)({ experimental: enabled })
   applyExperimentalLive(enabled, env)
+  await (deps.onApplied ?? refreshAfterSwitch)()
   return buildExperimentalReport(enabled, env)
 }

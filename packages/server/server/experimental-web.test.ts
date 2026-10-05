@@ -22,11 +22,13 @@ describe('buildExperimentalReport', () => {
   })
 })
 
+const onApplied = () => {}
+
 describe('setExperimental — applies live, never restarts', () => {
   test('enable: persists, flips the env every gate reads, and reports on', async () => {
     const env: Env = {}
     const writes: unknown[] = []
-    const r = await setExperimental(true, { env, readPrefs: async () => ({}), writePrefs: async p => { writes.push(p) } })
+    const r = await setExperimental(true, { env, readPrefs: async () => ({}), writePrefs: async p => { writes.push(p) }, onApplied })
     expect(writes).toEqual([{ experimental: true }])
     expect(providerFlagOn(env)).toBe(true)
     expect(nativeExperimentalOn(env)).toBe(true)
@@ -36,9 +38,9 @@ describe('setExperimental — applies live, never restarts', () => {
 
   test('disable: persists, removes only what the preference wrote, reports off', async () => {
     const env: Env = {}
-    await setExperimental(true, { env, readPrefs: async () => ({}), writePrefs: async () => {} })
+    await setExperimental(true, { env, readPrefs: async () => ({}), writePrefs: async () => {}, onApplied })
     const writes: unknown[] = []
-    const r = await setExperimental(false, { env, readPrefs: async () => ({ experimental: true }), writePrefs: async p => { writes.push(p) } })
+    const r = await setExperimental(false, { env, readPrefs: async () => ({ experimental: true }), writePrefs: async p => { writes.push(p) }, onApplied })
     expect(writes).toEqual([{ experimental: false }])
     expect(nativeExperimentalOn(env)).toBe(false)
     expect(env[EXPERIMENTAL_APPLIED_ENV]).toBeUndefined()
@@ -48,7 +50,7 @@ describe('setExperimental — applies live, never restarts', () => {
 
   test('no change is not written again', async () => {
     const writes: unknown[] = []
-    await setExperimental(true, { env: {}, readPrefs: async () => ({ experimental: true }), writePrefs: async p => { writes.push(p) } })
+    await setExperimental(true, { env: {}, readPrefs: async () => ({ experimental: true }), writePrefs: async p => { writes.push(p) }, onApplied })
     expect(writes).toEqual([])
   })
 
@@ -75,5 +77,20 @@ describe('refused where the GET is refused', () => {
     const block = src.slice(i, i + 700)
     expect(block).toContain("req.method === 'GET' || req.method === 'PUT'")
     expect(block).toMatch(/if \(TEAM_CENTRAL\) return new Response\('Not found', \{ status: 404/)
+  })
+})
+
+describe('L1 — the switch refreshes what the server has cached', () => {
+  test('after the state moves, onApplied runs once, after the env changed', async () => {
+    const env: Env = {}
+    const seen: boolean[] = []
+    await setExperimental(true, { env, readPrefs: async () => ({}), writePrefs: async () => {}, onApplied: () => { seen.push(providerFlagOn(env)) } })
+    expect(seen).toEqual([true])
+  })
+  test('the default refresh drops the cached /api/data and notifies SSE clients', () => {
+    const src = readFileSync(join(import.meta.dir, 'experimental-web.ts'), 'utf8')
+    expect(src).toMatch(/invalidateCache\(\)/)
+    expect(src).toMatch(/triggerSseNotification\(\)/)
+    expect(src).toMatch(/deps\.onApplied \?\? refreshAfterSwitch/)
   })
 })
