@@ -49,7 +49,20 @@ try {
   await fetch(`${s.base}/api/data`).then(r => r.arrayBuffer())
   // A live session to measure the chat on, while the others write.
   const cwd = join(home, '..', 'work', 'storm-live'); mkdirSync(cwd, { recursive: true })
+  // The chat is measured over a conversation that EXISTS, as `budget.ts` does (a seeded transcript, and
+  // the chat read until it has loaded). Without it the first round paid for the first-ever read of a
+  // transcript that the fake harness only creates at its first turn — an unresolved path scanned across
+  // every project and retried on a 1 s timer — which is a cold start, not what "send → echo while the
+  // server rebuilds" is a budget on. It took ~4.4 s on a 2-vCPU runner and sat in the p95 of 3 rounds.
+  await Bun.write(join(cwd, '.fake-seed'), files[files.length - 1]!.path)
   const sp = await (await fetch(`${s.base}/api/fleet/new`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ harness: 'claude', cwd, force: true, label: 'storm' }) })).json() as { id?: string }
+  if (sp.id) {
+    for (let i = 0; i < 50; i++) {
+      const r = await fetch(`${s.base}/api/fleet/chat?id=${sp.id}&lang=en`); const t = await r.text()
+      if (t.length > 2000) break
+      await Bun.sleep(200)
+    }
+  }
   await Bun.sleep(3000)
 
   const builds0 = builds().length
