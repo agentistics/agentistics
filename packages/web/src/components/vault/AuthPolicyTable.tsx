@@ -31,11 +31,12 @@ export function AuthPolicyTable({ view, lang, isMobile, gate, btn, onSave, onOpe
   const [draft, setDraft] = useState(initial)
   useEffect(() => { setDraft(initial) }, [initial])
   const changed = authPolicyDiff(rows, draft) > 0
-  const label = (c: ProofChoice) => vt(choiceKey(c), lang).replace(/\{presence\}/g, pres)
+  const presCap = pres.charAt(0).toUpperCase() + pres.slice(1)
+  const label = (c: ProofChoice) => vt(choiceKey(c), lang).replace(/\{presence\}/g, c === 'gesture' ? presCap : pres)
   const unlock = view.unlockPolicy
   const missing = view.authenticator === null || !view.presence
 
-  const cell: React.CSSProperties = { padding: isMobile ? '12px 0' : '10px 12px', borderTop: '1px solid var(--border)', minWidth: 0 }
+  const cell: React.CSSProperties = { padding: isMobile ? '12px 0' : '10px 12px', borderTop: '1px solid var(--border)', minWidth: 0, display: 'flex', alignItems: 'center' }
   const name = (title: string, desc: string, tag?: React.ReactNode) => (
     <div style={{ minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{title}{tag}</div>
@@ -49,7 +50,7 @@ export function AuthPolicyTable({ view, lang, isMobile, gate, btn, onSave, onOpe
   )
   const grid: React.CSSProperties = isMobile
     ? { display: 'grid', gridTemplateColumns: '1fr' }
-    : { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(220px, 280px)', alignItems: 'center' }
+    : { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(240px, 300px)', alignItems: 'stretch' }
 
   return (
     <form data-vault-auth-policy onSubmit={e => { e.preventDefault(); if (changed) onSave(draft) }}>
@@ -63,7 +64,7 @@ export function AuthPolicyTable({ view, lang, isMobile, gate, btn, onSave, onOpe
             <div role="columnheader" style={{ ...cell, borderTop: 'none', fontSize: 11.5, color: 'var(--text-tertiary)', paddingTop: 0 }}>{vt('ap_col_proof', lang)}</div>
           </div>
         )}
-        {unlock && (
+        {unlock && view.presence && (
           <div role="row" style={{ display: 'contents' }} data-kind="open">
             <div role="cell" style={{ ...cell, ...(isMobile ? { paddingBottom: 6 } : null) }}>{name(vt('ap_k_open', lang), vtf('ap_k_open_d', lang, { presence: pres }), criticalTag)}</div>
             <div role="cell" style={{ ...cell, ...(isMobile ? { borderTop: 'none', paddingTop: 0 } : null), display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
@@ -76,11 +77,11 @@ export function AuthPolicyTable({ view, lang, isMobile, gate, btn, onSave, onOpe
           <div role="row" key={r.kind} style={{ display: 'contents' }} data-kind={r.kind}>
             <div role="cell" style={{ ...cell, ...(isMobile ? { paddingBottom: 6 } : null) }}>{name(vt(kindKey(r.kind), lang), vt(`${kindKey(r.kind)}_d` as VaultKey, lang), r.critical ? criticalTag : undefined)}</div>
             <div role="cell" style={{ ...cell, ...(isMobile ? { borderTop: 'none', paddingTop: 0 } : null) }}>
-              <Select
+              <div style={{ width: '100%' }}><Select
                 value={draft[r.kind] ?? r.choice}
                 onChange={v => setDraft(d => ({ ...d, [r.kind]: v as ProofChoice }))}
-                options={r.choices.map(c => ({ value: c, label: c === r.default ? `${label(c)} · ${vt('ap_default_tag', lang)}` : label(c) }))}
-              />
+                options={r.choices.map(c => ({ value: c, label: label(c), ...(c === r.default ? { hint: vt('ap_default_tag', lang) } : {}) }))}
+              /></div>
             </div>
           </div>
         ))}
