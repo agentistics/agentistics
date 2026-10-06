@@ -53,8 +53,15 @@ export interface VaultView {
   localProofKind?: string | null
   /** v2.98.1: kinds this platform has but this build does not offer yet ("coming soon"). */
   presenceSoon?: string[]
+  /** Owner decision 2026-10-06: which proof each kind of action asks. Absent on an older server. */
+  authPolicy?: AuthPolicyView
 }
 export type UnlockMode = 'always' | 'hello-only' | 'daily'
+/** Owner decision 2026-10-06 — the per-action policy. The SERVER decides (and refuses "none" on a critical kind); this only draws it. */
+export type ProofChoice = 'code' | 'gesture' | 'both' | 'none'
+export type ActionKind = 'reveal' | 'use' | 'edit' | 'delete-secret' | 'delete-device' | 'wipe' | 'settings' | 'recovery'
+export interface AuthPolicyRow { kind: ActionKind; choice: ProofChoice; choices: ProofChoice[]; critical: boolean; read: boolean; default: ProofChoice }
+export interface AuthPolicyView { state: 'default' | 'stored' | 'unreadable' | 'locked'; rows: AuthPolicyRow[] }
 export interface UnlockPolicyView { mode: UnlockMode; hours: number; chosen: boolean; codeNextUnlock: boolean; windowEndsAt: string | null }
 export const UNLOCK_MODES: readonly UnlockMode[] = ['daily', 'always', 'hello-only']
 export const UNLOCK_HOURS_MIN = 1
@@ -138,6 +145,8 @@ export const lockNow = (code?: string) => call('POST', '/api/vault/lock', code ?
 /** Phase 1: raises the gesture IN THE SERVICE. `pending-stepup` = a code is owed (§2.2). */
 export const unlockGesture = () => call('POST', '/api/vault/unlock', _unlockFor ? { for: _unlockFor } : {}).then(r => reply<{ state: string }>(r))
 export const unlockCode = (code: string) => call('POST', '/api/vault/unlock/code', { code }).then(r => reply(r))
+/** Which proof each kind of action asks: gated by the CURRENT 'settings' choice (the server's `set-auth-policy` row). */
+export const setAuthPolicy = (policy: Partial<Record<ActionKind, ProofChoice>>, code?: string) => call('POST', '/api/vault/auth-policy', { policy, ...(code ? { code } : {}) }).then(r => reply(r))
 /** Changing what an unlock asks: the code AND the gesture, fresh (the server's `set-unlock-policy` row). */
 export const setUnlockPolicy = (mode: UnlockMode, hours: number, code?: string) => call('POST', '/api/vault/unlock-policy', { mode, hours, ...(code ? { code } : {}) }).then(r => reply(r))
 /** PURE. The hours as typed: whole, 1–24, else null. */
