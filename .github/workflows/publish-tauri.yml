@@ -93,15 +93,14 @@ jobs:
           "
           echo "Desktop build version set to $VERSION"
 
-      - name: Build Windows agentop sidecar
+      - name: Download the Windows agentop sidecar from the release
         shell: bash
         env:
-          AGENTISTICS_ENGINE_DIR: .engine
+          GH_TOKEN: ${{ github.token }}
         run: |
-          bun run build
-          bun run build:assets
           mkdir -p packages/desktop/binaries
-          bun build --compile --minify --target=bun-windows-x64 packages/server/bin/cli.ts --outfile packages/desktop/binaries/agentop.exe
+          gh release download "$TAG" --repo "${{ github.repository }}" --pattern agentop-windows-x64.exe --output packages/desktop/binaries/agentop.exe
+          test -s packages/desktop/binaries/agentop.exe
 
       - name: Copy logo for loading screen
         shell: bash
