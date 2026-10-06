@@ -556,7 +556,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
                   <TaskProgressBar
                     done={view.groupProgress.done} total={view.groupProgress.total}
                     statusCounts={view.groupProgress.counts} statuses={p.statuses} height={3} showPercent={false}
-                    subtaskTitles={groupMembers(t.id, p.subtasks).map(m => m.title)} lang={p.lang}
+                    subtaskTitles={groupMembers(t.id, p.subtasks).filter(m => m.status === 'in_progress' || m.status === 'in_review').map(m => m.title)} lang={p.lang}
                   />
                 )}
                 {/* An ORPHANED member only (its group is gone from this list) — the one case with no

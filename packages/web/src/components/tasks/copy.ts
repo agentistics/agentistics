@@ -631,9 +631,9 @@ const PT: BoardCopy = {
     in_progress: 'Em andamento',
     blocked: 'Bloqueada',
     in_review: 'Em revisão',
-    // "Entregue", not "Concluída": the whole board measures DELIVERY, and the status has to be the
-    // same word as the thing being counted.
-    done: 'Entregue',
+    // "Concluído": the protected status is a completion state, and the status has to be the same
+    // word as the thing being counted.
+    done: 'Concluído',
     abandoned: 'Abandonada',
   },
   markDelivered: 'Marcar entregue',
@@ -901,6 +901,12 @@ export function statusLabel(
   status: string, lang: Lang, statuses?: readonly { id: string; label: string }[] | null,
 ): string {
   const live = statuses?.find(s => s.id === status)
+  // Seeded protected labels are English storage defaults, not a user's rename. Translate those
+  // defaults on a Portuguese board while preserving any explicit rename verbatim.
+  const seeded: Record<string, string> = { todo: 'To do', in_progress: 'In progress', done: 'Done', blocked: 'Blocked', in_review: 'In review', abandoned: 'Abandoned' }
+  const translated: Record<string, string> = { todo: 'A fazer', in_progress: 'Em andamento', done: 'Concluído', blocked: 'Bloqueado', in_review: 'Em revisão', abandoned: 'Abandonado' }
+  if (live && (lang !== 'pt' || live.label !== seeded[status])) return live.label
+  if (lang === 'pt' && translated[status]) return translated[status]
   if (live) return live.label
   return boardCopy(lang).status[status] ?? status
 }

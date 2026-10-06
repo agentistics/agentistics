@@ -15,11 +15,11 @@ describe('progressTooltipModel', () => {
     expect(model.statuses.map(s => s.color)).toEqual(['#111111', '#8b5cf6', '#22c55e'])
   })
 
-  it('builds the localized breakdown and caps group titles at twelve', () => {
+  it('builds the localized breakdown and caps group titles at eight', () => {
     const model = progressTooltipModel(12, 13, 92, { in_review: 12, todo: 1 }, statuses, 'pt', Array.from({ length: 14 }, (_, i) => `M${i}`))
     expect(model.summary).toBe('12 de 13 concluídas (92%)')
-    expect(model.statuses.map(s => `${s.label} ${s.count}`)).toEqual(['To do 1', 'Em revisão 12'])
-    expect(model.titles).toHaveLength(12)
-    expect(model.moreTitles).toBe(2)
+    expect(model.statuses.map(s => `${s.label} ${s.count}`)).toEqual(['A fazer 1', 'Em revisão 12'])
+    expect(model.titles).toHaveLength(8)
+    expect(model.moreTitles).toBe(6)
   })
 })
