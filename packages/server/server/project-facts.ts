@@ -1,5 +1,8 @@
 /** PURE: which project directories need their git facts read, and where those facts land.
- *
+ */
+import { projectPathKey } from '@agentistics/core'
+
+/**
  *  `getGitRemote` and `getProjectGitStats` used to be called from inside `scanProjectDir`, which
  *  exists inside the walk of `~/.claude/projects`. A repository was therefore discovered as a SIDE
  *  EFFECT of Claude having a project directory: sessions from every other harness inherited a remote
@@ -33,22 +36,24 @@ export function planProjectFacts(
   projects: PlanProject[],
   alreadyResolved: ReadonlySet<string> = new Set(),
 ): PathFacts[] {
+  const resolvedKeys = new Set([...alreadyResolved].map(p => projectPathKey(p)))
   const earliest = new Map<string, string>()
   const order: string[] = []
 
   const see = (path: string, start: string) => {
     if (!path) return
-    if (!earliest.has(path)) { earliest.set(path, start); order.push(path); return }
-    const known = earliest.get(path)!
+    const key = projectPathKey(path)
+    if (!earliest.has(key)) { earliest.set(key, start); order.push(key); return }
+    const known = earliest.get(key)!
     // `''` means unknown, and unknown must never win a comparison against a real date.
-    if (start && (!known || start < known)) earliest.set(path, start)
+    if (start && (!known || start < known)) earliest.set(key, start)
   }
 
   for (const s of sessions) see(s.project_path ?? '', s.start_time ?? '')
   for (const p of projects) see(p.path, '')
 
   return order
-    .filter(path => !alreadyResolved.has(path))
+    .filter(path => !resolvedKeys.has(path))
     .map(path => ({ path, earliest: earliest.get(path) ?? '' }))
 }
 
@@ -76,11 +81,11 @@ export function applyProjectFacts(
 ): void {
   for (const s of sessions) {
     if (s.git_remote) continue
-    const f = s.project_path ? facts.get(s.project_path) : undefined
+    const f = s.project_path ? facts.get(projectPathKey(s.project_path)) : undefined
     if (f?.remote) s.git_remote = f.remote
   }
   for (const p of projects) {
-    const f = facts.get(p.path)
+    const f = facts.get(projectPathKey(p.path))
     if (!f) continue
     if (!p.gitRemote && f.remote) p.gitRemote = f.remote
     if (p.git_stats === undefined && f.stats !== undefined) p.git_stats = f.stats
