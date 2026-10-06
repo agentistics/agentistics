@@ -1951,6 +1951,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const out = await createStatus({ label: String(body.label ?? ''), color: String(body.color ?? '') })
       return json(out, out.ok ? 200 : 400)
     }
+    if (url.pathname === '/api/tasks/statuses/reorder' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({})) as { ids?: unknown }
+      const { reorderStatuses } = await import('./sessions/task-web')
+      const ok = Array.isArray(body.ids) && body.ids.every(x => typeof x === 'string') && await reorderStatuses(body.ids)
+      return json({ ok }, ok ? 200 : 400)
+    }
     if (url.pathname.startsWith('/api/tasks/statuses/') && req.method === 'POST') {
       const id = decodeURIComponent(url.pathname.slice('/api/tasks/statuses/'.length))
       const body = await req.json().catch(() => ({})) as { label?: string; color?: string }
@@ -1981,6 +1987,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const { createType } = await import('./sessions/task-web')
       const out = await createType({ label: String(body.label ?? ''), color: String(body.color ?? '') })
       return json(out, out.ok ? 200 : 400)
+    }
+    if (url.pathname === '/api/tasks/types/reorder' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({})) as { ids?: unknown }
+      const { reorderTypes } = await import('./sessions/task-web')
+      const ok = Array.isArray(body.ids) && body.ids.every(x => typeof x === 'string') && await reorderTypes(body.ids)
+      return json({ ok }, ok ? 200 : 400)
     }
     if (url.pathname.startsWith('/api/tasks/types/') && req.method === 'POST') {
       const id = decodeURIComponent(url.pathname.slice('/api/tasks/types/'.length))

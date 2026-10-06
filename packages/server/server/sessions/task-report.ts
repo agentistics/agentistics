@@ -91,7 +91,7 @@ export interface TaskListRow {
      * pressed.
      */
     commentsBySubtask: Record<string, number>
-    subtasks: number; subtasksDone: number; files: number
+    subtasks: number; subtasksDone: number; subtasksInProgress?: number; files: number
     /** Threads on the task — a record, so a count and nothing that implies a pending answer. */
     threads: number
   }
@@ -528,6 +528,7 @@ export function buildTaskList(o: {
         commentsBySubtask: comments.bySubtask,
         subtasks: subs.length,
         subtasksDone: subs.filter(t => t.done).length,
+        subtasksInProgress: subs.filter(t => !t.done && t.status === 'in_progress').length,
         files: (o.files ?? []).filter(f => f.taskId === task.id).length,
         ...threadCounts(task.id, o.threads ?? []),
       },

@@ -178,6 +178,7 @@ function TaskList() {
   // frozen at whatever the first render saw.
   const [storedGroups, setBoardColumns] = useBoardPref('groups')
   const [hideEmpty, setHideEmpty] = useBoardPref('hideEmpty')
+  const [composeSubtaskProgress, setComposeSubtaskProgress] = useBoardPref('composeSubtaskProgress')
   const boardColumns = useMemo(() => storedGroups ?? liveStatusOrder(statuses), [storedGroups, statuses])
   /**
    * The tasks on their way to `blocked`, waiting on the dialog's answer.
@@ -198,9 +199,7 @@ function TaskList() {
   /** The status vocabulary editor (see its own docblock) — closing it reloads the live list, so a
    *  rename, a recolour or a new/deleted status reaches the board immediately without a page
    *  refresh. */
-  const [managingStatuses, setManagingStatuses] = useState(false)
-  /** The task TYPE vocabulary editor — the same modal, over the other list. */
-  const [managingTypes, setManagingTypes] = useState(false)
+  const [managingStatuses, setManagingStatuses] = useState<'status' | 'type' | null>(null)
   /** The task whose session wizard is up — see `onCreateSession`. */
   const [starting, setStarting] = useState<{ taskId: string; title: string } | null>(null)
   /** Details fetched for the rows the table has expanded — subtasks live there. */
@@ -255,6 +254,8 @@ function TaskList() {
             onColumns={setBoardColumns}
             hideEmpty={hideEmpty}
             onHideEmpty={setHideEmpty}
+            composeSubtaskProgress={composeSubtaskProgress}
+            onComposeSubtaskProgress={setComposeSubtaskProgress}
             statuses={statuses}
             counts={Object.fromEntries(liveStatusOrder(statuses).map(st => [
               st, shown.filter(r => r.task.status === st).length,
@@ -353,8 +354,8 @@ function TaskList() {
             <div style={{ display: 'grid', gap: 6 }}>
               <span style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{MB.manage}</span>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button style={{ ...button(true), gap: 6 }} onClick={() => { setSheet(false); setManagingStatuses(true) }}><Settings2 size={14} /> {MB.statuses}</button>
-                <button style={{ ...button(true), gap: 6 }} onClick={() => { setSheet(false); setManagingTypes(true) }}><Settings2 size={14} /> {MB.types}</button>
+                <button style={{ ...button(true), gap: 6 }} onClick={() => { setSheet(false); setManagingStatuses('status') }}><Settings2 size={14} /> {MB.statuses}</button>
+                <button style={{ ...button(true), gap: 6 }} onClick={() => { setSheet(false); setManagingStatuses('type') }}><Settings2 size={14} /> {MB.types}</button>
               </div>
             </div>
             {view === 'board' && shown.length > 0 && arrange}
@@ -385,14 +386,14 @@ function TaskList() {
         </div>
         <button
           style={{ ...button(isMobile), padding: '0 9px' }}
-          onClick={() => setManagingStatuses(true)}
+          onClick={() => setManagingStatuses('status')}
           title="Manage statuses"
         >
           <Settings2 size={14} />
         </button>
         <button
           style={{ ...button(isMobile), padding: '0 9px', gap: 6 }}
-          onClick={() => setManagingTypes(true)}
+          onClick={() => setManagingStatuses('type')}
           title={boardCopy(lang).types.manage}
           aria-label={boardCopy(lang).types.manage}
         >
@@ -406,15 +407,8 @@ function TaskList() {
       {managingStatuses && (
         <ManageStatusesModal
           lang={lang}
-          onClose={() => { setManagingStatuses(false); void reloadStatuses() }}
-        />
-      )}
-
-      {managingTypes && (
-        <ManageStatusesModal
-          kind="type"
-          lang={lang}
-          onClose={() => { setManagingTypes(false); void reloadTypes() }}
+          kind={managingStatuses}
+          onClose={() => { const was = managingStatuses; setManagingStatuses(null); if (was === 'type') void reloadTypes(); else void reloadStatuses() }}
         />
       )}
 
