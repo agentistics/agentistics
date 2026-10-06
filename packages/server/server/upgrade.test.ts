@@ -16,7 +16,9 @@ import {
   describeStaleServer,
   describeUnconfirmedRestart,
   decideVersionVerification,
+  staleUpgradeState,
 } from './upgrade'
+import { darwinRestartPlan } from './server-restart-plan'
 
 // --- platform/arch gate -----------------------------------------------------
 // .github/workflows/release.yml publishes exactly two compiled assets: `agentop`
@@ -41,6 +43,8 @@ test('only the platform/arch pairs the release workflow publishes are self-insta
       'https://github.com/blpsoares/agentistics/releases/download/v2.5.0/agentop.exe',
     ],
   })
+  expect(resolveUpgradeAsset('darwin', 'arm64', '2.5.0')?.asset).toBe('agentop-darwin-arm64')
+  expect(resolveUpgradeAsset('darwin', 'x64', '2.5.0')?.asset).toBe('agentop-darwin-x64')
 })
 
 // The whole bug: the command printed "Latest: v2.5.0" and then downloaded through GitHub's rolling
@@ -69,14 +73,13 @@ test('the tag prefix is added once — the API reports a version, the tag is v<v
 
 test('an unsupported platform is still refused whatever the version', () => {
   // The platform gate runs BEFORE any download; a version can never talk it into one.
-  expect(resolveUpgradeAsset('darwin', 'arm64', '2.5.0')).toBeNull()
+  expect(resolveUpgradeAsset('freebsd', 'arm64', '2.5.0')).toBeNull()
 })
 
 test('unsupported platform/arch combinations are refused', () => {
   expect(resolveUpgradeAsset('linux', 'arm64', '2.5.0')).toBeNull()   // Raspberry Pi / Ampere VM
   expect(resolveUpgradeAsset('linux', 'arm', '2.5.0')).toBeNull()
-  expect(resolveUpgradeAsset('darwin', 'arm64', '2.5.0')).toBeNull()  // no macOS asset at all
-  expect(resolveUpgradeAsset('darwin', 'x64', '2.5.0')).toBeNull()
+  expect(resolveUpgradeAsset('darwin', 'ppc64', '2.5.0')).toBeNull()
   expect(resolveUpgradeAsset('win32', 'arm64', '2.5.0')).toBeNull()
   expect(resolveUpgradeAsset('freebsd', 'x64', '2.5.0')).toBeNull()
 })
@@ -85,6 +88,10 @@ test('unsupported platform/arch combinations are refused', () => {
 
 const elfHead = () => new Uint8Array([0x7f, 0x45, 0x4c, 0x46])
 const peHead = () => new Uint8Array([0x4d, 0x5a, 0x90, 0x00])
+const macho64 = (cputype: number) => new Uint8Array([
+  0xfe, 0xed, 0xfa, 0xcf,
+  (cputype >>> 24) & 0xff, (cputype >>> 16) & 0xff, (cputype >>> 8) & 0xff, cputype & 0xff,
+])
 
 function payload(head: Uint8Array, size: number): Uint8Array {
   const bytes = new Uint8Array(size)
@@ -99,6 +106,22 @@ test('executable magic is checked per platform', () => {
   expect(looksLikeExecutable(elfHead(), 'win32')).toBe(false)
   // "<!DOCTYPE" — a GitHub error/redirect page, the classic 200-with-HTML case.
   expect(looksLikeExecutable(new Uint8Array([0x3c, 0x21, 0x44, 0x4f]), 'linux')).toBe(false)
+  expect(looksLikeExecutable(macho64(0x0100000c), 'darwin')).toBe(true)
+  expect(looksLikeExecutable(macho64(0x0100000c), 'darwin', 'arm64')).toBe(true)
+  expect(looksLikeExecutable(macho64(0x0100000c), 'darwin', 'x64')).toBe(false)
+  expect(looksLikeExecutable(new Uint8Array([0xca, 0xfe, 0xba, 0xbe]), 'darwin')).toBe(true)
+})
+
+test('the macOS restart plan only kickstarts the installed LaunchAgent', () => {
+  expect(darwinRestartPlan({ plistPresent: true })).toEqual({ kind: 'launchd' })
+  expect(darwinRestartPlan({ plistPresent: false })).toEqual({ kind: 'none' })
+})
+
+test('a successful server version clears only the matching upgrade failure', () => {
+  expect(staleUpgradeState({ version: '2.5.0', failedAt: 1, attempts: 2, reason: 'restart' }, null, '2.5.0'))
+    .toEqual({ clearFailure: true, rewriteProgress: false })
+  expect(staleUpgradeState({ version: '2.5.0', failedAt: 1, attempts: 2, reason: 'restart' }, null, '2.5.1'))
+    .toEqual({ clearFailure: false, rewriteProgress: false })
 })
 
 test('verifyDownload rejects truncated payloads and non-executables', () => {
