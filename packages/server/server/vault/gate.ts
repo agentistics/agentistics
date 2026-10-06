@@ -1328,9 +1328,10 @@ export async function setUnlockPolicy(policy: unknown, ctx: GateContext): Promis
 }
 
 /** What the screen states about the policy in force: the mode, the hours, and whether the NEXT unlock owes the code. */
-export function unlockPolicyView(v: VaultJson | null): { mode: UnlockMode; hours: number; chosen: boolean; codeNextUnlock: boolean; windowEndsAt: string | null } {
+export function unlockPolicyView(v: VaultJson | null, hint?: number | null): { mode: UnlockMode; hours: number; chosen: boolean; codeNextUnlock: boolean; windowEndsAt: string | null } {
   const p = effectiveUnlockPolicy(v?.unlockPolicy)
-  const anchor = unlockWindowAnchor()
+  // `hint`: the window as the screen may state it on a cold service (service.ts `unlockWindowHint`).
+  const anchor = unlockWindowAnchor() ?? hint ?? null
   const ends = unlockWindowEndsMs(p, anchor)
   return {
     mode: p.mode, hours: p.hours, chosen: Boolean(v?.unlockPolicy),

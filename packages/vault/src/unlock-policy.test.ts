@@ -5,9 +5,9 @@ import { parseVaultJson, serializeVaultJson, type VaultJson } from './vault'
 const H = 3_600_000
 
 describe('the unlock policy (owner decision 2026-10-02)', () => {
-  it('the default is per day, 12 hours', () => {
-    expect(DEFAULT_UNLOCK_POLICY).toEqual({ mode: 'daily', hours: 12 })
-    expect(effectiveUnlockPolicy(undefined)).toEqual({ mode: 'daily', hours: 12 })
+  it('the default is per day, 24 hours', () => {
+    expect(DEFAULT_UNLOCK_POLICY).toEqual({ mode: 'daily', hours: 24 })
+    expect(effectiveUnlockPolicy(undefined)).toEqual({ mode: 'daily', hours: 24 })
   })
   it('always → the code every time; hello-only → never at unlock', () => {
     for (const anchor of [null, 0]) {
@@ -28,7 +28,7 @@ describe('the unlock policy (owner decision 2026-10-02)', () => {
   it('parses only a real policy: three modes, 1–24 whole hours', () => {
     expect(parseUnlockPolicy({ mode: 'daily', hours: 1 })).toEqual({ mode: 'daily', hours: 1 })
     expect(parseUnlockPolicy({ mode: 'daily', hours: 24 })).toEqual({ mode: 'daily', hours: 24 })
-    expect(parseUnlockPolicy({ mode: 'hello-only' })).toEqual({ mode: 'hello-only', hours: 12 })
+    expect(parseUnlockPolicy({ mode: 'hello-only' })).toEqual({ mode: 'hello-only', hours: 24 })
     for (const bad of [null, {}, { mode: 'never' }, { mode: 'daily', hours: 0 }, { mode: 'daily', hours: 25 }, { mode: 'daily', hours: 2.5 }, { mode: 'daily', hours: '3' }]) {
       expect(parseUnlockPolicy(bad)).toBeNull()
     }

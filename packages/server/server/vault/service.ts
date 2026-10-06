@@ -22,7 +22,7 @@ import { join } from 'node:path'
 import { homedir, platform as osPlatform } from 'node:os'
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { open as openFile, readFile as readFileP, stat as statP, unlink as unlinkP, mkdir as mkdirP } from 'node:fs/promises'
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto'
 import {
   VaultRefusalError, bytesEqual, chooseProtector, checkedList, destroyVault, detectionOrder, initVault, isModeTooOpen,
   dpapiProtector, keychainProtector, libsecretProtector, systemdCredsProtector, passphraseProtector,
@@ -475,15 +475,78 @@ export const PENDING_STEPUP_MS = 120_000
 
 /**
  * The per-day unlock window (owner decision 2026-10-02, unlock-policy.ts): when the last gesture+code
- * unlock happened. MEMORY ONLY — a restart or reboot starts with none — and dropped on recovery, reset,
- * a protector change and any failed code. Holds a timestamp, never key material.
+ * unlock happened. Dropped on recovery, reset, a protector change and any failed code. Holds a
+ * timestamp, never key material.
+ *
+ * VAULT.UX-R2 (owner, 2026-10-05): the window SURVIVES a lock (manual or automatic) AND a service
+ * restart — a reboot used to cost the code again inside the 24 h, which the owner reported as a bug.
+ * So it is also written to `unlock-window.json` in this machine's vault directory, and that file is
+ * MACed with a key derived from the DEK: the anchor is only believed after a presence gesture has
+ * already opened the DEK, so a file somebody wrote by hand (or copied from another vault) proves
+ * nothing and the code is asked as before. It skips the CODE, never the gesture.
  */
 let _unlockWindowAnchorMs: number | null = null
-/** A gesture+code unlock just completed: the window starts now. */
-export function noteCodeUnlock(): void { _unlockWindowAnchorMs = _now() }
+export const UNLOCK_WINDOW_FILE = 'unlock-window.json'
+function unlockWindowPath(): string { return join(vaultDir(), UNLOCK_WINDOW_FILE) }
+/** Serialises the window file's writes and deletes, so a drop can never land after a newer anchor. */
+let _windowIo: Promise<void> = Promise.resolve()
+function windowMac(dek: Uint8Array, kid: string, atMs: number): string {
+  const key = Buffer.from(hkdfSync('sha256', dek, Buffer.from(kid), Buffer.from('agentistics/unlock-window/v1'), 32))
+  return createHmac('sha256', key).update(`${kid}\0${atMs}`).digest('base64url')
+}
+/** A gesture+code unlock just completed: the window starts now (memory, and the MACed file). */
+export function noteCodeUnlock(): void {
+  const at = _now()
+  _unlockWindowAnchorMs = at
+  const o = _opened
+  if (!o) return
+  const body = new TextEncoder().encode(JSON.stringify({ v: 1, kid: o.kid, atMs: at, mac: windowMac(o.dek, o.kid, at) }))
+  _windowIo = _windowIo.then(() => writePrivateAtomic(secretFs(), unlockWindowPath(), body)).then(() => {}, () => {})
+}
 /** Recovery, reset, a protector change, a failed code: the next unlock owes the code again. */
-export function dropUnlockWindow(): void { _unlockWindowAnchorMs = null }
+export function dropUnlockWindow(): void {
+  _unlockWindowAnchorMs = null
+  _windowIo = _windowIo.then(() => secretFs().unlink(unlockWindowPath())).then(() => {}, () => {})
+}
 export function unlockWindowAnchor(): number | null { return _unlockWindowAnchorMs }
+/**
+ * What the SCREEN may say about the window (the countdown), even on a cold service whose memory is empty
+ * and whose DEK is not open: the memory anchor, else the file's timestamp UNVERIFIED (its MAC needs the
+ * DEK). It decides nothing — the gate still verifies the MAC after a gesture — so a hand-edited file can
+ * at worst make a clock wrong, never skip the code.
+ */
+export async function unlockWindowHint(kid: string | null): Promise<number | null> {
+  if (_unlockWindowAnchorMs !== null) return _unlockWindowAnchorMs
+  if (!kid) return null
+  await _windowIo
+  try {
+    const raw = await secretFs().readFile(unlockWindowPath())
+    if (!raw) return null
+    const j = JSON.parse(new TextDecoder().decode(raw)) as { v?: unknown; kid?: unknown; atMs?: unknown }
+    return j.v === 1 && j.kid === kid && typeof j.atMs === 'number' && Number.isFinite(j.atMs) && j.atMs <= _now() ? j.atMs : null
+  } catch { return null }
+}
+/** Resolves once every pending window write/delete has landed (tests, and the restart path). */
+export function unlockWindowSettled(): Promise<void> { return _windowIo }
+/**
+ * A cold service (memory empty) adopts the anchor from disk — ONLY when its MAC verifies under the DEK
+ * a gesture has just opened, it names this vault's kid, and it is not in the future.
+ */
+async function restoreUnlockWindow(dek: Uint8Array, kid: string): Promise<void> {
+  if (_unlockWindowAnchorMs !== null) return
+  await _windowIo
+  let raw: Uint8Array | null = null
+  try { raw = await secretFs().readFile(unlockWindowPath()) } catch { raw = null }
+  if (!raw) return
+  try {
+    const j = JSON.parse(new TextDecoder().decode(raw)) as { v?: unknown; kid?: unknown; atMs?: unknown; mac?: unknown }
+    if (j.v !== 1 || j.kid !== kid || typeof j.atMs !== 'number' || !Number.isFinite(j.atMs) || typeof j.mac !== 'string') return
+    if (j.atMs > _now()) return
+    const want = Buffer.from(windowMac(dek, kid, j.atMs)), got = Buffer.from(j.mac)
+    if (want.length !== got.length || !timingSafeEqual(want, got)) return
+    _unlockWindowAnchorMs = j.atMs
+  } catch { /* unreadable: no window, the code is asked */ }
+}
 
 let _pending: { opened: Opened; expiresMs: number; timer: ReturnType<typeof setTimeout> | null } | null = null
 
@@ -622,6 +685,7 @@ export async function unlockWithGesture(passphrase?: string, fresh?: { session: 
   if (s.state === 'open') {
     const freshToken = mintFresh(hasPresence(s.vault) ? fresh : undefined)
     const withFresh = freshToken ? { fresh: freshToken } : {}
+    if (hasPresence(s.vault) && s.vault.stepup) await restoreUnlockWindow(s.dek, s.kid)
     if (hasPresence(s.vault) && s.vault.stepup && unlockNeedsCode(effectiveUnlockPolicy(s.vault.unlockPolicy), _unlockWindowAnchorMs, _now())) {
       const opened: Opened = { kid: s.kid, dek: s.dek, vault: s.vault, via: s.via }
       const timer = setTimeout(() => abandonPending(), PENDING_STEPUP_MS)
@@ -1024,7 +1088,7 @@ export type VaultAuditType =
   | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
   | 'vault.init' | 'vault.rekey' | 'vault.reset' | 'vault.add-passphrase'
   | 'vault.stepup-failed' | 'vault.stepup-frozen' | 'vault.auto-locked' | 'vault.auto-lock-extended' | 'vault.recovered' | 'vault.recover-failed'
-  | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.presence-held' | 'vault.local-proof' | 'vault.recover-page' | 'vault.set-auto-lock' | 'vault.set-unlock-policy' | 'vault.unlock' | 'vault.personal-create' | 'vault.personal-edit' | 'vault.personal-reveal' | 'vault.personal-trash' | 'vault.personal-restore' | 'vault.personal-restore-version' | 'vault.personal-purge' | 'vault.personal-group' | 'vault.personal-import' | 'vault.personal-passkey-add' | 'vault.personal-passkey-remove' | 'vault.personal-code-reveal' | 'vault.personal-grant' | 'vault.personal-use' | 'vault.bundle-staged' | 'vault.bundle-restored' | 'vault.bundle-built' | 'vault.bundle-wiped'
+  | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.presence-held' | 'vault.local-proof' | 'vault.recover-page' | 'vault.set-auto-lock' | 'vault.set-unlock-policy' | 'vault.unlock' | 'vault.personal-create' | 'vault.personal-edit' | 'vault.personal-reveal' | 'vault.personal-reveal-refused' | 'vault.personal-trash' | 'vault.personal-restore' | 'vault.personal-restore-version' | 'vault.personal-purge' | 'vault.personal-group' | 'vault.personal-import' | 'vault.personal-passkey-add' | 'vault.personal-passkey-remove' | 'vault.personal-code-reveal' | 'vault.personal-grant' | 'vault.personal-use' | 'vault.bundle-staged' | 'vault.bundle-restored' | 'vault.bundle-built' | 'vault.bundle-wiped'
   | 'vault.phone-enrol-request' | 'vault.phone-enrol-approve' | 'vault.phone-enrol-deny' | 'vault.phone-key-add' | 'vault.phone-key-remove' | 'vault.phone-unlock-failed'
 
 /** `device` is the label the owner gave a phone ('opened from Pixel') — never a key, an id or a secret. */
@@ -1100,7 +1164,8 @@ export function __resetVaultForTests(opts: {
 } = {}): void {
   lockVault()
   _soonForTests = opts.presenceSoon ?? []
-  _unlockWindowAnchorMs = null // a fresh service: no per-day window survives a restart
+  _unlockWindowAnchorMs = null // a fresh service process: the window comes back only from its MACed file
+  _windowIo = Promise.resolve()
   _last = null
   _lastAttemptMs = 0
   _lastChecked = []

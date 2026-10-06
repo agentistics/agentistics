@@ -395,3 +395,62 @@ describe('opening /vault while the vault is already unlocked asks nothing', () =
     expect(hello.gestures).toBe(g0)
   })
 })
+
+describe('"Só uso" — write-only secrets (VAULT.UX-R2 item 11, owner-approved 2026-10-05)', () => {
+  const key = { kind: 'api-key', name: 'OpenAI', fields: { value: 'MARKER-sk-use-only' } }
+  const edit = (m: J, item: J) => http('POST', '/api/vault/personal/edit', { id: m.id, expectedVersion: m.version, item })
+
+  test('reveal is refused for every version, before any gesture, and audited as a refused attempt', async () => {
+    await presenceOn()
+    const m = (await http('POST', '/api/vault/personal', { item: { ...key, useOnly: true }, code: codeAt() })).json.meta
+    expect(m.useOnly).toBe(true)
+    const g0 = hello.gestures
+    const r = await http('POST', '/api/vault/personal/reveal', { id: m.id, field: 'value' })
+    expect(r.status).toBe(403)
+    expect(r.json.code).toBe('use-only')
+    expect(String(r.json.sentence)).toContain('use only')
+    expect((await http('POST', '/api/vault/personal/reveal', { id: m.id, field: 'value', version: 1 })).json.code).toBe('use-only')
+    expect(hello.gestures).toBe(g0) // refused before asking anybody to confirm anything
+    expect(BODIES.some(b => b.text.includes('MARKER-sk-use-only'))).toBe(false)
+    expect(readFileSync(join(vaultDir(), 'audit.jsonl'), 'utf8')).toContain('vault.personal-reveal-refused')
+  })
+
+  test('irreversible: an edit sending useOnly:false keeps it sealed; "replace value" works without reading the old one', async () => {
+    await presenceOn()
+    const m = (await http('POST', '/api/vault/personal', { item: { ...key, useOnly: true }, code: codeAt() })).json.meta
+    const e = await edit(m, { ...key, fields: { value: 'MARKER-sk-replaced' }, useOnly: false })
+    expect(e.json.ok).toBe(true)
+    expect(e.json.meta.useOnly).toBe(true)
+    expect(e.json.meta.version).toBe(2)
+    expect((await http('POST', '/api/vault/personal/reveal', { id: m.id, field: 'value' })).json.code).toBe('use-only')
+  })
+
+  test('sealing an existing secret also seals its history: restoring the pre-seal version stays sealed', async () => {
+    await presenceOn()
+    const m = (await http('POST', '/api/vault/personal', { item: key, code: codeAt() })).json.meta
+    expect(m.useOnly).toBeUndefined()
+    expect((await http('POST', '/api/vault/personal/reveal', { id: m.id, field: 'value' })).json.value).toBe('MARKER-sk-use-only')
+    const sealed = (await edit(m, { ...key, fields: {}, useOnly: true })).json.meta
+    expect(sealed.useOnly).toBe(true)
+    const back = await http('POST', '/api/vault/personal/restore-version', { id: m.id, version: 1, expectedVersion: sealed.version, code: codeAt() })
+    expect(back.json.ok).toBe(true)
+    expect(back.json.meta.useOnly).toBe(true)
+    expect((await http('POST', '/api/vault/personal/reveal', { id: m.id, field: 'value' })).json.code).toBe('use-only')
+  })
+
+  test('a session granted the secret still USES the value (env + vault ref) — the seal is on seeing, not on using', async () => {
+    await presenceOn()
+    const m = (await http('POST', '/api/vault/personal', { item: { ...key, useOnly: true }, code: codeAt() })).json.meta
+    expect((await http('POST', '/api/vault/personal/grants', { sessionId: 'abc123', itemIds: [m.id] })).json.ok).toBe(true)
+    const { grantEnv, useRef } = await import('./grants')
+    expect(Object.values(await grantEnv('abc123'))).toContain('MARKER-sk-use-only')
+    expect(await useRef('abc123', 'vault://openai')).toEqual({ ok: true, value: 'MARKER-sk-use-only' })
+  })
+
+  test('absent reads as OFF: an ordinary secret reveals exactly as before; a non-boolean flag is refused', async () => {
+    await presenceOn()
+    const m = (await http('POST', '/api/vault/personal', { item: key, code: codeAt() })).json.meta
+    expect((await http('POST', '/api/vault/personal/reveal', { id: m.id, field: 'value' })).json.ok).toBe(true)
+    expect((await http('POST', '/api/vault/personal', { item: { ...key, useOnly: 'yes' }, code: codeAt() })).json.ok).toBe(false)
+  })
+})
