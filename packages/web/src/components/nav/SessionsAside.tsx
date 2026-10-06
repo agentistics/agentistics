@@ -1413,8 +1413,8 @@ export function SessionsAside({
             </button>
           </div>
           {mutedRows.map(row => {
-            const color = HARNESS_COLORS[row.harness] ?? 'var(--text-tertiary)'
-            const label = HARNESS_LABELS[row.harness] ?? row.harness
+            const color = (HARNESS_COLORS as Record<string, string>)[row.harness] ?? 'var(--text-tertiary)'
+            const label = (HARNESS_LABELS as Record<string, string>)[row.harness] ?? row.harness
             return (
               <div key={sessionIdentityKey(row)} style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 44, padding: '3px 2px' }}>
                 <button
