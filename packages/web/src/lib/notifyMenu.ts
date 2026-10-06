@@ -8,10 +8,21 @@
 
 import { useSyncExternalStore } from 'react'
 import { sessionIdentityKey } from '@agentistics/core'
-import { getMutedKeys, mutedServerSnapshot, subscribeMutedSessions } from './mutedSessions'
+import { getMutedKeys, mutedServerSnapshot, setSessionMuted, subscribeMutedSessions } from './mutedSessions'
+import { pushNotification } from './notifications'
 import type { MenuEntry } from './rowMenu'
 
 export const NOTIFY_TOGGLE = 'toggle-notify'
+export const SESSION_MUTED_CODE = 'session.muted'
+
+export function muteSessionWithToast(key: string, meta: { name?: string; harness?: string }): void {
+  setSessionMuted(key, true)
+  pushNotification({
+    type: 'success',
+    code: SESSION_MUTED_CODE,
+    meta: { muteKey: key, ...meta },
+  })
+}
 
 export function notifyMenuExtras(
   row: { id: string; conversationId?: string | undefined } | undefined,

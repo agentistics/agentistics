@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertCircle, AlertTriangle, Info, CheckCircle2, X } from 'lucide-react'
+import { AlertCircle, AlertTriangle, Info, CheckCircle2, BellOff, X } from 'lucide-react'
 import { useNotifications, dismissNotification, resolveNotification, type AppNotification, type NotificationType } from '../lib/notifications'
 import { getNotificationSettings, NAY_CARD_CODES } from '../lib/sessionNotifications'
 import { UPDATE_NOTICE_CODE } from '../lib/updateToast'
+import { setSessionMuted } from '../lib/mutedSessions'
+import { SESSION_MUTED_CODE } from '../lib/notifyMenu'
 
 // How long a toast lingers before it auto-dismisses (ms). Errors/warnings stay longer
 // so they're readable; info/success clear a bit faster.
@@ -76,7 +78,7 @@ export function NotificationToasts({ lang }: Props) {
       // quiet. Both stay in the bell; only the popup is skipped.
       // The update's bell entry is the RECORD of the popup the Nay window already showed — never a toast too.
       if (n.code === UPDATE_NOTICE_CODE) continue
-      if (n.code && (NAY_CARD_CODES.has(n.code) || (n.code.startsWith('session.') && getNotificationSettings().doNotDisturb))) continue
+      if (n.code && (NAY_CARD_CODES.has(n.code) || (n.code.startsWith('session.') && n.code !== SESSION_MUTED_CODE && getNotificationSettings().doNotDisturb))) continue
       setToasts(t => [n, ...t])
       setTimeout(() => startLeave(n.id), AUTO_MS[n.type])
     }
@@ -100,6 +102,7 @@ export function NotificationToasts({ lang }: Props) {
         // Same opt-in handoff as the bell row (see NotificationBell.tsx): the update check is
         // automatic, the modal it can open is not.
         const isUpdate = n.code === 'app.update_available'
+        const isMuted = n.code === SESSION_MUTED_CODE
         return (
           <div
             key={n.id}
@@ -128,6 +131,26 @@ export function NotificationToasts({ lang }: Props) {
                 </div>
               )}
             </div>
+            {isMuted && (
+              <button
+                onClick={e => {
+                  e.stopPropagation()
+                  const key = String(n.meta?.muteKey ?? '')
+                  if (key) setSessionMuted(key, false)
+                  startLeave(n.id)
+                }}
+                aria-label={lang === 'pt' ? 'Desfazer silenciamento' : 'Undo mute'}
+                title={lang === 'pt' ? 'Desfazer' : 'Undo'}
+                style={{
+                  flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4,
+                  padding: '4px 7px', borderRadius: 6, border: '1px solid var(--border)',
+                  background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer',
+                  font: 'inherit', fontSize: 11,
+                }}
+              >
+                <BellOff size={12} />{lang === 'pt' ? 'Desfazer' : 'Undo'}
+              </button>
+            )}
             <button
               onClick={e => { e.stopPropagation(); startLeave(n.id) }}
               aria-label="dismiss"

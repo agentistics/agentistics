@@ -28,7 +28,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { X } from 'lucide-react'
+import { BellOff, X } from 'lucide-react'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import type { HarnessId } from '@agentistics/core'
 import type { FleetState } from '../../lib/fleet'
@@ -46,6 +46,8 @@ import { dismissAlert, snoozeAlert, useNayAlerts, useNayShock } from '../../lib/
 import { playEnter, playExit, type EnterHandle, playShock, prefersReducedMotion } from '../../lib/nayNotifyAnim'
 import { getNotificationSettings, subscribeNotificationSettings, type NotificationSettings } from '../../lib/sessionNotifications'
 import { NayEndSession } from './NayEndSession'
+import { muteSessionWithToast } from '../../lib/notifyMenu'
+import { sessionIdentityKey } from '../../lib/sessionIdentity'
 
 type Drawer = null | 'approve' | 'snooze' | 'snooze-custom' | 'end'
 
@@ -561,6 +563,20 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
           {!alert.demo && (
             <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); navigate(`/sessions/${encodeURIComponent(alert.sessionId)}`) })}>
               {pt ? 'Ir para a sessão' : 'Go to session'}
+            </button>
+          )}
+          {!alert.demo && (
+            <button
+              type="button"
+              aria-label={pt ? 'Silenciar esta sessão' : 'Mute this session'}
+              title={pt ? 'Silenciar esta sessão' : 'Mute this session'}
+              style={{ ...btn, padding: isMobile ? '8px 10px' : '5px 8px' }}
+              onClick={() => void close(() => {
+                muteSessionWithToast(sessionIdentityKey(row ?? { id: alert.sessionId }), { name: alert.name, harness: alert.harness ?? '' })
+                dismissAlert(alert.key)
+              })}
+            >
+              <BellOff size={14} />
             </button>
           )}
           {alert.kind === 'approval' && !alert.demo && (

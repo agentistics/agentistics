@@ -14,6 +14,7 @@
 
 import { applySummaryFilter, capacityText, summaryCounts, summaryParts, toggleSummaryPart, type SummaryPart } from '../../lib/asideSummary'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { createPortal } from 'react-dom'
 import { blurAfterDrag } from '../../lib/dragCleanup'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -51,6 +52,8 @@ import { reopeningLabel, useReopening, withReopening } from '../../lib/reopening
 import { buildPickRows } from '../../lib/sessionPick'
 import { NOTIFY_TOGGLE, mutedTooltip, notifyMenuExtras, useMutedKeys } from '../../lib/notifyMenu'
 import { toggleSessionMuted } from '../../lib/mutedSessions'
+import { mutedSessionRows } from '../../lib/mutedSessionList'
+import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import { rowMenuEntries, taskMenuEntries, LINK_TASK, UNLINK_TASK, type MenuEntry, type RowVerb } from '../../lib/rowMenu'
 import { SessionRowMenu } from '../sessions/SessionRowMenu'
 import { RenameSessionDialog } from '../sessions/RenameSessionDialog'
@@ -244,6 +247,7 @@ export function SessionsAside({
 }: SessionsAsideProps) {
   const pt = lang === 'pt'
   const mutedKeys = useMutedKeys()
+  const mutedRows = useMemo(() => mutedSessionRows(rows, mutedKeys), [rows, mutedKeys])
   const navigate = useNavigate()
   // 44px is the MOBILE figure. Applying it on desktop turns a compact list into a row of buttons.
   const isMobile = useIsMobile()
@@ -266,6 +270,17 @@ export function SessionsAside({
     navigate(splitHref(openBeside(readSplitRoute(routeSessionId, routeSearch), id), routeSearch))
   }
   const [query, setQuery] = useState('')
+  const [mutedPopover, setMutedPopover] = useState<{ x: number; y: number } | null>(null)
+  const mutedButtonRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (!mutedPopover) return
+    const close = (e: MouseEvent) => {
+      if (mutedButtonRef.current?.contains(e.target as Node)) return
+      setMutedPopover(null)
+    }
+    window.addEventListener('mousedown', close)
+    return () => window.removeEventListener('mousedown', close)
+  }, [mutedPopover])
   /** The summary line's own filter ("3 ativas · 2 trabalhando · 1 precisa de você"). Memory only. */
   const [summaryFilter, setSummaryFilter] = useState<SummaryPart | null>(null)
   const [creating, setCreating] = useState(false)
@@ -1340,7 +1355,95 @@ export function SessionsAside({
             order: groupOrder[groupBy] ?? [], hiddenFolders: hiddenFoldersOf(groupsValue).length,
           })}
         />
+        {mutedRows.length > 0 && (
+          <button
+            ref={mutedButtonRef}
+            type="button"
+            onClick={e => {
+              const r = e.currentTarget.getBoundingClientRect()
+              setMutedPopover(cur => cur ? null : { x: r.right, y: r.bottom + 6 })
+            }}
+            aria-label={pt ? 'Sessões silenciadas' : 'Muted sessions'}
+            title={pt ? 'Sessões silenciadas' : 'Muted sessions'}
+            style={{
+              position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flex: 1, minWidth: 0, minHeight: tap ?? 36, padding: 0, borderRadius: 9,
+              border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)',
+              color: 'var(--text-tertiary)', cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            <BellOff size={14} />
+            <span style={{
+              position: 'absolute', top: 3, right: 3, minWidth: 13, height: 13, padding: '0 3px',
+              borderRadius: 7, background: 'var(--anthropic-orange)', color: '#fff',
+              fontSize: 8.5, fontWeight: 700, lineHeight: 1, display: 'inline-flex',
+              alignItems: 'center', justifyContent: 'center',
+            }}>{mutedRows.length}</span>
+          </button>
+        )}
       </div>
+      {mutedPopover && createPortal(
+        <div
+          role="dialog"
+          aria-label={pt ? 'Sessões silenciadas' : 'Muted sessions'}
+          style={{
+            position: 'fixed', left: Math.max(10, Math.min(mutedPopover.x, window.innerWidth - 300)),
+            top: Math.min(mutedPopover.y, window.innerHeight - 260), width: 'min(290px, calc(100vw - 20px))',
+            maxHeight: 'min(250px, calc(100vh - 20px))', overflowY: 'auto', zIndex: 5000,
+            padding: 8, borderRadius: 10, border: '1px solid var(--border)',
+            background: 'var(--bg-card)', boxShadow: '0 12px 32px rgba(0,0,0,.35)',
+          }}
+          onMouseDown={e => e.stopPropagation()}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '3px 4px 7px' }}>
+            <strong style={{ fontSize: 12, color: 'var(--text-primary)' }}>{pt ? 'Sessões silenciadas' : 'Muted sessions'}</strong>
+            <button
+              type="button"
+              onClick={() => {
+                for (const row of mutedRows) toggleSessionMuted(sessionIdentityKey(row))
+                setMutedPopover(null)
+              }}
+              style={{
+                border: 'none', background: 'transparent', color: 'var(--anthropic-orange)',
+                cursor: 'pointer', font: 'inherit', fontSize: 11, padding: '6px 4px',
+              }}
+            >
+              {pt ? 'Reativar todas' : 'Unmute all'}
+            </button>
+          </div>
+          {mutedRows.map(row => {
+            const color = HARNESS_COLORS[row.harness] ?? 'var(--text-tertiary)'
+            const label = HARNESS_LABELS[row.harness] ?? row.harness
+            return (
+              <div key={sessionIdentityKey(row)} style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 44, padding: '3px 2px' }}>
+                <button
+                  type="button"
+                  onClick={() => openSessionRoute(row.id)}
+                  style={{
+                    flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 7, textAlign: 'left',
+                    border: 'none', background: 'transparent', color: 'var(--text-secondary)',
+                    cursor: 'pointer', font: 'inherit', padding: '7px 4px',
+                  }}
+                >
+                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }}>{row.title}</span>
+                  <span style={{ flexShrink: 0, color, fontSize: 10 }}>{label}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleSessionMuted(sessionIdentityKey(row))}
+                  style={{
+                    flexShrink: 0, minWidth: 44, minHeight: 44, border: 'none', background: 'transparent',
+                    color: 'var(--text-tertiary)', cursor: 'pointer', font: 'inherit', fontSize: 11,
+                  }}
+                >
+                  {pt ? 'Reativar' : 'Unmute'}
+                </button>
+              </div>
+            )
+          })}
+        </div>,
+        document.body,
+      )}
 
       {/*
         * THE GROUP VERBS, under "New session" because that is where starting work lives.
