@@ -1,0 +1,137 @@
+name: Publish npm packages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (e.g. v2.108.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish-mcp:
+    name: Publish @agentistics/mcp to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Set version
+        run: |
+          VERSION="${TAG#v}"
+          bun -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('packages/mcp/package.json', 'utf8'));
+            pkg.version = '$VERSION';
+            fs.writeFileSync('packages/mcp/package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      # Trusted publishing needs a recent npm CLI; the runner's bundled one is older than the
+      # release that added OIDC support.
+      - name: Setup Node + npm
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          # Deliberately NO registry-url: npm mints a credential from the runner's OIDC identity.
+      - name: Upgrade npm to a trusted-publishing build
+        run: npm install -g npm@latest
+
+      - name: Is this version already on npm?
+        id: published
+        run: |
+          VERSION="${TAG#v}"
+          if npm view "@agentistics/mcp@$VERSION" version >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "@agentistics/mcp@$VERSION is already published — nothing to do"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "@agentistics/mcp@$VERSION is new — publishing"
+          fi
+
+      - name: Publish to npm
+        if: steps.published.outputs.exists != 'true'
+        working-directory: packages/mcp
+        run: |
+          npm --version
+          bun run build
+          npm publish --access public
+
+  publish-npm-cli:
+    name: Publish @agentistics/agentop to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Set version
+        run: |
+          VERSION="${TAG#v}"
+          bun -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('packages/agentop/package.json', 'utf8'));
+            pkg.version = '$VERSION';
+            fs.writeFileSync('packages/agentop/package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: Setup Node + npm
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Upgrade npm to a trusted-publishing build
+        run: npm install -g npm@latest
+
+      - name: Is this version already on npm?
+        id: published
+        run: |
+          VERSION="${TAG#v}"
+          if npm view "@agentistics/agentop@$VERSION" version >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "@agentistics/agentop@$VERSION is already published — nothing to do"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "@agentistics/agentop@$VERSION is new — publishing"
+          fi
+
+      - name: Publish to npm
+        if: steps.published.outputs.exists != 'true'
+        working-directory: packages/agentop
+        run: |
+          npm --version
+          npm publish --access public
