@@ -5,7 +5,7 @@ import { spawn as spawnChild } from 'node:child_process'
 import { platform } from 'os'
 import { basename, dirname, join } from 'path'
 import { getVersionInfo, CURRENT_VERSION, compareVersions } from './version.ts'
-import { restartAutostart } from './autostart.ts'
+import { launchdPlistPath, restartAutostart } from './autostart.ts'
 import { AGENTISTICS_DATA_DIR, PORT } from './config.ts'
 import { cliStrings, type CliLang, type CliStrings } from './cli-i18n.ts'
 import { PRIMARY_REPO, fetchFirstOk, releaseAssetUrls } from './release-source.ts'
@@ -91,10 +91,11 @@ const MACHINE_IMAGE = 'agentistics-machine'
 // ---------------------------------------------------------------------------
 // Platform/arch gate
 //
-// The release workflow (.github/workflows/release.yml) compiles exactly TWO assets:
+// The release workflow (.github/workflows/release.yml) publishes these assets:
 //   • `agentop`      — `bun build --compile` on ubuntu-latest        → Linux x86_64 ELF
 //   • `agentop.exe`  — `--target=bun-windows-x64`                    → Windows x86_64 PE
-// There is no macOS asset and no arm64 asset. Downloading `agentop` on an arm64 Linux box
+//   • `agentop-darwin-x64` and `agentop-darwin-arm64` → macOS Mach-O
+// There is no Linux arm64 asset. Downloading `agentop` on an arm64 Linux box
 // (Raspberry Pi, Ampere VM) or on macOS replaces a WORKING binary with an ELF the kernel
 // cannot exec — and the upgrade then restarts the user's services onto it. So the gate is
 // an allowlist of the combinations the workflow actually publishes; everything else is
@@ -123,6 +124,8 @@ export function resolveUpgradeAsset(platformId: string, arch: string, version: s
   const key = `${platformId}/${arch}`
   if (key === 'linux/x64') return releaseAssetTarget(version, 'agentop')
   if (key === 'win32/x64') return releaseAssetTarget(version, 'agentop.exe')
+  if (key === 'darwin/arm64') return releaseAssetTarget(version, 'agentop-darwin-arm64')
+  if (key === 'darwin/x64') return releaseAssetTarget(version, 'agentop-darwin-x64')
   return null
 }
 
@@ -135,8 +138,27 @@ export function resolveUpgradeAsset(platformId: string, arch: string, version: s
 export const MIN_BINARY_BYTES = 4 * 1024 * 1024
 
 /** Pure: does the payload start with the executable magic for this platform? */
-export function looksLikeExecutable(head: Uint8Array, platformId: string): boolean {
+export function looksLikeExecutable(head: Uint8Array, platformId: string, arch?: string): boolean {
   if (platformId === 'win32') return head[0] === 0x4d && head[1] === 0x5a // "MZ"
+  if (platformId === 'darwin') {
+    const magic = head.length >= 4 ? ((head[0]! << 24) | (head[1]! << 16) | (head[2]! << 8) | head[3]!) >>> 0 : 0
+    const thin = magic === 0xfeedfacf || magic === 0xcffaedfe
+    const fat = magic === 0xcafebabe || magic === 0xbebafeca
+    if (!thin && !fat) return false
+    if (!arch || head.length < 8) return true
+    const want = arch === 'arm64' ? 0x0100000c : arch === 'x64' ? 0x01000007 : null
+    if (want === null) return true
+    const read32 = (offset: number, little: boolean) => little
+      ? (head[offset]! | (head[offset + 1]! << 8) | (head[offset + 2]! << 16) | (head[offset + 3]! << 24)) >>> 0
+      : ((head[offset]! << 24) | (head[offset + 1]! << 16) | (head[offset + 2]! << 8) | head[offset + 3]!) >>> 0
+    if (thin) return read32(4, magic === 0xcffaedfe) === want
+    const little = magic === 0xbebafeca
+    const count = read32(4, little)
+    for (let i = 0; i < count && 8 + i * 20 + 4 <= head.length; i++) {
+      if (read32(8 + i * 20, little) === want) return true
+    }
+    return false
+  }
   // 0x7F 'E' 'L' 'F'
   return head[0] === 0x7f && head[1] === 0x45 && head[2] === 0x4c && head[3] === 0x46
 }
@@ -150,7 +172,7 @@ export function verifyDownload(
   if (bytes.length < minBytes) {
     return { ok: false, reason: `downloaded file is only ${bytes.length} bytes (expected > ${minBytes})` }
   }
-  if (!looksLikeExecutable(bytes.subarray(0, 4), platformId)) {
+  if (!looksLikeExecutable(bytes.subarray(0, 4096), platformId, platformId === 'darwin' ? process.arch : undefined)) {
     return { ok: false, reason: `downloaded file is not an executable for ${platformId}` }
   }
   return { ok: true }
@@ -427,7 +449,7 @@ async function handOverUnmanagedServers(pids: readonly number[], newBin: string)
   })
 }
 
-async function restartRunningServices(newBin: string, wantVersion?: string): Promise<RestartOutcome> {
+async function restartRunningServices(newBin: string, wantVersion?: string, backup?: string): Promise<RestartOutcome> {
   let didSomething = false
   let restartedServer = false
   const failures: string[] = []
@@ -436,7 +458,52 @@ async function restartRunningServices(newBin: string, wantVersion?: string): Pro
   //    Decided once, here, from the unit file, the manager's own answer and /proc — never by
   //    killing whatever a pattern matched. `watch` keeps its own unit-only path below.
   let serverPlan: import('./server-restart-plan.ts').ServerRestartPlan = { kind: 'none' }
-  if (platform() === 'linux') {
+  if (platform() === 'darwin') {
+    const { darwinRestartPlan } = await import('./server-restart-plan.ts')
+    const plist = launchdPlistPath('server')
+    const plan = darwinRestartPlan({ plistPresent: existsSync(plist) })
+    if (plan.kind === 'launchd') {
+      const uid = String(process.getuid?.() ?? '')
+      const label = 'com.agentistics.agentop-server'
+      process.stdout.write(`  Restarting the macOS LaunchAgent ${label}…\n`)
+      const kick = await sh(['launchctl', 'kickstart', '-k', `gui/${uid}/${label}`])
+      if (kick.code !== 0) {
+        failures.push(`macOS LaunchAgent: launchctl kickstart failed (${kick.out || `exit ${kick.code}`})`)
+      } else if (wantVersion) {
+        process.stdout.write('    Waiting for /api/health and /api/version to report the new version…\n')
+        const deadline = Date.now() + 180_000
+        let matched = false
+        while (Date.now() < deadline) {
+          try {
+            const health = await fetch(`http://127.0.0.1:${PORT}/api/health`, { signal: AbortSignal.timeout(2_000) })
+            const version = await fetch(`http://127.0.0.1:${PORT}/api/version`, { signal: AbortSignal.timeout(2_000) })
+            const body = version.ok ? await version.json() as { current?: unknown } : null
+            if (health.ok && version.ok && body?.current === wantVersion) { matched = true; break }
+          } catch { /* launchd is still bringing the process back */ }
+          await new Promise(resolve => setTimeout(resolve, 1_000))
+        }
+        if (!matched) failures.push(`macOS LaunchAgent: /api/health and /api/version did not confirm v${wantVersion}`)
+      }
+      didSomething = true
+      restartedServer = true
+      if (failures.length > 0 && backup) {
+        process.stdout.write('  The macOS restart failed; restoring the previous binary and restarting launchd…\n')
+        try {
+          const failed = `${newBin}.failed-${process.pid}`
+          await rename(newBin, failed)
+          await rename(backup, newBin)
+          await chmod(newBin, 0o755)
+          await unlink(failed).catch(() => {})
+          await sh(['xattr', '-d', 'com.apple.quarantine', newBin])
+          const retry = await sh(['launchctl', 'kickstart', '-k', `gui/${uid}/${label}`])
+          if (retry.code !== 0) failures.push(`macOS rollback: launchctl kickstart failed (${retry.out || `exit ${retry.code}`})`)
+          else process.stdout.write('    Restored the backup binary and kickstarted launchd.\n')
+        } catch (err: any) {
+          failures.push(`macOS rollback failed: ${err?.message ?? String(err)}`)
+        }
+      }
+    }
+  } else if (platform() === 'linux') {
     const { planServerRestart, parseIsActive } = await import('./server-restart-plan.ts')
     const { readProcs } = await import('./server-restart-io.ts')
     const { unitPath } = await import('./autostart.ts')
@@ -986,6 +1053,8 @@ async function installDownloadedBinary(
   // 5) Swap in the verified file; anything going wrong here restores the backup.
   try {
     await rename(tmpPath, currentBin)
+    if (process.platform !== 'win32') await chmod(currentBin, 0o755)
+    if (process.platform === 'darwin') await sh(['xattr', '-d', 'com.apple.quarantine', currentBin])
   } catch (err: any) {
     await rename(backup, currentBin).catch(() => {})
     await unlink(tmpPath).catch(() => {})
@@ -1155,7 +1224,7 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
   writeProgress({ stage: 'restarting', version: info.latest })
   let restart: RestartOutcome
   try {
-    restart = await restartRunningServices(currentBin, info.latest)
+    restart = await restartRunningServices(currentBin, info.latest, installed.backup)
   } catch (err: any) {
     restart = { ok: false, failures: [`unexpected error: ${err?.message ?? String(err)}`], restartedServer: false }
   }
