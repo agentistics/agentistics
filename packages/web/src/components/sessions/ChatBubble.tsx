@@ -39,7 +39,7 @@ import { copyText } from '../../lib/clipboard'
 import { bubbleMenuHeight, bubbleMenuTop } from '../../lib/bubbleMenu'
 import { echoStatus } from '../../lib/echoStatus'
 import { messageTime } from '../../lib/messageTime'
-import { attachmentUrl } from '../../lib/attachmentUrl'
+import { attachmentUrl, sessionViewedUrl } from '../../lib/attachmentUrl'
 import { AttachmentLightbox } from './AttachmentLightbox'
 import { HarnessMark } from './HarnessMark'
 
@@ -113,6 +113,8 @@ export interface ChatTurn {
 
 export interface ChatBubbleProps {
   turn: ChatTurn
+  /** Session id for assistant-viewed Codex images, served by the transcript-bound route. */
+  sessionId?: string
   /** What agentop typed into this session's pane, so a `[Image #N]` marker can find its file. */
   attachmentSends?: readonly AttachmentSend[]
   /** What each delivered message carried, for this conversation — see `AttachmentMessage`. */
@@ -336,10 +338,13 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
   )
 }
 
-export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect }: ChatBubbleProps) {
+export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessionId, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect }: ChatBubbleProps) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const mine = turn.role === 'user'
+  const imageUrl = useCallback((path: string) => (
+    !mine && sessionId ? sessionViewedUrl(sessionId, path) : attachmentUrl(path)
+  ), [mine, sessionId])
   /**
    * The stamp under this message. `null` when the transcript carried no time for the turn — the
    * bubble then simply has none, which is the honest answer.
@@ -474,7 +479,11 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
   // A DICTATED message carries a one-line mark for the model (`dictationMark.ts`); the person sees
   // their words and a small microphone instead of the mark.
   const { text: spokenText, dictated } = mine ? stripDictatedMark(turn.text) : { text: turn.text, dictated: false }
-  const { images, text: prose } = splitImageAttachments(stripInjectedBlocks(spokenText))
+  // Only the person's message has composer attachment lines. Scanning assistant prose here turns
+  // example names (including `{uuid}-arquivo.jpg`) and code samples into broken image chips.
+  const { images, text: prose } = mine
+    ? splitImageAttachments(stripInjectedBlocks(spokenText))
+    : { images: [] as string[], text: spokenText }
 
   // And `[Image #4]` — the same question asked of what the HARNESS substituted rather than what the
   // composer typed; without this it ran into the first word of the prose (see `splitImageMarkers`).
@@ -830,7 +839,7 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
         {shownImages.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {shownImages.map((path, i) => (
-              <AttachmentThumb key={path} path={path} onOpen={() => setLightboxIndex(i)} />
+              <AttachmentThumb key={path} path={path} src={imageUrl(path)} onOpen={() => setLightboxIndex(i)} />
             ))}
           </div>
         )}
@@ -966,6 +975,7 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
           lang={lang}
+          srcFor={imageUrl}
         />
       )}
     </div>
@@ -973,7 +983,7 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
 })
 
 /** One attachment, as a small square. Falls back to a plain chip when the image fails to load. */
-function AttachmentThumb({ path, onOpen }: { path: string; onOpen: () => void }) {
+function AttachmentThumb({ path, src, onOpen }: { path: string; src: string; onOpen: () => void }) {
   const [broken, setBroken] = useState(false)
   const name = path.split('/').pop() ?? path
 
@@ -1006,7 +1016,7 @@ function AttachmentThumb({ path, onOpen }: { path: string; onOpen: () => void })
       }}
     >
       <img
-        src={attachmentUrl(path)}
+        src={src}
         alt=""
         onError={() => setBroken(true)}
         style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
