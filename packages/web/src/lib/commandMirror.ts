@@ -21,7 +21,7 @@ import type { CommandToken } from './commandToken'
 import type { MentionToken } from './mentionTokens'
 
 /** How a run is painted. `plain` is the ordinary text the field would have drawn anyway. */
-export type SegmentKind = 'plain' | 'command' | 'mention' | 'quote'
+export type SegmentKind = 'plain' | 'command' | 'mention'
 
 export interface DraftSegment {
   text: string
@@ -60,12 +60,8 @@ export function draftSegments(
   draft: string,
   token: CommandToken | null,
   mentions: readonly MentionToken[] = [],
-  quotes: readonly { start: number; end: number }[] = [],
 ): DraftSegment[] {
   const marks: { start: number; end: number; kind: SegmentKind }[] = []
-  // A QUOTE CARD (`quoteCards.ts`) is a whole marker line; a mention that happens to sit inside its
-  // preview text starts after it and is skipped by the walk below, so a card is never split.
-  for (const q of quotes) marks.push({ start: q.start, end: q.end, kind: 'quote' })
   if (token !== null && token.state === 'found') {
     marks.push({ start: token.start, end: token.end, kind: 'command' })
   }
@@ -95,7 +91,6 @@ export function draftSegments(
 export function needsMirror(
   token: CommandToken | null,
   mentions: readonly MentionToken[] = [],
-  quotes: number = 0,
 ): boolean {
-  return (token !== null && token.state === 'found') || mentions.length > 0 || quotes > 0
+  return (token !== null && token.state === 'found') || mentions.length > 0
 }

@@ -122,6 +122,43 @@ export function quoteFor(target: ReplyTarget): string {
   return target.excerpt ? quoteLines(target.text, Number.POSITIVE_INFINITY) : quoteLines(target.text)
 }
 
+/** Insert a reply as ordinary markdown at the current caret. The textarea remains the only
+ * layout surface: there are no sentinels, cards, or mirrored quote glyphs to drift from it. */
+export function insertReplyQuote(
+  draft: string,
+  caret: number,
+  target: ReplyTarget,
+): { draft: string; caret: number } {
+  const at = Math.max(0, Math.min(caret, draft.length))
+  const quote = quoteFor(target)
+  if (quote === '') return { draft, caret: at }
+  const before = draft.slice(0, at)
+  const after = draft.slice(at)
+  const prefix = before === '' || before.endsWith('\n') ? '' : '\n\n'
+  const suffix = after === '' || after.startsWith('\n') ? '\n\n' : '\n\n'
+  const inserted = `${prefix}${quote}${suffix}`
+  return { draft: before + inserted + after, caret: at + inserted.length }
+}
+
+/** Remove markdown quote prefixes while retaining the selected passage's line breaks. */
+export function unquoteLines(text: string): string {
+  return text.split('\n').map(line => line.startsWith('> ') ? line.slice(2) : line).join('\n').trim()
+}
+
+/** The leading quote block in a sent user message, if it has one. */
+export function leadingQuote(text: string): { quote: string; rest: string } | null {
+  const lines = text.split('\n')
+  let end = 0
+  while (end < lines.length && (lines[end]!.startsWith('> ') || lines[end] === '>')) end++
+  if (end === 0) return null
+  return { quote: unquoteLines(lines.slice(0, end).join('\n')), rest: lines.slice(end).join('\n').replace(/^\n+/, '') }
+}
+
+/** Text written by the person, excluding markdown quote lines. */
+export function stripQuotedLines(text: string): string {
+  return text.split('\n').filter(line => !line.startsWith('> ') && line !== '>').join('\n')
+}
+
 /**
  * Who said it.
  *

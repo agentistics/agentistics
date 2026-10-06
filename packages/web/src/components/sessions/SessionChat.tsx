@@ -74,10 +74,9 @@ import {
   emptyAtServerReason, emptyAtToolReason, filterAtServers, findAtServer, resolveAtToolView,
   type MenuMcpServer, dropEmptyAtTrigger,
 } from '../../lib/atMenu'
-import { addReply, composeReply, markExcerpt, replyAuthor, type ReplyTarget } from '../../lib/replyQuote'
+import { addReply, composeReply, insertReplyQuote, markExcerpt, stripQuotedLines, type ReplyTarget } from '../../lib/replyQuote'
 import {
-  atomicDelete, composeQuoted, insertQuote, nextQuoteId, placeOrphans, quoteLabel, quoteMarker, quoteMarks,
-  locateExcerpt, quotesInOrder, removeQuote, snapCaret, stripQuotes, syncQuotes, QUOTE_CLOSE,
+  composeQuoted, locateExcerpt,
 } from '../../lib/quoteCards'
 import { ROW_FLASH } from '../../lib/noteFocus'
 import { pendingEchoes, sessionIdentityKey } from '@agentistics/core'
@@ -917,22 +916,14 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     })
   }, [scratchId])
 
-  /** What a quote's card says — who, then the first words. See `quoteCards.ts`. */
-  const quoteHarness = (HARNESS_LABELS as Record<string, string>)[session.harness]
-  const labelOf = useCallback(
-    // Shorter on a phone, where a 64-character card wraps to three lines of a five-line field.
-    (t: ReplyTarget) => quoteLabel(t, replyAuthor(t.role, quoteHarness, pt ? 'pt' : 'en'), isMobile ? 24 : 64),
-    [quoteHarness, pt, isMobile],
-  )
-  /**
-   * A draft stored before quotes lived INSIDE it has targets and no cards. They are placed at the
-   * top — where the old strip put them in the message — rather than dropped. Idempotent: once every
-   * target has its card this changes nothing.
-   */
+  // Quotes are ordinary markdown now. Existing vault/attachment chips remain independent of this
+  // text path; no quote label or zero-width marker is painted in the composer.
   useEffect(() => {
-    const out = placeOrphans(draft, replyTo, labelOf)
-    if (out.draft !== draft) { editDraft(out.draft); editReply(out.replies) }
-  }, [draft, replyTo, labelOf, editDraft, editReply])
+    // One-time compatibility for drafts saved by the old marker/card composer.
+    if (!draft.includes('\u2063') || replyTo.length === 0) return
+    const plain = composeQuoted(draft, replyTo)
+    if (plain !== draft) editDraft(plain)
+  }, [draft, replyTo, editDraft])
   /**
    * Files written to THIS MACHINE, whose paths go into the message.
    *
@@ -960,7 +951,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    */
   const composerImages = attached.filter(a => isImagePath(a.path)).map(a => a.path)
   /** The character count under the caret's own field. `null` while it is empty — see `promptCount.ts`. */
-  const countLabel = promptCountLabel(stripQuotes(draft), pt ? 'pt' : 'en')
+  const countLabel = promptCountLabel(stripQuotedLines(draft), pt ? 'pt' : 'en')
   /** …and the index that survives an edit made while the overlay is open. See `openComposerLightbox`. */
   const composerLightboxAt = openComposerLightbox(composerLightbox, composerImages.length)
 
@@ -1378,8 +1369,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * what keeps a session's first command from being painted `missing` before the list has answered.
    */
   const cmdToken = useMemo(() => commandToken(draft, knownCommands(skills)), [draft, skills])
-  /** The quote cards in the draft, in order — the mirror paints each as a card. */
-  const cards = useMemo(() => quoteMarks(draft), [draft])
   /**
    * A `/` typed where a command cannot be — see `slashMisplaced`.
    *
@@ -1438,21 +1427,19 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   quoteState.current.caret = caret
 
   /**
-   * ADD quote cards AT THE CARET — never replacing one already there. Each card goes on its own line
-   * and the caret lands on the line after it, because choosing a passage to answer IS starting to
-   * write the answer. A passage already quoted is not added twice. The conversation is NOT scrolled
-   * to the tail: somebody answering several questions of one long message is still reading it.
+   * ADD plain markdown quote text AT THE CARET. The textarea owns the quote's layout and caret;
+   * there is no overlay or mirror copy to become misaligned after Enter/autogrow.
    */
   const addQuotes = useCallback((targets: readonly ReplyTarget[]) => {
     let { draft: d, replyTo: list } = quoteState.current
     // The TRACKED caret, never the field's own: selecting a passage in the conversation resets the
     // field's selection to 0 (measured in Chrome), which would put every new card at the top.
-    let at = snapCaret(d, Math.min(quoteState.current.caret, d.length))
+    let at = Math.min(quoteState.current.caret, d.length)
     for (const t of targets) {
       if (addReply(list, t).length === list.length) continue
-      const target: ReplyTarget = { ...t, id: nextQuoteId(list) }
+      const target: ReplyTarget = { ...t }
       list = [...list, target]
-      const out = insertQuote(d, at, quoteMarker(target.id!, labelOf(target)))
+      const out = insertReplyQuote(d, at, target)
       d = out.draft
       at = out.caret
     }
@@ -1467,7 +1454,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       node.focus()
       node.setSelectionRange(at, at)
     })
-  }, [editDraft, editReply, labelOf])
+  }, [editDraft, editReply])
 
   /** ONE stable reference for every bubble's reply button — see `ChatBubble`'s memo. */
   const onReplyToTurn = useCallback((t: ChatTurn) => {
@@ -1522,9 +1509,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * (`ROW_FLASH`) the aside's lists use for "the one you asked for", which fades on its own. A
    * passage that is no longer in the loaded window is SAID, never a click that does nothing.
    */
-  const jumpToQuote = useCallback((id: string) => {
-    const target = quoteState.current.replyTo.find(r => r.id === id)
-    const i = target?.key === undefined ? -1 : turns.findIndex(t => turnKeyOf(t) === target.key)
+  const jumpToQuote = useCallback((target: ReplyTarget) => {
+    const i = target.key === undefined ? -1 : turns.findIndex(t => turnKeyOf(t) === target.key)
     // A turn above the rendered window is rendered first, so the jump lands on it.
     if (i >= 0 && i < windowStart(turns.length, shownTurns)) flushSync(() => setShownTurns(shownToInclude(turns.length, i)))
     const el = i >= 0 && turnAnchors[i] ? document.getElementById(turnAnchors[i]!) : null
@@ -1537,7 +1523,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     const body = (el.firstElementChild as HTMLElement | null) ?? el
     // An EXCERPT is also marked word for word, when the browser can (CSS Custom Highlight) and the
     // text can be found on screen; the mark fades out in steps, like the flash around it.
-    const range = target?.excerpt ? excerptRange(body, target.text) : null
+    const range = target.excerpt ? excerptRange(body, target.text) : null
     // The registry is maplike in every browser that has it; this TS lib omits the Map methods.
     const hl = typeof CSS !== 'undefined' ? (CSS.highlights as unknown as Map<string, Highlight> | undefined) : undefined
     if (range && hl && typeof Highlight !== 'undefined') {
@@ -1558,13 +1544,14 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     body.addEventListener('animationend', () => { body.style.animation = '' }, { once: true })
   }, [turns, turnAnchors, pt, shownTurns])
 
-  /** The card's ✕: remove the card, and with it the quote. */
-  const dropQuote = useCallback((id: string) => {
-    const d = removeQuote(quoteState.current.draft, id)
-    editDraft(d)
-    editReply(prev => prev.filter(r => r.id !== id))
-    textareaRef.current?.focus()
-  }, [editDraft, editReply])
+  const onSentQuote = useCallback((quote: string, sentTurn: ChatTurn) => {
+    const needle = quote.replace(/^…|…$/g, '').replace(/\s+/g, ' ').trim()
+    const sentAt = turns.indexOf(sentTurn)
+    const candidates = turns.slice(0, sentAt >= 0 ? sentAt : turns.length)
+      .filter(t => t.role === 'assistant' && t.text.replace(/\s+/g, ' ').includes(needle))
+    const sourceTurn = candidates[candidates.length - 1] ?? turns.find(t => t.role === 'assistant' && t.text.replace(/\s+/g, ' ').includes(needle))
+    if (sourceTurn) jumpToQuote({ role: 'assistant', text: quote, excerpt: true, key: turnKeyOf(sourceTurn) })
+  }, [turns, jumpToQuote])
   // Leaving the conversation leaves the mode: a header still offering to forward messages from a
   // chat that is no longer on screen would forward something the reader cannot see.
   useEffect(() => () => chatSelection.clear(scratchId), [scratchId])
@@ -1989,7 +1976,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     attachments: attached.length,
   })
   /** What the send button could send. The same predicate decides its label, its colour and `stopShown`. */
-  const somethingToSend = hasSomethingToSend({ draft: stripQuotes(draft), attachments: attached.length })
+  const somethingToSend = hasSomethingToSend({ draft: stripQuotedLines(draft), attachments: attached.length })
   const [stopping, setStopping] = useState(false)
   async function stopNow() {
     if (!stopEnabled || stopping) return
@@ -2113,11 +2100,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // A trailing `@server:` is the picker's scaffolding and was never typed — it must not be sent.
     // `#` chips become their lean reference HERE, so the harness never sees a raw `#` — which Claude
     // Code would read as a memory note when it opens the message. See `sessionMention.ts`.
-    // QUOTE CARDS travel IN PLACE: each quote as a `> ` block, followed by what was written after it
-    // (`composeQuoted`). Mentions are expanded in the person's own words only, never in a quote.
-    const text = composeQuoted(draft, replyTo, s => expandSessionMentions(dropEmptyAtTrigger(s), pt)).trim()
+    // Quotes are already ordinary `> ` markdown in the draft. Keep the existing mention expansion
+    // and vault-chip handling on the same send path.
+    const text = expandSessionMentions(dropEmptyAtTrigger(draft), pt).trim()
     // A message that is only quotes, with nothing of the person's own, says nothing.
-    const ownWords = stripQuotes(draft).trim()
+    const ownWords = stripQuotedLines(draft).trim()
     // A message that is ONLY attachments is still a message: the paths are the content.
     // `canPrompt` is checked HERE now rather than only on the field's `disabled`, which no longer
     // follows it — see the note on the textarea. This is where it belonged anyway: the rule is
@@ -2148,7 +2135,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // pointed at, and burying the paths inside a sentence makes them easy to miss.
     // Quote first, then the paths, then what was typed. The quote is trimmed to a few lines: a
     // reply that repeats forty lines back at the session costs it context for no benefit.
-    // The quotes are already IN `text`, each before its own answer — see `composeQuoted`.
+    // The quote blocks are already IN `text`, exactly where the user placed them.
     const quote = ''
     // `composeReply` puts a BLANK LINE between the blocks, and that is not formatting: joined with a
     // single newline, CommonMark's lazy continuation pulls what was typed into the blockquote, and
@@ -2346,6 +2333,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 : {})}
               {...(turnAnchors[i] ? { anchorId: turnAnchors[i]! } : {})}
               {...(t.role === 'user' ? (() => { const grant = vaultGrantMessage(t.text, sessionGrants, pt); return grant ? { vaultGrant: grant } : {} })() : {})}
+              {...(t.role === 'user' ? { onQuoteClick: onSentQuote } : {})}
               {...(canPrompt && selecting === null ? { onReply: onReplyToTurn } : {})}
               {
                 // Forwarding and selecting READ this conversation, so they need nothing from the
@@ -2384,6 +2372,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               anchorId={echoAnchorId(session.id, q.text)}
               awaiting
               awaitingWorking={working}
+              onQuoteClick={onSentQuote}
               {...(q.at !== undefined ? { awaitingSinceMs: Math.max(0, now - q.at) } : {})}
             />
           ))}
@@ -2990,7 +2979,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     The mirror scrolls with the field, is `aria-hidden` (the text is already in the
                     field, and a screen reader must not hear it twice) and takes no pointer events. */}
                 <div style={{ position: 'relative' }}>
-                  {needsMirror(cmdToken, mentions, cards.length) && (
+                  {needsMirror(cmdToken, mentions) && (
                     <div
                       aria-hidden
                       ref={underlayRef}
@@ -3009,49 +2998,10 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         whiteSpace: 'pre-wrap', overflowWrap: 'break-word', color: 'var(--text-primary)',
                       }}
                     >
-                      {draftSegments(draft, cmdToken, mentions, cards).map((seg, i, all) => {
-                        const segAt = all.slice(0, i).reduce((n, x) => n + x.text.length, 0)
+                      {draftSegments(draft, cmdToken, mentions).map((seg, i) => {
                         // A plain run gets a key and nothing else, so it can never disagree with
                         // the textarea's own metrics for the text it is standing in for.
                         if (seg.kind === 'plain') return <span key={i}>{seg.text}</span>
-                        // A QUOTE CARD. Every character of the marker is drawn — the zero-width
-                        // prefix included — so the card still lays out exactly over the field's own
-                        // text; only colour, background and rings are added, never width. It takes
-                        // pointer events (the mirror as a whole does not): the card brings its
-                        // passage into view, and its ✕ removes it.
-                        if (seg.kind === 'quote') {
-                          const card = cards.find(c => c.start === segAt)
-                          const head = card ? card.closeStart - card.start : seg.text.length
-                          const id = card?.id ?? ''
-                          return (
-                            <span
-                              key={i}
-                              className="ag-tap"
-                              role="presentation"
-                              onMouseDown={e => e.preventDefault()}
-                              onClick={() => jumpToQuote(id)}
-                              title={pt ? 'Ir para o trecho na conversa' : 'Go to the passage in the conversation'}
-                              style={{
-                                pointerEvents: 'auto', cursor: 'pointer',
-                                background: 'var(--bg-elevated)', color: 'var(--anthropic-orange)',
-                                borderRadius: 4,
-                                boxShadow: '0 0 0 2px var(--bg-elevated), 0 0 0 3px color-mix(in srgb, var(--anthropic-orange) 45%, transparent)',
-                                boxDecorationBreak: 'clone', WebkitBoxDecorationBreak: 'clone',
-                                ['--ag-tap-grow' as string]: '4px',
-                              }}
-                            >
-                              {seg.text.slice(0, head)}
-                              <span
-                                className="ag-tap-icon"
-                                onMouseDown={e => e.preventDefault()}
-                                onClick={e => { e.stopPropagation(); dropQuote(id) }}
-                                title={pt ? 'Remover esta citação' : 'Remove this quote'}
-                                style={{ pointerEvents: 'auto', cursor: 'pointer', color: 'var(--text-tertiary)', ['--ag-tap-grow' as string]: '14px' }}
-                              >{seg.text.slice(head, head + QUOTE_CLOSE.length)}</span>
-                              {seg.text.slice(head + QUOTE_CLOSE.length)}
-                            </span>
-                          )
-                        }
                         // TWO MARKS, because they are two different things. A command is an ACTION
                         // the message performs and is painted as the button it effectively is; a
                         // mention is a REFERENCE to something on this machine and is marked as a
@@ -3081,9 +3031,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     // label back, a damaged one is dropped, and a quote whose card is gone goes too.
                     const raw = e.target.value
                     const at0 = e.target.selectionStart ?? raw.length
-                    const out = raw.includes('\u2063') || replyTo.length > 0
-                      ? syncQuotes(raw, replyTo, labelOf, at0)
-                      : { draft: raw, replies: replyTo, caret: at0 }
+                    const out = { draft: raw, replies: replyTo, caret: at0 }
                     editDraft(out.draft)
                     if (out.replies.length !== replyTo.length) editReply(out.replies)
                     setCaret(out.caret)
@@ -3113,10 +3061,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     // Copy menu (`selectionCaret.ts`).
                     const from = caretOfSelection(node.selectionStart, node.selectionEnd)
                     if (from === null) return
-                    if (cards.length > 0) {
-                      const to = snapCaret(draft, from, caret)
-                      if (to !== from) { node.setSelectionRange(to, to); setCaret(to); return }
-                    }
                     setCaret(from)
                   }}
                   onFocus={() => setTyping(true)}
@@ -3134,22 +3078,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                   }}
                   onPaste={onPaste}
                   onKeyDown={e => {
-                    // A quote card is ATOMIC: Backspace after it, or Delete before it, removes the
-                    // whole card (and its quote) rather than eating its label one letter at a time.
-                    if ((e.key === 'Backspace' || e.key === 'Delete') && cards.length > 0) {
-                      const node = e.currentTarget
-                      if (node.selectionStart === node.selectionEnd) {
-                        const out = atomicDelete(draft, node.selectionStart ?? 0, e.key)
-                        if (out) {
-                          e.preventDefault()
-                          editDraft(out.draft)
-                          editReply(prev => prev.filter(r => r.id !== out.id))
-                          setCaret(out.caret)
-                          requestAnimationFrame(() => node.setSelectionRange(out.caret, out.caret))
-                          return
-                        }
-                      }
-                    }
                     // THE PICKER OWNS THESE KEYS WHILE IT IS OPEN, and gives them all back the
                     // moment it closes. Enter must not send: the person is choosing a skill, and a
                     // half-typed `/bra` reaching the session is a message nobody wrote.
@@ -3253,7 +3181,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     // the note above the mirror div. `caretColor` is set unconditionally to the same
                     // colour the text would otherwise be, so it never rides on `color` and vanishes
                     // the moment `color` does.
-                    color: needsMirror(cmdToken, mentions, cards.length) ? 'transparent' : 'var(--text-primary)',
+                    color: needsMirror(cmdToken, mentions) ? 'transparent' : 'var(--text-primary)',
                     caretColor: 'var(--anthropic-orange)',
                     fontFamily: 'inherit', fontSize: 13.5,
                     lineHeight: 1.5, maxHeight: maxComposerH, overflowY: 'auto', padding: '6px 6px',
