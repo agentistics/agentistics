@@ -40,6 +40,11 @@ export type ServerRestartPlan =
   /** Nothing is running that this upgrade should restart. */
   | { kind: 'none' }
 
+/** Pure: whether the installed macOS LaunchAgent owns a server we should kickstart. */
+export function darwinRestartPlan(o: { plistPresent: boolean }): { kind: 'launchd' } | { kind: 'none' } {
+  return o.plistPresent ? { kind: 'launchd' } : { kind: 'none' }
+}
+
 const BASENAME = /[^/\\]+$/
 
 /**

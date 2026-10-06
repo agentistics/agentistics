@@ -70,15 +70,9 @@ export function UpgradeOverlay({ lang, isMobile }: { lang: Lang; isMobile: boole
               {flow.message ?? ut(lang, flow.phase === 'failed' ? 'loader.failed_body' : 'loader.timeout_body')}
             </p>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-              {flow.phase === 'failed' ? (
-                <button type="button" onClick={() => { const v = flow.target; dismissFlow(); void startUpgrade(v, lang === 'pt' ? 'pt' : 'en') }} style={primaryBtn}>
-                  <RotateCw size={14} /> {ut(lang, 'loader.retry')}
-                </button>
-              ) : (
-                <button type="button" onClick={() => window.location.reload()} style={primaryBtn}>
-                  <RotateCw size={14} /> {ut(lang, 'loader.reload')}
-                </button>
-              )}
+              <button type="button" onClick={() => { const v = flow.target; dismissFlow(); void startUpgrade(v, lang === 'pt' ? 'pt' : 'en') }} style={primaryBtn}>
+                <RotateCw size={14} /> {ut(lang, 'loader.retry')}
+              </button>
               <button type="button" onClick={dismissFlow} style={ghostBtn}>
                 <X size={14} /> {ut(lang, 'loader.dismiss')}
               </button>

@@ -15,7 +15,7 @@
 
 import { useState } from 'react'
 import { Link2, MoreHorizontal, Pencil, Plus, Trash2, XCircle } from 'lucide-react'
-import { PRIORITY_ORDER, type TaskPriorityId, type TaskStatusDef } from '@agentistics/core'
+import { PRIORITY_ORDER, sortTaskTypes, type TaskPriorityId, type TaskStatusDef } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { Select, ConfirmModal } from '../../pages/settings/primitives'
 import { DatePicker } from '../DatePicker'
@@ -24,7 +24,7 @@ import {
 } from './board'
 import { BlockedDialog } from './BlockedDialog'
 import { boardCopy, statusLabel, type Lang } from './copy'
-import { ChipSelect } from './ChipSelect'
+import { chipStyle, ChipSelect } from './ChipSelect'
 import { DoneNeedsSessionDialog } from './DoneNeedsSessionDialog'
 import { PanelMenu } from './PickerMenu'
 import { StatusChip } from './StatusChip'
@@ -32,19 +32,16 @@ import { DurationCellView } from './SubtaskDurationCell'
 import { rowButtonStyle } from './SubtaskActionsMenu'
 import {
   addLink, deleteTask, editTask, markTask, removeLink, setBlockedBy, useTaskList,
+  useTaskTypes,
   type TaskDetail, type TaskListRow, type TaskRecord, type TaskStatus,
 } from '../../lib/tasks'
+import { durationChipLabel, typeChipLabel } from './taskChipParts'
 
 type Statuses = readonly TaskStatusDef[] | null
 
 /** The look of a header pill — the hero's own, so a popover trigger and a read-only date agree. */
 function pillStyle(tone?: string): React.CSSProperties {
-  return {
-    display: 'inline-flex', alignItems: 'center', gap: 6, height: 24, padding: '0 10px',
-    borderRadius: 999, fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap', fontFamily: 'inherit',
-    color: tone ?? 'var(--text-secondary)', background: 'var(--ag-tint-2)',
-    border: `1px solid ${tone ?? 'var(--border)'}`,
-  }
+  return chipStyle(tone ?? 'var(--text-secondary)', 'var(--ag-tint-2)')
 }
 
 /** Links out — a PR, an issue, a doc. Only http(s) reaches here; the server refuses the rest. */
@@ -202,6 +199,7 @@ export function TaskChips({ id, detail, lang, statuses, reload, onFileSession, c
   const h = copy.header
   const task = detail.task
   const { rows: boardRows } = useTaskList()
+  const { types } = useTaskTypes()
   const [busy, setBusy] = useState(false)
   /** Set while the task is on its way to `blocked` — the reason dialog is ours. */
   const [blocking, setBlocking] = useState(false)
@@ -251,6 +249,18 @@ export function TaskChips({ id, detail, lang, statuses, reload, onFileSession, c
           }))}
           onPick={v => void run(() => editTask(id, { priority: v as TaskPriorityId }))}
         />
+        <ChipSelect
+          value={task.type ?? '__none__'}
+          compact block={false}
+          disabled={busy}
+          options={[
+            { value: '__none__', label: typeChipLabel(undefined, types, h.type, '—'), color: 'var(--text-tertiary)', dim: 'var(--border)' },
+            ...sortTaskTypes(types ?? []).map(t => ({
+              value: t.id, label: typeChipLabel(t.id, types, h.type, '—'), color: t.color, dim: `rgba(${parseInt(t.color.slice(1, 3), 16)}, ${parseInt(t.color.slice(3, 5), 16)}, ${parseInt(t.color.slice(5, 7), 16)}, 0.16)`,
+            })),
+          ]}
+          onPick={v => void run(() => editTask(id, { type: v === '__none__' ? '' : v }))}
+        />
 
         {startedAt && (
           <span title={fmtStamp(startedAt, lang)} style={pillStyle()}>
@@ -268,6 +278,7 @@ export function TaskChips({ id, detail, lang, statuses, reload, onFileSession, c
             max="2100-12-31"
             stuck
             lang={lang}
+            labelStyle={{ textTransform: 'none', letterSpacing: 0, fontSize: 12, fontWeight: 600, opacity: 1 }}
           />
         </span>
         {completedAt && (
@@ -277,10 +288,7 @@ export function TaskChips({ id, detail, lang, statuses, reload, onFileSession, c
         )}
         {((startedAt && completedAt) || (times && times.activeMinutes !== null)) && (
           <span style={pillStyle()} title={copy.duration}>
-            <DurationCellView
-              startedAt={startedAt} deliveredAt={completedAt}
-              activeMinutes={times?.activeMinutes ?? null} lang={lang}
-            />
+            {durationChipLabel(startedAt, completedAt, times?.activeMinutes ?? null, lang)}
           </span>
         )}
 

@@ -91,7 +91,7 @@ export interface TaskListRow {
      * pressed.
      */
     commentsBySubtask: Record<string, number>
-    subtasks: number; subtasksDone: number; subtasksInProgress?: number; files: number
+    subtasks: number; subtasksDone: number; subtasksInProgress?: number; subtasksByStatus?: Record<string, number>; files: number
     /** Threads on the task — a record, so a count and nothing that implies a pending answer. */
     threads: number
   }
@@ -242,11 +242,15 @@ export function rollupSessionsFor(
     // A NATIVE session's numbers are the engine's own snapshot (`task-native.ts`), never a meta.
     if (isNativeRow(r)) return nativeRollupSession(r)
     const meta = r.conversationId ? metas.get(r.conversationId) ?? null : null
+    const credits = meta?.harness === 'copilot' ? meta.copilot_credits : undefined
     return {
       rowId: r.id,
       provenance: r.conversationId ? (r.conversationLink ?? 'assigned') : 'none',
       meta,
-      costUSD: meta ? costOf(meta) : null,
+      // Copilot reports account credits, not a USD bill. Keep them in the rollup's dedicated
+      // currency so a task mixing Copilot with token-priced harnesses renders both honestly.
+      costUSD: meta && !credits ? costOf(meta) : null,
+      ...(credits ? { credits } : {}),
     } satisfies RollupSession
   })
 }
@@ -432,7 +436,7 @@ export function subtaskViews(
         ...(task.deliveredAt ? { deliveredAt: task.deliveredAt } : {}),
       }),
       ...(isGroupSubtask(s)
-        ? { groupProgress: groupProgress((membersByGroup.get(s.id) ?? []).map(m => m.done)) }
+        ? { groupProgress: groupProgress((membersByGroup.get(s.id) ?? []).map(m => m.status)) }
         : {}),
       times: isGroupSubtask(s) ? groupTimes(s, membersByGroup.get(s.id) ?? [], spansOfRows(mineRows, metas)) : pieceTimes({
         spans: spansOfRows(mineRows, metas), done: s.done,
@@ -529,6 +533,7 @@ export function buildTaskList(o: {
         subtasks: subs.length,
         subtasksDone: subs.filter(t => t.done).length,
         subtasksInProgress: subs.filter(t => !t.done && t.status === 'in_progress').length,
+        subtasksByStatus: Object.fromEntries(subs.reduce((m, s) => m.set(s.status, (m.get(s.status) ?? 0) + 1), new Map<string, number>())),
         files: (o.files ?? []).filter(f => f.taskId === task.id).length,
         ...threadCounts(task.id, o.threads ?? []),
       },

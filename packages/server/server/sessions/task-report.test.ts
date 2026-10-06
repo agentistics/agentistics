@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'bun:test'
 import type { SessionMeta } from '@agentistics/core'
 import {
-  buildTaskDetail, buildTaskList, groupVisibility, reposOfRows, subtaskViews,
+  buildTaskDetail, buildTaskList, groupVisibility, reposOfRows, rollupSessionsFor, subtaskViews,
 } from './task-report'
 import type { Subtask, Task } from './task-model'
 import type { ManagedSession } from './types'
@@ -124,6 +124,16 @@ describe('rollupSessionsFor', () => {
     expect(out).toHaveLength(3)
     // The two unlinked ones contribute nothing, which is what `sessionsLinked` is for.
     expect(out.filter(s => s.meta !== null)).toHaveLength(1)
+  })
+
+  it('turns Copilot premium requests into the task credits rollup', () => {
+    const meta = meta2({
+      harness: 'copilot',
+      model: 'gpt-5.6-luna',
+      copilot_credits: { nanoAiu: 808713000, premiumRequests: 2 },
+    })
+    const out = rollupSessionsFor([row({ conversationId: 'c1', harness: 'copilot' })], metasOf(meta), () => 99)
+    expect(out[0]).toMatchObject({ costUSD: null, credits: { nanoAiu: 808713000, premiumRequests: 2 } })
   })
 
   it('keeps distinct conversations apart', async () => {
@@ -486,14 +496,14 @@ describe('subtaskViews — the three shapes, no session counted twice', () => {
       const group = views.find(v => v.id === 'g1')!
       const loose = views.find(v => v.id === 's1')!
 
-      expect(group.groupProgress).toEqual({ done: 1, total: 3, percent: 33, complete: false })
+      expect(group.groupProgress).toMatchObject({ done: 1, total: 3, counts: { done: 1, todo: 2 }, percent: 33, complete: false })
       expect(loose.groupProgress).toBeUndefined()
     })
 
     it('a group with no members yet draws no progress bar — "nobody joined it" is not 0%', () => {
       const subs = [subtask({ id: 'g1', isGroup: true })]
       const views = subtaskViews(task(), subs, [], metasAll, costOf)
-      expect(views[0]!.groupProgress).toEqual({ done: 0, total: 0, percent: null, complete: false })
+      expect(views[0]!.groupProgress).toMatchObject({ done: 0, total: 0, counts: {}, percent: null, complete: false })
     })
   })
 

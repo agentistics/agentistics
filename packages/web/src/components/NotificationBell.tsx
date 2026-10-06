@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, AlertCircle, AlertTriangle, Info, CheckCircle2, Trash2, X } from 'lucide-react'
+import { Bell, BellOff, AlertCircle, AlertTriangle, Info, CheckCircle2, Trash2, X } from 'lucide-react'
 import { useNotifications, markAllRead, clearNotifications, dismissNotification, resolveNotification, notificationLink, type NotificationType } from '../lib/notifications'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { requestIdleReview } from '../lib/idleReviewRequest'
+import { muteSessionWithToast, SESSION_MUTED_CODE } from '../lib/notifyMenu'
 
 const ICON: Record<NotificationType, { color: string; Icon: typeof AlertCircle }> = {
   error:   { color: '#ef4444', Icon: AlertCircle },
@@ -178,6 +179,29 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) 
                     <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>
                       {relTime(n.ts, pt)}
                     </span>
+                    {n.code?.startsWith('session.') && n.code !== SESSION_MUTED_CODE && (
+                      <button className="ag-tap-icon"
+                        onClick={e => {
+                          e.stopPropagation()
+                          const key = String(n.meta?.muteKey ?? n.meta?.sessionId ?? '')
+                          if (!key) return
+                          muteSessionWithToast(key, {
+                            name: String(n.meta?.name ?? ''),
+                            harness: String(n.meta?.harness ?? ''),
+                          })
+                        }}
+                        title={pt ? 'Silenciar esta sessão' : 'Mute this session'}
+                        aria-label={pt ? 'Silenciar esta sessão' : 'Mute this session'}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          width: 22, height: 22, marginRight: isMobile ? -10 : 0,
+                          padding: 0, borderRadius: 6, border: 'none', background: 'transparent',
+                          color: 'var(--text-tertiary)', cursor: 'pointer',
+                        }}
+                      >
+                        <BellOff size={13} />
+                      </button>
+                    )}
                     {/* Per-item delete. Always visible, never hover-only: the bell is rendered on
                         mobile too, where hover does not exist, and the hit area is a full 44px
                         there (the icon stays small — only the touch target grows). */}

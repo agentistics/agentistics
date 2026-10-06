@@ -55,6 +55,8 @@ import type { HarnessId } from '@agentistics/core'
 import { canonicalTool } from '../harness-activity'
 import type { ChatTurn } from './chat-turn'
 import { commandSummary } from './shell-writes'
+import { existsSync } from 'node:fs'
+import { isAbsolute, resolve } from 'node:path'
 
 interface CodexLine {
   timestamp?: unknown
@@ -116,6 +118,27 @@ function messageText(payload: Record<string, unknown>): string {
     .map(part => (typeof part.text === 'string' ? part.text : ''))
     .join('')
     .trim()
+}
+
+/** Real local images carried by a Codex user message, not prose that names an image. */
+function localImagePaths(payload: Record<string, unknown>, cwd?: string): string[] {
+  if (!Array.isArray(payload.content)) return []
+  return (payload.content as Record<string, unknown>[])
+    .filter(part => part.type === 'local_image' && typeof part.path === 'string')
+    .map(part => String(part.path))
+    .map(path => isAbsolute(path) ? path : cwd ? resolve(cwd, path) : path)
+    .filter(path => existsSync(path))
+}
+
+/** The real path behind a Codex `view_image` call (its result carries only base64 input_image). */
+function viewedImagePaths(tools: readonly Tool[], cwd?: string): string[] {
+  return tools
+    .filter(tool => tool.name === 'view_image' && tool.detail && !tool.detail.endsWith('…'))
+    .map(tool => {
+      const path = tool.detail!
+      return isAbsolute(path) ? path : cwd ? resolve(cwd, path) : path
+    })
+    .filter(path => existsSync(path))
 }
 
 /**
@@ -211,6 +234,7 @@ export function parseCodexChat(
   lines: string[],
   harness: HarnessId = 'codex',
   max = 400,
+  cwd?: string,
 ): ChatTurn[] {
   const turns: ChatTurn[] = []
   /** Tool calls seen since the assistant message they belong to, in FILE order. */
@@ -264,6 +288,7 @@ export function parseCodexChat(
     if (kind === 'message') {
       const role = typeof payload.role === 'string' ? payload.role : ''
       const text = messageText(payload)
+      const paths = role === 'user' ? localImagePaths(payload, cwd) : []
       if (role === 'assistant') {
         newest = false
         if (text === '' && pending.length === 0) continue
@@ -271,6 +296,8 @@ export function parseCodexChat(
           role: 'assistant',
           text,
           ...(pending.length > 0 ? { tools: pending } : {}),
+          ...(viewedImagePaths(pending, cwd).length > 0
+            ? { imagePaths: viewedImagePaths(pending, cwd) } : {}),
           ...(at ? { at } : {}),
           ...(text === '' && pending.length > 0 && newestBatch ? { pending: true } : {}),
         })
@@ -281,9 +308,12 @@ export function parseCodexChat(
       }
       flushTools()
       newest = false
-      if (text === '') continue
+      if (text === '' && paths.length === 0) continue
       const turn = userTurn(role, text)
-      if (turn) turns.push(at ? { ...turn, at } : turn)
+      if (turn) {
+        const withImages = paths.length > 0 ? { ...turn, imagePaths: paths } : turn
+        turns.push(at ? { ...withImages, at } : withImages)
+      }
       continue
     }
 

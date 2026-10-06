@@ -200,6 +200,7 @@ export interface CliStrings {
   sessPrompted: (id: string) => string
   /** Refused: the session is sitting on a dialog, so typed text would answer the menu. */
   sessPromptBlocked: string
+  sessCodexBlocked: string
   /** Refused: nothing is running there to type into. */
   sessNotRunning: string
   /** Refused: nothing was typed. */
@@ -672,6 +673,7 @@ const EN: CliStrings = {
   sessPrompted: (id: string) => `sent to ${id}.`,
   sessPromptBlocked:
     'that session has a question open, so typed text would be answering its menu. Approve it, or attach and answer it there.',
+  sessCodexBlocked: 'Codex is waiting for a response on screen.',
   sessNotRunning: 'nothing is running in that session to type into.',
   sessPromptEmpty: 'nothing to send.',
   sessSendFailed: (id: string) => `${id} did not take the keystroke — it may have just ended.`,
@@ -1118,6 +1120,7 @@ const PT: CliStrings = {
   sessPrompted: (id: string) => `enviado para ${id}.`,
   sessPromptBlocked:
     'essa sessão está com uma pergunta aberta, então o texto digitado responderia o menu dela. Aprove, ou anexe e responda lá.',
+  sessCodexBlocked: 'Codex está esperando uma resposta na tela.',
   sessNotRunning: 'não há nada rodando nessa sessão para digitar.',
   sessPromptEmpty: 'nada para enviar.',
   sessSendFailed: (id: string) => `${id} não aceitou a tecla — pode ter acabado de encerrar.`,

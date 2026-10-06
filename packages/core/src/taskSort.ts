@@ -77,7 +77,7 @@ export interface SortableRow {
     rounds: number | null
     sessionsUsed: number
   }
-  counts?: { comments: number; subtasks: number; subtasksDone: number; subtasksInProgress?: number; files: number }
+  counts?: { comments: number; subtasks: number; subtasksDone: number; subtasksInProgress?: number; subtasksByStatus?: Record<string, number>; files: number }
   harnesses?: string[]
 }
 

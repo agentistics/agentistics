@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { Outlet, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { version } from '../../../package.json'
@@ -140,6 +140,7 @@ import { NayUpdateCard, type UpdateCardPlacement } from './components/nay/NayUpd
 import { UpgradeOverlay } from './components/UpgradeOverlay'
 import { UpdateFinale } from './components/UpdateFinale'
 import { bootWatchdog, fetchWithTimeout, loadErrorText, SMALL_TIMEOUT_MS, startupStripText, type BootVerdict, type LoadError } from './lib/startupLoad'
+import { shouldReleasePreboot } from './lib/prebootHandoff'
 
 /**
  * What the SESSIONS filter bar may filter by — narrower than the dashboard's on purpose: a fleet
@@ -321,9 +322,10 @@ function LoadingScreen({ lang, loadProgress }: { lang: string; loadProgress: Loa
       `}</style>
 
       {/* D1 loader */}
-      <div style={{ animation: 'loadFadeUp 0.35s ease-out both' }}>
+      <div style={{ position: 'fixed', left: '50%', top: 'calc(50% - 44px)', transform: 'translateX(-50%)', animation: 'loadFadeUp 0.35s ease-out both' }}>
         <AgentisticsLoader size={56} label={lang === 'pt' ? 'Carregando' : 'Loading'} />
       </div>
+      <div aria-hidden="true" style={{ width: 56, height: 56, flexShrink: 0 }} />
 
       {/* Title + subtitle */}
       <div style={{ textAlign: 'center', animation: 'loadFadeUp 0.35s ease-out 0.08s both' }}>
@@ -1565,6 +1567,16 @@ export function writeStudioSeen(storage: Pick<StorageLike, 'setItem'>): void {
 }
 
 export default function AppLayout() {
+  // The HTML shell and React both paint the same 56px Agentistics mark. Remove the HTML copy
+  // after React has committed and the browser has had one frame to paint its replacement.
+  useLayoutEffect(() => {
+    const preboot = document.getElementById('ag-preboot')
+    if (!preboot) return
+    const frame = window.requestAnimationFrame(() => {
+      if (shouldReleasePreboot({ reactCommitted: true, firstPainted: true })) preboot.classList.add('ag-preboot-ready')
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [])
   const location = useLocation()
   const navigate = useNavigate()
   // Reset scroll to the top on every route change — otherwise navigating away while scrolled to the

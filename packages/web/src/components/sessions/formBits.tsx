@@ -54,7 +54,7 @@ export function Muted({ text }: { text: string }) {
  * enough — this is the same lesson CLAUDE.md already states for the flex/grid item default: it must
  * be overridden at EVERY level of the ancestor chain, not only the deepest one.
  */
-export function TabStrip<T extends string>({ tabs, value, onPick, label, icon, count, tap, flush, ariaLabel }: {
+export function TabStrip<T extends string>({ tabs, value, onPick, label, icon, count, tap, flush, ariaLabel, variant = 'segmented' }: {
   tabs: readonly T[]
   /** The selected tab, or null when none is (a surface showing something the tabs do not name). */
   value: T | null
@@ -69,7 +69,45 @@ export function TabStrip<T extends string>({ tabs, value, onPick, label, icon, c
   /** Drop the strip's own bottom margin, for a strip that sits inside a header row. */
   flush?: boolean
   ariaLabel?: string
+  /**
+   * `underline` — a page's own areas (the `/vault` page, 2026-10-06): no pill behind the tabs, a hairline
+   * under the whole strip, and the selected tab in orange over an orange bar (the Nay dock's tabs). The
+   * strip scrolls sideways on a narrow screen rather than squeezing a label to an ellipsis.
+   */
+  variant?: 'segmented' | 'underline'
 }) {
+  if (variant === 'underline') {
+    return (
+      <div role="tablist" aria-label={ariaLabel} style={{
+        display: 'flex', gap: 22, marginBottom: flush ? 0 : 18, minWidth: 0, overflowX: 'auto',
+        borderBottom: '1px solid var(--border)', scrollbarWidth: 'none',
+      }}>
+        {tabs.map(id => {
+          const on = value === id
+          return (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={on}
+              onClick={() => onPick(id)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap',
+                minHeight: tap ?? undefined, padding: '10px 2px', marginBottom: -1, cursor: 'pointer',
+                border: 'none', borderBottom: `2px solid ${on ? 'var(--anthropic-orange)' : 'transparent'}`,
+                background: 'transparent', fontFamily: 'inherit', fontSize: 12, fontWeight: on ? 650 : 500,
+                color: on ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
+              }}
+            >
+              {icon && <span aria-hidden style={{ display: 'inline-flex', flexShrink: 0 }}>{icon(id)}</span>}
+              {label(id)}
+              {count && <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{count(id)}</span>}
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
   return (
     <div role="tablist" aria-label={ariaLabel} style={{
       display: 'flex', gap: 3, marginBottom: flush ? 0 : 8, padding: 3, borderRadius: 9, minWidth: 0,

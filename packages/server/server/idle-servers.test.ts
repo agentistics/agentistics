@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'bun:test'
-import { dataDirOfEnv, idleServers, isServerCommand, stoppableIdle } from './idle-servers'
+import { describe, it, test, expect } from 'bun:test'
+import { dataDirOfEnv, extraServers, idleServers, isServerCommand, stoppableIdle } from './idle-servers'
 
 describe('isServerCommand', () => {
   it('matches both forms that actually collided', () => {
@@ -51,6 +51,29 @@ describe('idleServers', () => {
     const r = idleServers({ processes: [orphan], listening: [], self: 999 })
     expect(r.idle.map(p => p.pid)).toEqual([3189270])
     expect(r.listener).toBeUndefined()
+  })
+})
+
+describe('extraServers', () => {
+  const service = { pid: 517, command: '/home/x/.local/bin/agentop server' }
+  const duplicate = { pid: 3189270, command: 'bun packages/server/bin/cli.ts server' }
+
+  test('WSL lsof/ss with no owner does not flag the lock holder', () => {
+    expect(extraServers({
+      processes: [service, duplicate], lockHolder: 517, serving: [], servingKnown: true, self: 999,
+    }).map(p => p.pid)).toEqual([3189270])
+  })
+
+  test('a healthy lock holder is the server even when lsof and ss name nobody', () => {
+    expect(extraServers({
+      processes: [service], lockHolder: 517, serving: [], servingKnown: true, self: 999,
+    })).toEqual([])
+  })
+
+  test('an unidentified serving process is never called extra', () => {
+    expect(extraServers({
+      processes: [service, duplicate], lockHolder: null, serving: [], servingKnown: false, self: 999,
+    })).toEqual([])
   })
 })
 

@@ -9,6 +9,42 @@
  */
 export interface VaultSelection { items: { id: string; name: string }[]; groups: { id: string; name: string }[] }
 
+export interface VaultGrantMessageRef { name: string; field: string; env: string }
+export interface VaultGrantMessage {
+  excerpt: string
+  grantedAt: string
+  credentials: VaultGrantMessageRef[]
+}
+
+const VAULT_REF = /vault:\/\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)?/g
+const vaultRefKey = (ref: string) => ref.slice('vault://'.length)
+
+/**
+ * PURE. Pair a user message containing vault references with the metadata-only grant record that
+ * issued them. The references become the same chip the composer uses; values are not accepted by
+ * this shape and therefore cannot reach the conversation modal.
+ */
+export function vaultGrantMessage(text: string, grants: readonly {
+  createdAt: string
+  refs: readonly { ref: string; env: string; name: string; field: string }[]
+}[], pt: boolean): VaultGrantMessage | null {
+  const refs = [...text.matchAll(VAULT_REF)].map(m => m[0])
+  if (refs.length === 0) return null
+  const keys = new Set(refs.map(vaultRefKey))
+  const grant = grants.find(g => g.refs.some(r => keys.has(vaultRefKey(r.ref))))
+  if (!grant) return null
+  const credentials = grant.refs
+    .filter(r => keys.has(vaultRefKey(r.ref)))
+    .map(r => ({ name: r.name, field: r.field, env: r.env }))
+  if (credentials.length === 0) return null
+  const byRef = new Map(grant.refs.map(r => [r.ref, r]))
+  const excerpt = text.replace(VAULT_REF, raw => {
+    const r = byRef.get(raw)
+    return r ? vaultChipToken({ items: [{ id: r.ref, name: r.name }], groups: [] }, pt) : raw
+  }).slice(0, 600)
+  return { excerpt, grantedAt: grant.createdAt, credentials }
+}
+
 /** Is the caret right after a `:vault` that opens the text or follows whitespace? → where it starts. */
 export function vaultTrigger(before: string): number | null {
   const m = /(?:^|\s)(:vault)$/i.exec(before)

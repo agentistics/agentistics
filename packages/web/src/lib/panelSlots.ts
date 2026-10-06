@@ -87,7 +87,7 @@ import { getActivePane, paneStorageKey, usePaneId, type PaneId } from './paneSco
 
 /** The ten panels ArtifactsAside used to render as tabs inside one `contents` container. */
 export type TabPanelId =
-  | 'live' | 'gallery' | 'skills' | 'agents' | 'forks' | 'workflows' | 'mcps' | 'prs' | 'tasks'
+  | 'search' | 'live' | 'gallery' | 'skills' | 'agents' | 'forks' | 'workflows' | 'mcps' | 'prs' | 'tasks'
   | 'metrics'
 
 export type PanelId = TabPanelId | 'studio' | 'cli' | 'shell' | 'hardware'
@@ -97,12 +97,12 @@ export type PanelId = TabPanelId | 'studio' | 'cli' | 'shell' | 'hardware'
  *  with `studio`/`hardware` (formerly right-slot-only) and `cli`/`shell` (formerly the bottom's
  *  default occupants) appended after them. */
 export const PANEL_IDS: readonly PanelId[] = [
-  'live', 'gallery', 'skills', 'agents', 'forks', 'workflows', 'mcps', 'prs', 'tasks', 'metrics',
+  'search', 'live', 'gallery', 'skills', 'agents', 'forks', 'workflows', 'mcps', 'prs', 'tasks', 'metrics',
   'studio', 'hardware', 'cli', 'shell',
 ]
 
 export function isTabPanelId(v: unknown): v is TabPanelId {
-  return v === 'live' || v === 'gallery' || v === 'skills' || v === 'agents' || v === 'forks'
+  return v === 'search' || v === 'live' || v === 'gallery' || v === 'skills' || v === 'agents' || v === 'forks'
     || v === 'workflows' || v === 'mcps' || v === 'prs' || v === 'tasks' || v === 'metrics'
 }
 
@@ -128,7 +128,7 @@ export type SlotId = 'right' | 'bottom'
 /** Defaults (spec §1): `cli`/`shell` at the bottom, everything else on the rail, nothing hidden —
  *  matching where the terminal panes have always lived and giving every other panel a rail icon. */
 export const DEFAULT_PLACEMENT: Record<PanelId, Placement> = {
-  live: 'rail', gallery: 'rail', skills: 'rail', agents: 'rail', forks: 'rail', workflows: 'rail',
+  search: 'rail', live: 'rail', gallery: 'rail', skills: 'rail', agents: 'rail', forks: 'rail', workflows: 'rail',
   mcps: 'rail', prs: 'rail', tasks: 'rail', metrics: 'rail', studio: 'rail', hardware: 'rail',
   cli: 'bottom', shell: 'bottom',
 }

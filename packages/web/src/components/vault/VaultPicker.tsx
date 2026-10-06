@@ -21,8 +21,8 @@ type Lang = 'en' | 'pt'
 const T = {
   title: { en: 'Hand secrets to this session', pt: 'Liberar segredos para esta sessão' },
   intro: {
-    en: 'The agent gets REFERENCES (vault://…) and uses them in commands; it never sees a value, and any value that shows up in an output is replaced. Sending asks you to confirm.',
-    pt: 'O agente recebe REFERÊNCIAS (vault://…) e as usa nos comandos; ele nunca vê um valor, e qualquer valor que aparecer numa saída é trocado. Enviar pede a sua confirmação.',
+    en: 'The agent gets REFERENCES (vault://…) and uses them in commands; it never sees a value, and any value that shows up in an output is replaced. Sending is immediate when the vault is open, unless a credential requires step-up confirmation.',
+    pt: 'O agente recebe REFERÊNCIAS (vault://…) e as usa nos comandos; ele nunca vê um valor, e qualquer valor que aparecer numa saída é trocado. Enviar é imediato com o cofre aberto, salvo quando uma credencial exige confirmação adicional.',
   },
   code: { en: 'Authenticator code', pt: 'Código do autenticador' },
   confirmCode: { en: 'Confirm', pt: 'Confirmar' },

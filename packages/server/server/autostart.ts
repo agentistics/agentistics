@@ -385,6 +385,11 @@ function launchdPaths(spec: ServiceSpec) {
   }
 }
 
+/** The LaunchAgent path shared by autostart and upgrade restart/rollback. */
+export function launchdPlistPath(mode: AutostartMode): string {
+  return join(homedir(), 'Library', 'LaunchAgents', `com.agentistics.agentop-${mode}.plist`)
+}
+
 /** The sentence naming what the user must still do for a REBOOT to bring this back. */
 function bootCaveatText(id: ServiceManagerId, spec: ServiceSpec): string {
   switch (bootCaveat(id)) {

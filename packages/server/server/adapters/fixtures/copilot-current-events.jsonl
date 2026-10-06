@@ -1,0 +1,7 @@
+{"type":"session.start","data":{"sessionId":"copilot-uuid","version":1,"producer":"copilot-agent","copilotVersion":"1.0.92","startTime":"2026-10-06T10:00:00.000Z","context":{"cwd":"/repo","repository":"org/repo","hostType":"github"}},"timestamp":"2026-10-06T10:00:00.010Z"}
+{"type":"user.message","data":{"content":"sanitized prompt"},"timestamp":"2026-10-06T10:00:01.000Z"}
+{"type":"assistant.turn_start","data":{"turnId":"turn-1"},"timestamp":"2026-10-06T10:00:02.000Z"}
+{"type":"assistant.message","data":{"model":"gpt-5.6-luna","content":"sanitized answer"},"timestamp":"2026-10-06T10:00:03.000Z"}
+{"type":"assistant.turn_end","data":{"turnId":"turn-1"},"timestamp":"2026-10-06T10:00:04.000Z"}
+{"type":"session.usage_checkpoint","data":{"totalNanoAiu":808713000,"totalPremiumRequests":2},"timestamp":"2026-10-06T10:00:05.000Z"}
+{"type":"session.shutdown","data":{"currentModel":"gpt-5.6-luna","modelMetrics":{"gpt-5.6-luna":{"requests":{"count":2,"cost":2},"usage":{"inputTokens":20,"outputTokens":5,"cacheReadTokens":3,"cacheWriteTokens":1}}},"codeChanges":{"linesAdded":1,"linesRemoved":0,"filesModified":["/repo/src/file.ts"]}},"timestamp":"2026-10-06T10:00:06.000Z"}

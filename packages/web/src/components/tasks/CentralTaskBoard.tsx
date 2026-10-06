@@ -217,7 +217,7 @@ function RowList({ rows, showMachine, lang, cost, isMobile, sort, onSort }: {
               </div>
               <span style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.35 }}>{r.task.title}</span>
               {r.counts.subtasks > 0 && (
-                <TaskProgressBar done={r.counts.subtasksDone} inProgress={r.subtasks.filter(s => !s.done && s.status === 'in_progress').length} total={r.counts.subtasks} />
+                <TaskProgressBar done={r.counts.subtasksDone} inProgress={r.subtasks.filter(s => !s.done && s.status === 'in_progress').length} statusCounts={r.counts.subtasksByStatus} total={r.counts.subtasks} />
               )}
               <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', ...numeric, fontSize: 11.5 }}>
                 <span>{fmtInt(r.rollup.sessionsLinked)} <span style={microLabel}>{pt ? 'sessões' : 'sessions'}</span></span>
@@ -277,7 +277,7 @@ function RowList({ rows, showMachine, lang, cost, isMobile, sort, onSort }: {
                 <td style={td}><StatusPill status={r.task.status} /></td>
                 <td style={{ ...td, minWidth: 120 }}>
                   {r.counts.subtasks > 0
-                    ? <TaskProgressBar done={r.counts.subtasksDone} inProgress={r.subtasks.filter(s => !s.done && s.status === 'in_progress').length} total={r.counts.subtasks} />
+                    ? <TaskProgressBar done={r.counts.subtasksDone} inProgress={r.subtasks.filter(s => !s.done && s.status === 'in_progress').length} statusCounts={r.counts.subtasksByStatus} total={r.counts.subtasks} />
                     : <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>—</span>}
                 </td>
                 {/* `sessionsLinked`: what this central actually holds. `sessionsUsed` would count a

@@ -33,6 +33,7 @@ export function parseCopilotEvents(content: string, fallbackId: string): Session
   let linesAdded = 0
   let linesRemoved = 0
   let filesModified = 0
+  let copilotCredits: { nanoAiu: number; premiumRequests: number } | undefined
 
   const userMessageTimestamps: string[] = []
   const messageHours: number[] = []
@@ -61,6 +62,9 @@ export function parseCopilotEvents(content: string, fallbackId: string): Session
       turnEvent = { ts: tsMs }
       turnEvents.push(turnEvent)
     }
+    // Current Copilot also stamps the resolved model on assistant.message/model.* events. This
+    // keeps live/crashed sessions identifiable even when no shutdown event was flushed.
+    if (typeof data.model === 'string' && data.model) model = data.model
 
     if (type === 'session.start') {
       sessionId = data.sessionId ?? sessionId
@@ -147,6 +151,12 @@ export function parseCopilotEvents(content: string, fallbackId: string): Session
       if (typeof data.currentModel === 'string') {
         model = data.currentModel
       }
+      if (Number.isFinite(data.totalNanoAiu) && Number.isFinite(data.totalPremiumRequests)) {
+        copilotCredits = {
+          nanoAiu: data.totalNanoAiu,
+          premiumRequests: data.totalPremiumRequests,
+        }
+      }
       // Code changes
       const cc = data.codeChanges
       if (cc && typeof cc === 'object') {
@@ -154,6 +164,15 @@ export function parseCopilotEvents(content: string, fallbackId: string): Session
         linesRemoved = (cc.linesRemoved as number | undefined) ?? 0
         const fm = cc.filesModified
         filesModified = Array.isArray(fm) ? fm.length : ((fm as number | undefined) ?? 0)
+      }
+    } else if (type === 'session.usage_checkpoint') {
+      // These are cumulative snapshots, not per-request deltas. Keep the latest one so a
+      // long-running session is never charged once per checkpoint.
+      if (Number.isFinite(data.totalNanoAiu) && Number.isFinite(data.totalPremiumRequests)) {
+        copilotCredits = {
+          nanoAiu: data.totalNanoAiu,
+          premiumRequests: data.totalPremiumRequests,
+        }
       }
     }
   }
@@ -204,6 +223,7 @@ export function parseCopilotEvents(content: string, fallbackId: string): Session
     _source: 'jsonl',
     mcp_tool_call_count: mcpToolCallCount,
     mcp_tool_names: mcpToolNamesSet.size > 0 ? Array.from(mcpToolNamesSet) : undefined,
+    ...(copilotCredits ? { copilot_credits: copilotCredits } : {}),
   }
 }
 
@@ -211,6 +231,8 @@ export function parseCopilotEvents(content: string, fallbackId: string): Session
  *  every value here is a scalar on one line — so a hand-rolled reader avoids a dependency and
  *  cannot be tripped by nested structures it would not know what to do with anyway. */
 export interface CopilotWorkspace {
+  /** Agentop's conversation id, when Copilot was launched by agentop. */
+  mcSessionId?: string
   cwd?: string
   /** `owner/name` as GitHub reports it. */
   repository?: string
@@ -238,6 +260,7 @@ export function parseCopilotWorkspace(text: string): CopilotWorkspace {
       case 'host_type': out.hostType = value; break
       case 'branch': out.branch = value; break
       case 'name': out.name = value; break
+      case 'mc_session_id': out.mcSessionId = value; break
       default: break
     }
   }

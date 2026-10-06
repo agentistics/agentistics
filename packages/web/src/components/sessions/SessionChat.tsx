@@ -31,7 +31,7 @@ import { reopeningLabel, withReopening } from '../../lib/reopeningStore'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { GROW_AT_PX, GROW_TURNS, INITIAL_TURNS, shownToInclude, windowStart } from '../../lib/turnWindow'
-import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerSendButton, ComposerShell, ComposerToolbar } from '../chat/ComposerShell'
+import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerSendButton, ComposerShell, ComposerToolbar, composerFieldStyle } from '../chat/ComposerShell'
 import { mutedTooltip, useMutedKeys } from '../../lib/notifyMenu'
 import { toggleSessionMuted } from '../../lib/mutedSessions'
 import { markDictated, stripDictatedMark } from '../../lib/dictationMark'
@@ -82,12 +82,13 @@ import {
 import { ROW_FLASH } from '../../lib/noteFocus'
 import { pendingEchoes, sessionIdentityKey } from '@agentistics/core'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
+import { AgentisticsLoader } from '../AgentisticsLoader'
 
 import {
   applyDraftRequest, consumeDraftRequest, getDraftRequest, useDraftRequest,
 } from '../../lib/composerStore'
 import { commandToken, knownCommands } from '../../lib/commandToken'
-import { draftSegments, needsMirror } from '../../lib/commandMirror'
+import { draftSegments, mirrorScrollTop, needsMirror } from '../../lib/commandMirror'
 import { knownServers, mentionTokens } from '../../lib/mentionTokens'
 import { commandNotFoundNotice } from '../../lib/commandNotice'
 import {
@@ -96,6 +97,7 @@ import {
 } from '../../lib/promptHistory'
 import { RecentPromptsPanel } from './RecentPromptsPanel'
 import { goToTurn } from '../../lib/turnScroll'
+import { findTurnIndex, registerChatSearchTarget } from '../../lib/chatSearchBridge'
 import { attachmentName, splitMessage } from '../../lib/messageAttachments'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -121,8 +123,8 @@ import { VaultCodeAsk, VaultPicker } from '../vault/VaultPicker'
 import { loadVault } from '../../lib/vaultApi'
 import { grantStep, UNLOCK_FIRST_LINE } from '../../lib/vaultGrantFlow'
 import { ensureVaultOpen } from '../vault/VaultUnlockHost'
-import { applyVaultChip, expandVaultChip, hasVaultChip, removeVaultChip, vaultChipTokens, vaultTrigger, type VaultSelection } from '../../lib/vaultChip'
-import { grantSession, withStepUp } from '../../lib/vaultPersonal'
+import { applyVaultChip, expandVaultChip, hasVaultChip, removeVaultChip, vaultChipTokens, vaultGrantMessage, vaultTrigger, type VaultSelection } from '../../lib/vaultChip'
+import { grantSession, listGrantRecords, withStepUp, type GrantRecord } from '../../lib/vaultPersonal'
 import { hasPasskeyHere, mobileState, passkeySupport, phoneGesture } from '../../lib/passkey'
 
 import type { AttachmentMessage, AttachmentSend, CostBasis, HarnessId, SessionMeta } from '@agentistics/core'
@@ -1206,6 +1208,15 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   }, [working])
 
   const turns = useMemo(() => payload?.turns ?? [], [payload])
+  const [grantRecords, setGrantRecords] = useState<GrantRecord[]>([])
+  const hasGrantedMessage = useMemo(() => turns.some(t => t.role === 'user' && /vault:\/\//.test(t.text)), [turns])
+  useEffect(() => {
+    if (!hasGrantedMessage) { setGrantRecords([]); return }
+    let alive = true
+    void listGrantRecords().then(r => { if (alive) setGrantRecords(r.ok ? r.grants : []) })
+    return () => { alive = false }
+  }, [hasGrantedMessage, session.id])
+  const sessionGrants = useMemo(() => grantRecords.filter(g => g.sessionId === session.id), [grantRecords, session.id])
   const placedAttention = useMemo(() => placeAttention(turns, payload?.attention ?? []), [turns, payload?.attention])
 
   /**
@@ -1378,6 +1389,22 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    */
   const slashHint = useMemo(() => slashMisplaced(draft.slice(0, caret)), [draft, caret])
   const underlayRef = useRef<HTMLDivElement | null>(null)
+  const [composerScrollbarPx, setComposerScrollbarPx] = useState(0)
+
+  // The mirror is a visual layer, but the textarea owns both wrapping and scrolling. The
+  // textarea's scrollbar reduces its content width; reserve that exact gutter in the mirror or
+  // a long chip changes the line breaks after the first overflow.
+  const syncComposerMirror = useCallback(() => {
+    const field = textareaRef.current
+    const mirror = underlayRef.current
+    if (!field || !mirror) return
+    mirror.scrollTop = mirrorScrollTop(field.scrollTop, mirror.scrollHeight, mirror.clientHeight)
+    setComposerScrollbarPx(field.offsetWidth - field.clientWidth)
+  }, [])
+
+  useLayoutEffect(() => {
+    syncComposerMirror()
+  }, [draft, maxComposerH, syncComposerMirror])
 
   const draftReq = useDraftRequest()
   const draftReqAt = draftReq?.sessionId === session.id ? draftReq.at : undefined
@@ -1784,6 +1811,35 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
         : 'That message is no longer in the loaded conversation.')
     }
   }, [session.id, turns, queued, pt])
+
+  /**
+   * "BUSCAR NA CONVERSA" asks this chat for one message (`chatSearchBridge.ts`): forward it through
+   * this chat's own forward modal, or go to it — widening the rendered window first, exactly as a
+   * quote card's jump does, then `goToTurn`'s scroll and flash. Resolved against the turns as they
+   * are NOW (a ref, so the registration does not churn on every poll). A message older than the
+   * loaded window is `not-loaded`; one that is loaded but has no bubble on screen (the terminal view)
+   * is `no-chat` — the panel says each in its own words.
+   */
+  const SEARCH_JUMP_CONTEXT = 40
+  const searchView = useRef({ turns, shownTurns, turnAnchors })
+  searchView.current = { turns, shownTurns, turnAnchors }
+  useEffect(() => registerChatSearchTarget(session.id, req => {
+    const { turns: now, shownTurns: shown, turnAnchors: anchors } = searchView.current
+    const i = findTurnIndex(now, req.turn)
+    if (i < 0) return 'not-loaded'
+    if (req.kind === 'forward') { setForwardTurns([now[i]!]); return 'done' }
+    // GENEROUS context above the target: with the default ten, the target sits inside the
+    // grow-at-top zone (`GROW_AT_PX`), the smooth scroll toward it renders yet another older block,
+    // and the content shifts under the scroll — measured landing ~460px past the message.
+    if (i < windowStart(now.length, shown)) flushSync(() => setShownTurns(shownToInclude(now.length, i, SEARCH_JUMP_CONTEXT)))
+    holdTailUntil.current = Date.now() + 4000
+    setAtTail(false)
+    const anchor = searchView.current.turnAnchors[i] ?? anchors[i]
+    // A search jump is usually LONG: a smooth scroll across hundreds of bubbles outlasts the flash,
+    // so the reader arrives after the mark has faded. Land instantly; `goToTurn` then only marks it.
+    if (anchor) document.getElementById(anchor)?.scrollIntoView({ block: 'center' })
+    return goToTurn(anchor) ? 'done' : 'no-chat'
+  }), [session.id])
 
   /**
    * RESTORE the conversation from just before a prompt (claude's own rewind), then hand the message
@@ -2281,6 +2337,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
             {(placedAttention.before.get(i) ?? []).map((m, k) => <AttentionMarkLine key={`am-${i}-${k}`} mark={m} pt={pt} />)}
             <ChatBubble
               turn={t}
+              sessionId={session.id}
               lang={lang}
               harness={session.harness}
               {...(payload?.attachmentSends ? { attachmentSends: payload.attachmentSends } : {})}
@@ -2288,6 +2345,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 ? { attachmentMessages: payload.attachmentMessages, markerSinceMs: previousPersonTurnMs(turns, i) }
                 : {})}
               {...(turnAnchors[i] ? { anchorId: turnAnchors[i]! } : {})}
+              {...(t.role === 'user' ? (() => { const grant = vaultGrantMessage(t.text, sessionGrants, pt); return grant ? { vaultGrant: grant } : {} })() : {})}
               {...(canPrompt && selecting === null ? { onReply: onReplyToTurn } : {})}
               {
                 // Forwarding and selecting READ this conversation, so they need nothing from the
@@ -2319,6 +2377,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
             <ChatBubble
               key={`echo-${i}`}
               turn={{ role: 'user', text: q.text }}
+              sessionId={session.id}
               lang={lang}
               harness={session.harness}
               {...(payload?.attachmentSends ? { attachmentSends: payload.attachmentSends } : {})}
@@ -2366,7 +2425,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
           {/* A SOURCE's live text is the model's own stream — exact, unlike a screen read — so it
               is drawn as the bubble it will become (`chatSource.ts`). */}
           {(source?.liveText || source?.liveReasoning) && (
-            <ChatBubble turn={{ role: 'assistant', text: source.liveText ?? '', ...(source.liveReasoning ? { reasoning: source.liveReasoning } : {}) }} lang={lang} harness={session.harness} />
+            <ChatBubble turn={{ role: 'assistant', text: source.liveText ?? '', ...(source.liveReasoning ? { reasoning: source.liveReasoning } : {}) }} lang={lang} harness={session.harness} sessionId={session.id} />
           )}
 
           {showWorking && (
@@ -2830,7 +2889,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                       fontFamily: 'inherit', fontSize: 12.5, fontWeight: 650,
                     }}
                   >
-                    {reopening ? <Loader size={14} className="ag-working-spin" /> : <RotateCcw size={14} />}
+                    {reopening ? <AgentisticsLoader size={14} label={reopeningLabel(pt)} /> : <RotateCcw size={14} />}
                     {reopening ? reopeningLabel(pt) : reopen.label}
                   </button>
                   {/* Why it cannot be reopened, in the row's own words. */}
@@ -2936,15 +2995,18 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                       aria-hidden
                       ref={underlayRef}
                       style={{
-                        position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none',
+                        position: 'absolute', top: 0, left: 0, bottom: 0, right: composerScrollbarPx,
+                        overflow: 'hidden', pointerEvents: 'none',
                         boxSizing: 'border-box', padding: '6px 6px',
                         // ABOVE the field, so a quote card can take a click; everything else in
                         // it takes no pointer events, so typing and selecting still reach the field.
                         zIndex: 2,
                         // The field computes to 16px on a phone (index.css's iOS zoom guard, which
                         // is `!important`), so the mirror must too or it stops lining up.
-                        fontFamily: 'inherit', fontSize: isMobile ? 16 : 13.5, lineHeight: 1.5,
-                        whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--text-primary)',
+                        fontFamily: composerFieldStyle.fontFamily,
+                        fontSize: isMobile ? 16 : composerFieldStyle.fontSize,
+                        lineHeight: composerFieldStyle.lineHeight,
+                        whiteSpace: 'pre-wrap', overflowWrap: 'break-word', color: 'var(--text-primary)',
                       }}
                     >
                       {draftSegments(draft, cmdToken, mentions, cards).map((seg, i, all) => {
@@ -3186,8 +3248,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     // field never grew past its one row however much was typed, and a prompt could
                     // only be read two lines at a time. It was correct while the composer was a
                     // ROW and was left behind when it became a column.
-                    width: '100%', display: 'block', boxSizing: 'border-box',
-                    resize: 'none', border: 'none', outline: 'none', background: 'transparent',
+                    ...composerFieldStyle,
                     // Transparent ONLY while the mirror is drawing the same text underneath — see
                     // the note above the mirror div. `caretColor` is set unconditionally to the same
                     // colour the text would otherwise be, so it never rides on `color` and vanishes
@@ -3203,8 +3264,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     userSelect: 'text', WebkitUserSelect: 'text', WebkitTouchCallout: 'default',
                   }}
                   onScroll={e => {
-                    const u = underlayRef.current
-                    if (u) u.scrollTop = (e.target as HTMLTextAreaElement).scrollTop
+                    syncComposerMirror()
                   }}
                 />
                 </div>

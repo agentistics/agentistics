@@ -45,6 +45,29 @@ export interface IdleServers {
 }
 
 /**
+ * Decide which live `agentop server` processes are genuinely extra.
+ *
+ * `lsof`/`ss` are deliberately not inputs to this rule: on WSL they can return no owner even
+ * while the systemd server is healthy.  The lock holder is the identity anchor.  `servingKnown`
+ * says whether the `/api/version` probe gave us a trustworthy answer; when it did, a process is
+ * extra only when it is neither the lock holder nor a process known to serve.  Unknown is a safe
+ * answer: an unprovable duplicate must not become a false alarm in the Resources panel.
+ */
+export function extraServers(o: {
+  processes: readonly ServerProcess[]
+  lockHolder: number | null
+  serving: readonly number[]
+  servingKnown: boolean
+  self: number
+}): ServerProcess[] {
+  if (!o.servingKnown) return []
+  const serving = new Set(o.serving)
+  return o.processes.filter(p =>
+    p.pid !== o.self && p.pid !== o.lockHolder && !serving.has(p.pid),
+  )
+}
+
+/**
  * Which server processes are doing nothing — PURE.
  *
  * `listening` is the set holding the port (usually one). `self` is this process, excluded because
@@ -117,4 +140,3 @@ export function stoppableIdle(o: { idle: readonly number[]; dataDirOf: (pid: num
   const ours = o.ours.replace(/\/+$/, '')
   return o.idle.filter(pid => pid !== o.self && pid !== o.lockHolder && o.dataDirOf(pid) === ours)
 }
-

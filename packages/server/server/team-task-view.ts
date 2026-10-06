@@ -27,7 +27,7 @@ export interface CentralTaskRow {
   comments: SharedTask['comments']
   subtasks: SharedTask['subtasks']
   files: SharedTask['files']
-  counts: { comments: number; subtasks: number; subtasksDone: number; subtasksInProgress?: number; files: number }
+  counts: { comments: number; subtasks: number; subtasksDone: number; subtasksInProgress?: number; subtasksByStatus?: Record<string, number>; files: number }
   /** Resolved through `task-rollup.ts`, over the sessions this central actually holds. */
   rollup: AttemptRollup
   harnesses: string[]
@@ -107,6 +107,7 @@ export function centralTaskRow(
       comments: input.shared.comments.length,
       subtasks: input.shared.subtasks.length,
       subtasksDone: input.shared.subtasks.filter(s => s.done).length,
+      subtasksByStatus: Object.fromEntries(input.shared.subtasks.reduce((m, s) => m.set(s.status, (m.get(s.status) ?? 0) + 1), new Map<string, number>())),
       files: input.shared.files.length,
     },
     rollup: rollupAttempt({ sessions }),
