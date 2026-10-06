@@ -14,6 +14,8 @@ import { WARN_INITIAL, nextWarn, type WarnState } from '../../lib/vaultExpiry'
 import { extendVaultOpen, lockVaultFromCard } from '../../lib/vaultApi'
 import { refreshVaultWatch, useVaultWatch } from '../../lib/vaultWatch'
 import { VaultGlyph } from './VaultGlyph'
+import { CodeBoxes } from '../CodeBoxes'
+
 
 export function VaultExpiryCard({ lang, isMobile, zIndex, enabled = true }: { lang: 'pt' | 'en'; isMobile: boolean; zIndex: number; enabled?: boolean }) {
   const pt = lang === 'pt'
@@ -60,9 +62,7 @@ export function VaultExpiryCard({ lang, isMobile, zIndex, enabled = true }: { la
       </div>
       {needCode && (
         <form onSubmit={e => { e.preventDefault(); if (code.trim()) void run(needCode, code.trim()) }} style={{ marginBottom: 10 }}>
-          <input value={code} onChange={e => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={16} autoFocus
-            placeholder={pt ? 'Código do autenticador' : 'Authenticator code'} aria-label={pt ? 'Código do autenticador' : 'Authenticator code'}
-            style={{ width: '100%', boxSizing: 'border-box', minHeight: isMobile ? 44 : 32, padding: '0 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: 16 }} />
+          <CodeBoxes value={code} onChange={setCode} label={pt ? 'Código do autenticador' : 'Authenticator code'} autoFocus error={!!error} errorKey={error} style={{ marginBottom: 0 }} />
         </form>
       )}
       {error && <div role="status" style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>{error}</div>}

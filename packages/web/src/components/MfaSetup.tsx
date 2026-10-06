@@ -3,6 +3,8 @@ import { ShieldCheck, ShieldOff, Copy, Check, AlertCircle } from 'lucide-react'
 import type { Lang } from '@agentistics/core'
 import { qrMatrix } from '../lib/qr'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { CodeBoxes } from './CodeBoxes'
+
 
 /**
  * Two-factor enrolment for the signed-in account.
@@ -160,8 +162,7 @@ export function MfaSetup({ lang, onClose, required = false, canDisable = true }:
                   ? 'Ativa nesta conta e obrigatória — contas owner não podem desativar a verificação em duas etapas. Você ainda pode gerar novos códigos de recuperação com um código atual.'
                   : 'Active on this account and mandatory — owner accounts cannot turn off two-factor authentication. You can still generate new recovery codes with a current code.')}
             </div>
-            <input value={code} onChange={e => setCode(e.target.value)} placeholder="123456" style={input}
-              inputMode="numeric" autoComplete="one-time-code" />
+            <CodeBoxes value={code} onChange={setCode} label={pt ? 'Código atual do autenticador' : 'Current authenticator code'} error={!!error} errorKey={error} />
             {error && <Err text={error} />}
             {/* Codes used to be issued once, at enrolment, and never again — so a mislaid sheet
                 quietly removed the only net under a lost phone. Same current code proves both. */}
@@ -219,8 +220,7 @@ export function MfaSetup({ lang, onClose, required = false, canDisable = true }:
               </div>
             </details>
 
-            <input value={code} onChange={e => setCode(e.target.value)} placeholder="123456" style={input} autoFocus
-              inputMode="numeric" autoComplete="one-time-code" />
+            <CodeBoxes value={code} onChange={setCode} label={pt ? 'Código do autenticador' : 'Authenticator code'} autoFocus error={!!error} errorKey={error} />
             {error && <Err text={error} />}
             <button type="submit" disabled={!code.trim() || busy} style={primaryBtn}>{pt ? 'Ativar' : 'Enable'}</button>
           </form>

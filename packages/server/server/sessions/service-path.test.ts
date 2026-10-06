@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { servicePath, SYSTEM_PATH } from './service-path'
+import { launchdServicePath, servicePath, SYSTEM_PATH } from './service-path'
 
 test('the harness directories reach the unit — the bug this exists for', () => {
   const out = servicePath('/home/u/.local/bin:/home/u/.bun/bin:/usr/bin:/bin')
@@ -36,4 +36,12 @@ test('nothing to add writes NO line at all', () => {
   expect(servicePath('/usr/bin:/bin')).toBeNull()
   expect(servicePath('')).toBeNull()
   expect(servicePath(undefined)).toBeNull()
+})
+
+test('LaunchAgent PATH always includes Homebrew locations and system binaries', () => {
+  const out = launchdServicePath('/home/u/.local/bin:/usr/bin')
+  expect(out.split(':')).toEqual([
+    '/home/u/.local/bin', '/usr/bin', '/opt/homebrew/bin', '/usr/local/bin',
+    '/usr/local/sbin', '/usr/sbin', '/sbin', '/bin',
+  ])
 })

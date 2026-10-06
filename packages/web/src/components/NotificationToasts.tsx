@@ -103,6 +103,7 @@ export function NotificationToasts({ lang }: Props) {
         // automatic, the modal it can open is not.
         const isUpdate = n.code === 'app.update_available'
         const isMuted = n.code === SESSION_MUTED_CODE
+        const isTelemetry = n.code === 'telemetry.first_use'
         return (
           <div
             key={n.id}
@@ -151,6 +152,7 @@ export function NotificationToasts({ lang }: Props) {
                 <BellOff size={12} />{lang === 'pt' ? 'Desfazer' : 'Undo'}
               </button>
             )}
+            {isTelemetry && <button onClick={e => { e.stopPropagation(); void fetch('/api/preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telemetryEnabled: false, telemetryNoticeDismissed: true }) }); startLeave(n.id) }} style={{ flexShrink: 0, padding: '4px 7px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', font: 'inherit', fontSize: 11 }}>{lang === 'pt' ? 'Desligar' : 'Turn off'}</button>}
             <button
               onClick={e => { e.stopPropagation(); startLeave(n.id) }}
               aria-label="dismiss"

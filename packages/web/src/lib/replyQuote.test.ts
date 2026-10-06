@@ -1,8 +1,22 @@
 import { describe, test, expect } from 'bun:test'
-import { addReply, markExcerpt, orderReplies, parseReplies, parseReply, quoteAll, quoteFor, quoteLines, replyAuthor, replyPreview, composeReply } from './replyQuote'
+import { addReply, insertReplyQuote, leadingQuote, markExcerpt, orderReplies, parseReplies, parseReply, quoteAll, quoteFor, quoteLines, replyAuthor, replyPreview, stripQuotedLines, composeReply } from './replyQuote'
 
 test('a quote is "> "-prefixed, line by line', () => {
   expect(quoteLines('one\ntwo')).toBe('> one\n> two')
+})
+
+test('a reply is inserted as plain markdown and leaves the caret after a blank line', () => {
+  const out = insertReplyQuote('answer', 6, { role: 'assistant', text: 'one\ntwo', excerpt: true })
+  expect(out.draft).toBe('answer\n\n> one\n> two\n\n')
+  expect(out.caret).toBe(out.draft.length)
+  expect(out.draft).not.toMatch(/[\u2063\u2064\u200b\u200c]/)
+})
+
+test('leading quote parsing supports collapse without hiding the answer', () => {
+  expect(leadingQuote('> one\n> two\n> three\n\nmy answer')).toEqual({
+    quote: 'one\ntwo\nthree', rest: 'my answer',
+  })
+  expect(stripQuotedLines('> one\n> two\n\nmy answer')).toContain('my answer')
 })
 
 test('a long message is bounded and SAYS there was more', () => {

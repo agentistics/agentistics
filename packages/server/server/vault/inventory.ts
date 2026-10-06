@@ -11,7 +11,9 @@ import { basename } from 'node:path'
 import { isKid, isPresenceId, parseSealed, parseVaultJson, PRESENCE_GESTURES, setupCodeCommand, setupCodeWhere } from '@agentistics/vault'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import { sealedFiles } from './boot'
-import { VAULT_ACTION_ROWS, requireVaultStepUp, rowFor, type VaultAction, setupCodeOwed, localProofKind, stepUpState, unlockPolicyView, type GateContext } from './gate'
+import { VAULT_ACTION_ROWS, authPolicyView, policyRow, proofsOf, requireVaultStepUp, rowFor, type VaultAction, setupCodeOwed, localProofKind, stepUpState, unlockPolicyView, type GateContext } from './gate'
+import { readAuthPolicy, type AuthPolicyRead } from './auth-policy'
+import { DEFAULT_AUTH_POLICY } from '@agentistics/vault'
 import { hardeningLines } from './hardening'
 import {
   displayPath, lockVault, pendingPlaintextFiles, presenceCandidates, presenceSoon, restoreWithFor, secretFs, unlockWindowHint, vaultDir, vaultLang, vaultStatus,
@@ -84,6 +86,8 @@ export interface VaultView {
   gestures: { probe: number; enroll: number }
   /** Owner decision 2026-10-02: what an unlock asks besides the gesture, and whether the NEXT one owes the code. */
   unlockPolicy: { mode: 'always' | 'hello-only' | 'daily'; hours: number; chosen: boolean; codeNextUnlock: boolean; windowEndsAt: string | null }
+  /** Owner decision 2026-10-06: which proof each kind of action asks — one row per kind (gate.ts `authPolicyView`). */
+  authPolicy: Awaited<ReturnType<typeof authPolicyView>>
 }
 
 const KIND_OF_PURPOSE: Record<string, VaultItem['kind']> = {
@@ -135,6 +139,9 @@ export async function readVaultView(files: string[] = sealedFiles(), pendingFile
   for (const f of await (pendingFiles ?? pendingPlaintextFiles)()) {
     items.push({ kind: kindOfPendingFile(f), state: 'pending', reason: 'plaintext', file: displayPath(f) })
   }
+  // Only an OPEN vault's record can be read; a locked one draws the defaults and says it is locked.
+  const authPolicy: AuthPolicyRead = s.state === 'open' ? await readAuthPolicy() : { policy: DEFAULT_AUTH_POLICY, state: 'locked' }
+  const authRows = await authPolicyView(authPolicy)
   return {
     state: s.state, protector: s.protector, protectorLabel: s.protectorLabel, kid, createdAt,
     sentence: s.sentence, pending: s.pending, canLock: s.state === 'open', items,
@@ -148,7 +155,10 @@ export async function readVaultView(files: string[] = sealedFiles(), pendingFile
     autoLockMinutes: stored?.autoLock?.minutes ?? 30,
     autoLockInMs: s.autoLockInMs ?? null, pendingStepup: s.pendingStepup === true, lockedBy: s.lockedBy ?? null,
     recoveryTodo: s.recoveryTodo ?? null,
-    gates: Object.fromEntries((Object.keys(VAULT_ACTION_ROWS) as VaultAction[]).map(k => { const r = rowFor(k, { session, loopback }); return [k, { code: r.code, gesture: r.gesture, grant: r.grant !== null }] })),
+    // Owner decision 2026-10-06: the rows the person's per-action policy makes of the table, so the icons
+    // the page draws are what the gate will ask.
+    gates: Object.fromEntries((Object.keys(VAULT_ACTION_ROWS) as VaultAction[]).map(k => { const r = stored ? policyRow(k, { session, loopback }, authPolicy.policy, proofsOf(stored)) : rowFor(k, { session, loopback }); return [k, { code: r.code, gesture: r.gesture, grant: r.grant !== null }] })),
+    authPolicy: { state: authPolicy.state, rows: authRows.rows },
     gestures: { probe: PRESENCE_GESTURES.probe, enroll: PRESENCE_GESTURES.enroll },
     unlockPolicy: unlockPolicyView(stored, await unlockWindowHint(typeof kid === 'string' ? kid : null)),
     setupCode: {

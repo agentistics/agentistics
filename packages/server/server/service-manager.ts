@@ -23,7 +23,7 @@
  */
 
 import { EXIT_INSTANCE_HELD } from './service-exit'
-import { servicePath } from './sessions/service-path'
+import { launchdServicePath, servicePath } from './sessions/service-path'
 
 /** An init system this product can register a mode with. */
 export type ServiceManagerId = 'systemd' | 'launchd' | 'pm2'
@@ -364,7 +364,7 @@ function xml(value: string): string {
  * `KeepAlive` follows `keepsRunning` for the same reason `Type` does on systemd: a plist with
  * `KeepAlive` over `docker compose up -d` relaunches it every time it succeeds.
  */
-export function launchdPlist(spec: ServiceSpec, opts: { stdoutPath: string; stderrPath: string }): string {
+export function launchdPlist(spec: ServiceSpec, opts: { stdoutPath: string; stderrPath: string; path?: string }): string {
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
@@ -382,6 +382,13 @@ export function launchdPlist(spec: ServiceSpec, opts: { stdoutPath: string; stde
     '  <true/>',
     '  <key>KeepAlive</key>',
     spec.keepsRunning ? '  <true/>' : '  <false/>',
+    '  <key>EnvironmentVariables</key>',
+    '  <dict>',
+    '    <key>PATH</key>',
+    `    <string>${xml(opts.path ?? launchdServicePath(undefined))}</string>`,
+    '    <key>AGENTISTICS_LAUNCHD</key>',
+    '    <string>1</string>',
+    '  </dict>',
     '  <key>StandardOutPath</key>',
     `  <string>${xml(opts.stdoutPath)}</string>`,
     '  <key>StandardErrorPath</key>',
@@ -395,6 +402,12 @@ export function launchdPlist(spec: ServiceSpec, opts: { stdoutPath: string; stde
 /** The relative path of a launchd agent's plist, under the user's home. */
 export function launchdPlistName(spec: ServiceSpec): string {
   return `${launchdLabel(spec)}.plist`
+}
+
+/** Extract the process id from `launchctl print` output, or null when it is not loaded. */
+export function parseLaunchdPid(output: string): number | null {
+  const pid = Number(/^\s*pid\s*=\s*(\d+)\s*$/m.exec(output)?.[1] ?? '')
+  return Number.isInteger(pid) && pid > 0 ? pid : null
 }
 
 /**

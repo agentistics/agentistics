@@ -18,6 +18,7 @@ import { mutedTooltip, useSessionMuted } from './lib/notifyMenu'
 import { useData, useDerivedStats, LIVE_INTERVAL_OPTIONS, LIVE_INTERVAL_OPTIONS_RISKY } from './hooks/useData'
 import { usePlanBasis } from './hooks/usePlanBasis'
 import { planScopeHarnesses, planScopeNote } from './lib/costBasis'
+import { planCostOf } from './lib/topUsage'
 import { bootLoading } from './lib/bootPhase'
 import { editorEnabledFor } from './lib/editorGate'
 import { useProjectedDerived } from './hooks/useProjectedDerived'
@@ -2703,7 +2704,7 @@ export default function AppLayout() {
     // only a real 200 response with no archiveMode may set it. On failure we retry with
     // backoff and leave state at `undefined` (neutral loading bg) so nothing false-gates.
     let cancelled = false
-    const apply = (prefs: { cardPrecision?: Record<string, boolean>; lang?: Lang; theme?: Theme; currency?: 'USD' | 'BRL'; textScale?: number; cardOrder?: string[]; monthlyBudgetUSD?: number | null; chatModel?: string; chatSoundEnabled?: boolean; editorAutosave?: boolean; archiveMode?: ArchiveMode; archiveSessions?: boolean; installDismissed?: boolean; team?: TeamConfig; billing?: unknown }) => {
+    const apply = (prefs: { cardPrecision?: Record<string, boolean>; lang?: Lang; theme?: Theme; currency?: 'USD' | 'BRL'; textScale?: number; cardOrder?: string[]; monthlyBudgetUSD?: number | null; chatModel?: string; chatSoundEnabled?: boolean; editorAutosave?: boolean; archiveMode?: ArchiveMode; archiveSessions?: boolean; installDismissed?: boolean; telemetryEnabled?: boolean; telemetryNoticeDismissed?: boolean; team?: TeamConfig; billing?: unknown }) => {
       if (prefs.cardPrecision) setCardPrecisionState(prefs.cardPrecision)
       // Total and never throws: a hand-edited preferences.json must not blank the dashboard.
       const nextBilling = normalizeBillingSettings(prefs.billing)
@@ -2741,6 +2742,12 @@ export default function AppLayout() {
       // Task 13 — the hidden-repo badge map, rebuilt from the same load (readTeamConnections
       // tolerates a missing/malformed `connections` array instead of `.map`-ing `undefined`).
       setDeniedRepoLabels(buildDeniedRepoLabels(readTeamConnections(prefs)))
+      if (!isCentral && prefs.telemetryNoticeDismissed !== true) {
+        pushNotification({ type: 'info', code: 'telemetry.first_use' })
+        // Mark it at emission time: an auto-dismiss, reload, or notification-history clear must not
+        // turn the first-use notice into a recurring prompt.
+        void fetch('/api/preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telemetryNoticeDismissed: true }) }).catch(() => {})
+      }
     }
     const load = async (attempt = 0) => {
       try {
@@ -3060,7 +3067,20 @@ export default function AppLayout() {
   const headerPlanBasis = costBasis === 'plan' && planBasis.basis?.coverage.computable
     ? planBasis.basis
     : null
-  const headerCostUSD = headerPlanBasis ? headerPlanBasis.planCostUSD : (derived?.totalCostUSD ?? 0)
+  const headerApiByHarness = useMemo(() => {
+    const byHarness: Record<string, number> = {}
+    for (const [harness, days] of Object.entries(derived?.apiCostByDay?.days ?? {})) {
+      byHarness[harness] = Object.values(days ?? {}).reduce((sum, day) => sum + day.costUSD, 0)
+    }
+    const undated = derived?.apiCostByDay?.undatedCostUSD ?? 0
+    if (undated !== 0) byHarness.claude = (byHarness.claude ?? 0) + undated
+    return byHarness
+  }, [derived?.apiCostByDay])
+  // A plan only prices the harnesses/days it covers. Every other slice remains at its API
+  // estimate, so the headline is the same sum the mixed rows below display.
+  const headerCostUSD = headerPlanBasis
+    ? planCostOf(headerApiByHarness, planAllocation(headerPlanBasis).byHarness)
+    : (derived?.totalCostUSD ?? 0)
   const headerCostScope = headerPlanBasis
     ? planScopeNote({
         covered: planScopeHarnesses(headerPlanBasis).covered.map(h => HARNESS_LABELS[h] ?? h),

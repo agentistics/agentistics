@@ -14,7 +14,7 @@ import { CodeField } from './VaultUnlock'
 import { presenceKey, vt, vtf, type VaultKey } from '../../lib/vaultText'
 import {
   authenticatorBegin, authenticatorConfirm, gestureStep, presenceProgress, cleanSetupCode, setupCodeAccept, setupCodeComplete, clampAutoLock, codeComplete, gateFor, grantAlive,
-  loadVault, lockNow, howStep2, parseUnlockHours, setUnlockPolicy, UNLOCK_MODES, type UnlockMode, needsTypedCode, parseAutoLockInput, presenceDisable, presenceEnrol, recoveryBegin,
+  loadVault, lockNow, howStep2, parseUnlockHours, setUnlockPolicy, setAuthPolicy, type ActionKind, type ProofChoice, UNLOCK_MODES, type UnlockMode, needsTypedCode, parseAutoLockInput, presenceDisable, presenceEnrol, recoveryBegin,
   recoveryConfirm, setAutoLock, wordRows, AUTO_LOCK_MAX, AUTO_LOCK_MIN,
   howConfirms, howNow, presenceProbe, wizardPlan,
   localProof, recoverWithWords, splitWords,
@@ -173,8 +173,8 @@ export function HardeningBlock({ view, lang }: { view: VaultView; lang: 'en' | '
 
 // ── a gated action: the dialog collects the code and warns about the gesture ─────────────────────
 
-export type GateKind = 'lock' | 'autolock' | 'presence-off' | 'unlock-policy'
-export const gateActionOf = (k: GateKind): string => k === 'lock' ? 'lock' : k === 'autolock' ? 'set-auto-lock' : k === 'unlock-policy' ? 'set-unlock-policy' : 'disable-presence'
+export type GateKind = 'lock' | 'autolock' | 'presence-off' | 'unlock-policy' | 'auth-policy'
+export const gateActionOf = (k: GateKind): string => k === 'lock' ? 'lock' : k === 'autolock' ? 'set-auto-lock' : k === 'unlock-policy' ? 'set-unlock-policy' : k === 'auth-policy' ? 'set-auth-policy' : 'disable-presence'
 export const presWordOf = (v: VaultView, lang: 'en' | 'pt') => vt(presenceKey(v.wrappers), lang)
 export const unlockModeKey = (m: UnlockMode): VaultKey => m === 'always' ? 'unlock_always' : m === 'hello-only' ? 'unlock_helloOnly' : 'unlock_daily'
 
@@ -224,8 +224,9 @@ export function UnlockPolicyRow({ view, lang, isMobile, gate, btn, onSave }: {
   )
 }
 
-export function GateDialog({ lang, view, isMobile, kind, minutes, policy, onCancel, onDone, onAction }: {
+export function GateDialog({ lang, view, isMobile, kind, minutes, policy, authPolicy, onCancel, onDone, onAction }: {
   lang: 'en' | 'pt'; view: VaultView; isMobile: boolean; kind: GateKind; minutes?: number; policy?: { mode: UnlockMode; hours: number }
+  authPolicy?: Partial<Record<ActionKind, ProofChoice>>
   onCancel: () => void; onDone: () => void; onAction?: (a: UiAction) => void
 }) {
   const action = gateActionOf(kind)
@@ -238,14 +239,15 @@ export function GateDialog({ lang, view, isMobile, kind, minutes, policy, onCanc
   // v2.98.1: the main machine's "turn off" also asks the 24 words — typed here, on a loopback page only.
   const wantsWords = kind === 'presence-off' && view.requirePresence && view.loopback === true
   const [words, setWords] = useState('')
-  const title = kind === 'lock' ? vt('lockNow', lang) : kind === 'autolock' ? vt('sec_autolock', lang) : kind === 'unlock-policy' ? vt('sec_unlock', lang) : vt('pres_offConfirm', lang)
+  const title = kind === 'lock' ? vt('lockNow', lang) : kind === 'autolock' ? vt('sec_autolock', lang) : kind === 'unlock-policy' ? vt('sec_unlock', lang) : kind === 'auth-policy' ? vt('ap_title', lang) : vt('pres_offConfirm', lang)
   const submit = async () => {
     if (busy || (wantsCode && !codeComplete(code))) return
     setBusy(true); setError(null)
     const c = wantsCode ? code : undefined
     const w = wantsWords ? splitWords(words).join(' ') : undefined
     const r = kind === 'lock' ? await lockNow(c) : kind === 'autolock' ? await setAutoLock(minutes ?? 30, c)
-      : kind === 'unlock-policy' ? await setUnlockPolicy(policy?.mode ?? 'daily', policy?.hours ?? 12, c) : await presenceDisable(c, w)
+      : kind === 'unlock-policy' ? await setUnlockPolicy(policy?.mode ?? 'daily', policy?.hours ?? 12, c)
+      : kind === 'auth-policy' ? await setAuthPolicy(authPolicy ?? {}, c) : await presenceDisable(c, w)
     setBusy(false)
     setWords('') // never kept past the request
     if (r.ok) { onDone(); return }
@@ -258,7 +260,7 @@ export function GateDialog({ lang, view, isMobile, kind, minutes, policy, onCanc
       <form onClick={e => e.stopPropagation()} onSubmit={e => { e.preventDefault(); void submit() }} style={card}>
         <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>{title}</div>
         {kind === 'presence-off' && <Note tone="warn">{vt('pres_offConsequence', lang)}</Note>}
-        {wantsCode && <CodeField value={code} onChange={setCode} label={vt('gate_dialog_code', lang)} autoFocus />}
+        {wantsCode && <CodeField value={code} onChange={setCode} label={vt('gate_dialog_code', lang)} autoFocus error={!!error} errorKey={error} />}
         {wantsWords && (
           <label style={{ display: 'block', marginBottom: 10 }}>
             <span style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{vt('pres_offWords', lang)}</span>

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test'
-import { calcCost, getModelPrice, UNPRICED_PRICE, modelCostUSD, isUnpricedModel, unpricedTokens, UNPRICED_MODEL_LABEL, UNPRICED_TOTAL_MARKER, sessionModelUsage, sessionCostUSD, MODEL_PRICING, formatModel, getModelColor, formatProjectName, projectFolder, HARNESS_CAPABILITIES, emptyStatsCache, mergeStatsCaches, sanitizeStatsCache, normalizeGitRemote, repoShortName, canonicalProjectPath, HARNESS_ORDER, SURFACE_HARNESS_ORDER, NATIVE_HARNESS_ID, sessionDay, normalizeSessionTimes } from './types'
+import { calcCost, getModelPrice, UNPRICED_PRICE, modelCostUSD, isUnpricedModel, unpricedTokens, UNPRICED_MODEL_LABEL, UNPRICED_TOTAL_MARKER, sessionModelUsage, sessionCostUSD, MODEL_PRICING, formatModel, getModelColor, formatProjectName, projectFolder, HARNESS_CAPABILITIES, emptyStatsCache, mergeStatsCaches, sanitizeStatsCache, normalizeGitRemote, repoShortName, canonicalProjectPath, projectPathKey, pathForHost, HARNESS_ORDER, SURFACE_HARNESS_ORDER, NATIVE_HARNESS_ID, sessionDay, normalizeSessionTimes } from './types'
 import type { ModelUsage, StatsCache } from './types'
 
 describe('sanitizeStatsCache', () => {
@@ -651,6 +651,20 @@ test('canonicalProjectPath leaves a real project path alone', () => {
   expect(canonicalProjectPath('/home/u/worktrees/thing')).toBe('/home/u/worktrees/thing')
   expect(canonicalProjectPath('/home/u/.claude')).toBe('/home/u/.claude')
   expect(canonicalProjectPath('/home/u/.worktrees')).toBe('/home/u/.worktrees')
+})
+
+test('projectPathKey equates Windows drives and their WSL mounts', () => {
+  expect(projectPathKey(String.raw`D:\code\repo`)).toBe('/mnt/d/code/repo')
+  expect(projectPathKey('/mnt/d/code/repo')).toBe('/mnt/d/code/repo')
+  expect(projectPathKey(String.raw`\\wsl.localhost\Ubuntu\mnt\d\code\repo`)).toBe('/mnt/d/code/repo')
+  expect(projectPathKey(String.raw`\\wsl$\Ubuntu\home\u\repo`)).toBe('/wsl/ubuntu/home/u/repo')
+})
+
+test('pathForHost adapts recorded paths without invoking a process', () => {
+  expect(pathForHost(String.raw`D:\code\repo`, 'linux')).toBe('/mnt/d/code/repo')
+  expect(pathForHost('/mnt/d/code/repo', 'win32')).toBe('/mnt/d/code/repo')
+  expect(pathForHost('/mnt/d/code/repo', 'win32')).not.toBe('D:\\code\\repo')
+  expect(pathForHost('/mnt/d/code/repo', 'linux')).toBe('/mnt/d/code/repo')
 })
 
 test('HARNESS_ORDER lists every harness exactly once', () => {

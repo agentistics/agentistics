@@ -13,6 +13,7 @@ import {
   launchdLabel,
   launchdPlist,
   launchdPlistName,
+  parseLaunchdPid,
   pm2DeleteArgs,
   pm2StartArgs,
   serviceManagerOptions,
@@ -96,9 +97,18 @@ test('the same distinction drives launchd KeepAlive and pm2 autorestart', () => 
   const paths = { stdoutPath: '/tmp/a.log', stderrPath: '/tmp/a.err' }
   expect(launchdPlist(FOREGROUND, paths)).toContain('<key>KeepAlive</key>\n  <true/>')
   expect(launchdPlist(RETURNS, paths)).toContain('<key>KeepAlive</key>\n  <false/>')
+  expect(launchdPlist(FOREGROUND, { ...paths, path: '/opt/homebrew/bin:/usr/local/bin:/bin' }))
+    .toContain('<key>PATH</key>\n    <string>/opt/homebrew/bin:/usr/local/bin:/bin</string>')
+  expect(launchdPlist(FOREGROUND, paths)).toContain('<string>1</string>')
 
   expect(pm2StartArgs(RETURNS)).toContain('--no-autorestart')
   expect(pm2StartArgs(FOREGROUND)).not.toContain('--no-autorestart')
+})
+
+test('launchctl print pid parsing is conservative', () => {
+  expect(parseLaunchdPid('pid = 1234\n')).toBe(1234)
+  expect(parseLaunchdPid('state = running\n')).toBeNull()
+  expect(parseLaunchdPid('pid = 0\n')).toBeNull()
 })
 
 test('a launchd agent is labelled and named consistently', () => {
