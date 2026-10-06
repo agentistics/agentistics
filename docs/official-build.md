@@ -29,8 +29,7 @@ newer engine; bump `api` only when the host's `@agentistics/engine-api` makes a 
 4. `bun install` in `.engine/` with `AGENTISTICS_PUBLIC_DIR=..`, which links the engine against this
    checkout's `@agentistics/core` / `@agentistics/engine-api`;
 5. `build:assets` with `AGENTISTICS_ENGINE_DIR=.engine` regenerates the slot; the step fails unless the
-   slot is `dir`. Every binary compiled after it (glibc, musl, Windows → the desktop sidecar, macOS)
-   carries the engine;
+   slot is `dir`. Both Linux binaries carry the engine;
 6. **smoke**: `packages/server/scripts/assert-official-engine.ts` runs `agentop --version` and fails
    the release unless it prints `engine <v> (api <x.y.z>)` with `<v>` equal to the checked-out
    engine's own version (this is what rejects the transitional in-tree engine, which reports the
@@ -48,32 +47,21 @@ newer engine; bump `api` only when the host's `@agentistics/engine-api` makes a 
 An official run without the engine is a **failed release**, never a community binary under an
 official name.
 
-## The GHCR image is the official build too
+## Release pipeline
 
-`publish-image` (the `ghcr.io/agentistics/agentistics` + `ghcr.io/blpsoares/agentistics` image) uses
-the same predicate, the same `engine.pin`, the same secret and the same assertions, so no published
-artifact — binary, installer or image — ships without the engine:
+`release.yml` serializes releases, computes and checks the version, commits the bump, pushes the tag,
+and creates the GitHub Release with the Linux `agentop` and `agentop-musl` assets. Because it uses
+`GITHUB_TOKEN`, it explicitly dispatches the downstream workflows after creating the release.
 
-1. it checks the engine out at `engine.pin`'s `ref` into `.engine/`, exactly as the build job does;
-2. it hands it to the Dockerfile as a **named build context**
-   (`--build-context engine=.engine --build-arg AGENTISTICS_OFFICIAL=1`). The Dockerfile
-   **bind-mounts** that context into the one `RUN` that compiles — a bind mount is not a layer, so
-   the engine's source is in no layer of any stage — and `.engine` is in `.dockerignore`, so
-   `COPY . .` cannot carry it in by the other door. Without the context and with
-   `AGENTISTICS_OFFICIAL=1`, the image build fails;
-3. that `RUN` compiles `release/agentop` with `--minify` (no source map) and runs
-   `assert-official-engine.ts` against it, so no image can exist without having passed it;
-4. **the image runs the compiled binary** (`CMD ["agentop", "server"]`), not the source. The runtime
-   stage gets `/usr/local/bin/agentop` and nothing of `packages/`, except a three-line forwarder at
-   `packages/server/bin/cli.ts` so the `docker compose exec app bun run packages/server/bin/cli.ts
-   setup-token|reset-password|doctor` that released `agentop central` binaries and `central.sh` run
-   keeps working;
-5. the workflow builds the image **loaded, not pushed**, copies the binary back out of it, runs the
-   same assertion again from outside, checks `find / -path '*engine*src*'` inside the image is empty,
-   and only then builds again (every layer a cache hit) with `push: true` to both namespaces.
+`publish-npm.yml` publishes `@agentistics/agentop` and `@agentistics/mcp` as independent jobs.
+`publish-tauri.yml` builds and attaches the Windows installer. Both workflows also listen for
+`release: published` and accept a tag through `workflow_dispatch`, so one failed publisher can be
+re-run alone without rebuilding or retagging the release:
 
-A community `docker build .` (a clone, `docker/central.yml`, `docker/machine.yml`, a fork) leaves the
-`engine` stage empty and builds with whatever slot `engine-slot.ts` picks on its own.
+```bash
+gh workflow run publish-npm.yml --ref main -f tag=v2.108.0
+gh workflow run publish-tauri.yml --ref main -f tag=v2.108.0
+```
 
 ## The one secret — `ENGINE_DEPLOY_KEY`
 
