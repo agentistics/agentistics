@@ -12,12 +12,14 @@
  * header and is why the bar cannot reach 100 on a timer: full-and-orange is what `ready` buys, and
  * `ready` is a fact about the fleet rather than a countdown.
  *
- * The bar is `transform: scaleX` on a ready-made track, not an animated `width`: width is laid out
- * every frame, transform is composited, and this runs while the machine is busy spawning a process.
+ * The loader is the same Agentistics mark used by boot, route fallbacks and reopen actions. The
+ * current step remains beside it in words; a separate progress bar made this flow look unlike every
+ * other loading surface and was especially easy to mistake for a disabled control.
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { CREATION_STEPS, creationStepText, creationView } from '../../lib/creationProgress'
+import { AgentisticsLoader } from '../../components/AgentisticsLoader'
+import { creationStepText, creationView } from '../../lib/creationProgress'
 
 export interface SessionCreatingProps {
   lang: 'pt' | 'en'
@@ -69,6 +71,11 @@ export function SessionCreating({ lang, harness, label, ready }: SessionCreating
       }}
     >
       <div style={{ width: '100%', maxWidth: 420, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <AgentisticsLoader
+          size={56}
+          label={ready ? (pt ? 'Abrindo' : 'Opening') : (pt ? 'Carregando' : 'Loading')}
+          style={{ alignSelf: 'center' }}
+        />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 15, fontWeight: 650, color: 'var(--text-primary)' }}>
             {label || (pt ? 'Preparando sua sessão' : 'Getting your session ready')}
@@ -83,39 +90,6 @@ export function SessionCreating({ lang, harness, label, ready }: SessionCreating
           </span>
         </div>
 
-        <div style={{
-          position: 'relative', height: 6, borderRadius: 999, overflow: 'hidden',
-          background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-        }}>
-          <div style={{
-            position: 'absolute', inset: 0, transformOrigin: 'left center',
-            transform: `scaleX(${view.percent / 100})`,
-            // Snappy while it climbs; the jump to full on `ready` gets its own, quicker curve so
-            // the finish reads as an arrival rather than as one more increment.
-            transition: ready ? 'transform 160ms ease-out, background 160ms ease-out' : 'transform 320ms ease-out',
-            background: view.complete ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
-          }} />
-        </div>
-
-        {/* The steps as ticks, so the sentence above has somewhere to sit in a sequence. Purely
-            positional — nothing here is clickable and nothing reports a duration, because none of
-            these has one anybody could promise. */}
-        <div style={{ display: 'flex', gap: 4 }} aria-hidden>
-          {CREATION_STEPS.map((s, i) => (
-            <span key={s.id} style={{
-              flex: 1, height: 2, borderRadius: 999,
-              transition: 'background 220ms ease-out',
-              // Only tokens this stylesheet actually defines — a `var()` naming one that does not
-              // exist falls back silently and the tick just looks wrong to whoever added it next.
-              background: view.complete
-                ? 'var(--anthropic-orange)'
-                : i <= view.index ? 'var(--text-tertiary)' : 'var(--border-subtle)',
-              // The step being worked on is the solid one; the ones behind it are dimmed rather
-              // than recoloured, so the row reads as a position and not as five states.
-              opacity: view.complete || i === view.index ? 1 : i < view.index ? 0.7 : 0.5,
-            }} />
-          ))}
-        </div>
       </div>
     </div>
   )
