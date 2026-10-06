@@ -490,7 +490,6 @@ const EN: BoardCopy = {
   },
   subtaskColumns: {
     id: 'ID',
-    progress: 'Progress',
     status: 'Status',
     started: 'Started',
     completed: 'Completed',
@@ -763,7 +762,6 @@ const PT: BoardCopy = {
   },
   subtaskColumns: {
     id: 'ID',
-    progress: 'Progresso',
     status: 'Status',
     started: 'Início',
     completed: 'Concluída',

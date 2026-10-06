@@ -23,6 +23,8 @@ import { boardCopy } from './copy'
 import { useMoney } from './money'
 import { threadCopy, type Lang } from './threadCopy'
 import { mixOf } from './threadView'
+import { liveStatusOrder } from './board'
+import { ProgressTooltip, progressTooltipModel } from './TaskProgressBar'
 
 function fmtHours(minutes: number | null, lang: Lang): string {
   if (minutes === null) return NA
@@ -37,13 +39,16 @@ export function ringLabelFontSize(size: number): number {
   return Math.max(9, Math.min(16, (size - 12) * 0.24))
 }
 
-function Ring({ done, inProgress, blocked, total, size, statuses }: {
+function Ring({ done, inProgress, blocked, total, size, statuses, counts, titles, lang }: {
   done: number
   inProgress: number
   blocked: number
   total: number
   size: number
   statuses: readonly TaskStatusDef[] | null
+  counts: Readonly<Record<string, number>>
+  titles: readonly string[]
+  lang: Lang
 }) {
   const pct = total === 0 ? 0 : Math.floor((done / total) * 100)
   const r = 36
@@ -51,15 +56,14 @@ function Ring({ done, inProgress, blocked, total, size, statuses }: {
   const doneCount = Math.max(0, Math.min(done, total))
   const inProgressCount = Math.max(0, Math.min(inProgress, total - doneCount))
   const blockedCount = Math.max(0, Math.min(blocked, total - doneCount - inProgressCount))
-  const segments = [
-    { count: doneCount, color: statusStyle(statuses, 'done').color, label: statusStyle(statuses, 'done').label },
-    { count: inProgressCount, color: statusStyle(statuses, 'in_progress').color, label: statusStyle(statuses, 'in_progress').label },
-    { count: blockedCount, color: statusStyle(statuses, 'blocked').color, label: statusStyle(statuses, 'blocked').label },
-  ]
+  const statusCounts: Record<string, number> = { ...counts, done: doneCount, in_progress: inProgressCount, blocked: blockedCount }
+  const segments = liveStatusOrder(statuses).map(id => ({ id, count: Math.max(0, Math.min(statusCounts[id] ?? 0, total)), color: statusStyle(statuses, id).color, label: statusStyle(statuses, id).label }))
+  const model = progressTooltipModel(doneCount, total, pct, statusCounts, statuses, lang, titles)
+  const [tip, setTip] = useState<{ x: number; y: number } | null>(null)
   let offset = 0
   const labelSize = ringLabelFontSize(size)
   return (
-    <div style={{ position: 'relative', width: size, height: size, flex: '0 0 auto' }} aria-label={`${pct}%`}>
+    <div style={{ position: 'relative', width: size, height: size, flex: '0 0 auto' }} aria-label={`${pct}%`} onMouseEnter={e => { const r = e.currentTarget.getBoundingClientRect(); setTip({ x: r.left, y: r.top - 7 }) }} onMouseLeave={() => setTip(null)}>
       <svg width={size} height={size} viewBox="0 0 84 84" style={{ transform: 'rotate(-90deg)' }}>
         <circle cx="42" cy="42" r={r} fill="none" stroke="var(--ag-tint-3)" strokeWidth="8" />
         {segments.map(segment => {
@@ -68,7 +72,7 @@ function Ring({ done, inProgress, blocked, total, size, statuses }: {
           offset += length
           return length > 0 ? (
             <circle
-              key={segment.label}
+              key={segment.id}
               cx="42" cy="42" r={r} fill="none" stroke={segment.color} strokeWidth="8" strokeLinecap="butt"
               strokeDasharray={`${length} ${c - length}`} strokeDashoffset={-currentOffset}
               aria-label={`${segment.label}: ${segment.count}`}
@@ -81,6 +85,7 @@ function Ring({ done, inProgress, blocked, total, size, statuses }: {
         fontSize: labelSize, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
         whiteSpace: 'nowrap', lineHeight: 1,
       }}>{pct}%</b>
+      {tip && typeof document !== 'undefined' && <ProgressTooltip model={model} x={tip.x} y={tip.y} />}
     </div>
   )
 }
@@ -110,6 +115,7 @@ export function TaskHero({ detail, lang, statuses, live, reload, onBack, onAbout
   const subsTotal = detail.subtasks.length
   const subsInProgress = detail.subtasks.filter(s => !s.done && s.status === 'in_progress').length
   const subsBlocked = detail.subtasks.filter(s => !s.done && s.status === 'blocked').length
+  const subtaskCounts = Object.fromEntries(detail.subtasks.reduce((m, s) => m.set(s.status, (m.get(s.status) ?? 0) + 1), new Map<string, number>()))
   const r = detail.rollup
   const cost = r.mixedCurrency || (r.credits !== null && r.costUSD === null)
     ? `${r.credits!.premiumRequests} req`
@@ -155,7 +161,8 @@ export function TaskHero({ detail, lang, statuses, live, reload, onBack, onAbout
         {subsTotal > 0 && (
           <Ring
             done={subsDone} inProgress={subsInProgress} blocked={subsBlocked} total={subsTotal}
-            size={isMobile ? 56 : 68} statuses={statuses}
+            size={isMobile ? 56 : 68} statuses={statuses} counts={subtaskCounts}
+            titles={liveStatusOrder(statuses).flatMap(id => detail.subtasks.filter(s => s.status === id).map(s => `${statusStyle(statuses, id).label}: ${s.title}`))} lang={lang}
           />
         )}
         <div style={{ minWidth: 0, flex: 1 }}>

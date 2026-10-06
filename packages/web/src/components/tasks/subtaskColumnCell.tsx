@@ -16,8 +16,6 @@ import { SubtaskSessions } from './SubtaskSessions'
 import { CostCellView, TokensCellView } from './SubtaskMoneyCells'
 import { ModelCellView } from './SubtaskModelCell'
 import { IdCell } from './IdCell'
-import { TaskProgressBar } from './TaskProgressBar'
-import { isGroupSubtask } from './subtaskGroups'
 import { costCellFor, effectiveTimes, subtaskRollupOf, tokensCellFor } from './subtaskRollup'
 import type { Money } from './money'
 import type { Lang } from './copy'
@@ -50,16 +48,6 @@ export function subtaskColumnCell(
   const t = ctx.subtask
   const times = effectiveTimes(ctx.subtaskRollups, t)
   switch (col) {
-    case 'progress': {
-      // A GROUP's bar is its members' (`groupProgress`, round-down like every bar here); a plain
-      // subtask is one unit of work, done or not. A group with no members draws nothing — the
-      // same "nobody broke this up" rule `TaskProgressBar` applies.
-      const gp = isGroupSubtask(t) ? ctx.subtaskRollups.find(v => v.id === t.id)?.groupProgress : undefined
-      if (isGroupSubtask(t) && !gp) return null
-      const done = gp ? gp.done : t.done ? 1 : 0
-      const total = gp ? gp.total : 1
-      return <div style={{ minWidth: 72 }}><TaskProgressBar done={done} total={total} showPercent={false} /></div>
-    }
     case 'started':
       return (
         <span

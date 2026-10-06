@@ -55,7 +55,7 @@ export interface CentralTaskRow {
   comments: TaskComment[]
   subtasks: Subtask[]
   files: TaskFile[]
-  counts: { comments: number; subtasks: number; subtasksDone: number; subtasksInProgress?: number; files: number }
+  counts: { comments: number; subtasks: number; subtasksDone: number; subtasksInProgress?: number; subtasksByStatus?: Record<string, number>; files: number }
   rollup: AttemptRollup
   harnesses: string[]
   repos: string[]
@@ -186,7 +186,7 @@ export interface TaskListRow {
   /** `commentsBySubtask` is each subtask's/group's THREAD size (a group includes its members');
    *  optional because an older server does not send it — read it as "no per-row count known". */
   counts: {
-    comments: number; subtasks: number; subtasksDone: number; subtasksInProgress?: number; files: number
+    comments: number; subtasks: number; subtasksDone: number; subtasksInProgress?: number; subtasksByStatus?: Record<string, number>; files: number
     commentsBySubtask?: Record<string, number>
     /** Threads on the task. Optional: an older server does not send it — "not known", never 0. */
     threads?: number

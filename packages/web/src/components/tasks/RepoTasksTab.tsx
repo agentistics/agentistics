@@ -142,7 +142,7 @@ export function RepoTasksTab(p: RepoTasksTabProps) {
               </div>
               <span style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.35 }}>{r.task.title}</span>
               {r.counts.subtasks > 0 && (
-                <TaskProgressBar done={r.counts.subtasksDone} inProgress={r.counts.subtasksInProgress} total={r.counts.subtasks} statuses={statuses} />
+                <TaskProgressBar done={r.counts.subtasksDone} inProgress={r.counts.subtasksInProgress} statusCounts={r.counts.subtasksByStatus} total={r.counts.subtasks} statuses={statuses} />
               )}
               <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', ...numeric, fontSize: 11.5 }}>
                 <span>{fmtInt(r.rollup.sessionsLinked)} <span style={microLabel}>{pt ? 'sessões' : 'sessions'}</span></span>
@@ -209,7 +209,7 @@ export function RepoTasksTab(p: RepoTasksTabProps) {
                 <td style={td}><StatusPill status={r.task.status} statuses={statuses} /></td>
                 <td style={{ ...td, minWidth: 120 }}>
                   {r.counts.subtasks > 0
-                    ? <TaskProgressBar done={r.counts.subtasksDone} inProgress={r.counts.subtasksInProgress} total={r.counts.subtasks} statuses={statuses} />
+                    ? <TaskProgressBar done={r.counts.subtasksDone} inProgress={r.counts.subtasksInProgress} statusCounts={r.counts.subtasksByStatus} total={r.counts.subtasks} statuses={statuses} />
                     : <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>—</span>}
                 </td>
                 {/* `sessionsLinked`, not `sessionsUsed`: a row with no conversation link named no

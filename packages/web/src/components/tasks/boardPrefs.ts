@@ -20,7 +20,7 @@
  */
 
 import type { BoardStatus, ColumnId } from './board'
-import type { SubtaskColumnId } from './subtaskColumnDefs'
+import { SUBTASK_COLUMNS, type SubtaskColumnId } from './subtaskColumnDefs'
 import { DEFAULT_SORT, type SortSpec } from '@agentistics/core'
 import { useSyncExternalStore } from 'react'
 import { createSharedPref, PERSONAL_PREFS } from '../../lib/sharedPref'
@@ -161,14 +161,16 @@ export function parseBoardPrefs(raw: unknown): BoardPrefs {
     // A stored column id no longer in the table is dropped rather than rendering a blank cell;
     // an EMPTY stored list is a real choice ("show me only the names") and is kept.
     columns: Array.isArray(p.columns) ? (p.columns as ColumnId[]) : null,
-    subtaskColumns: Array.isArray(p.subtaskColumns) ? (p.subtaskColumns as SubtaskColumnId[]) : null,
+    subtaskColumns: Array.isArray(p.subtaskColumns)
+      ? (p.subtaskColumns as SubtaskColumnId[]).filter(id => SUBTASK_COLUMNS.some(c => c.id === id))
+      : null,
     columnWidths: p.columnWidths && typeof p.columnWidths === 'object' && !Array.isArray(p.columnWidths)
       ? Object.fromEntries(Object.entries(p.columnWidths as Record<string, unknown>)
         .filter(([, n]) => typeof n === 'number' && Number.isFinite(n) && n > 0)) as Record<string, number>
       : {},
     subtaskColumnWidths: p.subtaskColumnWidths && typeof p.subtaskColumnWidths === 'object' && !Array.isArray(p.subtaskColumnWidths)
       ? Object.fromEntries(Object.entries(p.subtaskColumnWidths as Record<string, unknown>)
-        .filter(([, n]) => typeof n === 'number' && Number.isFinite(n) && n > 0)) as Record<string, number>
+        .filter(([id, n]) => id !== 'progress' && typeof n === 'number' && Number.isFinite(n) && n > 0)) as Record<string, number>
       : {},
     groups: statuses(p.groups),
     groupBy: isGroupBy(p.groupBy) ? p.groupBy : 'status',
