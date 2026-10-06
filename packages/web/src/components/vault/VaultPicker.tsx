@@ -7,9 +7,11 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { Folder, KeyRound, Loader2 } from 'lucide-react'
-import { Err, card, input, overlay, primaryBtn } from '../MfaSetup'
-import { cleanCode, codeComplete, loadVault, stepUp } from '../../lib/vaultApi'
-import { LockedVaultInline } from './VaultUnlock'
+import { Err, card, input, overlay } from '../MfaSetup'
+import { codeComplete, loadVault, stepUp } from '../../lib/vaultApi'
+import { CodeField } from './VaultUnlock'
+import { VaultStage } from './VaultStage'
+import { Checkbox, DialogActions, dialogButtonStyle } from '../../pages/settings/primitives'
 import { filterPersonal, listPersonal, type PersonalGroup, type PersonalMeta } from '../../lib/vaultPersonal'
 import type { VaultSelection } from '../../lib/vaultChip'
 import { pt_, type PKey } from '../../lib/personalText'
@@ -51,15 +53,18 @@ function Shell({ isMobile, title, onClose, children }: { isMobile: boolean; titl
   )
 }
 
-function CodeInput({ lang, isMobile, onCode, error }: { lang: Lang; isMobile: boolean; onCode: (c: string) => Promise<void>; error?: string | null }) {
+function CodeInput({ lang, isMobile, onCode, error, onCancel }: { lang: Lang; isMobile: boolean; onCode: (c: string) => Promise<void>; error?: string | null; onCancel?: () => void }) {
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
+  const ok = codeComplete(code) && !busy
   return (
-    <form onSubmit={e => { e.preventDefault(); if (codeComplete(code) && !busy) { setBusy(true); void onCode(code).finally(() => { setBusy(false); setCode('') }) } }}>
-      <input value={code} onChange={e => setCode(cleanCode(e.target.value))} placeholder="123456" inputMode="numeric" autoComplete="one-time-code" autoFocus maxLength={6}
-        aria-label={t('code', lang)} style={{ ...input, minHeight: isMobile ? 44 : undefined }} />
+    <form onSubmit={e => { e.preventDefault(); if (ok) { setBusy(true); void onCode(code).finally(() => { setBusy(false); setCode('') }) } }}>
+      <CodeField value={code} onChange={setCode} label={t('code', lang)} autoFocus />
       {error && <Err text={error} />}
-      <button type="submit" disabled={busy || !codeComplete(code)} style={{ ...primaryBtn, minHeight: isMobile ? 44 : undefined }}>{t('confirmCode', lang)}</button>
+      <DialogActions>
+        {onCancel && <button type="button" onClick={onCancel} style={dialogButtonStyle('secondary', isMobile)}>{t('cancel', lang)}</button>}
+        <button type="submit" disabled={!ok} style={dialogButtonStyle('primary', isMobile, !ok)}>{busy && <Loader2 size={14} className="ag-spin" />} {t('confirmCode', lang)}</button>
+      </DialogActions>
     </form>
   )
 }
@@ -101,7 +106,7 @@ export function VaultPicker({ lang, isMobile, initial, onConfirm, onClear, onClo
       {phase === 'loading' && <Loader2 size={14} className="ag-spin" />}
       {phase === 'failed' && <Err text={t('failed', lang)} />}
       {/* §10: the shared unlock — Hello + code on this computer, the phone's own ways on a phone. */}
-      {phase === 'locked' && <LockedVaultInline lang={lang} isMobile={isMobile} onOpened={() => { void load() }} />}
+      {phase === 'locked' && <VaultStage lang={lang} isMobile={isMobile} compact onOpened={() => { void load() }} />}
       {phase === 'list-code' && <CodeInput lang={lang} isMobile={isMobile} error={error} onCode={async c => { const r = await stepUp(c); if (!r.ok) { setError(r.sentence); return } setError(null); await load() }} />}
       {phase === 'ready' && (
         <>
@@ -111,31 +116,31 @@ export function VaultPicker({ lang, isMobile, initial, onConfirm, onClear, onClo
                 style={{ ...input, letterSpacing: 'normal', minHeight: isMobile ? 44 : undefined }} />
               {groups.length > 0 && <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '8px 0 2px' }}>{t('groups', lang)}</div>}
               {groups.filter(g => !q || g.name.toLowerCase().includes(q.toLowerCase())).map(g => (
-                <label key={g.id} style={row}>
-                  <input type="checkbox" checked={pickG.has(g.id)} onChange={() => toggle(pickG, g.id, setPickG)} />
+                <div key={g.id} style={row} onClick={() => toggle(pickG, g.id, setPickG)}>
+                  <Checkbox checked={pickG.has(g.id)} onChange={() => toggle(pickG, g.id, setPickG)} label="" ariaLabel={g.name} />
                   <Folder size={14} style={{ color: 'var(--anthropic-orange)' }} />
                   <span style={{ flex: 1, minWidth: 0, fontSize: 13.5 }}>{g.name}</span>
                   <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{t('count', lang, items.filter(i => i.groupId === g.id).length)}</span>
-                </label>
+                </div>
               ))}
               <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '10px 0 2px' }}>{t('items', lang)}</div>
               {shown.map(i => (
-                <label key={i.id} style={row}>
-                  <input type="checkbox" checked={pick.has(i.id)} onChange={() => toggle(pick, i.id, setPick)} />
+                <div key={i.id} style={row} onClick={() => toggle(pick, i.id, setPick)}>
+                  <Checkbox checked={pick.has(i.id)} onChange={() => toggle(pick, i.id, setPick)} label="" ariaLabel={i.name} />
                   <KeyRound size={14} style={{ color: 'var(--anthropic-orange)' }} />
                   <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, overflowWrap: 'anywhere' }}>{i.name}</span>
                   <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{pt_(`kind_${i.kind}` as PKey, lang)}</span>
-                </label>
+                </div>
               ))}
             </>
           )}
-          <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-            <button type="button" onClick={confirm} disabled={pick.size === 0 && pickG.size === 0} style={{ ...primaryBtn, width: 'auto', flex: 1, minHeight: isMobile ? 44 : undefined }}>{t('confirm', lang)}</button>
-            {initial && <button type="button" onClick={onClear} style={{ ...primaryBtn, width: 'auto', color: 'var(--text-secondary)', borderColor: 'var(--border)', background: 'transparent', minHeight: isMobile ? 44 : undefined }}>{t('clear', lang)}</button>}
-          </div>
         </>
       )}
-      <button type="button" onClick={onClose} style={{ marginTop: 10, background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', fontFamily: 'inherit', padding: isMobile ? '12px 0' : '4px 0' }}>{t('cancel', lang)}</button>
+      <DialogActions>
+        <button type="button" onClick={onClose} style={dialogButtonStyle('secondary', isMobile)}>{t('cancel', lang)}</button>
+        {phase === 'ready' && initial && <button type="button" onClick={onClear} style={dialogButtonStyle('secondary', isMobile)}>{t('clear', lang)}</button>}
+        {phase === 'ready' && <button type="button" onClick={confirm} disabled={pick.size === 0 && pickG.size === 0} style={dialogButtonStyle('primary', isMobile, pick.size === 0 && pickG.size === 0)}>{t('confirm', lang)}</button>}
+      </DialogActions>
     </Shell>
   )
 }
@@ -144,7 +149,7 @@ export function VaultPicker({ lang, isMobile, initial, onConfirm, onClear, onClo
 export function VaultCodeAsk({ lang, isMobile, onDone }: { lang: Lang; isMobile: boolean; onDone: (code: string | null) => void }) {
   return (
     <Shell isMobile={isMobile} title={t('code', lang)} onClose={() => onDone(null)}>
-      <CodeInput lang={lang} isMobile={isMobile} onCode={async c => { onDone(c) }} />
+      <CodeInput lang={lang} isMobile={isMobile} onCode={async c => { onDone(c) }} onCancel={() => onDone(null)} />
     </Shell>
   )
 }

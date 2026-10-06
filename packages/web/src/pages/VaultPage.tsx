@@ -11,24 +11,26 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
-import { Copy, Eye, EyeOff, FileUp, FolderPlus, History, KeyRound, Loader2, Pencil, Plus, RotateCcw, Search, Trash2, X } from 'lucide-react'
+import { Copy, Eye, EyeOff, FileUp, FolderPlus, History, KeyRound, Loader2, Lock, Pencil, Plus, Replace, RotateCcw, Search, ShieldCheck, Trash2, X } from 'lucide-react'
 import { VaultGlyph as VaultIcon } from '../components/vault/VaultGlyph'
-import { Checkbox } from './settings/primitives'
+import { Checkbox, ConfirmModal, DialogActions, FieldInput, FieldTextarea, Select, TabSelect, dialogButtonStyle } from './settings/primitives'
 import type { AppContext } from '../lib/app-context'
 import { useIsMobile } from '../hooks/useIsMobile'
-import { Err, card, input, overlay, primaryBtn, dangerBtn } from '../components/MfaSetup'
-import { cleanCode, codeComplete, loadVault, vaultPost, type Reply } from '../lib/vaultApi'
+import { Err, card, input, overlay, primaryBtn } from '../components/MfaSetup'
+import { codeComplete, loadVault, vaultPost, type Reply, type VaultItem } from '../lib/vaultApi'
+import { itemStateKey, kindKey, orderItems, reasonKey, vt } from '../lib/vaultText'
 import { resolvePaging } from '../components/team/tablePaging'
 import {
   KIND_FIELDS, PERSONAL_KINDS, REVEAL_HIDE_MS, copyWithAutoClear, createGroup, createPersonal, defaultImportChoices, deleteGroup, editPersonal,
   filterPersonal, importCommit, importPreview, importReady, listPersonal, listVersions, movePersonal, parseTags, purgePersonal, renameGroup,
-  restorePersonal, restoreVersion, revealPersonal, trashPersonal, withStepUp, wipeBackupHistory,
+  USE_ONLY_DEFAULT, isUseOnly, restorePersonal, restoreVersion, revealPersonal, trashPersonal, withStepUp, wipeBackupHistory,
   type ImportChoice, type ImportKey, type PersonalFilter, type PersonalGroup, type PersonalKind, type PersonalMeta,
 } from '../lib/vaultPersonal'
 import { pt_, type PKey } from '../lib/personalText'
 import { hasPasskeyHere, mobileState, passkeySupport, phoneGesture, removePasskey, setCodeReveal, type MobileState } from '../lib/passkey'
-import { LockedVaultInline, PhoneEnrol } from '../components/vault/VaultUnlock'
-import { VaultStage } from '../components/vault/VaultStage'
+import { CodeField, PhoneEnrol } from '../components/vault/VaultUnlock'
+import { VaultCodeStage, VaultStage } from '../components/vault/VaultStage'
+import { VaultCodeClock } from '../components/vault/VaultCodeClock'
 import { clearStalePhones, phoneFacts, readDeviceKey, removeDevice } from '../lib/phoneVault'
 
 type Lang = 'en' | 'pt'
@@ -42,6 +44,9 @@ export function usePersonalVault() {
   const [state, setState] = useState<State>({ kind: 'loading' })
   const [items, setItems] = useState<PersonalMeta[]>([])
   const [groups, setGroups] = useState<PersonalGroup[]>([])
+  // VAULT.UX-R2 item 10: the secrets Agentistics keeps for itself (GET /api/vault's inventory) — names,
+  // files, dates and states, never a value — listed beside the person's own, in ONE list.
+  const [systemItems, setSystemItems] = useState<VaultItem[]>([])
   const [busyHello, setBusyHello] = useState(false)
   // The code dialog the gate asks for: resolved with the typed code, or null when cancelled.
   const [codeAsk, setCodeAsk] = useState<null | ((code: string | null) => void)>(null)
@@ -73,6 +78,7 @@ export function usePersonalVault() {
     const v = await loadVault()
     if (v.kind === 'failed') { setState({ kind: 'failed' }); return }
     if (v.view.state !== 'open') { setState({ kind: 'locked' }); return }
+    if (v.kind === 'view') setSystemItems(orderItems(v.view.items))
     const r = await listPersonal()
     if (r.ok) {
       setItems(r.items); setGroups(r.groups); setState({ kind: 'ready' })
@@ -85,8 +91,10 @@ export function usePersonalVault() {
     setState({ kind: 'failed' })
   }, [])
   useEffect(() => { void load() }, [load])
-  return { state, setState, items, setItems, groups, setGroups, busyHello, codeAsk, mobile, setMobile, isPhone, host, gated, load }
+  return { state, setState, items, setItems, groups, setGroups, systemItems, busyHello, codeAsk, mobile, setMobile, isPhone, host, gated, load }
 }
+
+type Section = 'all' | 'mine' | 'system'
 
 export default function VaultPage() {
   const ctx = useOutletContext<AppContext>()
@@ -95,17 +103,19 @@ export default function VaultPage() {
   const isMobile = useIsMobile()
 
   const [filter, setFilter] = useState<PersonalFilter>({ q: '', kind: 'all', groupId: 'all', trash: false })
+  const [section, setSection] = useState<Section>(() => sectionFromUrl())
   const [qLive, setQLive] = useState('')
   const [page, setPage] = useState(0)
   const [size, setSize] = useState(25)
-  const [editing, setEditing] = useState<PersonalMeta | 'new' | null>(null)
+  const [editing, setEditing] = useState<{ item: PersonalMeta | null; replace?: boolean } | null>(null)
   const [versionsOf, setVersionsOf] = useState<PersonalMeta | null>(null)
   const [importing, setImporting] = useState(false)
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+  const [wipeAsk, setWipeAsk] = useState(false)
   // A vault that WAS open and is now locked (auto-lock, the Lock button) closes its safe on the way in.
   const wasReady = useRef(false)
-  const { state, setState, items, setItems, groups, busyHello, codeAsk, mobile, setMobile, isPhone, host, gated, load } = usePersonalVault()
+  const { state, setState, items, setItems, groups, systemItems, busyHello, codeAsk, mobile, setMobile, isPhone, host, gated, load } = usePersonalVault()
   useEffect(() => { if (state.kind === 'ready') wasReady.current = true }, [state.kind])
 
   // Reactive search: every keystroke, debounced 120 ms; page back to 1 whenever the filter changes.
@@ -114,24 +124,22 @@ export default function VaultPage() {
 
   const kindLabel = useCallback((k: PersonalKind) => t(`kind_${k}` as PKey), [lang]) // eslint-disable-line react-hooks/exhaustive-deps
   const shown = useMemo(() => filterPersonal(items, groups, filter, kindLabel), [items, groups, filter, kindLabel])
+  const sysShown = useMemo(() => filterSystem(systemItems, filter.q, lang), [systemItems, filter.q, lang])
   const paging = resolvePaging({ mode: 'maximized', total: shown.length, page, size })
   const rows = shown.slice(paging.start, paging.end)
   const groupName = (id: string | null) => (id ? groups.find(g => g.id === id)?.name ?? '' : '')
   const flash = (s: string) => { setToast(s); setTimeout(() => setToast(cur => (cur === s ? null : cur)), 4000) }
   const upsert = (m: PersonalMeta) => setItems(cur => [m, ...cur.filter(x => x.id !== m.id)])
 
-  const btn: React.CSSProperties = {
-    padding: isMobile ? '10px 14px' : '6px 12px', minHeight: isMobile ? 44 : undefined, borderRadius: 8, fontSize: 13,
-    border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', cursor: 'pointer',
-    display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'inherit',
-  }
+  const btn = pageBtn(isMobile)
   const hot: React.CSSProperties = { ...btn, ...primaryBtn, width: 'auto', padding: btn.padding, minHeight: btn.minHeight }
   const pageWrap: React.CSSProperties = { maxWidth: 1100, margin: '0 auto', padding: isMobile ? '16px 16px 96px' : '24px 28px', boxSizing: 'border-box' }
 
   const header = (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6, flexWrap: 'wrap' }}>
       <span aria-hidden style={{ width: 36, height: 36, borderRadius: 10, display: 'grid', placeItems: 'center', background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)' }}><VaultIcon size={19} /></span>
       <h1 style={{ fontSize: 20, margin: 0 }}>{t('title')}</h1>
+      {state.kind === 'ready' && <VaultCodeClock lang={lang} style={{ marginLeft: isMobile ? 0 : 'auto', flexBasis: isMobile ? '100%' : undefined }} />}
     </div>
   )
 
@@ -149,9 +157,8 @@ export default function VaultPage() {
   }
   if (state.kind === 'code') {
     return (
-      <div style={pageWrap}>{header}
-        <CodeForm lang={lang} isMobile={isMobile} prompt={t('needsCode')} error={state.error} onSubmit={async code => {
-          const { vaultPost } = await import('../lib/vaultApi')
+      <div style={pageWrap}>
+        <VaultCodeStage lang={lang} isMobile={isMobile} title={t('codeStageTitle')} sub={t('codeStageSub')} error={state.error} onSubmit={async code => {
           const r = await vaultPost<{ grant: string }>('/api/vault/stepup', { code })
           if (!r.ok) { setState({ kind: 'code', error: r.sentence || t('network') }); return }
           await load()
@@ -160,55 +167,71 @@ export default function VaultPage() {
     )
   }
 
+  const mineCount = items.filter(i => !i.deletedAt).length
+  const showMine = section !== 'system'
+  const showSystem = section !== 'mine' && !filter.trash
   return (
     <div style={pageWrap}>
       {header}
       <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, margin: '0 0 14px', maxWidth: 720 }}>{t('intro')}</p>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-        <button type="button" style={hot} onClick={() => setEditing('new')}><Plus size={14} /> {t('new')}</button>
+        <button type="button" style={hot} onClick={() => setEditing({ item: null })}><Plus size={14} /> {t('new')}</button>
         <button type="button" style={btn} onClick={() => setImporting(true)}><FileUp size={14} /> {t('importEnv')}</button>
         <button type="button" style={btn} onClick={() => setGroupsOpen(true)}><FolderPlus size={14} /> {t('groups')}</button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'minmax(0, 1fr) 170px 190px auto', gap: 8, marginBottom: 12 }}>
+      <div style={{ marginBottom: 10, overflowX: 'auto', maxWidth: '100%' }}>
+        <TabSelect<Section> value={section} onChange={v => { setSection(v); if (v === 'system') setFilter(f => ({ ...f, trash: false })) }} options={[
+          { value: 'all', label: `${t('section_all')} · ${mineCount + systemItems.length}` },
+          { value: 'mine', label: `${t('section_mine')} · ${mineCount}` },
+          { value: 'system', label: `${t('section_system')} · ${systemItems.length}` },
+        ]} />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : showMine ? 'minmax(0, 1fr) 170px 190px auto' : 'minmax(0, 1fr)', gap: 8, marginBottom: 12, alignItems: 'center' }}>
         <label style={{ position: 'relative', gridColumn: isMobile ? '1 / -1' : undefined }}>
           <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
           <input value={qLive} onChange={e => setQLive(e.target.value)} placeholder={t('search')} aria-label={t('search')}
-            style={{ ...input, marginBottom: 0, paddingLeft: 30, letterSpacing: 'normal', width: '100%', boxSizing: 'border-box', minHeight: isMobile ? 44 : undefined }} />
+            style={{ ...input, marginBottom: 0, paddingLeft: 30, letterSpacing: 'normal', width: '100%', boxSizing: 'border-box', fontSize: isMobile ? 16 : 13, minHeight: isMobile ? 44 : undefined }} />
         </label>
-        <select value={filter.kind} onChange={e => setFilter(f => ({ ...f, kind: e.target.value as PersonalFilter['kind'] }))} aria-label={t('f_kind')} style={{ ...input, marginBottom: 0, letterSpacing: 'normal', minHeight: isMobile ? 44 : undefined }}>
-          <option value="all">{t('allKinds')}</option>
-          {PERSONAL_KINDS.map(k => <option key={k} value={k}>{kindLabel(k)}</option>)}
-        </select>
-        <select value={filter.groupId} onChange={e => setFilter(f => ({ ...f, groupId: e.target.value }))} aria-label={t('f_group')} style={{ ...input, marginBottom: 0, letterSpacing: 'normal', minHeight: isMobile ? 44 : undefined }}>
-          <option value="all">{t('allGroups')}</option>
-          <option value="none">{t('noGroup')}</option>
-          {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-        </select>
-        <button type="button" style={{ ...btn, justifyContent: 'center', gridColumn: isMobile ? '1 / -1' : undefined, ...(filter.trash ? { borderColor: 'var(--anthropic-orange)', color: 'var(--anthropic-orange)' } : null) }}
-          aria-pressed={filter.trash} onClick={() => setFilter(f => ({ ...f, trash: !f.trash }))}>
-          <Trash2 size={14} /> {t('trash')} · {items.filter(i => i.deletedAt).length}
-        </button>
+        {showMine && (
+          <>
+            <div aria-label={t('f_kind')}>
+              <Select value={filter.kind} onChange={v => setFilter(f => ({ ...f, kind: v as PersonalFilter['kind'] }))}
+                options={[{ value: 'all', label: t('allKinds') }, ...PERSONAL_KINDS.map(k => ({ value: k, label: kindLabel(k) }))]} />
+            </div>
+            <div aria-label={t('f_group')}>
+              <Select value={filter.groupId} onChange={v => setFilter(f => ({ ...f, groupId: v }))}
+                options={[{ value: 'all', label: t('allGroups') }, { value: 'none', label: t('noGroup') }, ...groups.map(g => ({ value: g.id, label: g.name }))]} />
+            </div>
+            <button type="button" style={{ ...btn, justifyContent: 'center', gridColumn: isMobile ? '1 / -1' : undefined, ...(filter.trash ? { borderColor: 'var(--anthropic-orange)', color: 'var(--anthropic-orange)' } : null) }}
+              aria-pressed={filter.trash} onClick={() => setFilter(f => ({ ...f, trash: !f.trash }))}>
+              <Trash2 size={14} /> {t('trash')} · {items.filter(i => i.deletedAt).length}
+            </button>
+          </>
+        )}
       </div>
-      {filter.trash && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 10 }}>{t('trashNote')}</div>}
+      {filter.trash && showMine && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 10 }}>{t('trashNote')}</div>}
 
       {busyHello && <div role="status" aria-live="polite" style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600, marginBottom: 10 }}><Loader2 size={14} className="ag-spin" /> {t('confirmHello')}</div>}
       {toast && <div role="status" style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 10 }}>{toast}</div>}
 
-      {rows.length === 0 ? (
-        <div style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '18px 0' }}>{items.length === 0 ? t('empty') : t('noMatch')}</div>
+      {showMine && (rows.length === 0 ? (
+        section === 'mine' || (shown.length === 0 && sysShown.length === 0)
+          ? <div style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '18px 0' }}>{items.length === 0 ? t('empty') : t('noMatch')}</div>
+          : null
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {rows.map(m => (
             <ItemRow key={m.id} m={m} lang={lang} isMobile={isMobile} btn={btn} group={groupName(m.groupId)} groups={groups}
               gated={gated} onChanged={upsert} onRemoved={id => setItems(cur => cur.filter(x => x.id !== id))} onFlash={flash}
-              onEdit={() => setEditing(m)} onVersions={() => setVersionsOf(m)} />
+              onEdit={replace => setEditing({ item: m, replace })} onVersions={() => setVersionsOf(m)} />
           ))}
         </div>
-      )}
+      ))}
 
-      {shown.length > 0 && (
+      {showMine && shown.length > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 12, fontSize: 12.5, color: 'var(--text-secondary)' }}>
           <span>{t('showing', { a: paging.start + 1, b: paging.end, n: shown.length })}</span>
           {paging.paged && (
@@ -218,28 +241,36 @@ export default function VaultPage() {
               <button type="button" style={btn} disabled={paging.page + 1 >= paging.pageCount} onClick={() => setPage(paging.page + 1)}>{t('next')}</button>
             </>
           )}
-          <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', marginLeft: 'auto' }}>
-            <select value={paging.size} onChange={e => setSize(Number(e.target.value))} style={{ ...input, marginBottom: 0, width: 'auto', letterSpacing: 'normal', padding: '4px 8px', minHeight: isMobile ? 44 : undefined }}>
-              {paging.sizes.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
+          <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center', marginLeft: 'auto' }}>
+            <div style={{ width: 84 }} aria-label={t('perPage')}>
+              <Select value={String(paging.size)} onChange={v => setSize(Number(v))} options={paging.sizes.map(n => ({ value: String(n), label: String(n) }))} />
+            </div>
             {t('perPage')}
-          </label>
+          </div>
         </div>
       )}
+
+      {showSystem && (
+        <div data-vault-system style={{ marginTop: showMine ? 22 : 0 }}>
+          {showMine && <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}><ShieldCheck size={14} /> {t('section_system')}</div>}
+          <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.55, marginBottom: 10, maxWidth: 720 }}>{t('systemNote')}</div>
+          {sysShown.length === 0
+            ? <div style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '6px 0 12px' }}>{systemItems.length === 0 ? t('systemEmpty') : t('noMatch')}</div>
+            : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{sysShown.map((i, n) => <SystemRow key={`${i.file}-${n}`} item={i} lang={lang} />)}</div>}
+        </div>
+      )}
+
       {mobile && <PhonePanel lang={lang} isMobile={isMobile} state={mobile} isPhone={isPhone} host={host} gated={gated} onChanged={() => { void mobileState().then(ms => { if (ms.ok) setMobile({ passkeys: ms.passkeys, codeReveal: ms.codeReveal, loopback: ms.loopback, devices: ms.devices }) }) }} />}
       {!isPhone && (
         <div style={{ border: '1px solid var(--border)', borderRadius: 12, padding: '12px 16px', marginTop: 18, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6, flex: '1 1 260px' }}>{t('backupNote')}</span>
-          <button type="button" style={btn} onClick={() => {
-            if (!window.confirm(t('backupWipeConfirm'))) return
-            void gated(c => wipeBackupHistory(c), { action: 'personal-backup-wipe', target: '' }).then(r => flash(r.ok ? t('backupWiped', { n: r.deleted }) : (r.sentence || t('network'))))
-          }}><History size={14} /> {t('backupWipe')}</button>
+          <button type="button" style={btn} onClick={() => setWipeAsk(true)}><History size={14} /> {t('backupWipe')}</button>
         </div>
       )}
       <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 18, lineHeight: 1.6 }}>{t('neverPaste')}</div>
 
       {editing && (
-        <EditDialog lang={lang} isMobile={isMobile} item={editing === 'new' ? null : editing} groups={groups} gated={gated}
+        <EditDialog lang={lang} isMobile={isMobile} item={editing.item} replace={editing.replace === true} groups={groups} gated={gated}
           defaultGroup={filter.groupId !== 'all' && filter.groupId !== 'none' ? filter.groupId : null}
           onClose={() => setEditing(null)} onSaved={m => { upsert(m); setEditing(null) }} />
       )}
@@ -247,6 +278,56 @@ export default function VaultPage() {
       {importing && <ImportDialog lang={lang} isMobile={isMobile} groups={groups} gated={gated} onClose={() => setImporting(false)} onDone={s => { setImporting(false); flash(s); void load() }} />}
       {groupsOpen && <GroupsDialog lang={lang} isMobile={isMobile} groups={groups} items={items} gated={gated} onClose={() => setGroupsOpen(false)} onChanged={() => { void load() }} />}
       {codeAsk && <CodeDialog lang={lang} isMobile={isMobile} onDone={codeAsk} />}
+      <ConfirmModal open={wipeAsk} title={t('backupWipe')} message={t('backupWipeConfirm')} confirmLabel={t('backupWipe')} cancelLabel={t('cancel')}
+        onCancel={() => setWipeAsk(false)} onConfirm={() => {
+          setWipeAsk(false)
+          void gated(c => wipeBackupHistory(c), { action: 'personal-backup-wipe', target: '' }).then(r => flash(r.ok ? t('backupWiped', { n: r.deleted }) : (r.sentence || t('network'))))
+        }} />
+    </div>
+  )
+}
+
+/** `/vault?show=system` (the Settings link) opens on the system section; anything else on "All". */
+function sectionFromUrl(): Section {
+  try { const v = new URLSearchParams(window.location.search).get('show'); return v === 'system' || v === 'mine' ? v : 'all' } catch { return 'all' }
+}
+
+/** The system secrets a search keeps: matched on the kind's words (both languages' reading) and the file. */
+export function filterSystem(list: VaultItem[], q: string, lang: Lang): VaultItem[] {
+  const needle = q.trim().toLowerCase()
+  if (!needle) return list
+  return list.filter(i => `${vt(kindKey(i.kind), lang)} ${i.file}`.toLowerCase().includes(needle))
+}
+
+/** The app's page button (outlined, elevated) — 44px on mobile. One definition for the page and the quick view. */
+function pageBtn(isMobile: boolean): React.CSSProperties {
+  return {
+    padding: isMobile ? '10px 14px' : '6px 12px', minHeight: isMobile ? 44 : undefined, borderRadius: 8, fontSize: 13,
+    border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', cursor: 'pointer',
+    display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'inherit', boxSizing: 'border-box',
+  }
+}
+
+const SYSTEM_TONE = { sealed: 'var(--accent-green, #22c55e)', pending: 'var(--accent-orange, #f59e0b)', unreadable: 'var(--accent-red, #ef4444)' } as const
+
+/** One secret Agentistics keeps for itself: name, file, date and state — never a value, never Ver/Copiar. */
+function SystemRow({ item: i, lang }: { item: VaultItem; lang: Lang }) {
+  const t = (k: PKey) => pt_(k, lang)
+  const why = reasonKey(i.reason)
+  const tone = SYSTEM_TONE[i.state] ?? SYSTEM_TONE.unreadable
+  const fmt = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(lang === 'pt' ? 'pt-BR' : 'en-US') }
+  return (
+    <div data-system-row style={{ border: `1px solid ${i.state === 'sealed' ? 'var(--border)' : tone}`, borderRadius: 10, padding: '12px 14px', minWidth: 0 }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+        <ShieldCheck size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0, alignSelf: 'center' }} />
+        <strong style={{ fontSize: 14, minWidth: 0, overflowWrap: 'anywhere' }}>{vt(kindKey(i.kind), lang)}</strong>
+        <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 999, border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>{t('systemBadge')}</span>
+        <span style={{ marginLeft: 'auto', fontSize: 11.5, fontWeight: 700, color: tone }}>{vt(itemStateKey(i.state), lang)}</span>
+      </div>
+      <div style={{ fontFamily: 'var(--font-mono, ui-monospace, monospace)', fontSize: 12, color: 'var(--text-tertiary)', marginTop: 6, overflowWrap: 'anywhere' }}>{i.file}</div>
+      {i.sealedAt && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>{vt('sealedAt', lang)}: {fmt(i.sealedAt)}</div>}
+      {why && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>{vt(why, lang)}</div>}
+      {i.restoreWith && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>{vt('howToReenter', lang)}: <span style={{ fontFamily: 'var(--font-mono, ui-monospace, monospace)' }}>{i.restoreWith}</span></div>}
     </div>
   )
 }
@@ -298,58 +379,64 @@ export function QuickVaultBody({ lang, isMobile, onNavigate, onAsking }: { lang:
   const { state, setState, items, setItems, groups, busyHello, codeAsk, gated, load } = usePersonalVault()
   const [q, setQ] = useState('')
   const [toast, setToast] = useState<string | null>(null)
-  const [creating, setCreating] = useState(false)
+  const [editing, setEditing] = useState<{ item: PersonalMeta | null; replace?: boolean } | null>(null)
   const kindLabel = useCallback((k: PersonalKind) => pt_(`kind_${k}` as PKey, lang), [lang])
   const shown = useMemo(() => filterPersonal(items, groups, { q, kind: 'all', groupId: 'all', trash: false }, kindLabel), [items, groups, q, kindLabel])
   const groupName = (id: string | null) => (id ? groups.find(g => g.id === id)?.name ?? '' : '')
   const flash = (s: string) => { setToast(s); setTimeout(() => setToast(cur => (cur === s ? null : cur)), 4000) }
-  useEffect(() => { onAsking?.(!!codeAsk) }, [codeAsk, onAsking])
-  const btn: React.CSSProperties = {
-    padding: isMobile ? '10px 14px' : '6px 12px', minHeight: isMobile ? 44 : undefined, borderRadius: 8, fontSize: 13,
-    border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', cursor: 'pointer',
-    display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'inherit',
-  }
+  useEffect(() => { onAsking?.(!!codeAsk || !!editing) }, [codeAsk, editing, onAsking])
+  const btn = pageBtn(isMobile)
+  // The two actions share the top row, balanced: the primary (new) and the secondary (the full page).
+  // Equal halves; the longer label wraps inside its own button instead of pushing the other one out.
+  const half: React.CSSProperties = { flex: '1 1 0', minWidth: 0, justifyContent: 'center', whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.3, minHeight: isMobile ? 44 : 36 }
   return (
     <>
-        {state.kind === 'loading' && <Loader2 size={14} className="ag-spin" />}
-        {state.kind === 'failed' && <Err text={t('network')} />}
-        {state.kind === 'locked' && <LockedVaultInline lang={lang} isMobile={isMobile} onOpened={() => { void load() }} />}
-        {state.kind === 'code' && (
-          <CodeForm lang={lang} isMobile={isMobile} prompt={t('needsCode')} error={state.error} onSubmit={async code => {
-            const r = await vaultPost<{ grant: string }>('/api/vault/stepup', { code })
-            if (!r.ok) { setState({ kind: 'code', error: r.sentence || t('network') }); return }
-            await load()
-          }} />
-        )}
-        {state.kind === 'ready' && (
-          <>
-            <label style={{ position: 'relative', display: 'block', marginBottom: 10 }}>
-              <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-              <input value={q} onChange={e => setQ(e.target.value)} placeholder={t('search')} aria-label={t('search')} autoFocus={!isMobile}
-                style={{ ...input, marginBottom: 0, paddingLeft: 30, letterSpacing: 'normal', width: '100%', boxSizing: 'border-box', minHeight: isMobile ? 44 : undefined }} />
-            </label>
-            <button type="button" data-quick-new style={{ ...btn, ...primaryBtn, marginBottom: 10 }} onClick={() => setCreating(true)}><Plus size={14} /> {t('new')}</button>
-            {busyHello && <div role="status" aria-live="polite" style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600, marginBottom: 10 }}><Loader2 size={14} className="ag-spin" /> {t('confirmHello')}</div>}
-            {toast && <div role="status" style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 10 }}>{toast}</div>}
-            {shown.length === 0
-              ? <div style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '12px 0' }}>{items.filter(i => !i.deletedAt).length === 0 ? t('empty') : t('noMatch')}</div>
-              : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {shown.map(m => (
-                    <ItemRow key={m.id} m={m} lang={lang} isMobile={isMobile} btn={btn} group={groupName(m.groupId)} groups={groups} compact
-                      gated={gated} onChanged={x => setItems(cur => [x, ...cur.filter(y => y.id !== x.id)])} onRemoved={id => setItems(cur => cur.filter(x => x.id !== id))}
-                      onFlash={flash} onEdit={() => {}} onVersions={() => {}} />
-                  ))}
-                </div>
-              )}
-          </>
-        )}
-        <button type="button" data-vault-full-list style={{ ...btn, marginTop: 14, width: '100%', justifyContent: 'center', background: 'transparent', color: 'var(--anthropic-orange)', borderColor: 'var(--anthropic-orange)' }} onClick={() => { onNavigate?.(); navigate('/vault') }}>
-          <VaultIcon size={14} /> {t('quickAll')}
-        </button>
-      {creating && (
-        <EditDialog lang={lang} isMobile={isMobile} item={null} groups={groups} gated={gated} defaultGroup={null}
-          onClose={() => setCreating(false)} onSaved={m => { setItems(cur => [m, ...cur.filter(y => y.id !== m.id)]); setCreating(false) }} />
+      {state.kind === 'loading' && <Loader2 size={14} className="ag-spin" />}
+      {state.kind === 'failed' && <Err text={t('network')} />}
+      {/* Locked: the SAME centred safe as the /vault page, scaled for the panel (owner, 2026-10-05). */}
+      {state.kind === 'locked' && <VaultStage lang={lang} isMobile={isMobile} compact onOpened={() => { void load() }} />}
+      {state.kind === 'code' && (
+        <VaultCodeStage lang={lang} isMobile={isMobile} compact title={t('codeStageTitle')} sub={t('codeStageSub')} error={state.error} onSubmit={async code => {
+          const r = await vaultPost<{ grant: string }>('/api/vault/stepup', { code })
+          if (!r.ok) { setState({ kind: 'code', error: r.sentence || t('network') }); return }
+          await load()
+        }} />
+      )}
+      {state.kind === 'ready' && (
+        <>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+            <button type="button" data-quick-new style={{ ...dialogButtonStyle('primary', isMobile), ...half, width: undefined }} onClick={() => setEditing({ item: null })}>
+              <Plus size={14} /> {t('new')}
+            </button>
+            <button type="button" data-vault-full-list title={t('quickAllHint')} style={{ ...dialogButtonStyle('secondary', isMobile), ...half, width: undefined, color: 'var(--text-primary)' }}
+              onClick={() => { onNavigate?.(); navigate('/vault') }}>
+              <VaultIcon size={14} /> {t('quickAll')}
+            </button>
+          </div>
+          <VaultCodeClock lang={lang} style={{ marginBottom: 10 }} />
+          <label style={{ position: 'relative', display: 'block', marginBottom: 10 }}>
+            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder={t('search')} aria-label={t('search')} autoFocus={!isMobile}
+              style={{ ...input, marginBottom: 0, paddingLeft: 30, letterSpacing: 'normal', width: '100%', boxSizing: 'border-box', fontSize: isMobile ? 16 : 13, minHeight: isMobile ? 44 : undefined }} />
+          </label>
+          {busyHello && <div role="status" aria-live="polite" style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600, marginBottom: 10 }}><Loader2 size={14} className="ag-spin" /> {t('confirmHello')}</div>}
+          {toast && <div role="status" style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 10 }}>{toast}</div>}
+          {shown.length === 0
+            ? <div style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '12px 0' }}>{items.filter(i => !i.deletedAt).length === 0 ? t('empty') : t('noMatch')}</div>
+            : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {shown.map(m => (
+                  <ItemRow key={m.id} m={m} lang={lang} isMobile={isMobile} btn={btn} group={groupName(m.groupId)} groups={groups} compact
+                    gated={gated} onChanged={x => setItems(cur => [x, ...cur.filter(y => y.id !== x.id)])} onRemoved={id => setItems(cur => cur.filter(x => x.id !== id))}
+                    onFlash={flash} onEdit={replace => setEditing({ item: m, replace })} onVersions={() => {}} />
+                ))}
+              </div>
+            )}
+        </>
+      )}
+      {editing && (
+        <EditDialog lang={lang} isMobile={isMobile} item={editing.item} replace={editing.replace === true} groups={groups} gated={gated} defaultGroup={null}
+          onClose={() => setEditing(null)} onSaved={m => { setItems(cur => [m, ...cur.filter(y => y.id !== m.id)]); setEditing(null) }} />
       )}
       {codeAsk && <CodeDialog lang={lang} isMobile={isMobile} onDone={codeAsk} />}
     </>
@@ -362,14 +449,17 @@ type Gated = <T>(run: (code?: string, token?: string) => Promise<Reply<T>>, gest
 
 function ItemRow({ m, lang, isMobile, btn, group, groups, gated, onChanged, onRemoved, onFlash, onEdit, onVersions, compact = false }: {
   m: PersonalMeta; lang: Lang; isMobile: boolean; btn: React.CSSProperties; group: string; groups: PersonalGroup[]; gated: Gated
-  onChanged: (m: PersonalMeta) => void; onRemoved: (id: string) => void; onFlash: (s: string) => void; onEdit: () => void; onVersions: () => void
-  /** The quick panel: reveal and copy only — managing a secret is the page's job. */
+  onChanged: (m: PersonalMeta) => void; onRemoved: (id: string) => void; onFlash: (s: string) => void
+  /** Open the edit dialog; `replace` = the "Substituir valor" entry of a use-only secret (value fields only). */
+  onEdit: (replace?: boolean) => void; onVersions: () => void
+  /** The quick panel: reveal, copy and EDIT — versions, groups and the trash stay on the page. */
   compact?: boolean
 }) {
   const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
   // field → value, for 30 s after a reveal; dropped on unmount.
   const [shown, setShown] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
+  const [purgeAsk, setPurgeAsk] = useState(false)
   const timers = useRef<ReturnType<typeof setTimeout>[]>([])
   useEffect(() => () => { timers.current.forEach(clearTimeout); setShown({}) }, [])
   const hideLater = (field: string) => { timers.current.push(setTimeout(() => setShown(s => { const n = { ...s }; delete n[field]; return n }), REVEAL_HIDE_MS)) }
@@ -393,7 +483,6 @@ function ItemRow({ m, lang, isMobile, btn, group, groups, gated, onChanged, onRe
   }
   const act = async (kind: 'trash' | 'restore' | 'purge') => {
     setError(null)
-    if (kind === 'purge' && !window.confirm(t('purgeConfirm', { name: m.name }))) return
     const r = kind === 'trash' ? await gated((c, tk) => trashPersonal(m.id, m.version, c, tk), { action: 'personal-trash', target: m.id })
       : kind === 'restore' ? await gated((c, tk) => restorePersonal(m.id, m.version, c, tk), { action: 'personal-restore', target: m.id })
         : await gated((c, tk) => purgePersonal(m.id, c, tk), { action: 'personal-purge', target: m.id })
@@ -407,19 +496,21 @@ function ItemRow({ m, lang, isMobile, btn, group, groups, gated, onChanged, onRe
   }
   const fmt = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(lang === 'pt' ? 'pt-BR' : 'en-US') }
   const trashed = m.deletedAt !== null
+  const sealed = isUseOnly(m)
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', minWidth: 0 }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
         <KeyRound size={14} style={{ color: 'var(--anthropic-orange)', flexShrink: 0, alignSelf: 'center' }} />
         <strong style={{ fontSize: 14, minWidth: 0, overflowWrap: 'anywhere' }}>{m.name}</strong>
         <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 999, border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>{t(`kind_${m.kind}` as PKey)}</span>
+        {sealed && <span data-use-only title={t('useOnlySealed')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '1px 7px', borderRadius: 999, border: '1px solid var(--anthropic-orange)', color: 'var(--anthropic-orange)' }}><Lock size={10} /> {t('useOnlyBadge')}</span>}
         {m.confirmEach === false && <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{t('confirmEachOff')}</span>}
         {group && <span style={{ fontSize: 11.5, color: 'var(--anthropic-orange)' }}>▸ {group}</span>}
         {m.tags.map(tag => <span key={tag} style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>#{tag}</span>)}
         <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-tertiary)' }}>{t('updated', { date: fmt(m.updatedAt) })}</span>
       </div>
       {(m.notes || m.url) && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4, overflowWrap: 'anywhere' }}>{m.url && <span>{m.url}{m.notes ? ' · ' : ''}</span>}{m.notes}</div>}
-      {!trashed && (
+      {!trashed && !sealed && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
           {m.fields.map(f => (
             <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
@@ -435,20 +526,28 @@ function ItemRow({ m, lang, isMobile, btn, group, groups, gated, onChanged, onRe
           ))}
         </div>
       )}
-      {!compact && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
-        {!trashed && <button type="button" style={btn} onClick={onEdit}><Pencil size={13} /> {t('edit')}</button>}
-        {!trashed && <button type="button" style={btn} onClick={onVersions}><History size={13} /> {t('versions')}</button>}
-        {!trashed && (
-          <select value={m.groupId ?? ''} onChange={e => { void move(e.target.value || null) }} aria-label={t('move')}
-            style={{ ...input, marginBottom: 0, width: 'auto', letterSpacing: 'normal', padding: '5px 8px', fontSize: 12.5, minHeight: isMobile ? 44 : undefined }}>
-            <option value="">{t('noGroup')}</option>
-            {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-          </select>
+      {!trashed && sealed && (
+        // "Só uso": no value, no Ver/Copiar — what it is, and the one way to change it.
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)', flex: '1 1 220px', minWidth: 0, lineHeight: 1.5 }}>{t('useOnlySealed')}</span>
+          <button type="button" style={btn} onClick={() => onEdit(true)}><Replace size={13} /> {t('replaceValue')}</button>
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
+        {!trashed && <button type="button" style={btn} onClick={() => onEdit(false)}><Pencil size={13} /> {t('edit')}</button>}
+        {!compact && !trashed && <button type="button" style={btn} onClick={onVersions}><History size={13} /> {t('versions')}</button>}
+        {!compact && !trashed && groups.length > 0 && (
+          <div style={{ width: isMobile ? '100%' : 180 }} aria-label={t('move')}>
+            <Select value={m.groupId ?? ''} onChange={v => { void move(v || null) }} placeholder={t('noGroup')}
+              options={[{ value: '', label: t('noGroup') }, ...groups.map(g => ({ value: g.id, label: g.name }))]} />
+          </div>
         )}
-        {!trashed && <button type="button" style={btn} onClick={() => { void act('trash') }}><Trash2 size={13} /> {t('delete')}</button>}
-        {trashed && <button type="button" style={btn} onClick={() => { void act('restore') }}><RotateCcw size={13} /> {t('restore')}</button>}
-        {trashed && <button type="button" style={{ ...btn, color: '#ef4444', borderColor: '#ef4444' }} onClick={() => { void act('purge') }}><Trash2 size={13} /> {t('purge')}</button>}
-      </div>}
+        {!compact && !trashed && <button type="button" style={btn} onClick={() => { void act('trash') }}><Trash2 size={13} /> {t('delete')}</button>}
+        {!compact && trashed && <button type="button" style={btn} onClick={() => { void act('restore') }}><RotateCcw size={13} /> {t('restore')}</button>}
+        {!compact && trashed && <button type="button" style={{ ...btn, color: '#ef4444', borderColor: '#ef4444' }} onClick={() => setPurgeAsk(true)}><Trash2 size={13} /> {t('purge')}</button>}
+      </div>
+      <ConfirmModal open={purgeAsk} title={t('purge')} message={t('purgeConfirm', { name: m.name })} confirmLabel={t('purge')} cancelLabel={t('cancel')}
+        onCancel={() => setPurgeAsk(false)} onConfirm={() => { setPurgeAsk(false); void act('purge') }} />
       {error && <div style={{ marginTop: 8 }}><Err text={error} /></div>}
     </div>
   )
@@ -456,28 +555,32 @@ function ItemRow({ m, lang, isMobile, btn, group, groups, gated, onChanged, onRe
 
 // ── dialogs ──────────────────────────────────────────────────────────────────────────────────
 
-function Sheet({ isMobile, title, onClose, children, wide }: { isMobile: boolean; title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
+function Sheet({ lang, isMobile, title, onClose, children, wide, footer }: { lang: Lang; isMobile: boolean; title: string; onClose: () => void; children: React.ReactNode; wide?: boolean; footer?: React.ReactNode }) {
   useEffect(() => { const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h) }, [onClose])
-  const o: React.CSSProperties = isMobile ? { ...overlay, padding: 0, zIndex: 3000 } : overlay
+  const o: React.CSSProperties = isMobile ? { ...overlay, padding: 0, zIndex: 3000 } : { ...overlay, zIndex: 3000 }
   const c: React.CSSProperties = isMobile
     ? { ...card, maxWidth: 'none', width: '100%', height: '100dvh', maxHeight: '100dvh', borderRadius: 0, border: 'none', overflowY: 'auto', boxSizing: 'border-box' }
-    : { ...card, maxWidth: wide ? 640 : 480, maxHeight: '92vh', overflowY: 'auto', boxSizing: 'border-box' }
+    : { ...card, maxWidth: wide ? 640 : 480, maxHeight: '92vh', overflowY: 'auto', boxSizing: 'border-box', boxShadow: '0 12px 48px rgba(0,0,0,0.5)' }
   return (
     <div style={o} role="dialog" aria-modal="true" aria-label={title} onClick={onClose}>
       <div style={c} onClick={e => e.stopPropagation()}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>{title}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', flex: 1, minWidth: 0 }}>{title}</span>
+          <button type="button" className="ag-tap-icon" aria-label={pt_('close', lang)} onClick={onClose}
+            style={{ background: 'transparent', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', padding: 4, display: 'inline-flex' }}><X size={16} /></button>
+        </div>
         {children}
+        {footer}
       </div>
     </div>
   )
 }
-const label = (text: string, el: React.ReactNode) => (
-  <label style={{ display: 'block', marginBottom: 10 }}><span style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{text}</span>{el}</label>
-)
-const fieldStyle = (isMobile: boolean): React.CSSProperties => ({ ...input, marginBottom: 0, letterSpacing: 'normal', width: '100%', boxSizing: 'border-box', minHeight: isMobile ? 44 : undefined })
 
-function EditDialog({ lang, isMobile, item, groups, gated, defaultGroup, onClose, onSaved }: {
-  lang: Lang; isMobile: boolean; item: PersonalMeta | null; groups: PersonalGroup[]; gated: Gated; defaultGroup: string | null
+function EditDialog({ lang, isMobile, item, replace, groups, gated, defaultGroup, onClose, onSaved }: {
+  lang: Lang; isMobile: boolean; item: PersonalMeta | null
+  /** "Substituir valor" on a use-only secret: only the value fields, nothing else on the form. */
+  replace?: boolean
+  groups: PersonalGroup[]; gated: Gated; defaultGroup: string | null
   onClose: () => void; onSaved: (m: PersonalMeta) => void
 }) {
   const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
@@ -489,6 +592,11 @@ function EditDialog({ lang, isMobile, item, groups, gated, defaultGroup, onClose
   const [notes, setNotes] = useState(item?.notes ?? '')
   // "Sempre confirmar": ON by default (absent on an older record reads ON).
   const [confirmEach, setConfirmEach] = useState(item?.confirmEach !== false)
+  // "Só uso": a NEW secret starts at the kind's default (API keys ON) until the person touches the box;
+  // a sealed one stays sealed (the server refuses to lift it, so the form does not offer to).
+  const sealed = item !== null && isUseOnly(item)
+  const [useOnly, setUseOnly] = useState<boolean>(item ? sealed : USE_ONLY_DEFAULT['login'])
+  const [useOnlyTouched, setUseOnlyTouched] = useState(false)
   // The values typed here live only in this dialog's state, until save or close.
   const [fields, setFields] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
@@ -496,56 +604,78 @@ function EditDialog({ lang, isMobile, item, groups, gated, defaultGroup, onClose
   useEffect(() => () => setFields({}), [])
   const editing = item !== null
   const multiline = kind === 'env' || kind === 'note'
+  const pickKind = (k: PersonalKind) => { setKind(k); if (!editing && !useOnlyTouched) setUseOnly(USE_ONLY_DEFAULT[k]) }
   const save = async () => {
     if (busy || !name.trim()) return
     setBusy(true); setError(null)
     const f: Record<string, string> = {}
     for (const k of KIND_FIELDS[kind]) if (fields[k]) f[k] = fields[k]!
-    const body = { kind, name: name.trim(), url, groupId: groupId || null, tags: parseTags(tags), notes, confirmEach, ...(Object.keys(f).length ? { fields: f } : {}) }
+    const body = { kind, name: name.trim(), url, groupId: groupId || null, tags: parseTags(tags), notes, confirmEach, ...(useOnly ? { useOnly: true } : {}), ...(Object.keys(f).length ? { fields: f } : {}) }
     const r = editing ? await gated((c, tk) => editPersonal(item.id, item.version, body, c, tk), { action: 'personal-edit', target: item.id }) : await gated(c => createPersonal(body, c), false)
     setBusy(false)
     if (!r.ok) { setError(r.sentence || t('network')); return }
     setFields({})
     onSaved(r.meta)
   }
+  const tagList = parseTags(tags)
+  const valueFields = KIND_FIELDS[kind].map(k => (
+    multiline
+      ? <FieldTextarea key={k} label={t(`field_${k}` as PKey)} value={fields[k] ?? ''} onChange={v => setFields(s => ({ ...s, [k]: v }))} rows={kind === 'env' ? 6 : 4} mono spellCheck={false} autoComplete="off"
+          {...(editing ? { sub: sealed ? t('f_newValue') : t('f_keep') } : {})} />
+      : <FieldInput key={k} label={t(`field_${k}` as PKey)} value={fields[k] ?? ''} onChange={v => setFields(s => ({ ...s, [k]: v }))}
+          type={k === 'password' || k === 'value' ? 'password' : 'text'} mono={k !== 'login'} spellCheck={false}
+          autoComplete={k === 'login' ? 'off' : 'new-password'} {...(k === 'login' ? { placeholder: t('loginHint') } : {})}
+          {...(editing ? { sub: sealed ? t('f_newValue') : t('f_keep') } : {})} />
+  ))
+  const footer = (
+    <>
+      {editing && !replace && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>{t('editAsks')}</div>}
+      {error && <Err text={error} />}
+      <DialogActions>
+        <button type="button" onClick={onClose} style={dialogButtonStyle('secondary', isMobile)}>{t('cancel')}</button>
+        <button type="submit" form="vault-edit-form" disabled={busy || !name.trim()} style={dialogButtonStyle('primary', isMobile, busy || !name.trim())}>
+          {busy && <Loader2 size={14} className="ag-spin" />} {busy ? t('working') : t('save')}
+        </button>
+      </DialogActions>
+    </>
+  )
   return (
-    <Sheet isMobile={isMobile} title={editing ? t('editTitle') : t('createTitle')} onClose={onClose}>
-      <form onSubmit={e => { e.preventDefault(); void save() }}>
-        {label(t('f_kind'), (
-          <select value={kind} onChange={e => setKind(e.target.value as PersonalKind)} style={fieldStyle(isMobile)}>
-            {PERSONAL_KINDS.map(k => <option key={k} value={k}>{t(`kind_${k}` as PKey)}</option>)}
-          </select>
-        ))}
-        {label(t('f_name'), <input value={name} onChange={e => setName(e.target.value)} maxLength={120} autoFocus style={fieldStyle(isMobile)} />)}
-        {KIND_FIELDS[kind].map(k => (
-          <div key={k}>
-            {label(t(`field_${k}` as PKey), multiline
-              ? <textarea value={fields[k] ?? ''} onChange={e => setFields(s => ({ ...s, [k]: e.target.value }))} rows={kind === 'env' ? 6 : 4} spellCheck={false} autoComplete="off"
-                style={{ ...fieldStyle(isMobile), fontFamily: 'var(--font-mono, ui-monospace, monospace)', resize: 'vertical' }} />
-              : <input value={fields[k] ?? ''} onChange={e => setFields(s => ({ ...s, [k]: e.target.value }))} type={k === 'password' || k === 'value' ? 'password' : 'text'}
-                placeholder={k === 'login' ? t('loginHint') : ''} autoComplete={k === 'login' ? 'off' : 'new-password'} spellCheck={false} style={fieldStyle(isMobile)} />)}
-          </div>
-        ))}
-        {editing && <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: -4, marginBottom: 10 }}>{t('f_keep')}</div>}
-        {label(t('f_url'), <input value={url} onChange={e => setUrl(e.target.value)} maxLength={500} style={fieldStyle(isMobile)} />)}
-        {label(t('f_group'), (
-          <select value={groupId} onChange={e => setGroupId(e.target.value)} style={fieldStyle(isMobile)}>
-            <option value="">{t('noGroup')}</option>
-            {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-          </select>
-        ))}
-        {label(t('f_tags'), <input value={tags} onChange={e => setTags(e.target.value)} style={fieldStyle(isMobile)} />)}
-        {label(t('f_notes'), <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} maxLength={4000} style={{ ...fieldStyle(isMobile), resize: 'vertical' }} />)}
-        <div style={{ marginBottom: 10 }}>
-          <Checkbox checked={confirmEach} onChange={setConfirmEach} label={t('confirmEach')} />
-          <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 2, lineHeight: 1.5 }}>{t('confirmEachHelp')}</div>
-        </div>
-        {editing && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>{t('editAsks')}</div>}
-        {error && <Err text={error} />}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button type="button" onClick={onClose} style={{ ...primaryBtn, color: 'var(--text-secondary)', borderColor: 'var(--border)', background: 'transparent', minHeight: isMobile ? 44 : undefined }}>{t('cancel')}</button>
-          <button type="submit" disabled={busy || !name.trim()} style={{ ...primaryBtn, minHeight: isMobile ? 44 : undefined }}>{busy ? t('working') : t('save')}</button>
-        </div>
+    <Sheet lang={lang} isMobile={isMobile} title={replace && item ? `${t('replaceTitle')} · ${item.name}` : editing ? t('editTitle') : t('createTitle')} onClose={onClose} footer={footer}>
+      <form id="vault-edit-form" onSubmit={e => { e.preventDefault(); void save() }}>
+        {replace ? valueFields : (
+          <>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>{t('f_kind')}</div>
+              <Select value={kind} onChange={v => pickKind(v as PersonalKind)} options={PERSONAL_KINDS.map(k => ({ value: k, label: t(`kind_${k}` as PKey) }))} />
+            </div>
+            <FieldInput label={t('f_name')} value={name} onChange={setName} maxLength={120} autoFocus={!isMobile} />
+            {valueFields}
+            <FieldInput label={t('f_url')} value={url} onChange={setUrl} maxLength={500} />
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>{t('f_group')}</div>
+              <Select value={groupId} onChange={setGroupId} placeholder={t('noGroup')} options={[{ value: '', label: t('noGroup') }, ...groups.map(g => ({ value: g.id, label: g.name }))]} />
+            </div>
+            <FieldInput label={t('f_tags')} value={tags} onChange={setTags} />
+            {tagList.length > 0 && (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: -8, marginBottom: 14 }}>
+                {tagList.map(tag => <span key={tag} style={{ fontSize: 11.5, padding: '2px 8px', borderRadius: 999, border: '1px solid var(--border)', color: 'var(--text-secondary)', background: 'var(--bg-elevated)' }}>#{tag}</span>)}
+              </div>
+            )}
+            <FieldTextarea label={t('f_notes')} value={notes} onChange={setNotes} rows={3} maxLength={4000} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '12px 14px', border: '1px solid var(--border)', borderRadius: 10, background: 'var(--bg-elevated)' }}>
+              <div>
+                <Checkbox checked={confirmEach} onChange={setConfirmEach} label={t('confirmEach')} />
+                <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 2, lineHeight: 1.5, paddingLeft: 24 }}>{t('confirmEachHelp')}</div>
+              </div>
+              <div data-use-only-field>
+                {sealed
+                  ? <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--anthropic-orange)', fontWeight: 600 }}><Lock size={14} /> {t('useOnly')}</div>
+                  : <Checkbox checked={useOnly} onChange={v => { setUseOnly(v); setUseOnlyTouched(true) }} label={t('useOnly')} />}
+                <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 2, lineHeight: 1.5, paddingLeft: 24 }}>{sealed ? t('useOnlySealed') : t('useOnlyHelp')}</div>
+              </div>
+            </div>
+          </>
+        )}
       </form>
     </Sheet>
   )
@@ -564,7 +694,8 @@ function VersionsDialog({ lang, isMobile, item, gated, onClose, onRestored }: { 
     onRestored(r.meta)
   }
   return (
-    <Sheet isMobile={isMobile} title={t('versionsTitle', { name: item.name })} onClose={onClose}>
+    <Sheet lang={lang} isMobile={isMobile} title={t('versionsTitle', { name: item.name })} onClose={onClose}
+      footer={<DialogActions><button type="button" onClick={onClose} style={dialogButtonStyle('secondary', isMobile)}>{t('close')}</button></DialogActions>}>
       <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10, lineHeight: 1.6 }}>{t('versionsNote')}</div>
       {!list && !error && <Loader2 size={14} className="ag-spin" />}
       {list?.map(v => (
@@ -573,11 +704,10 @@ function VersionsDialog({ lang, isMobile, item, gated, onClose, onRestored }: { 
           <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{fmt(v.updatedAt)} · {v.name}{v.deletedAt ? ` · ${t('trash')}` : ''}</span>
           {v.version === item.version
             ? <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--accent-green, #22c55e)' }}>{t('current')}</span>
-            : <button type="button" onClick={() => { void restore(v.version) }} style={{ ...primaryBtn, width: 'auto', marginLeft: 'auto', padding: '5px 10px', minHeight: isMobile ? 44 : undefined }}>{t('restoreThis')}</button>}
+            : <button type="button" onClick={() => { void restore(v.version) }} style={{ ...dialogButtonStyle('primary', isMobile), width: isMobile ? '100%' : undefined, marginLeft: 'auto' }}>{t('restoreThis')}</button>}
         </div>
       ))}
       {error && <Err text={error} />}
-      <button type="button" onClick={onClose} style={{ marginTop: 10, background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', fontFamily: 'inherit', padding: isMobile ? '12px 0' : '4px 0' }}>{t('close')}</button>
     </Sheet>
   )
 }
@@ -589,6 +719,7 @@ function ImportDialog({ lang, isMobile, groups, gated, onClose, onDone }: { lang
   const [groupId, setGroupId] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
   const onFile = async (f: File | undefined) => {
     if (!f) return
     setBusy(true); setError(null)
@@ -609,46 +740,49 @@ function ImportDialog({ lang, isMobile, groups, gated, onClose, onDone }: { lang
     onDone(t('importDone', { c: r.created, r: r.replaced, s: r.skipped }))
   }
   const setChoice = (key: string, patch: Partial<ImportChoice>) => setChoices(cs => cs.map(c => (c.key === key ? { ...c, ...patch } : c)))
+  const footer = (
+    <DialogActions>
+      <button type="button" onClick={onClose} style={dialogButtonStyle('secondary', isMobile)}>{t('cancel')}</button>
+      {preview
+        ? <button type="button" disabled={busy || !importReady(choices)} onClick={() => { void commit() }} style={dialogButtonStyle('primary', isMobile, busy || !importReady(choices))}>{busy && <Loader2 size={14} className="ag-spin" />} {busy ? t('working') : t('importGo')}</button>
+        : <button type="button" disabled={busy} onClick={() => fileRef.current?.click()} style={dialogButtonStyle('primary', isMobile, busy)}>{busy ? <Loader2 size={14} className="ag-spin" /> : <FileUp size={14} />} {busy ? t('working') : t('chooseFile')}</button>}
+    </DialogActions>
+  )
   return (
-    <Sheet isMobile={isMobile} title={t('importTitle')} onClose={onClose} wide>
+    <Sheet lang={lang} isMobile={isMobile} title={t('importTitle')} onClose={onClose} wide footer={footer}>
       <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 10, lineHeight: 1.6 }}>{t('importIntro')}</div>
-      {!preview && (
-        <label style={{ ...primaryBtn, display: 'inline-flex', alignItems: 'center', gap: 6, width: 'auto', cursor: 'pointer', minHeight: isMobile ? 44 : undefined }}>
-          <FileUp size={14} /> {busy ? t('working') : t('chooseFile')}
-          <input type="file" accept=".env,.json,application/json,text/plain,*/*" style={{ display: 'none' }} onChange={e => { void onFile(e.target.files?.[0]); e.target.value = '' }} />
-        </label>
-      )}
+      <input ref={fileRef} type="file" accept=".env,.json,application/json,text/plain,*/*" style={{ display: 'none' }} onChange={e => { void onFile(e.target.files?.[0]); e.target.value = '' }} />
       {preview && (
         <>
           {preview.skipped > 0 && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 8 }}>{t('importSkipped', { n: preview.skipped })}</div>}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
             {preview.keys.map(k => {
               const c = choices.find(x => x.key === k.key)!
               return (
-                <div key={k.key} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+                <div key={k.key} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', borderTop: '1px solid var(--border)', paddingTop: 8 }}>
                   <code style={{ fontSize: 12.5, minWidth: 0, overflowWrap: 'anywhere', flex: '1 1 140px' }}>{k.key}</code>
                   {k.clash && <span style={{ fontSize: 11, color: 'var(--accent-orange, #f59e0b)' }}>{t('clash')}</span>}
                   {k.empty && <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{t('emptyValue')}</span>}
-                  <select value={c.action} onChange={e => setChoice(k.key, { action: e.target.value as ImportChoice['action'] })}
-                    style={{ ...input, marginBottom: 0, width: 'auto', letterSpacing: 'normal', padding: '4px 8px', fontSize: 12.5, minHeight: isMobile ? 44 : undefined }}>
-                    {(k.clash ? ['skip', 'replace', 'rename'] as const : ['import', 'skip'] as const).map(a => <option key={a} value={a}>{t(`act_${a}` as PKey)}</option>)}
-                  </select>
-                  {c.action === 'rename' && <input value={c.name ?? ''} onChange={e => setChoice(k.key, { name: e.target.value })} placeholder={k.key} style={{ ...input, marginBottom: 0, width: 160, letterSpacing: 'normal', minHeight: isMobile ? 44 : undefined }} />}
+                  <div style={{ width: isMobile ? '100%' : 150 }}>
+                    <Select value={c.action} onChange={v => setChoice(k.key, { action: v as ImportChoice['action'] })}
+                      options={(k.clash ? ['skip', 'replace', 'rename'] as const : ['import', 'skip'] as const).map(a => ({ value: a, label: t(`act_${a}` as PKey) }))} />
+                  </div>
+                  {c.action === 'rename' && (
+                    <div style={{ width: isMobile ? '100%' : 180 }}>
+                      <FieldInput label={t('f_name')} value={c.name ?? ''} onChange={v => setChoice(k.key, { name: v })} placeholder={k.key} />
+                    </div>
+                  )}
                 </div>
               )
             })}
           </div>
-          {label(t('importInto'), (
-            <select value={groupId} onChange={e => setGroupId(e.target.value)} style={fieldStyle(isMobile)}>
-              <option value="">{t('noGroup')}</option>
-              {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-            </select>
-          ))}
-          <button type="button" style={{ ...primaryBtn, minHeight: isMobile ? 44 : undefined }} disabled={busy || !importReady(choices)} onClick={() => { void commit() }}>{busy ? t('working') : t('importGo')}</button>
+          <div style={{ marginBottom: 4 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>{t('importInto')}</div>
+            <Select value={groupId} onChange={setGroupId} placeholder={t('noGroup')} options={[{ value: '', label: t('noGroup') }, ...groups.map(g => ({ value: g.id, label: g.name }))]} />
+          </div>
         </>
       )}
       {error && <div style={{ marginTop: 8 }}><Err text={error} /></div>}
-      <button type="button" onClick={onClose} style={{ marginTop: 10, background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', fontFamily: 'inherit', padding: isMobile ? '12px 0' : '4px 0' }}>{t('cancel')}</button>
     </Sheet>
   )
 }
@@ -664,26 +798,33 @@ function GroupsDialog({ lang, isMobile, groups, items, gated, onClose, onChanged
     if (!r.ok) { setError(r.sentence || t('network')); return false }
     onChanged(); return true
   }
+  // Row buttons: the dialog's own shapes, content-sized even on a phone (two of them share the row).
+  const small = (kind: 'secondary' | 'primary' | 'danger'): React.CSSProperties => ({ ...dialogButtonStyle(kind, isMobile), width: undefined, ...(kind === 'danger' ? { background: 'transparent', color: '#ef4444' } : null) })
   return (
-    <Sheet isMobile={isMobile} title={t('groups')} onClose={onClose}>
-      <form onSubmit={e => { e.preventDefault(); if (name.trim()) void run(c => createGroup(name.trim(), c), false).then(ok => { if (ok) setName('') }) }} style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <input value={name} onChange={e => setName(e.target.value)} placeholder={t('groupName')} aria-label={t('groupName')} maxLength={120} style={{ ...fieldStyle(isMobile), flex: 1 }} />
-        <button type="submit" disabled={!name.trim()} style={{ ...primaryBtn, width: 'auto', minHeight: isMobile ? 44 : undefined }}><FolderPlus size={14} /></button>
+    <Sheet lang={lang} isMobile={isMobile} title={t('groups')} onClose={onClose}
+      footer={<DialogActions><button type="button" onClick={onClose} style={dialogButtonStyle('secondary', isMobile)}>{t('close')}</button></DialogActions>}>
+      <form onSubmit={e => { e.preventDefault(); if (name.trim()) void run(c => createGroup(name.trim(), c), false).then(ok => { if (ok) setName('') }) }}
+        style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 6, flexDirection: isMobile ? 'column' : 'row' }}>
+        <div style={{ flex: 1, minWidth: 0, width: isMobile ? '100%' : undefined }}>
+          <FieldInput label={t('groupName')} value={name} onChange={setName} maxLength={120} />
+        </div>
+        <button type="submit" disabled={!name.trim()} style={{ ...dialogButtonStyle('primary', isMobile, !name.trim()), marginBottom: 14 }}><FolderPlus size={14} /> {t('save')}</button>
       </form>
       {groups.map(g => (
-        <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}>
+        <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}>
           {renaming?.id === g.id
-            ? <input value={renaming.name} onChange={e => setRenaming({ id: g.id, name: e.target.value })} autoFocus style={{ ...fieldStyle(isMobile), flex: 1 }} />
+            ? <div style={{ flex: 1, minWidth: 160 }}><FieldInput label={t('rename')} value={renaming.name} onChange={v => setRenaming({ id: g.id, name: v })} autoFocus /></div>
             : <span style={{ fontSize: 13.5, fontWeight: 600, flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{g.name} <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-tertiary)' }}>· {t('items', { n: items.filter(i => i.groupId === g.id && !i.deletedAt).length })}</span></span>}
-          {renaming?.id === g.id
-            ? <button type="button" onClick={() => { void run(c => renameGroup(g.id, g.version, renaming.name.trim(), c), false).then(ok => { if (ok) setRenaming(null) }) }} style={{ ...primaryBtn, width: 'auto', padding: '5px 10px' }}>{t('save')}</button>
-            : <button type="button" onClick={() => setRenaming({ id: g.id, name: g.name })} style={{ ...primaryBtn, width: 'auto', padding: '5px 10px', color: 'var(--text-secondary)', borderColor: 'var(--border)', background: 'transparent' }}>{t('rename')}</button>}
-          <button type="button" title={t('deleteGroupNote')} onClick={() => { void run((c, tk) => deleteGroup(g.id, c, tk), { action: 'personal-group-delete', target: g.id }) }} style={{ ...dangerBtn, width: 'auto', padding: '5px 10px' }}>{t('deleteGroup')}</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {renaming?.id === g.id
+              ? <button type="button" onClick={() => { void run(c => renameGroup(g.id, g.version, renaming.name.trim(), c), false).then(ok => { if (ok) setRenaming(null) }) }} style={small('primary')}>{t('save')}</button>
+              : <button type="button" onClick={() => setRenaming({ id: g.id, name: g.name })} style={small('secondary')}>{t('rename')}</button>}
+            <button type="button" title={t('deleteGroupNote')} onClick={() => { void run((c, tk) => deleteGroup(g.id, c, tk), { action: 'personal-group-delete', target: g.id }) }} style={small('danger')}>{t('deleteGroup')}</button>
+          </div>
         </div>
       ))}
       {groups.length > 0 && <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 6 }}>{t('deleteGroupNote')}</div>}
       {error && <Err text={error} />}
-      <button type="button" onClick={onClose} style={{ marginTop: 10, background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', fontFamily: 'inherit', padding: isMobile ? '12px 0' : '4px 0' }}>{t('close')}</button>
     </Sheet>
   )
 }
@@ -706,7 +847,7 @@ function PhonePanel({ lang, isMobile, state, isPhone, host, gated, onChanged }: 
   useEffect(() => { if (!isPhone) void phoneFacts().then(f => { if (f.ok) setStale(f.stale) }) }, [isPhone, state])
   const box: React.CSSProperties = { border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px', marginTop: 18 }
   const row: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }
-  const small: React.CSSProperties = { ...dangerBtn, width: 'auto', padding: '5px 10px', minHeight: isMobile ? 44 : undefined }
+  const small: React.CSSProperties = { ...dialogButtonStyle('danger', isMobile), width: undefined, background: 'transparent', color: '#ef4444' }
   if (isPhone) {
     // §10: register through the request the computer approves; once this phone works, say so.
     return (
@@ -745,37 +886,32 @@ function PhonePanel({ lang, isMobile, state, isPhone, host, gated, onChanged }: 
           <button type="button" style={small} onClick={() => { void gated(c => clearStalePhones(c), { action: 'mobile-passkey-remove', target: '' }).then(r => { if (r.ok) onChanged(); else setError(r.sentence || t('network')) }) }}>{t('phoneStaleClear')}</button>
         </div>
       )}
-      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10, cursor: 'pointer' }}>
-        <input type="checkbox" checked={state.codeReveal} onChange={e => { const on = e.target.checked; void gated(c => setCodeReveal(on, c), { action: 'mobile-code-reveal', target: '' }).then(r => { if (r.ok) onChanged(); else setError(r.sentence || t('network')) }) }} style={{ marginTop: 3 }} />
-        <span>
-          <span style={{ display: 'block', fontSize: 13, fontWeight: 600 }}>{t('phoneCodeToggle')}</span>
-          <span style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{t('phoneCodeCost')}</span>
-        </span>
-      </label>
+      <div style={{ marginTop: 12 }}>
+        <Checkbox checked={state.codeReveal} label={t('phoneCodeToggle')}
+          onChange={on => { void gated(c => setCodeReveal(on, c), { action: 'mobile-code-reveal', target: '' }).then(r => { if (r.ok) onChanged(); else setError(r.sentence || t('network')) }) }} />
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, marginTop: 2, paddingLeft: 24 }}>{t('phoneCodeCost')}</div>
+      </div>
       {error && <div style={{ marginTop: 8 }}><Err text={error} /></div>}
     </div>
   )
 }
 
-function CodeForm({ lang, isMobile, prompt, error, onSubmit }: { lang: Lang; isMobile: boolean; prompt: string; error: string | null; onSubmit: (code: string) => Promise<void> }) {
-  const [code, setCode] = useState('')
-  const [busy, setBusy] = useState(false)
-  return (
-    <form onSubmit={e => { e.preventDefault(); if (codeComplete(code) && !busy) { setBusy(true); void onSubmit(code).finally(() => { setBusy(false); setCode('') }) } }}
-      style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 18, maxWidth: 420 }}>
-      <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 10 }}>{prompt}</div>
-      <input value={code} onChange={e => setCode(cleanCode(e.target.value))} placeholder="123456" inputMode="numeric" autoComplete="one-time-code" autoFocus maxLength={6}
-        aria-label={pt_('codeLabel', lang)} style={{ ...input, minHeight: isMobile ? 44 : undefined }} />
-      {error && <Err text={error} />}
-      <button type="submit" disabled={busy || !codeComplete(code)} style={{ ...primaryBtn, minHeight: isMobile ? 44 : undefined }}>{busy ? pt_('working', lang) : pt_('confirm', lang)}</button>
-    </form>
-  )
-}
-
+/** The code the gate asked for in the middle of an action: the app's code field, the dialog footer. */
 function CodeDialog({ lang, isMobile, onDone }: { lang: Lang; isMobile: boolean; onDone: (code: string | null) => void }) {
+  const [code, setCode] = useState('')
+  const ok = codeComplete(code)
   return (
-    <Sheet isMobile={isMobile} title={pt_('codeLabel', lang)} onClose={() => onDone(null)}>
-      <CodeForm lang={lang} isMobile={isMobile} prompt={pt_('needsCode', lang).replace(/ para ver a lista\.| to see the list\./, '.')} error={null} onSubmit={async code => { onDone(code) }} />
+    <Sheet lang={lang} isMobile={isMobile} title={pt_('codeLabel', lang)} onClose={() => onDone(null)}
+      footer={(
+        <DialogActions>
+          <button type="button" onClick={() => onDone(null)} style={dialogButtonStyle('secondary', isMobile)}>{pt_('cancel', lang)}</button>
+          <button type="submit" form="vault-code-form" disabled={!ok} style={dialogButtonStyle('primary', isMobile, !ok)}>{pt_('confirm', lang)}</button>
+        </DialogActions>
+      )}>
+      <form id="vault-code-form" onSubmit={e => { e.preventDefault(); if (ok) onDone(code) }}>
+        <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 10, lineHeight: 1.55 }}>{pt_('needsCode', lang).replace(/ para ver a lista\.| to see the list\./, '.')}</div>
+        <CodeField value={code} onChange={setCode} label={pt_('codeLabel', lang)} autoFocus />
+      </form>
     </Sheet>
   )
 }

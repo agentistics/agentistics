@@ -92,21 +92,8 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
           display: 'flex', gap: 8, marginTop: 2, justifyContent: 'flex-end',
           flexDirection: isMobile ? 'column-reverse' : 'row',
         }}>
-          <button type="button" onClick={onCancel} style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            padding: isMobile ? '0 14px' : '8px 14px', minHeight: isMobile ? 44 : undefined,
-            width: isMobile ? '100%' : undefined,
-            borderRadius: 7, border: '1px solid var(--border)', background: 'transparent',
-            color: 'var(--text-secondary)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-          }}>{cancelLabel}</button>
-          <button type="button" onClick={() => { if (armed) onConfirm() }} disabled={!armed} style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            padding: isMobile ? '0 14px' : '8px 14px', minHeight: isMobile ? 44 : undefined,
-            width: isMobile ? '100%' : undefined,
-            borderRadius: 7, border: '1px solid #ef4444', background: '#ef4444',
-            color: '#fff', fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit',
-            cursor: armed ? 'pointer' : 'not-allowed', opacity: armed ? 1 : 0.45,
-          }}>{confirmLabel}</button>
+          <button type="button" onClick={onCancel} style={dialogButtonStyle('secondary', isMobile)}>{cancelLabel}</button>
+          <button type="button" onClick={() => { if (armed) onConfirm() }} disabled={!armed} style={dialogButtonStyle('danger', isMobile, !armed)}>{confirmLabel}</button>
         </div>
       </div>
     </div>
@@ -535,7 +522,7 @@ export function StatusDot({ state, size = 8 }: {
  * included — adding an inline 16px here would be dead code that reads like a live requirement.
  */
 export function FieldInput({
-  label, sub, value, onChange, type = 'text', placeholder, disabled,
+  label, sub, value, onChange, type = 'text', placeholder, disabled, autoComplete, maxLength, autoFocus, mono, inputMode, spellCheck,
 }: {
   label: string
   sub?: string
@@ -544,6 +531,13 @@ export function FieldInput({
   type?: 'text' | 'password'
   placeholder?: string
   disabled?: boolean
+  autoComplete?: string
+  maxLength?: number
+  autoFocus?: boolean
+  /** Monospace value (a secret, a code). */
+  mono?: boolean
+  inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']
+  spellCheck?: boolean
 }) {
   // A hidden field the user cannot proof-read is where a mistyped token or password becomes a
   // failure somewhere else entirely; the reveal is the same control every other form here uses.
@@ -560,6 +554,12 @@ export function FieldInput({
         onChange={e => onChange(e.target.value)}
         disabled={disabled}
         readOnly={disabled}
+        autoComplete={autoComplete}
+        maxLength={maxLength}
+        autoFocus={autoFocus}
+        inputMode={inputMode}
+        spellCheck={spellCheck}
+        aria-label={label}
         style={{
           width: '100%', boxSizing: 'border-box',
           padding: '7px 10px',
@@ -568,7 +568,7 @@ export function FieldInput({
           border: '1px solid var(--border)',
           borderRadius: 7,
           fontSize: 13,
-          fontFamily: type === 'password' ? 'inherit' : 'inherit',
+          fontFamily: mono ? 'var(--font-mono, ui-monospace, monospace)' : 'inherit',
           color: 'var(--text-primary)',
           outline: 'none',
           transition: 'border-color 0.15s',
@@ -583,6 +583,71 @@ export function FieldInput({
   )
 }
 
+/** FieldInput's multi-line twin: the same label, sub, border, radius, focus ring and type size. */
+export function FieldTextarea({ label, sub, value, onChange, rows = 4, mono, maxLength, placeholder, autoComplete, spellCheck }: {
+  label: string
+  sub?: string
+  value: string
+  onChange: (v: string) => void
+  rows?: number
+  mono?: boolean
+  maxLength?: number
+  placeholder?: string
+  autoComplete?: string
+  spellCheck?: boolean
+}) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 2 }}>{label}</div>
+      {sub && <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 5 }}>{sub}</div>}
+      <textarea
+        value={value} rows={rows} maxLength={maxLength} placeholder={placeholder} autoComplete={autoComplete} spellCheck={spellCheck}
+        aria-label={label}
+        onChange={e => onChange(e.target.value)}
+        style={{
+          width: '100%', boxSizing: 'border-box', padding: '7px 10px', resize: 'vertical', display: 'block',
+          background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 7, fontSize: 13, lineHeight: 1.5,
+          fontFamily: mono ? 'var(--font-mono, ui-monospace, monospace)' : 'inherit', color: 'var(--text-primary)', outline: 'none',
+          transition: 'border-color 0.15s',
+        }}
+        onFocus={e => { e.currentTarget.style.borderColor = 'var(--anthropic-orange)' }}
+        onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)' }}
+      />
+    </div>
+  )
+}
+
+/**
+ * The dialog footer's buttons — the shape `ConfirmModal` draws, as one style for every dialog: an
+ * outlined, muted SECONDARY (Cancel, Close), an orange PRIMARY (the app's accent, tinted), and a red
+ * DANGER. 44px tall and full width on mobile; content-sized on desktop.
+ */
+export function dialogButtonStyle(kind: 'secondary' | 'primary' | 'danger', isMobile: boolean, disabled = false): React.CSSProperties {
+  const base: React.CSSProperties = {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+    padding: isMobile ? '0 14px' : '8px 14px', minHeight: isMobile ? 44 : undefined, width: isMobile ? '100%' : undefined,
+    borderRadius: 7, fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit', boxSizing: 'border-box',
+    cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.45 : 1, whiteSpace: 'nowrap',
+  }
+  if (kind === 'secondary') return { ...base, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)' }
+  if (kind === 'danger') return { ...base, fontWeight: 700, border: '1px solid #ef4444', background: '#ef4444', color: '#fff' }
+  return { ...base, fontWeight: 700, border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)' }
+}
+
+/** The dialog footer row: right-aligned with an 8px gap; on mobile stacked, the primary on top. */
+export function DialogActions({ children, start }: { children: React.ReactNode; start?: React.ReactNode }) {
+  const isMobile = useIsMobile()
+  return (
+    <div data-dialog-actions style={{
+      display: 'flex', gap: 8, marginTop: 14, alignItems: isMobile ? 'stretch' : 'center',
+      justifyContent: 'flex-end', flexDirection: isMobile ? 'column-reverse' : 'row', flexWrap: isMobile ? 'nowrap' : 'wrap',
+    }}>
+      {start && <div style={{ marginRight: isMobile ? 0 : 'auto', display: 'flex', gap: 8, flexDirection: isMobile ? 'column' : 'row' }}>{start}</div>}
+      {children}
+    </div>
+  )
+}
+
 /**
  * A checkbox whose ENTIRE row — box and label — is the control.
  *
@@ -592,11 +657,13 @@ export function FieldInput({
  * user expects a checkbox label to do. Making the row itself the single focusable control fixes the
  * label click, keyboard and the touch target in one shape, instead of syncing two elements.
  */
-export function Checkbox({ checked, onChange, label, disabled }: {
+export function Checkbox({ checked, onChange, label, disabled, ariaLabel }: {
   checked: boolean
   onChange: (checked: boolean) => void
   label: string
   disabled?: boolean
+  /** The accessible name when `label` is empty because the row draws its own (a picker row). */
+  ariaLabel?: string
   /** Render the panel open, for the static-markup test that pins `position: fixed`. */
   defaultOpenForTest?: boolean
 }) {
@@ -612,6 +679,7 @@ export function Checkbox({ checked, onChange, label, disabled }: {
     <div
       role="checkbox"
       aria-checked={checked}
+      aria-label={label ? undefined : ariaLabel}
       aria-disabled={disabled || undefined}
       tabIndex={disabled ? -1 : 0}
       onClick={toggle}

@@ -147,6 +147,23 @@ export const PERSONAL_TEXT = {
   quickTitle: { en: 'Vault', pt: 'Cofre' },
   // The quick views (Nay Cofre tab, header/FAB popover) never list every secret — the whole list lives on /vault.
   quickAll: { en: 'See the full list of your secrets here', pt: 'Veja a listagem dos seus segredos aqui' },
+  quickAllHint: { en: 'Open the vault page with every secret, groups, trash and versions.', pt: 'Abre a página do Cofre com todos os segredos, grupos, lixeira e versões.' },
+  // VAULT.UX-R2 — "só uso" (write-only), the one list, the code stage.
+  useOnly: { en: 'Use only', pt: 'Só uso' },
+  useOnlyHelp: { en: 'Sessions and providers can use it, but nobody can see or copy the value — not even you. This cannot be undone: to change it later, replace the value.', pt: 'Sessões e provedores podem usar, mas ninguém pode ver ou copiar o valor — nem você. Não dá para desfazer: para trocar depois, substitua o valor.' },
+  useOnlySealed: { en: 'Use only — nobody can see or copy this value. You can replace it.', pt: 'Só uso — ninguém pode ver ou copiar este valor. Você pode substituí-lo.' },
+  useOnlyBadge: { en: 'use only', pt: 'só uso' },
+  replaceValue: { en: 'Replace value', pt: 'Substituir valor' },
+  replaceTitle: { en: 'Replace the value', pt: 'Substituir o valor' },
+  f_newValue: { en: 'Leave empty to keep the current value — it is never shown.', pt: 'Deixe vazio para manter o valor atual — ele nunca é mostrado.' },
+  section_all: { en: 'All', pt: 'Todos' },
+  section_mine: { en: 'Yours', pt: 'Seus' },
+  section_system: { en: 'System', pt: 'Do sistema' },
+  systemNote: { en: 'Kept by Agentistics itself (backups, the central, the encrypted channel). Only the name, file, date and state are shown — never a value.', pt: 'Guardados pelo próprio Agentistics (backups, a central, o canal cifrado). Só aparecem nome, arquivo, data e estado — nunca o valor.' },
+  systemEmpty: { en: 'Agentistics keeps no secret of its own on this machine yet.', pt: 'O Agentistics ainda não guarda nenhum segredo próprio nesta máquina.' },
+  systemBadge: { en: 'system', pt: 'sistema' },
+  codeStageTitle: { en: 'Confirm it is you', pt: 'Confirme que é você' },
+  codeStageSub: { en: 'Type the 6 digits from your authenticator app to see the list.', pt: 'Digite os 6 dígitos do seu app autenticador para ver a lista.' },
   quickClose: { en: 'Close', pt: 'Fechar' },
 
 } as const satisfies Record<string, Pair>

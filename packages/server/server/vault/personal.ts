@@ -14,7 +14,7 @@
 import { readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
-  GROUP_ID, ITEM_ID, KIND_FIELDS, PERSONAL_DIR, PERSONAL_PURPOSE, newPersonalId, parseImportText, parseVersionFile, recordName,
+  GROUP_ID, ITEM_ID, KIND_FIELDS, PERSONAL_DIR, PERSONAL_PURPOSE, isUseOnly, newPersonalId, parseImportText, parseVersionFile, recordName,
   trashExpired, versionTag, versionsToPrune,
   type PersonalGroup, type PersonalInput, type PersonalMeta, type PersonalValue,
 } from '@agentistics/vault'
@@ -91,12 +91,15 @@ export async function listVersions(id: string): Promise<PersonalMeta[] | StoreFa
   return out
 }
 
-function metaFrom(input: PersonalInput, base: { id: string; version: number; createdAt: string; confirmEach?: boolean }, fields: string[], deletedAt: string | null = null): PersonalMeta {
+function metaFrom(input: PersonalInput, base: { id: string; version: number; createdAt: string; confirmEach?: boolean; useOnly?: boolean }, fields: string[], deletedAt: string | null = null): PersonalMeta {
+  // "Só uso" is one-way: a record already sealed stays sealed whatever the edit says.
+  const useOnly = base.useOnly === true || input.useOnly === true
   return {
     v: 1, id: base.id, kind: input.kind, name: input.name, groupId: input.groupId ?? null, tags: input.tags ?? [], notes: input.notes ?? '',
     url: input.url ?? '', fields, createdAt: base.createdAt, updatedAt: iso(), version: base.version, deletedAt,
     // Always written explicitly from here on; an older record without it still reads as ON (`needsConfirm`).
     confirmEach: input.confirmEach ?? base.confirmEach ?? true,
+    ...(useOnly ? { useOnly: true } : {}),
   }
 }
 const presentFields = (kind: PersonalMeta['kind'], f: Record<string, string>) => KIND_FIELDS[kind].filter(k => typeof f[k] === 'string' && f[k] !== '')
@@ -128,7 +131,7 @@ export async function editItem(id: string, expectedVersion: number, input: Perso
     const v = input.fields?.[k] ?? (input.kind === m.kind ? prev.fields[k] : undefined)
     if (typeof v === 'string') fields[k] = v
   }
-  const meta = metaFrom(input, { id, version: m.version + 1, createdAt: m.createdAt, confirmEach: m.confirmEach !== false }, presentFields(input.kind, fields), m.deletedAt)
+  const meta = metaFrom(input, { id, version: m.version + 1, createdAt: m.createdAt, confirmEach: m.confirmEach !== false, useOnly: isUseOnly(m) }, presentFields(input.kind, fields), m.deletedAt)
   await writeVersion(meta, { v: 1, fields })
   return { ok: true, meta }
 }
@@ -142,6 +145,8 @@ async function rewriteMeta(id: string, expectedVersion: number, change: (m: Pers
   const value = await readValue(id, srcV)
   if (!value) return { ok: false, code: 'record-unreadable' }
   const meta: PersonalMeta = { ...src, ...change(src), id, version: m.version + 1, createdAt: m.createdAt, updatedAt: iso() }
+  // Restoring a version from BEFORE the seal must not unseal: "só uso" follows the newest record.
+  if (isUseOnly(m)) meta.useOnly = true
   await writeVersion(meta, value)
   return { ok: true, meta }
 }

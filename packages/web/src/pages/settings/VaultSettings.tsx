@@ -11,7 +11,7 @@
  * ever tells a person to run a command: a refusal carries an `action` and the page draws its button.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { useOutletContext } from 'react-router-dom'
+import { useNavigate, useOutletContext } from 'react-router-dom'
 import { VaultGlyph } from '../../components/vault/VaultGlyph'
 import { FingerprintPattern, KeyRound, List, Loader2, Lock, LockOpen, Printer, ShieldCheck, Smartphone, Timer } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
@@ -19,7 +19,7 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { SectionHeader, Divider, PrefRow, StatusDot } from './primitives'
 import { Err, Qr, card, codeBlock, dangerBtn, input, overlay, primaryBtn } from '../../components/MfaSetup'
 import { CodeField, VaultUnlock } from '../../components/vault/VaultUnlock'
-import { itemStateKey, kindKey, orderItems, presenceKey, reasonKey, stateKey, vt, vtf, type VaultKey } from '../../lib/vaultText'
+import { orderItems, presenceKey, stateKey, vt, vtf, type VaultKey } from '../../lib/vaultText'
 import {
   authenticatorBegin, authenticatorConfirm, gestureStep, presenceProgress, cleanCode, cleanSetupCode, setupCodeAccept, setupCodeComplete, clampAutoLock, codeComplete, credentials, gateFor, grantAlive, heartbeat,
   loadVault, lockNow, howStep2, parseUnlockHours, setUnlockPolicy, UNLOCK_MODES, type UnlockMode, minutesLeft, missingSteps, needsTypedCode, parseAutoLockInput, presenceDisable, presenceEnrol, recoveryBegin,
@@ -46,6 +46,7 @@ export default function VaultSettings() {
   const ctx = useOutletContext<AppContext>()
   const lang = ctx.lang === 'pt' ? 'pt' : 'en'
   const isMobile = useIsMobile()
+  const navigate = useNavigate()
   const t = (k: VaultKey) => vt(k, lang)
 
   const [res, setRes] = useState<Load>({ kind: 'loading' })
@@ -350,30 +351,15 @@ export default function VaultSettings() {
 
       {res.kind === 'view' && open && (
         <Sec icon={List} title={t('secretsHeader')} desc={t('sec_secrets_d')} badge={badgeOf('secrets')} last>
-          {items.length === 0 && <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('secretsEmpty')}</div>}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {items.map((i, n) => {
-              const why = reasonKey(i.reason)
-              return (
-                <div key={`${i.file}-${n}`} style={{
-                  border: '1px solid ' + (i.state === 'sealed' ? 'var(--border)' : TONE[i.state]), borderRadius: 10, padding: '12px 14px',
-                  minWidth: 0,
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-primary)' }}>{t(kindKey(i.kind))}</span>
-                    <span style={{ fontSize: 11.5, fontWeight: 700, color: TONE[i.state] }}>{t(itemStateKey(i.state))}</span>
-                  </div>
-                  <div style={{ ...mono, color: 'var(--text-tertiary)', marginTop: 4 }}>{i.file}</div>
-                  {i.sealedAt && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>{t('sealedAt')}: {fmt(i.sealedAt)}</div>}
-                  {why && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>{t(why)}</div>}
-                  {i.restoreWith && (
-                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
-                      {t('howToReenter')}: <span style={mono}>{i.restoreWith}</span>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
+          {/* VAULT.UX-R2 item 10: ONE list. The secrets Agentistics keeps for itself are listed beside the
+              person's own on the Vault page ("Do sistema"); here, only the count and the way there. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, color: 'var(--text-secondary)', flex: '1 1 240px', lineHeight: 1.55 }}>
+              {items.length === 0 ? t('secretsEmpty') : vtf('secretsOnVault', lang, { n: String(items.length) })}
+            </span>
+            <button type="button" onClick={() => navigate('/vault?show=system')} style={{ ...primaryBtn, width: isMobile ? '100%' : 'auto', minHeight: isMobile ? 44 : undefined, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+              <VaultGlyph size={14} /> {t('secretsOpenVault')}
+            </button>
           </div>
         </Sec>
       )}
@@ -625,7 +611,7 @@ function UnlockPolicyRow({ view, lang, isMobile, gate, btn, onSave }: {
   view: VaultView; lang: 'en' | 'pt'; isMobile: boolean; gate: { code: boolean; gesture: boolean }; btn: React.CSSProperties
   onSave: (p: { mode: UnlockMode; hours: number }) => void
 }) {
-  const cur = view.unlockPolicy ?? { mode: 'daily' as const, hours: 12, chosen: false, codeNextUnlock: true, windowEndsAt: null }
+  const cur = view.unlockPolicy ?? { mode: 'daily' as const, hours: 24, chosen: false, codeNextUnlock: true, windowEndsAt: null }
   const pres = presWordOf(view, lang)
   const [mode, setMode] = useState<UnlockMode>(cur.mode)
   const [hoursText, setHoursText] = useState(String(cur.hours))

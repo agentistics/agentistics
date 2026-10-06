@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 /**
  * The big safe on the vault page, in the app's ORANGE (`--anthropic-orange`: outline, dial, bolts, a soft
@@ -9,8 +9,10 @@ import { useEffect, useState } from 'react'
  *
  * `phase` says what it is doing:
  *  - `locked`     closed, still.
- *  - `unlocking`  Hello / the code is in progress: the dial turns like a combination lock — a little left,
- *                 a little right, alternating, several short turns, looping until the phase changes.
+ *  - `unlocking`  Hello / the code is in progress: ONLY the dial moves, like a combination lock — a little
+ *                 left, a little right, alternating, looping until the phase changes. Bolts and door stay
+ *                 shut. If the unlock fails (back to `locked`) the dial eases back to rest from wherever it
+ *                 was, instead of snapping.
  *  - `opening`    the unlock worked: the dial turns further to one side, the side bolts retract and the
  *                 door swings open (~2.2 s, `SAFE_OPEN_MS`) — the page shows its content AFTER this.
  *  - `open`       open, still (what the page shows once it has content, if the safe is drawn at all).
@@ -44,6 +46,15 @@ const CSS = `
 @media (prefers-reduced-motion:reduce){.vs .vs-dial,.vs .vs-door,.vs .vs-bolt{transition:none!important;animation:none!important}}
 `
 
+const lastDialDeg = new WeakMap<Element, number>()
+/** The rotation (degrees) of a computed `matrix(a, b, …)` transform; 0 for `none` or anything unreadable. */
+export function angleOf(transform: string): number {
+  const m = /^matrix\(([^,]+),\s*([^,]+)/.exec(transform)
+  if (!m) return 0
+  const a = Number(m[1]), b = Number(m[2])
+  return Number.isFinite(a) && Number.isFinite(b) ? Math.round(Math.atan2(b, a) * 180 / Math.PI) : 0
+}
+
 export function VaultSafe({ phase, from, width = 240, label }: { phase: SafePhase; from?: 'open'; width?: number; label?: string }) {
   // Mount open, close on the next frame: the CSS transition then plays the short reverse.
   const [closing, setClosing] = useState(from === 'open')
@@ -53,6 +64,32 @@ export function VaultSafe({ phase, from, width = 240, label }: { phase: SafePhas
     return () => clearTimeout(t)
   }, [from])
   const shown: SafePhase = closing ? 'open' : phase
+  // unlocking → locked (a cancelled Hello, a wrong code): ease the dial back from the angle the
+  // combination animation left it at — removing the animation alone would snap it to zero.
+  const dial = useRef<SVGGElement | null>(null)
+  const prev = useRef<SafePhase>(shown)
+  useEffect(() => {
+    const was = prev.current
+    prev.current = shown
+    const el = dial.current
+    if (was !== 'unlocking' || shown !== 'locked' || !el || typeof el.animate !== 'function') return
+    try { if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return } catch { /* no matchMedia: animate */ }
+    const deg = lastDialDeg.get(el) ?? 0
+    if (Math.abs(deg) < 1) return
+    el.animate([{ transform: `rotate(${deg}deg)` }, { transform: 'rotate(0deg)' }], { duration: 520, easing: 'cubic-bezier(.2,.7,.3,1)' })
+  }, [shown])
+  // While it turns, remember its angle every frame (read off the computed matrix), for the ease-back above.
+  useEffect(() => {
+    if (shown !== 'unlocking') return
+    let raf = 0
+    const tick = () => {
+      const el = dial.current
+      if (el) lastDialDeg.set(el, angleOf(getComputedStyle(el).transform))
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [shown])
   return (
     <>
       <style>{CSS}</style>
@@ -65,7 +102,7 @@ export function VaultSafe({ phase, from, width = 240, label }: { phase: SafePhas
           <rect x="14" y="34" width="8" height="16" rx="2" fill="currentColor" />
           <rect x="14" y="84" width="8" height="16" rx="2" fill="currentColor" />
           <g className="vs-bolt"><rect x="112" y="40" width="14" height="6" rx="2" fill="currentColor" /><rect x="112" y="88" width="14" height="6" rx="2" fill="currentColor" /></g>
-          <g className="vs-dial">
+          <g className="vs-dial" ref={dial}>
             <circle cx="66" cy="67" r="30" fill="none" stroke="currentColor" strokeWidth="3.5" />
             <circle cx="66" cy="67" r="21" fill="currentColor" opacity=".22" />
             <circle cx="66" cy="67" r="21" fill="none" stroke="currentColor" strokeWidth="3" />

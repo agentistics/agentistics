@@ -9,18 +9,19 @@
  *               everything else the §2.4 table gates (the inventory, settings, recovery, …).
  *   daily       "Per day" (the DEFAULT) — gesture + code on the first unlock after the service starts,
  *               or once the window has expired; within the window, a re-open after auto-lock is the
- *               gesture alone. The window is `hours` long (default 12, 1–24), anchored to the last
+ *               gesture alone. The window is `hours` long (default 24, 1–24), anchored to the last
  *               gesture+code unlock.
  *
- * The window lives ONLY in the service's memory — a restart or reboot starts with none — and the
- * service drops it on recovery, reset, a protector change and ANY failed code. Absent from vault.json
- * reads as `daily` / 12 h: that is the owner's default, and an older vault never chose anything else.
+ * The window survives a lock and a service restart (the service keeps its anchor in a file MACed under
+ * the data key — vault/service.ts) and is dropped on recovery, reset, a protector change and ANY failed
+ * code. Absent from vault.json reads as `daily` / 24 h: the owner's default (VAULT.UX-R2, 2026-10-05:
+ * "the code once, then only Hello for 24 hours").
  */
 export type UnlockMode = 'always' | 'hello-only' | 'daily'
 export interface UnlockPolicy { mode: UnlockMode; hours: number }
 
 export const UNLOCK_MODES: readonly UnlockMode[] = ['always', 'hello-only', 'daily']
-export const UNLOCK_WINDOW_DEFAULT_H = 12
+export const UNLOCK_WINDOW_DEFAULT_H = 24
 export const UNLOCK_WINDOW_MIN_H = 1
 export const UNLOCK_WINDOW_MAX_H = 24
 export const DEFAULT_UNLOCK_POLICY: UnlockPolicy = Object.freeze({ mode: 'daily', hours: UNLOCK_WINDOW_DEFAULT_H }) as UnlockPolicy

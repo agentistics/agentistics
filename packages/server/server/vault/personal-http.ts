@@ -6,7 +6,7 @@
  * `personal.test.ts` seals a marker and drives every route to prove it.
  */
 import { readJsonLimited } from '../limits'
-import { GROUP_ID, ITEM_ID, KIND_FIELDS, originMatchesRp, needsConfirm, validGroupName, validateInput, type PersonalKind } from '@agentistics/vault'
+import { GROUP_ID, ITEM_ID, KIND_FIELDS, isUseOnly, originMatchesRp, needsConfirm, validGroupName, validateInput, type PersonalKind } from '@agentistics/vault'
 import * as gate from './gate'
 import * as store from './personal'
 import * as mobile from './mobile'
@@ -114,6 +114,14 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     const version = b.version === undefined ? undefined : ver(b.version)
     if (!ITEM_ID.test(id) || !field || version === null) return reply(bad())
     const meta = await store.latestMeta(id)
+    // "Só uso" (VAULT.UX-R2 item 11): sealed write-only — refused BEFORE any gesture is asked, for every
+    // version (the newest record decides; sealing is irreversible), and audited as the refused attempt.
+    if (meta && isUseOnly(meta)) {
+      vaultAudit({ type: 'vault.personal-reveal-refused', name: id })
+      return reply(fail('use-only',
+        'This secret is "use only": sessions and providers can use it, but nobody can see or copy the value — not even you. To change it, use "Replace value".',
+        'Este segredo é "só uso": sessões e provedores podem usá-lo, mas ninguém pode ver ou copiar o valor — nem você. Para trocá-lo, use "Substituir valor".'))
+    }
     const g = await gate.requirePersonalReveal({ grant, session, loopback, fresh, code: codeOf(b), gestureToken: tokenOf(b), binding: `${id}:${field}` }, { confirm: meta ? needsConfirm(meta) : true })
     if (!g.ok) return reply(g)
     const r = await store.revealField(id, field, version)
