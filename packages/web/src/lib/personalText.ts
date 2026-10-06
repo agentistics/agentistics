@@ -24,8 +24,6 @@ export const PERSONAL_TEXT = {
   perPage: { en: 'per page', pt: 'por página' },
   prev: { en: 'Previous', pt: 'Anterior' },
   next: { en: 'Next', pt: 'Próxima' },
-  locked: { en: 'The vault is locked. Open it in Settings → Vault, then come back.', pt: 'O cofre está trancado. Abra-o em Ajustes → Cofre e volte aqui.' },
-  openSettings: { en: 'Open Settings → Vault', pt: 'Abrir Ajustes → Cofre' },
   needsCode: { en: 'Type the code from your authenticator to see the list.', pt: 'Digite o código do seu autenticador para ver a lista.' },
   codeLabel: { en: 'Authenticator code', pt: 'Código do autenticador' },
   confirm: { en: 'Confirm', pt: 'Confirmar' },
