@@ -8,6 +8,7 @@ import type { Server, ServerWebSocket } from 'bun'
 import type { LiveProcess, LiveUnavailableReason, SessionMeta } from '@agentistics/core'
 import { getRates } from './rates'
 import { getVersionInfo, startVersionRecheck } from './version'
+import { sendTelemetry } from './telemetry'
 import { handleUpgradeRoute, upgradableHint } from './upgrade-web'
 import { compressResponse, negotiateEncoding } from './http-compress'
 import { encodedBody, etagMatches, versionOf } from './data-response-cache'
@@ -4719,6 +4720,10 @@ const scheduleBackfillCheck = () => {
 }
 // One line with the boot's own clock, so a slow start can be read off the service's journal.
 console.log(`[boot] +${Math.round(performance.now())} ms listening on ${PORT}${SERVE_STATIC ? ` and ${WEB_PORT}` : ''}`)
+// Anonymous daily usage signal: tried at boot and every 6 h; `sendTelemetry` itself sends at most once per UTC day.
+const telemetryTick = () => { void readPreferences().then(prefs => sendTelemetry({ enabled: prefs.telemetryEnabled !== false })).catch(() => {}) }
+telemetryTick()
+setInterval(telemetryTick, 6 * 60 * 60 * 1000).unref?.()
 // Which ports this data dir's server listens on, beside its lock — so a CLI bounce from this data dir
 // restarts THIS server on its own ports, never whatever answers on the default one (`server-ports.ts`).
 void import('./server-ports').then(m => m.recordServerPorts(AGENTISTICS_DATA_DIR, { pid: process.pid, port: PORT, webPort: WEB_PORT }))

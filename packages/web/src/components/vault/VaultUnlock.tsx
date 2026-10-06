@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type React from 'react'
 import { Fingerprint, Lock, Smartphone } from 'lucide-react'
 import { Err, input, primaryBtn } from '../MfaSetup'
+import { CodeBoxes } from '../CodeBoxes'
 import { cleanCode, codeComplete, loadVault, unlockCode, unlockGesture, type UiAction, type VaultView } from '../../lib/vaultApi'
 import { vt, type VaultKey } from '../../lib/vaultText'
 import { PHONE_APPROVE_POLL_MS, PHONE_APPROVE_WAIT_MS, helloFallback } from '../../lib/helloFallback'
@@ -82,17 +83,9 @@ const btnBase = (isMobile: boolean): React.CSSProperties => ({
 })
 const hotBtn = (isMobile: boolean): React.CSSProperties => ({ ...btnBase(isMobile), ...primaryBtn, width: 'auto', padding: btnBase(isMobile).padding, minHeight: btnBase(isMobile).minHeight })
 
-export function CodeField({ value, onChange, label, autoFocus, onEnter }: { value: string; onChange: (v: string) => void; label: string; autoFocus?: boolean; onEnter?: () => void }) {
-  return (
-    <label style={{ display: 'block', marginBottom: 10 }}>
-      <span style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{label}</span>
-      <input
-        value={value} onChange={e => onChange(cleanCode(e.target.value))} placeholder="123456" style={{ ...input, marginBottom: 0 }}
-        inputMode="numeric" autoComplete="one-time-code" autoFocus={autoFocus} maxLength={6}
-        onKeyDown={e => { if (e.key === 'Enter' && onEnter) { e.preventDefault(); onEnter() } }}
-      />
-    </label>
-  )
+/** The vault's authenticator code field — the shared 6-box input (`CodeBoxes`), so every prompt looks and behaves the same. */
+export function CodeField({ value, onChange, label, autoFocus, onEnter, error, errorKey }: { value: string; onChange: (v: string) => void; label: string; autoFocus?: boolean; onEnter?: () => void; error?: boolean; errorKey?: unknown }) {
+  return <CodeBoxes value={cleanCode(value)} onChange={v => onChange(cleanCode(v))} label={label} autoFocus={autoFocus} onEnter={onEnter} error={error} errorKey={errorKey} />
 }
 
 /** ON this computer: gesture first (the SERVICE raises the dialog), then the code field. */
@@ -171,7 +164,7 @@ export function UnlockControl({ view, lang, onOpened, btn, isMobile, center, onA
       {phase === 'code' && (
         <form onSubmit={e => { e.preventDefault(); void submit() }} style={{ width: isMobile ? '100%' : 260 }}>
           <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, lineHeight: 1.5 }}>{vt('pendingCodeHint', lang)}</div>
-          <CodeField value={code} onChange={setCode} label={vt('codeLabel', lang)} autoFocus />
+          <CodeField value={code} onChange={setCode} label={vt('codeLabel', lang)} autoFocus error={!!error} errorKey={error} />
           <button type="submit" style={{ ...btn, width: '100%', justifyContent: 'center' }} disabled={!codeComplete(code) || busy}>{vt('codeConfirm', lang)}</button>
         </form>
       )}
@@ -205,7 +198,7 @@ function PhoneUnlock({ facts, lang, isMobile, onOpened }: { facts: PhoneFacts; l
       {canOpen && (
         <form onSubmit={e => { e.preventDefault(); void go(offers[0] === 'passkey' ? 'passkey' : 'code-only') }}>
           <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.55, marginBottom: 8 }}>{tx(offers[0] === 'passkey' ? 'phoneBioHint' : 'phoneCodeHint', lang)}</div>
-          <CodeField value={code} onChange={setCode} label={tx('codeLabel', lang)} autoFocus />
+          <CodeField value={code} onChange={setCode} label={tx('codeLabel', lang)} autoFocus error={!!error} errorKey={error} />
           <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 8 }}>
             {offers.includes('passkey') && (
               <button type="submit" style={hotBtn(isMobile)} disabled={!codeComplete(code) || busy !== null}>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { groupProgress, taskProgress } from './taskProgress'
+import { groupProgress, groupStatus, taskProgress } from './taskProgress'
 
 describe('taskProgress', () => {
   it('is NULL with no subtasks — "nobody broke this up" is not "nothing is done"', () => {
@@ -35,6 +35,12 @@ describe('taskProgress', () => {
     expect(taskProgress(12, 13, 0, 0, { todo: 1, in_review: 12 }).counts).toEqual({ todo: 1, in_review: 12 })
   })
 
+  it('excludes abandoned and custom statuses from segments and the denominator', () => {
+    expect(taskProgress(67, 74, 0, 0, { done: 67, todo: 3, abandoned: 3, experimental: 1 })).toMatchObject({
+      done: 67, total: 70, percent: 95, counts: { done: 67, todo: 3 },
+    })
+  })
+
   it('clamps a count that cannot be right rather than reporting over 100%', () => {
     // A store read mid-write can hand over more done than total; a 140% bar draws outside its cell.
     expect(taskProgress(7, 5)).toMatchObject({ done: 5, percent: 100, complete: true })
@@ -58,5 +64,13 @@ describe('groupProgress — a subtask GROUP\'s own progress, one hierarchy level
 
   it('counts member statuses', () => {
     expect(groupProgress(['done', 'in_review', 'todo']).counts).toEqual({ done: 1, in_review: 1, todo: 1 })
+  })
+
+  it('derives group status with active work ahead of blocked and done', () => {
+    expect(groupStatus(['done', 'done'])).toBe('done')
+    expect(groupStatus(['done', 'blocked'])).toBe('blocked')
+    expect(groupStatus(['blocked', 'in_review'])).toBe('in_progress')
+    expect(groupStatus(['done', 'abandoned'])).toBe('done')
+    expect(groupStatus(['abandoned'])).toBe('todo')
   })
 })

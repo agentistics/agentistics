@@ -6,6 +6,7 @@ import type { RepoStat } from '../hooks/useData'
 import { canonicalRepoKey } from '../lib/shareRepos'
 import { PLURAL_COPY, interpolate, plural } from './team/copy'
 import { withheldMarkStyle } from './team/withheldStyle'
+import { planCostOf } from '../lib/topUsage'
 
 interface Props {
   repos: RepoStat[]
@@ -17,6 +18,7 @@ interface Props {
   /** Task 13 — canonical repo key (or `NO_REPO_KEY`) -> labels of the connections hiding it.
    *  Absent/empty means nothing is hidden from anywhere. */
   deniedRepoLabels?: Map<string, string[]>
+  planFactors?: Readonly<Record<string, number | null>> | null
 }
 
 /** The `EyeOff` badge: "Hidden from N central(s)" plus the names on a second line. Clicking it
@@ -131,7 +133,7 @@ function ProviderLogo({ host, linked, size = 15, color }: { host: string; linked
   return <GitBranch size={size} color={color} style={{ flexShrink: 0 }} />
 }
 
-export function RepositoriesList({ repos, isCentral, currency = 'USD', brlRate = 1, lang, onOpen, deniedRepoLabels }: Props) {
+export function RepositoriesList({ repos, isCentral, currency = 'USD', brlRate = 1, lang, onOpen, deniedRepoLabels, planFactors = null }: Props) {
   const pt = lang === 'pt'
   if (repos.length === 0) {
     return (
@@ -207,7 +209,7 @@ export function RepositoriesList({ repos, isCentral, currency = 'USD', brlRate =
             {/* Primary metrics */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
               <Metric label={pt ? 'sessões' : 'sessions'} value={r.sessions} />
-              <Metric label={pt ? 'custo' : 'cost'} value={fmtCost(r.costUSD, currency, brlRate)} />
+              <Metric label={pt ? 'custo' : 'cost'} value={fmtCost(planFactors ? planCostOf(r.costByHarness, planFactors) : r.costUSD, currency, brlRate)} />
               <Metric
                 label="tokens"
                 value={fmt(totalTokens(r.tokens))}

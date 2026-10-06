@@ -9,7 +9,7 @@
 
 import { pieceTimes, spanOf, type PieceTimes, type SessionSpan } from './task-times'
 import type { SessionMeta, TaskProgress } from '@agentistics/core'
-import { commentCounts, commentsByTarget, groupProgress, sessionTokenTotal, type CommentTarget } from '@agentistics/core'
+import { commentCounts, commentsByTarget, groupProgress, groupStatus, sessionTokenTotal, type CommentTarget } from '@agentistics/core'
 import type {
   Attempt, AttemptStatus, Subtask, Task, TaskComment, TaskFile, TaskThread,
 } from './task-model'
@@ -506,6 +506,15 @@ function threadCounts(taskId: string, threads: readonly TaskThread[]): { threads
   return { threads: threads.filter(t => t.taskId === taskId).length }
 }
 
+/** Read-time canonicalization keeps stale stored group statuses from leaking into any surface. */
+function effectiveSubtasks(subtasks: readonly Subtask[]): Subtask[] {
+  return subtasks.map(subtask => {
+    if (!isGroupSubtask(subtask)) return subtask
+    const status = groupStatus(groupMembers(subtask.id, subtasks).map(member => member.status))
+    return { ...subtask, status, done: status === 'done' }
+  })
+}
+
 export function buildTaskList(o: {
   tasks: readonly Task[]
   attempts: readonly Attempt[]
@@ -521,7 +530,7 @@ export function buildTaskList(o: {
   const owners = conversationOwners(o.rows)
   return o.tasks.map(task => {
     const mine = rowsOfTask(task, o.rows, owners)
-    const subs = (o.subtasks ?? []).filter(t => t.taskId === task.id)
+    const subs = effectiveSubtasks((o.subtasks ?? []).filter(t => t.taskId === task.id))
     const comments = commentCounts((o.comments ?? []).filter(c => c.taskId === task.id), subs)
     return {
       task,
@@ -563,6 +572,7 @@ export function buildTaskDetail(o: {
     .map(r => (r.conversationId ? o.metas.get(r.conversationId) : undefined))
     .filter((m): m is SessionMeta => m !== undefined)
 
+  const subtasks = effectiveSubtasks((o.subtasks ?? []).filter(s => s.taskId === o.task.id))
   return {
     task: o.task,
     attempts: attemptViews(o.task, o.attempts, mine, o.metas, o.costOf),
@@ -627,9 +637,9 @@ export function buildTaskDetail(o: {
       [...(o.subtasks ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     ),
     threads: [...(o.threads ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-    subtasks: [...(o.subtasks ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    subtasks: [...subtasks].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     files: [...(o.files ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-    subtaskRollups: subtaskViews(o.task, o.subtasks ?? [], mine, o.metas, o.costOf),
+    subtaskRollups: subtaskViews(o.task, subtasks, mine, o.metas, o.costOf),
   }
 }
 

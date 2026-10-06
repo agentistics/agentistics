@@ -2,7 +2,7 @@ import { useState, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { taskProgress, type TaskStatusDef } from '@agentistics/core'
 import { liveStatusOrder, microLabel, statusStyle } from './board'
-import type { Lang } from './copy'
+import { statusLabel, type Lang } from './copy'
 
 export interface ProgressTooltipModel {
   summary: string
@@ -16,17 +16,17 @@ export function progressTooltipModel(done: number, total: number, percent: numbe
   const ids = [...order, ...Object.keys(counts).filter(id => !order.includes(id))]
   return {
     summary: lang === 'pt' ? `${done} de ${total} concluídas (${percent}%)` : `${done} of ${total} completed (${percent}%)`,
-    statuses: ids.filter(id => (counts[id] ?? 0) > 0).map(id => ({ id, label: statusStyle(statuses, id).label, count: counts[id]!, color: statusStyle(statuses, id).color })),
-    titles: [...titles].slice(0, 12), moreTitles: Math.max(0, titles.length - 12),
+    statuses: ids.filter(id => (counts[id] ?? 0) > 0).map(id => ({ id, label: statusLabel(id, lang, statuses), count: counts[id]!, color: statusStyle(statuses, id).color })),
+    titles: [...titles].slice(0, 8), moreTitles: Math.max(0, titles.length - 8),
   }
 }
 
 export function ProgressTooltip({ model, x, y }: { model: ProgressTooltipModel; x: number; y: number }) {
   return createPortal(
-    <span role="tooltip" style={{ position: 'fixed', left: x, top: y, transform: 'translateY(-100%)', zIndex: 4000, pointerEvents: 'none', minWidth: 150, padding: '6px 8px', borderRadius: 5, background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontSize: 10, lineHeight: 1.45, boxShadow: '0 3px 12px rgba(0,0,0,.25)' }}>
+    <span role="tooltip" style={{ position: 'fixed', left: x, top: y, transform: 'translateY(-100%)', zIndex: 4000, pointerEvents: 'none', width: 360, maxWidth: 'calc(100vw - 16px)', boxSizing: 'border-box', padding: '6px 8px', borderRadius: 5, background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontSize: 10, lineHeight: 1.45, boxShadow: '0 3px 12px rgba(0,0,0,.25)' }}>
       <span style={{ display: 'block', fontWeight: 650, marginBottom: 3 }}>{model.summary}</span>
       {model.statuses.map(s => <span key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 5 }}><i style={{ width: 7, height: 7, borderRadius: '50%', background: s.color, flex: '0 0 auto' }} />{s.label} {s.count}</span>)}
-      {model.titles.length > 0 && <span style={{ display: 'block', marginTop: 4, color: 'var(--text-secondary)' }}>{model.titles.join(', ')}{model.moreTitles > 0 ? ` +${model.moreTitles}` : ''}</span>}
+      {model.titles.length > 0 && <span style={{ display: 'block', marginTop: 4, color: 'var(--text-secondary)' }}>{model.titles.map(title => <span key={title} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>)}{model.moreTitles > 0 && <span style={{ display: 'block' }}>+{model.moreTitles}</span>}</span>}
     </span>, document.body,
   )
 }

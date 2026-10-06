@@ -22,6 +22,14 @@ test('a path only ever visited by a non-Claude harness is still planned — the 
   expect(plan.map(p => p.path)).toEqual(['/only-codex'])
 })
 
+test('deduplicates Windows and WSL spellings of a project', () => {
+  const plan = planProjectFacts([
+    S({ project_path: String.raw`D:\code\repo`, start_time: '2026-03-02' }),
+    S({ project_path: '/mnt/d/code/repo', start_time: '2026-03-01' }),
+  ], [])
+  expect(plan).toEqual([{ path: '/mnt/d/code/repo', earliest: '2026-03-01' }])
+})
+
 test('projects with no sessions are planned too, with no window', () => {
   const plan = planProjectFacts([], [{ path: '/empty' }])
   expect(plan).toEqual([{ path: '/empty', earliest: '' }])

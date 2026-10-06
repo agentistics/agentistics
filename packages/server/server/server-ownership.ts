@@ -41,7 +41,7 @@ export interface OwnershipFacts {
 
 /** Does the service manager own this data dir's server? The one question every launcher asks. */
 export function serviceOwnsServer(f: Omit<OwnershipFacts, 'insideUnit' | 'foregroundForced'>): boolean {
-  return f.platform === 'linux' && f.unitInstalled && f.ownersStore
+  return (f.platform === 'linux' || f.platform === 'darwin') && f.unitInstalled && f.ownersStore
 }
 
 export type StartRoute =
@@ -57,8 +57,8 @@ export function planServerStart(f: OwnershipFacts): StartRoute {
 }
 
 /** Is this process inside one of agentop's own units? `INVOCATION_ID` is systemd's own marker. */
-export function isInsideUnit(cgroup: string, invocationId: string | undefined): boolean {
-  return managedByAgentopUnit(cgroup) || (invocationId !== undefined && invocationId !== '')
+export function isInsideUnit(cgroup: string, invocationId: string | undefined, launchdMarker = false): boolean {
+  return managedByAgentopUnit(cgroup) || (invocationId !== undefined && invocationId !== '') || launchdMarker
 }
 
 export type ReclaimPlan =

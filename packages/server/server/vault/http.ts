@@ -193,6 +193,12 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     const b = await body()
     return reply(await gate.setUnlockPolicy({ mode: b.mode, hours: b.hours }, { grant, session, code: codeOf(b) }))
   }
+  if (path === '/api/vault/auth-policy' && req.method === 'POST') {
+    // Owner decision 2026-10-06: which proof each kind of action asks. The new policy is parsed (a
+    // critical kind can never be "nothing") and the change is gated by the CURRENT 'settings' choice.
+    const b = await body()
+    return reply(await gate.setAuthPolicy(b.policy, { grant, session, loopback, code: codeOf(b) }))
+  }
   if (path === '/api/vault/activity' && req.method === 'POST') {
     // The dashboard's input heartbeat (§5.1): human interaction resets the idle clock.
     noteVaultActivity()

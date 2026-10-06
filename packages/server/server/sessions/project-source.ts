@@ -17,9 +17,10 @@
  */
 
 import { homedir } from 'node:os'
-import { countPerKind, PROJECTS_PER_KIND, projectKind, takePerKind, type ProjectKind } from '@agentistics/core'
+import { countPerKind, pathForHost, PROJECTS_PER_KIND, projectKind, projectPathKey, takePerKind, type ProjectKind } from '@agentistics/core'
 import { loadConsolidated } from '../consolidate'
 import { isDirectory, isWorktreeDir, scanDirectories } from './dir-scan'
+import { readPreferences } from '../preferences'
 import {
   buildCandidates, mergeWalkedAndHistory, searchCandidates, withFixedCandidates,
   type ProjectCandidate,
@@ -35,13 +36,20 @@ async function allCandidates(): Promise<ProjectCandidate[]> {
   const now = Date.now()
   if (cache && now - cache.at < CACHE_TTL_MS) return cache.candidates
 
-  const [history, scanned] = await Promise.all([
+  const [history, roots] = await Promise.all([
     loadConsolidated()
       .then(m => buildCandidates([...m.values()]))
       // A store that cannot be read is a wizard with no history, never one that fails to open.
       .catch(() => [] as ProjectCandidate[]),
-    scanDirectories().catch(() => []),
+    readPreferences().then(p => p.scanRoots ?? []).catch(() => [] as string[]),
   ])
+  const scanRoots = [...new Map(
+    [homedir(), ...roots.map(root => pathForHost(root, process.platform === 'win32' ? 'win32' : 'linux'))]
+      .filter(Boolean)
+      .map(root => [projectPathKey(root), root] as const),
+  ).values()]
+  const scannedGroups = await Promise.all(scanRoots.map(root => scanDirectories(root).catch(() => [])))
+  const scanned = scannedGroups.flat()
 
   // History WINS on a path both know about: it carries the repository and the recency, and the walk
   // knows only that the directory exists. `mergeWalkedAndHistory` keeps the richer entry and lets
@@ -113,7 +121,7 @@ export async function findProjects(
   // entry's already-resolved `worktree` and merely overrides `source`, so paying for this twice
   // would be wasted the moment the cache is warm (the ordinary case: `cwd` is almost always
   // somewhere the walk or history has already seen).
-  const cwdKnownWorktree = known.find(c => c.path === cwd)?.worktree
+  const cwdKnownWorktree = known.find(c => projectPathKey(c.path) === projectPathKey(cwd))?.worktree
   const fixed: ProjectCandidate[] = [{
     path: cwd,
     name: baseName(cwd),
@@ -129,7 +137,7 @@ export async function findProjects(
   const typed = query.trim()
   if (typed.startsWith('/') || typed.startsWith('~')) {
     const path = typed.startsWith('~') ? typed.replace(/^~/, homedir()) : typed
-    if (!known.some(c => c.path === path) && await isDirectory(path)) {
+    if (!known.some(c => projectPathKey(c.path) === projectPathKey(path)) && await isDirectory(path)) {
       fixed.push({
         path, name: baseName(path), remote: '', lastSeenMs: 0, sessions: 0, source: 'typed',
         worktree: await isWorktreeDir(path),

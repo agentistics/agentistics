@@ -324,6 +324,12 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
       + 'not have.',
   },
   {
+    pattern: '.agentistics/telemetry.json', match: 'prefix', reason: 'regenerable',
+    restoreWith: 'nothing',
+    why: 'The anonymous install id of THIS machine. Restoring it elsewhere would make two machines '
+      + 'count as one; a new machine gets its own id.',
+  },
+  {
     pattern: '.agentistics/journal.db.stamps.json', match: 'prefix', reason: 'regenerable',
     restoreWith: 'nothing — the shadow writer re-derives it by re-reading its sources',
     why: 'Which source versions the shadow writer already folded into the journal. Restored beside a '

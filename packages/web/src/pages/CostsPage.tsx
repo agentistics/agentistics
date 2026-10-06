@@ -11,6 +11,7 @@ import { CacheHitRatePanel } from '../components/CacheHitRatePanel'
 import { TokenTotalsPanel } from '../components/TokenTotalsPanel'
 import { NativeUsagePanel } from '../components/NativeUsagePanel'
 import { useNativeUsage } from '../lib/nativeUsage'
+import { modelCostByHarness } from '../lib/costBasis'
 
 export default function CostsPage() {
   const ctx = useOutletContext<AppContext>()
@@ -45,6 +46,8 @@ export default function CostsPage() {
           modelUsage={derived.modelUsage}
           currency={currency}
           planFactor={ctx.costBasis === 'plan' && ctx.planBasis.basis ? planAllocation(ctx.planBasis.basis).aggregateFactor : null}
+          planFactors={ctx.costBasis === 'plan' && ctx.planBasis.basis ? planAllocation(ctx.planBasis.basis).byHarness : null}
+          costByHarness={modelCostByHarness(derived.modelUsage, derived.filteredSessions)}
           brlRate={brlRate}
           lang={lang}
           fallbackInputTokens={filters.projects.length > 0 ? derived.inputTokens : undefined}

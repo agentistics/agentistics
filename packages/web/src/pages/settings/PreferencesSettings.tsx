@@ -3,7 +3,7 @@ import { useOutletContext } from 'react-router-dom'
 import { GripVertical, RotateCcw, Save } from 'lucide-react'
 import type { Lang, Theme } from '@agentistics/core'
 import type { AppContext, PrefsDraft } from '../../lib/app-context'
-import { SectionHeader, Divider, TabSelect, PrefRow, Toggle } from './primitives'
+import { SectionHeader, Divider, TabSelect, PrefRow, Toggle, Checkbox } from './primitives'
 import { DEFAULT_CARD_ORDER, type CardId } from '../../lib/cardOrder'
 
 /** One label per `CardId`. Typed as the Record so the build fails if a card is added and this is
@@ -37,6 +37,19 @@ function seedDraft(ctx: AppContext): PrefsDraft {
 
 export default function PreferencesSettings() {
   const ctx = useOutletContext<AppContext>()
+  const [scanRootsText, setScanRootsText] = useState('')
+  const [scanRootsSaving, setScanRootsSaving] = useState(false)
+  const [scanRootsMessage, setScanRootsMessage] = useState('')
+  useEffect(() => {
+    if (ctx.isCentral) return
+    void fetch('/api/preferences')
+      .then(r => r.ok ? r.json() as Promise<{ scanRoots?: string[] }> : null)
+      .then(p => {
+        const roots = Array.isArray(p?.scanRoots) ? p!.scanRoots.filter(x => typeof x === 'string') : []
+        setScanRootsText(roots.join('\n'))
+      })
+      .catch(() => {})
+  }, [ctx.isCentral])
   // Central-wide delete policy. Owner-only AND central-only: it is not a personal preference —
   // turning it off removes a safety net for everyone on this central. null until read, so the row
   // never flashes a wrong state.
@@ -45,6 +58,13 @@ export default function PreferencesSettings() {
   const [savingDeleteText, setSavingDeleteText] = useState(false)
   const [includeDeleted, setIncludeDeleted] = useState<boolean | null>(null)
   const [savingIncludeDeleted, setSavingIncludeDeleted] = useState(false)
+  const [telemetryEnabled, setTelemetryEnabled] = useState(true)
+  const [savingTelemetry, setSavingTelemetry] = useState(false)
+  useEffect(() => { void fetch('/api/preferences').then(r => r.ok ? r.json() : null).then(p => { if (p) setTelemetryEnabled(p.telemetryEnabled !== false) }).catch(() => {}) }, [])
+  async function toggleTelemetry(value: boolean) {
+    setSavingTelemetry(true); setTelemetryEnabled(value)
+    try { const r = await fetch('/api/preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telemetryEnabled: value, telemetryNoticeDismissed: true }) }); if (!r.ok) throw new Error() } catch { setTelemetryEnabled(!value) } finally { setSavingTelemetry(false) }
+  }
   useEffect(() => {
     if (!isOwnerOnCentral) return
     void fetch('/api/team/config')
@@ -128,6 +148,24 @@ export default function PreferencesSettings() {
   }
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(seedDraft(ctx))
+  async function saveScanRoots() {
+    const roots = [...new Set(scanRootsText.split(/\r?\n/).map(x => x.trim()).filter(Boolean))]
+    setScanRootsSaving(true)
+    setScanRootsMessage('')
+    try {
+      const res = await fetch('/api/preferences', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scanRoots: roots }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setScanRootsText(roots.join('\n'))
+      setScanRootsMessage(pt ? 'Salvo.' : 'Saved.')
+    } catch {
+      setScanRootsMessage(pt ? 'Não foi possível salvar.' : 'Could not save.')
+    } finally {
+      setScanRootsSaving(false)
+    }
+  }
 
   return (
     <>
@@ -165,6 +203,14 @@ export default function PreferencesSettings() {
       )}
 
       {/*  Display  */}
+      <SectionHeader label={pt ? 'Privacidade' : 'Privacy'} />
+      <PrefRow
+        label={pt ? 'Enviar um sinal anônimo de uso' : 'Send an anonymous usage signal'}
+        sub={pt ? 'Enviar um número aleatório, a versão e o sistema uma vez por dia, para sabermos quantas pessoas usam o Agentistics. Nada do seu trabalho é enviado.' : 'Send a random number, the version, and the system once a day, so we can know how many people use Agentistics. None of your work is sent.'}
+      >
+        <span style={{ opacity: savingTelemetry ? 0.6 : 1 }}><Checkbox checked={telemetryEnabled} onChange={toggleTelemetry} label={pt ? 'Enviar sinal anônimo' : 'Send anonymous signal'} disabled={savingTelemetry} /></span>
+      </PrefRow>
+      <Divider />
       <SectionHeader label={pt ? 'Exibição' : 'Display'} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -206,6 +252,44 @@ export default function PreferencesSettings() {
       </div>
 
       <Divider />
+
+      {!ctx.isCentral && (
+        <>
+          <SectionHeader label={pt ? 'Raízes extras de projetos' : 'Additional project roots'} />
+          <p style={{ fontSize: 12.5, color: 'var(--text-tertiary)', lineHeight: 1.55, margin: '0 0 10px' }}>
+            {pt
+              ? 'Uma pasta por linha. Use isso para discos e montagens fora do diretório inicial; os caminhos das sessões também são descobertos automaticamente.'
+              : 'One folder per line. Use this for disks and mounts outside the home directory; session paths are discovered automatically too.'}
+          </p>
+          <textarea
+            value={scanRootsText}
+            onChange={e => { setScanRootsText(e.target.value); setScanRootsMessage('') }}
+            rows={4}
+            placeholder={pt ? 'D:\\código\n/mnt/d/code' : 'D:\\code\n/mnt/d/code'}
+            style={{
+              width: '100%', boxSizing: 'border-box', resize: 'vertical', padding: 9,
+              borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg-elevated)',
+              color: 'var(--text-primary)', font: 'inherit', fontSize: 13,
+            }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, marginTop: 8, marginBottom: 16 }}>
+            {scanRootsMessage && <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{scanRootsMessage}</span>}
+            <button
+              onClick={() => { void saveScanRoots() }}
+              disabled={scanRootsSaving}
+              style={{
+                padding: '7px 14px', borderRadius: 7, fontSize: 12.5, fontWeight: 600,
+                border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)',
+                color: 'var(--anthropic-orange)', cursor: scanRootsSaving ? 'default' : 'pointer',
+                fontFamily: 'inherit', opacity: scanRootsSaving ? 0.6 : 1,
+              }}
+            >
+              {pt ? 'Salvar raízes' : 'Save roots'}
+            </button>
+          </div>
+          <Divider />
+        </>
+      )}
 
       {/*  Card order  */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>

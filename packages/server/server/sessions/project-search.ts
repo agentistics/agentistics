@@ -9,7 +9,7 @@
  * opposite of a plain fuzzy matcher, and deliberately so.
  */
 
-import { normalizeGitRemote, repoShortName } from '@agentistics/core'
+import { normalizeGitRemote, projectPathKey, repoShortName } from '@agentistics/core'
 
 /** One place a session could start. */
 export interface ProjectCandidate {
@@ -75,7 +75,9 @@ const SOURCE_RANK: Record<ProjectCandidate['source'], number> = {
  * would do the same to two siblings. Both ends carry a discriminator; the middle is what can go.
  */
 export function candidatePath(c: ProjectCandidate, home: string, max = 44): string {
-  const short = home && c.path.startsWith(home) ? `~${c.path.slice(home.length)}` : c.path
+  const short = home && projectPathKey(c.path).startsWith(projectPathKey(home))
+    ? `~${c.path.slice(home.length)}`
+    : c.path
   if (short.length <= max) return short
 
   const parts = short.split('/')
@@ -117,7 +119,10 @@ export function buildCandidates(
       if (!path) continue
       const at = s.start_time ? Date.parse(s.start_time) : NaN
       const seen = Number.isFinite(at) ? at : 0
-      const found = byPath.get(path)
+      // Candidates represent places to start, so linked worktrees stay distinct even though
+      // dashboard project aggregation folds them into their owning repository.
+      const key = projectPathKey(path, false)
+      const found = byPath.get(key)
       if (found) {
         found.sessions += 1
         if (seen > found.lastSeenMs) found.lastSeenMs = seen
@@ -126,7 +131,7 @@ export function buildCandidates(
         if (!found.remote && s.git_remote) found.remote = normalizeGitRemote(s.git_remote)
         continue
       }
-      byPath.set(path, {
+      byPath.set(key, {
         path,
         name: baseName(path),
         remote: s.git_remote ? normalizeGitRemote(s.git_remote) : '',
@@ -224,11 +229,12 @@ export function withFixedCandidates(
   fixed: readonly ProjectCandidate[],
 ): ProjectCandidate[] {
   const out = new Map<string, ProjectCandidate>()
-  for (const c of history) out.set(c.path, c)
+  for (const c of history) out.set(projectPathKey(c.path, false), c)
   for (const c of fixed) {
-    const existing = out.get(c.path)
+    const key = projectPathKey(c.path, false)
+    const existing = out.get(key)
     // Keep what history knows (the remote, the counts) but let the fixed entry say WHY it is here.
-    out.set(c.path, existing ? { ...existing, source: c.source } : c)
+    out.set(key, existing ? { ...existing, source: c.source } : c)
   }
   return [...out.values()]
 }
@@ -256,10 +262,11 @@ export function mergeWalkedAndHistory(
   history: readonly ProjectCandidate[],
 ): ProjectCandidate[] {
   const byPath = new Map<string, ProjectCandidate>()
-  for (const c of walked) byPath.set(c.path, c)
+  for (const c of walked) byPath.set(projectPathKey(c.path, false), c)
   for (const c of history) {
-    const known = byPath.get(c.path)
-    byPath.set(c.path, known?.worktree !== undefined ? { ...c, worktree: known.worktree } : c)
+    const key = projectPathKey(c.path, false)
+    const known = byPath.get(key)
+    byPath.set(key, known?.worktree !== undefined ? { ...c, worktree: known.worktree } : c)
   }
   return [...byPath.values()]
 }

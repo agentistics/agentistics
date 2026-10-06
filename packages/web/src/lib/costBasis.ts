@@ -11,7 +11,7 @@
  * plan figure is an ALLOCATION — no row was individually billed — and a label that can be
  * forgotten will be.
  */
-import { planAllocation, type AggregatePlanBasis, type CostBasis, type HarnessId } from '@agentistics/core'
+import { calcCost, planAllocation, sessionModelUsage, type AggregatePlanBasis, type CostBasis, type HarnessId, type ModelUsage, type SessionMeta } from '@agentistics/core'
 
 export interface CostView {
   usd: number
@@ -216,4 +216,34 @@ export function splitPlanFactor(
     plan += usd * (usable ? f : 1)
   }
   return covered && api > 0 ? plan / api : null
+}
+
+/**
+ * Split an already-aggregated model table by harness. Claude's cache is the authoritative
+ * all-time aggregate; the other harnesses only exist as sessions, so their model costs are
+ * removed from the aggregate and the remainder stays with Claude. This lets model rows use the
+ * same per-harness factors as project/repository rows without inventing a global factor.
+ */
+export function modelCostByHarness(
+  modelUsage: Readonly<Record<string, ModelUsage>>,
+  sessions: readonly SessionMeta[],
+): Record<string, Record<string, number>> {
+  const out: Record<string, Record<string, number>> = {}
+  const nonClaude: Record<string, number> = {}
+  for (const session of sessions) {
+    const harness = session.harness ?? 'claude'
+    if (harness === 'claude') continue
+    for (const [model, usage] of sessionModelUsage(session)) {
+      const cost = calcCost(usage, model)
+      nonClaude[model] = (nonClaude[model] ?? 0) + cost
+      const byHarness = (out[model] ??= {})
+      byHarness[harness] = (byHarness[harness] ?? 0) + cost
+    }
+  }
+  for (const [model, usage] of Object.entries(modelUsage)) {
+    const total = calcCost(usage, model)
+    const claude = Math.max(0, total - (nonClaude[model] ?? 0))
+    if (claude > 0) (out[model] ??= {}).claude = claude
+  }
+  return out
 }

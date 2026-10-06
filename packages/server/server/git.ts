@@ -5,10 +5,22 @@ import { join } from 'path'
 import type { ProjectGitStats } from '@agentistics/core'
 import { openGitStatsCache, NOOP_GIT_STATS_CACHE, type GitStatsCache } from './git-stats-cache'
 import { GIT_STATS_CACHE_FILE } from './config'
-import { normalizeGitRemote } from '@agentistics/core'
+import { normalizeGitRemote, pathForHost } from '@agentistics/core'
 import { configFingerprint, createFingerprintMemo, findGitDirs, headFingerprint, type GitDirs } from './git-fs'
 
 const execFileAsync = promisify(execFile)
+
+export function gitCommandForPath(repoPath: string, platform: NodeJS.Platform = process.platform): {
+  file: string
+  args: string[]
+} {
+  const hostPath = pathForHost(repoPath, platform === 'win32' ? 'win32' : 'linux')
+  const useWsl = platform === 'win32' && hostPath.startsWith('/')
+  return {
+    file: useWsl ? 'wsl' : 'git',
+    args: useWsl ? ['git', '-C', hostPath] : ['-C', hostPath],
+  }
+}
 
 /** Run git WITHOUT a shell.
  *
@@ -25,11 +37,10 @@ async function git(
   args: string[],
   opts: { timeout: number; maxBuffer: number }
 ): Promise<string> {
-  // On Windows a POSIX path is a WSL path and git must be reached through `wsl`.
-  const useWsl = process.platform === 'win32' && repoPath.startsWith('/')
-  const file = useWsl ? 'wsl' : 'git'
-  const argv = useWsl ? ['git', '-C', repoPath, ...args] : ['-C', repoPath, ...args]
-  const { stdout } = await execFileAsync(file, argv, { ...opts, env: gitEnv() })
+  // Recorded paths can come from the other side of a Windows/WSL boundary. Normalize
+  // them before deciding whether native git or WSL git owns the path.
+  const command = gitCommandForPath(repoPath)
+  const { stdout } = await execFileAsync(command.file, [...command.args, ...args], { ...opts, env: gitEnv() })
   return stdout
 }
 

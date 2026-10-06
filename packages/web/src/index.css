@@ -181,28 +181,6 @@ html, body {
   100% { background-position: 200% 0; }
 }
 
-/* ── Route loader — animated bars (analytics motif) ─────────────────────────── */
-@keyframes ag-bar { 0%, 100% { transform: scaleY(0.32); opacity: 0.55; } 50% { transform: scaleY(1); opacity: 1; } }
-@keyframes ag-loader-in { from { opacity: 0; } to { opacity: 1; } }
-.ag-loader { display: flex; flex-direction: column; align-items: center; gap: 13px; animation: ag-loader-in 0.4s ease-out 0.1s both; }
-.ag-loader-bars { display: flex; align-items: flex-end; gap: 5px; height: 34px; }
-.ag-loader-bars > span {
-  width: 7px; height: 100%; border-radius: 3px; transform-origin: bottom; flex-shrink: 0;
-  background: linear-gradient(180deg, var(--anthropic-orange-light, #F59E0B), var(--anthropic-orange, #D97706));
-  animation: ag-bar 1.05s ease-in-out infinite;
-}
-.ag-loader-bars > span:nth-child(1) { animation-delay: 0s; }
-.ag-loader-bars > span:nth-child(2) { animation-delay: 0.11s; }
-.ag-loader-bars > span:nth-child(3) { animation-delay: 0.22s; }
-.ag-loader-bars > span:nth-child(4) { animation-delay: 0.33s; }
-.ag-loader-bars > span:nth-child(5) { animation-delay: 0.44s; }
-.ag-loader-label { font-size: 12px; color: var(--text-tertiary); letter-spacing: 0.03em; font-weight: 500; }
-@media (prefers-reduced-motion: reduce) {
-  .ag-loader-bars > span { animation: none; }
-  .ag-loader-bars > span:nth-child(2), .ag-loader-bars > span:nth-child(4) { transform: scaleY(0.6); }
-  .ag-loader-bars > span:nth-child(1), .ag-loader-bars > span:nth-child(5) { transform: scaleY(0.4); }
-}
-
 /* ── Mobile base ────────────────────────────────────────────────────────────── */
 @media (max-width: 767px) {
   html, body {
@@ -1114,3 +1092,31 @@ tr:hover .ag-row-actions,
 tr:focus-within .ag-row-actions,
 .ag-row-actions:focus-within { opacity: 1; }
 @media (hover: none) { .ag-row-actions { opacity: 1; } }
+
+/* The 6-box authenticator code input (components/CodeBoxes.tsx). Each box is ≥ 16px text so iOS never
+   zooms, ≥ 44px tall on a phone; the row shakes once on an error (not under reduced motion). */
+.ag-code-boxes { display: flex; gap: 8px; }
+.ag-code-box {
+  flex: 1 1 0; min-width: 0; max-width: 52px; height: 50px; box-sizing: border-box; padding: 0; text-align: center;
+  font-size: 22px; font-weight: 600; font-family: var(--font-mono, ui-monospace, monospace); font-variant-numeric: tabular-nums;
+  color: var(--text-primary); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px;
+  outline: none; caret-color: var(--anthropic-orange); transition: border-color 120ms, box-shadow 120ms;
+}
+.ag-code-box:focus, .ag-code-box:focus-visible {
+  border-color: var(--anthropic-orange);
+  box-shadow: 0 0 0 3px var(--anthropic-orange-dim);
+  outline: none;
+}
+.ag-code-box:disabled { opacity: 0.55; }
+.ag-code-boxes.is-error .ag-code-box { border-color: var(--accent-red); background: var(--accent-red-dim); }
+.ag-code-boxes.is-error .ag-code-box:focus { box-shadow: 0 0 0 3px var(--accent-red-dim); }
+.ag-code-boxes.is-shaking { animation: ag-code-shake 360ms ease-in-out; }
+@keyframes ag-code-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+@media (max-width: 380px) { .ag-code-boxes { gap: 6px; } .ag-code-box { height: 48px; } }
+@media (prefers-reduced-motion: reduce) { .ag-code-boxes.is-shaking { animation: none; } }

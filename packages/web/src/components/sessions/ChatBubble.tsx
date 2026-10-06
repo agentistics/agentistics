@@ -45,6 +45,7 @@ import { HarnessMark } from './HarnessMark'
 import type { VaultGrantMessage } from '../../lib/vaultChip'
 import { card, overlay } from '../MfaSetup'
 import { dialogButtonStyle } from '../../pages/settings/primitives'
+import { leadingQuote } from '../../lib/replyQuote'
 
 export interface ChatTurn {
   role: 'user' | 'assistant'
@@ -162,6 +163,8 @@ export interface ChatBubbleProps {
    * this bubble. Same stability requirement as `onReply` — see the note above.
    */
   onReplyExcerpt?: (turn: ChatTurn, excerpt: string) => void
+  /** Open the source message for a markdown quote in a sent user bubble. */
+  onQuoteClick?: (quote: string, turn: ChatTurn) => void
   /**
    * A DOM id for this bubble, so something outside the conversation can scroll to it.
    *
@@ -343,10 +346,11 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
   )
 }
 
-export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessionId, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect, vaultGrant }: ChatBubbleProps) {
+export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessionId, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, onQuoteClick, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect, vaultGrant }: ChatBubbleProps) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const mine = turn.role === 'user'
+  const [quoteExpanded, setQuoteExpanded] = useState(false)
   const imageUrl = useCallback((path: string) => (
     !mine && sessionId ? sessionViewedUrl(sessionId, path) : attachmentUrl(path)
   ), [mine, sessionId])
@@ -916,6 +920,45 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessio
                 )
               }
               const { command, rest } = splitSlashLine(text)
+              if (command === '' && mine && onQuoteClick) {
+                const quoted = leadingQuote(text)
+                if (quoted) {
+                  const lines = quoted.quote.split('\n')
+                  const shown = quoteExpanded ? lines : lines.slice(0, 2)
+                  return (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setQuoteExpanded(v => !v)}
+                        style={{
+                          display: 'block', width: '100%', padding: 0, border: 0, textAlign: 'left',
+                          background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer',
+                          font: 'inherit', fontSize: 11.5, lineHeight: 1.4,
+                        }}
+                        title={pt ? 'Ir para a mensagem citada' : 'Go to the quoted message'}
+                      >
+                        <span style={{ marginRight: 8, color: 'var(--anthropic-orange)' }}>↪</span>
+                        {quoteExpanded ? (pt ? 'ver menos' : 'show less') : (pt ? 'ver mais' : 'show more')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onQuoteClick(quoted.quote, turn)}
+                        style={{
+                          display: 'block', width: '100%', padding: 0, border: 0, textAlign: 'left',
+                          background: 'transparent', color: 'inherit', cursor: 'pointer',
+                        }}
+                      >
+                        <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                          {shown.map(line => `> ${line}`).join('\n')}
+                        </ReactMarkdown>
+                      </button>
+                      {quoted.rest.trim() !== '' && (
+                        <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{quoted.rest}</ReactMarkdown>
+                      )}
+                    </>
+                  )
+                }
+              }
               if (command === '') {
                 return <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{text}</ReactMarkdown>
               }

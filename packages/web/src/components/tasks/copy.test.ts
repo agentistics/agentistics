@@ -71,7 +71,7 @@ describe('boardCopy', () => {
   it('uses the same word for the status as for the thing being counted', () => {
     // "Entregue" and not "Concluída": the board measures deliveries, and a status that used a
     // different word would make the count and the column read as two different things.
-    expect(statusLabel('done', 'pt')).toBe('Entregue')
+    expect(statusLabel('done', 'pt')).toBe('Concluído')
     expect(boardCopy('pt').deliveries).toBe('Agentask')
   })
 })

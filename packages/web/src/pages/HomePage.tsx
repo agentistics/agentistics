@@ -34,7 +34,7 @@ import { capable, HARNESS_LABELS, HARNESS_PROVIDERS } from '../lib/harness'
 import { StreakBreakdownButton } from '../components/StreakBreakdownButton'
 import { PlanValuePanel } from '../components/PlanValuePanel'
 import { HomeComparisons } from '../components/HomeComparisons'
-import { planCostSubtitle, planScopeHarnesses, planScopeNote } from '../lib/costBasis'
+import { modelCostByHarness, planCostSubtitle, planScopeHarnesses, planScopeNote } from '../lib/costBasis'
 import { costEstimateNote } from '../lib/costEstimateNote'
 
 import type { CardId } from '../lib/cardOrder'
@@ -314,6 +314,8 @@ export default function HomePage() {
           modelUsage={derived.modelUsage}
           currency={currency}
           planFactor={costBasis === "plan" ? planFactor : null}
+          planFactors={costBasis === 'plan' && planBasis.basis ? planAllocation(planBasis.basis).byHarness : null}
+          costByHarness={modelCostByHarness(d.modelUsage, d.filteredSessions)}
           brlRate={brlRate}
           fallbackInputTokens={filters.projects.length > 0 ? derived.inputTokens : undefined}
           fallbackOutputTokens={filters.projects.length > 0 ? derived.outputTokens : undefined}

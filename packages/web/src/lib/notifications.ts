@@ -24,6 +24,10 @@ type Localized = { title: string; message?: string }
 /** Localized copy for server- and client-emitted notification codes. Resolved at
  *  render time by resolveNotification so switching the language re-translates. */
 export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }> = {
+  'telemetry.first_use': {
+    pt: { title: 'Uso anônimo do Agentistics', message: 'Enviar um sinal anônimo de uso (um número aleatório, a versão e o sistema) uma vez por dia, para sabermos quantas pessoas usam o Agentistics. Nada do seu trabalho é enviado.' },
+    en: { title: 'Anonymous Agentistics usage', message: 'Send an anonymous usage signal (a random number, the version, and the system) once a day, so we can know how many people use Agentistics. None of your work is sent.' },
+  },
   // The five member.* codes below name the central they are about via `{central}` (the
   // connection's label, else its endpoint host — never a token). With several centrals connected,
   // an unattributed "can't reach the central" is unactionable: the bell showed two byte-identical

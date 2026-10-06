@@ -751,6 +751,47 @@ export function canonicalProjectPath(path: string): string {
   return m && m[1] ? m[1] : path
 }
 
+/** Convert the common Windows/WSL spellings of a path to one comparison key. */
+export function projectPathKey(path: string, collapseWorktree = true): string {
+  if (!path) return ''
+  let p = path.trim().replace(/\\/g, '/').replace(/\/+$/, '')
+  const unc = /^\/\/(?:wsl\.localhost|wsl\$)\/([^/]+)(\/.*)?$/i.exec(p)
+  if (unc) {
+    const rest = unc[2] ?? '/'
+    // A WSL UNC path can point at a mounted Windows drive. Keep that path equal to
+    // C:\.../\/mnt/c/... while retaining the distro for native Linux paths.
+    p = /^\/mnt\/[a-z](?:\/|$)/i.test(rest)
+      ? rest
+      : `/wsl/${unc[1]!.toLowerCase()}${rest}`
+  }
+  const drive = /^([a-z]):(?:\/|$)/i.exec(p)
+  if (drive) p = `/mnt/${drive[1]!.toLowerCase()}${p.slice(2)}`
+  if (collapseWorktree) p = canonicalProjectPath(p)
+  return p.replace(/\/+/g, '/').replace(/\/+$/, '') || '/'
+}
+
+/** Convert a recorded path to the syntax expected by the current process' filesystem. */
+export function pathForHost(path: string, host: 'win32' | 'linux' | 'darwin' = 'linux'): string {
+  if (!path) return path
+  const slashPath = path.replace(/\\/g, '/')
+  if (host === 'win32' && /^\/\/(?:wsl\.localhost|wsl\$)\//i.test(slashPath)) {
+    const key = projectPathKey(path)
+    const wsl = /^\/wsl\/([^/]+)(\/.*)?$/i.exec(key)
+    if (wsl) return `\\\\wsl.localhost\\${wsl[1]}${(wsl[2] ?? '/').replace(/\//g, '\\')}`
+    return path
+  }
+  // POSIX paths are readable by WSL's git when the host is Windows. Keep the
+  // spelling so the caller can select `wsl git` instead of native git.
+  if (host === 'win32' && slashPath.startsWith('/')) return slashPath
+  const key = projectPathKey(path)
+  if (host !== 'win32') return key
+  const drive = /^\/mnt\/([a-z])(?:\/|$)/i.exec(key)
+  if (drive) return `${drive[1]!.toUpperCase()}:${key.slice(6).replace(/\//g, '\\') || '\\'}`
+  const wsl = /^\/wsl\/([^/]+)(\/.*)?$/i.exec(key)
+  if (wsl) return `\\\\wsl.localhost\\${wsl[1]}${(wsl[2] ?? '/').replace(/\//g, '\\')}`
+  return path.replace(/\//g, '\\')
+}
+
 /** An assistant process running right now with no session on disk to attribute it to. Not every
  *  assistant persists a conversation the moment it launches — agy writes nothing until a turn
  *  completes — so a freshly-opened one would otherwise be missing from "open now" entirely. */

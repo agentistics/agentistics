@@ -11,7 +11,7 @@
  */
 import { useState } from 'react'
 import { ArrowLeft, Pencil } from 'lucide-react'
-import type { TaskStatusDef } from '@agentistics/core'
+import { groupStatus, taskProgress, type TaskStatusDef } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import type { TaskDetail } from '../../lib/tasks'
 import { BetaTag } from '../BetaTag'
@@ -50,15 +50,13 @@ function Ring({ done, inProgress, blocked, total, size, statuses, counts, titles
   titles: readonly string[]
   lang: Lang
 }) {
-  const pct = total === 0 ? 0 : Math.floor((done / total) * 100)
+  const progress = taskProgress(done, total, inProgress, blocked, counts)
+  const pct = progress.percent ?? 0
   const r = 36
   const c = 2 * Math.PI * r
-  const doneCount = Math.max(0, Math.min(done, total))
-  const inProgressCount = Math.max(0, Math.min(inProgress, total - doneCount))
-  const blockedCount = Math.max(0, Math.min(blocked, total - doneCount - inProgressCount))
-  const statusCounts: Record<string, number> = { ...counts, done: doneCount, in_progress: inProgressCount, blocked: blockedCount }
-  const segments = liveStatusOrder(statuses).map(id => ({ id, count: Math.max(0, Math.min(statusCounts[id] ?? 0, total)), color: statusStyle(statuses, id).color, label: statusStyle(statuses, id).label }))
-  const model = progressTooltipModel(doneCount, total, pct, statusCounts, statuses, lang, titles)
+  const statusCounts = progress.counts
+  const segments = liveStatusOrder(statuses).map(id => ({ id, count: statusCounts[id] ?? 0, color: statusStyle(statuses, id).color, label: statusStyle(statuses, id).label }))
+  const model = progressTooltipModel(progress.done, progress.total, pct, statusCounts, statuses, lang, titles)
   const [tip, setTip] = useState<{ x: number; y: number } | null>(null)
   let offset = 0
   const labelSize = ringLabelFontSize(size)
@@ -67,7 +65,7 @@ function Ring({ done, inProgress, blocked, total, size, statuses, counts, titles
       <svg width={size} height={size} viewBox="0 0 84 84" style={{ transform: 'rotate(-90deg)' }}>
         <circle cx="42" cy="42" r={r} fill="none" stroke="var(--ag-tint-3)" strokeWidth="8" />
         {segments.map(segment => {
-          const length = total === 0 ? 0 : c * (segment.count / total)
+          const length = progress.total === 0 ? 0 : c * (segment.count / progress.total)
           const currentOffset = offset
           offset += length
           return length > 0 ? (
@@ -111,11 +109,16 @@ export function TaskHero({ detail, lang, statuses, live, reload, onBack, onAbout
   const rename = boardCopy(lang).header.renameTask
   const money = useMoney()
   const task = detail.task
-  const subsDone = detail.subtasks.filter(s => s.done).length
-  const subsTotal = detail.subtasks.length
-  const subsInProgress = detail.subtasks.filter(s => !s.done && s.status === 'in_progress').length
-  const subsBlocked = detail.subtasks.filter(s => !s.done && s.status === 'blocked').length
-  const subtaskCounts = Object.fromEntries(detail.subtasks.reduce((m, s) => m.set(s.status, (m.get(s.status) ?? 0) + 1), new Map<string, number>()))
+  const effectiveSubtasks = detail.subtasks.map(s => {
+    if (!s.isGroup) return s
+    const status = groupStatus(detail.subtasks.filter(m => m.parentGroupId === s.id).map(m => m.status))
+    return { ...s, status, done: status === 'done' }
+  })
+  const subsDone = effectiveSubtasks.filter(s => s.done).length
+  const subsTotal = effectiveSubtasks.length
+  const subsInProgress = effectiveSubtasks.filter(s => s.status === 'in_progress').length
+  const subsBlocked = effectiveSubtasks.filter(s => s.status === 'blocked').length
+  const subtaskCounts = Object.fromEntries(effectiveSubtasks.reduce((m, s) => m.set(s.status, (m.get(s.status) ?? 0) + 1), new Map<string, number>()))
   const r = detail.rollup
   const cost = r.mixedCurrency || (r.credits !== null && r.costUSD === null)
     ? `${r.credits!.premiumRequests} req`
@@ -162,7 +165,7 @@ export function TaskHero({ detail, lang, statuses, live, reload, onBack, onAbout
           <Ring
             done={subsDone} inProgress={subsInProgress} blocked={subsBlocked} total={subsTotal}
             size={isMobile ? 56 : 68} statuses={statuses} counts={subtaskCounts}
-            titles={liveStatusOrder(statuses).flatMap(id => detail.subtasks.filter(s => s.status === id).map(s => `${statusStyle(statuses, id).label}: ${s.title}`))} lang={lang}
+            titles={effectiveSubtasks.filter(s => s.status === 'in_progress' || s.status === 'in_review').map(s => `${statusStyle(statuses, s.status).label}: ${s.title}`)} lang={lang}
           />
         )}
         <div style={{ minWidth: 0, flex: 1 }}>
