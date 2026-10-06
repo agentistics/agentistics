@@ -23,6 +23,7 @@ import { useSyncExternalStore } from 'react'
 import { createSharedPref } from './sharedPref'
 import { UPGRADE_POLL_MS, UPGRADE_WAIT_MS, browserReloadEnv, clearAppCaches, upgradeArrived } from './appReload'
 import { measureRate, type ByteSample } from './updateAnim'
+import { restartStep, type RestartPhase } from './upgradeRestart'
 import { advance, rawStep, type ServerProgress, type StepView } from './upgradeSteps'
 import {
   RESTORE_KEY, decodeRestore, encodeRestore, parseSnooze, snapshotRestore, snoozeFor, type RestoreState, type Snooze,
@@ -58,9 +59,11 @@ export interface FlowState {
   rate: number | null
   /** The server's own refusal sentence, when it refused the press. */
   message: string | null
+  /** Readiness is separate from the visual phase so the overlay survives the server restart. */
+  restartPhase: RestartPhase | null
 }
 
-const IDLE: FlowState = { phase: 'idle', target: '', from: '', startedAt: 0, view: null, bytes: null, rate: null, message: null }
+const IDLE: FlowState = { phase: 'idle', target: '', from: '', startedAt: 0, view: null, bytes: null, rate: null, message: null, restartPhase: null }
 let state: FlowState = IDLE
 const listeners = new Set<() => void>()
 const set = (next: Partial<FlowState>) => { state = { ...state, ...next }; for (const fn of listeners) fn() }
@@ -94,6 +97,31 @@ async function getJson<T>(url: string): Promise<T | null> {
     const r = await fetch(url, { cache: 'no-store' })
     return r.ok ? await r.json() as T : null
   } catch { return null }
+}
+
+/** Ask the active worker to check for its replacement before we ever swap the document. */
+async function updateReady(): Promise<boolean> {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.serviceWorker) {
+      const registration = await navigator.serviceWorker.ready
+      await registration.update().catch(() => {})
+      const pending = registration.installing ?? registration.waiting
+      if (pending) {
+        await Promise.race([
+          new Promise<void>(resolve => {
+            const done = () => { pending.removeEventListener('statechange', done); resolve() }
+            pending.addEventListener('statechange', done)
+          }),
+          sleep(2500),
+        ])
+      }
+      await navigator.serviceWorker.ready
+    }
+  } catch { /* browsers without a usable worker still have a network bundle */ }
+  try {
+    const response = await fetch(`/index.html?ag-update=${Date.now()}`, { cache: 'no-store' })
+    return response.ok
+  } catch { return false }
 }
 
 function rememberWhereIAm(target: string, from: string): void {
@@ -131,7 +159,7 @@ export async function startUpgrade(target: string, lang: 'pt' | 'en'): Promise<v
   // restart (two needless restarts on 2026-10-04 took the app and the phone offline). The page is
   // the stale thing — drop its cached bundle and reload onto the server's.
   if (from && upgradeArrived(before, target)) { await reloadOntoCurrent(); return }
-  set({ phase: 'running', target, from, startedAt, view: rawStep({ startedAt, progress: null, quietPolls: 0, arrived: false }), bytes: null, rate: null, message: null })
+  set({ phase: 'running', target, from, startedAt, restartPhase: 'updating', view: rawStep({ startedAt, progress: null, quietPolls: 0, arrived: false }), bytes: null, rate: null, message: null })
   rememberWhereIAm(target, from)
 
   try {
@@ -139,6 +167,7 @@ export async function startUpgrade(target: string, lang: 'pt' | 'en'): Promise<v
     const body = await res.json().catch(() => ({})) as { ok?: boolean; message?: string; alreadyCurrent?: boolean }
     if (!res.ok || !body.ok) { if (id === runId) set({ phase: 'failed', message: body.message ?? null }); return }
     if (body.alreadyCurrent) { await reloadOntoCurrent(); return }
+    set({ restartPhase: 'restarting' })
   } catch {
     if (id === runId) set({ phase: 'failed', message: null })
     return
@@ -157,6 +186,8 @@ export async function startUpgrade(target: string, lang: 'pt' | 'en'): Promise<v
     quiet = status || info ? 0 : quiet + 1
     if (status) progress = status.progress
     const arrived = upgradeArrived(info, target)
+    const version = arrived ? 'new' : info ? 'old' : 'down'
+    const waiting = restartStep(state.restartPhase ?? 'restarting', { type: 'poll', version })
     const view = advance(state.view, rawStep({ startedAt, progress, quietPolls: quiet, arrived }))
     // `failed` is never the last word when the server ALREADY runs the target: a restart verdict can
     // be wrong while the new version answers (2026-10-05) and the page then said "the update did not
@@ -167,10 +198,14 @@ export async function startUpgrade(target: string, lang: 'pt' | 'en'): Promise<v
       const next: ByteSample = { received: progress.received, total: progress.total, at: Date.now() }
       if (!bytes || next.received !== bytes.received) { rate = measureRate(bytes, next, rate); bytes = next }
     }
-    set({ view, bytes, rate })
+    set({ view, bytes, rate, restartPhase: waiting })
     if (arrived) {
-      set({ phase: 'arrived' })
+      const ready = await updateReady()
+      const readyPhase = restartStep(waiting, { type: 'poll', version: 'new', serviceWorkerReady: ready, bundleReady: ready })
+      if (readyPhase !== 'ready') continue
+      set({ phase: 'arrived', restartPhase: readyPhase })
       await sleep(ARRIVAL_HOLD_MS)
+      set({ restartPhase: restartStep(readyPhase, { type: 'swap' }) })
       await clearAppCaches(browserReloadEnv())
       window.location.reload()
       return

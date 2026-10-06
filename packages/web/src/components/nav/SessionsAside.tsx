@@ -23,7 +23,7 @@ import { openBeside, openInPane, readSplitRoute, splitHref } from '../../lib/spl
 
 import {
   BellOff, ChevronDown, ChevronRight, Clock, Filter, Folder, FolderPlus, GripVertical, MoreVertical, Pin,
-  Loader, PinOff, Plus, RotateCcw, Search, Send, SquareArrowOutUpRight, X,
+  PinOff, Plus, RotateCcw, Search, Send, SquareArrowOutUpRight, X,
 } from 'lucide-react'
 import type { Filters } from '@agentistics/core'
 import {
@@ -87,6 +87,7 @@ import { ConfirmModal } from '../../pages/settings/primitives'
 // rather than invented a second time for user session groups.
 import { CLUSTER_ACCENT, CLUSTER_TINT } from '../tasks/subtaskGroups'
 import { NAY_UNDOCK_SESSION, requestUndockSession, withUndockEntry } from '../../lib/nayDockBridge'
+import { AgentisticsLoader } from '../AgentisticsLoader'
 
 /** The row menu's client-side "open beside" entry — see `openSessionBeside`. */
 const OPEN_BESIDE = '__open_beside__'
@@ -2525,7 +2526,7 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
     >
       {reopening && (
         <span role="status" style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: 11, color: 'var(--anthropic-orange)' }}>
-          <Loader size={12} className="ag-working-spin" />
+          <AgentisticsLoader size={12} label={reopeningLabel(lang !== 'en')} />
           {reopeningLabel(lang !== 'en')}
         </span>
       )}

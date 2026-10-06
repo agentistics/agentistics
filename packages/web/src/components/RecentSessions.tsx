@@ -28,6 +28,7 @@ import { guardNoticeText } from '../lib/terminalShortcuts'
 import { clipboardPasteAvailable, pasteFromClipboard } from '../lib/clipboardPaste'
 import { getPinnedIds, isSessionPinned, togglePinnedSession, subscribePinnedSessions, pinnedServerSnapshot, MAX_PINNED } from '../lib/pinnedSessions'
 import { getOpenModalSession, setOpenModalSession, subscribeOpenModalSession } from '../lib/openModalSession'
+import { AgentisticsLoader } from './AgentisticsLoader'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { encodeProjectDir } from '../lib/sessionTranscript'
 import { resumeCommand } from '../lib/resumeCommand'
@@ -2399,7 +2400,7 @@ function PrimaryButton({ primary, lang, onExpand, onPick, busy }: {
   }
   const filled = primary.kind === 'approve' || primary.kind === 'prompt'
   const reopening = primary.kind === 'resume' && !!busy
-  if (reopening) { label = reopeningLabel(lang === 'pt'); icon = <Loader size={13} className="ag-working-spin" /> }
+  if (reopening) { label = reopeningLabel(lang === 'pt'); icon = <AgentisticsLoader size={13} label={label} /> }
   const disabled = reopening || (primary.verb ? !primary.verb.enabled : false)
   return (
     <button
