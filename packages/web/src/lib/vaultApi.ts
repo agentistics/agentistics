@@ -62,6 +62,18 @@ export type ProofChoice = 'code' | 'gesture' | 'both' | 'none'
 export type ActionKind = 'reveal' | 'use' | 'edit' | 'delete-secret' | 'delete-device' | 'wipe' | 'settings' | 'recovery'
 export interface AuthPolicyRow { kind: ActionKind; choice: ProofChoice; choices: ProofChoice[]; critical: boolean; read: boolean; default: ProofChoice }
 export interface AuthPolicyView { state: 'default' | 'stored' | 'unreadable' | 'locked'; rows: AuthPolicyRow[] }
+/** PURE. The editable draft: each kind's choice in force. */
+export function authPolicyDraft(rows: readonly AuthPolicyRow[]): Partial<Record<ActionKind, ProofChoice>> {
+  return Object.fromEntries(rows.map(r => [r.kind, r.choice])) as Partial<Record<ActionKind, ProofChoice>>
+}
+/** PURE. How many rows the draft changes against the rows' choices (an absent draft entry changes nothing). */
+export function authPolicyDiff(rows: readonly AuthPolicyRow[], draft: Partial<Record<ActionKind, ProofChoice>>): number {
+  return rows.filter(r => draft[r.kind] !== undefined && draft[r.kind] !== r.choice).length
+}
+/** PURE. How many kinds are NOT at their default — what the settings row states. */
+export function authPolicyChanged(rows: readonly AuthPolicyRow[]): number {
+  return rows.filter(r => r.choice !== r.default).length
+}
 export interface UnlockPolicyView { mode: UnlockMode; hours: number; chosen: boolean; codeNextUnlock: boolean; windowEndsAt: string | null }
 export const UNLOCK_MODES: readonly UnlockMode[] = ['daily', 'always', 'hello-only']
 export const UNLOCK_HOURS_MIN = 1

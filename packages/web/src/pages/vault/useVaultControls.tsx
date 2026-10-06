@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   askWords, credentials, gateFor, grantAlive, heartbeat, loadVault, lockNow, missingSteps, needsTypedCode, presenceDisable, primarySection,
-  recoverySteps, setAutoLock, type Credential, type LoadResult, type UiAction, type UnlockMode, type VaultView, type WizardStep,
+  recoverySteps, setAutoLock, type Credential, type LoadResult, type UiAction, type UnlockMode, type VaultView, type WizardStep, type ActionKind, type ProofChoice,
 } from '../../lib/vaultApi'
 import { presenceKey, vt, vtf } from '../../lib/vaultText'
 import { EnrolWizard, GateDialog, RecoverDialog, gateActionOf, type GateKind } from '../../components/vault/VaultFlows'
@@ -28,7 +28,7 @@ export function useVaultControls(lang: Lang) {
   // v2.98.1: "add another way" opens the wizard on ONE kind (never re-running one already enrolled).
   const [wizardKind, setWizardKind] = useState<'hello' | 'fido2' | null>(null)
   const [recoverOpen, setRecoverOpen] = useState(false)
-  const [dialog, setDialog] = useState<null | { kind: GateKind; minutes?: number; policy?: { mode: UnlockMode; hours: number } }>(null)
+  const [dialog, setDialog] = useState<null | { kind: GateKind; minutes?: number; policy?: { mode: UnlockMode; hours: number }; authPolicy?: Partial<Record<ActionKind, ProofChoice>> }>(null)
   const [dismissed, setDismissed] = useState(() => { try { return localStorage.getItem(UPGRADE_DISMISS_KEY) === '1' } catch { return false } })
   const busyUi = wizard !== null || dialog !== null || recoverOpen
 
@@ -86,10 +86,12 @@ export function useVaultControls(lang: Lang) {
   }) : '')
 
   // An action's proofs: the icons say what it asks; a dialog collects the code (and warns about the gesture).
-  const ask = (kind: GateKind, minutes?: number, policy?: { mode: UnlockMode; hours: number }) => {
+  const ask = (kind: GateKind, minutes?: number, policy?: { mode: UnlockMode; hours: number }, authPolicy?: Partial<Record<ActionKind, ProofChoice>>) => {
     if (!view) return
     const action = gateActionOf(kind)
     if (kind === 'unlock-policy') { setDialog({ kind, policy }); return } // always the code AND the gesture
+    // The policy table: always the dialog — it states what the CURRENT settings row asks, and the change is a decision.
+    if (kind === 'auth-policy') { setDialog({ kind, authPolicy }); return }
     const gate = gateFor(view, action)
     if (!needsTypedCode(gate, grantAlive()) && !gate.gesture) {
       // A live grant covers the code and there is no gesture to raise: just do it; if the server
@@ -130,7 +132,7 @@ export function VaultFlowHost({ c, lang, isMobile, onChanged }: { c: VaultContro
     <>
       {c.dialog && (
         <GateDialog
-          lang={lang} view={view} isMobile={isMobile} kind={c.dialog.kind} minutes={c.dialog.minutes} policy={c.dialog.policy}
+          lang={lang} view={view} isMobile={isMobile} kind={c.dialog.kind} minutes={c.dialog.minutes} policy={c.dialog.policy} authPolicy={c.dialog.authPolicy}
           onCancel={() => c.setDialog(null)} onDone={() => { c.setDialog(null); done() }} onAction={c.onAction}
         />
       )}
