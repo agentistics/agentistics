@@ -29,6 +29,7 @@ import { versionedAsset } from '../../lib/brand'
 import { sessionCardStyle } from '../../lib/sessionCardStyle'
 import { readAsideGroupPrefs, subscribeAsideGroupPrefs } from '../../lib/sessionsAsidePrefs'
 import { VaultExpiryCard } from '../vault/VaultExpiryCard'
+import { AgentisticsLoader } from '../AgentisticsLoader'
 import { VaultGlyph } from '../vault/VaultGlyph'
 import { SessionFacts } from '../sessions/SessionFacts'
 import { SessionRowMenu } from '../sessions/SessionRowMenu'
@@ -68,6 +69,7 @@ import { naySections, NAY_SECTION_ORDER, NAY_SECTION_TEXT, naySectionOf, type Na
 import { cardStyleOf, clampFabPos, defaultFabPos, dockStyleOf, FAB_SIZE } from '../../lib/nayFab'
 import { setNayFabPrefs, useNayFabPrefs } from '../../lib/nayFabPrefsStore'
 import { createPersonalDoc, createSharedPref } from '../../lib/sharedPref'
+import { NAY_UNDOCK_SESSION } from '../../lib/nayDockBridge'
 
 const QuickVaultBody = lazy(() => import('../../pages/VaultPage').then(m => ({ default: m.QuickVaultBody })))
 
@@ -224,6 +226,15 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
   }, [act])
 
   const open = useCallback((id: string) => setDock(d => openSession(d, id)), [])
+  useEffect(() => {
+    if (isMobile) return
+    const onUndock = (event: Event) => {
+      const id = (event as CustomEvent<{ id?: unknown }>).detail?.id
+      if (typeof id === 'string' && id) setDock(d => detachSession(d, id, viewport()))
+    }
+    window.addEventListener(NAY_UNDOCK_SESSION, onUndock)
+    return () => window.removeEventListener(NAY_UNDOCK_SESSION, onUndock)
+  }, [isMobile])
   const [confirmEnd, setConfirmEnd] = useState(false)
   useEffect(() => { setConfirmEnd(false) }, [dock.panelSession])
 
@@ -577,7 +588,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
             : tab === 'vault'
             ? (
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: isMobile ? '6px 10px' : '8px 12px' }} data-nay-vault>
-                <Suspense fallback={<Loader2 size={14} className="ag-spin" />}>
+                <Suspense fallback={<AgentisticsLoader size={14} />}>
                   <QuickVaultBody lang={lang} isMobile={isMobile} />
                 </Suspense>
               </div>

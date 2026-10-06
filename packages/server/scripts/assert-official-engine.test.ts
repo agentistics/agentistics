@@ -75,12 +75,16 @@ describe('findLeakedMarkers', () => {
   })
 })
 
-describe('release.yml compiles every public binary minified, with no source map', () => {
-  const yml = readFileSync(join(import.meta.dir, '..', '..', '..', '.github', 'workflows', 'release.yml'), 'utf8')
+describe('the release workflows compile every public binary minified, with no source map', () => {
+  // release.yml builds the Linux binaries; the Tauri sidecar moved to publish-tauri.yml and the
+  // central image (two more compiles) was retired — so the count is over all three files.
+  const yml = ['release.yml', 'publish-npm.yml', 'publish-tauri.yml']
+    .map(f => readFileSync(join(import.meta.dir, '..', '..', '..', '.github', 'workflows', f), 'utf8'))
+    .join('\n')
   const compiles = yml.split('\n').filter(l => l.includes('bun build --compile'))
 
   test('there are compile steps to check', () => {
-    expect(compiles.length).toBeGreaterThanOrEqual(5)
+    expect(compiles.length).toBeGreaterThanOrEqual(3)
   })
 
   test('every one minifies', () => {

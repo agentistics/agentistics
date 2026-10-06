@@ -4,6 +4,7 @@ import type { MemberPresence } from '@agentistics/core'
 import { copyText } from '../lib/clipboard'
 import { subscribeEvent } from '../lib/eventStream'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { AgentisticsLoader } from './AgentisticsLoader'
 
 /** Shared 5-column grid for the desktop members table (status · user · label · last-seen · actions).
  *  minmax(0,…) lets the flexible columns actually shrink so long values ellipsize instead of
@@ -376,7 +377,7 @@ export function TeamMembers({ lang, presence }: Props) {
             opacity: loading ? 0.5 : 1,
           }}
         >
-          <RefreshCw size={10} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+          {loading ? <AgentisticsLoader size={10} /> : <RefreshCw size={10} />}
           {t('refresh', lang)}
         </button>
       </div>
@@ -633,7 +634,7 @@ export function TeamMembers({ lang, presence }: Props) {
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    <RotateCw size={10} style={{ animation: rotating[m.id] ? 'spin 1s linear infinite' : 'none' }} />
+                    {rotating[m.id] ? <AgentisticsLoader size={10} /> : <RotateCw size={10} />}
                     {rotating[m.id] ? t('rotating', lang) : t('rotate', lang)}
                   </button>
                   <button
@@ -892,7 +893,6 @@ export function TeamMembers({ lang, presence }: Props) {
       )}
 
       {/* Spinner keyframe */}
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }

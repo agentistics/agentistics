@@ -52,6 +52,7 @@ import { MagnifierLayer } from './components/a11y/MagnifierLayer'
 import { HideLensesButton } from './components/a11y/HideLensesButton'
 import { MagnifierButton } from './components/a11y/MagnifierButton'
 import { NotificationBell } from './components/NotificationBell'
+import { AgentisticsLoader } from './components/AgentisticsLoader'
 import { VaultHeaderButton } from './components/vault/VaultHeaderButton'
 import { HardwareModal } from './components/HardwareModal'
 import { useNotificationStream } from './hooks/useNotificationStream'
@@ -319,11 +320,9 @@ function LoadingScreen({ lang, loadProgress }: { lang: string; loadProgress: Loa
         }
       `}</style>
 
-      {/* Icon */}
+      {/* D1 loader */}
       <div style={{ animation: 'loadFadeUp 0.35s ease-out both' }}>
-        {/* The product's own mark (teal on a central), not a generic chart icon. */}
-        <img src={brandAsset('/minimalistLogo.png')} alt="" aria-hidden="true"
-          style={{ width: 48, height: 48, objectFit: 'contain', display: 'block' }} />
+        <AgentisticsLoader size={56} label={lang === 'pt' ? 'Carregando' : 'Loading'} />
       </div>
 
       {/* Title + subtitle */}

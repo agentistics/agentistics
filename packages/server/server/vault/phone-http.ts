@@ -11,6 +11,7 @@ import * as gate from './gate'
 import * as phone from './phone'
 import { phoneLabel, readMobile, removeDevice } from './mobile'
 import { vaultAudit, vaultLang, vaultStatus } from './service'
+import { actualOriginSecure, informationalSecure } from './request-origin'
 
 type Reply = (r: { ok: boolean } & Record<string, unknown>, extra?: Record<string, unknown>) => Response
 export interface PhoneHttpCtx { req: Request; path: string; url: URL; session: string; grant: string | null; loopback: boolean; reply: Reply }
@@ -39,7 +40,8 @@ export async function handlePhoneHttp(c: PhoneHttpCtx): Promise<Response | null>
   if (!path.startsWith('/api/vault/phone')) return null
   const origin = req.headers.get('origin') ?? `${c.url.protocol}//${c.url.host}`
   const rpId = c.url.hostname
-  const secure = originMatchesRp(origin, rpId)
+  const secure = actualOriginSecure(req, c.url)
+  const informationalSecureFlag = informationalSecure(req, c.url)
   const body = async (): Promise<Record<string, unknown>> => {
     const r = await readJsonLimited<Record<string, unknown>>(req, 8192)
     return r.ok && r.value && typeof r.value === 'object' ? r.value : {}
@@ -53,8 +55,8 @@ export async function handlePhoneHttp(c: PhoneHttpCtx): Promise<Response | null>
     const open = st.state === 'open'
     const codeOnly = open ? (await readMobile()).codeReveal : null
     return reply({
-      ok: true, state: st.state, loopback, secure, ...facts, codeOnly,
-      enrolKinds: open && !loopback ? enrolKinds({ secure, codeOnly: codeOnly === true }) : [],
+      ok: true, state: st.state, loopback, secure: informationalSecureFlag, ...facts, codeOnly,
+      enrolKinds: open && !loopback ? enrolKinds({ secure: informationalSecureFlag, codeOnly: codeOnly === true }) : [],
     })
   }
   if (path === '/api/vault/phone/enrol/status' && req.method === 'GET') {

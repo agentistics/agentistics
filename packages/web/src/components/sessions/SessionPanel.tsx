@@ -49,7 +49,7 @@ import { SessionChat, type SessionChatProps, type SessionComposerMetrics } from 
 import { SessionActions } from './SessionActions'
 import { ShellBand } from './ShellBand'
 import {
-  BAND_MIN_PX, bandPanelFull, readBandPrefs, resolveBandDrag, resolveBandHeight, withBandPanelFull,
+  BAND_MIN_PX, bandPanelFull, keepUsableColumnHeight, readBandPrefs, resolveBandDrag, resolveBandHeight, withBandPanelFull,
   writeBandPrefs,
 } from '../../lib/shellBand'
 import { floatPanel, minimizedPanels, restoreFloatingPanel, useFloatingPanels } from '../../lib/floatingPanels'
@@ -343,21 +343,54 @@ export function SessionPanel({
    * their own (a sidebar drag, a window resize, an aside opening).
    */
   const [columnHeight, setColumnHeight] = useState(0)
+  const columnElement = useRef<HTMLDivElement | null>(null)
   const columnObserver = useRef<ResizeObserver | null>(null)
+  const measurementFrame = useRef<number | null>(null)
+  const measureColumnNow = useCallback(() => {
+    const el = columnElement.current
+    if (!el) return
+    setColumnHeight(previous => keepUsableColumnHeight(previous, el.getBoundingClientRect().height))
+  }, [])
+  const scheduleColumnMeasure = useCallback(() => {
+    if (measurementFrame.current !== null) return
+    const run = () => {
+      measurementFrame.current = null
+      measureColumnNow()
+    }
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      measurementFrame.current = window.requestAnimationFrame(run)
+    } else {
+      run()
+    }
+  }, [measureColumnNow])
   const measureColumn = useCallback((el: HTMLDivElement | null) => {
     columnObserver.current?.disconnect()
     columnObserver.current = null
+    columnElement.current = el
     if (el === null) return
-    setColumnHeight(el.getBoundingClientRect().height)
+    measureColumnNow()
     if (typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(entries => {
-      const h = entries[0]?.contentRect.height
-      if (h !== undefined) setColumnHeight(h)
-    })
+    const ro = new ResizeObserver(() => scheduleColumnMeasure())
     ro.observe(el)
     columnObserver.current = ro
-  }, [])
-  useEffect(() => () => { columnObserver.current?.disconnect() }, [])
+  }, [measureColumnNow, scheduleColumnMeasure])
+  useEffect(() => {
+    const refresh = () => scheduleColumnMeasure()
+    window.addEventListener('resize', refresh)
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      window.removeEventListener('resize', refresh)
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+      if (measurementFrame.current !== null && typeof window.cancelAnimationFrame === 'function') {
+        window.cancelAnimationFrame(measurementFrame.current)
+      }
+      measurementFrame.current = null
+      columnObserver.current?.disconnect()
+      columnObserver.current = null
+    }
+  }, [scheduleColumnMeasure])
 
   return (
     // `flex: 1` + `minHeight: 0`, NOT `height: 100%`. In a column flex container a percentage

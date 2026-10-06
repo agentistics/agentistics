@@ -12,6 +12,7 @@ import {
 } from '../components/PDFExportModal'
 import type { PDFTheme, SectionId, ChartMetric } from '../components/PDFExportModal'
 import { brandAsset } from '../lib/brand'
+import { AgentisticsLoader } from '../components/AgentisticsLoader'
 
 // Config group helpers
 
@@ -287,7 +288,7 @@ export default function ExportPage() {
             >
               {exporting ? (
                 <>
-                  <div style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--ag-tint-strong)', borderTopColor: '#fff', animation: 'spin 0.7s linear infinite' }} />
+                  <AgentisticsLoader size={14} />
                   {t('export.generating', lang)}
                 </>
               ) : exportSuccess ? (
@@ -466,7 +467,6 @@ export default function ExportPage() {
         </div>
       </div>
 
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }

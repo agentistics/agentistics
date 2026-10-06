@@ -17,7 +17,11 @@ on:
 
 permissions:
   contents: write
-  packages: write  # push the central Docker image to GHCR (publish-image job)
+  actions: write  # dispatch the independent publish workflows (GITHUB_TOKEN does not emit release events)
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -179,6 +183,13 @@ jobs:
           NEXT="${RESULT%% *}"
           BUMP="${RESULT##* }"
 
+          # The release group serializes normal runs, but an explicit dispatch or a pre-existing
+          # remote tag must still fail before any version-bump commit is pushed.
+          if git rev-parse -q --verify "refs/tags/v$NEXT" >/dev/null; then
+            echo "::error::v$NEXT already exists; refusing to create a duplicate release"
+            exit 1
+          fi
+
           echo "current=$CURRENT"    >> $GITHUB_OUTPUT
           echo "next=$NEXT"          >> $GITHUB_OUTPUT
           echo "tag=v$NEXT"          >> $GITHUB_OUTPUT
@@ -253,9 +264,8 @@ jobs:
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
         run: bun run build
 
-      # `build:assets` also regenerates the engine slot (packages/server/scripts/engine-slot.ts):
-      # pointed at `.engine` on the official build, so every binary compiled below — glibc, musl,
-      # Windows, both macOS ones, and the desktop sidecar that consumes the Windows one — carries it.
+      # `build:assets` also regenerates the engine slot (packages/server/scripts/engine-slot.ts),
+      # pointed at `.engine` on the official build, so both Linux binaries compiled below carry it.
       - name: Embed frontend assets
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
         env:
@@ -268,7 +278,7 @@ jobs:
           fi
 
       # EVERY compile below is `--minify` (whitespace + syntax + identifiers) and NONE takes
-      # `--sourcemap`: these binaries are public (GitHub Releases, the desktop installer), and an
+      # `--sourcemap`: these binaries are public (GitHub Releases), and an
       # unminified bundle carries the engine's source readable, module paths and all. Obfuscation
       # beyond minify is a separate, later decision. The smoke step greps the result for marker
       # strings an unminified engine carries (packages/server/scripts/assert-official-engine.ts).
@@ -288,50 +298,17 @@ jobs:
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
         run: bun build --compile --minify --target=bun-linux-x64-musl packages/server/bin/cli.ts --outfile ./release/agentop-musl
 
-      - name: Compile Windows binary (cross-compile)
-        if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
-        run: bun build --compile --minify --target=bun-windows-x64 packages/server/bin/cli.ts --outfile ./release/agentop.exe
-
-      # Same cross-compile pattern as the musl and Windows binaries above — Bun downloads the
-      # macOS runtime for each target rather than needing a macOS machine to build on. TWO
-      # binaries because Apple Silicon and Intel Macs are different architectures with no
-      # universal fallback the way glibc/musl share one ISA; install.sh picks between them off
-      # `uname -m`.
-      - name: Compile macOS binary (Intel, cross-compile)
-        if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
-        run: bun build --compile --minify --target=bun-darwin-x64 packages/server/bin/cli.ts --outfile ./release/agentop-darwin-x64
-
-      - name: Compile macOS binary (Apple Silicon, cross-compile)
-        if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
-        run: bun build --compile --minify --target=bun-darwin-arm64 packages/server/bin/cli.ts --outfile ./release/agentop-darwin-arm64
-
-      - name: Upload Windows binary artifact
-        if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: agentop-windows-x64
-          path: release/agentop.exe
-          retention-days: 1
-
       - name: Smoke test
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
         run: ./release/agentop --help
 
       # THE RELEASE FAILS IF THE ENGINE IS ABSENT. `--version` must print `engine <v> (api <x.y.z>)`
-      # where <v> is the checked-out engine's own version (which is what tells it apart from the
-      # transitional in-tree engine, reporting the host's) and <x.y.z> satisfies engine.pin's range.
-      # It ALSO fails if the engine's source is readable in the binary: a module-header comment, an
-      # internal function name or an engine module path still present means it was built without
-      # --minify, or with a source map.
+      # where <v> is the checked-out engine's own version and <x.y.z> satisfies engine.pin's range.
       - name: Smoke test — the official binary carries the pinned engine, minified
         if: env.OFFICIAL == 'true' && steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
         run: bun packages/server/scripts/assert-official-engine.ts ./release/agentop --engine-dir .engine
 
-      # The runner itself is glibc, so the musl binary cannot be exec'd directly here — it needs an
-      # actual musl system. Alpine via Docker is the cheapest one, and it is also where the binary
-      # needs libstdc++/libgcc (verified by hand: Bun's own runtime links them even in its musl
-      # build, and Alpine's base image ships neither) — installing them here doubles as a check
-      # that install.sh's own musl branch names the right packages.
+      # The runner is glibc, so the musl binary needs a real musl system for its smoke test.
       - name: Smoke test (musl)
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
         run: |
@@ -344,26 +321,6 @@ jobs:
               /tmp/agentop-musl --version | grep -Eq "^engine [0-9]" || { echo "::error::the musl binary carries no engine"; exit 1; }
             fi
           '
-
-      # This runner is glibc/x86_64 Linux and can execute neither macOS binary — there is no
-      # emulator here the way Docker gave the musl binary a real place to run. What CAN be
-      # verified without a macOS machine is that Bun actually produced two DIFFERENT, genuine
-      # Mach-O executables rather than, say, two copies of the same file or a truncated download:
-      # `file` reads the Mach-O magic bytes and reports the architecture it finds. This is a
-      # header check, not a functional smoke test — it would not catch a binary that starts and
-      # then crashes. A real run needs a `runs-on: macos-latest` job, which this repo does not
-      # have yet.
-      - name: Verify macOS binaries (Mach-O header check — not a functional test)
-        if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
-        run: |
-          for f in ./release/agentop-darwin-x64 ./release/agentop-darwin-arm64; do
-            echo "== $f =="
-            file "$f"
-          done
-          file ./release/agentop-darwin-x64   | grep -qi 'Mach-O' || { echo "::error::agentop-darwin-x64 is not a Mach-O binary"; exit 1; }
-          file ./release/agentop-darwin-arm64 | grep -qi 'Mach-O' || { echo "::error::agentop-darwin-arm64 is not a Mach-O binary"; exit 1; }
-          file ./release/agentop-darwin-x64   | grep -qi 'x86_64' || { echo "::error::agentop-darwin-x64 is not x86_64"; exit 1; }
-          file ./release/agentop-darwin-arm64 | grep -qi 'arm64'  || { echo "::error::agentop-darwin-arm64 is not arm64"; exit 1; }
 
       - name: Generate changelog
         if: github.ref == 'refs/heads/main' && steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
@@ -439,7 +396,7 @@ jobs:
         # NEVER FATAL. Features now reach `main` straight from their work branches as well as `dev`,
         # so `dev` routinely moves while a release is running, and the push below was rejected as a
         # non-fast-forward — which failed the whole job AFTER the version was bumped and tagged, so
-        # the release (binary, npm, image) was never published. Refetch and retry a few times; if
+        # the release was never published. Refetch and retry a few times; if
         # it still cannot land, warn and let the release publish — a lagging version number on `dev`
         # is the cost this step's own comment above already accepts.
         run: |
@@ -467,558 +424,21 @@ jobs:
           fi
           git checkout main
 
-      # The VS Code extension, as an installable file on the release.
-      #
-      # It is how somebody without a marketplace account installs it:
-      # `code --install-extension agentistics-vscode-<v>.vsix`. The extension carries its OWN
-      # version (see PKG_FILES above), so the attached file says which extension shipped ALONGSIDE
-      # this server release rather than claiming to be the same thing.
-      #
-      # `continue-on-error` on purpose: a failure to package an editor extension must not hold back
-      # a server release. It stays visible in the run, and the attach below is skipped rather than
-      # publishing a release with a broken asset.
-      - name: Package the VS Code extension
-        id: vsix
-        if: github.ref == 'refs/heads/main' && steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
-        continue-on-error: true
-        run: |
-          bun run package:vscode
-          echo "path=$(ls packages/vscode/*.vsix | head -1)" >> $GITHUB_OUTPUT
-
-      - name: Publish versioned release + update latest
+      - name: Publish versioned release
         if: github.ref == 'refs/heads/main' && steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.version.outputs.tag }}"
           VERSION="${{ steps.version.outputs.next }}"
-          # Empty when the packaging step failed — every command below then degrades to the binaries
-          # rather than aborting a server release over an editor extension. Unquoted for exactly that
-          # reason: quoted, an empty value becomes an empty ARGUMENT and `gh` refuses it.
-          VSIX="${{ steps.vsix.outputs.path }}"
 
-          # Create the versioned release (Linux binary only; Windows installer added by build-desktop job).
-          # `gh release create` fails outright when the release already exists, which turns a
-          # re-run — the normal response to a later job in this workflow failing — into a second
-          # failure at the first step. Upload into it instead when it is already there.
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "release $TAG already exists — uploading the binaries into it"
-            gh release upload "$TAG" ./release/agentop ./release/agentop-musl ./release/agentop-darwin-x64 ./release/agentop-darwin-arm64 ./release/agentop.exe $VSIX --clobber
-          else
-            gh release create "$TAG" \
-              --title "v${VERSION}" \
-              --notes-file /tmp/release-notes.md \
-              ./release/agentop \
-              ./release/agentop-musl \
-              ./release/agentop-darwin-x64 \
-              ./release/agentop-darwin-arm64 \
-              ./release/agentop.exe \
-              $VSIX
-          fi
-
-          # Update the rolling latest pointer
-          gh release delete latest --yes 2>/dev/null || true
-          git push origin :refs/tags/latest 2>/dev/null || true
-          git tag -d latest 2>/dev/null || true
-          git tag latest
-          git push origin latest
-
-          # `--target` is REQUIRED here. Without it `gh release create` refuses a tag it cannot
-          # yet see on the remote ("tag latest exists locally but has not been pushed"), and the
-          # push immediately above has not necessarily propagated by the time this runs. That is
-          # exactly how v1.7.4 failed: the old `latest` release had already been DELETED by the
-          # line above, so the repository was left with no rolling release at all, and every job
-          # after this one — the npm publish, the Windows installer, the GHCR image — was skipped.
-          # Naming the commit lets gh create the release without waiting on tag propagation.
-          gh release create latest \
-            --target "$GITHUB_SHA" \
-            --title "Latest build ($(date -u +'%Y-%m-%d %H:%M UTC'))" \
+          # The release is created with GITHUB_TOKEN, so its published event cannot trigger another
+          # workflow. Dispatch the two independent publishers explicitly after the release exists.
+          gh release create "$TAG" \
+            --title "v${VERSION}" \
             --notes-file /tmp/release-notes.md \
             ./release/agentop \
-            ./release/agentop-musl \
-            ./release/agentop-darwin-x64 \
-            ./release/agentop-darwin-arm64 \
-            ./release/agentop.exe \
-            $VSIX
+            ./release/agentop-musl
 
-  build-desktop:
-    name: Build Tauri Desktop (Windows)
-    runs-on: windows-latest
-    needs: build
-    if: needs.build.outputs.skip != 'true' && needs.build.outputs.version_skip != 'true'
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Setup Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: packages/desktop
-
-      - name: Install root dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Install desktop dependencies
-        run: bun install --frozen-lockfile --cwd packages/desktop
-
-      - name: Download agentop.exe artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: agentop-windows-x64
-          path: packages/desktop/binaries/
-
-      - name: Copy logo for loading screen
-        shell: bash
-        run: cp packages/web/public/minimalistLogo.png packages/desktop/ui/logo.png
-
-      # The desktop job checks out the pre-bump commit, so set the version to the
-      # same value the build job published. Otherwise the installer is built at the
-      # old version while latest.json advertises the bumped one, which makes the
-      # updater re-prompt forever (installed version never reaches the manifest one).
-      - name: Set version
-        shell: bash
-        run: |
-          VERSION="${{ needs.build.outputs.next }}"
-          bun -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.version = '$VERSION';
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
-          echo "Desktop build version set to $VERSION"
-
-      - name: Build Tauri app
-        working-directory: packages/desktop
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-        run: bunx tauri build --target x86_64-pc-windows-msvc
-
-      - name: Check for updater signature
-        id: check_sig
-        shell: bash
-        run: |
-          BUNDLE=packages/desktop/target/x86_64-pc-windows-msvc/release/bundle/nsis
-          SIG_FILE=$(find "$BUNDLE" -maxdepth 1 -name "*.exe.sig" 2>/dev/null | head -1)
-          if [ -n "$SIG_FILE" ]; then
-            echo "has_sig=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_sig=false" >> $GITHUB_OUTPUT
-            echo "::warning title=Auto-updater disabled::No .exe.sig produced — latest.json will not be generated and the native Tauri updater cannot detect this release. Check that the TAURI_SIGNING_PRIVATE_KEY secret is set AND that bundle.createUpdaterArtifacts is true in tauri.conf.json. (The in-app update banner still works.)"
-          fi
-
-      - name: Generate latest.json for auto-updater
-        if: github.ref == 'refs/heads/main' && needs.build.outputs.tag != '' && steps.check_sig.outputs.has_sig == 'true'
-        shell: bash
-        run: |
-          BUNDLE=packages/desktop/target/x86_64-pc-windows-msvc/release/bundle/nsis
-          EXE=$(find "$BUNDLE" -maxdepth 1 -name "*.exe" ! -name "*.sig" | head -1)
-          SIG=$(cat ${EXE}.sig)
-          VERSION="${{ needs.build.outputs.next }}"
-          TAG="${{ needs.build.outputs.tag }}"
-          REPO="${{ github.repository }}"
-          FILENAME=$(basename "$EXE")
-          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-          cat > /tmp/latest.json <<EOF
-          {
-            "version": "${VERSION}",
-            "notes": "See https://github.com/${REPO}/releases/tag/${TAG} for full changelog.",
-            "pub_date": "${DATE}",
-            "platforms": {
-              "windows-x86_64": {
-                "signature": "${SIG}",
-                "url": "https://github.com/${REPO}/releases/download/${TAG}/${FILENAME}"
-              }
-            }
-          }
-          EOF
-
-      - name: Upload installer artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: agentistics-windows-installer
-          path: |
-            packages/desktop/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
-            packages/desktop/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.sig
-          retention-days: 7
-
-      - name: Attach installers to GitHub Release
-        if: github.ref == 'refs/heads/main' && needs.build.outputs.tag != ''
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          TAG="${{ needs.build.outputs.tag }}"
-          BUNDLE=packages/desktop/target/x86_64-pc-windows-msvc/release/bundle/nsis
-          SIG_FILES=$(find "$BUNDLE" -maxdepth 1 -name "*.exe.sig" 2>/dev/null || true)
-          LATEST_JSON=$([ -f /tmp/latest.json ] && echo /tmp/latest.json || true)
-          gh release upload "$TAG" \
-            $BUNDLE/*.exe \
-            $SIG_FILES \
-            $LATEST_JSON \
-            --clobber || true
-
-      - name: Attach installers to latest release
-        if: github.ref == 'refs/heads/main' && needs.build.outputs.tag != ''
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          BUNDLE=packages/desktop/target/x86_64-pc-windows-msvc/release/bundle/nsis
-          SIG_FILES=$(find "$BUNDLE" -maxdepth 1 -name "*.exe.sig" 2>/dev/null || true)
-          LATEST_JSON=$([ -f /tmp/latest.json ] && echo /tmp/latest.json || true)
-          gh release upload latest \
-            $BUNDLE/*.exe \
-            $SIG_FILES \
-            $LATEST_JSON \
-            --clobber || true
-
-  publish-mcp:
-    name: Publish @agentistics/mcp to npm
-    runs-on: ubuntu-latest
-    needs: build
-    # Trusted publishing: npm verifies THIS workflow's OIDC identity instead of a
-    # stored credential, so there is no NPM_TOKEN to rotate. `id-token: write` is
-    # what lets the runner mint that token — without it npm falls back to looking
-    # for a credential and the publish fails as unauthenticated.
-    #
-    # The trusted publisher is configured per package on npmjs.com and pins the
-    # repository AND this workflow's FILE NAME. Renaming this file, or moving the
-    # publish into a different workflow, breaks the publish until the npm-side
-    # configuration is updated to match.
-    permissions:
-      contents: read
-      id-token: write
-    # The MCP package follows the PROJECT's version, so every release publishes
-    # it — including releases that changed nothing under packages/mcp. That is
-    # the point: "agentistics 1.7.3" should ship "@agentistics/mcp 1.7.3", and
-    # the previous rule (publish only when the package's own code changed, with
-    # version bumps explicitly excluded from the diff) is why npm sat on 1.3.3
-    # while the project reached 1.7.3. The cost is releases whose package is
-    # byte-identical to the one before it, which is the intended trade.
-    if: |
-      github.ref == 'refs/heads/main' &&
-      needs.build.outputs.skip != 'true' &&
-      needs.build.outputs.version_skip != 'true'
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Set version
-        run: |
-          VERSION="${{ needs.build.outputs.next }}"
-          bun -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('packages/mcp/package.json', 'utf8'));
-            pkg.version = '$VERSION';
-            fs.writeFileSync('packages/mcp/package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
-
-      # Trusted publishing needs a recent npm CLI; the runner's bundled one is
-      # older than the release that added OIDC support, and an old CLI fails by
-      # looking for a credential rather than by saying the feature is missing.
-      - name: Setup Node + npm
-        uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-          # Deliberately NO registry-url: it writes an .npmrc expecting
-          # NODE_AUTH_TOKEN, and a credential present alongside OIDC is what
-          # makes npm authenticate as the token instead of as this workflow.
-      - name: Upgrade npm to a trusted-publishing build
-        run: npm install -g npm@latest
-
-      # Publishing on EVERY release makes "this version is already on npm" a
-      # normal outcome rather than a fault: re-running a release, or retrying it
-      # after a later job failed, would otherwise hit npm's publish conflict and
-      # turn an otherwise-successful release red. Asked explicitly, so the step
-      # below is skipped rather than failed.
-      - name: Is this version already on npm?
-        id: published
-        run: |
-          VERSION="${{ needs.build.outputs.next }}"
-          if npm view "@agentistics/mcp@$VERSION" version >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "@agentistics/mcp@$VERSION is already published — nothing to do"
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "@agentistics/mcp@$VERSION is new — publishing"
-          fi
-
-      - name: Publish to npm
-        if: steps.published.outputs.exists != 'true'
-        working-directory: packages/mcp
-        # No token, and no ~/.npmrc: npm mints its own short-lived credential
-        # from the runner's OIDC identity. Provenance is attached automatically
-        # on this path, so `--provenance` is not passed by hand.
-        run: |
-          npm --version
-          bun run build
-          npm publish --access public
-
-  publish-npm-cli:
-    name: Publish @agentistics/agentop to npm
-    runs-on: ubuntu-latest
-    needs: build
-    # Same trusted-publishing setup as publish-mcp above (OIDC identity pinned to
-    # this repo + this workflow FILE NAME on npmjs.com — renaming this file breaks
-    # the publish until the npm-side trusted publisher is updated to match).
-    permissions:
-      contents: read
-      id-token: write
-    # @agentistics/agentop is a thin wrapper — its own code rarely changes — but it
-    # publishes on EVERY release exactly like @agentistics/mcp, because its version
-    # IS the promise of which GitHub Release binary its postinstall downloads. A
-    # skipped release would leave the npm package pointing at a stale binary tag.
-    if: |
-      github.ref == 'refs/heads/main' &&
-      needs.build.outputs.skip != 'true' &&
-      needs.build.outputs.version_skip != 'true'
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Set version
-        run: |
-          VERSION="${{ needs.build.outputs.next }}"
-          bun -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('packages/agentop/package.json', 'utf8'));
-            pkg.version = '$VERSION';
-            fs.writeFileSync('packages/agentop/package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
-
-      # Trusted publishing needs a recent npm CLI; see the identical step in publish-mcp.
-      - name: Setup Node + npm
-        uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-      - name: Upgrade npm to a trusted-publishing build
-        run: npm install -g npm@latest
-
-      # Same "already published" guard as publish-mcp — a retried/re-run release
-      # must not turn npm's publish conflict into a red job.
-      - name: Is this version already on npm?
-        id: published
-        run: |
-          VERSION="${{ needs.build.outputs.next }}"
-          if npm view "@agentistics/agentop@$VERSION" version >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "@agentistics/agentop@$VERSION is already published — nothing to do"
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "@agentistics/agentop@$VERSION is new — publishing"
-          fi
-
-      - name: Publish to npm
-        if: steps.published.outputs.exists != 'true'
-        working-directory: packages/agentop
-        # No token, and no ~/.npmrc: npm mints its own short-lived credential
-        # from the runner's OIDC identity. prepublishOnly runs the platform-
-        # resolution unit tests; there is nothing to bundle — the CLI itself
-        # is the versioned binary already uploaded to this release by `build`.
-        run: |
-          npm --version
-          npm publish --access public
-
-  # Build & push the central (Team Mode aggregator) image to GHCR so `agentop central`
-  # can run from any machine WITHOUT cloning the repo — the CLI materializes a compose
-  # that pulls `ghcr.io/agentistics/agentistics:<version>` instead of building from source.
-  #
-  # DUAL-PUBLISHED across the repository move (blpsoares/ -> agentistics/): every tag is pushed
-  # to BOTH namespaces from ONE build, so both carry the same digest. Installs built before the
-  # move pull `ghcr.io/blpsoares/agentistics` (their compose files name it), and a transfer
-  # does NOT redirect GHCR the way it redirects the git and API URLs.
-  #
-  # One credential must be able to write both namespaces. GITHUB_TOKEN can only write the
-  # repository owner's, so the second namespace needs `secrets.GHCR_PUBLISH_TOKEN` (a PAT with
-  # write:packages, owned by an account that can publish to both) and `vars.GHCR_PUBLISH_USER`
-  # (that account's login). Without them: after the transfer the job publishes
-  # ghcr.io/agentistics only and SAYS so with a warning; before the transfer it FAILS, because
-  # the CLI it ships pulls a namespace GITHUB_TOKEN cannot write from blpsoares/.
-  publish-image:
-    name: Publish central image to GHCR
-    runs-on: ubuntu-latest
-    needs: build
-    if: |
-      github.ref == 'refs/heads/main' &&
-      needs.build.outputs.skip != 'true' &&
-      needs.build.outputs.version_skip != 'true'
-    env:
-      # THE IMAGE IS THE OFFICIAL BUILD TOO (leader decision Q-D): the same predicate as the build
-      # job's, so that no artifact this workflow publishes — binary, installer or image — ships
-      # without the engine. A fork's `main` builds the community image, exactly as before.
-      OFFICIAL: ${{ github.repository == 'agentistics/agentistics' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && github.event_name != 'pull_request' && github.event_name != 'pull_request_target' }}
-
-    steps:
-      # Check out main so the image includes the version-bump commit the build job pushed,
-      # keeping the image's internal version aligned with the release tag.
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: main
-
-      # ── The engine, the same way the build job gets it (docs/official-build.md) ───────────────
-      # Read from THIS checkout's engine.pin — main after the bump — so the image carries the very
-      # engine the release's binaries carry. The Dockerfile receives it as a named build context
-      # that is BIND-MOUNTED into the compile step and is never a layer; `.engine` is in
-      # .dockerignore, so the ordinary `COPY . .` cannot carry it in either.
-      - name: Read engine.pin
-        if: env.OFFICIAL == 'true'
-        id: engine_pin
-        env:
-          HAS_ENGINE_KEY: ${{ secrets.ENGINE_DEPLOY_KEY != '' }}
-        run: |
-          if [ "$HAS_ENGINE_KEY" != "true" ]; then
-            echo "::error::ENGINE_DEPLOY_KEY is not set — the official image cannot be built without the engine."
-            exit 1
-          fi
-          REF=$(jq -r .ref engine.pin)
-          if ! echo "$REF" | grep -Eq '^[0-9a-f]{40}$|^v[0-9]+\.[0-9]+\.[0-9]+'; then
-            echo "::error::engine.pin ref '$REF' is not a full commit SHA or a v<x.y.z> tag"
-            exit 1
-          fi
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
-          echo "▶ image engine pinned at $REF (api $(jq -r .api engine.pin))"
-
-      - name: Check out the engine at engine.pin
-        if: env.OFFICIAL == 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: agentistics/agentistics-engine
-          ref: ${{ steps.engine_pin.outputs.ref }}
-          path: .engine
-          ssh-key: ${{ secrets.ENGINE_DEPLOY_KEY }}
-          persist-credentials: false
-
-      # Only to run the release's own assertion script against the binary extracted from the image.
-      - name: Setup Bun
-        if: env.OFFICIAL == 'true'
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Resolve image namespaces
-        id: ns
-        env:
-          HAS_DUAL_TOKEN: ${{ secrets.GHCR_PUBLISH_TOKEN != '' }}
-          OWNER: ${{ github.repository_owner }}
-          VERSION: ${{ needs.build.outputs.next }}
-        run: |
-          owner="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
-          if [ "$HAS_DUAL_TOKEN" = "true" ]; then
-            images="ghcr.io/agentistics/agentistics ghcr.io/blpsoares/agentistics"
-          else
-            images="ghcr.io/${owner}/agentistics"
-            echo "::warning::GHCR_PUBLISH_TOKEN is not set — publishing ghcr.io/${owner}/agentistics only; the other namespace does not get v${VERSION}."
-          fi
-          tags=""
-          for img in $images; do
-            tags="${tags}${img}:${VERSION}"$'\n'"${img}:latest"$'\n'
-          done
-          {
-            echo "images=${images}"
-            echo "tags<<EOF"
-            printf '%s' "$tags"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ secrets.GHCR_PUBLISH_TOKEN != '' && vars.GHCR_PUBLISH_USER || github.actor }}
-          password: ${{ secrets.GHCR_PUBLISH_TOKEN || secrets.GITHUB_TOKEN }}
-
-      # BUILD, PROVE, THEN PUSH. The image is built and loaded locally first; on the official build
-      # the Dockerfile already runs assert-official-engine.ts inside its compile step (so no image
-      # can exist without passing it), and the step after this one runs it AGAIN from outside, on
-      # the binary taken out of the finished image — the bytes that would actually be pushed — and
-      # checks that no engine source file exists anywhere in the image. Only then is it pushed.
-      - name: Build (load locally, not pushed)
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          load: true
-          push: false
-          tags: agentistics:verify
-          build-contexts: ${{ env.OFFICIAL == 'true' && 'engine=.engine' || '' }}
-          build-args: ${{ env.OFFICIAL == 'true' && 'AGENTISTICS_OFFICIAL=1' || '' }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Smoke test — the image's binary carries the pinned engine, minified, and no engine source
-        if: env.OFFICIAL == 'true'
-        run: |
-          cid=$(docker create agentistics:verify)
-          docker cp "$cid:/usr/local/bin/agentop" ./agentop-from-image
-          docker rm "$cid" >/dev/null
-          bun packages/server/scripts/assert-official-engine.ts ./agentop-from-image --engine-dir .engine
-          leaked=$(docker run --rm --user root --entrypoint sh agentistics:verify -c "find / -xdev -path '*engine*src*' 2>/dev/null")
-          if [ -n "$leaked" ]; then
-            echo "::error::engine source files are present in the image:"; echo "$leaked"
-            exit 1
-          fi
-          rm -f ./agentop-from-image
-          echo "image verified: official engine present, no readable engine source, no engine source files"
-
-      # ONE build, every tag: the same manifest is pushed to each namespace, so the digests match.
-      # Same inputs as the verified build above, so every layer is a cache hit — and the Dockerfile's
-      # own in-build assertion holds for this build as much as for that one.
-      - name: Build and push
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.ns.outputs.tags }}
-          build-contexts: ${{ env.OFFICIAL == 'true' && 'engine=.engine' || '' }}
-          build-args: ${{ env.OFFICIAL == 'true' && 'AGENTISTICS_OFFICIAL=1' || '' }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Verify every namespace carries the same digest
-        env:
-          IMAGES: ${{ steps.ns.outputs.images }}
-          VERSION: ${{ needs.build.outputs.next }}
-        run: |
-          first=""
-          for img in $IMAGES; do
-            d="$(docker buildx imagetools inspect "${img}:${VERSION}" --format '{{json .Manifest.Digest}}' | tr -d '"')"
-            echo "${img}:${VERSION} -> ${d}"
-            if [ -z "$d" ]; then echo "::error::no digest for ${img}:${VERSION}"; exit 1; fi
-            if [ -z "$first" ]; then first="$d"; elif [ "$d" != "$first" ]; then
-              echo "::error::${img}:${VERSION} is ${d}, expected ${first}"; exit 1
-            fi
-          done
+          gh workflow run publish-npm.yml --ref main --field tag="$TAG"
+          gh workflow run publish-tauri.yml --ref main --field tag="$TAG"

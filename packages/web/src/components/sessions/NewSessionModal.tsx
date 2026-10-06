@@ -1,3 +1,4 @@
+import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 /**
  * NewSessionModal — starting a session from the dashboard, as a FOUR-STEP WIZARD.
  *
@@ -27,7 +28,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { unlockIfLocked } from '../vault/VaultUnlockHost'
-import { ChevronDown, ChevronLeft, ChevronRight, Check, ClipboardList, Loader, Lock, Paperclip, X } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Check, ClipboardList, Lock, Paperclip, X } from 'lucide-react'
 import { attachmentRoom, MAX_ATTACHMENTS, planPaste } from '../../lib/pastePlan'
 import { Field, inputStyle } from './formBits'
 import { HarnessPicker } from './HarnessPicker'
@@ -1031,7 +1032,7 @@ export function NewSessionModal({
                   color: 'var(--text-secondary)', fontFamily: 'inherit', fontSize: 12,
                 }}
               >
-                {uploading ? <Loader size={12} /> : <Paperclip size={12} />}
+                {uploading ? <AgentisticsLoader size={12} /> : <Paperclip size={12} />}
                 {uploading ? (pt ? 'Enviando…' : 'Uploading…') : (pt ? 'Anexar arquivo' : 'Attach file')}
               </button>
             </div>
@@ -1124,7 +1125,7 @@ export function NewSessionModal({
                 fontFamily: 'inherit', fontSize: 13, fontWeight: 650,
               }}
             >
-              {busy && <Loader size={14} />}
+              {busy && <AgentisticsLoader size={14} />}
               {busy
                 ? (pt ? 'Iniciando…' : 'Starting…')
                 : (pt ? 'Iniciar sessão' : 'Start session')}

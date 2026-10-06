@@ -56,7 +56,7 @@
  * actually reports one — a task with no direct sessions gets no footer row at all, per §4.4.
  */
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
 import {
   commentCounts, cycleSort, type StagedSessionDraft, type SubtaskSortKey, type SubtaskSortSpec, type TaskStatusDef,
@@ -69,6 +69,8 @@ import {
 import { SessionPicker } from './SessionPicker'
 import { DoneNeedsSessionDialog } from './DoneNeedsSessionDialog'
 import { TaskProgressBar } from './TaskProgressBar'
+import { ColResizeHandle } from './ColResizeHandle'
+import { contentWidthOf, fitContentWidth, resolveWidths, tableMinWidth } from './columnWidths'
 import { CommentCountButton } from './CommentThreadDialog'
 import { SubtaskActionsMenu } from './SubtaskActionsMenu'
 import {
@@ -217,6 +219,31 @@ export function SubtaskTable(p: SubtaskTableProps) {
   // inline subtask grid writes, so both surfaces always draw the same columns.
   const [storedCols, setColumns] = useBoardPref('subtaskColumns')
   const shownCols: SubtaskColumnId[] = storedCols ?? DEFAULT_SUBTASK_COLUMNS
+  const [savedWidths, setSavedWidths] = useBoardPref('subtaskColumnWidths')
+  const [draggingWidth, setDraggingWidth] = useState<{ id: string; w: number } | null>(null)
+  const subtaskWidths = useMemo(() => {
+    const defs = shownCols.map(id => SUBTASK_COLUMNS.find(c => c.id === id)!).filter(Boolean)
+    const widths = resolveWidths(defs, savedWidths)
+    if (draggingWidth) widths[draggingWidth.id] = draggingWidth.w
+    return widths
+  }, [shownCols, savedWidths, draggingWidth])
+  const fitSubtaskColumn = (id: string) => {
+    const nodes = [
+      ...Array.from(document.querySelectorAll<HTMLElement>(`[data-subtask-col="${id}"]`)),
+      ...Array.from(document.querySelectorAll<HTMLElement>(`[data-col="subtask-${id}"]`)),
+    ]
+    setSavedWidths({ ...savedWidths, [id]: fitContentWidth(nodes.map(contentWidthOf)) })
+  }
+  const subtaskResizeHandle = (id: string) => (
+    <ColResizeHandle
+      width={subtaskWidths[id]!}
+      mobile={isMobile}
+      title={L.resizeColumn}
+      onChange={w => setDraggingWidth({ id, w })}
+      onCommit={w => { setDraggingWidth(null); setSavedWidths({ ...savedWidths, [id]: w }) }}
+      onFit={() => fitSubtaskColumn(id)}
+    />
+  )
   /** The column filter (t-63b7d3b2b0 #2) — ephemeral, like the sort above: it narrows this one look
    *  at the grid and is never remembered across a remount. */
   const [filter, setFilter] = useState<SubtaskFilterState>(EMPTY_SUBTASK_FILTER)
@@ -375,7 +402,13 @@ export function SubtaskTable(p: SubtaskTableProps) {
           swipes sideways and has no scrollbar to lose, so it keeps the page's own vertical scroll —
           a nested one there traps the thumb. */}
       <div style={isMobile ? { overflowX: 'auto' } : { maxHeight: '70vh', overflow: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <table style={{ width: '100%', minWidth: isMobile ? undefined : tableMinWidth(1, 280, subtaskWidths, shownCols), borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <colgroup>
+          <col style={{ width: 1 }} />
+          <col style={{ width: isMobile ? undefined : 280 }} />
+          {shownCols.map(id => <col key={id} style={{ width: subtaskWidths[id] }} />)}
+          <col style={{ width: 88 }} />
+        </colgroup>
         <thead>
           <tr>
             {/* The leading '' is the gear-menu column (`SubtaskActionsMenu`) — no header text, same
@@ -401,6 +434,8 @@ export function SubtaskTable(p: SubtaskTableProps) {
                   mobile={isMobile}
                   onSort={k => setSort(cycleSort(sort, k))}
                   title={L.sortByColumn.replace('{column}', boardCopy(p.lang).subtaskColumns[id])}
+                  dataCol={`subtask-${id}`}
+                  handle={subtaskResizeHandle(id)}
                   align={def.numeric ? 'right' : 'left'}
                   reorder={{ scope: 'subtask-columns', id, onMove: (d, t) => setColumns(moveColumn(shownCols, d as SubtaskColumnId, t as SubtaskColumnId)) }}
                   style={{
@@ -545,6 +580,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
                 return (
                   <td
                     key={id}
+                    data-subtask-col={id}
                     style={{
                       ...cell, ...tint, whiteSpace: id === 'model' ? undefined : 'nowrap',
                       minWidth: id === 'sessions' ? 160 : id === 'status' ? 90 : undefined,

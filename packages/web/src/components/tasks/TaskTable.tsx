@@ -348,7 +348,7 @@ function cellFor(
 // ------------------------------------------------------------------------------ subrow
 
 function SubtaskRows({
-  subtasks, subtaskRollups, indent, mainCols, subtaskCols, sessions, lang, nowMs, statuses, onPatch, onRemove,
+  subtasks, subtaskRollups, indent, mainCols, subtaskCols, subtaskWidths, sessions, lang, nowMs, statuses, onPatch, onRemove,
   onCreateGroup, onLinkSession, onUnfile, onOpenSession, stagedFor, commentCounts, onOpenComments,
 }: {
   subtasks: Subtask[]
@@ -370,6 +370,8 @@ function SubtaskRows({
    *  through `ChipSelect` here (not `subtaskColumnCell`, which deliberately omits it — see that
    *  module's own header) whenever it appears in this list. */
   subtaskCols: readonly SubtaskColumnId[]
+  /** Saved widths for the shared subtask grid, so each expanded row and the detail page align. */
+  subtaskWidths: Readonly<Record<string, number>>
   /** The DELIVERY's sessions. Each subtask draws the ones filed under IT — see `SubtaskSessions`. */
   sessions: readonly TaskSessionRow[]
   lang: Lang
@@ -552,7 +554,7 @@ function SubtaskRows({
           {subtaskCols.map(id => {
             const def = SUBTASK_COLUMNS.find(c => c.id === id)!
             return (
-              <td key={id} style={{ ...cellBox, textAlign: def.numeric ? 'right' : 'left', ...tint }}>
+              <td key={id} data-subtask-col={id} style={{ ...cellBox, width: subtaskWidths[id], textAlign: def.numeric ? 'right' : 'left', ...tint }}>
                 {id === 'status'
                   ? (
                     <ChipSelect
@@ -585,7 +587,7 @@ function SubtaskRows({
           {subtaskCols.map(id => {
             const def = SUBTASK_COLUMNS.find(c => c.id === id)!
             return (
-              <td key={id} style={{ ...cellBox, textAlign: def.numeric ? 'right' : 'left' }}>
+              <td key={id} data-subtask-col={id} style={{ ...cellBox, width: subtaskWidths[id], textAlign: def.numeric ? 'right' : 'left' }}>
                 {id === 'sessions' && (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', minWidth: 0 }}>
                     {directSessions.map(s => (
@@ -707,6 +709,8 @@ export function TaskTable(p: TaskTableProps) {
   // opening a delivery here and opening it from its own page never disagree about the columns.
   const [storedSubtaskCols, setSubtaskColumns] = useBoardPref('subtaskColumns')
   const shownSubtaskCols: SubtaskColumnId[] = storedSubtaskCols ?? DEFAULT_SUBTASK_COLUMNS
+  const [savedSubtaskWidths, setSavedSubtaskWidths] = useBoardPref('subtaskColumnWidths')
+  const [draggingSubtaskWidth, setDraggingSubtaskWidth] = useState<{ id: string; w: number } | null>(null)
   /** The subtask column filter (t-63b7d3b2b0 #2) — ONE filter for the whole table, applied to every
    *  expanded delivery's own subtasks; ephemeral, like the per-delivery sort override below. */
   const [subtaskFilter, setSubtaskFilter] = useState<SubtaskFilterState>(EMPTY_SUBTASK_FILTER)
@@ -812,6 +816,29 @@ export function TaskTable(p: TaskTableProps) {
       onChange={w => setDragging({ id, w })}
       onCommit={w => { setDragging(null); setSavedWidths({ ...savedWidths, [id]: w }) }}
       onFit={() => fitColumn(id)}
+    />
+  )
+  const subtaskWidths = useMemo(() => {
+    const defs = shownSubtaskCols.map(id => SUBTASK_COLUMNS.find(c => c.id === id)!).filter(Boolean)
+    const w = resolveWidths(defs, savedSubtaskWidths)
+    if (draggingSubtaskWidth) w[draggingSubtaskWidth.id] = draggingSubtaskWidth.w
+    return w
+  }, [shownSubtaskCols, savedSubtaskWidths, draggingSubtaskWidth])
+  const fitSubtaskColumn = (id: string) => {
+    const nodes = [
+      ...Array.from(document.querySelectorAll<HTMLElement>(`[data-subtask-col="${id}"]`)),
+      ...Array.from(document.querySelectorAll<HTMLElement>(`[data-col="subtask-${id}"]`)),
+    ]
+    setSavedSubtaskWidths({ ...savedSubtaskWidths, [id]: fitContentWidth(nodes.map(contentWidthOf)) })
+  }
+  const subtaskResizeHandle = (id: string) => (
+    <ColResizeHandle
+      width={subtaskWidths[id]!}
+      mobile={isMobile}
+      title={L.resizeColumn}
+      onChange={w => setDraggingSubtaskWidth({ id, w })}
+      onCommit={w => { setDraggingSubtaskWidth(null); setSavedSubtaskWidths({ ...savedSubtaskWidths, [id]: w }) }}
+      onFit={() => fitSubtaskColumn(id)}
     />
   )
   // How few shown columns it takes before an expanded delivery's subtasks no longer fit as rows of
@@ -1215,6 +1242,8 @@ export function TaskTable(p: TaskTableProps) {
                                   ))}
                                   title={L.sortByColumn.replace('{column}', label)}
                                   reorder={{ scope: 'subtask-columns', id, onMove: (d, t) => setSubtaskColumns(moveColumn(shownSubtaskCols, d as SubtaskColumnId, t as SubtaskColumnId)) }}
+                                  dataCol={`subtask-${id}`}
+                                  handle={subtaskResizeHandle(id)}
                                   style={{
                                     ...microLabel, fontWeight: 600, padding: '5px 10px', whiteSpace: 'nowrap',
                                     paddingLeft: 10,
@@ -1242,6 +1271,7 @@ export function TaskTable(p: TaskTableProps) {
                             // unintended ~44-50px gap nobody asked for. A GROUP MEMBER still sits
                             // its own +20 deeper (see the title cell's own note).
                             indent={0} mainCols={effectiveCols} subtaskCols={shownSubtaskCols}
+                            subtaskWidths={subtaskWidths}
                             sessions={detail?.sessions ?? []}
                             lang={p.lang ?? 'en'}
                             nowMs={nowMs}
@@ -1430,7 +1460,13 @@ export function TaskTable(p: TaskTableProps) {
                                   <td style={{ padding: '5px 10px' }} />
                                   <td colSpan={cols.length + 1} style={{ padding: '6px 10px' }}>
                                     <div style={{ overflowX: 'auto' }}>
-                                      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 620 }}>
+                                      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: tableMinWidth(1, 280, subtaskWidths, shownSubtaskCols) }}>
+                                        <colgroup>
+                                          <col style={{ width: 1 }} />
+                                          <col style={{ width: 280 }} />
+                                          {shownSubtaskCols.map(id => <col key={id} style={{ width: subtaskWidths[id] }} />)}
+                                          <col style={{ width: 88 }} />
+                                        </colgroup>
                                         <tbody>{renderSubtaskGrid(shownSubtaskCols.length)}</tbody>
                                       </table>
                                     </div>

@@ -1,3 +1,4 @@
+import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 /**
  * VaultUnlock — the ONE way any screen opens a locked vault (VAULT.PERSONAL §10).
  *
@@ -15,7 +16,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type React from 'react'
-import { Fingerprint, Loader2, Lock, Smartphone } from 'lucide-react'
+import { Fingerprint, Lock, Smartphone } from 'lucide-react'
 import { Err, input, primaryBtn } from '../MfaSetup'
 import { cleanCode, codeComplete, loadVault, unlockCode, unlockGesture, type UiAction, type VaultView } from '../../lib/vaultApi'
 import { vt, type VaultKey } from '../../lib/vaultText'
@@ -157,13 +158,13 @@ export function UnlockControl({ view, lang, onOpened, btn, isMobile, center, onA
       {phase === 'phone' && (
         <div role="status" data-hello-fallback="phone" style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: isMobile ? undefined : 380, textAlign: align }}>
           <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6 }}><Smartphone size={14} style={{ verticalAlign: '-2px' }} /> {tx('helloFailedPhone', lang)}</div>
-          <div style={{ fontSize: 12.5, fontWeight: 600 }}><Loader2 size={13} className="ag-spin" style={{ verticalAlign: '-2px' }} /> {tx('helloFailedWaiting', lang)}</div>
+          <div style={{ fontSize: 12.5, fontWeight: 600 }}><AgentisticsLoader size={13} style={{ verticalAlign: '-2px' }} /> {tx('helloFailedWaiting', lang)}</div>
           <button type="button" style={{ ...btn, background: 'transparent' }} onClick={() => { void gesture() }}>{tx('helloRetry', lang)}</button>
         </div>
       )}
       {phase !== 'code' && phase !== 'phone' && (
         <button type="button" style={btn} onClick={() => { void gesture() }} disabled={phase === 'gesture'}>
-          {phase === 'gesture' && <Loader2 size={14} className="ag-spin" />}
+          {phase === 'gesture' && <AgentisticsLoader size={14} />}
           {phase === 'gesture' ? vt('unlocking', lang) : vt(label, lang)}
         </button>
       )}
@@ -208,13 +209,13 @@ function PhoneUnlock({ facts, lang, isMobile, onOpened }: { facts: PhoneFacts; l
           <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 8 }}>
             {offers.includes('passkey') && (
               <button type="submit" style={hotBtn(isMobile)} disabled={!codeComplete(code) || busy !== null}>
-                {busy === 'passkey' ? <Loader2 size={14} className="ag-spin" /> : <Fingerprint size={15} />} {busy === 'passkey' ? tx('working', lang) : tx('phoneBio', lang)}
+                {busy === 'passkey' ? <AgentisticsLoader size={14} /> : <Fingerprint size={15} />} {busy === 'passkey' ? tx('working', lang) : tx('phoneBio', lang)}
               </button>
             )}
             {offers.includes('code-only') && (
               <button type={offers[0] === 'code-only' ? 'submit' : 'button'} style={offers[0] === 'code-only' ? hotBtn(isMobile) : btnBase(isMobile)}
                 disabled={!codeComplete(code) || busy !== null} onClick={offers[0] === 'code-only' ? undefined : () => { void go('code-only') }}>
-                {busy === 'code-only' && <Loader2 size={14} className="ag-spin" />} {tx('phoneCodeOnly', lang)}
+                {busy === 'code-only' && <AgentisticsLoader size={14} />} {tx('phoneCodeOnly', lang)}
               </button>
             )}
           </div>
@@ -250,7 +251,7 @@ export function VaultUnlock({ lang, isMobile, onOpened, center, onAction, btn, o
     return () => { alive = false }
   }, [done])
   if (failed) return <Err text={tx('network', lang)} />
-  if (!view || !facts) return <div style={{ color: 'var(--text-tertiary)' }}><Loader2 size={14} className="ag-spin" /></div>
+  if (!view || !facts) return <div style={{ color: 'var(--text-tertiary)' }}><AgentisticsLoader size={14} /></div>
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: isMobile ? 'stretch' : center ? 'center' : 'flex-start' }}>
       {facts.loopback
@@ -345,10 +346,10 @@ export function PhoneEnrol({ lang, isMobile, onDone }: { lang: Lang; isMobile: b
       {phase === 'waiting' && (
         <div role="status" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: 4, fontVariantNumeric: 'tabular-nums' }}>{match}</div>
-          <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6 }}><Loader2 size={13} className="ag-spin" style={{ verticalAlign: '-2px' }} /> {tx('enrolWaiting', lang, { match })}</div>
+          <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6 }}><AgentisticsLoader size={13} style={{ verticalAlign: '-2px' }} /> {tx('enrolWaiting', lang, { match })}</div>
         </div>
       )}
-      {phase === 'finishing' && note && <div role="status" style={{ fontSize: 12.5, lineHeight: 1.6 }}><Loader2 size={13} className="ag-spin" style={{ verticalAlign: '-2px' }} /> {note}</div>}
+      {phase === 'finishing' && note && <div role="status" style={{ fontSize: 12.5, lineHeight: 1.6 }}><AgentisticsLoader size={13} style={{ verticalAlign: '-2px' }} /> {note}</div>}
       {phase === 'done' && note && <div role="status" style={{ fontSize: 12.5, lineHeight: 1.6 }}>{note}</div>}
       {error && <div style={{ marginTop: 8 }}><Err text={error} /></div>}
     </div>
@@ -377,7 +378,7 @@ export function PhoneRequests({ lang, isMobile, requests, onChanged }: { lang: L
           </div>
           <div style={{ display: 'flex', gap: 8, flexDirection: isMobile ? 'column' : 'row' }}>
             <button type="button" style={hotBtn(isMobile)} disabled={busy !== null} onClick={() => { void decide(q.id, true) }}>
-              {busy === q.id && <Loader2 size={14} className="ag-spin" />} {busy === q.id ? tx('reqApproving', lang) : tx('reqApprove', lang)}
+              {busy === q.id && <AgentisticsLoader size={14} />} {busy === q.id ? tx('reqApproving', lang) : tx('reqApprove', lang)}
             </button>
             <button type="button" style={btnBase(isMobile)} disabled={busy !== null} onClick={() => { void decide(q.id, false) }}>{tx('reqDeny', lang)}</button>
           </div>
