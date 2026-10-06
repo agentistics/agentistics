@@ -34,6 +34,11 @@ import { createSharedPref, type SharedPrefStore } from './sharedPref'
 /** The smallest band worth drawing: a prompt, a command and a few lines of its output. */
 export const BAND_MIN_PX = 140
 
+/** Keep a transient hidden-window measurement from erasing the last usable column height. */
+export function keepUsableColumnHeight(previous: number, next: number): number {
+  return Number.isFinite(next) && next > 0 ? next : previous
+}
+
 const STORAGE_KEY = 'agentistics-shell-band'
 
 export interface ShellWatchFacts {
