@@ -159,6 +159,7 @@ import { needsChoice, parseDialogOptions, readDialog } from './sessions/dialog-c
 import { answerFollowUp } from './sessions/answer-followup'
 import { liveTranscriptDeps, runTranscriptSearch } from './sessions/transcript-run'
 import { rulesFor } from './sessions/attention-rules'
+import { codexIsBlockingFrame } from './sessions/codex-send'
 import { planCrashGroup, planFellOffer } from './sessions/crash-group'
 import { selectFell } from './sessions/fell-selection'
 import {
@@ -4237,11 +4238,16 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
 
       const frame = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
       const rules = rulesFor(managed.harness)
-      if (rules && rules.approval.some(re => re.test(frame.join('\n')))) {
+      if (managed.harness === 'codex' && codexIsBlockingFrame(frame)) {
+        return { ok: false, message: s.sessCodexBlocked }
+      }
+      if (managed.harness !== 'codex' && rules && rules.approval.some(re => re.test(frame.join('\n')))) {
         return { ok: false, message: s.sessPromptBlocked }
       }
 
-      return (await backend.sendText(id, body))
+      return (await (managed.harness === 'codex' && backend.sendTextReliable
+        ? backend.sendTextReliable(id, body, managed.harness)
+        : backend.sendText(id, body)))
         ? { ok: true, message: s.sessPrompted(id) }
         : { ok: false, message: s.sessSendFailed(id) }
     },
