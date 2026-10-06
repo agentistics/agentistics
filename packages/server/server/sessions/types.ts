@@ -1,4 +1,4 @@
-/**
+  /**
  * types.ts — the whole contract of the session manager.
  *
  * Two boundaries live here. `SpawnSpec` / `planSpawn` decide WHAT to run and are per harness;
@@ -448,7 +448,9 @@ export interface SessionBackend {
    * poll and the keystroke is an ordinary outcome, not an error to crash a caller with.
    */
   sendText(id: string, text: string): Promise<boolean>
-    /**
+  /** Codex's bracketed-paste composer path; absent on older/non-tmux backends. */
+  sendTextReliable?(id: string, text: string, harness: string): Promise<boolean>
+   /**
    * Type literal text into the session WITHOUT submitting — the first half of `sendText`, exposed on
    * its own for the browser's key-by-key write channel (`input-web.ts`), where an implicit `Enter`
    * would turn every keystroke into a submitted turn.
