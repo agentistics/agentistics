@@ -13,26 +13,32 @@
 
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
-import { taskProgress } from '@agentistics/core'
-import { microLabel } from './board'
+import { taskProgress, type TaskStatusDef } from '@agentistics/core'
+import { microLabel, statusStyle } from './board'
 
-export function TaskProgressBar({ done, total, inProgress = 0, showPercent = true, height = 4, label }: {
+export function TaskProgressBar({ done, total, inProgress = 0, blocked = 0, statuses = null, showPercent = true, height = 4, label }: {
   done: number
   total: number
   /** The number beside the bar. Off in the tightest cells, where the bar alone is the signal. */
   showPercent?: boolean
   height?: number
   inProgress?: number
+  blocked?: number
+  statuses?: readonly TaskStatusDef[] | null
   /** A word before the bar, when it is not obvious what is being counted. */
   label?: string
 }) {
-  const p = taskProgress(done, total, inProgress)
+  const p = taskProgress(done, total, inProgress, blocked)
   const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number } | null>(null)
   const showTooltip = (text: string, e: React.MouseEvent<HTMLElement>) => {
     const rect = e.currentTarget.getBoundingClientRect()
     setTooltip({ text, x: rect.left, y: rect.top - 7 })
   }
   if (p.percent === null) return null
+  const doneStatus = statusStyle(statuses, 'done')
+  const inProgressStatus = statusStyle(statuses, 'in_progress')
+  const blockedStatus = statusStyle(statuses, 'blocked')
+  const statusText = (label: string, count: number) => `${label}: ${count}`
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
       {label && <span style={{ ...microLabel, fontSize: 9, flexShrink: 0 }}>{label}</span>}
@@ -40,27 +46,35 @@ export function TaskProgressBar({ done, total, inProgress = 0, showPercent = tru
         flex: 1, minWidth: 24, height, borderRadius: height / 2,
         background: 'var(--bg-elevated)', overflow: 'visible', position: 'relative',
       }}>
-        <div onMouseEnter={e => showTooltip(`${p.percent}% concluído · ${p.done} de ${p.total} subtarefas`, e)} onMouseLeave={() => setTooltip(null)} style={{
+        <div onMouseEnter={e => showTooltip(statusText(doneStatus.label, p.done), e)} onMouseLeave={() => setTooltip(null)} style={{
           position: 'relative',
           width: `${p.donePercent}%`, height: '100%', borderRadius: height / 2,
-          // Green only when it is ACTUALLY finished — the fill rounds down, so a bar that looks
-          // full is full. An almost-done task stays orange, which is what "still open" looks like
-          // everywhere else on this board.
-          background: p.complete ? 'var(--accent-green)' : 'var(--anthropic-orange)',
+          background: doneStatus.color,
           transition: 'width 0.2s',
         }} aria-label={`${p.percent}% concluído · ${p.done} de ${p.total} subtarefas`} />
         {p.inProgressPercent != null && p.inProgressPercent > 0 && (
-          <div onMouseEnter={e => showTooltip(`${p.inProgress} em andamento`, e)} onMouseLeave={() => setTooltip(null)} style={{
+          <div onMouseEnter={e => showTooltip(statusText(inProgressStatus.label, p.inProgress ?? 0), e)} onMouseLeave={() => setTooltip(null)} style={{
             position: 'absolute', left: `${p.donePercent}%`, top: 0,
-            width: `${p.inProgressPercent}%`, height: '100%', background: 'var(--accent-purple)',
+            width: `${p.inProgressPercent}%`, height: '100%', background: inProgressStatus.color,
             transition: 'left 0.2s, width 0.2s',
           }} aria-label={`${p.inProgress} em andamento`} />
+        )}
+        {p.blockedPercent != null && p.blockedPercent > 0 && (
+          <div onMouseEnter={e => showTooltip(statusText(blockedStatus.label, p.blocked ?? 0), e)} onMouseLeave={() => setTooltip(null)} style={{
+            position: 'absolute',
+            left: `${(p.donePercent ?? 0) + (p.inProgressPercent ?? 0)}%`,
+            top: 0,
+            width: `${p.blockedPercent}%`,
+            height: '100%',
+            background: blockedStatus.color,
+            transition: 'left 0.2s, width 0.2s',
+          }} aria-label={statusText(blockedStatus.label, p.blocked ?? 0)} />
         )}
       </div>
       {showPercent && (
         <span style={{
           ...microLabel, fontSize: 10, flexShrink: 0, fontVariantNumeric: 'tabular-nums',
-          color: p.complete ? 'var(--accent-green)' : 'var(--text-tertiary)',
+          color: p.complete ? doneStatus.color : 'var(--text-tertiary)',
         }}>
           {p.percent}% · {p.done}/{p.total}
         </span>

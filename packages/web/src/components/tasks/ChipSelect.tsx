@@ -18,7 +18,7 @@
  * the screen is a panel nobody can use.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -42,6 +42,16 @@ export interface ChipSelectProps {
   /** Fill the column it sits in. Off for the batch bar, where it sits among other buttons. */
   block?: boolean
   title?: string
+}
+
+/** The compact chip recipe shared by editable and read-only header chips. */
+export function chipStyle(color: string, dim: string): CSSProperties {
+  return {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+    boxSizing: 'border-box', height: 24, padding: '0 8px', borderRadius: 5,
+    border: `1px solid ${color}`, background: dim, color,
+    fontSize: 12, fontWeight: 600, lineHeight: 1, whiteSpace: 'nowrap', fontFamily: 'inherit',
+  }
 }
 
 /** Room a seven-option panel needs. Measured, not guessed: 7 rows + padding at the mobile height. */
@@ -106,14 +116,11 @@ export function ChipSelect({
         disabled={disabled}
         title={title}
         style={{
-          width: block ? '100%' : undefined, boxSizing: 'border-box',
+          width: block ? '100%' : undefined,
           cursor: disabled ? 'default' : 'pointer',
-          display: 'flex', alignItems: 'center', gap: 6,
+          ...chipStyle(current.color, current.dim),
           justifyContent: block ? 'space-between' : 'center',
-          padding: compact ? '3px 8px' : isMobile ? '10px 11px' : '6px 10px',
-          borderRadius: compact ? 5 : 7,
-          border: `1px solid ${current.color}`, background: current.dim, color: current.color,
-          fontSize: compact ? 11 : 12, fontWeight: 600, whiteSpace: 'nowrap',
+          ...(compact ? {} : { height: isMobile ? 44 : 32, padding: isMobile ? '0 11px' : '0 10px', borderRadius: 7 }),
           opacity: disabled ? 0.6 : 1,
         }}
       >

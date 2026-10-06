@@ -328,7 +328,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
         {/* The shared bar — it rounds DOWN, so this one cannot say 100% while the grid below it
             still shows an open row. That disagreement is exactly what one component prevents. */}
         <div style={{ flex: 1, maxWidth: 220 }}>
-          <TaskProgressBar done={done} total={p.subtasks.length} />
+          <TaskProgressBar done={done} total={p.subtasks.length} statuses={p.statuses} />
         </div>
         {/* The grid's own controls: ONE bar — Filter · Group · Columns · Sort — whose segments open
             the existing menus in the same portal panel (see `ViewBar.tsx`). */}
@@ -553,7 +553,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
                     hierarchy level down. Absent when the group has no members yet. Kept visible
                     whether the group is open or closed — completion is worth seeing at a glance. */}
                 {isGroup && view?.groupProgress && (
-                  <TaskProgressBar done={view.groupProgress.done} total={view.groupProgress.total} height={3} />
+                  <TaskProgressBar done={view.groupProgress.done} total={view.groupProgress.total} statuses={p.statuses} height={3} />
                 )}
                 {/* An ORPHANED member only (its group is gone from this list) — the one case with no
                     cluster to place it in, so the words are the only thing left saying where it came

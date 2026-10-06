@@ -15,7 +15,7 @@ import type { TaskStatusDef } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import type { TaskDetail } from '../../lib/tasks'
 import { BetaTag } from '../BetaTag'
-import { NA, button, fmtInt, fmtTokens, harnessColor } from './board'
+import { NA, button, fmtInt, fmtTokens, harnessColor, statusStyle } from './board'
 import { TaskChips, TaskMoreMenu } from './TaskChips'
 import { RenameInput } from './RenameInput'
 import { editTask } from '../../lib/tasks'
@@ -33,22 +33,53 @@ function fmtHours(minutes: number | null, lang: Lang): string {
   return m === 0 ? `${h}h` : `${h}h ${m}${lang === 'pt' ? 'min' : 'm'}`
 }
 
-function Ring({ done, total, size }: { done: number; total: number; size: number }) {
+export function ringLabelFontSize(size: number): number {
+  return Math.max(9, Math.min(16, (size - 12) * 0.24))
+}
+
+function Ring({ done, inProgress, blocked, total, size, statuses }: {
+  done: number
+  inProgress: number
+  blocked: number
+  total: number
+  size: number
+  statuses: readonly TaskStatusDef[] | null
+}) {
   const pct = total === 0 ? 0 : Math.floor((done / total) * 100)
   const r = 36
   const c = 2 * Math.PI * r
+  const doneCount = Math.max(0, Math.min(done, total))
+  const inProgressCount = Math.max(0, Math.min(inProgress, total - doneCount))
+  const blockedCount = Math.max(0, Math.min(blocked, total - doneCount - inProgressCount))
+  const segments = [
+    { count: doneCount, color: statusStyle(statuses, 'done').color, label: statusStyle(statuses, 'done').label },
+    { count: inProgressCount, color: statusStyle(statuses, 'in_progress').color, label: statusStyle(statuses, 'in_progress').label },
+    { count: blockedCount, color: statusStyle(statuses, 'blocked').color, label: statusStyle(statuses, 'blocked').label },
+  ]
+  let offset = 0
+  const labelSize = ringLabelFontSize(size)
   return (
     <div style={{ position: 'relative', width: size, height: size, flex: '0 0 auto' }} aria-label={`${pct}%`}>
       <svg width={size} height={size} viewBox="0 0 84 84" style={{ transform: 'rotate(-90deg)' }}>
         <circle cx="42" cy="42" r={r} fill="none" stroke="var(--ag-tint-3)" strokeWidth="8" />
-        <circle
-          cx="42" cy="42" r={r} fill="none" stroke="var(--anthropic-orange)" strokeWidth="8" strokeLinecap="round"
-          strokeDasharray={c} strokeDashoffset={c * (1 - pct / 100)}
-        />
+        {segments.map(segment => {
+          const length = total === 0 ? 0 : c * (segment.count / total)
+          const currentOffset = offset
+          offset += length
+          return length > 0 ? (
+            <circle
+              key={segment.label}
+              cx="42" cy="42" r={r} fill="none" stroke={segment.color} strokeWidth="8" strokeLinecap="butt"
+              strokeDasharray={`${length} ${c - length}`} strokeDashoffset={-currentOffset}
+              aria-label={`${segment.label}: ${segment.count}`}
+            ><title>{`${segment.label}: ${segment.count}`}</title></circle>
+          ) : null
+        })}
       </svg>
       <b style={{
         position: 'absolute', inset: 0, display: 'grid', placeItems: 'center',
-        fontSize: size > 60 ? 16 : 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
+        fontSize: labelSize, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
+        whiteSpace: 'nowrap', lineHeight: 1,
       }}>{pct}%</b>
     </div>
   )
@@ -77,6 +108,8 @@ export function TaskHero({ detail, lang, statuses, live, reload, onBack, onAbout
   const task = detail.task
   const subsDone = detail.subtasks.filter(s => s.done).length
   const subsTotal = detail.subtasks.length
+  const subsInProgress = detail.subtasks.filter(s => !s.done && s.status === 'in_progress').length
+  const subsBlocked = detail.subtasks.filter(s => !s.done && s.status === 'blocked').length
   const r = detail.rollup
   const cost = r.mixedCurrency || (r.credits !== null && r.costUSD === null)
     ? `${r.credits!.premiumRequests} req`
@@ -119,7 +152,12 @@ export function TaskHero({ detail, lang, statuses, live, reload, onBack, onAbout
       background: 'var(--bg-card)',
     }}>
       <div style={{ display: 'flex', gap: isMobile ? 12 : 18, alignItems: isMobile ? 'flex-start' : 'center' }}>
-        {subsTotal > 0 && <Ring done={subsDone} total={subsTotal} size={isMobile ? 56 : 68} />}
+        {subsTotal > 0 && (
+          <Ring
+            done={subsDone} inProgress={subsInProgress} blocked={subsBlocked} total={subsTotal}
+            size={isMobile ? 56 : 68} statuses={statuses}
+          />
+        )}
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, color: 'var(--text-tertiary)', fontFamily: 'var(--mono, monospace)' }}>
             <button
