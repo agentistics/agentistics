@@ -120,7 +120,10 @@ const isSpace = (c: string): boolean => /\s/.test(c)
  */
 export function excerptAround(text: string, matches: readonly ChatSearchSpan[]): { excerpt: string; highlights: ChatSearchSpan[] } {
   const first = matches[0]
-  let a = first ? Math.max(0, first.start - EXCERPT_LEAD) : 0
+  // A message that fits whole is shown whole — cutting "De " off a 70-character line saves nothing.
+  // So is a cut that would drop only a few leading characters.
+  let a = first && text.length > EXCERPT_CHARS ? Math.max(0, first.start - EXCERPT_LEAD) : 0
+  if (a < 16) a = 0
   // Leading whitespace says nothing; skip it before snapping.
   while (a < text.length && isSpace(text[a]!)) a++
   if (a > 0 && first) {

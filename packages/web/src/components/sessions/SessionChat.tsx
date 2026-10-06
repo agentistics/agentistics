@@ -1794,6 +1794,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * loaded window is `not-loaded`; one that is loaded but has no bubble on screen (the terminal view)
    * is `no-chat` — the panel says each in its own words.
    */
+  const SEARCH_JUMP_CONTEXT = 40
   const searchView = useRef({ turns, shownTurns, turnAnchors })
   searchView.current = { turns, shownTurns, turnAnchors }
   useEffect(() => registerChatSearchTarget(session.id, req => {
@@ -1801,10 +1802,17 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     const i = findTurnIndex(now, req.turn)
     if (i < 0) return 'not-loaded'
     if (req.kind === 'forward') { setForwardTurns([now[i]!]); return 'done' }
-    if (i < windowStart(now.length, shown)) flushSync(() => setShownTurns(shownToInclude(now.length, i)))
+    // GENEROUS context above the target: with the default ten, the target sits inside the
+    // grow-at-top zone (`GROW_AT_PX`), the smooth scroll toward it renders yet another older block,
+    // and the content shifts under the scroll — measured landing ~460px past the message.
+    if (i < windowStart(now.length, shown)) flushSync(() => setShownTurns(shownToInclude(now.length, i, SEARCH_JUMP_CONTEXT)))
     holdTailUntil.current = Date.now() + 4000
     setAtTail(false)
-    return goToTurn(searchView.current.turnAnchors[i] ?? anchors[i]) ? 'done' : 'no-chat'
+    const anchor = searchView.current.turnAnchors[i] ?? anchors[i]
+    // A search jump is usually LONG: a smooth scroll across hundreds of bubbles outlasts the flash,
+    // so the reader arrives after the mark has faded. Land instantly; `goToTurn` then only marks it.
+    if (anchor) document.getElementById(anchor)?.scrollIntoView({ block: 'center' })
+    return goToTurn(anchor) ? 'done' : 'no-chat'
   }), [session.id])
 
   /**

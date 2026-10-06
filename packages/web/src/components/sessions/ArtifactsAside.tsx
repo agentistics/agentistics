@@ -240,13 +240,18 @@ export interface ArtifactsAsideProps {
    * one (the metrics card's link) is withheld on exactly the same fact, so the two agree.
    */
   metrics?: SessionDrilldownProps
+  /**
+   * The SEARCH tab handed a message to the chat. On a phone the caller clears the screen for the
+   * chat (`ChatSearchTab.onHandedToChat`); absent falls back to `onClose`.
+   */
+  onHandedToChat?: () => void
 }
 
 
 export function ArtifactsAside({
   sessionId, cwd, lang, artifacts, loading, unavailable, older, turns, onClose,
   unlistedWrites, outsideNote, hideCloseButton, headerControls,
-  activeTab, focusRequest, session, onOpenTask, onTaskChanged, metrics,
+  activeTab, focusRequest, session, onOpenTask, onTaskChanged, metrics, onHandedToChat,
 }: ArtifactsAsideProps) {
   const pt = lang === 'pt'
   const isMobile = useIsMobile()
@@ -1331,7 +1336,7 @@ export function ArtifactsAside({
               <ChatSearchTab
                 sessionId={sessionId} lang={lang}
                 {...(session?.harness ? { harness: session.harness } : {})}
-                {...(isMobile ? { onHandedToChat: onClose } : {})}
+                {...(isMobile ? { onHandedToChat: onHandedToChat ?? onClose } : {})}
               />
             )
             : tab === 'metrics' ? <Note icon={<BarChart3 size={16} />} text={pt

@@ -53,6 +53,12 @@ describe('excerptAround', () => {
     expect(mark(excerpt, highlights)).toEqual(['ALVO'])
   })
 
+  it('a message that fits is shown whole, even when its match sits past the lead', () => {
+    const text = 'De nada! Se quiser, posso documentar a função de migração no README.'
+    const { excerpt } = excerptAround(text, findMatches(text, foldQuery('migracao')))
+    expect(excerpt).toBe(text)
+  })
+
   it('a match at the very start keeps the start uncut', () => {
     const text = 'Deploy feito com sucesso.'
     const { excerpt, highlights } = excerptAround(text, findMatches(text, foldQuery('deploy')))
