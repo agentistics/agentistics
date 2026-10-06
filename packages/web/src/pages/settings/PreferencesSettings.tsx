@@ -3,7 +3,7 @@ import { useOutletContext } from 'react-router-dom'
 import { GripVertical, RotateCcw, Save } from 'lucide-react'
 import type { Lang, Theme } from '@agentistics/core'
 import type { AppContext, PrefsDraft } from '../../lib/app-context'
-import { SectionHeader, Divider, TabSelect, PrefRow, Toggle } from './primitives'
+import { SectionHeader, Divider, TabSelect, PrefRow, Toggle, Checkbox } from './primitives'
 import { DEFAULT_CARD_ORDER, type CardId } from '../../lib/cardOrder'
 
 /** One label per `CardId`. Typed as the Record so the build fails if a card is added and this is
@@ -58,6 +58,13 @@ export default function PreferencesSettings() {
   const [savingDeleteText, setSavingDeleteText] = useState(false)
   const [includeDeleted, setIncludeDeleted] = useState<boolean | null>(null)
   const [savingIncludeDeleted, setSavingIncludeDeleted] = useState(false)
+  const [telemetryEnabled, setTelemetryEnabled] = useState(true)
+  const [savingTelemetry, setSavingTelemetry] = useState(false)
+  useEffect(() => { void fetch('/api/preferences').then(r => r.ok ? r.json() : null).then(p => { if (p) setTelemetryEnabled(p.telemetryEnabled !== false) }).catch(() => {}) }, [])
+  async function toggleTelemetry(value: boolean) {
+    setSavingTelemetry(true); setTelemetryEnabled(value)
+    try { const r = await fetch('/api/preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telemetryEnabled: value, telemetryNoticeDismissed: true }) }); if (!r.ok) throw new Error() } catch { setTelemetryEnabled(!value) } finally { setSavingTelemetry(false) }
+  }
   useEffect(() => {
     if (!isOwnerOnCentral) return
     void fetch('/api/team/config')
@@ -196,6 +203,14 @@ export default function PreferencesSettings() {
       )}
 
       {/*  Display  */}
+      <SectionHeader label={pt ? 'Privacidade' : 'Privacy'} />
+      <PrefRow
+        label={pt ? 'Enviar um sinal anônimo de uso' : 'Send an anonymous usage signal'}
+        sub={pt ? 'Enviar um número aleatório, a versão e o sistema uma vez por dia, para sabermos quantas pessoas usam o Agentistics. Nada do seu trabalho é enviado.' : 'Send a random number, the version, and the system once a day, so we can know how many people use Agentistics. None of your work is sent.'}
+      >
+        <span style={{ opacity: savingTelemetry ? 0.6 : 1 }}><Checkbox checked={telemetryEnabled} onChange={toggleTelemetry} label={pt ? 'Enviar sinal anônimo' : 'Send anonymous signal'} disabled={savingTelemetry} /></span>
+      </PrefRow>
+      <Divider />
       <SectionHeader label={pt ? 'Exibição' : 'Display'} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
