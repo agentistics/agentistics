@@ -206,7 +206,11 @@ const CODEX: HarnessTranscript = {
   async read(path, max) {
     let content: string
     try { content = await readFile(path, 'utf-8') } catch { return { turns: [], older: false } }
-    return windowed(parseCodexChat(content.split('\n'), 'codex', max + 1), max)
+    const lines = content.split('\n')
+    const meta = lines.map(line => { try { return JSON.parse(line) as any } catch { return null } })
+      .find(e => e?.type === 'session_meta')
+    const cwd = typeof meta?.payload?.cwd === 'string' ? meta.payload.cwd : undefined
+    return windowed(parseCodexChat(lines, 'codex', max + 1, cwd), max)
   },
   async readRecent(path, max) {
     return readTailWindow(path, max, lines => parseCodexChat(lines, 'codex', max))

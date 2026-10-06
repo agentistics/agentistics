@@ -13,6 +13,8 @@ function user(text: string, at?: string): GalleryTurn {
   return at ? { role: 'user', text, at } : { role: 'user', text }
 }
 
+const read = (path: string) => ({ tools: [{ name: 'Read', detail: path }] })
+
 describe('galleryGroups', () => {
   it('groups the files of one message together, keeping the words', () => {
     const groups = galleryGroups([
@@ -176,8 +178,6 @@ describe('what the SESSION produced', () => {
 })
 
 describe('viewedGroups — images the session opened with Read, never sent or produced', () => {
-  const read = (path: string) => ({ tools: [{ name: 'Read', detail: path }] })
-
   it('lists an image the session Read, labelled as its own group', () => {
     const out = viewedGroups([read('/repo/screenshot.png')])
     expect(out).toHaveLength(1)
@@ -224,6 +224,21 @@ describe('viewedGroups — images the session opened with Read, never sent or pr
   })
 })
 
+describe('gallery side counts', () => {
+  it('does not count a user image merely read by the assistant as Assistant', () => {
+    const sent = galleryGroups([user(shot)])
+    const viewed = viewedGroups([read('/repo/inspected.png')])
+    expect(gallerySides([...sent, ...viewed])).toEqual({ user: 1, llm: 0 })
+    expect(filterGallery([...sent, ...viewed], 'llm')).toEqual([])
+  })
+
+  it('counts an assistant-produced image as Assistant', () => {
+    const groups = producedGroups([{ path: '/repo/shot.png', name: 'shot.png' }])
+    expect(gallerySides(groups)).toEqual({ user: 0, llm: 1 })
+    expect(filterGallery(groups, 'llm')).toEqual(groups)
+  })
+})
+
 describe('the two sides of the gallery', () => {
   const sent = { path: '/a/x.png', name: 'x.png', kind: 'image' as const, format: 'PNG', origin: 'sent' as const }
   const made = { path: '/b/y.png', name: 'y.png', kind: 'image' as const, format: 'PNG', origin: 'produced' as const }
@@ -242,11 +257,11 @@ describe('the two sides of the gallery', () => {
       .toEqual({ user: 1, llm: 0 })
   })
 
-  it('a VIEWED file sits on the assistant’s side too — nobody sent it', () => {
+  it('a VIEWED file stays outside both side counts — it has its own section', () => {
     expect(gallerySides([...groups, { index: -1, text: '', files: [seen] }]))
-      .toEqual({ user: 1, llm: 2 })
+      .toEqual({ user: 1, llm: 1 })
     expect(filterGallery([...groups, { index: -1, text: '', files: [seen] }], 'llm').flatMap(g => g.files.map(f => f.origin)))
-      .toEqual(['produced', 'viewed'])
+      .toEqual(['produced'])
   })
 
   it('filters per FILE, and drops a group left with nothing', () => {

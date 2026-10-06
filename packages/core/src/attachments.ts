@@ -19,6 +19,9 @@
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif'])
 
 export function isImagePath(path: string): boolean {
+  // A filename copied from prose is not an attachment. In particular, Codex commonly uses
+  // `{uuid}-arquivo.jpg` as an example name in an answer; it is not a path to serve.
+  if (path.includes('{') || path.includes('}') || /^[a-z][a-z\d+.-]*:\/\//i.test(path)) return false
   const dot = path.lastIndexOf('.')
   if (dot < 0) return false
   return IMAGE_EXTENSIONS.has(path.slice(dot + 1).toLowerCase())
@@ -38,13 +41,17 @@ export interface SplitAttachments {
 
 export function splitImageAttachments(text: string): SplitAttachments {
   const images: string[] = []
-  const kept: string[] = []
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim()
-    if (looksLikeBarePath(trimmed) && isImagePath(trimmed)) images.push(trimmed)
-    else kept.push(line)
+  const lines = text.split('\n')
+  let i = 0
+  // Composer attachments are leading lines. Restricting this to the leading run also prevents a
+  // filename inside a fenced example (or later in ordinary prose) from becoming a thumbnail.
+  while (i < lines.length) {
+    const trimmed = lines[i]!.trim()
+    if (!looksLikeBarePath(trimmed) || !isImagePath(trimmed)) break
+    images.push(trimmed)
+    i++
   }
-  return { images, text: kept.join('\n').trim() }
+  return { images, text: lines.slice(i).join('\n').trim() }
 }
 
 /**

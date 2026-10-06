@@ -2336,6 +2336,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
             {(placedAttention.before.get(i) ?? []).map((m, k) => <AttentionMarkLine key={`am-${i}-${k}`} mark={m} pt={pt} />)}
             <ChatBubble
               turn={t}
+              sessionId={session.id}
               lang={lang}
               harness={session.harness}
               {...(payload?.attachmentSends ? { attachmentSends: payload.attachmentSends } : {})}
@@ -2375,6 +2376,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
             <ChatBubble
               key={`echo-${i}`}
               turn={{ role: 'user', text: q.text }}
+              sessionId={session.id}
               lang={lang}
               harness={session.harness}
               {...(payload?.attachmentSends ? { attachmentSends: payload.attachmentSends } : {})}
@@ -2422,7 +2424,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
           {/* A SOURCE's live text is the model's own stream — exact, unlike a screen read — so it
               is drawn as the bubble it will become (`chatSource.ts`). */}
           {(source?.liveText || source?.liveReasoning) && (
-            <ChatBubble turn={{ role: 'assistant', text: source.liveText ?? '', ...(source.liveReasoning ? { reasoning: source.liveReasoning } : {}) }} lang={lang} harness={session.harness} />
+            <ChatBubble turn={{ role: 'assistant', text: source.liveText ?? '', ...(source.liveReasoning ? { reasoning: source.liveReasoning } : {}) }} lang={lang} harness={session.harness} sessionId={session.id} />
           )}
 
           {showWorking && (
