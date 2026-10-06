@@ -862,22 +862,30 @@ export function monthlyCommitment(args: {
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface PlanAllocation {
-  /** C_h / A_h per harness. `null` where the plan cost is not computable. */
+  /** C_h / A_h over the whole scope; uncovered days contribute at their API price. */
   byHarness: Partial<Record<HarnessId, number | null>>
-  /** ΣC / ΣA, for surfaces whose rows are not per-harness. `null` when ΣA is 0. */
+  /** ΣC / ΣA over the whole scope, for legacy single-factor surfaces. */
   aggregateFactor: number | null
 }
 
 export function planAllocation(agg: AggregatePlanBasis): PlanAllocation {
   const byHarness: Partial<Record<HarnessId, number | null>> = {}
+  let totalPlan = 0
+  let totalApi = 0
   for (const [harness, basis] of Object.entries(agg.perHarness) as [HarnessId, PlanBasisResult][]) {
-    byHarness[harness] =
-      basis.coverage.computable && basis.apiCostUSD > 0 ? basis.planCostUSD / basis.apiCostUSD : null
+    const fallbackApi = (basis.coverage.excludedApiCostUSD ?? 0) + (basis.coverage.undatedApiCostUSD ?? 0)
+    const api = basis.apiCostUSD + fallbackApi
+    const plan = basis.planCostUSD + fallbackApi
+    byHarness[harness] = basis.coverage.computable && api > 0 ? plan / api : null
+    if (byHarness[harness] !== null && byHarness[harness] !== undefined) {
+      totalPlan += plan
+      totalApi += api
+    }
   }
   return {
     byHarness,
-    aggregateFactor: agg.coverage.computable && agg.apiCostUSD > 0
-      ? agg.planCostUSD / agg.apiCostUSD
+    aggregateFactor: agg.coverage.computable && totalApi > 0
+      ? totalPlan / totalApi
       : null,
   }
 }

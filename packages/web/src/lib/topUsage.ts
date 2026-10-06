@@ -12,6 +12,8 @@ export type TopDimension = 'harness' | 'model' | 'project' | 'repo' | 'user' | '
 export interface TopEntry {
   key: string
   cost: number
+  /** API cost split by harness, so plan basis can price each slice independently. */
+  costByHarness?: Record<string, number>
   tokens: number
   sessions: number
 }
@@ -21,6 +23,8 @@ export interface TopResult {
   /** Total across EVERY entry, not just the ones shown — the share of a podium place is only
    *  meaningful against the whole. */
   total: number
+  /** Cost split for the complete result, including entries outside the podium. */
+  costByHarness: Record<string, number>
   /** How many distinct entries existed before taking the top N. */
   distinct: number
 }
@@ -37,13 +41,14 @@ const tokensOf = (s: SessionMeta): number =>
  * and Gemini Flash), so the model dimension splits it per model rather than filing the entire
  * session under one label — otherwise the cheaper model inherits the expensive one's spend.
  */
-function contributions(s: SessionMeta, dim: TopDimension): Array<{ key: string; cost: number; tokens: number }> {
+function contributions(s: SessionMeta, dim: TopDimension): Array<{ key: string; cost: number; tokens: number; harness: string }> {
   if (dim === 'model') {
     const entries = sessionModelUsage(s)
     if (entries.length === 0) return []
     return entries.map(([model, usage]) => ({
       key: model,
       cost: calcCost(usage, model),
+      harness: s.harness ?? 'claude',
       tokens: usage.inputTokens + usage.outputTokens
         + usage.cacheReadInputTokens + usage.cacheCreationInputTokens,
     }))
@@ -57,7 +62,7 @@ function contributions(s: SessionMeta, dim: TopDimension): Array<{ key: string; 
     : (s.memberId ?? '')
 
   if (!key) return []
-  return [{ key, cost: sessionCostUSD(s) ?? 0, tokens: tokensOf(s) }]
+  return [{ key, cost: sessionCostUSD(s) ?? 0, tokens: tokensOf(s), harness: s.harness ?? 'claude' }]
 }
 
 /**
@@ -73,8 +78,10 @@ export function rankTop(
   const acc = new Map<string, TopEntry>()
   for (const s of sessions) {
     for (const c of contributions(s, dim)) {
-      const e = acc.get(c.key) ?? { key: c.key, cost: 0, tokens: 0, sessions: 0 }
+      const e = acc.get(c.key) ?? { key: c.key, cost: 0, costByHarness: {}, tokens: 0, sessions: 0 }
       e.cost += c.cost
+      const byHarness = (e.costByHarness ??= {})
+      byHarness[c.harness] = (byHarness[c.harness] ?? 0) + c.cost
       e.tokens += c.tokens
       // A session spanning two models counts once for each: the question is how many sessions
       // touched that model, and a session that used both really did touch both.
@@ -91,9 +98,14 @@ export function rankTop(
     || b.tokens - a.tokens
     || a.key.localeCompare(b.key))
 
+  const costByHarness: Record<string, number> = {}
+  for (const e of all) for (const [h, cost] of Object.entries(e.costByHarness ?? {})) {
+    costByHarness[h] = (costByHarness[h] ?? 0) + cost
+  }
   return {
     entries: all.slice(0, limit),
     total: all.reduce((sum, e) => sum + value(e), 0),
+    costByHarness,
     distinct: all.length,
   }
 }
@@ -133,7 +145,7 @@ function entryFromCache(key: string, c: StatsCache): TopEntry {
       + (u.cacheReadInputTokens ?? 0) + (u.cacheCreationInputTokens ?? 0)
   }
   const sessions = (c.dailyActivity ?? []).reduce((s, d) => s + (d.sessionCount ?? 0), 0)
-  return { key, cost, tokens, sessions }
+  return { key, cost, costByHarness: { claude: cost }, tokens, sessions }
 }
 
 /**
@@ -169,12 +181,16 @@ export function rankTopFromCaches(
       const c = caches[key]
       // A key with sessions but no cache still belongs on the podium — its sessions are all the
       // history there is, which is exactly the case for a member who only runs a non-Claude CLI.
-      e = c ? entryFromCache(key, c) : { key, cost: 0, tokens: 0, sessions: 0 }
+      e = c ? entryFromCache(key, c) : { key, cost: 0, costByHarness: {}, tokens: 0, sessions: 0 }
       acc.set(key, e)
       cachedDays.set(key, new Set((c?.dailyActivity ?? []).map(d => d.date)))
     }
     if ((s.harness ?? 'claude') !== 'claude') {
-      e.cost += sessionCostUSD(s) ?? 0
+      const cost = sessionCostUSD(s) ?? 0
+      e.cost += cost
+      const harness = s.harness ?? 'claude'
+      const byHarness = (e.costByHarness ??= {})
+      byHarness[harness] = (byHarness[harness] ?? 0) + cost
       e.tokens += tokensOf(s)
       e.sessions += 1
     } else if (s.start_time && !cachedDays.get(key)!.has(format(parseISO(s.start_time), 'yyyy-MM-dd'))) {
@@ -189,9 +205,14 @@ export function rankTopFromCaches(
     || b.cost - a.cost
     || b.tokens - a.tokens
     || a.key.localeCompare(b.key))
+  const costByHarness: Record<string, number> = {}
+  for (const e of all) for (const [h, cost] of Object.entries(e.costByHarness ?? {})) {
+    costByHarness[h] = (costByHarness[h] ?? 0) + cost
+  }
   return {
     entries: all.slice(0, limit),
     total: all.reduce((sum, e) => sum + value(e), 0),
+    costByHarness,
     distinct: all.length,
   }
 }
@@ -201,4 +222,15 @@ export function shareOf(entry: TopEntry, result: TopResult, metric: TopMetric): 
   if (result.total <= 0) return 0
   const v = metric === 'cost' ? entry.cost : metric === 'tokens' ? entry.tokens : entry.sessions
   return v / result.total
+}
+
+/** Cost of a row/result after each harness slice uses its own plan factor. */
+export function planCostOf(
+  costByHarness: Readonly<Record<string, number>> | undefined,
+  factors: Readonly<Record<string, number | null>> | null,
+): number {
+  return Object.entries(costByHarness ?? {}).reduce((sum, [harness, cost]) => {
+    const factor = factors?.[harness]
+    return sum + cost * (typeof factor === 'number' && Number.isFinite(factor) ? factor : 1)
+  }, 0)
 }

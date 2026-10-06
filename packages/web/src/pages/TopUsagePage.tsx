@@ -7,7 +7,7 @@ import { Section } from '../components/Section'
 import { MetricNote } from '../components/MetricNote'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../lib/harness'
 import { useIsMobile } from '../hooks/useIsMobile'
-import { rankTop, rankTopFromCaches, cacheTotalsUsable, shareOf, type TopDimension, type TopMetric, type TopEntry } from '../lib/topUsage'
+import { rankTop, rankTopFromCaches, cacheTotalsUsable, shareOf, planCostOf, type TopDimension, type TopMetric, type TopEntry } from '../lib/topUsage'
 import type { SurfaceHarnessId } from '@agentistics/core'
 
 const METRICS: Array<{ id: TopMetric; en: string; pt: string }> = [
@@ -79,16 +79,13 @@ export default function TopUsagePage() {
   const colourFor = (dim: TopDimension, key: string): string | null =>
     dim === 'harness' ? (HARNESS_COLORS[key as SurfaceHarnessId] ?? null) : null
 
-  // One factor for the whole page. The RANKING is unaffected — a linear rescale cannot reorder
-  // anything — so what changes is the magnitude, and the note below says these are shares of a
-  // plan rather than charges anyone received.
-  const topPlanFactor = (ctx.costBasis === 'plan' && ctx.planBasis.basis
-    ? planAllocation(ctx.planBasis.basis).aggregateFactor
-    : null) ?? 1
-  const topAllocated = topPlanFactor !== 1
+  const planFactors = ctx.costBasis === 'plan' && ctx.planBasis.basis
+    ? planAllocation(ctx.planBasis.basis).byHarness
+    : null
+  const topAllocated = !!planFactors && Object.values(planFactors).some(f => typeof f === 'number' && f !== 1)
 
   const valueLabel = (e: TopEntry): string =>
-    metric === "cost" ? fmtCost(e.cost * topPlanFactor, currency, brlRate)
+    metric === "cost" ? fmtCost(planFactors ? planCostOf(e.costByHarness, planFactors) : e.cost, currency, brlRate)
     : metric === 'tokens' ? `${fmt(e.tokens)} tok`
     : `${fmt(e.sessions)} ${e.sessions === 1 ? (pt ? 'sessão' : 'session') : (pt ? 'sessões' : 'sessions')}`
 
@@ -153,7 +150,7 @@ export default function TopUsagePage() {
           const result = cacheRank?.(dim.id) ?? rankTop(sessions, dim.id, metric)
           const Icon = dim.icon
           const totalLabel =
-            metric === "cost" ? fmtCost(result.total * topPlanFactor, currency, brlRate)
+            metric === "cost" ? fmtCost(planFactors ? planCostOf(result.costByHarness, planFactors) : result.total, currency, brlRate)
             : metric === 'tokens' ? `${fmt(result.total)} tok`
             : `${fmt(result.total)}`
           return (
