@@ -1,8 +1,9 @@
+import { AgentisticsLoader } from './AgentisticsLoader'
 import React, { useState, useEffect, useRef, useLayoutEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
-import { Loader, ChevronLeft, ChevronDown, ChevronUp } from 'lucide-react'
+import { ChevronLeft, ChevronDown, ChevronUp } from 'lucide-react'
 import type { HarnessId } from '@agentistics/core'
 import { HARNESS_LABELS, HARNESS_COLORS } from '../lib/harness'
 import { splitInlinedHistory } from '../lib/transcriptSplit'
@@ -388,7 +389,7 @@ export function HarnessChat({ harness, lang, initialProject, initialSessionId, o
   if (loading && view === 'projects' && projects.length === 0) {
     return (
       <div style={{ ...containerStyle, alignItems: 'center', justifyContent: 'center' }}>
-        <Loader size={16} style={{ animation: 'ttyChatSpin 1s linear infinite', color }} />
+        <AgentisticsLoader size={16} style={{ color }} />
       </div>
     )
   }
@@ -470,7 +471,7 @@ export function HarnessChat({ harness, lang, initialProject, initialSessionId, o
         <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}>
           {loading && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '30px 0' }}>
-              <Loader size={14} style={{ animation: 'ttyChatSpin 1s linear infinite', color }} />
+              <AgentisticsLoader size={14} style={{ color }} />
             </div>
           )}
           {!loading && sessions.length === 0 && (
@@ -543,7 +544,7 @@ export function HarnessChat({ harness, lang, initialProject, initialSessionId, o
         )}
         {loading && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-            <Loader size={14} style={{ animation: 'ttyChatSpin 1s linear infinite', color }} />
+            <AgentisticsLoader size={14} style={{ color }} />
           </div>
         )}
         {!loading && transcript.length === 0 && (

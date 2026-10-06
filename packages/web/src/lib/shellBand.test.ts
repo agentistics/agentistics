@@ -1,10 +1,21 @@
 import { describe, expect, it, test } from 'bun:test'
 import {
   BAND_FULLSCREEN_OVERSHOOT_PX, BAND_MIN_PX, BAND_SNAP_THRESHOLD_PX, DEFAULT_BAND_PREFS,
-  clampBandHeight, readBandPrefs, resolveBandDrag, resolveBandHeight, shellErrorText,
+  clampBandHeight, keepUsableColumnHeight, readBandPrefs, resolveBandDrag, resolveBandHeight, shellErrorText,
   wantsFullscreen, bandPanelFull, withBandPanelFull, seedBandOpen,
   bandGeometry, shellApiUrl, shellWatching, shellWhere, writeBandGeometry, writeBandPrefs, type BandPrefs,
 } from './shellBand'
+
+describe('keepUsableColumnHeight — transient hidden-window measurements', () => {
+  test('keeps the last real height when Chrome reports zero while the PWA is backgrounded', () => {
+    expect(keepUsableColumnHeight(900, 0)).toBe(900)
+  })
+
+  test('keeps the last real height for invalid measurements, but accepts a real positive resize', () => {
+    expect(keepUsableColumnHeight(900, Number.NaN)).toBe(900)
+    expect(keepUsableColumnHeight(900, 720)).toBe(720)
+  })
+})
 
 describe('the unwatch discipline', () => {
   const open = { bandOpen: true, sessionSelected: true, documentVisible: true }

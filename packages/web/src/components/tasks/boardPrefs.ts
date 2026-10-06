@@ -59,6 +59,8 @@ export interface BoardPrefs {
   subtaskColumns: SubtaskColumnId[] | null
   /** Saved widths of the delivery table's columns, by column id — only the ones the person dragged. */
   columnWidths: Record<string, number>
+  /** Saved widths of the subtask grid's columns, independent from the delivery table. */
+  subtaskColumnWidths: Record<string, number>
   /** Which status groups the table renders at all. `null` = every one of them. */
   groups: BoardStatus[] | null
   /** What the table's bands are: the status columns or the task type. Default `status`. */
@@ -78,7 +80,7 @@ export interface BoardPrefs {
 /** The metrics view is the default, because "what did it cost" is the question the board answers. */
 export const DEFAULT_PREFS: BoardPrefs = {
   view: 'overview', sort: { key: 'priority', dir: 'asc' }, columnSort: {}, lanes: 'none', wip: {},
-  columns: null, subtaskColumns: null, columnWidths: {}, groups: null, groupBy: 'status', typeGroups: null, collapsed: [], hideEmpty: false, composeSubtaskProgress: true, rail: {},
+  columns: null, subtaskColumns: null, columnWidths: {}, subtaskColumnWidths: {}, groups: null, groupBy: 'status', typeGroups: null, collapsed: [], hideEmpty: false, composeSubtaskProgress: true, rail: {},
 }
 
 /**
@@ -162,6 +164,10 @@ export function parseBoardPrefs(raw: unknown): BoardPrefs {
     subtaskColumns: Array.isArray(p.subtaskColumns) ? (p.subtaskColumns as SubtaskColumnId[]) : null,
     columnWidths: p.columnWidths && typeof p.columnWidths === 'object' && !Array.isArray(p.columnWidths)
       ? Object.fromEntries(Object.entries(p.columnWidths as Record<string, unknown>)
+        .filter(([, n]) => typeof n === 'number' && Number.isFinite(n) && n > 0)) as Record<string, number>
+      : {},
+    subtaskColumnWidths: p.subtaskColumnWidths && typeof p.subtaskColumnWidths === 'object' && !Array.isArray(p.subtaskColumnWidths)
+      ? Object.fromEntries(Object.entries(p.subtaskColumnWidths as Record<string, unknown>)
         .filter(([, n]) => typeof n === 'number' && Number.isFinite(n) && n > 0)) as Record<string, number>
       : {},
     groups: statuses(p.groups),

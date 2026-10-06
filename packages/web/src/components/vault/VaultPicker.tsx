@@ -1,3 +1,4 @@
+import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 /**
  * The `:vault` picker (VAULT.PERSONAL §8.5): choose credentials and/or whole groups to hand to THIS
  * session's agent. Metadata only — no value is ever fetched here. A locked vault runs the unlock first
@@ -6,7 +7,7 @@
  * itself asks for the code at send time.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Folder, KeyRound, Loader2 } from 'lucide-react'
+import { Folder, KeyRound } from 'lucide-react'
 import { Err, card, input, overlay } from '../MfaSetup'
 import { codeComplete, loadVault, stepUp } from '../../lib/vaultApi'
 import { CodeField } from './VaultUnlock'
@@ -63,7 +64,7 @@ function CodeInput({ lang, isMobile, onCode, error, onCancel }: { lang: Lang; is
       {error && <Err text={error} />}
       <DialogActions>
         {onCancel && <button type="button" onClick={onCancel} style={dialogButtonStyle('secondary', isMobile)}>{t('cancel', lang)}</button>}
-        <button type="submit" disabled={!ok} style={dialogButtonStyle('primary', isMobile, !ok)}>{busy && <Loader2 size={14} className="ag-spin" />} {t('confirmCode', lang)}</button>
+        <button type="submit" disabled={!ok} style={dialogButtonStyle('primary', isMobile, !ok)}>{busy && <AgentisticsLoader size={14} />} {t('confirmCode', lang)}</button>
       </DialogActions>
     </form>
   )
@@ -103,7 +104,7 @@ export function VaultPicker({ lang, isMobile, initial, onConfirm, onClear, onClo
   return (
     <Shell isMobile={isMobile} title={t('title', lang)} onClose={onClose}>
       <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 10 }}>{t('intro', lang)}</div>
-      {phase === 'loading' && <Loader2 size={14} className="ag-spin" />}
+      {phase === 'loading' && <AgentisticsLoader size={14} />}
       {phase === 'failed' && <Err text={t('failed', lang)} />}
       {/* §10: the shared unlock — Hello + code on this computer, the phone's own ways on a phone. */}
       {phase === 'locked' && <VaultStage lang={lang} isMobile={isMobile} compact onOpened={() => { void load() }} />}

@@ -13,7 +13,7 @@
  */
 
 import type { CSSProperties, ReactNode } from 'react'
-import { ArrowDown, ArrowUp } from 'lucide-react'
+import { ArrowDown, ArrowUp, GripVertical } from 'lucide-react'
 import { ariaSortOf, type SortDir } from '@agentistics/core'
 import { useState } from 'react'
 import { microLabel } from './board'
@@ -92,14 +92,7 @@ export function SortTh<K extends string>({ label, sortKey, current, onSort, styl
       }}
       {...(dataCol ? { 'data-col': dataCol } : {})}
       {...(reorder ? {
-        draggable: true,
         'data-col-draggable': reorder.id,
-        onDragStart: (e: React.DragEvent) => {
-          e.dataTransfer.effectAllowed = 'move'
-          e.dataTransfer.setData(columnDragType(reorder.scope), reorder.id)
-          setDragging(true)
-        },
-        onDragEnd: () => { setDragging(false); setOver(false) },
         onDragOver: (e: React.DragEvent) => {
           if (!isColumnDrag(e.dataTransfer.types, reorder.scope)) return
           e.preventDefault()
@@ -129,6 +122,22 @@ export function SortTh<K extends string>({ label, sortKey, current, onSort, styl
           />
         )
         : label}
+      {reorder && (
+        <span
+          draggable
+          role="button"
+          aria-label="Drag to reorder column"
+          title="Drag to reorder column"
+          onDragStart={e => {
+            e.stopPropagation()
+            e.dataTransfer.effectAllowed = 'move'
+            e.dataTransfer.setData(columnDragType(reorder.scope), reorder.id)
+            setDragging(true)
+          }}
+          onDragEnd={() => { setDragging(false); setOver(false) }}
+          style={{ display: 'inline-flex', alignItems: 'center', marginLeft: 5, cursor: 'grab', color: 'var(--text-tertiary)' }}
+        ><GripVertical size={12} /></span>
+      )}
       {handle}
     </th>
   )

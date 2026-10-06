@@ -1,5 +1,6 @@
+import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, EyeOff, Loader2, Check, Bell } from 'lucide-react'
+import { ChevronDown, ChevronRight, EyeOff, Check, Bell } from 'lucide-react'
 import type { SessionMeta, TeamConnection, ModelUsage, ShareSource, SiblingRuleFact } from '@agentistics/core'
 import type { ArchiveMode } from '../ArchiveConsentModal'
 import type { ShareTarget, ProjectTarget } from '../../lib/shareRepos'
@@ -235,7 +236,7 @@ export function ConnectionCard({
         }}
       >
         {state === 'resyncing'
-          ? <Loader2 size={10} style={{ color: 'var(--anthropic-orange)', animation: 'spin 1s linear infinite', flexShrink: 0 }} />
+          ? <AgentisticsLoader size={10} style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
           : <StatusDot state={statusStyle.dot} />}
         <div style={{ minWidth: 0, flex: '1 1 auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
           {/* The card's subject is the CONNECTION, so its title is the central: the local nickname
@@ -425,7 +426,7 @@ export function ConnectionCard({
                 disabled={disableWrites}
                 style={mobileBtn(disableWrites, false, isMobile)}
               >
-                {syncing ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : null}
+                {syncing ? <AgentisticsLoader size={13} /> : null}
                 {COPY.syncNow[lang]}
               </button>
               <button
@@ -469,7 +470,6 @@ export function ConnectionCard({
         requireText={centralLabel}
         requireTextHint={interpolate(COPY.disconnectHint[lang], { central: centralLabel })}
       />
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }

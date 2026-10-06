@@ -1,3 +1,4 @@
+import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 /**
  * Backup settings — the web's window onto the SAME backup engine `agentop backup` and the
  * cockpit's `backup` tab drive. This page owns no decisions: every number and every verdict is
@@ -15,7 +16,7 @@ import { useOutletContext } from 'react-router-dom'
 // verbs. There is deliberately no `Github` here: lucide-react v1
 // — the version this repo installs — carries no brand icons, so the GitHub mark is the local
 // `GithubMark` SVG below rather than a new dependency for one glyph.
-import { PlayCircle, Loader2, AlertTriangle, CheckCircle2, Clock, ChevronLeft, ChevronRight, RotateCcw, Pencil, Trash2 } from 'lucide-react'
+import { PlayCircle, AlertTriangle, CheckCircle2, Clock, ChevronLeft, ChevronRight, RotateCcw, Pencil, Trash2 } from 'lucide-react'
 // @harness-adapters-only: a backup copies each ADAPTER's own directory; the native harness's store
 // rides the `metrics` layer under ~/.agentistics, so it has no harness row here.
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
@@ -992,7 +993,7 @@ export default function BackupSettings() {
               }}
             >
               {running
-                ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> {pt ? 'Executando…' : 'Running…'}</>
+                ? <><AgentisticsLoader size={15} /> {pt ? 'Executando…' : 'Running…'}</>
                 : <><PlayCircle size={15} /> {pt ? 'Fazer backup agora' : 'Run backup now'}</>}
             </button>
           </div>
@@ -2243,7 +2244,7 @@ function GithubTextField({
           }}
         >
           {saving
-            ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> {savingLabel}</>
+            ? <><AgentisticsLoader size={14} /> {savingLabel}</>
             : saveLabel}
         </button>
       </div>
@@ -2522,7 +2523,7 @@ function GithubConnectForm({
           }}
         >
           {busy
-            ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> {pt ? 'Conectando…' : 'Connecting…'}</>
+            ? <><AgentisticsLoader size={15} /> {pt ? 'Conectando…' : 'Connecting…'}</>
             : reconnect
               ? (pt ? 'Salvar repositório' : 'Save repository')
               : (pt ? 'Conectar repositório' : 'Connect repository')}
@@ -2729,7 +2730,7 @@ function RestoreSection({
         }}
       >
         {listingBusy
-          ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> {pt ? 'Procurando…' : 'Looking…'}</>
+          ? <><AgentisticsLoader size={15} /> {pt ? 'Procurando…' : 'Looking…'}</>
           : (pt ? 'Ver backups' : 'List backups')}
       </button>
 
@@ -3236,7 +3237,7 @@ function RestoreButton({ text, primary, danger, disabled, busy, icon, buttonRef,
       }}
     >
       {busy
-        ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }} />
+        ? <AgentisticsLoader size={14} style={{ flexShrink: 0 }} />
         : icon}
       {text}
     </button>
@@ -3265,7 +3266,7 @@ function RestoreJobBlock({ job, pt }: { job: RestoreJob; pt: boolean }) {
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
         {active
-          ? <Loader2 size={14} style={{ color: 'var(--anthropic-orange)', animation: 'spin 1s linear infinite', flexShrink: 0 }} />
+          ? <AgentisticsLoader size={14} style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
           : job.state === 'done'
             ? <CheckCircle2 size={14} style={{ color: 'var(--accent-green)', flexShrink: 0 }} />
             : <AlertTriangle size={14} style={{ color: '#ef4444', flexShrink: 0 }} />}
