@@ -16,6 +16,15 @@ const cand = (over: Partial<ProjectCandidate> = {}): ProjectCandidate => ({
 })
 
 describe('buildCandidates', () => {
+  it('deduplicates Windows and WSL spellings of one project', () => {
+    const rows = buildCandidates([
+      { project_path: String.raw`D:\code\repo`, start_time: '2026-01-01T00:00:00Z' },
+      { project_path: '/mnt/d/code/repo', start_time: '2026-01-02T00:00:00Z' },
+    ])
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.path).toBe(String.raw`D:\code\repo`)
+    expect(rows[0]?.sessions).toBe(2)
+  })
   it('folds many sessions of one directory into a single candidate', () => {
     const out = buildCandidates([
       { project_path: '/repo/a', start_time: '2026-08-01T10:00:00Z' },

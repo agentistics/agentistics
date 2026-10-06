@@ -78,6 +78,8 @@ export interface CustomGridItem {
 }
 
 export interface Preferences {
+  /** Additional filesystem roots offered by the session/project discovery wizard. */
+  scanRoots?: string[]
   /**
    * B6.2 (engine-api 1.7): the harnesses a native session's agents may start as sessions of their
    * own. Absent or empty: none — delegation to another harness is DENIED by default (superskill R2).
