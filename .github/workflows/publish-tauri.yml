@@ -99,7 +99,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p packages/desktop/binaries
-          gh release download "$TAG" --repo "${{ github.repository }}" --pattern agentop-windows-x64.exe --output packages/desktop/binaries/agentop.exe
+          gh release download "$TAG" --repo "${{ github.repository }}" --pattern agentop.exe --output packages/desktop/binaries/agentop.exe
           test -s packages/desktop/binaries/agentop.exe
 
       - name: Copy logo for loading screen
