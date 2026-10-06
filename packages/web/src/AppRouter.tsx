@@ -1,5 +1,6 @@
 import React, { lazy, Suspense } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { legacyVaultTarget } from './pages/vault/vaultTabs'
 import AppLayout from './App'
 
 const HomePage = lazy(() => import('./pages/HomePage'))
@@ -34,7 +35,6 @@ const InstallSettings = lazy(() => import('./pages/settings/InstallSettings'))
 const ConnectionSettings = lazy(() => import('./pages/settings/ConnectionSettings'))
 const LiveSettings = lazy(() => import('./pages/settings/LiveSettings'))
 const ChatSettings = lazy(() => import('./pages/settings/ChatSettings'))
-const VaultSettings = lazy(() => import('./pages/settings/VaultSettings'))
 const ProvidersSettings = lazy(() => import('./pages/settings/ProvidersSettings'))
 const MemorySettings = lazy(() => import('./pages/settings/MemorySettings'))
 const UsersSettings = lazy(() => import('./pages/settings/UsersSettings'))
@@ -115,7 +115,9 @@ export default function AppRouter() {
             <Route path="connection" element={<Suspense fallback={<PageFallback />}><ConnectionSettings /></Suspense>} />
             <Route path="live" element={<Suspense fallback={<PageFallback />}><LiveSettings /></Suspense>} />
             <Route path="chat" element={<Suspense fallback={<PageFallback />}><ChatSettings /></Suspense>} />
-            <Route path="vault" element={<Suspense fallback={<PageFallback />}><VaultSettings /></Suspense>} />
+            {/* VAULT v4 (2026-10-06): the vault has ONE page, `/vault`. The old Settings → Vault screen's
+                controls live in its tabs now; a bookmark or an old link lands on the tab that holds them. */}
+            <Route path="vault" element={<LegacyVaultRedirect />} />
             <Route path="providers" element={<Suspense fallback={<PageFallback />}><ProvidersSettings /></Suspense>} />
             <Route path="memory" element={<Suspense fallback={<PageFallback />}><MemorySettings /></Suspense>} />
             <Route path="users" element={<Suspense fallback={<PageFallback />}><UsersSettings /></Suspense>} />
@@ -127,4 +129,10 @@ export default function AppRouter() {
       </Routes>
     </BrowserRouter>
   )
+}
+
+/** `/settings/vault` (the old screen) → the `/vault` tab that holds its controls now. */
+function LegacyVaultRedirect() {
+  const loc = useLocation()
+  return <Navigate to={legacyVaultTarget(loc.search)} replace />
 }

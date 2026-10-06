@@ -4,7 +4,7 @@ import { VaultUnlock, CodeField } from './VaultUnlock'
 import { VaultSafe, SAFE_OPEN_MS, SAFE_WIDTH_DESKTOP, SAFE_WIDTH_MOBILE, type SafePhase } from './VaultSafe'
 import { VaultCodeClock } from './VaultCodeClock'
 import { refreshVaultWatch } from '../../lib/vaultWatch'
-import { codeComplete } from '../../lib/vaultApi'
+import { codeComplete, type UiAction } from '../../lib/vaultApi'
 import { Err } from '../MfaSetup'
 import { dialogButtonStyle } from '../../pages/settings/primitives'
 
@@ -34,8 +34,10 @@ function reducedMotion(): boolean {
  * called — the page shows its content after the door has swung. `fromOpen` is a vault that just locked:
  * it mounts open and closes, short. No animation under `prefers-reduced-motion`: `onOpened` is immediate.
  */
-export function VaultStage({ lang, isMobile, fromOpen, onOpened, compact }: {
+export function VaultStage({ lang, isMobile, fromOpen, onOpened, compact, onAction }: {
   lang: Lang; isMobile: boolean; fromOpen?: boolean; onOpened: () => void
+  /** v2.98.1: the page control a refusal points at (recover / enroll / disable presence). */
+  onAction?: (a: UiAction) => void
   /** Drawn inside a panel (the Nay dock's Cofre tab): a smaller safe, and no viewport-tall block. */
   compact?: boolean
 }) {
@@ -57,7 +59,7 @@ export function VaultStage({ lang, isMobile, fromOpen, onOpened, compact }: {
   const sub = opening ? w('openSub') : busy ? w('unlockingSub') : w('lockedSub')
   return (
     <StageFrame isMobile={isMobile} compact={compact} phase={phase} fromOpen={fromOpen} label={w('lockedTitle')} title={title} sub={sub}>
-      {!opening && <VaultUnlock lang={lang} isMobile={isMobile} center onOpened={opened} onBusy={setBusy} />}
+      {!opening && <VaultUnlock lang={lang} isMobile={isMobile} center onOpened={opened} onBusy={setBusy} {...(onAction ? { onAction } : {})} />}
       {!opening && !busy && <VaultCodeClock lang={lang} center style={{ marginTop: 12 }} />}
     </StageFrame>
   )
