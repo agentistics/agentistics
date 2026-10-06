@@ -13,6 +13,7 @@ import * as mobile from './mobile'
 import * as phone from './phone'
 import * as grants from './grants'
 import { vaultAudit, vaultLang } from './service'
+import { informationalSecure } from './request-origin'
 
 type Reply = (r: { ok: boolean } & Record<string, unknown>, extra?: Record<string, unknown>) => Response
 export interface PersonalHttpCtx { req: Request; path: string; url: URL; session: string; grant: string | null; loopback: boolean; reply: Reply; /** Review H2: the single-use proof from this page's own unlock reply. */ fresh?: string | null }
@@ -71,7 +72,7 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
   if (path === '/api/vault/personal/mobile' && req.method === 'GET') {
     const g = await step('personal-list', {})
     if (!g.ok) return reply(g)
-    return reply({ ok: true, ...(await mobile.mobileView()), loopback, secure: originMatchesRp(req.headers.get('origin') ?? `${c.url.protocol}//${c.url.host}`, c.url.hostname), ...withGrant(g) })
+    return reply({ ok: true, ...(await mobile.mobileView()), loopback, secure: informationalSecure(req, c.url), ...withGrant(g) })
   }
   if (path === '/api/vault/personal/grants' && req.method === 'GET') {
     const g = await step('personal-list', {})
