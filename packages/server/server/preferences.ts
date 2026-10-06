@@ -78,6 +78,10 @@ export interface CustomGridItem {
 }
 
 export interface Preferences {
+  /** Anonymous daily usage signal. Absent means on by default. */
+  telemetryEnabled?: boolean
+  /** The first-use notice was dismissed in this server-owned preference store. */
+  telemetryNoticeDismissed?: boolean
   /**
    * B6.2 (engine-api 1.7): the harnesses a native session's agents may start as sessions of their
    * own. Absent or empty: none — delegation to another harness is DENIED by default (superskill R2).

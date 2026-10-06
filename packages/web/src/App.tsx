@@ -2703,7 +2703,7 @@ export default function AppLayout() {
     // only a real 200 response with no archiveMode may set it. On failure we retry with
     // backoff and leave state at `undefined` (neutral loading bg) so nothing false-gates.
     let cancelled = false
-    const apply = (prefs: { cardPrecision?: Record<string, boolean>; lang?: Lang; theme?: Theme; currency?: 'USD' | 'BRL'; textScale?: number; cardOrder?: string[]; monthlyBudgetUSD?: number | null; chatModel?: string; chatSoundEnabled?: boolean; editorAutosave?: boolean; archiveMode?: ArchiveMode; archiveSessions?: boolean; installDismissed?: boolean; team?: TeamConfig; billing?: unknown }) => {
+    const apply = (prefs: { cardPrecision?: Record<string, boolean>; lang?: Lang; theme?: Theme; currency?: 'USD' | 'BRL'; textScale?: number; cardOrder?: string[]; monthlyBudgetUSD?: number | null; chatModel?: string; chatSoundEnabled?: boolean; editorAutosave?: boolean; archiveMode?: ArchiveMode; archiveSessions?: boolean; installDismissed?: boolean; telemetryEnabled?: boolean; telemetryNoticeDismissed?: boolean; team?: TeamConfig; billing?: unknown }) => {
       if (prefs.cardPrecision) setCardPrecisionState(prefs.cardPrecision)
       // Total and never throws: a hand-edited preferences.json must not blank the dashboard.
       const nextBilling = normalizeBillingSettings(prefs.billing)
@@ -2741,6 +2741,12 @@ export default function AppLayout() {
       // Task 13 — the hidden-repo badge map, rebuilt from the same load (readTeamConnections
       // tolerates a missing/malformed `connections` array instead of `.map`-ing `undefined`).
       setDeniedRepoLabels(buildDeniedRepoLabels(readTeamConnections(prefs)))
+      if (!isCentral && prefs.telemetryNoticeDismissed !== true) {
+        pushNotification({ type: 'info', code: 'telemetry.first_use' })
+        // Mark it at emission time: an auto-dismiss, reload, or notification-history clear must not
+        // turn the first-use notice into a recurring prompt.
+        void fetch('/api/preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telemetryNoticeDismissed: true }) }).catch(() => {})
+      }
     }
     const load = async (attempt = 0) => {
       try {
