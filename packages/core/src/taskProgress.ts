@@ -15,29 +15,48 @@
 export interface TaskProgress {
   done: number
   total: number
+  /** Counts keyed by the board's status ids. */
+  counts: Record<string, number>
   inProgress?: number
   /** 0–100, rounded DOWN. `null` when there is nothing to be a fraction OF. */
   percent: number | null
   /** Widths for the composed bar, rounded DOWN and capped to the available total. */
   donePercent?: number | null
   inProgressPercent?: number | null
+  blocked?: number
+  blockedPercent?: number | null
   /** Every subtask closed, and there is at least one. */
   complete: boolean
 }
 
-export function taskProgress(done: number, total: number, inProgress = 0): TaskProgress {
+export function taskProgress(done: number, total: number, inProgress = 0, blocked = 0, statusCounts?: Readonly<Record<string, number>>): TaskProgress {
   const composed = arguments.length >= 3
   // A task with no subtasks has no progress — not 0%. "Nobody broke this up" and "nothing is done
   // yet" are different facts, and a 0% bar on every unbroken task would make the bar meaningless.
   if (total <= 0) return composed
-    ? { done: 0, total: 0, inProgress: 0, percent: null, donePercent: null, inProgressPercent: null, complete: false }
-    : { done: 0, total: 0, percent: null, complete: false }
-  const capped = Math.max(0, Math.min(done, total))
-  const active = Math.max(0, Math.min(inProgress, total - capped))
+    ? { done: 0, total: 0, counts: {}, inProgress: 0, blocked: 0, percent: null, donePercent: null, inProgressPercent: null, blockedPercent: null, complete: false }
+    : { done: 0, total: 0, counts: {}, percent: null, complete: false }
+  const raw = statusCounts ?? { done, in_progress: inProgress, blocked }
+  const counts: Record<string, number> = {}
+  let remaining = total
+  for (const [id, value] of Object.entries(raw)) {
+    const count = Math.max(0, Math.min(Math.floor(value || 0), remaining))
+    if (count > 0) counts[id] = count
+    remaining -= count
+  }
+  const capped = counts.done ?? 0
+  const active = counts.in_progress ?? 0
+  const blockedCount = counts.blocked ?? 0
   const percent = Math.floor((capped / total) * 100)
   return composed
-    ? { done: capped, total, inProgress: active, percent, donePercent: percent, inProgressPercent: Math.floor((active / total) * 100), complete: capped === total }
-    : { done: capped, total, percent, complete: capped === total }
+    ? {
+      done: capped, total, counts, inProgress: active, blocked: blockedCount, percent,
+      donePercent: percent,
+      inProgressPercent: Math.floor((active / total) * 100),
+      blockedPercent: Math.floor((blockedCount / total) * 100),
+      complete: capped === total,
+    }
+    : { done: capped, total, counts, percent, complete: capped === total }
 }
 
 /**
@@ -51,6 +70,11 @@ export function taskProgress(done: number, total: number, inProgress = 0): TaskP
  * server/web boundary: a server route holding real `Subtask` records and a future UI holding the
  * wire's mirror type can both pass `members.map(m => m.done)` through the one rule.
  */
-export function groupProgress(memberDone: readonly boolean[]): TaskProgress {
-  return taskProgress(memberDone.filter(Boolean).length, memberDone.length)
+export function groupProgress(memberStatuses: readonly (boolean | string)[]): TaskProgress {
+  const counts: Record<string, number> = {}
+  for (const status of memberStatuses) {
+    const id = typeof status === 'boolean' ? (status ? 'done' : 'todo') : status
+    counts[id] = (counts[id] ?? 0) + 1
+  }
+  return taskProgress(counts.done ?? 0, memberStatuses.length, 0, 0, counts)
 }

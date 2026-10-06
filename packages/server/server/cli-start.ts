@@ -159,6 +159,7 @@ import { needsChoice, parseDialogOptions, readDialog } from './sessions/dialog-c
 import { answerFollowUp } from './sessions/answer-followup'
 import { liveTranscriptDeps, runTranscriptSearch } from './sessions/transcript-run'
 import { rulesFor } from './sessions/attention-rules'
+import { codexIsBlockingFrame } from './sessions/codex-send'
 import { planCrashGroup, planFellOffer } from './sessions/crash-group'
 import { selectFell } from './sessions/fell-selection'
 import {
@@ -169,7 +170,7 @@ import { controlStrings } from '@agentistics/tui/control/i18n'
 import { loadHarnessSessions } from './sessions/harness-sessions'
 import { readProcessConversation, readSpawnWindowConversation, resolveProcessLog } from './sessions/process-conversation'
 import { agyLogCollisions } from './sessions/agy-conversation'
-import { idleServers, isServerCommand } from './idle-servers'
+import { extraServers, isServerCommand } from './idle-servers'
 import { planTaskDelete, taskDeleteIsNoop } from './sessions/task-delete'
 import { readSpawnBudget } from './sessions/memory-probe'
 // The lock on the door: one conversation, one live session. See `conversation-claim.ts` for the
@@ -918,8 +919,9 @@ async function nativeServerFacts(): Promise<ProcessFacts> {
  * invisible to `nativeServerFacts` by construction while it burns a core on the file watcher. This
  * asks the process table instead and subtracts the listener and ourselves.
  *
- * Empty on any failure, including a platform with no `ps`: an unreadable process table is "cannot
- * tell", and a warning invented out of one would appear on machines nobody could ask.
+ * The lock and `/api/version` answer are the identity proof. lsof/ss is only a supplementary hint
+ * when the lock holder does not answer; an empty owner result is therefore not a reason to accuse
+ * the lock holder (the WSL shape that prompted QUAL.2).
  */
 async function idleServerPids(): Promise<number[]> {
   try {
@@ -927,10 +929,34 @@ async function idleServerPids(): Promise<number[]> {
     const processes = ps.out.split('\n')
       .map(line => /^\s*(\d+)\s+(.*)$/.exec(line.trim()))
       .filter((m): m is RegExpExecArray => m !== null)
-      .map(m => ({ pid: Number(m[1]), command: m[2]! }))
+      .map(m => {
+        const pid = Number(m[1])
+        // ps can truncate or rewrite argv. `/proc/<pid>/cmdline` is the process identity we trust.
+        let command = m[2]!
+        try {
+          const raw = readFileSync(`/proc/${pid}/cmdline`, 'utf8')
+          if (raw) command = raw.split('\0').filter(Boolean).join(' ')
+        } catch { /* process exited or /proc is unavailable */ }
+        return { pid, command }
+      })
       .filter(p => isServerCommand(p.command))
-    const listening = (await listeningServerPids()).map(Number).filter(n => Number.isInteger(n) && n > 0)
-    return idleServers({ processes, listening, self: process.pid }).idle.map(p => p.pid)
+    const lockHolder = await probeInstanceLock(serverLockFile()).catch(() => null)
+    if (lockHolder === null) return []
+
+    // A response is the only proof that a process serves. A refused request is a known-empty
+    // answer; a namespace/permission failure is unknown and must suppress the warning.
+    let servingKnown = false
+    let lockAnswers = false
+    try {
+      const response = await fetch(`http://127.0.0.1:${PORT}/api/version`, { signal: AbortSignal.timeout(1_500) })
+      servingKnown = true
+      lockAnswers = response.ok && typeof (await response.json().catch(() => null) as { current?: unknown } | null)?.current === 'string'
+    } catch { /* cannot tell whether another namespace owns the port */ }
+    if (!servingKnown) return []
+
+    const owners = (await listeningServerPids()).map(Number).filter(n => Number.isInteger(n) && n > 0)
+    const serving = lockAnswers ? [lockHolder] : owners
+    return extraServers({ processes, lockHolder, serving, servingKnown: true, self: process.pid }).map(p => p.pid)
   } catch {
     return []
   }
@@ -4237,11 +4263,16 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
 
       const frame = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
       const rules = rulesFor(managed.harness)
-      if (rules && rules.approval.some(re => re.test(frame.join('\n')))) {
+      if (managed.harness === 'codex' && codexIsBlockingFrame(frame)) {
+        return { ok: false, message: s.sessCodexBlocked }
+      }
+      if (managed.harness !== 'codex' && rules && rules.approval.some(re => re.test(frame.join('\n')))) {
         return { ok: false, message: s.sessPromptBlocked }
       }
 
-      return (await backend.sendText(id, body))
+      return (await (managed.harness === 'codex' && backend.sendTextReliable
+        ? backend.sendTextReliable(id, body, managed.harness)
+        : backend.sendText(id, body)))
         ? { ok: true, message: s.sessPrompted(id) }
         : { ok: false, message: s.sessSendFailed(id) }
     },

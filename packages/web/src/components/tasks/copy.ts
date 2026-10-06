@@ -218,6 +218,7 @@ export interface BoardCopy {
     start: string
     due: string
     done: string
+    type: string
     noDue: string
     noLinks: string
     noBlockers: string
@@ -475,6 +476,7 @@ const EN: BoardCopy = {
     start: 'Start {date}',
     due: 'Due {date}',
     done: 'Done {date}',
+    type: 'Type',
     noDue: 'Due —',
     noLinks: 'No PR or document linked.',
     noBlockers: 'Nothing is blocking this.',
@@ -488,7 +490,6 @@ const EN: BoardCopy = {
   },
   subtaskColumns: {
     id: 'ID',
-    progress: 'Progress',
     status: 'Status',
     started: 'Started',
     completed: 'Completed',
@@ -747,6 +748,7 @@ const PT: BoardCopy = {
     start: 'Início {date}',
     due: 'Prazo {date}',
     done: 'Concluída {date}',
+    type: 'Tipo',
     noDue: 'Prazo —',
     noLinks: 'Nenhum PR ou documento ligado.',
     noBlockers: 'Nada está bloqueando esta tarefa.',
@@ -760,7 +762,6 @@ const PT: BoardCopy = {
   },
   subtaskColumns: {
     id: 'ID',
-    progress: 'Progresso',
     status: 'Status',
     started: 'Início',
     completed: 'Concluída',

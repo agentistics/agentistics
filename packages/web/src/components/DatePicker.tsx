@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, type CSSProperties } from 'react'
 import { ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react'
 import {
   format, parseISO, startOfMonth, addDays, getDay, getDaysInMonth,
@@ -19,11 +19,12 @@ interface DatePickerProps {
   stuck?: boolean
   lang: Lang
   align?: 'left' | 'right'
+  labelStyle?: CSSProperties
 }
 
 export function DatePicker({
   value, onChange, label, placeholder, max, min,
-  rangeStart, rangeEnd, stuck, lang, align = 'left',
+  rangeStart, rangeEnd, stuck, lang, align = 'left', labelStyle,
 }: DatePickerProps) {
   const [open, setOpen] = useState(false)
   const [triggerHovered, setTriggerHovered] = useState(false)
@@ -134,6 +135,7 @@ export function DatePicker({
           textTransform: 'uppercase',
           color: hasValue ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
           opacity: hasValue ? 1 : 0.7,
+          ...labelStyle,
         }}>
           {label}
         </span>

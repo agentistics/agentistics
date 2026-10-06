@@ -271,6 +271,10 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Sessão encerrada', message: '{name} ({harness}) foi encerrada.' },
     en: { title: 'Session closed', message: '{name} ({harness}) was closed.' },
   },
+  'session.muted': {
+    pt: { title: 'Sessão silenciada', message: 'As notificações desta sessão foram desativadas.' },
+    en: { title: 'Session muted', message: 'Notifications for this session are now off.' },
+  },
   // A staged session fired from the task TABLE started, but its filing under the subtask was
   // refused because the subtask is blocked. The session runs either way; this says where it is NOT.
   'tasks.fire_filing_blocked': {

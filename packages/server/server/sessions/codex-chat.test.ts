@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, beforeAll, afterAll } from 'bun:test'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { parseCodexChat, reasoningText, shellCommandOf, toolDetailOf } from './codex-chat'
 
 /**
@@ -48,6 +51,34 @@ describe('the pieces', () => {
 })
 
 describe('parseCodexChat', () => {
+  let imageDir: string
+  beforeAll(async () => {
+    imageDir = await mkdtemp(join(tmpdir(), 'codex-chat-image-'))
+    await writeFile(join(imageDir, 'attached.png'), 'not really an image, but it is a real file')
+  })
+  afterAll(async () => { await rm(imageDir, { recursive: true, force: true }) })
+
+  it('turns a real local_image rollout item into a user attachment', () => {
+    const turns = parseCodexChat([line({
+      type: 'message', role: 'user', content: [
+        { type: 'local_image', path: 'attached.png' },
+        { type: 'input_text', text: 'look at this' },
+      ],
+    })], 'codex', 400, imageDir)
+    expect(turns[0]).toMatchObject({
+      role: 'user', imagePaths: [join(imageDir, 'attached.png')],
+    })
+  })
+
+  it('maps a view_image call to the real file behind its input_image result', () => {
+    const turns = parseCodexChat([
+      msg('assistant', 'Here is what I saw.'),
+      call('view_image', { path: join(imageDir, 'attached.png') }),
+      line({ type: 'function_call_output', call_id: 'view', output: [{ type: 'input_image', image_url: 'data:image/png;base64,AA==' }] }),
+    ])
+    expect(turns[0]).toMatchObject({ imagePaths: [join(imageDir, 'attached.png')] })
+  })
+
   it('reads the person and the assistant, oldest first', () => {
     expect(parseCodexChat([msg('user', 'Salve'), msg('assistant', 'Salve.')])).toEqual([
       { role: 'user', text: 'Salve', at: AT },

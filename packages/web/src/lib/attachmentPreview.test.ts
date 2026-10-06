@@ -43,6 +43,12 @@ describe('splitImageAttachments', () => {
     expect(out.images).toEqual([])
     expect(out.text).toBe('/a/notes.txt\nhere it is')
   })
+
+  test('does not turn examples, code blocks, or later prose into attachments', () => {
+    const out = splitImageAttachments('```\n{uuid}-arquivo.jpg\n```\nsee /tmp/real.png')
+    expect(out.images).toEqual([])
+    expect(out.text).toContain('{uuid}-arquivo.jpg')
+  })
 })
 
 describe('splitImageMarkers', () => {

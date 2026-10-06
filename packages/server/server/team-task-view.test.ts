@@ -70,7 +70,7 @@ describe('centralTaskRow', () => {
         ],
       }),
     }), metasOf(meta()), () => 1)
-    expect(row.counts).toEqual({ comments: 1, subtasks: 2, subtasksDone: 1, files: 0 })
+    expect(row.counts).toEqual({ comments: 1, subtasks: 2, subtasksDone: 1, subtasksByStatus: { done: 1, todo: 1 }, files: 0 })
   })
 })
 

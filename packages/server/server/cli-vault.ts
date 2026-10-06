@@ -334,8 +334,8 @@ async function cmdSetupCode(): Promise<number> {
   if (!r.ok || typeof r.code !== 'string') return said(r)
   const mins = Math.max(1, Math.ceil(Number(r.expiresInMs ?? 0) / 60_000))
   process.stdout.write(t(
-    `Setup code: ${r.code.slice(0, 4)} ${r.code.slice(4)}\nType it in Settings → Vault. It works once, for ${mins} minutes.\n`,
-    `Código de configuração: ${r.code.slice(0, 4)} ${r.code.slice(4)}\nDigite-o em Configurações → Cofre. Vale uma vez, por ${mins} minutos.\n`))
+    `Setup code: ${r.code.slice(0, 4)} ${r.code.slice(4)}\nType it on the Vault page (Unlock methods). It works once, for ${mins} minutes.\n`,
+    `Código de configuração: ${r.code.slice(0, 4)} ${r.code.slice(4)}\nDigite-o na página Cofre (Métodos de desbloqueio). Vale uma vez, por ${mins} minutos.\n`))
   return 0
 }
 

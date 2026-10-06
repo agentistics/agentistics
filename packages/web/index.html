@@ -9,7 +9,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Agentistics" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="theme-color" content="#FD8924" />
+    <meta name="theme-color" content="#0a0a0f" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>Agentistics</title>
     <!-- Inter is self-hosted (see src/index.css @font-face + public/fonts). No external
@@ -19,14 +19,14 @@
          (or the UA's default light/blue chrome) before React ever mounts. These inline rules paint
          the app's own dark ground on the very first frame and show a boot loader in #root, so the
          opening is the app loading rather than a silent screen. It is CSP-safe (only inline <style>,
-         which `style-src 'self' 'unsafe-inline'` allows — no inline <script>), and it removes itself
-         with no JS: React's createRoot fills #root, and `#root:not(:empty) ~ #ag-preboot` then hides
-         the loader the instant real content commits. -->
+         which `style-src 'self' 'unsafe-inline'` allows — no inline <script>). React removes the
+         hand-off copy after its first committed paint. -->
     <style>
       html, body { margin: 0; background: #0a0a0f; color-scheme: dark; }
       #ag-preboot {
         position: fixed; inset: 0; z-index: 2147483647;
-        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+        display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+        padding-top: calc(50vh - 44px); box-sizing: border-box; gap: 16px;
         background: #0a0a0f;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
       }
@@ -38,9 +38,9 @@
         0%, 100% { transform: scale(.94); opacity: .55; }
         50%      { transform: scale(1);   opacity: 1;   }
       }
-      /* The moment React commits any content into #root it stops being :empty, and the following
-         sibling loader is hidden. `:not(:empty)` + `~` are universally supported — no `:has` needed. */
-      #root:not(:empty) ~ #ag-preboot { display: none; }
+      /* React removes this only after its first paint. Keeping the exact same 56px mark in place
+         for that hand-off prevents the browser's blank frame and avoids a second loader jump. */
+      #ag-preboot.ag-preboot-ready { opacity: 0; pointer-events: none; transition: opacity 160ms ease; }
       @media (prefers-reduced-motion: reduce) {
         #ag-preboot .ag-preboot-mark { animation: none; opacity: .9; }
       }
@@ -48,8 +48,7 @@
   </head>
   <body>
     <div id="root"></div>
-    <!-- Sibling AFTER #root (not a child) so React's createRoot never warns about pre-existing
-         children, and the `:has` rule above can hide it once #root holds real content. -->
+    <!-- Sibling AFTER #root so React's createRoot never warns about pre-existing children. -->
     <div id="ag-preboot" role="status" aria-label="Loading agentistics">
       <svg class="ag-preboot-mark" aria-hidden="true" viewBox="1 1 54 54" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 42.75L13.9004 42.2998L8.5 38.249V14.8652L28.6504 3.23145L48.8018 14.8662V38.1328L28.6094 49.791L23.5068 47.166L22.6943 46.748L21.9502 47.2783L14.5 52.5879V42.75Z" stroke="#FD8924" stroke-width="3"/><path d="M54 37.0665L50 39.2002V20.2002L54 22.664V37.0665Z" fill="#FD8924"/><path d="M3 36.8663L7 39V20L3 22.4638V36.8663Z" fill="#FD8924"/><path d="M16 26.5L20 19.5L24 26.5" stroke="#FD8924" stroke-width="2"/><path d="M33 26.5L37 19.5L41 26.5" stroke="#FD8924" stroke-width="2"/></svg>
       <div class="ag-preboot-label">agentistics</div>

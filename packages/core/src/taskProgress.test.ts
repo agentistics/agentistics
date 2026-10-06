@@ -3,7 +3,7 @@ import { groupProgress, taskProgress } from './taskProgress'
 
 describe('taskProgress', () => {
   it('is NULL with no subtasks — "nobody broke this up" is not "nothing is done"', () => {
-    expect(taskProgress(0, 0)).toEqual({ done: 0, total: 0, percent: null, complete: false })
+    expect(taskProgress(0, 0)).toMatchObject({ done: 0, total: 0, counts: {}, percent: null, complete: false })
   })
 
   it('rounds DOWN, so 99 of 100 never reads 100%', () => {
@@ -24,6 +24,17 @@ describe('taskProgress', () => {
     expect(taskProgress(10, 11, 4).inProgress).toBe(1)
   })
 
+  it('returns a blocked segment after done and in-progress work', () => {
+    expect(taskProgress(5, 11, 3, 2)).toMatchObject({
+      done: 5, inProgress: 3, blocked: 2, donePercent: 45, inProgressPercent: 27, blockedPercent: 18,
+    })
+    expect(taskProgress(10, 11, 4, 4).blocked).toBe(0)
+  })
+
+  it('preserves every supplied status count', () => {
+    expect(taskProgress(12, 13, 0, 0, { todo: 1, in_review: 12 }).counts).toEqual({ todo: 1, in_review: 12 })
+  })
+
   it('clamps a count that cannot be right rather than reporting over 100%', () => {
     // A store read mid-write can hand over more done than total; a 140% bar draws outside its cell.
     expect(taskProgress(7, 5)).toMatchObject({ done: 5, percent: 100, complete: true })
@@ -33,17 +44,19 @@ describe('taskProgress', () => {
 
 describe('groupProgress — a subtask GROUP\'s own progress, one hierarchy level below a task\'s (§F.1)', () => {
   it('counts `true` entries as done, over the same round-down rule as taskProgress', () => {
-    expect(groupProgress([true, false, false])).toEqual({
-      done: 1, total: 3, percent: 33, complete: false,
-    })
+    expect(groupProgress([true, false, false])).toMatchObject({ done: 1, total: 3, counts: { done: 1, todo: 2 }, percent: 33, complete: false })
   })
 
   it('is NULL with no members — "nobody joined this group" is not "nothing is done"', () => {
-    expect(groupProgress([])).toEqual({ done: 0, total: 0, percent: null, complete: false })
+    expect(groupProgress([])).toMatchObject({ done: 0, total: 0, counts: {}, percent: null, complete: false })
   })
 
   it('is complete only when every member is done', () => {
     expect(groupProgress([true, true])).toMatchObject({ percent: 100, complete: true })
     expect(groupProgress([true, false])).toMatchObject({ complete: false })
+  })
+
+  it('counts member statuses', () => {
+    expect(groupProgress(['done', 'in_review', 'todo']).counts).toEqual({ done: 1, in_review: 1, todo: 1 })
   })
 })

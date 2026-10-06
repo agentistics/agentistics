@@ -97,7 +97,7 @@ export function SubtaskDetail(p: SubtaskDetailProps) {
             `SubtaskTable` draws on the board. A loose subtask has no `groupProgress` and this
             renders nothing, same as `TaskProgressBar`'s own "nothing to be a fraction of" rule. */}
         {isGroupSubtask(p.subtask) && view?.groupProgress && (
-          <TaskProgressBar done={view.groupProgress.done} total={view.groupProgress.total} />
+          <TaskProgressBar done={view.groupProgress.done} total={view.groupProgress.total} statuses={statuses} />
         )}
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

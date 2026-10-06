@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { commandToken } from './commandToken'
-import { draftSegments, needsMirror } from './commandMirror'
+import { draftSegments, mirrorScrollTop, needsMirror } from './commandMirror'
 
 const known = new Set(['serena', 'update-docs'])
 
@@ -39,6 +39,14 @@ describe('needsMirror', () => {
     expect(needsMirror(commandToken('/serana', known))).toBe(false)
     expect(needsMirror(commandToken('/serena', null))).toBe(false)
     expect(needsMirror(null)).toBe(false)
+  })
+})
+
+describe('mirror scroll', () => {
+  it('follows the textarea without overscrolling a shorter mirror', () => {
+    expect(mirrorScrollTop(42, 180, 100)).toBe(42)
+    expect(mirrorScrollTop(120, 180, 100)).toBe(80)
+    expect(mirrorScrollTop(-1, 180, 100)).toBe(0)
   })
 })
 

@@ -105,7 +105,7 @@ import type {
  *  server to sort a raw session field by), so its header carries no click affordance, the same rule
  *  `TaskTable.tsx`'s own `cellFor` applies to any column with no `sort` in its `ColumnDef`. */
 function subtaskSortKeyFor(id: SubtaskColumnId): SubtaskSortKey | undefined {
-  return id === 'model' || id === 'progress' ? undefined : (id as SubtaskSortKey)
+  return id === 'model' ? undefined : (id as SubtaskSortKey)
 }
 
 const cell: React.CSSProperties = { padding: '7px 9px', borderTop: '1px solid var(--border)' }
@@ -328,7 +328,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
         {/* The shared bar — it rounds DOWN, so this one cannot say 100% while the grid below it
             still shows an open row. That disagreement is exactly what one component prevents. */}
         <div style={{ flex: 1, maxWidth: 220 }}>
-          <TaskProgressBar done={done} total={p.subtasks.length} />
+          <TaskProgressBar done={done} total={p.subtasks.length} statuses={p.statuses} />
         </div>
         {/* The grid's own controls: ONE bar — Filter · Group · Columns · Sort — whose segments open
             the existing menus in the same portal panel (see `ViewBar.tsx`). */}
@@ -553,7 +553,11 @@ export function SubtaskTable(p: SubtaskTableProps) {
                     hierarchy level down. Absent when the group has no members yet. Kept visible
                     whether the group is open or closed — completion is worth seeing at a glance. */}
                 {isGroup && view?.groupProgress && (
-                  <TaskProgressBar done={view.groupProgress.done} total={view.groupProgress.total} height={3} />
+                  <TaskProgressBar
+                    done={view.groupProgress.done} total={view.groupProgress.total}
+                    statusCounts={view.groupProgress.counts} statuses={p.statuses} height={3} showPercent={false}
+                    subtaskTitles={groupMembers(t.id, p.subtasks).map(m => m.title)} lang={p.lang}
+                  />
                 )}
                 {/* An ORPHANED member only (its group is gone from this list) — the one case with no
                     cluster to place it in, so the words are the only thing left saying where it came

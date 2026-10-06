@@ -138,6 +138,9 @@ export interface ChatPayload {
 /** The most turns one read returns. A conversation of thousands must not arrive as one response. */
 const MAX_TURNS = 400
 
+/** "All of it" for the conversation search — a bound only so no arithmetic on it can overflow. */
+export const FULL_TRANSCRIPT_TURNS = 1_000_000
+
 /**
  * The user's own retention setting for a harness, when one is recorded — Claude Code's
  * `cleanupPeriodDays` in `settings.json`. `undefined` for everything else, and for a file that is
@@ -162,6 +165,8 @@ async function readSessionChatCore(
   onRow: (row: { id: string; conversationId?: string; harness?: string; link?: SessionConversationLink | null }) => void = () => undefined,
   /** The transcript file this read resolved (the chat stream watches it). */
   onPath: (path: string) => void = () => undefined,
+  /** How many turns from the end. The chat's window by default; the conversation search reads all. */
+  maxTurns: number = MAX_TURNS,
 ): Promise<ChatPayload> {
   const s = controlStrings(lang)
   if (!host.sessions) return { turns: [], unavailable: s.sessionsNoHost, live: false }
@@ -314,7 +319,7 @@ async function readSessionChatCore(
   // stale memo in `transcript-path-memo.ts`; this is the symptom guard beside it, so the next cause
   // says something instead of drawing a blank pane.
   onPath(path)
-  const read = await reader.read(path, MAX_TURNS).catch(() => null)
+  const read = await reader.read(path, maxTurns).catch(() => null)
   if (read === null) {
     const availability = transcriptAvailability({
       harness: row.harness, resolved: true, readFailed: true, live, nowMs: Date.now(),
@@ -363,6 +368,25 @@ async function readSessionChatCore(
         }
       : {}),
   }
+}
+
+/**
+ * The WHOLE conversation of one session, for "Buscar na conversa" (`chat-search-web.ts`).
+ *
+ * The same core as the chat view — the same row resolution, the same exact-link rule, the same
+ * refusals, the same pending-rewind cut and the same vault scrub — so a search can never surface a
+ * message the chat would not show, nor a secret the chat would hide. Only the window differs.
+ */
+export function readSessionChatAll(
+  host: StartHost,
+  lang: CliLang,
+  id: string,
+  readerFor: typeof transcriptReaderFor = transcriptReaderFor,
+  /** The fleet row the read resolved — the search names the harness from it without a second poll. */
+  onRow?: (row: { id: string; harness?: string }) => void,
+  maxTurns: number = FULL_TRANSCRIPT_TURNS,
+): Promise<ChatPayload> {
+  return readSessionChatCore(host, lang, id, readerFor, onRow, undefined, maxTurns)
 }
 
 /**

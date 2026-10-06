@@ -503,7 +503,8 @@ function deliver(d: Delivery, settings: NotificationSettings): void {
       type: BELL_TYPE[d.event],
       code: d.bell.code,
       meta: {
-        sessionId: d.bell.id, name: d.bell.name, harness: d.bell.harness,
+        sessionId: d.bell.id, muteKey: muteKeyById.get(d.bell.id) ?? d.bell.id,
+        name: d.bell.name, harness: d.bell.harness,
         at: new Date(d.bell.sinceMs).toISOString().slice(0, 16),
       },
     })

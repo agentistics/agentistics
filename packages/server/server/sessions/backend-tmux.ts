@@ -21,6 +21,7 @@ import { probeDependency } from './dependency-probe'
 import { sessionEnv } from './login-env'
 import { planPromptDelivery } from './initial-prompt'
 import { frameChanged, needsSecondReturn } from './submit-check'
+import { planCodexSend } from './codex-send'
 import { writeToPane } from './pane-writer'
 import {
   SEND_NOW_FIRM_MS, SEND_NOW_GENTLE_MS, SEND_NOW_POLL_MS, hasQueuedMessages, sanitizePasteText,
@@ -183,8 +184,8 @@ export function pasteWriteArgs(id: string, text: string): { setArgs: string[]; p
  * through `this` would break the moment a caller spread or destructured the backend, and `index.ts`
  * spreads it.
  */
-async function sendTextTo(id: string, text: string): Promise<boolean> {
-  return writeToPane(id, () => typeAndSubmit(id, text))
+async function sendTextTo(id: string, text: string, harness?: string): Promise<boolean> {
+  return writeToPane(id, () => harness === 'codex' ? pasteAndSubmitCodex(id, text) : typeAndSubmit(id, text))
 }
 
 /**
@@ -353,6 +354,43 @@ async function typeAndSubmit(id: string, text: string): Promise<boolean> {
   return true
 }
 
+/** Codex needs the paste chip to be visible before its submit return is sent. */
+async function pasteAndSubmitCodex(id: string, text: string): Promise<boolean> {
+  if (!(await focusInput(id))) return false
+  if (planCodexSend('before-paste', await captureFrame(id), text) === 'blocked') return false
+  const pasted = await pasteBufferArgsFor(id, text)
+  if (pasted.code !== 0) return false
+
+  const pastedDeadline = Date.now() + SUBMIT_SHOW_MS
+  for (;;) {
+    const frame = await captureFrame(id)
+    const action = planCodexSend('after-paste', frame, text)
+    if (action === 'blocked') return false
+    if (action !== 'wait') break
+    if (Date.now() >= pastedDeadline) return false
+    await sleep(SUBMIT_POLL_MS)
+  }
+
+  await sleep(SUBMIT_SETTLE_MS)
+  if ((await tmux(sendKeysNamedArgs(id, 'Enter'))).code !== 0) return false
+  await sleep(SUBMIT_SETTLE_MS)
+  const first = planCodexSend('after-enter', await captureFrame(id), text)
+  if (first === 'blocked') return false
+  if (first === 'retry-enter') {
+    await sleep(SUBMIT_SETTLE_MS)
+    if ((await tmux(sendKeysNamedArgs(id, 'Enter'))).code !== 0) return false
+    await sleep(SUBMIT_SETTLE_MS)
+    return planCodexSend('after-retry', await captureFrame(id), text) === 'delivered'
+  }
+  return first === 'delivered'
+}
+
+async function pasteBufferArgsFor(id: string, text: string): Promise<{ code: number }> {
+  const { setArgs, pasteArgs } = pasteWriteArgs(id, text)
+  if ((await tmux(setArgs)).code !== 0) return { code: 1 }
+  return tmux(pasteArgs)
+}
+
 /** Did the pane change within the budget? Returns as soon as it did. */
 async function paneMoved(id: string, before: readonly string[]): Promise<boolean> {
   const deadline = Date.now() + SUBMIT_SHOW_MS
@@ -483,6 +521,7 @@ export const tmuxBackend: SessionBackend = {
   },
 
   sendText: sendTextTo,
+  sendTextReliable: (id: string, text: string, harness: string) => sendTextTo(id, text, harness),
 
   /**
    * Pick a numbered option, then WRITE INTO THE FIELD it opens, then submit.

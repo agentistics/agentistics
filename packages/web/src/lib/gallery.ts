@@ -331,7 +331,9 @@ export function viewedGroups(
   const files: GalleryFile[] = []
   for (const t of turns) {
     for (const call of t.tools ?? []) {
-      if ((call.canonical ?? call.name) !== 'Read') continue
+      // Codex calls the equivalent tool `view_image`; Claude and the other adapters may expose
+      // the shared `Read` name. Both mean the session looked at the file, never that it produced it.
+      if ((call.canonical ?? call.name) !== 'Read' && call.name !== 'view_image') continue
       const p = call.detail?.trim()
       // A truncated detail (`toolDetail` ellipsises past 200 chars) names no file — the same guard
       // the server's own allowlist applies before trusting one.
@@ -375,10 +377,10 @@ export function gallerySides(groups: readonly GalleryGroup[]): { user: number; l
   let llm = 0
   for (const g of groups) {
     for (const f of g.files) {
-      // `viewed` sits beside `produced` on purpose: both are things the ASSISTANT did, and the
-      // "Assistant" tab is the honest place to find either — neither was sent by the person.
-      if (f.origin === 'produced' || f.origin === 'viewed') llm += 1
-      else user += 1
+      // Viewed files have their own section. They must not inflate the Assistant count: opening a
+      // user's screenshot is not producing an image.
+      if (f.origin === 'produced') llm += 1
+      else if ((f.origin ?? 'sent') === 'sent') user += 1
     }
   }
   return { user, llm }
@@ -414,15 +416,14 @@ export function filterGallery(
   groups: readonly GalleryGroup[], scope: GalleryScope,
 ): GalleryGroup[] {
   if (scope === 'all') return [...groups]
-  // `llm` is "not sent" rather than "produced" alone, so a viewed file — the assistant's, same as a
-  // produced one — stays under the tab that already means "the assistant's side" (see
-  // `gallerySides`); the two must agree about which origins that tab covers.
+  // `llm` means produced by the assistant. Viewed files remain visible in `all` under their own
+  // section, but are intentionally absent from both side filters.
   return groups
     .map(g => ({
       ...g,
       files: g.files.filter(f => {
         const origin = f.origin ?? 'sent'
-        return scope === 'llm' ? origin !== 'sent' : origin === 'sent'
+        return scope === 'llm' ? origin === 'produced' : origin === 'sent'
       }),
     }))
     .filter(g => g.files.length > 0)

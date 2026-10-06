@@ -93,7 +93,7 @@ function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
           }}>{row.task.detail}</div>
         )}
 
-        {counts && <TaskProgressBar done={counts.subtasksDone} inProgress={counts.subtasksInProgress} total={counts.subtasks} showPercent={false} />}
+        {counts && <TaskProgressBar done={counts.subtasksDone} inProgress={counts.subtasksInProgress} statusCounts={counts.subtasksByStatus} total={counts.subtasks} statuses={statuses} showPercent={false} />}
 
         <div
           style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: 'var(--text-secondary)' }}

@@ -303,7 +303,25 @@ jobs:
       # web assets on a Windows runner.
       - name: Compile Windows binary (cross-compile)
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
-        run: bun build --compile --minify --target=bun-windows-x64 packages/server/bin/cli.ts --outfile ./release/agentop-windows-x64.exe
+        run: bun build --compile --minify --target=bun-windows-x64 packages/server/bin/cli.ts --outfile ./release/agentop.exe
+
+      # macOS binaries — `agentop upgrade` on a Mac downloads agentop-darwin-<arch>. They were
+      # dropped by the 2026-10-06 workflow split (v2.109.0/v2.109.1 shipped without them): keep them.
+      - name: Compile macOS binary (Intel, cross-compile)
+        if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
+        run: bun build --compile --minify --target=bun-darwin-x64 packages/server/bin/cli.ts --outfile ./release/agentop-darwin-x64
+
+      - name: Compile macOS binary (Apple Silicon, cross-compile)
+        if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
+        run: bun build --compile --minify --target=bun-darwin-arm64 packages/server/bin/cli.ts --outfile ./release/agentop-darwin-arm64
+
+      - name: Verify macOS binaries (Mach-O header check — not a functional test)
+        if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
+        run: |
+          file ./release/agentop-darwin-x64   | grep -qi 'Mach-O' || { echo "::error::agentop-darwin-x64 is not a Mach-O binary"; exit 1; }
+          file ./release/agentop-darwin-arm64 | grep -qi 'Mach-O' || { echo "::error::agentop-darwin-arm64 is not a Mach-O binary"; exit 1; }
+          file ./release/agentop-darwin-x64   | grep -qi 'x86_64' || { echo "::error::agentop-darwin-x64 is not x86_64"; exit 1; }
+          file ./release/agentop-darwin-arm64 | grep -qi 'arm64'  || { echo "::error::agentop-darwin-arm64 is not arm64"; exit 1; }
 
       - name: Smoke test
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
@@ -446,7 +464,9 @@ jobs:
             --notes-file /tmp/release-notes.md \
             ./release/agentop \
             ./release/agentop-musl \
-            ./release/agentop-windows-x64.exe
+            ./release/agentop.exe \
+            ./release/agentop-darwin-x64 \
+            ./release/agentop-darwin-arm64
 
           gh workflow run publish-npm.yml --ref main --field tag="$TAG"
           gh workflow run publish-tauri.yml --ref main --field tag="$TAG"

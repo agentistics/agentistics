@@ -35,6 +35,9 @@ export const copilotAdapter: HarnessAdapter = {
         .catch(() => '')
       if (wsText) {
         const ws = parseCopilotWorkspace(wsText)
+        // Agentop may give Copilot a distinct managed conversation id. That id is what task
+        // attachments and the fleet row carry; the Copilot UUID remains the directory name.
+        if (ws.mcSessionId) session.session_id = ws.mcSessionId
         const remote = copilotGitRemote(ws)
         if (remote) session.git_remote = remote
         if (ws.name) session.title = ws.name
