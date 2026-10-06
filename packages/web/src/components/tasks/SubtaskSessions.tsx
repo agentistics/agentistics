@@ -145,17 +145,18 @@ export function SubtaskSessions(p: SubtaskSessionsProps) {
   const runOpen = (id: string) => { closeMenu(); p.onOpen?.(id) }
 
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
-      {/* One chip, exactly as before — still opens the session on its own click. */}
+    <span style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, maxWidth: '100%' }}>
+      {/* One chip, exactly as before — still opens the session on its own click. It shrinks with the
+          column (the chip's label already ellipsises), so the actions button stays inside the cell. */}
       {plan.display.kind === 'single' && (
-        <SessionRef
+        <span style={{ minWidth: 0, flex: '0 1 auto', overflow: 'hidden', display: 'flex' }}><SessionRef
           id={plan.display.session.id}
           title={plan.display.session.label}
           harness={plan.display.session.harness}
           lang={p.lang}
           historical={plan.display.session.historical === true}
           onOpen={p.onOpen}
-        />
+        /></span>
       )}
 
       {/* Several: a compact count instead of an unbounded wrap of chips — its OWN small list still

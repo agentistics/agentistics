@@ -584,6 +584,8 @@ export function SubtaskTable(p: SubtaskTableProps) {
                     style={{
                       ...cell, ...tint, whiteSpace: id === 'model' ? undefined : 'nowrap',
                       minWidth: id === 'sessions' ? 160 : id === 'status' ? 90 : undefined,
+                      // Fixed layout + resizable widths: a cell never paints over its neighbour.
+                      overflow: 'hidden', textOverflow: 'ellipsis',
                       textAlign: def.numeric ? 'right' : 'left',
                     }}
                   >
@@ -655,7 +657,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
               {shownCols.map(id => {
                 const def = SUBTASK_COLUMNS.find(c => c.id === id)!
                 return (
-                  <td key={id} style={{ ...cell, textAlign: def.numeric ? 'right' : 'left', minWidth: id === 'sessions' ? 160 : undefined }}>
+                  <td key={id} style={{ ...cell, textAlign: def.numeric ? 'right' : 'left', minWidth: id === 'sessions' ? 160 : undefined, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {id === 'sessions' && (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', minWidth: 0 }}>
                         {directSessions.map(s => (
