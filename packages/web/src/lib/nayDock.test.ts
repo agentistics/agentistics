@@ -22,6 +22,13 @@ describe('where a session opens', () => {
   test('into the panel when no window holds it', () => {
     expect(openSession(empty, 's1')).toEqual({ open: true, panelSession: 's1', windows: [] })
   })
+  test('a mobile dock row opens in place; it does not need a session route', () => {
+    // NayDock supplies this open callback to SessionsAside as onOpenRow. The aside only calls
+    // navigate(sessionPath(id)) when that callback is absent.
+    const opened = openSession(empty, 's1')
+    expect(opened.panelSession).toBe('s1')
+    expect(opened.open).toBe(true)
+  })
   test('a detached session is RAISED and restored, never opened twice', () => {
     let s = detachSession(openSession(empty, 's1'), 's1', vp)
     s = detachSession(s, 's2', vp)

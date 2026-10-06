@@ -298,6 +298,13 @@ jobs:
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
         run: bun build --compile --minify --target=bun-linux-x64-musl packages/server/bin/cli.ts --outfile ./release/agentop-musl
 
+      # The Windows sidecar the desktop installer ships. Cross-compiled here (as before the split) and
+      # attached to the GitHub Release, so publish-tauri.yml downloads it instead of rebuilding the
+      # web assets on a Windows runner.
+      - name: Compile Windows binary (cross-compile)
+        if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
+        run: bun build --compile --minify --target=bun-windows-x64 packages/server/bin/cli.ts --outfile ./release/agentop-windows-x64.exe
+
       - name: Smoke test
         if: steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
         run: ./release/agentop --help
@@ -438,7 +445,8 @@ jobs:
             --title "v${VERSION}" \
             --notes-file /tmp/release-notes.md \
             ./release/agentop \
-            ./release/agentop-musl
+            ./release/agentop-musl \
+            ./release/agentop-windows-x64.exe
 
           gh workflow run publish-npm.yml --ref main --field tag="$TAG"
           gh workflow run publish-tauri.yml --ref main --field tag="$TAG"
