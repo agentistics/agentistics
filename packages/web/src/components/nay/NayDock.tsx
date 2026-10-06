@@ -332,6 +332,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
           key={s.id}
           session={s} {...(row ? { row } : {})} lang={lang} act={actFleet}
           metrics={metricsFor(s)}
+          {...(isMobile ? { focusComposerOnMount: true } : {})}
           onReopened={onReopened}
         />
       </div>
@@ -482,7 +483,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
         // and the home indicator itself: nothing above it pads for the notch. Without this the header
         // (tabs, gear, close) sat under the iOS status bar, invisible and untappable.
         ? {
-            position: 'fixed', inset: 0, zIndex: 400, background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
+            position: 'fixed', inset: 0, height: '100dvh', boxSizing: 'border-box', zIndex: 400, background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
             paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)',
             paddingLeft: 'env(safe-area-inset-left, 0px)', paddingRight: 'env(safe-area-inset-right, 0px)',
           }
@@ -510,6 +511,11 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
           <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {panelTitle}
           </span>
+          {isMobile && panelSession && (
+            <LabelButton icon={<SquareArrowOutUpRight size={14} />} label={pt ? 'Abrir a sessão' : 'Open session'}
+              title={pt ? 'Abrir esta sessão na tela de Sessões' : 'Open this session in the Sessions workspace'}
+              onClick={() => goToSession(panelSession)} />
+          )}
           {panelRow && isNayCwd(panelRow.cwd) && sessionRunning(panelRow) && (
             confirmEnd ? (
               <EndConfirm pt={pt} isMobile={isMobile}

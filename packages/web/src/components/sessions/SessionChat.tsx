@@ -244,6 +244,8 @@ export interface SessionChatProps {
    * the terminal screen and the fleet's verbs, exactly as before. The native runtime passes one.
    */
   source?: ChatSource
+  /** Focus the existing composer once when a compact overlay opens it. */
+  focusComposerOnMount?: boolean
 }
 
 // How often the conversation is re-read — and for how long it keeps being read after you leave —
@@ -268,7 +270,7 @@ const TAIL_SLACK = 24
 
 interface Attachment { name: string; path: string }
 
-export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onReopened, metrics, source }: SessionChatProps) {
+export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onReopened, metrics, source, focusComposerOnMount }: SessionChatProps) {
   // Every verb goes through the source when there is one (the native runtime's send/stop/answer).
   const act = source?.act ?? actProp
   const pt = lang === 'pt'
@@ -976,6 +978,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const fileRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    if (!focusComposerOnMount) return
+    const frame = requestAnimationFrame(() => textareaRef.current?.focus())
+    return () => cancelAnimationFrame(frame)
+  }, [focusComposerOnMount, session.id])
   /** Has this conversation been placed at its end yet? Opening mid-history is disorienting. */
   const landedRef = useRef(false)
   /**

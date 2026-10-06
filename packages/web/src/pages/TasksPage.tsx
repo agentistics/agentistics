@@ -354,8 +354,7 @@ function TaskList() {
             <div style={{ display: 'grid', gap: 6 }}>
               <span style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{MB.manage}</span>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button style={{ ...button(true), gap: 6 }} onClick={() => { setSheet(false); setManagingStatuses('status') }}><Settings2 size={14} /> {MB.statuses}</button>
-                <button style={{ ...button(true), gap: 6 }} onClick={() => { setSheet(false); setManagingStatuses('type') }}><Settings2 size={14} /> {MB.types}</button>
+                <button style={{ ...button(true), gap: 6 }} onClick={() => { setSheet(false); setManagingStatuses('status') }}><Settings2 size={14} /> {lang === 'pt' ? 'Status e tipos' : 'Statuses & types'}</button>
               </div>
             </div>
             {view === 'board' && shown.length > 0 && arrange}
@@ -385,19 +384,12 @@ function TaskList() {
           </button>
         </div>
         <button
-          style={{ ...button(isMobile), padding: '0 9px' }}
-          onClick={() => setManagingStatuses('status')}
-          title="Manage statuses"
-        >
-          <Settings2 size={14} />
-        </button>
-        <button
           style={{ ...button(isMobile), padding: '0 9px', gap: 6 }}
-          onClick={() => setManagingStatuses('type')}
-          title={boardCopy(lang).types.manage}
-          aria-label={boardCopy(lang).types.manage}
+          onClick={() => setManagingStatuses('status')}
+          title={lang === 'pt' ? 'Gerenciar status e tipos' : 'Manage statuses and types'}
+          aria-label={lang === 'pt' ? 'Gerenciar status e tipos' : 'Manage statuses and types'}
         >
-          <Settings2 size={14} />{!isMobile && <span style={{ fontSize: 12 }}>{boardCopy(lang).types.manage}</span>}
+          <Settings2 size={14} />{!isMobile && <span style={{ fontSize: 12 }}>{lang === 'pt' ? 'Status e tipos' : 'Statuses & types'}</span>}
         </button>
         <button style={button(isMobile, 'primary')} onClick={() => setOpen(v => !v)}>
           <Plus size={15} /> New task
@@ -408,7 +400,7 @@ function TaskList() {
         <ManageStatusesModal
           lang={lang}
           kind={managingStatuses}
-          onClose={() => { const was = managingStatuses; setManagingStatuses(null); if (was === 'type') void reloadTypes(); else void reloadStatuses() }}
+          onClose={() => { setManagingStatuses(null); void reloadTypes(); void reloadStatuses() }}
         />
       )}
 
