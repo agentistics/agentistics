@@ -23,7 +23,9 @@ function install(fetchImpl: (url: string, init?: RequestInit) => Promise<Respons
   ;(globalThis as any).sessionStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v) }, removeItem: (k: string) => { store.delete(k) } }
   ;(globalThis as any).window = { location: { pathname: '/', search: '', hash: '', reload: () => { reloads++ } }, scrollY: 0 }
   ;(globalThis as any).caches = { keys: async () => ['c1'], delete: async () => { cachesCleared++; return true } }
-  globalThis.fetch = fetchImpl as typeof fetch
+  // The browser-side readiness probe asks for the current shell after /api/version. Keep that
+  // pure-flow test seam explicit rather than making every fixture know about the document request.
+  globalThis.fetch = (async (url, init) => url.toString().startsWith('/index.html') ? json({}) : fetchImpl(url.toString(), init)) as typeof fetch
 }
 beforeEach(() => resetFlow())
 afterEach(() => {

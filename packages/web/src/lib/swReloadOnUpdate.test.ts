@@ -13,18 +13,14 @@ describe('the service worker reloads open windows when it replaces an older work
     expect(config).toContain('clientsClaim: true')
   })
 
-  test('it reloads only when another worker was active at install (a first install reloads nothing)', () => {
+  test('it claims a replacement but leaves navigation to the page update flow', () => {
     expect(script).toContain("self.addEventListener('install'")
     expect(script).toContain('self.registration.active')
     expect(script).toContain("self.addEventListener('activate'")
     expect(script).toContain('if (!replacedAnotherWorker) return')
-    expect(script).toContain('w.navigate(')
-    // navigate() only works on a controlled window: the worker must claim BEFORE it navigates.
+    expect(script).not.toContain('w.navigate(')
+    // The worker must claim, but must not navigate behind the overlay.
     expect(script.indexOf('clients.claim()')).toBeGreaterThan(-1)
-    expect(script.indexOf('clients.claim()')).toBeLessThan(script.indexOf('w.navigate('))
-    // ...and it must not AWAIT the navigation inside waitUntil (the navigation's fetch waits for activation).
-    expect(script).not.toMatch(/Promise\.all\([^)]*navigate/)
-    expect(script).toContain('for (const w of windows) w.navigate(w.url).catch(() => {})')
   })
 
   test('it can run as a worker script: it parses and registers exactly the two listeners', () => {

@@ -163,7 +163,7 @@ export default defineConfig({
         globIgnores: ['assets/monaco/**', 'assets/mermaid/**', '**/*.worker-*.js'],
         navigateFallback: null,
         skipWaiting: true,
-        // Reload the open windows when this worker replaces an older one (see the file).
+        // The page owns the visible update swap; the worker only claims its new assets.
         importScripts: ['sw-reload-on-update.js'],
         clientsClaim: true,
         runtimeCaching: [

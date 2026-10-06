@@ -82,6 +82,7 @@ import {
 import { ROW_FLASH } from '../../lib/noteFocus'
 import { pendingEchoes, sessionIdentityKey } from '@agentistics/core'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
+import { AgentisticsLoader } from '../AgentisticsLoader'
 
 import {
   applyDraftRequest, consumeDraftRequest, getDraftRequest, useDraftRequest,
@@ -2830,7 +2831,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                       fontFamily: 'inherit', fontSize: 12.5, fontWeight: 650,
                     }}
                   >
-                    {reopening ? <Loader size={14} className="ag-working-spin" /> : <RotateCcw size={14} />}
+                    {reopening ? <AgentisticsLoader size={14} label={reopeningLabel(pt)} /> : <RotateCcw size={14} />}
                     {reopening ? reopeningLabel(pt) : reopen.label}
                   </button>
                   {/* Why it cannot be reopened, in the row's own words. */}

@@ -32,6 +32,7 @@ import { hasSomethingToSend } from '../../lib/composerAction'
 import { forwardConfirmLabel } from '../../lib/chatForward'
 import { MAX_ATTACHMENTS, attachmentRoom, planPaste } from '../../lib/pastePlan'
 import { isImagePath } from '../../lib/attachmentPreview'
+import { AgentisticsLoader } from '../AgentisticsLoader'
 import { attachmentUrl } from '../../lib/attachmentUrl'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { overlayPadding } from '../../lib/mobileOverlay'
@@ -665,7 +666,7 @@ export function SessionPickModal({ kind, rows, lang, busy, forwardPreview, onClo
             }}
           >
             {busy
-              ? <Loader size={13} className="ag-working-spin" />
+              ? kind === 'reopen' ? <AgentisticsLoader size={13} label={reopeningLabel(pt)} /> : <Loader size={13} className="ag-working-spin" />
               : kind === 'reopen'
               ? <RotateCcw size={13} />
               : step !== 'compose' ? null
