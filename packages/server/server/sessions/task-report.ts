@@ -242,11 +242,15 @@ export function rollupSessionsFor(
     // A NATIVE session's numbers are the engine's own snapshot (`task-native.ts`), never a meta.
     if (isNativeRow(r)) return nativeRollupSession(r)
     const meta = r.conversationId ? metas.get(r.conversationId) ?? null : null
+    const credits = meta?.harness === 'copilot' ? meta.copilot_credits : undefined
     return {
       rowId: r.id,
       provenance: r.conversationId ? (r.conversationLink ?? 'assigned') : 'none',
       meta,
-      costUSD: meta ? costOf(meta) : null,
+      // Copilot reports account credits, not a USD bill. Keep them in the rollup's dedicated
+      // currency so a task mixing Copilot with token-priced harnesses renders both honestly.
+      costUSD: meta && !credits ? costOf(meta) : null,
+      ...(credits ? { credits } : {}),
     } satisfies RollupSession
   })
 }

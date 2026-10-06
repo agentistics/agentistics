@@ -340,6 +340,11 @@ export interface SessionMeta {
    */
   cache_creation_1h_input_tokens?: number
   cache_creation_5m_input_tokens?: number
+  /** Copilot's cumulative account usage, reported by `session.usage_checkpoint`. */
+  copilot_credits?: {
+    nanoAiu: number
+    premiumRequests: number
+  }
   /**
    * How many tokens were in the context window on the session's LAST turn — the measurement behind
    * the context gauge. Gated by `HARNESS_CAPABILITIES.contextWindow`.
