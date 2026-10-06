@@ -181,28 +181,6 @@ html, body {
   100% { background-position: 200% 0; }
 }
 
-/* ── Route loader — animated bars (analytics motif) ─────────────────────────── */
-@keyframes ag-bar { 0%, 100% { transform: scaleY(0.32); opacity: 0.55; } 50% { transform: scaleY(1); opacity: 1; } }
-@keyframes ag-loader-in { from { opacity: 0; } to { opacity: 1; } }
-.ag-loader { display: flex; flex-direction: column; align-items: center; gap: 13px; animation: ag-loader-in 0.4s ease-out 0.1s both; }
-.ag-loader-bars { display: flex; align-items: flex-end; gap: 5px; height: 34px; }
-.ag-loader-bars > span {
-  width: 7px; height: 100%; border-radius: 3px; transform-origin: bottom; flex-shrink: 0;
-  background: linear-gradient(180deg, var(--anthropic-orange-light, #F59E0B), var(--anthropic-orange, #D97706));
-  animation: ag-bar 1.05s ease-in-out infinite;
-}
-.ag-loader-bars > span:nth-child(1) { animation-delay: 0s; }
-.ag-loader-bars > span:nth-child(2) { animation-delay: 0.11s; }
-.ag-loader-bars > span:nth-child(3) { animation-delay: 0.22s; }
-.ag-loader-bars > span:nth-child(4) { animation-delay: 0.33s; }
-.ag-loader-bars > span:nth-child(5) { animation-delay: 0.44s; }
-.ag-loader-label { font-size: 12px; color: var(--text-tertiary); letter-spacing: 0.03em; font-weight: 500; }
-@media (prefers-reduced-motion: reduce) {
-  .ag-loader-bars > span { animation: none; }
-  .ag-loader-bars > span:nth-child(2), .ag-loader-bars > span:nth-child(4) { transform: scaleY(0.6); }
-  .ag-loader-bars > span:nth-child(1), .ag-loader-bars > span:nth-child(5) { transform: scaleY(0.4); }
-}
-
 /* ── Mobile base ────────────────────────────────────────────────────────────── */
 @media (max-width: 767px) {
   html, body {

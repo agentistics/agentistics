@@ -2,6 +2,7 @@ import React, { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { legacyVaultTarget } from './pages/vault/vaultTabs'
 import AppLayout from './App'
+import { AgentisticsLoader } from './components/AgentisticsLoader'
 
 const HomePage = lazy(() => import('./pages/HomePage'))
 const CostsPage = lazy(() => import('./pages/CostsPage'))
@@ -47,12 +48,7 @@ const BillingSettings = lazy(() => import('./pages/settings/BillingSettings'))
 function PageFallback() {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 340, padding: 40 }}>
-      <div className="ag-loader" role="status" aria-label="Loading">
-        <div className="ag-loader-bars" aria-hidden="true">
-          <span /><span /><span /><span /><span />
-        </div>
-        <div className="ag-loader-label">agentistics</div>
-      </div>
+      <AgentisticsLoader size={56} label="Loading" />
     </div>
   )
 }
