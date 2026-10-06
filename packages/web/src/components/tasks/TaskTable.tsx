@@ -279,7 +279,7 @@ function cellFor(
       // Nothing to be a fraction of. An empty bar here would say "0% done" about a task nobody
       // broke up, which is a claim about the work rather than about the board.
       ? <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
-      : <TaskProgressBar done={row.counts.subtasksDone} inProgress={row.counts.subtasksInProgress} total={row.counts.subtasks} />
+      : <TaskProgressBar done={row.counts.subtasksDone} inProgress={row.counts.subtasksInProgress} total={row.counts.subtasks} statuses={statuses} />
     case 'updated': return (
       <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>
         {new Date(row.task.updatedAt).toLocaleDateString()}
@@ -528,7 +528,7 @@ function SubtaskRows({
               </div>
             )}
             {isGroup && view?.groupProgress && (
-              <TaskProgressBar done={view.groupProgress.done} total={view.groupProgress.total} height={3} />
+              <TaskProgressBar done={view.groupProgress.done} total={view.groupProgress.total} statuses={statuses} height={3} />
             )}
             {/* An ORPHANED member only (its group is gone from this list) — the one case with no
                 cluster to place it in, so the words are the only thing left saying where it came

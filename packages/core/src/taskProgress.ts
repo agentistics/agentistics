@@ -21,22 +21,31 @@ export interface TaskProgress {
   /** Widths for the composed bar, rounded DOWN and capped to the available total. */
   donePercent?: number | null
   inProgressPercent?: number | null
+  blocked?: number
+  blockedPercent?: number | null
   /** Every subtask closed, and there is at least one. */
   complete: boolean
 }
 
-export function taskProgress(done: number, total: number, inProgress = 0): TaskProgress {
+export function taskProgress(done: number, total: number, inProgress = 0, blocked = 0): TaskProgress {
   const composed = arguments.length >= 3
   // A task with no subtasks has no progress — not 0%. "Nobody broke this up" and "nothing is done
   // yet" are different facts, and a 0% bar on every unbroken task would make the bar meaningless.
   if (total <= 0) return composed
-    ? { done: 0, total: 0, inProgress: 0, percent: null, donePercent: null, inProgressPercent: null, complete: false }
+    ? { done: 0, total: 0, inProgress: 0, blocked: 0, percent: null, donePercent: null, inProgressPercent: null, blockedPercent: null, complete: false }
     : { done: 0, total: 0, percent: null, complete: false }
   const capped = Math.max(0, Math.min(done, total))
   const active = Math.max(0, Math.min(inProgress, total - capped))
+  const blockedCount = Math.max(0, Math.min(blocked, total - capped - active))
   const percent = Math.floor((capped / total) * 100)
   return composed
-    ? { done: capped, total, inProgress: active, percent, donePercent: percent, inProgressPercent: Math.floor((active / total) * 100), complete: capped === total }
+    ? {
+      done: capped, total, inProgress: active, blocked: blockedCount, percent,
+      donePercent: percent,
+      inProgressPercent: Math.floor((active / total) * 100),
+      blockedPercent: Math.floor((blockedCount / total) * 100),
+      complete: capped === total,
+    }
     : { done: capped, total, percent, complete: capped === total }
 }
 
