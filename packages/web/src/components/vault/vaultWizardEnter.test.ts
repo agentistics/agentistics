@@ -8,7 +8,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const src = readFileSync(join(import.meta.dir, 'VaultSettings.tsx'), 'utf8')
+const src = readFileSync(join(import.meta.dir, 'VaultFlows.tsx'), 'utf8')
 const wizard = src.slice(src.indexOf('function EnrolWizard('), src.indexOf('const PRINT_CSS'))
 
 describe('the vault wizard: Enter submits every code step', () => {
