@@ -12,6 +12,7 @@
  */
 
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { taskProgress } from '@agentistics/core'
 import { microLabel } from './board'
 
@@ -26,7 +27,11 @@ export function TaskProgressBar({ done, total, inProgress = 0, showPercent = tru
   label?: string
 }) {
   const p = taskProgress(done, total, inProgress)
-  const [hovered, setHovered] = useState<'done' | 'inProgress' | null>(null)
+  const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number } | null>(null)
+  const showTooltip = (text: string, e: React.MouseEvent<HTMLElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    setTooltip({ text, x: rect.left, y: rect.top - 7 })
+  }
   if (p.percent === null) return null
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
@@ -35,7 +40,7 @@ export function TaskProgressBar({ done, total, inProgress = 0, showPercent = tru
         flex: 1, minWidth: 24, height, borderRadius: height / 2,
         background: 'var(--bg-elevated)', overflow: 'visible', position: 'relative',
       }}>
-        <div onMouseEnter={() => setHovered('done')} onMouseLeave={() => setHovered(null)} style={{
+        <div onMouseEnter={e => showTooltip(`${p.percent}% concluído · ${p.done} de ${p.total} subtarefas`, e)} onMouseLeave={() => setTooltip(null)} style={{
           position: 'relative',
           width: `${p.donePercent}%`, height: '100%', borderRadius: height / 2,
           // Green only when it is ACTUALLY finished — the fill rounds down, so a bar that looks
@@ -43,17 +48,13 @@ export function TaskProgressBar({ done, total, inProgress = 0, showPercent = tru
           // everywhere else on this board.
           background: p.complete ? 'var(--accent-green)' : 'var(--anthropic-orange)',
           transition: 'width 0.2s',
-        }} aria-label={`${p.percent}% concluído · ${p.done} de ${p.total} subtarefas`}>
-          {hovered === 'done' && <span role="tooltip" style={{ position: 'absolute', bottom: height + 7, left: 0, zIndex: 3, whiteSpace: 'nowrap', padding: '4px 7px', borderRadius: 4, background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontSize: 10, boxShadow: '0 3px 12px rgba(0,0,0,.25)' }}>{p.percent}% concluído · {p.done} de {p.total} subtarefas</span>}
-        </div>
+        }} aria-label={`${p.percent}% concluído · ${p.done} de ${p.total} subtarefas`} />
         {p.inProgressPercent != null && p.inProgressPercent > 0 && (
-          <div onMouseEnter={() => setHovered('inProgress')} onMouseLeave={() => setHovered(null)} style={{
+          <div onMouseEnter={e => showTooltip(`${p.inProgress} em andamento`, e)} onMouseLeave={() => setTooltip(null)} style={{
             position: 'absolute', left: `${p.donePercent}%`, top: 0,
             width: `${p.inProgressPercent}%`, height: '100%', background: 'var(--accent-purple)',
             transition: 'left 0.2s, width 0.2s',
-          }} aria-label={`${p.inProgress} em andamento`}>
-            {hovered === 'inProgress' && <span role="tooltip" style={{ position: 'absolute', bottom: height + 7, left: 0, zIndex: 3, whiteSpace: 'nowrap', padding: '4px 7px', borderRadius: 4, background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontSize: 10, boxShadow: '0 3px 12px rgba(0,0,0,.25)' }}>{p.inProgress} em andamento</span>}
-          </div>
+          }} aria-label={`${p.inProgress} em andamento`} />
         )}
       </div>
       {showPercent && (
@@ -63,6 +64,10 @@ export function TaskProgressBar({ done, total, inProgress = 0, showPercent = tru
         }}>
           {p.percent}% · {p.done}/{p.total}
         </span>
+      )}
+      {tooltip && typeof document !== 'undefined' && createPortal(
+        <span role="tooltip" style={{ position: 'fixed', left: tooltip.x, top: tooltip.y, transform: 'translateY(-100%)', zIndex: 4000, pointerEvents: 'none', whiteSpace: 'nowrap', padding: '4px 7px', borderRadius: 4, background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontSize: 10, boxShadow: '0 3px 12px rgba(0,0,0,.25)' }}>{tooltip.text}</span>,
+        document.body,
       )}
     </div>
   )
