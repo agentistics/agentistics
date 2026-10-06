@@ -892,6 +892,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     layout: rawSlotLayout, openPanel: openSlotPanel, closePanel: closeSlotPanel,
     movePanel: moveSlotPanel, dropPanel: dropSlotPanel, setRightOpen,
     hidePanelToConfig: hideSlotPanel, restorePanel: revealSlotPanel, setRailWidth,
+    setBottomOpen: setSlotBandOpen,
   } = usePanelSlots()
   /**
    * PINNED PANELS FLOAT (`lib/floatingPanels.ts`, owner 2026-09-27). The windows belong to the
@@ -1365,6 +1366,10 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       // that decides whether the metrics card offers its link.
       {...(sessionMetrics ? { metrics: sessionMetrics } : {})}
       onClose={() => closeSlotPanel(id)}
+      // The search handed a message to the chat (go to it / forward it). On a phone the panel covers
+      // the chat, so get out of the way — collapsing the BAND when it is docked there: taking the
+      // panel out of the band alone leaves the band open on its terminal tab.
+      onHandedToChat={() => (slotLayout.bottom === id ? setSlotBandOpen(false) : closeSlotPanel(id))}
     />
   )
   // ADDENDUM ITEM 4 — the right slot's own header close button is hidden on DESKTOP, where

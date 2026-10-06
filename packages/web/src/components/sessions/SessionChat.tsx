@@ -96,6 +96,7 @@ import {
 } from '../../lib/promptHistory'
 import { RecentPromptsPanel } from './RecentPromptsPanel'
 import { goToTurn } from '../../lib/turnScroll'
+import { findTurnIndex, registerChatSearchTarget } from '../../lib/chatSearchBridge'
 import { attachmentName, splitMessage } from '../../lib/messageAttachments'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -1809,6 +1810,35 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
         : 'That message is no longer in the loaded conversation.')
     }
   }, [session.id, turns, queued, pt])
+
+  /**
+   * "BUSCAR NA CONVERSA" asks this chat for one message (`chatSearchBridge.ts`): forward it through
+   * this chat's own forward modal, or go to it — widening the rendered window first, exactly as a
+   * quote card's jump does, then `goToTurn`'s scroll and flash. Resolved against the turns as they
+   * are NOW (a ref, so the registration does not churn on every poll). A message older than the
+   * loaded window is `not-loaded`; one that is loaded but has no bubble on screen (the terminal view)
+   * is `no-chat` — the panel says each in its own words.
+   */
+  const SEARCH_JUMP_CONTEXT = 40
+  const searchView = useRef({ turns, shownTurns, turnAnchors })
+  searchView.current = { turns, shownTurns, turnAnchors }
+  useEffect(() => registerChatSearchTarget(session.id, req => {
+    const { turns: now, shownTurns: shown, turnAnchors: anchors } = searchView.current
+    const i = findTurnIndex(now, req.turn)
+    if (i < 0) return 'not-loaded'
+    if (req.kind === 'forward') { setForwardTurns([now[i]!]); return 'done' }
+    // GENEROUS context above the target: with the default ten, the target sits inside the
+    // grow-at-top zone (`GROW_AT_PX`), the smooth scroll toward it renders yet another older block,
+    // and the content shifts under the scroll — measured landing ~460px past the message.
+    if (i < windowStart(now.length, shown)) flushSync(() => setShownTurns(shownToInclude(now.length, i, SEARCH_JUMP_CONTEXT)))
+    holdTailUntil.current = Date.now() + 4000
+    setAtTail(false)
+    const anchor = searchView.current.turnAnchors[i] ?? anchors[i]
+    // A search jump is usually LONG: a smooth scroll across hundreds of bubbles outlasts the flash,
+    // so the reader arrives after the mark has faded. Land instantly; `goToTurn` then only marks it.
+    if (anchor) document.getElementById(anchor)?.scrollIntoView({ block: 'center' })
+    return goToTurn(anchor) ? 'done' : 'no-chat'
+  }), [session.id])
 
   /**
    * RESTORE the conversation from just before a prompt (claude's own rewind), then hand the message

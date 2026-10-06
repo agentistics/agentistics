@@ -13,12 +13,13 @@
 
 import {
   Activity, Bot, BarChart3, ClipboardList, Cpu, FolderTree, GitBranch, GitPullRequest, Image, Plug,
-  Sparkles, TerminalSquare, Workflow, type LucideIcon,
+  Search, Sparkles, TerminalSquare, Workflow, type LucideIcon,
 } from 'lucide-react'
 import { HarnessMark } from '../components/sessions/HarnessMark'
 import type { PanelId } from './panelSlots'
 
 const ICON: Record<Exclude<PanelId, 'cli' | 'shell'>, LucideIcon> = {
+  search: Search,
   live: Activity,
   gallery: Image,
   skills: Sparkles,
