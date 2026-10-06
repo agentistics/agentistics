@@ -1,5 +1,6 @@
+import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 import { useMemo, useState, type ReactNode } from 'react'
-import { Loader2, Check, AlertTriangle } from 'lucide-react'
+import { Check, AlertTriangle } from 'lucide-react'
 import type { SessionMeta, TeamConnection, ModelUsage } from '@agentistics/core'
 import Drawer from '../../pages/settings/Drawer'
 import { FieldInput } from '../../pages/settings/primitives'
@@ -324,7 +325,7 @@ export function AddCentralDrawer({
               style={{ ...actionBtnStyle(isMobile, 'secondary'), opacity: (testing || !canAttemptTest(endpoint, dupe)) ? 0.5 : 1 }}
             >
               {testing && primaryPhase === 'idle'
-                ? <><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> {COPY.testingConn[lang]}</>
+                ? <><AgentisticsLoader size={13} /> {COPY.testingConn[lang]}</>
                 : COPY.testConnBtn[lang]}
             </button>
           </div>
@@ -355,7 +356,7 @@ export function AddCentralDrawer({
                 cursor: (primaryPhase === 'idle' && canAttemptTest(endpoint, dupe)) ? 'pointer' : 'not-allowed',
               }}
             >
-              {primaryPhase === 'testing' && <><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> {COPY.testingConn[lang]}</>}
+              {primaryPhase === 'testing' && <><AgentisticsLoader size={13} /> {COPY.testingConn[lang]}</>}
               {primaryPhase === 'success' && <><Check size={14} /> {COPY.testSuccess[lang]}</>}
               {primaryPhase === 'idle' && COPY.continueBtn[lang]}
             </button>
@@ -417,7 +418,7 @@ export function AddCentralDrawer({
                 cursor: (connecting || !canConnect(step, test, dupe)) ? 'not-allowed' : 'pointer',
               }}
             >
-              {connecting ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Check size={14} />}
+              {connecting ? <AgentisticsLoader size={13} /> : <Check size={14} />}
               {COPY.connectBtn[lang]}
             </button>
           </div>

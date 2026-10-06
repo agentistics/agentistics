@@ -1,3 +1,4 @@
+import { AgentisticsLoader } from './AgentisticsLoader'
 /**
  * HardwareModal.tsx — the hardware surface, as a modal reached from the top bar.
  *
@@ -676,7 +677,7 @@ export function HardwareModal({ lang, onClose }: { lang: Lang; onClose: () => vo
               title={lang === 'pt' ? 'Atualizar' : 'Refresh'}
               aria-label={lang === 'pt' ? 'Atualizar' : 'Refresh'}
             >
-              <RefreshCw size={14} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+              {loading ? <AgentisticsLoader size={14} /> : <RefreshCw size={14} />}
               {!isMobile && (lang === 'pt' ? 'Atualizar' : 'Refresh')}
             </button>
             {/* Maximizing is meaningless on a phone: the modal is already the whole viewport. */}

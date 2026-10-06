@@ -7,7 +7,8 @@
  * it always did. NEVER extends on its own. The same warning lands in Notificações, once.
  */
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, X } from 'lucide-react'
+import { X } from 'lucide-react'
+import { AgentisticsLoader } from '../AgentisticsLoader'
 import { pushNotification } from '../../lib/notifications'
 import { WARN_INITIAL, nextWarn, type WarnState } from '../../lib/vaultExpiry'
 import { extendVaultOpen, lockVaultFromCard } from '../../lib/vaultApi'
@@ -68,10 +69,10 @@ export function VaultExpiryCard({ lang, isMobile, zIndex, enabled = true }: { la
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button type="button" data-vault-extend disabled={busy !== null} onClick={() => { void (needCode === 'extend' && code.trim() ? run('extend', code.trim()) : run('extend')) }}
           style={{ ...btn, background: 'var(--anthropic-orange)', borderColor: 'var(--anthropic-orange)', color: '#fff', fontWeight: 600 }}>
-          {busy === 'extend' ? <Loader2 size={13} className="ag-spin" /> : (pt ? 'Manter aberto' : 'Keep open')}
+          {busy === 'extend' ? <AgentisticsLoader size={13} /> : (pt ? 'Manter aberto' : 'Keep open')}
         </button>
         <button type="button" data-vault-lock-now disabled={busy !== null} onClick={() => { void (needCode === 'lock' && code.trim() ? run('lock', code.trim()) : run('lock')) }} style={btn}>
-          {busy === 'lock' ? <Loader2 size={13} className="ag-spin" /> : (pt ? 'Trancar agora' : 'Lock now')}
+          {busy === 'lock' ? <AgentisticsLoader size={13} /> : (pt ? 'Trancar agora' : 'Lock now')}
         </button>
       </div>
     </div>

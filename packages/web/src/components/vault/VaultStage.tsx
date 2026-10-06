@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { AgentisticsLoader } from '../AgentisticsLoader'
 import { VaultUnlock, CodeField } from './VaultUnlock'
 import { VaultSafe, SAFE_OPEN_MS, SAFE_WIDTH_DESKTOP, SAFE_WIDTH_MOBILE, type SafePhase } from './VaultSafe'
 import { VaultCodeClock } from './VaultCodeClock'
@@ -85,7 +85,7 @@ export function VaultCodeStage({ lang, isMobile, compact, title, sub, error, onS
         <CodeField value={code} onChange={setCode} label={lang === 'pt' ? 'Código do autenticador' : 'Authenticator code'} autoFocus={!isMobile} />
         {error && <Err text={error} />}
         <button type="submit" disabled={busy || !codeComplete(code)} style={{ ...dialogButtonStyle('primary', isMobile, busy || !codeComplete(code)), width: '100%' }}>
-          {busy && <Loader2 size={14} className="ag-spin" />} {lang === 'pt' ? 'Confirmar' : 'Confirm'}
+          {busy && <AgentisticsLoader size={14} />} {lang === 'pt' ? 'Confirmar' : 'Confirm'}
         </button>
       </form>
     </StageFrame>

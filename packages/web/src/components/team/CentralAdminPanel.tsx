@@ -1,5 +1,6 @@
+import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 import React, { useState, useEffect } from 'react'
-import { Loader2, Server } from 'lucide-react'
+import { Server } from 'lucide-react'
 import { TeamMembers } from '../TeamMembers'
 import { PUSH_INTERVAL, type MemberPresence } from '@agentistics/core'
 import { SectionHeader, Divider, PrefRow } from '../../pages/settings/primitives'
@@ -159,7 +160,7 @@ export function CentralAdminPanel({ lang, presence }: CentralAdminPanelProps) {
             {c('express', lang)}
           </label>
           {intervalSaving && (
-            <Loader2 size={12} style={{ color: 'var(--text-tertiary)', animation: 'spin 1s linear infinite' }} />
+            <AgentisticsLoader size={12} style={{ color: 'var(--text-tertiary)' }} />
           )}
           {!intervalSaving && intervalSaveErr !== null && (
             <span style={{ fontSize: 11, color: '#ef4444' }}>{intervalSaveErr}</span>
@@ -170,8 +171,6 @@ export function CentralAdminPanel({ lang, presence }: CentralAdminPanelProps) {
       <Divider />
 
       <TeamMembers lang={lang} presence={presence} />
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }

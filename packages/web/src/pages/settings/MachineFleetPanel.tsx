@@ -1,3 +1,4 @@
+import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 /**
  * MachineFleetPanel.tsx — one machine's session fleet, relayed to its owning account, and the
  * screenless verbs performed on it.
@@ -27,7 +28,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Loader2, RefreshCw } from 'lucide-react'
+import { RefreshCw } from 'lucide-react'
 import type { MachineActionReply, MachineFleetAnswer, MachineFleetRow } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { machineFleetPanelView } from './machineFleetView'
@@ -144,7 +145,7 @@ export function MachineFleetPanel({ open, machineId, lang, onlyRow, hideHeader }
             }}
           >
             {loading
-              ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+              ? <AgentisticsLoader size={12} />
               : <RefreshCw size={12} />}
             {pt ? 'Atualizar' : 'Refresh'}
           </button>
@@ -234,7 +235,7 @@ export function MachineFleetPanel({ open, machineId, lang, onlyRow, hideHeader }
                         }}
                       >
                         {acting === `${r.id}:${v.action}`
-                          ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} />
+                          ? <AgentisticsLoader size={11} />
                           : v.label}
                       </button>
                     ))}

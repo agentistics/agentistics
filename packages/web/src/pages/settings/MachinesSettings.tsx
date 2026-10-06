@@ -1,6 +1,7 @@
+import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 import React, { useState, useEffect, useCallback } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { Plus, Copy, Check, RotateCw, Trash2, Pencil, X, Loader2, MonitorSmartphone } from 'lucide-react'
+import { Plus, Copy, Check, RotateCw, Trash2, Pencil, X, MonitorSmartphone } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
 import { ConnectionsPanel } from '../../components/team/ConnectionsPanel'
 import { SectionHeader, Section, Select, Checkbox, ConfirmModal, RecordCard, RecordCardAction, SaveBar, runSaveSteps } from './primitives'
@@ -854,7 +855,7 @@ function CentralMachinesView({ pt }: { pt: boolean }) {
                         onClick={() => setRotateConfirmId(m.id)}
                       >
                         {rotatingId === m.id
-                          ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> {pt ? 'Rotacionando…' : 'Rotating…'}</>
+                          ? <><AgentisticsLoader size={14} /> {pt ? 'Rotacionando…' : 'Rotating…'}</>
                           : <><RotateCw size={14} /> {pt ? 'Rotacionar' : 'Rotate'}</>}
                       </RecordCardAction>
                       <RecordCardAction label="Revoke machine" danger onClick={() => setRevokeConfirmId(m.id)}>
@@ -999,7 +1000,7 @@ function CentralMachinesView({ pt }: { pt: boolean }) {
                             : (pt ? 'Rotacionar token' : 'Rotate token')}
                         >
                           {rotatingId === m.id
-                            ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                            ? <AgentisticsLoader size={12} />
                             : <RotateCw size={12} />}
                         </button>
                         <button
@@ -1657,8 +1658,6 @@ function CentralMachinesView({ pt }: { pt: boolean }) {
         onConfirm={() => void bulkDelete()}
         onCancel={() => setBulkDeleteConfirm(false)}
       />
-
-      <style>{'@keyframes spin { to { transform: rotate(360deg); } }'}</style>
     </>
   )
 }

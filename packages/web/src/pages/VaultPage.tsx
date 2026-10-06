@@ -1,3 +1,4 @@
+import { AgentisticsLoader } from '../components/AgentisticsLoader'
 /**
  * /vault — VAULT.PERSONAL (spec `2026-10-03-vault-personal.md`). The person's OWN secrets: a paginated
  * list with a reactive search over METADATA, groups, a trash, versions, a `.env` import, and a reveal
@@ -11,7 +12,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
-import { Copy, Eye, EyeOff, FileUp, FolderPlus, History, KeyRound, Loader2, Lock, Pencil, Plus, Replace, RotateCcw, Search, ShieldCheck, Trash2, X } from 'lucide-react'
+import { Copy, Eye, EyeOff, FileUp, FolderPlus, History, KeyRound, Lock, Pencil, Plus, Replace, RotateCcw, Search, ShieldCheck, Trash2, X } from 'lucide-react'
 import { VaultGlyph as VaultIcon } from '../components/vault/VaultGlyph'
 import { Checkbox, ConfirmModal, DialogActions, FieldInput, FieldTextarea, Select, TabSelect, dialogButtonStyle } from './settings/primitives'
 import type { AppContext } from '../lib/app-context'
@@ -146,7 +147,7 @@ export default function VaultPage() {
     </div>
   )
 
-  if (state.kind === 'loading') return <div style={pageWrap}>{header}<div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}><Loader2 size={14} className="ag-spin" /></div></div>
+  if (state.kind === 'loading') return <div style={pageWrap}>{header}<div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}><AgentisticsLoader size={14} /></div></div>
   if (state.kind === 'failed') return <div style={pageWrap}>{header}<Err text={t('network')} /></div>
   if (state.kind === 'locked') {
     // §10: unlock RIGHT HERE — Hello on this computer, the phone's own ways on a phone — under a centred
@@ -235,7 +236,7 @@ export default function VaultPage() {
       </div>
       {filter.trash && showMine && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 10 }}>{t('trashNote')}</div>}
 
-      {busyHello && <div role="status" aria-live="polite" style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600, marginBottom: 10 }}><Loader2 size={14} className="ag-spin" /> {t('confirmHello')}</div>}
+      {busyHello && <div role="status" aria-live="polite" style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600, marginBottom: 10 }}><AgentisticsLoader size={14} /> {t('confirmHello')}</div>}
       {toast && <div role="status" style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 10 }}>{toast}</div>}
 
       {showMine && (rows.length === 0 ? (
@@ -412,7 +413,7 @@ export function QuickVaultBody({ lang, isMobile, onNavigate, onAsking }: { lang:
   const half: React.CSSProperties = { flex: '1 1 0', minWidth: 0, justifyContent: 'center', whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.3, minHeight: isMobile ? 44 : 36 }
   return (
     <>
-      {state.kind === 'loading' && <Loader2 size={14} className="ag-spin" />}
+      {state.kind === 'loading' && <AgentisticsLoader size={14} />}
       {state.kind === 'failed' && <Err text={t('network')} />}
       {/* Locked: the SAME centred safe as the /vault page, scaled for the panel (owner, 2026-10-05). */}
       {state.kind === 'locked' && <VaultStage lang={lang} isMobile={isMobile} compact onOpened={() => { void load() }} />}
@@ -440,7 +441,7 @@ export function QuickVaultBody({ lang, isMobile, onNavigate, onAsking }: { lang:
             <input value={q} onChange={e => setQ(e.target.value)} placeholder={t('search')} aria-label={t('search')} autoFocus={!isMobile}
               style={{ ...input, marginBottom: 0, paddingLeft: 30, letterSpacing: 'normal', width: '100%', boxSizing: 'border-box', fontSize: isMobile ? 16 : 13, minHeight: isMobile ? 44 : undefined }} />
           </label>
-          {busyHello && <div role="status" aria-live="polite" style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600, marginBottom: 10 }}><Loader2 size={14} className="ag-spin" /> {t('confirmHello')}</div>}
+          {busyHello && <div role="status" aria-live="polite" style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600, marginBottom: 10 }}><AgentisticsLoader size={14} /> {t('confirmHello')}</div>}
           {toast && <div role="status" style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 10 }}>{toast}</div>}
           {shown.length === 0
             ? <div style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '12px 0' }}>{items.filter(i => !i.deletedAt).length === 0 ? t('empty') : t('noMatch')}</div>
@@ -655,7 +656,7 @@ function EditDialog({ lang, isMobile, item, replace, groups, gated, defaultGroup
       <DialogActions>
         <button type="button" onClick={onClose} style={dialogButtonStyle('secondary', isMobile)}>{t('cancel')}</button>
         <button type="submit" form="vault-edit-form" disabled={busy || !name.trim()} style={dialogButtonStyle('primary', isMobile, busy || !name.trim())}>
-          {busy && <Loader2 size={14} className="ag-spin" />} {busy ? t('working') : t('save')}
+          {busy && <AgentisticsLoader size={14} />} {busy ? t('working') : t('save')}
         </button>
       </DialogActions>
     </>
@@ -718,7 +719,7 @@ function VersionsDialog({ lang, isMobile, item, gated, onClose, onRestored }: { 
     <Sheet lang={lang} isMobile={isMobile} title={t('versionsTitle', { name: item.name })} onClose={onClose}
       footer={<DialogActions><button type="button" onClick={onClose} style={dialogButtonStyle('secondary', isMobile)}>{t('close')}</button></DialogActions>}>
       <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10, lineHeight: 1.6 }}>{t('versionsNote')}</div>
-      {!list && !error && <Loader2 size={14} className="ag-spin" />}
+      {!list && !error && <AgentisticsLoader size={14} />}
       {list?.map(v => (
         <div key={v.version} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}>
           <strong style={{ fontSize: 13 }}>{t('version', { n: v.version })}</strong>
@@ -765,8 +766,8 @@ function ImportDialog({ lang, isMobile, groups, gated, onClose, onDone }: { lang
     <DialogActions>
       <button type="button" onClick={onClose} style={dialogButtonStyle('secondary', isMobile)}>{t('cancel')}</button>
       {preview
-        ? <button type="button" disabled={busy || !importReady(choices)} onClick={() => { void commit() }} style={dialogButtonStyle('primary', isMobile, busy || !importReady(choices))}>{busy && <Loader2 size={14} className="ag-spin" />} {busy ? t('working') : t('importGo')}</button>
-        : <button type="button" disabled={busy} onClick={() => fileRef.current?.click()} style={dialogButtonStyle('primary', isMobile, busy)}>{busy ? <Loader2 size={14} className="ag-spin" /> : <FileUp size={14} />} {busy ? t('working') : t('chooseFile')}</button>}
+        ? <button type="button" disabled={busy || !importReady(choices)} onClick={() => { void commit() }} style={dialogButtonStyle('primary', isMobile, busy || !importReady(choices))}>{busy && <AgentisticsLoader size={14} />} {busy ? t('working') : t('importGo')}</button>
+        : <button type="button" disabled={busy} onClick={() => fileRef.current?.click()} style={dialogButtonStyle('primary', isMobile, busy)}>{busy ? <AgentisticsLoader size={14} /> : <FileUp size={14} />} {busy ? t('working') : t('chooseFile')}</button>}
     </DialogActions>
   )
   return (
