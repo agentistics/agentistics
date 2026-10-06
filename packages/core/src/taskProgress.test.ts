@@ -17,6 +17,13 @@ describe('taskProgress', () => {
     expect(taskProgress(2, 3).complete).toBe(false)
   })
 
+  it('returns a composed in-progress segment and caps it after done work', () => {
+    expect(taskProgress(5, 11, 3)).toMatchObject({
+      done: 5, inProgress: 3, percent: 45, donePercent: 45, inProgressPercent: 27,
+    })
+    expect(taskProgress(10, 11, 4).inProgress).toBe(1)
+  })
+
   it('clamps a count that cannot be right rather than reporting over 100%', () => {
     // A store read mid-write can hand over more done than total; a 140% bar draws outside its cell.
     expect(taskProgress(7, 5)).toMatchObject({ done: 5, percent: 100, complete: true })

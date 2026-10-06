@@ -66,6 +66,8 @@ export interface BoardArrangeProps {
   onColumns: (next: BoardStatus[]) => void
   hideEmpty?: boolean
   onHideEmpty?: (hide: boolean) => void
+  composeSubtaskProgress?: boolean
+  onComposeSubtaskProgress?: (value: boolean) => void
   /** How many cards sit in each status, so a HIDDEN column still says what it holds. */
   counts: Record<string, number>
   /** The board's LIVE status list (`lib/tasks.ts`'s `useTaskStatuses`) — `null` while it loads. */
@@ -141,6 +143,11 @@ export function BoardArrange(p: BoardArrangeProps) {
         </PickerMenu>
 
         {p.onHideEmpty && <EmptyGroupsMenu hide={p.hideEmpty === true} onChange={p.onHideEmpty} lang={p.lang ?? 'en'} />}
+        {p.onComposeSubtaskProgress && (
+          <button type="button" onClick={() => p.onComposeSubtaskProgress?.(!(p.composeSubtaskProgress ?? true))} style={viewSegment(isMobile, p.composeSubtaskProgress !== false)}>
+            {p.lang === 'pt' ? 'Compor andamento' : 'Compose in progress'}
+          </button>
+        )}
 
         {/* SORT — the table's sort, one field written by both. Hand order is the board's resting
             order, so it is the "default" row rather than a key. */}

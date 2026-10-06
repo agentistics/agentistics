@@ -279,7 +279,7 @@ function cellFor(
       // Nothing to be a fraction of. An empty bar here would say "0% done" about a task nobody
       // broke up, which is a claim about the work rather than about the board.
       ? <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
-      : <TaskProgressBar done={row.counts.subtasksDone} total={row.counts.subtasks} />
+      : <TaskProgressBar done={row.counts.subtasksDone} inProgress={row.counts.subtasksInProgress} total={row.counts.subtasks} />
     case 'updated': return (
       <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>
         {new Date(row.task.updatedAt).toLocaleDateString()}
@@ -486,7 +486,7 @@ function SubtaskRows({
               member's own +20 offset is unchanged, so a member still sits exactly as far under its
               group as it always did. */}
           <td style={{ ...cellBox, paddingLeft: indent + (depth === 1 ? 20 : 0), ...tint }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', rowGap: 4 }}>
               {/* Same accordion toggle as `SubtaskTable`'s inline view — collapsed by default. */}
               {isGroupHeader && (
                 <button
@@ -542,7 +542,7 @@ function SubtaskRows({
             {/* "Ready to fire" stays glanceable, exactly as on the task page — the verbs behind
                 it are in the gear. */}
             {!isMember && t.stagedSession && (
-              <div style={{ marginTop: 3 }}>
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
                 <span style={{ ...pill('var(--anthropic-orange)'), fontSize: 9.5 }}>
                   {boardCopy(lang).staged.ready}
                 </span>
@@ -1344,7 +1344,7 @@ export function TaskTable(p: TaskTableProps) {
                                 belongs to the row, and pressing it never leaves the board. It is a
                                 pointer convenience over the chevron's button, not a second tab stop. */}
                             <td style={{ ...cellBox }}>
-                              <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flexWrap: 'wrap', rowGap: 4 }}>
                               {renamingId === row.task.id ? (
                                 <RenameInput
                                   value={row.task.title} ariaLabel={copy.header.renameTask}

@@ -17,15 +17,15 @@
  * with the list precisely so this screen never has to guess.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, Lock, Plus, Settings2, Trash2, X } from 'lucide-react'
+import { Check, GripVertical, Lock, Plus, Search, Settings2, Trash2, X } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useDismissOverlay } from '../../lib/dismissOverlay'
 import { overlayPadding } from '../../lib/mobileOverlay'
 import {
   createTaskStatus, createTaskType, deleteTaskStatus, deleteTaskType, editTaskStatus, editTaskType,
-  fetchTaskStatuses, fetchTaskTypes, type TaskStatusRow, type TaskTypeRow,
+  fetchTaskStatuses, fetchTaskTypes, reorderTaskStatuses, reorderTaskTypes, type TaskStatusRow, type TaskTypeRow,
 } from '../../lib/tasks'
 import { button, field, microLabel, surface } from './board'
 import { boardCopy, type Lang } from './copy'
@@ -44,6 +44,7 @@ interface VocabApi {
   create: (label: string, color: string) => Promise<{ ok: true; row: VocabRow } | { ok: false }>
   edit: (id: string, patch: { label?: string; color?: string }) => Promise<boolean>
   remove: (id: string) => Promise<{ ok: boolean }>
+  reorder: (ids: string[]) => Promise<boolean>
 }
 
 const API: Record<VocabKind, VocabApi> = {
@@ -52,12 +53,14 @@ const API: Record<VocabKind, VocabApi> = {
     create: async (l, c) => { const o = await createTaskStatus(l, c); return o.ok ? { ok: true, row: o.status } : { ok: false } },
     edit: editTaskStatus,
     remove: deleteTaskStatus,
+    reorder: reorderTaskStatuses,
   },
   type: {
     fetch: fetchTaskTypes,
     create: async (l, c) => { const o = await createTaskType(l, c); return o.ok ? { ok: true, row: o.type } : { ok: false } },
     edit: editTaskType,
     remove: deleteTaskType,
+    reorder: reorderTaskTypes,
   },
 }
 
@@ -138,13 +141,15 @@ function deleteReason(row: VocabRow, lang: Lang, kind: VocabKind): string | null
 }
 
 function StatusRow({
-  row, lang, kind, onSaved, onDeleted,
+  row, lang, kind, onSaved, onDeleted, onDragStart, onDrop,
 }: {
   row: VocabRow
   lang: Lang
   kind: VocabKind
   onSaved: (next: VocabRow) => void
   onDeleted: () => void
+  onDragStart: () => void
+  onDrop: () => void
 }) {
   const isMobile = useIsMobile()
   const [label, setLabel] = useState(row.label)
@@ -171,7 +176,8 @@ function StatusRow({
     <div style={{
       display: 'flex', alignItems: 'center', gap: 8, padding: '8px 4px',
       borderBottom: '1px solid var(--border)',
-    }}>
+    }} draggable onDragStart={onDragStart} onDragOver={e => e.preventDefault()} onDrop={onDrop}>
+      <span aria-label={lang === 'pt' ? 'Reordenar' : 'Reorder'} style={{ color: 'var(--text-tertiary)', cursor: 'grab', display: 'flex' }}><GripVertical size={15} /></span>
       <div style={{ position: 'relative' }}>
         <button
           type="button"
@@ -278,7 +284,8 @@ export interface ManageStatusesModalProps {
 }
 
 export function ManageStatusesModal({ lang, onClose, kind = 'status' }: ManageStatusesModalProps) {
-  const api = API[kind]
+  const [tab, setTab] = useState<VocabKind>(kind)
+  const api = API[tab]
   const T = boardCopy(lang).types
   const isMobile = useIsMobile()
   const dismiss = useDismissOverlay(onClose)
@@ -288,9 +295,15 @@ export function ManageStatusesModal({ lang, onClose, kind = 'status' }: ManageSt
   const [pickingNewColor, setPickingNewColor] = useState(false)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [dragged, setDragged] = useState<string | null>(null)
+  const filteredRows = useMemo(() => {
+    const needle = search.trim().toLowerCase()
+    return (rows ?? []).filter(row => !needle || row.label.toLowerCase().includes(needle))
+  }, [rows, search])
 
   const reload = async () => setRows(await api.fetch())
-  useEffect(() => { void reload() }, [kind])
+  useEffect(() => { void reload() }, [tab])
 
   const onCreate = async () => {
     const label = newLabel.trim()
@@ -303,7 +316,7 @@ export function ManageStatusesModal({ lang, onClose, kind = 'status' }: ManageSt
       setRows(r => [...(r ?? []), out.row])
       setNewLabel('')
     } else {
-      setCreateError(kind === 'type' ? T.createError : lang === 'pt'
+      setCreateError(tab === 'type' ? T.createError : lang === 'pt'
         ? 'Não foi possível criar o status. Tente novamente.'
         : 'Could not create the status. Try again.')
     }
@@ -335,7 +348,7 @@ export function ManageStatusesModal({ lang, onClose, kind = 'status' }: ManageSt
             background: 'var(--bg-elevated)', color: 'var(--text-secondary)',
           }}><Settings2 size={17} /></span>
           <span style={{ fontSize: 15, fontWeight: 700, flex: 1 }}>
-            {kind === 'type' ? T.manage : lang === 'pt' ? 'Gerenciar status' : 'Manage statuses'}
+            {lang === 'pt' ? 'Status e tipos' : 'Statuses and types'}
           </span>
           <button
             onClick={onClose}
@@ -349,7 +362,7 @@ export function ManageStatusesModal({ lang, onClose, kind = 'status' }: ManageSt
         </div>
 
         <p style={{ margin: 0, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-          {kind === 'type' ? T.intro : lang === 'pt' ? (
+          {tab === 'type' ? T.intro : lang === 'pt' ? (
             <>
               <strong style={{ color: 'var(--text-secondary)' }}>A fazer</strong>,{' '}
               <strong style={{ color: 'var(--text-secondary)' }}>Em andamento</strong>,{' '}
@@ -370,18 +383,36 @@ export function ManageStatusesModal({ lang, onClose, kind = 'status' }: ManageSt
           )}
         </p>
 
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', gap: 18 }}>
+          {(['status', 'type'] as const).map(value => (
+            <button key={value} type="button" onClick={() => { setTab(value); setSearch(''); setRows(null) }} style={{ border: 0, borderBottom: `2px solid ${tab === value ? 'var(--anthropic-orange)' : 'transparent'}`, background: 'transparent', color: tab === value ? 'var(--anthropic-orange)' : 'var(--text-tertiary)', padding: '7px 2px', cursor: 'pointer', fontSize: 12, fontWeight: 650 }}>
+              {value === 'status' ? (lang === 'pt' ? 'Status' : 'Statuses') : (lang === 'pt' ? 'Tipos' : 'Types')}
+            </button>
+          ))}
+        </div>
+        <div style={{ position: 'relative' }}>
+          <Search size={14} style={{ position: 'absolute', left: 10, top: 9, color: 'var(--text-tertiary)' }} />
+          <input value={search} onChange={e => { const value = e.target.value; setSearch(value); if (!(rows ?? []).some(r => r.label.toLowerCase().includes(value.trim().toLowerCase()))) setNewLabel(value) }} placeholder={lang === 'pt' ? 'Buscar' : 'Search'} style={{ ...field(isMobile), width: '100%', paddingLeft: 30 }} />
+        </div>
         <div style={{ display: 'grid' }}>
           {rows === null && (
             <div style={{ fontSize: 12, color: 'var(--text-tertiary)', padding: '8px 4px' }}>
               {lang === 'pt' ? 'Carregando…' : 'Loading…'}
             </div>
           )}
-          {rows?.map(row => (
+          {filteredRows.map(row => (
             <StatusRow
               key={row.id}
               row={row}
               lang={lang}
-              kind={kind}
+              kind={tab}
+              onDragStart={() => setDragged(row.id)}
+              onDrop={() => {
+                if (!dragged || dragged === row.id || !rows) return
+                const next = [...rows]; const from = next.findIndex(x => x.id === dragged); const to = next.findIndex(x => x.id === row.id)
+                const [moved] = next.splice(from, 1); next.splice(to, 0, moved!)
+                setRows(next); setDragged(null); void api.reorder(next.map(x => x.id))
+              }}
               onSaved={next => setRows(r => (r ?? []).map(x => (x.id === next.id ? next : x)))}
               onDeleted={() => setRows(r => (r ?? []).filter(x => x.id !== row.id))}
             />
@@ -390,7 +421,7 @@ export function ManageStatusesModal({ lang, onClose, kind = 'status' }: ManageSt
 
         <div style={{ display: 'grid', gap: 6 }}>
           <span style={{ ...microLabel, fontSize: 9 }}>
-            {kind === 'type' ? T.newLabel : lang === 'pt' ? 'Novo status' : 'New status'}
+            {tab === 'type' ? T.newLabel : lang === 'pt' ? 'Novo status' : 'New status'}
           </span>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <div style={{ position: 'relative' }}>
@@ -417,7 +448,7 @@ export function ManageStatusesModal({ lang, onClose, kind = 'status' }: ManageSt
               value={newLabel}
               onChange={e => setNewLabel(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') void onCreate() }}
-              placeholder={kind === 'type' ? T.placeholder : lang === 'pt' ? 'ex.: Aguardando cliente' : 'e.g. Waiting on client'}
+              placeholder={tab === 'type' ? T.placeholder : lang === 'pt' ? 'ex.: Aguardando cliente' : 'e.g. Waiting on client'}
               style={{ ...field(isMobile), flex: 1, minWidth: 0 }}
             />
             <button
@@ -428,7 +459,7 @@ export function ManageStatusesModal({ lang, onClose, kind = 'status' }: ManageSt
                 ...button(isMobile, 'primary'),
                 ...(!newLabel.trim() ? { opacity: 0.55 } : {}),
               }}
-            ><Plus size={14} /> {lang === 'pt' ? 'Adicionar' : 'Add'}</button>
+            ><Plus size={14} /> {lang === 'pt' ? 'Criar' : 'Create'}</button>
           </div>
           {createError && (
             <span style={{ fontSize: 11, color: 'var(--accent-red)' }}>{createError}</span>

@@ -161,6 +161,7 @@ export interface TaskStore {
   /** Add a new status, or edit an existing one's label/color. The `id` is never rewritten by this —
    *  create mints a fresh entry, edit finds the existing one by `id` and replaces label/color only. */
   upsertStatus(def: TaskStatusDef): Promise<void>
+  reorderStatuses(ids: readonly string[]): Promise<void>
   /** False when no status carries that id — never a silent success. The caller (`task-web.ts`) is
    *  the one that checks `canDeleteStatus` BEFORE calling this; this method trusts that call. */
   removeStatus(id: string): Promise<boolean>
@@ -169,6 +170,7 @@ export interface TaskStore {
   seedTypes(list: readonly TaskTypeDef[]): Promise<void>
   /** Add a type or edit one's label/color; the id never changes. */
   upsertType(def: TaskTypeDef): Promise<void>
+  reorderTypes(ids: readonly string[]): Promise<void>
   /** False when no type carries that id. The caller checks `canDeleteType` first. */
   removeType(id: string): Promise<boolean>
 
@@ -907,6 +909,12 @@ export function createTaskStore(file: string): TaskStore {
         })
       })
     },
+    reorderStatuses(ids) {
+      return enqueue(async () => {
+        const book = await read(); const rank = new Map(ids.map((id, i) => [id, i]))
+        await write({ ...book, statuses: book.statuses.map(s => ({ ...s, order: rank.get(s.id) ?? s.order })).sort((a, b) => a.order - b.order) })
+      })
+    },
     fileHistorical(link) {
       return enqueue(async () => {
         const book = await read()
@@ -975,6 +983,12 @@ export function createTaskStore(file: string): TaskStore {
       return enqueue(async () => {
         const book = await read()
         await write({ ...book, types: [...book.types.filter(s => s.id !== def.id), def] })
+      })
+    },
+    reorderTypes(ids) {
+      return enqueue(async () => {
+        const book = await read(); const rank = new Map(ids.map((id, i) => [id, i]))
+        await write({ ...book, types: book.types.map(t => ({ ...t, order: rank.get(t.id) ?? t.order })).sort((a, b) => a.order - b.order) })
       })
     },
     removeType(id) {
