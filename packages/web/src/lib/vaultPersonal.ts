@@ -116,7 +116,11 @@ export function copyWithAutoClear(text: string, clip: Pick<Clipboard, 'writeText
 /** Erase the vault's older bundles from the GitHub backup (gate `personal-backup-wipe`: code + gesture, fresh). */
 export const wipeBackupHistory = (code?: string) => vaultPost<{ deleted: number; failed: number }>(`${P}/backup/wipe-history`, withCode({}, code))
 
-export interface GrantAnswer { refs: { ref: string; env: string; name: string; field: string }[]; briefing: string }
+export interface GrantRef { ref: string; env: string; name: string; field: string }
+export interface GrantRecord { sessionId: string; createdAt: string; refs: GrantRef[] }
+export interface GrantAnswer { refs: GrantRef[]; briefing: string }
 /** Grant a session the chosen items/groups (gate `personal-grant`: the gesture, fresh). The answer: references + briefing, never a value. */
 export const grantSession = (sessionId: string, itemIds: string[], groupIds: string[], code?: string, gestureToken?: string) =>
   vaultPost<GrantAnswer>(`${P}/grants`, withCode({ sessionId, itemIds, groupIds, ...tok(gestureToken) }, code))
+/** Metadata only: current in-memory grants, never credential values. */
+export const listGrantRecords = () => vaultGet<{ grants: GrantRecord[] }>(`${P}/grants`)
