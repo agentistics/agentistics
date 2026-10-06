@@ -1,88 +1,64 @@
-/**
- * TaskProgressBar — how much of a task its subtasks say is done.
- *
- * One component and one arithmetic (`taskProgress` in `@agentistics/core`), drawn on the card, in
- * the table, on the detail header and over the subtask grid. Four bars computing their own
- * percentage is four chances for the same task to read 66% in one place and 67% in another, which
- * is the kind of disagreement that makes a reader stop believing both.
- *
- * A task with NO subtasks draws nothing at all — not an empty bar. "Nobody broke this up" and
- * "nothing is done yet" are different facts, and a 0% bar on every unbroken task would make the bar
- * mean nothing anywhere.
- */
-
-import { useState } from 'react'
+import { useState, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { taskProgress, type TaskStatusDef } from '@agentistics/core'
-import { microLabel, statusStyle } from './board'
+import { liveStatusOrder, microLabel, statusStyle } from './board'
+import type { Lang } from './copy'
 
-export function TaskProgressBar({ done, total, inProgress = 0, blocked = 0, statuses = null, showPercent = true, height = 4, label }: {
-  done: number
-  total: number
-  /** The number beside the bar. Off in the tightest cells, where the bar alone is the signal. */
-  showPercent?: boolean
-  height?: number
-  inProgress?: number
-  blocked?: number
-  statuses?: readonly TaskStatusDef[] | null
-  /** A word before the bar, when it is not obvious what is being counted. */
-  label?: string
-}) {
-  const p = taskProgress(done, total, inProgress, blocked)
-  const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number } | null>(null)
-  const showTooltip = (text: string, e: React.MouseEvent<HTMLElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect()
-    setTooltip({ text, x: rect.left, y: rect.top - 7 })
+export interface ProgressTooltipModel {
+  summary: string
+  statuses: Array<{ id: string; label: string; count: number; color: string }>
+  titles: string[]
+  moreTitles: number
+}
+
+export function progressTooltipModel(done: number, total: number, percent: number, counts: Readonly<Record<string, number>>, statuses: readonly TaskStatusDef[] | null, lang: Lang, titles: readonly string[] = []): ProgressTooltipModel {
+  const order = liveStatusOrder(statuses)
+  const ids = [...order, ...Object.keys(counts).filter(id => !order.includes(id))]
+  return {
+    summary: lang === 'pt' ? `${done} de ${total} concluídas (${percent}%)` : `${done} of ${total} completed (${percent}%)`,
+    statuses: ids.filter(id => (counts[id] ?? 0) > 0).map(id => ({ id, label: statusStyle(statuses, id).label, count: counts[id]!, color: statusStyle(statuses, id).color })),
+    titles: [...titles].slice(0, 12), moreTitles: Math.max(0, titles.length - 12),
   }
+}
+
+export function ProgressTooltip({ model, x, y }: { model: ProgressTooltipModel; x: number; y: number }) {
+  return createPortal(
+    <span role="tooltip" style={{ position: 'fixed', left: x, top: y, transform: 'translateY(-100%)', zIndex: 4000, pointerEvents: 'none', minWidth: 150, padding: '6px 8px', borderRadius: 5, background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontSize: 10, lineHeight: 1.45, boxShadow: '0 3px 12px rgba(0,0,0,.25)' }}>
+      <span style={{ display: 'block', fontWeight: 650, marginBottom: 3 }}>{model.summary}</span>
+      {model.statuses.map(s => <span key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 5 }}><i style={{ width: 7, height: 7, borderRadius: '50%', background: s.color, flex: '0 0 auto' }} />{s.label} {s.count}</span>)}
+      {model.titles.length > 0 && <span style={{ display: 'block', marginTop: 4, color: 'var(--text-secondary)' }}>{model.titles.join(', ')}{model.moreTitles > 0 ? ` +${model.moreTitles}` : ''}</span>}
+    </span>, document.body,
+  )
+}
+
+export function TaskProgressBar({ done, total, inProgress = 0, blocked = 0, statusCounts, statuses = null, showPercent = true, height = 4, label, subtaskTitles = [], lang = 'en' }: {
+  done: number; total: number; showPercent?: boolean; height?: number; inProgress?: number; blocked?: number
+  statusCounts?: Readonly<Record<string, number>>; statuses?: readonly TaskStatusDef[] | null; label?: string
+  subtaskTitles?: readonly string[]; lang?: Lang
+}) {
+  const p = taskProgress(done, total, inProgress, blocked, statusCounts)
+  const [tooltip, setTooltip] = useState<{ x: number; y: number } | null>(null)
   if (p.percent === null) return null
-  const doneStatus = statusStyle(statuses, 'done')
-  const inProgressStatus = statusStyle(statuses, 'in_progress')
-  const blockedStatus = statusStyle(statuses, 'blocked')
-  const statusText = (label: string, count: number) => `${label}: ${count}`
+  const order = liveStatusOrder(statuses)
+  const ids = [...order, ...Object.keys(p.counts).filter(id => !order.includes(id))]
+  const showTooltip = (e: MouseEvent<HTMLElement>) => { const r = e.currentTarget.getBoundingClientRect(); setTooltip({ x: r.left, y: r.top - 7 }) }
+  const model = progressTooltipModel(p.done, p.total, p.percent, p.counts, statuses, lang, subtaskTitles)
+  let left = 0
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
       {label && <span style={{ ...microLabel, fontSize: 9, flexShrink: 0 }}>{label}</span>}
-      <div style={{
-        flex: 1, minWidth: 24, height, borderRadius: height / 2,
-        background: 'var(--bg-elevated)', overflow: 'visible', position: 'relative',
-      }}>
-        <div onMouseEnter={e => showTooltip(statusText(doneStatus.label, p.done), e)} onMouseLeave={() => setTooltip(null)} style={{
-          position: 'relative',
-          width: `${p.donePercent}%`, height: '100%', borderRadius: height / 2,
-          background: doneStatus.color,
-          transition: 'width 0.2s',
-        }} aria-label={`${p.percent}% concluído · ${p.done} de ${p.total} subtarefas`} />
-        {p.inProgressPercent != null && p.inProgressPercent > 0 && (
-          <div onMouseEnter={e => showTooltip(statusText(inProgressStatus.label, p.inProgress ?? 0), e)} onMouseLeave={() => setTooltip(null)} style={{
-            position: 'absolute', left: `${p.donePercent}%`, top: 0,
-            width: `${p.inProgressPercent}%`, height: '100%', background: inProgressStatus.color,
-            transition: 'left 0.2s, width 0.2s',
-          }} aria-label={`${p.inProgress} em andamento`} />
-        )}
-        {p.blockedPercent != null && p.blockedPercent > 0 && (
-          <div onMouseEnter={e => showTooltip(statusText(blockedStatus.label, p.blocked ?? 0), e)} onMouseLeave={() => setTooltip(null)} style={{
-            position: 'absolute',
-            left: `${(p.donePercent ?? 0) + (p.inProgressPercent ?? 0)}%`,
-            top: 0,
-            width: `${p.blockedPercent}%`,
-            height: '100%',
-            background: blockedStatus.color,
-            transition: 'left 0.2s, width 0.2s',
-          }} aria-label={statusText(blockedStatus.label, p.blocked ?? 0)} />
-        )}
+      <div onMouseEnter={showTooltip} onMouseLeave={() => setTooltip(null)} style={{ flex: 1, minWidth: 24, height, borderRadius: height / 2, background: 'var(--bg-elevated)', overflow: 'hidden', position: 'relative' }} aria-label={`${p.percent}% · ${p.done} de ${p.total}`}>
+        {ids.map(id => {
+          const count = p.counts[id] ?? 0
+          if (count <= 0) return null
+          const width = count / p.total * 100
+          const node = <i key={id} aria-label={`${statusStyle(statuses, id).label}: ${count}`} style={{ position: 'absolute', left: `${left}%`, top: 0, width: `${width}%`, height: '100%', background: statusStyle(statuses, id).color }} />
+          left += width
+          return node
+        })}
       </div>
-      {showPercent && (
-        <span style={{
-          ...microLabel, fontSize: 10, flexShrink: 0, fontVariantNumeric: 'tabular-nums',
-          color: p.complete ? doneStatus.color : 'var(--text-tertiary)',
-        }}>
-          {p.percent}% · {p.done}/{p.total}
-        </span>
-      )}
-      {tooltip && typeof document !== 'undefined' && createPortal(
-        <span role="tooltip" style={{ position: 'fixed', left: tooltip.x, top: tooltip.y, transform: 'translateY(-100%)', zIndex: 4000, pointerEvents: 'none', whiteSpace: 'nowrap', padding: '4px 7px', borderRadius: 4, background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontSize: 10, boxShadow: '0 3px 12px rgba(0,0,0,.25)' }}>{tooltip.text}</span>,
-        document.body,
-      )}
+      {showPercent && <span style={{ ...microLabel, fontSize: 10, flexShrink: 0, fontVariantNumeric: 'tabular-nums', color: p.complete ? statusStyle(statuses, 'done').color : 'var(--text-tertiary)' }}>{p.percent}% · {p.done}/{p.total}</span>}
+      {tooltip && typeof document !== 'undefined' && <ProgressTooltip model={model} x={tooltip.x} y={tooltip.y} />}
     </div>
   )
 }

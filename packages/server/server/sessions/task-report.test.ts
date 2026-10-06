@@ -496,14 +496,14 @@ describe('subtaskViews — the three shapes, no session counted twice', () => {
       const group = views.find(v => v.id === 'g1')!
       const loose = views.find(v => v.id === 's1')!
 
-      expect(group.groupProgress).toEqual({ done: 1, total: 3, percent: 33, complete: false })
+      expect(group.groupProgress).toMatchObject({ done: 1, total: 3, counts: { done: 1, todo: 2 }, percent: 33, complete: false })
       expect(loose.groupProgress).toBeUndefined()
     })
 
     it('a group with no members yet draws no progress bar — "nobody joined it" is not 0%', () => {
       const subs = [subtask({ id: 'g1', isGroup: true })]
       const views = subtaskViews(task(), subs, [], metasAll, costOf)
-      expect(views[0]!.groupProgress).toEqual({ done: 0, total: 0, percent: null, complete: false })
+      expect(views[0]!.groupProgress).toMatchObject({ done: 0, total: 0, counts: {}, percent: null, complete: false })
     })
   })
 
