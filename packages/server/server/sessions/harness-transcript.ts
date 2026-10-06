@@ -225,9 +225,22 @@ export async function resolveCopilotTranscript(
   ref: TranscriptRef,
   stateDir: string = join(COPILOT_DIR, 'session-state'),
 ): Promise<string | null> {
-  if (!UUID_RE.test(ref.conversationId)) return null
-  const p = join(stateDir, ref.conversationId, 'events.jsonl')
-  return (await exists(p)) ? p : null
+  if (UUID_RE.test(ref.conversationId)) {
+    const p = join(stateDir, ref.conversationId, 'events.jsonl')
+    if (await exists(p)) return p
+  }
+  // Agentop's workspace metadata can preserve its managed id as `mc_session_id` while Copilot
+  // keeps its own UUID as the directory name. The adapter uses the managed id for task joins, so
+  // resolve the transcript through this small metadata index when the direct path misses.
+  for (const dir of await readdir(stateDir).catch(() => [] as string[])) {
+    if (!UUID_RE.test(dir)) continue
+    const workspace = await readFile(join(stateDir, dir, 'workspace.yaml'), 'utf8').catch(() => '')
+    const match = /^mc_session_id:\s*['"]?([^'"\s]+)['"]?\s*$/m.exec(workspace)
+    if (match?.[1] !== ref.conversationId) continue
+    const p = join(stateDir, dir, 'events.jsonl')
+    if (await exists(p)) return p
+  }
+  return null
 }
 
 /**

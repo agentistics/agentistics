@@ -1,4 +1,5 @@
 import { test, expect } from 'bun:test'
+import { readFile } from 'node:fs/promises'
 import { parseCopilotEvents, parseCopilotWorkspace, copilotGitRemote } from './copilot-parse'
 
 // Minimal real-world-shaped sample — no session.shutdown (crashed/no clean exit)
@@ -171,6 +172,19 @@ test('parseCopilotWorkspace reads the fields the session needs', () => {
   expect(ws.hostType).toBe('github')
   expect(ws.branch).toBe('main')
   expect(ws.name).toBe('Salve Coding Session')
+})
+
+test('parseCopilotWorkspace keeps agentop session identity when Copilot uses a different UUID', () => {
+  expect(parseCopilotWorkspace('id: copilot-uuid\nmc_session_id: agentop-session\n').mcSessionId).toBe('agentop-session')
+})
+
+test('reads a sanitized current fixture with cumulative premium-request checkpoints', async () => {
+  const fixture = await readFile(new URL('./fixtures/copilot-current-events.jsonl', import.meta.url), 'utf8')
+  const s = parseCopilotEvents(fixture, 'fallback')!
+  expect(s.session_id).toBe('copilot-uuid')
+  expect(s.model).toBe('gpt-5.6-luna')
+  expect(s.copilot_credits).toEqual({ nanoAiu: 808713000, premiumRequests: 2 })
+  expect(s.input_tokens + s.output_tokens + s.cache_read_input_tokens! + s.cache_creation_input_tokens!).toBe(29)
 })
 
 test('parseCopilotWorkspace survives junk without throwing', () => {

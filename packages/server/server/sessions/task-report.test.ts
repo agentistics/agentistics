@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'bun:test'
 import type { SessionMeta } from '@agentistics/core'
 import {
-  buildTaskDetail, buildTaskList, groupVisibility, reposOfRows, subtaskViews,
+  buildTaskDetail, buildTaskList, groupVisibility, reposOfRows, rollupSessionsFor, subtaskViews,
 } from './task-report'
 import type { Subtask, Task } from './task-model'
 import type { ManagedSession } from './types'
@@ -124,6 +124,16 @@ describe('rollupSessionsFor', () => {
     expect(out).toHaveLength(3)
     // The two unlinked ones contribute nothing, which is what `sessionsLinked` is for.
     expect(out.filter(s => s.meta !== null)).toHaveLength(1)
+  })
+
+  it('turns Copilot premium requests into the task credits rollup', () => {
+    const meta = meta2({
+      harness: 'copilot',
+      model: 'gpt-5.6-luna',
+      copilot_credits: { nanoAiu: 808713000, premiumRequests: 2 },
+    })
+    const out = rollupSessionsFor([row({ conversationId: 'c1', harness: 'copilot' })], metasOf(meta), () => 99)
+    expect(out[0]).toMatchObject({ costUSD: null, credits: { nanoAiu: 808713000, premiumRequests: 2 } })
   })
 
   it('keeps distinct conversations apart', async () => {

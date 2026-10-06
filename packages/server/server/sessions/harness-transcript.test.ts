@@ -187,7 +187,14 @@ describe('the copilot reader', () => {
       .toBe(join(root, ID, 'events.jsonl'))
   })
 
-  it('an id that is not a UUID resolves to nothing and reaches no filesystem', async () => {
+  it('resolves an agentop mc_session_id through workspace metadata', async () => {
+    const managed = 'agentop-session-id'
+    await writeFile(join(root, ID, 'workspace.yaml'), `id: ${ID}\nmc_session_id: ${managed}\n`)
+    expect(await resolveCopilotTranscript({ conversationId: managed }, root))
+      .toBe(join(root, ID, 'events.jsonl'))
+  })
+
+  it('an unknown managed id resolves to nothing without treating it as a path', async () => {
     expect(await resolveCopilotTranscript({ conversationId: '../../etc' }, root)).toBeNull()
   })
 
@@ -335,4 +342,3 @@ describe('a transcript that appears AFTER the first miss', () => {
     await rm(root, { recursive: true, force: true })
   })
 })
-
