@@ -655,7 +655,7 @@ function EditDialog({ lang, isMobile, item, replace, groups, gated, defaultGroup
               <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>{t('f_group')}</div>
               <Select value={groupId} onChange={setGroupId} placeholder={t('noGroup')} options={[{ value: '', label: t('noGroup') }, ...groups.map(g => ({ value: g.id, label: g.name }))]} />
             </div>
-            <FieldInput label={t('f_tags')} sub={t('tagsHint')} value={tags} onChange={setTags} />
+            <FieldInput label={t('f_tags')} value={tags} onChange={setTags} />
             {tagList.length > 0 && (
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: -8, marginBottom: 14 }}>
                 {tagList.map(tag => <span key={tag} style={{ fontSize: 11.5, padding: '2px 8px', borderRadius: 999, border: '1px solid var(--border)', color: 'var(--text-secondary)', background: 'var(--bg-elevated)' }}>#{tag}</span>)}

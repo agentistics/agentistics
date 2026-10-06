@@ -162,9 +162,8 @@ export const PERSONAL_TEXT = {
   systemNote: { en: 'Kept by Agentistics itself (backups, the central, the encrypted channel). Only the name, file, date and state are shown — never a value.', pt: 'Guardados pelo próprio Agentistics (backups, a central, o canal cifrado). Só aparecem nome, arquivo, data e estado — nunca o valor.' },
   systemEmpty: { en: 'Agentistics keeps no secret of its own on this machine yet.', pt: 'O Agentistics ainda não guarda nenhum segredo próprio nesta máquina.' },
   systemBadge: { en: 'system', pt: 'sistema' },
-  codeStageTitle: { en: 'Your authenticator code', pt: 'Código do autenticador' },
+  codeStageTitle: { en: 'Confirm it is you', pt: 'Confirme que é você' },
   codeStageSub: { en: 'Type the 6 digits from your authenticator app to see the list.', pt: 'Digite os 6 dígitos do seu app autenticador para ver a lista.' },
-  tagsHint: { en: 'Separate with commas.', pt: 'Separe com vírgulas.' },
   quickClose: { en: 'Close', pt: 'Fechar' },
 
 } as const satisfies Record<string, Pair>
