@@ -31,6 +31,13 @@ export interface PanelMetaEntry {
 }
 
 export const PANEL_META: Record<PanelId, PanelMetaEntry> = {
+  search: {
+    title: { en: 'Search the conversation', pt: 'Buscar na conversa' },
+    description: {
+      en: 'Find any message in this session’s whole conversation, then copy it, forward it or go to it.',
+      pt: 'Encontre qualquer mensagem da conversa inteira desta sessão e copie, encaminhe ou vá até ela.',
+    },
+  },
   live: {
     title: { en: 'Live', pt: 'Live' },
     description: {

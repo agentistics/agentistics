@@ -134,9 +134,9 @@ export interface SearchQueue {
  * is what closes that — only the most recently STARTED run may emit, and `cancel` bumps it too, so
  * a queue torn down with a request in flight can never write into an unmounted component.
  */
-export function createSearchQueue(
-  run: (q: string) => Promise<SearchState>,
-  emit: (state: SearchState) => void,
+export function createSearchQueue<S = SearchState>(
+  run: (q: string) => Promise<S>,
+  emit: (state: S) => void,
   delayMs: number = DEBOUNCE_MS,
 ): SearchQueue {
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -474,7 +474,7 @@ function HitRow({ hit, isMobile, lang, onOpen }: {
 }
 
 /** A control that is only an icon still has to be a 44px target on a phone, and still has a name. */
-function IconButton({ label, size, onClick, children }: {
+export function IconButton({ label, size, onClick, children }: {
   label: string
   size: number
   onClick: () => void

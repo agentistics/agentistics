@@ -96,6 +96,7 @@ import {
 } from '../../lib/promptHistory'
 import { RecentPromptsPanel } from './RecentPromptsPanel'
 import { goToTurn } from '../../lib/turnScroll'
+import { findTurnIndex, registerChatSearchTarget } from '../../lib/chatSearchBridge'
 import { attachmentName, splitMessage } from '../../lib/messageAttachments'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -1784,6 +1785,27 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
         : 'That message is no longer in the loaded conversation.')
     }
   }, [session.id, turns, queued, pt])
+
+  /**
+   * "BUSCAR NA CONVERSA" asks this chat for one message (`chatSearchBridge.ts`): forward it through
+   * this chat's own forward modal, or go to it — widening the rendered window first, exactly as a
+   * quote card's jump does, then `goToTurn`'s scroll and flash. Resolved against the turns as they
+   * are NOW (a ref, so the registration does not churn on every poll). A message older than the
+   * loaded window is `not-loaded`; one that is loaded but has no bubble on screen (the terminal view)
+   * is `no-chat` — the panel says each in its own words.
+   */
+  const searchView = useRef({ turns, shownTurns, turnAnchors })
+  searchView.current = { turns, shownTurns, turnAnchors }
+  useEffect(() => registerChatSearchTarget(session.id, req => {
+    const { turns: now, shownTurns: shown, turnAnchors: anchors } = searchView.current
+    const i = findTurnIndex(now, req.turn)
+    if (i < 0) return 'not-loaded'
+    if (req.kind === 'forward') { setForwardTurns([now[i]!]); return 'done' }
+    if (i < windowStart(now.length, shown)) flushSync(() => setShownTurns(shownToInclude(now.length, i)))
+    holdTailUntil.current = Date.now() + 4000
+    setAtTail(false)
+    return goToTurn(searchView.current.turnAnchors[i] ?? anchors[i]) ? 'done' : 'no-chat'
+  }), [session.id])
 
   /**
    * RESTORE the conversation from just before a prompt (claude's own rewind), then hand the message

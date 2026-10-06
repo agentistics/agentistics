@@ -2998,6 +2998,41 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return res
     }
 
+    // "Buscar na conversa": ONE session's whole transcript, searched (case- and accent-blind).
+    // Read only; the same readers and refusals as `/api/fleet/chat` — see `chat-search-web.ts`.
+    if (url.pathname === '/api/fleet/chat-search' && req.method === 'GET') {
+      const id = url.searchParams.get('id')
+      if (!id) {
+        return new Response(JSON.stringify({ error: 'bad_request' }), {
+          status: 400,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+      try {
+        const { searchSessionChat } = await import('./sessions/chat-search-web')
+        const { hostForFleet, fleetLang } = await import('./sessions/fleet-web')
+        const lang = fleetLang(url.searchParams.get('lang'))
+        const num = (k: string): number | undefined => {
+          const n = Number(url.searchParams.get(k))
+          return url.searchParams.has(k) && Number.isFinite(n) ? n : undefined
+        }
+        const offset = num('offset')
+        const limit = num('limit')
+        const payload = await searchSessionChat(
+          await hostForFleet(lang), lang, id, url.searchParams.get('q') ?? '',
+          { ...(offset !== undefined ? { offset } : {}), ...(limit !== undefined ? { limit } : {}) },
+        )
+        return new Response(JSON.stringify(payload), {
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      } catch (err) {
+        return new Response(JSON.stringify(safeError(err, { verbose: PROFILE === 'local' }).body), {
+          status: 500,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+    }
+
     if (url.pathname === '/api/fleet/chat' && req.method === 'GET') {
       const id = url.searchParams.get('id')
       if (!id) {

@@ -87,6 +87,7 @@ import {
   SessionDrilldownBody, SessionDrilldownHead, type SessionDrilldownProps,
 } from '../SessionDrilldown'
 import { ArtifactDoc } from './ArtifactDoc'
+import { ChatSearchTab } from './ChatSearchTab'
 import { GalleryTab } from './GalleryTab'
 import { turnAnchorIds } from '../../lib/promptHistory'
 // The FOURTH copy of this shape lived here, byte-identical to the three the repository
@@ -1323,6 +1324,16 @@ export function ArtifactsAside({
                store has no record of this conversation yet, and then there is NO TAB"). There is
                still a tab now — the rail put one there — so the panel has to say WHY it has nothing,
                rather than the blank region a reader got here before this branch existed. */
+            /* SEARCH reads the transcript ITSELF, on the server, and states the chat's refusal on its
+               own when there is one — so it answers before the refusal arm, which would otherwise
+               hide the field on a native session whose chat this panel is never handed. */
+            : tab === 'search' ? (
+              <ChatSearchTab
+                sessionId={sessionId} lang={lang}
+                {...(session?.harness ? { harness: session.harness } : {})}
+                {...(isMobile ? { onHandedToChat: onClose } : {})}
+              />
+            )
             : tab === 'metrics' ? <Note icon={<BarChart3 size={16} />} text={pt
               ? 'O banco ainda não tem registro desta conversa — as métricas aparecem depois que a sessão termina de ser processada.'
               : 'The store has no record of this conversation yet — metrics appear once the session has finished being processed.'} />

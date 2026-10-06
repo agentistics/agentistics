@@ -80,6 +80,9 @@ export function configuredProviders(list: readonly { id: string; label: string; 
 const base = (id: string) => `/api/runtime/sessions/${encodeURIComponent(id)}`
 
 export const windowUrl = (id: string) => `${base(id)}/messages?limit=200`
+/** One page of the session's messages, `before` a seq (`NativeWindow.nextBefore`) — the conversation search walks them all. */
+export const windowPageUrl = (id: string, before?: number) =>
+  `${base(id)}/messages?limit=200${before !== undefined ? `&before=${before}` : ''}`
 /** H24: switch the session's model for the next runs (same provider). */
 export const modelUrl = (id: string) => `${base(id)}/model`
 /** B9.1: the reasoning effort for the next runs (low, medium, high, off). */
