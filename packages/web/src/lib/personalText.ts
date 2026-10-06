@@ -111,6 +111,11 @@ export const PERSONAL_TEXT = {
   },
   backupWiped: { en: '{n} older vault copy(ies) erased from the backup.', pt: '{n} cópia(s) antiga(s) do cofre apagada(s) do backup.' },
   phoneTitle: { en: 'On your phone', pt: 'No celular' },
+  phoneLockedRegister: {
+    en: 'To use this phone: 1) open the vault on your computer, 2) reload this page and tap Register this phone, 3) approve on the computer.',
+    pt: 'Para usar este celular: 1) abra o cofre no computador, 2) recarregue esta página e toque em Registrar este celular, 3) aprove no computador.',
+  },
+  phoneReload: { en: 'Reload', pt: 'Recarregar' },
   phoneInsecure: {
     en: 'To use your phone\'s fingerprint or face, open Agentistics by its https address — for example by turning on HTTPS certificates in your Tailscale network and using the machine\'s https name.',
     pt: 'Para usar a digital ou o rosto do celular, abra o Agentistics pelo endereço https — por exemplo ligando os certificados HTTPS na sua rede Tailscale e usando o nome https da máquina.',

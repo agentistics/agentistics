@@ -83,6 +83,7 @@ import { ConfirmModal } from '../../pages/settings/primitives'
 // one unit (continuous left accent bar + shared tint, header down through the last row) — reused
 // rather than invented a second time for user session groups.
 import { CLUSTER_ACCENT, CLUSTER_TINT } from '../tasks/subtaskGroups'
+import { NAY_UNDOCK_SESSION, requestUndockSession, withUndockEntry } from '../../lib/nayDockBridge'
 
 /** The row menu's client-side "open beside" entry — see `openSessionBeside`. */
 const OPEN_BESIDE = '__open_beside__'
@@ -592,6 +593,11 @@ export function SessionsAside({
   const pickMenuAction = (action: string) => {
     if (!menu) return
     const { id } = menu
+    if (action === NAY_UNDOCK_SESSION) {
+      requestUndockSession(id)
+      setMenu(null)
+      return
+    }
     if (action === OPEN_BESIDE) {
       openSessionBeside(id)
       setMenu(null)
@@ -1714,7 +1720,7 @@ export function SessionsAside({
       {menu && (
         <SessionRowMenu
           x={menu.x} y={menu.y}
-          entries={rowMenuEntries(
+          entries={withUndockEntry(rowMenuEntries(
             menu.verbs, menu.state,
             [
               // The split view (desktop only, and only where this list opens sessions itself —
@@ -1729,7 +1735,7 @@ export function SessionsAside({
               ...groupMenuExtras(rows.find(r => r.id === menu.id), groupOfKey, pt),
               ...notifyExtras(rows.find(r => r.id === menu.id), mutedKeys, pt),
             ],
-          )}
+          ), pt, !isMobile)}
           onPick={pickMenuAction}
           onClose={() => setMenu(null)}
         />

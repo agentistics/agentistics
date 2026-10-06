@@ -31,7 +31,7 @@ import { hasPasskeyHere, mobileState, passkeySupport, phoneGesture, removePasske
 import { CodeField, PhoneEnrol } from '../components/vault/VaultUnlock'
 import { VaultCodeStage, VaultStage } from '../components/vault/VaultStage'
 import { VaultCodeClock } from '../components/vault/VaultCodeClock'
-import { clearStalePhones, phoneFacts, readDeviceKey, removeDevice } from '../lib/phoneVault'
+import { clearStalePhones, lockedPhoneBox, phoneFacts, readDeviceKey, removeDevice, type PhoneFacts } from '../lib/phoneVault'
 
 type Lang = 'en' | 'pt'
 type State = { kind: 'loading' } | { kind: 'locked' } | { kind: 'code'; error: string | null } | { kind: 'ready' } | { kind: 'failed' }
@@ -53,6 +53,7 @@ export function usePersonalVault() {
   const askCode = useCallback(() => new Promise<string | null>(res => setCodeAsk(() => (c: string | null) => { setCodeAsk(null); res(c) })), [])
   // §7: on a page NOT on this computer (the phone), a gesture is a passkey token, never a Hello prompt.
   const [mobile, setMobile] = useState<MobileState | null>(null)
+  const [lockedPhone, setLockedPhone] = useState<PhoneFacts | null>(null)
   const isPhone = mobile !== null && !mobile.loopback
   const host = typeof window !== 'undefined' ? window.location.hostname : ''
   const canPasskey = isPhone && passkeySupport(window) === 'ok' && hasPasskeyHere(mobile, host)
@@ -77,6 +78,8 @@ export function usePersonalVault() {
   const load = useCallback(async () => {
     const v = await loadVault()
     if (v.kind === 'failed') { setState({ kind: 'failed' }); return }
+    const pf = await phoneFacts()
+    if (pf.ok) setLockedPhone(pf)
     if (v.view.state !== 'open') { setState({ kind: 'locked' }); return }
     if (v.kind === 'view') setSystemItems(orderItems(v.view.items))
     const r = await listPersonal()
@@ -91,7 +94,7 @@ export function usePersonalVault() {
     setState({ kind: 'failed' })
   }, [])
   useEffect(() => { void load() }, [load])
-  return { state, setState, items, setItems, groups, setGroups, systemItems, busyHello, codeAsk, mobile, setMobile, isPhone, host, gated, load }
+  return { state, setState, items, setItems, groups, setGroups, systemItems, busyHello, codeAsk, mobile, setMobile, lockedPhone, isPhone, host, gated, load }
 }
 
 type Section = 'all' | 'mine' | 'system'
@@ -115,7 +118,7 @@ export default function VaultPage() {
   const [wipeAsk, setWipeAsk] = useState(false)
   // A vault that WAS open and is now locked (auto-lock, the Lock button) closes its safe on the way in.
   const wasReady = useRef(false)
-  const { state, setState, items, setItems, groups, systemItems, busyHello, codeAsk, mobile, setMobile, isPhone, host, gated, load } = usePersonalVault()
+  const { state, setState, items, setItems, groups, systemItems, busyHello, codeAsk, mobile, setMobile, lockedPhone, isPhone, host, gated, load } = usePersonalVault()
   useEffect(() => { if (state.kind === 'ready') wasReady.current = true }, [state.kind])
 
   // Reactive search: every keystroke, debounced 120 ms; page back to 1 whenever the filter changes.
@@ -152,6 +155,24 @@ export default function VaultPage() {
       // No page header here: the safe in the centre IS the title (owner, 2026-10-05).
       <div style={pageWrap}>
         <VaultStage lang={lang} isMobile={isMobile} fromOpen={wasReady.current} onOpened={() => { wasReady.current = false; void load() }} />
+        {lockedPhoneBox(lockedPhone && {
+          loopback: lockedPhone.loopback,
+          passkeys: lockedPhone.passkeys,
+          devices: lockedPhone.devices,
+          secure: lockedPhone.secure && window.isSecureContext !== false,
+        }) !== 'none' && (
+          <div style={{ border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px', margin: '18px auto 0', maxWidth: 430 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 6 }}>{t('phoneTitle')}</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 10 }}>{t('phoneLockedRegister')}</div>
+            {lockedPhoneBox(lockedPhone && {
+              loopback: lockedPhone.loopback,
+              passkeys: lockedPhone.passkeys,
+              devices: lockedPhone.devices,
+              secure: lockedPhone.secure && window.isSecureContext !== false,
+            }) === 'insecure' && <div style={{ fontSize: 12.5, color: 'var(--text-tertiary)', lineHeight: 1.55, marginBottom: 10 }}>{t('phoneInsecure')}</div>}
+            <button type="button" onClick={() => window.location.reload()} style={dialogButtonStyle('secondary', isMobile)}>{t('phoneReload')}</button>
+          </div>
+        )}
       </div>
     )
   }

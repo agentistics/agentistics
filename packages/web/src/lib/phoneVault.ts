@@ -16,6 +16,10 @@ export interface PhoneFacts {
   passkeys: number; devices: string[]; stale: number
   codeOnly: boolean | null; enrolKinds: Array<'passkey' | 'device'>
 }
+export function lockedPhoneBox(facts: Pick<PhoneFacts, 'loopback' | 'passkeys' | 'devices' | 'secure'> | null): 'none' | 'register' | 'insecure' {
+  if (!facts || facts.loopback || facts.passkeys > 0 || facts.devices.length > 0) return 'none'
+  return facts.secure ? 'register' : 'insecure'
+}
 export const phoneFacts = () => vaultGet<PhoneFacts>('/api/vault/phone')
 
 // ── the device key ("code alone") ─────────────────────────────────────────────────────────────
