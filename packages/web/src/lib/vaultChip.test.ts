@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { applyVaultChip, expandVaultChip, hasVaultChip, removeVaultChip, vaultChipLabel, vaultChipTokens, vaultTrigger } from './vaultChip'
+import { applyVaultChip, expandVaultChip, hasVaultChip, removeVaultChip, vaultChipLabel, vaultChipTokens, vaultGrantMessage, vaultTrigger } from './vaultChip'
 
 const sel = { items: [{ id: 'it_a', name: 'OpenAI' }, { id: 'it_b', name: 'Banco' }, { id: 'it_c', name: 'Wi-Fi' }], groups: [{ id: 'gr_p', name: 'pelvie' }] }
 
@@ -25,5 +25,18 @@ describe(':vault chip', () => {
   test('on send: references and the briefing, never a value', () => {
     expect(expandVaultChip('deploy with 🔐«OpenAI» now', ['vault://openai'], 'BRIEF')).toBe('deploy with vault://openai now\n\nBRIEF')
     expect(expandVaultChip('no chip', ['vault://x'], 'BRIEF')).toBe('no chip')
+  })
+  test('builds a user-bubble grant model from metadata and never includes values', () => {
+    const model = vaultGrantMessage('use vault://ads/login now', [{
+      createdAt: '2026-10-06T12:00:00.000Z',
+      refs: [{ ref: 'vault://ads/login', env: 'VAULT_ADS_LOGIN', name: 'ADS', field: 'login' }],
+    }], true)
+    expect(model).toEqual({
+      excerpt: 'use 🔐«ADS» now',
+      grantedAt: '2026-10-06T12:00:00.000Z',
+      credentials: [{ name: 'ADS', field: 'login', env: 'VAULT_ADS_LOGIN' }],
+    })
+    expect(JSON.stringify(model)).not.toContain('value')
+    expect(JSON.stringify(model)).not.toContain('MARKER')
   })
 })

@@ -26,7 +26,7 @@ import remarkGfm from 'remark-gfm'
 // message written across several lines renders as one run-on paragraph — which is what "the
 // messages are not formatted" turned out to mean. `HarnessChat` has always used it.
 import remarkBreaks from 'remark-breaks'
-import { ArrowUpRight, Check, ChevronDown, Clock, Copy, CornerUpLeft, Ellipsis, Forward, Image as ImageIcon, ListChecks, Loader, Mic, User } from 'lucide-react'
+import { ArrowUpRight, Check, ChevronDown, Clock, Copy, CornerUpLeft, Ellipsis, Forward, Image as ImageIcon, KeyRound, ListChecks, Loader, Mic, User } from 'lucide-react'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import { chatNote, type ChatNoteTab } from '../../lib/chatNote'
 import { openArtifacts } from '../../lib/artifactsStore'
@@ -42,6 +42,9 @@ import { messageTime } from '../../lib/messageTime'
 import { attachmentUrl } from '../../lib/attachmentUrl'
 import { AttachmentLightbox } from './AttachmentLightbox'
 import { HarnessMark } from './HarnessMark'
+import type { VaultGrantMessage } from '../../lib/vaultChip'
+import { card, overlay } from '../MfaSetup'
+import { dialogButtonStyle } from '../../pages/settings/primitives'
 
 export interface ChatTurn {
   role: 'user' | 'assistant'
@@ -181,6 +184,8 @@ export interface ChatBubbleProps {
   /** This turn is ticked. Only meaningful while `selectMode`. */
   selected?: boolean
   onToggleSelect?: (turn: ChatTurn) => void
+  /** Metadata for a user message that granted vault credentials. Values are never carried here. */
+  vaultGrant?: VaultGrantMessage
 }
 
 /** How long a finger must rest on a bubble before its menu opens, ms — the platform's own feel. */
@@ -336,7 +341,7 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
   )
 }
 
-export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect }: ChatBubbleProps) {
+export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect, vaultGrant }: ChatBubbleProps) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const mine = turn.role === 'user'
@@ -350,6 +355,7 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
    */
   const stamp = messageTime(turn.at, pt ? 'pt' : 'en')
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  const [grantOpen, setGrantOpen] = useState(false)
   /**
    * The RIGHT-CLICK menu, positioned where the click landed inside this bubble.
    *
@@ -630,7 +636,21 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
             nothing beside it: a user message carries no name to show and no header line of its
             own before this change, so the icon is the whole of it. */}
         {mine && (
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 5 }}>
+            {vaultGrant && (
+              <button
+                type="button"
+                onClick={() => setGrantOpen(true)}
+                title={pt ? 'Credencial anexada' : 'Credential attached'}
+                aria-label={pt ? 'Credencial anexada' : 'Credential attached'}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: 22, height: 22, padding: 0, borderRadius: 5,
+                  border: '1px solid var(--border-subtle)', background: 'var(--bg-tertiary)',
+                  color: 'var(--anthropic-orange)', cursor: 'pointer',
+                }}
+              ><KeyRound size={12} /></button>
+            )}
             <span
               aria-hidden
               style={{
@@ -968,9 +988,44 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, provis
           lang={lang}
         />
       )}
+      {grantOpen && vaultGrant && (
+        <VaultGrantModal grant={vaultGrant} pt={pt} isMobile={isMobile} onClose={() => setGrantOpen(false)} />
+      )}
     </div>
   )
 })
+
+function VaultGrantModal({ grant, pt, isMobile, onClose }: { grant: VaultGrantMessage; pt: boolean; isMobile: boolean; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return (
+    <div style={{ ...overlay, zIndex: 3000 }} role="dialog" aria-modal="true" aria-label={pt ? 'Credencial anexada' : 'Credential attached'} onClick={onClose}>
+      <div style={{ ...card, maxWidth: 520, width: '100%', maxHeight: '88vh', overflowY: 'auto', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, fontWeight: 700 }}>
+          <KeyRound size={16} /> {pt ? 'Credencial anexada' : 'Credential attached'}
+        </div>
+        <div style={{ marginTop: 14, fontSize: 12, color: 'var(--text-tertiary)' }}>{pt ? 'Mensagem' : 'Message'}</div>
+        <div style={{ marginTop: 5, padding: '9px 10px', borderRadius: 7, background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontSize: 12.5, lineHeight: 1.5, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{grant.excerpt}</div>
+        <div style={{ marginTop: 14, fontSize: 12, color: 'var(--text-tertiary)' }}>{pt ? 'Credenciais liberadas' : 'Credentials granted'}</div>
+        <div style={{ marginTop: 5, display: 'grid', gap: 6 }}>
+          {grant.credentials.map((c, i) => (
+            <div key={`${c.env}-${i}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 8, padding: '8px 10px', border: '1px solid var(--border-subtle)', borderRadius: 7, fontSize: 12 }}>
+              <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}><strong>{c.name}</strong> · {c.field}</span>
+              <code style={{ color: 'var(--anthropic-orange)' }}>${c.env}</code>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text-tertiary)' }}>{pt ? 'Liberado em' : 'Granted at'}: {new Date(grant.grantedAt).toLocaleString(pt ? 'pt-BR' : 'en-US')}</div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
+          <button type="button" onClick={onClose} style={dialogButtonStyle('secondary', isMobile)}>{pt ? 'Fechar' : 'Close'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 /** One attachment, as a small square. Falls back to a plain chip when the image fails to load. */
 function AttachmentThumb({ path, onOpen }: { path: string; onOpen: () => void }) {

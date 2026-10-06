@@ -121,8 +121,8 @@ import { VaultCodeAsk, VaultPicker } from '../vault/VaultPicker'
 import { loadVault } from '../../lib/vaultApi'
 import { grantStep, UNLOCK_FIRST_LINE } from '../../lib/vaultGrantFlow'
 import { ensureVaultOpen } from '../vault/VaultUnlockHost'
-import { applyVaultChip, expandVaultChip, hasVaultChip, removeVaultChip, vaultChipTokens, vaultTrigger, type VaultSelection } from '../../lib/vaultChip'
-import { grantSession, withStepUp } from '../../lib/vaultPersonal'
+import { applyVaultChip, expandVaultChip, hasVaultChip, removeVaultChip, vaultChipTokens, vaultGrantMessage, vaultTrigger, type VaultSelection } from '../../lib/vaultChip'
+import { grantSession, listGrantRecords, withStepUp, type GrantRecord } from '../../lib/vaultPersonal'
 import { hasPasskeyHere, mobileState, passkeySupport, phoneGesture } from '../../lib/passkey'
 
 import type { AttachmentMessage, AttachmentSend, CostBasis, HarnessId, SessionMeta } from '@agentistics/core'
@@ -1206,6 +1206,15 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   }, [working])
 
   const turns = useMemo(() => payload?.turns ?? [], [payload])
+  const [grantRecords, setGrantRecords] = useState<GrantRecord[]>([])
+  const hasGrantedMessage = useMemo(() => turns.some(t => t.role === 'user' && /vault:\/\//.test(t.text)), [turns])
+  useEffect(() => {
+    if (!hasGrantedMessage) { setGrantRecords([]); return }
+    let alive = true
+    void listGrantRecords().then(r => { if (alive) setGrantRecords(r.ok ? r.grants : []) })
+    return () => { alive = false }
+  }, [hasGrantedMessage, session.id])
+  const sessionGrants = useMemo(() => grantRecords.filter(g => g.sessionId === session.id), [grantRecords, session.id])
   const placedAttention = useMemo(() => placeAttention(turns, payload?.attention ?? []), [turns, payload?.attention])
 
   /**
@@ -2304,6 +2313,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 ? { attachmentMessages: payload.attachmentMessages, markerSinceMs: previousPersonTurnMs(turns, i) }
                 : {})}
               {...(turnAnchors[i] ? { anchorId: turnAnchors[i]! } : {})}
+              {...(t.role === 'user' ? (() => { const grant = vaultGrantMessage(t.text, sessionGrants, pt); return grant ? { vaultGrant: grant } : {} })() : {})}
               {...(canPrompt && selecting === null ? { onReply: onReplyToTurn } : {})}
               {
                 // Forwarding and selecting READ this conversation, so they need nothing from the
