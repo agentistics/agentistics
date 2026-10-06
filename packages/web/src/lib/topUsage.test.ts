@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test'
-import { rankTop, shareOf } from './topUsage'
+import { rankTop, planCostOf, shareOf } from './topUsage'
 import type { HarnessId, ModelUsage, SessionMeta } from '@agentistics/core'
 
 const usage = (input: number, output: number): ModelUsage => ({
@@ -90,6 +90,16 @@ test('ties resolve deterministically instead of shuffling between renders', () =
 test('shareOf is zero rather than NaN when there is nothing to share', () => {
   const empty = rankTop([], 'harness', 'cost')
   expect(shareOf({ key: 'x', cost: 0, tokens: 0, sessions: 0 }, empty, 'cost')).toBe(0)
+})
+
+test('mixed rows keep an uncovered harness at API price and totals close to their rows', () => {
+  const split = { claude: 10, antigravity: 20 }
+  const factors = { claude: 0.2, antigravity: null }
+  expect(planCostOf({ antigravity: 20 }, factors)).toBe(20)
+  expect(planCostOf(split, factors)).toBe(22)
+  expect(planCostOf(split, factors)).toBe(
+    planCostOf({ claude: 10 }, factors) + planCostOf({ antigravity: 20 }, factors),
+  )
 })
 
 // --- cache-backed person / machine podiums ---------------------------------------------------

@@ -273,6 +273,8 @@ export interface RepoStat {
   messages: number
   tools: number
   costUSD: number
+  /** API cost split by harness for per-harness plan allocation. */
+  costByHarness?: Record<string, number>
   /** The two conversational counters. NOT the total — print `tokens` for that. */
   inputTokens: number
   outputTokens: number
@@ -2309,7 +2311,7 @@ export function computeDerivedStats(
       if (!r) {
         r = repoStatsMap[key] = {
           id: key, remote: linked ? s.git_remote! : '', linked, name: '', path: '',
-          sessions: 0, messages: 0, tools: 0, costUSD: 0,
+          sessions: 0, messages: 0, tools: 0, costUSD: 0, costByHarness: {},
           inputTokens: 0, outputTokens: 0, tokens: EMPTY_TOKENS,
           gitCommits: 0, linesAdded: 0, linesRemoved: 0, filesModified: 0,
           ciSessions: 0, members: [], harnesses: [],
@@ -2321,7 +2323,11 @@ export function computeDerivedStats(
       r.sessions++
       r.messages += (s.user_message_count ?? 0)
       r.tools += Object.values(s.tool_counts ?? {}).reduce((a, b) => a + b, 0)
-      r.costUSD += repoSessionCostUSD(s)
+      const sessionCost = repoSessionCostUSD(s)
+      r.costUSD += sessionCost
+      const harness = s.harness ?? 'claude'
+      const byHarness = (r.costByHarness ??= {})
+      byHarness[harness] = (byHarness[harness] ?? 0) + sessionCost
       r.inputTokens += s.input_tokens ?? 0
       r.outputTokens += s.output_tokens ?? 0
       r.tokens = addTokens(r.tokens, sessionTokens(s))

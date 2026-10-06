@@ -18,6 +18,7 @@ import { mutedTooltip, useSessionMuted } from './lib/notifyMenu'
 import { useData, useDerivedStats, LIVE_INTERVAL_OPTIONS, LIVE_INTERVAL_OPTIONS_RISKY } from './hooks/useData'
 import { usePlanBasis } from './hooks/usePlanBasis'
 import { planScopeHarnesses, planScopeNote } from './lib/costBasis'
+import { planCostOf } from './lib/topUsage'
 import { bootLoading } from './lib/bootPhase'
 import { editorEnabledFor } from './lib/editorGate'
 import { useProjectedDerived } from './hooks/useProjectedDerived'
@@ -3060,7 +3061,20 @@ export default function AppLayout() {
   const headerPlanBasis = costBasis === 'plan' && planBasis.basis?.coverage.computable
     ? planBasis.basis
     : null
-  const headerCostUSD = headerPlanBasis ? headerPlanBasis.planCostUSD : (derived?.totalCostUSD ?? 0)
+  const headerApiByHarness = useMemo(() => {
+    const byHarness: Record<string, number> = {}
+    for (const [harness, days] of Object.entries(derived?.apiCostByDay?.days ?? {})) {
+      byHarness[harness] = Object.values(days ?? {}).reduce((sum, day) => sum + day.costUSD, 0)
+    }
+    const undated = derived?.apiCostByDay?.undatedCostUSD ?? 0
+    if (undated !== 0) byHarness.claude = (byHarness.claude ?? 0) + undated
+    return byHarness
+  }, [derived?.apiCostByDay])
+  // A plan only prices the harnesses/days it covers. Every other slice remains at its API
+  // estimate, so the headline is the same sum the mixed rows below display.
+  const headerCostUSD = headerPlanBasis
+    ? planCostOf(headerApiByHarness, planAllocation(headerPlanBasis).byHarness)
+    : (derived?.totalCostUSD ?? 0)
   const headerCostScope = headerPlanBasis
     ? planScopeNote({
         covered: planScopeHarnesses(headerPlanBasis).covered.map(h => HARNESS_LABELS[h] ?? h),

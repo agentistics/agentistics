@@ -4,6 +4,7 @@ import { fmt, formatModel, calcCost, isUnpricedModel, unpricedTokens, UNPRICED_M
 import { useIsMobile } from '../hooks/useIsMobile'
 import { resolveProvider, providerOrder } from '@agentistics/core'
 import { MetricNote } from './MetricNote'
+import { planCostOf } from '../lib/topUsage'
 
 type SortKey = 'cost' | 'tokens' | 'model'
 
@@ -27,6 +28,9 @@ interface Props {
    * `undefined` (or 1) leaves the table in API basis.
    */
   planFactor?: number | null
+  /** API cost for each model split by harness. Required for mixed-harness plan pricing. */
+  costByHarness?: Record<string, Readonly<Record<string, number>>>
+  planFactors?: Readonly<Record<string, number | null>> | null
   lang?: 'en' | 'pt'
 }
 
@@ -36,7 +40,7 @@ const COL: React.CSSProperties = { fontSize: 11, color: 'var(--text-tertiary)', 
 const GRID = 'minmax(120px,1fr) 56px 64px 64px 64px 88px'
 const GRID_MOBILE = 'minmax(100px,1fr) 56px 70px 88px'
 
-export function ModelBreakdown({ modelUsage, note, currency = 'USD', brlRate = 1, fallbackInputTokens, fallbackOutputTokens, fallbackCostUSD, planFactor, lang = "en" }: Props) {
+export function ModelBreakdown({ modelUsage, note, currency = 'USD', brlRate = 1, fallbackInputTokens, fallbackOutputTokens, fallbackCostUSD, planFactor, costByHarness, planFactors, lang = "en" }: Props) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const [query, setQuery] = useState('')
@@ -133,7 +137,11 @@ export function ModelBreakdown({ modelUsage, note, currency = 'USD', brlRate = 1
   // construction; only the magnitude and the meaning change, and `allocNote` below says which.
   const alloc = planFactor !== null && planFactor !== undefined && Number.isFinite(planFactor) ? planFactor : 1
   const showAlloc = alloc !== 1
-  const totalCost = entries.reduce((s, [id, u]) => s + calcCost(u, id), 0) * alloc
+  const costOf = (id: string, usage: ModelUsage): number => {
+    const api = calcCost(usage, id)
+    return costByHarness?.[id] ? planCostOf(costByHarness[id], planFactors ?? { claude: alloc }) : api * alloc
+  }
+  const totalCost = entries.reduce((s, [id, u]) => s + costOf(id, u), 0)
   // PRICE.UNKNOWN: tokens of models with no price are counted above but not priced — the total says so.
   const unpricedTotal = unpricedTokens(entries)
   const totalTokens = entries.reduce((s, [, u]) => s + u.inputTokens + u.outputTokens + u.cacheReadInputTokens + u.cacheCreationInputTokens, 0)
@@ -211,7 +219,7 @@ export function ModelBreakdown({ modelUsage, note, currency = 'USD', brlRate = 1
       {ordered.map(([modelId, usage], i) => {
         const provider = resolveProvider(modelId)
         const newGroup = byProvider && (i === 0 || resolveProvider(ordered[i - 1]![0]).id !== provider.id)
-        const costUSD = calcCost(usage, modelId) * alloc
+        const costUSD = costOf(modelId, usage)
         const tokens = usage.inputTokens + usage.outputTokens + usage.cacheReadInputTokens + usage.cacheCreationInputTokens
         const pct = totalTokens > 0 ? tokens / totalTokens : 0
         const color = getModelColor(modelId)

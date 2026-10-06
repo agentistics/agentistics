@@ -8,10 +8,14 @@ import { Section } from '../components/Section'
 import { RepositoriesList } from '../components/RepositoriesList'
 import { MetricNote } from '../components/MetricNote'
 import { SortControl } from '../components/SortControl'
+import { planAllocation } from '@agentistics/core'
 
 export default function RepositoriesPage() {
   const ctx = useOutletContext<AppContext>()
   const { derived, currency, brlRate, lang, isCentral, deniedRepoLabels } = ctx
+  const planFactors = ctx.costBasis === 'plan' && ctx.planBasis.basis
+    ? planAllocation(ctx.planBasis.basis).byHarness
+    : null
   const navigate = useNavigate()
   const pt = lang === 'pt'
   const [query, setQuery] = useState('')
@@ -132,6 +136,7 @@ export default function RepositoriesPage() {
           lang={lang}
           onOpen={openRepo}
           deniedRepoLabels={deniedRepoLabels}
+          planFactors={planFactors}
         />
         <MetricNote>
           {lang === 'pt'
