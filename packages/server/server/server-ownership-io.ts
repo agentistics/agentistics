@@ -27,7 +27,7 @@ export async function ownershipFacts(): Promise<OwnershipFacts> {
     platform: platform(),
     unitInstalled: await unitInstalled('server'),
     ownersStore: isOwnersStore(AGENTISTICS_DATA_DIR, accountHome()),
-    insideUnit: isInsideUnit(cgroup, process.env.INVOCATION_ID),
+    insideUnit: isInsideUnit(cgroup, process.env.INVOCATION_ID, process.env.AGENTISTICS_LAUNCHD === '1'),
     foregroundForced: process.env[FOREGROUND_ENV] === '1',
   }
 }
