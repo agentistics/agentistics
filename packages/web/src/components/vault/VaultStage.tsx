@@ -34,10 +34,12 @@ function reducedMotion(): boolean {
  * called — the page shows its content after the door has swung. `fromOpen` is a vault that just locked:
  * it mounts open and closes, short. No animation under `prefers-reduced-motion`: `onOpened` is immediate.
  */
-export function VaultStage({ lang, isMobile, fromOpen, onOpened, compact, onAction }: {
+export function VaultStage({ lang, isMobile, fromOpen, onOpened, compact, onAction, extra }: {
   lang: Lang; isMobile: boolean; fromOpen?: boolean; onOpened: () => void
   /** v2.98.1: the page control a refusal points at (recover / enroll / disable presence). */
   onAction?: (a: UiAction) => void
+  /** One more way in under the unlock (the page's "Recover with the 24 words", on this computer). */
+  extra?: React.ReactNode
   /** Drawn inside a panel (the Nay dock's Cofre tab): a smaller safe, and no viewport-tall block. */
   compact?: boolean
 }) {
@@ -61,6 +63,7 @@ export function VaultStage({ lang, isMobile, fromOpen, onOpened, compact, onActi
     <StageFrame isMobile={isMobile} compact={compact} phase={phase} fromOpen={fromOpen} label={w('lockedTitle')} title={title} sub={sub}>
       {!opening && <VaultUnlock lang={lang} isMobile={isMobile} center onOpened={opened} onBusy={setBusy} {...(onAction ? { onAction } : {})} />}
       {!opening && !busy && <VaultCodeClock lang={lang} center style={{ marginTop: 12 }} />}
+      {!opening && !busy && extra}
     </StageFrame>
   )
 }

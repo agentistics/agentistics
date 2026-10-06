@@ -5,10 +5,12 @@
  * the app's own tokens and primitives — `dialogButtonStyle`, `DialogActions`, `MfaSetup`'s card — so
  * the vault reads like the rest of the product. Type scale: 20 page, 15 area, 13 body, 12 secondary, 11 labels.
  */
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Info, X } from 'lucide-react'
 import { card, overlay } from '../../components/MfaSetup'
 import { dialogButtonStyle } from '../settings/primitives'
+import { Field, inputStyle } from '../../components/sessions/formBits'
+import { REVEAL_PAD, RevealButton } from '../../components/PasswordReveal'
 
 /** The page's outlined button (elevated, 12px) — 44px on mobile. */
 export function pageBtn(isMobile: boolean): React.CSSProperties {
@@ -62,20 +64,23 @@ export function Pill({ tone, text }: { tone: Tone; text: string }) {
 }
 
 /** One row: icon? + title + one line, then the status and the ONE action. */
-export function VaultRow({ icon, title, desc, status, children, isMobile, extra, data }: {
+export function VaultRow({ icon, title, desc, status, children, isMobile, extra, data, stackActions }: {
   icon?: React.ReactNode; title: React.ReactNode; desc?: React.ReactNode; status?: React.ReactNode; children?: React.ReactNode
   isMobile: boolean; extra?: React.ReactNode; data?: string
+  /** A secret's icon actions: on a phone they stay at the right, one above the other, instead of wrapping under the text. */
+  stackActions?: boolean
 }) {
+  const stack = isMobile && stackActions
   return (
     <div data-vault-row={data} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', minWidth: 0 }}>
-      <div style={{ display: 'flex', alignItems: isMobile ? 'flex-start' : 'center', gap: 12, flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
+      <div style={{ display: 'flex', alignItems: isMobile ? 'flex-start' : 'center', gap: 12, flexWrap: isMobile && !stack ? 'wrap' : 'nowrap' }}>
         {icon && <span aria-hidden style={{ display: 'inline-flex', flexShrink: 0, color: 'var(--text-secondary)', marginTop: isMobile ? 2 : 0 }}>{icon}</span>}
-        <div style={{ flex: '1 1 180px', minWidth: 0 }}>
+        <div style={{ flex: stack ? '1 1 0' : '1 1 140px', minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>{title}</div>
           {desc && <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, overflowWrap: 'anywhere' }}>{desc}</div>}
         </div>
         {(status || children) && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: 'auto', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: stack ? 2 : 8, flexShrink: 0, marginLeft: 'auto', flexWrap: stack ? 'nowrap' : 'wrap', justifyContent: 'flex-end', flexDirection: stack ? 'column' : 'row' }}>
             {status}
             {children}
           </div>
@@ -114,26 +119,62 @@ export function TextButton({ onClick, children, pressed }: { onClick: () => void
   )
 }
 
-/** The page's dialog shell: the app's card, a title row with ×, the body, then a `DialogActions` footer. */
+/**
+ * The page's dialog shell (the prototype's modal): the app's card with a title row and × over a
+ * hairline, the body, and the `DialogActions` footer over another hairline. Full screen on a phone.
+ */
 export function Sheet({ closeLabel, isMobile, title, onClose, children, wide, footer }: {
   closeLabel: string; isMobile: boolean; title: string; onClose: () => void; children: React.ReactNode; wide?: boolean; footer?: React.ReactNode
 }) {
   useEffect(() => { const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h) }, [onClose])
   const o: React.CSSProperties = isMobile ? { ...overlay, padding: 0, zIndex: 3000 } : { ...overlay, zIndex: 3000 }
+  const frame: React.CSSProperties = { ...card, padding: 0, display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }
   const c: React.CSSProperties = isMobile
-    ? { ...card, maxWidth: 'none', width: '100%', height: '100dvh', maxHeight: '100dvh', borderRadius: 0, border: 'none', overflowY: 'auto', boxSizing: 'border-box' }
-    : { ...card, maxWidth: wide ? 640 : 500, maxHeight: '90vh', overflowY: 'auto', boxSizing: 'border-box', boxShadow: '0 12px 48px rgba(0,0,0,0.5)' }
+    ? { ...frame, maxWidth: 'none', width: '100%', height: '100dvh', maxHeight: '100dvh', borderRadius: 0, border: 'none' }
+    : { ...frame, maxWidth: wide ? 640 : 500, maxHeight: '90vh', boxShadow: '0 20px 60px rgba(0,0,0,0.55)' }
   return (
     <div style={o} role="dialog" aria-modal="true" aria-label={title} onClick={onClose}>
       <div style={c} onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 18px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <span style={{ fontSize: 15, fontWeight: 650, color: 'var(--text-primary)', flex: 1, minWidth: 0 }}>{title}</span>
           <button type="button" className="ag-tap-icon" aria-label={closeLabel} onClick={onClose}
             style={{ background: 'transparent', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', padding: 4, display: 'inline-flex' }}><X size={16} /></button>
         </div>
-        {children}
-        {footer}
+        <div style={{ padding: 18, overflowY: 'auto', minHeight: 0, flex: isMobile ? 1 : undefined }}>{children}</div>
+        {footer && <div data-sheet-footer style={{ padding: '0 18px 12px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>{footer}</div>}
       </div>
+    </div>
+  )
+}
+
+/** A field's input, in the filter bar's own style (`formBits` `inputStyle`, without the magnifier's pad). */
+export const fieldInput: React.CSSProperties = { ...inputStyle, padding: '8px 10px' }
+
+/**
+ * A labelled text field for the secret dialog: `formBits` `Field` (11px uppercase label) over the
+ * field, with the app's own `RevealButton` on a hidden value — the person can proof-read what they typed.
+ */
+export function TextField({ label, hint, value, onChange, secret, rows, mono, placeholder, autoFocus, maxLength, autoComplete, lang }: {
+  label: string; hint?: string; value: string; onChange: (v: string) => void; secret?: boolean; rows?: number; mono?: boolean
+  placeholder?: string; autoFocus?: boolean; maxLength?: number; autoComplete?: string; lang: 'en' | 'pt'
+}) {
+  const [shown, setShown] = useState(false)
+  const style: React.CSSProperties = { ...fieldInput, fontFamily: mono ? 'var(--font-mono, ui-monospace, monospace)' : 'inherit' }
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <Field label={label} {...(hint ? { hint } : {})}>
+        {rows ? (
+          <textarea value={value} onChange={e => onChange(e.target.value)} rows={rows} placeholder={placeholder} maxLength={maxLength} aria-label={label}
+            autoComplete={autoComplete} spellCheck={false} style={{ ...style, resize: 'vertical', lineHeight: 1.5, display: 'block' }} />
+        ) : (
+          <div style={{ position: 'relative', display: 'flex', flexDirection: 'column' }}>
+            <input value={value} onChange={e => onChange(e.target.value)} type={secret && !shown ? 'password' : 'text'} placeholder={placeholder} aria-label={label}
+              autoFocus={autoFocus} maxLength={maxLength} autoComplete={autoComplete} spellCheck={false}
+              style={{ ...style, ...(secret ? { paddingRight: REVEAL_PAD } : null) }} />
+            {secret && <RevealButton shown={shown} onToggle={() => setShown(v => !v)} lang={lang} />}
+          </div>
+        )}
+      </Field>
     </div>
   )
 }

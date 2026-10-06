@@ -7,7 +7,7 @@
  */
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { FingerprintPattern, KeyRound, Laptop, Lock, ShieldCheck, Smartphone, Timer, Usb } from 'lucide-react'
+import { FingerprintPattern, Laptop, Smartphone, Usb } from 'lucide-react'
 import { ConfirmModal, DialogActions, Toggle, dialogButtonStyle } from '../settings/primitives'
 import { Err } from '../../components/MfaSetup'
 import { PhoneEnrol } from '../../components/vault/VaultUnlock'
@@ -29,6 +29,7 @@ const fmtDate = (iso: string | null | undefined, lang: Lang): string => {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? vt('unknown', lang) : d.toLocaleDateString(lang === 'pt' ? 'pt-BR' : 'en-US')
 }
+const fmtTime = (iso: string, lang: Lang): string => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? iso : d.toLocaleTimeString(lang === 'pt' ? 'pt-BR' : 'en-US', { hour: '2-digit', minute: '2-digit' }) }
 const fmtFull = (iso: string | null | undefined, lang: Lang): string => {
   if (!iso) return vt('unknown', lang)
   const d = new Date(iso)
@@ -79,28 +80,28 @@ export function MethodsArea({ lang, isMobile, c, mobile, isPhone, onGoDevices }:
       <AreaHead title={t('tab_methods')} desc={t('area_methods_d')} isMobile={isMobile} />
       <Rows>
         {helloRow && (
-          <VaultRow data="hello" isMobile={isMobile} icon={<FingerprintPattern size={16} />} title={vt('presenceName_hello', lang)} desc={t('m_hello_d')}
+          <VaultRow data="hello" isMobile={isMobile} title={vt('presenceName_hello', lang)} desc={t('m_hello_d')}
             status={<Pill tone={hasHello ? 'ok' : 'off'} text={hasHello ? t('st_active') : t('st_off')} />}>
             {presenceAction('hello', hasHello)}
           </VaultRow>
         )}
         {keyRow && (
-          <VaultRow data="fido2" isMobile={isMobile} icon={<Usb size={16} />} title={t('m_key')}
+          <VaultRow data="fido2" isMobile={isMobile} title={t('m_key')}
             desc={!hasKey && soon.includes('fido2') ? vt('pres_soon_fido2', lang) : t('m_key_d')}
             status={<Pill tone={hasKey ? 'ok' : 'off'} text={hasKey ? t('st_active') : soon.includes('fido2') && !view.presenceAvailable.includes('fido2') ? t('st_soon') : t('st_off')} />}>
             {presenceAction('fido2', hasKey)}
           </VaultRow>
         )}
         {!helloRow && !keyRow && (
-          <VaultRow data="presence-none" isMobile={isMobile} icon={<FingerprintPattern size={16} />} title={vt('sec_presence', lang)} desc={vt('pres_unavailable', lang)}
+          <VaultRow data="presence-none" isMobile={isMobile} title={vt('sec_presence', lang)} desc={vt('pres_unavailable', lang)}
             status={<Pill tone="off" text={vt('badge_na', lang)} />} />
         )}
-        <VaultRow data="passkey" isMobile={isMobile} icon={<Smartphone size={16} />} title={t('m_passkey')}
+        <VaultRow data="passkey" isMobile={isMobile} title={t('m_passkey')}
           desc={isPhone ? (here ? t('phoneReady') : t('m_passkey_none')) : passkeys > 0 ? t('m_passkey_d', { n: passkeys }) : t('m_passkey_none')}
           status={<Pill tone={passkeys > 0 || here ? 'ok' : 'off'} text={passkeys > 0 || here ? t('st_active') : t('st_off')} />}>
           <button type="button" style={btn} onClick={onGoDevices}>{t('manage')}</button>
         </VaultRow>
-        <VaultRow data="authenticator" isMobile={isMobile} icon={<KeyRound size={16} />} title={t('m_code')}
+        <VaultRow data="authenticator" isMobile={isMobile} title={t('m_code')}
           desc={auth
             ? (auth.pausedUntil ? vtf('auth_paused', lang, { date: fmtFull(auth.pausedUntil, lang) }) : t('m_code_d', { date: auth.lastUsedAt ? fmtDate(auth.lastUsedAt, lang) : vt('auth_never', lang) }))
             : t('m_code_none')}
@@ -272,37 +273,37 @@ export function SettingsArea({ lang, isMobile, c, isPhone, gated, onFlash }: {
     <section data-vault-area="settings">
       <AreaHead title={t('tab_settings')} desc={t('area_settings_d')} isMobile={isMobile} />
       <Rows>
-        <VaultRow data="state" isMobile={isMobile} icon={<Lock size={16} />} title={t('set_state')}
+        <VaultRow data="state" isMobile={isMobile} title={t('set_state')}
           desc={left !== null ? t('set_state_d', { n: minutesLeft(left) }) : vt('state_open', lang)} status={<Pill tone="ok" text={t('st_open')} />}>
           <button type="button" style={btn} onClick={() => c.ask('lock')} disabled={!view.canLock} title={c.tip('lock')} aria-label={`${vt('lockNow', lang)}. ${c.tip('lock')}`}>
             {vt('lockNow', lang)} <Gate code={c.g('lock').code} gesture={c.g('lock').gesture} lang={lang} />
           </button>
         </VaultRow>
-        <VaultRow data="autolock" isMobile={isMobile} icon={<Timer size={16} />} title={vt('sec_autolock', lang)} desc={t('set_autolock_d', { n: view.autoLockMinutes })}>
+        <VaultRow data="autolock" isMobile={isMobile} title={vt('sec_autolock', lang)} desc={t('set_autolock_d', { n: view.autoLockMinutes })}>
           <button type="button" style={btn} onClick={() => setEdit('autolock')} title={c.tip('set-auto-lock')}>{t('change')}</button>
         </VaultRow>
         {view.presence && view.authenticator && (
-          <VaultRow data="policy" isMobile={isMobile} icon={<FingerprintPattern size={16} />} title={vt('sec_unlock', lang)}
-            desc={vt(unlockModeKey(policy.mode), lang).replace('{presence}', pres)}>
+          <VaultRow data="policy" isMobile={isMobile} title={vt('sec_unlock', lang)}
+            desc={[vt(unlockModeKey(policy.mode), lang).replace('{presence}', pres), policy.windowEndsAt && !policy.codeNextUnlock ? vtf('unlock_now_window', lang, { time: fmtTime(policy.windowEndsAt, lang), presence: pres }) : policy.codeNextUnlock && policy.mode !== 'hello-only' ? vt('unlock_now_code', lang) : ''].filter(Boolean).join(' · ')}>
             <button type="button" style={btn} onClick={() => setEdit('policy')} title={c.tip('set-unlock-policy')}>{t('change')}</button>
           </VaultRow>
         )}
-        <VaultRow data="recovery" isMobile={isMobile} icon={<KeyRound size={16} />} title={vt('sec_recovery', lang)} desc={recoveryDesc}
+        <VaultRow data="recovery" isMobile={isMobile} title={vt('sec_recovery', lang)} desc={view.recoveryCreatedAt ? `${recoveryDesc} · ${t('rec_new_d')}` : recoveryDesc}
           status={view.recoveryCreatedAt ? undefined : <Pill tone="warn" text={t('st_missing')} />}>
           <button type="button" style={view.recoveryCreatedAt ? btn : c.primary === 'recovery' ? hotBtn(isMobile) : btn}
             title={view.recoveryCreatedAt ? c.tip('rotate-recovery') : vt('ultraBody', lang)}
             onClick={() => (view.recoveryCreatedAt ? c.setWizard(['recovery']) : c.startSetup('recovery'))}>
-            {view.recoveryCreatedAt ? vt('rec_new', lang) : vt('rec_create', lang)}
+            {view.recoveryCreatedAt ? t('rec_new_short') : vt('rec_create', lang)}
             <Gate code={c.g('rotate-recovery').code && Boolean(view.recoveryCreatedAt)} gesture={c.g('rotate-recovery').gesture && Boolean(view.recoveryCreatedAt)} lang={lang} />
           </button>
         </VaultRow>
         {c.canRecover && (
-          <VaultRow data="recover" isMobile={isMobile} icon={<KeyRound size={16} />} title={vt('rec_recover', lang)} desc={vt('rec_lost', lang)}>
-            <button type="button" style={btn} onClick={() => c.setRecoverOpen(true)}>{vt('rec_recover', lang)}</button>
+          <VaultRow data="recover" isMobile={isMobile} title={vt('rec_recover', lang)} desc={t('rec_recover_d')}>
+            <button type="button" style={btn} onClick={() => c.setRecoverOpen(true)}>{t('rec_recover_short')}</button>
           </VaultRow>
         )}
         {!isPhone && (
-          <VaultRow data="backup" isMobile={isMobile} icon={<ShieldCheck size={16} />} title={t('set_backup')} desc={t('set_backup_d')}>
+          <VaultRow data="backup" isMobile={isMobile} title={t('set_backup')} desc={t('set_backup_d')}>
             <button type="button" style={btn} onClick={() => navigate('/settings/backup')}>{t('openBackup')}</button>
           </VaultRow>
         )}
@@ -310,7 +311,7 @@ export function SettingsArea({ lang, isMobile, c, isPhone, gated, onFlash }: {
 
       {!isPhone && (
         <div data-vault-danger style={{
-          marginTop: 18, border: '1px solid color-mix(in srgb, var(--accent-red, #ef4444) 30%, transparent)', borderRadius: 10, padding: '14px 16px',
+          marginTop: 18, borderTop: '1px solid color-mix(in srgb, var(--accent-red, #ef4444) 30%, transparent)', padding: '15px 0 12px',
           background: 'color-mix(in srgb, var(--accent-red, #ef4444) 4%, transparent)',
         }}>
           <h3 style={{ fontSize: 13, fontWeight: 650, margin: '0 0 4px', color: 'var(--accent-red, #ef4444)' }}>{t('danger')}</h3>
@@ -347,7 +348,7 @@ export function SettingsArea({ lang, isMobile, c, isPhone, gated, onFlash }: {
                 {vt('created', lang)}: {view.createdAt ? fmtFull(view.createdAt, lang) : vt('none', lang)}
               </>
             ) },
-            { h: vt('sec_recovery', lang), body: <>{vt('sec_recovery_d', lang)} {vt('rec_offline', lang)}</> },
+            { h: vt('sec_recovery', lang), body: <>{vt('sec_recovery_d', lang)} {vt('rec_offline', lang)} {vt('rec_lost', lang)}</> },
             { h: vt('sec_hardening', lang), body: <><span style={{ display: 'block', marginBottom: 6 }}>{vt('sec_memory_d', lang)}</span><HardeningBlock view={view} lang={lang} /></> },
             ...([['how_envelope_h', 'how_envelope'], ['how_holder_h', 'how_holder'], ['how_protects_h', 'how_protects'], ['how_not_h', 'how_not'], ['how_backup_h', 'how_backup']] as const)
               .map(([h, b]) => ({ h: vt(h, lang), body: vt(b, lang) })),

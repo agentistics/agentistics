@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useOutletContext, useSearchParams } from 'react-router-dom'
 import { Copy, Eye, EyeOff, FileUp, FolderInput, FolderPlus, History, Info, KeyRound, Pencil, Plus, Replace, RotateCcw, Search, ShieldCheck, Trash2, X } from 'lucide-react'
 import { VaultGlyph as VaultIcon } from '../components/vault/VaultGlyph'
-import { Checkbox, ConfirmModal, DialogActions, FieldInput, FieldTextarea, Select, dialogButtonStyle } from './settings/primitives'
+import { Checkbox, ConfirmModal, DialogActions, FieldInput, Select, dialogButtonStyle } from './settings/primitives'
 import { Field, TabStrip, inputStyle } from '../components/sessions/formBits'
 import { BandOverflowMenu, type BandOverflowEntry } from '../components/sessions/bandControls'
 import type { AppContext } from '../lib/app-context'
@@ -41,7 +41,7 @@ import { lockedPhoneBox, phoneFacts, type PhoneFacts } from '../lib/phoneVault'
 import { VAULT_TABS, parseVaultTab, type VaultTab } from './vault/vaultTabs'
 import { VaultFlowHost, useVaultControls } from './vault/useVaultControls'
 import { DevicesArea, MethodsArea, SettingsArea, type Gated } from './vault/VaultAreas'
-import { AreaHead, InfoBlocks, LearnMore, Pill, Rows, Sheet, TextButton, VaultRow, hotBtn, iconBtn, pageBtn } from './vault/vaultUi'
+import { AreaHead, InfoBlocks, LearnMore, Pill, Rows, Sheet, TextButton, TextField, VaultRow, hotBtn, iconBtn, pageBtn } from './vault/vaultUi'
 
 type Lang = 'en' | 'pt'
 type State = { kind: 'loading' } | { kind: 'locked' } | { kind: 'code'; error: string | null } | { kind: 'ready' } | { kind: 'failed' }
@@ -129,7 +129,7 @@ export default function VaultPage() {
 
   const flash = (s: string) => { setToast(s); setTimeout(() => setToast(cur => (cur === s ? null : cur)), 4000) }
   const refreshMobile = () => { void mobileState().then(ms => { if (ms.ok) setMobile({ passkeys: ms.passkeys, codeReveal: ms.codeReveal, loopback: ms.loopback, devices: ms.devices }) }) }
-  const pageWrap: React.CSSProperties = { maxWidth: 1020, margin: '0 auto', padding: isMobile ? '22px 16px 96px' : '28px 28px 70px', boxSizing: 'border-box' }
+  const pageWrap: React.CSSProperties = { width: '100%', maxWidth: 1020, margin: '0 auto', padding: isMobile ? '22px 16px 96px' : '28px 28px 70px', boxSizing: 'border-box' }
 
   const header = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 5, flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
@@ -153,12 +153,8 @@ export default function VaultPage() {
     return (
       // No page header here: the safe in the centre IS the title (owner, 2026-10-05).
       <div style={pageWrap}>
-        <VaultStage lang={lang} isMobile={isMobile} fromOpen={wasReady.current} onAction={c.onAction} onOpened={() => { wasReady.current = false; void load() }} />
-        {c.canRecover && (
-          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 6 }}>
-            <TextButton onClick={() => c.setRecoverOpen(true)}>{vt('rec_recover', lang)}</TextButton>
-          </div>
-        )}
+        <VaultStage lang={lang} isMobile={isMobile} fromOpen={wasReady.current} onAction={c.onAction} onOpened={() => { wasReady.current = false; void load() }}
+          extra={c.canRecover ? <div style={{ marginTop: 8 }}><TextButton onClick={() => c.setRecoverOpen(true)}>{vt('rec_recover', lang)}</TextButton></div> : undefined} />
         {box !== 'none' && (
           <div style={{ border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px', margin: '18px auto 0', maxWidth: 430 }}>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>{t('phoneTitle')}</div>
@@ -376,7 +372,7 @@ function SystemSecretRow({ item: i, lang, isMobile, onDetails }: { item: VaultIt
   const meta = [t('systemMeta'), i.sealedAt ? t('sealedOn', { date: fmtDay(i.sealedAt, lang) }) : ''].filter(Boolean).join(' · ')
   const entries: BandOverflowEntry[] = [{ id: 'details', label: t('details'), icon: <Info size={14} />, onSelect: onDetails }]
   return (
-    <VaultRow data="system" isMobile={isMobile} icon={<ShieldCheck size={16} />} title={vt(kindKey(i.kind), lang)} desc={meta}
+    <VaultRow data="system" stackActions isMobile={isMobile} icon={<ShieldCheck size={16} />} title={vt(kindKey(i.kind), lang)} desc={meta}
       status={i.state !== 'sealed' ? <Pill tone={i.state === 'pending' ? 'warn' : 'bad'} text={vt(itemStateKey(i.state), lang)} /> : undefined}>
       <BandOverflowMenu label={t('moreActions')} entries={entries} isMobile={isMobile} />
     </VaultRow>
@@ -593,7 +589,7 @@ function SecretRow({ m, lang, isMobile, group, groups, gated, onChanged, onRemov
   const fieldName = t(`field_${field}` as PKey)
   return (
     <>
-      <VaultRow data="secret" isMobile={isMobile} icon={<KeyRound size={16} style={{ color: trashed ? 'var(--text-tertiary)' : 'var(--anthropic-orange)' }} />}
+      <VaultRow data="secret" stackActions isMobile={isMobile} icon={<KeyRound size={16} style={{ color: trashed ? 'var(--text-tertiary)' : 'var(--anthropic-orange)' }} />}
         title={m.name} desc={<span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{meta}</span>}
         extra={(
           <>
@@ -651,7 +647,7 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
   const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
   const editing = item !== null
   const [tab, setTab] = useState<'create' | 'import'>(editing ? 'create' : initialTab)
-  const [kind, setKind] = useState<PersonalKind>(item?.kind ?? 'login')
+  const [kind, setKind] = useState<PersonalKind>(item?.kind ?? 'password')
   const [name, setName] = useState(item?.name ?? '')
   const [url, setUrl] = useState(item?.url ?? '')
   const [groupId, setGroupId] = useState<string>(item?.groupId ?? defaultGroup ?? '')
@@ -662,7 +658,7 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
   // "Só uso": a NEW secret starts at the kind's default (API keys ON) until the person touches the box;
   // a sealed one stays sealed (the server refuses to lift it, so the form does not offer to).
   const sealed = item !== null && isUseOnly(item)
-  const [useOnly, setUseOnly] = useState<boolean>(item ? sealed : USE_ONLY_DEFAULT['login'])
+  const [useOnly, setUseOnly] = useState<boolean>(item ? sealed : USE_ONLY_DEFAULT['password'])
   const [useOnlyTouched, setUseOnlyTouched] = useState(false)
   // The values typed here live only in this dialog's state, until save or close.
   const [fields, setFields] = useState<Record<string, string>>({})
@@ -713,19 +709,16 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
   const tagList = parseTags(tags)
   const label = (text: string) => <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>{text}</div>
   const valueFields = KIND_FIELDS[kind].map(k => (
-    multiline
-      ? <FieldTextarea key={k} label={t(`field_${k}` as PKey)} value={fields[k] ?? ''} onChange={v => setFields(s => ({ ...s, [k]: v }))} rows={kind === 'env' ? 6 : 4} mono spellCheck={false} autoComplete="off"
-          {...(editing ? { sub: sealed ? t('f_newValue') : t('f_keep') } : {})} />
-      : <FieldInput key={k} label={t(`field_${k}` as PKey)} value={fields[k] ?? ''} onChange={v => setFields(s => ({ ...s, [k]: v }))}
-          type={k === 'password' || k === 'value' ? 'password' : 'text'} mono={k !== 'login'} spellCheck={false}
-          autoComplete={k === 'login' ? 'off' : 'new-password'} {...(k === 'login' ? { placeholder: t('loginHint') } : {})}
-          {...(editing ? { sub: sealed ? t('f_newValue') : t('f_keep') } : {})} />
+    <TextField key={k} lang={lang} label={t(`field_${k}` as PKey)} value={fields[k] ?? ''} onChange={v => setFields(cur => ({ ...cur, [k]: v }))}
+      {...(multiline ? { rows: kind === 'env' ? 6 : 3, mono: true } : { secret: k === 'password' || k === 'value', mono: k !== 'login' })}
+      autoComplete={k === 'login' ? 'off' : 'new-password'} {...(k === 'login' ? { placeholder: t('loginHint') } : { placeholder: t('valuePh') })}
+      {...(editing ? { hint: sealed ? t('f_newValue') : t('f_keep') } : {})} />
   ))
   const groupOptions = [{ value: '', label: t('noGroup') }, ...groups.map(g => ({ value: g.id, label: g.name }))]
   const footer = tab === 'import'
     ? (
       <>
-        {error && <Err text={error} />}
+        {error && <div style={{ marginTop: 12 }}><Err text={error} /></div>}
         <DialogActions>
           <button type="button" onClick={onClose} style={dialogButtonStyle('secondary', isMobile)}>{t('cancel')}</button>
           {preview
@@ -736,8 +729,8 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
     )
     : (
       <>
-        {editing && !replace && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>{t('editAsks')}</div>}
-        {error && <Err text={error} />}
+        {editing && !replace && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 12 }}>{t('editAsks')}</div>}
+        {error && <div style={{ marginTop: 12 }}><Err text={error} /></div>}
         <DialogActions>
           <button type="button" onClick={onClose} style={dialogButtonStyle('secondary', isMobile)}>{t('cancel')}</button>
           <button type="submit" form="vault-edit-form" disabled={busy || !name.trim()} style={dialogButtonStyle('primary', isMobile, busy || !name.trim())}>
@@ -792,23 +785,24 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
         <form id="vault-edit-form" onSubmit={e => { e.preventDefault(); void save() }}>
           {replace ? valueFields : (
             <>
-              <FieldInput label={t('f_name')} value={name} onChange={setName} maxLength={120} autoFocus={!isMobile} />
+              <TextField lang={lang} label={t('f_name')} value={name} onChange={setName} maxLength={120} autoFocus={!isMobile} placeholder={t('namePh')} />
               <div style={{ marginBottom: 14 }}>
-                {label(t('f_kind'))}
-                <Select value={kind} onChange={v => pickKind(v as PersonalKind)} options={PERSONAL_KINDS.map(k => ({ value: k, label: t(`kind_${k}` as PKey) }))} />
+                <Field label={t('f_kind')}>
+                  <Select value={kind} onChange={v => pickKind(v as PersonalKind)} options={PERSONAL_KINDS.map(k => ({ value: k, label: t(`kind_${k}` as PKey) }))} />
+                </Field>
               </div>
               {valueFields}
               <div data-use-only-field style={{ marginBottom: 14 }}>
                 {sealed
-                  ? <div style={{ fontSize: 12, color: 'var(--anthropic-orange)', fontWeight: 600 }}>{t('useOnly')}</div>
-                  : <Checkbox checked={useOnly} onChange={v => { setUseOnly(v); setUseOnlyTouched(true) }} label={t('useOnly')} />}
-                <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 2, lineHeight: 1.5, paddingLeft: sealed ? 0 : 24 }}>{sealed ? t('useOnlySealed') : t('useOnlyShort')}</div>
+                  ? <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}><strong style={{ color: 'var(--anthropic-orange)', fontWeight: 600 }}>{t('useOnly')}</strong> — {t('useOnlySealed')}</div>
+                  : <Checkbox checked={useOnly} onChange={v => { setUseOnly(v); setUseOnlyTouched(true) }} label={`${t('useOnly')} — ${t('useOnlyShort')}`} />}
               </div>
               <div style={{ marginBottom: 14 }}>
-                {label(t('f_group'))}
-                <Select value={groupId} onChange={setGroupId} placeholder={t('noGroup')} options={groupOptions} />
+                <Field label={t('f_group')}>
+                  <Select value={groupId} onChange={setGroupId} placeholder={t('noGroup')} options={groupOptions} />
+                </Field>
               </div>
-              <FieldInput label={t('f_tags')} value={tags} onChange={setTags} placeholder="api, prod" />
+              <TextField lang={lang} label={t('f_tagsShort')} value={tags} onChange={setTags} placeholder={t('tagsPh')} />
               {tagList.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: -8, marginBottom: 14 }}>
                   {tagList.map(tag => <span key={tag} style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, border: '1px solid var(--border)', color: 'var(--text-secondary)', background: 'var(--bg-elevated)' }}>#{tag}</span>)}
@@ -816,8 +810,8 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
               )}
               <details>
                 <summary style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', cursor: 'pointer', padding: isMobile ? '10px 0' : '4px 0', marginBottom: 10 }}>{t('moreOptions')}</summary>
-                <FieldInput label={t('f_url')} value={url} onChange={setUrl} maxLength={500} />
-                <FieldTextarea label={t('f_notes')} value={notes} onChange={setNotes} rows={3} maxLength={4000} />
+                <TextField lang={lang} label={t('f_url')} value={url} onChange={setUrl} maxLength={500} />
+                <TextField lang={lang} label={t('f_notes')} value={notes} onChange={setNotes} rows={3} maxLength={4000} />
                 <Checkbox checked={confirmEach} onChange={setConfirmEach} label={t('confirmEach')} />
                 <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 2, lineHeight: 1.5, paddingLeft: 24 }}>{t('confirmEachHelp')}</div>
               </details>

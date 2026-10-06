@@ -69,7 +69,7 @@ export const VAULT_CONTROL_MAP: readonly { control: string; from: 'page' | 'sett
   { control: 'Security key: add / coming soon', from: 'settings', tab: 'methods', marker: "t('st_soon')" },
   { control: 'Enrolled credentials list', from: 'settings', tab: 'methods', marker: "'pres_since'" },
   { control: 'Turn personal confirmation off', from: 'settings', tab: 'methods', marker: "vt('pres_turnOff'" },
-  { control: 'Recovery key: create / new', from: 'settings', tab: 'settings', marker: "vt('rec_new'" },
+  { control: 'Recovery key: create / new', from: 'settings', tab: 'settings', marker: "t('rec_new_short')" },
   { control: 'Auto-lock minutes', from: 'settings', tab: 'settings', marker: '<AutoLockRow' },
   { control: 'Unlock policy (daily / always / Hello only)', from: 'settings', tab: 'settings', marker: '<UnlockPolicyRow' },
   { control: 'Memory hardening report', from: 'settings', tab: 'settings', marker: '<HardeningBlock' },
