@@ -87,7 +87,7 @@ export function VaultCodeStage({ lang, isMobile, compact, title, sub, error, onS
   return (
     <StageFrame isMobile={isMobile} compact={compact} phase={busy ? 'unlocking' : 'locked'} label={title} title={title} sub={sub}>
       <form onSubmit={e => { e.preventDefault(); submit() }} style={{ width: isMobile ? '100%' : 260, textAlign: 'left' }}>
-        <CodeField value={code} onChange={setCode} label={lang === 'pt' ? 'Código do autenticador' : 'Authenticator code'} autoFocus={!isMobile} />
+        <CodeField value={code} onChange={setCode} label={lang === 'pt' ? 'Código do autenticador' : 'Authenticator code'} autoFocus={!isMobile} error={!!error} errorKey={error} />
         {error && <Err text={error} />}
         <button type="submit" disabled={busy || !codeComplete(code)} style={{ ...dialogButtonStyle('primary', isMobile, busy || !codeComplete(code)), width: '100%' }}>
           {busy && <AgentisticsLoader size={14} />} {lang === 'pt' ? 'Confirmar' : 'Confirm'}

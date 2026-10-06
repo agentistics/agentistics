@@ -1092,3 +1092,31 @@ tr:hover .ag-row-actions,
 tr:focus-within .ag-row-actions,
 .ag-row-actions:focus-within { opacity: 1; }
 @media (hover: none) { .ag-row-actions { opacity: 1; } }
+
+/* The 6-box authenticator code input (components/CodeBoxes.tsx). Each box is ≥ 16px text so iOS never
+   zooms, ≥ 44px tall on a phone; the row shakes once on an error (not under reduced motion). */
+.ag-code-boxes { display: flex; gap: 8px; }
+.ag-code-box {
+  flex: 1 1 0; min-width: 0; max-width: 52px; height: 50px; box-sizing: border-box; padding: 0; text-align: center;
+  font-size: 22px; font-weight: 600; font-family: var(--font-mono, ui-monospace, monospace); font-variant-numeric: tabular-nums;
+  color: var(--text-primary); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px;
+  outline: none; caret-color: var(--anthropic-orange); transition: border-color 120ms, box-shadow 120ms;
+}
+.ag-code-box:focus, .ag-code-box:focus-visible {
+  border-color: var(--anthropic-orange);
+  box-shadow: 0 0 0 3px var(--anthropic-orange-dim);
+  outline: none;
+}
+.ag-code-box:disabled { opacity: 0.55; }
+.ag-code-boxes.is-error .ag-code-box { border-color: var(--accent-red); background: var(--accent-red-dim); }
+.ag-code-boxes.is-error .ag-code-box:focus { box-shadow: 0 0 0 3px var(--accent-red-dim); }
+.ag-code-boxes.is-shaking { animation: ag-code-shake 360ms ease-in-out; }
+@keyframes ag-code-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+@media (max-width: 380px) { .ag-code-boxes { gap: 6px; } .ag-code-box { height: 48px; } }
+@media (prefers-reduced-motion: reduce) { .ag-code-boxes.is-shaking { animation: none; } }

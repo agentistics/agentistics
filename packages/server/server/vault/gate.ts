@@ -34,7 +34,9 @@ import {
   isPresenceId, isSilentId, judgeCode, matchTotp, mergeStepUpState, newRecoveryEntropy, openRecord, otpauthUri, parseAutoLockMinutes,
   parseStepUpState, presenceCode, presenceSentence, presenceDetailWords, recoveryProtector, writeRecoveryVerified, newDataKey, finishRetirement, RECOVERY_FILE, serializeVaultJson, PRESENCE_GESTURES, effectiveUnlockPolicy, parseUnlockPolicy, unlockNeedsCode, unlockWindowEndsMs, type UnlockMode, setGestureListener, setupCodeCommand, setupCodeWhere, skewWords, wordsToEntropy, writePrivateAtomic, revealAsks,
   type HeldPresence, type Protector, type ProtectorId, type StepUpState, type VaultJson, type WrapperRecord,
+  ACTION_KINDS, ACTION_KINDS_ORDER, choiceFor, choicesFor, parseAuthPolicy, proofsFor, type ActionKind, type AuthPolicy, type ProofChoice, type VaultProofs,
 } from '@agentistics/vault'
+import { readAuthPolicy, writeAuthPolicy, type AuthPolicyRead } from './auth-policy'
 import {
   abandonPending, adoptPending, ensureVaultOpen, lockVault, noteVaultActivity, openWithRecovery, pendingUnlock, protectorById,
   recoveryStepDone, recoveryTodo, refused, sealToFile, secretFs, sentence, setAutoLockPeriod, vaultAudit, vaultDir, vaultLang,
@@ -67,6 +69,8 @@ export type VaultAction =
   // (fresh, no grant: it starts an escalation); the computer's APPROVAL costs Windows Hello, fresh, and
   // only on loopback — together a stolen code alone cannot enrol a device.
   | 'phone-enrol-request' | 'phone-enrol-approve'
+  // Owner decision 2026-10-06: choosing which proof each kind of action asks (action-policy.ts).
+  | 'set-auth-policy'
 
 export interface ActionRow { code: boolean; gesture: boolean; grant: 'read' | null }
 
@@ -125,6 +129,54 @@ export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
   'personal-backup-wipe': { code: true, gesture: true, grant: null },
   'phone-enrol-request': { code: true, gesture: false, grant: null },
   'phone-enrol-approve': { code: false, gesture: true, grant: null },
+  // Changing what the vault asks is itself a security setting: by default code AND gesture, fresh — and,
+  // once chosen, whatever the 'settings' kind says (never nothing: it is critical).
+  'set-auth-policy': { code: true, gesture: true, grant: null },
+}
+
+/**
+ * Owner decision 2026-10-06 — the per-action policy (action-policy.ts). The actions whose proof the person
+ * chooses, by KIND. An action absent from this map keeps its row above, whatever the policy says (creating,
+ * the list, the enrolments, the phone's own steps). A kind's DEFAULT reproduces these actions' rows exactly,
+ * so a vault that never chose anything asks what it asked before.
+ */
+export const ACTION_KIND_OF: Readonly<Partial<Record<VaultAction, ActionKind>>> = {
+  'personal-reveal': 'reveal', // decided in requirePersonalReveal; mapped so the screen's icons follow
+  'personal-grant': 'use',
+  'personal-edit': 'edit',
+  'personal-restore': 'edit',
+  'personal-trash': 'delete-secret',
+  'personal-purge': 'delete-secret',
+  'personal-group-delete': 'delete-secret',
+  'mobile-passkey-remove': 'delete-device',
+  'personal-backup-wipe': 'wipe',
+  reset: 'wipe',
+  'set-auth-policy': 'settings',
+  'set-unlock-policy': 'settings',
+  'mobile-code-reveal': 'settings',
+  'mobile-passkey-add': 'settings',
+  'rotate-recovery': 'recovery',
+}
+
+/**
+ * PURE. The row THIS caller is held to once the policy and the vault's proofs are known. The kind's
+ * DEFAULT returns the table's row untouched (today's behaviour, grant reuse included). Any other choice
+ * asks what `proofsFor` decides; the 'read' grant still stands for the code only where the table's row
+ * already let it. `none` off this computer is the list's remote row — the code, riding the 'read' grant —
+ * because "ask nothing" is a decision about the person AT THIS COMPUTER (review M3).
+ */
+export function policyRow(action: VaultAction, ctx: { session: string; loopback?: boolean }, policy: AuthPolicy | null, has: VaultProofs): ActionRow {
+  const base = rowFor(action, ctx)
+  const kind = ACTION_KIND_OF[action]
+  if (!kind) return base
+  const choice = choiceFor(policy, kind)
+  if (choice === ACTION_KINDS[kind].default) return base
+  const p = proofsFor(choice, has)
+  if (!p.code && !p.gesture) {
+    if (choice === 'none' && !ctx.loopback && !fromSocket(ctx)) return { code: true, gesture: false, grant: 'read' }
+    return { code: false, gesture: false, grant: null }
+  }
+  return { code: p.code, gesture: p.gesture, grant: p.code && base.code ? base.grant : null }
 }
 
 /**
@@ -257,6 +309,8 @@ async function checkCodeWith(dek: Uint8Array, kid: string, code: string): Promis
 }
 
 function enrolled(v: VaultJson): boolean { return Boolean(v.stepup) }
+/** The proofs this vault can ask at all — what `proofsFor` decides against. */
+export function proofsOf(v: VaultJson): VaultProofs { return { hasAuthenticator: enrolled(v), hasPresence: hasPresence(v) } }
 
 /** v2.98.1: a kind this platform has but this build never offers (the page shows it as "coming soon"). */
 function presenceSoonRefusal(id: ProtectorId): Refusal | null {
@@ -324,7 +378,7 @@ export type GateResult = { ok: true; grant?: string } | Refusal
  */
 export async function requireVaultStepUp(action: VaultAction, ctx: GateContext): Promise<GateResult> {
   if (!VAULT_ACTION_ROWS[action]) return refused('bad-request', 'unknown vault action')
-  const row = rowFor(action, ctx)
+  let row = rowFor(action, ctx)
   if (action === 'unlock') return refused('bad-request', 'unlock is the two-phase flow (completeUnlock)')
   if (action === 'personal-grant-open' && !row.code && !row.gesture) {
     // No proof — but the vault must BE open (a locked one is the composer's one inline unlock, not a grant).
@@ -356,6 +410,8 @@ export async function requireVaultStepUp(action: VaultAction, ctx: GateContext):
     noteVaultActivity()
     return { ok: true }
   }
+  // Owner decision 2026-10-06: the person's choice for this kind of action, against what the vault can ask.
+  if (ACTION_KIND_OF[action]) row = policyRow(action, ctx, (await readAuthPolicy()).policy, proofsOf(o.vault))
   if (row.code && enrolled(o.vault)) {
     if (row.grant && grantValid(ctx.grant, ctx.session, row.grant)) { /* reused */ }
     else {
@@ -413,13 +469,12 @@ export async function requirePersonalReveal(ctx: GateContext, opts: { confirm?: 
     noteVaultActivity()
     return { ok: true }
   }
+  // Owner decision 2026-10-06: a choice other than today's goes its own, explicit way.
+  const choice = choiceFor((await readAuthPolicy()).policy, 'reveal')
+  if (choice !== ACTION_KINDS.reveal.default) return revealByPolicy(choice, ctx, o)
   // The authenticator code is never part of a reveal when a presence proof exists (Hello / passkey).
   const asks = revealAsks({ hasPresence: hasPresence(o.vault), hasAuthenticator: enrolled(o.vault), unlockMode: 'daily' })
-  if (asks.blocked) {
-    return refused('reveal-needs-setup', vaultLang() === 'pt'
-      ? 'Para ver um segredo, o cofre precisa pedir uma confirmação sua. Configure o autenticador (e, se puder, a confirmação pessoal) primeiro.'
-      : 'To see a secret, the vault must ask you to confirm. Set up the authenticator (and, where you can, personal confirmation) first.')
-  }
+  if (asks.blocked) return revealNeedsSetup()
   if (!ctx.loopback && asks.gesture) {
     // The phone (§7): a passkey token for THIS item+field, or — only when the owner opted in — the code,
     // which opens a 30-second reveal window for this session. Never a Hello prompt on the computer.
@@ -447,6 +502,56 @@ export async function requirePersonalReveal(ctx: GateContext, opts: { confirm?: 
   return { ok: true }
 }
 
+function revealNeedsSetup(): Refusal {
+  return refused('reveal-needs-setup', vaultLang() === 'pt'
+    ? 'Para ver um segredo, o cofre precisa pedir uma confirmação sua. Configure o autenticador (e, se puder, a confirmação pessoal) primeiro.'
+    : 'To see a secret, the vault must ask you to confirm. Set up the authenticator (and, where you can, personal confirmation) first.')
+}
+
+function phoneGestureRefusal(): Refusal {
+  return refused('mobile-gesture-required', vaultLang() === 'pt'
+    ? 'Neste aparelho, confirme com a digital (a passkey registrada para o cofre). Sem ela, faça isto no computador.'
+    : 'On this device, confirm with your biometrics (the passkey registered for the vault). Without it, do this on the computer.')
+}
+
+/**
+ * A reveal under a choice the person made (action-policy.ts), other than today's default:
+ *  - `none`: the open vault is the proof at this computer; off it, the list's remote row (the code / grant);
+ *  - otherwise `proofsFor` decides against what the vault has. The code is checked FRESH (off this computer,
+ *    a code-only reveal opens the same 30-second window the phone's opt-in uses); the gesture is the
+ *    presence unwrap here and a phone passkey's single-use token off it — never a prompt on an empty desk.
+ */
+async function revealByPolicy(choice: ProofChoice, ctx: GateContext, o: { dek: Uint8Array; kid: string; vault: VaultJson }): Promise<GateResult> {
+  const remote = !ctx.loopback && !fromSocket(ctx)
+  if (choice === 'none') {
+    if (remote) return requireVaultStepUp('personal-list', ctx)
+    noteVaultActivity()
+    return { ok: true }
+  }
+  const p = proofsFor(choice, proofsOf(o.vault))
+  if (!p.code && !p.gesture) return revealNeedsSetup()
+  const binding = `personal-reveal:${ctx.binding ?? ''}`
+  if (p.code) {
+    const windowed = remote && !p.gesture && codeWindowOpen(ctx.session)
+    if (!windowed) {
+      if (!ctx.code) return refused('stepup-required', sentence('stepup-required'))
+      const c = await checkCodeWith(o.dek, o.kid, ctx.code)
+      if (!c.ok) return c
+      if (remote && !p.gesture) openCodeWindow(ctx.session)
+    }
+  }
+  if (p.gesture) {
+    if (remote) {
+      if (!consumeGestureToken(ctx.session, ctx.gestureToken, binding)) return phoneGestureRefusal()
+    } else if (!(ctx.loopback && consumeFreshPresence({ session: ctx.session, token: ctx.fresh, binding }))) {
+      const g = await proveGesture(o)
+      if (!g.ok) return g
+    }
+  }
+  noteVaultActivity()
+  return { ok: true }
+}
+
 /**
  * The gesture an action owes. On loopback (and on the socket) it is the vault's own presence unwrap —
  * Windows Hello on this computer. OFF loopback, for a personal-secret action, the service never raises
@@ -459,9 +564,7 @@ async function gestureFor(action: VaultAction, ctx: GateContext, o: { dek: Uint8
   if (action === 'personal-grant' && ctx.loopback && consumeFreshPresence({ session: ctx.session, token: ctx.fresh, binding: `personal-grant:${ctx.binding ?? ''}` })) return { ok: true }
   if (action.startsWith('personal-') && !ctx.loopback && !fromSocket(ctx)) {
     if (consumeGestureToken(ctx.session, ctx.gestureToken, `${action}:${ctx.binding ?? ''}`)) return { ok: true }
-    return refused('mobile-gesture-required', vaultLang() === 'pt'
-      ? 'Neste aparelho, confirme com a digital (a passkey registrada para o cofre). Sem ela, faça isto no computador.'
-      : 'On this device, confirm with your biometrics (the passkey registered for the vault). Without it, do this on the computer.')
+    return phoneGestureRefusal()
   }
   return proveGesture(o)
 }
@@ -1325,6 +1428,35 @@ export async function setUnlockPolicy(policy: unknown, ctx: GateContext): Promis
   o.vault = vault
   vaultAudit({ type: 'vault.set-unlock-policy' })
   return g
+}
+
+/**
+ * Owner decision 2026-10-06: choose which proof each kind of action asks (action-policy.ts). The NEW
+ * policy is parsed first and refused whole when any critical kind says `none`; the change itself is gated
+ * by the CURRENT 'settings' choice (never nothing — it is critical). The record is sealed (auth-policy.ts).
+ */
+export async function setAuthPolicy(policy: unknown, ctx: GateContext): Promise<GateResult> {
+  const p = parseAuthPolicy(policy)
+  if (p === null) {
+    return refused('bad-request', vaultLang() === 'pt'
+      ? 'Escolha uma confirmação válida para cada ação. Excluir, apagar, os ajustes de segurança e a recuperação pedem pelo menos uma prova (código ou Hello).'
+      : 'Pick a valid proof for each action. Deleting, wiping, the security settings and recovery always ask at least one proof (the code or Hello).')
+  }
+  const g = await requireVaultStepUp('set-auth-policy', ctx)
+  if (!g.ok) return g
+  if (!(await ensureVaultOpen({ create: false, migrate: false }))) return refused('locked', sentence('locked'))
+  await writeAuthPolicy(p)
+  vaultAudit({ type: 'vault.set-auth-policy' })
+  return g
+}
+
+/** What the screen draws for the policy: one row per kind, its choice, the choices it may take, the default. */
+export async function authPolicyView(read?: AuthPolicyRead): Promise<{ state: 'default' | 'stored' | 'unreadable' | 'locked'; rows: { kind: ActionKind; choice: ProofChoice; choices: readonly ProofChoice[]; critical: boolean; read: boolean; default: ProofChoice }[] }> {
+  const r = read ?? await readAuthPolicy()
+  return {
+    state: r.state,
+    rows: ACTION_KINDS_ORDER.map(kind => ({ kind, choice: choiceFor(r.policy, kind), choices: choicesFor(kind), critical: ACTION_KINDS[kind].critical, read: ACTION_KINDS[kind].read, default: ACTION_KINDS[kind].default })),
+  }
 }
 
 /** What the screen states about the policy in force: the mode, the hours, and whether the NEXT unlock owes the code. */

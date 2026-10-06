@@ -12,7 +12,8 @@ import { ConfirmModal, DialogActions, Toggle, dialogButtonStyle } from '../setti
 import { Err } from '../../components/MfaSetup'
 import { PhoneEnrol } from '../../components/vault/VaultUnlock'
 import { AutoLockRow, Gate, HardeningBlock, HowStrip, Note, UnlockPolicyRow, presWordOf, soonKinds, unlockModeKey } from '../../components/vault/VaultFlows'
-import { addableKinds, minutesLeft, remainingMs, type Reply } from '../../lib/vaultApi'
+import { addableKinds, authPolicyChanged, minutesLeft, remainingMs, type Reply } from '../../lib/vaultApi'
+import { AuthPolicyTable } from '../../components/vault/AuthPolicyTable'
 import { vt, vtf } from '../../lib/vaultText'
 import { pt_, type PKey } from '../../lib/personalText'
 import { wipeBackupHistory } from '../../lib/vaultPersonal'
@@ -258,7 +259,7 @@ export function SettingsArea({ lang, isMobile, c, isPhone, gated, onFlash }: {
 }) {
   const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
   const navigate = useNavigate()
-  const [edit, setEdit] = useState<null | 'autolock' | 'policy'>(null)
+  const [edit, setEdit] = useState<null | 'autolock' | 'policy' | 'auth'>(null)
   const [learn, setLearn] = useState(false)
   const [wipeAsk, setWipeAsk] = useState(false)
   const view = c.view
@@ -286,6 +287,14 @@ export function SettingsArea({ lang, isMobile, c, isPhone, gated, onFlash }: {
           <VaultRow data="policy" isMobile={isMobile} title={vt('sec_unlock', lang)}
             desc={[vt(unlockModeKey(policy.mode), lang).replace('{presence}', pres), policy.windowEndsAt && !policy.codeNextUnlock ? vtf('unlock_now_window', lang, { time: fmtTime(policy.windowEndsAt, lang), presence: pres }) : policy.codeNextUnlock && policy.mode !== 'hello-only' ? vt('unlock_now_code', lang) : ''].filter(Boolean).join(' · ')}>
             <button type="button" style={btn} onClick={() => setEdit('policy')} title={c.tip('set-unlock-policy')}>{t('change')}</button>
+          </VaultRow>
+        )}
+        {view.authPolicy && view.authPolicy.rows.length > 0 && (
+          <VaultRow data="authpolicy" isMobile={isMobile} title={vt('ap_title', lang)}
+            desc={authPolicyChanged(view.authPolicy.rows) > 0
+              ? vtf('ap_row_d', lang, { n: authPolicyChanged(view.authPolicy.rows), total: view.authPolicy.rows.length })
+              : vtf('ap_row_default', lang, { presence: pres })}>
+            <button type="button" style={btn} onClick={() => setEdit('auth')} title={c.tip('set-auth-policy')}>{t('change')}</button>
           </VaultRow>
         )}
         <VaultRow data="recovery" isMobile={isMobile} title={vt('sec_recovery', lang)} desc={view.recoveryCreatedAt ? `${recoveryDesc} · ${t('rec_new_d')}` : recoveryDesc}
@@ -335,6 +344,15 @@ export function SettingsArea({ lang, isMobile, c, isPhone, gated, onFlash }: {
           <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 12 }}>{vtf('sec_unlock_d', lang, { presence: pres })}</div>
           <UnlockPolicyRow view={view} lang={lang} isMobile={isMobile} gate={c.g('set-unlock-policy')} btn={hotBtn(isMobile)}
             onSave={p => { close(); c.ask('unlock-policy', undefined, p) }} />
+        </Sheet>
+      )}
+      {edit === 'auth' && (
+        <Sheet closeLabel={t('close')} isMobile={isMobile} title={vt('ap_title', lang)} onClose={close} wide
+          footer={<DialogActions><button type="button" onClick={close} style={dialogButtonStyle('secondary', isMobile)}>{t('cancel')}</button></DialogActions>}>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 12 }}>{vtf('ap_desc', lang, { presence: pres })}</div>
+          <AuthPolicyTable view={view} lang={lang} isMobile={isMobile} gate={c.g('set-auth-policy')} btn={hotBtn(isMobile)}
+            onOpenUnlock={view.presence && view.authenticator ? () => setEdit('policy') : undefined}
+            onSave={d => { close(); c.ask('auth-policy', undefined, undefined, d) }} />
         </Sheet>
       )}
       {learn && (
