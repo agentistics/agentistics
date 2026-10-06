@@ -24,7 +24,7 @@ describe('planServerStart — a hand-run server goes through the unit when the u
   test('no unit, or another HOME (a preview / test server) → run here', () => {
     expect(planServerStart(facts({ unitInstalled: false }))).toEqual({ kind: 'run' })
     expect(planServerStart(facts({ ownersStore: false }))).toEqual({ kind: 'run' })
-    expect(planServerStart(facts({ platform: 'darwin' }))).toEqual({ kind: 'run' })
+    expect(planServerStart(facts({ platform: 'darwin', unitInstalled: true }))).toEqual({ kind: 'delegate' })
   })
   test('AGENTISTICS_SERVER_FOREGROUND=1 keeps it in this terminal', () => {
     expect(planServerStart(facts({ foregroundForced: true }))).toEqual({ kind: 'run' })
@@ -38,6 +38,7 @@ describe('planServerStart — a hand-run server goes through the unit when the u
     expect(isInsideUnit(TERM_CG, 'abc')).toBe(true)
     expect(isInsideUnit(TERM_CG, undefined)).toBe(false)
     expect(isInsideUnit(TERM_CG, '')).toBe(false)
+    expect(isInsideUnit(TERM_CG, undefined, true)).toBe(true)
   })
 })
 

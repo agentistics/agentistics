@@ -38,6 +38,7 @@ import {
   defaultServiceManager,
   launchdPlist,
   launchdPlistName,
+  parseLaunchdPid,
   pm2DeleteArgs,
   pm2StartArgs,
   systemdUnit,
@@ -51,6 +52,7 @@ import {
   type ServiceManagerId,
   type ServiceSpec,
 } from './service-manager'
+import { launchdServicePath } from './sessions/service-path'
 
 export type AutostartMode = 'server' | 'central' | 'watch' | 'machine'
 
@@ -537,7 +539,11 @@ async function enableLaunchd(spec: ServiceSpec): Promise<AutostartResult> {
   try {
     await mkdir(join(homedir(), 'Library', 'LaunchAgents'), { recursive: true })
     await mkdir(join(homedir(), '.agentistics'), { recursive: true })
-    await writeFile(paths.plist, launchdPlist(spec, { stdoutPath: paths.stdout, stderrPath: paths.stderr }), 'utf8')
+    await writeFile(paths.plist, launchdPlist(spec, {
+      stdoutPath: paths.stdout,
+      stderrPath: paths.stderr,
+      path: launchdServicePath(process.env.PATH),
+    }), 'utf8')
   } catch (err: any) {
     return { ok: false, message: `Could not write ${paths.plist}: ${err?.message ?? err}` }
   }
@@ -706,6 +712,7 @@ async function disablePm2(mode: AutostartMode): Promise<AutostartResult> {
 /** Is `mode` installed as a systemd user unit? The one fact that decides whether a restart goes
  *  through systemd or through the detached process the control center starts. */
 export async function unitInstalled(mode: AutostartMode): Promise<boolean> {
+  if (platform() === 'darwin') return existsSync(launchdPlistPath(mode))
   if (platform() !== 'linux') return false
   try {
     await readFile(unitPath(mode), 'utf8')
@@ -806,6 +813,52 @@ function verdictMessage(v: RestartVerdict, unit: string, subject: string, t: Cli
 export async function restartAutostart(mode: AutostartMode, deps: RestartDeps = {}): Promise<AutostartResult> {
   const exec: Exec = deps.run ?? run
   const unitFile = deps.unitDir ? join(deps.unitDir, unitName(mode)) : unitPath(mode)
+  if (platform() === 'darwin') {
+    if (mode === 'central') {
+      return {
+        ok: false,
+        message:
+          'The central runs in Docker, not as a LaunchAgent.\n' +
+          'Use `agentop central restart` to bounce it, or `agentop central up` to rebuild it after a code change.',
+      }
+    }
+    const plist = launchdPlistPath(mode)
+    if (!existsSync(plist)) {
+      return {
+        ok: false,
+        message:
+          `No ${launchdPlistName({ name: `agentop-${mode}`, description: '', command: '', keepsRunning: true })} LaunchAgent is installed, so there is nothing to restart.\n` +
+          `Run \`agentop autostart ${mode} enable\` first.`,
+      }
+    }
+    const uid = String(process.getuid?.() ?? '')
+    const label = `com.agentistics.agentop-${mode}`
+    const target = `gui/${uid}/${label}`
+    const beforePrint = await exec(['launchctl', 'print', target])
+    if (beforePrint.code !== 0) {
+      return { ok: false, message: `launchd could not inspect ${label}: ${beforePrint.stderr || `exit ${beforePrint.code}`}` }
+    }
+    const observe = deps.observe ?? (async (m: AutostartMode): Promise<ServingObservation> => {
+      if (m === 'server') return observeServing(m, exec)
+      const out = await exec(['launchctl', 'print', target])
+      return { pid: parseLaunchdPid(out.stdout), answering: out.code === 0 }
+    })
+    const verifiable = mode === 'server' || mode === 'watch'
+    const before = verifiable ? await observe(mode) : { pid: null, answering: false }
+    const kick = await exec(['launchctl', 'kickstart', '-k', target])
+    if (kick.code !== 0) {
+      return { ok: false, message: `launchctl kickstart ${label} failed: ${kick.stderr || `exit ${kick.code}`}` }
+    }
+    if (!verifiable) return { ok: true, message: `Restarted ${label}.` }
+    const verdict = await awaitReplacement(before, () => observe(mode), {
+      timeoutMs: deps.timeoutMs, intervalMs: deps.intervalMs, sleep: deps.sleep, now: deps.now,
+      ...(deps.onWait ? { onWait: deps.onWait } : {}),
+      ...(deps.wantVersion ? { wantVersion: deps.wantVersion } : {}),
+    })
+    const t = deps.strings ?? cliStrings(await resolveLang())
+    const outcome = verdictMessage(verdict, label, mode === 'server' ? `the server on :${PORT}` : label, t)
+    return { ok: outcome.ok, message: outcome.message }
+  }
   if (platform() !== 'linux') return notSupported('restart')
 
   if (mode === 'central') {
@@ -940,6 +993,25 @@ export async function restartAutostart(mode: AutostartMode, deps: RestartDeps = 
  * without reading systemd's manual.
  */
 export async function autostartStatus(mode?: AutostartMode): Promise<AutostartResult> {
+  if (platform() === 'darwin') {
+    const targets = mode ? [mode] : MODES
+    const lines: string[] = []
+    const uid = String(process.getuid?.() ?? '')
+    for (const m of targets) {
+      const label = `com.agentistics.agentop-${m}`
+      const plist = launchdPlistPath(m)
+      if (!existsSync(plist)) {
+        lines.push(`${label}: not installed`)
+        continue
+      }
+      const out = await run(['launchctl', 'print', `gui/${uid}/${label}`])
+      const state = out.code === 0 ? 'loaded' : 'not loaded'
+      const pid = out.code === 0 ? parseLaunchdPid(out.stdout) : null
+      lines.push(`${label}: installed=${state}${pid === null ? '' : `, pid=${pid}`}`)
+      lines.push(`  → starts at login; \`agentop autostart ${m} disable\` removes it`)
+    }
+    return { ok: true, message: lines.join('\n') }
+  }
   if (platform() !== 'linux') return notSupported('status')
 
   const targets = mode ? [mode] : MODES

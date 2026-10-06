@@ -38,6 +38,9 @@ export const SYSTEM_PATH = [
   '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin',
 ]
 
+/** Paths commonly used by macOS Homebrew and user-installed harnesses in a LaunchAgent. */
+export const LAUNCHD_REQUIRED_PATH = ['/opt/homebrew/bin', '/usr/local/bin']
+
 /**
  * Directories a distribution's systemd ALSO puts on a user service's default PATH (Ubuntu adds
  * these three). They are not appended — nothing agentop spawns lives there — but they must count as
@@ -74,4 +77,23 @@ export function servicePath(callerPath: string | undefined): string | null {
   if (userDirs === 0) return null
   const onlySystem = out.every(d => SYSTEM_PATH.includes(d) || SYSTEMD_EXTRA_PATH.includes(d))
   return onlySystem ? null : out.join(':')
+}
+
+/**
+ * The PATH for a macOS LaunchAgent. Unlike systemd, launchd does not provide a useful interactive
+ * PATH, so the Homebrew locations are always present even when the installing shell did not have
+ * them in its environment.
+ */
+export function launchdServicePath(callerPath: string | undefined): string {
+  const seen = new Set<string>()
+  const out: string[] = []
+  const add = (dir: string) => {
+    if (!dir.startsWith('/')) return
+    const clean = dir.length > 1 && dir.endsWith('/') ? dir.slice(0, -1) : dir
+    if (!seen.has(clean)) { seen.add(clean); out.push(clean) }
+  }
+  for (const dir of (callerPath ?? '').split(':')) add(dir)
+  for (const dir of LAUNCHD_REQUIRED_PATH) add(dir)
+  for (const dir of SYSTEM_PATH) add(dir)
+  return out.join(':')
 }
