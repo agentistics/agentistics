@@ -28,6 +28,16 @@ export interface DraftSegment {
   kind: SegmentKind
 }
 
+/** Keep the painted mirror within the same scroll range as the real textarea. */
+export function mirrorScrollTop(
+  textareaScrollTop: number,
+  mirrorScrollHeight: number,
+  mirrorClientHeight: number,
+): number {
+  const max = Math.max(0, mirrorScrollHeight - mirrorClientHeight)
+  return Math.max(0, Math.min(textareaScrollTop, max))
+}
+
 /**
  * The runs the mirror layer draws, in order.
  *

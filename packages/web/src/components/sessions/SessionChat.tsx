@@ -31,7 +31,7 @@ import { reopeningLabel, withReopening } from '../../lib/reopeningStore'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { GROW_AT_PX, GROW_TURNS, INITIAL_TURNS, shownToInclude, windowStart } from '../../lib/turnWindow'
-import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerSendButton, ComposerShell, ComposerToolbar } from '../chat/ComposerShell'
+import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerSendButton, ComposerShell, ComposerToolbar, composerFieldStyle } from '../chat/ComposerShell'
 import { mutedTooltip, useMutedKeys } from '../../lib/notifyMenu'
 import { toggleSessionMuted } from '../../lib/mutedSessions'
 import { markDictated, stripDictatedMark } from '../../lib/dictationMark'
@@ -87,7 +87,7 @@ import {
   applyDraftRequest, consumeDraftRequest, getDraftRequest, useDraftRequest,
 } from '../../lib/composerStore'
 import { commandToken, knownCommands } from '../../lib/commandToken'
-import { draftSegments, needsMirror } from '../../lib/commandMirror'
+import { draftSegments, mirrorScrollTop, needsMirror } from '../../lib/commandMirror'
 import { knownServers, mentionTokens } from '../../lib/mentionTokens'
 import { commandNotFoundNotice } from '../../lib/commandNotice'
 import {
@@ -1378,6 +1378,22 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    */
   const slashHint = useMemo(() => slashMisplaced(draft.slice(0, caret)), [draft, caret])
   const underlayRef = useRef<HTMLDivElement | null>(null)
+  const [composerScrollbarPx, setComposerScrollbarPx] = useState(0)
+
+  // The mirror is a visual layer, but the textarea owns both wrapping and scrolling. The
+  // textarea's scrollbar reduces its content width; reserve that exact gutter in the mirror or
+  // a long chip changes the line breaks after the first overflow.
+  const syncComposerMirror = useCallback(() => {
+    const field = textareaRef.current
+    const mirror = underlayRef.current
+    if (!field || !mirror) return
+    mirror.scrollTop = mirrorScrollTop(field.scrollTop, mirror.scrollHeight, mirror.clientHeight)
+    setComposerScrollbarPx(field.offsetWidth - field.clientWidth)
+  }, [])
+
+  useLayoutEffect(() => {
+    syncComposerMirror()
+  }, [draft, maxComposerH, syncComposerMirror])
 
   const draftReq = useDraftRequest()
   const draftReqAt = draftReq?.sessionId === session.id ? draftReq.at : undefined
@@ -2936,15 +2952,18 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                       aria-hidden
                       ref={underlayRef}
                       style={{
-                        position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none',
+                        position: 'absolute', top: 0, left: 0, bottom: 0, right: composerScrollbarPx,
+                        overflow: 'hidden', pointerEvents: 'none',
                         boxSizing: 'border-box', padding: '6px 6px',
                         // ABOVE the field, so a quote card can take a click; everything else in
                         // it takes no pointer events, so typing and selecting still reach the field.
                         zIndex: 2,
                         // The field computes to 16px on a phone (index.css's iOS zoom guard, which
                         // is `!important`), so the mirror must too or it stops lining up.
-                        fontFamily: 'inherit', fontSize: isMobile ? 16 : 13.5, lineHeight: 1.5,
-                        whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--text-primary)',
+                        fontFamily: composerFieldStyle.fontFamily,
+                        fontSize: isMobile ? 16 : composerFieldStyle.fontSize,
+                        lineHeight: composerFieldStyle.lineHeight,
+                        whiteSpace: 'pre-wrap', overflowWrap: 'break-word', color: 'var(--text-primary)',
                       }}
                     >
                       {draftSegments(draft, cmdToken, mentions, cards).map((seg, i, all) => {
@@ -3186,8 +3205,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     // field never grew past its one row however much was typed, and a prompt could
                     // only be read two lines at a time. It was correct while the composer was a
                     // ROW and was left behind when it became a column.
-                    width: '100%', display: 'block', boxSizing: 'border-box',
-                    resize: 'none', border: 'none', outline: 'none', background: 'transparent',
+                    ...composerFieldStyle,
                     // Transparent ONLY while the mirror is drawing the same text underneath — see
                     // the note above the mirror div. `caretColor` is set unconditionally to the same
                     // colour the text would otherwise be, so it never rides on `color` and vanishes
@@ -3203,8 +3221,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     userSelect: 'text', WebkitUserSelect: 'text', WebkitTouchCallout: 'default',
                   }}
                   onScroll={e => {
-                    const u = underlayRef.current
-                    if (u) u.scrollTop = (e.target as HTMLTextAreaElement).scrollTop
+                    syncComposerMirror()
                   }}
                 />
                 </div>
