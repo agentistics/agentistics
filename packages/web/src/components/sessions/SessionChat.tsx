@@ -29,6 +29,7 @@
 
 import { reopeningLabel, withReopening } from '../../lib/reopeningStore'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { flushSync } from 'react-dom'
 import { GROW_AT_PX, GROW_TURNS, INITIAL_TURNS, shownToInclude, windowStart } from '../../lib/turnWindow'
 import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerSendButton, ComposerShell, ComposerToolbar, composerFieldStyle } from '../chat/ComposerShell'
@@ -42,6 +43,7 @@ import { AttentionMarkLine, RecordedBlock } from './AttentionMarks'
 import { placeAttention, type ChatAttentionMark, type ChatRecorded } from '../../lib/sessionRecorded'
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
 import { modeStyle } from '../../lib/modeStyle'
+import { modeCycles, modeMenuFor, modeMenuPlacement, type MenuPlacement } from '../../lib/modeMenu'
 import { ApprovalCard } from './ApprovalCard'
 import { TypedModel } from './ModelSelect'
 import { approvalIdentity } from '../../lib/approvalQuestion'
@@ -407,6 +409,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const [moreOpen, setMoreOpen] = useState(false)
   /** The menu AND its button, so an outside-click handler can tell "inside" from "outside". */
   const moreMenuRef = useRef<HTMLDivElement | null>(null)
+  const modeButtonRef = useRef<HTMLButtonElement | null>(null)
+  const [modeMenuOpen, setModeMenuOpen] = useState(false)
+  const [modeMenuPos, setModeMenuPos] = useState<MenuPlacement | null>(null)
   /** This session's notification switch — the mute follows the conversation (`sessionIdentityKey`). */
   const notifyKey = sessionIdentityKey(session)
   const notifyMuted = useMutedKeys().includes(notifyKey)
@@ -513,6 +518,23 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       document.removeEventListener('keydown', onKey)
     }
   }, [moreOpen])
+
+  useEffect(() => {
+    if (!modeMenuOpen) return
+    const close = (e: MouseEvent) => {
+      const target = e.target as Element
+      if (!modeButtonRef.current?.contains(target) && !target.closest?.('[data-mode-menu]')) {
+        setModeMenuOpen(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setModeMenuOpen(false) }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [modeMenuOpen])
 
   // A recogniser left running after this panel unmounts keeps the tab's microphone indicator on
   // for a session nobody is looking at.
@@ -1749,6 +1771,23 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   // verb is ENABLED when a write can continue it here — the server decides, the row says so.
   const promptOffered = session.actionable || row?.verbs.some(v => v.action === 'prompt' && v.enabled) === true
   const canPrompt = !loading && promptOffered && (!blocked || answeringNow) && payload.live !== false
+  const modeOptions = useMemo(() => modeMenuFor(row?.harness), [row?.harness])
+  const chooseMode = useCallback(async (target: string) => {
+    if (!row?.mode || !canPrompt) return
+    const cycles = modeCycles(row.mode.id, target, modeOptions)
+    setModeMenuOpen(false)
+    for (let i = 0; i < cycles; i += 1) {
+      const out = await act({ id: session.id, action: 'cycleMode' })
+      if (!out.ok) {
+        setNotice(out.message)
+        return
+      }
+    }
+    if (cycles > 0) {
+      setNotice(modeOptions.find(mode => mode.id === target)?.label ?? target)
+      nudgeFleet()
+    }
+  }, [act, canPrompt, modeOptions, row?.mode, session.id])
   /** EXT.OPEN: the one question before a write continues an external session here. */
   const [continueAsk, setContinueAsk] = useState<{ message: string; text: string } | null>(null)
   const [continuing, setContinuing] = useState(false)
@@ -3353,21 +3392,21 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     dialog open sends a keystroke into that dialog. */}
                 {row?.mode && !answeringNow && (
                   <button
-                    onClick={() => void act({ id: session.id, action: 'cycleMode' })
-                      .then(out => {
-                        setNotice(out.message)
-                        // The chip's word comes from the next capture of the pane, not from this
-                        // reply — so without a nudge it kept showing the OLD mode until the 5s
-                        // poll came round, and the button read as broken.
-                        nudgeFleet()
-                      })}
+                    ref={modeButtonRef}
+                    onClick={() => {
+                      const rect = modeButtonRef.current?.getBoundingClientRect()
+                      if (rect) setModeMenuPos(modeMenuPlacement(rect, window.innerWidth, window.innerHeight))
+                      setModeMenuOpen(value => !value)
+                    }}
                     disabled={!canPrompt}
-                    aria-label={pt ? `Modo: ${row.mode.label}. Trocar para o próximo.` : `Mode: ${row.mode.label}. Switch to the next.`}
-                    title={pt
-                      ? `${row.mode.label} — clique para ir ao próximo modo`
-                      : `${row.mode.label} — click to move to the next mode`}
+                    aria-haspopup="menu"
+                    aria-expanded={modeMenuOpen}
+                    aria-label={pt ? `Modo: ${row.mode.label}` : `Mode: ${row.mode.label}`}
+                    title={row.mode.label}
                     style={{
-                      display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 9px',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                      width: isMobile ? 44 : undefined, minWidth: isMobile ? 44 : undefined,
+                      height: isMobile ? 44 : 30, padding: isMobile ? 0 : '0 9px',
                       borderRadius: 9, flexShrink: 0, maxWidth: 150,
                       // The colour IS the mode — see `modeStyle.ts`. Ordered by how much the
                       // session proceeds without asking, and never the fault colour: `auto` is how
@@ -3382,10 +3421,51 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     }}
                   >
                     <SlidersHorizontal size={13} style={{ flexShrink: 0 }} />
-                    <span style={{
+                    {!isMobile && <span style={{
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>{row.mode.label}</span>
+                    }}>{row.mode.label}</span>}
                   </button>
+                )}
+                {modeMenuOpen && row?.mode && modeOptions.length > 0 && modeMenuPos && createPortal(
+                  <div
+                    data-mode-menu
+                    role="menu"
+                    aria-label={pt ? 'Modos' : 'Modes'}
+                    style={{
+                      position: 'fixed', top: modeMenuPos.top, left: modeMenuPos.left,
+                      width: modeMenuPos.width, zIndex: 3000, padding: 4,
+                      background: 'var(--bg-card)', border: '1px solid var(--border)',
+                      borderRadius: 10, boxShadow: 'var(--ag-shadow-pop)',
+                    }}
+                  >
+                    {modeOptions.map(option => {
+                      const current = option.id === row.mode?.id
+                      const style = modeStyle(option.id)
+                      return (
+                        <button
+                          key={option.id}
+                          role="menuitemradio"
+                          aria-checked={current}
+                          onClick={() => void chooseMode(option.id)}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                            minHeight: 36, padding: '7px 9px', border: 'none', borderRadius: 7,
+                            background: current ? style.bg : 'transparent',
+                            color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 12,
+                            textAlign: 'left', cursor: canPrompt ? 'pointer' : 'default',
+                          }}
+                        >
+                          <span style={{
+                            width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                            background: style.fg,
+                          }} />
+                          <span style={{ flex: 1 }}>{option.label}</span>
+                          {current && <span aria-hidden style={{ color: style.fg }}>✓</span>}
+                        </button>
+                      )
+                    })}
+                  </div>,
+                  document.body,
                 )}
 
                 {/* THE PANEL OF EVERYTHING YOU SENT, its first row being the last message. ABSENT until
