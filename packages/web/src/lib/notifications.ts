@@ -200,8 +200,8 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
   // Shown once after the page dropped a stale service-worker bundle and reloaded onto the
   // server's own version (`bundleVersion.ts`).
   'app.updated': {
-    pt: { title: 'Agentistics atualizado para v{version}' },
-    en: { title: 'Agentistics updated to v{version}' },
+    pt: { title: 'Agentistics atualizado para {version}' },
+    en: { title: 'Agentistics updated to {version}' },
   },
   'app.update_available': {
     pt: { title: 'Atualização disponível', message: 'A versão {version} do Agentistics está pronta. Toque para instalar.' },
@@ -332,7 +332,9 @@ export function resolveNotification(n: AppNotification, lang: 'pt' | 'en'): Loca
   const fallbackTitle = n.code
     ? (lang === 'pt' ? `Evento: ${n.code}` : `Event: ${n.code}`)
     : ''
-  const title = loc?.title ?? n.title ?? fallbackTitle
+  let title = loc?.title ?? n.title ?? fallbackTitle
+  // Titles carry placeholders too ("Agentistics atualizado para {version}") — fill them like messages.
+  if (title && n.meta?.version) title = title.replace('{version}', `v${String(n.meta.version).replace(/^v/, '')}`)
   let message = loc?.message ?? n.message
   // Interpolate {user} from meta (e.g. "{user} connected to the central").
   if (message && n.meta?.user) {
