@@ -1,4 +1,4 @@
-import { defineConfig, transformWithOxc, type Plugin, type Rollup } from 'vite'
+import { defineConfig, minify, transformWithOxc, type Plugin, type Rollup } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import { createHash } from 'node:crypto'
@@ -125,7 +125,7 @@ function prebootScriptPlugin(): Plugin {
     },
     async buildStart() {
       if (!isBuild) return
-      const code = await compile()
+      const code = (await minify('ag-boot.js', await compile())).code
       builtPath = `assets/ag-boot-${createHash('md5').update(code).digest('hex').slice(0, 8)}.js`
       this.emitFile({ type: 'asset', fileName: builtPath, source: code })
     },
@@ -155,6 +155,9 @@ export default defineConfig({
     },
     VitePWA({
       registerType: 'autoUpdate',
+      // `defer`, not a plain script: a classic script in <head> holds the first paint until it has
+      // been fetched, and the first paint is the boot loader.
+      injectRegister: 'script-defer',
       // Service worker disabled in dev: it cached stale bundles during iteration,
       // making code changes appear not to take effect. Still enabled for prod builds.
       devOptions: { enabled: false, suppressWarnings: true, type: 'module' },

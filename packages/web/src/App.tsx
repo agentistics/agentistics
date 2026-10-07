@@ -1462,6 +1462,14 @@ export default function AppLayout() {
   const { data, loading, error, loadError, offline, startup, refetch, liveUpdates, setLiveUpdates, updateInterval, setUpdateInterval } = useData()
   const [riskyMode, setRiskyMode] = useState(false)
   const [lang, setLangState] = useState<Lang>('en')
+  // A local mirror of the language, for the one sentence the boot splash may say before the bundle
+  // (and the preferences) arrive — the same reason the theme is mirrored. The first render's 'en' is a
+  // placeholder, not a choice, so only a CHANGE is written.
+  const langSeen = useRef(false)
+  useEffect(() => {
+    if (!langSeen.current) { langSeen.current = true; return }
+    try { localStorage.setItem('agentistics-lang', lang) } catch { /* private mode */ }
+  }, [lang])
 
   // Team session gate
   // undefined = not yet fetched, TeamSessionState after fetch

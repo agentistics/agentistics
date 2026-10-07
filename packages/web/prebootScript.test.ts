@@ -32,12 +32,14 @@ describe('the boot splash script', () => {
 })
 
 describe('index.html', () => {
-  test('runs the splash script before the app bundle, and has no wordmark', async () => {
+  test('fetches the splash script first and runs it before the app bundle, and has no wordmark', async () => {
     const html = await read('index.html')
-    const boot = html.indexOf(`<script src="${PREBOOT_DEV_PATH}"></script>`)
-    const app = html.indexOf('<script type="module" src="/src/main.tsx">')
-    expect(boot).toBeGreaterThan(html.indexOf('id="ag-preboot"'))
-    expect(boot).toBeLessThan(app)
+    const boot = html.indexOf(`<script src="${PREBOOT_DEV_PATH}" defer fetchpriority="high"></script>`)
+    expect(boot).toBeGreaterThan(-1)
+    // first script/link with a src in the document, so nothing is discovered before it
+    expect(html.slice(0, boot)).not.toMatch(/<script\b|<link[^>]+(preload|stylesheet)/)
+    // deferred classic and module scripts run in document order: the loader first
+    expect(boot).toBeLessThan(html.indexOf('<script type="module" src="/src/main.tsx">'))
     expect(html).not.toContain('ag-preboot-label')
   })
 

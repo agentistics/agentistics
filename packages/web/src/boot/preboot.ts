@@ -40,11 +40,20 @@ function stampTheme(): void {
   } catch { /* private mode: dark, the default */ }
 }
 
+/** The app's language as last chosen here (App.tsx mirrors it), else the browser's. */
+function bootLang(): 'pt' | 'en' {
+  let stored: string | null = null
+  try { stored = localStorage.getItem('agentistics-lang') } catch { /* private mode */ }
+  if (stored === 'pt' || stored === 'en') return stored
+  return (navigator.language || '').toLowerCase().startsWith('pt') ? 'pt' : 'en'
+}
+
 function startPreboot(): void {
   stampTheme()
   const root = document.getElementById('ag-preboot')
   const svg = root?.querySelector<SVGSVGElement>('svg.ag-preboot-mark')
   if (!root || !svg || typeof svg.animate !== 'function') return
+  root.setAttribute('aria-label', bootLang() === 'pt' ? 'Carregando o Agentistics' : 'Loading Agentistics')
   const reduced = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
   const accent = document.documentElement.hasAttribute('data-central') ? CENTRAL_ACCENT : undefined
   svg.innerHTML = d1Markup(56, 'ag-d1-boot', reduced, accent)
@@ -61,7 +70,7 @@ function startPreboot(): void {
   window.setTimeout(() => {
     const status = root.querySelector<HTMLElement>('.ag-boot-status')
     if (!status || !root.isConnected || root.classList.contains('ag-boot-out') || status.textContent) return
-    status.textContent = (navigator.language || '').toLowerCase().startsWith('pt') ? 'Ainda carregando…' : 'Still loading…'
+    status.textContent = bootLang() === 'pt' ? 'Ainda carregando…' : 'Still loading…'
   }, STATUS_AFTER_MS)
 }
 
