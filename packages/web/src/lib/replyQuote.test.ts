@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test'
-import { addReply, insertReplyQuote, leadingQuote, markExcerpt, orderReplies, parseReplies, parseReply, quoteAll, quoteFor, quoteLines, replyAuthor, replyPreview, stripQuotedLines, composeReply } from './replyQuote'
+import { addReply, insertReplyQuote, leadingQuote, leadingQuotes, normalizeComposer, splitQuotedDraft, markExcerpt, orderReplies, parseReplies, parseReply, quoteAll, quoteFor, quoteLines, replyAuthor, replyPreview, stripQuotedLines, composeReply } from './replyQuote'
 
 test('a quote is "> "-prefixed, line by line', () => {
   expect(quoteLines('one\ntwo')).toBe('> one\n> two')
@@ -173,5 +173,63 @@ describe('several quotes at once', () => {
     expect(parseReplies('{"role":"user","text":"old"}')).toEqual([{ role: 'user', text: 'old' }])
     expect(parseReplies('nope')).toEqual([])
     expect(parseReplies(null)).toEqual([])
+  })
+})
+
+describe('quote blocks: several leading blocks, draft round-trip', () => {
+
+  test('leadingQuotes reads EVERY leading block, blank lines between them consumed', () => {
+    const text = '> …Como foi o teste?\n\n> …coisa está pronta\n> segunda linha\n\nminha resposta\n\n> not leading'
+    expect(leadingQuotes(text)).toEqual({
+      quotes: ['…Como foi o teste?', '…coisa está pronta\nsegunda linha'],
+      rest: 'minha resposta\n\n> not leading',
+    })
+  })
+
+  test('leadingQuotes with no leading quote returns the text untouched', () => {
+    expect(leadingQuotes('hello\n> later')).toEqual({ quotes: [], rest: 'hello\n> later' })
+    expect(leadingQuotes('> only a quote')).toEqual({ quotes: ['only a quote'], rest: '' })
+  })
+
+  test('leadingQuote keeps its old single-block shape, the later blocks in rest', () => {
+    expect(leadingQuote('> a\n\n> b\n\nme')).toEqual({ quote: 'a', rest: '> b\n\nme' })
+  })
+
+  test('serialize: quotes a blank line apart, then the typed text', () => {
+    const list = [
+      { role: 'assistant' as const, text: '…first…', excerpt: true },
+      { role: 'assistant' as const, text: 'second\nline', excerpt: true },
+    ]
+    expect(composeReply({ quote: quoteAll(list), paths: [], text: 'my answer' }))
+      .toBe('> …first…\n\n> second\n> line\n\nmy answer')
+  })
+
+  test('round trip: what is sent parses back into the same stack and words', () => {
+    const list = [
+      { role: 'assistant' as const, text: '…first…', excerpt: true },
+      { role: 'user' as const, text: 'one\ntwo\nthree\nfour\nfive' },
+    ]
+    const sent = composeReply({ quote: quoteAll(list), paths: [], text: 'answer\nline 2' })
+    const back = splitQuotedDraft(sent)
+    expect(back.text).toBe('answer\nline 2')
+    expect(back.replies.map(r => r.text)).toEqual(['…first…', 'one\ntwo\nthree\nfour\n…'])
+    // Lifted quotes are excerpts, so sending them again yields the very same message.
+    expect(composeReply({ quote: quoteAll(back.replies), paths: [], text: back.text })).toBe(sent)
+  })
+
+  test('splitQuotedDraft leaves a draft without leading quotes alone', () => {
+    expect(splitQuotedDraft('plain\n> mid')).toEqual({ replies: [], text: 'plain\n> mid' })
+  })
+
+  test('normalizeComposer: an old inline draft is not drawn (or sent) twice', () => {
+    const t = { role: 'assistant' as const, text: 'quoted bit', excerpt: true, key: 'k1' }
+    const out = normalizeComposer('> quoted bit\n\nmy words', [t])
+    expect(out.draft).toBe('my words')
+    expect(out.replies.map(r => r.text)).toEqual(['quoted bit'])
+  })
+
+  test('normalizeComposer: a list kept outside the draft passes through untouched', () => {
+    const t = { role: 'assistant' as const, text: 'quoted bit', excerpt: true, key: 'k1' }
+    expect(normalizeComposer('my words', [t])).toEqual({ draft: 'my words', replies: [t] })
   })
 })
