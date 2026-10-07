@@ -32,7 +32,7 @@ import {
   NA, PRIORITY, button, claimLeft, field, fmtDateTime, fmtInt, fmtStamp, fmtTokens, harnessColor, liveStatusMap,
   liveStatusOrder, microLabel, NO_TYPE_KEY, numeric, pill, statusStyle, surface, typeStyle, type BoardStatus, type ColumnId,
 } from './board'
-import { useMoney, type Money } from './money'
+import { copilotCreditsTooltip, formatTaskCost, useMoney, type Money } from './money'
 import {
   nextSort, PRIORITY_ORDER, sortRows,
   type SortKey, type SubtaskSortKey, type SubtaskSortSpec, type TaskPriorityId,
@@ -305,9 +305,12 @@ function cellFor(
       )
     }
     case 'rounds': return <Num v={r.rounds} />
-    case 'cost': return r.mixedCurrency || (r.credits !== null && r.costUSD === null)
-      ? <span style={{ ...numeric, fontSize: 12 }}>{r.credits!.premiumRequests} req</span>
-      : <span style={{ ...numeric, fontSize: 12, color: r.costUSD === null ? 'var(--text-tertiary)' : 'var(--anthropic-orange)' }}>{money(r.costUSD, r.costByHarness)}</span>
+    case 'cost': return (
+      <span
+        style={{ ...numeric, fontSize: 12, color: r.costUSD === null && r.credits === null ? 'var(--text-tertiary)' : 'var(--anthropic-orange)' }}
+        title={r.credits ? copilotCreditsTooltip(r.credits.premiumRequests, lang) : undefined}
+      >{formatTaskCost(money, r.costUSD, r.credits, r.costByHarness)}</span>
+    )
     case 'tokens': return <span style={{ ...numeric, fontSize: 12, color: r.tokens === null ? 'var(--text-tertiary)' : undefined }}>{fmtTokens(r.tokens)}</span>
     case 'harnesses': return <HarnessBadges harnesses={row.harnesses} />
     case 'subtasks': return row.counts.subtasks === 0
@@ -600,7 +603,7 @@ function SubtaskRows({
                   </span>
                 )}
                 {id === 'model' && <ModelCellView sessions={directSessions} />}
-                {id === 'cost' && <CostCellView r={directView.rollup} cost={costCellFor(directView.rollup)} money={money} />}
+                {id === 'cost' && <CostCellView r={directView.rollup} cost={costCellFor(directView.rollup)} money={money} lang={lang} />}
                 {id === 'tokens' && <TokensCellView tok={tokensCellFor(directView.rollup)} />}
               </td>
             )

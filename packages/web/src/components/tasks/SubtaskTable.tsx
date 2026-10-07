@@ -679,7 +679,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
                       </span>
                     )}
                     {id === 'model' && <ModelCellView sessions={directSessions} />}
-                    {id === 'cost' && <CostCellView r={directView.rollup} cost={directCost} money={money} />}
+                    {id === 'cost' && <CostCellView r={directView.rollup} cost={directCost} money={money} lang={p.lang} />}
                     {id === 'tokens' && <TokensCellView tok={directTok} />}
                   </td>
                 )

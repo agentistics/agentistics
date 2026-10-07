@@ -26,7 +26,7 @@ import {
   clearColumnSort, effectiveSort, hasOverride, pickColumnSort, withColumnSort, type ColumnSorts,
 } from './columnSort'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { useMoney } from './money'
+import { copilotCreditsTooltip, formatTaskCost, useMoney } from './money'
 import type { TaskListRow } from '../../lib/tasks'
 import { threadsCountText, mobileBoardCopy } from './boardCopyThreads'
 
@@ -48,9 +48,7 @@ function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
   const late = !closed && Number.isFinite(dueMs) && dueMs < nowMs
   const fmt = useMoney()
   const r = row.rollup
-  const cost = r.mixedCurrency || (r.credits !== null && r.costUSD === null)
-    ? `${r.credits!.premiumRequests} req`
-    : fmt(r.costUSD, r.costByHarness)
+  const cost = formatTaskCost(fmt, r.costUSD, r.credits, r.costByHarness)
   const pct = counts ? taskProgress(counts.subtasksDone, counts.subtasks).percent : null
   const threadCount = threadsCountText(counts?.threads, lang)
   return (
@@ -97,7 +95,7 @@ function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
 
         <div
           style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: 'var(--text-secondary)' }}
-          title={`${fmtInt(r.rounds)} prompts · ${r.sessionsUsed} sessions · ${fmtTokens(r.tokens)} tokens`}
+          title={`${fmtInt(r.rounds)} prompts · ${r.sessionsUsed} sessions · ${fmtTokens(r.tokens)} tokens${r.credits ? ` · ${copilotCreditsTooltip(r.credits.premiumRequests, lang)}` : ''}`}
         >
           {counts && pct !== null && (
             <span style={{ fontVariantNumeric: 'tabular-nums' }}>{pct}% · {counts.subtasksDone}/{counts.subtasks}</span>
