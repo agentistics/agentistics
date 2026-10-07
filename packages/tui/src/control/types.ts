@@ -1882,6 +1882,8 @@ export interface ProjectSearchResult {
   options: ProjectOption[]
   /** Matches per kind BEFORE the cap — see `countPerKind`. */
   totals: Record<ProjectKind, number>
+  /** True while a whole-disk root is still being indexed in the background. */
+  indexing?: boolean
 }
 
 /** One harness the wizard may offer, and the shape of the questions it earns. */

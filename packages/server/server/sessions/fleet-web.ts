@@ -746,6 +746,8 @@ export interface FleetNewOptions {
    * say", and the wizard then counts its rows and stops claiming a total it cannot know.
    */
   projectTotals?: Record<ProjectKind, number>
+  /** True while a configured disk is being indexed in the background. */
+  projectIndexing?: boolean
   /** The tasks that already exist here, so filing the new session is a pick, not a spelling test. */
   tasks: string[]
   /**
@@ -825,6 +827,7 @@ export async function readNewOptions(lang: CliLang, query: string): Promise<Flee
        * A cap shown as a count is a number that can never be anything but the cap.
        */
       projectTotals: projects.totals,
+      ...(projects.indexing ? { projectIndexing: true } : {}),
       tasks,
     }
   } catch (e) {
