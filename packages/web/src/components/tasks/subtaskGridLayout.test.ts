@@ -1,55 +1,46 @@
-import { describe, expect, it } from 'bun:test'
-import { subtaskGridLayout } from './subtaskGridLayout'
+import { describe, expect, test } from 'bun:test'
+import { MAX_COL_WIDTH, MIN_COL_WIDTH } from './columnWidths'
+import { SUBTASK_LEAD_WIDTH, SUBTASK_TITLE_ID, SUBTASK_TITLE_WIDTH, subtaskGridWidths } from './subtaskGridLayout'
 
-// The main row always carries `colsCount + 2` cells (a leading cell, the title, then one per shown
-// column). The subtask row draws a leading cell, a title cell, then one per shown SUBTASK column
-// (`subtaskColsCount`) plus a filler that must close the row out to the same width — this is the
-// invariant the whole bug was about, so it is pinned for every combination a reader could pick, not
-// just a sample.
-describe('subtaskGridLayout', () => {
-  it('keeps the inline row exactly as wide as the main row, for every possible column count', () => {
-    for (let subtaskColsCount = 1; subtaskColsCount <= 8; subtaskColsCount++) {
-      for (let colsCount = 0; colsCount <= 20; colsCount++) {
-        const layout = subtaskGridLayout(colsCount, subtaskColsCount)
-        if (layout.mode !== 'inline') continue
-        const inlineWidth = (2 + subtaskColsCount) + layout.filler
-        expect(inlineWidth).toBe(colsCount + 2)
-      }
-    }
+describe('subtaskGridWidths', () => {
+  test('defaults: title 280, each shown column at its own default, exact total', () => {
+    const g = subtaskGridWidths(['status', 'sessions'], {})
+    expect(g.title).toBe(SUBTASK_TITLE_WIDTH)
+    expect(g.cols).toEqual({ status: 100, sessions: 190 })
+    expect(g.total).toBe(SUBTASK_LEAD_WIDTH + 280 + 100 + 190)
   })
 
-  it('chooses nested below the threshold and inline at or above it', () => {
-    const subtaskColsCount = 8
-    for (let colsCount = 0; colsCount <= 20; colsCount++) {
-      const layout = subtaskGridLayout(colsCount, subtaskColsCount)
-      expect(layout.mode).toBe(colsCount >= subtaskColsCount ? 'inline' : 'nested')
-    }
+  test('the name column resizes like any other and is persisted under its own key', () => {
+    const g = subtaskGridWidths(['status'], { [SUBTASK_TITLE_ID]: 420, status: 150 })
+    expect(g.title).toBe(420)
+    expect(g.cols.status).toBe(150)
+    expect(g.total).toBe(SUBTASK_LEAD_WIDTH + 420 + 150)
   })
 
-  it('never gives the nested mode a filler — its own table is sized to need none', () => {
-    const subtaskColsCount = 8
-    for (let colsCount = 0; colsCount < subtaskColsCount; colsCount++) {
-      expect(subtaskGridLayout(colsCount, subtaskColsCount).filler).toBe(0)
-    }
+  test('depends on nothing but the subtask grid: delivery-table ids in the saved record are ignored', () => {
+    const a = subtaskGridWidths(['status', 'cost'], {})
+    const b = subtaskGridWidths(['status', 'cost'], { progress: 600, priority: 300, ghost: 9 })
+    expect(b).toEqual(a)
   })
 
-  it('gives the inline mode a zero filler exactly at the threshold', () => {
-    expect(subtaskGridLayout(8, 8)).toEqual({ mode: 'inline', filler: 0 })
-    expect(subtaskGridLayout(3, 3)).toEqual({ mode: 'inline', filler: 0 })
+  test('a hidden column takes no width', () => {
+    const g = subtaskGridWidths(['cost'], { status: 300 })
+    expect(g.cols).toEqual({ cost: 88 })
+    expect(g.total).toBe(SUBTASK_LEAD_WIDTH + 280 + 88)
   })
 
-  it('a narrower subtask column count lowers the threshold, exactly what hiding a column is for', () => {
-    // 5 main columns did not fit the old fixed 7-column subtask grid (nested); with the subtask
-    // grid narrowed to 5 of its own columns, the same 5 main columns fit inline again.
-    expect(subtaskGridLayout(5, 7).mode).toBe('nested')
-    expect(subtaskGridLayout(5, 5).mode).toBe('inline')
+  test('the live drag lays over the saved width, including on the name column', () => {
+    expect(subtaskGridWidths(['status'], { status: 150 }, { id: 'status', w: 210 }).cols.status).toBe(210)
+    expect(subtaskGridWidths(['status'], {}, { id: SUBTASK_TITLE_ID, w: 333 }).title).toBe(333)
+    // A drag on a column that is not shown changes nothing.
+    expect(subtaskGridWidths(['status'], {}, { id: 'cost', w: 333 }).cols).toEqual({ status: 100 })
   })
 
-  it('never returns a negative filler', () => {
-    for (let subtaskColsCount = 1; subtaskColsCount <= 8; subtaskColsCount++) {
-      for (let colsCount = 0; colsCount <= 20; colsCount++) {
-        expect(subtaskGridLayout(colsCount, subtaskColsCount).filler).toBeGreaterThanOrEqual(0)
-      }
-    }
+  test('saved widths are clamped; a trailing column is counted', () => {
+    const g = subtaskGridWidths(['status'], { [SUBTASK_TITLE_ID]: 5, status: 99999 }, null, { trailing: 88, lead: 8 })
+    expect(g.title).toBe(MIN_COL_WIDTH)
+    expect(g.cols.status).toBe(MAX_COL_WIDTH)
+    expect(g.lead).toBe(8)
+    expect(g.total).toBe(8 + MIN_COL_WIDTH + MAX_COL_WIDTH + 88)
   })
 })

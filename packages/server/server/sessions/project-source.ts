@@ -19,7 +19,7 @@
 import { homedir } from 'node:os'
 import { countPerKind, pathForHost, PROJECTS_PER_KIND, projectKind, projectPathKey, takePerKind, type ProjectKind } from '@agentistics/core'
 import { loadConsolidated } from '../consolidate'
-import { isDirectory, isWorktreeDir, scanDirectories } from './dir-scan'
+import { isDirectory, isWholeDiskRoot, isWorktreeDir, scanDirectories, type ScanOptions } from './dir-scan'
 import { readPreferences } from '../preferences'
 import {
   buildCandidates, mergeWalkedAndHistory, searchCandidates, withFixedCandidates,
@@ -30,62 +30,60 @@ import {
  *  shows up without restarting the control center. */
 const CACHE_TTL_MS = 60_000
 
-let cache: { at: number; candidates: ProjectCandidate[] } | null = null
+interface ProjectCache { at: number; candidates: ProjectCandidate[]; indexing: boolean }
+let cache: ProjectCache | null = null
+let indexingPromise: Promise<void> | null = null
 
-async function allCandidates(): Promise<ProjectCandidate[]> {
-  const now = Date.now()
-  if (cache && now - cache.at < CACHE_TTL_MS) return cache.candidates
-
+async function readHistoryAndRoots(): Promise<{ history: ProjectCandidate[]; roots: string[] }> {
   const [history, roots] = await Promise.all([
-    loadConsolidated()
-      .then(m => buildCandidates([...m.values()]))
-      // A store that cannot be read is a wizard with no history, never one that fails to open.
-      .catch(() => [] as ProjectCandidate[]),
+    loadConsolidated().then(m => buildCandidates([...m.values()])).catch(() => [] as ProjectCandidate[]),
     readPreferences().then(p => p.scanRoots ?? []).catch(() => [] as string[]),
   ])
   const scanRoots = [...new Map(
     [homedir(), ...roots.map(root => pathForHost(root, process.platform === 'win32' ? 'win32' : 'linux'))]
-      .filter(Boolean)
-      .map(root => [projectPathKey(root), root] as const),
+      .filter(Boolean).map(root => [projectPathKey(root), root] as const),
   ).values()]
-  const scannedGroups = await Promise.all(scanRoots.map(root => scanDirectories(root).catch(() => [])))
-  const scanned = scannedGroups.flat()
+  return { history, roots: scanRoots }
+}
 
-  // History WINS on a path both know about: it carries the repository and the recency, and the walk
-  // knows only that the directory exists. `mergeWalkedAndHistory` keeps the richer entry and lets
-  // the other one say why it is there — here the walk says nothing history has not already said
-  // better, EXCEPT `worktree`, which only the walk can know for free and history cannot know at
-  // all — see that function's own note; it is the whole reason this is no longer a bare
-  // `Map.set` overwrite.
-  const walked: ProjectCandidate[] = scanned.map(d => ({
-    path: d.path,
-    name: d.name,
-    remote: '',
-    lastSeenMs: 0,
-    sessions: 0,
-    // A linked worktree still "has a `.git`", so it keeps the same PROVENANCE as a repository the
-    // walk found — `worktree` is what tells the two apart for `projectKind`, and this is the field
-    // every OTHER reader of `source` (the terminal wizard included) already expects.
-    source: d.repo || d.worktree ? 'repo' : 'folder',
-    worktree: d.worktree,
-  }))
+function startBackgroundIndex(history: ProjectCandidate[], scanRoots: string[]): void {
+  if (indexingPromise) return
+  indexingPromise = (async () => {
+    const scannedGroups = await Promise.all(scanRoots.map(root => {
+      const options: ScanOptions = isWholeDiskRoot(root) ? {} : { timeBudgetMs: 1_000 }
+      return scanDirectories(root, options).catch(() => [])
+    }))
+    const walked: ProjectCandidate[] = scannedGroups.flat().map(d => ({
+      path: d.path, name: d.name, remote: '', lastSeenMs: 0, sessions: 0,
+      source: d.repo || d.worktree ? 'repo' : 'folder', worktree: d.worktree,
+    }))
+    let candidates = mergeWalkedAndHistory(walked, history)
+    const unresolved = candidates.filter(c => c.worktree === undefined)
+    if (unresolved.length > 0) {
+      const flags = await Promise.all(unresolved.map(c => isWorktreeDir(c.path)))
+      const resolved = new Map(unresolved.map((c, i) => [c.path, flags[i]!]))
+      candidates = candidates.map(c => resolved.has(c.path) ? { ...c, worktree: resolved.get(c.path) } : c)
+    }
+    cache = { at: Date.now(), candidates, indexing: false }
+  })().catch(() => {
+    if (cache) cache = { ...cache, at: Date.now(), indexing: false }
+  }).finally(() => { indexingPromise = null })
+}
 
-  let candidates = mergeWalkedAndHistory(walked, history)
-
-  // A history path the walk never reached (outside the scan depth, or outside `$HOME`) still needs
-  // to know whether it is a linked worktree — one `.git`-type `stat` per SUCH path, bounded by how
-  // many directories this machine has actually worked in, never by the whole home tree the walk
-  // covers. Distinct paths only (the Map above already deduped them), and this runs once per
-  // `CACHE_TTL_MS`, not once per keystroke.
-  const unresolved = candidates.filter(c => c.worktree === undefined)
-  if (unresolved.length > 0) {
-    const flags = await Promise.all(unresolved.map(c => isWorktreeDir(c.path)))
-    const resolved = new Map(unresolved.map((c, i) => [c.path, flags[i]!]))
-    candidates = candidates.map(c => resolved.has(c.path) ? { ...c, worktree: resolved.get(c.path) } : c)
+async function allCandidates(): Promise<ProjectCache> {
+  const now = Date.now()
+  if (cache) {
+    if (now - cache.at >= CACHE_TTL_MS && !indexingPromise) {
+      const { history, roots } = await readHistoryAndRoots()
+      cache = { ...cache, indexing: true }
+      startBackgroundIndex(history, roots)
+    }
+    return cache
   }
-
-  cache = { at: now, candidates }
-  return candidates
+  const { history, roots } = await readHistoryAndRoots()
+  cache = { at: now, candidates: history, indexing: true }
+  startBackgroundIndex(history, roots)
+  return cache
 }
 
 /** Drop the index, so a directory created seconds ago is findable without waiting out the TTL. */
@@ -110,12 +108,15 @@ export interface ProjectSearch {
    * machine. `rows` is what fits on screen; this is what is there.
    */
   totals: Record<ProjectKind, number>
+  /** True while the local filesystem index is being refreshed in the background. */
+  indexing: boolean
 }
 
 export async function findProjects(
   query: string, cwd: string, perKind = PROJECTS_PER_KIND,
 ): Promise<ProjectSearch> {
-  const known = await allCandidates()
+  const indexed = await allCandidates()
+  const known = indexed.candidates
 
   // Only worth a `stat` when the path is not already KNOWN — `withFixedCandidates` keeps the known
   // entry's already-resolved `worktree` and merely overrides `source`, so paying for this twice
@@ -157,6 +158,7 @@ export async function findProjects(
   return {
     rows: takePerKind(ranked, c => projectKind(c), perKind),
     totals: countPerKind(ranked, c => projectKind(c)),
+    indexing: indexed.indexing,
   }
 }
 

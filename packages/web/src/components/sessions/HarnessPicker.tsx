@@ -32,9 +32,10 @@ export interface HarnessPickerProps {
    * installed.
    */
   notice?: string
+  onRetry?: () => void
 }
 
-export function HarnessPicker({ lang, harnesses, value, onChange, notice }: HarnessPickerProps) {
+export function HarnessPicker({ lang, harnesses, value, onChange, notice, onRetry }: HarnessPickerProps) {
   const pt = lang === 'pt'
 
   if (harnesses === null) {
@@ -42,7 +43,12 @@ export function HarnessPicker({ lang, harnesses, value, onChange, notice }: Harn
   }
   if (harnesses.length === 0) {
     // Not an empty picker: the machine looked and found nothing it knows how to start.
-    if (notice) return <Muted text={notice} />
+    if (notice) return <>
+      <Muted text={notice} />
+      {onRetry && <button type="button" onClick={onRetry} style={{ alignSelf: 'flex-start', padding: '7px 11px', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12 }}>
+        {pt ? 'Tentar de novo' : 'Try again'}
+      </button>}
+    </>
     return <Muted text={pt
       ? 'Nenhum assistente que o agentop saiba iniciar foi encontrado nesta máquina.'
       : 'No assistant agentop knows how to start was found on this machine.'} />

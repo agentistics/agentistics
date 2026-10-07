@@ -40,6 +40,7 @@ export interface ProjectPickerProps {
   /** How many places of each kind MATCHED, before the server's per-kind cap. `undefined` means this
    *  server does not say. */
   projectTotals: Record<ProjectKind, number> | undefined
+  projectIndexing?: boolean
   /** The field's own value — see `useFleetNewOptions`. */
   query: string
   onQueryChange: (q: string) => void
@@ -51,7 +52,7 @@ export interface ProjectPickerProps {
 }
 
 export function ProjectPicker({
-  lang, isMobile, projects, projectTotals, query, onQueryChange, searching, value, onChange,
+  lang, isMobile, projects, projectTotals, projectIndexing, query, onQueryChange, searching, value, onChange,
 }: ProjectPickerProps) {
   const pt = lang === 'pt'
   /** Which kind of place the list is showing. `all` is the default — see `projectKind`. */
@@ -152,6 +153,7 @@ export function ProjectPicker({
       <p style={{ margin: '0 0 8px', fontSize: 10.5, lineHeight: 1.45, color: 'var(--text-tertiary)' }}>
         {kindHint(kindTab, pt)}
         {shownMore && <> {kindMoreText(shownMore, pt)}</>}
+        {projectIndexing && <> {pt ? 'Indexando discos em segundo plano…' : 'Indexing disks in the background…'}</>}
       </p>
 
       <div style={{

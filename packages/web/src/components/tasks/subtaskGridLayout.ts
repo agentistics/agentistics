@@ -1,55 +1,64 @@
 /**
- * subtaskGridLayout.ts — whether an expanded delivery's subtasks fit in the MAIN table's own rows,
- * or need their own nested one.
+ * subtaskGridLayout.ts — PURE: the widths of the SUBTASK grid, which is its own table and never
+ * borrows the delivery table's columns.
  *
- * `TaskTable.tsx` draws an expanded delivery's subtasks as rows of the SAME `<table>` as the main
- * rows: a sub-header row, then one row per subtask (`SubtaskRows`), then a "+ Add subtask" row. Its
- * main row always carries exactly `cols.length + 2` cells — a leading cell, the title, then one per
- * shown column (`COLUMNS.filter(shown)`) — and the "Columns" picker has no floor on how few of those
- * a reader may hide.
+ * It used to have two layouts. In `inline` mode an expanded delivery's subtasks were drawn as rows
+ * of the delivery table itself, and that table is `table-layout: fixed` with a `<colgroup>` sized by
+ * the DELIVERY columns — so a subtask cell's own `width` was ignored by the browser, every subtask
+ * column sat under whatever delivery column happened to be above it ("Subtarefas" under "Tarefa",
+ * "Sessões" under "Progresso"), and dragging a subtask header border saved a width nothing read.
+ * The grid is now ALWAYS one cell of the delivery table holding its own table, sized here.
  *
- * The subtask rows draw a leading action-menu cell, the title, then one cell per shown SUBTASK
- * column (`SubtaskColumnId` — status/started/completed/duration/sessions/model/cost/tokens, itself
- * now picked/hidden/reordered by its own "Columns" picker, t-63b7d3b2b0 #1) plus a filler cell that
- * closes the row out to `cols.length + 2`. That arithmetic only has a filler to grow when
- * `cols.length >= subtaskColsCount` (`filler = cols.length - subtaskColsCount`, clamped at 0) — hide
- * enough of the MAIN table's own columns and the subtask row's fixed cells alone already overshoot
- * `cols.length + 2`, so the subtask rows end up WIDER than the main rows in the same table and every
- * column in every row below them misaligns.
- *
- * `subtaskGridLayout` is the one place that decides which of the table's two layouts a delivery's
- * subtasks get, so the arithmetic behind it is tested independently of the JSX that reads it:
- *
- * - **`inline`** (`colsCount >= subtaskColsCount`): the sub-header row and `SubtaskRows` are drawn as
- *   rows of the outer table, closed out by `filler` cells.
- * - **`nested`** (fewer): the whole subtask block for that delivery is ONE row of the outer table —
- *   a leading cell plus a single cell spanning the rest, holding its OWN table with the subtask
- *   grid's own shown columns, scrolling horizontally inside itself rather than ever widening the
- *   outer one. That inner table is sized as though the outer table held exactly `subtaskColsCount`
- *   columns, which is what makes its own filler come out to zero.
+ * The table is given its EXACT width (`total`), never `width: 100%`: with every column fixed, a
+ * table wider than their sum hands the surplus to all of them in proportion, so a dragged border
+ * moved by a fraction of the drag and a saved width never rendered as the number saved. The
+ * surrounding box scrolls sideways when the grid is wider than the row.
  */
+import { MAX_COL_WIDTH, resolveWidths } from './columnWidths'
+import { SUBTASK_COLUMNS, type SubtaskColumnId } from './subtaskColumnDefs'
 
-export type SubtaskGridMode = 'inline' | 'nested'
+/** The saved-width key of the always-shown name column ("Subtarefas"). Not a `SubtaskColumnId`:
+ *  it is never in the "Columns" picker, but it resizes like every other column. */
+export const SUBTASK_TITLE_ID = 'title'
+export const SUBTASK_TITLE_WIDTH = 280
+/** The leading cell: the gear menu plus the thread button beside it (measured: 51px + 20px padding,
+ *  plus room for a comment count). */
+export const SUBTASK_LEAD_WIDTH = 84
 
-export interface SubtaskGridLayout {
-  mode: SubtaskGridMode
-  /**
-   * The filler cell's `colSpan`, for the `inline` mode only — 0 means no filler cell at all. Always
-   * 0 in `nested` mode: the nested table is sized to `subtaskColsCount` internally, which needs
-   * none.
-   */
-  filler: number
+export interface SubtaskGridWidths {
+  lead: number
+  title: number
+  /** One entry per SHOWN subtask column. */
+  cols: Record<string, number>
+  /** lead + title + every shown column + `trailing` — the table's own width. */
+  total: number
 }
 
 /**
- * @param colsCount the MAIN table's own shown column count (`cols.length` in `TaskTable.tsx`).
- * @param subtaskColsCount how many columns the SUBTASK grid currently shows (its own "Columns"
- *   picker's selection) — the threshold moves with it, since hiding subtask columns is exactly what
- *   lets a narrower main table stay `inline`.
+ * @param shown the shown subtask columns, in order.
+ * @param saved the person's saved widths (`boardPrefs.subtaskColumnWidths`), keyed by column id plus
+ *   `SUBTASK_TITLE_ID`.
+ * @param dragging the width being dragged right now, laid over the saved one.
+ * @param opts.trailing a fixed column after the grid (the standalone page's actions column), 0 if none.
+ * @param opts.lead the leading cell's width, `SUBTASK_LEAD_WIDTH` unless the surface draws it narrower.
  */
-export function subtaskGridLayout(colsCount: number, subtaskColsCount: number): SubtaskGridLayout {
-  if (colsCount >= subtaskColsCount) {
-    return { mode: 'inline', filler: Math.max(0, colsCount - subtaskColsCount) }
-  }
-  return { mode: 'nested', filler: 0 }
+export function subtaskGridWidths(
+  shown: readonly SubtaskColumnId[],
+  saved: Readonly<Record<string, number>>,
+  dragging: { id: string; w: number } | null = null,
+  opts: { trailing?: number; lead?: number } = {},
+): SubtaskGridWidths {
+  const lead = opts.lead ?? SUBTASK_LEAD_WIDTH
+  const trailing = opts.trailing ?? 0
+  const defs = [
+    { id: SUBTASK_TITLE_ID, width: SUBTASK_TITLE_WIDTH },
+    ...shown.map(id => SUBTASK_COLUMNS.find(c => c.id === id)!).filter(Boolean),
+  ]
+  const w = resolveWidths(defs, saved)
+  if (dragging && dragging.id in w) w[dragging.id] = Math.min(MAX_COL_WIDTH, dragging.w)
+  const title = w[SUBTASK_TITLE_ID]!
+  const cols: Record<string, number> = {}
+  for (const id of shown) if (w[id] !== undefined) cols[id] = w[id]!
+  const total = lead + title + Object.values(cols).reduce((n, v) => n + v, 0) + trailing
+  return { lead, title, cols, total }
 }

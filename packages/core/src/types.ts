@@ -1048,6 +1048,9 @@ const BASE_MODEL_PRICING: Record<string, { input: number; output: number; cacheR
   'gpt-5':          { input: 1.25, output: 10, cacheRead: 0.125, cacheWrite: 1.25 },
 }
 
+/** Public GitHub Copilot overage price used to estimate premium-request credits in task costs. */
+export const COPILOT_PREMIUM_REQUEST_USD = 0.04
+
 /**
  * `MODEL_PRICING`, with each row's 1-hour-TTL cache-write rate (`cacheWrite1h`) added.
  *

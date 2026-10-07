@@ -4,6 +4,7 @@ import { Cpu, Copy, CheckCheck, AlertCircle, CircleDot, ExternalLink } from 'luc
 import type { AppContext } from '../../lib/app-context'
 import { useChatHarnesses, type HarnessChatStatus } from '../../hooks/useChatHarnesses'
 import { SectionHeader } from './primitives'
+import { CenteredLoader } from '../../components/CenteredLoader'
 
 function CopyableCode({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -189,9 +190,7 @@ export default function HarnessesSettings() {
       </p>
 
       {loading ? (
-        <div style={{ fontSize: 13, color: 'var(--text-tertiary)', textAlign: 'center', padding: '24px 0' }}>
-          {pt ? 'Verificando…' : 'Checking…'}
-        </div>
+        <CenteredLoader size={40} label={pt ? 'Verificando' : 'Checking'} testId="harnesses-loading" />
       ) : harnesses.length === 0 ? (
         <div style={{ fontSize: 13, color: 'var(--text-tertiary)', textAlign: 'center', padding: '24px 0' }}>
           {pt ? 'Nenhum backend encontrado.' : 'No backends found.'}

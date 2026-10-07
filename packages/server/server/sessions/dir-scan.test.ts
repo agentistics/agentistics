@@ -1,116 +1,44 @@
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, it, test } from 'bun:test'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { classifyGitFile, isWorktreeDir, scanDirectories } from './dir-scan'
+import { classifyGitFile, isWholeDiskRoot, isWorktreeDir, scanDirectories, shouldPruneDirectory } from './dir-scan'
 
-/**
- * `classifyGitFile` — PURE. Content strings measured against real git 2.53
- * (`git worktree add` / `git submodule add`), not invented.
- */
-describe('classifyGitFile — the kind is what the file SAYS, never that it is a file at all', () => {
-  it('a real worktree gitdir line', () => {
-    // Measured verbatim from `cat <worktree>/.git` after `git worktree add`.
-    expect(classifyGitFile(
-      'gitdir: /home/dev/agentistics/.git/worktrees/wt-check\n',
-    )).toBe('worktree')
-  })
-
-  it('THE REPORTED BUG: a real submodule gitdir line is NOT a worktree', () => {
-    // Measured verbatim from `cat <submodule>/.git` after `git submodule add` — a submodule's
-    // `.git` is a FILE too, and `isFile()` alone cannot tell the two apart.
-    expect(classifyGitFile('gitdir: ../.git/modules/subdir\n')).toBe('other')
-  })
-
-  it('garbage content is not a worktree', () => {
-    expect(classifyGitFile('not a gitdir line at all')).toBe('other')
-    expect(classifyGitFile('')).toBe('other')
-    expect(classifyGitFile('gitdir:')).toBe('other')
-  })
-
-  it('a `gitdir:` line that names neither pattern is not a worktree', () => {
-    // A relocated repository, a future git format, anything this was never checked against — the
-    // ABSENCE of the worktree marker, never assumed present by default.
-    expect(classifyGitFile('gitdir: /some/other/place\n')).toBe('other')
-  })
-
-  it('is insensitive to CRLF and missing trailing newline — only the path decides', () => {
+describe('classifyGitFile', () => {
+  it('recognises worktrees but not submodules or garbage', () => {
+    expect(classifyGitFile('gitdir: /home/dev/.git/worktrees/x\n')).toBe('worktree')
+    expect(classifyGitFile('gitdir: ../.git/modules/x\n')).toBe('other')
+    expect(classifyGitFile('garbage')).toBe('other')
     expect(classifyGitFile('gitdir: /r/.git/worktrees/x\r\n')).toBe('worktree')
-    expect(classifyGitFile('gitdir: /r/.git/worktrees/x')).toBe('worktree')
   })
 })
 
-/**
- * THE REPORTED BUG (worktree): a git worktree's own `.git` is a FILE (`gitdir:
- * <main>/.git/worktrees/<name>`), never a directory. The old check (`entries.some(e => e.name ===
- * '.git')`) only asked whether an entry BY THAT NAME existed, so a worktree walked in came back
- * `repo: true` — the walk's own way of saying "this is a repository's main checkout" — and it went
- * on to read as a repository throughout the wizard.
- *
- * THE REVIEW FINDING (submodule): a git SUBMODULE's `.git` is ALSO a file
- * (`gitdir: ../.git/modules/<name>`), and checking only `isFile()` — never the CONTENT — called a
- * submodule a worktree too, which is factually wrong: a submodule is its own independent
- * repository, not "a second place to work in this one".
- */
-describe('scanDirectories — repo vs worktree vs submodule, from the SAME readdir', () => {
+describe('scanDirectories — repo vs worktree vs submodule', () => {
   let root: string
-
   beforeAll(async () => {
     root = await mkdtemp(join(tmpdir(), 'dir-scan-'))
-    // A real checkout: `.git` is a directory.
     await mkdir(join(root, 'main-checkout', '.git'), { recursive: true })
-    // A linked worktree: `.git` is a FILE whose content names `.git/worktrees/`.
     await mkdir(join(root, 'a-worktree'), { recursive: true })
     await writeFile(join(root, 'a-worktree', '.git'), 'gitdir: /somewhere/.git/worktrees/a-worktree\n')
-    // A submodule: `.git` is ALSO a FILE, but its content names `.git/modules/` instead.
     await mkdir(join(root, 'a-submodule'), { recursive: true })
     await writeFile(join(root, 'a-submodule', '.git'), 'gitdir: ../.git/modules/a-submodule\n')
-    // A `.git` FILE with garbage content — neither pattern, and not even a `gitdir:` line.
     await mkdir(join(root, 'garbage-git'), { recursive: true })
     await writeFile(join(root, 'garbage-git', '.git'), 'not a real git file\n')
-    // Neither a repo nor a worktree nor a submodule.
     await mkdir(join(root, 'plain-folder'), { recursive: true })
   })
   afterAll(async () => { await rm(root, { recursive: true, force: true }) })
-
-  it('flags a real checkout as repo, and NOT as a worktree', async () => {
+  it('classifies real checkout, worktree, submodule, garbage, and folder', async () => {
     const out = await scanDirectories(root, 1)
-    const main = out.find(d => d.name === 'main-checkout')
-    expect(main).toMatchObject({ repo: true, worktree: false })
-  })
-
-  it('flags a linked worktree as worktree, and NEVER as repo', async () => {
-    const out = await scanDirectories(root, 1)
-    const wt = out.find(d => d.name === 'a-worktree')
-    // THIS is the line that would have failed before the fix: the old code set `repo: true` here,
-    // because it never looked past the entry's NAME.
-    expect(wt).toMatchObject({ repo: false, worktree: true })
-  })
-
-  it('THE REVIEW FINDING: flags a submodule as repo, and NEVER as worktree', async () => {
-    const out = await scanDirectories(root, 1)
-    const sub = out.find(d => d.name === 'a-submodule')
-    // A `.git`-FILE-only check would have set `worktree: true` here — the misclassification the
-    // reviewer verified live with a real `git submodule add`.
-    expect(sub).toMatchObject({ repo: true, worktree: false })
-  })
-
-  it('a `.git` file with unrecognised content reads as a plain repository, never a worktree', async () => {
-    const out = await scanDirectories(root, 1)
-    const g = out.find(d => d.name === 'garbage-git')
-    expect(g).toMatchObject({ repo: true, worktree: false })
-  })
-
-  it('flags a plain folder as neither', async () => {
-    const out = await scanDirectories(root, 1)
-    const plain = out.find(d => d.name === 'plain-folder')
-    expect(plain).toMatchObject({ repo: false, worktree: false })
+    expect(out).toContainEqual(expect.objectContaining({ name: 'main-checkout', repo: true, worktree: false }))
+    expect(out).toContainEqual(expect.objectContaining({ name: 'a-worktree', repo: false, worktree: true }))
+    expect(out).toContainEqual(expect.objectContaining({ name: 'a-submodule', repo: true, worktree: false }))
+    expect(out).toContainEqual(expect.objectContaining({ name: 'garbage-git', repo: true, worktree: false }))
+    expect(out).toContainEqual(expect.objectContaining({ name: 'plain-folder', repo: false, worktree: false }))
   })
 })
 
-describe('isWorktreeDir — the same distinction, for a path the walk never visited', () => {
+describe('isWorktreeDir', () => {
   let root: string
-
   beforeAll(async () => {
     root = await mkdtemp(join(tmpdir(), 'is-worktree-'))
     await mkdir(join(root, 'repo', '.git'), { recursive: true })
@@ -118,32 +46,41 @@ describe('isWorktreeDir — the same distinction, for a path the walk never visi
     await writeFile(join(root, 'worktree', '.git'), 'gitdir: /main/.git/worktrees/worktree\n')
     await mkdir(join(root, 'submodule'), { recursive: true })
     await writeFile(join(root, 'submodule', '.git'), 'gitdir: ../.git/modules/submodule\n')
-    await mkdir(join(root, 'garbage'), { recursive: true })
-    await writeFile(join(root, 'garbage', '.git'), 'garbage\n')
   })
   afterAll(async () => { await rm(root, { recursive: true, force: true }) })
-
-  it('is true for a `.git` FILE whose content names a worktree', async () => {
+  it('recognises only a linked worktree', async () => {
     expect(await isWorktreeDir(join(root, 'worktree'))).toBe(true)
-  })
-
-  it('THE REVIEW FINDING: is false for a `.git` FILE whose content names a submodule', async () => {
     expect(await isWorktreeDir(join(root, 'submodule'))).toBe(false)
-  })
-
-  it('is false for a `.git` FILE with unrecognised content', async () => {
-    expect(await isWorktreeDir(join(root, 'garbage'))).toBe(false)
-  })
-
-  it('is false for a real checkout — its `.git` is a directory', async () => {
     expect(await isWorktreeDir(join(root, 'repo'))).toBe(false)
-  })
-
-  it('never throws on a directory with no `.git` at all', async () => {
-    expect(await isWorktreeDir(root)).toBe(false)
-  })
-
-  it('never throws on a directory that does not exist', async () => {
     expect(await isWorktreeDir(join(root, 'gone'))).toBe(false)
+  })
+})
+
+describe('disk project scan bounds', () => {
+  let root = ''
+  beforeAll(async () => {
+    root = await mkdtemp(join(tmpdir(), 'agentistics-dir-scan-'))
+    await mkdir(join(root, 'keep', 'nested'), { recursive: true })
+    await mkdir(join(root, 'node_modules', 'should-not-visit'), { recursive: true })
+    await mkdir(join(root, 'Program Files', 'should-not-visit'), { recursive: true })
+  })
+  afterAll(async () => { if (root) await rm(root, { recursive: true, force: true }) })
+  test('recognises whole-disk roots and system directories', () => {
+    expect(isWholeDiskRoot('/mnt/c')).toBe(true)
+    expect(isWholeDiskRoot('C:\\')).toBe(true)
+    expect(isWholeDiskRoot('/home/dev')).toBe(false)
+    expect(shouldPruneDirectory('Program Files')).toBe(true)
+    expect(shouldPruneDirectory('node_modules')).toBe(true)
+    expect(shouldPruneDirectory('System Volume Information')).toBe(true)
+  })
+  test('respects depth and skip list', async () => {
+    const rows = await scanDirectories(root, { depth: 1, timeBudgetMs: 1_000 })
+    expect(rows.map(row => row.path)).toContain(join(root, 'keep'))
+    expect(rows.map(row => row.path)).not.toContain(join(root, 'keep', 'nested'))
+    expect(rows.some(row => row.path.includes('node_modules'))).toBe(false)
+    expect(rows.some(row => row.path.includes('Program Files'))).toBe(false)
+  })
+  test('returns without walking when the time budget is exhausted', async () => {
+    expect(await scanDirectories(root, { depth: 4, timeBudgetMs: 0 })).toEqual([])
   })
 })

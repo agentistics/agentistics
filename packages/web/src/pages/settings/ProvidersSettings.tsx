@@ -1,4 +1,5 @@
 import { AgentisticsLoader } from '../../components/AgentisticsLoader'
+import { CenteredLoader } from '../../components/CenteredLoader'
 /**
  * Settings → Providers — the credential store for the native runtime's model providers
  * (`GET/PUT/DELETE /api/provider*`). Always all 7 providers, in the server's own order; never
@@ -292,7 +293,7 @@ function ProvidersSettingsBody() {
   // -----------------------------------------------------------------------------------------------
 
   if (state.loading) {
-    return <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{pt ? 'Carregando…' : 'Loading…'}</div>
+    return <CenteredLoader size={40} label={pt ? 'Carregando' : 'Loading'} testId="providers-loading" />
   }
 
   if (state.refusal?.code === 'flag-off') {
