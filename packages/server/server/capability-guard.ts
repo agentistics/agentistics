@@ -44,6 +44,9 @@ const EXACT: ReadonlyMap<string, keyof Capabilities> = new Map<string, keyof Cap
   // deployment that should read a transcript but not this.
   ['/api/billing/detect', 'localTranscripts'],
   ['/api/hardware-resources', 'localProcesses'],
+  // Lists this host's disks (reads /proc/mounts, /Volumes, statfs) for Settings' project-disk
+  // picker. Host facts that only matter where sessions are started, so the fleet's capability.
+  ['/api/project-disks', 'localShell'],
   // The session fleet is registered as a PREFIX below, not name by name — see the note there.
 ])
 
