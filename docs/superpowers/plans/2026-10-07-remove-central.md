@@ -403,3 +403,8 @@ Open:
 - **D6** The normal app binds `0.0.0.0` today (§1.11), not localhost/Tailscale. To make "no code
   path can expose it publicly" true: bind `127.0.0.1` + Tailscale addresses only (recommended; a
   phone on Wi-Fi without Tailscale loses access by LAN IP), or keep `0.0.0.0` as today?
+
+### 7.1 Final owner decisions (07/10, via the leader)
+- D4 = **delete** the central specs from the public repo (no archive copy); add a one-page pointer note in agentistics-cloud (`docs/archive/central-legacy.md`) with the last commit that has them and the 3–4 documents worth mining (governance/IAM, sessions-workflows privacy, multi-central repo sharing, central session management).
+- D6 = **yes**: step 10 runs (bind loopback + tailnet, pinned by a test). Security gates in §1.2's "stay" list stay until step 10 lands.
+- Branch base for the steps: `origin/main` (the release flow ships work branches to main and dev).
