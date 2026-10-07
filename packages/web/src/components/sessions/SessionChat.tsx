@@ -3847,7 +3847,7 @@ function collapse(s: string): string {
 }
 
 function Loading({ pt }: { pt: boolean }) {
-  return <CenteredLoader size={40} label={pt ? 'Lendo a conversa' : 'Reading the conversation'} testId="session-chat-loading" />
+  return <CenteredLoader size={40} label={pt ? 'Lendo a conversa' : 'Reading the conversation'} testId="session-chat-loading" placement="area" />
 }
 
 function Muted({ text }: { text: string }) {
