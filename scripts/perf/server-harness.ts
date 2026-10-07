@@ -34,7 +34,7 @@ export async function startPerfServer(home: string, o: { port?: number; env?: Re
   let out = ''
   const proc: Subprocess = spawn(['bun', join(REPO, 'packages/server/bin/cli.ts'), 'server', '--port', String(port)], {
     cwd: REPO,
-    env: { ...process.env, HOME: home, TMUX_TMPDIR: join(home, '..', 'tmux'), PORT: String(port), WEB_PORT: String(port + 1), AGENTISTICS_JOURNAL_BACKFILL: '0', INVOCATION_ID: '', ...o.env },
+    env: { ...process.env, HOME: home, TMUX_TMPDIR: join(home, '..', 'tmux'), PORT: String(port), WEB_PORT: String(port + 1), AGENTISTICS_JOURNAL_BACKFILL: '0', AGENTISTICS_TELEMETRY: '0', INVOCATION_ID: '', ...o.env },
     stdout: 'pipe', stderr: 'pipe',
   })
   const drain = async (s: ReadableStream<Uint8Array> | null | undefined) => { if (!s) return; const d = new TextDecoder(); for await (const c of s) out += d.decode(c) }
