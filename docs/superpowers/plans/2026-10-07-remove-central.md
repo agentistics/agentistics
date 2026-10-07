@@ -1,6 +1,6 @@
 # Remove the central — plan (CENTRAL.REMOVE, phase 1)
 
-**Date:** 2026-10-07 · **Base:** `origin/main` @ `c87f91be` (v2.111.0) · **Status:** plan only, nothing deleted.
+**Date:** 2026-10-07 · **Base:** `origin/main` @ `c87f91be` (v2.111.0) · **Status:** plan only, nothing deleted. Owner decisions D1–D5 resolved (§7); D6 open.
 
 Owner decision (07/10, final): the central does not exist any more. Agentistics is ONE product.
 Multi-machine / team features come back later only as the paid Agentistics Cloud
@@ -60,10 +60,11 @@ DEL: `AGENTISTICS_TEAM_CENTRAL`, `AGENTISTICS_CENTRAL_USER`, `AGENTISTICS_CENTRA
 `AGENTISTICS_TEAM_SENT_FILE`, `AGENTISTICS_TEAM_SYNC_FILE`, `AGENTISTICS_IMAGE`,
 `AGENTISTICS_DEPLOY_HINT=central.sh`, `AGENTISTICS_CENTRAL_URL` / `AGENTISTICS_CI_TOKEN` (ci-push).
 
-KEEP: `AGENTISTICS_EXPOSURE` (`local`|`lan`; default no longer depends on central — see §5 risk R4
-about `public`), `AGENTISTICS_TRUST_PROXY`, `AGENTISTICS_ALLOWED_ORIGINS`,
-`AGENTISTICS_ALLOW_LOCAL_SHELL` (re-check: it only mattered on a `lan` central — likely DEL with it),
-`AGENTISTICS_CONTAINER` (machine image).
+Also DEL (D5, D2): `AGENTISTICS_EXPOSURE` (the whole `local`/`lan`/`public` profile model is a
+central setting), `AGENTISTICS_ALLOW_LOCAL_SHELL`, `AGENTISTICS_TRUST_PROXY`,
+`AGENTISTICS_ALLOWED_ORIGINS` (the reverse-proxy escape hatch — the only knob that lets a public
+origin through), `BIND_IP`, `AGENTISTICS_CONTAINER` / `IN_CONTAINER` (the Docker image path).
+No refusal logic replaces them: they simply stop existing. See §1.11 for the binding.
 
 ### 1.3 Preferences keys (`preferences.ts`, `@agentistics/core` `team.ts`)
 
@@ -129,7 +130,9 @@ Total ≈ 33.6k lines incl. tests.
 | `stepup.ts` | `vault/http.ts` | **MOVE**: keep only what the vault uses (local re-auth); drop account/team/password entries of `PROTECTED` and `stepup.test.ts`'s exact table changes accordingly |
 | `mongo-dates.ts` | `tags-local-store.ts` (revives ISO → Date) | **MOVE** the `fromBsonDate`/`toBsonDate` revive pair into `tags-local-store.ts` (or `utils.ts`); DEL the rest + `DATE_FIELDS` |
 | `rate-limit.ts` | only `iam-handlers` / login | DEL with auth (re-verify no other importer) |
-| `client-ip.ts`, `secure-origin.ts`, `host-allow.ts`, `cors.ts`, `csrf.ts`, `security-headers.ts`, `exposure.ts`, `limits.ts`, `errors.ts` | `index.ts`, `capability-guard.ts` | **KEEP** |
+| `secure-origin.ts`, `host-allow.ts`, `cors.ts`, `csrf.ts`, `security-headers.ts`, `limits.ts`, `errors.ts` | `index.ts` | **KEEP** (`host-allow` loses the `ALLOWED_ORIGINS` entries; `cors` has nothing left to allow cross-origin) |
+| `exposure.ts` (`PROFILE`, `CAPS`) | ~16 modules, engine host `caps` | **DEL** the profiles; every capability is what `local` grants today. `CAPS` callers and the `capable` argument of `chat-gate`/`shell-gate`/`editor-gate` collapse to `true`; `capability-guard.ts` (which only ever refused because a profile denied a capability) is deleted with its tests. The engine host still passes a `caps` record (all `true`) — contract unchanged (§3) |
+| `client-ip.ts` | rate limit / audit behind `TRUST_PROXY` | **DEL** |
 | `notifications-store.ts` | `index.ts`, `sse.ts` | **KEEP**, drop its Mongo/central branch |
 | `redact.ts` (core) | team boundaries only today | verify other importers (core barrel); DEL if none, else KEEP |
 | `tags-resolve/aggregate/detail` | tags handlers | **KEEP**, drop `machine`/`team`/`account` source types and `sharedWith` |
@@ -189,7 +192,36 @@ Server: `central-branding.ts` swap in `sse.ts` `serveStatic`.
   `sentences.ts` locked-vault sentence mentions "central tokens" (edit).
 - engine-api: `host.ts` L112 comment, L491–492 `isCentral(): boolean` — see §3.
 
-### 1.10 Packaging, docs, CI
+### 1.10 Docker image / container launcher (D2: removed)
+
+`Dockerfile`, `docker/` (whole dir incl. `machine.yml`, `README.md`), the cockpit's `docker`
+runtime for `agentistics` (`RuntimeId` native|docker collapses to the native process, so the
+"same service under two runtimes" conflict model, per-runtime Stop/Rebuild verbs and
+`ControlService.conflict` go), `AutostartMode` `'machine'` + `findMachineCompose`, the
+`agentop-machine` unit, `composeRebuildCommands` + docker half of `rebuild-flags.ts`,
+`upgrade.ts` machine step (L585+) and `CENTRAL_PROJECT`, `upgrade-gate.ts` `container` refusal,
+`daemon-plan.ts` `container` input, `IN_CONTAINER` everywhere, `live-sessions.ts`
+container-specific `LiveUnavailableReason`s (`pid: host`, uid), `hardware-probe.ts` container
+branch, `cli-status`/`cli-uninstall` docker rows, `Logs` docker source, CLAUDE.md "Machine in
+Docker". `release.yml`'s `docker run … alpine` step is a build check, not the image — KEEP.
+
+### 1.11 Binding — the fact, and what "never public" requires
+
+Today the normal app is **not** bound to localhost/Tailscale: `index.ts` L4673/L4678 call
+`Bun.serve({ hostname: '0.0.0.0' })` on both 47291 and 47292 (security finding S-1 in
+`native-bind.ts`). `host-allow.ts` refuses a `localShell` request whose Host header does not name
+this machine, but it accepts every address `os.networkInterfaces()` reports — so any peer that can
+reach one of the machine's IPs (LAN, a VPS's public IP, a Docker bridge) gets the read routes with
+no authentication, and the `localShell` routes too if it addresses the machine by IP. Removing the
+central does not change this; removing `ALLOWED_ORIGINS`/`TRUST_PROXY` only closes the deliberate
+proxy path. Making "no code path can expose it publicly" TRUE needs the bind itself to change —
+**D6** (open). Recommended: bind `127.0.0.1` plus each Tailscale interface address (100.64.0.0/10,
+fd7a:115c:a1e0::/48) found at boot and re-checked on the host-allow refresh timer; never `0.0.0.0`;
+`tailscale serve` keeps working (it proxies to loopback). Cost: a phone on the same Wi-Fi without
+Tailscale stops reaching the app by LAN IP. Pinned by a test asserting every bind address is
+loopback or tailnet. Not done until D6 is answered.
+
+### 1.12 Packaging, docs, CI
 
 DEL: `central.sh`, `docker/central.yml`, `central.image.yml`, `central.ingest-only.yml`,
 `central.localdb.yml`, `central.selfcontrib.yml`, `central.env.example`, Dockerfile central
@@ -207,8 +239,10 @@ architecture rows, cost-basis central rule), AGENTS.md, wiki pages.
 GHCR: `release.yml` has **no** `publish-image` job any more (grep: no `ghcr` in workflows) — the
 `ghcr.io/agentistics/agentistics` image is a leftover; mark the GHCR package deprecated/private
 (owner action, outside the repo).
-`docs/superpowers/**` (84 historical specs/plans): see owner decision D4.
-`docker/machine.yml` (a NON-central machine in Docker, reuses the Dockerfile): see D2.
+`docs/superpowers/**` central specs/plans (84 files): **MOVE** (D4) to the private
+`agentistics-cloud` repo under `docs/archive/central-legacy/` (NOT `specs/`), with a `README.md`
+saying: "Historical self-hosted central — NOT the reference for Agentistics Cloud; current decisions
+live in docs/decisions." Deleted from the public repo in the same step. This plan file stays.
 
 ---
 
@@ -278,11 +312,13 @@ call, member side before central side) so every intermediate commit compiles and
 | 3 | Clients | MCP `agentistics_team_*` tools + `agentToolPolicy` rows/`central` field, VS Code wording, TUI cockpit (central service row, link pill, `setupBlocked`, Logs sources, setup modes, Help/Cheat sheet, preview) | 4 |
 | 4 | CLI + host | `agentop central`, `member`, `ci-push`, `setup-token`, `reset-password`, `server --central`, `start/restart/autostart central`, `setup` without modes, `cli-start.ts` host central parts, `cli-i18n.ts` strings, `service-manager`/`rebuild-flags`/`autostart` central halves, `upgrade.ts` central step, `uninstall-plan` central plan, `cli-doctor` central checks, `central-runtime.ts` | 6 |
 | 5 | Member side (server) | `team-uploader`, `team-connections` (+ `/api/team/status`/`connections` routes), `team-agent-client`, `share-rules`, `team-rules`, `team-elsewhere`, `team-forget-client`, `team-migrate`, `envelope-*`, `rotate-*`, `member-*`, `machine-consent`, `sessions/machine-fleet.ts`, `team-oidc`, `vault/prefs-tokens.ts` connection-token half; core `team.ts`, `siblingRules`, `proposalApply`, `sharedTask`, `remoteSessions`, `machineFleet`, `machineActions`; `preferences.ts` team merge/guards | 6 |
-| 6 | Central side (server) | every `TEAM_CENTRAL` branch in `index.ts` (keep the non-central bodies unconditionally), routes §1.4, auth gate + `AUTH_PUBLIC` + `authz-gate.test.ts`, IAM/accounts/teams/org-team/bootstrap/passwords/MFA/TOTP/reset/rate-limit, step-up reduced to the vault's use, Mongo + `mongo-dates` (move the revive helper to `tags-local-store`), `tags-store`/`tags-authority` central sources, remaining `team-*`, `central-config/branding/reach`, `INGEST_ONLY`, OIDC, `TEAM_MODE` folder union, env vars §1.2, `central` inputs of `daemon-plan`/`upgrade-gate`/gates, `exposure.ts` default + `public` refusal (D5), `audit.ts` Mongo sink, `sse.ts` branding swap | 9 |
+| 5b | Docker path (D2) | §1.10: Dockerfile, `docker/`, `RuntimeId` docker + conflict model, `machine` autostart/unit, compose rebuild, `IN_CONTAINER`, container branches in upgrade/daemon/live-sessions/hardware; cockpit Services back to one runtime | 4 |
+| 6 | Central side (server) | every `TEAM_CENTRAL` branch in `index.ts` (keep the non-central bodies unconditionally), routes §1.4, auth gate + `AUTH_PUBLIC` + `authz-gate.test.ts`, IAM/accounts/teams/org-team/bootstrap/passwords/MFA/TOTP/reset/rate-limit, step-up reduced to the vault's use, Mongo + `mongo-dates` (move the revive helper to `tags-local-store`), `tags-store`/`tags-authority` central sources, remaining `team-*`, `central-config/branding/reach`, `INGEST_ONLY`, OIDC, `TEAM_MODE` folder union, env vars §1.2, `central` inputs of `daemon-plan`/`upgrade-gate`/gates, `exposure.ts` + `capability-guard.ts` + `client-ip.ts` + `TRUST_PROXY`/`ALLOWED_ORIGINS` (D5, no replacement logic; engine host `caps` = all true, `originPolicy.allowedOrigins` = `[]`), `audit.ts` Mongo sink, `sse.ts` branding swap | 9 |
 | 7 | Contracts leftovers | core `org`, `iam`, `AppData` team caches, `SessionMeta.user`/`ci`, `redact` if orphaned, `projection-client` 409; vault `HOST_PURPOSES` + `sentences.ts`; `backup-plan.ts` central secret rows; `engine/load.ts` (`isCentral: () => false`, no prefs read) + fake engine; engine-api doc comment only | 3 |
-| 8 | Packaging, docs, guard | §1.10 deletions/edits, CLAUDE.md + AGENTS.md + README + wiki, casts re-recorded, and **`central-free.lint.test.ts`** grepping packages/scripts/docker/docs/workflows for `central`/`TEAM_CENTRAL`/`team-mode`/`/api/team/`/`agentop member` outside a tiny allowlist (`engine-api` `isCentral`, `docs/superpowers/**` per D4) so it cannot come back | 4 |
+| 8 | Packaging, docs, guard | §1.12 deletions/edits, the 84 specs moved to `agentistics-cloud/docs/archive/central-legacy/` + README (D4, private repo commit), CLAUDE.md + AGENTS.md + README + wiki, casts re-recorded, and **`central-free.lint.test.ts`** grepping packages/scripts/docker/docs/workflows for `central`/`TEAM_CENTRAL`/`team-mode`/`/api/team/`/`agentop member` plus `IN_CONTAINER`/`AGENTISTICS_EXPOSURE`/`ALLOWED_ORIGINS`/`docker compose` outside a tiny allowlist (`engine-api` `isCentral` and its `caps`/`originPolicy` docs) so it cannot come back | 4 |
+| 10 | Binding (only if D6 = yes) | §1.11 bind loopback + tailnet, test pinning it, Settings → phone-access copy updated | 2 |
 | 9 | Engine repo | drop `isCentral` checks + `refusedCentral` strings/tests; bump `engine.pin` ref only (api stays `^1.3.0`) | 1.5 |
-| | **Total** | | **≈ 43.5 h** (+ QA §5.2 ≈ 3 h, one release) |
+| | **Total** | | **≈ 47.5 h** with step 5b, + 2 h if D6 (+ QA §5.2 ≈ 3 h, one release) |
 
 Steps 2–7 touch `index.ts`, `cli-start.ts`, `App.tsx`, `SessionsPage.tsx`; they run one after the
 other, never in parallel with each other or with other work on those files.
@@ -293,10 +329,11 @@ other, never in parallel with each other or with other work on those files.
 git grep -nI -e TEAM_CENTRAL -e AGENTISTICS_TEAM -e CENTRAL_USER -e MONGO_URL -e INGEST_ONLY \
   -e OIDC_ -e team-mode -e 48080 -e "/api/team/" -e "agentop central" -e "agentop member" \
   -e "ci-push" -e "central.sh" -e "machineFleet" -e "shareMode" -e "envelope" \
+  -e IN_CONTAINER -e AGENTISTICS_EXPOSURE -e ALLOWED_ORIGINS -e TRUST_PROXY -e "docker compose" \
   -- packages scripts docker docs .github package.json Dockerfile README.md CLAUDE.md AGENTS.md
 git grep -nIi central -- packages | grep -v "engine-api/src/host.ts"
 ls packages/server/server | grep -E '^(team-|envelope-|iam-|central-|member-|machine-fleet|rotate-)'
-ls packages/web/src/components/team 2>/dev/null
+ls packages/web/src/components/team docker Dockerfile 2>/dev/null
 tsc --noEmit -p . && bun test   # full suite, not the hook subset
 bun run build:binary && ./release/agentop --help | grep -i -e central -e member   # must print nothing
 ```
@@ -318,8 +355,11 @@ time. No central-install scenarios (owner decision, §2).
 4. **Phone 390px**: Home, Sessions, Repositories, Repo detail, Tags, Tag detail, Tasks, Settings,
    Compare — `document.documentElement.scrollWidth <= innerWidth`, the More sheet has no removed
    entry and no dead tile.
-5. **Speed**: `scripts/perf/startup.ts --budget` within budget.
-6. **Binary**: `bun run build:binary` and run the compiled binary (TUI devtools stub still OK).
+5. **Binding**: `ss -ltnp | grep -E '4729[12]'` shows the addresses from §1.11 (if D6) or exactly
+   today's (if not); from another throwaway container on the docker network, `curl` to the host IP
+   is refused (D6) — never test against the owner's real server.
+6. **Speed**: `scripts/perf/startup.ts --budget` within budget.
+7. **Binary**: `bun run build:binary` and run the compiled binary (TUI devtools stub still OK).
 
 ---
 
@@ -327,8 +367,8 @@ time. No central-install scenarios (owner decision, §2).
 
 - **R1** Existing centrals break on their next upgrade attempt and stay on their old version
   (accepted by the owner, §2). Includes the owner's father and the 4 `central` machines in telemetry.
-- **R2** Login only ever existed on a central. Without it, `AGENTISTICS_EXPOSURE=public` would be an
-  unauthenticated public host → must refuse to start (D5).
+- **R2** Binding (§1.11): the app binds `0.0.0.0` today; until D6 the "never public" requirement
+  rests on the machine not having a reachable IP, not on the code.
 - **R3** Telemetry ordering (§4): shipping the client before the Worker drops every new ping.
 - **R4** Scale: ~55k lines plus surgery on `index.ts`/`cli-start.ts`/`App.tsx`/`SessionsPage.tsx`;
   conflicts with any parallel session editing them.
@@ -340,13 +380,18 @@ time. No central-install scenarios (owner decision, §2).
 - **R7** Engine: the host must keep `isCentral()` until the engine repo PR (step 9) lands, or the
   pinned engine fails to load.
 
-## 7. Owner decisions needed
+## 7. Owner decisions
 
-- **D1** Telemetry Worker: store an absent `mode` as NULL (recommended) or `'solo'`?
-- **D2** `docker/machine.yml` (a normal, non-central agentistics in Docker, offered in the cockpit):
-  keep it or remove it too as part of "one product"?
-- **D3** Confirm GitHub Actions ingest, team tags, task sharing and remote session management die
-  now and return only in Cloud.
-- **D4** `docs/superpowers/**` central specs (84 files): move to `agentistics-cloud/docs/legacy-central/`
-  as design input (recommended), delete, or leave as history?
-- **D5** `AGENTISTICS_EXPOSURE=public` → refuse to start (recommended)?
+Resolved (07/10, via leader):
+- **D1** Telemetry Worker stores an absent `mode` as **NULL**.
+- **D2** Remove `docker/machine.yml` and the whole Docker image/launcher path (§1.10, step 5b).
+- **D3** Confirmed: Actions ingest, team/machine tags, task sharing and remote session management
+  die now (only the owner used them).
+- **D4** Move the 84 central specs to `agentistics-cloud/docs/archive/central-legacy/` with the
+  "historical self-hosted central — NOT the reference" README; not into `specs/`.
+- **D5** `AGENTISTICS_EXPOSURE` is deleted with the central, no refusal logic.
+
+Open:
+- **D6** The normal app binds `0.0.0.0` today (§1.11), not localhost/Tailscale. To make "no code
+  path can expose it publicly" true: bind `127.0.0.1` + Tailscale addresses only (recommended; a
+  phone on Wi-Fi without Tailscale loses access by LAN IP), or keep `0.0.0.0` as today?
