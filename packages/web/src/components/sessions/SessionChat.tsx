@@ -85,6 +85,7 @@ import { ROW_FLASH } from '../../lib/noteFocus'
 import { pendingEchoes, sessionIdentityKey } from '@agentistics/core'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 import { AgentisticsLoader } from '../AgentisticsLoader'
+import { CenteredLoader } from '../CenteredLoader'
 
 import {
   applyDraftRequest, consumeDraftRequest, getDraftRequest, useDraftRequest,
@@ -3846,17 +3847,7 @@ function collapse(s: string): string {
 }
 
 function Loading({ pt }: { pt: boolean }) {
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-      padding: '48px 0', color: 'var(--text-tertiary)', fontSize: 12.5,
-    }}>
-      <Loader size={16} className="ag-working-spin" />
-      {pt ? 'Lendo a conversa…' : 'Reading the conversation…'}
-
-
-    </div>
-  )
+  return <CenteredLoader size={40} label={pt ? 'Lendo a conversa' : 'Reading the conversation'} testId="session-chat-loading" />
 }
 
 function Muted({ text }: { text: string }) {

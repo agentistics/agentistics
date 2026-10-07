@@ -24,6 +24,7 @@ import {
 import { PRIORITY_ORDER, type SortSpec, type TaskPriorityId } from '@agentistics/core'
 import { ChevronDown } from 'lucide-react'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { CenteredLoader } from '../components/CenteredLoader'
 import type { AppContext } from '../lib/app-context'
 import { useFleet } from '../lib/fleet'
 import { sessionPath } from '../lib/sessionRoute'
@@ -120,7 +121,7 @@ function CentralBoard() {
       </div>
 
       {machines === null && (
-        <div style={{ color: 'var(--text-tertiary)', fontSize: 12.5 }}>Loading…</div>
+        <CenteredLoader size={40} label={lang === 'pt' ? 'Carregando' : 'Loading'} testId="agentask-loading" />
       )}
       {machines !== null && error && <EmptyNotice error={error} />}
       {machines !== null && !error && machines.length === 0 && (
