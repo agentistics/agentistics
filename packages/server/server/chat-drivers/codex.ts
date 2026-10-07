@@ -26,6 +26,7 @@ import path from 'node:path'
 import { agentisticsMcpLaunch } from '../mcp-launch'
 import { existsSync } from 'node:fs'
 import { HOME_DIR } from '../config'
+import { mayRegisterHarnessMcp } from '../mcp-registration'
 import type { ChatDriver } from './types'
 import type { ChatMessage } from '../chat-tty'
 import { findCli } from './cli-detect'
@@ -60,6 +61,7 @@ async function readCodexConfig(): Promise<string> {
  * re-registering on every server restart.
  */
 async function ensureCodexMcp(port: number): Promise<void> {
+  if (!mayRegisterHarnessMcp(port)) return
   const apiUrl = `http://localhost:${port}`
   // `agentop mcp` on an installed binary, the script in a checkout — see `mcp-launch.ts`.
   const launch = agentisticsMcpLaunch()
