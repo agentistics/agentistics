@@ -70,7 +70,8 @@ import { SessionPicker } from './SessionPicker'
 import { DoneNeedsSessionDialog } from './DoneNeedsSessionDialog'
 import { TaskProgressBar } from './TaskProgressBar'
 import { ColResizeHandle } from './ColResizeHandle'
-import { contentWidthOf, fitContentWidth, resolveWidths, tableMinWidth } from './columnWidths'
+import { contentWidthOf, fitContentWidth } from './columnWidths'
+import { SUBTASK_TITLE_ID, subtaskGridWidths } from './subtaskGridLayout'
 import { CommentCountButton } from './CommentThreadDialog'
 import { SubtaskActionsMenu } from './SubtaskActionsMenu'
 import {
@@ -221,12 +222,15 @@ export function SubtaskTable(p: SubtaskTableProps) {
   const shownCols: SubtaskColumnId[] = storedCols ?? DEFAULT_SUBTASK_COLUMNS
   const [savedWidths, setSavedWidths] = useBoardPref('subtaskColumnWidths')
   const [draggingWidth, setDraggingWidth] = useState<{ id: string; w: number } | null>(null)
-  const subtaskWidths = useMemo(() => {
-    const defs = shownCols.map(id => SUBTASK_COLUMNS.find(c => c.id === id)!).filter(Boolean)
-    const widths = resolveWidths(defs, savedWidths)
-    if (draggingWidth) widths[draggingWidth.id] = draggingWidth.w
-    return widths
-  }, [shownCols, savedWidths, draggingWidth])
+  // The grid's own widths (`subtaskGridLayout.ts`): the name column resizes too, and the table is
+  // given its EXACT width so a saved width renders as the number saved (with `width: 100%` and every
+  // column fixed, the browser spread the surplus over all of them and a drag moved a fraction).
+  const grid = useMemo(
+    () => subtaskGridWidths(shownCols, savedWidths, draggingWidth, { lead: 8, trailing: 88 }),
+    [shownCols, savedWidths, draggingWidth],
+  )
+  const subtaskWidths = grid.cols
+  const subtaskWidthOf = (id: string): number => (id === SUBTASK_TITLE_ID ? grid.title : subtaskWidths[id]!)
   const fitSubtaskColumn = (id: string) => {
     const nodes = [
       ...Array.from(document.querySelectorAll<HTMLElement>(`[data-subtask-col="${id}"]`)),
@@ -236,7 +240,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
   }
   const subtaskResizeHandle = (id: string) => (
     <ColResizeHandle
-      width={subtaskWidths[id]!}
+      width={subtaskWidthOf(id)}
       mobile={isMobile}
       title={L.resizeColumn}
       onChange={w => setDraggingWidth({ id, w })}
@@ -402,10 +406,10 @@ export function SubtaskTable(p: SubtaskTableProps) {
           swipes sideways and has no scrollbar to lose, so it keeps the page's own vertical scroll —
           a nested one there traps the thumb. */}
       <div style={isMobile ? { overflowX: 'auto' } : { maxHeight: '70vh', overflow: 'auto' }}>
-      <table style={{ width: '100%', minWidth: isMobile ? undefined : tableMinWidth(1, 280, subtaskWidths, shownCols), borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+      <table data-subtask-grid style={{ width: isMobile ? '100%' : grid.total, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
         <colgroup>
-          <col style={{ width: 1 }} />
-          <col style={{ width: isMobile ? undefined : 280 }} />
+          <col style={{ width: grid.lead }} />
+          <col style={{ width: isMobile ? undefined : grid.title }} />
           {shownCols.map(id => <col key={id} style={{ width: subtaskWidths[id] }} />)}
           <col style={{ width: 88 }} />
         </colgroup>
@@ -420,6 +424,8 @@ export function SubtaskTable(p: SubtaskTableProps) {
               label={copy.subtasks} sortKey="title" current={sort} mobile={isMobile}
               onSort={k => setSort(cycleSort(sort, k))}
               title={L.sortByColumn.replace('{column}', copy.subtasks)}
+              dataCol={`subtask-${SUBTASK_TITLE_ID}`}
+              handle={isMobile ? undefined : subtaskResizeHandle(SUBTASK_TITLE_ID)}
               style={{ ...microLabel, padding: '6px 9px', fontWeight: 600, whiteSpace: 'nowrap', ...stickyHead }}
             />
             {shownCols.map(id => {
@@ -502,7 +508,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
               <td style={{ ...cell, width: 1, padding: 0, ...tint, ...clusterBarStyle(clustered) }} />
               {/* A MEMBER is indented one level under its group's header — the visual nesting that
                   replaces the old "parte do grupo" caption for every properly clustered row. */}
-              <td style={{ ...cell, minWidth: isMobile ? 150 : 280, width: isMobile ? undefined : '100%', ...tint, ...(depth === 1 ? { paddingLeft: 30 } : {}) }}>
+              <td data-subtask-col={SUBTASK_TITLE_ID} style={{ ...cell, minWidth: isMobile ? 150 : undefined, ...tint, ...(depth === 1 ? { paddingLeft: 30 } : {}) }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   {/* The accordion toggle — collapsed by default (product feedback, 2026-09-21),
                       the same chevron interaction `TaskTable`'s own task-row expansion already
@@ -655,7 +661,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
             <tr>
               {/* No gear here — this bucket is not a subtask, it has nothing a menu could act on. */}
               <td style={cell} />
-              <td style={{ ...cell, minWidth: isMobile ? 150 : 280, color: 'var(--text-tertiary)', fontStyle: 'italic', fontSize: 12 }}>
+              <td style={{ ...cell, minWidth: isMobile ? 150 : undefined, color: 'var(--text-tertiary)', fontStyle: 'italic', fontSize: 12 }}>
                 {copy.directSessions}
               </td>
               {shownCols.map(id => {
