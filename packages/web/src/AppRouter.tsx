@@ -1,8 +1,9 @@
-import React, { lazy, Suspense } from 'react'
+import React, { lazy, Suspense, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { legacyVaultTarget } from './pages/vault/vaultTabs'
 import AppLayout from './App'
 import { AgentisticsLoader } from './components/AgentisticsLoader'
+import { bootReleased, useBootHold } from './lib/bootSplash'
 
 const HomePage = lazy(() => import('./pages/HomePage'))
 const CostsPage = lazy(() => import('./pages/CostsPage'))
@@ -45,7 +46,16 @@ const ReposSettingsPage = lazy(() => import('./pages/settings/ReposSettingsPage'
 const PricingSettings = lazy(() => import('./pages/settings/PricingSettings'))
 const BillingSettings = lazy(() => import('./pages/settings/BillingSettings'))
 
+/**
+ * A route's lazy chunk is on its way. During the BOOT this is the first route of the app, and the
+ * boot splash is still up: the fallback holds it (`lib/bootSplash.ts`), so the one loader keeps
+ * running until the page itself can paint instead of the splash fading out onto a second loader.
+ * After the boot it is the in-page loader for a route change.
+ */
 function PageFallback() {
+  const [underSplash] = useState(() => !bootReleased())
+  useBootHold(underSplash)
+  if (underSplash) return null
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 340, padding: 40 }}>
       <AgentisticsLoader size={56} label="Loading" />

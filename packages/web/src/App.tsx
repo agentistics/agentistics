@@ -5,11 +5,11 @@ import { version } from '../../../package.json'
 import {
   Activity, AlertTriangle, ArrowLeft, ArrowRight, BarChart2, Bot,
   Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp,
-  Clock, Code2, Cpu, Database, DollarSign, Download,
-  FileCode, FileDown, FileText, Flame, FolderOpen, FolderTree, GitBranch,
+  Clock, Code2, Cpu, DollarSign, Download,
+  FileCode, FileDown, Flame, FolderOpen, FolderTree, GitBranch,
   GitCommit, GitCompare, Globe, Home, KeyRound, Layers,
   LogOut, Maximize2, MessageSquare, MessagesSquare, Moon, MoreHorizontal,
-  PanelLeft, RefreshCw, Server, Settings, Shield, ShieldCheck,
+  PanelLeft, RefreshCw, Server, Settings, ShieldCheck,
   SlidersHorizontal, Sparkles, Sun, Tag as TagIcon, Target, TerminalSquare,
   TrendingUp, Trophy, Users, Wrench, X, Zap,
   ZoomIn, ClipboardList, BellOff,
@@ -141,7 +141,7 @@ import { NayUpdateCard, type UpdateCardPlacement } from './components/nay/NayUpd
 import { UpgradeOverlay } from './components/UpgradeOverlay'
 import { UpdateFinale } from './components/UpdateFinale'
 import { bootWatchdog, fetchWithTimeout, loadErrorText, SMALL_TIMEOUT_MS, startupStripText, type BootVerdict, type LoadError } from './lib/startupLoad'
-import { shouldReleasePreboot } from './lib/prebootHandoff'
+import { bootReleased, scheduleBootRelease, setBootStatus, useBootHold } from './lib/bootSplash'
 
 /**
  * What the SESSIONS filter bar may filter by — narrower than the dashboard's on purpose: a fleet
@@ -210,28 +210,6 @@ interface IamState {
   mfaEnrollmentRequired?: boolean
 }
 
-// Phase 1: parallel (statsCache + sessions + health). Phase 2: projects. Phase 3: finalizing.
-const LOAD_STAGES: { key: string; labelPt: string; labelEn: string; icon: React.ReactNode; phase: 1 | 2 | 3 }[] = [
-  { key: 'statsCache', labelPt: 'Cache de estatísticas', labelEn: 'Stats cache',   icon: <Database size={13} />, phase: 1 },
-  { key: 'sessions',   labelPt: 'Metadados de sessões',  labelEn: 'Session data',  icon: <FileText size={13} />, phase: 1 },
-  { key: 'health',     labelPt: 'Verificações de saúde', labelEn: 'Health checks', icon: <Shield size={13} />,   phase: 1 },
-  { key: 'projects',   labelPt: 'Escaneando projetos',   labelEn: 'Project scan',  icon: <FolderOpen size={13} />, phase: 2 },
-  { key: 'finalizing', labelPt: 'Totalizando tokens',    labelEn: 'Counting tokens', icon: <Zap size={13} />,    phase: 3 },
-]
-
-function formatStageDetail(key: string, detail: string, lang: string): string {
-  const n = Number(detail)
-  if (isNaN(n) || n === 0) return ''
-  if (key === 'sessions') return `${n.toLocaleString()} ${lang === 'pt' ? 'sessões' : 'sessions'}`
-  if (key === 'projects') return `${n.toLocaleString()} ${lang === 'pt' ? 'projetos' : 'projects'}`
-  if (key === 'finalizing') {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M tokens`
-    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K tokens`
-    return `${n.toLocaleString()} tokens`
-  }
-  return n.toLocaleString()
-}
-
 /**
  * How long the boot screen has been up, and whether the server still answers. Every gate that holds
  * the boot screen (the session check, the preferences, the data) is a request that could hang — on a
@@ -286,168 +264,39 @@ function ServerProblem({ lang, problem, onRetry, autoRetry }: { lang: string; pr
   )
 }
 
-function LoadingScreen({ lang, loadProgress }: { lang: string; loadProgress: LoadProgress }) {
+/**
+ * The boot's loading state. It draws NOTHING of its own while the HTML splash is still up: it HOLDS
+ * the splash (the D1 loader, centred, running since the first frame), so the person sees one loader
+ * from the first paint to the usable app — never a wordmark, a "loading your data" page, or a second
+ * loader restarting on top of the first. A slow boot adds one short line under that loader.
+ *
+ * Only when the splash is already gone (a later reload of the data — after signing in, say) does it
+ * draw the same loader itself, at the same centred spot.
+ */
+function LoadingScreen({ lang }: { lang: string }) {
   const verdict = useBootWatchdog()
-  // The server stopped answering while this screen was up: say so instead of spinning. The requests
-  // behind the boot keep retrying and the probe keeps running, so when the server answers again this
-  // goes back to loading by itself; the button reloads the page for whoever does not want to wait.
-  if (verdict === 'unreachable') {
+  const [underSplash] = useState(() => !bootReleased())
+  // The server stopped answering: say so instead of spinning (the ServerProblem screen holds nothing,
+  // so the splash leaves for it). The requests keep retrying and the probe keeps running.
+  const unreachable = verdict === 'unreachable'
+  useBootHold(underSplash && !unreachable)
+  const slowLine = verdict === 'slow'
+    ? (lang === 'pt' ? 'Ainda carregando — o servidor está respondendo.' : 'Still loading — the server is answering.')
+    : null
+  useEffect(() => { if (underSplash) setBootStatus(slowLine) }, [underSplash, slowLine])
+  if (unreachable) {
     return <ServerProblem lang={lang} problem={{ kind: 'unreachable', detail: '' }} onRetry={() => location.reload()} autoRetry />
   }
-  // Group phase 1 stages to show parallel badge
-  const phase1Done = ['statsCache', 'sessions', 'health'].filter(k => loadProgress[k]?.status === 'done').length
-
+  if (underSplash) return <div style={{ minHeight: '100vh', background: 'var(--bg-base)' }} />
   return (
-    <div style={{
-      minHeight: '100vh',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 28,
-      background: 'var(--bg-base)',
-    }}>
-      <style>{`
-        @keyframes loadShimmer {
-          0%{background-position:200% center}
-          100%{background-position:-200% center}
-        }
-        @keyframes loadIndeterminate {
-          0%{transform:translateX(-100%)}
-          100%{transform:translateX(400%)}
-        }
-        @keyframes loadFadeUp {
-          from{opacity:0;transform:translateY(10px)}
-          to{opacity:1;transform:translateY(0)}
-        }
-      `}</style>
-
-      {/* D1 loader */}
-      <div style={{ position: 'fixed', left: '50%', top: 'calc(50% - 44px)', transform: 'translateX(-50%)', animation: 'loadFadeUp 0.35s ease-out both' }}>
-        <AgentisticsLoader size={56} label={lang === 'pt' ? 'Carregando' : 'Loading'} />
-      </div>
-      <div aria-hidden="true" style={{ width: 56, height: 56, flexShrink: 0 }} />
-
-      {/* Title + subtitle */}
-      <div style={{ textAlign: 'center', animation: 'loadFadeUp 0.35s ease-out 0.08s both' }}>
-        <div style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 5, letterSpacing: '-0.01em' }}>
-          agentistics
-        </div>
-        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
-          {lang === 'pt' ? 'Carregando seus dados...' : 'Loading your data...'}
-        </div>
-        {verdict === 'slow' && (
-          <div role="status" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 8, maxWidth: 320, lineHeight: 1.45 }}>
-            {lang === 'pt'
-              ? 'Está demorando mais que o normal. O servidor está respondendo e continua trabalhando.'
-              : 'This is taking longer than usual. The server is answering and still working.'}
-          </div>
-        )}
-      </div>
-
-      {/* Stage progress bars */}
-      <div style={{
-        width: 340,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-        animation: 'loadFadeUp 0.35s ease-out 0.16s both',
-      }}>
-        {/* Phase label */}
-        {phase1Done < 3 && (
-          <div style={{ fontSize: '0.625rem', color: 'var(--text-tertiary)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 2 }}>
-            {lang === 'pt' ? '⇉ Paralelo' : '⇉ Parallel'}
-          </div>
-        )}
-
-        {LOAD_STAGES.map((stage, idx) => {
-          const sp = loadProgress[stage.key]
-          const progress = sp?.progress ?? 0
-          const status = sp?.status ?? 'pending'
-          const label = lang === 'pt' ? stage.labelPt : stage.labelEn
-          const pct = Math.round(progress * 100)
-          const detailStr = sp?.detail ? formatStageDetail(stage.key, sp.detail, lang) : ''
-          // For phase separator
-          const prevStage = LOAD_STAGES[idx - 1]
-          const showSeparator = prevStage && prevStage.phase !== stage.phase && phase1Done === 3
-
-          return (
-            <React.Fragment key={stage.key}>
-              {showSeparator && (
-                <div style={{ height: 1, background: 'var(--border)', opacity: 0.4, margin: '2px 0' }} />
-              )}
-              <div>
-                <div style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: 6,
-                }}>
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 7,
-                    color: status === 'pending' ? 'var(--text-tertiary)' : 'var(--text-secondary)',
-                    transition: 'color 0.25s',
-                  }}>
-                    <span style={{ opacity: status === 'pending' ? 0.35 : 0.8, display: 'flex', transition: 'opacity 0.25s' }}>
-                      {stage.icon}
-                    </span>
-                    <span style={{ fontSize: '0.75rem', fontWeight: 500 }}>
-                      {label}
-                      {detailStr && status === 'done' && (
-                        <span style={{ color: 'var(--text-tertiary)', fontWeight: 400, marginLeft: 7, fontSize: 11 }}>
-                          {detailStr}
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                  <span style={{
-                    fontSize: '0.6875rem',
-                    fontWeight: 600,
-                    color: status === 'done' ? 'var(--anthropic-orange)' : status === 'active' ? 'var(--text-secondary)' : 'var(--text-tertiary)',
-                    transition: 'color 0.25s',
-                    minWidth: 34,
-                    textAlign: 'right',
-                    fontVariantNumeric: 'tabular-nums',
-                  }}>
-                    {status === 'pending' ? '—' : status === 'done' ? '✓' : pct > 0 ? `${pct}%` : '…'}
-                  </span>
-                </div>
-                {/* Bar track */}
-                <div style={{ height: 4, background: 'var(--bg-elevated)', borderRadius: 2, overflow: 'hidden', position: 'relative' }}>
-                  {status === 'active' && pct === 0 ? (
-                    // Indeterminate — shows loading activity before real progress arrives
-                    <div style={{
-                      position: 'absolute',
-                      top: 0, bottom: 0,
-                      width: '35%',
-                      borderRadius: 2,
-                      background: 'linear-gradient(90deg, transparent, rgba(217,119,6,0.55), transparent)',
-                      animation: 'loadIndeterminate 1.6s ease-in-out infinite',
-                    }} />
-                  ) : (
-                    <div style={{
-                      height: '100%',
-                      width: status === 'done' ? '100%' : `${pct}%`,
-                      minWidth: status === 'active' && pct > 0 && pct < 100 ? 10 : undefined,
-                      borderRadius: 2,
-                      ...(status === 'active' ? {
-                        backgroundImage: 'linear-gradient(90deg, var(--anthropic-orange) 0%, rgba(217,119,6,0.5) 50%, var(--anthropic-orange) 100%)',
-                        backgroundSize: '200% 100%',
-                        animation: 'loadShimmer 1.8s linear infinite',
-                      } : {
-                        background: status === 'done' ? 'var(--anthropic-orange)' : 'transparent',
-                      }),
-                      transition: 'width 0.3s ease-out',
-                    }} />
-                  )}
-                </div>
-              </div>
-            </React.Fragment>
-          )
-        })}
-      </div>
+    <div style={{ position: 'fixed', inset: 0, background: 'var(--bg-base)' }}>
+      <AgentisticsLoader size={56} label={lang === 'pt' ? 'Carregando' : 'Loading'}
+        style={{ position: 'absolute', left: '50%', top: '50%', margin: '-28px 0 0 -28px' }} />
+      {slowLine && (
+        <p role="status" style={{ position: 'absolute', left: 16, right: 16, top: 'calc(50% + 48px)', margin: 0, textAlign: 'center', fontSize: 12.5, lineHeight: 1.45, color: 'var(--text-tertiary)' }}>
+          {slowLine}
+        </p>
+      )}
     </div>
   )
 }
@@ -1568,16 +1417,11 @@ export function writeStudioSeen(storage: Pick<StorageLike, 'setItem'>): void {
 }
 
 export default function AppLayout() {
-  // The HTML shell and React both paint the same 56px Agentistics mark. Remove the HTML copy
-  // after React has committed and the browser has had one frame to paint its replacement.
-  useLayoutEffect(() => {
-    const preboot = document.getElementById('ag-preboot')
-    if (!preboot) return
-    const frame = window.requestAnimationFrame(() => {
-      if (shouldReleasePreboot({ reactCommitted: true, firstPainted: true })) preboot.classList.add('ag-preboot-ready')
-    })
-    return () => window.cancelAnimationFrame(frame)
-  }, [])
+  // The boot splash (`index.html` #ag-preboot) is the ONLY boot screen. Every commit asks for it to
+  // leave; it does once the browser has painted a commit in which no loading state holds it
+  // (`LoadingScreen`, the first route's `PageFallback`) — i.e. once the app, or a screen asking the
+  // person something (login, consent, an error), is actually on screen. See `lib/bootSplash.ts`.
+  useLayoutEffect(() => { scheduleBootRelease() })
   const location = useLocation()
   const navigate = useNavigate()
   // Reset scroll to the top on every route change — otherwise navigating away while scrolled to the
@@ -1615,9 +1459,17 @@ export default function AppLayout() {
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
-  const { data, loading, loadProgress, error, loadError, offline, startup, refetch, liveUpdates, setLiveUpdates, updateInterval, setUpdateInterval } = useData()
+  const { data, loading, error, loadError, offline, startup, refetch, liveUpdates, setLiveUpdates, updateInterval, setUpdateInterval } = useData()
   const [riskyMode, setRiskyMode] = useState(false)
   const [lang, setLangState] = useState<Lang>('en')
+  // A local mirror of the language, for the one sentence the boot splash may say before the bundle
+  // (and the preferences) arrive — the same reason the theme is mirrored. The first render's 'en' is a
+  // placeholder, not a choice, so only a CHANGE is written.
+  const langSeen = useRef(false)
+  useEffect(() => {
+    if (!langSeen.current) { langSeen.current = true; return }
+    try { localStorage.setItem('agentistics-lang', lang) } catch { /* private mode */ }
+  }, [lang])
 
   // Team session gate
   // undefined = not yet fetched, TeamSessionState after fetch
@@ -3563,11 +3415,11 @@ export default function AppLayout() {
     // Still resolving the session — show the honest boot loader, not a silent blank. We also can't
     // yet tell a 403 auth-hold from a real error (that needs `teamSession.central`), so holding the
     // loader here is correct as well as honest.
-    return <LoadingScreen lang={lang} loadProgress={loadProgress} />
+    return <LoadingScreen lang={lang} />
   }
   // Central: account-based IAM gate (bootstrap → login → app).
   if (teamSession.central) {
-    if (iam === undefined) return <LoadingScreen lang={lang} loadProgress={loadProgress} />
+    if (iam === undefined) return <LoadingScreen lang={lang} />
     if (iam.needsBootstrap) return <OwnerSetup lang={lang} onDone={() => { reloadIam(); refetch() }} />
     if (!iam.authed) return <Login onAuthed={() => { reloadIam(); refetch() }} />
     // Changing a password is step-up-protected (`server/stepup.ts`), and this screen is returned
@@ -3602,7 +3454,7 @@ export default function AppLayout() {
   // re-reading that state. Showing "Failed to load data — HTTP 403" in that gap turns the
   // moment right after signing up into a dead end with a Retry button that cannot help.
   if (error && teamSession.central && String(error).includes('403')) {
-    return <div style={{ minHeight: '100vh', background: 'var(--bg-base)' }} />
+    return <LoadingScreen lang={lang} />
   }
 
   if (error) {
@@ -3619,11 +3471,11 @@ export default function AppLayout() {
   // /api/data resolved, and the gaps here used to return a SILENT BLANK — the loader vanishing
   // before the data was ready. `bootLoading` is the single predicate deciding this.
   if (bootLoading({ loading, hasData: !!data, hasDerived: !!derived, prefsLoaded: archiveChoice !== undefined })) {
-    return <LoadingScreen lang={lang} loadProgress={loadProgress} />
+    return <LoadingScreen lang={lang} />
   }
   // `bootLoading` already guaranteed both are present; this explicit guard is what narrows them for
   // TypeScript below. It is not reachable as a blank — it returns the loader too, never `null`.
-  if (!data || !derived) return <LoadingScreen lang={lang} loadProgress={loadProgress} />
+  if (!data || !derived) return <LoadingScreen lang={lang} />
 
   // Capture non-null derived for use in nested functions (TypeScript can't narrow closures)
   const d = derived
