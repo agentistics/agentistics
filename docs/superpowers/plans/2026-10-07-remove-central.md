@@ -60,11 +60,16 @@ DEL: `AGENTISTICS_TEAM_CENTRAL`, `AGENTISTICS_CENTRAL_USER`, `AGENTISTICS_CENTRA
 `AGENTISTICS_TEAM_SENT_FILE`, `AGENTISTICS_TEAM_SYNC_FILE`, `AGENTISTICS_IMAGE`,
 `AGENTISTICS_DEPLOY_HINT=central.sh`, `AGENTISTICS_CENTRAL_URL` / `AGENTISTICS_CI_TOKEN` (ci-push).
 
-Also DEL (D5, D2): `AGENTISTICS_EXPOSURE` (the whole `local`/`lan`/`public` profile model is a
-central setting), `AGENTISTICS_ALLOW_LOCAL_SHELL`, `AGENTISTICS_TRUST_PROXY`,
-`AGENTISTICS_ALLOWED_ORIGINS` (the reverse-proxy escape hatch — the only knob that lets a public
-origin through), `BIND_IP`, `AGENTISTICS_CONTAINER` / `IN_CONTAINER` (the Docker image path).
-No refusal logic replaces them: they simply stop existing. See §1.11 for the binding.
+Also DEL (D5, D2): the env knobs `AGENTISTICS_EXPOSURE` and `AGENTISTICS_ALLOW_LOCAL_SHELL` (the
+profile is pinned to what `local` is today — no refusal logic added), `AGENTISTICS_ALLOWED_ORIGINS`
+(the reverse-proxy escape hatch; removing it only NARROWS `host-allow`), `BIND_IP`,
+`AGENTISTICS_CONTAINER` / `IN_CONTAINER` (the Docker image path).
+
+**SECURITY GATES STAY (leader, 07/10).** While the server binds `0.0.0.0` (§1.11),
+`capability-guard.ts`, `host-allow.ts`, `csrf.ts`, `cors.ts`, `security-headers.ts`, the `CAPS`
+plumbing in `exposure.ts`, `client-ip.ts` and `AGENTISTICS_TRUST_PROXY` are NOT removed or
+weakened — they are what keeps the shell and vault routes away from the LAN. Only their central
+inputs go. Re-evaluate them only after D6 is decided (and only if it is approved).
 
 ### 1.3 Preferences keys (`preferences.ts`, `@agentistics/core` `team.ts`)
 
@@ -131,8 +136,7 @@ Total ≈ 33.6k lines incl. tests.
 | `mongo-dates.ts` | `tags-local-store.ts` (revives ISO → Date) | **MOVE** the `fromBsonDate`/`toBsonDate` revive pair into `tags-local-store.ts` (or `utils.ts`); DEL the rest + `DATE_FIELDS` |
 | `rate-limit.ts` | only `iam-handlers` / login | DEL with auth (re-verify no other importer) |
 | `secure-origin.ts`, `host-allow.ts`, `cors.ts`, `csrf.ts`, `security-headers.ts`, `limits.ts`, `errors.ts` | `index.ts` | **KEEP** (`host-allow` loses the `ALLOWED_ORIGINS` entries; `cors` has nothing left to allow cross-origin) |
-| `exposure.ts` (`PROFILE`, `CAPS`) | ~16 modules, engine host `caps` | **DEL** the profiles; every capability is what `local` grants today. `CAPS` callers and the `capable` argument of `chat-gate`/`shell-gate`/`editor-gate` collapse to `true`; `capability-guard.ts` (which only ever refused because a profile denied a capability) is deleted with its tests. The engine host still passes a `caps` record (all `true`) — contract unchanged (§3) |
-| `client-ip.ts` | rate limit / audit behind `TRUST_PROXY` | **DEL** |
+| `exposure.ts` (`PROFILE`, `CAPS`), `capability-guard.ts`, `client-ip.ts` | ~16 modules, engine host `caps` | **KEEP** (security gates stay until D6). Only the env knob and the `central`/`lan`/`public` inputs go; the module keeps producing `CAPS`, every gate keeps its call site and its tests, the route table in `capability-guard.ts` keeps every `localShell`/vault entry (only central/relay entries leave). Re-evaluate after D6 |
 | `notifications-store.ts` | `index.ts`, `sse.ts` | **KEEP**, drop its Mongo/central branch |
 | `redact.ts` (core) | team boundaries only today | verify other importers (core barrel); DEL if none, else KEEP |
 | `tags-resolve/aggregate/detail` | tags handlers | **KEEP**, drop `machine`/`team`/`account` source types and `sharedWith` |
@@ -279,7 +283,7 @@ central installs**. The removal is plain deletion. Consequences, stated so nobod
 - `packages/core/src/canonical/**`: no central field. `projection-client.ts` documents a 409
   "central" refusal → remove that branch (the server stops emitting it).
 - Engine slot/`RESERVED_PREFIXES`: unaffected. `HostApi.caps` and `originPolicy()` stay in the
-  contract; after D5 the host passes every capability `true` and `allowedOrigins: []`.
+  contract; the host keeps passing its real `CAPS` and `allowedOrigins: []`.
 
 ---
 
@@ -314,11 +318,11 @@ call, member side before central side) so every intermediate commit compiles and
 | 4 | CLI + host | `agentop central`, `member`, `ci-push`, `setup-token`, `reset-password`, `server --central`, `start/restart/autostart central`, `setup` without modes, `cli-start.ts` host central parts, `cli-i18n.ts` strings, `service-manager`/`rebuild-flags`/`autostart` central halves, `upgrade.ts` central step, `uninstall-plan` central plan, `cli-doctor` central checks, `central-runtime.ts` | 6 |
 | 5 | Member side (server) | `team-uploader`, `team-connections` (+ `/api/team/status`/`connections` routes), `team-agent-client`, `share-rules`, `team-rules`, `team-elsewhere`, `team-forget-client`, `team-migrate`, `envelope-*`, `rotate-*`, `member-*`, `machine-consent`, `sessions/machine-fleet.ts`, `team-oidc`, `vault/prefs-tokens.ts` connection-token half; core `team.ts`, `siblingRules`, `proposalApply`, `sharedTask`, `remoteSessions`, `machineFleet`, `machineActions`; `preferences.ts` team merge/guards | 6 |
 | 5b | Docker path (D2) | §1.10: Dockerfile, `docker/`, `RuntimeId` docker + conflict model, `machine` autostart/unit, compose rebuild, `IN_CONTAINER`, container branches in upgrade/daemon/live-sessions/hardware; cockpit Services back to one runtime | 4 |
-| 6 | Central side (server) | every `TEAM_CENTRAL` branch in `index.ts` (keep the non-central bodies unconditionally), routes §1.4, auth gate + `AUTH_PUBLIC` + `authz-gate.test.ts`, IAM/accounts/teams/org-team/bootstrap/passwords/MFA/TOTP/reset/rate-limit, step-up reduced to the vault's use, Mongo + `mongo-dates` (move the revive helper to `tags-local-store`), `tags-store`/`tags-authority` central sources, remaining `team-*`, `central-config/branding/reach`, `INGEST_ONLY`, OIDC, `TEAM_MODE` folder union, env vars §1.2, `central` inputs of `daemon-plan`/`upgrade-gate`/gates, `exposure.ts` + `capability-guard.ts` + `client-ip.ts` + `TRUST_PROXY`/`ALLOWED_ORIGINS` (D5, no replacement logic; engine host `caps` = all true, `originPolicy.allowedOrigins` = `[]`), `audit.ts` Mongo sink, `sse.ts` branding swap | 9 |
+| 6 | Central side (server) | every `TEAM_CENTRAL` branch in `index.ts` (keep the non-central bodies unconditionally), routes §1.4, auth gate + `AUTH_PUBLIC` + `authz-gate.test.ts`, IAM/accounts/teams/org-team/bootstrap/passwords/MFA/TOTP/reset/rate-limit, step-up reduced to the vault's use, Mongo + `mongo-dates` (move the revive helper to `tags-local-store`), `tags-store`/`tags-authority` central sources, remaining `team-*`, `central-config/branding/reach`, `INGEST_ONLY`, OIDC, `TEAM_MODE` folder union, env vars §1.2, `central` inputs of `daemon-plan`/`upgrade-gate`/gates, `AGENTISTICS_EXPOSURE`/`ALLOW_LOCAL_SHELL`/`ALLOWED_ORIGINS` knobs only (D5; `exposure.ts`, `capability-guard.ts`, `host-allow.ts`, `client-ip.ts`, `TRUST_PROXY` STAY — security gates, §1.2), `audit.ts` Mongo sink, `sse.ts` branding swap | 9 |
 | 7 | Contracts leftovers | core `org`, `iam`, `AppData` team caches, `SessionMeta.user`/`ci`, `redact` if orphaned, `projection-client` 409; vault `HOST_PURPOSES` + `sentences.ts`; `backup-plan.ts` central secret rows; `engine/load.ts` (`isCentral: () => false`, no prefs read) + fake engine; engine-api doc comment only | 3 |
-| 8 | Packaging, docs, guard | §1.12 deletions/edits, the 84 specs moved to `agentistics-cloud/docs/archive/central-legacy/` + README (D4, private repo commit), CLAUDE.md + AGENTS.md + README + wiki, casts re-recorded, and **`central-free.lint.test.ts`** grepping packages/scripts/docker/docs/workflows for `central`/`TEAM_CENTRAL`/`team-mode`/`/api/team/`/`agentop member` plus `IN_CONTAINER`/`AGENTISTICS_EXPOSURE`/`ALLOWED_ORIGINS`/`docker compose` outside a tiny allowlist (`engine-api` `isCentral` and its `caps`/`originPolicy` docs) so it cannot come back | 4 |
+| 8 | Packaging, docs, guard | §1.12 deletions/edits, the 84 specs handled per D4 (pending: archive copy or delete + pointer note), CLAUDE.md + AGENTS.md + README + wiki, casts re-recorded, and **`central-free.lint.test.ts`** grepping packages/scripts/docker/docs/workflows for `central`/`TEAM_CENTRAL`/`team-mode`/`/api/team/`/`agentop member` plus `IN_CONTAINER`/`AGENTISTICS_EXPOSURE`/`ALLOWED_ORIGINS`/`docker compose` (the lint must NOT flag `capability-guard`/`host-allow`/`exposure.ts`) outside a tiny allowlist (`engine-api` `isCentral` and its `caps`/`originPolicy` docs) so it cannot come back | 4 |
 | 9 | Engine repo | drop `isCentral` checks + `refusedCentral` strings/tests; bump `engine.pin` ref only (api stays `^1.3.0`) | 1.5 |
-| 10 | Binding (only if D6 = yes) | §1.11 bind loopback + tailnet, test pinning it, Settings → phone-access copy updated | 2 |
+| 10 | Binding (only if D6 = yes) | §1.11 bind loopback + tailnet, test pinning it, Settings → phone-access copy updated; THEN re-evaluate (separately, with the leader) whether any gate in §1.2's "stay" list can be simplified | 2 |
 | | **Total** | | **≈ 47.5 h** with step 5b, + 2 h if D6 (+ QA §5.2 ≈ 3 h, one release) |
 
 Steps 2–7 touch `index.ts`, `cli-start.ts`, `App.tsx`, `SessionsPage.tsx`; they run one after the
@@ -330,7 +334,7 @@ other, never in parallel with each other or with other work on those files.
 git grep -nI -e TEAM_CENTRAL -e AGENTISTICS_TEAM -e CENTRAL_USER -e MONGO_URL -e INGEST_ONLY \
   -e OIDC_ -e team-mode -e 48080 -e "/api/team/" -e "agentop central" -e "agentop member" \
   -e "ci-push" -e "central.sh" -e "machineFleet" -e "shareMode" -e "envelope" \
-  -e IN_CONTAINER -e AGENTISTICS_EXPOSURE -e ALLOWED_ORIGINS -e TRUST_PROXY -e "docker compose" \
+  -e IN_CONTAINER -e AGENTISTICS_EXPOSURE -e ALLOWED_ORIGINS -e "docker compose" \
   -- packages scripts docker docs .github package.json Dockerfile README.md CLAUDE.md AGENTS.md
 git grep -nIi central -- packages | grep -v "engine-api/src/host.ts"
 ls packages/server/server | grep -E '^(team-|envelope-|iam-|central-|member-|machine-fleet|rotate-)'
@@ -388,9 +392,12 @@ Resolved (07/10, via leader):
 - **D2** Remove `docker/machine.yml` and the whole Docker image/launcher path (§1.10, step 5b).
 - **D3** Confirmed: Actions ingest, team/machine tags, task sharing and remote session management
   die now (only the owner used them).
-- **D4** Move the 84 central specs to `agentistics-cloud/docs/archive/central-legacy/` with the
-  "historical self-hosted central — NOT the reference" README; not into `specs/`.
-- **D5** `AGENTISTICS_EXPOSURE` is deleted with the central, no refusal logic.
+- **D4** (PENDING CHANGE — wait for the leader) Current: move the 84 central specs to
+  `agentistics-cloud/docs/archive/central-legacy/` with the "historical self-hosted central — NOT
+  the reference" README. Possible replacement: delete them, no archive copy, and add a one-page
+  pointer note in `agentistics-cloud` naming the deletion commit. Step 8 does whichever is final.
+- **D5** The `AGENTISTICS_EXPOSURE` knob is deleted with the central, no refusal logic; the
+  security gates behind it stay (leader, §1.2).
 
 Open:
 - **D6** The normal app binds `0.0.0.0` today (§1.11), not localhost/Tailscale. To make "no code
