@@ -43,7 +43,7 @@ import {
   NA, SESSION_STATE, button, field, fmtInt, fmtTokens,
   harnessColor, microLabel, numeric, pill, surface,
 } from './board'
-import { useMoney } from './money'
+import { copilotCreditsTooltip, formatTaskCost, useMoney } from './money'
 import { boardCopy, type Lang } from './copy'
 import { RailSection } from './RailSection'
 import { TaskChips, TaskMoreMenu } from './TaskChips'
@@ -156,13 +156,11 @@ function Caveats({ r }: { r: AttemptRollup }) {
 export function Rollup({ r, lang }: { r: AttemptRollup; lang: Lang }) {
   const fmt = useMoney()
   const copy = boardCopy(lang)
-  const money = r.mixedCurrency || (r.credits !== null && r.costUSD === null)
-    ? `${r.credits!.premiumRequests} req`
-    : fmt(r.costUSD, r.costByHarness)
+  const money = formatTaskCost(fmt, r.costUSD, r.credits, r.costByHarness)
   return (
     <>
       <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-        <Stat label={copy.cost} value={money} accent />
+        <Stat label={copy.cost} value={money} title={r.credits ? copilotCreditsTooltip(r.credits.premiumRequests, lang) : undefined} accent />
         <Stat label={copy.yourPrompts} value={fmtInt(r.rounds)} title={copy.yourPromptsTitle} />
         <Stat label={copy.sessions} value={String(r.sessionsUsed)} />
         <Stat label={copy.tokens} value={fmtTokens(r.tokens)} />

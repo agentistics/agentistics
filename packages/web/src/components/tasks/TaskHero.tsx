@@ -20,7 +20,7 @@ import { TaskChips, TaskMoreMenu } from './TaskChips'
 import { RenameInput } from './RenameInput'
 import { editTask } from '../../lib/tasks'
 import { boardCopy } from './copy'
-import { useMoney } from './money'
+import { copilotCreditsTooltip, formatTaskCost, useMoney } from './money'
 import { threadCopy, type Lang } from './threadCopy'
 import { mixOf } from './threadView'
 import { liveStatusOrder } from './board'
@@ -120,9 +120,7 @@ export function TaskHero({ detail, lang, statuses, live, reload, onBack, onAbout
   const subsBlocked = effectiveSubtasks.filter(s => s.status === 'blocked').length
   const subtaskCounts = Object.fromEntries(effectiveSubtasks.reduce((m, s) => m.set(s.status, (m.get(s.status) ?? 0) + 1), new Map<string, number>()))
   const r = detail.rollup
-  const cost = r.mixedCurrency || (r.credits !== null && r.costUSD === null)
-    ? `${r.credits!.premiumRequests} req`
-    : money(r.costUSD, r.costByHarness)
+  const cost = formatTaskCost(money, r.costUSD, r.credits, r.costByHarness)
   const mix = mixOf(detail.stats.harnesses)
   const models = detail.stats.models.filter(m => (m.tokens ?? 0) > 0).slice(0, 3).map(m => m.key)
 
@@ -242,7 +240,7 @@ export function TaskHero({ detail, lang, statuses, live, reload, onBack, onAbout
             flex: isMobile ? '1 1 33.3%' : '1 1 0', minWidth: 0, padding: isMobile ? '7px 10px' : '8px 14px',
             borderRight: '1px solid var(--border)', borderBottom: isMobile ? '1px solid var(--border)' : 'none',
             ...(isMobile && i === 2 ? { borderRight: 'none' } : {}),
-          }}>
+          }} title={i === 0 && r.credits ? copilotCreditsTooltip(r.credits.premiumRequests, lang) : undefined}>
             <span style={{ display: 'block', fontSize: 10.5, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</span>
             <b style={{ fontSize: isMobile ? 14 : 16, fontWeight: 650, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{value}</b>
           </div>
