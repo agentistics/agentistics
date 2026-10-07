@@ -145,13 +145,76 @@ export function unquoteLines(text: string): string {
   return text.split('\n').map(line => line.startsWith('> ') ? line.slice(2) : line).join('\n').trim()
 }
 
-/** The leading quote block in a sent user message, if it has one. */
-export function leadingQuote(text: string): { quote: string; rest: string } | null {
+const isQuoteLine = (line: string): boolean => line.startsWith('> ') || line === '>'
+
+/**
+ * EVERY leading quote block of a message, and what follows them.
+ *
+ * A reply to several passages is sent as several `> ` blocks, a blank line apart (`quoteAll`), and
+ * then the person's own words. Reading only the FIRST block left the second one inside `rest`,
+ * where it rendered as an ordinary blockquote with no collapse control and no way back to its
+ * source — the same message drawn two different ways. Blank lines BETWEEN blocks are consumed; the
+ * first non-blank line that is not a quote line ends the run, and everything from there is `rest`.
+ */
+export function leadingQuotes(text: string): { quotes: string[]; rest: string } {
   const lines = text.split('\n')
-  let end = 0
-  while (end < lines.length && (lines[end]!.startsWith('> ') || lines[end] === '>')) end++
-  if (end === 0) return null
-  return { quote: unquoteLines(lines.slice(0, end).join('\n')), rest: lines.slice(end).join('\n').replace(/^\n+/, '') }
+  const quotes: string[] = []
+  let i = 0
+  for (;;) {
+    let j = i
+    while (j < lines.length && lines[j]!.trim() === '') j++
+    if (j >= lines.length || !isQuoteLine(lines[j]!)) break
+    let end = j
+    while (end < lines.length && isQuoteLine(lines[end]!)) end++
+    const quote = unquoteLines(lines.slice(j, end).join('\n'))
+    if (quote !== '') quotes.push(quote)
+    i = end
+  }
+  if (quotes.length === 0) return { quotes: [], rest: text }
+  return { quotes, rest: lines.slice(i).join('\n').replace(/^\n+/, '') }
+}
+
+/** The leading quote block in a sent user message, if it has one. See `leadingQuotes`. */
+export function leadingQuote(text: string): { quote: string; rest: string } | null {
+  const { quotes, rest } = leadingQuotes(text)
+  if (quotes.length === 0) return null
+  const [first, ...others] = quotes
+  return { quote: first!, rest: [quoteAll(others.map(q => ({ role: 'assistant' as const, text: q, excerpt: true }))), rest].filter(b => b.trim() !== '').join('\n\n') }
+}
+
+/**
+ * A draft read back into the composer's two halves: the quote STACK and the words in the field.
+ *
+ * The composer holds quotes as a list drawn ABOVE the field, never as text inside it — the textarea
+ * keeps only what the person is writing. Text arriving from outside (a restored draft, a queued
+ * message handed back to edit, a draft saved by the version that kept quotes inline) still carries
+ * them as `> ` lines, so the leading blocks are lifted back into targets here.
+ *
+ * A lifted quote is an EXCERPT: its text is already what travels (capped and ellipsised when it was
+ * first quoted), and marking it whole again would cap it a second time. Its source turn is not
+ * known, so it carries no `key`; the composer finds the source by text, as the sent bubble does.
+ */
+export function splitQuotedDraft(draft: string): { replies: ReplyTarget[]; text: string } {
+  const { quotes, rest } = leadingQuotes(draft)
+  return { replies: quotes.map(q => ({ role: 'assistant' as const, text: q, excerpt: true })), text: quotes.length > 0 ? rest : draft }
+}
+
+/**
+ * The composer's state as it is LOADED from storage, normalised to "quotes in the list, words in
+ * the field".
+ *
+ * The version before this one inserted every quote INTO the draft and also stored the same targets
+ * in the list (unused at send). Loading that verbatim would draw each quote twice — once as a block,
+ * once as `> ` text — and send it twice. So a stored target whose quote already sits in the draft is
+ * dropped from the list, and the draft's leading blocks are lifted into it instead. A list written
+ * by this version never appears in its own draft, so it passes through untouched.
+ */
+export function normalizeComposer(
+  draft: string, replies: readonly ReplyTarget[],
+): { draft: string; replies: ReplyTarget[] } {
+  const kept = replies.filter(t => { const q = quoteFor(t); return q === '' || !draft.includes(q) })
+  const { replies: lifted, text } = splitQuotedDraft(draft)
+  return { draft: text, replies: lifted.reduce<ReplyTarget[]>((list, t) => addReply(list, t), kept) }
 }
 
 /** Text written by the person, excluding markdown quote lines. */

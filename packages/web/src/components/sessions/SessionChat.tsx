@@ -74,7 +74,8 @@ import {
   emptyAtServerReason, emptyAtToolReason, filterAtServers, findAtServer, resolveAtToolView,
   type MenuMcpServer, dropEmptyAtTrigger,
 } from '../../lib/atMenu'
-import { addReply, composeReply, insertReplyQuote, markExcerpt, stripQuotedLines, type ReplyTarget } from '../../lib/replyQuote'
+import { addReply, composeReply, markExcerpt, normalizeComposer, quoteAll, quoteFor, splitQuotedDraft, unquoteLines, stripQuotedLines, type ReplyTarget } from '../../lib/replyQuote'
+import { QuoteBlock } from '../chat/QuoteBlock'
 import {
   composeQuoted, locateExcerpt,
 } from '../../lib/quoteCards'
@@ -170,6 +171,22 @@ interface ChatPayload {
  * mirrors), so a caller with no data source for it simply omits the prop and the gauge does not
  * render — never a control open on numbers nobody supplied.
  */
+
+/**
+ * The composer's saved state for one conversation, normalised: quotes in the list, words in the
+ * field (`normalizeComposer`). A draft from the marker/card composer is first turned back into plain
+ * `> ` text (`composeQuoted`). Written back when it changed, so the old shape is converted once.
+ */
+function loadComposer(id: string): { draft: string; replies: ReplyTarget[] } {
+  const rawDraft = sessionScratch.readDraft(id)
+  const rawReplies = sessionScratch.readReply(id)
+  const plain = rawDraft.includes('\u2063') && rawReplies.length > 0 ? composeQuoted(rawDraft, rawReplies) : rawDraft
+  const out = normalizeComposer(plain, rawReplies)
+  if (out.draft !== rawDraft) sessionScratch.writeDraft(id, out.draft)
+  if (JSON.stringify(out.replies) !== JSON.stringify(rawReplies)) sessionScratch.writeReply(id, out.replies)
+  return out
+}
+
 export interface SessionComposerMetrics {
   /** The store's record for this conversation, or `undefined` when it has none yet. */
   meta: SessionMeta | undefined
@@ -320,7 +337,13 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * `showRefreshing`).
    */
   const [refreshing, setRefreshing] = useState(() => firstFrameStale(chatReadAt(scratchId), Date.now()))
-  const [draft, setDraft] = useState(() => sessionScratch.readDraft(scratchId))
+  /**
+   * The draft and its quote stack, READ TOGETHER and normalised: quotes live in the list drawn above
+   * the field, never as `> ` text inside it (`normalizeComposer`). A draft saved by an older version
+   * kept them inline; this lifts them out on the way in, and writes the result back once.
+   */
+  const [loaded] = useState(() => loadComposer(scratchId))
+  const [draft, setDraft] = useState(loaded.draft)
 
   /**
    * Every change to the draft, PERSISTED against the session it belongs to.
@@ -372,8 +395,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     setAtTail(true)
     setPayload(sessionScratch.readChat(scratchId) as ChatPayload | null)
     setRefreshing(firstFrameStale(chatReadAt(scratchId), Date.now()))
-    setDraft(sessionScratch.readDraft(scratchId))
-    setReplyTo(sessionScratch.readReply(scratchId))
+    const next = loadComposer(scratchId)
+    setDraft(next.draft)
+    setReplyTo(next.replies)
     setEcho(sessionScratch.readEchoes(scratchId))
     setAttached(sessionScratch.readAttachments(scratchId))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -893,9 +917,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * sent above what you write, which is what the assistant will actually see and is the same thing
    * mail has always done. Saying it plainly beats a UI that implies threading the session cannot do.
    */
-  const [replyTo, setReplyTo] = useState<ReplyTarget[]>(
-    () => sessionScratch.readReply(scratchId),
-  )
+  const [replyTo, setReplyTo] = useState<ReplyTarget[]>(loaded.replies)
 
   /**
    * Every change to the reply target, PERSISTED against the session it belongs to.
@@ -916,14 +938,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     })
   }, [scratchId])
 
-  // Quotes are ordinary markdown now. Existing vault/attachment chips remain independent of this
-  // text path; no quote label or zero-width marker is painted in the composer.
-  useEffect(() => {
-    // One-time compatibility for drafts saved by the old marker/card composer.
-    if (!draft.includes('\u2063') || replyTo.length === 0) return
-    const plain = composeQuoted(draft, replyTo)
-    if (plain !== draft) editDraft(plain)
-  }, [draft, replyTo, editDraft])
   /**
    * Files written to THIS MACHINE, whose paths go into the message.
    *
@@ -1411,50 +1425,24 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     if (draftReqAt === undefined || !draftReq) return
     if (seenReqAt.current === draftReqAt) return
     seenReqAt.current = draftReqAt
-    editDraft(d => applyDraftRequest(d, draftReq.text))
+    // A message handed back with `> ` lines gets its quotes back as BLOCKS, not as text.
+    const req = splitQuotedDraft(draftReq.text)
+    editDraft(d => applyDraftRequest(d, req.text))
+    if (req.replies.length > 0) editReply(list => req.replies.reduce(addReply, list))
     textareaRef.current?.focus()
     consumeDraftRequest(draftReqAt)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftReqAt])
 
   /**
-   * The latest draft, quotes and caret, for the stable callbacks below. They are handed to every
-   * bubble (`ChatBubble` is memoised), so they cannot close over the render's values.
-   */
-  const quoteState = useRef({ draft, replyTo, caret: 0 })
-  quoteState.current.draft = draft
-  quoteState.current.replyTo = replyTo
-  quoteState.current.caret = caret
-
-  /**
-   * ADD plain markdown quote text AT THE CARET. The textarea owns the quote's layout and caret;
-   * there is no overlay or mirror copy to become misaligned after Enter/autogrow.
+   * ADD quotes to the STACK above the field. The textarea holds only what the person writes — a
+   * quote typed into it as `> ` text read as raw markdown and had no collapse control; an overlay
+   * painted over the field drifted from the caret. The quotes go out ahead of the words at send.
    */
   const addQuotes = useCallback((targets: readonly ReplyTarget[]) => {
-    let { draft: d, replyTo: list } = quoteState.current
-    // The TRACKED caret, never the field's own: selecting a passage in the conversation resets the
-    // field's selection to 0 (measured in Chrome), which would put every new card at the top.
-    let at = Math.min(quoteState.current.caret, d.length)
-    for (const t of targets) {
-      if (addReply(list, t).length === list.length) continue
-      const target: ReplyTarget = { ...t }
-      list = [...list, target]
-      const out = insertReplyQuote(d, at, target)
-      d = out.draft
-      at = out.caret
-    }
-    if (list.length === quoteState.current.replyTo.length) { textareaRef.current?.focus(); return }
-    quoteState.current = { draft: d, replyTo: list, caret: at }
-    editDraft(d)
-    editReply(list)
-    setCaret(at)
-    requestAnimationFrame(() => {
-      const node = textareaRef.current
-      if (!node) return
-      node.focus()
-      node.setSelectionRange(at, at)
-    })
-  }, [editDraft, editReply])
+    editReply(list => targets.reduce(addReply, list))
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [editReply])
 
   /** ONE stable reference for every bubble's reply button — see `ChatBubble`'s memo. */
   const onReplyToTurn = useCallback((t: ChatTurn) => {
@@ -1544,14 +1532,19 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     body.addEventListener('animationend', () => { body.style.animation = '' }, { once: true })
   }, [turns, turnAnchors, pt, shownTurns])
 
-  const onSentQuote = useCallback((quote: string, sentTurn: ChatTurn) => {
+  const onSentQuote = useCallback((quote: string, sentTurn: ChatTurn | null) => {
     const needle = quote.replace(/^…|…$/g, '').replace(/\s+/g, ' ').trim()
-    const sentAt = turns.indexOf(sentTurn)
+    const sentAt = sentTurn ? turns.indexOf(sentTurn) : -1
     const candidates = turns.slice(0, sentAt >= 0 ? sentAt : turns.length)
       .filter(t => t.role === 'assistant' && t.text.replace(/\s+/g, ' ').includes(needle))
     const sourceTurn = candidates[candidates.length - 1] ?? turns.find(t => t.role === 'assistant' && t.text.replace(/\s+/g, ' ').includes(needle))
     if (sourceTurn) jumpToQuote({ role: 'assistant', text: quote, excerpt: true, key: turnKeyOf(sourceTurn) })
   }, [turns, jumpToQuote])
+  /** A quote in the composer's stack was clicked: its own turn when known, else found by its text. */
+  const openComposerQuote = useCallback((t: ReplyTarget) => {
+    if (t.key !== undefined && turns.some(x => turnKeyOf(x) === t.key)) jumpToQuote(t)
+    else onSentQuote(t.text, null)
+  }, [turns, jumpToQuote, onSentQuote])
   // Leaving the conversation leaves the mode: a header still offering to forward messages from a
   // chat that is no longer on screen would forward something the reader cannot see.
   useEffect(() => () => chatSelection.clear(scratchId), [scratchId])
@@ -1839,7 +1832,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     })
     if (out.ok) {
       const parts = splitMessage(stripDictatedMark(entry.text).text)
-      editDraft(d => applyDraftRequest(d, parts.text))
+      const req = splitQuotedDraft(parts.text)
+      editDraft(d => applyDraftRequest(d, req.text))
+      if (req.replies.length > 0) editReply(list => req.replies.reduce(addReply, list))
       if (parts.attachments.length > 0) {
         editAttached(a => [
           ...a,
@@ -2100,8 +2095,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // A trailing `@server:` is the picker's scaffolding and was never typed — it must not be sent.
     // `#` chips become their lean reference HERE, so the harness never sees a raw `#` — which Claude
     // Code would read as a memory note when it opens the message. See `sessionMention.ts`.
-    // Quotes are already ordinary `> ` markdown in the draft. Keep the existing mention expansion
-    // and vault-chip handling on the same send path.
+    // The quotes are the STACK above the field (`replyTo`); they go out first, as `> ` blocks.
     const text = expandSessionMentions(dropEmptyAtTrigger(draft), pt).trim()
     // A message that is only quotes, with nothing of the person's own, says nothing.
     const ownWords = stripQuotedLines(draft).trim()
@@ -2135,8 +2129,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // pointed at, and burying the paths inside a sentence makes them easy to miss.
     // Quote first, then the paths, then what was typed. The quote is trimmed to a few lines: a
     // reply that repeats forty lines back at the session costs it context for no benefit.
-    // The quote blocks are already IN `text`, exactly where the user placed them.
-    const quote = ''
+    const quote = quoteAll(replyTo)
     // `composeReply` puts a BLANK LINE between the blocks, and that is not formatting: joined with a
     // single newline, CommonMark's lazy continuation pulls what was typed into the blockquote, and
     // the person's own words render inside the grey bar as if the session had said them.
@@ -2948,6 +2941,25 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     on a transparent ground, where a pasted screenshot was hard to see and it was not
                     even clear anything was attached (owner, 2026-09-29). Inside the box they read as
                     part of the message being written, which is what they are. */}
+                {/* THE QUOTES, as rendered blocks ABOVE the text — a separate row of the field, like
+                    the attachments, never painted over the textarea. Each collapses to two lines,
+                    opens its source, and has its own ×. */}
+                {replyTo.length > 0 && (
+                  <div
+                    aria-label={pt ? 'Citações desta mensagem' : 'Quotes in this message'}
+                    style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '6px 4px 2px', maxHeight: '40vh', overflowY: 'auto' }}
+                  >
+                    {replyTo.map((t, i) => (
+                      <QuoteBlock
+                        key={`${t.key ?? ''}:${i}:${t.text.slice(0, 24)}`}
+                        text={unquoteLines(quoteFor(t))}
+                        pt={pt}
+                        onOpen={() => openComposerQuote(t)}
+                        onRemove={() => editReply(list => list.filter(x => x !== t))}
+                      />
+                    ))}
+                  </div>
+                )}
                 <ComposerAttachments
                   items={attached}
                   pt={pt}
@@ -3027,18 +3039,10 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                   ref={textareaRef}
                   value={draft}
                   onChange={e => {
-                    // Every edit goes through `syncQuotes`: a card an edit reached into gets its
-                    // label back, a damaged one is dropped, and a quote whose card is gone goes too.
+                    // Plain text only: the quotes are a separate stack above the field.
                     const raw = e.target.value
-                    const at0 = e.target.selectionStart ?? raw.length
-                    const out = { draft: raw, replies: replyTo, caret: at0 }
-                    editDraft(out.draft)
-                    if (out.replies.length !== replyTo.length) editReply(out.replies)
-                    setCaret(out.caret)
-                    if (out.draft !== raw) {
-                      const node = e.target
-                      requestAnimationFrame(() => node.setSelectionRange(out.caret, out.caret))
-                    }
+                    editDraft(raw)
+                    setCaret(e.target.selectionStart ?? raw.length)
                   }}
                   // Every caret move, not only every keystroke: clicking into the middle of a
                   // written prompt changes whether the caret is inside a `/command`, and a picker

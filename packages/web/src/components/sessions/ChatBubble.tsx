@@ -45,7 +45,8 @@ import { HarnessMark } from './HarnessMark'
 import type { VaultGrantMessage } from '../../lib/vaultChip'
 import { card, overlay } from '../MfaSetup'
 import { dialogButtonStyle } from '../../pages/settings/primitives'
-import { leadingQuote } from '../../lib/replyQuote'
+import { leadingQuotes } from '../../lib/replyQuote'
+import { QuoteBlock } from '../chat/QuoteBlock'
 
 export interface ChatTurn {
   role: 'user' | 'assistant'
@@ -350,7 +351,6 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessio
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const mine = turn.role === 'user'
-  const [quoteExpanded, setQuoteExpanded] = useState(false)
   const imageUrl = useCallback((path: string) => (
     !mine && sessionId ? sessionViewedUrl(sessionId, path) : attachmentUrl(path)
   ), [mine, sessionId])
@@ -921,37 +921,17 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessio
               }
               const { command, rest } = splitSlashLine(text)
               if (command === '' && mine && onQuoteClick) {
-                const quoted = leadingQuote(text)
-                if (quoted) {
-                  const lines = quoted.quote.split('\n')
-                  const shown = quoteExpanded ? lines : lines.slice(0, 2)
+                // EVERY leading quote block, each its own collapsible block that goes back to its
+                // source — a reply to several passages is several blocks (`leadingQuotes`).
+                const quoted = leadingQuotes(text)
+                if (quoted.quotes.length > 0) {
                   return (
                     <>
-                      <button
-                        type="button"
-                        onClick={() => setQuoteExpanded(v => !v)}
-                        style={{
-                          display: 'block', width: '100%', padding: 0, border: 0, textAlign: 'left',
-                          background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer',
-                          font: 'inherit', fontSize: 11.5, lineHeight: 1.4,
-                        }}
-                        title={pt ? 'Ir para a mensagem citada' : 'Go to the quoted message'}
-                      >
-                        <span style={{ marginRight: 8, color: 'var(--anthropic-orange)' }}>↪</span>
-                        {quoteExpanded ? (pt ? 'ver menos' : 'show less') : (pt ? 'ver mais' : 'show more')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onQuoteClick(quoted.quote, turn)}
-                        style={{
-                          display: 'block', width: '100%', padding: 0, border: 0, textAlign: 'left',
-                          background: 'transparent', color: 'inherit', cursor: 'pointer',
-                        }}
-                      >
-                        <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
-                          {shown.map(line => `> ${line}`).join('\n')}
-                        </ReactMarkdown>
-                      </button>
+                      {quoted.quotes.map((q, i) => (
+                        <div key={i} style={{ marginBottom: 8 }}>
+                          <QuoteBlock text={q} pt={pt} onOpen={() => onQuoteClick(q, turn)} />
+                        </div>
+                      ))}
                       {quoted.rest.trim() !== '' && (
                         <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{quoted.rest}</ReactMarkdown>
                       )}
