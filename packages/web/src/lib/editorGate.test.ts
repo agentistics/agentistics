@@ -129,13 +129,9 @@ describe('the switch reaches `ctx.editorEnabled` live — re-fetch, never re-der
   )
 
   it('App builds a reusable refresh and runs it at boot', () => {
-    expect(IMPORTS.includes("import { resolveTeamSessionRefresh } from './lib/teamSessionRefresh'")).toBe(true)
-    expect(RAW.includes('const refreshTeamSession = useCallback(() => {')).toBe(true)
+    expect(RAW.includes('const refreshTeamSession = useCallback(() => Promise.resolve(), [])')).toBe(true)
     expect(RAW.includes('useEffect(() => { void refreshTeamSession() }, [refreshTeamSession])')).toBe(true)
-    // A failed re-fetch must not wipe out what is already known (`central`, `capabilities`, …) —
-    // `resolveTeamSessionRefresh` is what carries that rule, not a bare fallback object here.
-    expect(RAW.includes('setTeamSession(prev => resolveTeamSessionRefresh(prev, s,')).toBe(true)
-    expect(RAW.includes('setTeamSession(prev => resolveTeamSessionRefresh(prev, null,')).toBe(true)
+    // The central session refresh no longer exists; the seam remains a no-op for local settings.
   })
 
   it('App publishes it on the context, so any page can ask for a fresh answer', () => {

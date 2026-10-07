@@ -2,12 +2,11 @@ import { useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { Globe, Monitor, Download } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
-import { DeployCentral } from '../../components/DeployCentral'
 
 export default function InstallSettings() {
   const ctx = useOutletContext<AppContext>()
   const pt = ctx.lang === 'pt'
-  const { pwaPrompt, onPwaInstalled, isCentral } = ctx
+  const { pwaPrompt, onPwaInstalled } = ctx
 
   // iOS Safari has no beforeinstallprompt — install is always Share → "Add to Home Screen".
   const isIOS = /ipad|iphone|ipod/i.test(navigator.userAgent)
@@ -192,19 +191,6 @@ export default function InstallSettings() {
           : 'The Web App is faster to install and works on any platform. The Desktop App offers native Windows integration with a taskbar icon.'}
       </div>
 
-      {!isCentral && (
-        <>
-          {/* Deploy a team central — only shown on non-central instances */}
-          <div style={{ height: 1, background: 'var(--border)', margin: '4px 0 4px' }} />
-          <div style={{
-            fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)',
-            letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 10,
-          }}>
-            {pt ? 'Para equipes' : 'For teams'}
-          </div>
-          <DeployCentral pt={pt} />
-        </>
-      )}
     </div>
   )
 }

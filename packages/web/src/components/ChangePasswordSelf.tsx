@@ -2,7 +2,9 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { AlertCircle, KeyRound, X, CheckCircle } from 'lucide-react'
 import type { Lang } from '@agentistics/core'
-import { Field } from './Login'
+function Field({ label, type, value, onChange, inputRef, disabled }: { label: string; type: string; value: string; onChange: (value: string) => void; inputRef?: React.RefObject<HTMLInputElement | null>; disabled?: boolean }) {
+  return <label style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 12, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-tertiary)' }}>{label}<input ref={inputRef} type={type} value={value} onChange={e => onChange(e.target.value)} disabled={disabled} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 13 }} /></label>
+}
 import { PasswordHint } from './PasswordHint'
 import { stepUpFetch } from '../lib/stepup'
 
