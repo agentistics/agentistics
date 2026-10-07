@@ -25,7 +25,8 @@
  * same probe, same CLI versions, same date, nothing added from memory of what a CLI prints:
  *
  *   claude       `Enter to confirm · Esc to cancel`
- *   codex        `Press enter to continue`
+ *   codex        `Press enter to continue` (0.113.0); `Press enter to confirm or esc to cancel` and
+ *                `enter continue · esc back` (0.160.1, 2026-10-07)
  *   kimi         `↑↓ navigate · Enter select · Esc exit`
  *   gemini       `Enter to select · ↑/↓ to navigate`
  *   copilot      `↑/↓ to navigate · enter to select`
