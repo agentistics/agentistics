@@ -8,6 +8,7 @@ import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import type { SurfaceHarnessId } from '@agentistics/core'
 import { createSharedPref } from '../../lib/sharedPref'
+import { CenteredLoader } from '../../components/CenteredLoader'
 
 type Origin = 'official' | 'community' | 'builtin'
 /** How the table is carved up. Persisted, because it is a viewing habit rather than a one-off. */
@@ -257,7 +258,7 @@ export default function PricingSettings() {
     </div>
   }
   if (!resp) {
-    return <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{pt ? 'Carregando…' : 'Loading…'}</div>
+    return <CenteredLoader size={40} label={pt ? 'Carregando' : 'Loading'} testId="pricing-loading" />
   }
 
   return (
