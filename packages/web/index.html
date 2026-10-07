@@ -14,47 +14,43 @@
     <title>Agentistics</title>
     <!-- Inter is self-hosted (see src/index.css @font-face + public/fonts). No external
          origin here, so the CSP can stay strict and no visitor IP leaves the instance. -->
-    <!-- Pre-React guard. index.css and the app bundle are separate requests that arrive AFTER this
-         document, so until they land the browser paints a bare, unstyled #root — a flash of blank
-         (or the UA's default light/blue chrome) before React ever mounts. These inline rules paint
-         the app's own dark ground on the very first frame and show a boot loader in #root, so the
-         opening is the app loading rather than a silent screen. It is CSP-safe (only inline <style>,
-         which `style-src 'self' 'unsafe-inline'` allows — no inline <script>). React removes the
-         hand-off copy after its first committed paint. -->
+    <!-- THE BOOT SCREEN — the only one. index.css and the app bundle arrive AFTER this document, so
+         these inline rules paint the app's own ground and the loader (D1 · Clássico) on the very first
+         frame. The SVG below is D1's frame 0 (the logo at 10 %); `/ag-boot.js` (a classic, external
+         script — the CSP is `script-src 'self'`) swaps in the full loader and starts it before the
+         bundle is fetched. React never draws a second boot screen: it holds this one until the app is
+         usable and then fades it out (`src/lib/bootSplash.ts`). The loader is pinned to the centre so
+         nothing under it — the status line included — can move it. -->
     <style>
       html, body { margin: 0; background: #0a0a0f; color-scheme: dark; }
+      :root[data-theme="light"], :root[data-theme="light"] body { background: #f4f4f7; color-scheme: light; }
       #ag-preboot {
-        position: fixed; inset: 0; z-index: 2147483647;
-        display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
-        padding-top: calc(50vh - 44px); box-sizing: border-box; gap: 16px;
-        background: #0a0a0f;
+        position: fixed; inset: 0; z-index: 2147483647; background: #0a0a0f;
+        opacity: 1; transition: opacity 220ms ease;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
       }
-      #ag-preboot .ag-preboot-mark { width: 56px; height: 56px; }
-      #ag-preboot .ag-preboot-label {
-        font-size: 13px; font-weight: 600; letter-spacing: .02em; color: rgba(255, 255, 255, .55);
+      :root[data-theme="light"] #ag-preboot { background: #f4f4f7; }
+      #ag-preboot .ag-preboot-mark {
+        position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px;
+        display: block; overflow: visible;
       }
-      /* React removes this only after its first paint. Keeping the exact same 56px mark in place
-         for that hand-off prevents the browser's blank frame and avoids a second loader jump. The
-         paths and footprint mirror AgentisticsLoader; there is no older splash animation to swap. */
-      #ag-preboot.ag-preboot-ready { opacity: 0; pointer-events: none; transition: opacity 160ms ease; }
-      @media (prefers-reduced-motion: reduce) {
-        #ag-preboot .ag-preboot-mark { opacity: .9; }
+      #ag-preboot .ag-boot-status {
+        position: absolute; left: 16px; right: 16px; top: calc(50% + 48px); margin: 0; text-align: center;
+        font-size: 12.5px; line-height: 1.45; color: rgba(255, 255, 255, .55);
       }
+      :root[data-theme="light"] #ag-preboot .ag-boot-status { color: rgba(10, 10, 15, .55); }
+      #ag-preboot .ag-boot-status:empty { display: none; }
+      #ag-preboot.ag-boot-out { opacity: 0; pointer-events: none; }
     </style>
   </head>
   <body>
     <div id="root"></div>
     <!-- Sibling AFTER #root so React's createRoot never warns about pre-existing children. -->
-    <div id="ag-preboot" role="status" aria-label="Loading agentistics">
-      <svg class="ag-preboot-mark" aria-hidden="true" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <g opacity=".1"><path d="M14.5 42.75L13.9004 42.2998L8.5 38.249V14.8652L28.6504 3.23145L48.8018 14.8662V38.1328L28.6094 49.791L23.5068 47.166L22.6943 46.748L21.9502 47.2783L14.5 52.5879V42.75Z" stroke="#FD8924" stroke-width="3"/><path d="M54 37.0665L50 39.2002V20.2002L54 22.664V37.0665Z" fill="#FD8924"/><path d="M3 36.8663L7 39V20L3 22.4638V36.8663Z" fill="#FD8924"/><path d="M16 26.5L20 19.5L24 26.5" stroke="#FD8924" stroke-width="2"/><path d="M33 26.5L37 19.5L41 26.5" stroke="#FD8924" stroke-width="2"/></g>
-        <path d="M14.5 42.75L13.9004 42.2998L8.5 38.249V14.8652L28.6504 3.23145L48.8018 14.8662V38.1328L28.6094 49.791L23.5068 47.166L22.6943 46.748L21.9502 47.2783L14.5 52.5879V42.75Z" stroke="#fff6ec" stroke-width="3" opacity=".65"/>
-        <path d="M14.5 42.75L13.9004 42.2998L8.5 38.249V14.8652L28.6504 3.23145L48.8018 14.8662V38.1328L28.6094 49.791L23.5068 47.166L22.6943 46.748L21.9502 47.2783L14.5 52.5879V42.75Z" stroke="#fff3e3" stroke-width="3" opacity=".32"/>
-        <path d="M14.5 42.75L13.9004 42.2998L8.5 38.249V14.8652L28.6504 3.23145L48.8018 14.8662V38.1328L28.6094 49.791L23.5068 47.166L22.6943 46.748L21.9502 47.2783L14.5 52.5879V42.75Z" stroke="#fff3e3" stroke-width="3" opacity=".18"/>
-      </svg>
-      <div class="ag-preboot-label">agentistics</div>
+    <div id="ag-preboot" role="status" aria-live="polite" aria-label="Loading agentistics">
+      <svg class="ag-preboot-mark" aria-hidden="true" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg"><g opacity=".1"><path d="M14.5 42.75L13.9004 42.2998L8.5 38.249V14.8652L28.6504 3.23145L48.8018 14.8662V38.1328L28.6094 49.791L23.5068 47.166L22.6943 46.748L21.9502 47.2783L14.5 52.5879V42.75Z" style="fill:none;stroke:#FD8924;stroke-width:3"/><path d="M54 37.0665L50 39.2002V20.2002L54 22.664V37.0665Z" style="fill:#FD8924"/><path d="M3 36.8663L7 39V20L3 22.4638V36.8663Z" style="fill:#FD8924"/><path d="M16 26.5L20 19.5L24 26.5" style="fill:none;stroke:#FD8924;stroke-width:2"/><path d="M33 26.5L37 19.5L41 26.5" style="fill:none;stroke:#FD8924;stroke-width:2"/></g></svg>
+      <p class="ag-boot-status"></p>
     </div>
+    <script src="/ag-boot.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

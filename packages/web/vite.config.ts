@@ -1,9 +1,10 @@
-import { defineConfig, type Rollup } from 'vite'
+import { defineConfig, transformWithOxc, type Plugin, type Rollup } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { composePrebootScript, PREBOOT_DEV_PATH, PREBOOT_SOURCES } from './prebootScript'
 
 const apiPort = process.env.PORT ?? '47291'
 
@@ -94,6 +95,47 @@ function isMermaidOnlyChunk(chunk: Rollup.PreRenderedChunk | Rollup.RenderedChun
     && ids.every(id => D3_FAMILY.test(id) || MERMAID_ONLY_MARKERS.some(marker => id.includes(marker)))
 }
 
+/**
+ * THE BOOT SPLASH'S SCRIPT. `index.html` names `/ag-boot.js`: in dev this serves it fresh from the
+ * two TypeScript sources; in a build it is emitted as `assets/ag-boot-<hash>.js` (cached for a year
+ * like every hashed asset) and the shell is pointed at that. One source — `lib/d1Loader.ts` — feeds
+ * this script AND the React loader, so the splash and the app can never draw two different loaders.
+ */
+function prebootScriptPlugin(): Plugin {
+  const root = fileURLToPath(new URL('.', import.meta.url))
+  const compile = async () => {
+    const [loader, boot] = await Promise.all(PREBOOT_SOURCES.map(async src =>
+      (await transformWithOxc(readFileSync(`${root}${src}`, 'utf8'), src, { lang: 'ts' })).code))
+    return composePrebootScript(loader, boot)
+  }
+  let builtPath = ''
+  let isBuild = false
+  return {
+    name: 'agentistics-preboot-script',
+    configResolved(config) { isBuild = config.command === 'build' },
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (req.url?.split('?')[0] !== PREBOOT_DEV_PATH) return next()
+        compile().then(code => {
+          res.setHeader('Content-Type', 'application/javascript')
+          res.setHeader('Cache-Control', 'no-store')
+          res.end(code)
+        }, next)
+      })
+    },
+    async buildStart() {
+      if (!isBuild) return
+      const code = await compile()
+      builtPath = `assets/ag-boot-${createHash('md5').update(code).digest('hex').slice(0, 8)}.js`
+      this.emitFile({ type: 'asset', fileName: builtPath, source: code })
+    },
+    transformIndexHtml: {
+      order: 'pre',
+      handler: (html: string) => (builtPath ? html.replace(`src="${PREBOOT_DEV_PATH}"`, `src="/${builtPath}"`) : html),
+    },
+  }
+}
+
 export default defineConfig({
   // The app reads its brand tags through `versionedAsset()` (`src/lib/brand.ts`).
   // `__APP_VERSION__` is the ROOT package's version — the same one the server reports as
@@ -102,6 +144,7 @@ export default defineConfig({
   define: { __BRAND_TAGS__: JSON.stringify(BRAND_TAGS), __APP_VERSION__: JSON.stringify(APP_VERSION) },
   plugins: [
     react(),
+    prebootScriptPlugin(),
     {
       // The two icon links in the shell get the same content tag as the manifest's icons, so a tab
       // or a home-screen entry that cached an older drawing fetches the current one.
