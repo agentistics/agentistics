@@ -217,7 +217,6 @@ export type {
   StopOption,
   TabId,
   TeamMode,
-  CentralLinkState,
 } from './types'
 export { TAB_ORDER, DEFAULT_SESSION_VIEW } from './types'
 // The arrangements are declared once, in `session-dimensions.ts`. Re-exported here so the SERVER —

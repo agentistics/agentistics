@@ -52,7 +52,7 @@ export async function runUninstall(args: string[]): Promise<number> {
     try {
       if (step === 'services') {
         const a = await import('./autostart')
-        for (const mode of ['server', 'central', 'watch', 'machine'] as const) {
+        for (const mode of ['server', 'watch', 'machine'] as const) {
           if (await a.unitInstalled(mode)) out((await a.disableAutostart(mode, { stop: true })).message.split('\n').pop() ?? '')
         }
       } else if (step === 'update-hook') {

@@ -8,18 +8,12 @@
  * was already written down in the docs, which means the product knew the answer and made the user
  * transcribe it.
  *
- * The `central` mode is the one with a second dimension: WHICH SHAPE of central this box runs
- * (`central-runtime.ts`). It decides both the command and — through `keepsRunning` — the kind of
- * unit. A native central holds the terminal, so it is a normal long-running service; a Docker one
- * returns as soon as the container is up, and registering THAT as a long-running service produces
- * a unit that reads inactive(dead) one second after a perfectly successful start.
  */
 
 import { homedir, platform, userInfo } from 'os'
 import { join, resolve } from 'path'
 import { mkdir, writeFile, readFile, unlink } from 'fs/promises'
 import { existsSync } from 'fs'
-import type { CentralRuntimeId } from './central-runtime'
 import { PORT } from './config'
 import { isWSL } from './wsl-ports-io'
 import {
@@ -54,14 +48,14 @@ import {
 } from './service-manager'
 import { launchdServicePath } from './sessions/service-path'
 
-export type AutostartMode = 'server' | 'central' | 'watch' | 'machine'
+export type AutostartMode = 'server' | 'watch' | 'machine'
 
 export interface AutostartResult {
   ok: boolean
   message: string
 }
 
-const MODES: AutostartMode[] = ['server', 'central', 'watch', 'machine']
+const MODES: AutostartMode[] = ['server', 'watch', 'machine']
 
 // --- shell-rc update-check hook markers (kept stable so uninstall is exact) ---
 const HOOK_BEGIN = '# >>> agentop update check >>>'
@@ -105,33 +99,7 @@ function tildeRc(rc: string): string {
 }
 
 /**
- * Locate the repo checkout holding `central.sh`, used only by the `central` mode command.
- *
- * The old version derived it as three directories up from `import.meta.dir` and guarded that
- * with a try/catch. `resolve` does not throw, so the guard never fired: under the COMPILED
- * BINARY `import.meta.dir` is Bun's virtual root (`/$bunfs/root`), three up is `/`, and the
- * unit shipped `ExecStart=bash /central.sh up` — a service that exits 127 and is restarted
- * every 5 seconds forever. Existence is the only thing that distinguishes a real checkout from
- * a path that merely parses, so check for the file rather than assuming the layout.
- *
- * Returns null when no candidate holds the script — see `serviceCommandFor`.
- */
-function findCentralScript(): string | null {
-  const candidates = [
-    // Running from source: <repoRoot>/packages/server/server/autostart.ts
-    resolve(import.meta.dir, '..', '..', '..'),
-    // Compiled binary invoked from inside a checkout.
-    process.cwd(),
-  ]
-  for (const dir of candidates) {
-    const script = join(dir, 'central.sh')
-    if (existsSync(script)) return script
-  }
-  return null
-}
-
-/**
- * Locate `docker/machine.yml`, the same way `findCentralScript` locates `central.sh` — it
+ * Locate `docker/machine.yml`, it
  * only exists in a repo checkout, so a boot unit for the Docker `machine` runtime can only be
  * written from one. Returns null otherwise, which `serviceCommandFor('machine')` turns into a
  * refusal rather than a unit whose `ExecStart` cannot resolve.
@@ -150,50 +118,17 @@ function findMachineCompose(): string | null {
 
 /**
  * The exact shell command each mode's service should run, or null when this machine cannot run
- * that mode at all. `central` needs `central.sh`, which only exists in a repo checkout; from an
+ * that mode at all. `machine` needs `docker/machine.yml`, which only exists in a repo checkout; from an
  * installed binary there is nothing to point at. Null means the caller must REFUSE — the same
  * rule the control center applies to a rebuild it cannot perform: absent beats present-and-failing.
  */
-export interface ServiceCommandOpts {
-  /**
-   * For `central`: the shape this box is configured to run.
-   *
-   * Absent keeps the historical answer exactly — `bash central.sh up` in a checkout — so an
-   * existing unit is regenerated as the same unit. Named, it decides both the command and whether
-   * the service is long-running.
-   */
-  centralRuntime?: CentralRuntimeId
-}
-
-export function serviceCommandFor(mode: AutostartMode, opts: ServiceCommandOpts = {}): string | null {
+export function serviceCommandFor(mode: AutostartMode): string | null {
   const bin = process.execPath
   switch (mode) {
     case 'server':
       return `${bin} server`
     case 'watch':
       return `${bin} watch`
-    case 'central': {
-      const script = findCentralScript()
-      switch (opts.centralRuntime) {
-        case 'native':
-          // The binary IS the server on this path, and `central up` runs it in the foreground —
-          // which is precisely the shape a service wants.
-          return `${bin} central up --native`
-        case 'docker-image':
-          // `-n` states the answer to central.sh's "re-run interactive setup?" up front. At boot
-          // stdin is not a tty so it would not have been asked, but a unit that depends on that
-          // accident is a unit that hangs the day someone runs it by hand.
-          return `${bin} central up --image -n`
-        case 'docker-build':
-          return script ? `bash ${script} up -n` : null
-        default:
-          // Unstated: the checkout wins, exactly as before. Without one, fall through to the
-          // published image rather than refusing — `agentop autostart central enable` used to be
-          // impossible from an installed binary, which is the ONE configuration where the user has
-          // no `central.sh` to write a unit around by hand either.
-          return script ? `bash ${script} up` : `${bin} central up -n`
-      }
-    }
     case 'machine': {
       // No `--build`: the boot-time unit brings back whatever image is already there. A rebuild
       // is a deliberate action (the control center's "Rebuild & restart"), never something that
@@ -210,28 +145,25 @@ export function serviceCommandFor(mode: AutostartMode, opts: ServiceCommandOpts 
  * See `service-manager.ts` — this is the field that decides `Type=simple` versus
  * `Type=oneshot` + `RemainAfterExit=yes`, launchd's `KeepAlive`, and pm2's `--no-autorestart`.
  */
-export function serviceKeepsRunning(mode: AutostartMode, opts: ServiceCommandOpts = {}): boolean {
+export function serviceKeepsRunning(mode: AutostartMode): boolean {
   switch (mode) {
     case 'server':
     case 'watch':
       return true
     case 'machine':
       return false
-    case 'central':
-      // Only the native central is the process. Both Docker shapes return once the container is up.
-      return opts.centralRuntime === 'native'
   }
 }
 
 /** The full description of one registration, in the terms every manager needs. */
-export function serviceSpecFor(mode: AutostartMode, opts: ServiceCommandOpts = {}): ServiceSpec | null {
-  const command = serviceCommandFor(mode, opts)
+export function serviceSpecFor(mode: AutostartMode): ServiceSpec | null {
+  const command = serviceCommandFor(mode)
   if (!command) return null
   return {
     name: `agentop-${mode}`,
     description: `agentop ${mode} (agentistics autostart)`,
     command,
-    keepsRunning: serviceKeepsRunning(mode, opts),
+    keepsRunning: serviceKeepsRunning(mode),
     // The server holds a port; a hand-started one makes the unit fail and loop every 5 s.
     ...(mode === 'server' ? { condition: `${process.execPath} autostart guard server` } : {}),
   }
@@ -410,13 +342,11 @@ function bootCaveatText(id: ServiceManagerId, spec: ServiceSpec): string {
 export interface AutostartOptions {
   /** Which init system to register with. Defaults to the platform's own; pm2 never by default. */
   manager?: ServiceManagerId
-  /** For `central`: the shape it runs as. Decides the command AND the unit type. */
-  centralRuntime?: CentralRuntimeId
 }
 
 /** Refusal shared by every manager: this box cannot run this mode at all. */
 function cannotResolve(mode: AutostartMode): AutostartResult {
-  const missing = mode === 'machine' ? 'docker/machine.yml' : 'central.sh'
+  const missing = 'docker/machine.yml'
   return {
     ok: false,
     message: `Cannot enable agentop-${mode} here: ${missing} was not found. ` +
@@ -441,7 +371,7 @@ export async function enableAutostart(mode: AutostartMode, opts: AutostartOption
 
   // Refuse before writing anything. A unit whose ExecStart cannot resolve is not a partial
   // success — it is a service the manager retries every few seconds for the life of the machine.
-  const spec = serviceSpecFor(mode, opts)
+  const spec = serviceSpecFor(mode)
   if (!spec) return cannotResolve(mode)
 
   switch (manager) {
@@ -665,7 +595,7 @@ async function anyUnitInstalled(): Promise<boolean> {
  * rather than reported as success.
  */
 async function disableLaunchd(mode: AutostartMode, opts: DisableOptions): Promise<AutostartResult> {
-  const spec = serviceSpecFor(mode, opts as AutostartOptions)
+  const spec = serviceSpecFor(mode)
   // A registration can be removed even when its command no longer resolves (the checkout moved),
   // so fall back to the bare name rather than refusing to clean up.
   const name = spec?.name ?? `agentop-${mode}`
@@ -706,8 +636,7 @@ async function disablePm2(mode: AutostartMode): Promise<AutostartResult> {
 /**
  * Restarts an agentop mode so it picks up new code (after an upgrade or a local change) or a
  * changed config. Only meaningful when the mode runs as a systemd user service — a foreground
- * `agentop server` has no service to bounce. `central` is redirected to `agentop central restart`
- * (that path rebuilds/restarts the Docker service, which a systemctl bounce can't do).
+ * `agentop server` has no service to bounce.
  */
 /** Is `mode` installed as a systemd user unit? The one fact that decides whether a restart goes
  *  through systemd or through the detached process the control center starts. */
@@ -814,14 +743,6 @@ export async function restartAutostart(mode: AutostartMode, deps: RestartDeps = 
   const exec: Exec = deps.run ?? run
   const unitFile = deps.unitDir ? join(deps.unitDir, unitName(mode)) : unitPath(mode)
   if (platform() === 'darwin') {
-    if (mode === 'central') {
-      return {
-        ok: false,
-        message:
-          'The central runs in Docker, not as a LaunchAgent.\n' +
-          'Use `agentop central restart` to bounce it, or `agentop central up` to rebuild it after a code change.',
-      }
-    }
     const plist = launchdPlistPath(mode)
     if (!existsSync(plist)) {
       return {
@@ -860,15 +781,6 @@ export async function restartAutostart(mode: AutostartMode, deps: RestartDeps = 
     return { ok: outcome.ok, message: outcome.message }
   }
   if (platform() !== 'linux') return notSupported('restart')
-
-  if (mode === 'central') {
-    return {
-      ok: false,
-      message:
-        'The central runs in Docker, not as a systemd service.\n' +
-        'Use `agentop central restart` to bounce it, or `agentop central up` to rebuild it after a code change.',
-    }
-  }
 
   // A restart only makes sense when the mode is installed as a service.
   let unitExists = true
@@ -987,7 +899,7 @@ export async function restartAutostart(mode: AutostartMode, deps: RestartDeps = 
  * Reports the enabled/active status of one or all agentop autostart services.
  *
  * It states WHAT each enabled unit runs, and it says the consequence in a sentence. `enabled=enabled,
- * active=inactive` is the exact shape of the bug people report — a central that is not running right
+ * active=inactive` is the exact shape of the bug people report — a server that is not running right
  * now and comes back anyway — and read as two words it looks like nothing is wrong. The unit is the
  * thing that brings it back; the sentence and the `ExecStart` are what make that discoverable
  * without reading systemd's manual.

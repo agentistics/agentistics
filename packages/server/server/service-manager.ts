@@ -12,9 +12,9 @@
  *
  * A service command is one of two shapes, and confusing them produces a unit that looks installed
  * and is wrong. `agentop server` runs in the FOREGROUND: the process is the service, and systemd's
- * `Type=simple` is correct. `docker compose up -d` and `central.sh up` RETURN once the container is
+ * `Type=simple` is correct. `docker compose up -d` RETURNS once the container is
  * up: under `Type=simple` systemd watches the wrapper exit, marks the unit inactive(dead) within a
- * second, and every later `is-active` answers `inactive` for a central that is serving traffic
+ * second, and every later `is-active` answers `inactive` for a container that is serving traffic
  * perfectly well. `Type=oneshot` + `RemainAfterExit=yes` is what states "the command finishing is
  * the service starting". Same distinction drives pm2's `--no-autorestart`: without it pm2 re-runs
  * `docker compose up -d` in a loop forever.
@@ -102,14 +102,13 @@ export function defaultServiceManager(facts: ServiceManagerFacts): ServiceManage
  * One registration, described in the terms every manager needs.
  *
  * `keepsRunning` is the field this module exists for — see the header. It is a property of the
- * COMMAND, not of the mode: a central started natively holds the terminal while the same central
- * started through Docker returns, so the same `agentop autostart central enable` produces
- * different unit types depending on the runtime the central was configured with.
+ * COMMAND, not of the mode: `agentop server` holds the terminal while `docker compose up -d`
+ * returns, so the two get different unit types.
  */
 export interface ServiceSpec {
-  /** Unit / label / pm2 process name, e.g. `agentop-central`. */
+  /** Unit / label / pm2 process name, e.g. `agentop-server`. */
   name: string
-  /** One line for a human, e.g. "agentop central (agentistics autostart)". */
+  /** One line for a human, e.g. "agentop server (agentistics autostart)". */
   description: string
   /** The command, already resolved to absolute paths. */
   command: string
@@ -338,7 +337,7 @@ export function migrateUnitPath(text: string, callerPath: string | undefined): s
   return lines.join('\n')
 }
 
-/** Reverse-DNS label for a launchd agent, e.g. `com.agentistics.agentop-central`. */
+/** Reverse-DNS label for a launchd agent, e.g. `com.agentistics.agentop-server`. */
 export function launchdLabel(spec: ServiceSpec): string {
   return `com.agentistics.${spec.name}`
 }

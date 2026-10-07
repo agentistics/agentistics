@@ -1,7 +1,7 @@
 /**
  * cli-stream.ts — the control center's OUTPUT CHANNEL: a long command's bytes, as pane lines.
  *
- * The commands whose output is the point — `docker compose up --build`, `central.sh up`, `bun run
+ * The commands whose output is the point — `docker compose up --build`, `bun run
  * bin` — used to run under `suspend`: the app left the alternate screen, the child inherited the
  * real tty, and the user pressed Enter to come back. They now run INSIDE the interface, streaming
  * into a framed pane, which is only possible if nothing they produce reaches the terminal directly.
@@ -12,9 +12,9 @@
  * pure and tested — the carriage-return collapsing, the escape stripping, the chunk-boundary
  * buffering and the ring bound all live there.
  *
- * It is imported statically by `cli-start.ts` and `cli-central.ts`, so it deliberately imports the
+ * It is imported statically by `cli-start.ts`, so it deliberately imports the
  * TUI's stream module by its own subpath rather than through `@agentistics/tui/control`: that entry
- * pulls in Ink and React, which have no business being loaded by `agentop central logs`.
+ * pulls in Ink and React, which have no business being loaded by a log reader.
  */
 
 import { createLineDecoder } from '@agentistics/tui/control/stream'

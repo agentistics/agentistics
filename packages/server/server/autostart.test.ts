@@ -33,23 +33,6 @@ test('removeHookBlock throws on a corrupt block (BEGIN without END)', () => {
   expect(() => removeHookBlock('# >>> agentop update check >>>\nagentop check-update\n')).toThrow()
 })
 
-// --- the `central` unit's ExecStart ---
-//
-// Regression: repoRoot() derived the checkout as three directories up from `import.meta.dir` and
-// guarded that with a try/catch. `resolve` never throws, so under the compiled binary
-// (`import.meta.dir` = Bun's virtual root) three up was `/` and the generated unit read
-// `ExecStart=bash /central.sh up` — exit 127, restarted every 5s for the life of the machine.
-
-test('the central command points at a central.sh that EXISTS, never a bare /central.sh', () => {
-  // This test file runs from source, so the checkout is findable and the command must resolve.
-  const cmd = serviceCommandFor('central')
-  expect(cmd).not.toBeNull()
-  expect(cmd).not.toContain(' /central.sh ')
-  const script = cmd!.replace(/^bash /, '').replace(/ up$/, '')
-  expect(script.endsWith('/central.sh')).toBe(true)
-  expect(existsSync(script)).toBe(true)
-})
-
 test('server and watch resolve to the running binary and never go looking for a checkout', () => {
   expect(serviceCommandFor('server')).toBe(`${process.execPath} server`)
   expect(serviceCommandFor('watch')).toBe(`${process.execPath} watch`)
@@ -60,8 +43,8 @@ test('server and watch resolve to the running binary and never go looking for a 
 // Before this, "start at boot" for the `agentistics` service could only ever mean the NATIVE
 // systemd unit above, even when the user actually runs it via `docker/machine.yml`. A
 // boot answer that installs the wrong mechanism is worse than not offering one, so `machine` gets
-// its own command, resolved the same way `central` resolves `central.sh` — by finding the file
-// that only exists in a repo checkout, never by assuming a fixed path.
+// its own command, resolved by finding the file that only exists in a repo checkout, never by
+// assuming a fixed path.
 
 test('the machine command points at a docker/machine.yml that EXISTS', () => {
   const cmd = serviceCommandFor('machine')

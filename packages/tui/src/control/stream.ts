@@ -2,7 +2,7 @@
  * stream.ts — PURE conversion of a command's raw output into lines a pane can hold.
  *
  * The control center now watches its long commands from INSIDE the alternate screen: `docker
- * compose up --build`, `central.sh up`, `bun run bin`. Their output no longer goes to the terminal,
+ * compose up --build`, `bun run bin`. Their output no longer goes to the terminal,
  * it goes into a framed pane Ink is composing — which means every byte has to be turned into
  * something with a known width and no way to move the cursor. That is what this module is for, and
  * it is deliberately pure: bytes in, lines out, no process, no Ink, no state that outlives a call.

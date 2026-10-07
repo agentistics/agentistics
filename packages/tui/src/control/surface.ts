@@ -261,7 +261,6 @@ export interface LogSourceOption {
 export function logSources(services: readonly ControlService[]): LogSourceOption[] {
   const out: LogSourceOption[] = []
   for (const service of services) {
-    if (service.id === 'central') continue
     if (service.running.length > 1) {
       for (const id of service.running) {
         const runtime = service.runtimes.find(r => r.id === id)

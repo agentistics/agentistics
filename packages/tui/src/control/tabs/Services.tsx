@@ -104,62 +104,6 @@ import type {
 import type { RunAction, TabChrome, TaskView } from '../ControlCenter'
 
 /**
- * The words the Services and Setup screens need that `control/i18n.ts` does not carry.
- *
- * They belong to choices the TUI INVENTS rather than to anything the host reports — the three
- * connect questions — and the host hands the TUI a `ControlStatus`, not a string table, so they
- * have to live on this side of the boundary. The "how should it run?" menu that used to live here
- * went with the flat service list: the host composes and LABELS its own start options now, because it
- * is the only side that knows what this box can actually run.
- *
- * Exported because Setup asks the same three connect questions in the same order.
- */
-export interface LauncherStrings {
-  itemConnect: string
-  itemConnectHint: string
-  itemDisconnect: string
-  itemDisconnectHint: string
-
-  promptEndpoint: string
-  promptToken: string
-  promptOrg: string
-  orgDefault: string
-}
-
-const LAUNCHER_EN: LauncherStrings = {
-  itemConnect: 'Connect to a central',
-  itemConnectHint: 'send my metrics (become a member)',
-  itemDisconnect: 'Disconnect from the central',
-  itemDisconnectHint: 'back to solo',
-
-  promptEndpoint: 'Central endpoint URL (e.g. http://host:48080)',
-  promptToken: "Member token (from the central's Team Manager)",
-  promptOrg: 'Org',
-  orgDefault: 'default',
-}
-
-const LAUNCHER_PT: LauncherStrings = {
-  itemConnect: 'Conectar a uma central',
-  itemConnectHint: 'enviar minhas métricas (virar member)',
-  itemDisconnect: 'Desconectar da central',
-  itemDisconnectHint: 'voltar para solo',
-
-  promptEndpoint: 'URL da central (ex.: http://host:48080)',
-  promptToken: 'Token do member (no Team Manager da central)',
-  promptOrg: 'Org',
-  orgDefault: 'default',
-}
-
-const LAUNCHER: Record<CliLang, LauncherStrings> = { en: LAUNCHER_EN, pt: LAUNCHER_PT }
-
-export function launcherStrings(lang: CliLang): LauncherStrings {
-  return LAUNCHER[lang] ?? LAUNCHER_EN
-}
-
-/** The connect questions, in the order `cli-start.ts` and `cli-setup.ts` both ask them. */
-export type ConnectStep = 'endpoint' | 'token' | 'org'
-
-/**
  * THE OVERLAY SEAM.
  *
  * `cockpit` is the three panes; every other variant is a question, and while one is up it OWNS the
@@ -183,8 +127,6 @@ type View =
    *  one may be skipped — see `archive-gate.ts`. */
   /** `thenBoot` is the wizard's tail: after the consent, member and central offer the boot unit. */
   | { kind: 'archive'; suggested: ArchiveMode; then: StartOption | null; gate?: boolean; thenBoot?: ServiceId }
-  | { kind: 'connect'; step: ConnectStep; endpoint: string; token: string }
-  | { kind: 'disconnect' }
   /** `runtime` is the one that just started, when this came from a fresh start's boot question —
    *  `enableBoot` needs it to write the matching unit. Absent for the manual "enable boot" action
    *  row (offered while the service is down, with nothing running yet to name). */
@@ -298,7 +240,6 @@ export function Services({
   host, status, strings: s, lang, width, height, isActive, run, task, onDismissTask,
   onChrome, onExit, onLang, mouseOn, onMouse, sessionPollMs, onSessionPollMs, initialSetup,
 }: ServicesProps) {
-  const l = launcherStrings(lang)
 
   const [view, setView] = useState<View>(initialSetup ? { kind: 'setup' } : { kind: 'cockpit' })
   const [wantFocus, setWantFocus] = useState<PaneId>('services')
@@ -332,7 +273,7 @@ export function Services({
   // A new task starts at the tail — its own tail, not the previous one's.
   useEffect(() => { setOutputView({ index: 0, follow: true }) }, [task?.id])
 
-  const services = (status?.services ?? []).filter(service => service.id !== 'central')
+  const services = status?.services ?? []
   const running = useMemo(() => services.filter(v => v.state === 'up'), [services])
   const selection = Math.min(serviceIndex, Math.max(0, services.length - 1))
   const selected: ControlService | undefined = services[selection]
@@ -392,7 +333,7 @@ export function Services({
         // The runtime travels with the question: `enableBoot` needs it to pick the matching
         // mechanism (a native systemd unit versus one that runs `docker compose … up -d`), and
         // this is the one place that actually knows which one just started.
-        ? { kind: 'boot', service: option.runtime === 'central' ? 'central' : 'agentistics', runtime: option.runtime }
+        ? { kind: 'boot', service: 'agentistics', runtime: option.runtime }
         : { kind: 'cockpit' })
     })
   }, [host, run])
@@ -1327,47 +1268,6 @@ export function Services({
           ),
         }
 
-      case 'disconnect':
-        return {
-          title: s.paneConfig,
-          node: (
-            <ConfirmPrompt
-              label={`${l.itemDisconnect} — ${l.itemDisconnectHint}?`}
-              yesLabel={s.yes}
-              noLabel={s.no}
-              onAnswer={yes => (yes ? void run(() => host.disconnect()).then(back) : back())}
-              onCancel={back}
-              width={body}
-              isActive={questionsLive}
-              origin={origin}
-            />
-          ),
-        }
-
-      case 'connect':
-        return {
-          title: l.itemConnect,
-          node: (
-            <TextPrompt
-              // Remounting per step (rather than reusing one field) is what clears the previous
-              // answer; a shared field would show the endpoint while asking for the token.
-              key={view.step}
-              label={view.step === 'endpoint' ? l.promptEndpoint : view.step === 'token' ? l.promptToken : l.promptOrg}
-              secret={view.step === 'token'}
-              defaultValue={view.step === 'org' ? l.orgDefault : undefined}
-              onSubmit={value => onConnect(view.step, view.endpoint, view.token, value)}
-              onCancel={() => {
-                // One level at a time, so a mistyped token does not throw away the endpoint.
-                if (view.step === 'org') return setView({ ...view, step: 'token' })
-                if (view.step === 'token') return setView({ ...view, step: 'endpoint' })
-                return back()
-              }}
-              width={body}
-              isActive={questionsLive}
-            />
-          ),
-        }
-
       case 'boot':
         return {
           title: s.paneConfig,
@@ -1468,17 +1368,6 @@ export function Services({
   function onArchiveSkip() {
     back()
     void run(async () => ({ ok: true, message: s.archiveLaterMessage }))
-  }
-
-  function onConnect(step: ConnectStep, endpoint: string, token: string, value: string) {
-    if (step === 'endpoint') return setView({ kind: 'connect', step: 'token', endpoint: value, token: '' })
-    if (step === 'token') return setView({ kind: 'connect', step: 'org', endpoint, token: value })
-    // The wizard's tail, and only after a connect that WORKED: a consent written for a machine that
-    // never joined would be a preference recorded about nothing. `cli-setup.ts` asks in this order.
-    return void run(() => host.connect({ endpoint, token, org: value })).then(res => {
-      if (res.ok) void askArchive('agentistics')
-      else back()
-    })
   }
 
   function onBoot(service: ServiceId, runtime: RuntimeId | undefined, yes: boolean) {

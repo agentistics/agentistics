@@ -221,12 +221,6 @@ describe('re-review (a) — --central finds central.env after a crash between sc
     expect(existsSync(envFile + '.next')).toBe(false)
     await rm(dir, { recursive: true, force: true })
   })
-  test('cli.ts recovers before it checks existence', async () => {
-    const src = await readFile(join(import.meta.dir, '..', '..', 'bin', 'cli.ts'), 'utf8')
-    const fn = src.slice(src.indexOf('async function loadCentralEnv'), src.indexOf('const HELP = `'))
-    expect(fn).toContain('findCentralEnvFile(candidates)')
-    expect(fn).not.toContain('candidates.find(')
-  })
 })
 
 describe('re-review (b) — a removed connection\'s sealed token never comes back', () => {

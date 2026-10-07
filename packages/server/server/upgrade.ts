@@ -84,8 +84,7 @@ const _D  = `${_ESC}[2m`
 const _Y  = `${_ESC}[33m`
 const _RD = `${_ESC}[91m`
 
-// central.sh sets PROJECT=${PROJECT:-team-mode}; docker/machine.yml builds `agentistics-machine`.
-const CENTRAL_PROJECT = 'team-mode'
+// docker/machine.yml builds `agentistics-machine`.
 const MACHINE_IMAGE = 'agentistics-machine'
 
 // ---------------------------------------------------------------------------
@@ -399,9 +398,8 @@ export type RestartOutcome = {
   /**
    * True only when something that answers THIS machine's own `/api/version` (bound to `PORT`) was
    * bounced: the native `agentop-server` systemd unit, the machine-in-Docker container (it runs
-   * with `network_mode: host`, so it binds `PORT` directly, unlike the central which is a separate
-   * container on its own port), or an unmanaged background `agentop server` process. Never true for
-   * `agentop-watch` (the OTel daemon has no HTTP surface) or the central (a different port). This is
+   * with `network_mode: host`, so it binds `PORT` directly,, or an unmanaged background `agentop server` process. Never true for
+   * `agentop-watch` (the OTel daemon has no HTTP surface) This is
    * what lets the poll below tell "a server was restarted and never came back" apart from "nothing
    * runs here to confirm" — `didSomething` alone conflates both.
    */
@@ -415,13 +413,13 @@ export type RestartOutcome = {
  * Self-restart is safe: `agentop upgrade` runs as a foreground CLI, a *separate* process from
  * the systemd user service or Docker container it restarts, so restarting those never kills
  * this process. `systemctl --user restart` is handled out-of-process by systemd, and the
- * central/machine live in their own containers.
+ * machine lives in its own container.
  *
  * Every step's result is CHECKED and collected: a swallowed restart failure leaves the user
  * on the old code while the CLI claims success — exactly the case where a critical update
  * silently did not take effect.
  *
- * @param newBin path to the just-installed binary — the central/machine restart is driven by
+ * @param newBin path to the just-installed binary — the machine restart is driven by
  *   THIS binary so the image tag matches the version we just installed (the running process
  *   still carries the old version number).
  */
@@ -566,23 +564,10 @@ async function restartRunningServices(newBin: string, wantVersion?: string, back
     }
   }
 
-  // 2) Central (Docker): pull the new version-tagged image and recreate. Driven through the NEW
-  //    binary so `agentop central` resolves the image tag to the version we just installed.
-  //    The central listens on its OWN port (48080 by default, mapped separately) — never `PORT` —
-  //    so bouncing it says nothing about whether `agentop server` itself came back up.
-  if (await dockerRunning(`label=com.docker.compose.project=${CENTRAL_PROJECT}`)) {
-    process.stdout.write('  Updating the central (Docker): pulling the new image and recreating…\n')
-    const pull = await shInherit([newBin, 'central', 'pull'])
-    if (pull !== 0) failures.push(`central: \`agentop central pull\` exited ${pull}`)
-    const up = await shInherit([newBin, 'central', 'up'])
-    if (up !== 0) failures.push(`central: \`agentop central up\` exited ${up}`)
-    didSomething = true
-  }
-
-  // 3) Machine-in-Docker: recreate. The machine image is built from a repo checkout
+  // 2) Machine-in-Docker: recreate. The machine image is built from a repo checkout
   //    (docker/machine.yml), so this only applies when that compose is reachable —
   //    and when it isn't, the container KEEPS RUNNING THE OLD VERSION, which is a failure,
-  //    not a footnote. Unlike the central, the machine runs with `network_mode: host`
+  //    not a footnote. The machine runs with `network_mode: host`
   //    (docker/machine.yml), so it binds `PORT` directly and counts toward `restartedServer`.
   if (await dockerRunning(`ancestor=${MACHINE_IMAGE}`)) {
     const compose = join(process.cwd(), 'docker', 'machine.yml')

@@ -1,51 +1,18 @@
-/**
- * cli-setup.ts — interactive mode wizard for `agentop setup` (and a bare `agentop` on an
- * unconfigured machine, and the "Reconfigure mode" action in `agentop start`).
- *
- * Arrow-key mode picker (see cli-ui.ts), then wires up the central (via central.sh init) or member
- * (via memberConnect), and optionally enables autostart. Ctrl-C is non-destructive: every prompt
- * exits cleanly and preferences are only written after all input is gathered.
- */
-
-import { defaultTeam } from '@agentistics/core'
-import { readPreferences, readPreferencesOrExit, writePreferences, resolveArchiveMode, type ArchiveMode } from './preferences'
+/** The local first-run wizard: history consent, then the optional server boot offer. */
+import { readPreferencesOrExit, writePreferences, resolveArchiveMode, type ArchiveMode } from './preferences'
 import { enableAutostart } from './autostart'
-import { runCentral } from './cli-central'
-import { memberConnect } from './cli-member'
-import { select, input, confirm } from './cli-ui'
+import { select, confirm } from './cli-ui'
 import { suggestHooksLine } from './cli-hooks'
 
 const ESC = '\x1b'
-const R = `${ESC}[0m`
 const D = `${ESC}[2m`
+const R = `${ESC}[0m`
 
-/**
- * Print the Claude Code integration OFFER, if there is one to make.
- *
- * A suggestion, deliberately, and never the install itself: writing hooks into someone's
- * `~/.claude` because they configured a metrics dashboard is exactly the thing `agentop hooks
- * install` exists to make an explicit act. Same rule autostart follows with `~/.bashrc`.
- */
-async function offerHooks(): Promise<void> {
-  const line = await suggestHooksLine()
-  if (line) process.stdout.write(`\n  ${D}${line}${R}\n`)
-}
-
-/**
- * Ask, ONCE, how the app should preserve session history past Claude's 30-day cleanup, and
- * persist the choice as `archiveMode`. This mirrors the web consent gate for people who only
- * ever use the CLI — without it, a CLI-only start leaves `archiveMode` unset, which the server
- * treats as 'off', silently preserving nothing. No-op when already chosen or on a non-TTY stdin
- * (a daemon/systemd start), and irrelevant on a central (aggregator, no local sessions).
- */
 export async function ensureArchiveModeChosen(): Promise<void> {
   if (!process.stdin.isTTY) return
   const prefs = await readPreferencesOrExit()
-  if (resolveArchiveMode(prefs) !== undefined) return // already chosen — never re-ask
-  process.stdout.write(
-    `\n  ${D}Claude deletes session transcripts older than 30 days. How should agentistics` +
-    ` preserve your history?${R}\n`,
-  )
+  if (resolveArchiveMode(prefs) !== undefined) return
+  process.stdout.write(`\n  ${D}Claude deletes session transcripts older than 30 days. How should agentistics preserve your history?${R}\n`)
   const mode = await select<ArchiveMode>({
     message: 'Preserve session history?',
     choices: [
@@ -58,83 +25,17 @@ export async function ensureArchiveModeChosen(): Promise<void> {
   process.stdout.write(`\n  ${D}archive mode set to ${mode}.${R}\n`)
 }
 
-/**
- * Run the interactive setup wizard. Requires an interactive stdin (a TTY); prints a hint and
- * returns otherwise. Returns a process-style exit code.
- */
 export async function runSetup(): Promise<number> {
   if (!process.stdin.isTTY) {
-    process.stderr.write(
-      'setup needs an interactive terminal. Configure non-interactively with ' +
-      '`agentop member connect --endpoint <url> --token <token>` instead.\n',
-    )
+    process.stderr.write('setup needs an interactive terminal.\n')
     return 1
   }
-
-  const mode = await select<'solo' | 'central' | 'member'>({
-    message: 'How should this machine track usage?',
-    choices: [
-      { name: 'solo', value: 'solo', hint: 'local only, nothing leaves this machine' },
-      { name: 'central', value: 'central', hint: 'host the team central (Docker) on this machine' },
-      { name: 'member', value: 'member', hint: 'everything solo does, plus push metrics (never chat) to a central' },
-    ],
-  })
-
-  if (mode === 'solo') {
-    // `agentop setup` is reachable on an ALREADY-configured machine (re-run manually, or the
-    // "Reconfigure mode" action in `agentop start`), and `writePreferences({ team: defaultTeam() })`
-    // is a `connections` key present in the payload — mergeTeamPayload treats that as an explicit
-    // REPLACEMENT of the whole array (spec §5.8), wiping every connection and denylist silently.
-    // Confirm first whenever there is something real to lose.
-    const existing = (await readPreferences()).team?.connections ?? []
-    if (existing.length > 0) {
-      const noun = existing.length === 1 ? 'central' : 'centrals'
-      const ok = await confirm(
-        `This machine is connected to ${existing.length} ${noun}. Switching to solo disconnects from all of them locally (their data on the central is untouched). Continue?`,
-        false,
-      )
-      if (!ok) {
-        process.stdout.write(`\n  ${D}left unchanged.${R}\n`)
-        return 0
-      }
-    }
-    await writePreferences({ team: defaultTeam() })
-    await ensureArchiveModeChosen()
-    process.stdout.write(`\n  ${D}solo mode set — you're all done.${R}\n`)
-    await offerHooks()
-    return 0
-  }
-
-  if (mode === 'central') {
-    process.stdout.write('\n  Launching the central setup (central.sh init)…\n\n')
-    const code = await runCentral('init', [])
-    if (code !== 0) {
-      process.stderr.write('\n  central init did not complete — fix the above and re-run `agentop central up`.\n')
-      return code
-    }
-    if (await confirm('Start the central on boot?', false)) {
-      const res = await enableAutostart('central')
-      process.stdout.write('\n  ' + res.message.replace(/\n/g, '\n  ') + '\n')
-    }
-    process.stdout.write('\n  central configured. Start it now from the launcher or `agentop central up`.\n')
-    return 0
-  }
-
-  // member
-  const endpoint = await input('Central endpoint URL (e.g. http://host:48080)')
-  const token = await input("Member token (from the central's Team Manager)")
-  const org = await input('Org', { default: 'default' })
-
-  const code = await memberConnect({ endpoint, token, org: org || undefined })
-  if (code !== 0) return code
-
   await ensureArchiveModeChosen()
-
-  if (await confirm('Start on boot?', false)) {
+  if (await confirm('Start the server on boot?', false)) {
     const res = await enableAutostart('server')
-    process.stdout.write('\n  ' + res.message.replace(/\n/g, '\n  ') + '\n')
+    process.stdout.write(`\n  ${res.message.replace(/\n/g, '\n  ')}\n`)
   }
-  process.stdout.write(`\n  ${D}member configured.${R}\n`)
-  await offerHooks()
+  const line = await suggestHooksLine()
+  if (line) process.stdout.write(`\n  ${D}${line}${R}\n`)
   return 0
 }

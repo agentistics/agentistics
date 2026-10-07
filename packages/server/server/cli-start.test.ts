@@ -12,7 +12,6 @@ import {
   parseContainerFacts,
   parseElapsedSeconds,
   pidsToKill,
-  centralStartNotes,
   sessionsPollerOptions,
   startOptionsFor,
   targetRuntimes,
@@ -142,7 +141,6 @@ test('a logical target names BOTH runtimes when both are up — the conflict is 
 
 test('a logical target names nothing when the service is down, so the caller can say so', () => {
   expect(targetRuntimes('agentistics', [])).toEqual([])
-  expect(targetRuntimes('agentistics', ['central'])).toEqual([])
 })
 
 test('a runtime target acts on exactly that runtime — how a conflict gets broken', () => {
@@ -155,12 +153,8 @@ test('a runtime target that is not running resolves to nothing', () => {
 })
 
 test("'all' is every running runtime, in canonical order, and never a stopped one", () => {
-  expect(targetRuntimes('all', ['central', 'machine', 'local'])).toEqual(['local', 'machine', 'central'])
+  expect(targetRuntimes('all', ['machine', 'local'])).toEqual(['local', 'machine'])
   expect(targetRuntimes('all', [])).toEqual([])
-})
-
-test("the central's service and runtime names mean the same thing", () => {
-  expect(targetRuntimes('central', ['central'])).toEqual(['central'])
 })
 
 // -- log resolution ----------------------------------------------------------
@@ -177,7 +171,6 @@ test('with both up the log follows the declared preference rather than a coin to
 // The most useful log of a server that is NOT running is the file the last one left behind.
 test('a logical log source with nothing up falls back to the primary runtime', () => {
   expect(logRuntime('agentistics', [])).toBe('local')
-  expect(logRuntime('central', [])).toBe('central')
 })
 
 test('a runtime log source reads that runtime whatever is up — the Logs screen selector', () => {
@@ -240,65 +233,6 @@ test('a stopped service keeps its row and offers exactly the starts this box can
 test('a runtime this box cannot run is not offered as a start that could not possibly work', () => {
   const svc = buildService('agentistics', EN.svcAgentistics, [NATIVE_DOWN, MACHINE_NO_DOCKER], EN)
   expect(svc.startOptions.map(o => o.runtime)).toEqual(['local', 'local'])
-})
-
-test('the Docker central offers one shape — background — with no plan or a Docker plan', () => {
-  const svc = buildService('central', EN.svcCentral, [runtime({ id: 'central' })], EN)
-  expect(svc.startOptions).toEqual([
-    { runtime: 'central', how: 'bg', label: EN.optCentral, hint: EN.optCentralHint, offersBoot: true },
-  ])
-  for (const centralPlan of ['script', 'image', 'init'] as const) {
-    expect(startOptionsFor('central', EN, { centralPlan })).toEqual([
-      { runtime: 'central', how: 'bg', label: EN.optCentral, hint: EN.optCentralHint, offersBoot: true },
-    ])
-  }
-})
-
-// A native central (external Mongo, standalone/no-repo) is the ONE case `runCentral` can run the
-// binary directly instead of Docker — see `planCentralStart` in cli-central.ts. It offers BOTH
-// shapes, neither of which carries `offersBoot`: foreground because it holds the terminal, and
-// background because no native-central systemd unit exists yet (see the field's own doc).
-test('a native-capable central offers foreground AND background, and only the detached one boots', () => {
-  const opts = startOptionsFor('central', EN, { centralPlan: 'native' })
-  expect(opts.map(o => o.how)).toEqual(['fg', 'bg'])
-  // A foreground start holds the terminal, so "bring it back at boot" is not a thing it can be.
-  expect(opts[0]!.offersBoot).toBeUndefined()
-  // The detached one DOES now: `serviceCommandFor` composes the unit from the configured central
-  // runtime, so a natively started central gets a unit that runs it natively. It used to install
-  // the Docker one — a boot mechanism that did not match what was actually running — which is why
-  // the option was withheld entirely.
-  expect(opts[1]!.offersBoot).toBe(true)
-  expect(opts.every(o => o.centralRuntime === 'native')).toBe(true)
-})
-
-// One verb per SHAPE. The screen used to show a single "Start" whose meaning was inferred from
-// what happened to be on disk, so a user holding a checkout could not ask for the published image.
-test('every available central shape becomes its own start verb', () => {
-  const opts = startOptionsFor('central', EN, {
-    centralRuntimes: [
-      { id: 'docker-image', available: true },
-      { id: 'docker-build', available: true },
-      { id: 'native', available: false, reason: 'bundled-mongo' },
-    ],
-  })
-  expect(opts.map(o => o.centralRuntime)).toEqual(['docker-image', 'docker-build'])
-  // A Docker central's `up` returns once the container is up: there is no attached shape to offer.
-  expect(opts.every(o => o.how === 'bg')).toBe(true)
-})
-
-// The other half of "a verb that cannot work is not offered": an absence with no explanation reads
-// as a broken screen.
-test('a withheld shape is explained in a sentence rather than offered and refused', () => {
-  const notes = centralStartNotes([
-    { id: 'docker-image', available: true },
-    { id: 'docker-build', available: false, reason: 'no-checkout' },
-    { id: 'native', available: false, reason: 'bundled-mongo' },
-  ], EN)
-  expect(notes).toHaveLength(2)
-  expect(notes[0]).toContain('checkout')
-  expect(notes[1]).toContain('external database')
-  expect(centralStartNotes(undefined, EN)).toEqual([])
-  expect(centralStartNotes([{ id: 'native', available: true }], EN)).toEqual([])
 })
 
 // Everything that has to happen AROUND a start is stated with the start, because this side is the
@@ -410,14 +344,6 @@ test('a conflict names the runtime each rebuild acts on', () => {
   ])
 })
 
-test('the restarts are localized, and a container says what a rebuild means for a container', () => {
-  const svc = buildService('central', PT.svcCentral, [runtime({ id: 'central', state: 'up' })], PT, {
-    rebuild: { central: true },
-  })
-  expect(svc.restartOptions.map(o => o.label)).toEqual(['Reiniciar', 'Reconstruir & reiniciar'])
-  expect(svc.restartOptions[1]!.hint).toBe(PT.optRebuildDockerHint)
-})
-
 test('a conflict offers a stop per runtime, so it can be broken without guessing', () => {
   const svc = buildService('agentistics', EN.svcAgentistics, [NATIVE_UP, MACHINE_UP], EN)
   expect(svc.stopOptions).toEqual([
@@ -489,7 +415,7 @@ test('buildService says nothing about boot unless it was told', () => {
 // ---------------------------------------------------------------------------
 //
 // The bug these cover, stated once: `enableBoot` wrote a systemd user unit and nothing in the
-// product could take it away. A user who stopped their central because they were finished with it
+// product could take it away. A user who stopped their server because they were finished with it
 // got it back on the next boot — and on the next login that starts the user's systemd manager —
 // with nothing on screen naming what had brought it back. A switch with one position is not a
 // switch, and `bootOptionsFor` is the thing that has to have both.
@@ -564,8 +490,8 @@ test('both mechanisms of agentistics get their own verb, each naming its runtime
 })
 
 test('a service with one mechanism names no runtime on its verb', () => {
-  // "Start at boot (docker)" on the central would invite the question "as opposed to what?".
-  const [only] = bootOptionsFor([mech({ mech: '', runtime: 'central', on: false })], BOOT_S, true, 'c')
+  // "Start at boot (docker)" would invite the question "as opposed to what?".
+  const [only] = bootOptionsFor([mech({ mech: '', runtime: 'local', on: false })], BOOT_S, true, 'c')
   expect(only!.label).not.toContain('(')
 })
 
@@ -576,12 +502,6 @@ test('bootModeFor sends the docker runtime to the docker unit and everything els
   expect(bootModeFor('agentistics', 'local')).toBe('server')
   // The manual verb has no runtime to name — it has always meant the native server.
   expect(bootModeFor('agentistics', undefined)).toBe('server')
-})
-
-test('the central has ONE mechanism, whatever runtime is named', () => {
-  for (const runtime of [undefined, 'central', 'local', 'machine'] as const) {
-    expect(bootModeFor('central', runtime)).toBe('central')
-  }
 })
 
 test('buildService carries the unit only beside a boot state it actually has', () => {

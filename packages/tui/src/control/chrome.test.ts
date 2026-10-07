@@ -364,7 +364,7 @@ describe('headerMeta', () => {
 
   test('never exceeds the width it was given, at any terminal size', () => {
     for (let width = 0; width <= 80; width++) {
-      const meta = headerMeta({ mode: 'central', version: '1.7.3', latestVersion: '1.7.4', width })
+      const meta = headerMeta({ mode: 'solo', version: '1.7.3', latestVersion: '1.7.4', width })
       expect(headerMetaWidth(meta)).toBeLessThanOrEqual(width)
     }
   })
@@ -396,12 +396,12 @@ describe('headerMeta', () => {
   test('gives up the counter only to keep the mode, and never overflows', () => {
     for (let width = 0; width <= 80; width++) {
       const meta = headerMeta({
-        mode: 'central', version: '1.7.3', latestVersion: '1.7.4', attention: 7, width,
+        mode: 'solo', version: '1.7.3', latestVersion: '1.7.4', attention: 7, width,
       })
       expect(headerMetaWidth(meta)).toBeLessThanOrEqual(width)
     }
-    const tiny = headerMeta({ mode: 'central', version: '1.7.3', attention: 7, width: 8 })
-    expect(tiny.text).toBe('central')
+    const tiny = headerMeta({ mode: 'solo', version: '1.7.3', attention: 7, width: 8 })
+    expect(tiny.text).toBe('solo')
     expect(tiny.alert).toBe('')
   })
 })
@@ -1007,7 +1007,7 @@ describe('detailContent', () => {
     const c = detailContent(
       service({
         state: 'down',
-        runtimes: [runtime({ id: 'central', kind: 'docker', state: 'unknown', available: false, reason: 'docker not installed' })],
+        runtimes: [runtime({ id: 'machine', kind: 'docker', state: 'unknown', available: false, reason: 'docker not installed' })],
       }),
       s,
       NOW,
@@ -1095,7 +1095,7 @@ describe('detailContent', () => {
 
   test('a stopped service says so, and an undetectable one explains itself', () => {
     const down = detailContent(
-      service({ runtimes: [runtime({ id: 'central', kind: 'docker', state: 'down' })] }),
+      service({ runtimes: [runtime({ id: 'machine', kind: 'docker', state: 'down' })] }),
       s,
       NOW,
     )
