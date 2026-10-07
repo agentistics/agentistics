@@ -1319,6 +1319,7 @@ export interface ControlStatus {
    * and the sentence has to name what to do instead ("stop it first"). The host decides, because
    * only it knows what is running.
    */
+  /** Why a setup mode is unavailable, when the host has a reason. */
   setupBlocked?: Partial<Record<TeamMode, string>>
   /** How the fleet list was last arranged. Absent on a machine that has never chosen. */
   sessionView?: SessionViewPrefs

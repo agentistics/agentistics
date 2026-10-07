@@ -1465,35 +1465,6 @@ describe('paneBadgeRoom', () => {
   })
 })
 
-describe('headerMeta — the central pill survives a missing machineName', () => {
-  test('shows account, latency and the dot even when the central never named this machine', () => {
-    // Real shape observed from a live /api/team/status: org + latencyMs + errKind are all present,
-    // machineName is simply absent (the central's whoami never resolved one for this token). The
-    // cell used to be gated ALL-OR-NOTHING on machineName and went completely blank.
-    const meta = headerMeta({
-      mode: 'member', version: '1.18.2', accountName: 'Nebulous', linkState: 'ok', pushMs: 378,
-      width: 200,
-    })
-    expect(meta.machine).toBe('Nebulous · 378ms')
-    expect(meta.machineState).toBe('ok')
-  })
-
-  test('an offline link still shows the account and its red dot with no machine name', () => {
-    const meta = headerMeta({
-      mode: 'member', version: '1.18.2', accountName: 'Nebulous', linkState: 'offline', width: 200,
-    })
-    expect(meta.machine).toBe('Nebulous')
-    expect(meta.machineState).toBe('offline')
-  })
-
-  test('a solo box with no central connection at all still shows nothing', () => {
-    const meta = headerMeta({ mode: 'solo', version: '1.18.2', width: 200 })
-    expect(meta.machine).toBe('')
-    expect(meta.machineState).toBeUndefined()
-  })
-})
-
-
 // ---------------------------------------------------------------------------
 // GL-02 — the attention counter's words
 // ---------------------------------------------------------------------------

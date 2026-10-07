@@ -806,18 +806,6 @@ const TOOLS: Tool[] = [
       "List repositories, grouped by normalized git remote (independent of local path or which machine produced the session), with session/message/token/cost totals and last-active date. Sessions with no linked repository are grouped under 'unlinked'. Optionally scope to a single harness. Rows tagged source \"projections\" (read from the journal) carry personTurns (the person's turns); there `messages` is a deprecated alias of personTurns, and subagent spend is reported apart (subagentTokens, subagentCostUSD).",
     inputSchema: { type: "object", properties: { harness: HARNESS_PARAM }, required: [] },
   },
-  {
-    name: "agentistics_team_status",
-    description:
-      "Get this machine's team-mode status: solo, central, or member. In member mode, lists its central connections (label, endpoint, connected/error state, last push). Use for 'am I connected to a team' or 'what central do I push to' questions.",
-    inputSchema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "agentistics_team_members",
-    description:
-      "List members of this team, central only: display name, online/presence status, latency, and last-seen timestamp. For usage/cost per member use agentistics_summary or agentistics_sessions against this central's own /api/data. Returns an explanatory message when this machine is not running as a central (solo/member mode).",
-    inputSchema: { type: "object", properties: {}, required: [] },
-  },
 ];
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toolsForGate(TOOLS, await nativeVisibleNow()) }));
@@ -1421,42 +1409,6 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
           legacy: () => apiGet("/api/data"),
           metrics: (q) => fetch(`${API}/api/runtime/metrics?${q}`),
         }));
-      }
-
-      case "agentistics_team_status": {
-        const prefs = await getPrefs();
-        const team = (prefs as any).team as { mode?: string; connections?: Array<any> } | undefined;
-        const mode = team?.mode ?? "solo";
-        const connections = (team?.connections ?? []).map((c: any) => ({
-          id: c.id,
-          label: c.label ?? null,
-          endpoint: c.endpoint,
-        }));
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({ mode, connections }, null, 2),
-          }],
-        };
-      }
-
-      case "agentistics_team_members": {
-        const res = await fetch(`${API}/api/team/members`);
-        if (res.status === 404) {
-          return { content: [{ type: "text", text: "This machine is not running as a central (solo or member mode) — there is no member roster here. Use agentistics_team_status to see the current mode." }] };
-        }
-        if (!res.ok) throw new Error(`GET /api/team/members → HTTP ${res.status}`);
-        const data = await res.json() as any;
-        const members = (data.members ?? []) as Array<any>;
-        const rows = members.map((m) => ({
-          id: m.id,
-          name: m.user,
-          label: m.label,
-          online: m.online ?? false,
-          latencyMs: m.latencyMs ?? null,
-          lastSeenAt: m.lastSeenAt ?? null,
-        }));
-        return { content: [{ type: "text", text: JSON.stringify(rows, null, 2) }] };
       }
 
       default:

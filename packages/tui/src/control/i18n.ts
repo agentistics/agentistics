@@ -216,8 +216,8 @@ export interface ControlStrings {
    * rule `HARNESS_CAPABILITIES` enforces for harnesses.
    */
   setupQuestion: string
-  setupMode: Record<TeamMode, string>
-  setupModeHint: Record<TeamMode, string>
+  setupMode: Record<'solo', string>
+  setupModeHint: Record<'solo', string>
   archiveUnset: string
   archiveQuestion: string
   archiveWhy: string
@@ -973,11 +973,9 @@ const EN: ControlStrings = {
   killQuestion: 'A server is already running here — stop it and start a new one?',
 
   setupQuestion: 'How should this machine track usage, and what may leave it?',
-  setupMode: { solo: 'solo', central: 'central', member: 'member' },
+  setupMode: { solo: 'solo' },
   setupModeHint: {
     solo: 'local only — nothing leaves this machine',
-    central: 'host the team central (Docker) here',
-    member: 'everything solo does, plus push metrics (never chat) to a central',
   },
   archiveUnset: 'not chosen yet',
   archiveQuestion: 'Preserve session history?',
@@ -1600,11 +1598,9 @@ const PT: ControlStrings = {
   killQuestion: 'Já existe um servidor rodando aqui — parar e iniciar outro?',
 
   setupQuestion: 'Como esta máquina deve registrar o uso, e o que pode sair dela?',
-  setupMode: { solo: 'solo', central: 'central', member: 'member' },
+  setupMode: { solo: 'solo' },
   setupModeHint: {
     solo: 'só local — nada sai desta máquina',
-    central: 'hospedar a central do time (Docker) aqui',
-    member: 'tudo que o solo faz, e ainda envia métricas (nunca chat) para uma central',
   },
   archiveUnset: 'ainda não escolhido',
   archiveQuestion: 'Preservar o histórico de sessões?',

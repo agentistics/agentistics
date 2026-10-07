@@ -332,7 +332,7 @@ export function Services({
   // A new task starts at the tail — its own tail, not the previous one's.
   useEffect(() => { setOutputView({ index: 0, follow: true }) }, [task?.id])
 
-  const services = status?.services ?? []
+  const services = (status?.services ?? []).filter(service => service.id !== 'central')
   const running = useMemo(() => services.filter(v => v.state === 'up'), [services])
   const selection = Math.min(serviceIndex, Math.max(0, services.length - 1))
   const selected: ControlService | undefined = services[selection]
@@ -621,12 +621,6 @@ export function Services({
   // the config pane
   // -------------------------------------------------------------------------
 
-  const connectAction = useMemo<Action>(() => (
-    status?.mode === 'member'
-      ? { label: s.actDisconnect, run: () => setView({ kind: 'disconnect' }) }
-      : { label: s.actConnect, run: () => setView({ kind: 'connect', step: 'endpoint', endpoint: '', token: '' }) }
-  ), [status?.mode, s])
-
   const configRows = useMemo<ConfigRow[]>(() => {
     const rows: ConfigRow[] = [
       // The short token is the fallback and the sentence is the preference: `fitValue` shows
@@ -644,18 +638,6 @@ export function Services({
         action: { label: s.actSetup, run: () => setView({ kind: 'setup' }) },
       },
     ]
-    if (status?.endpoint) {
-      // The endpoint IS the connection, so `enter` on it opens the same question the mode row does.
-      // A row the cursor can land on that then does nothing is worse than one that does the
-      // obvious thing.
-      rows.push({
-        key: 'endpoint',
-        label: s.endpointLabel,
-        value: status.endpoint,
-        short: stripScheme(status.endpoint),
-        action: connectAction,
-      })
-    }
     rows.push({
       key: 'history',
       label: s.historyLabel,
@@ -698,7 +680,7 @@ export function Services({
       action: { label: s.actSessionPoll, run: () => onSessionPollMs(nextSessionPollMs(sessionPollMs)) },
     })
     return rows
-  }, [s, status, connectAction, onLang, lang, mouseOn, onMouse, sessionPollMs, onSessionPollMs])
+  }, [s, status, onLang, lang, mouseOn, onMouse, sessionPollMs, onSessionPollMs])
 
   const configSelection = Math.min(configIndex, Math.max(0, configRows.length - 1))
 
@@ -1442,8 +1424,8 @@ export function Services({
                   // The BLOCKED reason replaces the ordinary hint rather than joining it: a row that
                   // cannot be picked has one thing worth saying, and it is why. The host decides —
                   // it is the only side that knows what is running.
-                  hint: status?.setupBlocked?.[mode] ?? s.setupModeHint[mode],
-                  disabled: Boolean(status?.setupBlocked?.[mode]),
+                  hint: s.setupModeHint[mode],
+                  disabled: false,
                 }))}
                 onSelect={value => onSetupMode(value as TeamMode)}
                 onCancel={back}
@@ -1529,15 +1511,6 @@ export function Services({
    * the central and stored nowhere else on this box.
    */
   function onSetupMode(mode: TeamMode) {
-    if (mode === 'central') {
-      return void run(() => host.initCentral(), s.setupMode.central).then(res => {
-        setView(res.ok ? { kind: 'boot', service: 'central' } : { kind: 'cockpit' })
-      })
-    }
-    if (mode === 'member') {
-      return setView({ kind: 'connect', step: 'endpoint', endpoint: '', token: '' })
-    }
-    if (status?.mode === 'member') return setView({ kind: 'disconnect' })
     return void run(() => host.setMode('solo'), s.setupMode.solo).then(res => {
       if (res.ok) void askArchive()
       else back()
@@ -1553,7 +1526,7 @@ export function Services({
  * harnesses for exactly the reason it would fail here — a mode added to the product would compile
  * clean and be missing from the wizard.
  */
-const SETUP_MODES: readonly TeamMode[] = ['solo', 'central', 'member'] as const
+const SETUP_MODES = ['solo'] as const
 
 /** Tone → colour. The one place a `DetailTone` becomes a colour, so the mapping cannot drift. */
 const TONE_COLOR: Record<DetailTone, string | undefined> = {

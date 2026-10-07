@@ -19,7 +19,6 @@ import {
   paneStrip,
   STRIP_SEP,
   tabUnderline,
-  type CentralLinkState,
   type ConfigCells,
   type HeaderLayout,
   type HeaderMeta,
@@ -41,7 +40,7 @@ import type { ControlStrings } from './i18n'
  * Which branch is drawn is decided by `headerLayout`, in the pure module, from the MEASURED art and
  * the measured tag — this component chooses nothing. The mode SENTENCE is not here either, only the
  * short token (`solo` / `central` / `member`): in member mode this row once read "member — sends
- * metrics to a central · http://198.51.100.199:48080" and wrapped, which shears every row below it.
+ * metrics endpoint" and wrapped, which shears every row below it.
  *
  * In the compact branch the MARK's columns are reserved before the tag is fitted, and `brandMark`
  * takes what that left. Both are total and neither can exceed what it was given, so the row cannot
@@ -97,14 +96,6 @@ export function Header({ layout, width }: { layout: HeaderLayout; width: number 
  * green bar in the corner is a light nobody looks at, and the whole value of this cell is that a
  * change in it is noticeable.
  */
-/** The link dot's colour per state — presentation only; the STATE is the host's decision. */
-const LINK_COLOR: Record<CentralLinkState, string> = {
-  ok: COLORS.running,
-  stale: COLORS.accent,
-  offline: COLORS.danger,
-  unauthorized: COLORS.danger,
-}
-
 const LOAD_COLOR: Record<'ok' | 'warn' | 'full', string | undefined> = {
   ok: undefined,
   warn: COLORS.accent,
@@ -123,9 +114,6 @@ function HeaderTag({ meta }: { meta: HeaderMeta }) {
           `stale` link is deliberately not red — the central owns the push cadence and may simply
           have nothing to say, and a warning that cries wolf is one people stop reading. The state
           is said in words on the connection card too; colour never carries it alone. */}
-      {meta.machine ? (
-        <Text color={LINK_COLOR[meta.machineState ?? 'ok']}>{` · ● ${meta.machine}`}</Text>
-      ) : null}
       {meta.alert ? <Text color={COLORS.accent} bold>{` · ${meta.alert}`}</Text> : null}
       {/* The parallel-sessions budget. Dim while there is room, `danger` once the ceiling is close
           or the machine is already swapping — but the NUMBERS are always drawn, so a reader who
@@ -467,4 +455,3 @@ export function ActionRow({ labels, selected, focused, width }: {
     </Text>
   )
 }
-
