@@ -25,8 +25,9 @@ const PRUNE = new Set([
   'node_modules', '.git', '.cache', '.npm', '.bun', '.cargo', '.rustup', '.nvm', '.pnpm-store',
   '.venv', 'venv', '__pycache__', '.mypy_cache', '.pytest_cache', '.ruff_cache',
   'target', 'dist', 'build', 'out', '.next', '.nuxt', '.turbo', '.svelte-kit', '.gradle',
-  'vendor', 'Library', 'snap', '.local', '.rbenv', '.pyenv', '.docker', '.vscode-server',
-  '.Trash', '.trash', 'AppData',
+  'vendor', 'library', 'snap', '.local', '.rbenv', '.pyenv', '.docker', '.vscode-server',
+  '.trash', 'appdata', '$recycle.bin', 'system volume information', 'windows', 'program files',
+  'program files (x86)', 'programdata', 'proc', 'sys', 'dev', 'run',
 ])
 
 export const SCAN_DEPTH = Number(process.env.AGENTISTICS_SCAN_DEPTH) > 0
@@ -35,6 +36,25 @@ export const SCAN_DEPTH = Number(process.env.AGENTISTICS_SCAN_DEPTH) > 0
 
 /** A hard backstop, so a pathological home directory cannot hang the wizard. */
 const MAX_ENTRIES = 40_000
+
+/** True for a selected filesystem disk, rather than a normal project directory. */
+export function isWholeDiskRoot(root: string): boolean {
+  const normalized = root.replace(/\\/g, '/').replace(/\/+$/, '')
+  return normalized === '' || normalized === '/' || /^\/mnt\/[a-z]$/i.test(normalized) || /^[a-z]:$/i.test(normalized)
+}
+
+export interface ScanOptions {
+  depth?: number
+  timeBudgetMs?: number
+  now?: () => number
+}
+
+export const DISK_SCAN_DEPTH = 4
+export const DISK_SCAN_BUDGET_MS = 250
+
+export function shouldPruneDirectory(name: string): boolean {
+  return PRUNE.has(name.toLowerCase())
+}
 
 export interface ScannedDir {
   path: string
@@ -115,19 +135,26 @@ async function gitFileKind(gitFilePath: string): Promise<'worktree' | 'other'> {
  */
 export async function scanDirectories(
   root: string = homedir(),
-  depth: number = SCAN_DEPTH,
+  depthOrOptions: number | ScanOptions = SCAN_DEPTH,
 ): Promise<ScannedDir[]> {
+  const options = typeof depthOrOptions === 'number' ? { depth: depthOrOptions } : depthOrOptions
+  const depth = options.depth ?? (isWholeDiskRoot(root) ? DISK_SCAN_DEPTH : SCAN_DEPTH)
+  const timeBudgetMs = options.timeBudgetMs ?? (isWholeDiskRoot(root) ? DISK_SCAN_BUDGET_MS : 1_000)
+  const now = options.now ?? Date.now
+  const deadline = now() + timeBudgetMs
   const out: ScannedDir[] = []
   let frontier: string[] = [root]
 
   for (let level = 0; level <= depth && frontier.length > 0; level++) {
+    if (now() >= deadline) break
     const next: string[] = []
     // Bounded fan-out per level rather than one promise per directory: a level of a wide home
     // directory is thousands of `readdir`s, and issuing them all at once is how a walk turns into a
     // spike of open file descriptors.
     for (let i = 0; i < frontier.length; i += 64) {
+      if (now() >= deadline) break
       const batch = frontier.slice(i, i + 64)
-      const results = await Promise.all(batch.map(async dir => {
+      const batchRead = Promise.all(batch.map(async dir => {
         try {
           return { dir, entries: await readdir(dir, { withFileTypes: true }) }
         } catch {
@@ -136,8 +163,14 @@ export async function scanDirectories(
           return { dir, entries: [] }
         }
       }))
+      const results = await Promise.race([
+        batchRead,
+        new Promise<null>(resolve => setTimeout(() => resolve(null), Math.max(0, deadline - now()))),
+      ])
+      if (results === null) break
 
       for (const { dir, entries } of results) {
+        if (now() >= deadline) return out
         // `.git` is a DIRECTORY for a repository's own checkout and a FILE for EITHER a linked
         // worktree OR a submodule — the file's own CONTENT is what tells those two apart, so a
         // read only happens for the rare entries that are actually `.git` files (worktrees and
@@ -160,7 +193,7 @@ export async function scanDirectories(
         // A repository's own subdirectories are still worth offering — a monorepo package is a real
         // place to start — so a `.git` does not stop the descent. Only the prune list does.
         for (const e of entries) {
-          if (!e.isDirectory() || PRUNE.has(e.name)) continue
+          if (!e.isDirectory() || shouldPruneDirectory(e.name)) continue
           next.push(join(dir, e.name))
         }
       }

@@ -2,7 +2,7 @@ import React, { lazy, Suspense, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { legacyVaultTarget } from './pages/vault/vaultTabs'
 import AppLayout from './App'
-import { AgentisticsLoader } from './components/AgentisticsLoader'
+import { CenteredLoader } from './components/CenteredLoader'
 import { bootReleased, useBootHold } from './lib/bootSplash'
 
 const HomePage = lazy(() => import('./pages/HomePage'))
@@ -56,11 +56,7 @@ function PageFallback() {
   const [underSplash] = useState(() => !bootReleased())
   useBootHold(underSplash)
   if (underSplash) return null
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 340, padding: 40 }}>
-      <AgentisticsLoader size={56} label="Loading" />
-    </div>
-  )
+  return <CenteredLoader label="Loading" testId="route-loading" />
 }
 
 export default function AppRouter() {

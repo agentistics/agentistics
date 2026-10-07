@@ -16,6 +16,7 @@ import { useEffect, useState } from 'react'
 import type { ProjectKind } from '@agentistics/core'
 import { SEARCH_DEBOUNCE_MS } from '../lib/projectTabs'
 import type { HarnessAnswer } from '../lib/wizardSteps'
+import { fetchFleetNewWithRetry } from '../lib/fleetNewRetry'
 
 export interface FleetProjectOption {
   path: string
@@ -35,6 +36,7 @@ export interface FleetNewOptions {
   /** How many places of each kind MATCHED, before the server's per-kind cap. `undefined` means this
    *  server does not say. */
   projectTotals: Record<ProjectKind, number> | undefined
+  projectIndexing: boolean
   /** The field's own value — answers instantly, one keystroke behind the actual search. */
   query: string
   setQuery: (q: string) => void
@@ -42,16 +44,21 @@ export interface FleetNewOptions {
   searching: boolean
   /** The server's sentence for why it cannot offer anything (`FleetNewOptions.unavailable`). */
   unavailable: string | undefined
+  retry: () => void
+  retryable: boolean
 }
 
 export function useFleetNewOptions(lang: 'pt' | 'en'): FleetNewOptions {
   const [harnesses, setHarnesses] = useState<HarnessAnswer[] | null>(null)
   const [projects, setProjects] = useState<FleetProjectOption[]>([])
   const [projectTotals, setProjectTotals] = useState<Record<ProjectKind, number> | undefined>(undefined)
+  const [projectIndexing, setProjectIndexing] = useState(false)
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [searching, setSearching] = useState(false)
   const [unavailable, setUnavailable] = useState<string | undefined>(undefined)
+  const [retryNumber, setRetryNumber] = useState(0)
+  const [retryable, setRetryable] = useState(false)
 
   useEffect(() => {
     if (query === debouncedQuery) return
@@ -62,29 +69,43 @@ export function useFleetNewOptions(lang: 'pt' | 'en'): FleetNewOptions {
 
   useEffect(() => {
     let alive = true
+    const controller = new AbortController()
+    setUnavailable(undefined)
+    setRetryable(false)
+    setHarnesses(null)
     const load = async () => {
       try {
-        const res = await fetch(`/api/fleet/new?lang=${lang}&q=${encodeURIComponent(debouncedQuery)}`)
-        if (!res.ok || !alive) return
-        const json = await res.json() as {
+        const json = await fetchFleetNewWithRetry<{
           harnesses: HarnessAnswer[]; projects: FleetProjectOption[]
           projectTotals?: Record<ProjectKind, number>
+          projectIndexing?: boolean
           unavailable?: string
-        }
+        }>(`/api/fleet/new?lang=${lang}&q=${encodeURIComponent(debouncedQuery)}`, { signal: controller.signal })
         if (!alive) return
         setHarnesses(json.harnesses)
         setProjects(json.projects)
         setProjectTotals(json.projectTotals)
+        setProjectIndexing(json.projectIndexing === true)
         setUnavailable(json.unavailable)
       } catch {
-        /* transient — the picker keeps what it had, which is better than an empty list */
+        if (alive) {
+          setHarnesses([])
+          setProjects([])
+          setProjectTotals(undefined)
+          setProjectIndexing(false)
+          setUnavailable(lang === 'pt'
+            ? 'Não consegui ver o que está instalado.'
+            : 'I could not see what is installed.')
+          setRetryable(true)
+        }
       } finally {
         if (alive) setSearching(false)
       }
     }
     void load()
-    return () => { alive = false }
-  }, [lang, debouncedQuery])
+    return () => { alive = false; controller.abort() }
+  }, [lang, debouncedQuery, retryNumber])
 
-  return { harnesses, projects, projectTotals, query, setQuery, searching, unavailable }
+  return { harnesses, projects, projectTotals, projectIndexing, query, setQuery, searching, unavailable,
+    retry: () => setRetryNumber(n => n + 1), retryable }
 }

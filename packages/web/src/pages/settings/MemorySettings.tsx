@@ -9,6 +9,7 @@ import { useOutletContext } from 'react-router-dom'
 import type { AppContext } from '../../lib/app-context'
 import { memoryGroups, type MemoryFactWire } from '../../lib/memoryView'
 import { SectionHeader } from './primitives'
+import { CenteredLoader } from '../../components/CenteredLoader'
 
 export default function MemorySettings() {
   const { lang } = useOutletContext<AppContext>()
@@ -49,7 +50,7 @@ export default function MemorySettings() {
           : 'What native sessions remember from one session to the next: facts you asked for (/remember) or approved. Each repository sees only its own. Nothing leaves this machine.'}
       </p>
       {error && <div role="alert" style={{ fontSize: 12.5, color: 'var(--accent-red)' }}>{error}</div>}
-      {facts === null && <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>…</div>}
+      {facts === null && <CenteredLoader size={40} label={pt ? 'Carregando' : 'Loading'} testId="memory-loading" />}
       {facts !== null && groups.length === 0 && !error && (
         <div data-testid="memory-empty" style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{pt ? 'Nada lembrado ainda.' : 'Nothing remembered yet.'}</div>
       )}

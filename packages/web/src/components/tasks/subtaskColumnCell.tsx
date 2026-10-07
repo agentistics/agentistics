@@ -83,7 +83,7 @@ export function subtaskColumnCell(
       return <ModelCellView sessions={ctx.sessions.filter(s => s.subtaskId === t.id)} />
     case 'cost': {
       const r = subtaskRollupOf(ctx.subtaskRollups, t)
-      return <CostCellView r={r} cost={costCellFor(r)} money={ctx.money} />
+      return <CostCellView r={r} cost={costCellFor(r)} money={ctx.money} lang={ctx.lang} />
     }
     case 'tokens': {
       const r = subtaskRollupOf(ctx.subtaskRollups, t)

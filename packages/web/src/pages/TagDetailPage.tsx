@@ -17,6 +17,7 @@ import { HARNESS_LABELS } from '../lib/harness'
 import { ConfirmModal, SectionHeader } from './settings/primitives'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { StatTile, STAT_TILE_GRID } from '../components/StatTile'
+import { CenteredLoader } from '../components/CenteredLoader'
 
 // GET /api/tags/:id response. Aggregate-only by design (spec rule 2): the server never sends the
 // session rows behind a tag, so every value rendered here is a count or a sum it already computed.
@@ -284,9 +285,7 @@ export default function TagDetailPage() {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         {back}
-        <div style={{ ...card, fontSize: 12.5, color: 'var(--text-tertiary)' }}>
-          {pt ? 'Carregando…' : 'Loading…'}
-        </div>
+        <CenteredLoader size={40} label={pt ? 'Carregando' : 'Loading'} testId="tag-loading" />
       </div>
     )
   }

@@ -32,7 +32,7 @@ import {
   NA, PRIORITY, button, claimLeft, field, fmtDateTime, fmtInt, fmtStamp, fmtTokens, harnessColor, liveStatusMap,
   liveStatusOrder, microLabel, NO_TYPE_KEY, numeric, pill, statusStyle, surface, typeStyle, type BoardStatus, type ColumnId,
 } from './board'
-import { useMoney, type Money } from './money'
+import { copilotCreditsTooltip, formatTaskCost, useMoney, type Money } from './money'
 import {
   nextSort, PRIORITY_ORDER, sortRows,
   type SortKey, type SubtaskSortKey, type SubtaskSortSpec, type TaskPriorityId,
@@ -73,7 +73,7 @@ import { EMPTY_SUBTASK_FILTER, filterSubtaskRows, type SubtaskFilterState } from
 import { SubtaskFilterMenu } from './SubtaskFilterMenu'
 import { PickerMenu } from './PickerMenu'
 import { ViewBar, ViewSortMenu, segmentBadge, viewSegment } from './ViewBar'
-import { subtaskGridLayout } from './subtaskGridLayout'
+import { SUBTASK_TITLE_ID, subtaskGridWidths } from './subtaskGridLayout'
 import { TaskProgressBar } from './TaskProgressBar'
 import { CommentCountButton, CommentThreadDialog } from './CommentThreadDialog'
 import { HarnessBadges } from './HarnessBadges'
@@ -305,9 +305,12 @@ function cellFor(
       )
     }
     case 'rounds': return <Num v={r.rounds} />
-    case 'cost': return r.mixedCurrency || (r.credits !== null && r.costUSD === null)
-      ? <span style={{ ...numeric, fontSize: 12 }}>{r.credits!.premiumRequests} req</span>
-      : <span style={{ ...numeric, fontSize: 12, color: r.costUSD === null ? 'var(--text-tertiary)' : 'var(--anthropic-orange)' }}>{money(r.costUSD, r.costByHarness)}</span>
+    case 'cost': return (
+      <span
+        style={{ ...numeric, fontSize: 12, color: r.costUSD === null && r.credits === null ? 'var(--text-tertiary)' : 'var(--anthropic-orange)' }}
+        title={r.credits ? copilotCreditsTooltip(r.credits.premiumRequests, lang) : undefined}
+      >{formatTaskCost(money, r.costUSD, r.credits, r.costByHarness)}</span>
+    )
     case 'tokens': return <span style={{ ...numeric, fontSize: 12, color: r.tokens === null ? 'var(--text-tertiary)' : undefined }}>{fmtTokens(r.tokens)}</span>
     case 'harnesses': return <HarnessBadges harnesses={row.harnesses} />
     case 'subtasks': return row.counts.subtasks === 0
@@ -419,8 +422,8 @@ function SubtaskRows({
   // 1 (leading) + 1 (title) + `subtaskCols.length` named cells + filler must equal `mainCols + 2` —
   // the task row above is [leading][title][mainCols…], and the leading column is there in BOTH
   // modes (Select only adds the checkbox INSIDE it), so this arithmetic does not depend on whether
-  // rows are being picked. See `subtaskGridLayout.ts` — the caller decides `inline` vs `nested`
-  // from this same pair before ever reaching this component.
+  // rows are being picked. The caller always draws these rows inside the subtask grid's OWN table
+  // (`subtaskGridLayout.ts`) with `mainCols` equal to `subtaskCols.length`, so the filler is 0.
   const filler = Math.max(0, mainCols - subtaskCols.length)
   // See `SubtaskTable`'s own doc comment for the full §F.1 clustering reasoning — this mirrors it
   // exactly, over the same `subtasks` pool (already scoped to one delivery): a member renders
@@ -487,7 +490,7 @@ function SubtaskRows({
               leaving a ~50px gap between the gear button and the title nobody asked for); the
               member's own +20 offset is unchanged, so a member still sits exactly as far under its
               group as it always did. */}
-          <td style={{ ...cellBox, paddingLeft: indent + (depth === 1 ? 20 : 0), ...tint }}>
+          <td data-subtask-col={SUBTASK_TITLE_ID} style={{ ...cellBox, paddingLeft: indent + (depth === 1 ? 20 : 0), ...tint }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', rowGap: 4 }}>
               {/* Same accordion toggle as `SubtaskTable`'s inline view — collapsed by default. */}
               {isGroupHeader && (
@@ -600,7 +603,7 @@ function SubtaskRows({
                   </span>
                 )}
                 {id === 'model' && <ModelCellView sessions={directSessions} />}
-                {id === 'cost' && <CostCellView r={directView.rollup} cost={costCellFor(directView.rollup)} money={money} />}
+                {id === 'cost' && <CostCellView r={directView.rollup} cost={costCellFor(directView.rollup)} money={money} lang={lang} />}
                 {id === 'tokens' && <TokensCellView tok={tokensCellFor(directView.rollup)} />}
               </td>
             )
@@ -818,12 +821,23 @@ export function TaskTable(p: TaskTableProps) {
       onFit={() => fitColumn(id)}
     />
   )
-  const subtaskWidths = useMemo(() => {
-    const defs = shownSubtaskCols.map(id => SUBTASK_COLUMNS.find(c => c.id === id)!).filter(Boolean)
-    const w = resolveWidths(defs, savedSubtaskWidths)
-    if (draggingSubtaskWidth) w[draggingSubtaskWidth.id] = draggingSubtaskWidth.w
-    return w
-  }, [shownSubtaskCols, savedSubtaskWidths, draggingSubtaskWidth])
+  // The SUBTASK grid's own widths (`subtaskGridLayout.ts`) — its own table, never the delivery
+  // table's columns, so nothing the delivery table does moves them.
+  const subtaskGrid = useMemo(
+    () => subtaskGridWidths(shownSubtaskCols, savedSubtaskWidths, draggingSubtaskWidth),
+    [shownSubtaskCols, savedSubtaskWidths, draggingSubtaskWidth],
+  )
+  const subtaskWidths = subtaskGrid.cols
+  const anyCustomWidth = hasCustomWidths(savedWidths) || hasCustomWidths(savedSubtaskWidths)
+  // Each band's scroller publishes its VISIBLE width (`--ag-band-w`), so an expanded subtask grid
+  // can be bounded by what is on screen rather than by the delivery table's full scroll width.
+  const trackVisibleWidth = (el: HTMLDivElement | null) => {
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => el.style.setProperty('--ag-band-w', `${el.clientWidth}px`))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }
+  const subtaskWidthOf = (id: string): number => (id === SUBTASK_TITLE_ID ? subtaskGrid.title : subtaskWidths[id]!)
   const fitSubtaskColumn = (id: string) => {
     const nodes = [
       ...Array.from(document.querySelectorAll<HTMLElement>(`[data-subtask-col="${id}"]`)),
@@ -833,22 +847,13 @@ export function TaskTable(p: TaskTableProps) {
   }
   const subtaskResizeHandle = (id: string) => (
     <ColResizeHandle
-      width={subtaskWidths[id]!}
+      width={subtaskWidthOf(id)}
       mobile={isMobile}
       title={L.resizeColumn}
       onChange={w => setDraggingSubtaskWidth({ id, w })}
       onCommit={w => { setDraggingSubtaskWidth(null); setSavedSubtaskWidths({ ...savedSubtaskWidths, [id]: w }) }}
       onFit={() => fitSubtaskColumn(id)}
     />
-  )
-  // How few shown columns it takes before an expanded delivery's subtasks no longer fit as rows of
-  // THIS table without overshooting the main row's own width — see `subtaskGridLayout.ts`. Every
-  // row's column count is the same `cols.length`, so this is decided once for the whole table
-  // rather than per expanded row. Moves with `shownSubtaskCols.length` too: narrowing the subtask
-  // grid's own columns is exactly what lets a narrower main table stay `inline`.
-  const gridLayout = useMemo(
-    () => subtaskGridLayout(cols.length, shownSubtaskCols.length),
-    [cols.length, shownSubtaskCols.length],
   )
 
   // Every group is BUILT, even a hidden one: the chooser needs its count to say what it is hiding.
@@ -1081,10 +1086,11 @@ export function TaskTable(p: TaskTableProps) {
         </ViewBar>
         <button
           type="button"
-          onClick={() => setSavedWidths({})}
-          disabled={!hasCustomWidths(savedWidths)}
+          // Both grids: a subtask width a person dragged must be undoable from here too.
+          onClick={() => { setSavedWidths({}); setSavedSubtaskWidths({}) }}
+          disabled={!anyCustomWidth}
           title={L.resetColumnWidths} aria-label={L.resetColumnWidths}
-          style={{ ...TRIGGER, ...(hasCustomWidths(savedWidths) ? {} : { opacity: 0.5, cursor: 'default' }) }}
+          style={{ ...TRIGGER, ...(anyCustomWidth ? {} : { opacity: 0.5, cursor: 'default' }) }}
         >
           <RotateCcw size={13} /> {isMobile ? '' : L.resetColumnWidths}
         </button>
@@ -1137,7 +1143,7 @@ export function TaskTable(p: TaskTableProps) {
             </div>
 
             {!isFolded && (
-              <div style={{ overflowX: 'auto' }}>
+              <div ref={trackVisibleWidth} style={{ overflowX: 'auto' }}>
                 <table style={{
                   width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed',
                   minWidth: g.rows.length === 0 ? 0 : tableMinWidth(leadWidth, 280, widths, cols.map(c => c.id)),
@@ -1197,11 +1203,9 @@ export function TaskTable(p: TaskTableProps) {
                       const subs = filterSubtaskRows(
                         detail?.subtasks ?? [], detail?.sessions ?? [], subtaskFilter,
                       )
-                      // The sub-header row, `SubtaskRows` and the "+ Add subtask" row, sized against
-                      // `effectiveCols` — the REAL `cols.length` when they are drawn as rows of this
-                      // table (`gridLayout.mode === 'inline'`), or `shownSubtaskCols.length` when
-                      // they are drawn inside their OWN nested table (see `subtaskGridLayout.ts`),
-                      // which is what makes their filler come out to zero in that case.
+                      // The sub-header row, `SubtaskRows` and the "+ Add subtask" row, drawn inside
+                      // the subtask grid's OWN table (`subtaskGridLayout.ts`) and sized against its
+                      // own column count, which is what makes their filler come out to zero.
                       const renderSubtaskGrid = (effectiveCols: number) => (
                         <>
                           <tr style={{ background: 'var(--bg-surface)' }}>
@@ -1216,9 +1220,11 @@ export function TaskTable(p: TaskTableProps) {
                                 { ...m, [row.task.id]: pickSubtaskSort(sort, m[row.task.id] ?? null, k) }
                               ))}
                               title={L.sortByColumn.replace('{column}', copy.subtasks)}
+                              dataCol={`subtask-${SUBTASK_TITLE_ID}`}
+                              handle={subtaskResizeHandle(SUBTASK_TITLE_ID)}
                               style={{
                                 ...microLabel, fontWeight: 600, padding: '5px 10px', whiteSpace: 'nowrap',
-                                paddingLeft: 0,
+                                paddingLeft: 0, textAlign: 'left',
                               }}
                             />
                             {shownSubtaskCols.map(id => {
@@ -1443,36 +1449,37 @@ export function TaskTable(p: TaskTableProps) {
                           </tr>
 
                           {open && (
-                            gridLayout.mode === 'inline'
-                              ? renderSubtaskGrid(cols.length)
-                              : (
-                                // Fewer main columns shown than the subtask grid's own current
-                                // column count: its fixed cells alone would already overshoot the
-                                // main row's `cols.length + 2`, so instead of drawing more rows of
-                                // THIS table it gets ONE row — a leading cell plus a single cell
-                                // spanning the rest (matching the "+ Add subtask" row's own
-                                // `colSpan={cols.length + 1}` right below it) — holding its own
-                                // nested table, sized as though there were exactly
-                                // `shownSubtaskCols.length` columns (so ITS filler comes out to
-                                // zero) and scrolling horizontally inside itself rather than ever
-                                // widening the outer one.
-                                <tr style={{ background: 'var(--bg-surface)' }}>
-                                  <td style={{ padding: '5px 10px' }} />
-                                  <td colSpan={cols.length + 1} style={{ padding: '6px 10px' }}>
-                                    <div style={{ overflowX: 'auto' }}>
-                                      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: tableMinWidth(1, 280, subtaskWidths, shownSubtaskCols) }}>
-                                        <colgroup>
-                                          <col style={{ width: 1 }} />
-                                          <col style={{ width: 280 }} />
-                                          {shownSubtaskCols.map(id => <col key={id} style={{ width: subtaskWidths[id] }} />)}
-                                          <col style={{ width: 88 }} />
-                                        </colgroup>
-                                        <tbody>{renderSubtaskGrid(shownSubtaskCols.length)}</tbody>
-                                      </table>
-                                    </div>
-                                  </td>
-                                </tr>
-                              )
+                            // The subtasks are ONE row of this table — a leading cell plus a single
+                            // cell spanning the rest — holding their OWN table at its own exact
+                            // width (`subtaskGridLayout.ts`). They used to be rows of THIS table
+                            // whenever enough delivery columns were shown, and then this table's
+                            // fixed `<colgroup>` sized them: every subtask column sat under some
+                            // delivery column and a dragged subtask border changed nothing. Wider
+                            // than the row, the grid scrolls sideways inside itself.
+                            <tr style={{ background: 'var(--bg-surface)' }}>
+                              <td style={{ padding: '5px 10px' }} />
+                              <td colSpan={cols.length + 1} style={{ padding: '6px 10px' }}>
+                                {/* Pinned to the VISIBLE part of the band: when the delivery
+                                    table itself is wider than the screen and scrolled sideways,
+                                    the subtask grid stays in view and scrolls on its own. */}
+                                <div style={{
+                                  overflowX: 'auto', position: 'sticky', insetInlineStart: 0,
+                                  maxWidth: `calc(var(--ag-band-w, 100%) - ${leadWidth + 20}px)`,
+                                }}>
+                                  <table
+                                    data-subtask-grid
+                                    style={{ width: subtaskGrid.total, borderCollapse: 'collapse', tableLayout: 'fixed' }}
+                                  >
+                                    <colgroup>
+                                      <col style={{ width: subtaskGrid.lead }} />
+                                      <col style={{ width: subtaskGrid.title }} />
+                                      {shownSubtaskCols.map(id => <col key={id} style={{ width: subtaskWidths[id] }} />)}
+                                    </colgroup>
+                                    <tbody>{renderSubtaskGrid(shownSubtaskCols.length)}</tbody>
+                                  </table>
+                                </div>
+                              </td>
+                            </tr>
                           )}
                         </React.Fragment>
                       )

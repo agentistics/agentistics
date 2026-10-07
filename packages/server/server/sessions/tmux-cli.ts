@@ -307,6 +307,31 @@ export function listSessionsArgs(socket?: string): string[] {
 }
 
 /**
+ * Every pane's pid, on OUR server. It used to be a bare `tmux list-panes -a`, which asks whichever
+ * server `$TMUX` names or, with none, the `default` socket — never `agentop`. Under systemd (no
+ * `$TMUX`) that is an empty server, so no row ever had a pid and antigravity's conversation link,
+ * which is read off `/proc/<pid>/fd`, never formed: its chat stayed blank while the terminal answered.
+ */
+export function listPanePidsArgs(socket?: string): string[] {
+  return sock(['list-panes', '-a', '-F', '#{session_name}\t#{pane_pid}'], socket)
+}
+
+/** PURE. `listPanePidsArgs`' output -> managed id -> pane pid. Not-ours and malformed lines are dropped. */
+export function parsePanePids(out: string): Map<string, number> {
+  const map = new Map<string, number>()
+  for (const raw of out.split('\n')) {
+    const line = raw.trim()
+    if (!line) continue
+    const [name, pidStr] = line.split('\t')
+    if (!name || !pidStr) continue
+    const id = idFromTmuxName(name)
+    const pid = Number(pidStr)
+    if (id && Number.isFinite(pid) && pid > 0) map.set(id, pid)
+  }
+  return map
+}
+
+/**
  * How many lines of scrollback each pane keeps.
  *
  * tmux's own default is 2000, which for an assistant transcript is a few minutes of work: attaching

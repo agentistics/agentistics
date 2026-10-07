@@ -32,7 +32,7 @@
 
 import { useCallback } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { fmtCost } from '@agentistics/core'
+import { COPILOT_PREMIUM_REQUEST_USD, fmtCost } from '@agentistics/core'
 import { NA } from './board'
 import { splitPlanFactor, viewCost } from '../../lib/costBasis'
 import type { AppContext } from '../../lib/app-context'
@@ -41,6 +41,26 @@ import type { AppContext } from '../../lib/app-context'
 export type CostSplit = Readonly<Record<string, number>> | null | undefined
 
 export type Money = (usd: number | null | undefined, byHarness: CostSplit) => string
+
+export type PremiumRequests = { premiumRequests: number } | null | undefined
+
+/** Sum the app's USD cost with Copilot credits priced at the public overage rate. */
+export function taskCostUSD(usd: number | null, credits: PremiumRequests): number | null {
+  if (credits === null || credits === undefined) return usd
+  return (usd ?? 0) + credits.premiumRequests * COPILOT_PREMIUM_REQUEST_USD
+}
+
+export function copilotCreditsTooltip(n: number, lang: 'pt' | 'en'): string {
+  return lang === 'pt'
+    ? `Inclui ${n} pedidos premium do Copilot, estimados ao preço avulso`
+    : `Includes ${n} Copilot premium requests, estimated at the pay-as-you-go price`
+}
+
+/** The one display rule shared by every task cost surface. */
+export function formatTaskCost(money: Money, usd: number | null, credits: PremiumRequests, byHarness: CostSplit): string {
+  const formatted = money(taskCostUSD(usd, credits), byHarness)
+  return credits === null || credits === undefined ? formatted : `≈${formatted}`
+}
 
 /** The formatter with nothing to read the preference from — dollars, unconverted. */
 export const usdOnly: Money = n => (n === null || n === undefined ? NA : fmtCost(n))

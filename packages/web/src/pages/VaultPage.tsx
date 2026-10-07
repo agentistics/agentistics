@@ -1,4 +1,5 @@
 import { AgentisticsLoader } from '../components/AgentisticsLoader'
+import { CenteredLoader } from '../components/CenteredLoader'
 /**
  * /vault — the ONE vault page (VAULT v4, owner-approved 2026-10-06: "tá perfeito! implementa exatamente
  * assim"). Locked: only the centred safe and its way in (the safe IS the title). Unlocked: the page
@@ -139,7 +140,7 @@ export default function VaultPage() {
     </div>
   )
 
-  if (state.kind === 'loading') return <div style={pageWrap}>{header}<div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}><AgentisticsLoader size={14} /></div></div>
+  if (state.kind === 'loading') return <div style={{ ...pageWrap, minHeight: '100%', display: 'flex', flexDirection: 'column' }}><CenteredLoader size={56} label={t('title')} testId="vault-loading" /></div>
   if (state.kind === 'failed') return <div style={pageWrap}>{header}<Err text={t('network')} /></div>
   if (state.kind === 'locked') {
     // §10: unlock RIGHT HERE — Hello on this computer, the phone's own ways on a phone — under a centred

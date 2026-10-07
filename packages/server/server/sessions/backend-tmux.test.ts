@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { pasteWriteArgs } from './backend-tmux'
+import { pasteWriteArgs, utf8LocaleEnv } from './backend-tmux'
 import { TMUX_SOCKET } from './tmux-cli'
 
 /**
@@ -31,6 +31,16 @@ describe('pasteWriteArgs — the argv shape (fleet socket, distinct from the She
   test('bracketed: the paste-buffer call carries `-p`, requesting bracketed paste from tmux', () => {
     const { pasteArgs } = pasteWriteArgs('s1', 'anything')
     expect(pasteArgs).toContain('-p')
+  })
+})
+
+describe('utf8LocaleEnv — tmux output is locale-stable', () => {
+  test('fills both locale variables when a service supplies neither', () => {
+    expect(utf8LocaleEnv({ PATH: '/bin' })).toMatchObject({ PATH: '/bin', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' })
+  })
+
+  test('preserves explicitly configured locales', () => {
+    expect(utf8LocaleEnv({ LANG: 'pt_BR.UTF-8', LC_ALL: 'pt_BR.UTF-8' })).toMatchObject({ LANG: 'pt_BR.UTF-8', LC_ALL: 'pt_BR.UTF-8' })
   })
 })
 
@@ -83,4 +93,16 @@ describe('coldStartArgv — the tmux server is born in a scope of its own', () =
     expect(coldStartArgv(['x'], { platform: 'linux', hasUserBus: true })).toBeNull()
     expect(coldStartArgv(['x'], { platform: 'darwin', runtimeDir: '/tmp', hasUserBus: true })).toBeNull()
   })
+})
+
+/**
+ * Every server-addressed tmux call must name OUR socket. `listPanePids` once ran a literal
+ * `tmux(['list-panes', …])` with no `-L`, which asked the ambient server ($TMUX, or `default` under
+ * systemd): no row had a pid, so antigravity's conversation link never formed and its chat was blank.
+ * A literal argv array is the shape of that bug; `-V` is the one call that needs no server.
+ */
+test('backend-tmux never calls tmux with a literal argv (no socket)', async () => {
+  const src = await Bun.file(new URL('./backend-tmux.ts', import.meta.url)).text()
+  const literal = [...src.matchAll(/\btmux\(\s*\[([^\]]*)\]/g)].map(m => m[1]!.trim())
+  expect(literal).toEqual(["'-V'"])
 })
