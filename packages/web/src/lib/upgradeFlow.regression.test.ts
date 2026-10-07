@@ -30,7 +30,11 @@ function install(fetchImpl: (url: string, init?: RequestInit) => Promise<Respons
 beforeEach(() => resetFlow())
 afterEach(() => {
   globalThis.fetch = real.fetch
-  for (const k of ['window', 'sessionStorage', 'caches'] as const) (globalThis as any)[k] = real[k]
+  // Assigning `undefined` leaves the KEY behind, and other suites decide "is there a DOM" with
+  // `'window' in globalThis` — so a missing original is deleted, not restored as undefined.
+  for (const k of ['window', 'sessionStorage', 'caches'] as const) {
+    if (real[k] === undefined) delete (globalThis as any)[k]; else (globalThis as any)[k] = real[k]
+  }
   resetFlow()
 })
 
