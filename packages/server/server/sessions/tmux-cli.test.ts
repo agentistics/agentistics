@@ -8,7 +8,7 @@ import {
   serverOptionsArgs, HISTORY_LIMIT, PANE_COLS, PANE_ROWS,
   resolveDefaultTerminal, resolveTruecolorTerm, spawnArgs,
   type TerminalProfile, tmuxListIsEmptyState, SHELL_SOCKET, TMUX_SOCKET, listSessionsArgs, resizeWindowArgs,
-  pasteBufferName, setBufferArgs, pasteBufferArgs,
+  pasteBufferName, setBufferArgs, pasteBufferArgs, listPanePidsArgs, parsePanePids,
 } from './tmux-cli'
 
 /** A colour-neutral profile: neither a 256-colour terminfo entry nor a truecolor invoker. */
@@ -479,5 +479,26 @@ describe('resizeWindowArgs', () => {
     // the same reason every other builder takes this argument.
     expect(resizeWindowArgs('abc', { cols: 80, rows: 24 }, SHELL_SOCKET).slice(0, 2))
       .toEqual(['-L', SHELL_SOCKET])
+  })
+})
+
+describe('listPanePidsArgs — the pane pids come from OUR server, never the ambient one', () => {
+  // A bare `tmux list-panes -a` asks whichever server $TMUX names, or the `default` socket when
+  // there is none. Under systemd that is an empty server, so no agentop row ever had a pid: the
+  // antigravity conversation link (`/proc/<pid>/fd`) never formed and its chat stayed blank.
+  it('targets the fleet socket by default', () => {
+    expect(listPanePidsArgs().slice(0, 2)).toEqual(['-L', TMUX_SOCKET])
+    expect(listPanePidsArgs()).toContain('list-panes')
+    expect(listPanePidsArgs()).toContain('-a')
+  })
+  it('targets a given socket', () => {
+    expect(listPanePidsArgs(SHELL_SOCKET).slice(0, 2)).toEqual(['-L', SHELL_SOCKET])
+  })
+})
+
+describe('parsePanePids', () => {
+  it('keys our sessions by id and drops everything else', () => {
+    const m = parsePanePids('agentop-a1\t123\nmy-own\t9\nagentop-b2\tnope\n\nagentop-c3\t0\n')
+    expect([...m]).toEqual([['a1', 123]])
   })
 })

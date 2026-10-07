@@ -13,7 +13,7 @@ import {
   tmuxListIsEmptyState,
   resolveDefaultTerminal, resolveTruecolorTerm, spawnArgs, sendKeysNamedArgs, sendKeysLiteralArgs, sendKeysNamedSequenceArgs,
   clearHistoryArgs, pasteBufferName, setBufferArgs, pasteBufferArgs,
-  showPrefixArgs, trimCapture,
+  showPrefixArgs, trimCapture, listPanePidsArgs, parsePanePids,
   type TerminalProfile,
 } from './tmux-cli'
 import { dependencyCommandLine } from './dependency-plan'
@@ -715,19 +715,7 @@ export const tmuxBackend: SessionBackend = {
   },
 
   async listPanePids(): Promise<Map<string, number>> {
-    const { out } = await tmux(['list-panes', '-a', '-F', '#{session_name}\t#{pane_pid}'])
-    const map = new Map<string, number>()
-    for (const raw of out.split('\n')) {
-      const line = raw.trim()
-      if (!line) continue
-      const [name, pidStr] = line.split('\t')
-      if (!name || !pidStr) continue
-      const id = idFromTmuxName(name)
-      const pid = Number(pidStr)
-      if (id && Number.isFinite(pid) && pid > 0) {
-        map.set(id, pid)
-      }
-    }
-    return map
+    const { out } = await tmux(listPanePidsArgs())
+    return parsePanePids(out)
   },
 }
