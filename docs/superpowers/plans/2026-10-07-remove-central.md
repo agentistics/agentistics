@@ -278,7 +278,8 @@ central installs**. The removal is plain deletion. Consequences, stated so nobod
   files. **No frozen path needs to change** → no `[ES.4]` exception needed.
 - `packages/core/src/canonical/**`: no central field. `projection-client.ts` documents a 409
   "central" refusal → remove that branch (the server stops emitting it).
-- Engine slot/`RESERVED_PREFIXES`: unaffected.
+- Engine slot/`RESERVED_PREFIXES`: unaffected. `HostApi.caps` and `originPolicy()` stay in the
+  contract; after D5 the host passes every capability `true` and `allowedOrigins: []`.
 
 ---
 
@@ -316,8 +317,8 @@ call, member side before central side) so every intermediate commit compiles and
 | 6 | Central side (server) | every `TEAM_CENTRAL` branch in `index.ts` (keep the non-central bodies unconditionally), routes §1.4, auth gate + `AUTH_PUBLIC` + `authz-gate.test.ts`, IAM/accounts/teams/org-team/bootstrap/passwords/MFA/TOTP/reset/rate-limit, step-up reduced to the vault's use, Mongo + `mongo-dates` (move the revive helper to `tags-local-store`), `tags-store`/`tags-authority` central sources, remaining `team-*`, `central-config/branding/reach`, `INGEST_ONLY`, OIDC, `TEAM_MODE` folder union, env vars §1.2, `central` inputs of `daemon-plan`/`upgrade-gate`/gates, `exposure.ts` + `capability-guard.ts` + `client-ip.ts` + `TRUST_PROXY`/`ALLOWED_ORIGINS` (D5, no replacement logic; engine host `caps` = all true, `originPolicy.allowedOrigins` = `[]`), `audit.ts` Mongo sink, `sse.ts` branding swap | 9 |
 | 7 | Contracts leftovers | core `org`, `iam`, `AppData` team caches, `SessionMeta.user`/`ci`, `redact` if orphaned, `projection-client` 409; vault `HOST_PURPOSES` + `sentences.ts`; `backup-plan.ts` central secret rows; `engine/load.ts` (`isCentral: () => false`, no prefs read) + fake engine; engine-api doc comment only | 3 |
 | 8 | Packaging, docs, guard | §1.12 deletions/edits, the 84 specs moved to `agentistics-cloud/docs/archive/central-legacy/` + README (D4, private repo commit), CLAUDE.md + AGENTS.md + README + wiki, casts re-recorded, and **`central-free.lint.test.ts`** grepping packages/scripts/docker/docs/workflows for `central`/`TEAM_CENTRAL`/`team-mode`/`/api/team/`/`agentop member` plus `IN_CONTAINER`/`AGENTISTICS_EXPOSURE`/`ALLOWED_ORIGINS`/`docker compose` outside a tiny allowlist (`engine-api` `isCentral` and its `caps`/`originPolicy` docs) so it cannot come back | 4 |
-| 10 | Binding (only if D6 = yes) | §1.11 bind loopback + tailnet, test pinning it, Settings → phone-access copy updated | 2 |
 | 9 | Engine repo | drop `isCentral` checks + `refusedCentral` strings/tests; bump `engine.pin` ref only (api stays `^1.3.0`) | 1.5 |
+| 10 | Binding (only if D6 = yes) | §1.11 bind loopback + tailnet, test pinning it, Settings → phone-access copy updated | 2 |
 | | **Total** | | **≈ 47.5 h** with step 5b, + 2 h if D6 (+ QA §5.2 ≈ 3 h, one release) |
 
 Steps 2–7 touch `index.ts`, `cli-start.ts`, `App.tsx`, `SessionsPage.tsx`; they run one after the
