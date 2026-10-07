@@ -83,8 +83,23 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) 
 
       {open && (
         <div style={{
-          position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 3000,
-          width: 320, maxHeight: 380, overflowY: 'auto',
+          position: isMobile ? 'fixed' : 'absolute',
+          ...(isMobile
+            ? {
+                top: 'max(8px, env(safe-area-inset-top))',
+                left: `max(8px, env(safe-area-inset-left))`,
+                right: `max(8px, env(safe-area-inset-right))`,
+                width: 'auto',
+                maxHeight: 'min(70vh, 520px)',
+              }
+            : {
+                top: '100%',
+                right: 0,
+                marginTop: 6,
+                width: 320,
+                maxHeight: 380,
+              }),
+          zIndex: 3000, overflowY: 'auto',
           background: 'var(--bg-card)', border: '1px solid var(--border)',
           borderRadius: 10, boxShadow: '0 16px 40px rgba(0,0,0,0.45)',
         }}>
