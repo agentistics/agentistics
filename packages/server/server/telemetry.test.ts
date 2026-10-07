@@ -1,10 +1,28 @@
 import { describe, expect, test } from 'bun:test'
-import { makePayload, shouldSendToday, ensureTelemetryId, sendTelemetry } from './telemetry'
+import { activeHarnesses, makePayload, shouldSendToday, ensureTelemetryId, sendTelemetry } from './telemetry'
+import type { SessionMeta } from '@agentistics/core'
 import { mkdtemp, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 describe('anonymous telemetry', () => {
+  const session = (harness: string, at: string): SessionMeta => ({
+    session_id: `${harness}-${at}`,
+    project_path: '/repo',
+    start_time: at,
+    user_message_timestamps: [at],
+    harness,
+  } as SessionMeta)
+
+  test('reports harnesses with activity in the last seven days only', () => {
+    const now = Date.parse('2026-10-07T12:00:00.000Z')
+    expect(activeHarnesses([
+      session('claude', '2026-10-06T12:00:00.000Z'),
+      session('codex', '2026-09-29T12:00:00.000Z'),
+    ], now)).toEqual(['claude'])
+    expect(activeHarnesses([], now)).toEqual([])
+  })
+
   test('persists one random install id', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'agentistics-telemetry-'))
     const path = join(dir, 'telemetry.json')
