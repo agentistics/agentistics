@@ -1,7 +1,8 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { readdir } from 'fs/promises'
-import { join } from 'path'
+import { join, resolve } from 'path'
+import { homedir, tmpdir } from 'os'
 import type { ProjectGitStats } from '@agentistics/core'
 import { openGitStatsCache, NOOP_GIT_STATS_CACHE, type GitStatsCache } from './git-stats-cache'
 import { GIT_STATS_CACHE_FILE } from './config'
@@ -578,6 +579,21 @@ async function statsForRepoRoot(toplevel: string, sinceIso?: string): Promise<Pr
   return run
 }
 
+/**
+ * Directories whose subfolders are never scanned for repositories. A session can run in `/tmp`
+ * or in the home folder itself; the "workspace folder holding several repos" fallback then ran
+ * `git` in every one of hundreds of subdirectories on EVERY data build (every 10–20 s), which kept
+ * the server busy and made the whole app slow (07/10). Such a folder is never a workspace.
+ */
+export const MAX_WORKSPACE_SUBDIRS = 30
+export function isNeverAWorkspace(projectPath: string, env: { home?: string; tmp?: string } = {}): boolean {
+  const p = resolve(projectPath).replace(/\\/g, '/').replace(/\/+$/, '') || '/'
+  const home = resolve(env.home ?? homedir()).replace(/\\/g, '/').replace(/\/+$/, '')
+  const tmp = resolve(env.tmp ?? tmpdir()).replace(/\\/g, '/').replace(/\/+$/, '')
+  if (p === '/' || p === home) return true
+  return [tmp, '/tmp', '/var/tmp', '/private/tmp', '/var/folders'].includes(p)
+}
+
 export async function getProjectGitStats(projectPath: string, sinceIso?: string): Promise<ProjectGitStats | undefined> {
   // The common case: projectPath is inside a git repo. Note what this now does NOT do — a path
   // that IS a repository never falls through to the subdirectory scan below, whatever its stats
@@ -588,6 +604,7 @@ export async function getProjectGitStats(projectPath: string, sinceIso?: string)
 
   // Fallback: projectPath is not itself a repo, so it may be a workspace folder holding several.
   // Scan one level of subdirectories and aggregate across the DISTINCT repositories found.
+  if (isNeverAWorkspace(projectPath)) return undefined
   let entries: { name: string; isDirectory(): boolean }[] = []
   try {
     entries = await readdir(projectPath, { withFileTypes: true })
@@ -596,6 +613,7 @@ export async function getProjectGitStats(projectPath: string, sinceIso?: string)
   }
 
   const subdirs = entries.filter(e => e.isDirectory() && !e.name.startsWith('.')).map(e => join(projectPath, e.name))
+  if (subdirs.length > MAX_WORKSPACE_SUBDIRS) return undefined
   const seenRoots = new Set<string>()
   let combined: ProjectGitStats | undefined
   for (const sub of subdirs) {
