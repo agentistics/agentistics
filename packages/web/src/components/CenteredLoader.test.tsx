@@ -2,13 +2,22 @@ import { expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { CenteredLoader } from './CenteredLoader'
 
-test('centered loader uses both axes and fills its loading surface', () => {
+test('a screen loader is centred on the viewport on both axes', () => {
   const html = renderToStaticMarkup(<CenteredLoader testId="surface" />)
   expect(html).toContain('data-testid="surface"')
-  expect(html).toContain('display:flex')
+  expect(html).toContain('data-placement="screen"')
+  expect(html).toContain('position:fixed')
+  expect(html).toContain('inset:0')
   expect(html).toContain('align-items:center')
   expect(html).toContain('justify-content:center')
-  expect(html).toContain('min-height:100%')
+})
+
+test('an area loader is centred inside its panel', () => {
+  const html = renderToStaticMarkup(<CenteredLoader testId="panel" placement="area" />)
+  expect(html).toContain('data-placement="area"')
+  expect(html).toContain('height:100%')
+  expect(html).toContain('align-items:center')
+  expect(html).not.toContain('position:fixed')
 })
 
 test('fixed loading surfaces all use the shared centering container', async () => {
