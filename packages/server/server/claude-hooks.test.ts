@@ -132,6 +132,35 @@ describe('planHookInstall', () => {
     expect(groups[0].hooks[0]).toEqual({ type: 'command', command: CMD, timeout: 42 })
   })
 
+  test('refreshes a stale binary path without touching unrelated user hooks, and is idempotent', () => {
+    const before = {
+      hooks: {
+        SessionStart: [{
+          matcher: 'startup',
+          hooks: [
+            { type: 'command', command: '/old/agentop hooks context --hook-version 2', timeout: 7 },
+            { type: 'command', command: '/home/u/.claude/hooks/user-start.sh' },
+          ],
+        }],
+        Stop: [{ hooks: [{ type: 'command', command: '/home/u/.claude/hooks/user-stop.sh' }] }],
+      },
+      model: 'opus',
+    }
+    const refreshed = planHookInstall(before, hookCommand('/new/agentop', HOOK_VERSION))
+    if (!refreshed.ok) throw new Error('unreachable')
+    expect(refreshed.changed).toBe(true)
+    expect((refreshed.settings as any).hooks.SessionStart[0].hooks).toEqual([
+      { type: 'command', command: hookCommand('/new/agentop'), timeout: 7 },
+      { type: 'command', command: '/home/u/.claude/hooks/user-start.sh' },
+    ])
+    expect((refreshed.settings as any).hooks.Stop).toEqual(before.hooks.Stop)
+    expect((refreshed.settings as any).model).toBe('opus')
+    const second = planHookInstall(refreshed.settings, hookCommand('/new/agentop', HOOK_VERSION))
+    if (!second.ok) throw new Error('unreachable')
+    expect(second.changed).toBe(false)
+    expect(second.settings).toBe(refreshed.settings)
+  })
+
   test('refuses a document it cannot merge into, rather than replacing it', () => {
     expect(planHookInstall('nonsense', CMD)).toEqual({ ok: false, error: { code: 'settings-not-object' } })
     expect(planHookInstall({ hooks: 'yes' }, CMD)).toEqual({ ok: false, error: { code: 'hooks-not-object' } })
