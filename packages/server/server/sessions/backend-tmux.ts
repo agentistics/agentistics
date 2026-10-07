@@ -46,6 +46,16 @@ const DELIVER_DEADLINE_MS = Number(process.env.AGENTISTICS_DELIVER_DEADLINE_MS) 
 /** How much of the pane to read to judge readiness — enough for the input box and its footer. */
 const DELIVER_CAPTURE_LINES = 40
 
+/** Locale for every command this backend starts. tmux formats are parsed as text and must not vary
+ * with the service manager's locale (systemd commonly starts us without LANG/LC_ALL). */
+export function utf8LocaleEnv(env: Record<string, string | undefined> = process.env): Record<string, string> {
+  return {
+    ...Object.fromEntries(Object.entries(env).filter(([, value]) => value !== undefined)) as Record<string, string>,
+    LANG: env.LANG || 'C.UTF-8',
+    LC_ALL: env.LC_ALL || 'C.UTF-8',
+  }
+}
+
 /**
  * The gap between typing a prompt and submitting it, and how long the submit is given to show.
  *
@@ -64,7 +74,7 @@ const SUBMIT_POLL_MS = 60
 /** True when this host has the named terminfo entry (`infocmp` exits 0). Never throws. */
 async function terminfoHas(name: string): Promise<boolean> {
   try {
-    const p = Bun.spawn(['infocmp', name], { stdout: 'ignore', stderr: 'ignore', stdin: 'ignore' })
+    const p = Bun.spawn(['infocmp', name], { stdout: 'ignore', stderr: 'ignore', stdin: 'ignore', env: utf8LocaleEnv() })
     return (await p.exited) === 0
   } catch {
     // No infocmp on PATH — treat every entry as absent, so agentop leaves tmux's own default rather
@@ -95,7 +105,7 @@ async function terminalProfile(): Promise<TerminalProfile> {
 
 async function tmux(args: string[]): Promise<{ code: number; out: string; err: string }> {
   try {
-    const p = Bun.spawn(['tmux', ...args], { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore' })
+    const p = Bun.spawn(['tmux', ...args], { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore', env: utf8LocaleEnv() })
     const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()])
     return { code: await p.exited, out, err }
   } catch {
@@ -138,7 +148,7 @@ async function tmuxStartingServer(args: string[]): Promise<{ code: number; out: 
     const argv = coldStartArgv(args, { platform: process.platform, runtimeDir, hasUserBus })
     if (argv) {
       try {
-        const p = Bun.spawn(argv, { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore' })
+        const p = Bun.spawn(argv, { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore', env: utf8LocaleEnv() })
         const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()])
         const code = await p.exited
         // systemd-run itself could not run the scope (no manager, no permission): tmux never ran,
@@ -486,7 +496,7 @@ export const tmuxBackend: SessionBackend = {
     // VAULT.PERSONAL §8.3: the session's OWN id, so a Claude Code hook inside it can name the grant it
     // acts under. Not a secret (the id is on every fleet row); a value never travels this way — tmux
     // `-e` is visible in `ps`.
-    const env: Record<string, string> = { ...(await sessionEnv()) as Record<string, string>, AGENTOP_MANAGED_ID: req.id }
+    const env: Record<string, string> = { ...utf8LocaleEnv(await sessionEnv()), AGENTOP_MANAGED_ID: req.id }
     // The same id is what an Agentask comment proves it came from (`session-identity.ts`): the MCP
     // derives the proof from a 0600 key file, so no token is ever put on a command line. The key is
     // created here, before the first session that could need it exists.

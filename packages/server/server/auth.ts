@@ -322,7 +322,7 @@ export function handleLogout(_req: Request): Response {
  * may read local transcripts (the route's capability).
  */
 export function projectionsWebOn(env: Record<string, string | undefined>, central: boolean, localTranscripts: boolean): boolean {
-  return !central && localTranscripts && featureOn('projections', env) && projectionSurfaceOn('web', env)
+  return !central && localTranscripts && featureOn('journal', env) && featureOn('projections', env) && projectionSurfaceOn('web', env)
 }
 
 /** The first import's state for the web, or `null` when there is nothing to say. Never throws. */

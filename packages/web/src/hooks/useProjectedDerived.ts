@@ -10,10 +10,11 @@
  * It re-reads whenever `/api/data` was re-read (`stamp`) and whenever the filters change, so the
  * server's push moves both paths together.
  */
-import { useEffect, useState } from 'react'
-import { httpMetricsQuery, ProjectionUnavailable, type Filters } from '@agentistics/core'
+import { useEffect, useRef, useState } from 'react'
+import { httpMetricsQuery, type Filters } from '@agentistics/core'
 import { blendedCostPerToken, getDateRangeFilter } from './useData'
 import { projectedDerived, projectedScope, type ProjectedDerived } from '../lib/projectedDerived'
+import { shouldDisableProjectedOverlay } from './projectedFallback'
 
 export function useProjectedDerived(opts: {
   enabled: boolean
@@ -23,19 +24,22 @@ export function useProjectedDerived(opts: {
 }): ProjectedDerived | null {
   const { enabled, filters, activeOnly, stamp } = opts
   const [overlay, setOverlay] = useState<ProjectedDerived | null>(null)
+  const projectionUnavailable = useRef(false)
   const range = getDateRangeFilter(filters.dateRange, filters.customStart, filters.customEnd)
   const scope = enabled ? projectedScope(filters, activeOnly, range) : null
   const key = scope ? JSON.stringify(scope) : null
   useEffect(() => {
     if (!scope) { setOverlay(null); return }
+    if (projectionUnavailable.current) return
     let live = true
     projectedDerived(httpMetricsQuery(''), scope, blendedCostPerToken)
       .then(o => { if (live) setOverlay(o) })
       .catch(err => {
+        if (shouldDisableProjectedOverlay(err)) projectionUnavailable.current = true
         if (!live) return
         // A refusal or an unreachable route leaves the legacy figures; anything else is a defect,
         // reported to the console rather than swallowed.
-        if (!(err instanceof ProjectionUnavailable)) console.error('[projections] web overlay failed', err)
+        if (!shouldDisableProjectedOverlay(err)) console.error('[projections] web overlay failed', err)
         setOverlay(null)
       })
     return () => { live = false }

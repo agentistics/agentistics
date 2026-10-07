@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { pasteWriteArgs } from './backend-tmux'
+import { pasteWriteArgs, utf8LocaleEnv } from './backend-tmux'
 import { TMUX_SOCKET } from './tmux-cli'
 
 /**
@@ -31,6 +31,16 @@ describe('pasteWriteArgs — the argv shape (fleet socket, distinct from the She
   test('bracketed: the paste-buffer call carries `-p`, requesting bracketed paste from tmux', () => {
     const { pasteArgs } = pasteWriteArgs('s1', 'anything')
     expect(pasteArgs).toContain('-p')
+  })
+})
+
+describe('utf8LocaleEnv — tmux output is locale-stable', () => {
+  test('fills both locale variables when a service supplies neither', () => {
+    expect(utf8LocaleEnv({ PATH: '/bin' })).toMatchObject({ PATH: '/bin', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' })
+  })
+
+  test('preserves explicitly configured locales', () => {
+    expect(utf8LocaleEnv({ LANG: 'pt_BR.UTF-8', LC_ALL: 'pt_BR.UTF-8' })).toMatchObject({ LANG: 'pt_BR.UTF-8', LC_ALL: 'pt_BR.UTF-8' })
   })
 })
 
