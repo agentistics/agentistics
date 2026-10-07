@@ -454,12 +454,9 @@ function fakeHost(opts: Options, apiUrl?: string): ControlHost {
     ...(opts.code ? { editDraft: async (draft: string) => ({ ok: true as const, text: draft, sentence: 'preview — no editor was opened' }) } : {}),
     refresh: async () => fakeStatus(opts, apiUrl),
     start: act,
-    connect: done,
-    disconnect: done,
     restart: act,
     stop: done,
     setMode: done,
-    initCentral: done,
     // `null` is "already answered", so the preview only opens on the consent gate when asked to.
     pendingArchiveMode: async () => (opts.pending ? 'consolidate' : null),
     upgrade: done,

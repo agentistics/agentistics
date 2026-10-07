@@ -96,24 +96,24 @@ export type ServiceState = 'up' | 'down' | 'unknown'
 /**
  * A LOGICAL service — what the user thinks about, and what the list shows one row per.
  *
- * There are two, and only two: the analytics server itself, and the team central. The ways of
- * running each of them are `RuntimeId`s below, and they are NOT services. Listing them as if they
+ * There is one: the analytics server itself. The ways of
+ * running it are `RuntimeId`s below, and they are NOT services. Listing them as if they
  * were is what made the screen offer to start a Docker copy of a server that was already running
  * natively: the same program, the same files, the same port, presented as two independent things
  * the user could start independently. CLAUDE.md states outright that the two must never both run.
  */
-export type ServiceId = 'agentistics' | 'central'
+export type ServiceId = 'agentistics'
 
 /**
  * One concrete way to run a logical service — an implementation detail of the host.
  *
  * `local` is the native process, `machine` is the same program inside a container
- * (docker/machine.yml), and `central` is the team central's container. A `RuntimeId`
+ * (docker/machine.yml). A `RuntimeId`
  * appears in the contract only where an action or a log genuinely has to name ONE of them: the
  * conflict case (both runtimes of `agentistics` up at once), a start option, and the full-screen
  * Logs screen's source selector.
  */
-export type RuntimeId = 'local' | 'machine' | 'central'
+export type RuntimeId = 'local' | 'machine'
 
 /**
  * How a runtime runs — the word a row and a pane badge wear.
@@ -124,27 +124,7 @@ export type RuntimeId = 'local' | 'machine' | 'central'
 export type ServiceRuntime = 'native' | 'docker'
 
 /**
- * One concrete way to BRING UP a central — a second dimension from `RuntimeId`, and not a
- * duplicate of it.
- *
- * `RuntimeId` answers "which of this box's things is this row about"; this answers "which shape of
- * the same central". The three are genuinely different deployments of one program: build the image
- * from a checkout, pull the published one, or run the binary itself with no Docker at all. The
- * cockpit needs the distinction because it offers them as separate start verbs — the screen used
- * to show ONE "Start" whose meaning was inferred from what happened to be on disk, so a user with
- * a clone could not ask for the published image and had nowhere to see why.
- *
- * Declared here rather than imported: the dependency direction is `server -> tui`, so this package
- * may not reach into `packages/server`. `central-runtime.test.ts` cross-checks this union against
- * the server's `CENTRAL_RUNTIMES`, which is what stops the two definitions drifting.
- */
-export type CentralRuntimeId = 'docker-build' | 'docker-image' | 'native'
-
-/**
  * Anything an action or a log read can name: a logical service, or one exact runtime of one.
- *
- * `central` is a member of both halves, which is not an accident and not an ambiguity — the central
- * has exactly one runtime, so naming the service and naming its runtime are the same instruction.
  */
 export type ServiceRef = ServiceId | RuntimeId
 
@@ -205,15 +185,6 @@ export type StartHow = 'fg' | 'bg'
 export interface StartRequest {
   runtime: RuntimeId
   how?: StartHow
-  /**
-   * For `central` only: which SHAPE of central to bring up.
-   *
-   * Absent means "whatever this central is configured with", which is what every start meant
-   * before the cockpit offered the choice — so an existing deployment keeps coming up exactly as
-   * it did. The host turns it into the same `--image` / `--build` / `--native` the CLI takes, so
-   * pressing a verb here and typing the command are one code path.
-   */
-  centralRuntime?: CentralRuntimeId
 }
 
 /**
@@ -1216,10 +1187,7 @@ export interface ControlSessions {
   baseline?: Baseline
 }
 
-export type TeamMode = 'solo' | 'central' | 'member'
-
-/** What the central link is doing — see `ControlStatus.linkState`. */
-export type CentralLinkState = 'ok' | 'stale' | 'offline' | 'unauthorized'
+export type TeamMode = 'solo'
 
 export type ArchiveMode = 'consolidate' | 'full' | 'off'
 
@@ -1263,64 +1231,8 @@ export interface ControlStatus {
      */
     percent: number
   }
-  /**
-   * What this machine is CALLED on the central it pushes to.
-   *
-   * Reported: "uso 1 computador e acesso mais 1 via ssh, e daí não lembro qual agentop é de qual
-   * máquina". Two identical cockpits in two terminals are indistinguishable, and the name already
-   * exists — the central mints it onto the token and the member reads it back from `whoami`. It was
-   * simply never shown.
-   *
-   * Absent in solo mode: there is no central to have named it, and substituting a hostname would be
-   * a different fact wearing the same label.
-   */
-  machineName?: string
-  /**
-   * The ACCOUNT that central knows this machine under.
-   *
-   * Beside the name because the two answer different halves of one question: two machines can be
-   * called `laptop` on two centrals, and the account is what says whose fleet this row belongs to.
-   * Read from the connection the machine actually has (`/api/team/status`), never from a config
-   * value typed here — a name this machine believes and the central does not is the one thing this
-   * cell must not show.
-   */
-  accountName?: string
-  /**
-   * Whether that link is WORKING — decided HERE, because only the host can see the connection.
-   *
-   * A name and a latency say a connection was configured and once answered; neither says it is
-   * alive now, and that was the whole of what the header could show. `stale` is its own answer
-   * rather than folded into `offline`: the central owns the push cadence, so a member that has not
-   * pushed recently has not failed at anything, and reporting that as broken is the false alarm
-   * that teaches people to ignore the indicator. Absent when there is no connection at all.
-   */
-  linkState?: CentralLinkState
-  /**
-   * Round trip of the last successful contact with the central, in milliseconds.
-   *
-   * `undefined` before the first one and wherever nothing is pushed — never `0`, which would read
-   * as an instant round trip rather than as no measurement. It is the number that says the link is
-   * WORKING rather than merely configured.
-   */
-  pushMs?: number
   /** The history-preservation setting in force, or `undefined` while it is still unanswered. */
   archiveMode?: ArchiveMode
-  /**
-   * Why a mode cannot be chosen right now, already localized — one entry per BLOCKED mode, and the
-   * ordinary case is an empty object.
-   *
-   * Reconfiguring a service that is RUNNING is the trap this closes: `central` re-runs
-   * `central.sh init`, which rewrites the environment file and recreates the containers, so
-   * choosing it in the middle of a working session tears down the very central being used. The
-   * cockpit already refuses a start for something that is up by handing over an empty
-   * `startOptions`; this is the same rule applied to the wizard.
-   *
-   * A REASON, never a bare flag: a greyed row with no explanation is indistinguishable from a bug,
-   * and the sentence has to name what to do instead ("stop it first"). The host decides, because
-   * only it knows what is running.
-   */
-  /** Why a setup mode is unavailable, when the host has a reason. */
-  setupBlocked?: Partial<Record<TeamMode, string>>
   /** How the fleet list was last arranged. Absent on a machine that has never chosen. */
   sessionView?: SessionViewPrefs
   /**
@@ -1456,9 +1368,6 @@ export interface ControlHost {
    */
   start(req: StartRequest): Promise<ActionResult>
 
-  connect(v: { endpoint: string; token: string; org: string }): Promise<ActionResult>
-  disconnect(): Promise<ActionResult>
-
   /**
    * Bounce / stop what a target names. A LOGICAL target acts on whichever runtimes of it are
    * actually up (both, when they are in conflict); a runtime target acts on exactly that one.
@@ -1473,9 +1382,8 @@ export interface ControlHost {
    *  that cannot identify them offers no verb rather than one that refuses. */
   stopIdle?(service: ServiceRef): Promise<ActionResult>
 
-  /** Persist a team mode from the Setup tab. `member` also needs `connect`. */
+  /** Persist the machine mode from the Setup tab (solo is the only one). */
   setMode(mode: 'solo'): Promise<ActionResult>
-  initCentral(): Promise<ActionResult>
   /** The archive-history consent, asked once. `null` when already chosen. */
   /**
    * Install the newer release and restart whatever is running onto it.
@@ -1605,7 +1513,7 @@ export interface ControlHost {
    * Watch what the CURRENT action is saying, line by line. Returns an unsubscribe.
    *
    * ONE channel rather than a callback threaded through every action signature: the commands worth
-   * watching are the long ones — `docker compose up --build`, `central.sh up`, `bun run bin` — and
+   * watching are the long ones — `docker compose up --build`, `bun run bin` — and
    * which of them a given call ends up running is the host's business. The UI subscribes once,
    * around whatever it is performing, and renders what arrives.
    *

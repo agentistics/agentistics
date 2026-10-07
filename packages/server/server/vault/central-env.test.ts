@@ -89,14 +89,3 @@ describe('S6 — central.env split', () => {
     expect((await stat(f)).mode & 0o777).toBe(0o600)
   })
 })
-
-describe('CI ingest writes no file (spec §5.5)', () => {
-  test('ci-push.ts reads its token from the environment and has no file-writing call', async () => {
-    const src = await readFile(join(import.meta.dir, '..', 'ci-push.ts'), 'utf8')
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-    expect(code).toContain('AGENTISTICS_CI_TOKEN')
-    for (const w of ['writeFile', 'appendFile', 'Bun.write', 'createWriteStream', 'openSync', 'writeSync']) {
-      expect(code.includes(w)).toBe(false)
-    }
-  })
-})

@@ -55,47 +55,6 @@ if (command === 'mcp') {
   await new Promise<never>(() => {})
 }
 
-/**
- * Load a central env file (KEY=VALUE) into process.env for keys not already set, so a NATIVE
- * central (no Docker) picks up MONGO_URL + the AGENTISTICS_TEAM_* secrets the same way the Docker
- * central reads central.env. Search order: $AGENTISTICS_CENTRAL_ENV, ./central.env,
- * ~/.agentistics/central.env. Values are trimmed (a stray space in `MONGO_URL= mongodb+srv…` would
- * otherwise break the driver). Never throws.
- */
-async function loadCentralEnv(): Promise<string | null> {
-  try {
-    const { readFileSync } = await import('node:fs')
-    const { join } = await import('node:path')
-    const { homedir } = await import('node:os')
-    const candidates = [
-      process.env.AGENTISTICS_CENTRAL_ENV,
-      join(process.cwd(), 'central.env'),
-      join(homedir(), '.agentistics', 'central.env'),
-    ].filter((p): p is string => !!p)
-    // Recovery FIRST: a split interrupted between its scrub and its rename leaves only
-    // `central.env.next`, and an exists-check before recovering would start --central without it.
-    const { findCentralEnvFile, loadCentralSecrets } = await import('../server/vault/central-env.ts')
-    const file = await findCentralEnvFile(candidates)
-    if (!file) return null
-    for (const line of readFileSync(file, 'utf8').split('\n')) {
-      const t = line.trim()
-      if (!t || t.startsWith('#')) continue
-      const eq = t.indexOf('=')
-      if (eq < 0) continue
-      const key = t.slice(0, eq).trim()
-      const value = t.slice(eq + 1).trim()
-      if (key && process.env[key] === undefined) process.env[key] = value
-    }
-    // The secret half of a split central.env lives in the vault (vault/central-env.ts).
-    const secrets = await loadCentralSecrets(file)
-    if (!secrets.ok) console.error(`  ✗ ${secrets.sentence}`)
-    else for (const [k, v] of Object.entries(secrets.env)) if (process.env[k] === undefined) process.env[k] = v.trim()
-    return file
-  } catch {
-    return null
-  }
-}
-
 const HELP = `
 Usage: agentop [command] [options]
 
@@ -104,19 +63,17 @@ Without a terminal it prints this help. \`--help\` always prints it.
 
 Commands:
   start         Same control center as bare agentop (non-interactive: runs like 'server')
-  setup         Interactive first-run wizard (solo / central / member)
+  setup         Interactive first-run wizard (history consent, start on boot)
   server        Start the web dashboard + background daemon (non-interactive)
-                (add --central to run the team central natively, no Docker; --bg to detach)
+                (--bg detaches it)
   restart       Restart a running mode's service so it picks up new code/config
-  status        Show services (server/central/member) + health
+  status        Show services + health
   tui           Alias for 'start' — the metrics dashboard is its 'dashboard' tab
   watch         Start the background metrics daemon only
   heavy         Run a heavy job (tsc -b, a full test suite, a build) through the machine-wide slot:
                 'agentop heavy -- <cmd>' waits its turn, shows its queue position, runs, exits with
                 the command's code. Slot 1 is /tmp/agentistics-heavy.lock (the manual flock)
   resources     Print the agentop processes on this machine, what each costs, and the alerts
-  central       Manage the team central (Docker; runs from anywhere)
-  member        Configure this machine as a team member
   session       Start / list / attach assistant sessions (tmux-backed; --bg detaches);
                 'session ls' prints the cockpit's table of what is running
   task          BETA — the delivery board: what each piece of work cost, in how many rounds
@@ -132,7 +89,6 @@ Commands:
 __ENGINE_VERBS__
   mcp           Serve the agentistics MCP over stdio (what assistants launch; registered
                 for you when agentop server starts)
-  ci-push       One-shot push of a CI runner's metrics to a central
   vault         Secrets at rest: status / init / unlock / lock / enroll / recover / rekey / add-passphrase / reset
                 (every secret agentop stores is encrypted — never plain text)
   upgrade       Upgrade agentop to the latest version
@@ -145,103 +101,37 @@ __ENGINE_VERBS__
                 (--yes). Uncommitted work and branches are never touched. --json, --repo <path>.
   doctor        Run the exposure preflight; add --exposed to check against the
                 strict public bar before opening a tunnel
-  setup-token   Reissue the one-time OWNER setup token (central only; run it where the
-                central runs: ./central.sh setup-token, or agentop central setup-token)
-  reset-password
-                Reset an account's password from the host (central only) — the recovery
-                path when the last owner is locked out. --email <address>, optional
-                --password <new> and --clear-mfa
 
 Options:
   --help, -h       Show this help message
   --version, -v    Show current version
   --port <n>       Port for the web server (default: 47291)  [server, start]
-  --central        Run as the team central natively (no Docker) — reads central.env for
-                   MONGO_URL + secrets; requires an external MONGO_URL (Atlas/mongod)  [server only]
   --bg             Start detached in the background (logs to ~/.agentistics)  [server only]
-
-Native central (no Docker):
-  agentop server --central [--bg] [--port <n>]
-    Runs the same server process with AGENTISTICS_TEAM_CENTRAL=1, loading central.env
-    (search: $AGENTISTICS_CENTRAL_ENV, ./central.env, ~/.agentistics/central.env). There is no
-    bundled Mongo — set MONGO_URL to an external cluster. Use --bg to run in the background like
-    the local server. For the all-in-one Docker flow (bundled Mongo) use \`agentop central up\`.
 
 Control center:
   agentop            (on a terminal)
   agentop start
     One full-screen application, in the terminal's alternate buffer — it adds nothing to
-    your scrollback. Tabs: Services (start/stop/restart this machine, a central or the
-    Docker machine; connect to or leave a central; enable a boot service), Setup (solo /
-    central / member and the history-preservation consent), Logs, Cheat sheet, Help,
+    your scrollback. Tabs: Services (start/stop/restart this machine or the
+    Docker machine; enable a boot service), Setup (the history-preservation consent), Logs, Cheat sheet, Help,
     Contribute. Picking "foreground" closes it and starts the server in this terminal.
     Non-interactive stdin runs like 'agentop server'.
 
 Restart:
-  agentop restart [server|watch|central|--all] [--rebuild] [-y|-n] [--cache]
+  agentop restart [server|watch|machine|--all] [--rebuild] [--cache]
     Restart a running mode so it picks up new code (after an upgrade/pull) or config.
-    server/watch bounce the systemd user service; central restarts its container.
-    --all bounces every service currently up (local + central + machine), non-interactively.
-    --rebuild recreates the Docker image/container (central + machine) instead of just bouncing
+    server/watch bounce the systemd user service; machine restarts its container.
+    --all bounces every service currently up (local + machine), non-interactively.
+    --rebuild recreates the Docker image/container (machine) instead of just bouncing
     it — use it to pick up new code in Docker deployments (native server: use bun bin / upgrade).
     A --rebuild builds the image from SCRATCH (no Docker cache), so it cannot hand you back the
     image it just replaced. That is slow — several minutes — so:
       --cache      reuse Docker's layer cache instead (the fast path)
-      -y / --yes   re-run the central's interactive setup, without being asked
-      -n / --no    do not re-run it, without being asked (a rebuild's default when it has no
-                   terminal to ask on). Passing both -y and -n is refused.
 
 Setup:
   agentop setup
-    Interactive wizard: pick solo, host a central, or join one as a member.
+    Interactive wizard: the history-preservation consent and the start-on-boot offer.
     The control center's Setup tab asks the same questions.
-
-Central:
-  agentop central <up|init|down|logs|status|restart|pull|setup-token|reset-password>
-    HOW it runs is your choice, and \`up\` takes it as a flag:
-      --image    Docker, published image (ghcr.io/agentistics/agentistics) — no checkout needed
-      --build    Docker, built from this checkout (central.sh)
-      --native   the agentop binary IS the server — no Docker; needs an external MONGO_URL
-      --bg       native only: detach instead of holding this terminal
-    Unstated, it uses whatever \`agentop central init\` recorded, and failing that the same
-    default as before (a checkout builds; otherwise the database decides). A shape that cannot
-    work here is refused in a sentence, never silently swapped for another.
-    \`up\` also accepts -y/--yes or -n/--no (answer "re-run interactive setup?" up front, for
-    unattended runs; both together is refused) and --no-cache/--cache (build the image from
-    scratch, or reuse Docker's layer cache — cached by default on a plain \`up\`).
-    \`init\` asks for the port, org, bind interface, database and the shape above, and writes
-    central.env (chmod 600). Publishing it on the internet is a separate step and a separate
-    set of variables — see docs/exposure.md.
-    setup-token reissues the one-time OWNER setup token (for when the boot that printed it
-    scrolled away), running where the database is reachable. Refused once an owner exists.
-    reset-password --email <address> resets an account's password from the host — there is no
-    e-mail-based reset, so this is how a locked-out last owner gets back in.
-
-Member (a machine may belong to several centrals at once):
-  agentop member connect --token <token> [--endpoint <url>] [--org <org>] [--label <name>]
-    Verify the token against the central, then add a new connection or UPDATE an existing
-    one keyed by its endpoint (a token rotation on a known central updates in place).
-    A token minted by a central with a public URL configured carries that URL, so the token
-    alone is enough — --endpoint is only needed for a bare token.
-  agentop member list
-    List every connection this machine has, with its live sync state. ('status' is an alias.)
-  agentop member status [--endpoint <url>]
-    Show every connection's mode/endpoint/user/last-sync (or just one, with --endpoint).
-  agentop member leave [--endpoint <url>] [--all]
-    0 connections     nothing to do.
-    1 connection      leaves it, no prompt.
-    N, --endpoint     leaves that one connection.
-    N, --all          leaves every connection — back to solo.
-    N, no flag, TTY   arrow-key picker (pick one, "Leave all", or Cancel).
-    N, no flag, non-TTY  refuses — pass --endpoint <url> or --all instead of guessing.
-
-CI (GitHub Actions):
-  agentop ci-push [--endpoint <url>] [--token <ci-token>] [--org <org>]
-    One-shot push of this runner's metrics to a central. Prefers keyless
-    GitHub OIDC (needs permissions: id-token: write); falls back to a
-    static token. Reads AGENTISTICS_CENTRAL_URL / AGENTISTICS_CI_TOKEN /
-    AGENTISTICS_OIDC_AUDIENCE / AGENTISTICS_TEAM_ORG when flags are omitted.
-    Never fails the job on a push error.
 
 Claude Code integration:
   agentop hooks <install|uninstall|status> [--hook-only|--skill-only]
@@ -275,7 +165,7 @@ Updates:
 
 Autostart:
   agentop autostart <mode> <enable|disable|status>
-    mode ∈ { server, central, watch, machine }
+    mode ∈ { server, watch, machine }
     enable   Register + start the service at boot (also adds a terminal
              update-check hook to ~/.bashrc)
     disable  Stop and remove the service
@@ -284,25 +174,14 @@ Autostart:
     installed (never chosen by default — it is your process list). None of them needs root, and
     each names the one step it cannot take for you so a reboot really does bring the service
     back: linger on systemd, login-not-boot on launchd, \`pm2 save\` + \`pm2 startup\` on pm2.
-    \`central\` follows the shape that central was configured with, so a natively started
-    central gets a unit that starts it natively rather than one that starts Docker.
 
 Examples:
   agentop start
   agentop setup
-  agentop central up --image        # a central from the published image, no clone
-  agentop central up --native --bg  # a central on Atlas, detached, no Docker
   agentop server
   agentop server --port 4000
   agentop restart server
   agentop watch
-  agentop central up
-  agentop member connect --token act1_aHR0cHM6Ly9jZW50cmFsLmV4YW1wbGU.abc123
-  agentop member connect --endpoint http://host:48080 --token abc123
-  agentop member connect --endpoint http://other:48080 --token def456 --label "Client B"
-  agentop member list
-  agentop member leave --endpoint http://host:48080
-  agentop member leave --all
   agentop upgrade
   agentop check-update
   agentop autostart server enable
@@ -473,32 +352,6 @@ if (command === 'setup') {
   process.exit(code)
 }
 
-if (command === 'central') {
-  const { runCentral } = await import('../server/cli-central.ts')
-  const action = args[0]
-  if (!action) {
-    console.error('Missing central action. Expected one of: up, init, down, logs, status, restart, pull.\n')
-    console.log(await helpText())
-    process.exit(1)
-  }
-  // `up` takes the rebuild flags; every other action forwards its argv untouched (reset-password
-  // has its own --email/--password, and -n there must stay reset-password's business).
-  let extra = args.slice(1)
-  if (action === 'up') {
-    const { parseRebuildFlags, centralUpArgs } = await import('../server/rebuild-flags.ts')
-    const parsed = parseRebuildFlags(extra)
-    if (!parsed.ok) {
-      const { cliStrings } = await import('../server/cli-i18n.ts')
-      const { resolveLang } = await import('../server/cli-lang.ts')
-      console.error(cliStrings(await resolveLang()).flagConflict(parsed.conflict[0], parsed.conflict[1]))
-      process.exit(1)
-    }
-    extra = [...centralUpArgs(parsed.flags), ...parsed.rest]
-  }
-  const code = await runCentral(action, extra)
-  process.exit(code)
-}
-
 if (command === 'session') {
   const { runSession } = await import('../server/sessions/cli-session.ts')
   const code = await runSession(args)
@@ -588,56 +441,6 @@ if (command === 'code' || command === 'provider' || command === 'ingest') {
   process.exit(await runEngineVerb(command, args, await resolveCliLang()))
 }
 
-if (command === 'member') {
-  const sub = args[0]
-  const rest = args.slice(1)
-  // readFlag returns the NEXT argv token — a boolean flag like --all must NEVER be read this
-  // way, or `member leave --all` would swallow whatever argument follows it (there happens to be
-  // none today, but the bug is in the parsing, not in today's argv shape).
-  const readFlag = (name: string): string | undefined => {
-    const idx = rest.indexOf(name)
-    return idx !== -1 && rest[idx + 1] ? rest[idx + 1] : undefined
-  }
-  const hasFlag = (name: string): boolean => rest.includes(name)
-
-  if (sub === 'connect') {
-    const { memberConnect } = await import('../server/cli-member.ts')
-    const { parseMemberConnectArgs } = await import('../server/member-connect-args.ts')
-    // Only the token is required: a composite `act1_…` token carries the central's URL, and
-    // demanding --endpoint here refused the very command the central prints. See
-    // member-connect-args.ts — resolving the endpoint is memberConnect's job, not the gate's.
-    const parsed = parseMemberConnectArgs(rest)
-    if (!parsed.ok) {
-      console.error(`${parsed.usage}\n`)
-      process.exit(1)
-    }
-    const code = await memberConnect(parsed.opts)
-    process.exit(code)
-  }
-  if (sub === 'leave') {
-    const { memberLeave } = await import('../server/cli-member.ts')
-    const endpoint = readFlag('--endpoint')
-    const all = hasFlag('--all')
-    const code = await memberLeave({ endpoint, all })
-    process.exit(code)
-  }
-  if (sub === 'status') {
-    const { memberStatus } = await import('../server/cli-member.ts')
-    const endpoint = readFlag('--endpoint')
-    const code = await memberStatus({ endpoint })
-    process.exit(code)
-  }
-  if (sub === 'list') {
-    const { memberList } = await import('../server/cli-member.ts')
-    const endpoint = readFlag('--endpoint')
-    const code = await memberList({ endpoint })
-    process.exit(code)
-  }
-  console.error(`Invalid member action: ${sub ?? '(none)'}. Expected one of: connect, leave, status, list.\n`)
-  console.log(await helpText())
-  process.exit(1)
-}
-
 if (command === 'heavy') {
   // RES.1 addendum 2 — the heavy-job slot. stderr carries the queue; stdout is the command's.
   const { runHeavy } = await import('../server/resources/heavy-io.ts')
@@ -648,21 +451,6 @@ if (command === 'resources') {
   // RES.1 — the governor's view, read-only: what the server would show at /api/resources.
   const { printResources } = await import('../server/resources/cli-resources.ts')
   process.exit(await printResources(args))
-}
-
-if (command === 'ci-push') {
-  // One-shot push of this (ephemeral GitHub Actions) runner's metrics to a central.
-  const readFlag = (name: string): string | undefined => {
-    const idx = args.indexOf(name)
-    return idx !== -1 && args[idx + 1] ? args[idx + 1] : undefined
-  }
-  const { runCiPush } = await import('../server/ci-push.ts')
-  const code = await runCiPush({
-    endpoint: readFlag('--endpoint'),
-    token: readFlag('--token'),
-    org: readFlag('--org'),
-  })
-  process.exit(code)
 }
 
 if (command === '--version' || command === '-v') {
@@ -815,7 +603,7 @@ if (command === 'autostart') {
   }
 
   if (!modeArg || !isAutostartMode(modeArg)) {
-    console.error(`Invalid mode: ${modeArg ?? '(none)'}. Expected one of: server, central, watch, machine.\n`)
+    console.error(`Invalid mode: ${modeArg ?? '(none)'}. Expected one of: server, watch, machine.\n`)
     console.log(await helpText())
     process.exit(1)
   }
@@ -842,10 +630,10 @@ if (command === 'status') {
 }
 
 if (command === 'restart') {
-  // `--rebuild` recreates Docker images/containers (central + machine) instead of just bouncing,
-  // from scratch unless `--cache` says otherwise; `-y`/`-n` answer the central's setup prompt.
+  // `--rebuild` recreates the Docker image/container (machine) instead of just bouncing,
+  // from scratch unless `--cache` says otherwise.
   const rebuild = args.includes('--rebuild')
-  const { parseRebuildFlags, centralRebuildArgs } = await import('../server/rebuild-flags.ts')
+  const { parseRebuildFlags } = await import('../server/rebuild-flags.ts')
   const parsed = parseRebuildFlags(args.filter(a => a !== '--rebuild' && a !== '--all'))
   if (!parsed.ok) {
     const { cliStrings } = await import('../server/cli-i18n.ts')
@@ -861,18 +649,9 @@ if (command === 'restart') {
     const { restartAllServices } = await import('../server/cli-start.ts')
     process.exit(await restartAllServices(rebuild, flags))
   }
-  // The central runs in Docker — delegate to its own compose. `up` rebuilds/pulls + recreates;
-  // `restart` just bounces the running container.
-  if (modeArg === 'central') {
-    const { runCentral } = await import('../server/cli-central.ts')
-    const code = rebuild
-      ? await runCentral('up', centralRebuildArgs(flags))
-      : await runCentral('restart', [])
-    process.exit(code)
-  }
   const { restartAutostart, isAutostartMode } = await import('../server/autostart.ts')
   if (!isAutostartMode(modeArg)) {
-    console.error(`Invalid mode: ${modeArg}. Expected one of: server, watch, central, machine.\n`)
+    console.error(`Invalid mode: ${modeArg}. Expected one of: server, watch, machine.\n`)
     process.exit(1)
   }
   // The server is the mode this tool actually starts for you, and it starts it DETACHED, not as a
@@ -942,15 +721,10 @@ if (command === 'server' || command === 'start' || !command) {
   // `--port` is already in the environment — see the note above the command dispatch. The index is
   // still needed here to forward the flag to a detached copy.
   const portIdx = args.indexOf('--port')
-  // Native central (no Docker): same server process with TEAM_CENTRAL=1, reading central.env for
-  // MONGO_URL + secrets. Unlike the Docker central there is NO bundled Mongo, so an external
-  // MONGO_URL (Atlas or your own mongod) is required.
-  const central = args.includes('--central')
   // THE UNIT OWNS THIS DATA DIR'S SERVER WHEN IT IS INSTALLED (docs/incidents/2026-10-04-server-
   // outside-unit.md). A hand-run `agentop server` / `--bg` here would be a second, unsupervised copy
   // that holds the data dir and leaves the unit failed — so it starts the unit instead and returns.
-  // `--central` and an explicit `--port` are a different server and keep running here.
-  if (!central && portIdx === -1) {
+  if (portIdx === -1) {
     const { serverStartRoute, startServerUnit } = await import('../server/server-ownership-io.ts')
     if ((await serverStartRoute()).kind === 'delegate') {
       const r = await startServerUnit()
@@ -971,23 +745,11 @@ if (command === 'server' || command === 'start' || !command) {
     }
   }
   // This process is the agentop SERVICE — the vault's only holder (SECRETS.4 §5.2) — and claims it
-  // before anything below reads a secret (a native central's sealed env included).
+  // before anything below reads a secret.
   {
     const { becomeVaultHolder } = await import('../server/vault/service.ts')
     becomeVaultHolder()
   }
-  if (central) {
-    const envFile = await loadCentralEnv()
-    process.env.AGENTISTICS_TEAM_CENTRAL = '1'
-    if (!process.env.MONGO_URL) {
-      console.error('\n  ✗ native central needs MONGO_URL — there is no bundled Mongo without Docker.')
-      console.error('    Set MONGO_URL (external Mongo/Atlas) in central.env or the environment.')
-      console.error('    (Or use `agentop central up` for the all-in-one Docker flow.)\n')
-      process.exit(1)
-    }
-    if (envFile) console.log(`  central: loaded ${envFile}`)
-  }
-
   // ONE SERVER PER DATA DIR, asked before ANYTHING loads. `index.ts` claims the lock for real, but
   // only after the vault, the watcher daemon and every import of the app have run — so a duplicate
   // start, and a service manager restarting one every five seconds, paid that each time (190 times
@@ -1031,14 +793,14 @@ if (command === 'server' || command === 'start' || !command) {
     const script = process.argv[1]
     const fromSource = !!script && (script.endsWith('.ts') || script.endsWith('.js'))
     const selfBase = fromSource ? `"${process.execPath}" "${script}"` : `"${process.execPath}"`
-    // Re-invoke `server` in the foreground (drop --bg), forwarding --central / --port.
-    const fwd = [central ? '--central' : '', portIdx !== -1 && args[portIdx + 1] ? `--port ${args[portIdx + 1]}` : '']
+    // Re-invoke `server` in the foreground (drop --bg), forwarding --port.
+    const fwd = [portIdx !== -1 && args[portIdx + 1] ? `--port ${args[portIdx + 1]}` : '']
       .filter(Boolean).join(' ')
     const cmd = `${selfBase} server ${fwd}`.trim()
     const child = spawn('sh', ['-c', `nohup ${cmd} >> "${log}" 2>&1 &`], { stdio: 'ignore', detached: true })
     child.unref()
     const webPort = parseInt(process.env.WEB_PORT ?? String((parseInt(process.env.PORT ?? '47291', 10)) + 1), 10)
-    console.log(`\n  started ${central ? 'central ' : ''}in the background.`)
+    console.log('\n  started in the background.')
     console.log(`  web:  http://localhost:${webPort}`)
     console.log(`  logs: ${log}\n`)
     process.exit(0)
@@ -1054,10 +816,7 @@ if (command === 'server' || command === 'start' || !command) {
   // Server, daemon and version check run in parallel — the daemon and the banner only where they
   // belong (a central has no host sessions, a container is upgraded by its image): daemon-plan.ts.
   const { serverDaemonPlan } = await import('../server/daemon-plan.ts')
-  const plan = serverDaemonPlan({
-    central: process.env.AGENTISTICS_TEAM_CENTRAL === '1',
-    container: process.env.AGENTISTICS_CONTAINER === '1',
-  })
+  const plan = serverDaemonPlan({ central: false, container: process.env.AGENTISTICS_CONTAINER === '1' })
   await Promise.all([
     import('../server/index.ts'),
     plan.watcher ? import('../server/otel-watcher.ts') : null,
@@ -1072,12 +831,6 @@ if (command === 'server' || command === 'start' || !command) {
 } else if (command === 'doctor') {
   const { runDoctor } = await import('../server/cli-doctor.ts')
   await runDoctor(args)
-} else if (command === 'setup-token') {
-  const { runSetupToken } = await import('../server/cli-setup-token.ts')
-  await runSetupToken()
-} else if (command === 'reset-password') {
-  const { runResetPassword } = await import('../server/cli-reset-password.ts')
-  await runResetPassword(args)
 } else {
   console.error(`Unknown command: ${command}\n`)
   console.log(await helpText())

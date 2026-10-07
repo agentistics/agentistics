@@ -106,14 +106,6 @@ function HeaderTag({ meta }: { meta: HeaderMeta }) {
   return (
     <Text>
       <Text dimColor>{meta.text}</Text>
-      {/* WHICH machine, and whether its link is alive. The dot AND the text share the link's own
-          colour — green while the last push landed, amber while it is merely quiet, red when the
-          central refused or cannot be reached. They used to disagree: the dot carried the state
-          and the text sat in a fixed indigo that reads as violet on most terminals, so a failing
-          link and a healthy one were printed in the exact same colour except for one character. A
-          `stale` link is deliberately not red — the central owns the push cadence and may simply
-          have nothing to say, and a warning that cries wolf is one people stop reading. The state
-          is said in words on the connection card too; colour never carries it alone. */}
       {meta.alert ? <Text color={COLORS.accent} bold>{` · ${meta.alert}`}</Text> : null}
       {/* The parallel-sessions budget. Dim while there is room, `danger` once the ceiling is close
           or the machine is already swapping — but the NUMBERS are always drawn, so a reader who

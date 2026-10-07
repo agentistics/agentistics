@@ -13,11 +13,11 @@
  *  - `captureOutput` — it prints a sentence. The prints are swallowed and the last line becomes the
  *    failure message in the status line.
  *  - `streamOutput` — its output is the point and there is nothing to ask. `docker compose up
- *    --build`, `central.sh up`, `bun run bin`: the child is spawned with BOTH pipes captured (never
+ *    --build`, `bun run bin`: the child is spawned with BOTH pipes captured (never
  *    `inherit`, never a tty of its own) and every line it produces is published on the output
  *    channel, which the control center draws into a pane. This is what replaced leaving the screen.
- *  - `suspend` — it asks a QUESTION, so it needs the real terminal. `central.sh init` is the whole
- *    of that list: it refuses outright without a tty, and a prompt streamed into a pane is a
+ *  - `suspend` — it asks a QUESTION, so it needs the real terminal. A docker foreground start is the whole
+ *    of that list: it needs the tty, and a prompt streamed into a pane is a
  *    question nobody can answer.
  *
  * Language follows `--lang en|pt`, else `preferences.lang` (shared with the web), else English;
@@ -40,8 +40,8 @@ import type { CodeStartLaunch } from './code-launch'
 import { homedir, platform } from 'node:os'
 import { accountHome } from './account-home'
 import {
-  DEFAULT_TEAM, HARNESS_ORDER, repoShortName, sendNowDelivered,
-  type HarnessId, type TeamConnection,
+  HARNESS_ORDER, repoShortName, sendNowDelivered,
+  type HarnessId,
 } from '@agentistics/core'
 import type {
   ActionResult,
@@ -57,7 +57,6 @@ import type {
   ControlService,
   ControlSessions,
   TranscriptSearch,
-  CentralLinkState,
   ControlStatus,
   LogSource,
   RestartOption,
@@ -97,11 +96,8 @@ import { lastBackup, lastPerHarness, lastBackupRun, loadBackupHistory } from './
 import { scheduleStatus } from './backup/schedule'
 import { loadConsolidated } from './consolidate'
 import { cachedBaseline, resetBaselineCache } from './sessions/fleet-baseline'
-import { centralRuntimeChoices, centralStartPlan, runCentral, type CentralStartPlan } from './cli-central'
-import { flagFor, type CentralRuntimeId, type CentralRuntimeOption } from './central-runtime'
 import { onOutputLine, publishLines, streamCommand } from './cli-stream'
 import {
-  centralRebuildArgs,
   composeRebuildCommands,
   rebuildFlags,
   type RebuildFlags,
@@ -110,7 +106,6 @@ import {
 // this module is loaded by every `agentop` subcommand.
 import { createLineDecoder } from '@agentistics/tui/control/stream'
 import { ensureArchiveModeChosen } from './cli-setup'
-import { memberConnect, memberLeave } from './cli-member'
 import {
   disableAutostart,
   enableAutostart,
@@ -222,19 +217,11 @@ const CY = `${ESC}[96m`
 const GR = `${ESC}[92m`
 const YE = `${ESC}[33m`
 
-const CENTRAL_PROJECT = 'team-mode'      // central.sh: PROJECT=${PROJECT:-team-mode}
 const MACHINE_IMAGE = 'agentistics-machine' // docker/machine.yml: image
-const CENTRAL_FILTER = `label=com.docker.compose.project=${CENTRAL_PROJECT}`
 const MACHINE_FILTER = `ancestor=${MACHINE_IMAGE}`
 
-/**
- * Inside a container the app always listens on 47291 — both compose files pin `PORT: 47291`, so the
- * INTERNAL port is a constant even though the published one is the user's choice (APP_PORT).
- * Asking docker which host port that maps to is the only way to state the central's URL without
- * guessing; 48080 is merely the default the wizard offers.
- */
+/** Inside the container the app always listens on 47291 (docker/machine.yml pins `PORT`). */
 const CONTAINER_APP_PORT = '47291/tcp'
-const CENTRAL_DEFAULT_PORT = 48080
 
 const SERVER_LOG = join(homedir(), '.agentistics', 'agentop-server.log')
 
@@ -254,32 +241,16 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 // resolveLang lives in cli-lang.ts so `agentop tui` resolves the language identically.
 
 // state + detection
-type Mode = 'solo' | 'central' | 'member'
-
-/**
- * `connections` is the authority; `endpoint` is only the legacy MIRROR of `connections[0]` that
- * `normalizeTeamConfig` keeps writing for downgrades. Every member-mode decision below reads the
- * array, because the mirror cannot answer "how many centrals" — and a control center that answers
- * that question with one endpoint out of three is the same misreport `agentop status` was fixed
- * for.
- */
-async function loadState(): Promise<{
-  mode: Mode; endpoint?: string; connections: TeamConnection[]; mouse: boolean; sessionPollMs: number
-}> {
+/** The preferences the cockpit reads, in the shape it wants them. */
+async function loadState(): Promise<{ mouse: boolean; sessionPollMs: number }> {
   try {
     const prefs = await readPreferences()
     // Mouse ON unless the preference says otherwise — the default the control center assumes, and
     // the one an unreadable preferences file falls back to below. It is the reachable-by-default
     // half of the setting; `m` in the app is how it is turned off, and it is written back here.
-    return {
-      mode: prefs.team?.mode ?? 'solo',
-      endpoint: prefs.team?.endpoint,
-      connections: prefs.team?.connections ?? [],
-      mouse: prefs.mouse !== false,
-      sessionPollMs: sessionPollMsOrDefault(prefs),
-    }
+    return { mouse: prefs.mouse !== false, sessionPollMs: sessionPollMsOrDefault(prefs) }
   } catch {
-    return { mode: 'solo', connections: [], mouse: true, sessionPollMs: SESSION_POLL_DEFAULT_MS }
+    return { mouse: true, sessionPollMs: SESSION_POLL_DEFAULT_MS }
   }
 }
 
@@ -297,18 +268,16 @@ type RuntimeUp = Record<RuntimeId, boolean>
  *
  * One total record rather than a lookup with a fallback, so the compiler is the thing that notices
  * a new runtime or a new service — and so a logical target and a runtime target resolve through
- * exactly the same table. `central` appears on both sides because the central has a single runtime:
- * naming the service and naming its runtime are the same instruction.
+ * exactly the same table.
  */
 export const TARGET_RUNTIMES: Record<ServiceRef, readonly RuntimeId[]> = {
   agentistics: ['local', 'machine'],
-  central: ['central'],
   local: ['local'],
   machine: ['machine'],
 }
 
 /** Canonical order, used wherever a set of runtimes has to be listed or acted on in sequence. */
-export const RUNTIME_ORDER: readonly RuntimeId[] = ['local', 'machine', 'central']
+export const RUNTIME_ORDER: readonly RuntimeId[] = ['local', 'machine']
 
 /**
  * The runtimes an action target names, restricted to the ones actually RUNNING.
@@ -357,27 +326,7 @@ export function aggregateState(
  * Facts `startOptionsFor` needs beyond the runtime id and the strings — everything a caller can
  * only learn by asking this box, never by looking at the runtime's name.
  */
-export interface StartFacts {
-  /**
-   * Which shape `central up` would take here — see `planCentralStart` in cli-central.ts. `native`
-   * is the ONLY state that offers a native start at all: it means an external (non-bundled) Mongo
-   * is configured and this is the standalone (no-repo) path, which is the one case
-   * `runCentral`/`runNativeCentral` can run the binary directly instead of Docker. Every other
-   * value (including `undefined`, before a plan was ever computed) keeps the Docker-only option
-   * this screen has always offered — a native option that could not actually reach a database
-   * would be a verb that fails on principle.
-   */
-  centralPlan?: CentralStartPlan
-  /**
-   * Every way a central could be brought up here, available or not — `centralRuntimeOptions`.
-   *
-   * When present it REPLACES the `centralPlan` inference for the central's start verbs: the screen
-   * offers one start per available shape instead of the single "Start" whose meaning was decided
-   * by whatever happened to be on disk. `centralPlan` stays, because it answers a different
-   * question that has not changed — whether the start needs the real terminal.
-   */
-  centralRuntimes?: CentralRuntimeOption[]
-}
+export interface StartFacts {}
 
 /**
  * The starts a single runtime offers.
@@ -412,7 +361,7 @@ export function startOptionsFor(runtime: RuntimeId, s: CliStrings, facts: StartF
       return [
         {
           // Foreground here means genuinely attached — `docker compose up --build` without `-d`,
-          // run under `suspend()` exactly like `central.sh init`: it needs the real tty because
+          // run under `suspend()`: it needs the real tty because
           // Ctrl-C is how you stop it, not because it asks a question. No `offersBoot`: it never
           // returns until you interrupt it. No `asksArchive` either — a container start never has
           // (see the field's own doc): the gate belongs to the process writing to ~/.agentistics,
@@ -429,87 +378,7 @@ export function startOptionsFor(runtime: RuntimeId, s: CliStrings, facts: StartF
           offersBoot: true,
         },
       ]
-    case 'central': {
-      // The shapes this box can actually bring up, each its own verb. A central has three, they
-      // are genuinely different deployments, and the screen used to show one "Start" that picked
-      // between them by inference — so a user holding a checkout could not ask for the published
-      // image, and nothing said why the option they expected was missing.
-      const runtimes = facts.centralRuntimes?.filter(r => r.available).map(r => r.id)
-      if (runtimes && runtimes.length > 0) {
-        return runtimes.flatMap(id => centralStartsFor(id, s))
-      }
-
-      // No runtime list supplied (a caller that predates it, or a status read that failed): keep
-      // exactly the behaviour that existed before, decided by `centralPlan`.
-      if (facts.centralPlan === 'native') return centralStartsFor('native', s)
-      return [
-        {
-          runtime: 'central', how: 'bg', label: s.optCentral, hint: s.optCentralHint, offersBoot: true,
-        },
-      ]
-    }
   }
-}
-
-/**
- * The starts ONE central shape offers.
- *
- * Only the native one has two, and the asymmetry is real rather than an omission: `docker compose
- * up -d` returns once the container is up, so there is no attached variant to offer, while the
- * native server holds the terminal until you stop it and therefore has both shapes.
- *
- * `offersBoot` follows the same rule it does everywhere — never on a foreground option, and only
- * where a boot mechanism genuinely exists for what was started. Both Docker shapes register the
- * `agentop-central` unit; the native background start now does too, because `serviceCommandFor`
- * composes the unit from the SAME configured runtime rather than always writing the Docker one.
- */
-function centralStartsFor(id: CentralRuntimeId, s: CliStrings): StartOption[] {
-  switch (id) {
-    case 'docker-image':
-      return [{
-        runtime: 'central', centralRuntime: 'docker-image', how: 'bg',
-        label: s.optCentralImage, hint: s.optCentralImageHint, offersBoot: true,
-      }]
-    case 'docker-build':
-      return [{
-        runtime: 'central', centralRuntime: 'docker-build', how: 'bg',
-        label: s.optCentralBuild, hint: s.optCentralBuildHint, offersBoot: true,
-      }]
-    case 'native':
-      return [
-        {
-          runtime: 'central', centralRuntime: 'native', how: 'fg',
-          label: s.optCentralNativeForeground, hint: s.optCentralNativeForegroundHint,
-        },
-        {
-          runtime: 'central', centralRuntime: 'native', how: 'bg',
-          label: s.optCentralNativeBackground, hint: s.optCentralNativeBackgroundHint,
-          offersBoot: true,
-        },
-      ]
-  }
-}
-
-/**
- * PURE: the sentences naming the central shapes this box CANNOT start, and why.
- *
- * The verbs stay absent — a control that fails on principle is worse than a missing one — but an
- * absence with no explanation reads as a broken screen. This is the other half: said once, in the
- * detail pane, where a sentence fits.
- */
-export function centralStartNotes(runtimes: CentralRuntimeOption[] | undefined, s: CliStrings): string[] {
-  if (!runtimes) return []
-  const notes: string[] = []
-  for (const r of runtimes) {
-    if (r.available || !r.reason) continue
-    if (r.id === 'docker-image' && r.reason === 'no-docker') notes.push(s.centralBlockedImageNoDocker)
-    else if (r.id === 'docker-build' && r.reason === 'no-docker') notes.push(s.centralBlockedBuildNoDocker)
-    else if (r.id === 'docker-build' && r.reason === 'no-checkout') notes.push(s.centralBlockedBuildNoCheckout)
-    else if (r.id === 'native' && r.reason === 'bundled-mongo') notes.push(s.centralBlockedNativeBundled)
-    else if (r.id === 'native' && r.reason === 'no-env') notes.push(s.centralBlockedNativeNoEnv)
-    else notes.push(`${flagFor(r.id)}: ${r.reason}`)
-  }
-  return notes
 }
 
 /**
@@ -527,7 +396,7 @@ export type RebuildAbility = Partial<Record<RuntimeId, boolean>>
  *
  * PURE, and the mirror of `startOptionsFor` — including the reason it is here rather than in the
  * screen: what a rebuild MEANS is per runtime (recompile the binary, rebuild the image, go through
- * the central's own `up`) and whether it can happen at all is a fact about this box.
+ * a container image) and whether it can happen at all is a fact about this box.
  *
  * In a CONFLICT each copy is rebuilt on its own, exactly as it is stopped on its own: "rebuild it"
  * has no single meaning while the same program is running twice, and rebuilding both would leave
@@ -564,7 +433,7 @@ function restartOptionsFor(
  * would have removed the native unit and left the container coming back.
  */
 export interface BootMechanism {
-  /** The full unit name, e.g. `agentop-central.service`. NAMED in every sentence it produces. */
+  /** The full unit name, e.g. `agentop-machine.service`. NAMED in every sentence it produces. */
   unit: string
   /** Which runtime it brings back, handed straight back to `enableBoot`/`disableBoot`. */
   runtime?: RuntimeId
@@ -574,7 +443,7 @@ export interface BootMechanism {
   on: boolean
   /**
    * Whether the unit could be WRITTEN here — its `ExecStart` needs a file that only a repo checkout
-   * has (`central.sh`, `docker/machine.yml`). False means no enable verb is offered, rather
+   * has (`docker/machine.yml`). False means no enable verb is offered, rather
    * than one that writes a unit systemd would then restart every five seconds forever.
    */
   installable: boolean
@@ -629,11 +498,9 @@ export function bootOptionsFor(
  * `agentistics` boots as the native server by default: the verb offered while nothing is running
  * has always meant that. `runtime: 'machine'` is the ONE case that means something else — the
  * container's unit runs `docker compose … up -d`, so writing (or removing) a native unit there
- * would act on a mechanism that does not match what the user pointed at. `central` has exactly one
- * mechanism regardless of `runtime`.
+ * would act on a mechanism that does not match what the user pointed at.
  */
-export function bootModeFor(service: ServiceId, runtime?: RuntimeId): AutostartMode {
-  if (service === 'central') return 'central'
+export function bootModeFor(_service: ServiceId, runtime?: RuntimeId): AutostartMode {
   return runtime === 'machine' ? 'machine' : 'server'
 }
 
@@ -663,8 +530,6 @@ export function buildService(
     /** Every registration this box can change. Empty on a platform with no user systemd. */
     bootOptions?: BootOption[]
     rebuild?: RebuildAbility
-    centralPlan?: CentralStartPlan
-    centralRuntimes?: CentralRuntimeOption[]
     /** Pids of extra copies of this service that hold no port — see `idle-servers.ts`. */
     idlePids?: number[]
   } = {},
@@ -693,13 +558,7 @@ export function buildService(
     // The single most important line in the model: while anything is up there is nothing to start.
     startOptions: up.length > 0
       ? []
-      : runtimes.filter(r => r.available).flatMap(r => startOptionsFor(r.id, s, {
-          centralPlan: facts.centralPlan,
-          centralRuntimes: facts.centralRuntimes,
-        })),
-    // The other half of "a verb that cannot work is not offered": what was withheld, and why.
-    // Only the central has shapes to withhold, so every other row carries nothing here.
-    startNotes: id === 'central' ? centralStartNotes(facts.centralRuntimes, s) : undefined,
+      : runtimes.filter(r => r.available).flatMap(r => startOptionsFor(r.id, s)),
     // …and its mirror: nothing to restart until something is running.
     restartOptions: up.length > 0 ? restartOptionsFor(id, up, s, facts.rebuild ?? {}) : [],
     stopOptions: up.length > 1
@@ -761,12 +620,11 @@ async function dockerIds(filter: string): Promise<string[]> {
 }
 
 async function detectRuntimes(): Promise<RuntimeUp> {
-  const [local, central, machine] = await Promise.all([
+  const [local, machine] = await Promise.all([
     isServerRunning(),
-    dockerIds(CENTRAL_FILTER).then((i) => i.length > 0),
     dockerIds(MACHINE_FILTER).then((i) => i.length > 0),
   ])
-  return { local, central, machine }
+  return { local, machine }
 }
 
 /** The running runtimes, in canonical order — the input every target resolution needs. */
@@ -778,14 +636,14 @@ async function runningRuntimes(): Promise<RuntimeId[]> {
 /** Is exactly this runtime up? Used where probing all three would be wasted work. */
 async function isRuntimeUp(id: RuntimeId): Promise<boolean> {
   if (id === 'local') return isServerRunning()
-  return (await dockerIds(id === 'central' ? CENTRAL_FILTER : MACHINE_FILTER)).length > 0
+  return (await dockerIds(MACHINE_FILTER)).length > 0
 }
 
 /**
  * A container's state, distinguishing "not running" from "we could not tell" from "impossible here".
  *
  * Reporting `down` when docker's daemon is unreachable would be a lie the user then acts on —
- * starting a central that is already up, or believing one stopped. `sh` answers 127 when the binary
+ * starting a container that is already up, or believing one stopped. `sh` answers 127 when the binary
  * cannot be spawned at all and a non-zero code when docker itself refused, and those two are NOT
  * the same fact: with no docker installed there is no container to be uncertain about, so the
  * runtime is reported unavailable and stops colouring its service's state (and stops being offered
@@ -1078,7 +936,7 @@ async function startDocker(s: CliStrings): Promise<number> {
  * terminal streams its logs directly and Ctrl-C stops the container (the standard, unsurprising
  * meaning of "run it in the foreground" for a compose service).
  *
- * Run under `suspend()`, the same wrapper `central.sh init` uses: not because this asks a question,
+ * Run under `suspend()`, the wrapper a question uses: not because this asks a question,
  * but because it needs the REAL tty for the same reason a question does — Ctrl-C has to reach the
  * child, which a piped/streamed child (Ink still owns the keyboard) cannot receive. `tty()` is used
  * for the notices around it because `suspend()` mutes `process.stdout.write`; the child's own
@@ -1243,28 +1101,7 @@ async function restartLocalSvc(s: CliStrings, mode: RestartMode = {}): Promise<b
   )
   return true
 }
-/** Returns whether the central actually came back up — a non-zero exit here means the old
- *  container (or none at all) is what's left running, and that must never be reported as a
- *  restart that happened. */
-async function restartCentralSvc(s: CliStrings, mode: RestartMode = {}): Promise<boolean> {
-  process.stdout.write(`  ${D}${mode.rebuild ? s.rebuildingCentral : s.restartingCentral}${R}\n`)
-  // `up` rebuilds/pulls the image and recreates; `restart` just bounces the running container.
-  // A rebuild states its answer to central.sh's setup prompt rather than relying on a piped child
-  // happening to fail `[ -t 0 ]`, and rebuilds from scratch unless `--cache` was asked for.
-  let code: number
-  if (!mode.rebuild) {
-    code = await runCentral('restart', [], { streamed: mode.stream })
-  } else {
-    const flags = rebuildFlags(mode.flags ?? {})
-    if (flags.cache === 'fresh') process.stdout.write(`  ${D}${s.rebuildNoCache}${R}\n`)
-    code = await runCentral('up', centralRebuildArgs(mode.flags ?? {}, { streamed: mode.stream }), {
-      streamed: mode.stream,
-    })
-  }
-  if (code !== 0) process.stderr.write(`  ${YE}${s.centralFailed}${R}\n`)
-  return code === 0
-}
-/** Same contract as {@link restartCentralSvc}: false means the machine container did NOT end up
+/** False means the machine container did NOT end up
  *  running the new build (or running at all), and the caller must say so rather than "restarted". */
 async function restartMachineSvc(s: CliStrings, mode: RestartMode = {}): Promise<boolean> {
   process.stdout.write(`  ${D}${mode.rebuild ? s.rebuildingMachine : s.restartingMachine}${R}\n`)
@@ -1312,7 +1149,6 @@ async function restartRuntimes(
 ): Promise<boolean> {
   let ok = true
   if (targets.includes('local')) ok = (await restartLocalSvc(s, mode)) && ok
-  if (targets.includes('central')) ok = (await restartCentralSvc(s, mode)) && ok
   if (targets.includes('machine')) ok = (await restartMachineSvc(s, mode)) && ok
   return ok
 }
@@ -1473,7 +1309,7 @@ async function divertOutput<T>(sink: (chunk: string) => void, fn: () => Promise<
 /**
  * Run `fn` with stdout/stderr diverted into a string.
  *
- * The action modules (`cli-member`, the stop/restart helpers) report by printing, which is right
+ * The action modules (the stop/restart helpers) report by printing, which is right
  * for their own CLI subcommands and fatal inside the alternate screen. Capturing keeps them
  * unchanged and turns their output into something better: the failure message shown in the status
  * line, which is otherwise a generic sentence.
@@ -1488,7 +1324,7 @@ async function captureOutput<T>(fn: () => Promise<T>): Promise<{ value: T; text:
  * Run `fn` with everything it and its children print flowing into the OUTPUT CHANNEL as lines.
  *
  * This is what replaced leaving the alternate screen. Two halves meet here: the children are piped
- * by `streamCommand` / `runCentral({ streamed })` and publish themselves, and the host's own prints
+ * by `streamCommand` and publish themselves, and the host's own prints
  * — "building & starting the machine container…", the addresses afterwards, a warning about a
  * missing compose file — are diverted through the same decoder, so the pane reads as one story in
  * the order it was told. The decoder is per-scope and flushed at the end, so a note written without
@@ -1566,7 +1402,7 @@ function pauseForEnter(message: string): Promise<void> {
  * RESERVED FOR COMMANDS THAT ASK SOMETHING. Everything whose output was merely worth watching now
  * streams into a pane instead (`streamOutput`), which is the whole point of the change: leaving the
  * alternate screen costs the user their place, and coming back costs them a keypress. What is left
- * on this path is `central.sh init`, which reads answers from the tty and refuses without one — and
+ * on this path is a docker foreground start, which needs the tty — and
  * a prompt streamed into a pane is a question nobody can answer.
  *
  * Leaving the alternate screen is only half of it: Ink is still mounted and still listening on
@@ -2425,7 +2261,7 @@ async function restorableSessions(fell: readonly ManagedSession[]): Promise<Rest
  * `task-reopen.ts` was extracted to end: `answerSession` alone re-reads the frame, re-parses the
  * options and refuses a numbered dialog on a harness with no verified way to pick — a browser copy
  * of that would be a button that approves the highlighted row. Only `suspend`-requiring actions
- * (`central.sh init`) need a real terminal, and the web host is never asked for one.
+ * (a docker foreground start) need a real terminal, and the web host is never asked for one.
  */
 /**
  * Wait until a just-reopened session is actually LISTENING — or give up and say so.
@@ -2581,78 +2417,6 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
     }
   }
 
-  /**
-   * The machine's name on its central and the last push's round trip, or `{}`.
-   *
-   * Read from the LOCAL server's `/api/team/status`, which is the process that actually pushes —
-   * this one only draws. Best-effort and short-timeout on purpose: the cockpit must open on a
-   * machine whose server is down, and a header fact is never worth a hang. Absent beats wrong here
-   * as everywhere: no name is drawn rather than a hostname standing in for one.
-   */
-  /**
-   * How long a connection may go without a successful push before the header calls it STALE.
-   *
-   * Three minutes, against a cadence the CENTRAL owns and which floors at 15s (30s by default): well
-   * clear of an ordinary quiet period, and short enough that a link which died between two polls
-   * says so before you have acted on it. A member that has never pushed at all is stale too — "not
-   * yet" and "working" are different answers, and only one of them may wear the green dot.
-   */
-  const LINK_STALE_MS = 3 * 60_000
-
-  /**
-   * What the link is DOING, from the facts `/api/team/status` already publishes.
-   *
-   * The decision lives here rather than in the TUI for the ordinary reason — the control center owns
-   * no logic — and the order matters: an AUTH failure outranks everything (a revoked token does not
-   * heal by waiting), then unreachable, then merely quiet.
-   */
-  const linkStateOf = (errKind: unknown, lastSuccessAt: number | null): CentralLinkState => {
-    if (errKind === 'auth') return 'unauthorized'
-    if (errKind === 'net') return 'offline'
-    if (lastSuccessAt === null) return 'stale'
-    return Date.now() - lastSuccessAt > LINK_STALE_MS ? 'stale' : 'ok'
-  }
-
-  const centralIdentity = async (): Promise<
-    Pick<ControlStatus, 'machineName' | 'accountName' | 'linkState' | 'pushMs'>
-  > => {
-    try {
-      const res = await fetch(`http://localhost:${PORT}/api/team/status`, {
-        signal: AbortSignal.timeout(1200),
-      })
-      if (!res.ok) return {}
-      const body = await res.json() as {
-        connections?: Array<{
-          machineName?: unknown; latencyMs?: unknown
-          org?: unknown; errKind?: unknown; lastSuccessAt?: unknown
-        }>
-      }
-      // The FIRST connection: a machine with several centrals has one name per central, and a header
-      // cell cannot carry a list. The connection card shows them all.
-      const first = body.connections?.[0]
-      const name = typeof first?.machineName === 'string' && first.machineName ? first.machineName : undefined
-      const ms = typeof first?.latencyMs === 'number' && Number.isFinite(first.latencyMs)
-        ? Math.max(0, Math.round(first.latencyMs))
-        : undefined
-      const account = typeof first?.org === 'string' && first.org ? first.org : undefined
-      const lastOk = typeof first?.lastSuccessAt === 'number' && Number.isFinite(first.lastSuccessAt)
-        ? first.lastSuccessAt
-        : null
-      return {
-        ...(name ? { machineName: name } : {}),
-        ...(account ? { accountName: account } : {}),
-        // Gated on `first` existing (there IS a connection), never on `name`: a central that never
-        // resolved this token's machine name still answers whoami with an org and a latency, and
-        // the header must draw the account + dot from those alone rather than going blank because
-        // one field of three could not be named.
-        ...(first ? { linkState: linkStateOf(first?.errKind, lastOk) } : {}),
-        ...(ms !== undefined ? { pushMs: ms } : {}),
-      }
-    } catch {
-      return {}
-    }
-  }
-
   /** The setting in force, for the Setup tab to state. `undefined` while it is still unanswered. */
   const currentArchiveMode = async (): Promise<ArchiveMode | undefined> => {
     try {
@@ -2676,39 +2440,27 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
    */
   const serviceRows = async (): Promise<ControlService[]> => {
     const s = S()
-    const [local, central, machine, bootAgentistics, bootMachine, bootCentral, repo, machineCompose, centralPlan, centralRuntimes] = await Promise.all([
+    const [local, machine, bootAgentistics, bootMachine, repo, machineCompose] = await Promise.all([
       isServerRunning(),
-      dockerState(CENTRAL_FILTER, s),
       dockerState(MACHINE_FILTER, s),
       // Two more probes on the refresh path, both local, both guarded, both answering `undefined`
       // rather than throwing — and both skipped outright off Linux.
       bootState('server'),
       bootState('machine'),
-      bootState('central'),
       // What a REBUILD would need, asked before it is offered: the native one recompiles this repo,
       // the machine one needs its compose file. Two `stat`s, and the answer is what keeps a verb
       // that cannot work off the action row.
       inRepoCheckout(),
       Bun.file(machineComposePath()).exists(),
-      // Whether `central up` would be Docker or native here — the one fact that decides whether a
-      // native start option even exists (see `StartFacts.centralPlan`).
-      centralStartPlan(),
-      // …and every SHAPE it could take, available or not. One probe feeds both the verbs the row
-      // offers and the sentences the detail pane says about the ones it does not.
-      centralRuntimeChoices(),
     ])
     // Asked whatever the runtime state says: the case this exists for is a second server running
     // while the row reads perfectly healthy, so gating it on `local` would skip exactly the machine
     // that needs it — and it is worth asking even when nothing holds the port at all.
     const idlePids = await idleServerPids()
-    const [nativeFacts, centralFacts, machineFacts] = await Promise.all([
+    const [nativeFacts, machineFacts] = await Promise.all([
       local ? nativeServerFacts() : Promise.resolve<ProcessFacts>({}),
-      central.state === 'up' ? containerFacts(CENTRAL_FILTER) : Promise.resolve<ContainerFacts>({}),
       machine.state === 'up' ? containerFacts(MACHINE_FILTER) : Promise.resolve<ContainerFacts>({}),
     ])
-    // The published port is the central's own business and never reaches a runtime row; splitting
-    // it off here keeps the rows to fields `ServiceRuntimeState` actually declares.
-    const { hostPort: centralPort, ...centralProc } = centralFacts
     const { hostPort: _machinePort, ...machineProc } = machineFacts
 
     const localUrls = { webUrl: `http://localhost:${WEB_PORT}`, apiUrl: `http://localhost:${PORT}` }
@@ -2731,20 +2483,6 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // host, which is why it publishes nothing and its URLs are the native ones.
       ...(machine.state === 'up' ? { ...localUrls, ...machineProc } : {}),
     }
-    const centralRuntime: ServiceRuntimeState = {
-      id: 'central',
-      kind: 'docker',
-      state: central.state,
-      available: central.available,
-      reason: central.reason,
-      // The central publishes ONE port and serves the dashboard and the api on it, so there is no
-      // second URL to name — `apiUrl` is for the split the native server has, not for repeating
-      // the same address under another word.
-      ...(central.state === 'up'
-        ? { webUrl: `http://localhost:${centralPort ?? CENTRAL_DEFAULT_PORT}`, ...centralProc }
-        : {}),
-    }
-
     // Only a Linux box has the mechanism at all — see `bootOptionsFor`. Asked once and handed to
     // both services, so the two rows can never disagree about whether this box does boot units.
     const bootSupported = platform() === 'linux'
@@ -2791,21 +2529,6 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         rebuild: { local: repo, machine: machineCompose },
         idlePids,
       }),
-      // The central's rebuild always works: `central.sh up` inside a checkout, and the published
-      // image outside one — `cli-central.ts` picks between them, and a central that is RUNNING
-      // (the only state that offers a restart) has already proved whichever path it took.
-      buildService('central', s.svcCentral, [centralRuntime], s, {
-        boot: bootCentral,
-        bootUnit: unitName('central'),
-        // One mechanism, so no word distinguishes it — `Start at boot`, not `Start at boot (docker)`.
-        bootOptions: bootOptionsFor([{
-          unit: unitName('central'), runtime: 'central', mech: '',
-          on: bootCentral === 'on', installable: canWrite('central'),
-        }], s, bootSupported, s.svcCentral),
-        rebuild: { central: true },
-        centralPlan,
-        centralRuntimes,
-      }),
     ]
   }
 
@@ -2825,14 +2548,6 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
     }
     return logRuntime(source, up)
   }
-
-  const modeSentence = (s: CliStrings, mode: Mode, connections: number): string =>
-    // The endpoint travels in its own field and the header prints it separately; embedding it
-    // here too would render it twice. With MORE than one central the count is the fact the
-    // endpoint field cannot carry on its own, so the sentence names it.
-    mode === 'member' ? (connections > 1 ? s.configMembers(connections) : s.configMemberBare)
-    : mode === 'central' ? s.configCentral
-    : s.configSolo
 
   /**
    * The actual body of `ControlHost.resumeSession`, run inside `withResumeLock` by its caller.
@@ -2974,41 +2689,20 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
 
     async refresh(): Promise<ControlStatus> {
       const s = S()
-      const [{ mode, endpoint, connections, mouse, sessionPollMs }, services] =
+      const [{ mouse, sessionPollMs }, services] =
         await Promise.all([loadState(), serviceRows()])
       return remember({
-        mode,
-        modeLabel: modeSentence(s, mode, connections.length),
-        // Every endpoint, not the mirror's first one: the detail pane is where the user checks
-        // WHICH centrals this machine feeds, and naming one of three there reads as a machine that
-        // is connected to one. `fitValue` degrades the joined list the same way it degrades a
-        // single URL.
-        endpoint: mode !== 'member' ? undefined
-          : connections.length > 1 ? connections.map(c => c.endpoint).join(' · ')
-          : (connections[0]?.endpoint ?? endpoint),
+        mode: 'solo',
+        modeLabel: s.configSolo,
         services,
         version: CURRENT_VERSION,
         latestVersion,
-        // WHICH machine this is on its central, and how long the last push took. Both come from the
-        // running server's own status route rather than being re-derived here: the uploader already
-        // resolves the name from `whoami` and already times its round trips, and a second
-        // implementation of either would be a second answer that can disagree with the one the
-        // connection card shows.
-        ...(await centralIdentity()),
         // The parallel-sessions budget. Computed HERE and not in the TUI, like every other decision
         // on this object: the arithmetic lives in the pure `memory-budget.ts` and the two `/proc`
         // reads in `memory-probe.ts`, and the answer arrives already decided — including `red`,
         // which depends on swap pressure the screen has no way to know about.
         ...(await memoryStatus()),
         archiveMode: await currentArchiveMode(),
-        // The setup wizard is a question the cockpit asks, so what it may offer is decided here,
-        // beside the very service states that decide it. `central` is the only mode that
-        // RECONFIGURES a running service — it re-runs `central.sh init`, which rewrites the
-        // environment file and recreates the containers — so it is the only one withheld, and it
-        // is withheld with a sentence rather than by disappearing.
-        setupBlocked: services.some(v => v.id === 'central' && v.state === 'up')
-          ? { central: s.setupBlockedCentralUp }
-          : {},
         ...(await sessionViewPref()),
         mouse,
         sessionPollMs,
@@ -3026,44 +2720,6 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      */
     async start(req: StartRequest): Promise<ActionResult> {
       const s = S()
-
-      if (req.runtime === 'central') {
-        // The verb the user pressed names the SHAPE, and it travels as the very flag the CLI takes
-        // — pressing "Start (docker · published image)" here and typing `agentop central up
-        // --image` are one code path, which is what stops the two surfaces drifting into offering
-        // different deployments. Absent means "whatever this central is configured with", exactly
-        // as every start meant before the choice existed.
-        const chosen = req.centralRuntime
-        const args = chosen ? [flagFor(chosen)] : []
-
-        // Which shape needs the real terminal is a separate question from which shape it is, and
-        // `centralStartPlan` still answers it — except when the user has just told us, in which
-        // case their answer outranks what is on disk.
-        const plan = chosen
-          ? (chosen === 'native' ? 'native' : chosen === 'docker-build' ? 'script' : 'image')
-          : await centralStartPlan()
-
-        // Native + background is the one shape that neither streams nor suspends: it returns
-        // immediately with the server detached, so its own prints (which side, which port, the log
-        // path) are just captured for the status line like any other quick action.
-        if (plan === 'native' && req.how === 'bg') {
-          const { value: code } = await captureOutput(() => runCentral('up', args, { detached: true }))
-          return code === 0
-            ? { ok: true, message: s.centralStarted }
-            : { ok: false, message: s.centralFailed }
-        }
-        // Asked BEFORE it is run, because the answer decides who gets the terminal. A first-ever
-        // central (`init`) has questions, a native foreground start becomes a server that never
-        // exits until Ctrl-C — both need the real tty. Everything else is docker compose with
-        // nothing to answer, which is what the pane is for.
-        const streamable = plan === 'script' || plan === 'image'
-        const code = streamable
-          ? await streamOutput(() => runCentral('up', args, { streamed: true }))
-          : await suspend(() => runCentral('up', args))
-        return code === 0
-          ? { ok: true, message: s.centralStarted }
-          : { ok: false, message: s.centralFailed }
-      }
 
       if (req.runtime === 'machine') {
         // Foreground needs the real tty (Ctrl-C has to reach the child), so it is suspended in
@@ -3103,37 +2759,6 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       return { ok: true, message: `${s.startedBg} http://localhost:${WEB_PORT}${hint}` }
     },
 
-    async connect(v): Promise<ActionResult> {
-      const s = S()
-      const { value: code, text } = await captureOutput(() =>
-        memberConnect({ endpoint: v.endpoint, token: v.token, org: v.org || undefined }),
-      )
-      if (code === 0) return { ok: true, message: s.connected }
-      return { ok: false, message: lastLine(text) || s.connectFailed }
-    },
-
-    /**
-     * Leave a central — and with several connected, WHICH one is a question.
-     *
-     * `memberLeave()` handles 0/1/N itself and refuses to guess `connections[0]`; its N-connection
-     * branch opens a picker, so that case goes through `suspend` (a question needs the real tty —
-     * a prompt captured into the status line is one nobody can answer, and Ink still owns the
-     * keyboard). One connection asks nothing and stays captured, which is the common path.
-     *
-     * The message is derived from what is LEFT afterwards rather than asserted: "back to solo" was
-     * simply false when a machine that fed three centrals left one.
-     */
-    async disconnect(): Promise<ActionResult> {
-      const s = S()
-      const before = (await loadState()).connections.length
-      const { code, text } = before > 1
-        ? { code: await suspend(() => memberLeave()), text: '' }
-        : await captureOutput(() => memberLeave()).then(r => ({ code: r.value, text: r.text }))
-      if (code !== 0) return { ok: false, message: lastLine(text) || s.disconnectFailed }
-      const after = (await loadState()).connections.length
-      return { ok: true, message: after > 0 ? s.stillConnected(after) : s.disconnected }
-    },
-
     /**
      * Bounce whatever the target names, resolved against what is RUNNING.
      *
@@ -3150,10 +2775,9 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
        * Streamed when there is something to WATCH: a rebuild, or anything going through docker
        * compose. A native bounce says three lines and its outcome is the status line, so it stays
        * captured — the output pane must not take over the detail region for the most common action
-       * on this screen. The central used to be suspended here for the opposite reason (its child
-       * inherited the terminal and wrote past any capture); piping it is what removed that.
+       * on this screen. 
        */
-      const watchable = rebuild || targets.includes('central') || targets.includes('machine')
+      const watchable = rebuild || targets.includes('machine')
       const mode: RestartMode = { rebuild, stream: watchable }
       const work = () => restartRuntimes(s, targets, mode)
       const ok = watchable ? await streamOutput(work) : (await captureOutput(work)).value
@@ -3189,49 +2813,14 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       if (targets.length === 0) return { ok: false, message: s.svcNotRunning }
       await captureOutput(async () => {
         if (targets.includes('local')) await stopLocal(s)
-        if (targets.includes('central')) await stopContainers(CENTRAL_FILTER, s.stoppingCentral)
         if (targets.includes('machine')) await stopContainers(MACHINE_FILTER, s.stoppingMachine)
       })
       return { ok: true, message: target === 'all' ? s.stoppedAll : s.stoppedDone }
     },
 
-    // `solo` is the only mode a preference write can establish on its own: central and member
-    // both need a real action to succeed first (`initCentral`, `connect`), which writes it.
+    // Solo is the only mode left, so there is nothing to persist.
     async setMode(): Promise<ActionResult> {
-      const s = S()
-      /**
-       * Going solo with centrals attached is a LEAVE, not a preference write.
-       *
-       * `{ ...DEFAULT_TEAM }` carries an explicit `connections: []`, which `mergeTeamPayload`
-       * honours as a replacement of the whole array — so this used to drop every connection AND
-       * every token in one write. A member token is minted on the central and stored nowhere else
-       * on this machine, so that is unrecoverable without re-minting one per central; worse, each
-       * central kept serving this machine's data while the machine had no way left to ask it to
-       * stop. `--all` asks nothing, so it stays captured, and a leave that FAILED aborts the write
-       * instead of orphaning the tokens it could not surrender.
-       */
-      const { connections } = await loadState()
-      if (connections.length > 0) {
-        const { value: code, text } = await captureOutput(() => memberLeave({ all: true }))
-        if (code !== 0) return { ok: false, message: lastLine(text) || s.disconnectFailed }
-      }
-      try {
-        await writePreferences({ team: { ...DEFAULT_TEAM } })
-        return { ok: true, message: s.soloSet }
-      } catch {
-        return { ok: false, message: s.prefsWriteFailed }
-      }
-    },
-
-    async initCentral(): Promise<ActionResult> {
-      const s = S()
-      // The ONE action still suspended, and the reason is not its output but its INPUT: `init` reads
-      // the port, the org and the secrets from the terminal — central.sh exits rather than run
-      // without a tty. Streaming it would put the questions in a pane and leave the answers nowhere.
-      const code = await suspend(() => runCentral('init', []))
-      return code === 0
-        ? { ok: true, message: s.centralInitDone }
-        : { ok: false, message: s.centralInitFailed }
+      return { ok: true, message: S().soloSet }
     },
 
     async pendingArchiveMode(): Promise<ArchiveMode | null> {
@@ -3275,8 +2864,6 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // that now means something else: the option that just started the Docker runtime in the
       // background hands its own runtime back here, so answering "yes" writes the `agentop-machine`
       // unit (`docker compose … up -d`) instead of a native unit that would not match what is
-      // actually running. `central` has one mechanism regardless of `runtime` — `agentop-central`
-      // already runs `central.sh up` (Docker) — so it is passed through unchanged.
       const mode = bootModeFor(service, runtime)
       const res = await enableAutostart(mode)
       // enableAutostart formats for a printed block; the status line is one row.
@@ -3647,7 +3234,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
     async readLog(source: LogSource, maxLines: number): Promise<string[]> {
       const runtime = await resolveLogRuntime(source)
       if (runtime === 'local') return tailFile(SERVER_LOG, maxLines)
-      const ids = await dockerIds(runtime === 'central' ? CENTRAL_FILTER : MACHINE_FILTER)
+      const ids = await dockerIds(MACHINE_FILTER)
       if (!ids.length) return []
       // `2>&1` inside the shell rather than two pipes read separately: a container writes to both
       // streams and reading them apart would interleave the log in the wrong order.
