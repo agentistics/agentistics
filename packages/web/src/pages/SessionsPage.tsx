@@ -51,7 +51,6 @@ import { PanelRail, panelTile } from '../components/sessions/PanelRail'
 import { MENTION_ADDED_TOAST } from '../lib/mentionInsert'
 import type { HarnessId, SessionPreset } from '@agentistics/core'
 import { freedBytes } from '@agentistics/core'
-import { getCentralMachine } from '../lib/centralMachinePick'
 import type { AppContext } from '../lib/app-context'
 import { useFleet, useFleetIndex, type FleetActionId } from '../lib/fleet'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -72,8 +71,6 @@ import { MagnifierButton } from '../components/a11y/MagnifierButton'
 import { HideLensesButton } from '../components/a11y/HideLensesButton'
 import { NotificationBell } from '../components/NotificationBell'
 import { ArtifactsAside } from '../components/sessions/ArtifactsAside'
-import { RelayedAsideNote } from '../components/sessions/RelayedAsideNote'
-import { relayedTabAvailable } from '../lib/relayedAside'
 import { HardwarePanel } from '../components/sessions/HardwarePanel'
 import { UnsavedChangesGuard } from '../components/sessions/UnsavedChangesGuard'
 import { PanelFixedControls, PanelPinButton, PanelTileDropdown } from '../components/sessions/bandControls'
@@ -556,7 +553,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    * still names one from before the connection changed — must read as absent, never as present and
    * refusing. See `lib/panelSlots.ts`'s `resolveForGates`.
    */
-  const relayed = getCentralMachine() !== null
+  const relayed = false
 
   /**
    * WHERE A REOPEN LANDS — one place, for all three controls on this page that can perform one.
@@ -1314,19 +1311,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    */
   const tabPane = (
     id: TabPanelId, opts?: { hideCloseButton?: boolean; headerControls?: ReactNode },
-  ): ReactNode => selected === undefined ? null : relayed && !relayedTabAvailable(id) ? (
-    // ANOTHER MACHINE's session, on a central: this tab reads that machine's own disk or
-    // conversation, which the central cannot reach — say so instead of mounting a panel whose
-    // first request is refused. See `lib/relayedAside.ts`.
-    <RelayedAsideNote
-      key={selected.id}
-      id={id}
-      lang={pt ? 'pt' : 'en'}
-      onClose={() => closeSlotPanel(id)}
-      {...(opts?.hideCloseButton ? { hideCloseButton: true } : {})}
-      {...(opts?.headerControls ? { headerControls: opts.headerControls } : {})}
-    />
-  ) : (
+  ): ReactNode => selected === undefined ? null : (
     <ArtifactsAside
       key={selected.id}
       {...(opts?.hideCloseButton ? { hideCloseButton: true } : {})}
@@ -3440,4 +3425,3 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     </>
   )
 }
-

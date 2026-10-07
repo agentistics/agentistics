@@ -10,8 +10,6 @@ const CostsPage = lazy(() => import('./pages/CostsPage'))
 const TopUsagePage = lazy(() => import('./pages/TopUsagePage'))
 const RepositoriesPage = lazy(() => import('./pages/RepositoriesPage'))
 const RepoDetailPage = lazy(() => import('./pages/RepoDetailPage'))
-const ActionsPage = lazy(() => import('./pages/ActionsPage'))
-const MembersPage = lazy(() => import('./pages/MembersPage'))
 const TagsPage = lazy(() => import('./pages/TagsPage'))
 const VaultPage = lazy(() => import('./pages/VaultPage'))
 const TasksPage = lazy(() => import('./pages/TasksPage'))
@@ -34,15 +32,11 @@ const DataSourcesSettings = lazy(() => import('./pages/settings/DataSourcesSetti
 const BackupSettings = lazy(() => import('./pages/settings/BackupSettings'))
 const HarnessesSettings = lazy(() => import('./pages/settings/HarnessesSettings'))
 const InstallSettings = lazy(() => import('./pages/settings/InstallSettings'))
-const ConnectionSettings = lazy(() => import('./pages/settings/ConnectionSettings'))
 const LiveSettings = lazy(() => import('./pages/settings/LiveSettings'))
 const ChatSettings = lazy(() => import('./pages/settings/ChatSettings'))
 const ProvidersSettings = lazy(() => import('./pages/settings/ProvidersSettings'))
 const MemorySettings = lazy(() => import('./pages/settings/MemorySettings'))
-const UsersSettings = lazy(() => import('./pages/settings/UsersSettings'))
 const TeamsSettings = lazy(() => import('./pages/settings/TeamsSettings'))
-const MachinesSettings = lazy(() => import('./pages/settings/MachinesSettings'))
-const ReposSettingsPage = lazy(() => import('./pages/settings/ReposSettingsPage'))
 const PricingSettings = lazy(() => import('./pages/settings/PricingSettings'))
 const BillingSettings = lazy(() => import('./pages/settings/BillingSettings'))
 
@@ -86,9 +80,7 @@ export default function AppRouter() {
               A bookmark, a pinned tab or an old link still lands somewhere that answers. */}
           <Route path="projects" element={<Navigate to="/repositories" replace />} />
           <Route path="repositories" element={<Suspense fallback={<PageFallback />}><RepositoriesPage /></Suspense>} />
-          <Route path="repositories/actions" element={<Suspense fallback={<PageFallback />}><ActionsPage /></Suspense>} />
           <Route path="repo/:id" element={<Suspense fallback={<PageFallback />}><RepoDetailPage /></Suspense>} />
-          <Route path="members" element={<Suspense fallback={<PageFallback />}><MembersPage /></Suspense>} />
           <Route path="tasks" element={<Suspense fallback={<PageFallback />}><TasksPage /></Suspense>} />
           <Route path="tasks/:id" element={<Suspense fallback={<PageFallback />}><TasksPage /></Suspense>} />
           <Route path="tags" element={<Suspense fallback={<PageFallback />}><TagsPage /></Suspense>} />
@@ -114,7 +106,6 @@ export default function AppRouter() {
             <Route path="pricing" element={<Suspense fallback={<PageFallback />}><PricingSettings /></Suspense>} />
             <Route path="billing" element={<Suspense fallback={<PageFallback />}><BillingSettings /></Suspense>} />
             <Route path="install" element={<Suspense fallback={<PageFallback />}><InstallSettings /></Suspense>} />
-            <Route path="connection" element={<Suspense fallback={<PageFallback />}><ConnectionSettings /></Suspense>} />
             <Route path="live" element={<Suspense fallback={<PageFallback />}><LiveSettings /></Suspense>} />
             <Route path="chat" element={<Suspense fallback={<PageFallback />}><ChatSettings /></Suspense>} />
             {/* VAULT v4 (2026-10-06): the vault has ONE page, `/vault`. The old Settings → Vault screen's
@@ -122,10 +113,7 @@ export default function AppRouter() {
             <Route path="vault" element={<LegacyVaultRedirect />} />
             <Route path="providers" element={<Suspense fallback={<PageFallback />}><ProvidersSettings /></Suspense>} />
             <Route path="memory" element={<Suspense fallback={<PageFallback />}><MemorySettings /></Suspense>} />
-            <Route path="users" element={<Suspense fallback={<PageFallback />}><UsersSettings /></Suspense>} />
             <Route path="teams" element={<Suspense fallback={<PageFallback />}><TeamsSettings /></Suspense>} />
-            <Route path="machines" element={<Suspense fallback={<PageFallback />}><MachinesSettings /></Suspense>} />
-            <Route path="repositories" element={<Suspense fallback={<PageFallback />}><ReposSettingsPage /></Suspense>} />
           </Route>
         </Route>
       </Routes>
