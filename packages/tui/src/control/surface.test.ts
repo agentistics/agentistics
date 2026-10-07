@@ -273,31 +273,26 @@ describe('logSources', () => {
     ...over,
   })
 
-  const central = service({ id: 'central', label: 'agentistics central', state: 'down', running: [],
-    runtimes: [{ id: 'central', kind: 'docker', state: 'down', available: true }] })
-
   test('one entry per LOGICAL service, under the name the cockpit prints', () => {
     // The bug this replaces: a constant `['local', 'central', 'machine']` inside the component,
     // rendered verbatim, so the selector offered the native process and the container of the SAME
     // service as two things — the exact distinction the logical-service model deleted.
-    expect(logSources([service(), central])).toEqual([
+    expect(logSources([service()])).toEqual([
       { source: 'agentistics', label: 'agentistics' },
-      { source: 'central', label: 'agentistics central' },
     ])
   })
 
   test('never offers a runtime id as a label', () => {
-    for (const option of logSources([service(), central])) {
+    for (const option of logSources([service()])) {
       expect(['local', 'machine']).not.toContain(option.label)
     }
   })
 
   test('a CONFLICT expands into its running runtimes — those really are two different logs', () => {
     const conflicted = service({ running: ['local', 'machine'] })
-    expect(logSources([conflicted, central])).toEqual([
+    expect(logSources([conflicted])).toEqual([
       { source: 'local', label: 'agentistics (native)' },
       { source: 'machine', label: 'agentistics (docker)' },
-      { source: 'central', label: 'agentistics central' },
     ])
   })
 

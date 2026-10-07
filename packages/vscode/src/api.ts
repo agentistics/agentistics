@@ -5,7 +5,7 @@
  * the fleet is on), which is the whole reason the webview does not fetch for itself: a webview's
  * `localhost` is the BROWSER's, and in a remote window that is not the machine the sessions run on.
  *
- * Every method is TOTAL. A server that is not running, a central that refuses, a profile with no
+ * Every method is TOTAL. A server that is not running, a profile with no
  * host power and a socket that died mid-request are four different answers and are kept apart —
  * `LinkStatus` is what carries the difference to the screen. Nothing here throws at the caller, and
  * nothing here invents a value: a failed read of the fleet keeps the PREVIOUS one, exactly as the
@@ -69,7 +69,7 @@ export class AgentopClient {
    * The fleet, plus how this window is doing at asking for it.
    *
    * 403 and 404 are ANSWERS, not failures: the first is an exposure profile with no host power, the
-   * second a central, which aggregates many machines and hosts none of their sessions. Rendering
+   * second, which aggregates many machines and hosts none of their sessions. Rendering
    * either as an empty fleet would be a confident "nothing is running" from a machine that was
    * never allowed to look. And a request that TIMED OUT is neither of those, nor a dead server —
    * see `slow` on `LinkState`.
@@ -177,7 +177,7 @@ export class AgentopClient {
    */
   async today(now: Date, opts: { projected?: boolean } = {}): Promise<TodayTotals | null> {
     if (opts.projected) {
-      // A4.5: a few hundred bytes from the projections. A refusal (gate off, central, no reader) or an
+      // A4.5: a few hundred bytes from the projections. A refusal (gate off, no reader) or an
       // unreachable route reads /api/data below, exactly as before.
       try {
         return await projectedToday(httpMetricsQuery(this.api, (input, init) =>

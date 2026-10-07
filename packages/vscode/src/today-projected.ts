@@ -15,7 +15,7 @@
  * Tokens (all four counters) and cost are the main agent's (`subagent=false`), which is the legacy
  * per-session figure's meaning. `sessions` counts the sessions with activity today.
  *
- * A refusal (404 when the gate is off, 409 on a central, 503 with no reader) throws
+ * A refusal (404 when the gate is off, 503 with no reader) throws
  * `ProjectionUnavailable`, and the caller reads `/api/data` as before.
  */
 import { allMetricGroups, type MetricsQueryFn } from '@agentistics/core'

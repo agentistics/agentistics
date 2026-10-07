@@ -445,13 +445,10 @@ export function headerMeta(input: HeaderMetaInput): HeaderMeta {
   // name dropped the whole cell, dot included, over one missing piece of a fact otherwise known.
   // `linkState` is the right presence signal because it is set (in `cli-start.ts`) exactly when
   // there IS a connection, independent of whether that connection could be named.
-  const machine = linkState !== undefined
-    ? [machineName, accountName, pushMs !== undefined ? `${pushMs}ms` : '']
-        .filter(Boolean).join(' · ')
-    : ''
+  const machine = ''
 
   const level = memory ? loadLevel(memory.percent) : undefined
-  const linked = linkState !== undefined ? { machineState: linkState } : {}
+  const linked = {}
   const full = {
     text, machine, alert, update, memory: mem, memoryRed: red, ...linked,
     ...(level ? { memoryLevel: level } : {}),

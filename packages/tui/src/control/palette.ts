@@ -60,7 +60,7 @@ export const PALETTE_COMMANDS: readonly PaletteCommand[] = [
   { id: 'keys', label: '/keys', description: w('rebind the app\'s keys', 'trocar as teclas do app'), keys: '', run: { kind: 'settings', section: 'keys' } },
   { id: 'lang', label: '/lang', description: w('english · português', 'english · português'), keys: '', run: { kind: 'lang' } },
   { id: 'dashboard', label: '/dashboard', description: w('metrics (existing screen)', 'métricas (tela existente)'), keys: '[ ]', run: { kind: 'tab', tab: 'dashboard' } },
-  { id: 'services', label: '/services', description: w('server, central, logs (existing)', 'servidor, central, logs (existente)'), keys: '[ ]', run: { kind: 'tab', tab: 'services' } },
+  { id: 'services', label: '/services', description: w('server and logs (existing)', 'servidor e logs (existente)'), keys: '[ ]', run: { kind: 'tab', tab: 'services' } },
   { id: 'help', label: '/help', description: w('every key, by screen', 'todas as teclas, por tela'), keys: '?', run: { kind: 'help' } },
   { id: 'quit', label: '/quit', description: w('leave agentop', 'sair do agentop'), keys: 'ctrl+c', run: { kind: 'quit' } },
 ] as const
