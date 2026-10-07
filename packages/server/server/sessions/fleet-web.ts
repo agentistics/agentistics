@@ -16,6 +16,7 @@
  * host per request would fire one per poll.
  */
 
+import { PROMPT_ACK_MS, withDeadline } from './prompt-deadline'
 import type { HarnessId, ProjectKind } from '@agentistics/core'
 import type { StartHost } from '../cli-start'
 import type { CliLang } from '../cli-lang'
@@ -309,37 +310,30 @@ export async function runFleetAction(
       // the harness writes for it — the resolver refuses a record from after the turn it is asked
       // about, and a submit that waits on the pane takes hundreds of milliseconds.
       const sentAtMs = Date.now()
-      const out = await host.promptSession(req.id, text)
-      // RECORDED ONLY ON A CONFIRMED DELIVERY, and recorded HERE rather than in the browser: a
-      // queue held by the tab that sent it is a queue no other device can see, which is the whole
-      // of the report. `conversationOfRow` because a message belongs to the CONVERSATION, not to
-      // the session that happened to host it — reopening one must not lose what is still waiting.
-      //
-      // AND IT DOES NOT HOLD THE REPLY. `host.sessions()` is a FLEET READ — it walks every session
-      // and captures panes — and awaiting it here put that whole cost between pressing enter and
-      // the browser hearing back, on the one action where the person is watching. Reported as
-      // "está demorando pra ser enviada… não tem motivo pra demorar", and there was none: the
-      // message had already been delivered by the line above.
-      //
-      // The queue is for DISPLAY, so it can be written a moment later. What it must not do is make
-      // the send look slow. A failure to record leaves the message un-queued and delivered, which
-      // is the harmless direction: the transcript is the record either way.
-      if (out.ok) {
+      const record = () => {
         void (async () => {
           try {
             const row = (await host.sessions?.())?.sessions.find(r => r.id === req.id || r.conversationId === req.id)
             const conv = row ? conversationOfRow(row) : ''
             if (conv) recordPrompt(conv, text)
-            // What this message CARRIED, off the text that was just typed — see
-            // `attachmentMessageOf`. The same row lookup serves both, so it costs nothing more.
             const carried = attachmentMessageOf(conv ?? '', sentAtMs, text)
             if (carried) await recordAttachmentMessage(carried)
           } catch { /* the message went; the queue is a view of it, not the record */ }
-          // The pushed chat (PERF.1) hears about the send now, not on its next safety read.
           const { wakeChat } = await import('./chat-stream')
           wakeChat(req.id)
         })()
       }
+      // THE RESPONSE IS NOT HELD FOR A SLOW PANE. `promptSession` is a chain of tmux spawns under
+      // the pane's write lock; past `PROMPT_ACK_MS` the keys are in flight, so the browser is told
+      // the message was accepted and a LATE failure is raised as a notification instead.
+      const raced = await withDeadline(host.promptSession(req.id, text), PROMPT_ACK_MS, late => {
+        if ('value' in late && late.value.ok) { record(); return }
+        const message = 'value' in late ? late.value.message : (lang === 'pt' ? 'A mensagem não foi entregue.' : 'The message was not delivered.')
+        void import('../sse').then(m => m.broadcastNotification({ type: 'error', title: 'Message not delivered', message })).catch(() => {})
+      })
+      if (!raced.settled) return { ok: true, message: (lang === 'pt' ? 'Mensagem enviada.' : 'Message sent.') }
+      const out = raced.value
+      if (out.ok) record()
       return out
     }
     case 'cycleMode':
