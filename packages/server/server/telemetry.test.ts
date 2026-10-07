@@ -52,7 +52,7 @@ describe('anonymous telemetry', () => {
     expect(shouldSendTelemetry({ ...base, dataDir: '/tmpx/agentistics' })).toBe(true)
   })
   test('payload contains exactly the public fields', () => {
-    expect(makePayload({ id: 'x', version: '2.110.0', os: 'linux', arch: 'x64', harnesses: ['codex', 'codex', 'claude'], mode: 'solo' })).toEqual({ id: 'x', version: '2.110.0', os: 'linux', arch: 'x64', harnesses: ['claude', 'codex'], mode: 'solo' })
+    expect(makePayload({ id: 'x', version: '2.110.0', os: 'linux', arch: 'x64', harnesses: ['codex', 'codex', 'claude'] })).toEqual({ id: 'x', version: '2.110.0', os: 'linux', arch: 'x64', harnesses: ['claude', 'codex'] })
   })
   test('opt-out and environment disable before network', async () => {
     const fetchFn = (async () => { throw new Error('must not call') }) as unknown as typeof fetch
