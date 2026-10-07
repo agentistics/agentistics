@@ -3397,6 +3397,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 {row?.mode && !answeringNow && (
                   <button
                     ref={modeButtonRef}
+                    className="ag-tap-icon"
                     onClick={() => {
                       const rect = modeButtonRef.current?.getBoundingClientRect()
                       if (rect) setModeMenuPos(modeMenuPlacement(rect, window.innerWidth, window.innerHeight))
@@ -3409,8 +3410,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     title={row.mode.label}
                     style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-                      width: isMobile ? 44 : undefined, minWidth: isMobile ? 44 : undefined,
-                      height: isMobile ? 44 : 30, padding: isMobile ? 0 : '0 9px',
+                      height: 30, padding: '0 9px',
                       borderRadius: 9, flexShrink: 0, maxWidth: 150,
                       // The colour IS the mode — see `modeStyle.ts`. Ordered by how much the
                       // session proceeds without asking, and never the fault colour: `auto` is how
