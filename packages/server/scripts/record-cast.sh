@@ -62,7 +62,7 @@ trap cleanup EXIT
 # puts that user's name and directory layout on screen for the first seconds of
 # every recording. What gets typed is just `agentop start`.
 tmux new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS" \
-  "env -u PROMPT_COMMAND -u STARSHIP_SHELL COLORTERM=truecolor FORCE_COLOR=3 \
+  "env -u PROMPT_COMMAND -u STARSHIP_SHELL AGENTISTICS_TELEMETRY=0 COLORTERM=truecolor FORCE_COLOR=3 \
    HOME='${HOME_DIR:-$HOME}' PATH='${BIN_DIR:-$HOME/.local/bin}:/usr/local/bin:/usr/bin:/bin' \
    ${EXTRA_ENV:-} PS1='$ ' bash --noprofile --norc"
 tmux set-option -t "$SESSION" status off

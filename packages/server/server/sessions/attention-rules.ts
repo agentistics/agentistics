@@ -93,8 +93,16 @@ export const ATTENTION_RULES: Record<HarnessId, AttentionRules | null> = {
     mainWorking: [/\(\d+[hms][^)]*·\s*↓/],
   },
   codex: {
-    probed: 'codex 0.113.0, 2026-08-13',
-    approval: [/Press enter to continue/],
+    probed: 'codex 0.113.0, 2026-08-13 + codex 0.160.1, 2026-10-07',
+    approval: [
+      // 0.113.0's update picker.
+      /Press enter to continue/,
+      // 0.160.1's command, network and patch approvals (fixtures/codex-0.160.1/). For a release
+      // these read as `waiting`: the terminal showed the question and the chat offered no card.
+      /Press enter to confirm or esc to cancel/,
+      // 0.160.1's directory-trust prompt.
+      /enter continue · esc back/,
+    ],
     // `working` deliberately absent — see the header.
   },
   kimi: {

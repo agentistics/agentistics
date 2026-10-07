@@ -1,5 +1,6 @@
 import React from 'react'
 import { clearDataCache } from '../hooks/useData'
+import { releaseBoot } from '../lib/bootSplash'
 
 interface Props {
   children: React.ReactNode
@@ -23,6 +24,8 @@ export class RootErrorBoundary extends React.Component<Props, State> {
   }
 
   override componentDidCatch(error: Error, info: React.ErrorInfo) {
+    // The boot splash sits above everything; an error during the boot must not stay hidden under it.
+    releaseBoot()
     // eslint-disable-next-line no-console
     console.error('[agentistics] uncaught render error', error, info.componentStack)
   }

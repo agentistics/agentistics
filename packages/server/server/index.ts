@@ -140,6 +140,7 @@ import { startAgentClient, reconcileNow } from './team-agent-client'
 import { validateIngestToken } from './team-tokens'
 import { getAccount } from './accounts'
 import { getTeam } from './teams'
+import { discoverProjectDisks } from './disk-picker'
 
 // ---------------------------------------------------------------------------
 // Reads the first `cwd` field found in a JSONL session file.
@@ -965,6 +966,23 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         return new Response(JSON.stringify(prefs), {
           status: 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      } catch (err) {
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        console.error(safe.logLine)
+        return new Response(JSON.stringify(safe.body), {
+          status: 500,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+    }
+
+    if (url.pathname === '/api/project-disks' && req.method === 'GET') {
+      try {
+        const disks = await discoverProjectDisks()
+        return new Response(JSON.stringify({ disks }), {
+          status: 200,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'private, max-age=5' },
         })
       } catch (err) {
         const safe = safeError(err, { verbose: PROFILE === 'local' })
@@ -4721,7 +4739,12 @@ const scheduleBackfillCheck = () => {
 // One line with the boot's own clock, so a slow start can be read off the service's journal.
 console.log(`[boot] +${Math.round(performance.now())} ms listening on ${PORT}${SERVE_STATIC ? ` and ${WEB_PORT}` : ''}`)
 // Anonymous daily usage signal: tried at boot and every 6 h; `sendTelemetry` itself sends at most once per UTC day.
-const telemetryTick = () => { void readPreferences().then(prefs => sendTelemetry({ enabled: prefs.telemetryEnabled !== false })).catch(() => {}) }
+const telemetryTick = () => {
+  void readPreferences().then(async prefs => {
+    if (prefs.telemetryEnabled === false) return
+    await sendTelemetry({ enabled: true, loadSessions: async () => (await buildApiResponse()).sessions })
+  }).catch(() => {})
+}
 telemetryTick()
 setInterval(telemetryTick, 6 * 60 * 60 * 1000).unref?.()
 // Which ports this data dir's server listens on, beside its lock — so a CLI bounce from this data dir
