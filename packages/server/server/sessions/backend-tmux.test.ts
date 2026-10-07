@@ -84,3 +84,15 @@ describe('coldStartArgv — the tmux server is born in a scope of its own', () =
     expect(coldStartArgv(['x'], { platform: 'darwin', runtimeDir: '/tmp', hasUserBus: true })).toBeNull()
   })
 })
+
+/**
+ * Every server-addressed tmux call must name OUR socket. `listPanePids` once ran a literal
+ * `tmux(['list-panes', …])` with no `-L`, which asked the ambient server ($TMUX, or `default` under
+ * systemd): no row had a pid, so antigravity's conversation link never formed and its chat was blank.
+ * A literal argv array is the shape of that bug; `-V` is the one call that needs no server.
+ */
+test('backend-tmux never calls tmux with a literal argv (no socket)', async () => {
+  const src = await Bun.file(new URL('./backend-tmux.ts', import.meta.url)).text()
+  const literal = [...src.matchAll(/\btmux\(\s*\[([^\]]*)\]/g)].map(m => m[1]!.trim())
+  expect(literal).toEqual(["'-V'"])
+})
