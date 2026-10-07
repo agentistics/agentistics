@@ -214,6 +214,7 @@ describe('handleSession', () => {
     expect(projectionsWebOn({ ...on, AGENTISTICS_PROJECTIONS: '0' }, false, true)).toBe(false)
     expect(projectionsWebOn({ ...on, AGENTISTICS_PROJECTIONS_SURFACES: 'mcp' }, false, true)).toBe(false)
     expect(projectionsWebOn({ AGENTISTICS_PROJECTIONS: 'off' }, false, true)).toBe(false)
+    expect(projectionsWebOn({ AGENTISTICS_PROJECTIONS: '1', AGENTISTICS_JOURNAL: '0' }, false, true)).toBe(false)
     expect(projectionsWebOn(on, true, true)).toBe(false)
     expect(projectionsWebOn(on, false, false)).toBe(false)
     // The default (the backfill item): nothing set reads the projections on the web.
