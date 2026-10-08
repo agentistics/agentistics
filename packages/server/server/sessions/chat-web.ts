@@ -24,6 +24,7 @@
  * on it saying why. The link was never the problem; there was no reader.
  */
 
+import { stripContextTurns } from './agentistics-context'
 import { anyGrant, scrubDeep } from '../vault/grants'
 import { isExternalRowId } from './external-continue'
 import type { StartHost } from '../cli-start'
@@ -44,6 +45,7 @@ import { planSessionSource } from './session-source'
 import type { SessionSurfaceDeps } from './session-surface-deps'
 import { CLAUDE_DIR } from '../config'
 import { safeReadJson } from '../utils'
+import { isComposerMessage } from './composer-message'
 
 /** What the journal remembers of a conversation whose transcript is gone — numbers only (D5, Q3). */
 export interface ChatRecorded {
@@ -331,6 +333,9 @@ async function readSessionChatCore(
       live,
     }
   }
+  // The fenced agentistics context (a harness with no invisible channel gets it in its first message)
+  // never reaches a bubble: the person's own words stay, and one small chip says it was sent.
+  read.turns = stripContextTurns(read.turns)
   // A REWIND agentop just drove is not in the transcript until the conversation continues — the
   // turns it undid are cut here until then. See `rewind-pending.ts`.
   const rewound = pendingRewindFor(conversationId, Date.now())
@@ -339,6 +344,9 @@ async function readSessionChatCore(
     if (cut.stale) forgetRewind(conversationId)
     else read.turns = cut.turns
   }
+  read.turns = read.turns.map(turn => turn.role === 'user' && isComposerMessage(id, turn.text)
+    ? { ...turn, composer: true }
+    : turn)
   // What is still waiting, judged against the user turns THIS read returned. The window matters and
   // is the right one: a message queued a minute ago cannot be older than the last 400 turns, and
   // comparing against a wider slice would cost a second read to learn nothing.

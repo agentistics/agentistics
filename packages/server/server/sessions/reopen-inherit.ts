@@ -28,6 +28,8 @@ export function inheritedIdentity(prev: ManagedSession | undefined): Partial<Man
   if (prev.taskId) out.taskId = prev.taskId
   if (prev.subtaskId) out.subtaskId = prev.subtaskId
   if (prev.attemptId) out.attemptId = prev.attemptId
+  if (prev.parentSessionId) out.parentSessionId = prev.parentSessionId
+  if (prev.parentConversationId) out.parentConversationId = prev.parentConversationId
   if (prev.harnessName) {
     out.harnessName = prev.harnessName
     if (prev.harnessNameSince !== undefined) out.harnessNameSince = prev.harnessNameSince

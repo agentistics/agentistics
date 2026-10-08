@@ -1222,12 +1222,9 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
   // Auto-apply: bounce any running services so they run the new version immediately.
   process.stdout.write('Applying the update to running services…\n')
   writeProgress({ stage: 'restarting', version: info.latest })
-  let restart: RestartOutcome
   try {
-    restart = await restartRunningServices(currentBin, info.latest, installed.backup)
-  } catch (err: any) {
-    restart = { ok: false, failures: [`unexpected error: ${err?.message ?? String(err)}`], restartedServer: false }
-  }
+    await restartRunningServices(currentBin, info.latest, installed.backup)
+  } catch { /* /api/version below is authoritative even when the helper cannot report a result */ }
 
   // THE SERVER ITSELF IS THE FINAL WORD. A restart verdict is built from side facts (a pid read with
   // lsof/ss, a unit state), and any of them can be wrong or unobtainable while the new version is
@@ -1235,24 +1232,6 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
   // in about a second, the pid lookup returned nothing, and the upgrade recorded `failed` over a
   // healthy server (and the page said "the update did not finish"). So before any failure is
   // recorded, ask the port what it runs: exactly the target version means the upgrade succeeded.
-  let rescued = false
-  if (!restart.ok) {
-    const seen = await pollRunningVersion(PORT, info.latest, { timeoutMs: 8_000, maxMs: 8_000 })
-    rescued = seen.ok
-  }
-
-  if (!restart.ok && !rescued) {
-    // The binary IS installed — but claiming "Done, now running vX" while a service still runs
-    // the old code is the lie that hides a failed critical update.
-    process.stderr.write(
-      `\n  ${_Y}${_B}${s.upgradeRestartFailed(info.latest)}${_R}\n` +
-      restart.failures.map(f => `    • ${f}\n`).join('') +
-      `  ${s.upgradeRestartHint}\n\n`,
-    )
-    recordUpgradeFailure(info.latest, `restart failed: ${restart.failures.join('; ')}`)
-    return 1
-  }
-
   // The restart command succeeding only means systemd/docker ACCEPTED it. An orphaned process
   // from before a reboot can go on holding the port while the unit's own new process crash-loops
   // trying to bind it — invisible to every check above, and exactly what let a previous run print
@@ -1260,13 +1239,16 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
   // before the upgrade. This is the one check that asks what is actually answering requests.
   //
   // A restarted server whose OWN new process never binds the port at all (a harder crash-loop —
-  // broken build, missing dependency, a fatal startup error) leaves `observed === null` too, which
-  // used to be treated as "nothing runs here to confirm" and printed "Done" over a service that was
-  // actually down. `restart.restartedServer` is what tells the two apart.
-  const verified = rescued
-    ? { ok: true, observed: info.latest, state: 'matched' as const }
-    : await pollRunningVersion(PORT, info.latest)
-  const decision = decideVersionVerification(verified, restart.restartedServer)
+  // broken build, missing dependency, a fatal startup error) leaves `observed === null`; the
+  // command now reports that as unconfirmed instead of printing "Done" over a server that is down.
+  // Keep polling even when the service-manager helper reported a failure. It may have returned
+  // before the replacement finished booting, and the HTTP endpoint is the authoritative answer.
+  const verified = await pollRunningVersion(PORT, info.latest)
+  // A completed binary upgrade is only reported as successful once the new server identity has
+  // answered; do not claim success while this endpoint is still down.
+  const decision: VersionVerification = verified.ok
+    ? { ok: true }
+    : { ok: false, reason: verified.observed !== null ? 'mismatch' : 'unconfirmed' }
   if (!decision.ok) {
     const facts = await portHolderFacts(PORT)
     const lines = decision.reason === 'mismatch'
@@ -1293,6 +1275,13 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
     const line = await repairWslAutostart()
     if (line) process.stdout.write(`  ${line}\n`)
   } catch { /* the upgrade itself succeeded; autostart repair is best-effort */ }
+
+  // The installed binary may have a new path. Refresh only an integration the user had already
+  // opted into, using the same idempotent merge as `agentop hooks install`.
+  try {
+    const { refreshInstalledHooks } = await import('./cli-hooks.ts')
+    await refreshInstalledHooks()
+  } catch { /* hook repair is best-effort; it must not undo a verified upgrade */ }
 
   // Success is recorded explicitly, and any failure memory of THIS version is dropped with it.
   clearUpgradeFailure()

@@ -2,7 +2,7 @@ import { describe, expect, test, afterEach } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { openParseCache, NOOP_PARSE_CACHE, type ParseCache } from './parse-cache'
+import { openParseCache, NOOP_PARSE_CACHE, clearParseCacheMemo, type ParseCache } from './parse-cache'
 import { cacheSlot, type FileStamp } from './parse-cache-key'
 
 const dirs: string[] = []
@@ -149,17 +149,20 @@ describe('openParseCache', () => {
 
   test('flush keeps a row that is always hit and never rewritten', async () => {
     // Without the batched touch, a transcript that never changes ages out on `used`
-    // and is reparsed — the exact file the cache exists to stop reparsing.
+    // and is reparsed — the exact file the cache exists to stop reparsing. The touch is
+    // at most daily (PERF.1: rewriting every row on every build cost ~50 ms a build), so
+    // the clock moves in days here; production gc's cutoff is 30 of them.
+    const DAY = 24 * 60 * 60 * 1000
     let clock = 1_000_000
     const c = await openParseCache(await tempDb(), () => clock)
     c.set('session', stamp(), { v: 1 })
     c.flush()
 
-    clock += 60_000
+    clock += 2 * DAY
     expect(c.get<{ v: number }>('session', stamp())).toEqual({ v: 1 })
     c.flush()
 
-    expect(c.gc(clock - 1_000)).toBe(0)
+    expect(c.gc(clock - DAY)).toBe(0)
     expect(c.get<{ v: number }>('session', stamp())).toEqual({ v: 1 })
     c.close()
   })
@@ -195,7 +198,28 @@ describe('openParseCache', () => {
       .run('{not json', cacheSlot('session', stamp().path))
     raw.close()
 
+    // A fresh process: the in-memory copy (which is still right — it was derived from the
+    // file, not from this blob) is not what this test is about.
+    clearParseCacheMemo()
     expect(c.get<{ v: number }>('session', stamp())).toBeNull()
+    c.close()
+  })
+  test('a row read again within a day is answered from memory and not rewritten', async () => {
+    // PERF.1: a warm build was 1200 SELECTs + JSON.parses + 1200 UPDATEs of `used`.
+    const file = await tempDb()
+    let clock = 1_000_000
+    const c = await openParseCache(file, () => clock)
+    c.set('session', stamp(), { v: 1 })
+    clock += 60_000
+    const got = c.get<{ v: number }>('session', stamp())!
+    expect(got).toEqual({ v: 1 })
+    got.v = 99 // a caller stamping a field must not reach the next reader
+    c.flush()
+    expect(c.get<{ v: number }>('session', stamp())).toEqual({ v: 1 })
+    const { Database } = await import('bun:sqlite')
+    const raw = new Database(file)
+    expect((raw.query('SELECT used FROM parse_cache').get() as { used: number }).used).toBe(1_000_000)
+    raw.close()
     c.close()
   })
 })
@@ -207,4 +231,5 @@ describe('NOOP_PARSE_CACHE', () => {
     expect(c.get('session', stamp())).toBeNull()
     expect(() => { c.flush(); c.close() }).not.toThrow()
   })
+
 })

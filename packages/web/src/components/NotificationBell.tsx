@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Bell, BellOff, AlertCircle, AlertTriangle, Info, CheckCircle2, Trash2, X } from 'lucide-react'
 import { useNotifications, markAllRead, clearNotifications, dismissNotification, resolveNotification, notificationLink, type NotificationType } from '../lib/notifications'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { openWhatsNew } from '../whatsNew/open'
 import { requestIdleReview } from '../lib/idleReviewRequest'
 import { muteSessionWithToast, SESSION_MUTED_CODE } from '../lib/notifyMenu'
 
@@ -152,10 +153,12 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) 
               // checks it once on mount, so a request made from anywhere else in the app survives
               // the race.
               const isIdle = n.code === 'sessions.idle'
-              const clickable = link !== null || isUpdate || isIdle
+              const isWhatsNew = n.code === 'app.whats_new'
+              const clickable = link !== null || isUpdate || isIdle || isWhatsNew
               const go = () => {
                 setOpen(false)
                 if (isUpdate) { window.dispatchEvent(new CustomEvent('agentistics:open-update-modal')); return }
+                if (isWhatsNew) { openWhatsNew(n.meta); return }
                 if (isIdle) { navigate('/sessions'); requestIdleReview(); return }
                 if (link) navigate(link)
               }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { codexIsBlockingFrame, planCodexSend } from './codex-send'
+import { classifyCodexSendFailure, codexIsBlockingFrame, planCodexSend } from './codex-send'
 
 const idle = ['› Find and fix a bug in @filename', '', 'gpt-5.4-mini low · 100% left · /tmp/scratchpad']
 const update = [
@@ -11,6 +11,10 @@ const shortInline = ['› fix it', '', 'gpt-5.4-mini low · 100% left · /tmp/sc
 const pasted = ['› [Pasted Content 420 chars]', '', 'gpt-5.4-mini low · 100% left · /tmp/scratchpad']
 
 describe('Codex send decision', () => {
+  test('a failed write names the prompt when the pane is still asking', () => {
+    expect(classifyCodexSendFailure(update, true)).toBe('prompt')
+    expect(classifyCodexSendFailure(idle, false)).toBe('ended')
+  })
   test('real update prompt is blocked before any paste', () => {
     expect(codexIsBlockingFrame(update)).toBe(true)
     expect(planCodexSend('before-paste', update)).toBe('blocked')

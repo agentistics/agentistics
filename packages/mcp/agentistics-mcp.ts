@@ -13,6 +13,7 @@ import {
   sessionHarness,
   sessionMessages,
   sessionTokens,
+  startedByIndex,
   harnessParam,
   toolsForGate,
 } from "./session-tokens.js";
@@ -582,6 +583,20 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "agentistics_session_message",
+    description:
+      "Send a message to ANOTHER agentistics session — the standard channel between a session and the one that started it (or the ones it started). `to` is a session reference (managed id, conversation id, exact title or unique id prefix); `kind` is handback (work finished/committed), block (you cannot continue) or question (you need a decision); `body` is the text. It is typed into the target's own conversation through the same path its composer uses, headed `[from session <id> · <kind>]`, and — when YOUR session is filed on a task or subtask — also recorded there as a comment of that kind. Use it to report to the session that started you instead of asking the user; a parent may message its children the same way. Refused for a session that does not exist, for yourself, from a process that is not a verified agentop session, and more than once per 2 seconds to the same session.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        to: { type: "string", description: "The target session reference." },
+        kind: { type: "string", enum: ["handback", "block", "question"] },
+        body: { type: "string", description: "The message." },
+      },
+      required: ["to", "kind", "body"],
+    },
+  },
+  {
     name: "agentistics_summary",
     description:
       "Get an overview of AI coding usage metrics (across all tracked harnesses — Claude Code, Codex, Gemini, Copilot, Antigravity — or scoped to one): total tokens, estimated cost, sessions, streak, most used model, and top project. Good starting point for any metrics question.",
@@ -1071,6 +1086,16 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
+      case "agentistics_session_message": {
+        const a = args as any;
+        const body = await apiSend("POST", "/api/session-message", {
+          to: a?.to,
+          kind: a?.kind,
+          body: a?.body,
+          session: sessionProof(process.env),
+        });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
       case "agentistics_summary": {
         const harness = (args as any)?.harness as string | undefined;
         return text(await analytics("agentistics_summary", harness, {
@@ -1098,6 +1123,9 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const limit = Math.min((args as any)?.limit ?? 20, 50);
         const harness = (args as any)?.harness as string | undefined;
         const data = await apiGet("/api/data");
+        // Who started each session — read off the fleet (best effort: a central, or a server with no
+        // host power, has no fleet and the field is simply absent).
+        const startedBy = await apiGet("/api/fleet").then((f: any) => startedByIndex(f?.rows ?? [])).catch(() => new Map<string, { id: string; title?: string }>());
         const rows = filterSessions((data.sessions ?? []) as AnySession[], harness)
           .slice(0, limit)
           .map((s: any) => {
@@ -1118,6 +1146,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
               estimatedCostUSD: unpriced > 0 && unpriced === input + output + cacheRead + cacheWrite ? null : Math.round(cost * 10000) / 10000,
               ...(unpriced > 0 ? { unpricedTokens: unpriced } : {}),
               model: s.model ?? null,
+              ...(startedBy.get(s.session_id) ? { startedBy: startedBy.get(s.session_id) } : {}),
             };
           });
         return { content: [{ type: "text", text: JSON.stringify(rows, null, 2) }] };

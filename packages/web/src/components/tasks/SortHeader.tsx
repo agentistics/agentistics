@@ -110,18 +110,6 @@ export function SortTh<K extends string>({ label, sortKey, current, onSort, styl
       } : {})}
       aria-sort={sortKey ? ariaSortOf(current, sortKey) : undefined}
     >
-      {sortKey
-        ? (
-          <SortButton
-            label={label}
-            dir={current && current.key === sortKey ? current.dir : null}
-            onClick={() => onSort(sortKey)}
-            title={title}
-            mobile={mobile}
-            align={a}
-          />
-        )
-        : label}
       {reorder && (
         <span
           draggable
@@ -135,9 +123,21 @@ export function SortTh<K extends string>({ label, sortKey, current, onSort, styl
             setDragging(true)
           }}
           onDragEnd={() => { setDragging(false); setOver(false) }}
-          style={{ display: 'inline-flex', alignItems: 'center', marginLeft: 5, cursor: 'grab', color: 'var(--text-tertiary)' }}
+          style={{ display: 'inline-flex', alignItems: 'center', marginRight: 5, cursor: 'grab', color: 'var(--text-tertiary)' }}
         ><GripVertical size={12} /></span>
       )}
+      {sortKey
+        ? (
+          <SortButton
+            label={label}
+            dir={current && current.key === sortKey ? current.dir : null}
+            onClick={() => onSort(sortKey)}
+            title={title}
+            mobile={mobile}
+            align={a}
+          />
+        )
+        : label}
       {handle}
     </th>
   )

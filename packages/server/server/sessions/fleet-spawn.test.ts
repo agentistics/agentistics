@@ -158,3 +158,12 @@ describe('planFleetSpawn', () => {
     })
   })
 })
+
+describe('planFleetSpawn — parent', () => {
+  it('carries an explicit parent session id, trimmed; blank is absent', () => {
+    const ok = planFleetSpawn({ harness: 'claude', cwd: '/r', parent: '  abc123  ' }, HARNESSES)
+    expect(ok.ok && ok.plan.parentSessionId).toBe('abc123')
+    const none = planFleetSpawn({ harness: 'claude', cwd: '/r', parent: '  ' }, HARNESSES)
+    expect(none.ok && 'parentSessionId' in none.plan).toBe(false)
+  })
+})

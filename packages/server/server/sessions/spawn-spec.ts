@@ -62,6 +62,7 @@
 
 import type { HarnessId } from '@agentistics/core'
 import { HARNESS_PROCESS_LOGS, HARNESS_SESSION_SOURCES } from './harness-session-file'
+import { prependContext } from './agentistics-context'
 import type { InitialPrompt, SpawnRequest, SpawnPlanResult, SpawnSpec } from './types'
 
 export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
@@ -93,6 +94,9 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     // wrote `~/.claude/projects/-tmp-sid-probe/<uuid>.jsonl` — the same id the adapter reads back as
     // `SessionMeta.session_id`, which is the only thing that makes the record worth keeping.
     assignId: id => ['--session-id', id],
+    // `--append-system-prompt <prompt>  Append a system prompt to the default system prompt` (claude
+    // 2.1.293). VERIFIED LIVE 2026-10-07: `claude -p --append-system-prompt "secret word is X"` answered X.
+    context: { kind: 'args', args: text => ['--append-system-prompt', text] },
   },
 
   // `Usage: codex [OPTIONS] [PROMPT]` / `[PROMPT]  Optional user prompt to start the session`
@@ -100,6 +104,10 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
   // from the CLI (`-c` accepts unknown keys silently), so it is absent rather than guessed.
   codex: {
     bin: 'codex',
+    // `codex --help` (0.161.0): `--no-daemon Run without the shared background server`. This
+    // avoids the daemon feature-settings negotiation that blocks every first message; it is scoped
+    // to this managed process and does not alter ~/.codex/config.toml or other Codex clients.
+    startupArgs: ['--no-daemon'],
     prompt: { kind: 'positional' },
     modelFlag: '--model', // `-m, --model <MODEL>`
     // EMPTY, checked 2026-09-02 against codex-cli 0.113.0: `--help` prints "Model the agent should
@@ -112,6 +120,12 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     // A SUBCOMMAND, not a flag: `codex resume [OPTIONS] [SESSION_ID] [PROMPT]`, whose argument is
     // documented as "Conversation/session id (UUID) or thread name".
     resume: id => ['resume', id],
+    // `-c, --config <key=value>` overrides config.toml; `developer_instructions` is a key of codex
+    // 0.160.1's own config schema (present in the binary) that ADDS a developer message without
+    // replacing the base instructions. The value is TOML, and JSON.stringify yields a valid TOML
+    // basic string. Flag accepted and request sent on 2026-10-07; the answer could not be observed
+    // (this machine's codex auth returns 401), so the live proof is still owed.
+    context: { kind: 'args', args: text => ['-c', `developer_instructions=${JSON.stringify(text)}`] },
   },
 
   // Kimi's only prompt flag is `-p, --prompt <prompt>  Run one prompt non-interactively and print
@@ -128,6 +142,20 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     modelSuggestions: [],
     // `-S, --session [id]  Resume a session. With ID: resume that session.`
     resume: id => ['-S', id],
+    // `--agent-file <path>  Load an agent definition from a Markdown file and select it for the new
+    // session` (kimi 0.38). The body is a prompt TEMPLATE and `${base_prompt}` embeds kimi's builtin default
+    // prompt (read from the binary), so the context is APPENDED, not substituted. Frontmatter needs `name` and
+    // `description`; an empty body is refused ("Missing prompt body"). VERIFIED LIVE 2026-10-08. It sits
+    // under the agentistics data dir, never the user's project. Not combinable with --session, which
+    // is a resume and carries no context anyway.
+    context: {
+      kind: 'files',
+      files: (_dir, text) => [{
+        name: 'agentistics-agent.md',
+        text: `---\nname: agentistics-session\ndescription: Background context from agentistics\n---\n\${base_prompt}\n\n${text}`,
+      }],
+      args: dir => ['--agent-file', `${dir}/agentistics-agent.md`],
+    },
   },
 
   // `-i, --prompt-interactive  Execute the provided prompt and continue in interactive mode`.
@@ -137,6 +165,11 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
   gemini: {
     bin: 'gemini',
     prompt: { kind: 'flag', flag: '--prompt-interactive' },
+    // NO invisible channel (checked against gemini 0.55, 2026-10-08, live): no system-prompt flag; `GEMINI_SYSTEM_MD`
+    // would REPLACE the whole system prompt; `GEMINI_CLI_SYSTEM_SETTINGS_PATH` is refused unless the file's directory
+    // is root-owned ("Parent directory is insecure"); `--include-directories` loads no GEMINI.md unless the setting
+    // `loadMemoryFromIncludeDirectories` (default false) is on, and the only places that setting can live are the
+    // user's ~/.gemini or the project. So the fenced block rides the first message.
     modelFlag: '--model', // `-m, --model  Model  [string]`
     // EMPTY as of 2026-09-02, checked against gemini 0.55.1. `--help` prints "Model  [string]" and
     // no values; the CLI has `--list-extensions` and `--list-sessions` but nothing that lists
@@ -186,6 +219,11 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     // `~/.copilot/session-state/<uuid>/events.jsonl` — and that directory name IS the id the
     // adapter keys sessions by.
     assignId: id => ['--session-id', id],
+    // `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` (`copilot help environment`): "comma-separated list of
+    // additional directories to search for custom instructions files". VERIFIED 2026-10-07 with
+    // `copilot instruction list --json`: setting it adds the `nested-agents` source for an AGENTS.md
+    // in that dir (absent without it). The model answer could not be observed (monthly quota).
+    context: { kind: 'env-dir', env: 'COPILOT_CUSTOM_INSTRUCTIONS_DIRS', file: 'AGENTS.md' },
   },
 
   // `--prompt-interactive  Run an initial prompt interactively and continue the session`, plus a
@@ -310,7 +348,7 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
     return { ok: false, error: { code: 'resume-unsupported', harness: req.harness } }
   }
 
-  const argv: string[] = [spec.bin]
+  const argv: string[] = [spec.bin, ...(spec.startupArgs ?? [])]
   // The resume argv goes FIRST because one of these is a subcommand (`codex resume <id>`), and a
   // subcommand that follows a flag is not a subcommand any more.
   if (req.resumeId && spec.resume) argv.push(...spec.resume(req.resumeId))
@@ -321,18 +359,46 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
   if (req.model && spec.modelFlag) argv.push(spec.modelFlag, req.model)
   if (req.effort && spec.effortFlag) argv.push(spec.effortFlag, req.effort)
 
+  // THE AGENTISTICS CONTEXT — fresh sessions only (a reopened conversation already has its history).
+  // Official channel first; a harness with none gets the fenced block ahead of its first message.
+  let env: Record<string, string> | undefined
+  let contextFile: { dir: string; name: string; text: string } | undefined
+  let contextExtraFiles: { name: string; text: string }[] | undefined
+  let contextVia: 'args' | 'env-dir' | 'files' | 'first-message' | 'none' = 'none'
+  let prompt = req.prompt
+  if (req.context && !req.resumeId) {
+    if (spec.context?.kind === 'args') {
+      argv.push(...spec.context.args(req.context.text))
+      contextVia = 'args'
+    } else if (spec.context?.kind === 'env-dir') {
+      env = { [spec.context.env]: req.context.dir }
+      contextFile = { dir: req.context.dir, name: spec.context.file, text: req.context.text }
+      contextVia = 'env-dir'
+    } else if (spec.context?.kind === 'files') {
+      const [first, ...rest] = spec.context.files(req.context.dir, req.context.text)
+      if (first) contextFile = { dir: req.context.dir, name: first.name, text: first.text }
+      if (rest.length) contextExtraFiles = rest
+      if (spec.context.env) env = spec.context.env(req.context.dir)
+      if (spec.context.args) argv.push(...spec.context.args(req.context.dir))
+      contextVia = 'files'
+    } else if (prompt) {
+      prompt = prependContext(req.context.block, prompt)
+      contextVia = 'first-message'
+    }
+  }
+
   // How the initial prompt will be DELIVERED once the session is up — see `initial-prompt.ts`. A
   // `positional` prompt is in argv but may not have been auto-submitted (`submit`); a `send-keys`
   // harness needs it typed (`type`); a `flag` harness runs it itself and needs no delivery.
   let initialPrompt: InitialPrompt | undefined
-  if (req.prompt) {
+  if (prompt) {
     if (spec.prompt.kind === 'positional') {
-      argv.push(req.prompt)
+      argv.push(prompt)
       initialPrompt = { mode: 'submit' }
     } else if (spec.prompt.kind === 'flag') {
-      argv.push(spec.prompt.flag, req.prompt)
+      argv.push(spec.prompt.flag, prompt)
     } else {
-      initialPrompt = { mode: 'type', text: req.prompt }
+      initialPrompt = { mode: 'type', text: prompt }
     }
   }
 
@@ -345,6 +411,10 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
     ok: true,
     plan: {
       argv,
+      ...(env ? { env } : {}),
+      ...(contextFile ? { contextFile } : {}),
+      ...(contextExtraFiles ? { contextExtraFiles } : {}),
+      ...(req.context && !req.resumeId ? { contextVia } : {}),
       ...(initialPrompt ? { initialPrompt } : {}),
       ...(conversationId ? { conversationId } : {}),
     },

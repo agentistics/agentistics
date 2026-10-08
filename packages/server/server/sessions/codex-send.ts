@@ -39,6 +39,12 @@ export function codexIsBlockingFrame(frame: readonly string[]): boolean {
   return update || approval
 }
 
+/** Classify a failed write using the screen read immediately after the backend refused it. */
+export function classifyCodexSendFailure(frame: readonly string[], alive: boolean): 'prompt' | 'ended' {
+  if (!alive) return 'ended'
+  return codexIsBlockingFrame(frame) ? 'prompt' : 'ended'
+}
+
 export function codexHasPastedComposer(frame: readonly string[], sentText = ''): boolean {
   return codexHasComposerText(frame, sentText)
 }

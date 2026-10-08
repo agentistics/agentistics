@@ -64,3 +64,39 @@ describe('withStepUp', () => {
     expect(seen).toEqual([undefined, '123456'])
   })
 })
+
+import { batchBinding, newGroupName } from './vaultPersonal'
+import { creatableName } from '../pages/settings/primitives'
+import { NO_SELECTION, selectedVisible, setRows, toggleMode } from '../components/tasks/selection'
+
+test('batchBinding is order-free and equals the server\'s pinned string', () => {
+  expect(batchBinding(['b', 'a'])).toBe(batchBinding(['a', 'b']))
+  expect(batchBinding(['a', 'b'])).toBe('batch:2:e6169119046025e6') // same vector as personal.test.ts
+})
+test('a group is offered for creation only when the typed name is new', () => {
+  const groups = [{ name: 'Produção' }, { name: 'Pessoal' }]
+  expect(newGroupName('  Staging ', groups)).toBe('Staging')
+  expect(newGroupName('produção', groups)).toBeNull()
+  expect(newGroupName('   ', groups)).toBeNull()
+  expect(newGroupName('x'.repeat(121), groups)).toBeNull()
+  expect(creatableName('Staging', [{ label: 'Produção' }])).toBe('Staging')
+  expect(creatableName('PRODUÇÃO', [{ label: 'Produção' }])).toBeNull()
+})
+test('select mode: select-all ticks the whole filtered set, and only what is on screen acts', () => {
+  let s = toggleMode(NO_SELECTION)
+  s = setRows(s, ['a', 'b', 'c'], true)
+  expect(selectedVisible(s, ['a', 'b'])).toEqual(['a', 'b'])
+  expect(selectedVisible(toggleMode(s), ['a', 'b'])).toEqual([])
+})
+
+import { allKind, setAllKind } from './vaultPersonal'
+test('mark all as API key touches only the rows that will be written, and toggles back', () => {
+  const cs = [{ key: 'A', action: 'import' as const }, { key: 'B', action: 'skip' as const }, { key: 'C', action: 'rename' as const, name: 'c' }]
+  const marked = setAllKind(cs, 'api-key')
+  expect(marked.map(c => c.kind)).toEqual(['api-key', undefined, 'api-key'])
+  expect(allKind(marked, 'api-key')).toBe(true)
+  expect(allKind(cs, 'api-key')).toBe(false)
+  expect(allKind([{ key: 'X', action: 'skip' }], 'api-key')).toBe(false)
+  expect(defaultImportChoices([{ key: 'K', clash: null, empty: false }])[0]!.kind).toBeUndefined()
+  expect(setAllKind(marked, 'note').every(c => c.action === 'skip' || c.kind === 'note')).toBe(true)
+})

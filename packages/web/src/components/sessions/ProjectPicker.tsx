@@ -16,12 +16,14 @@
  * tabs FILTER it, they never re-order it.
  */
 import { useMemo, useState } from 'react'
-import { FolderClock, FolderGit2, FolderSymlink, Folder, Loader, Search } from 'lucide-react'
+import { FolderClock, FolderGit2, FolderOpen, FolderSymlink, Folder, Loader, Search, X } from 'lucide-react'
 import { projectKind, type ProjectKind } from '@agentistics/core'
 import {
   KIND_TABS, kindCount, kindEmpty, kindHint, kindLabel, kindMore, kindMoreText, type ProjectTab,
 } from '../../lib/projectTabs'
 import { Muted, inputStyle } from './formBits'
+import { diskLabel, shortPath } from '../../lib/folderBrowser'
+import { FolderBrowser } from './FolderBrowser'
 
 export interface ProjectPickerOption {
   path: string
@@ -41,6 +43,10 @@ export interface ProjectPickerProps {
    *  server does not say. */
   projectTotals: Record<ProjectKind, number> | undefined
   projectIndexing?: boolean
+  projectIndexProgress?: { visited: number; queued: number }[]
+  projectDisks?: { id: string; label: string; letter?: string; install: boolean; count: number }[]
+  projectDisk?: string
+  onProjectDiskChange?: (disk: string) => void
   /** The field's own value — see `useFleetNewOptions`. */
   query: string
   onQueryChange: (q: string) => void
@@ -52,11 +58,13 @@ export interface ProjectPickerProps {
 }
 
 export function ProjectPicker({
-  lang, isMobile, projects, projectTotals, projectIndexing, query, onQueryChange, searching, value, onChange,
+  lang, isMobile, projects, projectTotals, projectIndexing, projectIndexProgress, projectDisks, projectDisk, onProjectDiskChange, query, onQueryChange, searching, value, onChange,
 }: ProjectPickerProps) {
   const pt = lang === 'pt'
   /** Which kind of place the list is showing. `all` is the default — see `projectKind`. */
   const [kindTab, setKindTab] = useState<ProjectTab>('all')
+  /** "Procurar pasta…" is open: the browser takes the list's place. */
+  const [browsing, setBrowsing] = useState(false)
 
   /**
    * The rows, split by KIND, and the counts the tabs carry.
@@ -77,7 +85,7 @@ export function ProjectPicker({
   }, [projects])
 
   /** What the list is showing. `all` keeps the server's ranking, which is the useful default. */
-  const shownProjects = kindTab === 'all' ? projects : byKind[kindTab]
+  const shownProjects = (kindTab === 'all' ? projects : byKind[kindTab]).filter(p => p.path !== value)
   /** Whether rows are being held back, and how many — `null` whenever that cannot be known. */
   const shownMore = kindMore(
     shownProjects.length,
@@ -108,6 +116,51 @@ export function ProjectPicker({
           }} />
         )}
       </div>
+
+      {browsing ? (
+        <FolderBrowser
+          lang={lang}
+          isMobile={isMobile}
+          disks={projectDisks}
+          startDisk={(() => {
+            const d = projectDisks?.find(x => x.id === projectDisk)
+            return d ? { path: d.id, install: d.install } : null
+          })()}
+          onUse={path => { onChange(path); setBrowsing(false) }}
+          onCancel={() => setBrowsing(false)}
+        />
+      ) : (<>
+      <button type="button" onClick={() => setBrowsing(true)} style={{
+        display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8, minHeight: isMobile ? 44 : 30,
+        padding: '0 12px', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12,
+        border: '1px dashed var(--border-subtle)', background: 'transparent', color: 'var(--anthropic-orange)',
+      }}>
+        <FolderOpen size={14} />{pt ? 'Procurar pasta…' : 'Browse folder…'}
+      </button>
+
+      {projectDisks && projectDisks.length > 1 && (
+        <div role="tablist" aria-label={pt ? 'Disco' : 'Disk'} style={{
+          display: 'flex', gap: 3, marginBottom: 8, padding: 3, borderRadius: 9,
+          background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+          overflowX: isMobile ? 'auto' : 'visible',
+        }}>
+          {[...projectDisks.map(d => ({
+            id: d.id,
+            label: diskLabel(d, pt),
+            count: d.count,
+          })), { id: 'all', label: pt ? 'Todos os discos' : 'All disks', count: projectDisks.reduce((n, d) => n + d.count, 0) }].map(d => {
+            const on = (projectDisk || projectDisks.find(x => x.install)?.id) === d.id
+            return <button key={d.id} role="tab" aria-selected={on} onClick={() => onProjectDiskChange?.(d.id)} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+              minHeight: 28, borderRadius: 7, border: 'none', cursor: 'pointer',
+              background: on ? 'var(--bg-surface)' : 'transparent',
+              color: on ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
+              fontFamily: 'inherit', fontSize: 11, fontWeight: on ? 650 : 500,
+              ...(isMobile ? { flexShrink: 0, padding: '0 10px', whiteSpace: 'nowrap' } : { flex: 1, minWidth: 0 }),
+            }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.label}</span><span style={{ fontSize: 10, color: 'var(--text-tertiary)', flexShrink: 0 }}>{d.count}</span></button>
+          })}
+        </div>
+      )}
 
       <div role="tablist" style={{
         display: 'flex', gap: 3, marginBottom: 8, padding: 3, borderRadius: 9,
@@ -153,14 +206,35 @@ export function ProjectPicker({
       <p style={{ margin: '0 0 8px', fontSize: 10.5, lineHeight: 1.45, color: 'var(--text-tertiary)' }}>
         {kindHint(kindTab, pt)}
         {shownMore && <> {kindMoreText(shownMore, pt)}</>}
-        {projectIndexing && <> {pt ? 'Indexando discos em segundo plano…' : 'Indexing disks in the background…'}</>}
+        {projectIndexing && <> {pt ? 'Indexando discos em segundo plano' : 'Indexing disks in the background'}{projectIndexProgress?.length ? ` (${projectIndexProgress.reduce((n, p) => n + p.visited, 0)} visited, ${projectIndexProgress.reduce((n, p) => n + p.queued, 0)} queued)…` : '…'}</>}
       </p>
 
       <div style={{
         maxHeight: 190, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4,
         border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 6,
       }}>
-        {shownProjects.length === 0 ? (
+        {value && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, minWidth: 0,
+            background: 'var(--anthropic-orange-dim)', color: 'var(--text-primary)',
+          }}>
+            <Folder size={15} style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
+            <span style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }} title={value}>
+              <span style={{ fontSize: 12.5, fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {projects.find(p => p.path === value)?.label ?? (value.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || value)}
+              </span>
+              <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {shortPath(value)}
+              </span>
+            </span>
+            <button type="button" className="ag-tap-icon" onClick={() => onChange('')} aria-label={pt ? 'Desfazer a escolha' : 'Clear the choice'} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, border: 'none',
+              background: 'transparent', cursor: 'pointer', color: 'var(--text-tertiary)', borderRadius: 6,
+              width: 28, height: 28,
+            }}><X size={14} /></button>
+          </div>
+        )}
+        {shownProjects.length === 0 && !value ? (
           /* A SENTENCE PER REASON. "Nothing matched this search" and "nothing of this kind is here"
              send a reader to two different actions — clear the box, or switch tab. */
           <Muted text={kindEmpty(kindTab, query, projects.length > 0, pt)} />
@@ -201,6 +275,7 @@ export function ProjectPicker({
           )
         })}
       </div>
+      </>)}
     </div>
   )
 }

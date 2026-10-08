@@ -69,6 +69,12 @@ export const CHAT_NOTES: Record<string, ChatNote> = {
     'gallery',
   ),
 
+  'agentistics context sent': n(
+    'contexto do agentistics enviado',
+    'agentistics told the assistant where it is running (session, tools, rules). Background only — nobody asked it to reply.',
+    'O agentistics avisou ao assistente onde ele está rodando (sessão, ferramentas, regras). Só contexto — ele não deve responder.',
+  ),
+
   // ---- Explain only. Each is the harness talking to itself; none has a place to go. ----
   'system reminder': n(
     'lembrete do sistema',

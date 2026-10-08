@@ -821,7 +821,19 @@ export function popoverStyle(pos: PopoverRect | null): React.CSSProperties {
   }
 }
 
-export function Select({ value, onChange, options, placeholder, disabled, searchable, searchPlaceholder, defaultOpenForTest }: {
+/** The synthetic value of the "create" row a creatable `Select` appends; never reaches `onChange`. */
+const CREATE_ROW = '\u0000create'
+/**
+ * PURE. The typed text a creatable `Select` offers to create: null when nothing is typed or an option
+ * with that label already exists (case-insensitive) — then it is a choice, not a creation.
+ */
+export function creatableName(typed: string, options: readonly { label: string }[]): string | null {
+  const n = typed.trim()
+  if (!n) return null
+  return options.some(o => o.label.trim().toLowerCase() === n.toLowerCase()) ? null : n
+}
+
+export function Select({ value, onChange, options, placeholder, disabled, searchable, searchPlaceholder, defaultOpenForTest, creatable }: {
   value: string
   onChange: (v: string) => void
   /** `disabled` greys an option out and blocks selection; `hint` says why, inline. */
@@ -834,6 +846,11 @@ export function Select({ value, onChange, options, placeholder, disabled, search
   searchPlaceholder?: string
   /** Render the panel open, for the static-markup test that pins `position: fixed`. */
   defaultOpenForTest?: boolean
+  /**
+   * Select-or-create: with text typed that matches no option, a last row `label(text)` appears and
+   * picking it calls `onCreate(text)` (the caller creates, then selects). Forces the search box on.
+   */
+  creatable?: { label: (text: string) => string; onCreate: (text: string) => void }
 }) {
   const [open, setOpen] = React.useState(Boolean(defaultOpenForTest))
   // Portalled only once mounted on a client: a static render (and its test) keeps the list inline.
@@ -851,10 +868,12 @@ export function Select({ value, onChange, options, placeholder, disabled, search
   const [pos, setPos] = React.useState<PopoverRect | null>(null)
   const POPOVER_MAX_H = 280
 
-  const showSearch = searchable ?? options.length > 8
-  const filtered = (showSearch && query.trim())
+  const showSearch = creatable ? true : (searchable ?? options.length > 8)
+  const matched = (showSearch && query.trim())
     ? options.filter(o => o.label.toLowerCase().includes(query.trim().toLowerCase()))
     : options
+  const toCreate = creatable ? creatableName(query, options) : null
+  const filtered = toCreate && creatable ? [...matched, { value: CREATE_ROW, label: creatable.label(toCreate) }] : matched
 
   const selectedLabel = options.find(o => o.value === value)?.label ?? placeholder ?? ''
   const isEmpty = !value
@@ -914,6 +933,7 @@ export function Select({ value, onChange, options, placeholder, disabled, search
   }
 
   const handleSelect = (optValue: string) => {
+    if (optValue === CREATE_ROW && creatable && toCreate) { creatable.onCreate(toCreate); setOpen(false); setQuery(''); return }
     onChange(optValue)
     setOpen(false)
     setQuery('')

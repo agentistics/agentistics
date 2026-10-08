@@ -27,6 +27,7 @@ export interface FleetActResult {
   id?: string
   /** EXT.OPEN: the write needs a YES first — `message` is the question. */
   confirm?: boolean
+  failure?: 'prompt' | 'ended'
 }
 
 /** The sentence for an answer that carried none — a network error, or a body that is not ours. */
@@ -47,5 +48,48 @@ export function parseActResult(json: unknown, lang: 'pt' | 'en'): FleetActResult
     ? o.message
     : actFallbackMessage(lang)
   const id = typeof o.id === 'string' && o.id.trim() !== '' ? o.id : undefined
-  return { ok: o.ok === true, message, ...(id ? { id } : {}), ...(o.confirm === true ? { confirm: true } : {}) }
+  const failure = o.failure === 'prompt' || o.failure === 'ended' ? o.failure : undefined
+  return { ok: o.ok === true, message, ...(id ? { id } : {}), ...(o.confirm === true ? { confirm: true } : {}), ...(failure ? { failure } : {}) }
+}
+
+/**
+ * A send that timed out is not a send that failed. Before the red sentence, look for the message in
+ * the session's own conversation for a few seconds: if it is there, it went.
+ */
+export const SENT_CHECK_ATTEMPTS = 4
+export const SENT_CHECK_INTERVAL_MS = 1_500
+
+/** Does `text` appear among the user turns? Whitespace-normalised, so wrapping cannot hide it. */
+export function textInUserTurns(
+  turns: readonly { role?: string; text?: string }[],
+  text: string,
+): boolean {
+  const norm = (v: string) => v.replace(/\s+/g, ' ').trim()
+  const want = norm(text)
+  if (!want) return false
+  return turns.some(t => t.role === 'user' && typeof t.text === 'string' && norm(t.text).includes(want))
+}
+
+/**
+ * Ask `check` up to `attempts` times, `intervalMs` apart; `true` as soon as the message is seen.
+ * A throwing check counts as "not seen yet" — it must never turn into the answer.
+ */
+export async function confirmSendLanded(
+  check: () => Promise<boolean>,
+  opts: { attempts?: number; intervalMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<boolean> {
+  const attempts = opts.attempts ?? SENT_CHECK_ATTEMPTS
+  const wait = opts.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)))
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await wait(opts.intervalMs ?? SENT_CHECK_INTERVAL_MS)
+    try { if (await check()) return true } catch { /* not seen yet */ }
+  }
+  return false
+}
+
+/** Calm, accurate wording for a send nobody could confirm — the composer offers Retry beside it. */
+export function sendUnconfirmedMessage(lang: 'pt' | 'en'): string {
+  return lang === 'pt'
+    ? 'Não consegui confirmar que a mensagem chegou. Use "Tentar de novo" se ela não aparecer na conversa.'
+    : 'Could not confirm the message arrived. Use "Retry" if it does not show up in the conversation.'
 }

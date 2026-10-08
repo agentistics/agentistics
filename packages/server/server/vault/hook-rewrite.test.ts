@@ -24,6 +24,14 @@ describe('PreToolUse rewrite — the command keeps the reference, never the valu
   test('the rewritten text holds the call, not a value', () => {
     expect(run('curl -H "Authorization: Bearer vault://gh" x')).toBe(`curl -H "Authorization: Bearer $(agentop vault ref 'vault://gh')" x`)
   })
+  test('does not wrap a reference already inside a vault ref call', () => {
+    const command = "printf %s \"$(agentop vault ref 'vault://gh')\""
+    expect(run(command)).toBeNull()
+  })
+  test('rewrites only the bare reference in a mixed command', () => {
+    const command = "printf '%s %s' \"$(agentop vault ref 'vault://gh')\" vault://banco/password"
+    expect(run(command)).toBe("printf '%s %s' \"$(agentop vault ref 'vault://gh')\" \"$(agentop vault ref 'vault://banco/password')\"")
+  })
   test('answers', () => {
     expect(JSON.parse(preToolAnswer({ command: 'a', description: 'd' }, 'b'))).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: { command: 'b', description: 'd' } } })
     expect(postToolAnswer({ stdout: 'x' }, '{"stdout":"«vault:gh»"}', true)).toContain('updatedToolOutput')

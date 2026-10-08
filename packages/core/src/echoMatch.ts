@@ -58,6 +58,15 @@ export function collapseEcho(text: string): string {
 }
 
 /**
+ * The transcript drops the optional space after bash mode's `!` prefix. Normal messages keep the
+ * ordinary collapsed-whitespace rule; only a bang command gets this extra wire-format normalisation.
+ */
+export function normalizeEcho(text: string): string {
+  const collapsed = collapseEcho(text)
+  return collapsed.startsWith('!') ? `!${collapsed.slice(1).trimStart()}` : collapsed
+}
+
+/**
  * Shorter than this and only an exact match retires the echo.
  *
  * Long enough that a coincidence is not credible, short enough to cover a real one-line message
@@ -113,7 +122,7 @@ export function pendingEchoes(
   echoes: readonly string[],
   userTurns: readonly string[],
 ): string[] {
-  const seen = userTurns.map(collapseEcho).filter(t => t !== '')
+  const seen = userTurns.map(normalizeEcho).filter(t => t !== '')
   const stripped = userTurns.map(withoutLeadingMarkers).filter(t => t !== '')
   const match = echoes.map(text => matchEcho(text, userTurns, seen, stripped))
   // The last echo matched by something a coincidence cannot fake. Delivery is FIFO, so everything
@@ -140,7 +149,7 @@ function matchEcho(
   seen: readonly string[],
   stripped: readonly string[],
 ): EchoMatch {
-  const c = collapseEcho(text)
+  const c = normalizeEcho(text)
   // An empty echo is nothing to wait for. It anchors nothing — there is no evidence in it.
   if (c === '') return 'weak'
   if (seen.includes(c)) return c.length >= SAFE_CONTAINS_LEN ? 'anchor' : 'weak'

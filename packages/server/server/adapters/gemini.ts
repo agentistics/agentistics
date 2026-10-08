@@ -7,6 +7,10 @@ import type { HarnessAdapter } from './types'
 import { harnessEnabled } from './types'
 import { GEMINI_DIR } from '../config'
 import { createLimiter, safeReadDir, safeReadJson } from '../utils'
+import { createFileMemo, registerMemo, versionOf } from './file-memo'
+
+/** One parsed chat per (file version, project path) — see file-memo.ts. */
+const memo = registerMemo(createFileMemo<SessionMeta | null>())
 
 const GEMINI_TMP_DIR = join(GEMINI_DIR, 'tmp')
 const GEMINI_PROJECTS_FILE = join(GEMINI_DIR, 'projects.json')
@@ -65,16 +69,18 @@ export const geminiAdapter: HarnessAdapter = {
       }
     }))
 
+    // Sorted: the walk pushes in completion order, and the build's output order follows this list.
+    allFiles.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))
     const limit = createLimiter(20)
     const sessions = await Promise.all(allFiles.map(({ file, projectPath }) =>
-      limit(async () => {
+      limit(async () => memo.get(file, `${await versionOf([file])}|${projectPath}`, async () => {
         const content = await readFile(file, 'utf-8').catch(() => '')
         // Derive a stable fallback ID from the file path: <dirName>/<filename-no-ext>
         const dirName = basename(file.replace(/\/chats\/[^/]+$/, ''))
         const fileBase = basename(file).replace(/\.(jsonl|json)$/, '')
         const fallbackId = `${dirName}/${fileBase}`
         return parseGeminiChat(content, fallbackId, projectPath)
-      })
+      }))
     ))
 
     return sessions.filter((s): s is SessionMeta => s !== null && !!s.start_time)

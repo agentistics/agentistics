@@ -18,6 +18,7 @@ import path from 'node:path'
 import { agentisticsMcpLaunch, sameMcpLaunch } from '../mcp-launch'
 import { existsSync } from 'node:fs'
 import { HOME_DIR } from '../config'
+import { mayRegisterHarnessMcp } from '../mcp-registration'
 import type { ChatDriver } from './types'
 import type { ChatMessage } from '../chat-tty'
 import { findCli } from './cli-detect'
@@ -54,6 +55,7 @@ async function writeGeminiSettings(settings: Record<string, unknown>): Promise<v
  * Idempotent — skips if already registered with the same port.
  */
 async function ensureGeminiMcp(port: number): Promise<void> {
+  if (!mayRegisterHarnessMcp(port)) return
   const apiUrl = `http://localhost:${port}`
   // `agentop mcp` on an installed binary, the script in a checkout — see `mcp-launch.ts`.
   const launch = agentisticsMcpLaunch()

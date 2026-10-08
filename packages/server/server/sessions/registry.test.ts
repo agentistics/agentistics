@@ -411,3 +411,18 @@ describe('the renamed-session title survives a round trip through the file', () 
     } finally { await rm(dir, { recursive: true, force: true }) }
   })
 })
+
+describe('the parent link survives the heartbeat rewrite (SESSION.LINK)', () => {
+  it('parentSessionId and parentConversationId are read back after touch()', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'registry-parent-'))
+    try {
+      const reg = createSessionRegistry(join(dir, 'managed-sessions.json'))
+      await reg.add({ id: 'c1', harness: 'claude', cwd: '/w', createdAt: '2026-10-08T00:00:00Z', parentSessionId: 'p1', parentConversationId: 'conv-p1' } as never)
+      expect(await reg.touch(['c1'], 1791500000000)).toBe(1)
+      const [row] = await reg.read()
+      expect(row!.lastSeenMs).toBe(1791500000000)
+      expect(row!.parentSessionId).toBe('p1')
+      expect(row!.parentConversationId).toBe('conv-p1')
+    } finally { await rm(dir, { recursive: true, force: true }) }
+  })
+})

@@ -78,9 +78,9 @@ export async function webHarnesses(
 }
 
 /** Directories to offer, from the LOCAL store — so the picker works with the server's data cold. */
-export async function webProjects(host: StartHost, query: string): Promise<WebProjectOption[]> {
+export async function webProjects(host: StartHost, query: string, disk?: string): Promise<WebProjectOption[]> {
   if (!host.searchProjects) return []
-  const found = await host.searchProjects(query)
+  const found = await host.searchProjects(query, disk)
   return found.options.map(p => ({
     path: p.path,
     label: p.label,

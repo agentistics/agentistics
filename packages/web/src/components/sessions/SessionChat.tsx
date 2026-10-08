@@ -32,7 +32,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import { createPortal } from 'react-dom'
 import { flushSync } from 'react-dom'
 import { GROW_AT_PX, GROW_TURNS, INITIAL_TURNS, shownToInclude, windowStart } from '../../lib/turnWindow'
-import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerSendButton, ComposerShell, ComposerToolbar, composerFieldStyle } from '../chat/ComposerShell'
+import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerSegmentField, ComposerSendButton, ComposerShell, ComposerToolbar, composerFieldStyle } from '../chat/ComposerShell'
 import { mutedTooltip, useMutedKeys } from '../../lib/notifyMenu'
 import { toggleSessionMuted } from '../../lib/mutedSessions'
 import { markDictated, stripDictatedMark } from '../../lib/dictationMark'
@@ -76,7 +76,7 @@ import {
   emptyAtServerReason, emptyAtToolReason, filterAtServers, findAtServer, resolveAtToolView,
   type MenuMcpServer, dropEmptyAtTrigger,
 } from '../../lib/atMenu'
-import { addReply, composeReply, markExcerpt, normalizeComposer, quoteAll, quoteFor, splitQuotedDraft, unquoteLines, stripQuotedLines, type ReplyTarget } from '../../lib/replyQuote'
+import { appendIncoming, fromFields, insertQuoteAt, markExcerpt, normalizeComposer, quoteFor, removeQuoteAt, serializeFields, splitQuotedDraft, toFields, unquoteLines, stripQuotedLines, type ComposerFields, type FieldCaret, type ReplyTarget } from '../../lib/replyQuote'
 import { QuoteBlock } from '../chat/QuoteBlock'
 import {
   composeQuoted, locateExcerpt,
@@ -216,7 +216,9 @@ export interface SessionChatProps {
   row?: FleetRow
   lang: 'pt' | 'en'
   act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; occurrence?: number; confirm?: boolean })
-    => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean }>
+    => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' }>
+  /** Switch to the live terminal when a failed write found a blocking prompt. */
+  onOpenTerminal?: () => void
   /**
    * The files this session has touched, reported up as the conversation is read.
    *
@@ -291,7 +293,7 @@ const TAIL_SLACK = 24
 
 interface Attachment { name: string; path: string }
 
-export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onReopened, metrics, source, focusComposerOnMount }: SessionChatProps) {
+export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onReopened, onOpenTerminal, metrics, source, focusComposerOnMount }: SessionChatProps) {
   // Every verb goes through the source when there is one (the native runtime's send/stop/answer).
   const act = source?.act ?? actProp
   const pt = lang === 'pt'
@@ -724,6 +726,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * `vault://` references plus a briefing — never a value.
    */
   const [vaultSel, setVaultSel] = useState<VaultSelection | null>(null)
+  const [vaultGrantCache, setVaultGrantCache] = useState<null | { key: string; refs: string[]; briefing: string; expiresAt: number }>(null)
   const [vaultPickerOpen, setVaultPickerOpen] = useState(false)
   const [vaultTriggerSeen, setVaultTriggerSeen] = useState<number | null>(null)
   const [vaultCodeAsk, setVaultCodeAsk] = useState<null | ((c: string | null) => void)>(null)
@@ -898,6 +901,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   }, [row, act, sourceControls])
 
   const [notice, setNotice] = useState<string | null>(null)
+  const [deliveryFailure, setDeliveryFailure] = useState<'prompt' | 'ended' | null>(null)
   const [atTail, setAtTail] = useState(true)
   /**
    * THE RECENT-PROMPTS PANEL — open or not. It replaced the single-message recall dialog; its own
@@ -988,7 +992,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    */
   const composerImages = attached.filter(a => isImagePath(a.path)).map(a => a.path)
   /** The character count under the caret's own field. `null` while it is empty — see `promptCount.ts`. */
-  const countLabel = promptCountLabel(stripQuotedLines(draft), pt ? 'pt' : 'en')
+  /** Everything the person wrote: the main field plus every reply field between the quotes. */
+  const ownText = [...replyTo.map(r => r.before ?? ''), draft].filter(t => t !== '').join('\n')
+  const countLabel = promptCountLabel(stripQuotedLines(ownText), pt ? 'pt' : 'en')
   /** …and the index that survives an edit made while the overlay is open. See `openComposerLightbox`. */
   const composerLightboxAt = openComposerLightbox(composerLightbox, composerImages.length)
 
@@ -1008,6 +1014,59 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const fileRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  /**
+   * THE COMPOSER IS AN ORDERED LIST: field 0, quote 1, field 1, quote 2 … the main field last
+   * (`replyQuote.ts`, "INTERLEAVED QUOTES AND REPLIES"). A reply answers each passage right under
+   * it — stacking every quote at the top detached the answers from what they answer, and the model
+   * received "quote, quote, quote, all my text". Read through a ref so the bubble callbacks stay
+   * stable for `ChatBubble`'s memo.
+   */
+  const composerNow = useRef({ replyTo, draft, caret })
+  composerNow.current = { replyTo, draft, caret }
+  /** The reply fields ABOVE each quote, by quote index. The main field is `textareaRef`. */
+  const segRefs = useRef<(HTMLTextAreaElement | null)[]>([])
+  /** Where the person was last writing — a new quote goes there. `null`: nowhere yet (the end). */
+  const lastField = useRef<FieldCaret | { field: 'main' } | null>(null)
+  /** The field above the FIRST quote is drawn only while it holds text or the caret. */
+  const [focusedSeg, setFocusedSeg] = useState<number | null>(null)
+  const commitFields = useCallback((f: ComposerFields) => {
+    const out = fromFields(f)
+    editReply(out.replies)
+    editDraft(out.draft)
+  }, [editReply, editDraft])
+  const focusField = useCallback((at: FieldCaret, quotes: number) => {
+    const main = at.field >= quotes
+    lastField.current = main ? { field: 'main' } : at
+    if (!main) setFocusedSeg(at.field)
+    requestAnimationFrame(() => {
+      const el = main ? textareaRef.current : segRefs.current[at.field]
+      if (!el) return
+      el.focus()
+      const c = Math.min(at.caret, el.value.length)
+      el.setSelectionRange(c, c)
+      if (main) setCaret(c)
+    })
+  }, [])
+  /** Text arriving from outside (a queued message handed back, a rewind) — quotes become blocks. */
+  const takeIncoming = useCallback((text: string) => {
+    if (splitQuotedDraft(text).replies.length === 0) { editDraft(d => applyDraftRequest(d, text)); return }
+    const now = composerNow.current
+    commitFields(appendIncoming(toFields(now.replyTo, now.draft), text, applyDraftRequest))
+  }, [editDraft, commitFields])
+  const editSegment = useCallback((i: number, value: string) => {
+    editReply(list => list.map((r, k) => {
+      if (k !== i) return r
+      const { before: _b, ...rest } = r
+      return value === '' ? rest : { ...rest, before: value }
+    }))
+  }, [editReply])
+  /** × on a quote: it goes, and its reply MERGES into the field above — typed text is never lost. */
+  const removeQuote = useCallback((i: number) => {
+    const now = composerNow.current
+    const r = removeQuoteAt(toFields(now.replyTo, now.draft), i)
+    commitFields(r.fields)
+    focusField(r.focus, r.fields.quotes.length)
+  }, [commitFields, focusField])
   useEffect(() => {
     if (!focusComposerOnMount) return
     const frame = requestAnimationFrame(() => textareaRef.current?.focus())
@@ -1448,24 +1507,33 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     if (draftReqAt === undefined || !draftReq) return
     if (seenReqAt.current === draftReqAt) return
     seenReqAt.current = draftReqAt
-    // A message handed back with `> ` lines gets its quotes back as BLOCKS, not as text.
-    const req = splitQuotedDraft(draftReq.text)
-    editDraft(d => applyDraftRequest(d, req.text))
-    if (req.replies.length > 0) editReply(list => req.replies.reduce(addReply, list))
+    // A message handed back with `> ` lines gets its quotes back as BLOCKS, each with its reply.
+    takeIncoming(draftReq.text)
     textareaRef.current?.focus()
     consumeDraftRequest(draftReqAt)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftReqAt])
 
   /**
-   * ADD quotes to the STACK above the field. The textarea holds only what the person writes — a
-   * quote typed into it as `> ` text read as raw markdown and had no collapse control; an overlay
-   * painted over the field drifted from the caret. The quotes go out ahead of the words at send.
+   * ADD quotes WHERE THE PERSON IS WRITING: the field holding the caret is split there and each
+   * quote goes in with its own reply field after it (`insertQuoteAt`) — never stacked at the top,
+   * which detached every answer from the passage it answers. Nowhere yet means the end.
    */
   const addQuotes = useCallback((targets: readonly ReplyTarget[]) => {
-    editReply(list => targets.reduce(addReply, list))
-    requestAnimationFrame(() => textareaRef.current?.focus())
-  }, [editReply])
+    const now = composerNow.current
+    let f = toFields(now.replyTo, now.draft)
+    const last = lastField.current
+    let at: FieldCaret = last !== null && last.field !== 'main' && last.field < f.quotes.length
+      ? { field: last.field, caret: last.caret }
+      : { field: f.quotes.length, caret: last === null ? now.draft.length : now.caret }
+    for (const t of targets) {
+      const r = insertQuoteAt(f, at, t)
+      f = r.fields
+      at = r.focus
+    }
+    commitFields(f)
+    focusField(at, f.quotes.length)
+  }, [commitFields, focusField])
 
   /** ONE stable reference for every bubble's reply button — see `ChatBubble`'s memo. */
   const onReplyToTurn = useCallback((t: ChatTurn) => {
@@ -1872,9 +1940,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     })
     if (out.ok) {
       const parts = splitMessage(stripDictatedMark(entry.text).text)
-      const req = splitQuotedDraft(parts.text)
-      editDraft(d => applyDraftRequest(d, req.text))
-      if (req.replies.length > 0) editReply(list => req.replies.reduce(addReply, list))
+      takeIncoming(parts.text)
       if (parts.attachments.length > 0) {
         editAttached(a => [
           ...a,
@@ -2011,7 +2077,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     attachments: attached.length,
   })
   /** What the send button could send. The same predicate decides its label, its colour and `stopShown`. */
-  const somethingToSend = hasSomethingToSend({ draft: stripQuotedLines(draft), attachments: attached.length })
+  const somethingToSend = hasSomethingToSend({ draft: stripQuotedLines(ownText), attachments: attached.length })
   const [stopping, setStopping] = useState(false)
   async function stopNow() {
     if (!stopEnabled || stopping) return
@@ -2135,10 +2201,10 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // A trailing `@server:` is the picker's scaffolding and was never typed — it must not be sent.
     // `#` chips become their lean reference HERE, so the harness never sees a raw `#` — which Claude
     // Code would read as a memory note when it opens the message. See `sessionMention.ts`.
-    // The quotes are the STACK above the field (`replyTo`); they go out first, as `> ` blocks.
-    const text = expandSessionMentions(dropEmptyAtTrigger(draft), pt).trim()
+    // The quotes go out WHERE THEY SIT, each followed by its reply (`serializeFields`).
+    const fields = toFields(replyTo, draft)
     // A message that is only quotes, with nothing of the person's own, says nothing.
-    const ownWords = stripQuotedLines(draft).trim()
+    const ownWords = stripQuotedLines(fields.fields.join('\n')).trim()
     // A message that is ONLY attachments is still a message: the paths are the content.
     // `canPrompt` is checked HERE now rather than only on the field's `disabled`, which no longer
     // follows it — see the note on the textarea. This is where it belonged anyway: the rule is
@@ -2169,20 +2235,33 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // pointed at, and burying the paths inside a sentence makes them easy to miss.
     // Quote first, then the paths, then what was typed. The quote is trimmed to a few lines: a
     // reply that repeats forty lines back at the session costs it context for no benefit.
-    const quote = quoteAll(replyTo)
-    // `composeReply` puts a BLANK LINE between the blocks, and that is not formatting: joined with a
-    // single newline, CommonMark's lazy continuation pulls what was typed into the blockquote, and
-    // the person's own words render inside the grey bar as if the session had said them.
-    let composed = composeReply({ quote, paths: attached.map(a => a.path), text })
+    // `serializeFields` puts a BLANK LINE between the blocks, and that is not formatting: joined with
+    // a single newline, CommonMark's lazy continuation pulls what was typed into the blockquote, and
+    // the person's own words render inside the grey bar as if the session had said them. The paths
+    // LEAD, which is where `splitMessage` reads them back.
+    let composed = serializeFields(
+      { quotes: fields.quotes, fields: fields.fields.map(dropEmptyAtTrigger) },
+      attached.map(a => a.path),
+      t => expandSessionMentions(t, pt),
+    )
     // The `:vault` chip: grant first (the gesture), then the chip becomes references + a briefing. A
     // grant that is refused stops the send and keeps the draft — a message pointing at secrets the
     // session cannot use would only fail later, at the command.
     if (hasVaultChip(composed)) {
       if (!vaultSel) { setNotice(pt ? 'Escolha de novo os segredos do chip 🔐 (clique nele).' : 'Choose the 🔐 chip\'s secrets again (click it).'); return }
-      const g = await grantVault(vaultSel)
-      if (!g.ok) { setNotice(g.sentence || (pt ? 'Os segredos não foram liberados; nada foi enviado.' : 'The secrets were not granted; nothing was sent.')); return }
-      setNotice(null)
-      composed = expandVaultChip(composed, g.refs.map(r => r.ref), g.briefing)
+      const key = JSON.stringify({ items: vaultSel.items.map(i => i.id).sort(), groups: vaultSel.groups.map(g => g.id).sort() })
+      const cached = vaultGrantCache?.key === key && vaultGrantCache.expiresAt > Date.now() ? vaultGrantCache : null
+      if (cached) {
+        composed = expandVaultChip(composed, cached.refs, cached.briefing)
+      } else {
+        const g = await grantVault(vaultSel)
+        if (!g.ok) { setNotice(g.sentence || (pt ? 'Os segredos não foram liberados; nada foi enviado.' : 'The secrets were not granted; nothing was sent.')); return }
+        // A failed pane write may be retried without another Hello, but never keep a browser-side
+        // resolved grant indefinitely if the person abandons the composer.
+        setVaultGrantCache({ key, refs: g.refs.map(r => r.ref), briefing: g.briefing, expiresAt: Date.now() + 2 * 60_000 })
+        setNotice(null)
+        composed = expandVaultChip(composed, g.refs.map(r => r.ref), g.briefing)
+      }
     }
     // Dictated? The model is told in one short trailing line — see `dictationMark.ts`. Taken and
     // cleared here, so the NEXT message starts undictated unless the microphone is used again.
@@ -2208,6 +2287,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
      */
     const restore = { draft, attached, replyTo }
     setSending(true)
+    setDeliveryFailure(null)
     // A SOURCE draws its own optimistic turn (the native runtime's `sent`); an echo would be a second copy.
     if (!source) editEcho(list => [...list, full])
     setDraft('')
@@ -2239,6 +2319,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       : await act({ id: session.id, action: 'prompt', text: full })
     setSending(false)
     if (out.ok) {
+      setVaultGrantCache(null)
       // Ask for the transcript at once. The harness writes the user turn as soon as it takes the
       // message, and the next scheduled read is up to `CHAT_POLL_MS` away — three seconds in which
       // the echo sits there labelled as undelivered when it has in fact already landed.
@@ -2266,6 +2347,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     editReply(restore.replyTo)
     // A question is asked in its dialog, once — not again as a line under the field.
     if (!out.confirm) setNotice(out.message)
+    if (out.failure === 'prompt' || out.failure === 'ended') setDeliveryFailure(out.failure)
   }
 
   if (payload?.unavailable) {
@@ -2891,7 +2973,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                   {/* A DRAFT waiting here — typically a FORWARD landed in it — is invisible while the
                       field is hidden, so it is said. It is keyed on the conversation, so Reopen
                       brings the field back with it (`scratchKey`). */}
-                  {draft.trim() !== '' && (
+                  {ownText.trim() !== '' && (
                     <span role="status" style={{ flexBasis: '100%', order: 3, fontSize: 11.5, lineHeight: 1.5, color: 'var(--anthropic-orange)' }}>
                       {pt
                         ? 'Há um rascunho guardado aqui. Reabra a sessão para continuar a escrever e enviar.'
@@ -2986,18 +3068,79 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     opens its source, and has its own ×. */}
                 {replyTo.length > 0 && (
                   <div
-                    aria-label={pt ? 'Citações desta mensagem' : 'Quotes in this message'}
+                    aria-label={pt ? 'Citações e respostas desta mensagem' : 'Quotes and replies in this message'}
                     style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '6px 4px 2px', maxHeight: '40vh', overflowY: 'auto' }}
                   >
-                    {replyTo.map((t, i) => (
-                      <QuoteBlock
-                        key={`${t.key ?? ''}:${i}:${t.text.slice(0, 24)}`}
-                        text={unquoteLines(quoteFor(t))}
-                        pt={pt}
-                        onOpen={() => openComposerQuote(t)}
-                        onRemove={() => editReply(list => list.filter(x => x !== t))}
-                      />
-                    ))}
+                    {replyTo.map((t, i) => {
+                      const before = t.before ?? ''
+                      // The field above the FIRST quote is the text before every quote: drawn only
+                      // while it holds something or the caret, so a reply does not open on an empty
+                      // field above what it answers. Every later field is a quote's own reply.
+                      const showField = i > 0 || before !== '' || focusedSeg === 0
+                      return (
+                        <Fragment key={`${t.role}:${t.excerpt ? 1 : 0}:${t.key ?? ''}:${t.text}`}>
+                          {showField && (
+                            <ComposerSegmentField
+                              ref={el => { segRefs.current[i] = el }}
+                              value={before}
+                              maxHeight={maxComposerH}
+                              isMobile={isMobile}
+                              // The stack is padded 4px for the quote bars; the field steps back out
+                              // so its text lines up with the main field's under it.
+                              style={{ marginLeft: -4, width: 'calc(100% + 8px)' }}
+                              aria-label={pt ? `Resposta à citação ${i}` : `Reply to quote ${i}`}
+                              placeholder={i > 0 ? (pt ? 'Sua resposta a esta citação…' : 'Your reply to this quote…') : undefined}
+                              disabled={!typing && (!canPrompt || sending)}
+                              onChange={e => {
+                                editSegment(i, e.target.value)
+                                lastField.current = { field: i, caret: e.target.selectionStart ?? e.target.value.length }
+                              }}
+                              onSelect={e => {
+                                const node = e.currentTarget
+                                // A selection made in the CONVERSATION says nothing about where the
+                                // person was writing — same guard as the main field.
+                                const anchor = document.getSelection()?.anchorNode
+                                if (anchor && node.parentElement && !node.parentElement.contains(anchor)) return
+                                const from = caretOfSelection(node.selectionStart, node.selectionEnd)
+                                if (from !== null) lastField.current = { field: i, caret: from }
+                              }}
+                              onFocus={e => {
+                                setTyping(true)
+                                setFocusedSeg(i)
+                                lastField.current = { field: i, caret: e.currentTarget.selectionStart ?? before.length }
+                              }}
+                              onBlur={() => { setTyping(false); setFocusedSeg(f => (f === i ? null : f)) }}
+                              onPaste={onPaste}
+                              onKeyDown={e => {
+                                const node = e.currentTarget
+                                // The arrows walk OUT of a field at its ends, into the next one — the
+                                // fields read as one message, so the caret moves through it as one.
+                                if (e.key === 'ArrowUp' && node.selectionStart === 0 && node.selectionEnd === 0 && i > 0) {
+                                  const prev = segRefs.current[i - 1]
+                                  if (prev) { e.preventDefault(); prev.focus(); prev.setSelectionRange(prev.value.length, prev.value.length) }
+                                  return
+                                }
+                                if (e.key === 'ArrowDown' && node.selectionStart === node.value.length && node.selectionEnd === node.value.length) {
+                                  const next = segRefs.current[i + 1] ?? textareaRef.current
+                                  if (next) { e.preventDefault(); next.focus(); next.setSelectionRange(0, 0) }
+                                  return
+                                }
+                                if (e.key === 'Escape' && selecting !== null) { e.preventDefault(); setSelecting(null); return }
+                                // Same rule as the main field: a phone's return breaks the line.
+                                if (e.key === 'Enter' && !e.shiftKey && !isMobile) { e.preventDefault(); void send(); return }
+                                if (e.key === 'Escape' && stopEnabled) { e.preventDefault(); void stopNow() }
+                              }}
+                            />
+                          )}
+                          <QuoteBlock
+                            text={unquoteLines(quoteFor(t))}
+                            pt={pt}
+                            onOpen={() => openComposerQuote(t)}
+                            onRemove={() => removeQuote(i)}
+                          />
+                        </Fragment>
+                      )
+                    })}
                   </div>
                 )}
                 <ComposerAttachments
@@ -3107,7 +3250,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     if (from === null) return
                     setCaret(from)
                   }}
-                  onFocus={() => setTyping(true)}
+                  onFocus={() => { setTyping(true); lastField.current = { field: 'main' } }}
                   onBlur={e => {
                     setTyping(false)
                     // Leaving the field closes the picker — unless the focus went INTO it, which
@@ -3751,6 +3894,24 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 <p style={{ margin: '8px 0 0', fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
                   {notice ?? source?.notice}
                 </p>
+              )}
+              {deliveryFailure && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 7, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (deliveryFailure === 'prompt') onOpenTerminal?.()
+                      else void reopenNow()
+                      setDeliveryFailure(null)
+                    }}
+                    disabled={deliveryFailure === 'prompt' ? !onOpenTerminal : !reopen?.enabled || reopening}
+                    style={{ border: 0, borderRadius: 8, padding: '6px 10px', background: 'var(--anthropic-orange)', color: '#fff', fontFamily: 'inherit', fontSize: 11.5, cursor: 'pointer' }}
+                  >
+                    {deliveryFailure === 'prompt'
+                      ? (pt ? 'Abrir pergunta no terminal' : 'Open the question in the terminal')
+                      : (pt ? 'Reabrir sessão' : 'Reopen session')}
+                  </button>
+                </div>
               )}
               {/* A SOURCE's run line (tokens, cost, context) — the bottom bar's slot. */}
               {source?.status}

@@ -21,7 +21,7 @@ import { cacheIsUsable, stripVolatile } from './fleetCache'
 import { getCentralMachine } from './centralMachinePick'
 import { relayedToSessions, type RelayedRow } from './relayedSessions'
 import { notifyFleetTransitions, type SessionActivity } from './sessionNotifications'
-import { parseActResult } from './fleetAct'
+import { confirmSendLanded, parseActResult, sendUnconfirmedMessage, textInUserTurns } from './fleetAct'
 import { parseRelayActResult } from './relayAct'
 import { nativeAct, readNativeFleet } from './nativeFleet'
 import { withNativeSessions } from './nativeFleetRow'
@@ -193,7 +193,7 @@ export interface FleetState {
     ids?: readonly string[]
     /** EXT.OPEN: yes to ending an external process so its conversation continues here. */
     confirm?: boolean
-  }) => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean }>
+  }) => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' }>
 }
 
 /**
@@ -464,6 +464,7 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
   const refresh = useCallback(() => { void pollOnce() }, [])
 
   const act = useCallback<FleetState['act']>(async req => {
+    let machineIdAtCall: string | null | undefined
     // A NATIVE session's row verbs go to the engine (`nativeFleet.ts`) — the machine's
     // `/api/fleet/act` has no row by that id. The answer has the same shape, so the menu needs no branch.
     if (isNativeSessionId(req.id)) {
@@ -508,6 +509,7 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
        * nothing decided in this browser is trusted there.
        */
       const machineId = getCentralMachine()
+      machineIdAtCall = machineId
       const url = machineId
         ? `/api/team/machine-fleet/act?lang=${lang}`
         : `/api/fleet/act?lang=${lang}`
@@ -559,6 +561,19 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
       // A poll settles what actually happened — see the note above. It runs even here.
       void pollOnce()
       const timedOut = err instanceof Error && err.name === 'AbortError'
+      // A timed-out SEND is checked against the session's own conversation before it is called a
+      // failure: the keys usually landed and only the answer was slow.
+      if (timedOut && req.action === 'prompt' && req.text && !machineIdAtCall) {
+        const landed = await confirmSendLanded(async () => {
+          const r = await fetch(`/api/fleet/chat?id=${encodeURIComponent(req.id)}&lang=${lang}`)
+          if (!r.ok) return false
+          const b = await r.json() as { turns?: { role?: string; text?: string }[] }
+          return textInUserTurns(b.turns ?? [], req.text ?? '')
+        })
+        return landed
+          ? { ok: true, message: lang === 'pt' ? 'Mensagem enviada.' : 'Message sent.' }
+          : { ok: false, message: sendUnconfirmedMessage(lang) }
+      }
       return {
         ok: false,
         message: timedOut
