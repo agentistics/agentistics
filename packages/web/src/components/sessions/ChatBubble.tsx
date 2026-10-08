@@ -47,6 +47,7 @@ import { card, overlay } from '../MfaSetup'
 import { dialogButtonStyle } from '../../pages/settings/primitives'
 import { sentSegments } from '../../lib/replyQuote'
 import { QuoteBlock } from '../chat/QuoteBlock'
+import { shellRunViewModel } from '../../lib/shellRun'
 
 export interface ChatTurn {
   role: 'user' | 'assistant'
@@ -1127,18 +1128,11 @@ function menuItemStyle(isMobile: boolean): React.CSSProperties {
  * The output scrolls inside its own box, never the page (a 390px screen and a 200-column log).
  */
 function ShellRunBlock({ run, pt }: { run: NonNullable<ChatTurn['shell']>; pt: boolean }) {
-  const [open, setOpen] = useState(false)
+  const model = shellRunViewModel(run)
+  const [open, setOpen] = useState(model.expandedByDefault)
+  const { lines, hasOut } = model
   const out = run.output
-  const lines = out ? [out.stdout, out.stderr].filter(t => t !== '').join('\n').split('\n').length : 0
-  const hasOut = out !== undefined && (out.stdout !== '' || out.stderr !== '')
   const mono = 'var(--font-mono, ui-monospace, monospace)'
-  const status = run.running
-    ? (pt ? 'executando…' : 'running…')
-    : out === undefined
-      ? (pt ? 'executado' : 'ran')
-      : !hasOut
-        ? (pt ? 'sem saída' : 'no output')
-        : pt ? `${lines} ${lines === 1 ? 'linha' : 'linhas'}` : `${lines} ${lines === 1 ? 'line' : 'lines'}`
   const pre: React.CSSProperties = {
     margin: 0, padding: '8px 10px', borderRadius: 8,
     background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)',
@@ -1148,32 +1142,20 @@ function ShellRunBlock({ run, pt }: { run: NonNullable<ChatTurn['shell']>; pt: b
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
       <div style={{ fontFamily: mono, fontWeight: 600, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-        <span style={{ color: 'var(--anthropic-orange)' }}>!</span>{run.command}
+        <span style={{ color: 'var(--text-tertiary)' }}>$ </span>{run.command}
       </div>
-      <button
-        type="button"
-        className="ag-tap"
-        onClick={() => { if (hasOut) setOpen(o => !o) }}
-        aria-expanded={hasOut ? open : undefined}
-        disabled={!hasOut}
-        title={hasOut ? (pt ? 'Mostrar/ocultar a saída' : 'Show/hide the output') : undefined}
-        style={{
-          alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: '100%',
-          padding: '3px 9px', borderRadius: 999, cursor: hasOut ? 'pointer' : 'default',
-          background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)',
-          color: run.running ? 'var(--anthropic-orange)' : 'var(--text-secondary)', fontSize: 11,
-        }}
-      >
-        {run.running
-          ? <Loader size={11} className="ag-working-spin" style={{ flexShrink: 0 }} />
-          : <Check size={11} style={{ flexShrink: 0 }} />}
-        <span style={{ fontFamily: mono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
-          {run.summary}
-        </span>
-        <span style={{ opacity: 0.7, whiteSpace: 'nowrap' }}>· {status}</span>
-        {hasOut && <ChevronDown size={12} style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s' }} />}
-      </button>
-      {open && out && (
+      {run.running && <div style={{ color: 'var(--anthropic-orange)', fontSize: 11 }}><Loader size={11} className="ag-working-spin" /> {pt ? 'executando…' : 'running…'}</div>}
+      {!run.running && !hasOut && (
+        <div style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>
+          {out === undefined ? (pt ? 'executado' : 'ran') : (pt ? 'sem saída' : 'no output')}
+        </div>
+      )}
+      {!run.running && hasOut && lines > 12 && (
+        <button type="button" className="ag-tap" onClick={() => setOpen(o => !o)} aria-expanded={open} style={{ alignSelf: 'flex-start', border: 0, background: 'transparent', color: 'var(--text-tertiary)', padding: 0, fontSize: 11 }}>
+          <ChevronDown size={12} style={{ transform: open ? 'rotate(180deg)' : undefined }} /> {pt ? `${lines} linhas` : `${lines} lines`}
+        </button>
+      )}
+      {open && out && hasOut && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
           {out.truncated && (
             <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>

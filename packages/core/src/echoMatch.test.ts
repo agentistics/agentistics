@@ -1,5 +1,15 @@
 import { expect, test } from 'bun:test'
-import { pendingEchoes, SAFE_CONTAINS_LEN } from './echoMatch'
+import { normalizeEcho, pendingEchoes, SAFE_CONTAINS_LEN } from './echoMatch'
+
+test('normalizes bash echoes without changing ordinary message matching', () => {
+  expect(normalizeEcho('! mkdir -p a\t b  ')).toBe('!mkdir -p a b')
+  expect(normalizeEcho('!\tmkdir -p a\n b')).toBe('!mkdir -p a b')
+  expect(normalizeEcho('  uma  mensagem\n normal  ')).toBe('uma mensagem normal')
+})
+
+test('a bang echo matches the stored bash-input turn despite prefix whitespace', () => {
+  expect(pendingEchoes(['! mkdir -p a b  '], ['!mkdir -p a b'])).toEqual([])
+})
 
 test('an exact match retires the echo', () => {
   expect(pendingEchoes(['faz o merge'], ['faz o merge'])).toEqual([])
