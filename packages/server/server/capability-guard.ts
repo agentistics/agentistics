@@ -47,6 +47,9 @@ const EXACT: ReadonlyMap<string, keyof Capabilities> = new Map<string, keyof Cap
   // Lists this host's disks (reads /proc/mounts, /Volumes, statfs) for Settings' project-disk
   // picker. Host facts that only matter where sessions are started, so the fleet's capability.
   ['/api/project-disks', 'localShell'],
+  // One level of DIRECTORY names under the home or an enabled disk, for New session's folder
+  // browser. It reads the host's file system, so it rides the fleet's capability.
+  ['/api/fs/folders', 'localShell'],
   // The session fleet is registered as a PREFIX below, not name by name — see the note there.
 ])
 
