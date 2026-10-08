@@ -6,7 +6,7 @@
  * `personal.test.ts` seals a marker and drives every route to prove it.
  */
 import { readJsonLimited } from '../limits'
-import { GROUP_ID, ITEM_ID, KIND_FIELDS, isUseOnly, originMatchesRp, needsConfirm, validGroupName, validateInput, type PersonalKind } from '@agentistics/vault'
+import { GROUP_ID, ITEM_ID, KIND_FIELDS, PERSONAL_KINDS, TYPE_ID, isUseOnly, originMatchesRp, needsConfirm, validGroupName, validateInput, type PersonalKind } from '@agentistics/vault'
 import * as gate from './gate'
 import * as store from './personal'
 import * as mobile from './mobile'
@@ -261,7 +261,9 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
       const o = x as Record<string, unknown>
       if (typeof o.key !== 'string' || !['import', 'skip', 'replace', 'rename'].includes(String(o.action))) return []
       const name = typeof o.name === 'string' ? o.name.trim().slice(0, 120) : undefined
-      return [{ key: o.key, action: o.action as 'import' | 'skip' | 'replace' | 'rename', ...(name ? { name } : {}) }]
+      const kind = typeof o.kind === 'string' && (PERSONAL_KINDS as readonly string[]).includes(o.kind) ? o.kind as PersonalKind : undefined
+      const typeId = typeof o.typeId === 'string' && TYPE_ID.test(o.typeId) ? o.typeId : undefined
+      return [{ key: o.key, action: o.action as 'import' | 'skip' | 'replace' | 'rename', ...(name ? { name } : {}), ...(kind ? { kind } : {}), ...(typeId && kind ? { typeId } : {}) }]
     }) : []
     if (!token) return reply(bad())
     const g = await step('personal-import-env', b)

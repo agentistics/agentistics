@@ -30,10 +30,12 @@ import { resolvePaging } from '../components/team/tablePaging'
 import {
   KIND_FIELDS, PERSONAL_KINDS, REVEAL_HIDE_MS, copyWithAutoClear, createGroup, createPersonal, defaultImportChoices, deleteGroup, editPersonal,
   filterPersonal, importCommit, importPreview, importReady, listPersonal, listVersions, movePersonal, parseTags, purgePersonal, renameGroup,
-  USE_ONLY_DEFAULT, isUseOnly, batchBinding, newGroupName, trashBatch, restorePersonal, restoreVersion, revealPersonal, trashPersonal, withStepUp,
+  USE_ONLY_DEFAULT, isUseOnly, allKind, setAllKind, batchBinding, newGroupName, trashBatch, restorePersonal, restoreVersion, revealPersonal, trashPersonal, withStepUp,
   type ImportChoice, type ImportKey, type PersonalFilter, type PersonalGroup, type PersonalKind, type PersonalMeta,
 } from '../lib/vaultPersonal'
 import { pt_, type PKey } from '../lib/personalText'
+import { NEW_TYPE, choiceValue, kindChoices, kindName, resolveChoice, useVaultTypes } from '../lib/vaultKinds'
+import { CreateTypeDialog } from '../components/vault/KindTypes'
 import { NO_SELECTION, clearTicks, leaveMode, selectedVisible, setRows, toggleMode, toggleRow, type Selection } from '../components/tasks/selection'
 import { hasPasskeyHere, mobileState, passkeySupport, phoneGesture, type MobileState } from '../lib/passkey'
 import { CodeField } from '../components/vault/VaultUnlock'
@@ -234,6 +236,7 @@ function SecretsArea({ lang, isMobile, personal, pending, onFlash }: {
   const [learn, setLearn] = useState(false)
   const [sysDetails, setSysDetails] = useState<VaultItem | null>(null)
   // SELECT MODE (the Agentask pattern, tasks/selection.ts): ephemeral, off at start, leaving clears.
+  const types = useVaultTypes()
   const [sel, setSel] = useState<Selection>(NO_SELECTION)
   const [confirmBatch, setConfirmBatch] = useState(false)
   const [batchBusy, setBatchBusy] = useState(false)
@@ -243,7 +246,7 @@ function SecretsArea({ lang, isMobile, personal, pending, onFlash }: {
   useEffect(() => { setPage(0) }, [filter])
 
   const kindLabel = useCallback((k: PersonalKind) => t(`kind_${k}` as PKey), [lang]) // eslint-disable-line react-hooks/exhaustive-deps
-  const shown = useMemo(() => filterPersonal(items, groups, filter, kindLabel), [items, groups, filter, kindLabel])
+  const shown = useMemo(() => filterPersonal(items, groups, filter, kindLabel, m => kindName(m, types, kindLabel)), [items, groups, filter, kindLabel, types])
   // The system secrets carry no kind of the person's and no group: a kind or group filter, or the trash, hides them.
   const showSystem = !filter.trash && filter.kind === 'all' && filter.groupId === 'all'
   const sysShown = useMemo(() => (showSystem ? filterSystem(systemItems, filter.q, lang) : []), [systemItems, filter.q, lang, showSystem])
@@ -314,7 +317,7 @@ function SecretsArea({ lang, isMobile, personal, pending, onFlash }: {
         <div style={{ minWidth: 0 }}>
           <Field label={t('f_kind')}>
             <Select value={filter.kind} onChange={v => setFilter(f => ({ ...f, kind: v as PersonalFilter['kind'] }))}
-              options={[{ value: 'all', label: t('allKinds') }, ...PERSONAL_KINDS.map(k => ({ value: k, label: kindLabel(k) }))]} />
+              options={[{ value: 'all', label: t('allKinds') }, ...PERSONAL_KINDS.map(k => ({ value: k as string, label: kindLabel(k) })), ...types.map(ty => ({ value: ty.id, label: ty.name }))]} />
           </Field>
         </div>
         <div style={{ minWidth: 0 }}>
@@ -583,6 +586,7 @@ function SecretRow({ m, lang, isMobile, group, groups, gated, onChanged, onRemov
   selecting?: boolean; checked?: boolean; onTick?: () => void
 }) {
   const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
+  const types = useVaultTypes()
   // field → value, for 30 s after a reveal; dropped on unmount and when the row closes.
   const [shown, setShown] = useState<Record<string, string>>({})
   const [open, setOpen] = useState(false)
@@ -626,7 +630,7 @@ function SecretRow({ m, lang, isMobile, group, groups, gated, onChanged, onRemov
   const trashed = m.deletedAt !== null
   const sealed = isUseOnly(m)
   const meta = [
-    t(`kind_${m.kind}` as PKey), group, sealed ? t('useOnlyBadge') : '', m.confirmEach === false ? t('confirmEachOff') : '',
+    kindName(m, types, k => t(`kind_${k}` as PKey)), group, sealed ? t('useOnlyBadge') : '', m.confirmEach === false ? t('confirmEachOff') : '',
     ...m.tags.map(x => `#${x}`), t('updated', { date: fmtDay(m.updatedAt, lang) }),
   ].filter(Boolean).join(' · ')
   const entries: BandOverflowEntry[] = trashed
@@ -711,6 +715,9 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
   const editing = item !== null
   const [tab, setTab] = useState<'create' | 'import'>(editing ? 'create' : initialTab)
   const [kind, setKind] = useState<PersonalKind>(item?.kind ?? 'password')
+  const types = useVaultTypes()
+  const [typeId, setTypeId] = useState<string | null>(item?.typeId ?? null)
+  const [makingType, setMakingType] = useState(false)
   const [name, setName] = useState(item?.name ?? '')
   const [url, setUrl] = useState(item?.url ?? '')
   const [groupId, setGroupId] = useState<string>(item?.groupId ?? defaultGroup ?? '')
@@ -729,13 +736,18 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
   const [error, setError] = useState<string | null>(null)
   useEffect(() => () => setFields({}), [])
   const multiline = kind === 'env' || kind === 'note'
-  const pickKind = (k: PersonalKind) => { setKind(k); if (!editing && !useOnlyTouched) setUseOnly(USE_ONLY_DEFAULT[k]) }
+  const pickKind = (k: PersonalKind, tid: string | null = null) => { setKind(k); setTypeId(tid); if (!editing && !useOnlyTouched) setUseOnly(USE_ONLY_DEFAULT[k]) }
+  const pickChoice = (v: string) => {
+    if (v === NEW_TYPE) { setMakingType(true); return }
+    const r = resolveChoice(v, types)
+    if (r) pickKind(r.kind, r.typeId)
+  }
   const save = async () => {
     if (busy || !name.trim()) return
     setBusy(true); setError(null)
     const f: Record<string, string> = {}
     for (const k of KIND_FIELDS[kind]) if (fields[k]) f[k] = fields[k]!
-    const body = { kind, name: name.trim(), url, groupId: groupId || null, tags: parseTags(tags), notes, confirmEach, ...(useOnly ? { useOnly: true } : {}), ...(Object.keys(f).length ? { fields: f } : {}) }
+    const body = { kind, ...(typeId || editing ? { typeId } : {}), name: name.trim(), url, groupId: groupId || null, tags: parseTags(tags), notes, confirmEach, ...(useOnly ? { useOnly: true } : {}), ...(Object.keys(f).length ? { fields: f } : {}) }
     const r = editing ? await gated((c, tk) => editPersonal(item.id, item.version, body, c, tk), { action: 'personal-edit', target: item.id }) : await gated(c => createPersonal(body, c), false)
     setBusy(false)
     if (!r.ok) { setError(r.sentence || t('network')); return }
@@ -747,6 +759,8 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
   const [preview, setPreview] = useState<{ token: string; keys: ImportKey[]; skipped: number } | null>(null)
   const [choices, setChoices] = useState<ImportChoice[]>([])
   const [importGroup, setImportGroup] = useState(defaultGroup ?? '')
+  // The import row that asked for "Criar tipo…" (the new type is selected on it once made).
+  const [makingTypeFor, setMakingTypeFor] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const onFile = async (file: File | undefined) => {
     if (!file) return
@@ -818,6 +832,7 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
     )
   const title = replace && item ? `${t('replaceTitle')} · ${item.name}` : editing ? t('editTitle') : t('createTitle')
   return (
+    <>
     <Sheet closeLabel={t('close')} isMobile={isMobile} title={title} onClose={onClose} footer={footer} wide={tab === 'import' && preview !== null}>
       {!editing && (
         <TabStrip<'create' | 'import'> variant="underline" tabs={['create', 'import']} value={tab} onPick={v => { setTab(v); setError(null) }}
@@ -830,6 +845,13 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
           {preview && (
             <>
               {preview.skipped > 0 && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 8 }}>{t('importSkipped', { n: preview.skipped })}</div>}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+                <button type="button" data-import-mark-all style={{ ...pageBtn(isMobile), flex: isMobile ? '1 1 100%' : undefined }}
+                  onClick={() => setChoices(cs => (allKind(cs, 'api-key') ? setAllKind(cs, 'env') : setAllKind(cs, 'api-key')))}>
+                  <KeyRound size={14} /> {allKind(choices, 'api-key') ? t('unmarkAllApiKey') : t('markAllApiKey')}
+                </button>
+                <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)', flex: '1 1 200px' }}>{t('importKindNote')}</span>
+              </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
                 {preview.keys.map(k => {
                   const c = choices.find(x => x.key === k.key)!
@@ -842,6 +864,13 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
                         <Select value={c.action} onChange={v => setChoice(k.key, { action: v as ImportChoice['action'] })}
                           options={(k.clash ? ['skip', 'replace', 'rename'] as const : ['import', 'skip'] as const).map(a => ({ value: a, label: t(`act_${a}` as PKey) }))} />
                       </div>
+                      {c.action !== 'skip' && (
+                        <div style={{ width: isMobile ? '100%' : 190 }} data-import-kind>
+                          <Select value={choiceValue(c.kind || c.typeId || !(k.clash && c.action === 'replace') ? c : { ...(k.clash.kind ? { kind: k.clash.kind } : {}), ...(k.clash.typeId ? { typeId: k.clash.typeId } : {}) }, types)}
+                            onChange={v => { if (v === NEW_TYPE) { setMakingTypeFor(k.key); return } const r = resolveChoice(v, types); if (r) setChoice(k.key, { kind: r.kind, ...(r.typeId ? { typeId: r.typeId } : { typeId: undefined }) }) }}
+                            options={kindChoices(types, x => t(`kind_${x}` as PKey), t('createTypeRow'))} />
+                        </div>
+                      )}
                       {c.action === 'rename' && (
                         <div style={{ width: isMobile ? '100%' : 180 }}>
                           <FieldInput label={t('f_name')} value={c.name ?? ''} onChange={v => setChoice(k.key, { name: v })} placeholder={k.key} />
@@ -865,7 +894,7 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
               <TextField lang={lang} label={t('f_name')} value={name} onChange={setName} maxLength={120} autoFocus={!isMobile} placeholder={t('namePh')} />
               <div style={{ marginBottom: 14 }}>
                 <Field label={t('f_kind')}>
-                  <Select value={kind} onChange={v => pickKind(v as PersonalKind)} options={PERSONAL_KINDS.map(k => ({ value: k, label: t(`kind_${k}` as PKey) }))} />
+                  <Select value={choiceValue({ kind, ...(typeId ? { typeId } : {}) }, types)} onChange={pickChoice} options={kindChoices(types, k => t(`kind_${k}` as PKey), t('createTypeRow'))} />
                 </Field>
               </div>
               {valueFields}
@@ -897,6 +926,10 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
         </form>
       )}
     </Sheet>
+      {makingTypeFor && <CreateTypeDialog lang={lang} isMobile={isMobile} initialBase={choices.find(x => x.key === makingTypeFor)?.kind ?? 'api-key'} onClose={() => setMakingTypeFor(null)}
+        onCreated={ty => { setChoice(makingTypeFor, { kind: ty.base, typeId: ty.id }); setMakingTypeFor(null) }} />}
+      {makingType && <CreateTypeDialog lang={lang} isMobile={isMobile} initialBase={kind} onClose={() => setMakingType(false)} onCreated={ty => { setMakingType(false); pickKind(ty.base, ty.id) }} />}
+    </>
   )
 }
 

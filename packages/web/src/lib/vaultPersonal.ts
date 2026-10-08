@@ -19,14 +19,16 @@ export interface PersonalMeta {
   confirmEach?: boolean
   /** "Só uso": sessions use it, nobody sees or copies it (the server refuses `reveal`). Absent = off. Irreversible. */
   useOnly?: boolean
+  /** The person's own name for the kind (`vaultKinds`); the sealed `kind` stays the base. */
+  typeId?: string
   id: string; kind: PersonalKind; name: string; groupId: string | null; tags: string[]; notes: string; url: string
   fields: string[]; createdAt: string; updatedAt: string; version: number; deletedAt: string | null
 }
 export interface PersonalGroup { id: string; name: string; version: number; createdAt: string; updatedAt: string }
-export interface PersonalItemInput { confirmEach?: boolean; useOnly?: boolean; kind: PersonalKind; name: string; groupId?: string | null; tags?: string[]; notes?: string; url?: string; fields?: Record<string, string> }
-export interface ImportKey { key: string; clash: { id: string; version: number } | null; empty: boolean }
+export interface PersonalItemInput { typeId?: string | null; confirmEach?: boolean; useOnly?: boolean; kind: PersonalKind; name: string; groupId?: string | null; tags?: string[]; notes?: string; url?: string; fields?: Record<string, string> }
+export interface ImportKey { key: string; clash: { id: string; version: number; kind?: PersonalKind; typeId?: string } | null; empty: boolean }
 export type ImportAction = 'import' | 'skip' | 'replace' | 'rename'
-export interface ImportChoice { key: string; action: ImportAction; name?: string }
+export interface ImportChoice { key: string; action: ImportAction; name?: string; /** What the pair is stored as; absent = `env`, what an import always made. */ kind?: PersonalKind; /** The person's label over `kind`. */ typeId?: string }
 
 const P = '/api/vault/personal'
 const withCode = (b: Record<string, unknown>, code?: string) => (code ? { ...b, code } : b)
@@ -78,22 +80,22 @@ export async function withStepUp<T>(run: (code?: string) => Promise<Reply<T>>, a
 
 const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
 
-export interface PersonalFilter { q: string; kind: PersonalKind | 'all'; groupId: string | 'all' | 'none'; trash: boolean }
+export interface PersonalFilter { q: string; kind: PersonalKind | 'all' | (string & {}); groupId: string | 'all' | 'none'; trash: boolean }
 
 /**
  * PURE. The reactive search: every term must match one of name, group name, tags, notes, url or kind
  * (accent- and case-insensitive). METADATA ONLY — a value is never in this list to match against.
  * Ordered by name. Fast enough for a few thousand rows on every keystroke (one pass, no regex).
  */
-export function filterPersonal(items: readonly PersonalMeta[], groups: readonly PersonalGroup[], f: PersonalFilter, kindLabel: (k: PersonalKind) => string = k => k): PersonalMeta[] {
+export function filterPersonal(items: readonly PersonalMeta[], groups: readonly PersonalGroup[], f: PersonalFilter, kindLabel: (k: PersonalKind) => string = k => k, typeLabel: (m: PersonalMeta) => string = () => ''): PersonalMeta[] {
   const gName = new Map(groups.map(g => [g.id, g.name]))
   const terms = fold(f.q).split(/\s+/).filter(Boolean)
   return items.filter(m => {
     if (f.trash !== (m.deletedAt !== null)) return false
-    if (f.kind !== 'all' && m.kind !== f.kind) return false
+    if (f.kind !== 'all' && (f.kind.startsWith('kt_') ? m.typeId !== f.kind : m.kind !== f.kind)) return false
     if (f.groupId === 'none' ? m.groupId !== null : f.groupId !== 'all' && m.groupId !== f.groupId) return false
     if (terms.length === 0) return true
-    const hay = fold([m.name, m.groupId ? gName.get(m.groupId) ?? '' : '', m.tags.join(' '), m.notes, m.url, m.kind, kindLabel(m.kind)].join('\n'))
+    const hay = fold([m.name, m.groupId ? gName.get(m.groupId) ?? '' : '', m.tags.join(' '), m.notes, m.url, m.kind, kindLabel(m.kind), typeLabel(m)].join('\n'))
     return terms.every(t => hay.includes(t))
   }).sort((a, b) => a.name.localeCompare(b.name))
 }
@@ -101,6 +103,19 @@ export function filterPersonal(items: readonly PersonalMeta[], groups: readonly 
 /** PURE. A clash defaults to SKIP (never overwritten by default); everything else to import. */
 export function defaultImportChoices(keys: readonly ImportKey[]): ImportChoice[] {
   return keys.map(k => ({ key: k.key, action: k.clash ? 'skip' : 'import' }))
+}
+/** PURE. Every row that will be written (not skipped) takes `kind`; skipped rows are left alone. */
+export function setAllKind(choices: readonly ImportChoice[], kind: PersonalKind): ImportChoice[] {
+  return choices.map(c => {
+    if (c.action === 'skip') return c
+    const { typeId: _drop, ...rest } = c // a base kind carries no label
+    return { ...rest, kind }
+  })
+}
+/** PURE. Are all the rows that will be written already `kind`? (drives the "mark all" toggle) */
+export function allKind(choices: readonly ImportChoice[], kind: PersonalKind): boolean {
+  const live = choices.filter(c => c.action !== 'skip')
+  return live.length > 0 && live.every(c => c.kind === kind && !c.typeId)
 }
 /** PURE. Can the import be sent as chosen? (a rename needs a non-empty name; nothing chosen is nothing to send) */
 export function importReady(choices: readonly ImportChoice[]): boolean {

@@ -88,3 +88,15 @@ test('select mode: select-all ticks the whole filtered set, and only what is on 
   expect(selectedVisible(s, ['a', 'b'])).toEqual(['a', 'b'])
   expect(selectedVisible(toggleMode(s), ['a', 'b'])).toEqual([])
 })
+
+import { allKind, setAllKind } from './vaultPersonal'
+test('mark all as API key touches only the rows that will be written, and toggles back', () => {
+  const cs = [{ key: 'A', action: 'import' as const }, { key: 'B', action: 'skip' as const }, { key: 'C', action: 'rename' as const, name: 'c' }]
+  const marked = setAllKind(cs, 'api-key')
+  expect(marked.map(c => c.kind)).toEqual(['api-key', undefined, 'api-key'])
+  expect(allKind(marked, 'api-key')).toBe(true)
+  expect(allKind(cs, 'api-key')).toBe(false)
+  expect(allKind([{ key: 'X', action: 'skip' }], 'api-key')).toBe(false)
+  expect(defaultImportChoices([{ key: 'K', clash: null, empty: false }])[0]!.kind).toBeUndefined()
+  expect(setAllKind(marked, 'note').every(c => c.action === 'skip' || c.kind === 'note')).toBe(true)
+})

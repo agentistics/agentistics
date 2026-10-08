@@ -88,6 +88,7 @@ export const USER_UI_PREF_REGISTRY = {
   studioSeen: { machine: 'ui', maxBytes: SMALL },
   centralMachine: { machine: 'ui', maxBytes: SMALL },
   updateSnooze: { machine: 'ui', maxBytes: SMALL },
+  vaultKinds: { machine: 'ui', maxBytes: SMALL },
 } as const satisfies Record<string, KeySpec>
 
 export type UserUiPrefKey = keyof typeof USER_UI_PREF_REGISTRY

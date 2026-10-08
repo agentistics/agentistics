@@ -156,6 +156,35 @@ describe('gate rows (spec §3)', () => {
     expect((await http('POST', '/api/vault/personal/trash-batch', { items: [] })).json.code).toBe('bad-request')
     expect((await http('POST', '/api/vault/personal/trash-batch', { items: [{ id, expectedVersion: 1 }, { id, expectedVersion: 1 }] })).json.code).toBe('bad-request')
   })
+  test('import: each row is stored as the kind chosen (default env); api-key rows are use-only; password lands in its field', async () => {
+    const prev = await http('POST', '/api/vault/personal/import/preview', { text: 'OPENAI_KEY=sk-aaa\nPLAIN=bbb\nPASS=ccc\nSKIPPED=ddd' })
+    expect(prev.json.ok).toBe(true)
+    const r = await http('POST', '/api/vault/personal/import/commit', { token: prev.json.token, groupId: null, choices: [
+      { key: 'OPENAI_KEY', action: 'import', kind: 'api-key' }, { key: 'PLAIN', action: 'import' },
+      { key: 'PASS', action: 'import', kind: 'password' }, { key: 'SKIPPED', action: 'skip', kind: 'bogus' },
+    ] })
+    expect(r.json).toMatchObject({ ok: true, created: 3, skipped: 1 })
+    const items = (await http('GET', '/api/vault/personal')).json.items as { name: string; kind: string; useOnly?: boolean; fields: string[] }[]
+    const by = (n: string) => items.find(i => i.name === n)!
+    expect(by('OPENAI_KEY')).toMatchObject({ kind: 'api-key', useOnly: true, fields: ['value'] })
+    expect(by('PLAIN')).toMatchObject({ kind: 'env', fields: ['value'] })
+    expect(by('PLAIN').useOnly).toBeUndefined()
+    expect(by('PASS')).toMatchObject({ kind: 'password', fields: ['password'] })
+  })
+  test('a custom type label rides the record (base kind unchanged), survives edits, clears on null, and is validated', async () => {
+    const m = (await http('POST', '/api/vault/personal', { item: { ...login, typeId: 'kt_mongo1' }, code: codeAt() })).json.meta
+    expect(m).toMatchObject({ kind: 'login', typeId: 'kt_mongo1' })
+    expect((await http('POST', '/api/vault/personal', { item: { ...login, typeId: 'bad id' }, code: codeAt() })).json.ok).toBe(false)
+    next()
+    const kept = await http('POST', '/api/vault/personal/edit', { id: m.id, expectedVersion: 1, item: { kind: 'login', name: 'Renomeado' }, code: codeAt() })
+    expect(kept.json.meta).toMatchObject({ name: 'Renomeado', typeId: 'kt_mongo1' }) // absent keeps the label
+    const cleared = await http('POST', '/api/vault/personal/edit', { id: m.id, expectedVersion: 2, item: { kind: 'login', name: 'Renomeado', typeId: null }, code: codeAt() })
+    expect(cleared.json.meta.typeId).toBeUndefined()
+    const prev = await http('POST', '/api/vault/personal/import/preview', { text: 'MONGO_URI=mongodb://x' })
+    await http('POST', '/api/vault/personal/import/commit', { token: prev.json.token, groupId: null, choices: [{ key: 'MONGO_URI', action: 'import', kind: 'api-key', typeId: 'kt_mongo1' }] })
+    const it = ((await http('GET', '/api/vault/personal')).json.items as { name: string; kind: string; typeId?: string; useOnly?: boolean }[]).find(i => i.name === 'MONGO_URI')!
+    expect(it).toMatchObject({ kind: 'api-key', typeId: 'kt_mongo1', useOnly: true })
+  })
   test('the batch binding is pinned (the web page computes the same string)', async () => {
     const { batchBinding } = await import('./personal-http')
     expect(batchBinding(['b', 'a'])).toBe(batchBinding(['a', 'b']))

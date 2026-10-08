@@ -20,6 +20,7 @@ import { wipeBackupHistory } from '../../lib/vaultPersonal'
 import { hasPasskeyHere, passkeySupport, removePasskey, setCodeReveal, type MobileState } from '../../lib/passkey'
 import { clearStalePhones, phoneFacts, readDeviceKey, removeDevice } from '../../lib/phoneVault'
 import type { VaultControls } from './useVaultControls'
+import { CustomTypesRow } from '../../components/vault/KindTypes'
 import { AfterRows, AreaHead, InfoBlocks, LearnMore, Pill, Rows, Sheet, VaultRow, dangerOutline, hotBtn, pageBtn } from './vaultUi'
 
 type Lang = 'en' | 'pt'
@@ -297,6 +298,7 @@ export function SettingsArea({ lang, isMobile, c, isPhone, gated, onFlash }: {
             <button type="button" style={btn} onClick={() => setEdit('auth')} title={c.tip('set-auth-policy')}>{t('change')}</button>
           </VaultRow>
         )}
+        <CustomTypesRow lang={lang} isMobile={isMobile} />
         <VaultRow data="recovery" isMobile={isMobile} title={vt('sec_recovery', lang)} desc={view.recoveryCreatedAt ? `${recoveryDesc} · ${t('rec_new_d')}` : recoveryDesc}
           status={view.recoveryCreatedAt ? undefined : <Pill tone="warn" text={t('st_missing')} />}>
           <button type="button" style={view.recoveryCreatedAt ? btn : c.primary === 'recovery' ? hotBtn(isMobile) : btn}
