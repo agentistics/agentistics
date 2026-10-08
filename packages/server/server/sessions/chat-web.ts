@@ -44,6 +44,7 @@ import { planSessionSource } from './session-source'
 import type { SessionSurfaceDeps } from './session-surface-deps'
 import { CLAUDE_DIR } from '../config'
 import { safeReadJson } from '../utils'
+import { isComposerMessage } from './composer-message'
 
 /** What the journal remembers of a conversation whose transcript is gone — numbers only (D5, Q3). */
 export interface ChatRecorded {
@@ -339,6 +340,9 @@ async function readSessionChatCore(
     if (cut.stale) forgetRewind(conversationId)
     else read.turns = cut.turns
   }
+  read.turns = read.turns.map(turn => turn.role === 'user' && isComposerMessage(id, turn.text)
+    ? { ...turn, composer: true }
+    : turn)
   // What is still waiting, judged against the user turns THIS read returned. The window matters and
   // is the right one: a message queued a minute ago cannot be older than the last 400 turns, and
   // comparing against a wider slice would cost a second read to learn nothing.

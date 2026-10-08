@@ -21,6 +21,7 @@ import type { HarnessId, ProjectKind } from '@agentistics/core'
 import type { StartHost } from '../cli-start'
 import type { CliLang } from '../cli-lang'
 import { recordPrompt } from './pending-prompts'
+import { recordComposerMessage } from './composer-message'
 import { isExternalRowId, planContinueHere } from './external-continue'
 import { SPAWN_SPECS } from './spawn-spec'
 import { cliStrings } from '../cli-i18n'
@@ -310,7 +311,11 @@ export async function runFleetAction(
       // the harness writes for it — the resolver refuses a record from after the turn it is asked
       // about, and a submit that waits on the pane takes hundreds of milliseconds.
       const sentAtMs = Date.now()
+      // Runs only on a CONFIRMED delivery (now or late, see the race below). Besides the display
+      // queue it records the composer fingerprint, so the chat shows this turn as the person's own
+      // message even when the harness stored it as a paste (`recordComposerMessage`).
       const record = () => {
+        recordComposerMessage(req.id, text)
         void (async () => {
           try {
             const row = (await host.sessions?.())?.sessions.find(r => r.id === req.id || r.conversationId === req.id)
@@ -1236,6 +1241,9 @@ async function continueExternal(lang: CliLang, req: FleetActionRequest, text: st
     attach: false,
     prompt: text,
   })
-  if (out.ok) recordPrompt(plan.conversationId, text)
+  if (out.ok) {
+    recordPrompt(plan.conversationId, text)
+    recordComposerMessage(req.id, text)
+  }
   return { ok: out.ok, message: out.ok ? cli.sessContinuedHere : out.message, ...(out.id ? { id: out.id } : {}) }
 }
