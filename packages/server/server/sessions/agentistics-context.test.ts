@@ -96,35 +96,28 @@ describe('delivery per harness', () => {
     expect(r.plan.contextFile).toEqual({ dir: '/data/session-context/abc123', name: 'AGENTS.md', text: ctx().text })
     expect(r.plan.initialPrompt).toEqual({ mode: 'type', text: 'oi' })
   })
-  test('gemini: invisible — system-settings env + GEMINI.md in the context dir, prompt untouched', () => {
-    const r = plan('gemini'); if (!r.ok) throw new Error('x')
-    expect(r.plan.contextVia).toBe('files')
-    expect(r.plan.env).toEqual({ GEMINI_CLI_SYSTEM_SETTINGS_PATH: '/data/session-context/abc123/settings.json' })
-    expect(r.plan.contextFile).toEqual({ dir: '/data/session-context/abc123', name: 'GEMINI.md', text: ctx().text })
-    const settings = JSON.parse(r.plan.contextExtraFiles![0]!.text)
-    expect(settings.context).toEqual({ includeDirectories: ['/data/session-context/abc123'], loadMemoryFromIncludeDirectories: true })
-    expect(r.plan.argv.at(-1)).toBe('oi')
-  })
-  test('kimi: invisible — --agent-file extending the default agent; the typed prompt is untouched', () => {
+  test('kimi: invisible — --agent-file whose body keeps the default prompt and appends the context; the typed prompt is untouched', () => {
     const r = plan('kimi'); if (!r.ok) throw new Error('x')
     expect(r.plan.contextVia).toBe('files')
     expect(r.plan.argv).toContain('--agent-file')
     expect(r.plan.argv[r.plan.argv.indexOf('--agent-file') + 1]).toBe('/data/session-context/abc123/agentistics-agent.md')
     const f = r.plan.contextFile!
-    expect(f.text.startsWith('---\nextends: agent\nname: agentistics-session\npromptVars:\n  roleAdditional: |\n')).toBe(true)
-    expect(f.text).toContain('    ' + CONTEXT_HEADER)
+    expect(f.text.startsWith('---\nname: agentistics-session\ndescription: ')).toBe(true)
+    expect(f.text).toContain('---\n${base_prompt}\n\n' + CONTEXT_HEADER)
     expect(r.plan.initialPrompt).toEqual({ mode: 'type', text: 'oi' })
   })
-  test('antigravity (no channel exists): fenced block, header first, user text AFTER the closing fence', () => {
-    const r = plan('antigravity'); if (!r.ok) throw new Error('x')
-    expect(r.plan.contextVia).toBe('first-message')
-    const sent = r.plan.initialPrompt?.text ?? r.plan.argv.at(-1)!
-    expect(sent).toBe(`${ctx().block}\n\noi`)
-    expect(sent.split('\n')[1]).toBe(CONTEXT_HEADER)
-    expect(sent.indexOf('oi')).toBeGreaterThan(sent.indexOf(CONTEXT_CLOSE))
+  test('antigravity and gemini (no invisible channel exists): fenced block, header first, user text AFTER the closing fence', () => {
+    for (const h of ['antigravity', 'gemini'] as const) {
+      const r = plan(h); if (!r.ok) throw new Error('x')
+      expect(r.plan.contextVia).toBe('first-message')
+      const sent = r.plan.initialPrompt?.text ?? r.plan.argv.at(-1)!
+      expect(sent).toBe(`${ctx().block}\n\noi`)
+      expect(sent.split('\n')[1]).toBe(CONTEXT_HEADER)
+      expect(sent.indexOf('oi')).toBeGreaterThan(sent.indexOf(CONTEXT_CLOSE))
+    }
   })
   test('no first message: NOTHING is sent (context is held, never sent alone)', () => {
-    for (const h of ['antigravity'] as const) {
+    for (const h of ['antigravity', 'gemini'] as const) {
       const r = plan(h, { prompt: undefined }); if (!r.ok) throw new Error('x')
       expect(r.plan.contextVia).toBe('none'); expect(r.plan.initialPrompt).toBeUndefined()
       expect(r.plan.argv.join(' ')).not.toContain(CONTEXT_OPEN)
@@ -134,7 +127,7 @@ describe('delivery per harness', () => {
     expect(pendingContextFor(g.plan, ctx())).toBeUndefined()
   })
   test('every channel but the fallback keeps the context out of the prompt', () => {
-    for (const h of ['claude', 'codex', 'copilot', 'gemini', 'kimi'] as const) {
+    for (const h of ['claude', 'codex', 'copilot', 'kimi'] as const) {
       const r = plan(h); if (!r.ok) throw new Error(h)
       const sent = r.plan.initialPrompt?.text ?? r.plan.argv.at(-1)!
       expect(sent).toBe('oi')

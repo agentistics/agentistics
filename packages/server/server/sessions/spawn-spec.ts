@@ -139,15 +139,16 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     // `-S, --session [id]  Resume a session. With ID: resume that session.`
     resume: id => ['-S', id],
     // `--agent-file <path>  Load an agent definition from a Markdown file and select it for the new
-    // session` (kimi 0.38). The file `extends: agent` and adds `promptVars.roleAdditional`, the same
-    // mechanism the built-in coder/explore profiles use to ADD to the default system prompt. It sits
+    // session` (kimi 0.38). The body is a prompt TEMPLATE and `${base_prompt}` embeds kimi's builtin default
+    // prompt (read from the binary), so the context is APPENDED, not substituted. Frontmatter needs `name` and
+    // `description`; an empty body is refused ("Missing prompt body"). VERIFIED LIVE 2026-10-08. It sits
     // under the agentistics data dir, never the user's project. Not combinable with --session, which
     // is a resume and carries no context anyway.
     context: {
       kind: 'files',
       files: (_dir, text) => [{
         name: 'agentistics-agent.md',
-        text: `---\nextends: agent\nname: agentistics-session\npromptVars:\n  roleAdditional: |\n${text.split('\n').map(l => (l ? `    ${l}` : '')).join('\n')}\n---\n`,
+        text: `---\nname: agentistics-session\ndescription: Background context from agentistics\n---\n\${base_prompt}\n\n${text}`,
       }],
       args: dir => ['--agent-file', `${dir}/agentistics-agent.md`],
     },
@@ -160,17 +161,11 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
   gemini: {
     bin: 'gemini',
     prompt: { kind: 'flag', flag: '--prompt-interactive' },
-    // No system-prompt flag exists. `GEMINI_CLI_SYSTEM_SETTINGS_PATH` names a settings file; ours turns on
-    // `context.includeDirectories` + `loadMemoryFromIncludeDirectories` for a directory under the
-    // agentistics data dir that holds a GEMINI.md — read at start like any context file, outside the project.
-    context: {
-      kind: 'files',
-      files: (dir, text) => [
-        { name: 'GEMINI.md', text },
-        { name: 'settings.json', text: JSON.stringify({ context: { includeDirectories: [dir], loadMemoryFromIncludeDirectories: true } }) },
-      ],
-      env: dir => ({ GEMINI_CLI_SYSTEM_SETTINGS_PATH: `${dir}/settings.json` }),
-    },
+    // NO invisible channel (checked against gemini 0.55, 2026-10-08, live): no system-prompt flag; `GEMINI_SYSTEM_MD`
+    // would REPLACE the whole system prompt; `GEMINI_CLI_SYSTEM_SETTINGS_PATH` is refused unless the file's directory
+    // is root-owned ("Parent directory is insecure"); `--include-directories` loads no GEMINI.md unless the setting
+    // `loadMemoryFromIncludeDirectories` (default false) is on, and the only places that setting can live are the
+    // user's ~/.gemini or the project. So the fenced block rides the first message.
     modelFlag: '--model', // `-m, --model  Model  [string]`
     // EMPTY as of 2026-09-02, checked against gemini 0.55.1. `--help` prints "Model  [string]" and
     // no values; the CLI has `--list-extensions` and `--list-sessions` but nothing that lists
