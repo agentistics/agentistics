@@ -943,6 +943,8 @@ export interface ControlSession {
   taskId?: string
   /** The managed id of the session that started this one. The title is resolved against the other rows. */
   parentSessionId?: string
+  /** The parent's conversation id — the link that survives the parent being reopened. */
+  parentConversationId?: string
 }
 
 /**

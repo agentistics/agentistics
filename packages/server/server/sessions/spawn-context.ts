@@ -78,12 +78,34 @@ export async function resolveContextTask(
 export async function resolveContextParent(parentId: string | undefined): Promise<Pick<ContextInput, 'parentId' | 'parentTitle'>> {
   if (!parentId) return {}
   try {
-    const { readRegistry } = await import('./registry')
-    const row = (await readRegistry()).find(m => m.id === parentId)
-    const title = row?.label || row?.task || ''
-    return { parentId, ...(title ? { parentTitle: title } : {}) }
+    const link = await parentLinkOf(parentId)
+    const title = link.title ?? ''
+    // The CONVERSATION id is what the child is told to message: it survives a reopen of the parent.
+    return { parentId: link.parentConversationId ?? parentId, ...(title ? { parentTitle: title } : {}) }
   } catch {
     return { parentId }
+  }
+}
+
+/**
+ * What to record for a parent given the managed id of the session that is spawning: its managed id
+ * and, when its registry row knows it, its conversation id (the stable one). A reopened row carries
+ * the PREVIOUS record's `parentConversationId` forward untouched.
+ */
+export async function parentLinkOf(
+  parentManagedId: string | undefined,
+): Promise<{ parentSessionId?: string; parentConversationId?: string; title?: string }> {
+  if (!parentManagedId) return {}
+  try {
+    const { readRegistry } = await import('./registry')
+    const row = (await readRegistry()).find(m => m.id === parentManagedId)
+    return {
+      parentSessionId: parentManagedId,
+      ...(row?.conversationId ? { parentConversationId: row.conversationId } : {}),
+      ...(row?.label || row?.task ? { title: (row.label || row.task)! } : {}),
+    }
+  } catch {
+    return { parentSessionId: parentManagedId }
   }
 }
 

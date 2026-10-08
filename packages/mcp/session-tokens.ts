@@ -111,13 +111,14 @@ export function toolsForGate<T extends { inputSchema: { properties?: Record<stri
  * resolved against the same rows; a parent no longer in the fleet is still named by id.
  */
 export function startedByIndex(
-  rows: ReadonlyArray<{ id: string; conversationId?: string; title?: string; parentSessionId?: string }>,
+  rows: ReadonlyArray<{ id: string; conversationId?: string; title?: string; parentSessionId?: string; parentConversationId?: string }>,
 ): Map<string, { id: string; title?: string }> {
   const out = new Map<string, { id: string; title?: string }>();
   for (const r of rows) {
     if (!r.parentSessionId) continue;
-    const parent = rows.find(p => p.id === r.parentSessionId || p.conversationId === r.parentSessionId);
-    const who = { id: r.parentSessionId, ...(parent?.title ? { title: parent.title } : {}) };
+    const parent = (r.parentConversationId ? rows.find(p => p.conversationId === r.parentConversationId) : undefined)
+      ?? rows.find(p => p.id === r.parentSessionId || p.conversationId === r.parentSessionId);
+    const who = { id: parent?.id ?? r.parentSessionId, ...(parent?.title ? { title: parent.title } : {}) };
     out.set(r.id, who);
     if (r.conversationId) out.set(r.conversationId, who);
   }

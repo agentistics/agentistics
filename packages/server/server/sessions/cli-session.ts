@@ -29,7 +29,7 @@ import { toControlSession } from './control-session'
 import { recordedRepo, repoFacts } from './repo-facts'
 import { emptyReason, renderSessionTable, resolveWidth } from './session-table'
 import { SPAWN_SPECS, planSpawn } from './spawn-spec'
-import { buildSpawnContext, pendingContextFor, resolveContextParent, resolveContextTask, resolveContextTaskByRef, writeContextFile } from './spawn-context'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextParent, resolveContextTask, resolveContextTaskByRef, writeContextFile } from './spawn-context'
 import { rulesFor } from './attention-rules'
 // The harness half of a rename. Shared with the cockpit's Rename verb — see `rename.ts`.
 import { renameInHarness, renameMessage } from './rename'
@@ -314,7 +314,8 @@ async function start(
   const cwd = cmd.cwd ? resolve(cmd.cwd) : process.cwd()
   const lang = await resolveLang()
   const id = newSessionId()
-  const parentSessionId = callerSessionId()
+  const parentLink = await parentLinkOf(callerSessionId())
+  const parentSessionId = parentLink.parentSessionId
   const ctx = buildSpawnContext({ sessionId: id, cwd, ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)), ...(await resolveContextParent(parentSessionId)) })
   const planned = planSpawn({
     harness: cmd.harness, cwd, prompt: cmd.prompt, model: cmd.model, effort: cmd.effort,
@@ -372,6 +373,7 @@ async function start(
     ...(cmd.taskId ? { taskId: cmd.taskId } : {}),
     ...(cmd.attemptId ? { attemptId: cmd.attemptId } : {}),
     ...(parentSessionId ? { parentSessionId } : {}),
+    ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}),
     ...(pendingContextFor(planned.plan, ctx) ? { pendingContext: pendingContextFor(planned.plan, ctx)! } : {}),
     // The link is EXACT here: the CLI was handed this id (`SpawnSpec.assignId`).
     ...(planned.plan.conversationId
@@ -512,7 +514,8 @@ async function batch(
   // `task-rollup.ts` has to report as a hole. Best effort: a book that cannot be written costs the
   // ids, never the sessions.
   const resolved = await resolveTaskAndAttempts(cmd).catch(() => null)
-  const parentSessionId = callerSessionId()
+  const parentLink = await parentLinkOf(callerSessionId())
+  const parentSessionId = parentLink.parentSessionId
 
   for (const spec of cmd.specs) {
     const cwd = spec.cwd ? resolve(spec.cwd) : process.cwd()
@@ -568,6 +571,7 @@ async function batch(
       // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
       ...(resolved?.taskId ? { taskId: resolved.taskId } : {}),
       ...(parentSessionId ? { parentSessionId } : {}),
+      ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}),
       ...(pendingContextFor(planned.plan, ctx) ? { pendingContext: pendingContextFor(planned.plan, ctx)! } : {}),
       ...(spec.attempt && resolved?.attempts.get(spec.attempt)
         ? { attemptId: resolved.attempts.get(spec.attempt)! }

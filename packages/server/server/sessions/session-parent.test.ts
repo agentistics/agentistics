@@ -19,3 +19,15 @@ describe('parent of a started session', () => {
     expect((await resolveContextParent('no-such-session')).parentId).toBe('no-such-session')
   })
 })
+
+describe('parentLinkOf', () => {
+  test('records the parent\'s conversation id from the registry; unknown parent keeps the managed id only', async () => {
+    const { parentLinkOf } = await import('./spawn-context')
+    expect(await parentLinkOf(undefined)).toEqual({})
+    expect(await parentLinkOf('no-such')).toEqual({ parentSessionId: 'no-such' })
+  })
+  test('a reopen keeps the parent conversation id', () => {
+    const prev = { id: 'x', harness: 'claude', cwd: '/', createdAt: '', parentSessionId: 'p1', parentConversationId: 'cp' } as ManagedSession
+    expect(inheritedIdentity(prev).parentConversationId).toBe('cp')
+  })
+})

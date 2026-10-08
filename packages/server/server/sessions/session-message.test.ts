@@ -97,3 +97,18 @@ describe('agentistics_session_message', () => {
     expect((await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'x' }, f.deps)).ok).toBe(true)
   })
 })
+
+describe('a parent that was reopened', () => {
+  test('the child messages the parent by CONVERSATION id and it reaches the parent\'s NEW managed id', async () => {
+    // The parent was `parent-1` when the child started; after a reopen its row is `parent-2`, same conversation.
+    const f = fake({ rows: async () => [{ id: 'parent-2', title: 'Leader', conversationId: 'conv-p' }, { id: 'child-1', title: 'Worker', conversationId: 'conv-c' }] })
+    const out = await sendSessionMessage('child-1', { to: 'conv-p', kind: 'handback', body: 'done' }, f.deps)
+    expect(out).toMatchObject({ ok: true, to: 'parent-2' })
+    expect(f.prompts[0]!.id).toBe('parent-2')
+  })
+  test('the OLD managed id no longer resolves — the stored link must be the conversation', async () => {
+    const f = fake({ rows: async () => [{ id: 'parent-2', title: 'Leader', conversationId: 'conv-p' }] })
+    const out = await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'x' }, f.deps)
+    expect(!out.ok && out.code).toBe('no_such_session')
+  })
+})

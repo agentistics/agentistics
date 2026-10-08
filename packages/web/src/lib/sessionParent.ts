@@ -16,12 +16,14 @@ export interface SessionParent {
 }
 
 export function sessionParent(
-  session: Pick<ControlSession, 'parentSessionId'>,
+  session: Pick<ControlSession, 'parentSessionId' | 'parentConversationId'>,
   rows: readonly Pick<ControlSession, 'id' | 'conversationId' | 'title'>[],
 ): SessionParent | null {
-  const pid = session.parentSessionId
+  const pid = session.parentConversationId ?? session.parentSessionId
   if (!pid) return null
-  const hit = rows.find(r => r.id === pid) ?? rows.find(r => r.conversationId === pid)
+  // The conversation id first: it survives a reopen of the parent, whose managed id does not.
+  const hit = rows.find(r => r.conversationId === pid) ?? rows.find(r => r.id === pid)
+    ?? (session.parentSessionId ? rows.find(r => r.id === session.parentSessionId) : undefined)
   return hit ? { id: hit.id, title: hit.title, openable: true } : { id: pid, openable: false }
 }
 

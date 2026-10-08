@@ -20,3 +20,14 @@ describe('sessionParent', () => {
     expect(createdByLabel(p, false)).toBe('created by Leader')
   })
 })
+
+describe('sessionParent after the parent was reopened', () => {
+  const now = [{ id: 'p2', conversationId: 'cp', title: 'Leader' }]
+  test('the stored conversation id finds the new managed row even though the old managed id is gone', () => {
+    const p = sessionParent({ parentSessionId: 'p1', parentConversationId: 'cp' }, now)
+    expect(p).toEqual({ id: 'p2', title: 'Leader', openable: true })
+  })
+  test('without a conversation id the old managed id no longer resolves (legacy rows)', () => {
+    expect(sessionParent({ parentSessionId: 'p1' }, now)?.openable).toBe(false)
+  })
+})

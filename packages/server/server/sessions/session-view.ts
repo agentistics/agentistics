@@ -216,6 +216,7 @@ export interface SessionView {
   taskId?: string
   /** The managed id of the session that started this one — `ManagedSession.parentSessionId`. */
   parentSessionId?: string
+  parentConversationId?: string
   /**
    * Whether this harness has probed approval rules at all.
    *
@@ -637,6 +638,7 @@ export function buildSessionViews(o: {
       ...(r.managed?.task ? { task: r.managed.task } : {}),
       ...(r.managed?.taskId ? { taskId: r.managed.taskId } : {}),
       ...(r.managed?.parentSessionId ? { parentSessionId: r.managed.parentSessionId } : {}),
+      ...(r.managed?.parentConversationId ? { parentConversationId: r.managed.parentConversationId } : {}),
       ...(r.managed?.conversationId ? { conversationId: r.managed.conversationId } : {}),
       ...(r.managed?.conversationLink ? { conversationLink: r.managed.conversationLink } : {}),
       ...(r.managed?.conversationLinkVia ? { conversationLinkVia: r.managed.conversationLinkVia } : {}),

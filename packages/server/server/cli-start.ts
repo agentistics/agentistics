@@ -131,7 +131,7 @@ import { resolveBackend } from './sessions'
 import { inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
 import { SPAWN_SPECS, planSpawn } from './sessions/spawn-spec'
 import { prependContext } from './sessions/agentistics-context'
-import { buildSpawnContext, pendingContextFor, resolveContextParent, resolveContextTask, writeContextFile } from './sessions/spawn-context'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextParent, resolveContextTask, writeContextFile } from './sessions/spawn-context'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
 import { bornConversationLink } from './sessions/born-link'
@@ -1904,7 +1904,7 @@ function linkProcessConversationSoon(id: string, harness: HarnessId): void {
 async function spawnRow(a: {
   id: string
   spawnedAt: string
-  req: { harness: HarnessId; cwd: string; label?: string; task?: string; taskId?: string; attemptId?: string; parentSessionId?: string; inherit?: ManagedSession }
+  req: { harness: HarnessId; cwd: string; label?: string; task?: string; taskId?: string; attemptId?: string; parentSessionId?: string; parentConversationId?: string; inherit?: ManagedSession }
   pendingContext?: string
   model?: string
   effort?: string
@@ -1930,6 +1930,7 @@ async function spawnRow(a: {
     ...(req.taskId ? { taskId: req.taskId } : {}),
     ...(req.attemptId ? { attemptId: req.attemptId } : {}),
     ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
+    ...(req.parentConversationId ? { parentConversationId: req.parentConversationId } : {}),
     ...(pendingContext ? { pendingContext } : {}),
     // Recorded at the one moment it is certain — the harness was just handed this id, or we asked
     // it to reopen this conversation.
@@ -1986,6 +1987,7 @@ async function spawnManaged(req: {
   contextSubtaskId?: string
   /** The managed id of the session that is starting this one (`ManagedSession.parentSessionId`). */
   parentSessionId?: string
+  parentConversationId?: string
   attemptId?: string
   /** The row this spawn REPLACES: its identity (`inheritedIdentity`) is born into the new row. */
   inherit?: ManagedSession
@@ -2054,11 +2056,13 @@ async function spawnManaged(req: {
   const effort = req.effort ?? launch.effort
   // Minted BEFORE the plan: the agentistics context tells the harness its own session id.
   const id = newSessionId()
+  // The parent's conversation id, read from the registry at spawn: stable across the parent's reopens.
+  const parentLink = req.parentSessionId ? await parentLinkOf(req.parentSessionId) : {}
   const ctx = buildSpawnContext({
       sessionId: id,
       cwd: req.cwd,
       ...(await resolveContextTask(req.contextTaskId ?? req.taskId, req.contextSubtaskId, req.task)),
-      ...(await resolveContextParent(req.parentSessionId ?? req.inherit?.parentSessionId)),
+      ...(await resolveContextParent(req.parentSessionId ?? req.inherit?.parentConversationId ?? req.inherit?.parentSessionId)),
     })
   const planned = planSpawn({
     harness: req.harness,
@@ -2094,7 +2098,7 @@ async function spawnManaged(req: {
   // <id>" for seconds — the placeholder `control-session.ts` keeps for sessions started OUTSIDE
   // agentop. Born linked — see `born-link.ts` for the window a patch-afterwards left open.
   const bornLink = bornConversationLink(planned.plan.conversationId, req.resumeId)
-  await addSession(await spawnRow({ id, spawnedAt, req, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx) }))
+  await addSession(await spawnRow({ id, spawnedAt, req: { ...req, ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}) }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx) }))
   // A REOPEN keeps the replaced row's mute. A session linked to a conversation is muted under that
   // conversation, which the new row keeps; one with no link (codex, kimi, gemini…) was muted under its
   // managed id, which changes here, so the mute moves to the new id or it would silently come undone.

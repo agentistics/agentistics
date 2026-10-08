@@ -147,3 +147,11 @@ test("startedByIndex names the parent by title, keyed by managed and conversatio
   expect(m.get("o")).toEqual({ id: "gone" });
   expect(m.get("p")).toBeUndefined();
 });
+
+test("startedByIndex follows a reopened parent through its conversation id", () => {
+  const m = startedByIndex([
+    { id: "p2", conversationId: "cp", title: "Leader" },
+    { id: "c", conversationId: "cc", parentSessionId: "p1", parentConversationId: "cp" },
+  ]);
+  expect(m.get("c")).toEqual({ id: "p2", title: "Leader" });
+});
