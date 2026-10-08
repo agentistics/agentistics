@@ -45,7 +45,7 @@ import { HarnessMark } from './HarnessMark'
 import type { VaultGrantMessage } from '../../lib/vaultChip'
 import { card, overlay } from '../MfaSetup'
 import { dialogButtonStyle } from '../../pages/settings/primitives'
-import { leadingQuotes } from '../../lib/replyQuote'
+import { sentSegments } from '../../lib/replyQuote'
 import { QuoteBlock } from '../chat/QuoteBlock'
 
 export interface ChatTurn {
@@ -921,20 +921,22 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessio
               }
               const { command, rest } = splitSlashLine(text)
               if (command === '' && mine && onQuoteClick) {
-                // EVERY leading quote block, each its own collapsible block that goes back to its
-                // source — a reply to several passages is several blocks (`leadingQuotes`).
-                const quoted = leadingQuotes(text)
-                if (quoted.quotes.length > 0) {
+                // EVERY quote, each its own collapsible block that goes back to its source, and
+                // each REPLY right under the passage it answers, in the order it was written —
+                // `[quote 1] reply 1 [quote 2] reply 2` (`sentSegments`).
+                const segs = sentSegments(text)
+                if (segs.some(seg => seg.kind === 'quote')) {
                   return (
                     <>
-                      {quoted.quotes.map((q, i) => (
+                      {segs.map((seg, i) => seg.kind === 'quote' ? (
                         <div key={i} style={{ marginBottom: 8 }}>
-                          <QuoteBlock text={q} pt={pt} onOpen={() => onQuoteClick(q, turn)} />
+                          <QuoteBlock text={seg.text} pt={pt} onOpen={() => onQuoteClick(seg.text, turn)} />
+                        </div>
+                      ) : (
+                        <div key={i} style={{ marginBottom: i < segs.length - 1 ? 8 : 0 }}>
+                          <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{seg.text}</ReactMarkdown>
                         </div>
                       ))}
-                      {quoted.rest.trim() !== '' && (
-                        <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{quoted.rest}</ReactMarkdown>
-                      )}
                     </>
                   )
                 }
