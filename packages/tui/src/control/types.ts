@@ -1862,7 +1862,7 @@ export interface ControlHost {
    * `Repositories 12 · Projects 12 · Folders 12` on a machine with twenty repositories — the cap,
    * shown as a fact about the machine.
    */
-  searchProjects?(query: string): Promise<ProjectSearchResult>
+  searchProjects?(query: string, disk?: string): Promise<ProjectSearchResult>
 
   /** Start one. An attached request comes back with a ticket the shell hands to `ControlExit`. */
   spawnSession?(req: SpawnSessionRequest): Promise<SpawnSessionResult>
@@ -1884,6 +1884,9 @@ export interface ProjectSearchResult {
   totals: Record<ProjectKind, number>
   /** True while a whole-disk root is still being indexed in the background. */
   indexing?: boolean
+  /** Per-disk crawler progress, for the small non-blocking wizard note. */
+  indexProgress?: { root: string; visited: number; queued: number; candidates: number; complete: boolean }[]
+  disks?: { id: string; label: string; letter?: string; install: boolean; count: number }[]
 }
 
 /** One harness the wizard may offer, and the shape of the questions it earns. */

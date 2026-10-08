@@ -125,7 +125,7 @@ export function NewSessionModal({
   // The wizard's own data source — harnesses, matching projects, and the search that drives them
   // both. Shared with `StagedSessionCompose`, which needs the same fetch for the same reason —
   // see `useFleetNewOptions`'s own header.
-  const { harnesses: fleetHarnesses, projects, projectTotals, projectIndexing, query, setQuery, searching, unavailable, retry, retryable } = useFleetNewOptions(lang)
+  const { harnesses: fleetHarnesses, projects, projectTotals, projectIndexing, projectIndexProgress, projectDisks, projectDisk, setProjectDisk, query, setQuery, searching, unavailable, retry, retryable } = useFleetNewOptions(lang)
   /**
    * The NATIVE harness (UI.2): offered only when the loaded engine provides the native runtime
    * (`GET /api/engine` — a community build has none). Its model list is the chosen PROVIDER's, so the
@@ -890,6 +890,10 @@ export function NewSessionModal({
               projects={projects}
               projectTotals={projectTotals}
               projectIndexing={projectIndexing}
+              projectIndexProgress={projectIndexProgress}
+              projectDisks={projectDisks}
+              projectDisk={projectDisk}
+              onProjectDiskChange={setProjectDisk}
               query={query}
               onQueryChange={setQuery}
               searching={searching}

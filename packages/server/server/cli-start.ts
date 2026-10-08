@@ -4512,9 +4512,9 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       })
     },
 
-    async searchProjects(query: string): Promise<ProjectSearchResult> {
-      const found = await findProjects(query, process.cwd())
-      return { totals: found.totals, options: found.rows.map(c => ({
+    async searchProjects(query: string, disk?: string): Promise<ProjectSearchResult> {
+      const found = await findProjects(query, process.cwd(), undefined, disk)
+      return { totals: found.totals, indexing: found.indexing, indexProgress: found.indexProgress, disks: found.disks, options: found.rows.map(c => ({
         path: c.path,
         // Name and repo travel SEPARATELY: the picker aligns them into columns, and a pre-joined
         // label is one cell holding two facts that no column arithmetic can take apart again.

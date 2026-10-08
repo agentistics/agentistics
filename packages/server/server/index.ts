@@ -2515,6 +2515,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const out = await readNewOptions(
         fleetLang(url.searchParams.get('lang')),
         url.searchParams.get('q') ?? '',
+        url.searchParams.get('disk') ?? undefined,
       )
       return new Response(JSON.stringify(out), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
@@ -2799,7 +2800,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const q = url.searchParams.get('q') ?? ''
         const [harnesses, projects, tasks] = await Promise.all([
           webHarnesses(host),
-          webProjects(host, q),
+          webProjects(host, q, url.searchParams.get('disk') ?? undefined),
           webTasks(host),
         ])
         return new Response(JSON.stringify({ harnesses, projects, tasks }), {
