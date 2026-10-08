@@ -20,6 +20,7 @@ export function rewriteVaultRefs(command: string, granted: readonly string[], in
   let out = ''
   let quote: '"' | "'" | null = null
   let i = 0
+  let changed = false
   VAULT_REF.lastIndex = 0
   while (i < command.length) {
     const c = command[i]!
@@ -32,8 +33,16 @@ export function rewriteVaultRefs(command: string, granted: readonly string[], in
       m.lastIndex = i
       const hit = m.exec(command)
       if (hit && granted.includes(hit[0])) {
+        // The shared briefing teaches every harness the safe form. Claude's hook sees that form too;
+        // leave the reference alone when it is already the argument of `vault ref`.
+        if (/vault ref '\s*$/.test(command.slice(0, i))) {
+          out += hit[0]
+          i += hit[0].length
+          continue
+        }
         const sub = call(hit[0])
         out += quote === '"' ? sub : quote === "'" ? `'"${sub}"'` : `"${sub}"`
+        changed = true
         i += hit[0].length
         continue
       }
@@ -41,7 +50,7 @@ export function rewriteVaultRefs(command: string, granted: readonly string[], in
     out += c
     i++
   }
-  return out
+  return changed ? out : null
 }
 
 /** The PostToolUse answer, or null when nothing was scrubbed (the hook then prints nothing at all). */
