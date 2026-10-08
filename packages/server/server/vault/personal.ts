@@ -14,9 +14,9 @@
 import { readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
-  GROUP_ID, ITEM_ID, KIND_FIELDS, PERSONAL_DIR, PERSONAL_PURPOSE, isUseOnly, newPersonalId, parseImportText, parseVersionFile, recordName,
+  GROUP_ID, ITEM_ID, KIND_FIELDS, PERSONAL_DIR, USE_ONLY_DEFAULT, PERSONAL_PURPOSE, isUseOnly, newPersonalId, parseImportText, parseVersionFile, recordName,
   trashExpired, versionTag, versionsToPrune,
-  type PersonalGroup, type PersonalInput, type PersonalMeta, type PersonalValue,
+  type PersonalGroup, type PersonalKind, type PersonalInput, type PersonalMeta, type PersonalValue,
 } from '@agentistics/vault'
 import { openFromFile, sealToFile, vaultDir } from './service'
 
@@ -91,15 +91,18 @@ export async function listVersions(id: string): Promise<PersonalMeta[] | StoreFa
   return out
 }
 
-function metaFrom(input: PersonalInput, base: { id: string; version: number; createdAt: string; confirmEach?: boolean; useOnly?: boolean }, fields: string[], deletedAt: string | null = null): PersonalMeta {
+function metaFrom(input: PersonalInput, base: { id: string; version: number; createdAt: string; confirmEach?: boolean; useOnly?: boolean; typeId?: string }, fields: string[], deletedAt: string | null = null): PersonalMeta {
   // "Só uso" is one-way: a record already sealed stays sealed whatever the edit says.
   const useOnly = base.useOnly === true || input.useOnly === true
+  // The label: a string sets it, null clears it, absent keeps the record's own.
+  const typeId = input.typeId === undefined ? base.typeId : input.typeId ?? undefined
   return {
     v: 1, id: base.id, kind: input.kind, name: input.name, groupId: input.groupId ?? null, tags: input.tags ?? [], notes: input.notes ?? '',
     url: input.url ?? '', fields, createdAt: base.createdAt, updatedAt: iso(), version: base.version, deletedAt,
     // Always written explicitly from here on; an older record without it still reads as ON (`needsConfirm`).
     confirmEach: input.confirmEach ?? base.confirmEach ?? true,
     ...(useOnly ? { useOnly: true } : {}),
+    ...(typeId ? { typeId } : {}),
   }
 }
 const presentFields = (kind: PersonalMeta['kind'], f: Record<string, string>) => KIND_FIELDS[kind].filter(k => typeof f[k] === 'string' && f[k] !== '')
@@ -131,7 +134,7 @@ export async function editItem(id: string, expectedVersion: number, input: Perso
     const v = input.fields?.[k] ?? (input.kind === m.kind ? prev.fields[k] : undefined)
     if (typeof v === 'string') fields[k] = v
   }
-  const meta = metaFrom(input, { id, version: m.version + 1, createdAt: m.createdAt, confirmEach: m.confirmEach !== false, useOnly: isUseOnly(m) }, presentFields(input.kind, fields), m.deletedAt)
+  const meta = metaFrom(input, { id, version: m.version + 1, createdAt: m.createdAt, confirmEach: m.confirmEach !== false, useOnly: isUseOnly(m), ...(m.typeId ? { typeId: m.typeId } : {}) }, presentFields(input.kind, fields), m.deletedAt)
   await writeVersion(meta, { v: 1, fields })
   return { ok: true, meta }
 }
@@ -226,7 +229,7 @@ const IMPORT_TTL_MS = 10 * 60_000
 let _imports = new Map<string, { session: string; until: number; pairs: { key: string; value: string }[] }>()
 function dropExpiredImports(): void { for (const [k, v] of _imports) if (_now() >= v.until) { v.pairs.forEach(p => { p.value = '' }); _imports.delete(k) } }
 
-export interface ImportPreviewKey { key: string; clash: { id: string; version: number } | null; empty: boolean }
+export interface ImportPreviewKey { key: string; clash: { id: string; version: number; kind: PersonalKind; typeId?: string } | null; empty: boolean }
 
 /**
  * Parse the file text and hold the pairs in memory under a token for THIS session; answer the KEYS
@@ -240,14 +243,17 @@ export async function importPreview(text: string, session: string): Promise<{ ok
   const live = (await listItems()).filter(m => !m.deletedAt)
   const keys = parsed.pairs.map(p => {
     const c = live.find(m => m.name === p.key)
-    return { key: p.key, clash: c ? { id: c.id, version: c.version } : null, empty: p.value === '' }
+    return { key: p.key, clash: c ? { id: c.id, version: c.version, kind: c.kind, ...(c.typeId ? { typeId: c.typeId } : {}) } : null, empty: p.value === '' }
   })
   const token = newPersonalId('it').slice(3)
   _imports.set(token, { session, until: _now() + IMPORT_TTL_MS, pairs: parsed.pairs })
   return { ok: true, token, keys, skipped: parsed.skipped }
 }
 
-export type ImportChoice = { key: string; action: 'import' | 'skip' | 'replace' | 'rename'; name?: string }
+/** `kind` is the secret kind the pair is stored as; absent reads as `env` (what an import always made). */
+export type ImportChoice = { key: string; action: 'import' | 'skip' | 'replace' | 'rename'; name?: string; kind?: PersonalKind; typeId?: string }
+/** The value field an imported value lands in, for a kind (a login keeps its user name field empty). */
+export const importField = (kind: PersonalKind): string => (kind === 'password' || kind === 'login' ? 'password' : 'value')
 
 export async function importCommit(token: string, session: string, choices: ImportChoice[], groupId: string | null, tags: string[]):
   Promise<{ ok: true; created: number; replaced: number; skipped: number } | StoreFail> {
@@ -263,13 +269,15 @@ export async function importCommit(token: string, session: string, choices: Impo
       if (!c || c.action === 'skip') { skipped++; continue }
       const clash = live.find(m => m.name === p.key)
       if (c.action === 'replace' && clash) {
-        const r = await editItem(clash.id, clash.version, { kind: 'env', name: clash.name, groupId: clash.groupId, tags: clash.tags, notes: clash.notes, url: clash.url, fields: { value: p.value } })
+        const k = c.kind ?? clash.kind
+        const r = await editItem(clash.id, clash.version, { kind: k, name: clash.name, groupId: clash.groupId, tags: clash.tags, notes: clash.notes, url: clash.url, fields: { [importField(k)]: p.value }, typeId: c.typeId ?? (c.kind ? null : undefined) })
         if (r.ok) replaced++; else skipped++
         continue
       }
       const name = c.action === 'rename' && c.name ? c.name : p.key
       if (c.action === 'import' && clash) { skipped++; continue } // a clash must be decided, never overwritten by default
-      await createItem({ kind: 'env', name, groupId, tags, notes: '', url: '', fields: { value: p.value } })
+      const kind = c.kind ?? 'env'
+      await createItem({ kind, name, groupId, tags, notes: '', url: '', fields: { [importField(kind)]: p.value }, ...(USE_ONLY_DEFAULT[kind] ? { useOnly: true } : {}), ...(c.typeId ? { typeId: c.typeId } : {}) })
       created++
     }
   } finally { held.pairs.forEach(p => { p.value = '' }) }

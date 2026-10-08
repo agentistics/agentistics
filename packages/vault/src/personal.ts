@@ -59,7 +59,16 @@ export interface PersonalMeta {
    * ABSENT READS AS OFF — every existing secret stays revealable exactly as before.
    */
   useOnly?: boolean
+  /**
+   * A person's own NAME for the kind (e.g. "Token do Mongo" over `api-key`) — a label, nothing more: `kind`
+   * stays the base kind the sealed record is validated and priced by. It points at a definition the person
+   * keeps in their preferences (`vaultKinds`); a pointer to a definition that is gone reads as the base kind.
+   * ABSENT = no label. Additive: an older build ignores it.
+   */
+  typeId?: string
 }
+/** The shape of a custom type's id (minted by the page). */
+export const TYPE_ID = /^kt_[a-z0-9]{4,24}$/
 /** One reading of the flag, so "absent" can never be interpreted two ways. */
 export const needsConfirm = (m: Pick<PersonalMeta, 'confirmEach'>): boolean => m.confirmEach !== false
 /** One reading of "só uso": only an explicit `true` seals; absent is an ordinary, revealable secret. */
@@ -117,6 +126,8 @@ export interface PersonalInput {
   confirmEach?: boolean
   /** "Só uso". Only `true` is meaningful; `false` never lifts a record already sealed (personal.ts store). */
   useOnly?: boolean
+  /** The custom type label: a string sets it, `null` clears it, absent keeps what the record has. */
+  typeId?: string | null
 }
 
 export type Invalid = { ok: false; field: string; reason: 'required' | 'too-long' | 'bad-kind' | 'bad-field' | 'bad-group' | 'too-many' }
@@ -169,7 +180,8 @@ export function validateInput(x: unknown, opts: { requireFields: boolean }): { o
   }
   if (o.confirmEach !== undefined && typeof o.confirmEach !== 'boolean') return { ok: false, field: 'confirmEach', reason: 'bad-field' }
   if (o.useOnly !== undefined && typeof o.useOnly !== 'boolean') return { ok: false, field: 'useOnly', reason: 'bad-field' }
-  return { ok: true, value: { kind, name, groupId, tags, notes, url, ...(fields ? { fields } : {}), ...(typeof o.confirmEach === 'boolean' ? { confirmEach: o.confirmEach } : {}), ...(o.useOnly === true ? { useOnly: true } : {}) } }
+  if (o.typeId !== undefined && o.typeId !== null && (typeof o.typeId !== 'string' || !TYPE_ID.test(o.typeId))) return { ok: false, field: 'typeId', reason: 'bad-field' }
+  return { ok: true, value: { kind, name, groupId, tags, notes, url, ...(o.typeId !== undefined ? { typeId: o.typeId as string | null } : {}), ...(fields ? { fields } : {}), ...(typeof o.confirmEach === 'boolean' ? { confirmEach: o.confirmEach } : {}), ...(o.useOnly === true ? { useOnly: true } : {}) } }
 }
 
 export function validGroupName(x: unknown): string | null {
