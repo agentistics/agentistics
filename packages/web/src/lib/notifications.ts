@@ -204,10 +204,10 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     en: { title: 'Agentistics updated to {version}' },
   },
   // Raised instead of `app.updated` when the new version has curated release notes: clicking it
-  // opens the What's-new modal (`whatsNew/`). `{version}` is the running one.
+  // opens the What's-new modal (`whatsNew/`). `{version}` is the running one, already "v"-prefixed.
   'app.whats_new': {
-    pt: { title: 'Atualizado para v{version} — clique para ver as novidades' },
-    en: { title: 'Updated to v{version} — see what\'s new' },
+    pt: { title: 'Atualizado para {version} — clique para ver as novidades' },
+    en: { title: 'Updated to {version} — see what\'s new' },
   },
   'app.update_available': {
     pt: { title: 'Atualização disponível', message: 'A versão {version} do Agentistics está pronta. Toque para instalar.' },
