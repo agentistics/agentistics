@@ -227,10 +227,10 @@ export function ProjectPicker({
                 {shortPath(value)}
               </span>
             </span>
-            <button type="button" onClick={() => onChange('')} aria-label={pt ? 'Desfazer a escolha' : 'Clear the choice'} style={{
+            <button type="button" className="ag-tap-icon" onClick={() => onChange('')} aria-label={pt ? 'Desfazer a escolha' : 'Clear the choice'} style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, border: 'none',
               background: 'transparent', cursor: 'pointer', color: 'var(--text-tertiary)', borderRadius: 6,
-              width: isMobile ? 44 : 28, height: isMobile ? 44 : 28, margin: isMobile ? '-8px -10px -8px 0' : 0,
+              width: 28, height: 28,
             }}><X size={14} /></button>
           </div>
         )}
