@@ -8,7 +8,8 @@
  *
  * The bug these pin: the only codex approval rule was `Press enter to continue` (codex 0.113.0's
  * update picker). 0.160.1's command / patch / network prompts end in `Press enter to confirm or esc
- * to cancel` and its trust prompt in `enter continue · esc back`, so every one of them read as
+ * to cancel`, its startup daemon-settings prompt uses the same confirmation footer, and its trust
+ * prompt in `enter continue · esc back`, so every one of them read as
  * `waiting` — the terminal showed the question and the chat had no card to answer it with.
  */
 import { describe, expect, it } from 'bun:test'
@@ -55,6 +56,7 @@ const PROMPTS = {
     'No, and tell Codex what to do differently (esc)',
   ],
   trust: ['Trust and continue', 'Back to Agent Command Center'],
+  'startup-daemon': ['Run without daemon this time', 'Restart with these settings', 'Cancel'],
 } as const
 
 describe('codex 0.160.1 — every blocking prompt is seen, and its options read', () => {

@@ -2,10 +2,12 @@ import { cacheKind, etagMatches, etagOf, staticCacheControl } from './static-cac
 import { join } from 'path'
 import { spawn } from 'child_process'
 import { stat } from 'fs/promises'
+import { watch as fsWatch, statSync } from 'fs'
+import { watchedEvent, WATCH_DEPTH } from './watch-filter'
 import chokidar from 'chokidar'
 import { SESSION_META_DIR, PROJECTS_DIR, STATS_CACHE_FILE, PORT, TEAM_CENTRAL, CODEX_SESSIONS_DIR, GEMINI_DIR, COPILOT_DIR, ANTIGRAVITY_BRAIN_DIR, ANTIGRAVITY_CONVERSATIONS_DIR } from './config'
 import { centralManifest, centralHtml } from './central-branding'
-import { invalidateCache, rebuildNow } from './data'
+import { invalidateCache, rebuildNow, useWatcherDrivenRefresh } from './data'
 import { createRebuildScheduler } from './rebuild-scheduler'
 import { mirrorFile } from './archive'
 import { getEnabledAdapters } from './adapters/types'
@@ -70,8 +72,12 @@ const rebuilds = createRebuildScheduler({
   build: rebuildNow,
   onRebuilt: notifySseClients,
   debounceMs: 300,
-  // Idle time after a build, 4x its duration, 2–10 s: the rebuild storm (rebuild-scheduler.ts).
-  minGapMs: 2000,
+  // Idle time after a build, 4x its duration, 5–10 s: the rebuild storm (rebuild-scheduler.ts).
+  // PERF.1 step 1: the floor was 2 s when a build took 1–2 s, so 4x the build set the pace (~5–8 s
+  // between builds). Builds now take ~0.1–0.3 s and the 2 s floor became the pace: ~28 builds a minute
+  // with three sessions writing — cheap each, ~8 % of a core together. 5 s keeps the dashboard as fresh
+  // as it was (and as fresh as its own 5 s fleet poll) at under half the builds.
+  minGapMs: 5000,
   maxGapMs: 10_000,
   loadFactor: 4,
 })
@@ -84,7 +90,7 @@ let sseDebounce: ReturnType<typeof setTimeout> | null = null
  * callers of `triggerSseNotification` (the team modules, their tests, the CLI) keep the cheap path —
  * mark the cache stale, nudge listeners — rather than starting a full build in the background.
  */
-export function enableRebuildOnChange(): void { rebuildOnChange = true }
+export function enableRebuildOnChange(): void { rebuildOnChange = true; useWatcherDrivenRefresh() }
 
 export function triggerSseNotification() {
   if (rebuildOnChange) rebuilds.changed()
@@ -101,8 +107,42 @@ export function triggerSseNotification() {
 /** Default noise filter for harness roots. */
 const DEFAULT_IGNORED = /(^|[/\\])(\.git|node_modules|plugins|cache|\.tmp|shell_snapshots|skills|memories|log|logs|bin|antigravity|history|ide|pkg)([/\\]|$)/
 
+/** Mirror a new/changed source file into the archive, then tell the rebuild scheduler. */
+function onSourceChange(path: string | undefined, isWrite: boolean): void {
+  // Mirror new/changed source files into the archive before notifying clients,
+  // so deleted-by-cleanup history is preserved as it is written.
+  if (typeof path === 'string' && isWrite) void mirrorFile(path)
+  triggerSseNotification()
+}
+
+/**
+ * A session directory watched with ONE native recursive `fs.watch` (see watch-filter.ts for why not
+ * chokidar: it re-lists the whole directory on every event, ~21 % of a core with three sessions
+ * writing). Returns false when the native watch cannot be had — not running on Bun, the directory is
+ * not there yet, or the OS refused (inotify limits) — and the caller falls back to chokidar.
+ */
+function watchNative(dir: string, ignored: RegExp): boolean {
+  if (!process.versions.bun) return false
+  try {
+    if (!statSync(dir).isDirectory()) return false
+    const w = fsWatch(dir, { recursive: true, persistent: true }, (event, file) => {
+      const rel = typeof file === 'string' ? file : file == null ? null : String(file)
+      if (!watchedEvent(rel, ignored, WATCH_DEPTH)) return
+      // `rename` is a create or a delete; mirroring a path that is gone is a no-op in `mirrorFile`.
+      onSourceChange(rel ? join(dir, rel) : undefined, true)
+    })
+    w.on('error', (err: unknown) => console.warn(`[watcher] Could not watch ${dir}:`, String(err)))
+    console.log(`[watcher] Watching ${dir} (native, recursive)`)
+    return true
+  } catch (err) {
+    console.warn(`[watcher] Native watch of ${dir} unavailable (${String(err)}); using chokidar`)
+    return false
+  }
+}
+
 export async function setupFileWatcher() {
-  const watch = (dir: string, ignored: RegExp = DEFAULT_IGNORED) => {
+  const watch = (dir: string, ignored: RegExp = DEFAULT_IGNORED, native = false) => {
+    if (native && watchNative(dir, ignored)) return
     const watcher = chokidar.watch(dir, {
       persistent: true,
       ignoreInitial: true,
@@ -113,14 +153,7 @@ export async function setupFileWatcher() {
       depth: 6,
       ignored: (p: string) => ignored.test(p) || /\.sqlite/.test(p),
     })
-    watcher.on('all', (event: string, path: string) => {
-      // Mirror new/changed source files into the archive before notifying clients,
-      // so deleted-by-cleanup history is preserved as it is written.
-      if (typeof path === 'string' && (event === 'add' || event === 'change')) {
-        void mirrorFile(path)
-      }
-      triggerSseNotification()
-    })
+    watcher.on('all', (event: string, path: string) => onSourceChange(path, event === 'add' || event === 'change'))
     watcher.on('error', (err: unknown) => {
       console.warn(`[watcher] Could not watch ${dir}:`, String(err))
     })
@@ -128,8 +161,10 @@ export async function setupFileWatcher() {
   }
 
   // Claude core paths
-  watch(SESSION_META_DIR)
-  watch(PROJECTS_DIR)
+  // The session DIRECTORIES natively; the single stats file stays on chokidar, which survives the
+  // file being replaced by a rename.
+  watch(SESSION_META_DIR, DEFAULT_IGNORED, true)
+  watch(PROJECTS_DIR, DEFAULT_IGNORED, true)
   watch(STATS_CACHE_FILE)
 
   // Additional harnesses: watch ONLY each harness's session directory — NOT its
@@ -155,7 +190,11 @@ export async function setupFileWatcher() {
         await stat(dir)
         // Antigravity's transcripts live in .system_generated/logs/, which the default
         // filter's `logs` rule would drop — watch that tree with a narrower filter.
-        watch(dir, adapter.id === 'antigravity' ? ANTIGRAVITY_IGNORED : DEFAULT_IGNORED)
+        // Antigravity stays on chokidar: its conversation folders can hold whole repositories
+        // (`.git`, `node_modules`), and a recursive native watch would add a watch per directory
+        // in them, where chokidar never descends into an ignored tree.
+        if (adapter.id === 'antigravity') watch(dir, ANTIGRAVITY_IGNORED)
+        else watch(dir, DEFAULT_IGNORED, true)
         if (adapter.id === 'antigravity') {
           // Antigravity's tokens / model / cost live ONLY in conversations/<id>.db, in a
           // different tree from the transcripts. Without this, a turn that only updates

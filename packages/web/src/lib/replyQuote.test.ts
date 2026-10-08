@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test'
-import { addReply, insertReplyQuote, leadingQuote, leadingQuotes, normalizeComposer, splitQuotedDraft, markExcerpt, orderReplies, parseReplies, parseReply, quoteAll, quoteFor, quoteLines, replyAuthor, replyPreview, stripQuotedLines, composeReply } from './replyQuote'
+import { addReply, insertReplyQuote, leadingQuote, leadingQuotes, normalizeComposer, splitQuotedDraft, markExcerpt, orderReplies, parseReplies, parseReply, quoteAll, quoteFor, quoteLines, replyAuthor, replyPreview, stripQuotedLines, composeReply, appendIncoming, fromFields, insertQuoteAt, parseFields, removeQuoteAt, sentSegments, serializeFields, toFields } from './replyQuote'
 
 test('a quote is "> "-prefixed, line by line', () => {
   expect(quoteLines('one\ntwo')).toBe('> one\n> two')
@@ -217,8 +217,14 @@ describe('quote blocks: several leading blocks, draft round-trip', () => {
     expect(composeReply({ quote: quoteAll(back.replies), paths: [], text: back.text })).toBe(sent)
   })
 
-  test('splitQuotedDraft leaves a draft without leading quotes alone', () => {
-    expect(splitQuotedDraft('plain\n> mid')).toEqual({ replies: [], text: 'plain\n> mid' })
+  test('splitQuotedDraft leaves a draft without quotes alone', () => {
+    expect(splitQuotedDraft('plain\nno quote')).toEqual({ replies: [], text: 'plain\nno quote' })
+  })
+
+  test('splitQuotedDraft lifts a quote that is not leading, keeping the words above it', () => {
+    expect(splitQuotedDraft('plain\n> mid')).toEqual({
+      replies: [{ role: 'assistant', text: 'mid', excerpt: true, before: 'plain' }], text: '',
+    })
   })
 
   test('normalizeComposer: an old inline draft is not drawn (or sent) twice', () => {
@@ -231,5 +237,85 @@ describe('quote blocks: several leading blocks, draft round-trip', () => {
   test('normalizeComposer: a list kept outside the draft passes through untouched', () => {
     const t = { role: 'assistant' as const, text: 'quoted bit', excerpt: true, key: 'k1' }
     expect(normalizeComposer('my words', [t])).toEqual({ draft: 'my words', replies: [t] })
+  })
+})
+
+describe('interleaved quotes and replies', () => {
+  const q = (text: string, key?: string) => ({ role: 'assistant' as const, text, excerpt: true, ...(key ? { key } : {}) })
+
+  test('three interleaved pairs serialise in order and parse back to the same fields', () => {
+    const f = { quotes: [q('one'), q('two\nlines'), q('three')], fields: ['', 'reply 1', 'reply 2', 'reply 3'] }
+    const sent = serializeFields(f)
+    expect(sent).toBe('> one\n\nreply 1\n\n> two\n> lines\n\nreply 2\n\n> three\n\nreply 3')
+    const back = parseFields(sent)
+    expect(back.fields).toEqual(f.fields)
+    expect(back.quotes.map(x => x.text)).toEqual(['one', 'two\nlines', 'three'])
+    expect(serializeFields(back)).toBe(sent)
+    // The stored shape round-trips too: each field rides on the quote below it.
+    const stored = fromFields(back)
+    expect(stored.draft).toBe('reply 3')
+    expect(stored.replies.map(r => r.before)).toEqual([undefined, 'reply 1', 'reply 2'])
+    expect(toFields(stored.replies, stored.draft)).toEqual(back)
+    expect(splitQuotedDraft(sent)).toEqual({ replies: stored.replies, text: stored.draft })
+  })
+
+  test('paths lead the message, where splitMessage reads them', () => {
+    expect(serializeFields({ quotes: [q('a')], fields: ['', 'r'] }, ['/x/.agentistics/f.png'])).toBe('/x/.agentistics/f.png\n\n> a\n\nr')
+  })
+
+  test('an old stack (no `before`) loads as quotes then the free text', () => {
+    expect(toFields([q('a'), q('b')], 'mine')).toEqual({ quotes: [q('a'), q('b')], fields: ['', '', 'mine'] })
+  })
+
+  test('a quote goes AFTER the field being edited, not at the top', () => {
+    const start = { quotes: [q('one')], fields: ['', 'reply 1'] }
+    const out = insertQuoteAt(start, { field: 1, caret: 'reply 1'.length }, q('two'))
+    expect(out.fields).toEqual({ quotes: [q('one'), q('two')], fields: ['', 'reply 1', ''] })
+    expect(out.focus).toEqual({ field: 2, caret: 0 })
+  })
+
+  test('a quote at a caret mid-field splits it; the rest becomes the new reply', () => {
+    const out = insertQuoteAt({ quotes: [], fields: ['hello world'] }, { field: 0, caret: 5 }, q('x'))
+    expect(out.fields).toEqual({ quotes: [q('x')], fields: ['hello', 'world'] })
+    expect(out.focus).toEqual({ field: 1, caret: 0 })
+  })
+
+  test('inserting between two quotes keeps the later reply with its own quote', () => {
+    const start = { quotes: [q('one'), q('two')], fields: ['', 'r1', 'r2'] }
+    const out = insertQuoteAt(start, { field: 1, caret: 2 }, q('mid'))
+    expect(out.fields.quotes.map(x => x.text)).toEqual(['one', 'mid', 'two'])
+    expect(out.fields.fields).toEqual(['', 'r1', '', 'r2'])
+  })
+
+  test('the same quote twice is not added', () => {
+    const start = { quotes: [q('one', 'k')], fields: ['', 'r'] }
+    expect(insertQuoteAt(start, { field: 1, caret: 1 }, q('one', 'k')).fields).toEqual(start)
+  })
+
+  test('removing a quote merges its reply into the field above — nothing typed is lost', () => {
+    const start = { quotes: [q('one'), q('two')], fields: ['', 'reply 1', 'reply 2'] }
+    const out = removeQuoteAt(start, 1)
+    expect(out.fields).toEqual({ quotes: [q('one')], fields: ['', 'reply 1\n\nreply 2'] })
+    expect(out.focus).toEqual({ field: 1, caret: 'reply 1\n\n'.length })
+    const first = removeQuoteAt(start, 0)
+    expect(first.fields).toEqual({ quotes: [q('two')], fields: ['reply 1', 'reply 2'] })
+  })
+
+  test('a `> ` line inside a code fence stays code', () => {
+    expect(parseFields('```\n> not a quote\n```').quotes).toEqual([])
+  })
+
+  test('the sent bubble draws quotes and replies interleaved, in order', () => {
+    expect(sentSegments('> one\n\nreply 1\n\n> two\n\nreply 2')).toEqual([
+      { kind: 'quote', text: 'one' }, { kind: 'text', text: 'reply 1' },
+      { kind: 'quote', text: 'two' }, { kind: 'text', text: 'reply 2' },
+    ])
+  })
+
+  test('incoming text joins the main field, its quotes follow in order', () => {
+    const join = (d: string, t: string) => (d === '' ? t : `${d} ${t}`)
+    const out = appendIncoming({ quotes: [], fields: ['typed'] }, 'lead\n\n> a\n\nra\n\n> b\n\nrb', join)
+    expect(out.quotes.map(x => x.text)).toEqual(['a', 'b'])
+    expect(out.fields).toEqual(['typed lead', 'ra', 'rb'])
   })
 })

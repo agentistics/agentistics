@@ -104,3 +104,23 @@ export function toolsForGate<T extends { inputSchema: { properties?: Record<stri
     return { ...t, inputSchema: { ...t.inputSchema, properties: { ...props, harness: param } } };
   });
 }
+
+/**
+ * Who started each session, from the fleet rows: keyed by the session's conversation id AND its
+ * managed id, so a metrics row (which carries the conversation id) finds it. The parent's title is
+ * resolved against the same rows; a parent no longer in the fleet is still named by id.
+ */
+export function startedByIndex(
+  rows: ReadonlyArray<{ id: string; conversationId?: string; title?: string; parentSessionId?: string; parentConversationId?: string }>,
+): Map<string, { id: string; title?: string }> {
+  const out = new Map<string, { id: string; title?: string }>();
+  for (const r of rows) {
+    if (!r.parentSessionId) continue;
+    const parent = (r.parentConversationId ? rows.find(p => p.conversationId === r.parentConversationId) : undefined)
+      ?? rows.find(p => p.id === r.parentSessionId || p.conversationId === r.parentSessionId);
+    const who = { id: parent?.id ?? r.parentSessionId, ...(parent?.title ? { title: parent.title } : {}) };
+    out.set(r.id, who);
+    if (r.conversationId) out.set(r.conversationId, who);
+  }
+  return out;
+}

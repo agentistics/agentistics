@@ -100,7 +100,7 @@ describe('planSpawn', () => {
     const r = planSpawn({ harness: 'codex', cwd: '/tmp', prompt: 'implement X', model: 'o3' })
     expect(r).toEqual({
       ok: true,
-      plan: { argv: ['codex', '--model', 'o3', 'implement X'], initialPrompt: { mode: 'submit' } },
+      plan: { argv: ['codex', '--no-daemon', '--model', 'o3', 'implement X'], initialPrompt: { mode: 'submit' } },
     })
   })
 

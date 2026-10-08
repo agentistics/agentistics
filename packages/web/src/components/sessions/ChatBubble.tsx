@@ -32,7 +32,7 @@ import { chatNote, type ChatNoteTab } from '../../lib/chatNote'
 import { openArtifacts } from '../../lib/artifactsStore'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { splitSlashLine } from '../../lib/slashLine'
-import { hasPastedContent, pastePreview, splitPastedContent, stripInjectedBlocks } from '../../lib/pastedContent'
+import { hasPastedContent, pastePreview, splitPastedContent, stripInjectedBlocks, unwrapPastedContent, isQuoteOnlyPastedBlob } from '../../lib/pastedContent'
 import { resolveMarkerPaths, splitImageAttachments, splitImageMarkers } from '../../lib/attachmentPreview'
 import type { AttachmentMessage, AttachmentSend } from '@agentistics/core'
 import { copyText } from '../../lib/clipboard'
@@ -45,12 +45,15 @@ import { HarnessMark } from './HarnessMark'
 import type { VaultGrantMessage } from '../../lib/vaultChip'
 import { card, overlay } from '../MfaSetup'
 import { dialogButtonStyle } from '../../pages/settings/primitives'
-import { leadingQuotes } from '../../lib/replyQuote'
+import { sentSegments } from '../../lib/replyQuote'
 import { QuoteBlock } from '../chat/QuoteBlock'
+import { shellRunViewModel } from '../../lib/shellRun'
 
 export interface ChatTurn {
   role: 'user' | 'assistant'
   text: string
+  /** The server matched this turn to a recent send from our composer. */
+  composer?: boolean
   pending?: boolean
   /**
    * A background TASK this turn started, by the label the assistant gave it.
@@ -910,7 +913,9 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessio
                 thing you pressed and the thing that appears are visibly the same act. The rule is
                 `slashLine.ts` and it is anchored: a `/home/...` path is not a command. */}
             {turn.shell ? <ShellRunBlock run={turn.shell} pt={pt} /> : (() => {
-              if (hasPastedContent(text)) {
+              const ownComposerMessage = turn.composer === true || isQuoteOnlyPastedBlob(text)
+              const renderedText = ownComposerMessage ? unwrapPastedContent(text) : text
+              if (!ownComposerMessage && hasPastedContent(text)) {
                 return (
                   <>
                     {splitPastedContent(text).map((seg, i) => seg.kind === 'paste'
@@ -919,28 +924,31 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessio
                   </>
                 )
               }
-              const { command, rest } = splitSlashLine(text)
+              const { command, rest } = splitSlashLine(renderedText)
               if (command === '' && mine && onQuoteClick) {
-                // EVERY leading quote block, each its own collapsible block that goes back to its
-                // source — a reply to several passages is several blocks (`leadingQuotes`).
-                const quoted = leadingQuotes(text)
-                if (quoted.quotes.length > 0) {
+                // EVERY quote, each its own collapsible block that goes back to its source, and
+                // each REPLY right under the passage it answers, in the order it was written —
+                // `[quote 1] reply 1 [quote 2] reply 2` (`sentSegments`), read from the text as the
+                // person typed it (`renderedText` unwraps a composer paste).
+                const segs = sentSegments(renderedText)
+                if (segs.some(seg => seg.kind === 'quote')) {
                   return (
                     <>
-                      {quoted.quotes.map((q, i) => (
+                      {segs.map((seg, i) => seg.kind === 'quote' ? (
                         <div key={i} style={{ marginBottom: 8 }}>
-                          <QuoteBlock text={q} pt={pt} onOpen={() => onQuoteClick(q, turn)} />
+                          <QuoteBlock text={seg.text} pt={pt} onOpen={() => onQuoteClick(seg.text, turn)} />
+                        </div>
+                      ) : (
+                        <div key={i} style={{ marginBottom: i < segs.length - 1 ? 8 : 0 }}>
+                          <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{seg.text}</ReactMarkdown>
                         </div>
                       ))}
-                      {quoted.rest.trim() !== '' && (
-                        <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{quoted.rest}</ReactMarkdown>
-                      )}
                     </>
                   )
                 }
               }
               if (command === '') {
-                return <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{text}</ReactMarkdown>
+                return <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{renderedText}</ReactMarkdown>
               }
               return (
                 <>
@@ -1120,18 +1128,11 @@ function menuItemStyle(isMobile: boolean): React.CSSProperties {
  * The output scrolls inside its own box, never the page (a 390px screen and a 200-column log).
  */
 function ShellRunBlock({ run, pt }: { run: NonNullable<ChatTurn['shell']>; pt: boolean }) {
-  const [open, setOpen] = useState(false)
+  const model = shellRunViewModel(run)
+  const [open, setOpen] = useState(model.expandedByDefault)
+  const { lines, hasOut } = model
   const out = run.output
-  const lines = out ? [out.stdout, out.stderr].filter(t => t !== '').join('\n').split('\n').length : 0
-  const hasOut = out !== undefined && (out.stdout !== '' || out.stderr !== '')
   const mono = 'var(--font-mono, ui-monospace, monospace)'
-  const status = run.running
-    ? (pt ? 'executando…' : 'running…')
-    : out === undefined
-      ? (pt ? 'executado' : 'ran')
-      : !hasOut
-        ? (pt ? 'sem saída' : 'no output')
-        : pt ? `${lines} ${lines === 1 ? 'linha' : 'linhas'}` : `${lines} ${lines === 1 ? 'line' : 'lines'}`
   const pre: React.CSSProperties = {
     margin: 0, padding: '8px 10px', borderRadius: 8,
     background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)',
@@ -1141,32 +1142,20 @@ function ShellRunBlock({ run, pt }: { run: NonNullable<ChatTurn['shell']>; pt: b
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
       <div style={{ fontFamily: mono, fontWeight: 600, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-        <span style={{ color: 'var(--anthropic-orange)' }}>!</span>{run.command}
+        <span style={{ color: 'var(--text-tertiary)' }}>$ </span>{run.command}
       </div>
-      <button
-        type="button"
-        className="ag-tap"
-        onClick={() => { if (hasOut) setOpen(o => !o) }}
-        aria-expanded={hasOut ? open : undefined}
-        disabled={!hasOut}
-        title={hasOut ? (pt ? 'Mostrar/ocultar a saída' : 'Show/hide the output') : undefined}
-        style={{
-          alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: '100%',
-          padding: '3px 9px', borderRadius: 999, cursor: hasOut ? 'pointer' : 'default',
-          background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)',
-          color: run.running ? 'var(--anthropic-orange)' : 'var(--text-secondary)', fontSize: 11,
-        }}
-      >
-        {run.running
-          ? <Loader size={11} className="ag-working-spin" style={{ flexShrink: 0 }} />
-          : <Check size={11} style={{ flexShrink: 0 }} />}
-        <span style={{ fontFamily: mono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
-          {run.summary}
-        </span>
-        <span style={{ opacity: 0.7, whiteSpace: 'nowrap' }}>· {status}</span>
-        {hasOut && <ChevronDown size={12} style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s' }} />}
-      </button>
-      {open && out && (
+      {run.running && <div style={{ color: 'var(--anthropic-orange)', fontSize: 11 }}><Loader size={11} className="ag-working-spin" /> {pt ? 'executando…' : 'running…'}</div>}
+      {!run.running && !hasOut && (
+        <div style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>
+          {out === undefined ? (pt ? 'executado' : 'ran') : (pt ? 'sem saída' : 'no output')}
+        </div>
+      )}
+      {!run.running && hasOut && lines > 12 && (
+        <button type="button" className="ag-tap" onClick={() => setOpen(o => !o)} aria-expanded={open} style={{ alignSelf: 'flex-start', border: 0, background: 'transparent', color: 'var(--text-tertiary)', padding: 0, fontSize: 11 }}>
+          <ChevronDown size={12} style={{ transform: open ? 'rotate(180deg)' : undefined }} /> {pt ? `${lines} linhas` : `${lines} lines`}
+        </button>
+      )}
+      {open && out && hasOut && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
           {out.truncated && (
             <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>

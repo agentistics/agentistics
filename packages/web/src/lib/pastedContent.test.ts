@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { hasPastedContent, pastePreview, splitPastedContent } from './pastedContent'
+import { hasPastedContent, isQuoteOnlyPastedBlob, pastePreview, splitPastedContent, unwrapPastedContent } from './pastedContent'
 
 describe('splitPastedContent', () => {
   test('strips tags and id, keeps the body as a paste', () => {
@@ -24,6 +24,15 @@ describe('splitPastedContent', () => {
   })
   test('preview', () => {
     expect(pastePreview('a\nb\nc\nd', 2)).toEqual({ head: 'a\nb', total: 4, truncated: true })
+  })
+  test('a composer message unwraps its paste tags for normal markdown rendering', () => {
+    expect(unwrapPastedContent('before\n<pasted_content id="x">\n> quoted\n</pasted_content id="x">\nafter'))
+      .toBe('before\n\n> quoted\n\nafter')
+  })
+  test('reload fallback accepts only a whole paste made of quote lines', () => {
+    expect(isQuoteOnlyPastedBlob('<pasted_content id="x">\n> one\n> two\n</pasted_content id="x">')).toBe(true)
+    expect(isQuoteOnlyPastedBlob('<pasted_content id="x">\nplain\n</pasted_content id="x">')).toBe(false)
+    expect(isQuoteOnlyPastedBlob('before <pasted_content id="x">\n> one\n</pasted_content id="x">')).toBe(false)
   })
 })
 

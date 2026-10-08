@@ -73,6 +73,9 @@ import type { PrefsDraft, AppContext } from './lib/app-context'
 import { NayDock } from './components/nay/NayDock'
 import { dockActiveOnly } from './lib/nayDock'
 import { UpdateModal } from './components/UpdateModal'
+import { WhatsNewModal } from './components/WhatsNewModal'
+import { OPEN_WHATS_NEW_EVENT, type WhatsNewRequest } from './whatsNew/open'
+import { planWhatsNew, releasesBetween, SEEN_KEY } from './whatsNew/select'
 import { InstallModal } from './components/InstallModal'
 import { ArchiveConsentModal, type ArchiveMode } from './components/ArchiveConsentModal'
 import { resolveArchiveChoice } from './lib/archive'
@@ -134,7 +137,7 @@ import { reopenedSessionRoute, sessionPath } from './lib/sessionRoute'
 import { SessionTitleFlag } from './components/sessions/SessionTitleFlag'
 import { ChatSelectionOverlay } from './components/sessions/ChatSelectionBar'
 import { brandAsset } from './lib/brand'
-import { healStaleBundle, takeUpdatedToast } from './lib/bundleVersion'
+import { BUNDLE_VERSION, healStaleBundle, takeUpdatedToast } from './lib/bundleVersion'
 import { promptDismissedFor, promptExit, shouldShowToast, versionRefetchDue, type PromptExit, type VersionAnswer } from './lib/updateToast'
 import { consumeRestore, snoozeUpdate, startUpgrade, upgradeInFlight, useUpdateSnooze, useUpgradeFlow } from './lib/upgradeFlow'
 import { NayUpdateCard, type UpdateCardPlacement } from './components/nay/NayUpdateCard'
@@ -2682,7 +2685,15 @@ export default function AppLayout() {
     }
     // The reload above leaves one line behind it: "Agentistics atualizado para vX".
     const updatedTo = takeUpdatedToast()
-    if (updatedTo) pushNotification({ type: 'success', code: 'app.updated', meta: { version: updatedTo } })
+    // The first load of a new version: when it has curated notes the line leads to them
+    // (`whatsNew/`), otherwise it is the plain "updated" one. The last version seen is
+    // remembered per browser; a first install announces nothing.
+    let seen: string | null = null
+    try { seen = localStorage.getItem(SEEN_KEY) } catch { /* private window: announce nothing */ }
+    const news = BUNDLE_VERSION ? planWhatsNew({ current: BUNDLE_VERSION, seen }) : null
+    if (BUNDLE_VERSION) { try { localStorage.setItem(SEEN_KEY, BUNDLE_VERSION) } catch { /* ignore */ } }
+    if (news) pushNotification({ type: 'success', code: 'app.whats_new', meta: { version: BUNDLE_VERSION, from: news.from } })
+    else if (updatedTo) pushNotification({ type: 'success', code: 'app.updated', meta: { version: updatedTo } })
     check('interval')
     const tick = window.setInterval(() => check('interval'), 60_000)
     const onVisible = () => check('focus')
@@ -2719,6 +2730,14 @@ export default function AppLayout() {
         <NayUpdateCard lang={lang} isMobile={isMobile} info={versionAnswer} placement={placement} onExit={onPromptExit} />
       )
     : undefined
+
+  // The "Updated to vX" notification opens the What's-new sheet through this event.
+  const [whatsNew, setWhatsNew] = useState<WhatsNewRequest | null>(null)
+  useEffect(() => {
+    const handler = (e: Event) => setWhatsNew((e as CustomEvent<WhatsNewRequest>).detail ?? null)
+    window.addEventListener(OPEN_WHATS_NEW_EVENT, handler)
+    return () => window.removeEventListener(OPEN_WHATS_NEW_EVENT, handler)
+  }, [])
 
   // The bell's update entry dispatches this to open the sheet on click.
   useEffect(() => {
@@ -4829,6 +4848,11 @@ export default function AppLayout() {
           onClose={() => setShowUpdateModal(false)}
         />
       )}
+
+      {whatsNew && (() => {
+        const entries = releasesBetween(whatsNew.from, whatsNew.version)
+        return entries.length > 0 ? <WhatsNewModal entries={entries} lang={lang === 'pt' ? 'pt' : 'en'} isMobile={isMobile} onClose={() => setWhatsNew(null)} /> : null
+      })()}
 
       {/* The one install flow's loader, and the finale on the bundle that arrived. */}
       <UpgradeOverlay lang={lang} isMobile={isMobile} />

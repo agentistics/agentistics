@@ -11,6 +11,22 @@ import type { JournalStatus, JournalDisabledReason } from './journal/types'
 const execAsync = promisify(exec)
 
 /**
+ * Whether `git` runs. Asked once per process when it does (PERF.1 step 1: this check spawned a shell
+ * and git on EVERY build — with sessions writing, a process every couple of seconds, ~7 % of a core
+ * measured), and again at most once a minute while it does not, so installing git is still noticed.
+ */
+let _gitOk = false
+let _gitCheckedAt = -Infinity
+const GIT_RECHECK_MS = 60_000
+async function gitAvailable(): Promise<boolean> {
+  if (_gitOk) return true
+  if (Date.now() - _gitCheckedAt < GIT_RECHECK_MS) return false
+  _gitCheckedAt = Date.now()
+  try { await execAsync('git --version', { timeout: 3000 }); _gitOk = true } catch { _gitOk = false }
+  return _gitOk
+}
+
+/**
  * The journal seam (P1 §10, journal/types.ts's own note on `JournalDisabledReason`): the journal
  * is opened by a process this module does not own (the shadow writer, per the P1 spec), and
  * `journal/types.ts` deliberately keeps `JournalDisabledReason` a bare CODE — "a code, rendered
@@ -249,9 +265,7 @@ export async function runHealthChecks(): Promise<HealthIssue[]> {
   }
 
   // 5. Check git availability
-  try {
-    await execAsync('git --version', { timeout: 3000 })
-  } catch {
+  if (!(await gitAvailable())) {
     issues.push({
       id: 'git-unavailable',
       severity: 'info',

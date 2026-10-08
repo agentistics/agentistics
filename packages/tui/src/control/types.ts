@@ -941,6 +941,10 @@ export interface ControlSession {
   lastUserMessageAt?: number
   /** The task id behind `task` (the label). */
   taskId?: string
+  /** The managed id of the session that started this one. The title is resolved against the other rows. */
+  parentSessionId?: string
+  /** The parent's conversation id — the link that survives the parent being reopened. */
+  parentConversationId?: string
 }
 
 /**
@@ -1340,6 +1344,8 @@ export interface ActionResult {
   ok: boolean
   /** Already-localized one-line outcome, shown in the status line. */
   message: string
+  /** A failed pane write classified from the post-write screen. */
+  failure?: 'prompt' | 'ended'
 }
 
 /** What `ControlHost.selfCheck` answered. `message` is localized and present on every non-`none`. */
@@ -1862,7 +1868,7 @@ export interface ControlHost {
    * `Repositories 12 · Projects 12 · Folders 12` on a machine with twenty repositories — the cap,
    * shown as a fact about the machine.
    */
-  searchProjects?(query: string): Promise<ProjectSearchResult>
+  searchProjects?(query: string, disk?: string): Promise<ProjectSearchResult>
 
   /** Start one. An attached request comes back with a ticket the shell hands to `ControlExit`. */
   spawnSession?(req: SpawnSessionRequest): Promise<SpawnSessionResult>
@@ -1884,6 +1890,9 @@ export interface ProjectSearchResult {
   totals: Record<ProjectKind, number>
   /** True while a whole-disk root is still being indexed in the background. */
   indexing?: boolean
+  /** Per-disk crawler progress, for the small non-blocking wizard note. */
+  indexProgress?: { root: string; visited: number; queued: number; candidates: number; complete: boolean }[]
+  disks?: { id: string; label: string; letter?: string; install: boolean; count: number }[]
 }
 
 /** One harness the wizard may offer, and the shape of the questions it earns. */
@@ -1970,6 +1979,10 @@ export interface SpawnSessionRequest {
   task?: string
   /** NW-02: the BOARD task to file it under (its id) — filed on the board right after it starts. */
   taskId?: string
+  /** The subtask of `taskId` this session is for — told to the harness in its context; filing is the caller's. */
+  subtaskId?: string
+  /** The managed id of the session starting this one — recorded as `ManagedSession.parentSessionId`. */
+  parentSessionId?: string
   prompt?: string
   model?: string
   effort?: string

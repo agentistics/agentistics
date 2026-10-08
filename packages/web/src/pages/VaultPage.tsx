@@ -16,7 +16,7 @@ import { CenteredLoader } from '../components/CenteredLoader'
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useOutletContext, useSearchParams } from 'react-router-dom'
-import { Copy, Eye, EyeOff, FileUp, FolderInput, FolderPlus, History, Info, KeyRound, Pencil, Plus, Replace, RotateCcw, Search, ShieldCheck, Trash2, X } from 'lucide-react'
+import { CheckSquare, ChevronDown, ChevronUp, Copy, Eye, EyeOff, FileUp, FolderInput, FolderPlus, History, Info, KeyRound, Pencil, Plus, Replace, RotateCcw, Search, ShieldCheck, Trash2, X } from 'lucide-react'
 import { VaultGlyph as VaultIcon } from '../components/vault/VaultGlyph'
 import { Checkbox, ConfirmModal, DialogActions, FieldInput, Select, dialogButtonStyle } from './settings/primitives'
 import { Field, TabStrip, inputStyle } from '../components/sessions/formBits'
@@ -30,10 +30,13 @@ import { resolvePaging } from '../components/team/tablePaging'
 import {
   KIND_FIELDS, PERSONAL_KINDS, REVEAL_HIDE_MS, copyWithAutoClear, createGroup, createPersonal, defaultImportChoices, deleteGroup, editPersonal,
   filterPersonal, importCommit, importPreview, importReady, listPersonal, listVersions, movePersonal, parseTags, purgePersonal, renameGroup,
-  USE_ONLY_DEFAULT, isUseOnly, restorePersonal, restoreVersion, revealPersonal, trashPersonal, withStepUp,
+  USE_ONLY_DEFAULT, isUseOnly, allKind, setAllKind, batchBinding, newGroupName, trashBatch, restorePersonal, restoreVersion, revealPersonal, trashPersonal, withStepUp,
   type ImportChoice, type ImportKey, type PersonalFilter, type PersonalGroup, type PersonalKind, type PersonalMeta,
 } from '../lib/vaultPersonal'
 import { pt_, type PKey } from '../lib/personalText'
+import { NEW_TYPE, choiceValue, kindChoices, kindName, resolveChoice, useVaultTypes } from '../lib/vaultKinds'
+import { CreateTypeDialog } from '../components/vault/KindTypes'
+import { NO_SELECTION, clearTicks, leaveMode, selectedVisible, setRows, toggleMode, toggleRow, type Selection } from '../components/tasks/selection'
 import { hasPasskeyHere, mobileState, passkeySupport, phoneGesture, type MobileState } from '../lib/passkey'
 import { CodeField } from '../components/vault/VaultUnlock'
 import { VaultCodeStage, VaultStage } from '../components/vault/VaultStage'
@@ -221,7 +224,7 @@ function SecretsArea({ lang, isMobile, personal, pending, onFlash }: {
   lang: Lang; isMobile: boolean; personal: ReturnType<typeof usePersonalVault>; pending: number; onFlash: (s: string) => void
 }) {
   const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
-  const { items, setItems, groups, systemItems, gated, load } = personal
+  const { items, setItems, groups, setGroups, systemItems, gated, load } = personal
   const [filter, setFilter] = useState<PersonalFilter>({ q: '', kind: 'all', groupId: 'all', trash: false })
   const [qLive, setQLive] = useState('')
   const [page, setPage] = useState(0)
@@ -232,13 +235,18 @@ function SecretsArea({ lang, isMobile, personal, pending, onFlash }: {
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [learn, setLearn] = useState(false)
   const [sysDetails, setSysDetails] = useState<VaultItem | null>(null)
+  // SELECT MODE (the Agentask pattern, tasks/selection.ts): ephemeral, off at start, leaving clears.
+  const types = useVaultTypes()
+  const [sel, setSel] = useState<Selection>(NO_SELECTION)
+  const [confirmBatch, setConfirmBatch] = useState(false)
+  const [batchBusy, setBatchBusy] = useState(false)
 
   // Reactive search: every keystroke, debounced 120 ms; page back to 1 whenever the filter changes.
   useEffect(() => { const id = setTimeout(() => setFilter(f => ({ ...f, q: qLive })), 120); return () => clearTimeout(id) }, [qLive])
   useEffect(() => { setPage(0) }, [filter])
 
   const kindLabel = useCallback((k: PersonalKind) => t(`kind_${k}` as PKey), [lang]) // eslint-disable-line react-hooks/exhaustive-deps
-  const shown = useMemo(() => filterPersonal(items, groups, filter, kindLabel), [items, groups, filter, kindLabel])
+  const shown = useMemo(() => filterPersonal(items, groups, filter, kindLabel, m => kindName(m, types, kindLabel)), [items, groups, filter, kindLabel, types])
   // The system secrets carry no kind of the person's and no group: a kind or group filter, or the trash, hides them.
   const showSystem = !filter.trash && filter.kind === 'all' && filter.groupId === 'all'
   const sysShown = useMemo(() => (showSystem ? filterSystem(systemItems, filter.q, lang) : []), [systemItems, filter.q, lang, showSystem])
@@ -248,6 +256,30 @@ function SecretsArea({ lang, isMobile, personal, pending, onFlash }: {
   const upsert = (m: PersonalMeta) => setItems(cur => [m, ...cur.filter(x => x.id !== m.id)])
   const mineCount = items.filter(i => !i.deletedAt).length
   const trashCount = items.filter(i => i.deletedAt).length
+  // The selection that ACTS is the one on screen: the rows of the current filter (all pages), live ones only.
+  const selectable = shown.filter(m => !m.deletedAt)
+  const selected = selectedVisible(sel, selectable.map(m => m.id))
+  const selectedItems = selectable.filter(m => selected.includes(m.id))
+  const allTicked = selectable.length > 0 && selected.length === selectable.length
+  useEffect(() => { if (filter.trash && sel.on) setSel(leaveMode()) }, [filter.trash]) // eslint-disable-line react-hooks/exhaustive-deps
+  const deleteBatch = async () => {
+    if (batchBusy || selectedItems.length === 0) return
+    setBatchBusy(true)
+    // ONE proof for the whole batch: the policy's 'delete' proof, asked once; each item then answers on its own.
+    const r = await gated((c, tk) => trashBatch(selectedItems.map(m => ({ id: m.id, version: m.version })), c, tk),
+      { action: 'personal-trash', target: batchBinding(selectedItems.map(m => m.id)) })
+    setBatchBusy(false)
+    if (!r.ok) { onFlash(r.sentence || t('network')); return }
+    const done = r.results.filter(x => x.ok && x.meta)
+    setItems(cur => cur.map(x => done.find(d => d.id === x.id)?.meta ?? x))
+    const failed = r.results.filter(x => !x.ok)
+    const nameOf = (id: string) => items.find(x => x.id === id)?.name ?? id
+    onFlash(failed.length === 0 ? t('batchDone', { n: done.length })
+      : t('batchPartial', { ok: done.length, bad: failed.length, names: failed.map(f => `${nameOf(f.id)} (${f.sentence ?? f.code ?? '?'})`).join('; ') }))
+    // Leave ticked only what failed, so a retry is one click.
+    setSel(s => ({ on: true, ids: new Set(failed.map(f => f.id)) }))
+    if (failed.length === 0) setSel(leaveMode())
+  }
   const btn = pageBtn(isMobile)
   const grow: React.CSSProperties = isMobile ? { flex: 1 } : {}
 
@@ -255,6 +287,12 @@ function SecretsArea({ lang, isMobile, personal, pending, onFlash }: {
     <section data-vault-area="secrets">
       <AreaHead title={t('tab_secrets')} desc={t('area_secrets_d')} isMobile={isMobile} actions={(
         <>
+          {!filter.trash && mineCount > 0 && (
+            <button type="button" style={{ ...btn, ...grow, ...(sel.on ? { color: 'var(--anthropic-orange)', border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)' } : null) }}
+              onClick={() => setSel(toggleMode)} aria-pressed={sel.on} title={t('selectModeTitle')} data-vault-select>
+              <CheckSquare size={14} /> {t('selectMode')}{sel.on && selected.length > 0 ? ` · ${selected.length}` : ''}
+            </button>
+          )}
           <button type="button" style={{ ...btn, ...grow }} onClick={() => setDialog({ item: null, tab: 'import' })}><FileUp size={14} /> {t('importShort')}</button>
           <button type="button" style={{ ...hotBtn(isMobile), ...grow }} onClick={() => setDialog({ item: null, tab: 'create' })}><Plus size={14} /> {t('new')}</button>
         </>
@@ -279,7 +317,7 @@ function SecretsArea({ lang, isMobile, personal, pending, onFlash }: {
         <div style={{ minWidth: 0 }}>
           <Field label={t('f_kind')}>
             <Select value={filter.kind} onChange={v => setFilter(f => ({ ...f, kind: v as PersonalFilter['kind'] }))}
-              options={[{ value: 'all', label: t('allKinds') }, ...PERSONAL_KINDS.map(k => ({ value: k, label: kindLabel(k) }))]} />
+              options={[{ value: 'all', label: t('allKinds') }, ...PERSONAL_KINDS.map(k => ({ value: k as string, label: kindLabel(k) })), ...types.map(ty => ({ value: ty.id, label: ty.name }))]} />
           </Field>
         </div>
         <div style={{ minWidth: 0 }}>
@@ -296,6 +334,19 @@ function SecretsArea({ lang, isMobile, personal, pending, onFlash }: {
         </div>
       )}
 
+      {sel.on && selectable.length > 0 && (
+        <div data-vault-batchbar style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 10, padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 10, background: 'var(--bg-elevated)' }}>
+          <Checkbox checked={allTicked} onChange={v => setSel(cur => setRows(cur, selectable.map(m => m.id), v))} label={t('selectAll', { n: selectable.length })} />
+          <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 8, flexWrap: 'wrap', flex: isMobile ? '1 1 100%' : undefined }}>
+            <button type="button" style={{ ...pageBtn(isMobile), flex: isMobile ? 1 : undefined }} onClick={() => setSel(leaveMode())}>{t('doneSelecting')}</button>
+            <button type="button" disabled={selected.length === 0 || batchBusy} data-vault-batch-delete onClick={() => setConfirmBatch(true)}
+              style={{ ...dialogButtonStyle('primary', isMobile, selected.length === 0 || batchBusy), width: undefined, flex: isMobile ? 1 : undefined, ...(selected.length === 0 ? null : { background: 'var(--accent-red, #ef4444)', borderColor: 'var(--accent-red, #ef4444)', color: '#fff' }) }}>
+              {batchBusy ? <AgentisticsLoader size={14} /> : <Trash2 size={14} />} {t('deleteN', { n: selected.length })}
+            </button>
+          </span>
+        </div>
+      )}
+
       {rows.length === 0 && sysShown.length === 0
         ? <div style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '18px 0' }}>{items.length === 0 && systemItems.length === 0 ? t('empty') : t('noMatch')}</div>
         : (
@@ -303,6 +354,7 @@ function SecretsArea({ lang, isMobile, personal, pending, onFlash }: {
             {rows.map(m => (
               <SecretRow key={m.id} m={m} lang={lang} isMobile={isMobile} group={groupName(m.groupId)} groups={groups}
                 gated={gated} onChanged={upsert} onRemoved={id => setItems(cur => cur.filter(x => x.id !== id))} onFlash={onFlash}
+                selecting={sel.on && !m.deletedAt} checked={sel.ids.has(m.id)} onTick={() => setSel(cur => toggleRow(cur, m.id))}
                 onEdit={replace => setDialog({ item: m, replace })} onVersions={() => setVersionsOf(m)} onMove={() => setMoving(m)} />
             ))}
             {paging.end >= shown.length && sysShown.map((i, n) => <SystemSecretRow key={`${i.file}-${n}`} item={i} lang={lang} isMobile={isMobile} onDetails={() => setSysDetails(i)} />)}
@@ -338,8 +390,12 @@ function SecretsArea({ lang, isMobile, personal, pending, onFlash }: {
       {dialog && (
         <SecretDialog lang={lang} isMobile={isMobile} item={dialog.item} replace={dialog.replace === true} initialTab={dialog.tab ?? 'create'} groups={groups} gated={gated}
           defaultGroup={filter.groupId !== 'all' && filter.groupId !== 'none' ? filter.groupId : null}
+          onGroupCreated={g => setGroups(cur => [...cur.filter(x => x.id !== g.id), g])}
           onClose={() => setDialog(null)} onSaved={m => { upsert(m); setDialog(null) }} onImported={s => { setDialog(null); onFlash(s); void load() }} />
       )}
+      <ConfirmModal open={confirmBatch} title={t('batchTitle', { n: selected.length })} message={t('batchMessage', { names: selectedItems.map(m => m.name).join(', ') })}
+        confirmLabel={t('deleteN', { n: selected.length })} cancelLabel={t('cancel')}
+        onCancel={() => setConfirmBatch(false)} onConfirm={() => { setConfirmBatch(false); void deleteBatch() }} />
       {versionsOf && <VersionsDialog lang={lang} isMobile={isMobile} item={versionsOf} gated={gated} onClose={() => setVersionsOf(null)} onRestored={m => { upsert(m); setVersionsOf(null) }} />}
       {moving && <MoveDialog lang={lang} isMobile={isMobile} item={moving} groups={groups} gated={gated} onClose={() => setMoving(null)} onMoved={m => { upsert(m); setMoving(null) }} />}
       {groupsOpen && <GroupsDialog lang={lang} isMobile={isMobile} groups={groups} items={items} gated={gated} onClose={() => setGroupsOpen(false)} onChanged={() => { void load() }} />}
@@ -447,7 +503,7 @@ export function QuickVault({ lang, isMobile, onClose }: { lang: Lang; isMobile: 
 export function QuickVaultBody({ lang, isMobile, onNavigate, onAsking }: { lang: Lang; isMobile: boolean; onNavigate?: () => void; onAsking?: (asking: boolean) => void }) {
   const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
   const navigate = useNavigate()
-  const { state, setState, items, setItems, groups, busyHello, codeAsk, gated, load } = usePersonalVault()
+  const { state, setState, items, setItems, groups, setGroups, busyHello, codeAsk, gated, load } = usePersonalVault()
   const [q, setQ] = useState('')
   const [toast, setToast] = useState<string | null>(null)
   const [editing, setEditing] = useState<{ item: PersonalMeta | null; replace?: boolean } | null>(null)
@@ -505,7 +561,7 @@ export function QuickVaultBody({ lang, isMobile, onNavigate, onAsking }: { lang:
         </>
       )}
       {editing && (
-        <SecretDialog lang={lang} isMobile={isMobile} item={editing.item} replace={editing.replace === true} initialTab="create" groups={groups} gated={gated} defaultGroup={null}
+        <SecretDialog lang={lang} isMobile={isMobile} item={editing.item} replace={editing.replace === true} initialTab="create" groups={groups} gated={gated} defaultGroup={null} onGroupCreated={g => setGroups(cur => [...cur.filter(x => x.id !== g.id), g])}
           onClose={() => setEditing(null)} onSaved={m => { setItems(cur => [m, ...cur.filter(y => y.id !== m.id)]); setEditing(null) }}
           onImported={s => { setEditing(null); flash(s); void load() }} />
       )}
@@ -519,15 +575,18 @@ export function QuickVaultBody({ lang, isMobile, onNavigate, onAsking }: { lang:
 /** The field a row's own eye and copy act on: the password or the value (a login's user name is the other one). */
 const primaryField = (m: PersonalMeta): string => (m.fields.includes('password') ? 'password' : m.fields.includes('value') ? 'value' : m.fields[0] ?? 'value')
 
-function SecretRow({ m, lang, isMobile, group, groups, gated, onChanged, onRemoved, onFlash, onEdit, onVersions, onMove, compact = false }: {
+function SecretRow({ m, lang, isMobile, group, groups, gated, onChanged, onRemoved, onFlash, onEdit, onVersions, onMove, compact = false, selecting = false, checked = false, onTick }: {
   m: PersonalMeta; lang: Lang; isMobile: boolean; group: string; groups: PersonalGroup[]; gated: Gated
   onChanged: (m: PersonalMeta) => void; onRemoved: (id: string) => void; onFlash: (s: string) => void
   /** Open the dialog; `replace` = the "Substituir valor" entry of a use-only secret (value fields only). */
   onEdit: (replace?: boolean) => void; onVersions: () => void; onMove: () => void
   /** The quick panel: reveal, copy and EDIT — versions, groups and the trash stay on the page. */
   compact?: boolean
+  /** The list's select mode: a checkbox leads the row and the row's own actions step aside. */
+  selecting?: boolean; checked?: boolean; onTick?: () => void
 }) {
   const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
+  const types = useVaultTypes()
   // field → value, for 30 s after a reveal; dropped on unmount and when the row closes.
   const [shown, setShown] = useState<Record<string, string>>({})
   const [open, setOpen] = useState(false)
@@ -555,8 +614,10 @@ function SecretRow({ m, lang, isMobile, group, groups, gated, onChanged, onRemov
     onFlash(ok ? `${t('copied')} ${t('clipboardWarn')}` : t('network'))
   }
   const toggleOpen = () => {
+    // Opening only lists the fields, masked: the ONE reveal control is each field's own eye, which asks the
+    // proof the policy names for reveal, exactly as before.
     if (open) { setOpen(false); setShown({}); return }
-    setOpen(true); void show(primaryField(m))
+    setOpen(true)
   }
   const act = async (kind: 'trash' | 'restore' | 'purge') => {
     setError(null)
@@ -569,7 +630,7 @@ function SecretRow({ m, lang, isMobile, group, groups, gated, onChanged, onRemov
   const trashed = m.deletedAt !== null
   const sealed = isUseOnly(m)
   const meta = [
-    t(`kind_${m.kind}` as PKey), group, sealed ? t('useOnlyBadge') : '', m.confirmEach === false ? t('confirmEachOff') : '',
+    kindName(m, types, k => t(`kind_${k}` as PKey)), group, sealed ? t('useOnlyBadge') : '', m.confirmEach === false ? t('confirmEachOff') : '',
     ...m.tags.map(x => `#${x}`), t('updated', { date: fmtDay(m.updatedAt, lang) }),
   ].filter(Boolean).join(' · ')
   const entries: BandOverflowEntry[] = trashed
@@ -590,7 +651,9 @@ function SecretRow({ m, lang, isMobile, group, groups, gated, onChanged, onRemov
   const fieldName = t(`field_${field}` as PKey)
   return (
     <>
-      <VaultRow data="secret" stackActions isMobile={isMobile} icon={<KeyRound size={16} style={{ color: trashed ? 'var(--text-tertiary)' : 'var(--anthropic-orange)' }} />}
+      <VaultRow data="secret" stackActions isMobile={isMobile}
+        lead={selecting ? <span style={{ display: 'inline-flex', flexShrink: 0 }}><Checkbox checked={checked} onChange={() => onTick?.()} label="" ariaLabel={`${t('selectRow')}: ${m.name}`} /></span> : undefined}
+        icon={<KeyRound size={16} style={{ color: trashed ? 'var(--text-tertiary)' : 'var(--anthropic-orange)' }} />}
         title={m.name} desc={<span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{meta}</span>}
         extra={(
           <>
@@ -614,16 +677,17 @@ function SecretRow({ m, lang, isMobile, group, groups, gated, onChanged, onRemov
             {error && <div style={{ marginTop: 8 }}><Err text={error} /></div>}
           </>
         )}>
-        {!sealed && !trashed && (
+        {!selecting && !sealed && !trashed && (
           <>
             <button type="button" className="ag-tap-icon" style={iconBtn} onClick={toggleOpen} aria-expanded={open}
-              aria-label={`${open ? t('hide') : t('reveal')} ${fieldName}`} title={open ? t('hide') : t('reveal')}>
-              {open ? <EyeOff size={15} /> : <Eye size={15} />}
+              aria-label={`${open ? t('closeRow') : t('openRow')} · ${m.name}`} title={open ? t('closeRow') : t('openRow')}>
+              {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
             </button>
-            <button type="button" className="ag-tap-icon" style={iconBtn} onClick={() => { void copy(field) }} aria-label={`${t('copy')} ${fieldName}`} title={t('copy')}><Copy size={15} /></button>
+            {/* Open: the Valor row below carries its own copy, so the header's would be the duplicate. */}
+            {!open && <button type="button" className="ag-tap-icon" style={iconBtn} onClick={() => { void copy(field) }} aria-label={`${t('copy')} ${fieldName}`} title={t('copy')}><Copy size={15} /></button>}
           </>
         )}
-        <BandOverflowMenu label={t('moreActions')} entries={entries} isMobile={isMobile} />
+        {!selecting && <BandOverflowMenu label={t('moreActions')} entries={entries} isMobile={isMobile} />}
       </VaultRow>
       <ConfirmModal open={purgeAsk} title={t('purge')} message={t('purgeConfirm', { name: m.name })} confirmLabel={t('purge')} cancelLabel={t('cancel')}
         onCancel={() => setPurgeAsk(false)} onConfirm={() => { setPurgeAsk(false); void act('purge') }} />
@@ -637,18 +701,23 @@ function SecretRow({ m, lang, isMobile, group, groups, gated, onChanged, onRemov
  * "Novo segredo", "Editar" and "Importar" — ONE dialog (VAULT v4): Criar | Importar .env / JSON for a
  * new secret, the same form alone for an edit, and only the value fields for "Substituir valor".
  */
-function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated, defaultGroup, onClose, onSaved, onImported }: {
+function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated, defaultGroup, onGroupCreated, onClose, onSaved, onImported }: {
   lang: Lang; isMobile: boolean; item: PersonalMeta | null
   /** "Substituir valor" on a use-only secret: only the value fields, nothing else on the form. */
   replace?: boolean
   initialTab: 'create' | 'import'
   groups: PersonalGroup[]; gated: Gated; defaultGroup: string | null
+  /** A group made from the select's "Criar grupo" row: the page adds it to its list. */
+  onGroupCreated: (g: PersonalGroup) => void
   onClose: () => void; onSaved: (m: PersonalMeta) => void; onImported: (summary: string) => void
 }) {
   const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
   const editing = item !== null
   const [tab, setTab] = useState<'create' | 'import'>(editing ? 'create' : initialTab)
   const [kind, setKind] = useState<PersonalKind>(item?.kind ?? 'password')
+  const types = useVaultTypes()
+  const [typeId, setTypeId] = useState<string | null>(item?.typeId ?? null)
+  const [makingType, setMakingType] = useState(false)
   const [name, setName] = useState(item?.name ?? '')
   const [url, setUrl] = useState(item?.url ?? '')
   const [groupId, setGroupId] = useState<string>(item?.groupId ?? defaultGroup ?? '')
@@ -667,13 +736,18 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
   const [error, setError] = useState<string | null>(null)
   useEffect(() => () => setFields({}), [])
   const multiline = kind === 'env' || kind === 'note'
-  const pickKind = (k: PersonalKind) => { setKind(k); if (!editing && !useOnlyTouched) setUseOnly(USE_ONLY_DEFAULT[k]) }
+  const pickKind = (k: PersonalKind, tid: string | null = null) => { setKind(k); setTypeId(tid); if (!editing && !useOnlyTouched) setUseOnly(USE_ONLY_DEFAULT[k]) }
+  const pickChoice = (v: string) => {
+    if (v === NEW_TYPE) { setMakingType(true); return }
+    const r = resolveChoice(v, types)
+    if (r) pickKind(r.kind, r.typeId)
+  }
   const save = async () => {
     if (busy || !name.trim()) return
     setBusy(true); setError(null)
     const f: Record<string, string> = {}
     for (const k of KIND_FIELDS[kind]) if (fields[k]) f[k] = fields[k]!
-    const body = { kind, name: name.trim(), url, groupId: groupId || null, tags: parseTags(tags), notes, confirmEach, ...(useOnly ? { useOnly: true } : {}), ...(Object.keys(f).length ? { fields: f } : {}) }
+    const body = { kind, ...(typeId || editing ? { typeId } : {}), name: name.trim(), url, groupId: groupId || null, tags: parseTags(tags), notes, confirmEach, ...(useOnly ? { useOnly: true } : {}), ...(Object.keys(f).length ? { fields: f } : {}) }
     const r = editing ? await gated((c, tk) => editPersonal(item.id, item.version, body, c, tk), { action: 'personal-edit', target: item.id }) : await gated(c => createPersonal(body, c), false)
     setBusy(false)
     if (!r.ok) { setError(r.sentence || t('network')); return }
@@ -685,6 +759,8 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
   const [preview, setPreview] = useState<{ token: string; keys: ImportKey[]; skipped: number } | null>(null)
   const [choices, setChoices] = useState<ImportChoice[]>([])
   const [importGroup, setImportGroup] = useState(defaultGroup ?? '')
+  // The import row that asked for "Criar tipo…" (the new type is selected on it once made).
+  const [makingTypeFor, setMakingTypeFor] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const onFile = async (file: File | undefined) => {
     if (!file) return
@@ -716,6 +792,20 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
       {...(editing ? { hint: sealed ? t('f_newValue') : t('f_keep') } : {})} />
   ))
   const groupOptions = [{ value: '', label: t('noGroup') }, ...groups.map(g => ({ value: g.id, label: g.name }))]
+  // Select-or-create: the new group is persisted like any other (POST /groups), then chosen where it was asked.
+  const creatableGroup = (choose: (id: string) => void) => ({
+    label: (text: string) => t('createGroupRow', { text }),
+    onCreate: (text: string) => {
+      const name = newGroupName(text, groups)
+      if (!name) return
+      void (async () => {
+        setError(null)
+        const r = await gated(c => createGroup(name, c), false)
+        if (!r.ok) { setError(r.sentence || t('network')); return }
+        onGroupCreated(r.group); choose(r.group.id)
+      })()
+    },
+  })
   const footer = tab === 'import'
     ? (
       <>
@@ -742,6 +832,7 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
     )
   const title = replace && item ? `${t('replaceTitle')} · ${item.name}` : editing ? t('editTitle') : t('createTitle')
   return (
+    <>
     <Sheet closeLabel={t('close')} isMobile={isMobile} title={title} onClose={onClose} footer={footer} wide={tab === 'import' && preview !== null}>
       {!editing && (
         <TabStrip<'create' | 'import'> variant="underline" tabs={['create', 'import']} value={tab} onPick={v => { setTab(v); setError(null) }}
@@ -754,6 +845,13 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
           {preview && (
             <>
               {preview.skipped > 0 && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 8 }}>{t('importSkipped', { n: preview.skipped })}</div>}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+                <button type="button" data-import-mark-all style={{ ...pageBtn(isMobile), flex: isMobile ? '1 1 100%' : undefined }}
+                  onClick={() => setChoices(cs => (allKind(cs, 'api-key') ? setAllKind(cs, 'env') : setAllKind(cs, 'api-key')))}>
+                  <KeyRound size={14} /> {allKind(choices, 'api-key') ? t('unmarkAllApiKey') : t('markAllApiKey')}
+                </button>
+                <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)', flex: '1 1 200px' }}>{t('importKindNote')}</span>
+              </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
                 {preview.keys.map(k => {
                   const c = choices.find(x => x.key === k.key)!
@@ -766,6 +864,13 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
                         <Select value={c.action} onChange={v => setChoice(k.key, { action: v as ImportChoice['action'] })}
                           options={(k.clash ? ['skip', 'replace', 'rename'] as const : ['import', 'skip'] as const).map(a => ({ value: a, label: t(`act_${a}` as PKey) }))} />
                       </div>
+                      {c.action !== 'skip' && (
+                        <div style={{ width: isMobile ? '100%' : 190 }} data-import-kind>
+                          <Select value={choiceValue(c.kind || c.typeId || !(k.clash && c.action === 'replace') ? c : { ...(k.clash.kind ? { kind: k.clash.kind } : {}), ...(k.clash.typeId ? { typeId: k.clash.typeId } : {}) }, types)}
+                            onChange={v => { if (v === NEW_TYPE) { setMakingTypeFor(k.key); return } const r = resolveChoice(v, types); if (r) setChoice(k.key, { kind: r.kind, ...(r.typeId ? { typeId: r.typeId } : { typeId: undefined }) }) }}
+                            options={kindChoices(types, x => t(`kind_${x}` as PKey), t('createTypeRow'))} />
+                        </div>
+                      )}
                       {c.action === 'rename' && (
                         <div style={{ width: isMobile ? '100%' : 180 }}>
                           <FieldInput label={t('f_name')} value={c.name ?? ''} onChange={v => setChoice(k.key, { name: v })} placeholder={k.key} />
@@ -777,7 +882,7 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
               </div>
               <div style={{ marginBottom: 4 }}>
                 {label(t('importInto'))}
-                <Select value={importGroup} onChange={setImportGroup} placeholder={t('noGroup')} options={groupOptions} />
+                <Select value={importGroup} onChange={setImportGroup} placeholder={t('noGroup')} options={groupOptions} searchPlaceholder={t('searchOrCreateGroup')} creatable={creatableGroup(setImportGroup)} />
               </div>
             </>
           )}
@@ -789,7 +894,7 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
               <TextField lang={lang} label={t('f_name')} value={name} onChange={setName} maxLength={120} autoFocus={!isMobile} placeholder={t('namePh')} />
               <div style={{ marginBottom: 14 }}>
                 <Field label={t('f_kind')}>
-                  <Select value={kind} onChange={v => pickKind(v as PersonalKind)} options={PERSONAL_KINDS.map(k => ({ value: k, label: t(`kind_${k}` as PKey) }))} />
+                  <Select value={choiceValue({ kind, ...(typeId ? { typeId } : {}) }, types)} onChange={pickChoice} options={kindChoices(types, k => t(`kind_${k}` as PKey), t('createTypeRow'))} />
                 </Field>
               </div>
               {valueFields}
@@ -800,7 +905,7 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
               </div>
               <div style={{ marginBottom: 14 }}>
                 <Field label={t('f_group')}>
-                  <Select value={groupId} onChange={setGroupId} placeholder={t('noGroup')} options={groupOptions} />
+                  <Select value={groupId} onChange={setGroupId} placeholder={t('noGroup')} options={groupOptions} searchPlaceholder={t('searchOrCreateGroup')} creatable={creatableGroup(setGroupId)} />
                 </Field>
               </div>
               <TextField lang={lang} label={t('f_tagsShort')} value={tags} onChange={setTags} placeholder={t('tagsPh')} />
@@ -821,6 +926,10 @@ function SecretDialog({ lang, isMobile, item, replace, initialTab, groups, gated
         </form>
       )}
     </Sheet>
+      {makingTypeFor && <CreateTypeDialog lang={lang} isMobile={isMobile} initialBase={choices.find(x => x.key === makingTypeFor)?.kind ?? 'api-key'} onClose={() => setMakingTypeFor(null)}
+        onCreated={ty => { setChoice(makingTypeFor, { kind: ty.base, typeId: ty.id }); setMakingTypeFor(null) }} />}
+      {makingType && <CreateTypeDialog lang={lang} isMobile={isMobile} initialBase={kind} onClose={() => setMakingType(false)} onCreated={ty => { setMakingType(false); pickKind(ty.base, ty.id) }} />}
+    </>
   )
 }
 

@@ -141,6 +141,7 @@ import { validateIngestToken } from './team-tokens'
 import { getAccount } from './accounts'
 import { getTeam } from './teams'
 import { discoverProjectDisks } from './disk-picker'
+import { allowedRoots, listFolders, rootListing } from './fs-folders'
 
 // ---------------------------------------------------------------------------
 // Reads the first `cwd` field found in a JSONL session file.
@@ -974,6 +975,26 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           status: 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
+      }
+    }
+
+    if (url.pathname === '/api/fs/folders' && req.method === 'GET') {
+      try {
+        const scanRoots = (await readPreferences()).scanRoots ?? []
+        const headers = { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+        const asked = url.searchParams.get('path') ?? ''
+        // No path = the top of the browser: the home and each enabled disk. No file system read.
+        if (asked === '') {
+          return new Response(JSON.stringify({ path: '', parent: null, folders: rootListing(allowedRoots(scanRoots)), partial: false }), { status: 200, headers })
+        }
+        const listing = await listFolders(asked, { scanRoots })
+        if (listing.ok) return new Response(JSON.stringify(listing), { status: 200, headers })
+        const status = listing.reason === 'forbidden' ? 403 : listing.reason === 'not-found' ? 404 : 400
+        return new Response(JSON.stringify({ error: listing.reason }), { status, headers })
+      } catch (err) {
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        console.error(safe.logLine)
+        return new Response(JSON.stringify(safe.body), { status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } })
       }
     }
 
@@ -1875,6 +1896,18 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       })
       return json(out, notifyStatus(out))
     }
+    // SESSION → SESSION MESSAGES — `agentistics_session_message` (`sessions/session-message.ts`). The sender
+    // must PROVE it is a session (the MCP sends id + HMAC, `session-proof.ts`); unverified is refused.
+    if (url.pathname === '/api/session-message' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({})) as { to?: unknown; kind?: unknown; body?: unknown; session?: { id?: unknown; token?: unknown } }
+      const { verifySessionIdentity } = await import('./sessions/session-identity')
+      const sender = body.session ? await verifySessionIdentity(body.session.id, body.session.token) : null
+      const { sendSessionMessage, defaultMessageDeps, messageStatus } = await import('./sessions/session-message')
+      const out = await sendSessionMessage(sender, {
+        to: String(body.to ?? ''), kind: String(body.kind ?? ''), body: String(body.body ?? ''),
+      }, await defaultMessageDeps())
+      return json(out, messageStatus(out))
+    }
     // USER SESSION GROUPS — the door the MCP tools use to organise sessions (see
     // `sessions/session-groups-web.ts`). Matched before `/api/tasks`; it shares no path with it.
     if (url.pathname === '/api/session-groups' && req.method === 'GET') {
@@ -2515,6 +2548,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const out = await readNewOptions(
         fleetLang(url.searchParams.get('lang')),
         url.searchParams.get('q') ?? '',
+        url.searchParams.get('disk') ?? undefined,
       )
       return new Response(JSON.stringify(out), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
@@ -2799,7 +2833,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const q = url.searchParams.get('q') ?? ''
         const [harnesses, projects, tasks] = await Promise.all([
           webHarnesses(host),
-          webProjects(host, q),
+          webProjects(host, q, url.searchParams.get('disk') ?? undefined),
           webTasks(host),
         ])
         return new Response(JSON.stringify({ harnesses, projects, tasks }), {

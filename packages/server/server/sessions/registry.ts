@@ -64,6 +64,8 @@ export interface SessionPatch {
    * was explicitly moved out of.
    */
   subtaskId?: string | null
+  /** See `ManagedSession.pendingContext`. `null` clears it once the first real prompt carried it. */
+  pendingContext?: string | null
   attemptId?: string
   endedAt?: string
   conversationId?: string
@@ -129,6 +131,11 @@ function sanitize(raw: unknown): ManagedSession | null {
     // A field missing HERE is read back as absent however correctly it was written — the same
     // silent drop `conversationId` suffered above, and `TaskPatch` suffered for `shared`.
     ...(typeof s.subtaskId === 'string' ? { subtaskId: s.subtaskId } : {}),
+    ...(typeof s.pendingContext === 'string' ? { pendingContext: s.pendingContext } : {}),
+    // The parent link (SESSION.LINK). Missing here, it was written at spawn and wiped by the first
+    // heartbeat rewrite ~20 s later, so "started by" never showed.
+    ...(typeof s.parentSessionId === 'string' ? { parentSessionId: s.parentSessionId } : {}),
+    ...(typeof s.parentConversationId === 'string' ? { parentConversationId: s.parentConversationId } : {}),
     ...(typeof s.attemptId === 'string' ? { attemptId: s.attemptId } : {}),
     ...(typeof s.endedAt === 'string' ? { endedAt: s.endedAt } : {}),
     // Written by `resumeSession` and `openTask` and, until this line existed, dropped on the way back

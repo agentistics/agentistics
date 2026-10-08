@@ -9,7 +9,7 @@
  * so the session chat looks and behaves as it did.
  */
 
-import type { ReactNode } from 'react'
+import { forwardRef, useLayoutEffect, useRef, type ReactNode, type TextareaHTMLAttributes } from 'react'
 import { Loader, Mic, Paperclip, Send, X } from 'lucide-react'
 
 /** The box: field column + attachments + text + toolbar. `hidden` keeps the caller's reopen state. */
@@ -217,3 +217,42 @@ export const composerFieldStyle = {
   caretColor: 'var(--anthropic-orange)', fontFamily: 'inherit', fontSize: 13.5,
   lineHeight: 1.5, overflowY: 'auto' as const, padding: '6px 6px',
 }
+
+/**
+ * A REPLY FIELD between two quotes — the composer's own field, smaller in nothing: same typography,
+ * same padding, and it grows with what is written up to `maxHeight`, then scrolls. A reply to
+ * several passages is `[quote 1] reply 1 [quote 2] reply 2 …`, and each reply is one of these.
+ */
+export const ComposerSegmentField = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement> & {
+  value: string
+  maxHeight: number
+  isMobile?: boolean
+}>(function ComposerSegmentField({ value, maxHeight, isMobile, style, ...rest }, ref) {
+  const own = useRef<HTMLTextAreaElement | null>(null)
+  useLayoutEffect(() => {
+    const el = own.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`
+  }, [value, maxHeight])
+  return (
+    <textarea
+      {...rest}
+      ref={el => {
+        own.current = el
+        if (typeof ref === 'function') ref(el)
+        else if (ref) ref.current = el
+      }}
+      value={value}
+      rows={1}
+      style={{
+        ...composerFieldStyle,
+        color: 'var(--text-primary)',
+        fontSize: isMobile ? 16 : composerFieldStyle.fontSize,
+        maxHeight,
+        userSelect: 'text', WebkitUserSelect: 'text',
+        ...style,
+      }}
+    />
+  )
+})

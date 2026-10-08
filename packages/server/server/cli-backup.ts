@@ -13,8 +13,8 @@ import { bundleForBackup, stageVaultFromArchive } from './vault/bundle-io'
 import { vaultBundlePathFor } from './backup/vault-bundle-github'
 import { hostname, tmpdir } from 'os'
 import { existsSync } from 'fs'
-import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
-import { join } from 'path'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'fs/promises'
+import { join, relative, isAbsolute, sep } from 'path'
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, HOME_DIR } from './config'
 import { readPreferences, writePreferences, type Preferences } from './preferences'
@@ -519,7 +519,22 @@ async function buildRepoManifest(
  */
 export async function pruneOldBackups(keep: number, log: (l: string) => void): Promise<void> {
   const entries = await loadBackupHistory()
+  const backupsDir = await realpath(join(AGENTISTICS_DATA_DIR, 'backups')).catch(() => null)
+  if (!backupsDir) {
+    log('backup prune refused: the backups directory does not exist')
+    return
+  }
   for (const old of toPrune(entries, keep)) {
+    const resolved = await realpath(old.path).catch(() => null)
+    const rel = resolved === null ? null : relative(backupsDir, resolved)
+    if (resolved === null || rel === null) {
+      log(`backup prune refused outside backups directory: ${old.path}`)
+      continue
+    }
+    if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+      log(`backup prune refused outside backups directory: ${old.path}`)
+      continue
+    }
     await rm(old.path, { force: true }).catch(() => {})
     await recordPrune(old.path)
     log(`pruned ${old.path}`)

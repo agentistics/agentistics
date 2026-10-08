@@ -12,11 +12,18 @@
  * (a staged draft is allowed to sit with no harness chosen at all, asked at fire time). That
  * decision stays with each caller, over the `harnesses` this hook returns.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { ProjectKind } from '@agentistics/core'
 import { SEARCH_DEBOUNCE_MS } from '../lib/projectTabs'
 import type { HarnessAnswer } from '../lib/wizardSteps'
 import { fetchFleetNewWithRetry } from '../lib/fleetNewRetry'
+import { createSharedPref, PERSONAL_PREFS } from '../lib/sharedPref'
+
+const projectDiskPref = createSharedPref<string>({
+  key: 'agentistics-project-disk-v1', prefKey: 'projectDisk', endpoint: PERSONAL_PREFS,
+  fallback: '', adoptLocalWhenAbsent: true,
+  parse: raw => typeof raw === 'string' ? raw : null,
+})
 
 export interface FleetProjectOption {
   path: string
@@ -37,6 +44,10 @@ export interface FleetNewOptions {
    *  server does not say. */
   projectTotals: Record<ProjectKind, number> | undefined
   projectIndexing: boolean
+  projectIndexProgress: { visited: number; queued: number }[]
+  projectDisks: { id: string; label: string; letter?: string; install: boolean; count: number }[]
+  projectDisk: string
+  setProjectDisk: (disk: string) => void
   /** The field's own value — answers instantly, one keystroke behind the actual search. */
   query: string
   setQuery: (q: string) => void
@@ -53,6 +64,9 @@ export function useFleetNewOptions(lang: 'pt' | 'en'): FleetNewOptions {
   const [projects, setProjects] = useState<FleetProjectOption[]>([])
   const [projectTotals, setProjectTotals] = useState<Record<ProjectKind, number> | undefined>(undefined)
   const [projectIndexing, setProjectIndexing] = useState(false)
+  const [projectIndexProgress, setProjectIndexProgress] = useState<{ visited: number; queued: number }[]>([])
+  const projectDisk = useSyncExternalStore(projectDiskPref.subscribe, projectDiskPref.get, projectDiskPref.serverSnapshot)
+  const [projectDisks, setProjectDisks] = useState<{ id: string; label: string; letter?: string; install: boolean; count: number }[]>([])
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [searching, setSearching] = useState(false)
@@ -79,13 +93,22 @@ export function useFleetNewOptions(lang: 'pt' | 'en'): FleetNewOptions {
           harnesses: HarnessAnswer[]; projects: FleetProjectOption[]
           projectTotals?: Record<ProjectKind, number>
           projectIndexing?: boolean
+          projectIndexProgress?: { visited: number; queued: number }[]
+          projectDisks?: { id: string; label: string; letter?: string; install: boolean; count: number }[]
           unavailable?: string
-        }>(`/api/fleet/new?lang=${lang}&q=${encodeURIComponent(debouncedQuery)}`, { signal: controller.signal })
+        }>(`/api/fleet/new?lang=${lang}&q=${encodeURIComponent(debouncedQuery)}${projectDisk ? `&disk=${encodeURIComponent(projectDisk)}` : ''}`, { signal: controller.signal })
         if (!alive) return
         setHarnesses(json.harnesses)
         setProjects(json.projects)
         setProjectTotals(json.projectTotals)
         setProjectIndexing(json.projectIndexing === true)
+        setProjectIndexProgress(json.projectIndexProgress ?? [])
+        // The first response establishes the install-disk default when no personal choice exists.
+        const disks = json.projectDisks ?? []
+        setProjectDisks(disks)
+        if (disks.length > 0 && (!projectDisk || !disks.some(d => d.id === projectDisk))) {
+          projectDiskPref.set(disks.find(d => d.install)?.id ?? disks[0]!.id)
+        }
         setUnavailable(json.unavailable)
       } catch {
         if (alive) {
@@ -93,6 +116,8 @@ export function useFleetNewOptions(lang: 'pt' | 'en'): FleetNewOptions {
           setProjects([])
           setProjectTotals(undefined)
           setProjectIndexing(false)
+          setProjectIndexProgress([])
+          setProjectDisks([])
           setUnavailable(lang === 'pt'
             ? 'Não consegui ver o que está instalado.'
             : 'I could not see what is installed.')
@@ -104,8 +129,9 @@ export function useFleetNewOptions(lang: 'pt' | 'en'): FleetNewOptions {
     }
     void load()
     return () => { alive = false; controller.abort() }
-  }, [lang, debouncedQuery, retryNumber])
+  }, [lang, debouncedQuery, retryNumber, projectDisk])
 
-  return { harnesses, projects, projectTotals, projectIndexing, query, setQuery, searching, unavailable,
+  return { harnesses, projects, projectTotals, projectIndexing, projectIndexProgress, projectDisks, projectDisk,
+    setProjectDisk: (disk: string) => projectDiskPref.set(disk), query, setQuery, searching, unavailable,
     retry: () => setRetryNumber(n => n + 1), retryable }
 }

@@ -20,11 +20,13 @@ export function clampWidth(w: number): number {
 export function resolveWidths(
   columns: ReadonlyArray<{ id: string; width: number }>,
   saved: Readonly<Record<string, number>>,
+  /** Computed defaults (`columnDefaultWidth.ts`) — used only for a column nobody resized. */
+  defaults: Readonly<Record<string, number>> = {},
 ): Record<string, number> {
   const out: Record<string, number> = {}
   for (const c of columns) {
     const s = saved[c.id]
-    out[c.id] = typeof s === 'number' && Number.isFinite(s) ? clampWidth(s) : c.width
+    out[c.id] = typeof s === 'number' && Number.isFinite(s) ? clampWidth(s) : (defaults[c.id] ?? c.width)
   }
   return out
 }

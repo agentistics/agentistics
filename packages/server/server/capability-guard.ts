@@ -47,6 +47,9 @@ const EXACT: ReadonlyMap<string, keyof Capabilities> = new Map<string, keyof Cap
   // Lists this host's disks (reads /proc/mounts, /Volumes, statfs) for Settings' project-disk
   // picker. Host facts that only matter where sessions are started, so the fleet's capability.
   ['/api/project-disks', 'localShell'],
+  // One level of DIRECTORY names under the home or an enabled disk, for New session's folder
+  // browser. It reads the host's file system, so it rides the fleet's capability.
+  ['/api/fs/folders', 'localShell'],
   // The session fleet is registered as a PREFIX below, not name by name — see the note there.
 ])
 
@@ -89,6 +92,7 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   ['/api/session-groups', 'localShell'],
   // Per-session notification switch: resolves a ref against THIS machine's fleet, same as above.
   ['/api/session-notify', 'localShell'],
+  ['/api/session-message', 'localShell'],
   // The file store is addressed by file id rather than under `/api/tasks/`, so it needs its own
   // entry: a route that is not registered here is assumed harmless.
   ['/api/task-files', 'localShell'],

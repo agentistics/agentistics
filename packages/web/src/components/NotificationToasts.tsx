@@ -3,6 +3,7 @@ import { AlertCircle, AlertTriangle, Info, CheckCircle2, BellOff, X } from 'luci
 import { useNotifications, dismissNotification, resolveNotification, type AppNotification, type NotificationType } from '../lib/notifications'
 import { getNotificationSettings, NAY_CARD_CODES } from '../lib/sessionNotifications'
 import { UPDATE_NOTICE_CODE } from '../lib/updateToast'
+import { openWhatsNew } from '../whatsNew/open'
 import { setSessionMuted } from '../lib/mutedSessions'
 import { SESSION_MUTED_CODE } from '../lib/notifyMenu'
 
@@ -102,14 +103,16 @@ export function NotificationToasts({ lang }: Props) {
         // Same opt-in handoff as the bell row (see NotificationBell.tsx): the update check is
         // automatic, the modal it can open is not.
         const isUpdate = n.code === 'app.update_available'
+        const isWhatsNew = n.code === 'app.whats_new'
         const isMuted = n.code === SESSION_MUTED_CODE
         const isTelemetry = n.code === 'telemetry.first_use'
         return (
           <div
             key={n.id}
-            role={isUpdate ? 'button' : undefined}
-            tabIndex={isUpdate ? 0 : undefined}
-            onClick={isUpdate ? () => { window.dispatchEvent(new CustomEvent('agentistics:open-update-modal')); startLeave(n.id) } : undefined}
+            role={isUpdate || isWhatsNew ? 'button' : undefined}
+            tabIndex={isUpdate || isWhatsNew ? 0 : undefined}
+            onClick={isUpdate ? () => { window.dispatchEvent(new CustomEvent('agentistics:open-update-modal')); startLeave(n.id) }
+              : isWhatsNew ? () => { openWhatsNew(n.meta); startLeave(n.id) } : undefined}
             style={{
               pointerEvents: 'auto',
               display: 'flex', alignItems: 'flex-start', gap: 10,
@@ -117,7 +120,7 @@ export function NotificationToasts({ lang }: Props) {
               background: 'var(--bg-card)', border: '1px solid var(--border)',
               borderLeft: `3px solid ${color}`,
               boxShadow: '0 12px 32px rgba(0,0,0,0.4)',
-              cursor: isUpdate ? 'pointer' : undefined,
+              cursor: isUpdate || isWhatsNew ? 'pointer' : undefined,
               animation: isLeaving
                 ? `toastOut ${EXIT_MS}ms ease-in forwards`
                 : 'toastIn 0.18s ease-out',

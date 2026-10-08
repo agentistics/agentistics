@@ -43,6 +43,14 @@ export interface ReplyTarget {
    * line, so the quote can sit BETWEEN the person's answers instead of above all of them.
    */
   id?: string
+  /**
+   * The person's own words written BETWEEN the previous quote (or the start of the message) and
+   * this one. A reply answers each passage right under it — `[quote 1] reply 1 [quote 2] reply 2` —
+   * so a quote carries the field that sits ABOVE it, and the composer's main field is the text after
+   * the last quote. Absent (a target stored before quotes interleaved) reads as nothing written
+   * there, which is exactly the old stacked layout, so no stored draft needs migrating.
+   */
+  before?: string
 }
 
 /** How many lines of the quoted message travel with the reply. See decision 1. */
@@ -183,31 +191,33 @@ export function leadingQuote(text: string): { quote: string; rest: string } | nu
 }
 
 /**
- * A draft read back into the composer's two halves: the quote STACK and the words in the field.
+ * A draft read back into the composer: its quotes, each carrying the words written ABOVE it
+ * (`before`), and the words after the last quote, which go in the main field.
  *
- * The composer holds quotes as a list drawn ABOVE the field, never as text inside it — the textarea
- * keeps only what the person is writing. Text arriving from outside (a restored draft, a queued
- * message handed back to edit, a draft saved by the version that kept quotes inline) still carries
- * them as `> ` lines, so the leading blocks are lifted back into targets here.
+ * EVERY `> ` run is a quote, wherever it sits — a reply answers each passage right under it, so a
+ * draft is `[quote 1] reply 1 [quote 2] reply 2 … free text` and reading only the LEADING blocks
+ * pushed every later quote into the free text as raw markdown. See `parseFields`.
  *
  * A lifted quote is an EXCERPT: its text is already what travels (capped and ellipsised when it was
  * first quoted), and marking it whole again would cap it a second time. Its source turn is not
  * known, so it carries no `key`; the composer finds the source by text, as the sent bubble does.
  */
 export function splitQuotedDraft(draft: string): { replies: ReplyTarget[]; text: string } {
-  const { quotes, rest } = leadingQuotes(draft)
-  return { replies: quotes.map(q => ({ role: 'assistant' as const, text: q, excerpt: true })), text: quotes.length > 0 ? rest : draft }
+  const f = parseFields(draft)
+  if (f.quotes.length === 0) return { replies: [], text: draft }
+  const { replies, draft: text } = fromFields(f)
+  return { replies, text }
 }
 
 /**
  * The composer's state as it is LOADED from storage, normalised to "quotes in the list, words in
- * the field".
+ * the fields".
  *
- * The version before this one inserted every quote INTO the draft and also stored the same targets
- * in the list (unused at send). Loading that verbatim would draw each quote twice — once as a block,
- * once as `> ` text — and send it twice. So a stored target whose quote already sits in the draft is
- * dropped from the list, and the draft's leading blocks are lifted into it instead. A list written
- * by this version never appears in its own draft, so it passes through untouched.
+ * An older version inserted every quote INTO the draft and also stored the same targets in the list
+ * (unused at send). Loading that verbatim would draw each quote twice — once as a block, once as
+ * `> ` text — and send it twice. So a stored target whose quote already sits in the draft is dropped
+ * from the list, and the draft's quotes are lifted into it instead. A list written by this version
+ * never appears in its own draft, so it passes through untouched.
  */
 export function normalizeComposer(
   draft: string, replies: readonly ReplyTarget[],
@@ -215,6 +225,176 @@ export function normalizeComposer(
   const kept = replies.filter(t => { const q = quoteFor(t); return q === '' || !draft.includes(q) })
   const { replies: lifted, text } = splitQuotedDraft(draft)
   return { draft: text, replies: lifted.reduce<ReplyTarget[]>((list, t) => addReply(list, t), kept) }
+}
+
+// ---------------------------------------------------------------------------
+// INTERLEAVED QUOTES AND REPLIES.
+//
+// The composer is an ORDERED list: field 0, quote 1, field 1, quote 2, field 2 … quote n, field n.
+// Field 0 is what was written above the first quote, field i the reply to quote i, and field n — the
+// composer's own main textarea — the free text after the last quote. `fields.length` is always
+// `quotes.length + 1`. Stored as the quote list with each field kept on the quote BELOW it
+// (`before`) plus the main draft, so an old stack loads unchanged.
+// ---------------------------------------------------------------------------
+
+/** The composer as one ordered list. `fields.length === quotes.length + 1`. */
+export interface ComposerFields { quotes: ReplyTarget[]; fields: string[] }
+
+/** Where the caret is: which field, and the offset in it. */
+export interface FieldCaret { field: number; caret: number }
+
+/** Stored shape → ordered list. */
+export function toFields(replies: readonly ReplyTarget[], draft: string): ComposerFields {
+  return {
+    quotes: replies.map(({ before: _b, ...t }) => t),
+    fields: [...replies.map(r => r.before ?? ''), draft],
+  }
+}
+
+/** Ordered list → stored shape. An empty field is not stored, so an unchanged target compares equal. */
+export function fromFields(f: ComposerFields): { replies: ReplyTarget[]; draft: string } {
+  return {
+    replies: f.quotes.map((q, i) => {
+      const { before: _b, ...t } = q
+      const before = f.fields[i] ?? ''
+      return before === '' ? t : { ...t, before }
+    }),
+    draft: f.fields[f.quotes.length] ?? '',
+  }
+}
+
+/**
+ * Add a quote AT THE CARET: the field being edited is split there, the quote goes in between, and
+ * the text after the caret becomes the new quote's reply. With the caret at the end of a field this
+ * is "after the segment being edited" — never stacked at the top. The caret lands at the start of
+ * the new reply field, which is where the answer to that quote is written.
+ *
+ * The same quote twice is not added (`addReply`'s rule); the state comes back unchanged.
+ */
+export function insertQuoteAt(
+  f: ComposerFields, at: FieldCaret, target: ReplyTarget,
+): { fields: ComposerFields; focus: FieldCaret } {
+  const field = Math.max(0, Math.min(at.field, f.quotes.length))
+  const text = f.fields[field] ?? ''
+  const caret = Math.max(0, Math.min(at.caret, text.length))
+  if (target.text.trim() === '' || f.quotes.some(q => sameReply(q, target))) {
+    return { fields: { quotes: [...f.quotes], fields: [...f.fields] }, focus: { field, caret } }
+  }
+  const { before: _b, ...clean } = target
+  const left = text.slice(0, caret).replace(/\s+$/, '')
+  const right = text.slice(caret).replace(/^\s+/, '')
+  const quotes = [...f.quotes]
+  quotes.splice(field, 0, clean)
+  const fields = [...f.fields]
+  fields.splice(field, 1, left, right)
+  return { fields: { quotes, fields }, focus: { field: field + 1, caret: 0 } }
+}
+
+/**
+ * Remove quote `i` and MERGE its reply into the field above it — typed text is never lost. The
+ * caret lands where the two met.
+ */
+export function removeQuoteAt(f: ComposerFields, i: number): { fields: ComposerFields; focus: FieldCaret } {
+  if (i < 0 || i >= f.quotes.length) return { fields: { quotes: [...f.quotes], fields: [...f.fields] }, focus: { field: 0, caret: 0 } }
+  const above = f.fields[i] ?? ''
+  const reply = f.fields[i + 1] ?? ''
+  const joint = above.trim() !== '' && reply.trim() !== '' ? '\n\n' : ''
+  const merged = above.trim() === '' ? reply : reply.trim() === '' ? above : above.replace(/\s+$/, '') + joint + reply.replace(/^\s+/, '')
+  const quotes = f.quotes.filter((_, k) => k !== i)
+  const fields = [...f.fields]
+  fields.splice(i, 2, merged)
+  const caret = above.trim() === '' ? 0 : reply.trim() === '' ? merged.length : above.replace(/\s+$/, '').length + joint.length
+  return { fields: { quotes, fields }, focus: { field: i, caret } }
+}
+
+/**
+ * What the harness receives: the attachment paths (leading, which is where `splitMessage` reads
+ * them), then field 0, quote 1, field 1, quote 2 … field n, each block a blank line apart. The blank
+ * line is load-bearing — see `composeReply` — and empty blocks are dropped. `mapText` transforms
+ * each field (the `#` mention expansion) without touching the quotes.
+ */
+export function serializeFields(
+  f: ComposerFields, paths: readonly string[] = [], mapText: (s: string) => string = s => s,
+): string {
+  const blocks: string[] = [paths.join('\n')]
+  f.fields.forEach((text, i) => {
+    blocks.push(mapText(text))
+    const q = f.quotes[i]
+    if (q) blocks.push(quoteFor(q))
+  })
+  return blocks.map(b => b.trim()).filter(b => b !== '').join('\n\n')
+}
+
+/**
+ * The inverse of `serializeFields` for a text with no paths: every `> ` run is a quote (an EXCERPT —
+ * see `splitQuotedDraft`), and the text between runs is the field. A run that unquotes to nothing
+ * stays text.
+ */
+export function parseFields(text: string): ComposerFields {
+  const lines = text.split('\n')
+  const quotes: ReplyTarget[] = []
+  const fields: string[] = []
+  let buf: string[] = []
+  let i = 0
+  // A `> ` line inside a fenced code block is code, not a quote.
+  let fenced = false
+  while (i < lines.length) {
+    if (/^\s*(```|~~~)/.test(lines[i]!)) fenced = !fenced
+    if (fenced || !isQuoteLine(lines[i]!)) { buf.push(lines[i]!); i++; continue }
+    let end = i
+    while (end < lines.length && isQuoteLine(lines[end]!)) end++
+    const run = lines.slice(i, end)
+    const quote = unquoteLines(run.join('\n'))
+    if (quote === '') buf.push(...run)
+    else {
+      fields.push(buf.join('\n').trim())
+      quotes.push({ role: 'assistant', text: quote, excerpt: true })
+      buf = []
+    }
+    i = end
+  }
+  fields.push(buf.join('\n').trim())
+  return { quotes, fields }
+}
+
+/**
+ * The SENT message as the bubble draws it: quote and text segments in the order they were written,
+ * so each reply sits under the passage it answers.
+ */
+export type SentSegment = { kind: 'quote'; text: string } | { kind: 'text'; text: string }
+export function sentSegments(text: string): SentSegment[] {
+  const f = parseFields(text)
+  const out: SentSegment[] = []
+  f.fields.forEach((t, i) => {
+    if (t !== '') out.push({ kind: 'text', text: t })
+    const q = f.quotes[i]
+    if (q) out.push({ kind: 'quote', text: q.text })
+  })
+  return out
+}
+
+/**
+ * Text arriving from outside (a queued message handed back, a rewind) joins the composer: its own
+ * leading text joins the main field (`join`, the caller's `applyDraftRequest`), and its quotes and
+ * replies follow, in their order.
+ */
+export function appendIncoming(f: ComposerFields, text: string, join: (draft: string, text: string) => string): ComposerFields {
+  const inc = parseFields(text)
+  const last = f.fields[f.fields.length - 1] ?? ''
+  const lead = inc.fields[0] ?? ''
+  let quotes = [...f.quotes]
+  const fields = [...f.fields.slice(0, -1), lead === '' ? last : join(last, lead)]
+  inc.quotes.forEach((q, k) => {
+    if (quotes.some(x => sameReply(x, q))) {
+      // Already here: its reply joins the field it would have opened rather than being lost.
+      const reply = inc.fields[k + 1] ?? ''
+      if (reply !== '') fields[fields.length - 1] = join(fields[fields.length - 1]!, reply)
+      return
+    }
+    quotes = [...quotes, q]
+    fields.push(inc.fields[k + 1] ?? '')
+  })
+  return { quotes, fields }
 }
 
 /** Text written by the person, excluding markdown quote lines. */
@@ -263,11 +443,13 @@ export function parseReply(raw: string | null): ReplyTarget | null {
     const excerpt = (v as Record<string, unknown>).excerpt === true
     const key = (v as Record<string, unknown>).key
     const id = (v as Record<string, unknown>).id
+    const before = (v as Record<string, unknown>).before
     return {
       role, text,
       ...(excerpt ? { excerpt: true } : {}),
       ...(typeof key === 'string' && key !== '' ? { key } : {}),
       ...(typeof id === 'string' && /^\d+$/.test(id) ? { id } : {}),
+      ...(typeof before === 'string' && before !== '' ? { before } : {}),
     }
   } catch { return null }
 }

@@ -53,8 +53,24 @@ function archiveDestFor(src: string): string | null {
 }
 
 /** Mirror a single changed file into the archive. Called by the file watcher. */
+/**
+ * `archiveEnabled` for the watcher's hot path. The watcher calls `mirrorFile` on EVERY file event,
+ * and each call read and parsed preferences.json from disk to learn the archive mode — with sessions
+ * writing, ~12 % of a core measured (PERF.1 step 1). The answer is held for a few seconds: turning
+ * 'full' on runs a `fullSync()` of its own (the preferences route), and a mirror copied for a few
+ * seconds after it is turned off is a copy nobody reads.
+ */
+const MIRROR_MODE_TTL_MS = 5_000
+let _mirrorMode: { enabled: boolean; at: number } | null = null
+async function mirrorEnabled(): Promise<boolean> {
+  if (_mirrorMode && Date.now() - _mirrorMode.at < MIRROR_MODE_TTL_MS) return _mirrorMode.enabled
+  const enabled = await archiveEnabled()
+  _mirrorMode = { enabled, at: Date.now() }
+  return enabled
+}
+
 export async function mirrorFile(src: string): Promise<void> {
-  if (!(await archiveEnabled())) return
+  if (!(await mirrorEnabled())) return
   if (src === STATS_CACHE_FILE) {
     await snapshotStatsCache()
     return

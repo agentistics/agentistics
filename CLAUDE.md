@@ -3573,3 +3573,11 @@ bash and nothing exercised it, so a defect was observable only in production, on
   `BUMP="patch"` floor in the shell converts that loud failure back into a quietly wrong release,
   so the lint refuses one. A NON-empty list of only non-conventional subjects is a different thing
   — the read worked, there is nothing to bump — and is a legitimate patch.
+
+## Release checklist — the "What's new" entry
+
+**Every release adds its entry to `packages/web/src/whatsNew/releases.ts` in the same commit.** After
+an update the first load announces "Updated to vX — see what's new" and opens a modal built from that
+file (`whatsNew/select.ts` picks every version between the one last seen and the running one). Only
+changes a person can notice belong there — `features` and `fixes`, 3–8 short plain-language lines each,
+PT and EN, no refactors/tests/internal items. A version with no entry announces nothing.

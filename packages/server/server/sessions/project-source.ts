@@ -17,9 +17,12 @@
  */
 
 import { homedir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { countPerKind, pathForHost, PROJECTS_PER_KIND, projectKind, projectPathKey, takePerKind, type ProjectKind } from '@agentistics/core'
 import { loadConsolidated } from '../consolidate'
 import { isDirectory, isWholeDiskRoot, isWorktreeDir, scanDirectories, type ScanOptions } from './dir-scan'
+import { DiskIndex, type DiskIndexProgress } from './disk-index'
+import { discoverProjectDisks, type ProjectDisk } from '../disk-picker'
 import { readPreferences } from '../preferences'
 import {
   buildCandidates, mergeWalkedAndHistory, searchCandidates, withFixedCandidates,
@@ -30,9 +33,26 @@ import {
  *  shows up without restarting the control center. */
 const CACHE_TTL_MS = 60_000
 
-interface ProjectCache { at: number; candidates: ProjectCandidate[]; indexing: boolean }
+interface ProjectCache { at: number; candidates: ProjectCandidate[]; indexing: boolean; indexProgress: DiskIndexProgress[] }
 let cache: ProjectCache | null = null
 let indexingPromise: Promise<void> | null = null
+const diskIndex = new DiskIndex()
+
+function normalPath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+}
+
+/** The home itself and temporary trees are implementation space, never places to start a session. */
+export function isExcludedProjectPath(path: string, home = homedir(), temporary = tmpdir()): boolean {
+  const candidate = normalPath(path)
+  const homeRoot = normalPath(home)
+  const temporaryRoot = normalPath(temporary)
+  return candidate === homeRoot || candidate === temporaryRoot || candidate.startsWith(`${temporaryRoot}/`)
+}
+
+function visibleCandidates(candidates: readonly ProjectCandidate[]): ProjectCandidate[] {
+  return candidates.filter(c => !isExcludedProjectPath(c.path))
+}
 
 async function readHistoryAndRoots(): Promise<{ history: ProjectCandidate[]; roots: string[] }> {
   const [history, roots] = await Promise.all([
@@ -49,22 +69,40 @@ async function readHistoryAndRoots(): Promise<{ history: ProjectCandidate[]; roo
 function startBackgroundIndex(history: ProjectCandidate[], scanRoots: string[]): void {
   if (indexingPromise) return
   indexingPromise = (async () => {
-    const scannedGroups = await Promise.all(scanRoots.map(root => {
-      const options: ScanOptions = isWholeDiskRoot(root) ? {} : { timeBudgetMs: 1_000 }
+    const diskRoots = scanRoots.filter(isWholeDiskRoot)
+    diskIndex.configure(diskRoots)
+    const regularRoots = scanRoots.filter(root => !isWholeDiskRoot(root))
+    let regularWalked: ProjectCandidate[] = []
+    const update = (snapshot: ReturnType<typeof diskIndex.snapshot>) => {
+      const walked = [...regularWalked, ...snapshot.candidates].map(d => 'source' in d ? d : {
+        path: d.path, name: d.name, remote: '', lastSeenMs: 0, sessions: 0,
+        source: d.repo || d.worktree ? 'repo' : 'folder', worktree: d.worktree,
+      }) as ProjectCandidate[]
+      cache = { at: Date.now(), candidates: mergeWalkedAndHistory(visibleCandidates(walked), visibleCandidates(history)), indexing: snapshot.indexing || !!indexingPromise, indexProgress: snapshot.progress }
+    }
+    diskIndex.onSnapshot = update
+    diskIndex.start()
+    const scannedGroups = await Promise.all(regularRoots.map(root => {
+      const options: ScanOptions = { timeBudgetMs: 1_000 }
       return scanDirectories(root, options).catch(() => [])
     }))
-    const walked: ProjectCandidate[] = scannedGroups.flat().map(d => ({
+    regularWalked = scannedGroups.flat().map(d => ({
       path: d.path, name: d.name, remote: '', lastSeenMs: 0, sessions: 0,
       source: d.repo || d.worktree ? 'repo' : 'folder', worktree: d.worktree,
     }))
-    let candidates = mergeWalkedAndHistory(walked, history)
+    const diskWalked: ProjectCandidate[] = diskIndex.snapshot().candidates.map(d => ({
+      path: d.path, name: d.name, remote: '', lastSeenMs: 0, sessions: 0,
+      source: d.repo || d.worktree ? 'repo' : 'folder', worktree: d.worktree,
+    }))
+    let candidates = mergeWalkedAndHistory(visibleCandidates([...regularWalked, ...diskWalked]), visibleCandidates(history))
     const unresolved = candidates.filter(c => c.worktree === undefined)
     if (unresolved.length > 0) {
       const flags = await Promise.all(unresolved.map(c => isWorktreeDir(c.path)))
       const resolved = new Map(unresolved.map((c, i) => [c.path, flags[i]!]))
       candidates = candidates.map(c => resolved.has(c.path) ? { ...c, worktree: resolved.get(c.path) } : c)
     }
-    cache = { at: Date.now(), candidates, indexing: false }
+    const snapshot = diskIndex.snapshot()
+    cache = { at: Date.now(), candidates, indexing: snapshot.indexing, indexProgress: snapshot.progress }
   })().catch(() => {
     if (cache) cache = { ...cache, at: Date.now(), indexing: false }
   }).finally(() => { indexingPromise = null })
@@ -81,7 +119,7 @@ async function allCandidates(): Promise<ProjectCache> {
     return cache
   }
   const { history, roots } = await readHistoryAndRoots()
-  cache = { at: now, candidates: history, indexing: true }
+  cache = { at: now, candidates: visibleCandidates(history), indexing: true, indexProgress: [] }
   startBackgroundIndex(history, roots)
   return cache
 }
@@ -110,13 +148,43 @@ export interface ProjectSearch {
   totals: Record<ProjectKind, number>
   /** True while the local filesystem index is being refreshed in the background. */
   indexing: boolean
+  indexProgress: DiskIndexProgress[]
+  disks: { id: string; label: string; letter?: string; install: boolean; count: number }[]
+}
+
+function pathOnDisk(path: string, disk: ProjectDisk): boolean {
+  const a = path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  const b = disk.path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  return a === b || a.startsWith(`${b}/`)
+}
+
+function diskForPath(path: string, disks: ProjectDisk[]): ProjectDisk | undefined {
+  return disks.filter(d => pathOnDisk(path, d)).sort((a, b) => b.path.length - a.path.length)[0]
+}
+
+export function filterCandidatesByDisk<T extends { path: string }>(
+  candidates: readonly T[], disks: readonly ProjectDisk[], requestedDisk?: string,
+): { candidates: T[]; selectedDisk?: ProjectDisk } {
+  const install = disks.find(d => d.isInstallDisk) ?? disks[0]
+  const selectedDisk = requestedDisk === 'all' ? undefined : disks.find(d => d.path === requestedDisk) ?? install
+  return {
+    candidates: selectedDisk
+      ? candidates.filter(c => diskForPath(c.path, [...disks])?.path === selectedDisk.path)
+      : [...candidates],
+    selectedDisk,
+  }
 }
 
 export async function findProjects(
-  query: string, cwd: string, perKind = PROJECTS_PER_KIND,
+  query: string, cwd: string, perKind = PROJECTS_PER_KIND, requestedDisk?: string,
 ): Promise<ProjectSearch> {
   const indexed = await allCandidates()
-  const known = indexed.candidates
+  const configuredRoots = (await readPreferences().catch(() => ({ scanRoots: [] as string[] }))).scanRoots ?? []
+  const discovered = await discoverProjectDisks().catch(() => [])
+  const disks = discovered.filter(d => d.isInstallDisk || configuredRoots.some(root => pathOnDisk(root, d)))
+  const filtered = filterCandidatesByDisk(visibleCandidates(indexed.candidates), disks, requestedDisk)
+  const selectedDisk = filtered.selectedDisk
+  const known = filtered.candidates
 
   // Only worth a `stat` when the path is not already KNOWN — `withFixedCandidates` keeps the known
   // entry's already-resolved `worktree` and merely overrides `source`, so paying for this twice
@@ -154,12 +222,23 @@ export async function findProjects(
    * the cap was spending its budget on. A directory named like the one you want must not be able
    * to push the one you want off the list. See `takePerKind`.
    */
-  const ranked = searchCandidates(withFixedCandidates(known, fixed), query, Number.MAX_SAFE_INTEGER)
+  const visibleFixed = fixed.filter(c => !isExcludedProjectPath(c.path) && (!selectedDisk || diskForPath(c.path, disks)?.path === selectedDisk.path))
+  const ranked = searchCandidates(withFixedCandidates(known, visibleFixed), query, Number.MAX_SAFE_INTEGER)
+  const diskCounts = disks.map(d => ({
+    id: d.path, label: d.label, ...(d.letter ? { letter: d.letter } : {}), install: d.isInstallDisk,
+    count: searchCandidates(withFixedCandidates(indexed.candidates.filter(c => diskForPath(c.path, disks)?.path === d.path), []), query, Number.MAX_SAFE_INTEGER).length,
+  }))
   return {
     rows: takePerKind(ranked, c => projectKind(c), perKind),
     totals: countPerKind(ranked, c => projectKind(c)),
     indexing: indexed.indexing,
+    indexProgress: indexed.indexProgress,
+    disks: diskCounts,
   }
+}
+
+export function diskIndexProgress(): DiskIndexProgress[] {
+  return diskIndex.snapshot().progress
 }
 
 function baseName(path: string): string {

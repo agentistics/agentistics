@@ -16,10 +16,12 @@
  * host per request would fire one per poll.
  */
 
+import { PROMPT_ACK_MS, withDeadline } from './prompt-deadline'
 import type { HarnessId, ProjectKind } from '@agentistics/core'
 import type { StartHost } from '../cli-start'
 import type { CliLang } from '../cli-lang'
 import { recordPrompt } from './pending-prompts'
+import { recordComposerMessage } from './composer-message'
 import { isExternalRowId, planContinueHere } from './external-continue'
 import { SPAWN_SPECS } from './spawn-spec'
 import { cliStrings } from '../cli-i18n'
@@ -119,6 +121,8 @@ export interface FleetActionResponse {
    * question; resend with `confirm: true` to go ahead.
    */
   confirm?: boolean
+  /** Present on a failed pane write; the browser offers the matching recovery action. */
+  failure?: 'prompt' | 'ended'
 }
 
 /**
@@ -309,37 +313,34 @@ export async function runFleetAction(
       // the harness writes for it — the resolver refuses a record from after the turn it is asked
       // about, and a submit that waits on the pane takes hundreds of milliseconds.
       const sentAtMs = Date.now()
-      const out = await host.promptSession(req.id, text)
-      // RECORDED ONLY ON A CONFIRMED DELIVERY, and recorded HERE rather than in the browser: a
-      // queue held by the tab that sent it is a queue no other device can see, which is the whole
-      // of the report. `conversationOfRow` because a message belongs to the CONVERSATION, not to
-      // the session that happened to host it — reopening one must not lose what is still waiting.
-      //
-      // AND IT DOES NOT HOLD THE REPLY. `host.sessions()` is a FLEET READ — it walks every session
-      // and captures panes — and awaiting it here put that whole cost between pressing enter and
-      // the browser hearing back, on the one action where the person is watching. Reported as
-      // "está demorando pra ser enviada… não tem motivo pra demorar", and there was none: the
-      // message had already been delivered by the line above.
-      //
-      // The queue is for DISPLAY, so it can be written a moment later. What it must not do is make
-      // the send look slow. A failure to record leaves the message un-queued and delivered, which
-      // is the harmless direction: the transcript is the record either way.
-      if (out.ok) {
+      // Runs only on a CONFIRMED delivery (now or late, see the race below). Besides the display
+      // queue it records the composer fingerprint, so the chat shows this turn as the person's own
+      // message even when the harness stored it as a paste (`recordComposerMessage`).
+      const record = () => {
+        recordComposerMessage(req.id, text)
         void (async () => {
           try {
             const row = (await host.sessions?.())?.sessions.find(r => r.id === req.id || r.conversationId === req.id)
             const conv = row ? conversationOfRow(row) : ''
             if (conv) recordPrompt(conv, text)
-            // What this message CARRIED, off the text that was just typed — see
-            // `attachmentMessageOf`. The same row lookup serves both, so it costs nothing more.
             const carried = attachmentMessageOf(conv ?? '', sentAtMs, text)
             if (carried) await recordAttachmentMessage(carried)
           } catch { /* the message went; the queue is a view of it, not the record */ }
-          // The pushed chat (PERF.1) hears about the send now, not on its next safety read.
           const { wakeChat } = await import('./chat-stream')
           wakeChat(req.id)
         })()
       }
+      // THE RESPONSE IS NOT HELD FOR A SLOW PANE. `promptSession` is a chain of tmux spawns under
+      // the pane's write lock; past `PROMPT_ACK_MS` the keys are in flight, so the browser is told
+      // the message was accepted and a LATE failure is raised as a notification instead.
+      const raced = await withDeadline(host.promptSession(req.id, text), PROMPT_ACK_MS, late => {
+        if ('value' in late && late.value.ok) { record(); return }
+        const message = 'value' in late ? late.value.message : (lang === 'pt' ? 'A mensagem não foi entregue.' : 'The message was not delivered.')
+        void import('../sse').then(m => m.broadcastNotification({ type: 'error', title: 'Message not delivered', message })).catch(() => {})
+      })
+      if (!raced.settled) return { ok: true, message: (lang === 'pt' ? 'Mensagem enviada.' : 'Message sent.') }
+      const out = raced.value
+      if (out.ok) record()
       return out
     }
     case 'cycleMode':
@@ -748,6 +749,9 @@ export interface FleetNewOptions {
   projectTotals?: Record<ProjectKind, number>
   /** True while a configured disk is being indexed in the background. */
   projectIndexing?: boolean
+  /** Progress for each configured disk; present while and after indexing for the wizard note. */
+  projectIndexProgress?: { root: string; visited: number; queued: number; candidates: number; complete: boolean }[]
+  projectDisks?: { id: string; label: string; letter?: string; install: boolean; count: number }[]
   /** The tasks that already exist here, so filing the new session is a pick, not a spelling test. */
   tasks: string[]
   /**
@@ -761,7 +765,7 @@ export interface FleetNewOptions {
  * The wizard's own data. Never throws — a machine that cannot answer says so in a sentence, and an
  * empty list is only ever a real "there is nothing here".
  */
-export async function readNewOptions(lang: CliLang, query: string): Promise<FleetNewOptions> {
+export async function readNewOptions(lang: CliLang, query: string, disk?: string): Promise<FleetNewOptions> {
   const s = controlStrings(lang)
   try {
     const host = await hostFor(lang)
@@ -773,7 +777,7 @@ export async function readNewOptions(lang: CliLang, query: string): Promise<Flee
     const [harnesses, projects, tasks] = await Promise.all([
       host.startableHarnesses(),
       host.searchProjects
-        ? host.searchProjects(query).catch(() => EMPTY_PROJECT_SEARCH)
+        ? host.searchProjects(query, disk).catch(() => EMPTY_PROJECT_SEARCH)
         : Promise.resolve(EMPTY_PROJECT_SEARCH),
       host.sessionTasks ? host.sessionTasks().catch(() => []) : Promise.resolve([]),
     ])
@@ -828,6 +832,8 @@ export async function readNewOptions(lang: CliLang, query: string): Promise<Flee
        */
       projectTotals: projects.totals,
       ...(projects.indexing ? { projectIndexing: true } : {}),
+      ...(projects.indexProgress ? { projectIndexProgress: projects.indexProgress } : {}),
+      ...(projects.disks ? { projectDisks: projects.disks } : {}),
       tasks,
     }
   } catch (e) {
@@ -1237,6 +1243,9 @@ async function continueExternal(lang: CliLang, req: FleetActionRequest, text: st
     attach: false,
     prompt: text,
   })
-  if (out.ok) recordPrompt(plan.conversationId, text)
+  if (out.ok) {
+    recordPrompt(plan.conversationId, text)
+    recordComposerMessage(req.id, text)
+  }
   return { ok: out.ok, message: out.ok ? cli.sessContinuedHere : out.message, ...(out.id ? { id: out.id } : {}) }
 }

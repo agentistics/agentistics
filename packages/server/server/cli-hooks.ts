@@ -259,6 +259,27 @@ async function install(what: { hook: boolean; skill: boolean }): Promise<number>
   return failed ? 1 : 0
 }
 
+/**
+ * Refresh an installation after the agentop binary moved during an upgrade.
+ *
+ * This deliberately does not install the integration for a user who never opted into it: an
+ * existing settings file is not enough. At least one managed hook must already be present. Once
+ * opted in, use the same installer as `agentop hooks install`; its merge planner updates only our
+ * entries, adds a newly introduced managed hook, and leaves every unrelated hook untouched.
+ */
+export async function refreshInstalledHooks(): Promise<boolean> {
+  try {
+    const file = settingsFile()
+    const settings = await readSettings(file)
+    const installed = HOOK_SPECS.some(spec => readHookStatus(settings, HOOK_VERSION, spec.event).installed)
+    if (!installed) return false
+    return (await install({ hook: true, skill: false })) === 0
+  } catch {
+    // A hook refresh must never turn an otherwise successful binary upgrade into a failed one.
+    return false
+  }
+}
+
 async function uninstall(what: { hook: boolean; skill: boolean }): Promise<number> {
   let failed = false
 

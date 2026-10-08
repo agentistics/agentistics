@@ -24,6 +24,8 @@ export type PromptMode =
 export interface SpawnSpec {
   /** The binary, as it is found on PATH. */
   bin: string
+  /** Safe per-process flags that avoid shared-daemon state; never written to the user's config. */
+  startupArgs?: readonly string[]
   prompt: PromptMode
   /** Absent when the CLI has no model flag. */
   modelFlag?: string
@@ -60,6 +62,25 @@ export interface SpawnSpec {
    */
   resume?: (id: string) => string[]
   /**
+   * The OFFICIAL channel that tells this harness where it is running (see `agentistics-context.ts`).
+   * ABSENT = no verified channel: the context is prepended to the FIRST user message instead.
+   *  - `args`    — a flag carrying the text itself;
+   *  - `env-dir` — an env var naming a directory that holds an instructions file we write.
+   */
+  context?:
+    | { kind: 'args'; args: (text: string) => string[] }
+    | { kind: 'env-dir'; env: string; file: string }
+    /**
+     * Files we write under the session's own context dir (OUTSIDE the user's project), reached by an
+     * env var and/or flags that point the harness at them.
+     */
+    | {
+        kind: 'files'
+        files: (dir: string, text: string) => { name: string; text: string }[]
+        env?: (dir: string) => Record<string, string>
+        args?: (dir: string) => string[]
+      }
+  /**
    * The argv (after `bin`) that tells a FRESH session which conversation id to write under.
    *
    * Absent for every CLI that invents its own and never reports it back, which is most of them —
@@ -93,6 +114,11 @@ export interface SpawnRequest {
    */
   conversationId?: string
   prompt?: string
+  /**
+   * What the harness is told about agentistics at spawn. `dir` is where an `env-dir` harness gets its
+   * instructions file (the caller writes `SpawnPlan.contextFile` there). Ignored beside `resumeId`.
+   */
+  context?: { text: string; block: string; dir: string }
   model?: string
   effort?: string
   label?: string
@@ -120,6 +146,14 @@ export interface InitialPrompt {
 
 export interface SpawnPlan {
   argv: string[]
+  /** Extra environment for the pane (an `env-dir` context channel). */
+  env?: Record<string, string>
+  /** A file the CALLER must write before spawning (this module is pure). */
+  contextFile?: { dir: string; name: string; text: string }
+  /** Further files of a `files` channel, written beside `contextFile` (same dir). */
+  contextExtraFiles?: { name: string; text: string }[]
+  /** How the context travelled; absent when none was asked for. */
+  contextVia?: 'args' | 'env-dir' | 'files' | 'first-message' | 'none'
   /** How to deliver the initial prompt once the harness is up — absent when there is no prompt, or a
    *  `flag` harness that runs it itself. */
   initialPrompt?: InitialPrompt
@@ -152,6 +186,8 @@ export interface BackendSpawn {
   id: string
   cwd: string
   argv: string[]
+  /** Extra environment variables for the pane, merged over the session env. */
+  env?: Record<string, string>
   /**
    * How to deliver the initial prompt once the harness is ready to receive it.
    *
@@ -258,6 +294,24 @@ export interface ManagedSession {
    * as two is the double-count that rule exists to prevent.
    */
   subtaskId?: string
+  /**
+   * The agentistics context, HELD for a harness with no system channel that was started with no
+   * first message. Sending it alone would make the assistant answer it, so it waits and is
+   * prepended to the first real prompt (`promptSession`), then cleared.
+   */
+  pendingContext?: string
+  /**
+   * The managed id of the session that STARTED this one (`AGENTOP_MANAGED_ID` of the caller, or an
+   * explicit `parent` on the HTTP spawn). Recorded at spawn, the one moment it is a fact; a reopen
+   * inherits it. It is what the child is told to report to (`agentistics_session_message`).
+   */
+  parentSessionId?: string
+  /**
+   * The parent's CONVERSATION id, when it was known at spawn. A managed id changes on every reopen of
+   * the parent; the conversation does not, so this is the link that survives. Resolved to the live
+   * row at read/send time.
+   */
+  parentConversationId?: string
   attemptId?: string
   /**
    * The last time this session was OBSERVED ALIVE, epoch ms — stamped at creation, then refreshed by

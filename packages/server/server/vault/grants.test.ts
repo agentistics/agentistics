@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { memoryProtector } from '@agentistics/vault'
 import { __resetVaultForTests, ensureVaultOpen, lockVault, sealToFile } from './service'
 import { __resetPersonalForTests, createGroup, createItem } from './personal'
-import { __resetGrantsForTests, grantBriefing, grantEnv, grantOf, grantSession, refKey, revokeGrant, scrubDeep, scrubTerminalLine } from './grants'
+import { __resetGrantsForTests, grantBriefing, grantEnv, grantOf, grantSession, refKey, revokeGrant, scrubDeep, scrubTerminalLine, VAULT_REF_INSTRUCTION } from './grants'
 
 beforeEach(async () => {
   const dir = await mkdtemp(join(tmpdir(), 'agentistics-grants-'))
@@ -28,7 +28,9 @@ describe('per-session grants', () => {
     expect(r.grant.refs.map(x => x.ref)).toEqual(['vault://openai', 'vault://painel-pelvie/login', 'vault://painel-pelvie/password'])
     expect(await grantEnv('s1')).toEqual({ VAULT_OPENAI: 'MARKER-2', VAULT_PAINEL_PELVIE_LOGIN: 'adm', VAULT_PAINEL_PELVIE_PASSWORD: 'MARKER-1' })
     const brief = grantBriefing(r.grant, 'pt')
-    expect(brief).toContain('$VAULT_OPENAI')
+    expect(brief).toContain(VAULT_REF_INSTRUCTION)
+    expect(brief).toContain('vault://openai')
+    expect(brief).not.toContain('VAULT_OPENAI')
     expect(brief).not.toContain('MARKER')
     void a
   })
@@ -41,6 +43,15 @@ describe('per-session grants', () => {
     await grantSession('s1', [b.id], [])
     lockVault('user')
     expect(grantOf('s1')).toBeNull()
+  })
+  test('a ref is refused outside the live managed-session grant window', async () => {
+    const { useRef } = await import('./grants')
+    const b = (await createItem({ kind: 'api-key', name: 'OpenAI', fields: { value: 'MARKER-window' } })).meta
+    expect(await useRef('s1', 'vault://openai')).toEqual({ ok: false, code: 'not-granted' })
+    await grantSession('s1', [b.id], [])
+    expect(await useRef('other-session', 'vault://openai')).toEqual({ ok: false, code: 'not-granted' })
+    lockVault('user')
+    expect(await useRef('s1', 'vault://openai')).toEqual({ ok: false, code: 'not-granted' })
   })
   test('ref keys', () => {
     expect(refKey('Banco Itaú (PF)')).toBe('banco-itau-pf')
