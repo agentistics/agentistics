@@ -2,6 +2,7 @@ import path from 'node:path'
 import { agentisticsMcpLaunch, CANONICAL_MCP_NAME, sameMcpLaunch, staleAgentisticsMcps, type StaleMcp } from './mcp-launch'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { HOME_DIR } from './config'
+import { mayRegisterHarnessMcp } from './mcp-registration'
 
 
 export const NAY_CHAT_DIR = path.join(HOME_DIR, '.agentistics', 'nay-chat')
@@ -216,6 +217,7 @@ export async function ensureNayChat(port: number): Promise<void> {
 // claude --print mode (which reads ~/.claude.json user scope) can find the tools.
 // Safe to call on every restart — skips if already registered with the same port.
 export async function registerMcpGlobally(port: number): Promise<void> {
+  if (!mayRegisterHarnessMcp(port)) return
   const apiUrl = `http://localhost:${port}`
   // `agentop mcp` on an installed binary, `bun run <script>` in a checkout — see `mcp-launch.ts`
   // for why the script path alone left every other machine without an MCP.

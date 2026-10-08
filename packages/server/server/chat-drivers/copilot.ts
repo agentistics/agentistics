@@ -15,6 +15,7 @@ import { agentisticsMcpLaunch, sameMcpLaunch } from '../mcp-launch'
 import { existsSync, readFileSync } from 'node:fs'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { HOME_DIR } from '../config'
+import { mayRegisterHarnessMcp } from '../mcp-registration'
 import type { ChatDriver } from './types'
 import { findCli } from './cli-detect'
 
@@ -32,6 +33,7 @@ function copilotIsAvailable(): boolean {
  * ~/.copilot/mcp-config.json. Idempotent — skips if entry already matches.
  */
 async function ensureCopilotMcp(port: number): Promise<void> {
+  if (!mayRegisterHarnessMcp(port)) return
   const apiUrl = `http://localhost:${port}`
   // `agentop mcp` on an installed binary, the script in a checkout — see `mcp-launch.ts`.
   const launch = agentisticsMcpLaunch()
