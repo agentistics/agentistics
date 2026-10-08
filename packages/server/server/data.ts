@@ -1130,28 +1130,40 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     // page. Consolidate mode exists precisely because the harnesses delete their own transcripts,
     // so "its raw files are gone" is the normal case, not an edge one.
     const harnessSet = new Set<SurfaceHarnessId>(['claude'])
+    // Revival is in two halves. Claude's stored sessions are revived HERE, against the Claude walk.
+    // Every other harness's are revived after the adapters have run (below): revived here, a LIVE
+    // Codex session's stored copy — written by the PREVIOUS build — was listed before the adapter's
+    // fresh one, won the final dedup, and the dashboard showed every non-Claude session one build
+    // behind (an appended turn appeared only when something else changed), with the session listed
+    // twice in its project. It also let a stored non-Claude session reach `supplementStatsCache`,
+    // which must only ever see Claude's.
+    const deferredRevival: SessionMeta[] = []
+    const revive = (s: SessionMeta) => {
+      const id = s.session_id
+      sessions.push(s)
+      harnessSet.add(s.harness)
+      const existing = projByPath.get(s.project_path)
+      if (existing) {
+        existing.sessions.push({ sessionId: id, created: s.start_time })
+      } else if (s.project_path) {
+        const np: ServerProject = {
+          path: s.project_path,
+          name: s.project_path.split('/').filter(Boolean).pop() ?? s.project_path,
+          sessions: [{ sessionId: id, created: s.start_time }],
+          gitRemote: s.git_remote || undefined,
+        }
+        projects.push(np)
+        projByPath.set(s.project_path, np)
+      }
+    }
+    let projByPath = new Map(projects.map(p => [p.path, p]))
     if (mode === 'consolidate') {
       const liveIds = new Set(sessions.map(s => s.session_id))
       // Live ids are skipped inside the store read, before it copies them (PERF.1).
       const stored = await loadConsolidated({ skipIds: liveIds })
-      const projByPath = new Map(projects.map(p => [p.path, p]))
-      for (const [id, s] of stored) {
-        if (liveIds.has(id)) continue
-        sessions.push(s)
-        harnessSet.add(s.harness)
-        const existing = projByPath.get(s.project_path)
-        if (existing) {
-          existing.sessions.push({ sessionId: id, created: s.start_time })
-        } else if (s.project_path) {
-          const np: ServerProject = {
-            path: s.project_path,
-            name: s.project_path.split('/').filter(Boolean).pop() ?? s.project_path,
-            sessions: [{ sessionId: id, created: s.start_time }],
-            gitRemote: s.git_remote || undefined,
-          }
-          projects.push(np)
-          projByPath.set(s.project_path, np)
-        }
+      for (const s of stored.values()) {
+        if ((s.harness ?? 'claude') === 'claude') revive(s)
+        else deferredRevival.push(s)
       }
     }
 
@@ -1229,6 +1241,17 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
           })
         }
       }
+    }
+    // --- The other half of the consolidate revival (see `deferredRevival` above) ---
+    // Only now is it known which non-Claude sessions are live: a stored one revives only when no
+    // harness reader produced it this build. Remotes are backfilled for them the way the first
+    // pass did for Claude's (a revived session's directory may be gone, so git cannot say).
+    if (deferredRevival.length > 0) {
+      const liveNow = new Set(sessions.map(s => s.session_id))
+      projByPath = new Map(projects.map(p => [p.path, p]))
+      let revived = 0
+      for (const s of deferredRevival) if (!liveNow.has(s.session_id)) { revive(s); revived++ }
+      if (revived > 0) backfillGitRemote(sessions, projects)
     }
     // --- Repository discovery, for every harness ---
     // A repository is a property of a DIRECTORY, not of whichever assistant happened to visit it.
