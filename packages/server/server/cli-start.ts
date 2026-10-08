@@ -131,7 +131,7 @@ import { resolveBackend } from './sessions'
 import { inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
 import { SPAWN_SPECS, planSpawn } from './sessions/spawn-spec'
 import { prependContext } from './sessions/agentistics-context'
-import { buildSpawnContext, pendingContextFor, resolveContextTask, writeContextFile } from './sessions/spawn-context'
+import { buildSpawnContext, pendingContextFor, resolveContextParent, resolveContextTask, writeContextFile } from './sessions/spawn-context'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
 import { bornConversationLink } from './sessions/born-link'
@@ -1904,7 +1904,7 @@ function linkProcessConversationSoon(id: string, harness: HarnessId): void {
 async function spawnRow(a: {
   id: string
   spawnedAt: string
-  req: { harness: HarnessId; cwd: string; label?: string; task?: string; taskId?: string; attemptId?: string; inherit?: ManagedSession }
+  req: { harness: HarnessId; cwd: string; label?: string; task?: string; taskId?: string; attemptId?: string; parentSessionId?: string; inherit?: ManagedSession }
   pendingContext?: string
   model?: string
   effort?: string
@@ -1929,6 +1929,7 @@ async function spawnRow(a: {
     // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
     ...(req.taskId ? { taskId: req.taskId } : {}),
     ...(req.attemptId ? { attemptId: req.attemptId } : {}),
+    ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
     ...(pendingContext ? { pendingContext } : {}),
     // Recorded at the one moment it is certain — the harness was just handed this id, or we asked
     // it to reopen this conversation.
@@ -1983,6 +1984,8 @@ async function spawnManaged(req: {
    */
   contextTaskId?: string
   contextSubtaskId?: string
+  /** The managed id of the session that is starting this one (`ManagedSession.parentSessionId`). */
+  parentSessionId?: string
   attemptId?: string
   /** The row this spawn REPLACES: its identity (`inheritedIdentity`) is born into the new row. */
   inherit?: ManagedSession
@@ -2055,6 +2058,7 @@ async function spawnManaged(req: {
       sessionId: id,
       cwd: req.cwd,
       ...(await resolveContextTask(req.contextTaskId ?? req.taskId, req.contextSubtaskId, req.task)),
+      ...(await resolveContextParent(req.parentSessionId ?? req.inherit?.parentSessionId)),
     })
   const planned = planSpawn({
     harness: req.harness,
@@ -4572,6 +4576,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.task ? { task: req.task } : {}),
         ...(req.taskId ? { contextTaskId: req.taskId } : {}),
         ...(req.subtaskId ? { contextSubtaskId: req.subtaskId } : {}),
+        ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
         ...(req.force ? { force: true } : {}),
       }, S(), lang).then(async r => {
         // NW-02: a session started for a BOARD task is filed there by id, not only named after it.

@@ -70,6 +70,23 @@ export async function resolveContextTask(
   }
 }
 
+/**
+ * The parent session a new one reports to, as the context names it. The title is best effort (the
+ * registry label, else its task name); an unknown id still yields the id — the child can message it.
+ * An empty/absent parent yields nothing.
+ */
+export async function resolveContextParent(parentId: string | undefined): Promise<Pick<ContextInput, 'parentId' | 'parentTitle'>> {
+  if (!parentId) return {}
+  try {
+    const { readRegistry } = await import('./registry')
+    const row = (await readRegistry()).find(m => m.id === parentId)
+    const title = row?.label || row?.task || ''
+    return { parentId, ...(title ? { parentTitle: title } : {}) }
+  } catch {
+    return { parentId }
+  }
+}
+
 export function installedHarnessNames(): string[] | undefined {
   const { ids, blind } = availableHarnesses()
   return blind ? undefined : ids.map(id => HARNESS_NAMES[id] ?? id)

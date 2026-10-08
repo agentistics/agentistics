@@ -155,3 +155,23 @@ describe('delivery per harness', () => {
     }
   })
 })
+
+describe('context for a child session', () => {
+  test('a started session is told its parent and how to report to it', () => {
+    const t = contextText({ sessionId: 'c1', cwd: '/w', parentId: 'p1', parentTitle: 'Leader' })
+    expect(t).toContain('You were started by session p1 ("Leader")')
+    expect(t).toContain('agentistics_session_message (kind: handback | block | question)')
+    expect(t).toContain('not to the user')
+  })
+  test('no parent: no such sentence; unknown title still names the id', () => {
+    expect(contextText({ sessionId: 'c1', cwd: '/w' })).not.toContain('You were started by')
+    const t = contextText({ sessionId: 'c1', cwd: '/w', parentId: 'p1' })
+    expect(t).toContain('You were started by session p1. When you finish')
+  })
+  test('the cleanup rule is ONE bullet and still covers closing children and removing worktrees', () => {
+    const t = contextText({ sessionId: 'c1', cwd: '/w' })
+    expect(t.match(/Clean up after yourself/g)?.length).toBe(1)
+    expect(t).toContain('close it (agentop session kill) and file it in the task\'s finished folder')
+    expect(t).toContain('git worktree remove')
+  })
+})

@@ -17,6 +17,7 @@
  * a session's state by one poll interval — which is a bug people report as flicker.
  */
 
+import { sessionParent } from '../lib/sessionParent'
 import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
   type CSSProperties, type ReactElement, type ReactNode,
@@ -1990,6 +1991,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       // Follow a reopen to the row it created. Without it the panel keeps an id the fleet no longer
       // carries — see `SessionPanel`'s own `onOpened`.
       onOpened={goToReopened}
+      parent={sessionParent(selected, fleet.rows)}
+      {...(sessionParent(selected, fleet.rows)?.openable ? { onOpenParent: () => navigate(sessionPath(sessionParent(selected, fleet.rows)!.id)) } : {})}
       {...(composerMetrics ? { metrics: composerMetrics } : {})}
       // CONTROLLED on both layouts now. Passing `onViewChange` is what suppresses SessionPanel's
       // own header, and mobile draws the same three things in the row that already holds the back

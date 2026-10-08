@@ -134,3 +134,16 @@ test("sessionTokens prices 1h cache writes at the 1h rate (the same figure as th
   const without1h = sessionCostUSD({ ...s, cache_creation_1h_input_tokens: undefined, cache_creation_5m_input_tokens: undefined })!;
   expect(t.cost).toBeGreaterThan(without1h);
 });
+
+import { startedByIndex } from "./session-tokens";
+test("startedByIndex names the parent by title, keyed by managed and conversation id", () => {
+  const m = startedByIndex([
+    { id: "p", conversationId: "cp", title: "Leader" },
+    { id: "c", conversationId: "cc", title: "W", parentSessionId: "p" },
+    { id: "o", title: "Orphan", parentSessionId: "gone" },
+  ]);
+  expect(m.get("cc")).toEqual({ id: "p", title: "Leader" });
+  expect(m.get("c")).toEqual({ id: "p", title: "Leader" });
+  expect(m.get("o")).toEqual({ id: "gone" });
+  expect(m.get("p")).toBeUndefined();
+});

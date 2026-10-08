@@ -214,6 +214,8 @@ export interface SessionView {
   lastUserMessageMs?: number
   /** The task id behind `task` (the label) — `ManagedSession.taskId`, carried straight through. */
   taskId?: string
+  /** The managed id of the session that started this one — `ManagedSession.parentSessionId`. */
+  parentSessionId?: string
   /**
    * Whether this harness has probed approval rules at all.
    *
@@ -634,6 +636,7 @@ export function buildSessionViews(o: {
       ...(r.managed?.effort ? { effort: r.managed.effort } : {}),
       ...(r.managed?.task ? { task: r.managed.task } : {}),
       ...(r.managed?.taskId ? { taskId: r.managed.taskId } : {}),
+      ...(r.managed?.parentSessionId ? { parentSessionId: r.managed.parentSessionId } : {}),
       ...(r.managed?.conversationId ? { conversationId: r.managed.conversationId } : {}),
       ...(r.managed?.conversationLink ? { conversationLink: r.managed.conversationLink } : {}),
       ...(r.managed?.conversationLinkVia ? { conversationLinkVia: r.managed.conversationLinkVia } : {}),

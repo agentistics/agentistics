@@ -1875,6 +1875,18 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       })
       return json(out, notifyStatus(out))
     }
+    // SESSION → SESSION MESSAGES — `agentistics_session_message` (`sessions/session-message.ts`). The sender
+    // must PROVE it is a session (the MCP sends id + HMAC, `session-proof.ts`); unverified is refused.
+    if (url.pathname === '/api/session-message' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({})) as { to?: unknown; kind?: unknown; body?: unknown; session?: { id?: unknown; token?: unknown } }
+      const { verifySessionIdentity } = await import('./sessions/session-identity')
+      const sender = body.session ? await verifySessionIdentity(body.session.id, body.session.token) : null
+      const { sendSessionMessage, defaultMessageDeps, messageStatus } = await import('./sessions/session-message')
+      const out = await sendSessionMessage(sender, {
+        to: String(body.to ?? ''), kind: String(body.kind ?? ''), body: String(body.body ?? ''),
+      }, await defaultMessageDeps())
+      return json(out, messageStatus(out))
+    }
     // USER SESSION GROUPS — the door the MCP tools use to organise sessions (see
     // `sessions/session-groups-web.ts`). Matched before `/api/tasks`; it shares no path with it.
     if (url.pathname === '/api/session-groups' && req.method === 'GET') {

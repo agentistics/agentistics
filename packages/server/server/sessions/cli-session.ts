@@ -29,7 +29,7 @@ import { toControlSession } from './control-session'
 import { recordedRepo, repoFacts } from './repo-facts'
 import { emptyReason, renderSessionTable, resolveWidth } from './session-table'
 import { SPAWN_SPECS, planSpawn } from './spawn-spec'
-import { buildSpawnContext, pendingContextFor, resolveContextTask, resolveContextTaskByRef, writeContextFile } from './spawn-context'
+import { buildSpawnContext, pendingContextFor, resolveContextParent, resolveContextTask, resolveContextTaskByRef, writeContextFile } from './spawn-context'
 import { rulesFor } from './attention-rules'
 // The harness half of a rename. Shared with the cockpit's Rename verb — see `rename.ts`.
 import { renameInHarness, renameMessage } from './rename'
@@ -294,6 +294,15 @@ async function spawnFailure(backend: SessionBackend, id: string, bin?: string): 
     || `the session exited immediately${outcome.status !== undefined ? ` (status ${outcome.status})` : ''}`
 }
 
+/**
+ * The managed id of the session this command runs INSIDE (`AGENTOP_MANAGED_ID`, set on every pane
+ * agentop spawns) — the parent of anything it starts. Undefined outside a managed pane.
+ */
+export function callerSessionId(env: Record<string, string | undefined> = process.env): string | undefined {
+  const id = env.AGENTOP_MANAGED_ID?.trim()
+  return id ? id : undefined
+}
+
 async function start(
   cmd: Extract<SessionCommand, { kind: 'start' }>,
   backend: SessionBackend,
@@ -305,7 +314,8 @@ async function start(
   const cwd = cmd.cwd ? resolve(cmd.cwd) : process.cwd()
   const lang = await resolveLang()
   const id = newSessionId()
-  const ctx = buildSpawnContext({ sessionId: id, cwd, ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)) })
+  const parentSessionId = callerSessionId()
+  const ctx = buildSpawnContext({ sessionId: id, cwd, ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)), ...(await resolveContextParent(parentSessionId)) })
   const planned = planSpawn({
     harness: cmd.harness, cwd, prompt: cmd.prompt, model: cmd.model, effort: cmd.effort,
     conversationId: randomUUID(),
@@ -361,6 +371,7 @@ async function start(
     // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
     ...(cmd.taskId ? { taskId: cmd.taskId } : {}),
     ...(cmd.attemptId ? { attemptId: cmd.attemptId } : {}),
+    ...(parentSessionId ? { parentSessionId } : {}),
     ...(pendingContextFor(planned.plan, ctx) ? { pendingContext: pendingContextFor(planned.plan, ctx)! } : {}),
     // The link is EXACT here: the CLI was handed this id (`SpawnSpec.assignId`).
     ...(planned.plan.conversationId
@@ -501,11 +512,12 @@ async function batch(
   // `task-rollup.ts` has to report as a hole. Best effort: a book that cannot be written costs the
   // ids, never the sessions.
   const resolved = await resolveTaskAndAttempts(cmd).catch(() => null)
+  const parentSessionId = callerSessionId()
 
   for (const spec of cmd.specs) {
     const cwd = spec.cwd ? resolve(spec.cwd) : process.cwd()
     const id = newSessionId()
-    const ctx = buildSpawnContext({ sessionId: id, cwd, ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
+    const ctx = buildSpawnContext({ sessionId: id, cwd, ...(await resolveContextParent(parentSessionId)), ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
     const planned = planSpawn({
       harness: spec.harness,
       cwd,
@@ -555,6 +567,7 @@ async function batch(
       task: cmd.task,
       // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
       ...(resolved?.taskId ? { taskId: resolved.taskId } : {}),
+      ...(parentSessionId ? { parentSessionId } : {}),
       ...(pendingContextFor(planned.plan, ctx) ? { pendingContext: pendingContextFor(planned.plan, ctx)! } : {}),
       ...(spec.attempt && resolved?.attempts.get(spec.attempt)
         ? { attemptId: resolved.attempts.get(spec.attempt)! }
