@@ -284,6 +284,13 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
       + '(idempotent upserts), which is exactly the state a restored machine is in.',
   },
   {
+    pattern: '.agentistics/session-context', match: 'prefix', reason: 'regenerable',
+    restoreWith: 'nothing — every spawn writes its own file',
+    why: 'The per-session instructions file an env-dir harness (copilot) reads, written by '
+      + 'sessions/spawn-context.ts from the session id at spawn. It names a session that will not exist on '
+      + 'another machine.',
+  },
+  {
     pattern: '.agentistics/login-env.json', match: 'prefix', reason: 'regenerable',
     restoreWith: 'nothing — the next session spawn re-resolves it from the login shell',
     why: 'The last good login-shell PATH and toolchain locations (sessions/login-env.ts). They '

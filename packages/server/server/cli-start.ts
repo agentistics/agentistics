@@ -130,6 +130,7 @@ import { scanProcesses } from './live-sessions'
 import { resolveBackend } from './sessions'
 import { inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
 import { SPAWN_SPECS, planSpawn } from './sessions/spawn-spec'
+import { buildSpawnContext, writeContextFile } from './sessions/spawn-context'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
 import { bornConversationLink } from './sessions/born-link'
@@ -2037,10 +2038,13 @@ async function spawnManaged(req: {
   const launch = req.resumeId ? inheritedLaunch(req.inherit, req.harness) : {}
   const model = req.model ?? launch.model
   const effort = req.effort ?? launch.effort
+  // Minted BEFORE the plan: the agentistics context tells the harness its own session id.
+  const id = newSessionId()
   const planned = planSpawn({
     harness: req.harness,
     cwd: req.cwd,
     ...(req.resumeId ? { resumeId: req.resumeId } : {}),
+    context: buildSpawnContext({ lang, sessionId: id, ...(req.taskId ? { taskId: req.taskId, taskTitle: req.task ?? '' } : {}) }),
     ...(req.prompt ? { prompt: req.prompt } : {}),
     ...(model ? { model } : {}),
     ...(effort ? { effort } : {}),
@@ -2060,7 +2064,6 @@ async function spawnManaged(req: {
     return { ok: false, message: s.sessNotOnPath(bin, process.env.PATH ?? '') }
   }
 
-  const id = newSessionId()
   // Stamped BEFORE the launch, for the reason `cli-session.ts` records at its own two spawn sites:
   // `planFirstSightingClaims` asks whether a conversation began AFTER we spawned, and a timestamp
   // taken once the call has returned can already be later than the conversation the child opened.
@@ -2080,11 +2083,13 @@ async function spawnManaged(req: {
   }
   // A launch that fails takes its row with it: no row is ever left for a pane that is not there.
   const abandon = () => removeSession(id).catch(() => {})
+  await writeContextFile(planned.plan)
   try {
     await backend.spawn({
       id,
       cwd: req.cwd,
       argv: planned.plan.argv,
+      ...(planned.plan.env ? { env: planned.plan.env } : {}),
       // Deliver the initial prompt once the harness is ready (see `initial-prompt.ts`). The harness's
       // screen rules ride along so the backend can tell an idle prompt from a startup dialog.
       ...(planned.plan.initialPrompt

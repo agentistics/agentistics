@@ -60,6 +60,15 @@ export interface SpawnSpec {
    */
   resume?: (id: string) => string[]
   /**
+   * The OFFICIAL channel that tells this harness where it is running (see `agentistics-context.ts`).
+   * ABSENT = no verified channel: the context is prepended to the FIRST user message instead.
+   *  - `args`    — a flag carrying the text itself;
+   *  - `env-dir` — an env var naming a directory that holds an instructions file we write.
+   */
+  context?:
+    | { kind: 'args'; args: (text: string) => string[] }
+    | { kind: 'env-dir'; env: string; file: string }
+  /**
    * The argv (after `bin`) that tells a FRESH session which conversation id to write under.
    *
    * Absent for every CLI that invents its own and never reports it back, which is most of them —
@@ -93,6 +102,11 @@ export interface SpawnRequest {
    */
   conversationId?: string
   prompt?: string
+  /**
+   * What the harness is told about agentistics at spawn. `dir` is where an `env-dir` harness gets its
+   * instructions file (the caller writes `SpawnPlan.contextFile` there). Ignored beside `resumeId`.
+   */
+  context?: { text: string; block: string; dir: string }
   model?: string
   effort?: string
   label?: string
@@ -120,6 +134,12 @@ export interface InitialPrompt {
 
 export interface SpawnPlan {
   argv: string[]
+  /** Extra environment for the pane (an `env-dir` context channel). */
+  env?: Record<string, string>
+  /** A file the CALLER must write before spawning (this module is pure). */
+  contextFile?: { dir: string; name: string; text: string }
+  /** How the context travelled; absent when none was asked for. */
+  contextVia?: 'args' | 'env-dir' | 'first-message' | 'none'
   /** How to deliver the initial prompt once the harness is up — absent when there is no prompt, or a
    *  `flag` harness that runs it itself. */
   initialPrompt?: InitialPrompt
@@ -152,6 +172,8 @@ export interface BackendSpawn {
   id: string
   cwd: string
   argv: string[]
+  /** Extra environment variables for the pane, merged over the session env. */
+  env?: Record<string, string>
   /**
    * How to deliver the initial prompt once the harness is ready to receive it.
    *
