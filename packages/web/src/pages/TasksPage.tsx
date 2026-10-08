@@ -276,6 +276,12 @@ function TaskList() {
     </div>
   )
 
+  // First data not here yet: the shared screen loader and NOTHING else — no toolbar, no empty or
+  // "every group is hidden" state, which would claim something about data that has not arrived.
+  if (rows === null) {
+    return <CenteredLoader size={40} label={lang === 'pt' ? 'Carregando' : 'Loading'} testId="agentask-loading" />
+  }
+
   return (
     <div style={{
       padding: isMobile ? 12 : 18,
@@ -301,7 +307,7 @@ function TaskList() {
               aria-label={MB.adjust}
             ><Settings2 size={15} /> {MB.adjust}</button>
           </div>
-          {view === 'board' && shown.length > 0 && (
+          {rows !== null && view === 'board' && shown.length > 0 && (
             <div
               className="ag-noscroll" role="tablist" aria-label={MB.chips}
               style={{
@@ -463,7 +469,6 @@ function TaskList() {
 
       {view === 'board' && !isMobile && searchBox}
 
-      {rows === null && <div style={{ color: 'var(--text-tertiary)', fontSize: 12.5 }}>Loading…</div>}
 
       {excluded > 0 && (
         // Said, never swallowed: a rollup that silently shrank is the same defect as a confident
@@ -483,7 +488,7 @@ function TaskList() {
       {view !== 'overview' && rows !== null && shown.length === 0 && (
         <EmptyNotice error={rows.length > 0 ? null : error} />
       )}
-      {view === 'board' && shown.length > 0 && (
+      {rows !== null && view === 'board' && shown.length > 0 && (
         <>
           {!isMobile && arrange}
           {isMobile ? (

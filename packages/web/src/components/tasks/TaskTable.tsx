@@ -42,6 +42,7 @@ import { DEFAULT_PREFS, useBoardPref } from './boardPrefs'
 import { ColResizeHandle } from './ColResizeHandle'
 import { contentWidthOf, fitContentWidth, hasCustomWidths, resolveWidths, tableMinWidth } from './columnWidths'
 import { SortTh } from './SortHeader'
+import { defaultWidths } from './columnDefaultWidth'
 import { dropEmpty } from './emptyGroups'
 import { EmptyGroupsMenu } from './EmptyGroupsMenu'
 import { moveColumn } from './columnOrder'
@@ -800,11 +801,15 @@ export function TaskTable(p: TaskTableProps) {
   // the pointer is down (one saved write per drag — see `ColResizeHandle`).
   const [savedWidths, setSavedWidths] = useBoardPref('columnWidths')
   const [dragging, setDragging] = useState<{ id: string; w: number } | null>(null)
+  const colDefaults = useMemo(
+    () => defaultWidths(cols, id => copy.columns[id as ColumnId], p.lang ?? 'en'),
+    [cols, copy, p.lang],
+  )
   const widths = useMemo(() => {
-    const w = resolveWidths(cols, savedWidths)
+    const w = resolveWidths(cols, savedWidths, colDefaults)
     if (dragging) w[dragging.id] = dragging.w
     return w
-  }, [cols, savedWidths, dragging])
+  }, [cols, savedWidths, dragging, colDefaults])
   const leadWidth = isMobile ? 100 : 62
   const fitColumn = (id: string) => {
     const nodes = Array.from(document.querySelectorAll<HTMLElement>(`[data-col="${id}"]`))
@@ -823,9 +828,15 @@ export function TaskTable(p: TaskTableProps) {
   )
   // The SUBTASK grid's own widths (`subtaskGridLayout.ts`) — its own table, never the delivery
   // table's columns, so nothing the delivery table does moves them.
+  const subtaskDefaults = useMemo(
+    () => defaultWidths(
+      SUBTASK_COLUMNS.filter(c => shownSubtaskCols.includes(c.id)),
+      id => copy.subtaskColumns[id as SubtaskColumnId], p.lang ?? 'en'),
+    [shownSubtaskCols, copy, p.lang],
+  )
   const subtaskGrid = useMemo(
-    () => subtaskGridWidths(shownSubtaskCols, savedSubtaskWidths, draggingSubtaskWidth),
-    [shownSubtaskCols, savedSubtaskWidths, draggingSubtaskWidth],
+    () => subtaskGridWidths(shownSubtaskCols, savedSubtaskWidths, draggingSubtaskWidth, { defaults: subtaskDefaults }),
+    [shownSubtaskCols, savedSubtaskWidths, draggingSubtaskWidth, subtaskDefaults],
   )
   const subtaskWidths = subtaskGrid.cols
   const anyCustomWidth = hasCustomWidths(savedWidths) || hasCustomWidths(savedSubtaskWidths)
@@ -1113,8 +1124,8 @@ export function TaskTable(p: TaskTableProps) {
 
       {visible.length === 0 && (
         <div style={{ ...surface, padding: 16, fontSize: 12.5, color: 'var(--text-tertiary)' }}>
-          Every group is hidden. Open <strong style={{ color: 'var(--text-secondary)' }}>Groups</strong> above
-          to bring one back — the tasks are still there.
+          {L.allGroupsHiddenLead} <strong style={{ color: 'var(--text-secondary)' }}>{L.allGroupsHiddenName}</strong>{' '}
+          {L.allGroupsHiddenTail}
         </div>
       )}
 

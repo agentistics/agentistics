@@ -7,7 +7,9 @@
  * ask and what to do when the answer does not come.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { subscribeEvent } from './eventStream'
+import { peekTaskList, putTaskList, subscribeTaskList, type TaskListEntry } from './taskListStore'
 import {
   sortTaskStatuses, sortTaskTypes, type Filters, type StagedSessionDraft, type TaskPriorityId, type TaskProgress,
 } from '@agentistics/core'
@@ -418,34 +420,54 @@ export function taskQuery(filters: Filters | undefined): string {
 }
 
 export function useTaskList(filters?: Filters) {
-  const [rows, setRows] = useState<TaskListRow[] | null>(null)
-  const [overview, setOverview] = useState<BoardOverview | null>(null)
-  /** Sessions the page's filters kept out of these numbers — stated, never swallowed. */
-  const [excluded, setExcluded] = useState(0)
-  const [error, setError] = useState<TasksError>(null)
-
   const q = useMemo(() => taskQuery(filters), [filters])
+  // Stale-while-revalidate (`taskListStore.ts`): a cached list renders at once, and the fetch below
+  // only applies what changed.
+  const entry = useSyncExternalStore(
+    useCallback(l => subscribeTaskList(q, l), [q]),
+    () => peekTaskList(q),
+  )
 
   const load = useCallback(async () => {
+    let next: TaskListEntry
     try {
       const res = await fetch(`/api/tasks${q}`)
-      if (res.status === 403 || res.status === 404) { setError('refused'); setRows([]); return }
-      if (!res.ok) { setError('down'); setRows([]); return }
-      const body = await res.json() as {
-        tasks: TaskListRow[]; overview: BoardOverview; excludedByFilter?: number
+      if (res.status === 403 || res.status === 404) next = { rows: [], overview: null, excluded: 0, error: 'refused' }
+      else if (!res.ok) next = { rows: [], overview: null, excluded: 0, error: 'down' }
+      else {
+        const body = await res.json() as {
+          tasks: TaskListRow[]; overview: BoardOverview; excludedByFilter?: number
+        }
+        next = { rows: body.tasks ?? [], overview: body.overview ?? null, excluded: body.excludedByFilter ?? 0, error: null }
       }
-      setError(null)
-      setRows(body.tasks ?? [])
-      setOverview(body.overview ?? null)
-      setExcluded(body.excludedByFilter ?? 0)
     } catch {
-      setError('down')
-      setRows([])
+      next = { rows: [], overview: null, excluded: 0, error: 'down' }
     }
+    // A failed refresh must not blank a board that is already on screen.
+    const cached = peekTaskList(q)
+    if (next.error && cached && cached.rows.length > 0) return
+    putTaskList(q, next)
   }, [q])
 
-  useEffect(() => { void load() }, [load])
-  return { rows, overview, excluded, error, reload: load }
+  useEffect(() => {
+    void load()
+    // The app's one push channel (`eventStream.ts`) — no second poll. A `change` is debounced: a
+    // burst of file events is one refetch.
+    let t: ReturnType<typeof setTimeout> | null = null
+    const off = subscribeEvent('change', () => {
+      if (t) clearTimeout(t)
+      t = setTimeout(() => void load(), 400)
+    })
+    return () => { off(); if (t) clearTimeout(t) }
+  }, [load])
+
+  return {
+    rows: entry ? entry.rows : null,
+    overview: entry?.overview ?? null,
+    excluded: entry?.excluded ?? 0,
+    error: entry?.error ?? null,
+    reload: load,
+  }
 }
 
 /**

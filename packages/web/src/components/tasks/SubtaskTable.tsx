@@ -80,6 +80,7 @@ import {
 } from './subtaskGroups'
 import { SessionRef } from './SessionRef'
 import { SortTh } from './SortHeader'
+import { defaultWidths } from './columnDefaultWidth'
 import { orderedSubtasks } from './subtaskSortView'
 import { useStagedDialogs, type StagedTarget } from './useStagedDialogs'
 import { boardCopy, statusLabel, type Lang } from './copy'
@@ -225,9 +226,15 @@ export function SubtaskTable(p: SubtaskTableProps) {
   // The grid's own widths (`subtaskGridLayout.ts`): the name column resizes too, and the table is
   // given its EXACT width so a saved width renders as the number saved (with `width: 100%` and every
   // column fixed, the browser spread the surplus over all of them and a drag moved a fraction).
+  const colDefaults = useMemo(
+    () => defaultWidths(
+      SUBTASK_COLUMNS.filter(c => shownCols.includes(c.id)),
+      id => copy.subtaskColumns[id as SubtaskColumnId], p.lang),
+    [shownCols, copy, p.lang],
+  )
   const grid = useMemo(
-    () => subtaskGridWidths(shownCols, savedWidths, draggingWidth, { lead: 8, trailing: 88 }),
-    [shownCols, savedWidths, draggingWidth],
+    () => subtaskGridWidths(shownCols, savedWidths, draggingWidth, { lead: 8, trailing: 88, defaults: colDefaults }),
+    [shownCols, savedWidths, draggingWidth, colDefaults],
   )
   const subtaskWidths = grid.cols
   const subtaskWidthOf = (id: string): number => (id === SUBTASK_TITLE_ID ? grid.title : subtaskWidths[id]!)

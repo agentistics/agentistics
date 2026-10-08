@@ -46,7 +46,7 @@ export function subtaskGridWidths(
   shown: readonly SubtaskColumnId[],
   saved: Readonly<Record<string, number>>,
   dragging: { id: string; w: number } | null = null,
-  opts: { trailing?: number; lead?: number } = {},
+  opts: { trailing?: number; lead?: number; defaults?: Readonly<Record<string, number>> } = {},
 ): SubtaskGridWidths {
   const lead = opts.lead ?? SUBTASK_LEAD_WIDTH
   const trailing = opts.trailing ?? 0
@@ -54,7 +54,7 @@ export function subtaskGridWidths(
     { id: SUBTASK_TITLE_ID, width: SUBTASK_TITLE_WIDTH },
     ...shown.map(id => SUBTASK_COLUMNS.find(c => c.id === id)!).filter(Boolean),
   ]
-  const w = resolveWidths(defs, saved)
+  const w = resolveWidths(defs, saved, opts.defaults)
   if (dragging && dragging.id in w) w[dragging.id] = Math.min(MAX_COL_WIDTH, dragging.w)
   const title = w[SUBTASK_TITLE_ID]!
   const cols: Record<string, number> = {}
