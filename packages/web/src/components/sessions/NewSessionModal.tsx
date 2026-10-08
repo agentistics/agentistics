@@ -586,6 +586,8 @@ export function NewSessionModal({
           harness: harness!.id,
           cwd,
           ...(task ? { task } : {}),
+          // Told to the harness in its context; the FILING itself is still done below, after the row exists.
+          ...(subtaskTarget ? { taskId: subtaskTarget.taskId, ...(subtaskTarget.subtaskId ? { subtaskId: subtaskTarget.subtaskId } : {}) } : {}),
           ...(model ? { model } : {}),
           ...(effort ? { effort } : {}),
           // The paths go FIRST, each on its own line, then what was typed — the same order the

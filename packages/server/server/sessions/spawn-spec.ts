@@ -138,6 +138,19 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     modelSuggestions: [],
     // `-S, --session [id]  Resume a session. With ID: resume that session.`
     resume: id => ['-S', id],
+    // `--agent-file <path>  Load an agent definition from a Markdown file and select it for the new
+    // session` (kimi 0.38). The file `extends: agent` and adds `promptVars.roleAdditional`, the same
+    // mechanism the built-in coder/explore profiles use to ADD to the default system prompt. It sits
+    // under the agentistics data dir, never the user's project. Not combinable with --session, which
+    // is a resume and carries no context anyway.
+    context: {
+      kind: 'files',
+      files: (_dir, text) => [{
+        name: 'agentistics-agent.md',
+        text: `---\nextends: agent\nname: agentistics-session\npromptVars:\n  roleAdditional: |\n${text.split('\n').map(l => (l ? `    ${l}` : '')).join('\n')}\n---\n`,
+      }],
+      args: dir => ['--agent-file', `${dir}/agentistics-agent.md`],
+    },
   },
 
   // `-i, --prompt-interactive  Execute the provided prompt and continue in interactive mode`.
@@ -147,6 +160,17 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
   gemini: {
     bin: 'gemini',
     prompt: { kind: 'flag', flag: '--prompt-interactive' },
+    // No system-prompt flag exists. `GEMINI_CLI_SYSTEM_SETTINGS_PATH` names a settings file; ours turns on
+    // `context.includeDirectories` + `loadMemoryFromIncludeDirectories` for a directory under the
+    // agentistics data dir that holds a GEMINI.md — read at start like any context file, outside the project.
+    context: {
+      kind: 'files',
+      files: (dir, text) => [
+        { name: 'GEMINI.md', text },
+        { name: 'settings.json', text: JSON.stringify({ context: { includeDirectories: [dir], loadMemoryFromIncludeDirectories: true } }) },
+      ],
+      env: dir => ({ GEMINI_CLI_SYSTEM_SETTINGS_PATH: `${dir}/settings.json` }),
+    },
     modelFlag: '--model', // `-m, --model  Model  [string]`
     // EMPTY as of 2026-09-02, checked against gemini 0.55.1. `--help` prints "Model  [string]" and
     // no values; the CLI has `--list-extensions` and `--list-sessions` but nothing that lists
@@ -340,7 +364,8 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
   // Official channel first; a harness with none gets the fenced block ahead of its first message.
   let env: Record<string, string> | undefined
   let contextFile: { dir: string; name: string; text: string } | undefined
-  let contextVia: 'args' | 'env-dir' | 'first-message' | 'none' = 'none'
+  let contextExtraFiles: { name: string; text: string }[] | undefined
+  let contextVia: 'args' | 'env-dir' | 'files' | 'first-message' | 'none' = 'none'
   let prompt = req.prompt
   if (req.context && !req.resumeId) {
     if (spec.context?.kind === 'args') {
@@ -350,6 +375,13 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
       env = { [spec.context.env]: req.context.dir }
       contextFile = { dir: req.context.dir, name: spec.context.file, text: req.context.text }
       contextVia = 'env-dir'
+    } else if (spec.context?.kind === 'files') {
+      const [first, ...rest] = spec.context.files(req.context.dir, req.context.text)
+      if (first) contextFile = { dir: req.context.dir, name: first.name, text: first.text }
+      if (rest.length) contextExtraFiles = rest
+      if (spec.context.env) env = spec.context.env(req.context.dir)
+      if (spec.context.args) argv.push(...spec.context.args(req.context.dir))
+      contextVia = 'files'
     } else if (prompt) {
       prompt = prependContext(req.context.block, prompt)
       contextVia = 'first-message'
@@ -382,6 +414,7 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
       argv,
       ...(env ? { env } : {}),
       ...(contextFile ? { contextFile } : {}),
+      ...(contextExtraFiles ? { contextExtraFiles } : {}),
       ...(req.context && !req.resumeId ? { contextVia } : {}),
       ...(initialPrompt ? { initialPrompt } : {}),
       ...(conversationId ? { conversationId } : {}),

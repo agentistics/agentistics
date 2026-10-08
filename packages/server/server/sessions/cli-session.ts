@@ -29,7 +29,7 @@ import { toControlSession } from './control-session'
 import { recordedRepo, repoFacts } from './repo-facts'
 import { emptyReason, renderSessionTable, resolveWidth } from './session-table'
 import { SPAWN_SPECS, planSpawn } from './spawn-spec'
-import { buildSpawnContext, writeContextFile } from './spawn-context'
+import { buildSpawnContext, pendingContextFor, resolveContextTask, resolveContextTaskByRef, writeContextFile } from './spawn-context'
 import { rulesFor } from './attention-rules'
 // The harness half of a rename. Shared with the cockpit's Rename verb — see `rename.ts`.
 import { renameInHarness, renameMessage } from './rename'
@@ -305,10 +305,11 @@ async function start(
   const cwd = cmd.cwd ? resolve(cmd.cwd) : process.cwd()
   const lang = await resolveLang()
   const id = newSessionId()
+  const ctx = buildSpawnContext({ sessionId: id, cwd, ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)) })
   const planned = planSpawn({
     harness: cmd.harness, cwd, prompt: cmd.prompt, model: cmd.model, effort: cmd.effort,
     conversationId: randomUUID(),
-    context: buildSpawnContext({ lang, sessionId: id }),
+    context: ctx,
   })
   if (!planned.ok) { console.error(explainPlanError(planned.error)); return 1 }
 
@@ -360,6 +361,7 @@ async function start(
     // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
     ...(cmd.taskId ? { taskId: cmd.taskId } : {}),
     ...(cmd.attemptId ? { attemptId: cmd.attemptId } : {}),
+    ...(pendingContextFor(planned.plan, ctx) ? { pendingContext: pendingContextFor(planned.plan, ctx)! } : {}),
     // The link is EXACT here: the CLI was handed this id (`SpawnSpec.assignId`).
     ...(planned.plan.conversationId
       ? { conversationId: planned.plan.conversationId, conversationLink: 'assigned' as const, conversationLinkVia: 'assigned-id' as const }
@@ -500,14 +502,14 @@ async function batch(
   // ids, never the sessions.
   const resolved = await resolveTaskAndAttempts(cmd).catch(() => null)
 
-  const batchLang = await resolveLang()
   for (const spec of cmd.specs) {
     const cwd = spec.cwd ? resolve(spec.cwd) : process.cwd()
     const id = newSessionId()
+    const ctx = buildSpawnContext({ sessionId: id, cwd, ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
     const planned = planSpawn({
       harness: spec.harness,
       cwd,
-      context: buildSpawnContext({ lang: batchLang, sessionId: id }),
+      context: ctx,
       ...(spec.prompt ? { prompt: spec.prompt } : {}),
       ...(spec.model ? { model: spec.model } : {}),
       ...(spec.effort ? { effort: spec.effort } : {}),
@@ -553,6 +555,7 @@ async function batch(
       task: cmd.task,
       // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
       ...(resolved?.taskId ? { taskId: resolved.taskId } : {}),
+      ...(pendingContextFor(planned.plan, ctx) ? { pendingContext: pendingContextFor(planned.plan, ctx)! } : {}),
       ...(spec.attempt && resolved?.attempts.get(spec.attempt)
         ? { attemptId: resolved.attempts.get(spec.attempt)! }
         : {}),

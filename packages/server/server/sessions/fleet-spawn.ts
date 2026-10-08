@@ -50,6 +50,9 @@ export interface FleetSpawnBody {
   harness?: unknown
   cwd?: unknown
   task?: unknown
+  /** Board ids of the task / subtask the session is created for (context only; the client files it). */
+  taskId?: unknown
+  subtaskId?: unknown
   prompt?: unknown
   model?: unknown
   effort?: unknown
@@ -67,6 +70,8 @@ export interface FleetSpawnPlan {
   harness: string
   cwd: string
   task?: string
+  taskId?: string
+  subtaskId?: string
   prompt?: string
   model?: string
   effort?: string
@@ -153,6 +158,8 @@ export function planFleetSpawn(
   }
 
   const task = text(body.task)
+  const taskId = text(body.taskId)
+  const subtaskId = taskId ? text(body.subtaskId) : undefined
   const prompt = text(body.prompt)
   const label = text(body.label)
   const force = readForce(body.force)
@@ -163,6 +170,8 @@ export function planFleetSpawn(
       harness,
       cwd,
       ...(task ? { task } : {}),
+      ...(taskId ? { taskId } : {}),
+      ...(subtaskId ? { subtaskId } : {}),
       ...(prompt ? { prompt } : {}),
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),

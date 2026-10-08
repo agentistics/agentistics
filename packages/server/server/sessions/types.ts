@@ -68,6 +68,16 @@ export interface SpawnSpec {
   context?:
     | { kind: 'args'; args: (text: string) => string[] }
     | { kind: 'env-dir'; env: string; file: string }
+    /**
+     * Files we write under the session's own context dir (OUTSIDE the user's project), reached by an
+     * env var and/or flags that point the harness at them.
+     */
+    | {
+        kind: 'files'
+        files: (dir: string, text: string) => { name: string; text: string }[]
+        env?: (dir: string) => Record<string, string>
+        args?: (dir: string) => string[]
+      }
   /**
    * The argv (after `bin`) that tells a FRESH session which conversation id to write under.
    *
@@ -138,8 +148,10 @@ export interface SpawnPlan {
   env?: Record<string, string>
   /** A file the CALLER must write before spawning (this module is pure). */
   contextFile?: { dir: string; name: string; text: string }
+  /** Further files of a `files` channel, written beside `contextFile` (same dir). */
+  contextExtraFiles?: { name: string; text: string }[]
   /** How the context travelled; absent when none was asked for. */
-  contextVia?: 'args' | 'env-dir' | 'first-message' | 'none'
+  contextVia?: 'args' | 'env-dir' | 'files' | 'first-message' | 'none'
   /** How to deliver the initial prompt once the harness is up — absent when there is no prompt, or a
    *  `flag` harness that runs it itself. */
   initialPrompt?: InitialPrompt
@@ -280,6 +292,12 @@ export interface ManagedSession {
    * as two is the double-count that rule exists to prevent.
    */
   subtaskId?: string
+  /**
+   * The agentistics context, HELD for a harness with no system channel that was started with no
+   * first message. Sending it alone would make the assistant answer it, so it waits and is
+   * prepended to the first real prompt (`promptSession`), then cleared.
+   */
+  pendingContext?: string
   attemptId?: string
   /**
    * The last time this session was OBSERVED ALIVE, epoch ms — stamped at creation, then refreshed by
