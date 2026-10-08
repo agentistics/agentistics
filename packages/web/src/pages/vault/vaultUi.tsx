@@ -64,16 +64,19 @@ export function Pill({ tone, text }: { tone: Tone; text: string }) {
 }
 
 /** One row: icon? + title + one line, then the status and the ONE action. */
-export function VaultRow({ icon, title, desc, status, children, isMobile, extra, data, stackActions }: {
+export function VaultRow({ icon, title, desc, status, children, isMobile, extra, data, stackActions, lead }: {
   icon?: React.ReactNode; title: React.ReactNode; desc?: React.ReactNode; status?: React.ReactNode; children?: React.ReactNode
   isMobile: boolean; extra?: React.ReactNode; data?: string
   /** A secret's icon actions: on a phone they stay at the right, one above the other, instead of wrapping under the text. */
   stackActions?: boolean
+  /** A leading control (the select mode's checkbox), before the icon. */
+  lead?: React.ReactNode
 }) {
   const stack = isMobile && stackActions
   return (
     <div data-vault-row={data} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: isMobile ? 'flex-start' : 'center', gap: 12, flexWrap: isMobile && !stack ? 'wrap' : 'nowrap' }}>
+        {lead}
         {icon && <span aria-hidden style={{ display: 'inline-flex', flexShrink: 0, color: 'var(--text-secondary)', marginTop: isMobile ? 2 : 0 }}>{icon}</span>}
         <div style={{ flex: stack ? '1 1 0' : '1 1 140px', minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>{title}</div>

@@ -20,6 +20,19 @@ export interface PersonalHttpCtx { req: Request; path: string; url: URL; session
 
 /** Large enough for a 64 KiB value or a `.env` file; still bounded and read as a stream. */
 const BODY_LIMIT = 256 * 1024
+/** Most secrets one batch delete may name. */
+const BATCH_LIMIT = 200
+
+/**
+ * The binding a phone's gesture token carries for a batch: a short digest of the sorted ids (a token's target is
+ * capped at 200 characters). FNV-1a/64 — not a secret, only a name; the token is single-use and session-bound.
+ * The web page computes the same string (`batchBinding` in lib/vaultPersonal.ts; both tests pin one vector).
+ */
+export function batchBinding(ids: readonly string[]): string {
+  let h = 0xcbf29ce484222325n
+  for (const ch of [...ids].sort().join(',')) { h ^= BigInt(ch.charCodeAt(0)); h = (h * 0x100000001b3n) & 0xffffffffffffffffn }
+  return `batch:${ids.length}:${h.toString(16).padStart(16, '0')}`
+}
 
 const pt = () => vaultLang() === 'pt'
 const fail = (code: string, en: string, ptText: string) => ({ ok: false as const, code, sentence: pt() ? ptText : en })
@@ -143,6 +156,30 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     if (!r.ok) return reply(storeFail(r))
     vaultAudit({ type: audit, name: id })
     return reply({ ok: true, meta: r.meta, ...withGrant(g) })
+  }
+  if (path === '/api/vault/personal/trash-batch') {
+    // Deleting N secrets is ONE act: the proof 'personal-trash' asks is asked ONCE for the whole batch (a phone's
+    // token is bound to the batch's digest), then each item is trashed on its own and reported on its own — one
+    // stale version never aborts the rest.
+    const raw = Array.isArray(b.items) ? b.items : []
+    const items: { id: string; ev: number }[] = []
+    for (const x of raw) {
+      const o = x && typeof x === 'object' ? x as Record<string, unknown> : {}
+      const id = typeof o.id === 'string' ? o.id : '', ev = ver(o.expectedVersion)
+      if (!ITEM_ID.test(id) || !ev) return reply(bad())
+      items.push({ id, ev })
+    }
+    if (items.length === 0 || items.length > BATCH_LIMIT || new Set(items.map(i => i.id)).size !== items.length) return reply(bad())
+    const g = await step('personal-trash', b, batchBinding(items.map(i => i.id)))
+    if (!g.ok) return reply(g)
+    const results: Record<string, unknown>[] = []
+    for (const it of items) {
+      const r = await store.trashItem(it.id, it.ev)
+      if (!r.ok) { const f = storeFail(r); results.push({ id: it.id, ok: false, code: f.code, sentence: f.sentence }); continue }
+      vaultAudit({ type: 'vault.personal-trash', name: it.id })
+      results.push({ id: it.id, ok: true, meta: r.meta })
+    }
+    return reply({ ok: true, results, ...withGrant(g) })
   }
   if (path === '/api/vault/personal/restore-version') {
     const id = typeof b.id === 'string' ? b.id : '', ev = ver(b.expectedVersion), v = ver(b.version)

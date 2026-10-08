@@ -41,6 +41,22 @@ export const revealPersonal = (id: string, field: string, code?: string, version
 export const trashPersonal = (id: string, expectedVersion: number, code?: string, gestureToken?: string) => vaultPost<{ meta: PersonalMeta }>(`${P}/trash`, withCode({ id, expectedVersion, ...tok(gestureToken) }, code))
 export const restorePersonal = (id: string, expectedVersion: number, code?: string, gestureToken?: string) => vaultPost<{ meta: PersonalMeta }>(`${P}/restore`, withCode({ id, expectedVersion, ...tok(gestureToken) }, code))
 export const restoreVersion = (id: string, version: number, expectedVersion: number, code?: string, gestureToken?: string) => vaultPost<{ meta: PersonalMeta }>(`${P}/restore-version`, withCode({ id, version, expectedVersion, ...tok(gestureToken) }, code))
+/** Same string as the server's `batchBinding` (personal-http.ts): FNV-1a/64 over the sorted ids. */
+export function batchBinding(ids: readonly string[]): string {
+  let h = 0xcbf29ce484222325n
+  for (const ch of [...ids].sort().join(',')) { h ^= BigInt(ch.charCodeAt(0)); h = (h * 0x100000001b3n) & 0xffffffffffffffffn }
+  return `batch:${ids.length}:${h.toString(16).padStart(16, '0')}`
+}
+export interface BatchResult { id: string; ok: boolean; meta?: PersonalMeta; code?: string; sentence?: string }
+/** Delete (to the trash) several secrets with ONE proof; every item answers on its own. */
+export const trashBatch = (items: readonly { id: string; version: number }[], code?: string, gestureToken?: string) =>
+  vaultPost<{ results: BatchResult[] }>(`${P}/trash-batch`, withCode({ items: items.map(i => ({ id: i.id, expectedVersion: i.version })), ...tok(gestureToken) }, code))
+/** The name a "Criar grupo" row would create for what was typed: null when empty, too long, or a group with that name exists. */
+export function newGroupName(typed: string, groups: readonly Pick<PersonalGroup, 'name'>[]): string | null {
+  const n = typed.trim()
+  if (!n || n.length > 120) return null
+  return groups.some(g => g.name.trim().toLowerCase() === n.toLowerCase()) ? null : n
+}
 export const purgePersonal = (id: string, code?: string, gestureToken?: string) => vaultPost(`${P}/purge`, withCode({ id, ...tok(gestureToken) }, code))
 export const movePersonal = (id: string, expectedVersion: number, groupId: string | null, code?: string) => vaultPost<{ meta: PersonalMeta }>(`${P}/move`, withCode({ id, expectedVersion, groupId }, code))
 export const createGroup = (name: string, code?: string) => vaultPost<{ group: PersonalGroup }>(`${P}/groups`, withCode({ name }, code))
