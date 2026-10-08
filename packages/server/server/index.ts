@@ -141,6 +141,7 @@ import { validateIngestToken } from './team-tokens'
 import { getAccount } from './accounts'
 import { getTeam } from './teams'
 import { discoverProjectDisks } from './disk-picker'
+import { allowedRoots, listFolders, rootListing } from './fs-folders'
 
 // ---------------------------------------------------------------------------
 // Reads the first `cwd` field found in a JSONL session file.
@@ -974,6 +975,26 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           status: 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
+      }
+    }
+
+    if (url.pathname === '/api/fs/folders' && req.method === 'GET') {
+      try {
+        const scanRoots = (await readPreferences()).scanRoots ?? []
+        const headers = { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+        const asked = url.searchParams.get('path') ?? ''
+        // No path = the top of the browser: the home and each enabled disk. No file system read.
+        if (asked === '') {
+          return new Response(JSON.stringify({ path: '', parent: null, folders: rootListing(allowedRoots(scanRoots)), partial: false }), { status: 200, headers })
+        }
+        const listing = await listFolders(asked, { scanRoots })
+        if (listing.ok) return new Response(JSON.stringify(listing), { status: 200, headers })
+        const status = listing.reason === 'forbidden' ? 403 : listing.reason === 'not-found' ? 404 : 400
+        return new Response(JSON.stringify({ error: listing.reason }), { status, headers })
+      } catch (err) {
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        console.error(safe.logLine)
+        return new Response(JSON.stringify(safe.body), { status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } })
       }
     }
 
