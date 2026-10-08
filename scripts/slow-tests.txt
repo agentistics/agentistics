@@ -2,3 +2,4 @@
 # benchmark). CI and `bun test` still run them — this list only narrows the HOOK.
 packages/server/server/claude-chat-removed.test.ts   # ~28s, spawns a server
 packages/server/server/runtime-metrics-perf.test.ts  # ~23s, perf benchmark
+packages/server/server/rebuild-incremental.test.ts  # ~8s, builds a synthetic home + two child builds
