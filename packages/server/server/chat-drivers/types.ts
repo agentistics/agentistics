@@ -59,6 +59,10 @@ export interface HarnessChatStatus {
   authReady: boolean
   /** installed && authReady — driver is usable. */
   ready: boolean
+  /** CLI version when it can be read. */
+  version?: string
+  /** Reserved for a future official-latest check. */
+  updateAvailable?: boolean
   /** From `model-catalog.ts` — the CLI's own list where it publishes one, else the verified table. */
   models: ChatDriverModel[]
   /** `cli`: the harness's own list. `table`: the incomplete fallback — see `modelFreeText`. */

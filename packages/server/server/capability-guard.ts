@@ -55,6 +55,7 @@ const EXACT: ReadonlyMap<string, keyof Capabilities> = new Map<string, keyof Cap
 
 /** Prefix (no trailing slash) → capability. Matches `<prefix>` and `<prefix>/…` only. */
 const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
+  ['/api/harnesses', 'localChat'],
   // RES.1 — the process governor: reads every agentop process on the host, kills on request, and
   // registers helper processes. Host power, so the strictest capability.
   ['/api/resources', 'localShell'],

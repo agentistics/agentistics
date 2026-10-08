@@ -25,7 +25,7 @@ export function ScopeNote({ children }: { children: React.ReactNode }) {
 // ConfirmModal
 // Centered confirmation dialog for destructive actions (delete/revoke/remove). Renders nothing
 // when `open` is false. Backdrop click + Escape = cancel. The confirm button is red (danger).
-export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel }: {
+export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, children }: {
   open: boolean
   title: string
   message: string
@@ -39,6 +39,7 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
   /** Prompt shown above the input, e.g. `Type "Client X" to confirm`. */
   requireTextHint?: string
   focusCancel?: boolean
+  children?: React.ReactNode
 }) {
   const isMobile = useIsMobile()
   const [typed, setTyped] = React.useState('')
@@ -69,6 +70,7 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
           <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
         </div>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, margin: 0 }}>{message}</p>
+        {children}
         {requireText !== undefined && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {requireTextHint && (

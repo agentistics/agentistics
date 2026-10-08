@@ -2,8 +2,8 @@ import React, { useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { Cpu, Copy, CheckCheck, AlertCircle, CircleDot, ExternalLink } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
-import { useChatHarnesses, type HarnessChatStatus } from '../../hooks/useChatHarnesses'
-import { SectionHeader } from './primitives'
+import { installHarness, useChatHarnesses, type HarnessChatStatus } from '../../hooks/useChatHarnesses'
+import { ConfirmModal, SectionHeader } from './primitives'
 import { CenteredLoader } from '../../components/CenteredLoader'
 
 function CopyableCode({ text }: { text: string }) {
@@ -39,7 +39,10 @@ function CopyableCode({ text }: { text: string }) {
   )
 }
 
-function HarnessStatusBadge({ h }: { h: HarnessChatStatus }) {
+export function HarnessStatusBadge({ h, pt = false }: { h: HarnessChatStatus; pt?: boolean }) {
+  if (h.updateAvailable) {
+    return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: '#f97316', background: 'rgba(249,115,22,0.10)', border: '1px solid rgba(249,115,22,0.28)', padding: '2px 8px', borderRadius: 20 }}>{pt ? 'Atualização disponível' : 'Update available'}</span>
+  }
   if (h.ready) {
     return (
       <span style={{
@@ -51,7 +54,7 @@ function HarnessStatusBadge({ h }: { h: HarnessChatStatus }) {
         padding: '2px 8px', borderRadius: 20,
       }}>
         <CircleDot size={10} />
-        Ready
+        {h.version ? `${pt ? 'Instalado' : 'Installed'} · v${h.version}` : (pt ? 'Instalado' : 'Installed')}
       </span>
     )
   }
@@ -66,7 +69,7 @@ function HarnessStatusBadge({ h }: { h: HarnessChatStatus }) {
         padding: '2px 8px', borderRadius: 20,
       }}>
         <AlertCircle size={10} />
-        Not installed
+        {pt ? 'Não instalado' : 'Not installed'}
       </span>
     )
   }
@@ -80,12 +83,12 @@ function HarnessStatusBadge({ h }: { h: HarnessChatStatus }) {
       padding: '2px 8px', borderRadius: 20,
     }}>
       <AlertCircle size={10} />
-      Not authenticated
+        {pt ? 'Precisa entrar na conta' : 'Needs sign-in'}
     </span>
   )
 }
 
-function HarnessCard({ h }: { h: HarnessChatStatus }) {
+function HarnessCard({ h, pt }: { h: HarnessChatStatus; pt: boolean }) {
   const { setup } = h
   const hasGuidance = !h.ready && (setup.installCmd || setup.loginCmd || setup.docUrl || setup.note)
 
@@ -110,7 +113,7 @@ function HarnessCard({ h }: { h: HarnessChatStatus }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{h.label}</span>
-            <HarnessStatusBadge h={h} />
+            <HarnessStatusBadge h={h} pt={pt} />
           </div>
           {h.ready && h.models.length > 0 && (
             <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
@@ -177,7 +180,17 @@ function HarnessCard({ h }: { h: HarnessChatStatus }) {
 export default function HarnessesSettings() {
   const ctx = useOutletContext<AppContext>()
   const pt = ctx.lang === 'pt'
-  const { harnesses, loading } = useChatHarnesses()
+  const { harnesses, loading, reload } = useChatHarnesses()
+  const [target, setTarget] = useState<HarnessChatStatus | null>(null)
+  const [progress, setProgress] = useState<string[]>([])
+  const [running, setRunning] = useState(false)
+  const begin = async () => {
+    if (!target) return
+    setRunning(true); setProgress([])
+    const result = await installHarness(target.id, target.installed, line => setProgress(p => [...p, line]))
+    if (!result.ok) setProgress(p => [...p, result.error ?? (pt ? 'Falha na instalação.' : 'Installation failed.')])
+    setRunning(false); if (result.ok) { setTarget(null); reload() }
+  }
   const readyCount = harnesses.filter(h => h.ready).length
 
   return (
@@ -198,7 +211,15 @@ export default function HarnessesSettings() {
       ) : (
         <>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {harnesses.map(h => <HarnessCard key={h.id} h={h} />)}
+            {harnesses.map(h => <div key={h.id}>
+              <HarnessCard h={h} pt={pt} />
+              {(!h.ready || h.updateAvailable === true) && <button type="button" onClick={() => {
+                if (h.installed && !h.authReady) { window.location.assign('/sessions'); return }
+                setTarget(h)
+              }} style={{ margin: '6px 0 8px 42px', padding: '7px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12 }}>
+                {h.installed && !h.authReady ? (pt ? 'Entrar' : 'Sign in') : h.installed ? (pt ? 'Atualizar' : 'Update') : (pt ? 'Instalar' : 'Install')}
+              </button>}
+            </div>)}
           </div>
           <div style={{
             marginTop: 14, padding: '10px 14px', borderRadius: 8,
@@ -206,11 +227,22 @@ export default function HarnessesSettings() {
             fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.6,
           }}>
             {pt
-              ? `${readyCount} de ${harnesses.length} backends prontos. Instalação e autenticação devem ser feitas no terminal — o Agentistics não executa comandos automaticamente.`
-              : `${readyCount} of ${harnesses.length} backend${harnesses.length !== 1 ? 's' : ''} ready. Install and authenticate in your terminal — Agentistics does not run commands on your behalf.`}
+              ? `${readyCount} de ${harnesses.length} backends prontos. Instale e entre na conta pelos botões acima.`
+              : `${readyCount} of ${harnesses.length} backends ready. Install and sign in with the buttons above.`}
           </div>
         </>
       )}
+      <ConfirmModal
+        open={target !== null}
+        title={target ? `${pt ? 'Instalar' : 'Install'} ${target.label}?` : ''}
+        message={target ? (pt ? `Vamos instalar ${target.label}, pelo instalador oficial, como seu usuário. Nenhum sudo será usado.` : `We will install ${target.label} from its official installer, as your user. sudo will not be used.`) : ''}
+        confirmLabel={running ? (pt ? 'Instalando…' : 'Installing…') : (pt ? 'Continuar' : 'Continue')}
+        cancelLabel={pt ? 'Cancelar' : 'Cancel'}
+        onCancel={() => { if (!running) setTarget(null) }}
+        onConfirm={() => { void begin() }}
+      >
+        {progress.length > 0 && <div aria-live="polite" style={{ fontSize: 12, color: 'var(--text-secondary)', background: 'var(--bg-elevated)', padding: 8, borderRadius: 7 }}>{progress.map((p, i) => <div key={`${p}-${i}`}>{p}</div>)}</div>}
+      </ConfirmModal>
     </div>
   )
 }

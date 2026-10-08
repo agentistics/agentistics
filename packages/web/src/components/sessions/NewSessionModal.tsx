@@ -807,6 +807,7 @@ export function NewSessionModal({
               onChange={id => { setHarness(harnesses?.find(h => h.id === id) ?? null); setDirty(true) }}
               {...(unavailable ? { notice: unavailable } : {})}
               {...(retryable ? { onRetry: retry } : {})}
+              onInstall={() => { window.location.assign('/settings/harnesses') }}
             />
           </Field>
 

@@ -15,6 +15,7 @@ import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 export interface HarnessPickerOption {
   id: string
   label: string
+  installed?: boolean
 }
 
 export interface HarnessPickerProps {
@@ -33,9 +34,10 @@ export interface HarnessPickerProps {
    */
   notice?: string
   onRetry?: () => void
+  onInstall?: (id: string) => void
 }
 
-export function HarnessPicker({ lang, harnesses, value, onChange, notice, onRetry }: HarnessPickerProps) {
+export function HarnessPicker({ lang, harnesses, value, onChange, notice, onRetry, onInstall }: HarnessPickerProps) {
   const pt = lang === 'pt'
 
   if (harnesses === null) {
@@ -61,9 +63,10 @@ export function HarnessPicker({ lang, harnesses, value, onChange, notice, onRetr
         const color = (HARNESS_COLORS as Record<string, string>)[h.id] ?? 'var(--text-secondary)'
         const name = (HARNESS_LABELS as Record<string, string>)[h.id] ?? h.label
         return (
+          <div key={h.id} style={{ display: 'flex', alignItems: 'stretch', gap: 4, opacity: h.installed === false ? 0.58 : 1 }}>
           <button
-            key={h.id}
             type="button"
+            disabled={h.installed === false}
             onClick={() => onChange(h.id)}
             style={{
               display: 'flex', alignItems: 'center', gap: 8,
@@ -77,6 +80,8 @@ export function HarnessPicker({ lang, harnesses, value, onChange, notice, onRetr
             <HarnessMark harness={h.id} size={18} />
             {name}
           </button>
+          {h.installed === false && <button type="button" onClick={() => onInstall?.(h.id)} style={{ border: '1px solid var(--border-subtle)', borderRadius: 8, background: 'var(--bg-elevated)', color: 'var(--text-secondary)', padding: '0 9px', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11 }}>{pt ? 'Instalar' : 'Install'}</button>}
+          </div>
         )
       })}
     </div>

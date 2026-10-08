@@ -87,6 +87,8 @@ describe('routeCapability', () => {
   it('maps the local chat routes', () => {
     expect(routeCapability('/api/chat-tty')).toBe('localChat')
     expect(routeCapability('/api/chat-harnesses')).toBe('localChat')
+    expect(routeCapability('/api/harnesses/codex/install')).toBe('localChat')
+    expect(routeCapability('/api/harnesses/codex/update')).toBe('localChat')
   })
 
   it('maps every host transcript reader, including detail sub-paths', () => {
