@@ -700,7 +700,10 @@ memory only, dies when the vault locks or the person revokes it, and holds ids a
   reference, audited per use; `PostToolUse` replaces every tool output through the scrubber.
   **Unverified:** the Claude Code docs do not say whether the transcript JSONL keeps the hook-replaced
   output or the original; treat the on-disk transcript as possibly holding the value.
-- **Other harnesses**: no hook to rewrite or scrub — only the copies agentop SERVES are scrubbed.
+- **Other harnesses**: the briefing tells them to use `$(agentop vault ref 'vault://key')` in the
+  shell command. The ref is resolved at run time only when `AGENTOP_MANAGED_ID` names that session's
+  live in-memory grant; there is no value in the briefing, environment instruction or conversation.
+  There is no hook to rewrite or scrub their tool calls, so only the copies agentop SERVES are scrubbed.
 - **Every copy agentop serves** of a granted session — chat turns, pending prompts, terminal frames, the
   fleet's tails — has the value and its base64 / url / hex forms replaced by `«vault:NAME»`.
 

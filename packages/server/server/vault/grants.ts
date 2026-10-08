@@ -97,12 +97,15 @@ export async function grantEnv(sessionId: string): Promise<Record<string, string
   return env
 }
 
-/** What the MODEL is told: names, references and env names — never a value. */
+/** The one execution instruction shared by non-hook harnesses. It contains no value or phantom env var. */
+export const VAULT_REF_INSTRUCTION = "Use this secret inside a shell command as $(agentop vault ref 'vault://<key>') — the value is fetched at run time for this session only; never print it, never write it to a file or the conversation."
+
+/** What the MODEL is told: names and references — never a value. */
 export function grantBriefing(g: Grant, lang: 'en' | 'pt' = 'en'): string {
-  const lines = g.refs.map(r => `- ${r.name}${r.field !== 'value' ? ` (${r.field})` : ''}: ${r.ref} → $${r.env}`)
+  const lines = g.refs.map(r => `- ${r.name}${r.field !== 'value' ? ` (${r.field})` : ''}: ${r.ref}`)
   return lang === 'pt'
-    ? `Segredos do cofre liberados para esta sessão (você NÃO vê os valores; use as variáveis de ambiente nos comandos):\n${lines.join('\n')}\nQualquer valor que aparecer numa saída será trocado por «vault:NOME». Nunca peça para o usuário colar um segredo.`
-    : `Vault secrets granted to this session (you do NOT see the values; use the environment variables in commands):\n${lines.join('\n')}\nAny value that shows up in an output is replaced by «vault:NAME». Never ask the user to paste a secret.`
+    ? `Segredos do cofre liberados para esta sessão (você NÃO vê os valores):\n${lines.join('\n')}\n${VAULT_REF_INSTRUCTION}\nQualquer valor que aparecer numa saída será trocado por «vault:NOME». Nunca peça para o usuário colar um segredo.`
+    : `Vault secrets granted to this session (you do NOT see the values):\n${lines.join('\n')}\n${VAULT_REF_INSTRUCTION}\nAny value that shows up in an output is replaced by «vault:NAME». Never ask for a secret to be pasted.`
 }
 
 export function __resetGrantsForTests(now?: () => number): void { _grants = new Map(); _scrubbers = new Map(); _now = now ?? (() => Date.now()) }
