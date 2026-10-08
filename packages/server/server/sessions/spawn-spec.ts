@@ -100,6 +100,10 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
   // from the CLI (`-c` accepts unknown keys silently), so it is absent rather than guessed.
   codex: {
     bin: 'codex',
+    // `codex --help` (0.161.0): `--no-daemon Run without the shared background server`. This
+    // avoids the daemon feature-settings negotiation that blocks every first message; it is scoped
+    // to this managed process and does not alter ~/.codex/config.toml or other Codex clients.
+    startupArgs: ['--no-daemon'],
     prompt: { kind: 'positional' },
     modelFlag: '--model', // `-m, --model <MODEL>`
     // EMPTY, checked 2026-09-02 against codex-cli 0.113.0: `--help` prints "Model the agent should
@@ -310,7 +314,7 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
     return { ok: false, error: { code: 'resume-unsupported', harness: req.harness } }
   }
 
-  const argv: string[] = [spec.bin]
+  const argv: string[] = [spec.bin, ...(spec.startupArgs ?? [])]
   // The resume argv goes FIRST because one of these is a subcommand (`codex resume <id>`), and a
   // subcommand that follows a flag is not a subcommand any more.
   if (req.resumeId && spec.resume) argv.push(...spec.resume(req.resumeId))

@@ -207,6 +207,7 @@ export interface CliStrings {
   sessPromptEmpty: string
   /** The backend accepted neither the text nor the key. */
   sessSendFailed: (id: string) => string
+  sessSessionEnded: string
   /** The keystroke went in — and the sentence says what it did, not that it "approved". */
   sessApproved: (id: string) => string
   /** Refused: it is not asking anything at this moment, whatever the list said a poll ago. */
@@ -677,6 +678,7 @@ const EN: CliStrings = {
   sessNotRunning: 'nothing is running in that session to type into.',
   sessPromptEmpty: 'nothing to send.',
   sessSendFailed: (id: string) => `${id} did not take the keystroke — it may have just ended.`,
+  sessSessionEnded: 'The session ended.',
   sessApproved: (id: string) => `sent the confirm key to ${id}.`,
   sessNotAsking: 'that session is not asking anything right now — nothing was sent.',
   sessApproveUnknown: (harness: string) =>
@@ -1124,6 +1126,7 @@ const PT: CliStrings = {
   sessNotRunning: 'não há nada rodando nessa sessão para digitar.',
   sessPromptEmpty: 'nada para enviar.',
   sessSendFailed: (id: string) => `${id} não aceitou a tecla — pode ter acabado de encerrar.`,
+  sessSessionEnded: 'A sessão foi encerrada.',
   sessApproved: (id: string) => `tecla de confirmação enviada para ${id}.`,
   sessNotAsking: 'essa sessão não está perguntando nada agora — nada foi enviado.',
   sessApproveUnknown: (harness: string) =>

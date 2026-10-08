@@ -159,7 +159,7 @@ import { needsChoice, parseDialogOptions, readDialog } from './sessions/dialog-c
 import { answerFollowUp } from './sessions/answer-followup'
 import { liveTranscriptDeps, runTranscriptSearch } from './sessions/transcript-run'
 import { rulesFor } from './sessions/attention-rules'
-import { codexIsBlockingFrame } from './sessions/codex-send'
+import { classifyCodexSendFailure, codexIsBlockingFrame } from './sessions/codex-send'
 import { planCrashGroup, planFellOffer } from './sessions/crash-group'
 import { selectFell } from './sessions/fell-selection'
 import {
@@ -4270,11 +4270,23 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         return { ok: false, message: s.sessPromptBlocked }
       }
 
-      return (await (managed.harness === 'codex' && backend.sendTextReliable
+      const sent = await (managed.harness === 'codex' && backend.sendTextReliable
         ? backend.sendTextReliable(id, body, managed.harness)
-        : backend.sendText(id, body)))
-        ? { ok: true, message: s.sessPrompted(id) }
-        : { ok: false, message: s.sessSendFailed(id) }
+        : backend.sendText(id, body))
+      if (sent) return { ok: true, message: s.sessPrompted(id) }
+      // A pane can change between the guard above and the actual write. Read it once more so a
+      // startup/daemon prompt is explained as a question, while a dead pane gets the reopen path.
+      const after = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
+      const aliveAfter = (await backend.list().catch(() => [])).some(b => b.id === id && b.alive)
+      if (managed.harness === 'codex') {
+        const failure = classifyCodexSendFailure(after, aliveAfter)
+        return failure === 'prompt'
+          ? { ok: false, message: s.sessCodexBlocked, failure }
+          : { ok: false, message: s.sessSessionEnded, failure }
+      }
+      return aliveAfter
+        ? { ok: false, message: s.sessSendFailed(id), failure: 'ended' as const }
+        : { ok: false, message: s.sessSessionEnded, failure: 'ended' as const }
     },
 
     /**

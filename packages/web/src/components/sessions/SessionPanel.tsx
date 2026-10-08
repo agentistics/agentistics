@@ -488,6 +488,7 @@ export function SessionPanel({
             /* THE SAME callback the row's menu gets. There are two Reopen buttons on this
                screen — the menu's verb and the composer's — and they must land in one place. */
             {...(onOpened ? { onReopened: onOpened } : {})}
+            {...(onOpenTerminal ? { onOpenTerminal } : {})}
           />
         ) : relayed ? (
           /* ANOTHER MACHINE's session. The live stream is the machine's own SSE route, refused on a

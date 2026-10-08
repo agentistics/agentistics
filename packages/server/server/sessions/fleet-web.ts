@@ -119,6 +119,8 @@ export interface FleetActionResponse {
    * question; resend with `confirm: true` to go ahead.
    */
   confirm?: boolean
+  /** Present on a failed pane write; the browser offers the matching recovery action. */
+  failure?: 'prompt' | 'ended'
 }
 
 /**

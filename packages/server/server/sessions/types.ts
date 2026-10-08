@@ -24,6 +24,8 @@ export type PromptMode =
 export interface SpawnSpec {
   /** The binary, as it is found on PATH. */
   bin: string
+  /** Safe per-process flags that avoid shared-daemon state; never written to the user's config. */
+  startupArgs?: readonly string[]
   prompt: PromptMode
   /** Absent when the CLI has no model flag. */
   modelFlag?: string

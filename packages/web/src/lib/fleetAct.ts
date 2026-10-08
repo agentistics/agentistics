@@ -27,6 +27,7 @@ export interface FleetActResult {
   id?: string
   /** EXT.OPEN: the write needs a YES first — `message` is the question. */
   confirm?: boolean
+  failure?: 'prompt' | 'ended'
 }
 
 /** The sentence for an answer that carried none — a network error, or a body that is not ours. */
@@ -47,5 +48,6 @@ export function parseActResult(json: unknown, lang: 'pt' | 'en'): FleetActResult
     ? o.message
     : actFallbackMessage(lang)
   const id = typeof o.id === 'string' && o.id.trim() !== '' ? o.id : undefined
-  return { ok: o.ok === true, message, ...(id ? { id } : {}), ...(o.confirm === true ? { confirm: true } : {}) }
+  const failure = o.failure === 'prompt' || o.failure === 'ended' ? o.failure : undefined
+  return { ok: o.ok === true, message, ...(id ? { id } : {}), ...(o.confirm === true ? { confirm: true } : {}), ...(failure ? { failure } : {}) }
 }

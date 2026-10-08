@@ -102,6 +102,9 @@ export const ATTENTION_RULES: Record<HarnessId, AttentionRules | null> = {
       /Press enter to confirm or esc to cancel/,
       // 0.160.1's directory-trust prompt.
       /enter continue · esc back/,
+      // codex-cli 0.160.x startup daemon-settings question. Unlike the other prompts this is
+      // drawn before the first conversation turn, so it must be recognised from its option footer.
+      /Run without daemon this time[\s\S]*Restart with these settings[\s\S]*Cancel/,
     ],
     // `working` deliberately absent — see the header.
   },
