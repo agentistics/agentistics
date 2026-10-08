@@ -216,7 +216,9 @@ export interface SessionChatProps {
   row?: FleetRow
   lang: 'pt' | 'en'
   act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; occurrence?: number; confirm?: boolean })
-    => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean }>
+    => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' }>
+  /** Switch to the live terminal when a failed write found a blocking prompt. */
+  onOpenTerminal?: () => void
   /**
    * The files this session has touched, reported up as the conversation is read.
    *
@@ -291,7 +293,7 @@ const TAIL_SLACK = 24
 
 interface Attachment { name: string; path: string }
 
-export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onReopened, metrics, source, focusComposerOnMount }: SessionChatProps) {
+export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onReopened, onOpenTerminal, metrics, source, focusComposerOnMount }: SessionChatProps) {
   // Every verb goes through the source when there is one (the native runtime's send/stop/answer).
   const act = source?.act ?? actProp
   const pt = lang === 'pt'
@@ -724,6 +726,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * `vault://` references plus a briefing — never a value.
    */
   const [vaultSel, setVaultSel] = useState<VaultSelection | null>(null)
+  const [vaultGrantCache, setVaultGrantCache] = useState<null | { key: string; refs: string[]; briefing: string; expiresAt: number }>(null)
   const [vaultPickerOpen, setVaultPickerOpen] = useState(false)
   const [vaultTriggerSeen, setVaultTriggerSeen] = useState<number | null>(null)
   const [vaultCodeAsk, setVaultCodeAsk] = useState<null | ((c: string | null) => void)>(null)
@@ -898,6 +901,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   }, [row, act, sourceControls])
 
   const [notice, setNotice] = useState<string | null>(null)
+  const [deliveryFailure, setDeliveryFailure] = useState<'prompt' | 'ended' | null>(null)
   const [atTail, setAtTail] = useState(true)
   /**
    * THE RECENT-PROMPTS PANEL — open or not. It replaced the single-message recall dialog; its own
@@ -2245,10 +2249,19 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // session cannot use would only fail later, at the command.
     if (hasVaultChip(composed)) {
       if (!vaultSel) { setNotice(pt ? 'Escolha de novo os segredos do chip 🔐 (clique nele).' : 'Choose the 🔐 chip\'s secrets again (click it).'); return }
-      const g = await grantVault(vaultSel)
-      if (!g.ok) { setNotice(g.sentence || (pt ? 'Os segredos não foram liberados; nada foi enviado.' : 'The secrets were not granted; nothing was sent.')); return }
-      setNotice(null)
-      composed = expandVaultChip(composed, g.refs.map(r => r.ref), g.briefing)
+      const key = JSON.stringify({ items: vaultSel.items.map(i => i.id).sort(), groups: vaultSel.groups.map(g => g.id).sort() })
+      const cached = vaultGrantCache?.key === key && vaultGrantCache.expiresAt > Date.now() ? vaultGrantCache : null
+      if (cached) {
+        composed = expandVaultChip(composed, cached.refs, cached.briefing)
+      } else {
+        const g = await grantVault(vaultSel)
+        if (!g.ok) { setNotice(g.sentence || (pt ? 'Os segredos não foram liberados; nada foi enviado.' : 'The secrets were not granted; nothing was sent.')); return }
+        // A failed pane write may be retried without another Hello, but never keep a browser-side
+        // resolved grant indefinitely if the person abandons the composer.
+        setVaultGrantCache({ key, refs: g.refs.map(r => r.ref), briefing: g.briefing, expiresAt: Date.now() + 2 * 60_000 })
+        setNotice(null)
+        composed = expandVaultChip(composed, g.refs.map(r => r.ref), g.briefing)
+      }
     }
     // Dictated? The model is told in one short trailing line — see `dictationMark.ts`. Taken and
     // cleared here, so the NEXT message starts undictated unless the microphone is used again.
@@ -2274,6 +2287,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
      */
     const restore = { draft, attached, replyTo }
     setSending(true)
+    setDeliveryFailure(null)
     // A SOURCE draws its own optimistic turn (the native runtime's `sent`); an echo would be a second copy.
     if (!source) editEcho(list => [...list, full])
     setDraft('')
@@ -2305,6 +2319,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       : await act({ id: session.id, action: 'prompt', text: full })
     setSending(false)
     if (out.ok) {
+      setVaultGrantCache(null)
       // Ask for the transcript at once. The harness writes the user turn as soon as it takes the
       // message, and the next scheduled read is up to `CHAT_POLL_MS` away — three seconds in which
       // the echo sits there labelled as undelivered when it has in fact already landed.
@@ -2332,6 +2347,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     editReply(restore.replyTo)
     // A question is asked in its dialog, once — not again as a line under the field.
     if (!out.confirm) setNotice(out.message)
+    if (out.failure === 'prompt' || out.failure === 'ended') setDeliveryFailure(out.failure)
   }
 
   if (payload?.unavailable) {
@@ -3878,6 +3894,24 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 <p style={{ margin: '8px 0 0', fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
                   {notice ?? source?.notice}
                 </p>
+              )}
+              {deliveryFailure && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 7, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (deliveryFailure === 'prompt') onOpenTerminal?.()
+                      else void reopenNow()
+                      setDeliveryFailure(null)
+                    }}
+                    disabled={deliveryFailure === 'prompt' ? !onOpenTerminal : !reopen?.enabled || reopening}
+                    style={{ border: 0, borderRadius: 8, padding: '6px 10px', background: 'var(--anthropic-orange)', color: '#fff', fontFamily: 'inherit', fontSize: 11.5, cursor: 'pointer' }}
+                  >
+                    {deliveryFailure === 'prompt'
+                      ? (pt ? 'Abrir pergunta no terminal' : 'Open the question in the terminal')
+                      : (pt ? 'Reabrir sessão' : 'Reopen session')}
+                  </button>
+                </div>
               )}
               {/* A SOURCE's run line (tokens, cost, context) — the bottom bar's slot. */}
               {source?.status}

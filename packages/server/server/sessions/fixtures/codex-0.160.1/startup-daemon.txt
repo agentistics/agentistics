@@ -1,0 +1,8 @@
+
+  These settings persist and can disable functionality for other clients.
+
+› 1. Run without daemon this time
+  2. Restart with these settings
+  3. Cancel
+
+  Press enter to confirm or esc to cancel

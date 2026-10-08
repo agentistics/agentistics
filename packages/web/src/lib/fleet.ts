@@ -193,7 +193,7 @@ export interface FleetState {
     ids?: readonly string[]
     /** EXT.OPEN: yes to ending an external process so its conversation continues here. */
     confirm?: boolean
-  }) => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean }>
+  }) => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' }>
 }
 
 /**

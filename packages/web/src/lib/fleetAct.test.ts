@@ -40,3 +40,9 @@ describe('parseActResult — EXT.OPEN: a write that needs a YES first', () => {
     expect('confirm' in parseActResult({ ok: false, message: 'no' }, 'en')).toBe(false)
   })
 })
+
+test('a failed pane write carries its classified recovery action', () => {
+  expect(parseActResult({ ok: false, message: 'Codex is waiting for a response on screen.', failure: 'prompt' }, 'en').failure).toBe('prompt')
+  expect(parseActResult({ ok: false, message: 'A sessão foi encerrada.', failure: 'ended' }, 'pt').failure).toBe('ended')
+  expect(parseActResult({ ok: false, message: 'old server' }, 'en').failure).toBeUndefined()
+})

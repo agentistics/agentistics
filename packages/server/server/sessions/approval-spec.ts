@@ -157,7 +157,7 @@ export const APPROVAL_SPECS: Record<HarnessId, ApprovalSpec | null> = {
   // reason.
   codex: {
     key: 'Enter',
-    probed: 'codex 0.113.0, 2026-08-13',
+    probed: 'codex 0.160.1, 2026-10-07',
     // VERIFIED by driving a live codex 0.153.4 session twice on 2026-09-10: its own
     // directory-trust prompt (`1. Yes, continue` / `2. No, quit`, the dialog every first-time user
     // meets on their very first message) accepted a bare `2` and quit cleanly — the pane exited —

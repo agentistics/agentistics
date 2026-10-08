@@ -1340,6 +1340,8 @@ export interface ActionResult {
   ok: boolean
   /** Already-localized one-line outcome, shown in the status line. */
   message: string
+  /** A failed pane write classified from the post-write screen. */
+  failure?: 'prompt' | 'ended'
 }
 
 /** What `ControlHost.selfCheck` answered. `message` is localized and present on every non-`none`. */
