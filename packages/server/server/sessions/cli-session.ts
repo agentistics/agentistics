@@ -29,6 +29,7 @@ import { toControlSession } from './control-session'
 import { recordedRepo, repoFacts } from './repo-facts'
 import { emptyReason, renderSessionTable, resolveWidth } from './session-table'
 import { SPAWN_SPECS, planSpawn } from './spawn-spec'
+import { buildSpawnContext, pendingContextFor, resolveContextTask, resolveContextTaskByRef, writeContextFile } from './spawn-context'
 import { rulesFor } from './attention-rules'
 // The harness half of a rename. Shared with the cockpit's Rename verb — see `rename.ts`.
 import { renameInHarness, renameMessage } from './rename'
@@ -302,9 +303,13 @@ async function start(
   // is written verbatim into the registry, where `list` would print it back meaningless from
   // anywhere else.
   const cwd = cmd.cwd ? resolve(cmd.cwd) : process.cwd()
+  const lang = await resolveLang()
+  const id = newSessionId()
+  const ctx = buildSpawnContext({ sessionId: id, cwd, ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)) })
   const planned = planSpawn({
     harness: cmd.harness, cwd, prompt: cmd.prompt, model: cmd.model, effort: cmd.effort,
     conversationId: randomUUID(),
+    context: ctx,
   })
   if (!planned.ok) { console.error(explainPlanError(planned.error)); return 1 }
 
@@ -312,12 +317,10 @@ async function start(
   // process. A refusal here means nothing below this point runs: no id is minted, no row is
   // written, nothing is spawned. `--force` still goes through this check, so the override note
   // is printed from the SAME place a plain refusal would have been.
-  const lang = await resolveLang()
   if (reportAdmission(
     await admitOrWait(1, cmd.force ?? false, lang, cmd.json ?? false), lang, cmd.json ?? false,
   )) return 1
 
-  const id = newSessionId()
   // Stamped BEFORE the process is launched, not after it has been checked for a crash.
   //
   // `planFirstSightingClaims` asks whether a conversation began AFTER we spawned, and this is the
@@ -328,8 +331,9 @@ async function start(
   // for good. The moment we launched is the moment the claim means; the moment we finished
   // checking is not.
   const spawnedAt = new Date().toISOString()
+  await writeContextFile(planned.plan)
   try {
-    await backend.spawn({ id, cwd, argv: planned.plan.argv, ...spawnPromptArg(planned.plan, cmd.harness) })
+    await backend.spawn({ id, cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...spawnPromptArg(planned.plan, cmd.harness) })
   } catch (e) {
     console.error(`Could not start the session: ${e instanceof Error ? e.message : String(e)}`)
     return 1
@@ -357,6 +361,7 @@ async function start(
     // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
     ...(cmd.taskId ? { taskId: cmd.taskId } : {}),
     ...(cmd.attemptId ? { attemptId: cmd.attemptId } : {}),
+    ...(pendingContextFor(planned.plan, ctx) ? { pendingContext: pendingContextFor(planned.plan, ctx)! } : {}),
     // The link is EXACT here: the CLI was handed this id (`SpawnSpec.assignId`).
     ...(planned.plan.conversationId
       ? { conversationId: planned.plan.conversationId, conversationLink: 'assigned' as const, conversationLinkVia: 'assigned-id' as const }
@@ -499,9 +504,12 @@ async function batch(
 
   for (const spec of cmd.specs) {
     const cwd = spec.cwd ? resolve(spec.cwd) : process.cwd()
+    const id = newSessionId()
+    const ctx = buildSpawnContext({ sessionId: id, cwd, ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
     const planned = planSpawn({
       harness: spec.harness,
       cwd,
+      context: ctx,
       ...(spec.prompt ? { prompt: spec.prompt } : {}),
       ...(spec.model ? { model: spec.model } : {}),
       ...(spec.effort ? { effort: spec.effort } : {}),
@@ -509,7 +517,6 @@ async function batch(
     })
     if (!planned.ok) { failed.push({ harness: spec.harness, reason: explainPlanError(planned.error) }); continue }
 
-    const id = newSessionId()
     // Stamped BEFORE the process is launched, not after it has been checked for a crash.
     //
     // `planFirstSightingClaims` asks whether a conversation began AFTER we spawned, and this is the
@@ -520,9 +527,11 @@ async function batch(
     // for good. The moment we launched is the moment the claim means; the moment we finished
     // checking is not.
     const spawnedAt = new Date().toISOString()
+    await writeContextFile(planned.plan)
     try {
       await backend.spawn({
         id, cwd, argv: planned.plan.argv,
+        ...(planned.plan.env ? { env: planned.plan.env } : {}),
         ...spawnPromptArg(planned.plan, spec.harness),
       })
     } catch (e) {
@@ -546,6 +555,7 @@ async function batch(
       task: cmd.task,
       // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
       ...(resolved?.taskId ? { taskId: resolved.taskId } : {}),
+      ...(pendingContextFor(planned.plan, ctx) ? { pendingContext: pendingContextFor(planned.plan, ctx)! } : {}),
       ...(spec.attempt && resolved?.attempts.get(spec.attempt)
         ? { attemptId: resolved.attempts.get(spec.attempt)! }
         : {}),

@@ -24,6 +24,7 @@
  * on it saying why. The link was never the problem; there was no reader.
  */
 
+import { stripContextTurns } from './agentistics-context'
 import { anyGrant, scrubDeep } from '../vault/grants'
 import { isExternalRowId } from './external-continue'
 import type { StartHost } from '../cli-start'
@@ -332,6 +333,9 @@ async function readSessionChatCore(
       live,
     }
   }
+  // The fenced agentistics context (a harness with no invisible channel gets it in its first message)
+  // never reaches a bubble: the person's own words stay, and one small chip says it was sent.
+  read.turns = stripContextTurns(read.turns)
   // A REWIND agentop just drove is not in the transcript until the conversation continues — the
   // turns it undid are cut here until then. See `rewind-pending.ts`.
   const rewound = pendingRewindFor(conversationId, Date.now())

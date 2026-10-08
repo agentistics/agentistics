@@ -130,6 +130,8 @@ import { scanProcesses } from './live-sessions'
 import { resolveBackend } from './sessions'
 import { inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
 import { SPAWN_SPECS, planSpawn } from './sessions/spawn-spec'
+import { prependContext } from './sessions/agentistics-context'
+import { buildSpawnContext, pendingContextFor, resolveContextTask, writeContextFile } from './sessions/spawn-context'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
 import { bornConversationLink } from './sessions/born-link'
@@ -1903,11 +1905,12 @@ async function spawnRow(a: {
   id: string
   spawnedAt: string
   req: { harness: HarnessId; cwd: string; label?: string; task?: string; taskId?: string; attemptId?: string; inherit?: ManagedSession }
+  pendingContext?: string
   model?: string
   effort?: string
   bornLink: Partial<ManagedSession> | null | undefined
 }): Promise<ManagedSession> {
-  const { id, spawnedAt, req, model, effort, bornLink } = a
+  const { id, spawnedAt, req, model, effort, bornLink, pendingContext } = a
   return {
     id,
     harness: req.harness,
@@ -1926,6 +1929,7 @@ async function spawnRow(a: {
     // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
     ...(req.taskId ? { taskId: req.taskId } : {}),
     ...(req.attemptId ? { attemptId: req.attemptId } : {}),
+    ...(pendingContext ? { pendingContext } : {}),
     // Recorded at the one moment it is certain — the harness was just handed this id, or we asked
     // it to reopen this conversation.
     ...(bornLink ?? {}),
@@ -1971,6 +1975,14 @@ async function spawnManaged(req: {
   task?: string
   /** See `ManagedSession.taskId`: recorded at spawn, the one moment it is a fact. */
   taskId?: string
+  /**
+   * Task/subtask the session is being created FOR, ids only — told to the harness in its context.
+   * Deliberately not `taskId`: that one is stamped on the row at spawn, while the web files the
+   * session itself right after (and a filing under a subtask must not find a task stamp already
+   * there).
+   */
+  contextTaskId?: string
+  contextSubtaskId?: string
   attemptId?: string
   /** The row this spawn REPLACES: its identity (`inheritedIdentity`) is born into the new row. */
   inherit?: ManagedSession
@@ -2037,10 +2049,18 @@ async function spawnManaged(req: {
   const launch = req.resumeId ? inheritedLaunch(req.inherit, req.harness) : {}
   const model = req.model ?? launch.model
   const effort = req.effort ?? launch.effort
+  // Minted BEFORE the plan: the agentistics context tells the harness its own session id.
+  const id = newSessionId()
+  const ctx = buildSpawnContext({
+      sessionId: id,
+      cwd: req.cwd,
+      ...(await resolveContextTask(req.contextTaskId ?? req.taskId, req.contextSubtaskId, req.task)),
+    })
   const planned = planSpawn({
     harness: req.harness,
     cwd: req.cwd,
     ...(req.resumeId ? { resumeId: req.resumeId } : {}),
+    context: ctx,
     ...(req.prompt ? { prompt: req.prompt } : {}),
     ...(model ? { model } : {}),
     ...(effort ? { effort } : {}),
@@ -2060,7 +2080,6 @@ async function spawnManaged(req: {
     return { ok: false, message: s.sessNotOnPath(bin, process.env.PATH ?? '') }
   }
 
-  const id = newSessionId()
   // Stamped BEFORE the launch, for the reason `cli-session.ts` records at its own two spawn sites:
   // `planFirstSightingClaims` asks whether a conversation began AFTER we spawned, and a timestamp
   // taken once the call has returned can already be later than the conversation the child opened.
@@ -2071,7 +2090,7 @@ async function spawnManaged(req: {
   // <id>" for seconds — the placeholder `control-session.ts` keeps for sessions started OUTSIDE
   // agentop. Born linked — see `born-link.ts` for the window a patch-afterwards left open.
   const bornLink = bornConversationLink(planned.plan.conversationId, req.resumeId)
-  await addSession(await spawnRow({ id, spawnedAt, req, model, effort, bornLink }))
+  await addSession(await spawnRow({ id, spawnedAt, req, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx) }))
   // A REOPEN keeps the replaced row's mute. A session linked to a conversation is muted under that
   // conversation, which the new row keeps; one with no link (codex, kimi, gemini…) was muted under its
   // managed id, which changes here, so the mute moves to the new id or it would silently come undone.
@@ -2080,11 +2099,13 @@ async function spawnManaged(req: {
   }
   // A launch that fails takes its row with it: no row is ever left for a pane that is not there.
   const abandon = () => removeSession(id).catch(() => {})
+  await writeContextFile(planned.plan)
   try {
     await backend.spawn({
       id,
       cwd: req.cwd,
       argv: planned.plan.argv,
+      ...(planned.plan.env ? { env: planned.plan.env } : {}),
       // Deliver the initial prompt once the harness is ready (see `initial-prompt.ts`). The harness's
       // screen rules ride along so the backend can tell an idle prompt from a startup dialog.
       ...(planned.plan.initialPrompt
@@ -4270,9 +4291,14 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         return { ok: false, message: s.sessPromptBlocked }
       }
 
-      return (await (managed.harness === 'codex' && backend.sendTextReliable
-        ? backend.sendTextReliable(id, body, managed.harness)
-        : backend.sendText(id, body)))
+      // A context HELD at spawn (no invisible channel, no first message then) rides in front of the
+      // first real prompt, once — never sent alone, where the assistant would answer it.
+      const outgoing = managed.pendingContext ? prependContext(managed.pendingContext, body) : body
+      const sent = await (managed.harness === 'codex' && backend.sendTextReliable
+        ? backend.sendTextReliable(id, outgoing, managed.harness)
+        : backend.sendText(id, outgoing))
+      if (sent && managed.pendingContext) await patchSession(id, { pendingContext: null }).catch(() => {})
+      return sent
         ? { ok: true, message: s.sessPrompted(id) }
         : { ok: false, message: s.sessSendFailed(id) }
     },
@@ -4544,6 +4570,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.effort ? { effort: req.effort } : {}),
         ...(req.label ? { label: req.label } : {}),
         ...(req.task ? { task: req.task } : {}),
+        ...(req.taskId ? { contextTaskId: req.taskId } : {}),
+        ...(req.subtaskId ? { contextSubtaskId: req.subtaskId } : {}),
         ...(req.force ? { force: true } : {}),
       }, S(), lang).then(async r => {
         // NW-02: a session started for a BOARD task is filed there by id, not only named after it.

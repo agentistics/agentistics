@@ -28,6 +28,8 @@ export type SessionCommand =
       task?: string
       /** See `ManagedSession.taskId`. Resolved from the task book before the spawn. */
       taskId?: string
+      /** `--subtask <id|title>`: the subtask of `--task` this session is for (told to the harness). */
+      subtask?: string
       attemptId?: string
       /** `--notify off` starts the session with its notifications muted (delivery only — it still
        *  shows as waiting). Absent = on. */
@@ -70,6 +72,8 @@ export type SessionCommand =
       task: string
       /** The task book's id for `task`, resolved before the spawn. */
       taskId?: string
+      /** `--subtask <id|title>`: a subtask of `task` every session of the batch is for. */
+      subtask?: string
       /** One entry per session to start. */
       specs: BatchSpec[]
       json?: boolean
@@ -115,7 +119,7 @@ function notifyValue(v: string): NotifySwitch | null {
 }
 
 const VALUE_FLAGS = new Set([
-  '-p', '--prompt', '--model', '--effort', '--cwd', '--name', '--task', '--session', '--attempt', '--notify',
+  '-p', '--prompt', '--model', '--effort', '--cwd', '--name', '--task', '--subtask', '--session', '--attempt', '--notify',
 ])
 
 function isHarness(v: string): v is HarnessId {
@@ -215,6 +219,7 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
     else if (arg === '--effort') cmd.effort = value
     else if (arg === '--cwd') cmd.cwd = value
     else if (arg === '--name') cmd.label = value
+    else if (arg === '--subtask') cmd.subtask = value
   }
 
   return cmd
@@ -292,6 +297,7 @@ function parseLs(argv: string[], json: boolean): SessionCommand {
  */
 function parseBatch(argv: string[], json: boolean): SessionCommand {
   let task = ''
+  let subtask: string | undefined
   const specs: BatchSpec[] = []
   const shared: { cwd?: string; model?: string; effort?: string; attempt?: string; notify?: NotifySwitch } = {}
 
@@ -311,6 +317,7 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
     }
     i++
     if (arg === '--task') { task = value; continue }
+    if (arg === '--subtask') { subtask = value; continue }
     // `--cwd`, `--model` and `--effort` before the sessions are DEFAULTS for all of them: a batch
     // is usually many assistants on one repository, and repeating the path per session is how a
     // generated command line gets long enough to be got wrong.
@@ -340,7 +347,7 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
 
   if (!task) return { kind: 'error', message: 'batch needs --task "<name>" so the sessions belong together.' }
   if (specs.length === 0) return { kind: 'error', message: 'batch needs at least one --session "<harness>: <prompt>".' }
-  return { kind: 'batch', task, specs, ...(json ? { json: true } : {}), ...(force ? { force: true } : {}) }
+  return { kind: 'batch', task, ...(subtask ? { subtask } : {}), specs, ...(json ? { json: true } : {}), ...(force ? { force: true } : {}) }
 }
 
 /** `<harness>[@<cwd>]: <prompt>` — the one string that describes a session in a batch. */

@@ -1973,6 +1973,8 @@ export interface SpawnSessionRequest {
   task?: string
   /** NW-02: the BOARD task to file it under (its id) — filed on the board right after it starts. */
   taskId?: string
+  /** The subtask of `taskId` this session is for — told to the harness in its context; filing is the caller's. */
+  subtaskId?: string
   prompt?: string
   model?: string
   effort?: string

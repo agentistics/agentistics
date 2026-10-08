@@ -496,7 +496,7 @@ export const tmuxBackend: SessionBackend = {
     // VAULT.PERSONAL §8.3: the session's OWN id, so a Claude Code hook inside it can name the grant it
     // acts under. Not a secret (the id is on every fleet row); a value never travels this way — tmux
     // `-e` is visible in `ps`.
-    const env: Record<string, string> = { ...utf8LocaleEnv(await sessionEnv()), AGENTOP_MANAGED_ID: req.id }
+    const env: Record<string, string> = { ...utf8LocaleEnv(await sessionEnv()), AGENTOP_MANAGED_ID: req.id, ...(req.env ?? {}) }
     // The same id is what an Agentask comment proves it came from (`session-identity.ts`): the MCP
     // derives the proof from a 0600 key file, so no token is ever put on a command line. The key is
     // created here, before the first session that could need it exists.
