@@ -132,6 +132,10 @@ function sanitize(raw: unknown): ManagedSession | null {
     // silent drop `conversationId` suffered above, and `TaskPatch` suffered for `shared`.
     ...(typeof s.subtaskId === 'string' ? { subtaskId: s.subtaskId } : {}),
     ...(typeof s.pendingContext === 'string' ? { pendingContext: s.pendingContext } : {}),
+    // The parent link (SESSION.LINK). Missing here, it was written at spawn and wiped by the first
+    // heartbeat rewrite ~20 s later, so "started by" never showed.
+    ...(typeof s.parentSessionId === 'string' ? { parentSessionId: s.parentSessionId } : {}),
+    ...(typeof s.parentConversationId === 'string' ? { parentConversationId: s.parentConversationId } : {}),
     ...(typeof s.attemptId === 'string' ? { attemptId: s.attemptId } : {}),
     ...(typeof s.endedAt === 'string' ? { endedAt: s.endedAt } : {}),
     // Written by `resumeSession` and `openTask` and, until this line existed, dropped on the way back

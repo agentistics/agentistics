@@ -14,3 +14,7 @@ test('shell output up to twelve lines starts expanded, longer output starts coll
   expect(shellRunViewModel(run({ stdout: Array.from({ length: 12 }, (_, i) => `line ${i}`).join('\n'), stderr: '' })).expandedByDefault).toBe(true)
   expect(shellRunViewModel(run({ stdout: Array.from({ length: 13 }, (_, i) => `line ${i}`).join('\n'), stderr: '' })).expandedByDefault).toBe(false)
 })
+
+test("Claude Code's '(Bash completed with no output)' reads as no output", () => {
+  expect(shellRunViewModel(run({ stdout: '(Bash completed with no output)', stderr: '' }))).toEqual({ lines: 0, hasOut: false, expandedByDefault: false })
+})
