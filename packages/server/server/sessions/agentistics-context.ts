@@ -22,6 +22,9 @@ export interface ContextInput {
   /** Set when it was created from one subtask of that task. */
   subtaskId?: string
   subtaskTitle?: string
+  /** Set when another managed session started this one: its id and (best effort) its title. */
+  parentId?: string
+  parentTitle?: string
   /** Display names of the harnesses installed here (the fleet's own detection). Omitted when unknown. */
   harnesses?: readonly string[]
 }
@@ -64,6 +67,11 @@ export function contextText(i: ContextInput): string {
     )
   } else {
     lines.push('This session is not linked to a task. If the work grows beyond a quick question, offer to file it in Agentask — ask first.')
+  }
+  if (i.parentId) {
+    lines.push(
+      `You were started by session ${i.parentId}${i.parentTitle ? ` ("${i.parentTitle}")` : ''}. When you finish, get blocked or need a decision, report to it with agentistics_session_message (kind: handback | block | question) — not to the user — and keep working only on what it asked.`,
+    )
   }
   if (i.harnesses && i.harnesses.length > 0) lines.push(`Harnesses installed on this machine: ${i.harnesses.join(', ')}.`)
   lines.push(

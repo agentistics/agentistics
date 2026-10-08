@@ -941,6 +941,10 @@ export interface ControlSession {
   lastUserMessageAt?: number
   /** The task id behind `task` (the label). */
   taskId?: string
+  /** The managed id of the session that started this one. The title is resolved against the other rows. */
+  parentSessionId?: string
+  /** The parent's conversation id — the link that survives the parent being reopened. */
+  parentConversationId?: string
 }
 
 /**
@@ -1977,6 +1981,8 @@ export interface SpawnSessionRequest {
   taskId?: string
   /** The subtask of `taskId` this session is for — told to the harness in its context; filing is the caller's. */
   subtaskId?: string
+  /** The managed id of the session starting this one — recorded as `ManagedSession.parentSessionId`. */
+  parentSessionId?: string
   prompt?: string
   model?: string
   effort?: string

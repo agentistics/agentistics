@@ -77,6 +77,7 @@ export const AGENT_TOOL_NAMES = [
   'agentistics_session_group_edit',
   // Session notifications (1)
   'agentistics_session_notify',
+  'agentistics_session_message',
   // Metrics (6)
   'agentistics_summary',
   'agentistics_harnesses',
@@ -162,11 +163,15 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
     ...GROUPS, risk: 'W', routes: ['POST /api/session-notify'],
     reason: 'a per-session on/off switch for delivery; reversible, and the session state is untouched',
   },
+  agentistics_session_message: {
+    ...GROUPS, risk: 'W', routes: ['POST /api/session-message'],
+    reason: 'types a message into another session through the composer path; additive, rate-limited, sender verified',
+  },
   // ------------------------------------------------------------------ Metrics
   agentistics_summary: { ...DATA, capability: 'localTranscripts', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/runtime/metrics'], reason: 'reads computed metrics' },
   agentistics_harnesses: { ...DATA, capability: 'localTranscripts', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/runtime/metrics'], reason: 'reads computed metrics per harness' },
   agentistics_projects: { ...DATA, capability: 'localTranscripts', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/runtime/metrics'], reason: 'reads computed metrics per project' },
-  agentistics_sessions: { ...DATA, risk: 'R', routes: ['GET /api/data'], reason: 'reads session metadata (first_prompt is untrusted text, §4.8)' },
+  agentistics_sessions: { ...DATA, capability: 'localShell', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/fleet'], reason: 'reads session metadata (first_prompt is untrusted text, §4.8)' },
   agentistics_costs: { ...DATA, capability: 'localTranscripts', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/runtime/metrics'], reason: 'reads computed costs' },
   agentistics_repos: { ...DATA, capability: 'localTranscripts', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/runtime/metrics'], reason: 'reads computed metrics per repository' },
   // ------------------------------------------------------------------ Layouts (custom page, stored in preferences)

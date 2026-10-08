@@ -300,6 +300,18 @@ export interface ManagedSession {
    * prepended to the first real prompt (`promptSession`), then cleared.
    */
   pendingContext?: string
+  /**
+   * The managed id of the session that STARTED this one (`AGENTOP_MANAGED_ID` of the caller, or an
+   * explicit `parent` on the HTTP spawn). Recorded at spawn, the one moment it is a fact; a reopen
+   * inherits it. It is what the child is told to report to (`agentistics_session_message`).
+   */
+  parentSessionId?: string
+  /**
+   * The parent's CONVERSATION id, when it was known at spawn. A managed id changes on every reopen of
+   * the parent; the conversation does not, so this is the link that survives. Resolved to the live
+   * row at read/send time.
+   */
+  parentConversationId?: string
   attemptId?: string
   /**
    * The last time this session was OBSERVED ALIVE, epoch ms — stamped at creation, then refreshed by
