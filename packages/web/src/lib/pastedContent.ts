@@ -39,6 +39,22 @@ export function splitPastedContent(text: string): PastedSegment[] {
   return out
 }
 
+/** Remove transcript plumbing when the server proved the block came from our composer. */
+export function unwrapPastedContent(text: string): string {
+  return text
+    .replace(OPEN, '')
+    .replace(CLOSE, '')
+    .trim()
+}
+
+/** Reload fallback: a whole pasted block containing only reply quote lines is ours. */
+export function isQuoteOnlyPastedBlob(text: string): boolean {
+  const segments = splitPastedContent(text)
+  if (segments.length !== 1 || segments[0]?.kind !== 'paste') return false
+  const lines = segments[0].text.split('\n').map(line => line.trim()).filter(Boolean)
+  return lines.length > 0 && lines.every(line => line.startsWith('> '))
+}
+
 /** First `n` non-empty lines, and how many lines the whole paste has. */
 export function pastePreview(text: string, n = 3): { head: string; total: number; truncated: boolean } {
   const lines = text.split('\n')

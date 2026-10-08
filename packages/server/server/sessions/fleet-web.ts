@@ -20,6 +20,7 @@ import type { HarnessId, ProjectKind } from '@agentistics/core'
 import type { StartHost } from '../cli-start'
 import type { CliLang } from '../cli-lang'
 import { recordPrompt } from './pending-prompts'
+import { recordComposerMessage } from './composer-message'
 import { isExternalRowId, planContinueHere } from './external-continue'
 import { SPAWN_SPECS } from './spawn-spec'
 import { cliStrings } from '../cli-i18n'
@@ -310,6 +311,7 @@ export async function runFleetAction(
       // about, and a submit that waits on the pane takes hundreds of milliseconds.
       const sentAtMs = Date.now()
       const out = await host.promptSession(req.id, text)
+      if (out.ok) recordComposerMessage(req.id, text)
       // RECORDED ONLY ON A CONFIRMED DELIVERY, and recorded HERE rather than in the browser: a
       // queue held by the tab that sent it is a queue no other device can see, which is the whole
       // of the report. `conversationOfRow` because a message belongs to the CONVERSATION, not to
@@ -1237,6 +1239,9 @@ async function continueExternal(lang: CliLang, req: FleetActionRequest, text: st
     attach: false,
     prompt: text,
   })
-  if (out.ok) recordPrompt(plan.conversationId, text)
+  if (out.ok) {
+    recordPrompt(plan.conversationId, text)
+    recordComposerMessage(req.id, text)
+  }
   return { ok: out.ok, message: out.ok ? cli.sessContinuedHere : out.message, ...(out.id ? { id: out.id } : {}) }
 }

@@ -32,7 +32,7 @@ import { chatNote, type ChatNoteTab } from '../../lib/chatNote'
 import { openArtifacts } from '../../lib/artifactsStore'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { splitSlashLine } from '../../lib/slashLine'
-import { hasPastedContent, pastePreview, splitPastedContent, stripInjectedBlocks } from '../../lib/pastedContent'
+import { hasPastedContent, pastePreview, splitPastedContent, stripInjectedBlocks, unwrapPastedContent, isQuoteOnlyPastedBlob } from '../../lib/pastedContent'
 import { resolveMarkerPaths, splitImageAttachments, splitImageMarkers } from '../../lib/attachmentPreview'
 import type { AttachmentMessage, AttachmentSend } from '@agentistics/core'
 import { copyText } from '../../lib/clipboard'
@@ -51,6 +51,8 @@ import { QuoteBlock } from '../chat/QuoteBlock'
 export interface ChatTurn {
   role: 'user' | 'assistant'
   text: string
+  /** The server matched this turn to a recent send from our composer. */
+  composer?: boolean
   pending?: boolean
   /**
    * A background TASK this turn started, by the label the assistant gave it.
@@ -910,7 +912,9 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessio
                 thing you pressed and the thing that appears are visibly the same act. The rule is
                 `slashLine.ts` and it is anchored: a `/home/...` path is not a command. */}
             {turn.shell ? <ShellRunBlock run={turn.shell} pt={pt} /> : (() => {
-              if (hasPastedContent(text)) {
+              const ownComposerMessage = turn.composer === true || isQuoteOnlyPastedBlob(text)
+              const renderedText = ownComposerMessage ? unwrapPastedContent(text) : text
+              if (!ownComposerMessage && hasPastedContent(text)) {
                 return (
                   <>
                     {splitPastedContent(text).map((seg, i) => seg.kind === 'paste'
@@ -919,11 +923,11 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessio
                   </>
                 )
               }
-              const { command, rest } = splitSlashLine(text)
+              const { command, rest } = splitSlashLine(renderedText)
               if (command === '' && mine && onQuoteClick) {
                 // EVERY leading quote block, each its own collapsible block that goes back to its
                 // source — a reply to several passages is several blocks (`leadingQuotes`).
-                const quoted = leadingQuotes(text)
+                const quoted = leadingQuotes(renderedText)
                 if (quoted.quotes.length > 0) {
                   return (
                     <>
@@ -940,7 +944,7 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessio
                 }
               }
               if (command === '') {
-                return <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{text}</ReactMarkdown>
+                return <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{renderedText}</ReactMarkdown>
               }
               return (
                 <>
