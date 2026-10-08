@@ -41,6 +41,10 @@ export interface ProjectPickerProps {
    *  server does not say. */
   projectTotals: Record<ProjectKind, number> | undefined
   projectIndexing?: boolean
+  projectIndexProgress?: { visited: number; queued: number }[]
+  projectDisks?: { id: string; label: string; letter?: string; install: boolean; count: number }[]
+  projectDisk?: string
+  onProjectDiskChange?: (disk: string) => void
   /** The field's own value — see `useFleetNewOptions`. */
   query: string
   onQueryChange: (q: string) => void
@@ -52,7 +56,7 @@ export interface ProjectPickerProps {
 }
 
 export function ProjectPicker({
-  lang, isMobile, projects, projectTotals, projectIndexing, query, onQueryChange, searching, value, onChange,
+  lang, isMobile, projects, projectTotals, projectIndexing, projectIndexProgress, projectDisks, projectDisk, onProjectDiskChange, query, onQueryChange, searching, value, onChange,
 }: ProjectPickerProps) {
   const pt = lang === 'pt'
   /** Which kind of place the list is showing. `all` is the default — see `projectKind`. */
@@ -109,6 +113,30 @@ export function ProjectPicker({
         )}
       </div>
 
+      {projectDisks && projectDisks.length > 1 && (
+        <div role="tablist" aria-label={pt ? 'Disco' : 'Disk'} style={{
+          display: 'flex', gap: 3, marginBottom: 8, padding: 3, borderRadius: 9,
+          background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+          overflowX: isMobile ? 'auto' : 'visible',
+        }}>
+          {[...projectDisks.map(d => ({
+            id: d.id,
+            label: d.install ? (pt ? 'Este disco' : 'This disk') : `${pt ? 'Disco' : 'Drive'} ${d.letter ?? d.label}:`,
+            count: d.count,
+          })), { id: 'all', label: pt ? 'Todos os discos' : 'All disks', count: projectDisks.reduce((n, d) => n + d.count, 0) }].map(d => {
+            const on = (projectDisk || projectDisks.find(x => x.install)?.id) === d.id
+            return <button key={d.id} role="tab" aria-selected={on} onClick={() => onProjectDiskChange?.(d.id)} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+              minHeight: 28, borderRadius: 7, border: 'none', cursor: 'pointer',
+              background: on ? 'var(--bg-surface)' : 'transparent',
+              color: on ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
+              fontFamily: 'inherit', fontSize: 11, fontWeight: on ? 650 : 500,
+              ...(isMobile ? { flexShrink: 0, padding: '0 10px', whiteSpace: 'nowrap' } : { flex: 1, minWidth: 0 }),
+            }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.label}</span><span style={{ fontSize: 10, color: 'var(--text-tertiary)', flexShrink: 0 }}>{d.count}</span></button>
+          })}
+        </div>
+      )}
+
       <div role="tablist" style={{
         display: 'flex', gap: 3, marginBottom: 8, padding: 3, borderRadius: 9,
         background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
@@ -153,7 +181,7 @@ export function ProjectPicker({
       <p style={{ margin: '0 0 8px', fontSize: 10.5, lineHeight: 1.45, color: 'var(--text-tertiary)' }}>
         {kindHint(kindTab, pt)}
         {shownMore && <> {kindMoreText(shownMore, pt)}</>}
-        {projectIndexing && <> {pt ? 'Indexando discos em segundo plano…' : 'Indexing disks in the background…'}</>}
+        {projectIndexing && <> {pt ? 'Indexando discos em segundo plano' : 'Indexing disks in the background'}{projectIndexProgress?.length ? ` (${projectIndexProgress.reduce((n, p) => n + p.visited, 0)} visited, ${projectIndexProgress.reduce((n, p) => n + p.queued, 0)} queued)…` : '…'}</>}
       </p>
 
       <div style={{

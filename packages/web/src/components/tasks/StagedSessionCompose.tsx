@@ -107,7 +107,7 @@ export function StagedSessionCompose(p: StagedSessionComposeProps) {
   // The harnesses/folders THIS machine can start/reach — the SAME `/api/fleet/new` fetch the
   // ordinary new-session wizard runs, so a draft can never name an assistant this machine cannot
   // spawn or a folder it cannot resolve, and the two dialogs can never disagree about either list.
-  const { harnesses, projects, projectTotals, projectIndexing, query, setQuery, searching, unavailable, retry, retryable } = useFleetNewOptions(p.lang)
+  const { harnesses, projects, projectTotals, projectIndexing, projectIndexProgress, projectDisks, projectDisk, setProjectDisk, query, setQuery, searching, unavailable, retry, retryable } = useFleetNewOptions(p.lang)
 
   const harness = useMemo(() => harnesses?.find(h => h.id === harnessId) ?? null, [harnesses, harnessId])
   const wizardHarness = useMemo(() => harness ? toWizardHarness(harness) : null, [harness])
@@ -488,6 +488,10 @@ export function StagedSessionCompose(p: StagedSessionComposeProps) {
               projects={projects}
               projectTotals={projectTotals}
               projectIndexing={projectIndexing}
+              projectIndexProgress={projectIndexProgress}
+              projectDisks={projectDisks}
+              projectDisk={projectDisk}
+              onProjectDiskChange={setProjectDisk}
               query={query}
               onQueryChange={setQuery}
               searching={searching}

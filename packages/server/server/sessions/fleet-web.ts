@@ -748,6 +748,9 @@ export interface FleetNewOptions {
   projectTotals?: Record<ProjectKind, number>
   /** True while a configured disk is being indexed in the background. */
   projectIndexing?: boolean
+  /** Progress for each configured disk; present while and after indexing for the wizard note. */
+  projectIndexProgress?: { root: string; visited: number; queued: number; candidates: number; complete: boolean }[]
+  projectDisks?: { id: string; label: string; letter?: string; install: boolean; count: number }[]
   /** The tasks that already exist here, so filing the new session is a pick, not a spelling test. */
   tasks: string[]
   /**
@@ -761,7 +764,7 @@ export interface FleetNewOptions {
  * The wizard's own data. Never throws — a machine that cannot answer says so in a sentence, and an
  * empty list is only ever a real "there is nothing here".
  */
-export async function readNewOptions(lang: CliLang, query: string): Promise<FleetNewOptions> {
+export async function readNewOptions(lang: CliLang, query: string, disk?: string): Promise<FleetNewOptions> {
   const s = controlStrings(lang)
   try {
     const host = await hostFor(lang)
@@ -773,7 +776,7 @@ export async function readNewOptions(lang: CliLang, query: string): Promise<Flee
     const [harnesses, projects, tasks] = await Promise.all([
       host.startableHarnesses(),
       host.searchProjects
-        ? host.searchProjects(query).catch(() => EMPTY_PROJECT_SEARCH)
+        ? host.searchProjects(query, disk).catch(() => EMPTY_PROJECT_SEARCH)
         : Promise.resolve(EMPTY_PROJECT_SEARCH),
       host.sessionTasks ? host.sessionTasks().catch(() => []) : Promise.resolve([]),
     ])
@@ -828,6 +831,8 @@ export async function readNewOptions(lang: CliLang, query: string): Promise<Flee
        */
       projectTotals: projects.totals,
       ...(projects.indexing ? { projectIndexing: true } : {}),
+      ...(projects.indexProgress ? { projectIndexProgress: projects.indexProgress } : {}),
+      ...(projects.disks ? { projectDisks: projects.disks } : {}),
       tasks,
     }
   } catch (e) {
