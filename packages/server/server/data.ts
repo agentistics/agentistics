@@ -534,6 +534,16 @@ export function enrichProjectSessions(projects: ServerProject[], metaMap: Map<st
 // ---------------------------------------------------------------------------
 
 const CACHE_TTL_MS = 30_000
+/**
+ * PERF.1 step 1: in the SERVER the file watcher already rebuilds on every change
+ * (`rebuild-scheduler.ts`), so the 30 s refresh-on-read was a full build every 30 s for as long as a
+ * dashboard was open — with nothing changed. There it is only a safety net for the inputs no watcher
+ * sees (git history, the session registry), and runs every 10 minutes at most.
+ */
+const WATCHED_CACHE_TTL_MS = 10 * 60_000
+let _cacheTtlMs = CACHE_TTL_MS
+/** Called by the server once its watcher drives rebuilds (`sse.ts` `enableRebuildOnChange`). */
+export function useWatcherDrivenRefresh(): void { _cacheTtlMs = WATCHED_CACHE_TTL_MS }
 
 type CacheStatus = 'idle' | 'computing' | 'done'
 
@@ -620,12 +630,25 @@ function backfillGitRemote(sessions: SessionMeta[], projects: ServerProject[]): 
   return n
 }
 
+/**
+ * Most recent first, and a TOTAL order: sessions that started in the same instant are ordered by
+ * (harness, session_id). The readers finish in whatever order their files do, so a tie left to the
+ * input order made two builds over identical files differ (PERF.1: the incremental build is checked
+ * byte for byte against a full one, which needs the full one to be deterministic first).
+ */
+function newestFirst(a: SessionMeta, b: SessionMeta): number {
+  const t = b.start_time.localeCompare(a.start_time)
+  if (t !== 0) return t
+  const ka = sessionKey(a), kb = sessionKey(b)
+  return ka < kb ? -1 : ka > kb ? 1 : 0
+}
+
 export async function buildApiResponse(): Promise<ApiResponse> {
   if (_status === 'computing') return _promise!
   // Stale-while-revalidate: once a result exists, always serve it immediately. When it's older than
   // the TTL, refresh in the background — but never make the caller wait for that rebuild.
   if (_status === 'done' && _promise) {
-    if (Date.now() - _resolvedAt >= CACHE_TTL_MS) revalidateInBackground()
+    if (Date.now() - _resolvedAt >= _cacheTtlMs) revalidateInBackground()
     return _promise
   }
 
@@ -732,7 +755,7 @@ async function buildQuickResponse(): Promise<ApiResponse> {
   for (const s of stored.values()) if (!byId.has(sessionKey(s))) byId.set(sessionKey(s), s)
   const sessions = [...byId.values()]
   for (const s of sessions) normalizeSessionTimes(s)
-  sessions.sort((a, b) => b.start_time.localeCompare(a.start_time))
+  sessions.sort(newestFirst)
 
   const harnessSet = new Set<SurfaceHarnessId>(['claude'])
   const projByPath = new Map<string, ServerProject>()
@@ -1108,8 +1131,9 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     // so "its raw files are gone" is the normal case, not an edge one.
     const harnessSet = new Set<SurfaceHarnessId>(['claude'])
     if (mode === 'consolidate') {
-      const stored = await loadConsolidated()
       const liveIds = new Set(sessions.map(s => s.session_id))
+      // Live ids are skipped inside the store read, before it copies them (PERF.1).
+      const stored = await loadConsolidated({ skipIds: liveIds })
       const projByPath = new Map(projects.map(p => [p.path, p]))
       for (const [id, s] of stored) {
         if (liveIds.has(id)) continue
@@ -1145,7 +1169,7 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     }
 
     // Sort sessions by start_time descending (most recent first)
-    sessions.sort((a, b) => b.start_time.localeCompare(a.start_time))
+    sessions.sort(newestFirst)
 
     // Post-processing health checks based on session data (tool metrics)
     analyzeToolHealthIssues(sessions, healthIssues)
@@ -1384,7 +1408,7 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
       }
     }
 
-    sessions.sort((a, b) => b.start_time.localeCompare(a.start_time))
+    sessions.sort(newestFirst)
 
     // Final safety net: dedup by (harness, session_id) — `sessionKey`.
     // This key used to include `user`, which silently disabled it on a central that is also a
@@ -1474,7 +1498,7 @@ export async function buildApiResponseStream(onProgress: ProgressFn): Promise<Ap
   // stale, refresh in the background; the caller still gets the cached result now (no 44s wait).
   if (_status === 'done' && _promise) {
     for (const s of STAGES) onProgress(s, 1)
-    if (Date.now() - _resolvedAt >= CACHE_TTL_MS) revalidateInBackground()
+    if (Date.now() - _resolvedAt >= _cacheTtlMs) revalidateInBackground()
     return _promise
   }
 

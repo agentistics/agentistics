@@ -5,7 +5,7 @@ import { stat } from 'fs/promises'
 import chokidar from 'chokidar'
 import { SESSION_META_DIR, PROJECTS_DIR, STATS_CACHE_FILE, PORT, TEAM_CENTRAL, CODEX_SESSIONS_DIR, GEMINI_DIR, COPILOT_DIR, ANTIGRAVITY_BRAIN_DIR, ANTIGRAVITY_CONVERSATIONS_DIR } from './config'
 import { centralManifest, centralHtml } from './central-branding'
-import { invalidateCache, rebuildNow } from './data'
+import { invalidateCache, rebuildNow, useWatcherDrivenRefresh } from './data'
 import { createRebuildScheduler } from './rebuild-scheduler'
 import { mirrorFile } from './archive'
 import { getEnabledAdapters } from './adapters/types'
@@ -84,7 +84,7 @@ let sseDebounce: ReturnType<typeof setTimeout> | null = null
  * callers of `triggerSseNotification` (the team modules, their tests, the CLI) keep the cheap path —
  * mark the cache stale, nudge listeners — rather than starting a full build in the background.
  */
-export function enableRebuildOnChange(): void { rebuildOnChange = true }
+export function enableRebuildOnChange(): void { rebuildOnChange = true; useWatcherDrivenRefresh() }
 
 export function triggerSseNotification() {
   if (rebuildOnChange) rebuilds.changed()

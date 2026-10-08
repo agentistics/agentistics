@@ -56,6 +56,31 @@ CREATE INDEX IF NOT EXISTS parse_cache_used ON parse_cache(used);
  * fallback is exactly the time this cache was meant to save — never a wrong number,
  * because every value in it is recomputable from the file it names.
  */
+/**
+ * PERF.1 step 1 — what every build paid for a cache that was all hits. A warm rebuild over 1200
+ * transcripts did 1200 SELECTs and JSON.parsed 1200 blobs (~60 ms), then rewrote `used` on all 1200
+ * rows in a transaction (~50 ms) — to learn nothing, because nothing had changed.
+ *
+ * - A row read or written is REMEMBERED in this process, under the same (slot, key) the table uses,
+ *   so a later build answers from memory. A hit hands out a shallow COPY: callers assign top-level
+ *   fields onto what they get (project path, git remote, labels) and nothing assigns into a nested
+ *   one. The memo is per database file and bounded (`MEMO_CAP`, least-recently-used first).
+ * - `used` is only an age for `gc()` (30 days), so a row is touched when its stamp is older than
+ *   `TOUCH_AFTER_MS`, not on every read. A row hit daily still never ages out.
+ */
+const MEMO_CAP = 50_000
+const TOUCH_AFTER_MS = 24 * 60 * 60 * 1000
+const MEMOS = new Map<string, Map<string, { key: string; value: unknown; used: number }>>()
+
+function shallowCopy<T>(v: T): T {
+  if (Array.isArray(v)) return v.slice() as T
+  if (v !== null && typeof v === 'object') return { ...(v as object) } as T
+  return v
+}
+
+/** For tests: forget what every parse cache remembers in memory. */
+export function clearParseCacheMemo(): void { for (const m of MEMOS.values()) m.clear() }
+
 export async function openParseCache(
   file: string = PARSE_CACHE_FILE,
   /** Injected so gc/flush behaviour is testable without sleeping. Production passes none. */
@@ -86,7 +111,7 @@ export async function openParseCache(
     // `parse_cache` table with different columns — `CREATE TABLE IF NOT EXISTS` only
     // matches on the table NAME, never the columns) throws right here, not later
     // unguarded. Falling into the catch below is exactly the degrade this cache promises.
-    selectStmt = db.query('SELECT key, value FROM parse_cache WHERE slot = ?')
+    selectStmt = db.query('SELECT key, value, used FROM parse_cache WHERE slot = ?')
     upsertStmt = db.query(
       'INSERT INTO parse_cache (slot, key, value, used) VALUES (?, ?, ?, ?) ' +
       'ON CONFLICT(slot) DO UPDATE SET key = excluded.key, value = excluded.value, used = excluded.used'
@@ -103,19 +128,40 @@ export async function openParseCache(
   // Slots READ this build. Touched in one transaction by flush() so a row that is
   // always hit and never rewritten does not age out under gc().
   const readSlots = new Set<string>()
+  let memo = MEMOS.get(file)
+  if (!memo) { memo = new Map(); MEMOS.set(file, memo) }
+  const remember = (slot: string, entry: { key: string; value: unknown; used: number }) => {
+    memo!.delete(slot)
+    memo!.set(slot, entry)
+    while (memo!.size > MEMO_CAP) memo!.delete(memo!.keys().next().value as string)
+  }
+  const touchIfOld = (slot: string, entry: { used: number }) => {
+    const at = now()
+    if (at - entry.used >= TOUCH_AFTER_MS) { readSlots.add(slot); entry.used = at }
+  }
 
   const store: ParseCache = {
     get<T>(kind: ParseCacheKind, stamp: FileStamp, variant = ''): T | null {
       const slot = cacheSlot(kind, stamp.path, variant)
+      const key = cacheKey(stamp)
+      const mem = memo!.get(slot)
+      if (mem && mem.key === key) {
+        memo!.delete(slot); memo!.set(slot, mem)
+        touchIfOld(slot, mem)
+        stats.hits++
+        return shallowCopy(mem.value) as T
+      }
       try {
-        const row = selectStmt.get(slot) as { key: string; value: string } | null
-        if (!row || row.key !== cacheKey(stamp)) { stats.misses++; return null }
+        const row = selectStmt.get(slot) as { key: string; value: string; used: number } | null
+        if (!row || row.key !== key) { stats.misses++; return null }
         // A blob written by an older build may no longer parse or may no longer hold
         // the shape the caller expects. Both are a miss — recompute, never crash.
         const parsed = JSON.parse(row.value) as T
-        readSlots.add(slot)
+        const entry = { key, value: parsed as unknown, used: Number(row.used) || 0 }
+        touchIfOld(slot, entry)
+        remember(slot, entry)
         stats.hits++
-        return parsed
+        return shallowCopy(parsed)
       } catch {
         stats.misses++
         return null
@@ -125,8 +171,11 @@ export async function openParseCache(
     set(kind: ParseCacheKind, stamp: FileStamp, value: unknown, variant = ''): void {
       try {
         const slot = cacheSlot(kind, stamp.path, variant)
-        upsertStmt.run(slot, cacheKey(stamp), JSON.stringify(value), now())
-        readSlots.add(slot)
+        const text = JSON.stringify(value)
+        const at = now()
+        upsertStmt.run(slot, cacheKey(stamp), text, at)
+        // Remembered as the table will give it back (a JSON round trip), never the caller's object.
+        remember(slot, { key: cacheKey(stamp), value: JSON.parse(text), used: at })
         stats.writes++
       } catch { /* a cache that cannot store is still a correct cache */ }
     },
@@ -148,6 +197,8 @@ export async function openParseCache(
       try {
         const before = store.rowCount()
         gcStmt.run(cutoffMs)
+        // What the table forgot, the memo forgets: a dropped row must miss here too.
+        for (const [slot, e] of memo!) if (e.used < cutoffMs) memo!.delete(slot)
         return before - store.rowCount()
       } catch { return 0 }
     },
