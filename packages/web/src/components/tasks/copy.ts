@@ -259,6 +259,10 @@ export interface BoardCopy {
    */
   list: {
     resetColumnWidths: string
+    allGroupsHiddenLead: string
+    allGroupsHiddenName: string
+    allGroupsHiddenTail: string
+    dragColumn: string
     resizeColumn: string
     select: string
     selectTitle: string
@@ -548,6 +552,10 @@ const EN: BoardCopy = {
   },
   list: {
     resetColumnWidths: 'Reset column widths',
+    allGroupsHiddenLead: 'Every group is hidden. Open',
+    allGroupsHiddenName: 'Groups',
+    allGroupsHiddenTail: 'above to bring one back — the tasks are still there.',
+    dragColumn: 'Drag to reorder column',
     resizeColumn: 'Drag to resize · double-click to fit the content',
     select: 'Select',
     selectTitle: 'Show checkboxes to pick several tasks at once',
@@ -820,6 +828,10 @@ const PT: BoardCopy = {
   },
   list: {
     resetColumnWidths: 'Restaurar largura das colunas',
+    allGroupsHiddenLead: 'Todos os grupos estão ocultos. Abra',
+    allGroupsHiddenName: 'Grupos',
+    allGroupsHiddenTail: 'acima para trazer um de volta — as tarefas continuam aqui.',
+    dragColumn: 'Arraste para reordenar a coluna',
     resizeColumn: 'Arraste para redimensionar · clique duplo ajusta ao conteúdo',
     select: 'Selecionar',
     selectTitle: 'Mostrar as caixas de seleção para escolher várias tarefas de uma vez',
