@@ -10,6 +10,60 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.111.4': {
+    features: [
+      {
+        pt: 'Na Nova sessão, "Procurar pasta…" deixa escolher qualquer pasta clicando, sem digitar caminho, e um filtro mostra um disco por vez.',
+        en: 'In New session, "Browse folder…" lets you pick any folder by clicking, without typing a path, and a filter shows one disk at a time.',
+      },
+      {
+        pt: 'Cofre: um só botão de olho por segredo, criar grupo na hora, excluir vários de uma vez e escolher o tipo de cada linha ao importar (inclusive tipos seus).',
+        en: 'Vault: one eye button per secret, create a group on the spot, delete several at once and pick each row\'s type when importing (your own types too).',
+      },
+      {
+        pt: 'Segredos do cofre liberados para uma conversa agora funcionam em todos os assistentes, não só no Claude Code.',
+        en: 'Vault secrets granted to a conversation now work in every assistant, not only Claude Code.',
+      },
+      {
+        pt: 'Cada assistente já começa sabendo que roda dentro do agentistics, sem responder sozinho.',
+        en: 'Every assistant starts knowing it runs inside agentistics, without answering on its own.',
+      },
+      {
+        pt: 'Uma sessão criada por outra mostra quem a criou e avisa a sessão de origem quando termina.',
+        en: 'A session started by another one shows who started it and reports back to it when done.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'O app fica mais leve enquanto as sessões trabalham: só o que mudou é recalculado.',
+        en: 'The app stays lighter while sessions work: only what changed is recalculated.',
+      },
+      {
+        pt: 'O Agentask abre mais rápido, lembrando a última lista, e as colunas se ajustam ao conteúdo.',
+        en: 'Agentask opens faster by remembering the last list, and columns fit their content.',
+      },
+      {
+        pt: 'Cada citação fica junto da sua resposta na mensagem.',
+        en: 'Each quote stays next to your reply to it in the message.',
+      },
+      {
+        pt: 'Uma mensagem digitada não aparece mais como "Texto colado".',
+        en: 'A typed message no longer shows up as "Pasted text".',
+      },
+      {
+        pt: 'Sem o aviso falso "A máquina não respondeu a tempo" quando a mensagem chegou.',
+        en: 'No more false "The machine did not answer in time" warning when the message arrived.',
+      },
+      {
+        pt: 'O Codex não trava mais o envio com a pergunta do serviço em segundo plano.',
+        en: 'Codex no longer blocks sending with its background-service question.',
+      },
+      {
+        pt: 'Atualizar o app também atualiza a integração com os assistentes e espera a versão nova subir.',
+        en: 'Updating the app also refreshes the assistant integrations and waits for the new version to come up.',
+      },
+    ],
+  },
   '2.111.3': {
     features: [],
     fixes: [
