@@ -55,7 +55,7 @@ function Row({ t, pt, onGo, touch }: { t: LinkTarget; pt: boolean; onGo: (path: 
   // The TITLE wins the width; the meta keeps its natural size and wraps under the title when it must.
   const inner = (
     <>
-      <span style={{ minWidth: 0, flex: '1 1 20ch', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.label}</span>
+      <span style={{ minWidth: 0, flexBasis: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.label}</span>
       <span style={{ fontSize: 11, color: 'var(--text-tertiary)', flex: '0 1 auto', display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
         {t.harness && <span role="img" aria-label={harness ?? ''} title={harness ?? ''} style={{ display: 'inline-flex' }}><HarnessMark harness={t.harness} size={12} /></span>}
         {at && <span title={at.full}>· {at.label}</span>}
@@ -65,7 +65,7 @@ function Row({ t, pt, onGo, touch }: { t: LinkTarget; pt: boolean; onGo: (path: 
     </>
   )
   const min = touch ? { minHeight: 44 } : {}
-  const wrap = { flexWrap: 'wrap', rowGap: 2 } as const
+  const wrap = { flexWrap: 'wrap', rowGap: 2, alignContent: 'center' } as const
   return t.path ? (
     <button type="button" data-link-kind={t.kind} onClick={() => onGo(t.path!)} style={{ ...ROW_STYLE, ...wrap, ...min, cursor: 'pointer' }}>{inner}</button>
   ) : (
