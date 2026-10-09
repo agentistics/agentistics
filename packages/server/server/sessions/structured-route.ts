@@ -32,6 +32,23 @@ export interface RouteInput {
   acpOptIn: readonly string[]
 }
 
+/**
+ * THE ONE-LINE SWITCH (owner decision, F2/F3 integration, 09/10): a harness listed here has a structured
+ * driver that is BUILT and tested but is NOT routed to — its web sessions run as a TUI + the adapter, the
+ * same as flag OFF. Delete the entry to turn the driver on. The value is the reason, cited.
+ *
+ * antigravity: agy's `--output-format stream-json` carries no permission request — print mode soft-denies a
+ * tool that needs approval — so a structured agy session could never ask the person, while the TUI can.
+ */
+export const STRUCTURED_ROUTE_OFF: Readonly<Partial<Record<HarnessId, string>>> = {
+  antigravity: 'agy stream-json states no permission request (print mode soft-denies tools), so approvals work only in the TUI',
+}
+
+/** PURE. The READY driver a harness would be routed to, or null when its route is switched off here. */
+export function routableDriver(harness: HarnessId, driver: StructuredDriverId | null): StructuredDriverId | null {
+  return STRUCTURED_ROUTE_OFF[harness] ? null : driver
+}
+
 export function routeSpawn(i: RouteInput): SpawnRoute {
   if (!i.harness) return 'tmux'
   if (i.flagOn && i.origin === 'web' && i.driver) return 'structured'

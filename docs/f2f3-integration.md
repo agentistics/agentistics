@@ -41,3 +41,17 @@ Auto-merged but SEMANTICALLY duplicated (tsc caught it; no textual conflict):
 |---|---|
 | `docs/f2-structured-backend.md` | Both kept: F2.0 "Open items" then the "Kimi 2.1.1 findings" section (placed before the F2.1 Gemini section, as on the Kimi branch). No code conflict in the public tree. |
 
+## 4. F3.2 Antigravity (`feat/f3-2-agy` 42da84e3)
+
+| File | Resolution |
+|---|---|
+| `docs/f2-structured-backend.md` | Both kept (Kimi + Gemini sections, then the F3.2 section). The harness table's Antigravity row auto-merged from F3.2. |
+| `packages/server/server/cli-start.ts` | Same two locals in the other order again — integ's kept. |
+| `packages/server/server/index.ts` | Both MCP boot registrations kept: Kimi (`ensureKimiMcp`) then Agy (`ensureAgyMcp`). |
+
+**Owner decision applied (leader, 09/10): agy web sessions run as TUI + adapter by default.** The agy structured
+driver stays BUILT and ready in the engine, but `STRUCTURED_ROUTE_OFF` (`sessions/structured-route.ts`, one line:
+`antigravity: '<reason>'`) takes it out of the routing. Reason: agy's `stream-json` states no permission request
+(print mode soft-denies a tool), so a structured agy session could never ask the person while the TUI can. To turn the
+driver on, delete the entry. Pinned by a test in `structured-backend.test.ts`.
+

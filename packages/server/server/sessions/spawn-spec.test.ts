@@ -152,11 +152,17 @@ describe('planSpawn', () => {
     expect(r).toEqual({ ok: true, plan: { argv: ['agy', '--effort', 'high'] } })
   })
 
+  it('accepts agy 1.3.2\'s two extra levels, xhigh and max (P-23)', () => {
+    for (const effort of ['xhigh', 'max']) {
+      expect(planSpawn({ harness: 'antigravity', cwd: '/tmp', effort })).toEqual({ ok: true, plan: { argv: ['agy', '--effort', effort] } })
+    }
+  })
+
   it('refuses an agy effort outside that set', () => {
-    const r = planSpawn({ harness: 'antigravity', cwd: '/tmp', effort: 'xhigh' })
+    const r = planSpawn({ harness: 'antigravity', cwd: '/tmp', effort: 'extreme' })
     expect(r).toEqual({
       ok: false,
-      error: { code: 'unknown-effort', harness: 'antigravity', value: 'xhigh', accepted: ['low', 'medium', 'high'] },
+      error: { code: 'unknown-effort', harness: 'antigravity', value: 'extreme', accepted: ['low', 'medium', 'high', 'xhigh', 'max'] },
     })
   })
 

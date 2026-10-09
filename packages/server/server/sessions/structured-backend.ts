@@ -29,7 +29,7 @@ import type {
 import { answerFits } from '@agentistics/engine-api'
 import { SPAWN_SPECS } from './spawn-spec'
 import type { DurableStore, DurableTransport, SavedSpawn } from './structured-durable'
-import { routeSpawn, type SpawnRoute } from './structured-route'
+import { routableDriver, routeSpawn, type SpawnRoute } from './structured-route'
 import type { BackendSession, BackendSpawn, SessionActivity, SessionBackend, TerminalCapture } from './types'
 
 /** Which harness an argv starts — by its binary's base name against the spawn specs. */
@@ -406,7 +406,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
       const acpDriven = !!(acp && harness && acp.harnesses().includes(harness))
       const route = routeSpawn({
         flagOn, ...(origin ? { origin } : {}), harness,
-        driver: reg && harness ? reg.driverFor(harness) : null,
+        driver: reg && harness ? routableDriver(harness, reg.driverFor(harness)) : null,
         acpDriven,
         acpOptIn: acpDriven ? await provider.allowed().catch((): readonly string[] => []) : [],
       })

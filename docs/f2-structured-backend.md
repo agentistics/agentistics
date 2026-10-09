@@ -186,7 +186,7 @@ Legend: **D** declared in code · **V** verified on a real session (date + CLI v
 | Kimi | `acp` | F2.2 | ready (**V** kimi 2.1.1, 2026-10-09) | — **V** (ACP `session/new` has no id parameter; `kimi acp` has only `--login/--region`) | **V** `session/load` with `session_<uuid>` | **V** `session/set_config_option model` (no `-m` under `acp`) | **V** `set_config_option thinking` (only for a thinking-capable model) | **V** stdio `mcpServers` → `mcp__<name>__*` | first-message, **V measured**: `--agent-file` is not read by `kimi acp` — and since 2.1.1 not by the interactive TUI either | **V** chunks | **V** `request_permission` (approve_once/approve_always/reject) | **V** AskUserQuestion as `request_permission` (`q0_opt_N`+`q0_skip`; first question, no free text) | **V** `session/cancel`, also with a permission open | **V** uuid (store) ↔ `session_<uuid>` (ACP) | see "Kimi 2.1.1 findings" |
 | Copilot | `acp` | F2.3 | ready (re-verify `--acp` on 1.0.93) | — (verify `--session-id`) | D | D `--model` | — | D | flag: env `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` (verify) | D | D | — | D | verify | |
 | Codex | `codex-app-server` | F3.1 | **stub** | — (server mints the thread id) | TARGET `thread/resume` | TARGET | TARGET | TARGET `-c mcp_servers` | TARGET protocol `developerInstructions` | TARGET item deltas | TARGET approvals | TARGET | TARGET `turn/interrupt` | thread id = rollout id? | |
-| Antigravity | `agy-stream-json` | F3.2 | **stub** | — (agy mints it) | TARGET `--conversation` | TARGET | TARGET `xhigh/max` | TARGET (P-20) | TARGET first-message unless a field exists | TARGET | TARGET | TARGET | TARGET | from the stream | |
+| Antigravity | `agy-stream-json` | F3.2 | **ready** (schema from agy docs; first live capture pending `f3-2-agy-live.sh`) | — (agy mints it; stated on every event, `conversation_id`) | D `--conversation <id>` (stream-json pairing: live step W) | D `--model` | D `--effort low\|medium\|high\|xhigh\|max` | D global `mcp_config.json` via `agy mcp add` at boot (`agy-mcp.ts`, P-20) — **no per-session MCP flag** | first-message (no system-prompt flag in `--help` 1.3.2; input message = `content` only; `--agent` replaces the main agent) | D `step_update` `agent_response` `text_delta` | — print mode soft-denies a tool needing approval (stderr notice + `tool_info.error`); allow-rules in `settings.json` | — agent settles a choice itself in print mode | D end the process, next prompt resumes (`control_request` = exit 2, no interrupt) | identity (store keys on the stream's `conversation_id`) | fake: 25/25 (`f3-2-agy-fake-resultado.txt`); live: owner |
 | Claude Code | `claude-stream-json` | F3.3 | **stub** | TARGET `--session-id` | TARGET `--resume` | TARGET | TARGET | TARGET `--mcp-config` | TARGET flag `--append-system-prompt` | TARGET partial messages | TARGET `--permission-prompt-tool` | TARGET AskUserQuestion | TARGET interrupt | = session id | |
 | OpenCode | — | F5 | absent | | | | | | | | | | | | |
 
@@ -307,3 +307,32 @@ slot, real gemini on `gemini-3.5-flash-lite`). Recorded frames: engine `test/fix
   pickable by number on every harness; `canChoose` used to ask the *keystroke* spec, so gemini's card was shown with
   "nobody has verified how to pick an option on gemini — attach"; (2) a reopen pressed in the browser carries
   `origin: 'web'` (`ResumeSessionRequest.origin`), so it resumes structured again (it was a TUI resume).
+
+## F3.2 — Antigravity (`agy-stream-json`): what the protocol states and what it does not
+
+Source of the schema, read 2026-10-09 (agy 1.3.2): `agy --help`, agy's own docs
+(antigravity.google/docs/cli/headless) and its embedded release notes. **Not yet captured from a live run**:
+starting agy needs a login and the sandbox classifier refuses copying it, so `f3-2-agy-live.sh` (live mode,
+owner-seeded) records the real wire (step W) before anything else. The parser is tolerant exactly where the
+docs are silent (where `conversation_id` sits, the shape of `error`) and strict elsewhere.
+
+- **In**: `{"event":"user","message":{"content":"…"}}`, one per line; prompts come only from stdin (never `-p "…"`);
+  any non-text block ends the session; `control_request`/`control_response` end it with exit 2.
+- **Out**: `init` (once per process), `step_update` (`step_type` user_input | agent_response | tool | checkpoint;
+  `text_delta`; `tool_info`), `result` (once per turn). `conversation_id` is on every event.
+- **No permission request, no question, no interrupt, no reasoning field is documented.** Print mode
+  soft-denies a tool that needs approval (the run goes on; `tool_info.error` names it), so a structured agy
+  session never has an open card; a refused tool is shown on its turn ("refused: …") and on the Terminal tab.
+  Anything the person must allow is configured in agy's `settings.json` `permissions.allow` (or
+  `--dangerously-skip-permissions`, which this driver never passes). **Product consequence for the integrator:**
+  shell commands (default Ask) are refused in a web-born agy session until an allow-rule exists — decide whether
+  to route agy structured by default, or to offer a mode choice later (`--mode accept-edits|plan` exists; the
+  contract has no `mode` field yet).
+- **Cancel** ends the child; the next prompt relaunches with `--conversation <id>`, so a stopped turn does not
+  lose the conversation. **Resume** seeds the window from the engine's own agy transcript reader (stream-json
+  does not replay history).
+- **MCP** is global to agy (`~/.gemini/config/mcp_config.json`), registered by the host at boot through
+  `agy mcp add` (`agy-mcp.ts`, same default-server gate as the other harnesses) — P-20.
+- **P-23**: `--effort` accepts `xhigh|max` on 1.3.2 (`spawn-spec.ts` updated).
+- The driver adds `AGENTOP_MANAGED_ID` to the child's env (the MCP's session proof needs it; the `acp` driver does
+  not yet — a shared fix in `structuredSpawnOf` would cover all drivers).

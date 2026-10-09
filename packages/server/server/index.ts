@@ -402,6 +402,10 @@ void (async () => {
   // Kimi has no chat driver (its chat is a real session), so it is not in ALL_DRIVERS — P-20.
   await import('./kimi-mcp').then(m => m.ensureKimiMcp(PORT)).catch(err =>
     console.warn('[mcp] could not register for kimi:', err instanceof Error ? err.message : String(err)))
+  // Antigravity has no chat driver but has an MCP config of its own (`agy mcp add`, ENGINE.MAP P-20).
+  const { ensureAgyMcp } = await import('./agy-mcp')
+  await ensureAgyMcp(PORT).then(r => { if (r.action === 'refuse') console.warn(`[mcp] agy left alone: ${r.reason}`) }, err =>
+    console.warn('[mcp] could not register for antigravity:', err instanceof Error ? err.message : String(err)))
 })()
 // The model pickers read the CLIs' own lists (`model-catalog.ts`); warm the ones that are COMMANDS
 // (`agy models` goes to the network) so the first wizard open already offers them. A central neither

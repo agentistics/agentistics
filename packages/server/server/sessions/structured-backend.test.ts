@@ -11,7 +11,7 @@ import type {
 } from '@agentistics/engine-api'
 import { answerFits, structuredRegistry, stubDriver } from '@agentistics/engine-api'
 import { acpAsStructured, structuredSpawnOf, withStructured, type StructuredProvider } from './structured-backend'
-import { answerStructured, routeSpawn, structuredIntentOf, structuredReopenOrigin } from './structured-route'
+import { STRUCTURED_ROUTE_OFF, answerStructured, routableDriver, routeSpawn, structuredIntentOf, structuredReopenOrigin } from './structured-route'
 import type { BackendSpawn, SessionBackend } from './types'
 
 function fakeBase(): SessionBackend & { calls: Array<[string, unknown?]> } {
@@ -330,5 +330,24 @@ describe('structuredSpawnOf (pure)', () => {
     const r = structuredSpawnOf({ ...web('kimi'), structured: structuredIntentOf({ harness: 'kimi', origin: 'web', resumeId: 'c9' }, { ctx: { text: 'x', block: 'y' }, conversationId: 'o' }) }, 'kimi')
     expect(r).toEqual({ id: 'm-1', harness: 'kimi', cwd: '/w', resumeId: 'c9' })
     expect(structuredSpawnOf({ id: 'a', cwd: '/w', argv: ['kimi'], initialPrompt: { text: 'p' } as never }, 'kimi')).toEqual({ id: 'a', harness: 'kimi', cwd: '/w', initialPrompt: 'p' })
+  })
+})
+
+describe('the one-line route switch (STRUCTURED_ROUTE_OFF)', () => {
+  test('agy: a READY driver exists, but a web-born agy session is a TUI + adapter, with the reason cited', async () => {
+    expect(STRUCTURED_ROUTE_OFF.antigravity).toMatch(/permission/)
+    expect(routableDriver('antigravity', 'agy-stream-json')).toBeNull()
+    expect(routableDriver('gemini', 'acp')).toBe('acp')
+    const base = fakeBase()
+    const started: StructuredSpawn[] = []
+    const reg = structuredRegistry([{
+      id: 'agy-stream-json', status: 'ready', harnesses: ['antigravity'], note: 'fake', declares: () => DECL,
+      async start(req) { started.push(req); return { ok: true, session: fakeSession(req) as unknown as StructuredSession } },
+    }])
+    const b = withStructured(base, provider(reg))
+    const req = web('antigravity')
+    await b.spawn(req)
+    expect(base.calls).toEqual([['spawn', req]])
+    expect(started).toEqual([])
   })
 })
