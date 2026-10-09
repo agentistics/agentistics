@@ -112,3 +112,34 @@ describe('a parent that was reopened', () => {
     expect(!out.ok && out.code).toBe('no_such_session')
   })
 })
+
+describe('why a message did not land is told apart, for every harness', () => {
+  const HARNESSES = ['claude', 'codex', 'gemini', 'copilot', 'kimi', 'antigravity']
+  for (const harness of HARNESSES) {
+    const rows = [{ id: 'parent-1', title: `Leader (${harness})`, conversationId: 'conv-p' }, { id: 'child-1', title: 'Worker', conversationId: 'conv-c' }]
+    test(`${harness}: an open dialog is target_blocked (409), not an ended session`, async () => {
+      const f = fake({ rows: async () => rows, prompt: async () => ({ ok: false, message: 'waiting on screen', failure: 'prompt' }) })
+      const out = await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'x' }, f.deps)
+      expect(!out.ok && out.code).toBe('target_blocked')
+      expect(!out.ok && out.message).toContain('NOT delivered')
+      expect(messageStatus(out)).toBe(409)
+    })
+    test(`${harness}: a live target that did not confirm is not_confirmed, with the pane's own sentence`, async () => {
+      const f = fake({ rows: async () => rows, prompt: async () => ({ ok: false, message: 'parent-1 is running but did not confirm', failure: 'unconfirmed' }) })
+      const out = await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'x' }, f.deps)
+      expect(!out.ok && out.code).toBe('not_confirmed')
+      expect(!out.ok && out.message).toBe('parent-1 is running but did not confirm')
+      expect(messageStatus(out)).toBe(502)
+    })
+    test(`${harness}: only a pane that is gone is not_delivered`, async () => {
+      const f = fake({ rows: async () => rows, prompt: async () => ({ ok: false, message: 'The session ended.', failure: 'ended' }) })
+      const out = await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'x' }, f.deps)
+      expect(!out.ok && out.code).toBe('not_delivered')
+    })
+    test(`${harness}: a refusal that is not delivered mirrors nothing and keeps the window open`, async () => {
+      const f = fake({ rows: async () => rows, senderTask: async () => ({ taskId: 't1' }), prompt: async () => ({ ok: false, failure: 'prompt' }) })
+      await sendSessionMessage('child-1', { to: 'parent-1', kind: 'block', body: 'x' }, f.deps)
+      expect(f.comments).toHaveLength(0)
+    })
+  }
+})

@@ -2991,6 +2991,16 @@ by the compiler.
   unverified poster keeps its free-text `author` and never becomes a recipient. A request carrying a
   session identity can never send (`session_fanout`, 403) — only the person delivers to N. Sessions
   may OPEN a thread only for a `handback` or a `block`.
+  **The proof must survive a harness that FILTERS its MCP's environment**: codex hands an MCP only
+  `HOME LANG LC_ALL LOGNAME PATH SHELL TERM USER` (measured, 0.161.0), so `AGENTOP_MANAGED_ID` never
+  arrived and every `agentistics_session_message` from a Codex session was `unverified_sender`.
+  `session-proof.ts` reads the id (and a relocated `AGENTISTICS_DIR`) from the nearest ANCESTOR's
+  `/proc/<pid>/environ` when its own environment lacks it — no registration change, no weaker proof.
+  **Delivery tells three failures apart** (`prompt-guard.ts`, per harness): `prompt` (a dialog is open,
+  `target_blocked` 409), `ended` (the pane is gone), `unconfirmed` (alive, the submit could not be
+  shown — `not_confirmed`); `ended` is never said of a live pane. Codex's composer is the LAST `›` on
+  the screen (a delivered message is echoed in the history with the same marker) and the screen's
+  bottom — never a `NN% left` line, which codex 0.161 dropped — is the anchor for dialogs.
 - **New `/api/tasks` sub-routes ride the existing `capability-guard.ts` entries** (`/api/tasks`,
   `/api/task-files` → `localShell`). `GET /api/tasks/next` and `/api/tasks/activity` are matched
   BEFORE the generic `<ref>` GET, or they resolve as task references and 404.

@@ -46,3 +46,7 @@ test('a failed pane write carries its classified recovery action', () => {
   expect(parseActResult({ ok: false, message: 'A sessão foi encerrada.', failure: 'ended' }, 'pt').failure).toBe('ended')
   expect(parseActResult({ ok: false, message: 'old server' }, 'en').failure).toBeUndefined()
 })
+
+test('an unconfirmed send keeps its failure kind so the composer does not hand the words back', () => {
+  expect(parseActResult({ ok: false, message: 'check its screen', failure: 'unconfirmed' }, 'en').failure).toBe('unconfirmed')
+})

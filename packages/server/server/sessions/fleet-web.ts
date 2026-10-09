@@ -127,7 +127,7 @@ export interface FleetActionResponse {
    */
   confirm?: boolean
   /** Present on a failed pane write; the browser offers the matching recovery action. */
-  failure?: 'prompt' | 'ended'
+  failure?: 'prompt' | 'ended' | 'unconfirmed'
 }
 
 /**

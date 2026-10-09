@@ -38,7 +38,7 @@ export interface SenderTask {
 export interface MessageDeps {
   rows: () => Promise<readonly FleetRowForGroups[]>
   /** Type the text into one row through the composer's send path. */
-  prompt: (rowId: string, text: string) => Promise<{ ok: boolean; message?: string }>
+  prompt: (rowId: string, text: string) => Promise<{ ok: boolean; message?: string; failure?: 'prompt' | 'ended' | 'unconfirmed' }>
   /** The task/subtask the sender is filed on, from the registry. */
   senderTask: (senderId: string) => Promise<SenderTask>
   /** Record the mirror comment on the board. */
@@ -59,6 +59,8 @@ const MESSAGES: Record<string, string> = {
   self: 'A session cannot message itself.',
   rate_limited: 'Too many messages to this session; wait a couple of seconds.',
   not_delivered: 'The message could not be delivered.',
+  target_blocked: 'The target is waiting on an approval prompt on its screen, so the message was NOT delivered — send it again once the prompt is answered.',
+  not_confirmed: 'The target is running but did not confirm it took the message; it may or may not have arrived — check before sending it again.',
 }
 
 const fail = (code: string, message?: string, matches?: string[]): MessageReply => ({
@@ -98,7 +100,15 @@ export async function sendSessionMessage(
   if (prev !== undefined && t - prev < MESSAGE_MIN_GAP_MS) return fail('rate_limited')
 
   const sent = await deps.prompt(target.id, `${messageHeader(senderId, kind)}\n${body}`)
-  if (!sent.ok) return fail('not_delivered', sent.message)
+  if (!sent.ok) {
+    // Three different facts, three different answers: a dialog is open (nothing was typed — retry
+    // after it is answered), the pane is gone (a real end), or the keys went in and the submit could
+    // not be confirmed (the message may have arrived; the sender must look before it resends).
+    // `ended` is never said of a live session.
+    if (sent.failure === 'prompt') return fail('target_blocked')
+    if (sent.failure === 'unconfirmed') return fail('not_confirmed', sent.message)
+    return fail('not_delivered', sent.message)
+  }
   lastSent.set(pair, t)
 
   let mirrored = false
@@ -123,6 +133,8 @@ export function messageStatus(out: MessageReply): number {
   if (out.code === 'ambiguous_session') return 409
   if (out.code === 'rate_limited') return 429
   if (out.code === 'not_delivered') return 502
+  if (out.code === 'not_confirmed') return 502
+  if (out.code === 'target_blocked') return 409
   return 400
 }
 
@@ -133,7 +145,7 @@ export async function defaultMessageDeps(): Promise<MessageDeps> {
     prompt: async (rowId, text) => {
       const { runFleetAction } = await import('./fleet-web')
       const out = await runFleetAction('en', { action: 'prompt', id: rowId, text })
-      return { ok: out.ok, ...(out.message ? { message: out.message } : {}) }
+      return { ok: out.ok, ...(out.message ? { message: out.message } : {}), ...(out.failure ? { failure: out.failure } : {}) }
     },
     senderTask: async id => {
       const { readRegistry } = await import('./registry')
