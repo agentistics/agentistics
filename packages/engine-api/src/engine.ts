@@ -22,6 +22,9 @@ export interface EngineManifest {
     nativeRuntime: boolean
     replay: HarnessId[]
     live: HarnessId[]
+    /** 1.9 — the harnesses whose integration serves `chat`. Derived from the registry, never restated.
+     *  Optional: an engine built against 1.8 does not say, and then serves none. */
+    chat?: HarnessId[]
     providers: ProviderId[]
   }
 }

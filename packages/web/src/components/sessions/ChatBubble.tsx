@@ -101,7 +101,7 @@ export interface ChatTurn {
   at?: string
   /**
    * The real files behind this turn's `[Image #N]` markers, ALREADY resolved on the server through
-   * the harness's own companion entry — see `chat-turn.ts`'s own doc on the field. Preferred over
+   * the harness's own companion entry — see core's `chatTurn.ts` own doc on the field. Preferred over
    * `resolveMarkerPaths`'s own heuristic whenever present; that heuristic remains the fallback for
    * a turn this was not resolved for.
    */
@@ -503,7 +503,7 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessio
   const { markers, text } = splitImageMarkers(prose)
 
   // THE SERVER'S OWN LINK WINS WHEN IT HAS ONE. Claude Code writes a marker turn's images into a
-  // companion entry beside it — see `chat-turn.ts`'s `imagePaths` — which the server already
+  // companion entry beside it — see core's `chatTurn.ts` `imagePaths` — which the server already
   // resolved and validated exactly, so there is nothing left to infer here. Only a turn this was
   // NOT resolved for (an older read, a companion that did not survive a truncated window, a turn
   // whose companion could not account for it exactly) falls back to `resolveMarkerPaths`'s own

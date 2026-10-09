@@ -292,7 +292,7 @@ export function producedGroups(
   return files.length === 0 ? [] : [{ index: -1, text: '', files }]
 }
 
-/** A tool call the browser already reads as file-carrying — shared shape with `chat-turn.ts`. */
+/** A tool call the browser already reads as file-carrying — shared shape with core's `chatTurn.ts`. */
 interface ToolCall {
   name: string
   canonical?: string

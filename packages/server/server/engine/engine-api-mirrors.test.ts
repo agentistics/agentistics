@@ -37,8 +37,12 @@ import type {
   CursorUse as ApiCursorUse,
   ReuseSurface,
   EngineSessionActivity,
+  EngineChatTurn,
+  EngineShellRun,
+  EngineShellOutput,
 } from '@agentistics/engine-api'
 import type { SessionActivity } from '../sessions/types'
+import type { ChatTurn, ShellOutput, ShellRun } from '@agentistics/core'
 import type { HealthIssue } from '@agentistics/core'
 import type { Capabilities } from '../exposure'
 import type { readJsonLimited } from '../limits'
@@ -100,6 +104,11 @@ ok<Assignable<Awaited<ReturnType<typeof buildReuseSurface>>, ReuseSurface>>()
 
 // 1.4 — a fleet transition's activities are the host's own, word for word.
 ok<Equal<SessionActivity, EngineSessionActivity>>()
+
+// 1.9 — the chat channel's turn is core's `ChatTurn`, field for field.
+ok<Equal<ChatTurn, EngineChatTurn>>()
+ok<Equal<ShellRun, EngineShellRun>>()
+ok<Equal<ShellOutput, EngineShellOutput>>()
 
 describe('engine-api mirrors', () => {
   it('lists the same harnesses the host orders', () => {
