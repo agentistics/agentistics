@@ -37,6 +37,7 @@ import { ATTACHMENT_DIR, readAttachmentLog } from './attachment-web'
 import { transcriptReaderFor } from './harness-transcript'
 import { conversationOfRow } from './row-conversation'
 import { migratePrompts, pendingFor, type PendingPrompt } from './pending-prompts'
+import { HARNESS_PROCESS_TRANSCRIPTS } from './harness-session-file'
 import { transcriptAvailability, transcriptSentence, type TranscriptAvailability } from './transcript-availability'
 import type { SessionConversationLink } from '@agentistics/core'
 import type { SurfaceMark } from '../projections/session-surface'
@@ -81,6 +82,15 @@ export interface ChatPayload {
    * conversation has not said anything yet" are different facts, and the second is temporary.
    */
   unavailable?: string
+  /**
+   * Already-localized: why this row's conversation link is SLOWER here than it would be elsewhere.
+   * Present only off Linux on a live, unlinked row of a harness whose exact link is a `/proc` read
+   * but which still has first sighting to fall back on (codex, kimi — `HARNESS_PROCESS_TRANSCRIPTS`,
+   * `onlyRoute: false`). Not a refusal: the composer stays, the first message still creates the
+   * conversation, and the store claims it once it lands — the row just cannot be linked by its own
+   * process, and saying nothing would leave a slow link reading as a broken one.
+   */
+  linkNote?: string
   /**
    * WHY there is no transcript, as a state the UI can branch on (`present` / `not-yet-written` /
    * `expired` / `deleted` / `unreadable`). `unavailable` is the sentence for it; this is the fact,
@@ -228,9 +238,15 @@ async function readSessionChatCore(
     // not an unlinkable one. Refusing here replaced the composer, so the one act that creates the
     // conversation was the one the chat withheld (CHAT.FIRST). A session that is NOT running keeps
     // its sentence: nothing more is coming.
+    // F0.3: where the process names the conversation, a row that is not linked yet may carry a
+    // sentence saying why its link is slower on this platform.
     if (live && row.harness) {
       const queued = pendingFor(row.id, [])
-      return { turns: [], live, ...(queued.length > 0 ? { pending: queued } : {}) }
+      const procRoute = HARNESS_PROCESS_TRANSCRIPTS[row.harness as HarnessId]
+      const linkNote = procRoute && !row.conversationBlind
+        ? processLinkNote(procRoute.onlyRoute, process.platform, row.harness as HarnessId, lang)
+        : undefined
+      return { turns: [], live, ...(queued.length > 0 ? { pending: queued } : {}), ...(linkNote ? { linkNote } : {}) }
     }
     return {
       turns: [],
@@ -464,4 +480,22 @@ export async function readSessionChat(
     ...(link !== undefined ? { link } : {}),
   }
   return mergeSessionSurface(merged, who, surface)
+}
+
+/**
+ * The off-Linux sentence for `ChatPayload.linkNote`, or `undefined` where there is nothing to say.
+ * PURE, so the platform rule is pinned without running on another OS.
+ */
+export function processLinkNote(
+  onlyRoute: boolean,
+  platform: NodeJS.Platform,
+  harness: HarnessId,
+  lang: CliLang,
+): string | undefined {
+  if (platform === 'linux' || onlyRoute) return undefined
+  // The id, as every other row sentence names a harness (`sessConversationBlind`, `sessConversationLost`).
+  const name = harness
+  return lang === 'pt'
+    ? `O vínculo exato desta sessão de ${name} lê os arquivos abertos do processo, o que só funciona no Linux. Aqui a conversa é vinculada quando chega ao histórico local — mais devagar, e não quando outra sessão de ${name} está aberta na mesma pasta.`
+    : `This ${name} session's exact link reads the process's open files, which only works on Linux. Here the conversation is linked once it reaches the local history — more slowly, and not while another ${name} session is open in the same folder.`
 }

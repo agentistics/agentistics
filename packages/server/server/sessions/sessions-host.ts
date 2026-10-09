@@ -29,8 +29,9 @@ import { markerReadOptions } from './approval-spec'
 import { planAdoptions } from './session-adopt'
 // The claim for harnesses that cannot be handed a conversation id. See `task-attribution.ts`.
 import { planFirstSightingClaims } from './task-attribution'
-import { HARNESS_PROCESS_LOGS } from './harness-session-file'
-import { agyLogCollisions } from './agy-conversation'
+import { HARNESS_PROCESS_TRANSCRIPTS } from './harness-session-file'
+import { holderCollisions } from './process-transcript'
+import { collisionKey, type ProcessTranscriptFile } from './process-conversation'
 import { loadConversations, type Conversation } from './conversations'
 import { HEARTBEAT_MS, planCrashGroup, type CrashGroup } from './crash-group'
 import { emptyHarnessSessionIndex, type HarnessSessionIndex } from './harness-sessions'
@@ -101,15 +102,16 @@ export interface SessionsPoller {
 }
 
 /**
- * One attempt at the OTHER exact link — the conversation named in the log a harness's own process
- * holds open (`HARNESS_PROCESS_LOGS`; antigravity only today, see `agy-conversation.ts`).
+ * One attempt at the OTHER exact link — the conversation named by a file a harness's own process
+ * holds open (`HARNESS_PROCESS_TRANSCRIPTS`: agy's log by content, codex's rollout/lock and kimi's
+ * session directory by name — see `agy-conversation.ts` and `process-transcript.ts`).
  *
  * Extracted from the poll loop below so a caller with exactly ONE freshly spawned row can retry it
  * on its own schedule — see `linkProcessConversationSoon` in `cli-start.ts`'s spawn wiring, and the
  * header there for why the poll loop alone is not enough. `pid` is a parameter rather than resolved
  * here so a caller walking many rows (the poll loop) still pays for `listPanePids()` once, not once
  * per row. `knownLog`, when given, skips re-resolving the pid's `/proc/<pid>/fd` — the caller has
- * already paid for it to run `agyLogCollisions` (see the poll loop and `linkProcessConversationSoon`
+ * already paid for it to run `holderCollisions` (see the poll loop and `linkProcessConversationSoon`
  * below), and it must never be asked twice: a pid whose pane exits between the two reads would
  * resolve differently the second time, on a check whose whole point is the answer being the SAME
  * fact both times.
@@ -124,11 +126,11 @@ export async function linkProcessConversation(o: {
   id: string
   harness: HarnessId
   pid: number
-  knownLog?: string | null
-  readProcessConversation: (harness: HarnessId, pid: number, knownLog?: string | null) => Promise<string | null>
+  knownLog?: ProcessTranscriptFile | null
+  readProcessConversation: (harness: HarnessId, pid: number, knownLog?: ProcessTranscriptFile | null) => Promise<string | null>
   recordConversation: (id: string, conversationId: string, link: 'assigned', via?: ConversationLinkReason) => Promise<unknown>
 }): Promise<boolean> {
-  if (!HARNESS_PROCESS_LOGS[o.harness]) return false
+  if (!HARNESS_PROCESS_TRANSCRIPTS[o.harness]) return false
   const found = await o.readProcessConversation(o.harness, o.pid, o.knownLog).catch(() => null)
   if (!found) return false
   try {
@@ -137,6 +139,89 @@ export async function linkProcessConversation(o: {
   } catch {
     return false
   }
+}
+
+/**
+ * The process-transcript link, SAMPLED densely for a while — for a harness that holds its file open
+ * only while it writes (`holds: 'while-writing'`, kimi: 10–300 ms per write, measured; see
+ * `process-transcript.ts`). One read per five-second poll sees such a file by luck; reading every
+ * `intervalMs` for as long as the harness is writing sees it on its first burst, which is what makes
+ * the link land within a second of the conversation existing, parallel rows in one folder included —
+ * each row is resolved through its OWN pane's process, so no folder or time window is involved.
+ *
+ * Bounded three ways, because it is a tight loop: it asks only rows of `harness` with NO link yet
+ * (re-read after every write it makes), it stops at `deadline()` (a getter, so a caller that sees
+ * more activity can extend it without starting a second loop), and it stops the moment no such row
+ * is left. The registry and the pane pids are read once per `refreshMs`, not once per tick.
+ *
+ * The collision guard is the poll's, narrowed to what a burst can afford: every candidate pid is
+ * resolved on every tick and two HOLDERS naming one conversation link neither. `otherPids` — live
+ * processes of this harness that agentop did not start, taken from the caller's last process scan —
+ * join it, so a kimi resumed by hand in a terminal on our row's session still refuses.
+ */
+export async function sampleProcessLinks(o: {
+  harness: HarnessId
+  readRegistry: () => Promise<ManagedSession[]>
+  listPanePids: () => Promise<Map<string, number> | undefined>
+  resolveProcessLog: (harness: HarnessId, pid: number) => Promise<ProcessTranscriptFile | null>
+  readProcessConversation: (harness: HarnessId, pid: number, knownLog?: ProcessTranscriptFile | null) => Promise<string | null>
+  recordConversation: (id: string, conversationId: string, link: 'assigned', via?: ConversationLinkReason) => Promise<unknown>
+  deadline: () => number
+  intervalMs: number
+  refreshMs?: number
+  /** Ask only these rows (a freshly spawned one); every unlinked row of `harness` when absent. */
+  onlyIds?: ReadonlySet<string>
+  otherPids?: readonly number[]
+  now?: () => number
+  sleep?: (ms: number) => Promise<void>
+}): Promise<number> {
+  const now = o.now ?? Date.now
+  const sleep = o.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)))
+  const refreshMs = o.refreshMs ?? 1_000
+  let writes = 0
+  let open: { id: string; pid: number }[] = []
+  let refreshedAt = -Infinity
+  const refresh = async (): Promise<void> => {
+    refreshedAt = now()
+    const [registry, pids] = await Promise.all([
+      o.readRegistry().catch(() => [] as ManagedSession[]),
+      o.listPanePids().catch(() => undefined),
+    ])
+    open = []
+    for (const m of registry) {
+      if (m.harness !== o.harness || m.conversationId) continue
+      if (o.onlyIds && !o.onlyIds.has(m.id)) continue
+      const pid = pids?.get(m.id)
+      if (pid !== undefined) open.push({ id: m.id, pid })
+    }
+  }
+  while (now() < o.deadline()) {
+    if (now() - refreshedAt >= refreshMs) await refresh()
+    if (open.length === 0) break
+    const resolved = new Map<number, ProcessTranscriptFile | null>()
+    const pids = new Set<number>([...open.map(r => r.pid), ...(o.otherPids ?? [])])
+    await Promise.all([...pids].map(async pid => {
+      resolved.set(pid, await o.resolveProcessLog(o.harness, pid).catch(() => null))
+    }))
+    const keyByHolder = new Map<number, string | null>()
+    for (const r of resolved.values()) if (r) keyByHolder.set(r.holder, collisionKey(o.harness, r))
+    const collided = holderCollisions(keyByHolder)
+    let linkedAny = false
+    for (const row of open) {
+      const known = resolved.get(row.pid) ?? null
+      if (!known || collided.has(known.holder)) continue
+      const linked = await linkProcessConversation({
+        id: row.id, harness: o.harness, pid: row.pid, knownLog: known,
+        readProcessConversation: o.readProcessConversation,
+        recordConversation: o.recordConversation,
+      })
+      if (linked) { writes++; linkedAny = true }
+    }
+    // A write changed what is left to ask: re-read rather than ask a linked row again.
+    if (linkedAny) refreshedAt = -Infinity
+    await sleep(o.intervalMs)
+  }
+  return writes
 }
 
 /** Rows the after-the-fact read may try per poll: each one lists a log directory. */
@@ -197,15 +282,15 @@ export function createSessionsPoller(o: {
    *
    * Injected like every other read here, so the poller stays testable without a `/proc`.
    */
-  readProcessConversation?: (harness: HarnessId, pid: number, knownLog?: string | null) => Promise<string | null>
+  readProcessConversation?: (harness: HarnessId, pid: number, knownLog?: ProcessTranscriptFile | null) => Promise<string | null>
   /**
    * Which log a pid holds open, WITHOUT reading its content — see `process-conversation.ts`'s
-   * `resolveProcessLog`. Used to build the collision guard (`agyLogCollisions`) BEFORE any content
+   * `resolveProcessLog`. Used to build the collision guard (`holderCollisions`) BEFORE any content
    * is trusted: a fleet with two live agy processes sharing one log (they name it by SECOND) must
    * never have either one linked from it, and that can only be known by resolving every candidate
    * pid's log FIRST. Optional like every other `/proc` read here.
    */
-  resolveProcessLog?: (harness: HarnessId, pid: number) => Promise<string | null>
+  resolveProcessLog?: (harness: HarnessId, pid: number) => Promise<ProcessTranscriptFile | null>
   /**
    * The conversation a row's process created, recovered from the log it LEFT BEHIND — for the row
    * whose process ended (or whose live read never landed) before anything linked it. See
@@ -479,10 +564,10 @@ export function createSessionsPoller(o: {
       // for one answer is a second place for them to disagree about which pid is which row.
       const panePids = await o.backend.listPanePids?.().catch(() => new Map<string, number>())
 
-      // The OTHER exact link: the conversation named in the log the harness's own process holds
-      // OPEN (`HARNESS_PROCESS_LOGS` — antigravity only today; see `agy-conversation.ts` for why
-      // that harness has neither an assign flag nor a session record, and why even the
-      // harness-and-directory fallback is closed for a session agentop started).
+      // The OTHER exact link: the conversation named by a file the harness's own process holds
+      // OPEN (`HARNESS_PROCESS_TRANSCRIPTS` — agy's log, codex's rollout and thread lock, kimi's
+      // session directory; see `agy-conversation.ts` and `process-transcript.ts` for why none of the
+      // three has an assign flag or a session record to link by instead).
       //
       // Recorded as `assigned` rather than `observed`: this is the harness's own statement about
       // the conversation it created, read out of the process WE spawned into WE own's pane — not
@@ -490,43 +575,55 @@ export function createSessionsPoller(o: {
       // ambiguity. The content read is asked only of a row with NO link yet; the COLLISION check
       // below additionally sweeps `/proc/<pid>/fd` for every LIVE process of such a harness this
       // poll already knows about (not only our own unlinked rows — see its own comment), which costs
-      // one extra sweep per already-linked live agy session too. Still nothing at all on a fleet
-      // without one, which is the case that matters: this whole block is a no-op there.
+      // one extra sweep per already-linked live session of those harnesses too. Nothing at all on a
+      // fleet without agy, codex or kimi: this whole block is a no-op there. kimi holds its files
+      // only while writing, so this once-a-poll read mostly misses it; `sampleProcessLinks` below is
+      // what catches it, run in bursts while kimi's transcript tree is being written.
       const procLinkStart = performance.now()
       let procLinkWrites = 0
       if (o.recordConversation && o.readProcessConversation) {
-        // THE COLLISION GUARD, resolved BEFORE any content is trusted — see `agyLogCollisions`'s
-        // own header for what was actually measured. `HARNESS_PROCESS_LOGS` names its log by
+        // THE COLLISION GUARD, resolved BEFORE any content is trusted — see `agyLogCollisions`'s and
+        // `holderCollisions`' own headers for what was actually measured. agy names its log by
         // SECOND, so two live processes of such a harness — anywhere on this machine, not only
         // among our own unlinked rows, because the process that collides with ours need not be one
         // agentop started — can hold the identical file open, and the file's content then cannot be
         // attributed to either of them. Every candidate pid's log is resolved once, up front, so the
-        // read below never has to guess which pid a line belongs to.
-        const logByPid = new Map<string, string | null>()
+        // read below never has to guess which pid a line belongs to. For codex and kimi the
+        // identity compared is the CONVERSATION the path names: two panes running `codex resume` on
+        // one thread both hold its rollout, and neither may be linked from it.
+        const logByPid = new Map<string, ProcessTranscriptFile | null>()
+        const harnessOfPid = new Map<string, HarnessId>()
         if (o.resolveProcessLog) {
           const candidates = new Map<string, HarnessId>()
           for (const p of processes) {
-            if (p.pid !== undefined && HARNESS_PROCESS_LOGS[p.harness]) {
+            if (p.pid !== undefined && HARNESS_PROCESS_TRANSCRIPTS[p.harness]) {
               candidates.set(String(p.pid), p.harness)
             }
           }
           // Belt and braces: a row's own pane pid, in case `scanProcesses` (a `/proc` scan matched
           // by command line) missed one that tmux's own bookkeeping still knows about.
           for (const m of registry) {
-            if (!HARNESS_PROCESS_LOGS[m.harness]) continue
+            if (!HARNESS_PROCESS_TRANSCRIPTS[m.harness]) continue
             const pid = panePids?.get(m.id)
             if (pid !== undefined) candidates.set(String(pid), m.harness)
           }
           await Promise.all([...candidates].map(async ([pidKey, harness]) => {
+            harnessOfPid.set(pidKey, harness)
             logByPid.set(pidKey, await o.resolveProcessLog!(harness, Number(pidKey)).catch(() => null))
           }))
         }
-        const collidedPids = agyLogCollisions(
-          new Map([...logByPid].map(([pidKey, log]) => [Number(pidKey), log])),
-        )
+        // Keyed by the HOLDER, never by the pid asked about: `scanProcesses` reports a codex's node
+        // shim and its native binary as two processes, and both resolve to the one rollout the binary
+        // holds — keyed by the asked pid, every codex would collide with itself. See
+        // `holderCollisions`.
+        const keyByHolder = new Map<number, string | null>()
+        for (const [pidKey, resolved] of logByPid) {
+          if (resolved) keyByHolder.set(resolved.holder, collisionKey(harnessOfPid.get(pidKey)!, resolved))
+        }
+        const collidedHolders = holderCollisions(keyByHolder)
 
         for (const m of registry) {
-          if (!HARNESS_PROCESS_LOGS[m.harness]) continue
+          if (!HARNESS_PROCESS_TRANSCRIPTS[m.harness]) continue
           // A link the process log itself produced is not final: the SAME process can go on to
           // create another conversation (agy after a model switch, a /clear, a resume), and the pane
           // then shows answers that the old, "exact" link never will — the web chat sat on
@@ -540,10 +637,11 @@ export function createSessionsPoller(o: {
           // REFUSE rather than read a log another live process also has open — see the header
           // above. Left unlinked exactly as a pid with no log at all is: the next poll re-resolves,
           // so a collision that clears (one process ends) is retried, never permanently refused.
-          if (collidedPids.has(pid)) continue
+          const known = logByPid.get(String(pid))
+          if (known && collidedHolders.has(known.holder)) continue
           const linked = await linkProcessConversation({
             id: m.id, harness: m.harness, pid,
-            knownLog: logByPid.get(String(pid)),
+            ...(logByPid.has(String(pid)) ? { knownLog: known ?? null } : {}),
             readProcessConversation: relink
               ? async (h, p, k) => { const f = await o.readProcessConversation!(h, p, k); return f && f !== m.conversationId ? f : null }
               : o.readProcessConversation,
@@ -565,7 +663,7 @@ export function createSessionsPoller(o: {
         const taken = new Set(registry.map(m => m.conversationId).filter((v): v is string => Boolean(v)))
         for (const m of registry) {
           if (budget <= 0) break
-          if (m.conversationId || !HARNESS_PROCESS_LOGS[m.harness]) continue
+          if (m.conversationId || !HARNESS_PROCESS_TRANSCRIPTS[m.harness]?.afterTheFact) continue
           const spawnedMs = Date.parse(m.createdAt)
           if (!Number.isFinite(spawnedMs)) continue
           const alive = panePids?.get(m.id) !== undefined

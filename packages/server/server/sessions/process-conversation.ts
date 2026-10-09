@@ -1,19 +1,20 @@
 /**
- * process-conversation.ts — the IO half of `agy-conversation.ts`: which conversation the process
- * behind one of our panes is writing, read from the log that process holds OPEN.
+ * process-conversation.ts — the IO half of the process-transcript link: which conversation the
+ * process behind one of our panes is writing, read from a file that process holds OPEN.
  *
- * The pure module holds every RULE (which file, which line, and every refusal); this one only
- * performs the two reads and never decides anything. Same split as
- * `harness-session-file.ts` / `harness-sessions.ts`, and for the same reason: the rules are what
- * needs pinning against real bytes, and the filesystem is what must never throw into the poll.
+ * The pure modules hold every RULE (which file, which line or name, and every refusal —
+ * `agy-conversation.ts` for agy, `process-transcript.ts` for codex and kimi); this one only walks
+ * `/proc` and reads, and never decides anything. Same split as `harness-session-file.ts` /
+ * `harness-sessions.ts`, and for the same reason: the rules are what needs pinning against real
+ * bytes, and the filesystem is what must never throw into the poll.
  *
  * ## Cost, and why it is asked so narrowly
  *
  * The poll runs every five seconds over the whole fleet. A `/proc/<pid>/fd` sweep is a `readdir`
  * plus a `readlink` per descriptor, and the log read is the whole file — so the CALLER asks only
- * for a row that has NO link yet and whose harness has an entry in `HARNESS_PROCESS_LOGS`. On a
- * fleet with no antigravity in it this module is never called at all, and a linked agy row is asked
- * exactly once: `recordConversation` writes the id, and the next poll skips it.
+ * for a row whose harness has an entry in `HARNESS_PROCESS_TRANSCRIPTS` (plus the live processes of
+ * those harnesses, for the collision guard). On a fleet with no agy, codex or kimi in it this module
+ * is never called at all. A codex holder's walk is three `readlink`s of `exe` and one fd sweep.
  *
  * Failure is ABSENCE, always. No `/proc` (not Linux), a pid that has exited between the pane listing
  * and this read, a descriptor whose target cannot be resolved, an unreadable log: the answer is
@@ -22,10 +23,10 @@
  */
 
 import { readFile, readdir, readlink } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
 import { ANTIGRAVITY_DIR } from '../config'
-import { HARNESS_PROCESS_LOGS } from './harness-session-file'
+import { HARNESS_PROCESS_TRANSCRIPTS } from './harness-session-file'
 
 /** Every path this process currently holds open. `[]` for anything that cannot be read. */
 async function openFiles(pid: number): Promise<string[]> {
@@ -41,61 +42,162 @@ async function openFiles(pid: number): Promise<string[]> {
     try {
       out.push(await readlink(join(dir, name)))
     } catch {
-      // A descriptor closed between the listing and the resolve, or a link we may not follow. One
-      // missing entry is one fewer candidate, never a failed read of the rest.
     }
   }
   return out
 }
 
-/**
- * Which log the process at `pid` holds open for this harness, or `null` when nothing here can say.
- *
- * Split out from `readProcessConversation` so a caller can resolve MANY pids' logs FIRST — to run
- * `agyLogCollisions` (`agy-conversation.ts`) — before reading any of their content. That check has
- * to happen before the read: once two processes are writing into the SAME file, nothing in it can
- * be safely attributed to either of them, so there is no "read first, decide after" that is safe.
- */
-export async function resolveProcessLog(
-  harness: HarnessId,
-  pid: number,
-): Promise<string | null> {
-  const source = HARNESS_PROCESS_LOGS[harness]
-  if (!source) return null
-  return source.logFromFds(await openFiles(pid))
+/** The direct children of a pid, from every one of its threads. `[]` when unreadable. */
+async function childrenOf(pid: number): Promise<number[]> {
+  let tasks: string[]
+  try {
+    tasks = await readdir(`/proc/${pid}/task`)
+  } catch {
+    return []
+  }
+  const out = new Set<number>()
+  for (const t of tasks) {
+    try {
+      for (const c of (await readFile(`/proc/${pid}/task/${t}/children`, 'utf-8')).split(/\s+/)) {
+        const n = Number(c)
+        if (Number.isInteger(n) && n > 0) out.add(n)
+      }
+    } catch {
+    }
+  }
+  return [...out]
 }
 
+/** How deep under the pane a holder may sit: codex is pane -> shim -> node -> codex (3). */
+const HOLDER_MAX_DEPTH = 5
+
 /**
- * The conversation the process at `pid` is writing, or `null` when nothing here can say.
- *
- * `null` covers every distinguishable failure on purpose: this answer feeds
- * `recordConversation`, which writes a link that is then treated as exact everywhere, so the only
- * two outcomes worth having are a conversation somebody can point at and no answer at all.
- *
- * `knownLog`, when given, is trusted over resolving fresh — a caller that already ran the
- * collision check above has already paid for this pid's `/proc/<pid>/fd` sweep, and asking again
- * on a fleet with a live agy process would sweep it twice every poll for no reason.
+ * The executable's basename, as `/proc/<pid>/exe` names it NOW — with the kernel's ` (deleted)`
+ * suffix removed. A CLI that updates itself in place leaves its running process pointing at a file
+ * that is gone (measured 2026-10-08: kimi 0.41 swapped its binary mid-probe and the pane process
+ * read `…/bin/kimi.bak (deleted)`), and that process is still the harness.
  */
-export async function readProcessConversation(
-  harness: HarnessId,
-  pid: number,
-  knownLog?: string | null,
-): Promise<string | null> {
-  const source = HARNESS_PROCESS_LOGS[harness]
-  if (!source) return null
-
-  const log = knownLog !== undefined ? knownLog : await resolveProcessLog(harness, pid)
-  if (!log) return null
-
+async function exeName(pid: number): Promise<string | null> {
   try {
-    return source.conversationFrom(await readFile(log, 'utf-8'))
+    return basename((await readlink(`/proc/${pid}/exe`)).replace(/ \(deleted\)$/, ''))
   } catch {
     return null
   }
 }
 
 /**
- * Where each harness leaves the per-process logs `HARNESS_PROCESS_LOGS` reads. A `Record<HarnessId,
+ * The processes under (and including) `pid` whose executable is named one of `holders`.
+ *
+ * Descends through anything else — a node shim, a login shell — and, below a holder, ONLY into
+ * children that are holders themselves: what else runs below a holder is the commands it executes,
+ * and their descriptors must never be read as the harness's own (a `cat` of another session's
+ * rollout would otherwise link this row to it). The holder-under-holder case is real: the same
+ * self-update left the old kimi as a wrapper holding nothing and a new `kimi-code` child, on the new
+ * binary, holding the session files. The name is `/proc/<pid>/exe`'s basename and never `comm`: node
+ * renames its main thread (`MainThread`, measured on the codex shim) and the kernel truncates `comm`
+ * to 15 bytes.
+ */
+async function holderPids(pid: number, holders: readonly string[], depth = 0, underHolder = false): Promise<number[]> {
+  const exe = await exeName(pid)
+  const isHolder = exe !== null && holders.includes(exe)
+  if (underHolder && !isHolder) return []
+  const out: number[] = isHolder ? [pid] : []
+  if (depth >= HOLDER_MAX_DEPTH) return out
+  for (const c of await childrenOf(pid)) out.push(...await holderPids(c, holders, depth + 1, underHolder || isHolder))
+  return out
+}
+
+/** Which file a pid's harness process holds open, and WHICH process holds it. */
+export interface ProcessTranscriptFile {
+  file: string
+  /** The process holding it — the pid the collision guard compares, never the pid that was asked. */
+  holder: number
+}
+
+/**
+ * Which file the harness process behind `pid` holds open, or `null` when nothing here can say.
+ *
+ * Split out from `readProcessConversation` so a caller can resolve MANY pids FIRST — to run the
+ * collision guard (`holderCollisions`) — before trusting any of them. For agy that check has to
+ * happen before the read: once two processes are writing into the SAME log, nothing in it can be
+ * safely attributed to either.
+ *
+ * More than one holder under one pane naming a file of this harness is ambiguity, not a choice, and
+ * answers `null` — the same refusal `fileFromFds` makes for one process naming two conversations.
+ */
+export async function resolveProcessLog(
+  harness: HarnessId,
+  pid: number,
+): Promise<ProcessTranscriptFile | null> {
+  const source = HARNESS_PROCESS_TRANSCRIPTS[harness]
+  if (!source) return null
+  return resolveHolderFile(pid, source.holders, source.fileFromFds)
+}
+
+/**
+ * The walk itself, with the harness's two facts passed in — exported so a test can drive it against
+ * the REAL `/proc` with processes of its own rather than a mock of the very thing under test.
+ */
+export async function resolveHolderFile(
+  pid: number,
+  holders: readonly string[] | null,
+  fileFromFds: (targets: readonly string[]) => string | null,
+): Promise<ProcessTranscriptFile | null> {
+  const pids = holders ? await holderPids(pid, holders) : [pid]
+  let found: ProcessTranscriptFile | null = null
+  for (const holder of pids) {
+    const file = fileFromFds(await openFiles(holder))
+    if (!file) continue
+    // Two holders on DIFFERENT files is two conversations under one pane: no answer. Two on the same
+    // file (a descriptor inherited by a relaunched child) is one fact, kept on the first holder.
+    if (found) { if (found.file !== file) return null; continue }
+    found = { file, holder }
+  }
+  return found
+}
+
+/**
+ * The identity two holders must never share — the conversation for a path-named harness, the file
+ * itself for a content-named one (two agy processes in one log), or `null`.
+ */
+export function collisionKey(harness: HarnessId, resolved: ProcessTranscriptFile | null): string | null {
+  const source = HARNESS_PROCESS_TRANSCRIPTS[harness]
+  if (!source || !resolved) return null
+  return source.conversation.from === 'path' ? source.conversation.read(resolved.file) : resolved.file
+}
+
+/**
+ * The conversation the process behind `pid` is writing, or `null` when nothing here can say.
+ *
+ * `null` covers every distinguishable failure on purpose: this answer feeds
+ * `recordConversation`, which writes a link that is then treated as exact everywhere, so the only
+ * two outcomes worth having are a conversation somebody can point at and no answer at all.
+ *
+ * `known`, when given, is trusted over resolving fresh — a caller that already ran the collision
+ * check has already paid for this pid's `/proc` walk, and must not ask twice: a pane that changes
+ * between the two reads would answer a different fact than the one the guard checked.
+ */
+export async function readProcessConversation(
+  harness: HarnessId,
+  pid: number,
+  known?: ProcessTranscriptFile | null,
+): Promise<string | null> {
+  const source = HARNESS_PROCESS_TRANSCRIPTS[harness]
+  if (!source) return null
+
+  const resolved = known !== undefined ? known : await resolveProcessLog(harness, pid)
+  if (!resolved) return null
+  if (source.conversation.from === 'path') return source.conversation.read(resolved.file)
+
+  try {
+    return source.conversation.read(await readFile(resolved.file, 'utf-8'))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Where each harness leaves the per-process logs `HARNESS_PROCESS_TRANSCRIPTS`' after-the-fact read lists. A `Record<HarnessId,
  * …>` so a harness added later has to say, rather than being absent by omission.
  */
 const PROCESS_LOG_DIRS: Record<HarnessId, string | null> = {
@@ -130,10 +232,10 @@ export async function readSpawnWindowConversation(
   },
   logsDir?: string,
 ): Promise<string | null> {
-  const source = HARNESS_PROCESS_LOGS[o.harness]
+  const source = HARNESS_PROCESS_TRANSCRIPTS[o.harness]?.afterTheFact
   const dir = logsDir ?? PROCESS_LOG_DIRS[o.harness]
   if (!source || !dir) return null
-  const { logStartMs, windowMs, conversationFromSpawn } = source.afterTheFact
+  const { logStartMs, windowMs, conversationFromSpawn } = source
 
   let names: string[]
   try {

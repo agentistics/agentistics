@@ -144,6 +144,8 @@ const SEND_NOW_RESULT_MS = 6000
 interface ChatPayload {
   turns: ChatTurn[]
   unavailable?: string
+  /** Already-localized: why the conversation link is slower on this OS (off Linux, codex/kimi). */
+  linkNote?: string
   /** LIVE.2: the times a person was asked something, from the journal. HISTORY — never a control. */
   attention?: ChatAttentionMark[]
   /** LIVE.2: numbers only, for a conversation whose transcript is gone (accompanies `unavailable`). */
@@ -2428,6 +2430,13 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
           {/* Where the window BEGINS, said at the top of the scroll — the one place a reader looks
               when they wonder where the rest went. Everything derived from these turns (the
               gallery, Files, Live) inherits the same cap and says so in its own panel. */}
+          {!loading && payload?.linkNote && (
+            <p style={{
+              margin: 0, textAlign: 'center', fontSize: 11, lineHeight: 1.5,
+              color: 'var(--text-tertiary)',
+            }}>{payload.linkNote}</p>
+          )}
+
           {!loading && payload?.older && (
             <p style={{
               margin: 0, textAlign: 'center', fontSize: 11, lineHeight: 1.5,

@@ -225,21 +225,25 @@ describe('conversationLinkable', () => {
     // per-process log open, and that log names the conversation it created. See
     // `agy-conversation.ts`; the chain pid -> fd -> log -> conversation is exact at every step.
     expect(conversationLinkable('antigravity')).toBe(true)
+    // codex and kimi on the same third route, read by NAME: codex's native binary holds
+    // `thread-writer-locks/<id>.lock` and `rollout-…-<id>.jsonl`, kimi opens `session_<id>/…` while
+    // writing (measured 2026-10-08, `process-transcript.ts`).
+    expect(conversationLinkable('codex')).toBe(true)
+    expect(conversationLinkable('kimi')).toBe(true)
   })
 
   it('is false where every answer would be a harness-and-directory guess', () => {
     // The guess gives every session of one repository the same conversation — the bug that reopened
     // three rows onto one conversation. It is fine to OFFER, and this flag is what stops it being
-    // presented as the conversation the row is in.
-    for (const harness of ['codex', 'kimi', 'gemini'] as const) {
-      expect(conversationLinkable(harness)).toBe(false)
-    }
+    // presented as the conversation the row is in. gemini holds no file open to read (probed
+    // 2026-10-08) and is not assigned an id yet.
+    expect(conversationLinkable('gemini')).toBe(false)
   })
 })
 
 describe('conversationLinkGoneForever', () => {
   it('is true ONLY for the harness whose sole route needs the live process', () => {
-    // antigravity has neither `assignId` nor a session-file route — `HARNESS_PROCESS_LOGS` (a
+    // antigravity has neither `assignId` nor a session-file route — `HARNESS_PROCESS_TRANSCRIPTS` (a
     // `/proc/<pid>/fd` read) is its only way to an exact link, and that answer stops existing the
     // moment the process exits. See the header above the function for why this must be a DIFFERENT
     // question from `conversationLinkable`, which stays true for antigravity throughout.
@@ -256,12 +260,17 @@ describe('conversationLinkGoneForever', () => {
   })
 
   it('is false for a harness that was never linkable in the first place', () => {
-    // codex, kimi and gemini are `!conversationLinkable` already — `sessConversationBlind` names
-    // that, and this function exists for the narrower, DIFFERENT case `conversationLinkable` cannot
-    // tell apart: a harness that CAN link, in principle, but only within a window that has closed.
-    for (const harness of ['codex', 'kimi', 'gemini'] as const) {
-      expect(conversationLinkGoneForever(harness)).toBe(false)
-    }
+    // gemini is `!conversationLinkable` already — `sessConversationBlind` names that, and this
+    // function exists for the narrower, DIFFERENT case: a harness that CAN link, in principle, but
+    // only within a window that has closed.
+    expect(conversationLinkGoneForever('gemini')).toBe(false)
+  })
+
+  it('is false for codex and kimi, whose process route is not their ONLY route', () => {
+    // An ended, unlinked codex or kimi conversation is still claimed by first sighting once it is in
+    // the store — slower, and refused on a shared folder, but not gone.
+    expect(conversationLinkGoneForever('codex')).toBe(false)
+    expect(conversationLinkGoneForever('kimi')).toBe(false)
   })
 })
 

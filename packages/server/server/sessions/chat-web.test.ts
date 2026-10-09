@@ -8,8 +8,8 @@
  * session created from the workspace stayed un-chattable for its whole life.
  */
 
-import { test, expect } from 'bun:test'
-import { readSessionChat } from './chat-web'
+import { describe, it, test, expect } from 'bun:test'
+import { processLinkNote, readSessionChat } from './chat-web'
 import { pendingFor, recordPrompt, resetPrompts } from './pending-prompts'
 
 /** A cwd that is not a project on any machine, so no transcript can ever resolve for it. */
@@ -226,4 +226,23 @@ test('CHAT.FIRST: a message sent before the link shows as pending, and moves to 
   expect(pendingFor('sess1', [])).toEqual([])
   expect(pendingFor(conv, []).map(p => p.text)).toEqual(['first message'])
   resetPrompts()
+})
+
+describe('processLinkNote — off Linux, the row says why its link is slower', () => {
+  it('is silent on Linux, where the process names the conversation', () => {
+    expect(processLinkNote(false, 'linux', 'codex', 'en')).toBeUndefined()
+  })
+
+  it('names the harness and the fallback off Linux for codex and kimi', () => {
+    for (const h of ['codex', 'kimi'] as const) {
+      const en = processLinkNote(false, 'darwin', h, 'en')!
+      expect(en).toContain(h)
+      expect(en).toContain('only works on Linux')
+      expect(processLinkNote(false, 'win32', h, 'pt')).toContain('só funciona no Linux')
+    }
+  })
+
+  it('is silent for a harness whose process route is its ONLY route — that row is unrecoverable, said elsewhere', () => {
+    expect(processLinkNote(true, 'darwin', 'antigravity', 'en')).toBeUndefined()
+  })
 })

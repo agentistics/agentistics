@@ -61,7 +61,7 @@
  */
 
 import type { HarnessId } from '@agentistics/core'
-import { HARNESS_PROCESS_LOGS, HARNESS_SESSION_SOURCES } from './harness-session-file'
+import { HARNESS_PROCESS_TRANSCRIPTS, HARNESS_SESSION_SOURCES } from './harness-session-file'
 import { prependContext } from './agentistics-context'
 import type { InitialPrompt, SpawnRequest, SpawnPlanResult, SpawnSpec } from './types'
 
@@ -276,17 +276,18 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
  *  2. the harness keeps a record of its own live sessions that can be matched back to our row
  *     (`HARNESS_SESSION_SOURCES` — Claude's `~/.claude/sessions/<pid>.json`, which carries the tmux
  *     session name we started it under);
- *  3. the harness holds a per-process LOG open that names the conversation it created
- *     (`HARNESS_PROCESS_LOGS` — antigravity, reached through the tmux pane pid's own file
- *     descriptors; see `agy-conversation.ts`).
+ *  3. the harness's own process holds a FILE open that names the conversation
+ *     (`HARNESS_PROCESS_TRANSCRIPTS`, reached through the tmux pane pid: antigravity's per-process
+ *     log, read by content — `agy-conversation.ts`; codex's rollout and thread lock and kimi's
+ *     session directory, read by name — `process-transcript.ts`).
  *
- * The third was added because agy has neither of the first two and the fallback everything else
- * leans on is closed for it in particular: its store record carries no `project_path` for a session
- * agentop started, so even the harness-and-directory guess had nothing to match on. Its chat view
- * was therefore permanently empty while its terminal worked, which is the defect this answers.
+ * The third was added for agy, which has neither of the first two and whose store record carries no
+ * `project_path` for a session agentop started, so even the harness-and-directory guess had nothing
+ * to match on. It was widened to codex and kimi (P-17) because their only link was a first-sighting
+ * claim that waits for the data rebuild and refuses whenever two rows share a folder.
  *
- * `false` is still the answer for codex, kimi and gemini, and it must be SAID rather than papered
- * over: everything downstream then falls back to `conversationForProcess`, which matches by harness
+ * `false` is still the answer for gemini (F0.2 gives it an assigned id), and it must be SAID rather
+ * than papered over: everything downstream then falls back to `conversationForProcess`, which matches by harness
  * and directory and therefore gives every session of one repository the same conversation. That
  * guess is good enough to OFFER a reopen a person confirms by title, and not good enough to be
  * presented as the conversation this row is in. The same rule `HARNESS_CAPABILITIES` applies to a
@@ -299,7 +300,7 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
 export function conversationLinkable(harness: HarnessId): boolean {
   return SPAWN_SPECS[harness]?.assignId !== undefined
     || HARNESS_SESSION_SOURCES[harness] !== null
-    || HARNESS_PROCESS_LOGS[harness] !== null
+    || HARNESS_PROCESS_TRANSCRIPTS[harness] !== null
 }
 
 /**
@@ -323,7 +324,9 @@ export function conversationLinkable(harness: HarnessId): boolean {
 export function conversationLinkGoneForever(harness: HarnessId): boolean {
   return SPAWN_SPECS[harness]?.assignId === undefined
     && HARNESS_SESSION_SOURCES[harness] === null
-    && HARNESS_PROCESS_LOGS[harness] !== null
+    // Only where route 3 is the ONLY route: a codex or kimi conversation that ended unlinked is
+    // still claimed by first sighting once the store has it, so it is not gone.
+    && HARNESS_PROCESS_TRANSCRIPTS[harness]?.onlyRoute === true
 }
 
 /** Decide the exact argv (and any text to type in) for a requested session. */

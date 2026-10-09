@@ -82,11 +82,23 @@ describe('which conversation a row continues from', () => {
   })
 
   it('says so where the harness can never report one', () => {
-    // codex invents its own id and never hands it back, so everything downstream falls to the
-    // harness-and-directory guess. That is fine to OFFER and not fine to state as fact.
-    const c = toControlSession(view({ harness: 'codex' }), S, LIVE)
+    // gemini invents its own id, never hands it back and holds no file open to read it from, so
+    // everything downstream falls to the harness-and-directory guess. That is fine to OFFER and not
+    // fine to state as fact.
+    const c = toControlSession(view({ harness: 'gemini' }), S, LIVE)
     expect(c.conversationId).toBeUndefined()
-    expect(c.conversationBlind).toBe(S.sessConversationBlind('codex'))
+    expect(c.conversationBlind).toBe(S.sessConversationBlind('gemini'))
+  })
+
+  it('stays quiet on a codex or kimi row not linked YET — their own process names it', () => {
+    // codex holds its thread lock from spawn and kimi its session files while writing
+    // (`process-transcript.ts`), so an absent id is "not yet", never "never": the chat keeps its
+    // composer instead of a refusal (Q1 step 1, Q7).
+    for (const harness of ['codex', 'kimi'] as const) {
+      expect(toControlSession(view({ harness }), S, LIVE).conversationBlind, harness).toBeUndefined()
+      // and an ENDED unlinked one is not "lost forever": first sighting still claims it.
+      expect(toControlSession(view({ harness, status: 'exited' }), S, LIVE).conversationBlind, harness).toBeUndefined()
+    }
   })
 
   it('stays quiet on a claude row that has not been recorded YET', () => {
