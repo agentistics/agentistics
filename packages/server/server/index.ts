@@ -822,7 +822,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname === '/api/hardware-resources' && req.method === 'GET') {
       try {
         const { getHardwareSnapshot } = await import('./hardware-probe')
-        const snapshot = await getHardwareSnapshot(serverProcStatsMap)
+        // The fleet half comes from the SessionHub's last snapshot when it is fresh (no tmux call), and
+        // is never a reason to create or wake the hub — see `hardware-sessions.ts`.
+        const { processSessionHub } = await import('./sessions/session-hub')
+        const snapshot = await getHardwareSnapshot(serverProcStatsMap, () => processSessionHub()?.last())
         return new Response(JSON.stringify(snapshot), {
           status: 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
