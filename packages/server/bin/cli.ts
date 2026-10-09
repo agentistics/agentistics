@@ -21,6 +21,13 @@
 const command = process.argv[2] === 'tui' ? 'start' : process.argv[2]
 const args = process.argv.slice(3)
 
+// `run` must be dispatched before the normal bootstrap: its child receives a fresh HOME and must
+// never let this parent read or write the owner's preferences, harness configs, or proc card.
+if (command === 'run') {
+  const { runRun } = await import('../server/cli-run.ts')
+  process.exit(await runRun(args))
+}
+
 // RES.1 — declare this process to the governor. Bun makes its processes non-dumpable, so the
 // environment the governor would read (HOME, CLAUDE_PID) is unreadable from outside; the card is how
 // it learns who owns this process. Synchronous and tiny; never throws.
@@ -73,6 +80,8 @@ Commands:
   heavy         Run a heavy job (tsc -b, a full test suite, a build) through the machine-wide slot:
                 'agentop heavy -- <cmd>' waits its turn, shows its queue position, runs, exits with
                 the command's code. Slot 1 is /tmp/agentistics-heavy.lock (the manual flock)
+  run           Run a command or throwaway server with isolated HOME, ports and process scope
+                ('run --rm'; 'run ls' and 'run stop <name>' manage active throwaways)
   resources     Print the agentop processes on this machine, what each costs, and the alerts
   session       Start / list / attach assistant sessions (tmux-backed; --bg detaches);
                 'session ls' prints the cockpit's table of what is running
