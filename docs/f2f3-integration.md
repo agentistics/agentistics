@@ -55,3 +55,16 @@ driver stays BUILT and ready in the engine, but `STRUCTURED_ROUTE_OFF` (`session
 (print mode soft-denies a tool), so a structured agy session could never ask the person while the TUI can. To turn the
 driver on, delete the entry. Pinned by a test in `structured-backend.test.ts`.
 
+### Engine side — merge 4, F3.2 (`9e4e14fa`)
+
+| File | Resolution |
+|---|---|
+| `engine/src/structured/stubs.ts` | Header comment only: F3.2's "agy is WRITTEN, no longer a stub" kept, F2.0b's transport/determinism paragraph kept. |
+| `public.pin` | Public integ commit (see "Pins"). |
+
+**Known limitation, accepted because the route is off:** `agy-structured.ts` starts its child through `deps.launch`
+directly, NOT through `req.transport`, and stamps turns with its own clock — it does not follow the F2.0b driver rule
+(relay + deterministic replay), and it relaunches the child after a cancel, which the single-pipe replay model does not
+cover. A structured agy session would therefore NOT survive an `agentop server` restart. Nothing routes to it while
+`STRUCTURED_ROUTE_OFF.antigravity` is set; moving it onto the transport is a prerequisite for deleting that entry.
+
