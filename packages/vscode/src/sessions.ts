@@ -204,6 +204,7 @@ export class SessionsHub implements vscode.Disposable {
     if (payload) this.fleet = payload
     // H22: the native sessions, beside the fleet (absent where the native runtime may not be shown).
     const native = await this.deps.client().native()
+    if (epoch !== this.fleetEpoch) return
     if (native) this.fleet = { ...this.fleet, native }
     else if (this.fleet.native) { const { native: _gone, ...rest } = this.fleet; this.fleet = rest }
 

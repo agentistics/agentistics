@@ -291,7 +291,8 @@ function openStream(e: LiveEntry, now: number): void {
       const held = sessionScratch.readChat(e.key)
       if (!held) { e.signals = applyChatSignal({ turns: [], ...e.signals }, kind, JSON.parse((ev as MessageEvent<string>).data)); return }
       const next = applyChatSignal(held, kind, JSON.parse((ev as MessageEvent<string>).data))
-      accept(e, JSON.stringify(next))
+      e.raw = null
+      publishChat(e, next)
     } catch { closeStream(e) }
   })
   es.onerror = () => { closeStream(e); e.streamRetryAt = Date.now() + STREAM_RETRY_MS }
@@ -352,16 +353,22 @@ function accept(e: LiveEntry, text: string): void {
     }
     e.raw = text
     e.ended = next.live === false
-    // The gallery's `galleryFileUrl` needs the server's REAL attachments directory to route a
-    // `viewed` file correctly under a relocated `AGENTISTICS_DIR` — set here, before the listeners
-    // (which render the gallery from these very turns) are notified.
-    if (next.attachmentsDir) setAttachmentsDir(next.attachmentsDir)
-    // Write through, so the NEXT visit starts where this one ended.
-    sessionScratch.writeChat(e.key, next)
-    for (const cb of [...e.listeners]) cb(next)
+    publishChat(e, next)
   } catch {
     /* a frame that does not parse is dropped; the next one, or the interval, replaces it */
   }
+}
+
+/** Publish a signal without serializing/re-parsing the entire transcript on each token chunk. */
+function publishChat(e: LiveEntry, next: CachedChat): void {
+  stampRead(e.key, Date.now())
+    // The gallery's `galleryFileUrl` needs the server's REAL attachments directory to route a
+    // `viewed` file correctly under a relocated `AGENTISTICS_DIR` — set here, before the listeners
+    // (which render the gallery from these very turns) are notified.
+  if (next.attachmentsDir) setAttachmentsDir(next.attachmentsDir)
+    // Write through, so the NEXT visit starts where this one ended.
+  sessionScratch.writeChat(e.key, next)
+  for (const cb of [...e.listeners]) cb(next)
 }
 
 /**

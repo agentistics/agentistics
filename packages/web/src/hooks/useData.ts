@@ -394,6 +394,7 @@ export function useData() {
   const [liveUpdates, setLiveUpdates] = useState(true)
   const [updateInterval, setUpdateInterval] = useState(30)
   const streamRef = useRef<EventSource | null>(null)
+  const refreshFlightRef = useRef({ inFlight: false, pending: false })
   const patchEpochRef = useRef(0)
   const dataRevisionRef = useRef<string | null>(null)
   const dataRef = useRef<AppData | null>(data)
@@ -430,6 +431,9 @@ export function useData() {
    * which retries on its own.
    */
   const refresh = useCallback(async () => {
+    const flight = refreshFlightRef.current
+    if (flight.inFlight) { flight.pending = true; return }
+    flight.inFlight = true
     const epoch = patchEpochRef.current
     try {
       let res: Response
@@ -469,6 +473,9 @@ export function useData() {
       }
       // 401/403 are an AUTH state the app resolves (a login screen); asking again cannot change them.
       if (!(e.kind === 'server' && (e.status === 401 || e.status === 403))) schedule(retryDelayMs(attempt))
+    } finally {
+      flight.inFlight = false
+      if (flight.pending) { flight.pending = false; void refreshRef.current() }
     }
   }, [openProgress, schedule])
   refreshRef.current = refresh
@@ -493,6 +500,9 @@ export function useData() {
   // sockets to the same URL spent two of the browser's ~6 per-origin slots that live terminals need.
   useEffect(() => {
     if (!liveUpdates) return
+    const offConnected = subscribeEvent('connected', () => {
+      if (dataRevisionRef.current) void fetchData()
+    })
     const offPatch = subscribeEvent('data-patch', event => {
       try {
         const patch = JSON.parse(event.data) as DataPatch
@@ -513,7 +523,7 @@ export function useData() {
       } catch { /* Legacy change events ask for a full read. */ }
       void fetchData()
     })
-    return () => { offPatch(); offChange() }
+    return () => { offConnected(); offPatch(); offChange() }
   }, [liveUpdates, fetchData])
 
   // Fallback polling at the selected interval when live updates are enabled.

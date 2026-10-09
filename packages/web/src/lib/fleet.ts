@@ -404,6 +404,7 @@ async function pollOnce(): Promise<void> {
     // what stops a freshly opened page announcing everything that happened while it was closed.
     lastActivity = notifyFleetTransitions(lastActivity, json.rows ?? [], pollLang)
   } catch {
+    if (epoch !== fleetEpoch) return
     // Transient — keep the last known answer rather than reporting an empty fleet, and record that
     // it did not arrive.
     snapFailures++
@@ -419,7 +420,7 @@ let nextStreamTry = 0
 let streamedFleet: FleetPayload | null = null
 
 function openFleetStream(): void {
-  const url = `/api/fleet/events?lang=${pollLang}`
+  const url = `/api/fleet/events?lang=${pollLang}&closed=0`
   if (fleetStream && fleetStreamUrl === url) return
   fleetStream?.close()
   fleetStreamUrl = url
@@ -457,6 +458,7 @@ function ensurePolling(lang: 'pt' | 'en'): void {
   if (lang !== pollLang) {
     // The payload is localized by the server, so a language change invalidates the snapshot's
     // words but not its facts. Re-request rather than translate here.
+    fleetEpoch++
     pollLang = lang
     openFleetStream()
     void pollOnce()

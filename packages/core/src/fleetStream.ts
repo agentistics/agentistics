@@ -48,18 +48,23 @@ export function expandFleetView(wire: FleetWire): FleetWire {
 /** Fetch-based SSE for hosts without EventSource (Node extension host and Bun cockpit).
  * A silent or incomplete connection expires; callers then use their existing poll fallback.
  */
-export function followFleet(url: string, onFrame: (wire: FleetWire) => void, options: { history?: boolean } = {}): { loadClosed(): Promise<void>; healthy(): boolean; retryable(): boolean; close(): void } {
+export function followFleet(url: string, onFrame: (wire: FleetWire) => void, options: { history?: boolean; onBytes?: (bytes: number) => void; onEventBytes?: (event: string, bytes: number) => void } = {}): { loadClosed(): Promise<void>; healthy(): boolean; retryable(): boolean; close(): void } {
   const controller = new AbortController()
   let wire: FleetWire | null = null
   let at = Date.now()
   let closed = false
   let paging = false
+  let pagedTotal: number | null = null
+  let initialClosedSent = 0
   async function loadClosed(): Promise<void> {
     if (!wire || closed || paging) return
     paging = true
     try {
-      let offset = (wire.closed as { sent?: number } | undefined)?.sent ?? 0
       let total = wire.closedTotal as number ?? (wire.closed as { total?: number } | undefined)?.total ?? 0
+      // A new closed row is inserted at the beginning, shifting every page offset. Re-read the
+      // paged part when the count changes so a closed=0 subscriber does not skip that new row.
+      let offset = pagedTotal !== null && pagedTotal !== total ? initialClosedSent : (wire.closed as { sent?: number } | undefined)?.sent ?? 0
+      const historyOrder = wire.rows.filter(r => r.id.startsWith('closed:')).slice(0, offset).map(r => r.id)
       while (offset < total && !closed) {
         const pageUrl = new URL(url, typeof location === 'undefined' ? 'http://localhost' : location.href)
         pageUrl.pathname = '/api/fleet/closed'; pageUrl.searchParams.set('offset', String(offset)); pageUrl.searchParams.set('limit', '100')
@@ -68,15 +73,26 @@ export function followFleet(url: string, onFrame: (wire: FleetWire) => void, opt
         const page = await res.json() as { sessions: FleetWire['sessions']; rows: FleetWire['rows']; total: number }
         if (!Array.isArray(page.rows) || !Array.isArray(page.sessions) || !page.rows.length) break
         total = page.total; offset += page.rows.length
+        historyOrder.push(...page.rows.map(r => r.id))
         const merge = (old: FleetWire['rows'], added: FleetWire['rows']) => {
           const rows = new Map(old.map(r => [r.id, r]))
           for (const row of added) if (!rows.has(row.id)) rows.set(row.id, row)
-          return [...rows.values()]
+          const paged = new Set(historyOrder)
+          return [
+            ...[...rows.values()].filter(r => !r.id.startsWith('closed:')),
+            ...[...paged].flatMap(id => rows.has(id) ? [rows.get(id)!] : []),
+            ...[...rows.values()].filter(r => r.id.startsWith('closed:') && !paged.has(r.id) && offset < total),
+          ]
         }
         if (!wire || closed) return
         wire = { ...wire, sessions: merge(wire.sessions, page.sessions), rows: merge(wire.rows, page.rows), closed: { total, sent: offset } }
         onFrame(expandFleetView(wire))
       }
+      if (total === 0 && wire.rows.some(r => r.id.startsWith('closed:'))) {
+        wire = { ...wire, sessions: wire.sessions.filter(r => !r.id.startsWith('closed:')), rows: wire.rows.filter(r => !r.id.startsWith('closed:')), closed: { total: 0, sent: 0 } }
+        onFrame(expandFleetView(wire))
+      }
+      pagedTotal = total
     } catch { controller.abort() }
     finally { paging = false }
   }
@@ -91,15 +107,18 @@ export function followFleet(url: string, onFrame: (wire: FleetWire) => void, opt
       for (;;) {
         const { done, value } = await reader.read()
         if (done) break
+        options.onBytes?.(value.byteLength)
         buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, '\n')
         let split: number
         while ((split = buffer.indexOf('\n\n')) >= 0) {
           const frame = buffer.slice(0, split); buffer = buffer.slice(split + 2)
           const event = frame.split('\n').find(l => l.startsWith('event:'))?.slice(6).trim()
           const data = frame.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trimStart()).join('\n')
+          if (event) options.onEventBytes?.(event, new TextEncoder().encode(frame + '\n\n').byteLength)
           if (event === 'ping') { at = Date.now(); continue }
           if (event !== 'snapshot' && event !== 'delta') continue
           wire = applyFleetWire(wire, event, JSON.parse(data))
+          if (event === 'snapshot') { initialClosedSent = (wire.closed as { sent?: number } | undefined)?.sent ?? 0; pagedTotal = null }
           at = Date.now()
           if (!closed) { onFrame(expandFleetView(wire)); if (options.history) void loadClosed() }
         }

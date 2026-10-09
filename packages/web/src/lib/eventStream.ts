@@ -43,6 +43,7 @@ export function createEventStream(makeES: () => EventSource): EventStream {
   }
 
   function open() {
+    lastFrameAt = 0
     es = makeES()
     const mark = () => { lastFrameAt = Date.now() }
     es.addEventListener('connected', mark)

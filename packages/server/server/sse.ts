@@ -22,6 +22,7 @@ export const sseClients = new Set<SseController>()
 export const sseEncoder = new TextEncoder()
 
 export async function notifySseClients() {
+  if (sseClients.size === 0) return
   let event = 'event: change\ndata: {}\n\n'
   if (!TEAM_CENTRAL && featureOn('adapter-chat')) {
     try {

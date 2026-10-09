@@ -3,7 +3,8 @@
 All harnesses use the same client rules: Claude Code, Codex, Gemini, Copilot, Antigravity, Kimi,
 OpenCode and native Agentistics. The adapter flag stays off by default.
 
-The browser, VS Code extension host and terminal cockpit subscribe to `/api/fleet/events`.
+The browser, VS Code extension host and terminal cockpit subscribe to `/api/fleet/events?closed=0`.
+The first frame carries active rows; history is paged when the consumer displays closed sessions.
 `fleetStream.ts` applies the first snapshot and sequential deltas, keeping both row shapes,
 server ordering and metadata deletion. A sequence gap or invalid frame closes the stream. Silence
 for 45 seconds also closes it. Existing polling is the fallback while a stream is unhealthy;
@@ -24,6 +25,44 @@ A 15-second heartbeat allows healthy clients to suppress the dashboard interval 
 
 Central data retains its scoped GET path. The shared broadcast stream must not carry unscoped
 team session bodies; extending patches to central deployments requires per-viewer subscriptions.
+
+## Reproducible checks and measured limits
+
+Run heavy commands through the blocking shared lock, a systemd scope capped at 4 GB and 200% CPU,
+and `NODE_OPTIONS=--max-old-space-size=3600`. Require 3 GB available before starting; the QA and
+bench scripts stop their own processes if available memory falls below 2 GB or load rises above 8.
+
+`bun packages/server/scripts/qa-clients-seam.ts` serves the built web app against SSE fixtures.
+It checks all eight harnesses at 1280 and 390 pixels, using an actual `ses_` id and native message
+protocol for Agentistics. The run on 2026-10-09 passed all 16 cases: partial text, completion,
+no horizontal overflow, no terminal captures, and no fleet/data refetch in a healthy 31-second
+window. Evidence: `.cache/f1-3-qa-YWEd1Y/results.json` and 32 screenshots. This is contract QA;
+it does not substitute for real-session Q1 or mobile keyboard QA.
+
+`ENGINE_MAP_SCRIPTS=<engine-map scripts directory> bun packages/server/scripts/bench-clients-seam.ts`
+reuses `env-setup.sh` and `fake-harness` against `release/agentop`. It measures the shared fleet
+consumer plus data patches, chat SSE and health checks, with 10 fake sessions and 0/1/5 clients.
+The unchanged ENGINE.MAP bench models the former polling/terminal client; keep it for comparisons.
+The canonical fake currently implements six CLI transcript formats (listed in its header), so
+real OpenCode/native timing remains part of the independent eight-harness QA.
+
+Measured on 2026-10-09 with engine slot and adapter flag on:
+
+| Run | CPU, server + reaped children | Per-client traffic | Snapshot | Delta | Extra data GETs |
+|---|---:|---:|---:|---:|---:|
+| Active snapshot, C=1 | 6.67% | 15.65 KB/min | 22,223 B | max 3,877 B | 0 |
+| Active snapshot, C=5 | 7.53% | 0.666 KB/min | 22,361 B | none in window | 0 |
+
+Evidence: `.cache/f1-3-bench-hGP81C/logs/clients.json`. Four of five observed chat streams were
+adapter sources; one used the server's legacy fallback. Its harness/source needs independent
+investigation rather than assuming equal adapter coverage from fixture tags.
+The C=0 window overlapped the first journal import (24.07% CPU); it cannot establish a steady idle
+baseline or prove the per-client CPU budget. The active first frame meets 50 KB, but observed deltas
+exceed 2 KB. **09 section 8 is not yet passed.** Server delta sizing, stable CPU attribution,
+the legacy fallback and the 30-minute memory soak remain integration work.
+That recorded run used a partial dashboard baseline, so its zero extra GETs does not establish
+data-patch correctness. The benchmark now requires the full dashboard revision and records patch
+counts and the harness/id for every chat source; repeat it for dashboard performance evidence.
 
 ## Independent QA handoff
 

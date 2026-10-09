@@ -3398,19 +3398,39 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
 
     followSessions(receive, history) {
       let previous: Set<string> | null = null
-      return followFleet(`http://127.0.0.1:${PORT}/api/fleet/events?lang=${lang}`, wire => {
+      let lastFall: number | undefined
+      let first = true
+      let closed = false
+      let latest: ControlSessions | undefined
+      const stream = followFleet(`http://127.0.0.1:${PORT}/api/fleet/events?lang=${lang}&closed=0`, wire => {
         const rows = wire.rows as ControlSession[]
         const waiting = new Set(rows.filter(sessionNotify).map(r => r.id))
         const rang = previous === null ? [] : [...waiting].filter(id => !previous!.has(id))
         previous = waiting
-        receive({
+        const fall = (wire.fell as ControlSessions['fell'])?.atMs
+        latest = {
           sessions: rows, attention: wire.attention as number, rang,
           finishedTasks: wire.finishedTasks as string[],
           unavailable: wire.unavailable as string | undefined,
           fell: wire.fell as ControlSessions['fell'],
           baseline: wire.baseline as ControlSessions['baseline'],
-        })
+          detachHint: latest?.detachHint,
+          restorable: fall === lastFall ? latest?.restorable : undefined,
+        }
+        receive(latest)
+        if (first || fall !== lastFall) {
+          // Crash offers include the host's dismissal and resumability rules. Read them once
+          // on connection and when the fall changes. Late reads contribute host metadata only.
+          void this.sessions?.().then(next => {
+            if (!closed && next && latest && lastFall === fall) {
+              latest = { ...latest, detachHint: next.detachHint, restorable: next.restorable, rang: [] }
+              receive(latest)
+            }
+          }).catch(() => { /* A later fallback retries host metadata; the pushed rows stay current. */ })
+        }
+        first = false; lastFall = fall
       }, { history })
+      return { ...stream, close: () => { closed = true; stream.close() } }
     },
 
     async sessions(): Promise<ControlSessions> {

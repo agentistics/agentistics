@@ -5,6 +5,7 @@ import { createEventStream, sharedEventStream } from './eventStream'
 class FakeES {
   static instances: FakeES[] = []
   closed = false
+  readyState = 1
   listeners = new Map<string, Set<(e: MessageEvent) => void>>()
   constructor() { FakeES.instances.push(this) }
   addEventListener(type: string, fn: (e: MessageEvent) => void) {
@@ -119,4 +120,21 @@ describe('sharedEventStream — one instance across duplicated module copies', (
     expect(firstUsed).toBe(1)
     expect(secondUsed).toBe(0)
   })
+})
+
+
+test('health requires a heartbeat from this connection, and is reset on reopening', () => {
+  const { stream, all } = fresh()
+  const off = stream.subscribe('change', () => {})
+  expect(stream.healthy()).toBe(false)
+  all()[0]!.emit('connected')
+  expect(stream.healthy()).toBe(true)
+  all()[0]!.readyState = 2
+  expect(stream.healthy()).toBe(false)
+  off()
+  const again = stream.subscribe('change', () => {})
+  expect(stream.healthy()).toBe(false)
+  all()[1]!.emit('ping')
+  expect(stream.healthy()).toBe(true)
+  again()
 })

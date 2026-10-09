@@ -28,11 +28,12 @@ export function planDataPatch(previous: Record<string, unknown>, next: Record<st
   return { base, revision, set, remove, ...(changed ? { sessions: { upsert, remove: removed, order } } : {}) }
 }
 export function applyDataPatch<T extends object>(previous: T, revision: string | null, patch: DataPatch): T | null {
-  if (!revision || patch.base !== revision || !patch.revision || !patch.set || !Array.isArray(patch.remove)) return null
+  if (!revision || !patch || patch.base !== revision || typeof patch.revision !== 'string' || !patch.revision || !patch.set || typeof patch.set !== 'object' || Array.isArray(patch.set) || !Array.isArray(patch.remove) || patch.remove.some(key => typeof key !== 'string')) return null
   const result: Record<string, unknown> = { ...previous } as Record<string, unknown>
   for (const [key, value] of Object.entries(patch.set)) if (!blocked.has(key)) result[key] = value
   for (const key of patch.remove) if (!blocked.has(key)) delete result[key]
   if (patch.sessions) {
+    if (!Array.isArray(patch.sessions.upsert) || !Array.isArray(patch.sessions.remove) || !Array.isArray(patch.sessions.order) || patch.sessions.upsert.some(row => !row || typeof row !== 'object') || [...patch.sessions.remove, ...patch.sessions.order].some(key => typeof key !== 'string')) return null
     const rows = new Map(((result.sessions ?? []) as Record<string, unknown>[]).map(r => [dataSessionKey(r), r]))
     for (const key of patch.sessions.remove) rows.delete(key)
     for (const row of patch.sessions.upsert) rows.set(dataSessionKey(row), row)

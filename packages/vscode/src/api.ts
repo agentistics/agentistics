@@ -90,7 +90,7 @@ export class AgentopClient {
   }
 
   followFleet(view: Arrangement, receive: (payload: FleetPayload) => void): ReturnType<typeof followFleet> {
-    return followFleet(this.url('/api/fleet/events', viewParams(view)), wire => receive(wire as unknown as FleetPayload), { history: !view.onlyActive })
+    return followFleet(this.url('/api/fleet/events', { ...viewParams(view), closed: '0' }), wire => receive(wire as unknown as FleetPayload), { history: !view.onlyActive })
   }
 
   /**
