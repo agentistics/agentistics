@@ -75,3 +75,14 @@ describe('the hard reload, done by the page', () => {
     await expect(clearAppCaches(hostile)).resolves.toBeUndefined()
   })
 })
+
+import { upgradeStalled, UPGRADE_STALL_MS } from './appReload'
+describe('the wait stops being endless', () => {
+  test('stalled after 90 s unless the server is genuinely working', () => {
+    expect(upgradeStalled(UPGRADE_STALL_MS - 1, null)).toBe(false)
+    expect(upgradeStalled(UPGRADE_STALL_MS, null)).toBe(true)
+    expect(upgradeStalled(UPGRADE_STALL_MS, 'done')).toBe(true)
+    expect(upgradeStalled(UPGRADE_STALL_MS * 3, 'downloading')).toBe(false)
+    expect(upgradeStalled(UPGRADE_STALL_MS * 3, 'restarting')).toBe(false)
+  })
+})
