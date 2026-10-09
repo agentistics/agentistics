@@ -19,8 +19,9 @@ import { filterByTitle, newestFirst, type SessionLinks } from '../../lib/session
 import { messageTime } from '../../lib/messageTime'
 import { STATE_COLOR } from '../../lib/sessionCardStyle'
 import { inputStyle } from './formBits'
+import { HarnessMark } from './HarnessMark'
 
-export interface LinkTarget { kind: 'parent' | 'child' | 'task'; key: string; label: string; harness?: string; state?: string; startedAt?: number; path: string | null }
+export interface LinkTarget { kind: 'parent' | 'child' | 'task'; key: string; label: string; harness?: string; state?: string; stateLabel?: string; startedAt?: number; path: string | null }
 
 export function linkTargets(links: SessionLinks): LinkTarget[] {
   const out: LinkTarget[] = []
@@ -29,7 +30,7 @@ export function linkTargets(links: SessionLinks): LinkTarget[] {
       path: links.parent.openable ? sessionPath(links.parent.id) : null })
   }
   for (const c of newestFirst(links.children)) {
-    out.push({ kind: 'child', key: `c:${c.id}`, label: c.title, harness: c.harness, state: c.state, ...(c.startedAt ? { startedAt: c.startedAt } : {}), path: sessionPath(c.id) })
+    out.push({ kind: 'child', key: `c:${c.id}`, label: c.title, harness: c.harness, state: c.state, ...(c.stateLabel ? { stateLabel: c.stateLabel } : {}), ...(c.startedAt ? { startedAt: c.startedAt } : {}), path: sessionPath(c.id) })
   }
   if (links.task) out.push({ kind: 'task', key: `t:${links.task.id}`, label: links.task.label ?? links.task.id, path: `/tasks/${encodeURIComponent(links.task.id)}` })
   return out
@@ -51,21 +52,24 @@ const ROW_STYLE = {
 function Row({ t, pt, onGo, touch }: { t: LinkTarget; pt: boolean; onGo: (path: string) => void; touch: boolean }) {
   const harness = t.harness ? (HARNESS_LABELS as Record<string, string>)[t.harness] ?? t.harness : null
   const at = t.startedAt ? messageTime(new Date(t.startedAt).toISOString(), pt ? 'pt' : 'en') : null
+  // The TITLE wins the width; the meta keeps its natural size and wraps under the title when it must.
   const inner = (
     <>
-      <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.label}</span>
-      <span style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0, textAlign: 'right' }}>
-        {[harness, at ? <span key="at" title={at.full}>{at.label}</span> : null].filter(Boolean).map((x, i) => <span key={i}>{i ? ' · ' : ''}{x}</span>)}
-        {t.state && <>{(harness || at) ? ' · ' : ''}<span data-state-word={t.state}
-          style={{ color: STATE_COLOR[t.state as keyof typeof STATE_COLOR] ?? 'var(--text-tertiary)' }}>{t.state}</span></>}
+      <span style={{ minWidth: 0, flex: '1 1 20ch', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.label}</span>
+      <span style={{ fontSize: 11, color: 'var(--text-tertiary)', flex: '0 1 auto', display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
+        {t.harness && <span role="img" aria-label={harness ?? ''} title={harness ?? ''} style={{ display: 'inline-flex' }}><HarnessMark harness={t.harness} size={12} /></span>}
+        {at && <span title={at.full}>· {at.label}</span>}
+        {t.state && <span data-state-word={t.state}
+          style={{ color: STATE_COLOR[t.state as keyof typeof STATE_COLOR] ?? 'var(--text-tertiary)' }}>· {t.stateLabel ?? t.state}</span>}
       </span>
     </>
   )
   const min = touch ? { minHeight: 44 } : {}
+  const wrap = { flexWrap: 'wrap', rowGap: 2 } as const
   return t.path ? (
-    <button type="button" data-link-kind={t.kind} onClick={() => onGo(t.path!)} style={{ ...ROW_STYLE, ...min, cursor: 'pointer' }}>{inner}</button>
+    <button type="button" data-link-kind={t.kind} onClick={() => onGo(t.path!)} style={{ ...ROW_STYLE, ...wrap, ...min, cursor: 'pointer' }}>{inner}</button>
   ) : (
-    <div data-link-kind={t.kind} style={{ ...ROW_STYLE, ...min, color: 'var(--text-tertiary)' }}
+    <div data-link-kind={t.kind} style={{ ...ROW_STYLE, ...wrap, ...min, color: 'var(--text-tertiary)' }}
       title={pt ? 'Não está mais na frota' : 'No longer in the fleet'}>{inner}</div>
   )
 }

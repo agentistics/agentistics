@@ -41,7 +41,7 @@ import { filterByTitle, newestFirst } from '../../lib/sessionParent'
 const many: SessionLinks = {
   parent: null, task: null,
   children: [
-    { id: 'a', title: 'Old running', harness: 'claude', state: 'working', startedAt: 1000 },
+    { id: 'a', title: 'Old running', harness: 'claude', state: 'working', stateLabel: 'trabalhando', startedAt: 1000 },
     { id: 'b', title: 'Ação nova', harness: 'claude', state: 'waiting', startedAt: 3000 },
     { id: 'c', title: 'Dead one', harness: 'claude', state: 'exited', startedAt: 2000 },
   ],
@@ -73,5 +73,14 @@ describe('link popover polish', () => {
     const html = renderToStaticMarkup(<SessionLinkPanel links={many} pt={false} onGo={() => {}} />)
     expect(html).toContain('data-testid="link-search-toggle"')
     expect(html).not.toContain('data-testid="link-search"')
+  })
+})
+
+describe('link row meta', () => {
+  it('shows the localized state label and a harness icon, not raw ids or the harness name text', () => {
+    const html = renderToStaticMarkup(<SessionLinkPanel links={many} pt onGo={() => {}} />)
+    expect(html).toContain('trabalhando')
+    expect(html).toContain('aria-label="Claude Code"')
+    expect(html).not.toContain('>Claude Code<')
   })
 })

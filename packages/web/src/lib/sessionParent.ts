@@ -34,6 +34,7 @@ export function createdByLabel(p: SessionParent, pt: boolean): string {
 }
 
 type LinkRow = Pick<ControlSession, 'id' | 'conversationId' | 'title' | 'harness' | 'state' | 'startedAt'> & {
+  stateLabel?: string
   parentSessionId?: string
   parentConversationId?: string
 }
