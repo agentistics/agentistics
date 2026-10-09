@@ -95,8 +95,8 @@ const stillTyped = [
 ]
 
 describe('Codex composer vs history echo (the false "session ended")', () => {
-  test('the composer input is the last marker above the status line', () => {
-    expect(codexComposerInput(echoed)).toEqual(['› Find and fix a bug in @filename', ''])
+  test('the composer input is the LAST marker on the screen, down', () => {
+    expect(codexComposerInput(echoed)).toEqual(['› Find and fix a bug in @filename', '', 'gpt-5.4-mini low · 100% left · /tmp/scratchpad'])
     expect(codexComposerInput(stillTyped)[0]).toBe('› [from session child-1 · handback]')
   })
   test('a delivered message echoed in the history is NOT read as still typed', () => {
@@ -111,8 +111,36 @@ describe('Codex composer vs history echo (the false "session ended")', () => {
     const staleChip = ['› [Pasted Content 900 chars]', '', '• Working (1s)', '', '› Find and fix a bug in @filename', '', 'gpt-5.4-mini low · 100% left · /tmp']
     expect(planCodexSend('after-paste', staleChip, 'the next message')).toBe('wait')
   })
-  test('with no marker in reach the legacy 8-line area still applies', () => {
+  test('with no marker at all the bottom of the screen is the area', () => {
     const noMarker = ['plain', 'finished the migration, all green', 'gpt-5.4-mini low · 100% left · /tmp']
     expect(planCodexSend('after-enter', noMarker, SENT)).toBe('retry-enter')
+  })
+})
+
+// codex 0.161.0, captured live (fixtures/codex-0.161.0/README.md): no `NN% left` status line — the
+// only "% left" on screen is a rate-limit warning ABOVE the composer.
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+const live = (name: string) => readFileSync(join(import.meta.dir, 'fixtures/codex-0.161.0', `${name}.txt`), 'utf8').split('\n')
+const SENT_LIVE = '[from session livesender · handback]\nreply with exactly: ok'
+
+describe('codex 0.161.0 (live captures)', () => {
+  test('an idle screen is not blocked and takes a paste', () => {
+    expect(codexIsBlockingFrame(live('idle'))).toBe(false)
+    expect(planCodexSend('before-paste', live('idle'), SENT_LIVE)).toBe('paste')
+  })
+  test('the pasted text is seen in the composer even though there is no status line', () => {
+    expect(planCodexSend('after-paste', live('idle'), SENT_LIVE)).toBe('wait')
+    expect(planCodexSend('after-paste', live('typed'), SENT_LIVE)).toBe('enter')
+    expect(planCodexSend('after-enter', live('typed'), SENT_LIVE)).toBe('retry-enter')
+    expect(planCodexSend('after-retry', live('typed'), SENT_LIVE)).toBe('failed')
+  })
+  test('a delivered message (echo in the history, empty composer) is delivered, working or idle', () => {
+    expect(planCodexSend('after-enter', live('delivered'), SENT_LIVE)).toBe('delivered')
+    expect(planCodexSend('after-enter', live('working'), SENT_LIVE)).toBe('delivered')
+    expect(codexIsBlockingFrame(live('delivered'))).toBe(false)
+  })
+  test('a failed write on a live pane here is unconfirmed, not ended', () => {
+    expect(classifyCodexSendFailure(live('typed'), true)).toBe('unconfirmed')
   })
 })
