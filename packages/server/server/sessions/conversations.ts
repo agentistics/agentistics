@@ -18,8 +18,14 @@ import { SPAWN_SPECS } from './spawn-spec'
 
 /** One conversation, as the fleet screen needs it. */
 export interface Conversation {
-  /** The HARNESS's own id — what a resume takes. */
+  /** The id the STORE keys this conversation by. For every harness but gemini it is also what a resume takes. */
   sessionId: string
+  /**
+   * The id the harness CLI itself takes (`--resume`) and was handed at spawn (`--session-id`), when it
+   * is not `sessionId` — gemini, whose store key is the synthetic `<project>/<file>`. Read through
+   * `resumeIdOf` / `findConversation`, never compared by hand.
+   */
+  nativeId?: string
   harness: HarnessId
   cwd: string
   /** `sessionLabel()`: the user's own name, else the harness title, else the opening prompt. */
@@ -37,8 +43,8 @@ export interface Conversation {
   /**
    * Whether this harness can reopen a conversation by id AT ALL.
    *
-   * False for gemini, whose `--resume` takes "latest" or an index rather than an id. A row that
-   * cannot be resumed still LISTS — it is part of the history — it just offers no verb.
+   * False when the harness has no resume-by-id, or when THIS conversation has no id the CLI accepts
+   * (a gemini chat whose header carries no `sessionId`). A row that cannot be resumed still LISTS — it is part of the history — it just offers no verb.
    */
   resumable: boolean
   /** The opening prompt, kept for search. Never rendered as a title — `sessionLabel` does that. */
@@ -67,6 +73,24 @@ export interface Conversation {
 /** The four token counters of one conversation (SS-05). */
 export interface TokenParts { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }
 
+/** The id a RESUME must be given: the harness's own when the store key is not it. */
+export function resumeIdOf(c: Pick<Conversation, 'sessionId' | 'nativeId'>): string {
+  return c.nativeId ?? c.sessionId
+}
+
+/**
+ * The conversation an id names, whichever of its two ids that is — the store key, or the harness's
+ * own (`nativeId`). A row's recorded `conversationId` is the second for a gemini session agentop
+ * assigned an id to at spawn, and the first for everything else; looking up by the key alone made
+ * that row look like a conversation the store had never seen.
+ */
+export function findConversation<C extends Pick<Conversation, 'sessionId' | 'nativeId'>>(
+  pool: readonly C[],
+  id: string,
+): C | undefined {
+  return pool.find(c => c.sessionId === id) ?? pool.find(c => c.nativeId === id)
+}
+
 const CACHE_TTL_MS = 30_000
 let cache: { at: number; list: Conversation[] } | null = null
 
@@ -94,6 +118,7 @@ export function toConversation(s: SessionMeta): Conversation {
   const costUSD = total > 0 ? sessionCostUSD(s) : null
   return {
     sessionId: s.session_id,
+    ...(s.native_session_id ? { nativeId: s.native_session_id } : {}),
     harness,
     startedMs: Date.parse(s.start_time) || 0,
     // Where the session IS: a worktree session records it as `current_cwd` while `project_path`
@@ -101,7 +126,8 @@ export function toConversation(s: SessionMeta): Conversation {
     cwd: s.current_cwd || s.project_path || '',
     title: sessionLabel(s),
     lastActivityMs: lastActivityOf(s),
-    resumable: SPAWN_SPECS[harness]?.resume !== undefined,
+    resumable: SPAWN_SPECS[harness]?.resume !== undefined
+      && (SPAWN_SPECS[harness]?.resumeIdOk?.(s.native_session_id ?? s.session_id) ?? true),
     firstPrompt: s.first_prompt ?? '',
     // Absent rather than zero when the harness records none: a confident 0 next to real numbers is
     // the same lie `HARNESS_CAPABILITIES` exists to prevent on the dashboard.
@@ -169,7 +195,7 @@ export function conversationForProcess(
   proc: { harness: HarnessId; cwd: string; namedId?: string },
 ): Conversation | undefined {
   if (proc.namedId) {
-    const exact = conversations.find(c => c.sessionId === proc.namedId)
+    const exact = findConversation(conversations, proc.namedId)
     if (exact) return exact
     // The process named a conversation the store has never seen. Inferring a DIFFERENT one would be
     // worse than offering nothing: it would reopen something the user did not ask for.

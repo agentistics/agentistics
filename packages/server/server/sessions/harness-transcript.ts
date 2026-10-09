@@ -248,19 +248,68 @@ export async function resolveCopilotTranscript(
 }
 
 /**
- * Gemini files a chat at `~/.gemini/tmp/<project>/chats/<file>.jsonl`, and the conversation id this
- * product uses IS `<project>/<file>` — so the path needs no directory listing and no memo, unlike
- * codex's and kimi's. It is also the reason the id has to be checked rather than interpolated: it
- * is the only conversation id in this table that is a path fragment.
+ * Gemini files a chat at `~/.gemini/tmp/<project>/chats/<file>.jsonl`, and a conversation is named
+ * by ONE OF TWO ids in this product:
+ *
+ *  - `<project>/<file>` — the store's synthetic key, which IS the path and needs no directory
+ *    listing. It is the only conversation id in this table that is a path fragment, so it is checked
+ *    rather than interpolated.
+ *  - the chat header's `sessionId` UUID — what `gemini --session-id <uuid>` assigned at spawn and
+ *    what `--resume <uuid>` takes (`spawn-spec.ts`). The file is
+ *    `…/chats/session-<timestamp>-<first 8 of the uuid>.jsonl` (verified live, gemini 0.63.0), so the
+ *    scan is a `readdir` per project for that suffix, and the HEADER is then read to confirm — eight
+ *    hex characters are a hint, the header's `sessionId` is the proof, and two chats sharing a
+ *    suffix must never be confused. Memoized with the shared miss-TTL rule: a freshly assigned
+ *    session has no file until its first turn, and that miss must not outlive the wait.
  */
-async function resolveGeminiTranscript(ref: TranscriptRef): Promise<string | null> {
+const geminiPathMemo = createTranscriptPathMemo()
+
+/** Reset the memo. Tests only. */
+export function forgetGeminiTranscriptPaths(): void {
+  geminiPathMemo.clear()
+}
+
+async function readGeminiHeaderId(path: string): Promise<string | null> {
+  try {
+    const first = (await readFile(path, 'utf-8')).split('\n', 1)[0] ?? ''
+    const id = (JSON.parse(first) as { sessionId?: unknown }).sessionId
+    return typeof id === 'string' ? id : null
+  } catch { return null }
+}
+
+async function findGeminiChatByUuid(uuid: string, tmpDir: string): Promise<string | null> {
+  const suffix = `-${uuid.slice(0, 8).toLowerCase()}.jsonl`
+  for (const project of await subdirs(tmpDir)) {
+    const chats = join(tmpDir, project, 'chats')
+    for (const name of await readdir(chats).catch(() => [] as string[])) {
+      if (!name.startsWith('session-') || !name.toLowerCase().endsWith(suffix)) continue
+      const path = join(chats, name)
+      if ((await readGeminiHeaderId(path))?.toLowerCase() === uuid.toLowerCase()) return path
+    }
+  }
+  return null
+}
+
+export async function resolveGeminiTranscript(
+  ref: TranscriptRef,
+  tmpDir: string = join(GEMINI_DIR, 'tmp'),
+  // Injectable only so a test can step past the miss TTL without waiting it out.
+  now: number = Date.now(),
+): Promise<string | null> {
+  if (UUID_RE.test(ref.conversationId)) {
+    return resolveMemoizedPath(geminiPathMemo, ref.conversationId, {
+      exists,
+      scan: () => findGeminiChatByUuid(ref.conversationId, tmpDir),
+      now,
+    })
+  }
   const parts = ref.conversationId.split('/')
   // Exactly `<project>/<file>`, and neither half may leave the chats directory. A `.` or `..`, an
   // empty segment or a nested path is refused outright — an id that cannot be trusted is an id
   // that names no file, which is the same answer as a conversation nobody has written yet.
   if (parts.length !== 2) return null
   if (parts.some(p => p === '' || p === '.' || p === '..' || p.includes('\\'))) return null
-  const path = join(GEMINI_DIR, 'tmp', parts[0]!, 'chats', `${parts[1]!}.jsonl`)
+  const path = join(tmpDir, parts[0]!, 'chats', `${parts[1]!}.jsonl`)
   return (await exists(path)) ? path : null
 }
 
@@ -365,11 +414,13 @@ const CLAUDE: HarnessTranscript = {
 /**
  * The reader for each harness, and the one `null` that is not a gap.
  *
- * GEMINI IS READ THROUGH THE ID THIS PRODUCT ALREADY KEYS IT BY, and it took a link to get here.
+ * GEMINI IS READ THROUGH EITHER OF ITS TWO IDS, and it took a link to get here.
  * This entry was `null` for a long time, with a reason that was a LINK fact and not a format one: a
- * reader is only ever offered a `conversationId`, gemini has no `assignId` and its `-r, --resume`
- * takes "latest" or an index rather than an id, so an entry would have been code nothing could
- * reach. What changed is that `planFirstSightingClaims` deliberately includes gemini, and the id it
+ * reader is only ever offered a `conversationId`, and gemini had no way to be given or to report one.
+ * Since F0.2 it has: `--session-id <uuid>` assigns the id at spawn and `--resume <uuid>` reopens by
+ * it (`spawn-spec.ts`), so a session agentop starts carries the header UUID, which
+ * `resolveGeminiTranscript` finds by the file name's `-<uuid8>` suffix and confirms against the
+ * header. The older route survives for chats first seen by the store: that `planFirstSightingClaims` deliberately includes gemini, and the id it
  * claims is the SYNTHETIC one the store is keyed on — `${dirName}/${fileBase}` — which is not a
  * UUID resolving to nothing but the chat file's own path in the only form this product knew it by.
  *

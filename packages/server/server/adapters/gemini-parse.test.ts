@@ -432,3 +432,35 @@ describe('gemini journal — appended message records', () => {
     expect(parseGeminiChat(onlyPatches, 'agentistics/session-z', '/p')).toBeNull()
   })
 })
+
+// ---------------------------------------------------------------------------
+// F0.2 — the chat header's sessionId is kept as the lookup ALIAS (never as the key)
+// ---------------------------------------------------------------------------
+
+describe('native_session_id', () => {
+  const UUID = '04d97770-e53f-4b7d-86d2-63bd12ec32eb'
+  const jsonl = (header: object) => [
+    JSON.stringify(header),
+    JSON.stringify({ id: 'u1', timestamp: '2026-10-09T10:49:55.000Z', type: 'user', content: [{ text: 'hello there' }] }),
+    JSON.stringify({ id: 'g1', timestamp: '2026-10-09T10:49:58.000Z', type: 'gemini', content: 'hi', model: 'gemini-3-flash-preview' }),
+  ].join('\n')
+
+  test('a journal header sessionId becomes the alias while the store key stays the synthetic id', () => {
+    const s = parseGeminiChat(
+      jsonl({ sessionId: UUID, projectHash: 'h', startTime: '2026-10-09T10:49:54.676Z', lastUpdated: '2026-10-09T10:49:58.000Z', kind: 'main' }),
+      'work/session-2026-10-09T10-49-04d97770', '/p/work')
+    expect(s?.session_id).toBe('work/session-2026-10-09T10-49-04d97770')
+    expect(s?.native_session_id).toBe(UUID)
+  })
+
+  test('the rich-JSON format carries it too', () => {
+    const s = parseGeminiChat(RICH_JSON_SAMPLE, 'p/chat', '/p')
+    expect(s?.native_session_id).toBe('6fa861f9-c282-4aef-a436-25f97419462b')
+  })
+
+  test('a header without a usable sessionId leaves the alias ABSENT, never empty', () => {
+    const s = parseGeminiChat(jsonl({ projectHash: 'h', startTime: '2026-10-09T10:49:54.676Z', kind: 'main' }), 'work/x', '/p/work')
+    expect(s).not.toBeNull()
+    expect('native_session_id' in (s as object)).toBe(false)
+  })
+})

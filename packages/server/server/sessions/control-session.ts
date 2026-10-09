@@ -104,8 +104,8 @@ export function toControlSession(
   })
   // Why there is no conversation link, on a row we HOST and only while it has none — two DIFFERENT
   // facts, and conflating them is how a disabled Reopen button ended up with nothing beside it
-  // explaining why. `!conversationLinkable` is a harness that can NEVER report one (codex, kimi,
-  // gemini): true the moment the row exists, no matter its state. `conversationLinkGoneForever` is
+  // explaining why. `!conversationLinkable` is a harness that can NEVER report one (none of the
+  // three routes in `spawn-spec.ts` exists for it): true the moment the row exists, no matter its state. `conversationLinkGoneForever` is
   // narrower — a harness that CAN (antigravity, via its own process log), but only while that
   // process is alive.
   //

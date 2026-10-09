@@ -188,7 +188,7 @@ import {
 import { HARNESS_PROCESS_TRANSCRIPTS } from './sessions/harness-session-file'
 import { modeSpecFor } from './sessions/mode-spec'
 import { isServerProcess, readServerSnapshot } from './sessions/shared-snapshot'
-import { conversationForProcess, forgetConversations, loadConversations } from './sessions/conversations'
+import { conversationForProcess, findConversation, forgetConversations, loadConversations, resumeIdOf } from './sessions/conversations'
 
 export type StartResult = number | 'foreground'
 
@@ -1605,6 +1605,7 @@ function explainSpawnError(e: SpawnPlanError, s: CliStrings): string {
   switch (e.code) {
     case 'unsupported-harness': return s.sessSpawnUnsupported(e.harness)
     case 'resume-unsupported': return s.sessSpawnNoResume(e.harness)
+    case 'resume-id-unusable': return s.sessSpawnNoResumeId(e.harness)
     case 'model-unsupported': return s.sessSpawnNoModel(e.harness)
     case 'effort-unsupported': return s.sessSpawnNoEffort(e.harness)
     case 'unknown-effort': return s.sessSpawnBadEffort(e.harness, e.value, e.accepted)
@@ -2197,13 +2198,13 @@ async function reopenEntries(
     inUse,
     conversationFor: entry => {
       const own = entry.conversationId
-        ? conversations.find(c => c.sessionId === entry.conversationId)
+        ? findConversation(conversations, entry.conversationId)
         : undefined
       const conv = own ?? conversations.find(c =>
         !taken.has(c.sessionId) && c.harness === entry.harness && c.cwd === entry.cwd)
       if (!conv?.resumable) return null
       taken.add(conv.sessionId)
-      return { sessionId: conv.sessionId, title: conv.title }
+      return { sessionId: resumeIdOf(conv), title: conv.title }
     },
   })
 
@@ -2322,13 +2323,13 @@ async function restorableSessions(fell: readonly ManagedSession[]): Promise<Rest
     entries: fell,
     conversationFor: m => {
       const own = m.conversationId
-        ? conversations.find(c => c.sessionId === m.conversationId)
+        ? findConversation(conversations, m.conversationId)
         : undefined
       const conv = own ?? conversations.find(c =>
         !taken.has(c.sessionId) && c.harness === m.harness && c.cwd === m.cwd)
       if (!conv?.resumable) return null
       taken.add(conv.sessionId)
-      return { sessionId: conv.sessionId, title: conv.title }
+      return { sessionId: resumeIdOf(conv), title: conv.title }
     },
   }).map(o => ({
     id: o.entry.id,

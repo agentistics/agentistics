@@ -59,8 +59,9 @@ export interface SpawnSpec {
    *
    * A function rather than a flag string because the shapes genuinely differ: codex takes a
    * SUBCOMMAND (`codex resume <id>`), the rest take a flag, and they do not agree on which. Absent
-   * when the CLI cannot reopen a conversation by id at all — gemini's `--resume` takes "latest" or
-   * an index, never an id, so it has none and the verb is simply not offered for it.
+   * when the CLI cannot reopen a conversation by id at all, and the verb is then simply not offered.
+   * (Gemini's `--resume` is documented as "latest | index" but takes the session UUID too, which is
+   * what is passed — see its entry in `SPAWN_SPECS`.)
    */
   resume?: (id: string) => string[]
   /**
@@ -90,10 +91,17 @@ export interface SpawnSpec {
    * this harness rather than showing the harness-and-directory guess as though it were a fact.
    *
    * Only ever set where the id the CLI accepts is EXACTLY the id the adapter reads sessions back
-   * by, verified by running it. Gemini accepts a UUID and is deliberately absent for that reason —
-   * see its entry in `SPAWN_SPECS`.
+   * by, verified by running it. Gemini is the case that needed a bridge: it accepts a UUID, but the
+   * store keys its chats by a synthetic path id, so the UUID is matched through
+   * `SessionMeta.native_session_id` — see its entry in `SPAWN_SPECS`.
    */
   assignId?: (id: string) => string[]
+  /**
+   * Which conversation ids `resume` can be given. Absent = any. A harness whose store holds ids the
+   * CLI cannot open (gemini's old synthetic `<project>/<file>`) sets it, and `planSpawn` then
+   * REFUSES `resume-id-unusable` instead of launching a CLI that fails on a pane nobody watches.
+   */
+  resumeIdOk?: (id: string) => boolean
 }
 
 export interface SpawnRequest {
@@ -176,6 +184,7 @@ export interface SpawnPlan {
 export type SpawnPlanError =
   | { code: 'unsupported-harness'; harness: HarnessId }
   | { code: 'resume-unsupported'; harness: HarnessId }
+  | { code: 'resume-id-unusable'; harness: HarnessId; id: string }
   | { code: 'model-unsupported'; harness: HarnessId }
   | { code: 'effort-unsupported'; harness: HarnessId }
   | { code: 'unknown-effort'; harness: HarnessId; value: string; accepted: string[] }
