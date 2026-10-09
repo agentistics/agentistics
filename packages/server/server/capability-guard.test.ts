@@ -134,6 +134,12 @@ describe('routeCapability', () => {
     expect(routeCapability('/api/mcp/tools')).toBe('localShell')
   })
 
+  it('maps the per-harness MCP status and sign-in to localShell: listing starts every server, signing in spawns a login', () => {
+    expect(routeCapability('/api/mcp/harnesses')).toBe('localShell')
+    expect(routeCapability('/api/mcp/status')).toBe('localShell')
+    expect(routeCapability('/api/mcp/auth')).toBe('localShell')
+  })
+
   it('returns null for ordinary metric routes', () => {
     expect(routeCapability('/api/data')).toBeNull()
     expect(routeCapability('/api/tags/abc')).toBeNull()

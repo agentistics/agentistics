@@ -34,3 +34,9 @@ function ownerDataDir(): string {
 
 export const TMUX_SOCKET = socketForDataDir('agentop', AGENTISTICS_DATA_DIR, ownerDataDir())
 export const SHELL_SOCKET = socketForDataDir('agentop-shell', AGENTISTICS_DATA_DIR, ownerDataDir())
+/**
+ * The socket the MCP sign-in panes run on. Its own, for the reason the shell has one: a login pane
+ * is not a session, and on the fleet socket it would surface as an `unregistered` row that no verb
+ * can act on. See `mcp-auth.ts`.
+ */
+export const MCP_AUTH_SOCKET = socketForDataDir('agentop-mcpauth', AGENTISTICS_DATA_DIR, ownerDataDir())

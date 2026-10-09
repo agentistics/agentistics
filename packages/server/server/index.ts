@@ -1715,12 +1715,19 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
+    // Per-harness MCP state and the harness's own OAuth sign-in (`mcp-auth.ts`). `localShell`.
+    if (url.pathname.startsWith('/api/mcp/')) {
+      const { handleMcpAuthRoute } = await import('./mcp-auth-web')
+      const res = await handleMcpAuthRoute(req, url, CORS_HEADERS, PROFILE === 'local')
+      if (res) return res
+    }
+
     if ((url.pathname === '/api/mcp/install' || url.pathname === '/api/mcp/remove'
       || url.pathname === '/api/mcp/replace') && req.method === 'POST') {
       try {
         const read = await readJsonLimited<{
           paste?: string; name?: string; scope?: string; projectPath?: string; lang?: string
-          original?: string
+          original?: string; allowDuplicate?: boolean
         }>(req, LIMITS.bodyBytes)
         if (!read.ok) {
           return new Response(JSON.stringify({ ok: false, message: read.error }), {
@@ -1743,6 +1750,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const result = url.pathname === '/api/mcp/install'
           ? await installMcp({
             paste: body.paste ?? '', scope, lang,
+            ...(body.allowDuplicate === true ? { allowDuplicate: true } : {}),
             ...(body.name ? { name: body.name } : {}),
             ...(body.projectPath ? { projectPath: body.projectPath } : {}),
           })

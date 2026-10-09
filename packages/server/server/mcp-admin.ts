@@ -30,6 +30,8 @@ import {
   serversFromMcpJson, validMcpName, type McpScope, type McpServer,
 } from './mcp-config'
 import { mcpRunState, type McpRunState, type ProcArgv } from './mcp-status'
+import { wouldDuplicate } from './mcp-harness-status'
+import { mcpStatus } from './mcp-auth'
 
 async function readJson(file: string): Promise<unknown> {
   try { return JSON.parse(await readFile(file, 'utf-8')) } catch { return null }
@@ -110,7 +112,12 @@ export async function listMcp(projectPath?: string | null): Promise<McpListPaylo
 
 export type McpWriteResult =
   | { ok: true; names: string[] }
-  | { ok: false; message: string }
+  /**
+   * `code: 'duplicate'` is the no-duplicate rule: the paste points at an address Claude Code already
+   * lists under another name (`existing`), so adding it would give the same server a second login.
+   * It is the PERSON's call, made by sending the same request again with `allowDuplicate`.
+   */
+  | { ok: false; message: string; code?: 'duplicate'; existing?: string }
 
 /** The sentence for a machine with no `claude` CLI — it names what does work. */
 function noCli(pt: boolean): McpWriteResult {
@@ -148,6 +155,8 @@ export async function installMcp(o: {
   name?: string
   projectPath?: string
   lang: 'pt' | 'en'
+  /** The person saw the duplicate sentence and wants it anyway. */
+  allowDuplicate?: boolean
 }): Promise<McpWriteResult> {
   const pt = o.lang === 'pt'
   if (!(await claudeCliAvailable())) return noCli(pt)
@@ -174,6 +183,26 @@ export async function installMcp(o: {
     // REFUSED, not repaired — and the reason is said, because "we could not read that" and "that
     // server does not work" send a reader to two different places.
     return { ok: false, message: why[parsed.reason][pt ? 'pt' : 'en'] }
+  }
+
+  // The no-duplicate rule: a server whose address is already listed (a user-scope `figma` beside the
+  // plugin's `plugin:figma:figma`) is a second login for the same thing. Said, never silently added.
+  if (!o.allowDuplicate) {
+    const listed = await mcpStatus('claude', { refresh: true, ...(o.projectPath ? { cwd: o.projectPath } : {}) })
+    for (const server of parsed.servers) {
+      let url: unknown
+      try { url = (JSON.parse(server.json) as { url?: unknown }).url } catch { url = undefined }
+      if (typeof url !== 'string') continue
+      const existing = wouldDuplicate(listed.servers, server.name, url)
+      if (existing) {
+        return {
+          ok: false, code: 'duplicate', existing,
+          message: pt
+            ? `Este endereço já está configurado como "${existing}". Adicionar de novo cria um segundo login para o mesmo servidor. Autentique o que já existe, ou confirme para adicionar mesmo assim.`
+            : `This address is already configured as "${existing}". Adding it again creates a second login for the same server. Authenticate the existing one, or confirm to add it anyway.`,
+        }
+      }
+    }
   }
 
   const done: string[] = []

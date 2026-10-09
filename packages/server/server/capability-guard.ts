@@ -30,6 +30,11 @@ const EXACT: ReadonlyMap<string, keyof Capabilities> = new Map<string, keyof Cap
   // ask `tools/list`, so it rides `localShell` rather than the `mcpAdmin` prefix below — reading
   // and writing the CONFIGURATION is a different power from RUNNING it.
   ['/api/mcp/tools', 'localShell'],
+  // Per-harness MCP state (`<cli> mcp list` health-checks every configured server) and the harness's
+  // own OAuth sign-in, which spawns its login in a pane. Host power, like check/tools above.
+  ['/api/mcp/harnesses', 'localShell'],
+  ['/api/mcp/status', 'localShell'],
+  ['/api/mcp/auth', 'localShell'],
   ['/api/chat-tty', 'localChat'],
   ['/api/chat-harnesses', 'localChat'],
   ['/api/projects-list', 'localTranscripts'],
