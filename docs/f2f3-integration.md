@@ -90,3 +90,5 @@ in the chat-tail reader, `acp/launch.ts` ends children on host exit.
 | `engine/src/structured/acp-structured.test.ts` | Registry test updated for the union: claude ready (F3.3), antigravity ready (F3.2), codex still a stub. |
 | `public.pin` | Public integ commit (see "Pins"). |
 
+Also (no textual conflict, stale assertion): `agy-structured.test.ts` asserted `driverFor('claude')` is null "F3.3 still a stub" — true on the F3.2 branch alone, false after F3.3. Updated to `claude-stream-json`.
+
