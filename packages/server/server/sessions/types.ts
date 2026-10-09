@@ -27,6 +27,8 @@ export interface SpawnSpec {
   bin: string
   /** Safe per-process flags that avoid shared-daemon state; never written to the user's config. */
   startupArgs?: readonly string[]
+  /** Official per-process log override; only supplied for a managed spawn. */
+  logFileFlag?: string
   prompt: PromptMode
   /** Absent when the CLI has no model flag. */
   modelFlag?: string
@@ -114,6 +116,8 @@ export interface SpawnRequest {
    * recorded that was not passed to the CLI.
    */
   conversationId?: string
+  /** Exclusive log path chosen by the host; ignored by harnesses without a log override. */
+  logFile?: string
   prompt?: string
   /**
    * What the harness is told about agentistics at spawn. `dir` is where an `env-dir` harness gets its

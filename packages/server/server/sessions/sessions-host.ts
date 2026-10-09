@@ -46,6 +46,7 @@ import { readProcRss, readProcStat } from '../hardware-probe'
 import { procAvailable } from './proc-liveness'
 import { backgroundWork } from './attention'
 import { adapterActivity, planScreen, type AdapterStateFeed } from './adapter-state'
+import { linkDecision, liveLinks, moveAllowed } from './relink-policy'
 
 /** How often the cockpit refreshes. Five seconds is the interval the feature was specified at. */
 export const SESSION_POLL_MS = Number(process.env.AGENTISTICS_SESSION_POLL_MS) > 0
@@ -172,6 +173,13 @@ export async function sampleProcessLinks(o: {
   refreshMs?: number
   /** Ask only these rows (a freshly spawned one); every unlinked row of `harness` when absent. */
   onlyIds?: ReadonlySet<string>
+  /**
+   * Also ask the LINKED rows whose link follows their process (`relink-policy.ts`), so a kimi that
+   * moved to a new session (`/new`) is caught while it writes — a once-a-poll read mostly misses a
+   * file held only while writing. Set by the watcher-driven burst; a spawn's own run leaves it off,
+   * or a resumed row would keep the loop busy for its whole spawn window to learn nothing.
+   */
+  follow?: boolean
   otherPids?: readonly number[]
   now?: () => number
   sleep?: (ms: number) => Promise<void>
@@ -180,7 +188,8 @@ export async function sampleProcessLinks(o: {
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)))
   const refreshMs = o.refreshMs ?? 1_000
   let writes = 0
-  let open: { id: string; pid: number }[] = []
+  let open: { id: string; pid: number; current?: string }[] = []
+  let live: ReadonlyMap<string, readonly string[]> = new Map()
   let refreshedAt = -Infinity
   const refresh = async (): Promise<void> => {
     refreshedAt = now()
@@ -189,11 +198,14 @@ export async function sampleProcessLinks(o: {
       o.listPanePids().catch(() => undefined),
     ])
     open = []
+    live = liveLinks(registry, id => pids?.has(id) ?? false)
     for (const m of registry) {
-      if (m.harness !== o.harness || m.conversationId) continue
+      if (m.harness !== o.harness) continue
+      const decision = linkDecision(m, 'process-file')
+      if (decision === 'keep' || (decision === 'follow' && !o.follow)) continue
       if (o.onlyIds && !o.onlyIds.has(m.id)) continue
       const pid = pids?.get(m.id)
-      if (pid !== undefined) open.push({ id: m.id, pid })
+      if (pid !== undefined) open.push({ id: m.id, pid, ...(decision === 'follow' ? { current: m.conversationId! } : {}) })
     }
   }
   while (now() < o.deadline()) {
@@ -213,7 +225,12 @@ export async function sampleProcessLinks(o: {
       if (!known || collided.has(known.holder)) continue
       const linked = await linkProcessConversation({
         id: row.id, harness: o.harness, pid: row.pid, knownLog: known,
-        readProcessConversation: o.readProcessConversation,
+        readProcessConversation: row.current === undefined
+          ? o.readProcessConversation
+          : async (h, p, k) => {
+            const f = await o.readProcessConversation(h, p, k)
+            return f && f !== row.current && moveAllowed(row.id, f, live) ? f : null
+          },
         recordConversation: o.recordConversation,
       })
       if (linked) { writes++; linkedAny = true }
@@ -247,6 +264,15 @@ export function createSessionsPoller(o: {
    * `loadConversations`: it is a filesystem read, and a harness with no such file simply has none.
    */
   loadHarnessSessions?: () => Promise<HarnessSessionIndex>
+  /**
+   * Which recorded conversation ids, absent from the store, the harness's own transcript reader can
+   * find on disk — `reopen-link.ts`'s `exactLinksOnDisk`. Injected and optional for the same reason
+   * as the two above; without it a row whose conversation the store lacks offers no reopen.
+   */
+  findExactLinks?: (
+    entries: readonly { harness?: HarnessId; cwd?: string; conversationId?: string }[],
+    pool: readonly Conversation[],
+  ) => Promise<Set<string>>
   /**
    * Stamp `lastSeenMs` on the sessions that are alive right now — the HEARTBEAT.
    *
@@ -283,6 +309,8 @@ export function createSessionsPoller(o: {
    *
    * Injected like every other read here, so the poller stays testable without a `/proc`.
    */
+  /** Exclusive managed log; also works without a live pid. */
+  readManagedConversation?: (harness: HarnessId, id: string) => Promise<string | null>
   readProcessConversation?: (harness: HarnessId, pid: number, knownLog?: ProcessTranscriptFile | null) => Promise<string | null>
   /**
    * Which log a pid holds open, WITHOUT reading its content — see `process-conversation.ts`'s
@@ -638,6 +666,36 @@ export function createSessionsPoller(o: {
       // fleet without agy, codex or kimi: this whole block is a no-op there. kimi holds its files
       // only while writing, so this once-a-poll read mostly misses it; `sampleProcessLinks` below is
       // what catches it, run in bursts while kimi's transcript tree is being written.
+      // Exclusive managed logs cannot collide even when three rows start in the same second/cwd.
+      // Being exclusive, the log also MOVES a reopened/assigned link when the process goes on to
+      // another conversation (`/new`) — see `relink-policy.ts`. A move that would put two live rows
+      // on one conversation, or that two logs name at once, is refused.
+      const managedLogLinked = new Set<string>()
+      const isLive = (id: string): boolean => panePids?.has(id) ?? false
+      let live = liveLinks(registry, isLive)
+      if (o.recordConversation && o.readManagedConversation) {
+        const managedFound: Array<[ManagedSession, string]> = []
+        for (const m of registry) {
+          if (linkDecision(m, 'managed-log') === 'keep') continue
+          const found = await o.readManagedConversation(m.harness, m.id).catch(() => null)
+          if (!found) continue
+          managedLogLinked.add(m.id)
+          if (found !== m.conversationId) managedFound.push([m, found])
+        }
+        const movesTo = new Map<string, number>()
+        for (const [m, found] of managedFound) if (m.conversationId) movesTo.set(found, (movesTo.get(found) ?? 0) + 1)
+        for (const [m, found] of managedFound) {
+          if (m.conversationId && !moveAllowed(m.id, found, live, movesTo.get(found))) continue
+          try {
+            await o.recordConversation(m.id, found, 'assigned', 'process-log')
+            // The fallback below must not overwrite the newer managed log with an old open DB.
+            m.conversationId = found
+            m.conversationLinkVia = 'process-log'
+          } catch { /* retry next poll */ }
+        }
+        // The moves above changed which live row drives what; the route below guards against that.
+        live = liveLinks(registry, isLive)
+      }
       const procLinkStart = performance.now()
       let procLinkWrites = 0
       if (o.recordConversation && o.readProcessConversation) {
@@ -682,15 +740,16 @@ export function createSessionsPoller(o: {
         const collidedHolders = holderCollisions(keyByHolder)
 
         for (const m of registry) {
-          if (!HARNESS_PROCESS_TRANSCRIPTS[m.harness]) continue
-          // A link the process log itself produced is not final: the SAME process can go on to
-          // create another conversation (agy after a model switch, a /clear, a resume), and the pane
-          // then shows answers that the old, "exact" link never will — the web chat sat on
-          // "delivered, not read" while the terminal answered. So a row linked this way keeps being
-          // asked, and a DIFFERENT id the log now names re-links it. Any other link (spawn-assigned,
-          // reopened by id) stays untouched.
-          const relink = Boolean(m.conversationId) && (m.conversationLinkVia === 'process-log' || m.conversationLinkVia === 'first-sighting')
-          if (m.conversationId && !relink) continue
+          if (!HARNESS_PROCESS_TRANSCRIPTS[m.harness] || managedLogLinked.has(m.id)) continue
+          // A link is not final: the SAME process can go on to create another conversation (agy
+          // after a model switch, a /clear, a resume; codex/kimi after /new), and the pane then shows
+          // answers the old link never will — the web chat sat on "delivered, not read" while the
+          // terminal answered. So a linked row keeps being asked and a DIFFERENT id re-links it —
+          // a row linked by an id we handed the CLI (a reopen) only when this file is exclusive to
+          // its process (`relink-policy.ts`), and never onto a conversation another live row drives.
+          const decision = linkDecision(m, 'process-file')
+          if (decision === 'keep') continue
+          const relink = decision === 'follow'
           const pid = panePids?.get(m.id)
           if (!pid) continue
           // REFUSE rather than read a log another live process also has open — see the header
@@ -702,7 +761,10 @@ export function createSessionsPoller(o: {
             id: m.id, harness: m.harness, pid,
             ...(logByPid.has(String(pid)) ? { knownLog: known ?? null } : {}),
             readProcessConversation: relink
-              ? async (h, p, k) => { const f = await o.readProcessConversation!(h, p, k); return f && f !== m.conversationId ? f : null }
+              ? async (h, p, k) => {
+                const f = await o.readProcessConversation!(h, p, k)
+                return f && f !== m.conversationId && moveAllowed(m.id, f, live) ? f : null
+              }
               : o.readProcessConversation,
             recordConversation: o.recordConversation,
           })
@@ -867,8 +929,24 @@ export function createSessionsPoller(o: {
       confirmMemory = confirm.memory
       const confirmedActivity = confirm.activities
 
+      // Rows that could be offered a reopen from their EXACT link — not running, holding a recorded
+      // id. `findExactLinks` asks only about ids the store does not carry, and memoizes.
+      const exactLinksOnDisk = o.findExactLinks
+        ? await o.findExactLinks(
+          reconciled
+            .filter(r => r.managed && (r.managed.endedAt || r.status === 'lost' || r.status === 'exited'))
+            .map(r => ({
+              ...(r.managed!.harness ? { harness: r.managed!.harness } : {}),
+              ...(r.managed!.cwd ? { cwd: r.managed!.cwd } : {}),
+              ...(r.managed!.conversationId ? { conversationId: r.managed!.conversationId } : {}),
+            })),
+          conversations,
+        ).catch(() => new Set<string>())
+        : undefined
+
       const sessions = buildSessionViews({
         reconciled,
+        ...(exactLinksOnDisk ? { exactLinksOnDisk } : {}),
         activity: confirmedActivity,
         background,
         tails,

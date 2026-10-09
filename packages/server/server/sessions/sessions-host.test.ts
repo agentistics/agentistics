@@ -922,10 +922,149 @@ describe('a process-log link follows the conversation the process moves to', () 
   it('the same conversation again writes nothing', async () => {
     expect(await run({ conversationId: 'old', conversationLinkVia: 'process-log' }, 'old')).toEqual([])
   })
-  it('a link that was not produced by the log (spawn-assigned) is never replaced', async () => {
+  it('an assigned link is never replaced from agy\'s SHARED (non-managed) log — not exclusive', async () => {
     expect(await run({ conversationId: 'old', conversationLinkVia: 'assigned-id' }, 'new')).toEqual([])
   })
   it('no conversation named yet changes nothing', async () => {
     expect(await run({ conversationId: 'old', conversationLinkVia: 'first-sighting' }, null)).toEqual([])
+  })
+})
+
+describe('exclusive managed agy log', () => {
+  it('links three same-folder/same-second rows without a live pid, then follows a new conversation', async () => {
+    const rows = ['0123456789', 'abcdef0123', 'fedcba9876'].map(id => managed(id, { harness: 'antigravity' }))
+    const logs = new Map(rows.map((r, i) => [r.id, `conversation-${i}`]))
+    const writes: unknown[] = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [] }), readRegistry: async () => rows,
+      scanProcesses: async () => ({ procs: [] }), now: () => NOW,
+      readManagedConversation: async (_h, id) => logs.get(id) ?? null,
+      recordConversation: async (id, conv, link, via) => { writes.push([id, conv, link, via]) },
+    })
+    await p.poll()
+    expect(writes).toEqual(rows.map((r, i) => [r.id, `conversation-${i}`, 'assigned', 'process-log']))
+    writes.length = 0
+    await p.poll()
+    expect(writes).toEqual([])
+    logs.set(rows[0]!.id, 'new-conversation')
+    await p.poll()
+    expect(writes).toEqual([[rows[0]!.id, 'new-conversation', 'assigned', 'process-log']])
+  })
+  it('never asks another harness for a managed log', async () => {
+    const reads: string[] = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [] }),
+      readRegistry: async () => [managed('abcdef0123', { harness: 'codex' }), managed('fedcba9876', { harness: 'kimi' })],
+      scanProcesses: async () => ({ procs: [] }), now: () => NOW,
+      readManagedConversation: async (_h, id) => { reads.push(id); return 'other' },
+      recordConversation: async () => { throw new Error('must not write') },
+    })
+    await p.poll()
+    expect(reads).toEqual([])
+  })
+  it('keeps the process route when the managed log is absent or unreadable', async () => {
+    const writes: string[] = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [backendSession('0123456789')], panePids: { '0123456789': 777 } }),
+      readRegistry: async () => [managed('0123456789', { harness: 'antigravity' })],
+      scanProcesses: async () => ({ procs: [] }), now: () => NOW,
+      readManagedConversation: async () => { throw new Error('unreadable') },
+      readProcessConversation: async () => 'from-db-or-old-log',
+      recordConversation: async (_id, conv) => { writes.push(conv) },
+    })
+    await p.poll()
+    expect(writes).toEqual(['from-db-or-old-log'])
+  })
+})
+
+describe('AGY.RELINK — a row reopened by id follows its process to a new conversation', () => {
+  const OLD = 'fbd845b8-0000-4000-8000-000000000001'
+  const NEW = 'e4da8024-0000-4000-8000-000000000002'
+  const run = async (o: {
+    rows: ManagedSession[]
+    logs: Record<string, string | null>
+    panePids?: Record<string, number>
+  }) => {
+    const writes: Array<[string, string, string, string | undefined]> = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: Object.keys(o.panePids ?? {}).map(id => backendSession(id)), panePids: o.panePids ?? {} }),
+      readRegistry: async () => o.rows,
+      scanProcesses: async () => ({ procs: [] }), now: () => NOW,
+      readManagedConversation: async (_h, id) => o.logs[id] ?? null,
+      readProcessConversation: async () => null,
+      recordConversation: async (id, conv, link, via) => { writes.push([id, conv, link, via]) },
+    })
+    await p.poll()
+    return writes
+  }
+  for (const via of ['resumed-id', 'assigned-id'] as const) {
+    it(`REPRODUCTION (${via}): its own managed log names the conversation /new created -> re-linked`, async () => {
+      const rows = [managed('34e8bb8d76', { harness: 'antigravity', conversationId: OLD, conversationLinkVia: via })]
+      expect(await run({ rows, logs: { '34e8bb8d76': NEW }, panePids: { '34e8bb8d76': 777 } }))
+        .toEqual([['34e8bb8d76', NEW, 'assigned', 'process-log']])
+    })
+  }
+  it('a log still streaming the reopened conversation writes nothing', async () => {
+    const rows = [managed('34e8bb8d76', { harness: 'antigravity', conversationId: OLD, conversationLinkVia: 'resumed-id' })]
+    expect(await run({ rows, logs: { '34e8bb8d76': OLD }, panePids: { '34e8bb8d76': 777 } })).toEqual([])
+  })
+  it('follows after the server restarts too — the decision is the registry plus the log, nothing in memory', async () => {
+    const rows = () => [managed('34e8bb8d76', { harness: 'antigravity', conversationId: OLD, conversationLinkVia: 'resumed-id' })]
+    expect(await run({ rows: rows(), logs: { '34e8bb8d76': NEW } })).toEqual([['34e8bb8d76', NEW, 'assigned', 'process-log']])
+  })
+  it('COLLISION: never moves onto a conversation another LIVE row drives', async () => {
+    const rows = [
+      managed('34e8bb8d76', { harness: 'antigravity', conversationId: OLD, conversationLinkVia: 'resumed-id' }),
+      managed('99602d0d00', { harness: 'antigravity', conversationId: NEW, conversationLinkVia: 'process-log' }),
+    ]
+    expect(await run({ rows, logs: { '34e8bb8d76': NEW, '99602d0d00': NEW }, panePids: { '34e8bb8d76': 777, '99602d0d00': 778 } })).toEqual([])
+  })
+  it('a RETIRED row on that conversation is not live and blocks nothing', async () => {
+    const rows = [
+      managed('34e8bb8d76', { harness: 'antigravity', conversationId: OLD, conversationLinkVia: 'resumed-id' }),
+      managed('11afc7304f', { harness: 'antigravity', conversationId: NEW, conversationLinkVia: 'process-log' }),
+    ]
+    expect(await run({ rows, logs: { '34e8bb8d76': NEW, '11afc7304f': NEW }, panePids: { '34e8bb8d76': 777 } }))
+      .toEqual([['34e8bb8d76', NEW, 'assigned', 'process-log']])
+  })
+  it('COLLISION: two rows whose logs name the same NEW conversation -> neither moves', async () => {
+    const rows = [
+      managed('34e8bb8d76', { harness: 'antigravity', conversationId: OLD, conversationLinkVia: 'resumed-id' }),
+      managed('abcdef0123', { harness: 'antigravity', conversationId: 'c-2', conversationLinkVia: 'assigned-id' }),
+    ]
+    expect(await run({ rows, logs: { '34e8bb8d76': NEW, abcdef0123: NEW }, panePids: { '34e8bb8d76': 777, abcdef0123: 778 } })).toEqual([])
+  })
+  it('a link with no provenance, or one from the harness\'s own file, is never moved', async () => {
+    const rows = [
+      managed('34e8bb8d76', { harness: 'antigravity', conversationId: OLD }),
+      managed('abcdef0123', { harness: 'antigravity', conversationId: 'c-2', conversationLinkVia: 'harness-session-file' }),
+    ]
+    expect(await run({ rows, logs: { '34e8bb8d76': NEW, abcdef0123: 'c-3' } })).toEqual([])
+  })
+})
+
+describe('AGY.REOPEN — the exact-link reopen through the poller', () => {
+  it('asks findExactLinks only about rows with nothing running, and offers their reopen', async () => {
+    const asked: string[] = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [backendSession('live')], frames: { live: ['❯ '] } }),
+      readRegistry: async () => [
+        managed('live', { harness: 'antigravity', cwd: '/w', conversationId: 'conv-live' }),
+        managed('dead', { harness: 'antigravity', cwd: '/w', conversationId: 'conv-dead' }),
+      ],
+      scanProcesses: async () => ({ procs: [] }),
+      // The store does not hold the agy conversation — the case agy's missing history.jsonl causes.
+      loadConversations: async () => [],
+      findExactLinks: async entries => {
+        for (const e of entries) asked.push(e.conversationId ?? '')
+        return new Set(entries.map(e => e.conversationId!).filter(Boolean))
+      },
+      now: () => NOW,
+    })
+    const snap = await p.poll()
+    expect(asked).toEqual(['conv-dead'])
+    const dead = snap.sessions.find(s => s.id === 'dead')
+    expect(dead?.resume?.sessionId).toBe('conv-dead')
+    expect(snap.sessions.find(s => s.id === 'live')?.resume).toBeUndefined()
   })
 })

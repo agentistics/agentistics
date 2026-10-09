@@ -34,7 +34,7 @@ import { spawn } from 'node:child_process'
 import { rekeyMutedSession } from './sessions/session-notify-web'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, writeSync } from 'node:fs'
-import { join, resolve as resolvePath } from 'node:path'
+import { dirname, join, resolve as resolvePath } from 'node:path'
 import type { CodeHostPort } from '@agentistics/engine-api'
 import type { CodeLaunch } from '@agentistics/tui/control/code-types'
 import type { CodeStartLaunch } from './code-launch'
@@ -117,7 +117,7 @@ import {
 import { confirm } from './cli-ui'
 import { compareVersions, CURRENT_VERSION, getVersionInfo } from './version'
 import { budgetFromEnv, decideSelfGuard, exeWasReplaced, parseProcStatusMemory, planRestartArgv, selfGuardMessage, type SelfSample } from './self-guard'
-import { readlink, readFile as readFileText } from 'node:fs/promises'
+import { mkdir, readlink, readFile as readFileText } from 'node:fs/promises'
 import { execInPlace } from './exec-in-place'
 import { cliStrings, type CliLang, type CliStrings } from './cli-i18n'
 import { awaitReplacement, type RestartVerdict, type ServingObservation } from './service-manager'
@@ -169,7 +169,7 @@ import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import { controlStrings } from '@agentistics/tui/control/i18n'
 import { loadHarnessSessions } from './sessions/harness-sessions'
 import {
-  collisionKey, readProcessConversation, readSpawnWindowConversation, resolveProcessLog, type ProcessTranscriptFile,
+  collisionKey, managedProcessLogPath, readManagedConversation, readProcessConversation, readSpawnWindowConversation, resolveProcessLog, type ProcessTranscriptFile,
 } from './sessions/process-conversation'
 import { holderCollisions } from './sessions/process-transcript'
 import { onTranscriptActivity } from './sessions/transcript-activity'
@@ -195,6 +195,8 @@ import { HARNESS_PROCESS_TRANSCRIPTS } from './sessions/harness-session-file'
 import { modeSpecFor } from './sessions/mode-spec'
 import { isServerProcess, readServerSnapshot } from './sessions/shared-snapshot'
 import { conversationForProcess, forgetConversations, loadConversations } from './sessions/conversations'
+import { exactLinksOnDisk } from './sessions/reopen-link'
+import { reopenTargetFor } from './sessions/reopen-target'
 
 export type StartResult = number | 'foreground'
 
@@ -1556,6 +1558,9 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
   return {
     backend, readRegistry, scanProcesses, loadConversations, touchSessions,
     loadHarnessSessions,
+    // The exact-link reopen (`reopen-target.ts`): without it a row whose conversation the store
+    // lacks — every agy session agentop started — offers no reopen.
+    findExactLinks: exactLinksOnDisk,
     // Written once per session, not once per poll — the poller only calls this when the harness's
     // own record disagrees with the registry.
     // The link kind travels WITH the id. Dropping it here would persist a first-sighting claim as
@@ -1570,6 +1575,7 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
     // `cli-session.ts`'s poller: that one is a one-shot command and writes nothing, exactly as it
     // takes no heartbeat.
     readProcessConversation,
+    readManagedConversation,
     // Which log a live pid holds open, WITHOUT reading its content — the collision guard's own
     // input (see `sessions-host.ts`'s `createSessionsPoller` doc for `resolveProcessLog`, and
     // `agy-conversation.ts` for what it protects). This is the ONE production caller of
@@ -1710,7 +1716,7 @@ const WHILE_WRITING_SPAWN_WINDOW_MS = 20_000
 const WHILE_WRITING_ACTIVITY_WINDOW_MS = 3_000
 
 /** One dense sampling run over this machine's own rows of `harness` — see `sampleProcessLinks`. */
-async function sampleLinksFor(harness: HarnessId, deadline: () => number, onlyIds?: ReadonlySet<string>): Promise<number> {
+async function sampleLinksFor(harness: HarnessId, deadline: () => number, onlyIds?: ReadonlySet<string>, follow = false): Promise<number> {
   const backend = await resolveBackend()
   // Other live processes of this harness join the collision guard; scanned ONCE per run, because a
   // full `/proc` scan every 100 ms is exactly the cost this loop must not have.
@@ -1725,6 +1731,7 @@ async function sampleLinksFor(harness: HarnessId, deadline: () => number, onlyId
     deadline,
     intervalMs: WHILE_WRITING_INTERVAL_MS,
     ...(onlyIds ? { onlyIds } : {}),
+    ...(follow ? { follow } : {}),
     otherPids: procs.filter(p => p.harness === harness && p.pid !== undefined).map(p => p.pid!),
   })
 }
@@ -1736,8 +1743,9 @@ function recordProcessLink(sid: string, conversationId: string, link: 'assigned'
 }
 
 /**
- * Burst-sample whenever the watcher reports a write under a `while-writing` harness's session tree.
- * One run per harness at a time: a write during a run EXTENDS it rather than starting another.
+ * Burst-sample whenever the watcher reports a write under a `while-writing` harness's session tree —
+ * the unlinked rows AND the linked rows that follow their process, so a kimi that moved to a new
+ * session (`/new`, even on a reopened row) is caught while it writes. One run per harness at a time: a write during a run EXTENDS it rather than starting another.
  * Installed once, by the first poller this process builds — the same process that runs the watcher
  * (`agentop server`); a process with no watcher simply never hears of any activity.
  */
@@ -1753,7 +1761,7 @@ function listenForTranscriptActivity(): void {
     if (running) { running.until = until; return }
     const burst = { until }
     activityBursts.set(harness, burst)
-    void sampleLinksFor(harness, () => burst.until)
+    void sampleLinksFor(harness, () => burst.until, undefined, true)
       .catch(() => 0)
       .finally(() => activityBursts.delete(harness))
   })
@@ -1831,6 +1839,13 @@ function linkProcessConversationSoon(id: string, harness: HarnessId): void {
       // something else took the id) is no longer this loop's to touch.
       const row = (await readRegistry().catch(() => [])).find(m => m.id === id)
       if (!row || row.conversationId) return
+      const managedConversation = await readManagedConversation(harness, id)
+      if (managedConversation) {
+        try {
+          await recordProcessLink(id, managedConversation, 'assigned', 'process-log')
+          return
+        } catch { continue } // retry if the registry write failed
+      }
       const backend = await resolveBackend()
       const panePids = await backend.listPanePids?.().catch(() => undefined)
       const pid = panePids?.get(id)
@@ -2033,9 +2048,11 @@ async function spawnManaged(req: {
       ...(await resolveContextParent(req.parentSessionId ?? req.inherit?.parentConversationId ?? req.inherit?.parentSessionId)),
     })
   const offeredConversationId = randomUUID()
+  const logFile = managedProcessLogPath(req.harness, id, AGENTISTICS_DATA_DIR)
   const planned = planSpawn({
     harness: req.harness,
     cwd: req.cwd,
+    ...(logFile ? { logFile } : {}),
     ...(req.resumeId ? { resumeId: req.resumeId } : {}),
     context: ctx,
     ...(req.prompt ? { prompt: req.prompt } : {}),
@@ -2078,6 +2095,7 @@ async function spawnManaged(req: {
   const abandon = () => removeSession(id).catch(() => {})
   await writeContextFile(planned.plan)
   try {
+    if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
     await backend.spawn({
       id,
       cwd: req.cwd,
@@ -2248,20 +2266,12 @@ async function reopenEntries(
   // apart, so a set of five rows used to start five copies of one conversation. A row that RECORDED
   // which conversation it drives is exact and takes that one.
   const taken = new Set<string>()
+  const onDisk = await exactLinksOnDisk(entries, conversations)
   const plan = planTaskReopen({
     entries,
     liveIds: live,
     inUse,
-    conversationFor: entry => {
-      const own = entry.conversationId
-        ? conversations.find(c => c.sessionId === entry.conversationId)
-        : undefined
-      const conv = own ?? conversations.find(c =>
-        !taken.has(c.sessionId) && c.harness === entry.harness && c.cwd === entry.cwd)
-      if (!conv?.resumable) return null
-      taken.add(conv.sessionId)
-      return { sessionId: conv.sessionId, title: conv.title }
-    },
+    conversationFor: entry => reopenTargetFor({ entry, pool: conversations, onDisk, taken }),
   })
 
   // GATE THE WHOLE SET, before spawning any of it — see spawn-admission.ts. `plan.reopen.length` is
@@ -2371,22 +2381,14 @@ async function restorableSessions(fell: readonly ManagedSession[]): Promise<Rest
   if (fell.length === 0) return []
   const conversations = await loadConversations()
   const taken = new Set<string>()
+  const onDisk = await exactLinksOnDisk(fell, conversations)
 
   // The DECISION is the pure `planFellOffer`; this is the I/O around it — the conversation store,
   // and the claiming that stops four fallen rows in one repository being offered four copies of one
   // conversation.
   return planFellOffer({
     entries: fell,
-    conversationFor: m => {
-      const own = m.conversationId
-        ? conversations.find(c => c.sessionId === m.conversationId)
-        : undefined
-      const conv = own ?? conversations.find(c =>
-        !taken.has(c.sessionId) && c.harness === m.harness && c.cwd === m.cwd)
-      if (!conv?.resumable) return null
-      taken.add(conv.sessionId)
-      return { sessionId: conv.sessionId, title: conv.title }
-    },
+    conversationFor: m => reopenTargetFor({ entry: m, pool: conversations, onDisk, taken }),
   }).map(o => ({
     id: o.entry.id,
     label: o.label,

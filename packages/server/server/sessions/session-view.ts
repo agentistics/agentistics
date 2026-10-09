@@ -22,6 +22,7 @@ import type { RepoFacts } from './repo-facts'
 import type { ReconciledSession } from './session-ref'
 import type { Conversation } from './conversations'
 import { conversationForProcess } from './conversations'
+import { reopenTargetFor } from './reopen-target'
 import type { ManagedSession, SessionActivity } from './types'
 import type { ChatTurn } from './chat-tail'
 
@@ -492,6 +493,11 @@ export function buildSessionViews(o: {
    *  is driving, and to offer the conversations that are not running at all. */
   conversations?: readonly Conversation[]
   /**
+   * Exact conversation ids the store does not hold but whose transcript the harness's own reader
+   * found on disk — see `reopen-link.ts`. What lets a row reopen from its exact link alone.
+   */
+  exactLinksOnDisk?: ReadonlySet<string>
+  /**
    * How many closed conversations to offer.
    *
    * Small on purpose. A machine with hundreds of them must not drown the handful that are actually
@@ -527,26 +533,24 @@ export function buildSessionViews(o: {
      */
     exactId?: string,
   ): { resume?: { sessionId: string; title: string } } => {
-    const pool = o.conversations ?? []
-    const knownId = exactId ?? managed?.conversationId
-    const own = knownId ? pool.find(c => c.sessionId === knownId) : undefined
-    // A row that KNOWS which conversation it drives never falls back to the guess — not even when
-    // the store does not hold that conversation yet. Since the id is recorded at SPAWN (not only at
-    // reopen), that gap is now ordinary: a session minutes old has an id and no transcript written
-    // under it. "Not yet" and "some other conversation in this directory" are not the same answer,
-    // and taking the second is the guess that handed three rows one conversation after a crash.
-    if (knownId) {
-      if (!own?.resumable) return {}
-      claimed.add(own.sessionId)
-      return { resume: { sessionId: own.sessionId, title: own.title } }
-    }
-    const conv = pool.find(c =>
-      !claimed.has(c.sessionId)
-      && c.harness === harness
-      && sessionAtCwd({ current_cwd: c.cwd, project_path: c.cwd }, managed?.cwd ?? ''))
-    if (!conv?.resumable) return {}
-    claimed.add(conv.sessionId)
-    return { resume: { sessionId: conv.sessionId, title: conv.title } }
+    // The rule lives in `reopen-target.ts`, shared with every other reopen path. A row that KNOWS
+    // which conversation it drives never falls back to the directory guess — not even when the
+    // store does not hold it — and reopens straight from that exact link when the harness's own
+    // transcript for it is on disk (`exactLinksOnDisk`), which is how an agy session agentop
+    // started gets its reopen back: agy files no project path for it, so the store cannot offer it.
+    const t = reopenTargetFor({
+      entry: {
+        harness,
+        ...(managed?.cwd ? { cwd: managed.cwd } : {}),
+        ...(managed?.conversationId ? { conversationId: managed.conversationId } : {}),
+        ...(managed?.harnessName ? { harnessName: managed.harnessName } : {}),
+      },
+      ...(exactId ? { exactId } : {}),
+      pool: o.conversations ?? [],
+      ...(o.exactLinksOnDisk ? { onDisk: o.exactLinksOnDisk } : {}),
+      taken: claimed,
+    })
+    return t ? { resume: { sessionId: t.sessionId, title: t.title } } : {}
   }
 
   /**

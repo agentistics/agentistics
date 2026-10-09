@@ -399,6 +399,50 @@ describe('a row that KNOWS which conversation it drives', () => {
     expect(v!.resume).toBeUndefined()
   })
 
+  // AGY.REOPEN: an Antigravity session agentop started is linked EXACTLY (its process log names the
+  // conversation) but agy files no project path for it, so the store pool never holds it. The
+  // reopen comes from the link itself once the harness's own transcript is on disk.
+  it('reopens from the EXACT link when the store lacks it but the transcript is on disk — every resumable harness', () => {
+    for (const harness of ['claude', 'codex', 'copilot', 'kimi', 'antigravity'] as const) {
+      const reconciled = [row('a', {
+        status: 'lost',
+        backend: undefined,
+        managed: managed('a', { harness, cwd: '/repo/agy', conversationId: 'c2cc0410-62b8-46fe-890f-48bc9886df8f' }),
+      })]
+      const [v] = buildSessionViews({
+        reconciled,
+        activity: new Map(),
+        processes: [],
+        // A same-harness conversation in the same directory: the guess would pick it. It must not.
+        conversations: [conv('older', { harness, cwd: '/repo/agy' })],
+        exactLinksOnDisk: new Set(['c2cc0410-62b8-46fe-890f-48bc9886df8f']),
+      })
+      expect(v!.resume?.sessionId).toBe('c2cc0410-62b8-46fe-890f-48bc9886df8f')
+    }
+  })
+
+  it('offers nothing from the exact link for a harness that cannot resume by id (gemini)', () => {
+    const reconciled = [row('a', {
+      status: 'lost',
+      backend: undefined,
+      managed: managed('a', { harness: 'gemini', conversationId: 'proj/chat-1' }),
+    })]
+    const [v] = buildSessionViews({
+      reconciled, activity: new Map(), processes: [], conversations: [],
+      exactLinksOnDisk: new Set(['proj/chat-1']),
+    })
+    expect(v!.resume).toBeUndefined()
+  })
+
+  it('offers no exact-link reopen on a RUNNING row — reopening is for a row with nothing running', () => {
+    const reconciled = [row('a', { managed: managed('a', { harness: 'antigravity', conversationId: 'x' }) })]
+    const [v] = buildSessionViews({
+      reconciled, activity: new Map([['a', 'waiting']]), processes: [], conversations: [],
+      exactLinksOnDisk: new Set(['x']),
+    })
+    expect(v!.resume).toBeUndefined()
+  })
+
   it('still guesses for a row that recorded nothing — the old behaviour, unchanged', () => {
     const reconciled = [row('a', { status: 'lost', backend: undefined })]
     const [v] = buildSessionViews({

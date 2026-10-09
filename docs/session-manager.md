@@ -234,11 +234,13 @@ its own record while the process lives, which is read as well.
 
 **antigravity is linked a third way.** It has no assign flag — measured against agy 1.1.27 on
 2026-09-08, `agy --conversation <fresh-uuid>` answers `warning: conversation "…" not found` and then
-creates one under an id of its own — and it writes no session record. What it does do is open one
-log per process, `~/.gemini/antigravity-cli/log/cli-<YYYYMMDD_HHMMSS>.log`, **hold it open** for the
-life of that process, and write `Created conversation <uuid>` into it. So the chain *managed row →
-tmux pane pid → open file descriptor → log → conversation* is exact at every step, and agentop reads
-it (`agy-conversation.ts` for the rules, `process-conversation.ts` for the two reads).
+creates one under an id of its own — and it writes no session record. Agentop supplies
+`--log-file <data-dir>/agy-logs/<managed-id>.log`, giving each spawn and reopen an exclusive log.
+agy 1.3.2 wrote `Created conversation <uuid>` into that file in both print and TUI probes. Agentop
+can read it after the process exits and without `/proc`; sessions created in the same second do not
+share it. On Linux, the process's open `conversations/<uuid>.db` (or brain transcript) is another
+exact source. Multiple distinct conversation paths are refused. The old timestamp log and its
+spawn-window recovery remain fallbacks. See [Antigravity linking and QA](antigravity-link.md).
 
 That route mattered more for agy than it would for anyone else, because for a session **agentop
 started** even the harness-and-directory fallback below is closed: the adapter takes a
@@ -247,9 +249,8 @@ prompt typed in its own UI — a session agentop starts is handed its first prom
 `--prompt-interactive`, so its record carries an empty `project_path` and is not a candidate for
 anything. Measured the same day: 15 of 38 agy conversations here had a directory recorded, and the
 23 without were exactly the ones agentop had opened. Its chat view was therefore permanently empty
-while its terminal worked perfectly. The limit worth stating: this is a `/proc` read, so off Linux
-there is no link and the chat view says "this session has no linked conversation yet", which is
-true.
+while its terminal worked perfectly. The exclusive managed log supplies the missing link without
+relying on that project-path hint.
 
 **codex and kimi are linked the same way, by the file NAME.** Neither can be told an id, but each
 one's own process names its conversation in a path it opens (measured 2026-10-08 against codex

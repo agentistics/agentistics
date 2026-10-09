@@ -27,6 +27,7 @@
 import type { ModelUsage, SessionMeta, TurnEvent } from '@agentistics/core'
 import { activeMinutesOf, emptyModelUsage, sessionModelUsage, charCount } from '@agentistics/core'
 import { canonicalTool, countGitCommands } from '../harness-activity'
+import { splitContextBlock } from '../sessions/agentistics-context'
 
 /** One parsed line of the global history.jsonl. */
 export interface AntigravityHistoryEntry {
@@ -93,6 +94,14 @@ export interface AntigravityParseOptions {
    *  CHILDREN: a child is dispatched by its parent, so demanding a human prompt would throw its
    *  (real, already-billed) tokens away. Never set for top-level conversations. */
   allowNoUserTurn?: boolean
+  /**
+   * The directory agentop STARTED this conversation in, from its own session registry (the managed
+   * row whose exact link names this conversation). A fact agentop controls, unlike
+   * `history.jsonl`, which agy writes only for a prompt typed in its own UI — so a conversation
+   * agentop opened is otherwise filed with no project path at all. Outranked by history's
+   * `workspace` (the harness's own statement); outranks everything else.
+   */
+  managedCwd?: string
 }
 
 /** A parsed conversation plus the file paths it touched. The path SET (not just its size) is
@@ -168,7 +177,9 @@ export function firstHistoryPrompt(
   for (const e of entries) {
     if (e.conversationId !== conversationId) continue
     if (e.isSlashCommand) continue
-    if (e.display.trim()) return e.display
+    // A line that is agentop's context and nothing else is not something the person typed.
+    const display = withoutContext(e.display)
+    if (display.trim()) return display
   }
   return ''
 }
@@ -184,6 +195,53 @@ export function extractUserRequest(content: string): string {
     .replace(/<ADDITIONAL_METADATA>[\s\S]*?<\/ADDITIONAL_METADATA>/g, '')
     .replace(/<USER_SETTINGS_CHANGE>[\s\S]*?<\/USER_SETTINGS_CHANGE>/g, '')
     .trim()
+}
+
+/**
+ * The project folder agentop wrote into the context block it prepends to the first message of an
+ * agy session it started (`agentistics-context.ts`: `… Project folder: <cwd>.` on its own line).
+ * The last-resort project path for an agentop-started conversation whose registry row is gone.
+ * `''` when the block or the sentence is absent. The trailing `.` is the sentence's, so a path
+ * containing dots survives: the match is greedy up to the LAST dot on that line.
+ */
+export function projectFolderFromContext(block: string): string {
+  const m = /Project folder: (.+)\.[ \t]*$/m.exec(block)
+  return m?.[1]?.trim() ?? ''
+}
+
+/** A history `display` / USER_INPUT text with agentop's leading context block removed. */
+function withoutContext(text: string): string {
+  const split = splitContextBlock(text)
+  return split ? split.rest : text
+}
+
+/**
+ * conversationId → the directory agentop started it in, from the raw `managed-sessions.json`.
+ *
+ * Only `antigravity` rows that carry a `conversationId` and a `cwd`. A conversation reopened N
+ * times has N rows; they share the directory in practice, and the NEWEST row (by `createdAt`)
+ * decides when they do not, since it is where the conversation was last worked on. Total: a file
+ * that is missing, unparseable or not an array yields an empty map, never a throw.
+ */
+export function managedAntigravityCwds(raw: string): Map<string, string> {
+  const out = new Map<string, string>()
+  let rows: unknown
+  try { rows = JSON.parse(raw) } catch { return out }
+  if (!Array.isArray(rows)) return out
+  const at = new Map<string, number>()
+  for (const r of rows) {
+    if (!r || typeof r !== 'object') continue
+    const row = r as { harness?: unknown; conversationId?: unknown; cwd?: unknown; createdAt?: unknown }
+    if (row.harness !== 'antigravity') continue
+    if (typeof row.conversationId !== 'string' || !row.conversationId) continue
+    if (typeof row.cwd !== 'string' || !row.cwd) continue
+    const t = typeof row.createdAt === 'string' ? Date.parse(row.createdAt) || 0 : 0
+    const prev = at.get(row.conversationId)
+    if (prev !== undefined && prev > t) continue
+    at.set(row.conversationId, t)
+    out.set(row.conversationId, row.cwd)
+  }
+  return out
 }
 
 /** `/model`, `/usage foo` → true. A path like `/home/padawan is where…` → false. */
@@ -368,6 +426,7 @@ export function parseAntigravityTranscriptDetailed(
   let userMessages = 0
   let assistantMessages = 0
   let firstPrompt = ''
+  let contextFolder = ''
   let hasGenuineUserTurn = false
   let toolErrors = 0
   const toolErrorCategories: Record<string, number> = {}
@@ -425,12 +484,18 @@ export function parseAntigravityTranscriptDetailed(
     if (type === 'USER_INPUT') {
       const text = extractUserRequest(typeof step.content === 'string' ? step.content : '')
       if (!text) continue
+      // agentop's context block rides the first message of a session it started (agy has no system
+      // channel). It names the project folder, and it is not what the person typed — so it never
+      // becomes the first_prompt, which labels the session everywhere.
+      const ctx = splitContextBlock(text)
+      if (ctx && !contextFolder) contextFolder = projectFolderFromContext(ctx.block)
+      const prompt = ctx ? ctx.rest : text
       // A slash command is a CLI action, not a prompt — never the first_prompt.
-      const slash = isSlashCommandPrompt(text)
+      const slash = isSlashCommandPrompt(prompt)
       if (!slash) {
         hasGenuineUserTurn = true
         if (turnEvent) turnEvent.userPrompt = true
-        if (!firstPrompt) firstPrompt = text.slice(0, 200)
+        if (!firstPrompt && prompt.trim()) firstPrompt = prompt.slice(0, 200)
       }
       userMessages++
       { const n = charCount(text); if (n > 0) { userChars += n; userCharMsgs++ } }
@@ -545,7 +610,9 @@ export function parseAntigravityTranscriptDetailed(
 
   // conversation_summaries.db (often empty) is an optional enrichment only.
   const summary = options.summary ?? null
-  let resolvedPath = projectPath
+  // history's `workspace` (the harness's own statement), then the directory agentop started it in
+  // (its registry), then the folder agentop wrote into the context, then the summaries table.
+  let resolvedPath = projectPath || options.managedCwd || contextFolder
   if (!resolvedPath && summary && typeof summary.workspace_uris === 'string') {
     try {
       const uris = JSON.parse(summary.workspace_uris)
