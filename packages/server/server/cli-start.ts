@@ -187,7 +187,7 @@ import {
   createSessionsPoller, linkProcessConversation, sampleProcessLinks, SESSION_POLL_MS, type SessionsPoller,
   type SessionSnapshot,
 } from './sessions/sessions-host'
-import { createSessionHub, type SessionHub } from './sessions/session-hub'
+import { createSessionHub, setProcessSessionHub, type SessionHub } from './sessions/session-hub'
 import { hostAdapterState, onAdapterStateChange } from './sessions/adapter-state-host'
 import { HARNESS_PROCESS_TRANSCRIPTS } from './sessions/harness-session-file'
 import { modeSpecFor } from './sessions/mode-spec'
@@ -1618,6 +1618,7 @@ export function ensureSessionHub(): Promise<SessionHub> {
       const { fleetHub } = await import('./engine/fleet-hub')
       // Only a FRESH reading says anything new: an `unavailable` snapshot is the previous one again.
       hub.observe(snap => { if (!snap.unavailable) fleetHub.observe(snap.sessions, snap.polledAtMs) })
+      setProcessSessionHub(hub)
       return hub
     })()
     void sessionHub.catch(() => { sessionHub = null })
