@@ -146,3 +146,33 @@ describe('chat stream — an unresolved path (ENGINE.MAP P-03)', () => {
     ctl.abort()
   })
 })
+
+describe('chat stream — the first send to a session with no transcript yet', () => {
+  test('a send re-reads at short offsets until the path resolves, then stops', async () => {
+    let reads = 0
+    let path: string | null = null
+    const timers: Array<{ f: () => void; ms: number }> = []
+    const ctl = new AbortController()
+    const res = chatStreamResponse('u3', {
+      async read(_fresh, onPath) { reads++; if (path) onPath(path); return { turns: [], live: true } },
+      onFleetTick: () => () => {},
+      watchFile: () => ({ close() {} }),
+      setTimer: (f, ms) => { timers.push({ f, ms }); if (ms === 25) queueMicrotask(f); return timers.length },
+      clearTimer: () => {},
+    }, ctl.signal)!
+    await events(res, e => e.length >= 1, 300)
+    wakeChat('u3')
+    await Bun.sleep(30)
+    const burst = timers.filter(t => t.ms === 700 || t.ms === 1_500 || t.ms === 3_000)
+    expect(burst.map(t => t.ms)).toEqual([700, 1_500, 3_000])
+    const before = reads
+    path = '/tmp/x.jsonl' // the harness wrote it
+    burst[0]!.f()
+    await Bun.sleep(30)
+    expect(reads).toBe(before + 1)
+    burst[1]!.f() // resolved: the rest of the burst does nothing
+    await Bun.sleep(30)
+    expect(reads).toBe(before + 1)
+    ctl.abort()
+  })
+})

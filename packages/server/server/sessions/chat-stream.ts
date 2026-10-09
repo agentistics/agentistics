@@ -29,6 +29,13 @@ export const ROW_TTL_MS = 5_000
 export const SAFETY_MS = 10_000
 /** First retry of an unresolved path when no fleet tick source is wired; doubles up to `SAFETY_MS`. */
 export const UNRESOLVED_BACKOFF_MS = 1_000
+/**
+ * After a SEND to a session whose transcript is not on disk yet, re-read at these offsets: a harness
+ * writes its transcript on the first message (codex's rollout ~1 s after it), and waiting for the next
+ * fleet tick would put the first answer up to one tick late. A read here resolves a path — it polls no
+ * fleet.
+ */
+export const AFTER_SEND_RETRY_MS = [700, 1_500, 3_000] as const
 export const KEEPALIVE_MS = 15_000
 /** Chat streams one server keeps at once; past it the client falls back to polling. */
 export const MAX_CHAT_STREAMS = 32
@@ -167,13 +174,19 @@ export function chatStreamResponse(id: string, deps: ChatStreamDeps, signal: Abo
     open--
     watcher?.close()
     tickOff?.(); tickOff = null
-    for (const t of [debounce, safety, keepalive]) if (t !== null) clearTimer(t)
+    for (const t of [debounce, safety, keepalive, ...burst]) if (t !== null) clearTimer(t)
     const set = wakers.get(id)
     set?.delete(waker)
     if (set && set.size === 0) wakers.delete(id)
     try { ctl.close() } catch { /* already */ }
   }
-  const waker = () => schedule(true)
+  let burst: unknown[] = []
+  const waker = () => {
+    schedule(true)
+    if (path) return
+    for (const t of burst) clearTimer(t)
+    burst = AFTER_SEND_RETRY_MS.map(ms => setTimer(() => { if (!path) schedule(true) }, ms))
+  }
 
   const stream = new ReadableStream<Uint8Array>({
     start(c) {
