@@ -16,7 +16,7 @@
     "bench.ts": {
       "mode": "patched",
       "engine": "d2e20bcbb4826dfe0732c72f7e5e7955a5de8ce4ea4001baddfc7df99b8d0873",
-      "public": "c3b49f33f30db858857447de4f8c596293a013783af8377d8fbd53c0ec1e4814"
+      "public": "b5f0ffa2011fa04b297c95a6323d7122d1a86503fbe4a828918bba4d678434d8"
     }
   }
 }

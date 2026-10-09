@@ -135,7 +135,7 @@ echo "[run] server up after ${i}s, measuring pid $HOLDER"
 # ── the bench, then the budgets ─────────────────────────────────────────────────────────────────
 OUT="$ROOT/logs"
 "$BUN" "$HERE/bench.ts" --base "http://127.0.0.1:$PORT" --pid "$HOLDER" --root "$ROOT" --plan "$PLAN" \
-  --soak-min "$SOAK_MIN" --label "$LABEL" --out "$OUT/bench-$LABEL.json" | tee "$OUT/bench-$LABEL.md"
+  --soak-min "$SOAK_MIN" --force-spawn --label "$LABEL" --out "$OUT/bench-$LABEL.json" | tee "$OUT/bench-$LABEL.md"
 
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   { echo "### ENGINE.MAP bench — $LABEL (plan $PLAN)"; echo; cat "$OUT/bench-$LABEL.md"; echo; } >> "$GITHUB_STEP_SUMMARY"

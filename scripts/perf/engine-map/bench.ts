@@ -3,6 +3,10 @@
  * Differences from the engine's file — keep this list exact, `sync.test.ts` pins the hashes:
  *   1. switch probe: 10 samples instead of 5, and p95 of GET / first frame reported (`switchGetP95`,
  *      `switchFirstP95`, a table column) — the 09 §8 budget is p95, the original printed p50 only;
+ *   2. `--force-spawn`: sends `force: true` with POST /api/fleet/new. The sessions here are FAKES (a bash loop
+ *      and a python append), so the spawn gate's real-assistant memory estimate (spawn-admission.ts) would
+ *      refuse a mixed fleet of 10 on a 7 GB, 2-core CI runner for a reason that has nothing to do with what
+ *      is being measured. run.sh passes it; without the flag the request is byte for byte the engine's.
  * Everything else — the simulated web client, the probes, the soak, the tables — is byte for byte.
  */
 /**
@@ -42,6 +46,7 @@ const PLAN = arg('plan', 'full')!
 const SOAK_MIN = Number(arg('soak-min', PLAN === 'full' ? '30' : '0'))
 const OUT = arg('out', join(ROOT, 'logs', 'bench-results.json'))!
 const LABEL = arg('label', 'baseline')!
+const FORCE_SPAWN = argv.includes('--force-spawn')
 const HARNESSES = (arg('harnesses', 'claude,codex,gemini,copilot,kimi,antigravity')!).split(',')
 if (!PID || !ROOT) { console.error('usage: --pid <server pid> --root <ROOT>'); process.exit(2) }
 const TMUX_LOG = join(ROOT, 'logs', 'tmux-calls.log')
@@ -198,7 +203,7 @@ async function spawnUpTo(n: number): Promise<{ spawnMs: number[] }> {
     const cwd = join(ROOT, 'work', `repo${group}`)
     Bun.spawnSync(['mkdir', '-p', cwd])
     const harness = HARNESSES[have % HARNESSES.length]!
-    const r = await post('/api/fleet/new?lang=en', { harness, cwd, label: `bench-${have}-${harness}` })
+    const r = await post('/api/fleet/new?lang=en', { harness, cwd, label: `bench-${have}-${harness}`, ...(FORCE_SPAWN ? { force: true } : {}) })
     if (!r.json?.ok) { log('spawn refused:', JSON.stringify(r.json)); break }
     spawnMs.push(r.ms)
     have++
