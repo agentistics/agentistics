@@ -808,6 +808,9 @@ const TOOLS: Tool[] = [
   },
 ];
 
+/** Exported for the session-context parity test; the live list remains the single MCP registry. */
+export const MCP_TOOL_NAMES = TOOLS.map(tool => tool.name)
+
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toolsForGate(TOOLS, await nativeVisibleNow()) }));
 
 // The local agent audit (spec §4.6, P1.2): every W/D call is one line, R calls are counted per
