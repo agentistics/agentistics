@@ -4,6 +4,8 @@
 #   PLAN=quick scripts/perf/engine-map/run.sh                  # CI: ~6 min, N=0/1/10 × C=0/1/5
 #   PLAN=quick SOAK_MIN=5 LABEL=soak scripts/perf/engine-map/run.sh
 #
+# ADAPTER_CHAT=1 starts the server with the adapter chat flag ON (default: off) — the F4 on/off comparison.
+#
 # Locally it is a heavy job: >= 5 GB available, one at a time, in a capped scope — and the SERVER never
 # inside flock (a flock inherited by the server outlives the script):
 #   systemd-run --user --scope -p MemoryMax=3G -p CPUQuota=200% scripts/perf/engine-map/run.sh
@@ -64,6 +66,7 @@ SPATH="$ROOT/bin:$(dirname "$BUN"):/usr/local/bin:/usr/bin:/bin"
 SRV_ENV=(env -i HOME="$TH" USER="${USER:-runner}" LOGNAME="${USER:-runner}" SHELL=/bin/bash LANG=C.UTF-8 TERM=xterm-256color
   PATH="$SPATH" TMUX_TMPDIR="$ROOT/tmux" TMUX_SHIM_LOG="$ROOT/logs/tmux-calls.log"
   AGENTISTICS_DIR="$ROOT/data" PORT="$PORT" WEB_PORT="$WEB_PORT"
+  $([ "${ADAPTER_CHAT:-0}" = 1 ] && echo AGENTISTICS_ADAPTER_CHAT=1)
   AGENTISTICS_THROWAWAY=1 AGENTISTICS_TELEMETRY=0 AGENTISTICS_JOURNAL_BACKFILL=0 FAKE_THINK_S="${FAKE_THINK_S:-1}")
 
 # `--port` is what keeps `agentop server` from delegating to an installed service unit: this one is
