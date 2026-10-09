@@ -2090,7 +2090,7 @@ async function spawnManaged(req: {
         : {}),
       // F2.0 — the same spawn in a structured driver's terms; tmux ignores it (`structured-backend.ts`).
       structured: structuredIntentOf(req, {
-        model, effort, ctx, mcp: agentisticsMcpLaunch(),
+        model, effort, ctx, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } },
         // The driver applies it only where its declaration says the protocol assigns ids; the row is
         // linked by what the protocol then STATES (`onConversation`), never by this offer.
         conversationId: offeredConversationId,
@@ -2768,6 +2768,9 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       harness: req.harness as HarnessId,
       cwd: req.cwd,
       resumeId: req.sessionId,
+      ...(req.origin ? { origin: req.origin } : {}),
+      ...(previous?.model ? { model: previous.model } : {}),
+      ...(previous?.effort ? { effort: previous.effort } : {}),
       ...(req.prompt ? { prompt: req.prompt } : {}),
       ...(req.label ? { label: req.label } : {}),
       ...(previous ? { inherit: previous } : {}),
@@ -4057,6 +4060,15 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
 
       const live = (await backend.list().catch(() => [])).find(b => b.id === id)
       if (!live?.alive) return { ok: false, message: s.sessNotRunning }
+
+      // The structured protocol states whether input is blocked. Send through its driver;
+      // Codex's TUI-only reliable paste method cannot address a structured process.
+      if (backend.chatOf?.(id)) {
+        if (backend.attentionOf?.(id)) return { ok: false, message: s.sessPromptBlocked }
+        return await backend.sendText(id, body)
+          ? { ok: true, message: s.sessPrompted(id) }
+          : { ok: false, message: s.sessSendFailed(id) }
+      }
 
       const frame = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
       const rules = rulesFor(managed.harness)

@@ -26,6 +26,7 @@ function fakeBase(): SessionBackend & { calls: Array<[string, unknown?]> } {
     captureTerminal: rec('captureTerminal', null),
     sendText: rec('sendText', true), sendTextRaw: rec('sendTextRaw', true), sendKey: rec('sendKey', true), sendPaste: rec('sendPaste', true),
     sendChoiceText: rec('sendChoiceText', 'sent'),
+    sendTextReliable: rec('sendTextReliable', false),
     kill: rec('kill', true), attachCommand: () => ['tmux', 'attach'], detachHint: rec('detachHint', 'C-b d'),
   } as unknown as SessionBackend & { calls: Array<[string, unknown?]> }
 }
@@ -324,4 +325,21 @@ describe('structuredSpawnOf (pure)', () => {
     expect(r).toEqual({ id: 'm-1', harness: 'kimi', cwd: '/w', resumeId: 'c9' })
     expect(structuredSpawnOf({ id: 'a', cwd: '/w', argv: ['kimi'], initialPrompt: { text: 'p' } as never }, 'kimi')).toEqual({ id: 'a', harness: 'kimi', cwd: '/w', initialPrompt: 'p' })
   })
+})
+
+test('the Codex reliable-send method also routes through the structured driver', async () => {
+  const base = fakeBase()
+  const eng = fakeEngine()
+  const b = withStructured(base, provider(eng.reg))
+  await b.spawn(web('gemini'))
+  expect(await b.sendTextReliable!('m-1', 'structured prompt', 'codex')).toBe(true)
+  expect(eng.sessions[0]!.prompts).toEqual(['structured prompt'])
+  expect(base.calls.some(c => c[0] === 'sendTextReliable')).toBe(false)
+  expect(await b.sendTextReliable!('t-1', 'terminal prompt', 'codex')).toBe(false)
+  expect(base.calls).toContainEqual(['sendTextReliable', 't-1'])
+})
+
+test('structured MCP launch carries the host endpoint explicitly (throwaway ports never target production)', () => {
+  const intent = structuredIntentOf({ harness: 'codex', origin: 'web' }, { mcp: { command: 'agentop', args: ['mcp'], env: { AGENTISTICS_API: 'http://localhost:49991' } } })
+  expect(intent.mcp).toEqual([{ name: 'agentistics', command: 'agentop', args: ['mcp'], env: { AGENTISTICS_API: 'http://localhost:49991' } }])
 })

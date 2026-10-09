@@ -728,3 +728,8 @@ describe('dedupeExternalProcesses — one row per SESSION, not per process', () 
     expect(externalId(proc(1) as never)).not.toBe(externalId(proc(1, { startedMs: 2000 }) as never))
   })
 })
+
+it('reopens a protocol-stated Codex thread before the file/metrics cache catches up', () => {
+  const views = buildSessionViews({ activity: new Map(), reconciled: [row('codex-web', { status: 'lost', backend: undefined, managed: managed('codex-web', { harness: 'codex', conversationId: 'thread-from-protocol', conversationLinkVia: 'protocol-stated', label: 'Codex task' }) })], processes: [], conversations: [] })
+  expect(views.find(v => v.id === 'codex-web')?.resume).toEqual({ sessionId: 'thread-from-protocol', title: 'Codex task' })
+})

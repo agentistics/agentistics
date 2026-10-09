@@ -1917,6 +1917,8 @@ export interface SpawnSessionRequest {
 }
 
 export interface ResumeSessionRequest {
+  /** The web reopen uses the same structured route as a web spawn. */
+  origin?: 'web' | 'terminal'
   /** The HARNESS's own conversation id. */
   sessionId: string
   harness: string

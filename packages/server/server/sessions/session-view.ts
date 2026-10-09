@@ -24,6 +24,7 @@ import type { Conversation } from './conversations'
 import { conversationForProcess } from './conversations'
 import type { ManagedSession, SessionActivity } from './types'
 import type { ChatTurn } from './chat-tail'
+import { SPAWN_SPECS } from './spawn-spec'
 
 /**
  * The registry's own record of when a session began, as epoch ms — PURE.
@@ -536,6 +537,12 @@ export function buildSessionViews(o: {
     // under it. "Not yet" and "some other conversation in this directory" are not the same answer,
     // and taking the second is the guess that handed three rows one conversation after a crash.
     if (knownId) {
+      // A protocol-stated id is already exact; a freshly completed rollout may not be in the
+      // metrics cache yet. Reopen it by id without waiting for that independent file scan.
+      if (!own && managed?.conversationLinkVia === 'protocol-stated' && SPAWN_SPECS[harness]?.resume && !claimed.has(knownId)) {
+        claimed.add(knownId)
+        return { resume: { sessionId: knownId, title: managed.label ?? knownId } }
+      }
       if (!own?.resumable) return {}
       claimed.add(own.sessionId)
       return { resume: { sessionId: own.sessionId, title: own.title } }

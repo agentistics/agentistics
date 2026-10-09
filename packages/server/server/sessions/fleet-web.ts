@@ -541,6 +541,7 @@ async function runFleetActionOnce(
       if (!row) return { ok: false, message: s.sessionsRowGone }
       if (!row.resume) return { ok: false, message: s.sessionsReopenNone }
       const out = await host.resumeSession({
+        origin: 'web',
         sessionId: row.resume.sessionId,
         harness: row.harness,
         cwd: row.cwd,

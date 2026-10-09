@@ -52,7 +52,7 @@ export function structuredIntentOf(
     effort?: string | undefined
     conversationId?: string
     ctx?: { text: string; block: string }
-    mcp?: { command: string; args: readonly string[] }
+    mcp?: { command: string; args: readonly string[]; env?: Readonly<Record<string, string>> }
   },
 ): StructuredIntent {
   return {
@@ -64,7 +64,7 @@ export function structuredIntentOf(
     ...(req.resumeId ? { resumeId: req.resumeId } : {}),
     ...(req.prompt ? { prompt: req.prompt } : {}),
     ...(o.ctx && !req.resumeId ? { instructions: { text: o.ctx.text, block: o.ctx.block } } : {}),
-    ...(o.mcp ? { mcp: [{ name: 'agentistics', command: o.mcp.command, args: [...o.mcp.args] }] } : {}),
+    ...(o.mcp ? { mcp: [{ name: 'agentistics', command: o.mcp.command, args: [...o.mcp.args], ...(o.mcp.env ? { env: o.mcp.env } : {}) }] } : {}),
   }
 }
 
