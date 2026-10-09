@@ -44,6 +44,7 @@ import { ATTN_BAR_CLASS, ATTN_COUNT_CLASS, attentionCount, attentionIds, pruneDi
 import { rowSelected } from '../../lib/fleetSelection'
 import { filterFleet, ignoredDimensions } from '../../lib/fleetFilter'
 import { NewSessionModal } from '../sessions/NewSessionModal'
+import { claimOrphanWizard } from '../../lib/newSessionWizardStore'
 import { SessionPickModal } from '../sessions/SessionPickModal'
 import { IdleReviewCard } from '../sessions/IdleReviewCard'
 import { PendingSessionCard } from '../sessions/PendingSessionCard'
@@ -285,6 +286,8 @@ export function SessionsAside({
   /** The summary line's own filter ("3 ativas · 2 trabalhando · 1 precisa de você"). Memory only. */
   const [summaryFilter, setSummaryFilter] = useState<SummaryPart | null>(null)
   const [creating, setCreating] = useState(false)
+  // A layout swap unmounted the open wizard: take it over (see `newSessionWizardStore`).
+  useEffect(() => { if (claimOrphanWizard()) setCreating(true) }, [])
   /**
    * The aside's own arrangement — which dimension it sub-groups by, the manual order per
    * dimension, which groups are folded, and how a card shows its status. Seeded on mount and
