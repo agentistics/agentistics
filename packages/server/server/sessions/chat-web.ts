@@ -363,7 +363,7 @@ async function readSessionChatCore(
   // Read once per chat load, not per turn: the log is one small append-only file and the view
   // resolves against it locally. Omitted when there is nothing recorded, so a machine that never
   // attached anything carries no field at all.
-  const { sends, messages } = await readAttachmentLog({ sessionId: id, conversationId })
+  const { sends, messages } = await readAttachmentLog({ sessionId: id, conversationId, pendingId: row.id })
   // VAULT.PERSONAL §8.4: a session granted vault secrets is served with every value — and its
   // base64/url/hex forms — replaced by «vault:NAME». No grant, no work: the same objects come back.
   if (anyGrant()) {
