@@ -7,9 +7,8 @@ import {
 import { SPAWN_SPECS, planSpawn } from './spawn-spec'
 import { pendingContextFor } from './spawn-context'
 import { CONTEXT_TOOL_NAMES } from './agentistics-context'
-import { MCP_TOOL_NAMES } from '../../../mcp/agentistics-mcp'
 import { clearSpecificationSkillCache, specificationSkillsFor } from './specification-skills'
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -41,7 +40,11 @@ describe('context text', () => {
     expect(t).not.toContain('Phase 2')
   })
   test('the context lists every registered MCP tool', () => {
-    expect(new Set(CONTEXT_TOOL_NAMES)).toEqual(new Set(MCP_TOOL_NAMES))
+    // Read from the source: importing agentistics-mcp.ts starts the stdio server and ends the test process.
+    const source = readFileSync(join(import.meta.dir, '../../../mcp/agentistics-mcp.ts'), 'utf8')
+    const registered = [...source.matchAll(/^\s*name: "(agentistics_[a-z_]+)",$/gm)].map(m => m[1] as string)
+    expect(registered.length).toBeGreaterThan(30)
+    expect(new Set<string>(CONTEXT_TOOL_NAMES)).toEqual(new Set<string>(registered))
   })
   test('specification skills are printed only when detected', () => {
     const t = contextText({ ...base, specSkills: ['superpowers'] })
