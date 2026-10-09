@@ -82,7 +82,7 @@ import { reorderByDrag } from './dragReorder'
 import { clampRailWidth, RAIL_WIDTH_FLOOR_PX } from './railFit'
 import { createElement, useSyncExternalStore, type ComponentType, type ReactElement } from 'react'
 import { holdIfUnsaved } from './unsavedBuffers'
-import { getFloating, restoreFloatingPanel, subscribeFloating, type FloatingSet } from './floatingPanels'
+import { getFloating, dockPanel, restoreFloatingPanel, subscribeFloating, type FloatingSet } from './floatingPanels'
 import { getActivePane, paneStorageKey, usePaneId, type PaneId } from './paneScope'
 
 /** The ten panels ArtifactsAside used to render as tabs inside one `contents` container. */
@@ -859,6 +859,16 @@ export function showPanel(panel: PanelId, pane: PaneId = getActivePane()): void 
     && isPanelShown(state, 'studio') && !isPanelShown(next, 'studio')
   if (studioDisplaced && holdIfUnsaved('close', () => commit(next))) return
   commit(next)
+}
+
+/**
+ * UNPIN a floating window: dock it back to the slot its placement names and open it there. The one
+ * gesture behind every "dock back" control — the window's own pin and the pressed pin beside its
+ * minimized tab in the bottom band — so the two can never disagree about where it lands.
+ */
+export function unpinPanel(panel: PanelId, pane: PaneId = getActivePane()): void {
+  dockPanel(panel, pane)
+  showPanel(panel, pane)
 }
 
 /**
