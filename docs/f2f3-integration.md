@@ -99,3 +99,10 @@ Also (no textual conflict, stale assertion): `agy-structured.test.ts` asserted `
 | `sessions/harness-available.ts` | AVAILABILITY's 15 s TTL memo (`availableHarnesses(now)`) AND integ's `adoptUserBinOnPath()` + `userSearchPath()` — the adoption now runs on each refresh, not once per process. |
 | `sessions/harness-available.test.ts` | Auto-merged with duplicated imports (removed). The TTL test now isolates `HOME` (like its sibling test): with `~/.local/bin` adopted onto PATH, a real home holding `agy` made `['claude']` read `['claude','antigravity']`. |
 
+## 7. `fix/terminal-button` (afbcdde5) — the "Open in terminal" button (F2.0b's `terminal` action)
+
+| File | Resolution |
+|---|---|
+| `sessions/sessions-host.ts` | Both blocks kept: smallfixes' `exactLinksOnDisk` (exact-link reopen candidates) and terminal-button's `structured` set fed to `buildSessionViews`. |
+| `sessions/fleet-row.test.ts` | Both describes kept (`conversationLinkVia`, "open in terminal"). |
+

@@ -139,3 +139,25 @@ describe('fleetRow — conversationLinkVia is a flat field, not only link.reason
     expect(fleetRow(row({ conversationId: 'conv-1' }), S).conversationLinkVia).toBeUndefined()
   })
 })
+
+describe('fleetRow — "open in terminal" (F2.0b)', () => {
+  it('is offered on a row running over its protocol, in the row\'s language, and enabled', () => {
+    const r = fleetRow(row({ structured: true, state: 'waiting' }), S)
+    expect(verb(r, 'terminal')).toEqual({ action: 'terminal' as never, label: 'Open in terminal', enabled: true })
+    expect(verb(fleetRow(row({ structured: true }), controlStrings('pt')), 'terminal').label).toBe('Abrir no terminal')
+  })
+
+  it('is ABSENT (not dimmed) on a pane session — it already is a terminal', () => {
+    expect(fleetRow(row(), S).verbs.some(v => (v.action as string) === 'terminal')).toBe(false)
+  })
+
+  it('is absent on a row agentop does not host, even if flagged', () => {
+    expect(fleetRow(row({ structured: true, actionable: false, state: 'unknown' }), S).verbs.some(v => (v.action as string) === 'terminal')).toBe(false)
+  })
+
+  it('is the same for every harness — the server action, not the row, decides who can resume', () => {
+    for (const harness of ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi']) {
+      expect(fleetRow(row({ harness, structured: true }), S).verbs.some(v => (v.action as string) === 'terminal')).toBe(true)
+    }
+  })
+})

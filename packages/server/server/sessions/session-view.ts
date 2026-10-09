@@ -102,6 +102,8 @@ export interface SessionView {
    * chip naming the wrong mode is worse than no chip, so absence is the honest answer for both.
    */
   mode?: { id: string; label: string }
+  /** F2.0b — running over its harness's protocol right now: the web offers "open in terminal". */
+  structured?: true
   /**
    * The OPTIONS that dialog is offering, when they could be read with confidence.
    *
@@ -485,6 +487,8 @@ export function buildSessionViews(o: {
   approvals?: ReadonlyMap<string, string[]>
   /** The harness MODE each running session is in, keyed by row id — see `mode-spec.ts`. */
   modes?: ReadonlyMap<string, { id: string; label: string }>
+  /** The ids running structured right now (`SessionBackend.isStructured`) — see `SessionView.structured`. */
+  structured?: ReadonlySet<string>
   /** The options that dialog offers, keyed by session id. Absent where they could not be read. */
   dialogOptions?: ReadonlyMap<string, DialogOption[]>
   /** How those options are picked, keyed by session id — see `SessionView.dialogSelect`. */
@@ -648,6 +652,7 @@ export function buildSessionViews(o: {
       // it works, while it waits, and while it is asking. It is gated on the frame having named
       // one, which `modeOf` already answers.
       ...(o.modes?.get(r.id) ? { mode: o.modes.get(r.id)! } : {}),
+      ...(!finished && r.status === 'running' && o.structured?.has(r.id) ? { structured: true as const } : {}),
       ...(o.fell?.has(r.id) ? { fell: true as const } : {}),
       ...(r.managed?.label ? { label: r.managed.label } : {}),
       ...(r.managed?.labelSince !== undefined ? { labelSince: r.managed.labelSince } : {}),

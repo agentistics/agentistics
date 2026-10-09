@@ -485,6 +485,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
       if (!s) return base.dialogOf?.(id)
       return s.attention()?.options.map(o => o.label)
     },
+    isStructured(id) { return structuredOnly(id) !== undefined || (!!durable && durable.isAlive(id)) },
     attentionOf(id) { const l = structuredOnly(id); return l ? l.s.attention() : base.attentionOf?.(id) },
     async answer(id, a: StructuredAnswer) { const l = structuredOnly(id); return l ? l.s.answer(a) : (base.answer?.(id, a) ?? false) },
     chatOf(id) {

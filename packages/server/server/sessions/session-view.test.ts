@@ -56,6 +56,15 @@ describe('buildSessionViews', () => {
     expect(b!.chatTurns).toBeUndefined()
   })
 
+  it('marks a row running over its protocol — and only while it runs (F2.0b)', () => {
+    const reconciled = [row('a'), row('b'), row('c', { status: 'exited' })]
+    const structured = new Set(['a', 'c'])
+    const [a, b, c] = buildSessionViews({ reconciled, activity: new Map(), processes: [], structured })
+    expect(a!.structured).toBe(true)
+    expect(b!.structured).toBeUndefined()
+    expect(c!.structured).toBeUndefined() // a finished row has nothing to switch
+  })
+
   it('reports approval detection exactly where rules exist, for every harness', () => {
     // Written as an INVARIANT rather than against one harness that happens to be unprobed today:
     // this test used to name gemini, and it broke the day gemini was probed — asserting a fact

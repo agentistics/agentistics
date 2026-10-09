@@ -656,6 +656,12 @@ export interface SessionBackend {
    * conversation as a TUI under the same managed id. `not-structured` for every other session.
    */
   toTerminal?(id: string): Promise<{ ok: true } | { ok: false; why: 'not-structured' | 'no-conversation' | 'no-resume' | 'still-running' | 'spawn-failed' }>
+  /**
+   * F2.0b — whether this session is RUNNING over its harness's protocol right now (one this process
+   * drives, or one a surviving relay still owns). The web's "open in terminal" is offered on exactly
+   * these rows; `undefined`/false for every other session, a TUI that came back from `toTerminal` included.
+   */
+  isStructured?(id: string): boolean
   /** F2.0b — take back the structured sessions that outlived the previous server (the owner process only). */
   reattach?(): Promise<void>
 }
