@@ -32,3 +32,40 @@ export function createdByLabel(p: SessionParent, pt: boolean): string {
   const who = p.title ? p.title : p.id.slice(0, 8)
   return pt ? `criada por ${who}` : `created by ${who}`
 }
+
+type LinkRow = Pick<ControlSession, 'id' | 'conversationId' | 'title' | 'harness' | 'state'> & {
+  parentSessionId?: string
+  parentConversationId?: string
+}
+
+/**
+ * The fleet rows that name `session` as their parent — by managed id or by conversation id (the
+ * link that survives a reopen). A row never counts as its own child.
+ */
+export function sessionChildren<R extends LinkRow>(
+  session: Pick<ControlSession, 'id' | 'conversationId'>,
+  rows: readonly R[],
+): R[] {
+  return rows.filter(r => {
+    if (r.id === session.id) return false
+    const hit = (v?: string) => v !== undefined && (v === session.id || (!!session.conversationId && v === session.conversationId))
+    return hit(r.parentConversationId) || hit(r.parentSessionId)
+  })
+}
+
+export interface SessionLinks {
+  parent: SessionParent | null
+  children: LinkRow[]
+  task: { id: string; label?: string } | null
+}
+
+/** Everything the ⓘ shows; `null` when the session has no link at all (the icon is then absent). */
+export function sessionLinks(
+  session: Pick<ControlSession, 'id' | 'conversationId' | 'parentSessionId' | 'parentConversationId' | 'taskId' | 'task'>,
+  rows: readonly LinkRow[],
+): SessionLinks | null {
+  const parent = sessionParent(session, rows)
+  const children = sessionChildren(session, rows)
+  const task = session.taskId ? { id: session.taskId, ...(session.task ? { label: session.task } : {}) } : null
+  return parent || children.length || task ? { parent, children, task } : null
+}
