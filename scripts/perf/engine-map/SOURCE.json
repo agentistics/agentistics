@@ -1,0 +1,22 @@
+{
+  "_comment": "Provenance of the copies in this folder. Canonical source: the ENGINE repo, branch docs/engine-map, docs/engine-map/scripts/. 'identical' = byte for byte (public sha256 must equal engine sha256); 'patched' = the header of the file lists every difference. sync.test.ts pins the public hashes and, where the engine repo is on disk, re-reads the engine side. To re-sync: copy the engine file, re-apply the listed patch, run `bun scripts/perf/engine-map/sync.ts --write`.",
+  "engineRef": "origin/docs/engine-map",
+  "engineCommit": "e2e11a34f9fd27cab7260f9ff8f7c03d5b28b871",
+  "files": {
+    "fake-harness": {
+      "mode": "identical",
+      "engine": "12ffc6580dcd3d10726c4f07b617c9c80b074686fdcacf3f37166097dc074e70",
+      "public": "12ffc6580dcd3d10726c4f07b617c9c80b074686fdcacf3f37166097dc074e70"
+    },
+    "tmux-shim": {
+      "mode": "identical",
+      "engine": "942bef7f7a8d4dd9cbd8226ea1a0daf76d6e9c5c8486a9ad11cd7a4436cf14a1",
+      "public": "942bef7f7a8d4dd9cbd8226ea1a0daf76d6e9c5c8486a9ad11cd7a4436cf14a1"
+    },
+    "bench.ts": {
+      "mode": "patched",
+      "engine": "d2e20bcbb4826dfe0732c72f7e5e7955a5de8ce4ea4001baddfc7df99b8d0873",
+      "public": "c3b49f33f30db858857447de4f8c596293a013783af8377d8fbd53c0ec1e4814"
+    }
+  }
+}
