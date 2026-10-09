@@ -222,7 +222,7 @@ export function toControlSession(
     // about which option is a field. See `isFreeTextOption`.
     ...(v.dialogOptions?.length
       ? {
-          dialogOptions: v.dialogOptions.map(o => (isFreeTextOption(v.harness, o.label)
+          dialogOptions: v.dialogOptions.map(o => (o.freeText || isFreeTextOption(v.harness, o.label)
             ? { ...o, freeText: true }
             : o)),
         }

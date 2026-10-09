@@ -577,7 +577,9 @@ export function createSessionsPoller(o: {
         const tail = (): string[] => anyGrant() ? approvalTail(frame, APPROVAL_LINES).map(l => scrubTerminalLine(r.id, l)) : approvalTail(frame, APPROVAL_LINES)
         if (statedDialog) {
           approvals.set(r.id, tail())
-          dialogOptions.set(r.id, statedDialog.map((label, i) => ({ number: i + 1, label: anyGrant() ? scrubTerminalLine(r.id, label) : label, selected: i === 0 })))
+          // F3.3 — which option is a FIELD is the protocol's statement too, never re-derived from a label.
+          const statedOptions = o.backend.attentionOf?.(r.id)?.options
+          dialogOptions.set(r.id, statedDialog.map((label, i) => ({ number: i + 1, label: anyGrant() ? scrubTerminalLine(r.id, label) : label, selected: i === 0, ...(statedOptions?.[i]?.freeText ? { freeText: true } : {}) })))
           dialogSelect.set(r.id, 'numbered')
         } else if (state === 'waiting-approval') {
           approvals.set(r.id, tail())

@@ -24,6 +24,7 @@ Code) worker builds on this; nothing here names a harness first.
 | The composite backend (over tmux) | public | `packages/server/server/sessions/structured-backend.ts` |
 | A5.4's ACP opt-in (now a wrapper) | public | `packages/server/server/sessions/acp-backend.ts` |
 | `acp` driver (gemini, kimi, copilot) | engine | `engine/src/structured/acp-structured.ts` |
+| `claude-stream-json` driver (claude, F3.3) | engine | `engine/src/structured/claude-stream-json.ts` |
 | F3 stubs + their TARGET declarations | engine | `engine/src/structured/stubs.ts` |
 | `engine.structured` registry | engine | `engine/src/structured/engine-structured.ts` |
 
@@ -146,7 +147,7 @@ Legend: **D** declared in code · **V** verified on a real session (date + CLI v
 | Copilot | `acp` | F2.3 | ready (re-verify `--acp` on 1.0.93) | — (verify `--session-id`) | D | D `--model` | — | D | flag: env `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` (verify) | D | D | — | D | verify | |
 | Codex | `codex-app-server` | F3.1 | **stub** | — (server mints the thread id) | TARGET `thread/resume` | TARGET | TARGET | TARGET `-c mcp_servers` | TARGET protocol `developerInstructions` | TARGET item deltas | TARGET approvals | TARGET | TARGET `turn/interrupt` | thread id = rollout id? | |
 | Antigravity | `agy-stream-json` | F3.2 | **stub** | — (agy mints it) | TARGET `--conversation` | TARGET | TARGET `xhigh/max` | TARGET (P-20) | TARGET first-message unless a field exists | TARGET | TARGET | TARGET | TARGET | from the stream | |
-| Claude Code | `claude-stream-json` | F3.3 | **stub** | TARGET `--session-id` | TARGET `--resume` | TARGET | TARGET | TARGET `--mcp-config` | TARGET flag `--append-system-prompt` | TARGET partial messages | TARGET `--permission-prompt-tool` | TARGET AskUserQuestion | TARGET interrupt | = session id | |
+| Claude Code | `claude-stream-json` | F3.3 | **ready** | V `--session-id` (stated back as `system/init` `session_id`) | V `--resume` (same id; no stdout replay → window = transcript tail, bounded) | V `--model` | D `--effort` (`--help`) | V `--mcp-config` (replaces the user-scope `agentistics`; `AGENTOP_MANAGED_ID` reaches the MCP) | V flag `--append-system-prompt` | V `stream_event` text/thinking deltas | V `can_use_tool` → allow/deny (+ `updatedPermissions` per suggestion; deny-with-text) | V AskUserQuestion via `can_use_tool` → `updatedInput.answers` (+ “Type something”) | V `control_request interrupt` | = session id | V 2026-10-09 claude 2.1.295 (driver fixtures); Q1–Q11 by another model: `~/.agentistics/leader/qa/f3-3-claude-live.sh` |
 | OpenCode | — | F5 | absent | | | | | | | | | | | | |
 
 A worker's row is done when: the driver is `ready`, every cell is **V** or a cited **—**, its driver
@@ -191,5 +192,15 @@ process by its PID (never by name) → the row continues as a TUI resume of the 
 - **The web composer and cards** were not changed: a structured row's `dialogOptions` / `attentionOf`
   feed the existing approve path; the free-text affordance of a protocol `question` (`freeText`
   without an option) needs a UI decision when a driver first states one (F3.3 AskUserQuestion, F3.1).
+- **F3.3 Claude Code** (claude 2.1.295, measured 2026-10-09): prompts sent while a turn runs are MERGED by
+  the CLI into one user message (one `result` for several prompts), so the driver tracks what the CLI took
+  through `--replay-user-messages` and the row reads `waiting` only once nothing sent is untaken — Q7's
+  "each delivered once" holds as text, but the store may hold one merged user turn. No login →
+  `initialize` answers `account.tokenSource: "none"` and the start is refused (F2 fallback). Shared,
+  additive host changes: `structuredSpawnOf` sets `AGENTOP_MANAGED_ID` on every structured child (like a
+  tmux pane), `StructuredProvider.prepare` ensures the session-identity key, `DialogOption.freeText`
+  carries a protocol-stated free-text option to the row, and `promptSession` refuses a prompt while a
+  structured session states an open request. P-07 restored (d851b3fa reverted) in the public reader and
+  the engine copy. Mode cycle (`control_request set_permission_mode`) and `!` bash are not wired (Q10).
 - **gemini `storeIdOf`** must map the ACP sessionId to the store's synthetic `${dir}/${file}` (F2.1),
   or the row links to an id no reader resolves.
