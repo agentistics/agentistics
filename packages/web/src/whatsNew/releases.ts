@@ -10,6 +10,40 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.114.0': {
+    features: [
+      {
+        pt: 'O ⓘ ao lado do título mostra as sessões mais recentes primeiro, com a hora, separa as que estão rodando das encerradas e tem busca.',
+        en: 'The ⓘ next to the title lists the newest sessions first, with their time, keeps running ones apart from ended ones and has a search.',
+      },
+      {
+        pt: 'Cada assistente agora começa sabendo trabalhar como líder ou como executor, quais ferramentas do agentistics tem e quando sugerir uma skill de especificação.',
+        en: 'Every assistant now starts knowing how to work as a leader or a worker, which agentistics tools it has and when to suggest a specification skill.',
+      },
+      {
+        pt: 'Experimental (agentop experimental enable): sessões de Claude, Codex, Gemini e Kimi criadas pela web conversam pelo protocolo oficial de cada assistente — resposta ao vivo, cartões de permissão e pergunta, e a sessão continua viva quando o servidor reinicia.',
+        en: 'Experimental (agentop experimental enable): Claude, Codex, Gemini and Kimi sessions started from the web talk through each assistant\'s official protocol — live answers, permission and question cards, and the session stays alive when the server restarts.',
+      },
+      {
+        pt: 'Codex e Gemini mostram o comando `!` e a saída dele no chat.',
+        en: 'Codex and Gemini show a `!` command and its output in the chat.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'A animação de atualização vai até o fim sem piscar nem mostrar a tela de carregamento no meio.',
+        en: 'The update animation plays to the end without flashing or showing the loading screen in the middle.',
+      },
+      {
+        pt: 'Codex: a web não mostra mais "sessão encerrada" com a sessão viva, a mensagem enviada com o Codex ocupado entra na fila dele e o texto não volta para o campo nem é reenviado.',
+        en: 'Codex: the web no longer says "session ended" while the session is alive, a message sent while Codex is busy joins its queue, and the text no longer comes back to the box or gets sent twice.',
+      },
+      {
+        pt: 'Gemini e Kimi ficam ligados à conversa certa desde a criação; reabrir uma sessão Kimi voltou a funcionar.',
+        en: 'Gemini and Kimi are linked to the right conversation from the start; reopening a Kimi session works again.',
+      },
+    ],
+  },
   '2.113.0': {
     features: [
       {

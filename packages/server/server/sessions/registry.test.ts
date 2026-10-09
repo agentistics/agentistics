@@ -412,6 +412,20 @@ describe('the renamed-session title survives a round trip through the file', () 
   })
 })
 
+describe('F2.0 — the structured driver and the protocol-stated link survive a round trip', () => {
+  it('structuredDriver and conversationLinkVia protocol-stated are read back', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'registry-structured-'))
+    try {
+      const reg = createSessionRegistry(join(dir, 'managed-sessions.json'))
+      await reg.add({ id: 's1', harness: 'gemini', cwd: '/w', createdAt: '2026-10-09T00:00:00Z' } as never)
+      expect(await reg.patch('s1', { structuredDriver: 'acp', conversationId: 'c1', conversationLink: 'assigned', conversationLinkVia: 'protocol-stated' })).toBe(true)
+      const [row] = await reg.read()
+      expect(row!.structuredDriver).toBe('acp')
+      expect(row!.conversationLinkVia).toBe('protocol-stated')
+    } finally { await rm(dir, { recursive: true, force: true }) }
+  })
+})
+
 describe('the parent link survives the heartbeat rewrite (SESSION.LINK)', () => {
   it('parentSessionId and parentConversationId are read back after touch()', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'registry-parent-'))

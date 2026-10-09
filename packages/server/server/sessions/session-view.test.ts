@@ -4,6 +4,8 @@ import { rulesFor } from './attention-rules'
 import type { HarnessProcess } from '../live-sessions'
 import type { ManagedSession, SessionActivity } from './types'
 import type { ReconciledSession } from './session-ref'
+import { toConversation } from './conversations'
+import type { SessionMeta } from '@agentistics/core'
 import {
   attentionCount, bellTransitions, buildSessionViews, collapseSupersededSessions,
   needsAttention, type SessionView, dedupeExternalProcesses, externalId
@@ -52,6 +54,15 @@ describe('buildSessionViews', () => {
     const [a, b] = buildSessionViews({ reconciled, activity: new Map(), processes: [], chatTails })
     expect(a!.chatTurns).toEqual([{ role: 'user', text: 'hi' }, { role: 'assistant', text: 'hello' }])
     expect(b!.chatTurns).toBeUndefined()
+  })
+
+  it('marks a row running over its protocol — and only while it runs (F2.0b)', () => {
+    const reconciled = [row('a'), row('b'), row('c', { status: 'exited' })]
+    const structured = new Set(['a', 'c'])
+    const [a, b, c] = buildSessionViews({ reconciled, activity: new Map(), processes: [], structured })
+    expect(a!.structured).toBe(true)
+    expect(b!.structured).toBeUndefined()
+    expect(c!.structured).toBeUndefined() // a finished row has nothing to switch
   })
 
   it('reports approval detection exactly where rules exist, for every harness', () => {
@@ -399,6 +410,50 @@ describe('a row that KNOWS which conversation it drives', () => {
     expect(v!.resume).toBeUndefined()
   })
 
+  // AGY.REOPEN: an Antigravity session agentop started is linked EXACTLY (its process log names the
+  // conversation) but agy files no project path for it, so the store pool never holds it. The
+  // reopen comes from the link itself once the harness's own transcript is on disk.
+  it('reopens from the EXACT link when the store lacks it but the transcript is on disk — every resumable harness', () => {
+    for (const harness of ['claude', 'codex', 'copilot', 'kimi', 'antigravity'] as const) {
+      const reconciled = [row('a', {
+        status: 'lost',
+        backend: undefined,
+        managed: managed('a', { harness, cwd: '/repo/agy', conversationId: 'c2cc0410-62b8-46fe-890f-48bc9886df8f' }),
+      })]
+      const [v] = buildSessionViews({
+        reconciled,
+        activity: new Map(),
+        processes: [],
+        // A same-harness conversation in the same directory: the guess would pick it. It must not.
+        conversations: [conv('older', { harness, cwd: '/repo/agy' })],
+        exactLinksOnDisk: new Set(['c2cc0410-62b8-46fe-890f-48bc9886df8f']),
+      })
+      expect(v!.resume?.sessionId).toBe('c2cc0410-62b8-46fe-890f-48bc9886df8f')
+    }
+  })
+
+  it('offers nothing from the exact link for gemini\'s SYNTHETIC id — its resume takes only the uuid', () => {
+    const reconciled = [row('a', {
+      status: 'lost',
+      backend: undefined,
+      managed: managed('a', { harness: 'gemini', conversationId: 'proj/chat-1' }),
+    })]
+    const [v] = buildSessionViews({
+      reconciled, activity: new Map(), processes: [], conversations: [],
+      exactLinksOnDisk: new Set(['proj/chat-1']),
+    })
+    expect(v!.resume).toBeUndefined()
+  })
+
+  it('offers no exact-link reopen on a RUNNING row — reopening is for a row with nothing running', () => {
+    const reconciled = [row('a', { managed: managed('a', { harness: 'antigravity', conversationId: 'x' }) })]
+    const [v] = buildSessionViews({
+      reconciled, activity: new Map([['a', 'waiting']]), processes: [], conversations: [],
+      exactLinksOnDisk: new Set(['x']),
+    })
+    expect(v!.resume).toBeUndefined()
+  })
+
   it('still guesses for a row that recorded nothing — the old behaviour, unchanged', () => {
     const reconciled = [row('a', { status: 'lost', backend: undefined })]
     const [v] = buildSessionViews({
@@ -727,4 +782,47 @@ describe('dedupeExternalProcesses — one row per SESSION, not per process', () 
     // And falls back to the old key exactly when there is none.
     expect(externalId(proc(1) as never)).not.toBe(externalId(proc(1, { startedMs: 2000 }) as never))
   })
+})
+
+describe('a gemini row whose recorded id is the uuid agentop assigned (F0.2)', () => {
+  const UUID = '04d97770-e53f-4b7d-86d2-63bd12ec32eb'
+  const conv = toConversation({
+    session_id: 'work/session-2026-10-09T10-49-04d97770', native_session_id: UUID,
+    project_path: '/repo/g', start_time: '2026-10-09T10:49:54.676Z', first_prompt: 'hello',
+    user_message_count: 2, harness: 'gemini', input_tokens: 0, output_tokens: 0,
+  } as unknown as SessionMeta)
+  const reconciled = [row('g1', { managed: managed('g1', { harness: 'gemini', cwd: '/repo/g', conversationId: UUID, conversationLink: 'assigned' }) })]
+
+  it('finds its conversation in the store through the alias and links the two ids', () => {
+    const views = buildSessionViews({ reconciled, activity: new Map(), processes: [], conversations: [conv] })
+    const g = views.find(v => v.id === 'g1')!
+    expect(g.conversationId).toBe(UUID)
+    expect(g.conversationStoreId).toBe(conv.sessionId)
+    expect(g.turns).toBe(2)
+  })
+
+  it('offers the UUID — not the store key — as the reopen target once the process is gone', () => {
+    // A reboot leaves the registry row as `lost`: the shape that is reopened.
+    const lost = [row('g1', { status: 'lost', backend: undefined,
+      managed: managed('g1', { harness: 'gemini', cwd: '/repo/g', conversationId: UUID, conversationLink: 'assigned' }) })]
+    const g = buildSessionViews({ reconciled: lost, activity: new Map(), processes: [], conversations: [conv] }).find(v => v.id === 'g1')!
+    expect(g.resume).toEqual({ sessionId: UUID, title: conv.title })
+  })
+
+  it('does not list the same conversation a second time as a closed row', () => {
+    const views = buildSessionViews({ reconciled, activity: new Map(), processes: [], conversations: [conv] })
+    expect(views.filter(v => v.harness === 'gemini').map(v => v.id)).toEqual(['g1'])
+  })
+
+  it('a transcript-search hit named by the store key still finds the live row', async () => {
+    const { filterSessions } = await import('./session-view')
+    const views = buildSessionViews({ reconciled, activity: new Map(), processes: [], conversations: [conv] })
+    expect(filterSessions(views, 'zzz-only-in-transcript', new Set([conv.sessionId])).map(v => v.id)).toEqual(['g1'])
+    expect(filterSessions(views, 'zzz-only-in-transcript', new Set(['other'])).length).toBe(0)
+  })
+})
+
+it('reopens a protocol-stated Codex thread before the file/metrics cache catches up', () => {
+  const views = buildSessionViews({ activity: new Map(), reconciled: [row('codex-web', { status: 'lost', backend: undefined, managed: managed('codex-web', { harness: 'codex', conversationId: 'thread-from-protocol', conversationLinkVia: 'protocol-stated', label: 'Codex task' }) })], processes: [], conversations: [] })
+  expect(views.find(v => v.id === 'codex-web')?.resume).toEqual({ sessionId: 'thread-from-protocol', title: 'Codex task' })
 })

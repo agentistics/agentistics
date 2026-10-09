@@ -196,6 +196,7 @@ export interface CliStrings {
   sessPromptEmpty: string
   /** The backend accepted neither the text nor the key. */
   sessSendFailed: (id: string) => string
+  sessSendUnconfirmed: (id: string) => string
   sessSessionEnded: string
   /** The keystroke went in — and the sentence says what it did, not that it "approved". */
   sessApproved: (id: string) => string
@@ -210,6 +211,12 @@ export interface CliStrings {
   sessNeedsChoice: (n: number) => string
   /** Refused: the question changed between being shown and being answered. */
   sessChoiceGone: string
+  /** F2.0b — "open in terminal" on a structured session: what happened, or why not. */
+  sessTerminalOpened: string
+  sessTerminalNotStructured: string
+  sessTerminalNoConversation: string
+  sessTerminalNoResume: (harness: string) => string
+  sessTerminalFailed: string
   /** Refused: no verified way to select an option by number on this harness. */
   sessChooseUnknown: (harness: string) => string
   /** The chosen option went in — and the sentence names WHICH, because that is the whole point. */
@@ -352,6 +359,7 @@ export interface CliStrings {
   sessNoHarnessOnPath: (path: string) => string
   sessSpawnUnsupported: (harness: string) => string
   sessSpawnNoResume: (harness: string) => string
+  sessSpawnNoResumeId: (harness: string) => string
   sessSpawnNoModel: (harness: string) => string
   sessSpawnNoEffort: (harness: string) => string
   sessSpawnBadEffort: (harness: string, value: string, accepted: string[]) => string
@@ -603,6 +611,7 @@ const EN: CliStrings = {
   sessNotRunning: 'nothing is running in that session to type into.',
   sessPromptEmpty: 'nothing to send.',
   sessSendFailed: (id: string) => `${id} did not take the keystroke — it may have just ended.`,
+  sessSendUnconfirmed: (id: string) => `${id} is running but did not confirm it took the message — check its screen before sending it again.`,
   sessSessionEnded: 'The session ended.',
   sessApproved: (id: string) => `sent the confirm key to ${id}.`,
   sessNotAsking: 'that session is not asking anything right now — nothing was sent.',
@@ -619,6 +628,11 @@ const EN: CliStrings = {
     `that dialog offers ${n} options, so there is nothing to simply approve — pick one.`,
   sessChoiceGone:
     'the session is asking something else now — nothing was sent. Look again before answering.',
+  sessTerminalOpened: 'this session now runs in a terminal (the same conversation, resumed) — attach to it.',
+  sessTerminalNotStructured: 'this session already runs in a terminal — attach to it.',
+  sessTerminalNoConversation: 'the session has not said which conversation it is yet, so there is nothing to resume in a terminal — try again in a moment.',
+  sessTerminalNoResume: (harness: string) => `${harness} cannot resume a conversation by its id in a terminal, so this session stays where it is — keep using it here.`,
+  sessTerminalFailed: 'the terminal could not be opened for this session; it was left as it was if it could still run.',
   sessChooseUnknown: (harness: string) =>
     `agentop has no verified way to pick an option on ${harness}, and will not confirm the highlighted one for you — attach to answer it there.`,
   sessAnswered: (label: string) => `answered: ${label}`,
@@ -772,6 +786,7 @@ const EN: CliStrings = {
     'If it runs as a service, run `agentop restart server` from a terminal where the assistants work.',
   sessSpawnUnsupported: (harness: string) => `agentop cannot start ${harness} yet.`,
   sessSpawnNoResume: (harness: string) => `${harness} cannot reopen a conversation by id.`,
+  sessSpawnNoResumeId: (harness: string) => `this ${harness} conversation has no id the CLI can reopen — it was recorded before agentop could assign one. Start a new session instead.`,
   sessSpawnNoModel: (harness: string) => `${harness} has no model flag, so a model cannot be set.`,
   sessSpawnNoEffort: (harness: string) => `${harness} has no effort flag, so an effort cannot be set.`,
   sessSpawnBadEffort: (harness: string, value: string, accepted: string[]) =>
@@ -1001,6 +1016,7 @@ const PT: CliStrings = {
   sessNotRunning: 'não há nada rodando nessa sessão para digitar.',
   sessPromptEmpty: 'nada para enviar.',
   sessSendFailed: (id: string) => `${id} não aceitou a tecla — pode ter acabado de encerrar.`,
+  sessSendUnconfirmed: (id: string) => `${id} está rodando mas não confirmou ter recebido a mensagem — veja a tela dela antes de reenviar.`,
   sessSessionEnded: 'A sessão foi encerrada.',
   sessApproved: (id: string) => `tecla de confirmação enviada para ${id}.`,
   sessNotAsking: 'essa sessão não está perguntando nada agora — nada foi enviado.',
@@ -1014,6 +1030,11 @@ const PT: CliStrings = {
     `esse diálogo tem ${n} opções, então não há o que simplesmente aprovar — escolha uma.`,
   sessChoiceGone:
     'a sessão está perguntando outra coisa agora — nada foi enviado. Olhe de novo antes de responder.',
+  sessTerminalOpened: 'esta sessão agora roda num terminal (a mesma conversa, retomada) — anexe a ela.',
+  sessTerminalNotStructured: 'esta sessão já roda num terminal — anexe a ela.',
+  sessTerminalNoConversation: 'a sessão ainda não disse qual é a conversa dela, então não há o que retomar num terminal — tente de novo em instantes.',
+  sessTerminalNoResume: (harness: string) => `o ${harness} não retoma uma conversa pelo id num terminal, então esta sessão fica onde está — continue usando por aqui.`,
+  sessTerminalFailed: 'não foi possível abrir o terminal desta sessão; ela ficou como estava se ainda podia rodar.',
   sessChooseUnknown: (harness: string) =>
     `o agentop não tem forma verificada de escolher uma opção no ${harness}, e não vai confirmar a destacada por você — anexe para responder lá.`,
   sessAnswered: (label: string) => `respondido: ${label}`,
@@ -1162,6 +1183,7 @@ const PT: CliStrings = {
     'Se ele roda como serviço, rode `agentop restart server` num terminal onde os assistentes funcionam.',
   sessSpawnUnsupported: (harness: string) => `o agentop ainda não inicia ${harness}.`,
   sessSpawnNoResume: (harness: string) => `${harness} não reabre conversa por id.`,
+  sessSpawnNoResumeId: (harness: string) => `esta conversa do ${harness} não tem um id que o CLI consiga reabrir — foi gravada antes de o agentop poder atribuir um. Comece uma sessão nova.`,
   sessSpawnNoModel: (harness: string) => `${harness} não tem flag de modelo, então não dá para definir um.`,
   sessSpawnNoEffort: (harness: string) => `${harness} não tem flag de effort, então não dá para definir um.`,
   sessSpawnBadEffort: (harness: string, value: string, accepted: string[]) =>

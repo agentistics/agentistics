@@ -13,21 +13,52 @@ export type CodexSendPhase = 'before-paste' | 'after-paste' | 'after-enter' | 'a
 export type CodexSendAction = 'blocked' | 'paste' | 'wait' | 'enter' | 'retry-enter' | 'delivered' | 'failed'
 
 const PASTED = /Pasted Content(?:\s+\d+\s+chars?)?/i
-const CODEX_STATUS = /\b\d+%\s+left\b/i
+const COMPOSER_MARKER = /^\s*›/
+/** How much of the bottom of the screen a blocking dialog is looked for in (non-blank lines). */
+const BLOCKING_LINES = 8
 
-/** Only the active composer/modal area: scrollback must never block a new send. */
+/**
+ * The bottom of the screen: its last `BLOCKING_LINES` non-blank lines.
+ *
+ * It used to end at the line matching `NN% left` ("the status line") and look 8 lines above it. That
+ * line is NOT a stable anchor: codex 0.161.0 dropped the old `model · 100% left · cwd` footer for
+ * `GPT-5.6-Luna medium · <cwd>` plus `? for shortcuts`, and `NN% left` now survives only inside a
+ * rate-limit warning (`⚠ 5h limit: 49% left · resets at 13:41`) drawn ABOVE the composer — so the
+ * anchor moved up to a warning, the composer fell below the "area", and a pasted message was
+ * invisible: measured live, `sendTextReliable` gave up after 600 ms without pressing Enter and left
+ * the text typed in the box. A dialog's footer is the LAST thing on the screen in every version, so
+ * the screen's own bottom is the anchor.
+ */
 export function codexComposerArea(frame: readonly string[]): string[] {
-  const status = frame.findLastIndex(line => CODEX_STATUS.test(line))
-  const end = status >= 0 ? status : frame.length
-  return frame.slice(Math.max(0, end - 8), end)
+  const kept: string[] = []
+  for (let i = frame.length - 1; i >= 0 && kept.length < BLOCKING_LINES; i--) {
+    if ((frame[i] ?? '').trim() !== '') kept.unshift(frame[i]!)
+  }
+  return kept
 }
 
 function normalise(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
 }
 
+/**
+ * The ACTIVE input box only: from the LAST `›` on the screen down.
+ *
+ * Codex draws a submitted message in the history with the very same `›` marker, directly above the
+ * composer, so looking for the sent text in a window of the screen found the ECHO of a message that
+ * had been delivered, read it as "still in the box", pressed Return a second time on an empty input
+ * and called the send failed — a live Codex target that had taken the message answered "the session
+ * ended". The composer is the bottom-most marker, which is what puts the history echo (further up)
+ * outside it. Called only on a screen that is not a dialog (`planCodexSend` checks blocking first),
+ * where the last marker is the composer and not a menu option.
+ */
+export function codexComposerInput(frame: readonly string[]): string[] {
+  const i = frame.findLastIndex(line => COMPOSER_MARKER.test(line))
+  return i >= 0 ? frame.slice(i) : codexComposerArea(frame)
+}
+
 function codexHasComposerText(frame: readonly string[], sentText: string): boolean {
-  const area = codexComposerArea(frame).join('\n')
+  const area = codexComposerInput(frame).join('\n')
   const tail = normalise(sentText).slice(-30)
   return PASTED.test(area) || (tail.length > 0 && normalise(area).includes(tail))
 }
@@ -39,10 +70,16 @@ export function codexIsBlockingFrame(frame: readonly string[]): boolean {
   return update || approval
 }
 
-/** Classify a failed write using the screen read immediately after the backend refused it. */
-export function classifyCodexSendFailure(frame: readonly string[], alive: boolean): 'prompt' | 'ended' {
+/**
+ * Classify a failed write using the screen read immediately after the backend refused it.
+ *
+ * `ended` is reserved for a pane that is GONE. A live pane that is not on a dialog is `unconfirmed`:
+ * the keys were written and the submit could not be shown to have landed — saying "the session
+ * ended" there sent people to reopen a conversation that was running fine.
+ */
+export function classifyCodexSendFailure(frame: readonly string[], alive: boolean): 'prompt' | 'ended' | 'unconfirmed' {
   if (!alive) return 'ended'
-  return codexIsBlockingFrame(frame) ? 'prompt' : 'ended'
+  return codexIsBlockingFrame(frame) ? 'prompt' : 'unconfirmed'
 }
 
 export function codexHasPastedComposer(frame: readonly string[], sentText = ''): boolean {

@@ -131,11 +131,53 @@ describe('poll: codex rows linked by the file their own process holds', () => {
     expect(calls).toEqual([['a', C2, 'assigned', 'process-log']])
   })
 
-  it('leaves a row linked by an assigned id alone, whatever its process holds', async () => {
+  it('AGY.RELINK: a row REOPENED by id follows its own process to the new thread (/new)', async () => {
     const calls = await pollOnce({
       rows: [managed('a', 'codex', { conversationId: C1, conversationLinkVia: 'resumed-id' })],
       panePids: { a: 101 },
       resolve: () => ({ file: rollout(C2), holder: 1101 }),
+    })
+    expect(calls).toEqual([['a', C2, 'assigned', 'process-log']])
+  })
+
+  it('a reopened row whose process still holds the reopened thread writes nothing', async () => {
+    const calls = await pollOnce({
+      rows: [managed('a', 'codex', { conversationId: C1, conversationLinkVia: 'resumed-id' })],
+      panePids: { a: 101 },
+      resolve: () => ({ file: rollout(C1), holder: 1101 }),
+    })
+    expect(calls).toEqual([])
+  })
+
+  it('a reopened row is NOT moved while its process holds two threads (the /resume picker reading)', async () => {
+    const calls = await pollOnce({
+      rows: [managed('a', 'codex', { conversationId: C1, conversationLinkVia: 'resumed-id' })],
+      panePids: { a: 101 },
+      // `fileFromFds` refuses two threads, so the resolved file is null.
+      resolve: () => null,
+    })
+    expect(calls).toEqual([])
+  })
+
+  it('COLLISION: a reopened row is not moved onto a thread another LIVE row drives', async () => {
+    const calls = await pollOnce({
+      rows: [
+        managed('a', 'codex', { conversationId: C1, conversationLinkVia: 'resumed-id' }),
+        managed('b', 'codex', { conversationId: C2, conversationLinkVia: 'process-log' }),
+      ],
+      panePids: { a: 101, b: 102 },
+      // b's process is between writes on its thread; a's process now holds b's thread.
+      resolve: (_h, pid) => (pid === 101 ? { file: rollout(C2), holder: 1101 } : null),
+    })
+    expect(calls).toEqual([])
+  })
+
+  it('COLLISION: two holders on the new thread -> the reopened row does not move', async () => {
+    const calls = await pollOnce({
+      rows: [managed('a', 'codex', { conversationId: C1, conversationLinkVia: 'resumed-id' })],
+      panePids: { a: 101 },
+      procs: [{ harness: 'codex', cwd: '/elsewhere', pid: 999 }],
+      resolve: (_h, pid) => ({ file: rollout(C2), holder: pid === 999 ? 999 : 1101 }),
     })
     expect(calls).toEqual([])
   })
@@ -149,6 +191,15 @@ describe('poll: kimi rows', () => {
       resolve: () => ({ file: wire(K1), holder: 201 }),
     })
     expect(calls).toEqual([['k', K1, 'assigned', 'process-log']])
+  })
+
+  it('AGY.RELINK: a reopened kimi row a poll catches writing a NEW session is re-linked', async () => {
+    const calls = await pollOnce({
+      rows: [managed('k', 'kimi', { conversationId: K1, conversationLinkVia: 'resumed-id' })],
+      panePids: { k: 201 },
+      resolve: () => ({ file: wire(K2), holder: 201 }),
+    })
+    expect(calls).toEqual([['k', K2, 'assigned', 'process-log']])
   })
 
   it('writes nothing for gemini or opencode, which have no process-transcript route', async () => {
@@ -257,5 +308,74 @@ describe('sampleProcessLinks — the dense sampler for a harness that holds its 
       sleep: c.sleep,
     })
     expect([...asked]).toEqual([202])
+  })
+
+  it('AGY.RELINK: with `follow`, a REOPENED kimi row is caught writing its new session and moved', async () => {
+    const c = clock()
+    let registry = [managed('k1', 'kimi', { conversationId: K1, conversationLinkVia: 'resumed-id' })]
+    const calls: Array<[string, string]> = []
+    const writes = await sampleProcessLinks({
+      harness: 'kimi',
+      readRegistry: async () => registry,
+      listPanePids: async () => new Map([['k1', 201]]),
+      // Writes its OLD session first (no move), then the /new one for a single tick.
+      resolveProcessLog: async (_h, pid) => {
+        const t = c.now() - NOW
+        return t === 200 ? { file: wire(K1), holder: pid } : t === 600 ? { file: wire(K2), holder: pid } : null
+      },
+      readProcessConversation,
+      recordConversation: async (id, cid) => {
+        calls.push([id, cid])
+        registry = registry.map(r => (r.id === id ? { ...r, conversationId: cid, conversationLinkVia: 'process-log' } : r))
+      },
+      deadline: () => NOW + 1_000,
+      intervalMs: 100,
+      refreshMs: 0,
+      follow: true,
+      now: c.now,
+      sleep: c.sleep,
+    })
+    expect(writes).toBe(1)
+    expect(calls).toEqual([['k1', K2]])
+  })
+
+  it('without `follow` (a spawn\'s own run) a linked row is not asked at all', async () => {
+    const c = clock()
+    let asked = 0
+    await sampleProcessLinks({
+      harness: 'kimi',
+      readRegistry: async () => [managed('k1', 'kimi', { conversationId: K1, conversationLinkVia: 'resumed-id' })],
+      listPanePids: async () => new Map([['k1', 201]]),
+      resolveProcessLog: async () => { asked++; return null },
+      readProcessConversation,
+      recordConversation: async () => undefined,
+      deadline: () => NOW + 1_000,
+      intervalMs: 100,
+      now: c.now,
+      sleep: c.sleep,
+    })
+    expect(asked).toBe(0)
+  })
+
+  it('with `follow`, COLLISION: a reopened kimi row is not moved onto a session another live row drives', async () => {
+    const c = clock()
+    const calls: unknown[] = []
+    await sampleProcessLinks({
+      harness: 'kimi',
+      readRegistry: async () => [
+        managed('k1', 'kimi', { conversationId: K1, conversationLinkVia: 'resumed-id' }),
+        managed('k2', 'kimi', { conversationId: K2, conversationLinkVia: 'process-log' }),
+      ],
+      listPanePids: async () => new Map([['k1', 201], ['k2', 202]]),
+      resolveProcessLog: async (_h, pid) => (pid === 201 ? { file: wire(K2), holder: pid } : null),
+      readProcessConversation,
+      recordConversation: async (...a) => { calls.push(a) },
+      deadline: () => NOW + 500,
+      intervalMs: 100,
+      follow: true,
+      now: c.now,
+      sleep: c.sleep,
+    })
+    expect(calls).toEqual([])
   })
 })

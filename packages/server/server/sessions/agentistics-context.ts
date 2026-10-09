@@ -27,6 +27,10 @@ export interface ContextInput {
   parentTitle?: string
   /** Display names of the harnesses installed here (the fleet's own detection). Omitted when unknown. */
   harnesses?: readonly string[]
+  /** Specification/design skills installed for this session's harness. Phase 2 may store the role. */
+  specSkills?: readonly string[]
+  /** TODO(phase 2): stored role and `agentistics_session_role` will choose the role line. */
+  role?: 'leader' | 'worker'
 }
 
 /** The block is fenced so the chat UI can recognise it and render it collapsed. */
@@ -46,6 +50,21 @@ export const CONTEXT_LABEL: Record<ContextLang, string> = {
   en: 'agentistics context',
 }
 
+const TOOL_GROUPS = {
+  Tasks: [
+    'agentistics_tasks', 'agentistics_task', 'agentistics_task_create', 'agentistics_task_status', 'agentistics_task_statuses',
+    'agentistics_task_types', 'agentistics_task_type_edit', 'agentistics_task_status_edit', 'agentistics_task_comment',
+    'agentistics_task_subtask', 'agentistics_task_link', 'agentistics_task_blocked_by', 'agentistics_task_next',
+    'agentistics_task_claim', 'agentistics_task_activity', 'agentistics_task_edit', 'agentistics_task_session', 'agentistics_task_delete',
+  ],
+  Sessions: ['agentistics_sessions', 'agentistics_session_groups', 'agentistics_session_group_create', 'agentistics_session_group_edit', 'agentistics_session_notify', 'agentistics_session_message'],
+  Metrics: ['agentistics_summary', 'agentistics_costs', 'agentistics_projects', 'agentistics_repos', 'agentistics_harnesses', 'agentistics_tags', 'agentistics_tag_detail'],
+  Dashboards: ['agentistics_component_catalog', 'agentistics_get_layouts', 'agentistics_create_layout', 'agentistics_add_component', 'agentistics_remove_component', 'agentistics_set_active_layout', 'agentistics_delete_layout', 'agentistics_export_pdf', 'agentistics_build_layout'],
+} as const
+
+/** The context's tool inventory, kept explicit so the MCP registry parity test can guard it. */
+export const CONTEXT_TOOL_NAMES = Object.values(TOOL_GROUPS).flat()
+
 /**
  * The context as plain lines — what `--append-system-prompt` and friends receive. ENGLISH only: it
  * is read by the model, and the UI label is the only part a person sees. A section whose data is
@@ -55,11 +74,24 @@ export function contextText(i: ContextInput): string {
   const lines = [
     CONTEXT_HEADER,
     `You are running inside agentistics, an app that manages and measures coding-assistant sessions. Session: ${i.sessionId}. Project folder: ${i.cwd}.`,
-    'Tools — the "agentistics" MCP server gives you:',
-    '- Tasks (Agentask): agentistics_tasks, agentistics_task, agentistics_task_create, agentistics_task_subtask, agentistics_task_comment, agentistics_task_status, agentistics_task_session — plan, record and close work.',
-    '- Sessions and sidebar folders: agentistics_sessions, agentistics_session_groups, agentistics_session_group_create, agentistics_session_group_edit, agentistics_session_notify.',
-    '- Metrics: agentistics_summary, agentistics_costs, agentistics_projects, agentistics_repos, agentistics_harnesses.',
+    'Tools — the "agentistics" MCP server gives you (grouped by purpose):',
+    `- Tasks (Agentask): ${TOOL_GROUPS.Tasks.join(', ')} — plan, claim, edit, link, comment, coordinate, and close work.`,
+    `- Sessions: ${TOOL_GROUPS.Sessions.join(', ')} — list, message another session, notify the user, and organise sidebar folders.`,
+    `- Metrics: ${TOOL_GROUPS.Metrics.join(', ')} — summary, costs, projects, repos, harnesses, and tags.`,
+    `- Dashboards: ${TOOL_GROUPS.Dashboards.join(', ')} — layouts, components, and PDF export.`,
   ]
+  lines.push(
+    'Your role here: decide from the request. LEADER organises: break the request into Agentask tasks/subtasks, propose which sessions to open (harness + model each), follow them, have each delivery QA\'d by a different model, and report to the user; do not implement big pieces yourself. WORKER implements one defined piece, tests, commits, and reports to whoever started it. AUTO: one piece → worker; several fronts → leader; you may become leader if the work grows.',
+    'Becoming leader: rename this session to "[ LEADER ] - <title>" (UI in English) or "[ LÍDER ] - <title>" (UI in Portuguese), keeping the user\'s title; propose a title and wait for the user\'s OK if needed. If you started the session, pick the title.',
+    'Open other sessions only after the user explicitly approves: `agentop session <harness> --bg --cwd <dir> --name "<title>" -p "<request>"` or `agentop session batch --task "<task>" …`. Every opened session is a WORKER; for a leader hand-off, tell the user it is a leader hand-off so the new session is marked as leader. File each opened session on its subtask and in the task\'s folder.',
+    'Model/harness balance: use the strongest model for design, coordination, and hard bugs; a mid model for clearly scoped implementation; a light model for probes/screenshots; QA must use a different model from the author. Respect the user\'s usage rules. No usage rules are saved yet: before proposing sessions, ask the user once what plans, quotas, and preferences they allow.',
+    'Specification skill rule: if you are a leader, or a worker facing a complex implementation, ASK the user in this session whether to use a specification skill (SDD, such as superpowers). Use it only after a yes; never make it automatic. If none is installed for this harness, you may suggest installing one, but install only after the user\'s OK. Never start every session with it.',
+    'Do NOT suggest or ask about a specification skill when a brief, specification, or plan already exists — for example, a worker started by a leader with one, or when the user already gave one. A leader starting a worker must pass the specification path or text in the worker prompt; that worker never asks about specification skills in that case.',
+    'For tests, servers, previews, and QA use `agentop run --rm -- <command>` so the run has its own HOME, ports, terminal, and memory cap. Never test in the user\'s real environment; stop processes only by the PID you saved, never by name.',
+    'This session runs the real harness in a terminal the user can open. When something needs an interactive step (OAuth login of an MCP via `/mcp`, a login prompt, or a TUI menu), tell the user to open this session\'s "Terminal" tab in agentistics and do it there — for example, type `/mcp`, pick the server, and choose Authenticate; the browser opens for the login. Never say the session is not interactive and never send the user to an outside terminal.',
+    'Commit at every green milestone — only commits survive a reboot.',
+    ...(i.role ? [`Your stored role: ${i.role.toUpperCase()}.`] : []),
+  )
   if (i.taskId) {
     const sub = i.subtaskId ? `, subtask ${i.subtaskId}${i.subtaskTitle ? ` "${i.subtaskTitle}"` : ''}` : ''
     lines.push(
@@ -74,6 +106,7 @@ export function contextText(i: ContextInput): string {
     )
   }
   if (i.harnesses && i.harnesses.length > 0) lines.push(`Harnesses installed on this machine: ${i.harnesses.join(', ')}.`)
+  if (i.specSkills && i.specSkills.length > 0) lines.push(`Specification skills installed for this harness: ${i.specSkills.join(', ')}`)
   lines.push(
     'Rules:',
     '- Never start, delegate to or orchestrate another session or harness on your own. You may SUGGEST it (which harness, why, what it would do); start it only after the user explicitly approves in this conversation.',

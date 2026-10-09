@@ -53,8 +53,9 @@
 
 import type { HarnessId } from '@agentistics/core'
 import { canonicalTool } from '../harness-activity'
-import type { ChatTurn } from './chat-turn'
+import type { ChatTurn } from '@agentistics/core'
 import { commandSummary } from './shell-writes'
+import { parseCodexShell } from './bash-mode'
 import { existsSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 
@@ -360,8 +361,10 @@ function userTurn(role: string, text: string): ChatTurn | null {
     return { role: 'user', text }
   }
   if (!env.unwrap) return { role: 'user', text: env.note, system: env.note }
+  const shell = parseCodexShell(text)
+  if (shell) return { role: 'user', text: `!${shell.command}`, shell }
   const cmd = shellCommandOf(text)
   return cmd === ''
     ? { role: 'user', text: env.note, system: env.note }
-    : { role: 'user', text: cmd }
+    : { role: 'user', text: `!${cmd}` }
 }

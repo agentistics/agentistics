@@ -14,6 +14,7 @@ import { createTaskStore, type TaskStore } from './task-store'
 import { migrateLegacyTasks, type TaskBook } from './task-model'
 import { historicalRows } from './task-historical'
 import { nativeRows } from './task-native'
+import { withNativeAliases } from './native-id-alias'
 import type { BoardRow, ManagedSession } from './types'
 import { CORE_TYPE_ID, coreStatusMigration, planStatusMigration, planTypeMigration, type SessionMeta } from '@agentistics/core'
 
@@ -155,7 +156,7 @@ export async function loadTaskWorld(): Promise<TaskWorld> {
     store.read(),
     // The store is an enrichment, never a prerequisite: one that cannot be read costs the money
     // column, not the list.
-    loadConsolidated().catch(() => new Map<string, SessionMeta>()),
+    loadConsolidated().then(withNativeAliases).catch(() => new Map<string, SessionMeta>()),
   ])
   return {
     store, book, registryRows, metas, costOf: sessionCostUSD,

@@ -58,12 +58,18 @@ export function parseGeminiChat(
 // Each 'gemini' message may carry tokens{input,output,cached,...} and model.
 // ---------------------------------------------------------------------------
 
+/** The header's `sessionId` when it is a usable string — what `gemini --resume <uuid>` takes. */
+function nativeIdOf(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim() ? v.trim() : undefined
+}
+
 function parseRichJson(content: string, fallbackId: string, projectPath: string): SessionMeta | null {
   let parsed: any
   try { parsed = JSON.parse(content) } catch { return null }
 
   const startTime = (parsed.startTime as string | undefined) ?? ''
   const lastUpdated = (parsed.lastUpdated as string | undefined) ?? ''
+  const nativeId = nativeIdOf(parsed.sessionId)
 
   // Summed in the SAME branch that increments the count beside it — see `promptChars.ts`.
   let userChars = 0, userCharMsgs = 0, assistantChars = 0, assistantCharMsgs = 0
@@ -175,6 +181,7 @@ function parseRichJson(content: string, fallbackId: string, projectPath: string)
 
   return {
     session_id: fallbackId,
+    ...(nativeId ? { native_session_id: nativeId } : {}),
     project_path: projectPath,
     start_time: startTime || lastUpdated || '',
     end_time: lastUpdated || undefined,
@@ -226,6 +233,7 @@ function parseJsonl(content: string, fallbackId: string, projectPath: string): S
 
   let startTime = ''
   let lastUpdated = ''
+  let nativeId: string | undefined
 
   // Accumulate unique messages by id across all $set snapshots
   const seenIds = new Set<string>()
@@ -254,6 +262,7 @@ function parseJsonl(content: string, fallbackId: string, projectPath: string): S
 
     // Header line: {sessionId, projectHash, startTime, lastUpdated, kind}
     if (parsed.sessionId !== undefined || parsed.startTime !== undefined) {
+      nativeId ??= nativeIdOf(parsed.sessionId)
       if (parsed.startTime) {
         if (!startTime || parsed.startTime < startTime) startTime = parsed.startTime as string
       }
@@ -294,6 +303,7 @@ function parseJsonl(content: string, fallbackId: string, projectPath: string): S
     endTime: lastUpdated,
     messages: allMessages,
     fallbackId,
+    nativeId,
   })
 }
 
@@ -307,6 +317,7 @@ interface JsonlParsedData {
   endTime: string
   messages: Array<{ type: string; timestamp?: string; text?: string }>
   fallbackId: string
+  nativeId?: string | undefined
 }
 
 function buildJsonlSessionMeta(data: JsonlParsedData): SessionMeta | null {
@@ -368,6 +379,7 @@ function buildJsonlSessionMeta(data: JsonlParsedData): SessionMeta | null {
 
   return {
     session_id: data.fallbackId,
+    ...(data.nativeId ? { native_session_id: data.nativeId } : {}),
     project_path: projectPath,
     start_time: startTime || endTime || '',
     end_time: endTime || undefined,

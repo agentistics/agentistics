@@ -104,8 +104,8 @@ export function toControlSession(
   })
   // Why there is no conversation link, on a row we HOST and only while it has none — two DIFFERENT
   // facts, and conflating them is how a disabled Reopen button ended up with nothing beside it
-  // explaining why. `!conversationLinkable` is a harness that can NEVER report one (codex, kimi,
-  // gemini): true the moment the row exists, no matter its state. `conversationLinkGoneForever` is
+  // explaining why. `!conversationLinkable` is a harness that can NEVER report one (none of the
+  // three routes in `spawn-spec.ts` exists for it): true the moment the row exists, no matter its state. `conversationLinkGoneForever` is
   // narrower — a harness that CAN (antigravity, via its own process log), but only while that
   // process is alive.
   //
@@ -161,6 +161,7 @@ export function toControlSession(
     ...(v.model ? { model: v.model } : {}),
     ...(v.effort ? { effort: v.effort } : {}),
     ...(v.mode ? { mode: v.mode } : {}),
+    ...(v.structured ? { structured: true as const } : {}),
     ...(v.note ? { note: v.note } : {}),
     state,
     // The mark rides ON the state word rather than in a cell of its own, so it reaches every
@@ -223,7 +224,7 @@ export function toControlSession(
     // about which option is a field. See `isFreeTextOption`.
     ...(v.dialogOptions?.length
       ? {
-          dialogOptions: v.dialogOptions.map(o => (isFreeTextOption(v.harness, o.label)
+          dialogOptions: v.dialogOptions.map(o => (o.freeText || isFreeTextOption(v.harness, o.label)
             ? { ...o, freeText: true }
             : o)),
         }
@@ -235,10 +236,12 @@ export function toControlSession(
     // move for a numberless one. Asking only about `choice` withheld the picker from claude's trust
     // prompt — which prints no numbers — and left the bare confirm in its place, so the only
     // reachable answer was the highlighted `No, exit`.
-    ...(needsChoice(v.dialogOptions ?? []) && canPick(approvalFor(v.harness), v.dialogSelect ?? null)
+    // A dialog the PROTOCOL stated (a structured session) is picked by number through the driver, on
+    // every harness that has one — the keystroke spec is not asked, because no key is sent.
+    ...(needsChoice(v.dialogOptions ?? []) && (v.dialogStated || canPick(approvalFor(v.harness), v.dialogSelect ?? null))
       ? { canChoose: true as const }
       : {}),
-    ...(needsChoice(v.dialogOptions ?? []) && !canPick(approvalFor(v.harness), v.dialogSelect ?? null) && harness
+    ...(needsChoice(v.dialogOptions ?? []) && !v.dialogStated && !canPick(approvalFor(v.harness), v.dialogSelect ?? null) && harness
       ? { chooseBlind: s.sessChooseBlind(harness) }
       : {}),
     // The verb exists only where BOTH halves are true: the session is asking, and somebody has read

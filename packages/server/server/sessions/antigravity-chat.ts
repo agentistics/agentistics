@@ -47,7 +47,7 @@
 
 import type { HarnessId } from '@agentistics/core'
 import { canonicalTool } from '../harness-activity'
-import type { ChatTurn } from './chat-turn'
+import type { ChatTurn } from '@agentistics/core'
 
 /** One line of `transcript_full.jsonl`, as far as a conversation is concerned. */
 interface AgyStep {

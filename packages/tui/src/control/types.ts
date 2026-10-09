@@ -873,6 +873,8 @@ export interface ControlSession {
    * keypress nobody asked for.
    */
   mode?: { id: string; label: string }
+  /** F2.0b — running over its harness's protocol right now (not a pane): the web offers "open in terminal". */
+  structured?: true
   /**
    * Whether this row can be acted on at all.
    *
@@ -1258,7 +1260,7 @@ export interface ActionResult {
   /** Already-localized one-line outcome, shown in the status line. */
   message: string
   /** A failed pane write classified from the post-write screen. */
-  failure?: 'prompt' | 'ended'
+  failure?: 'prompt' | 'ended' | 'unconfirmed'
 }
 
 /** What `ControlHost.selfCheck` answered. `message` is localized and present on every non-`none`. */
@@ -1543,6 +1545,8 @@ export interface ControlHost {
    * contract exists to prevent.
    */
   sessions?(): Promise<ControlSessions>
+  /** Pushed rows while the server answers; the cockpit polls when unhealthy. */
+  followSessions?(receive: (next: ControlSessions) => void, history?: boolean): { healthy(): boolean; retryable(): boolean; close(): void }
 
   /**
    * Which conversations SAID this — the deep half of the sessions search.
@@ -1584,6 +1588,13 @@ export interface ControlHost {
    * pressing it again.
    */
   interruptSession?(id: string): Promise<ActionResult>
+
+  /**
+   * F2.0b — "open in terminal" on a STRUCTURED session (one driven over its harness's protocol): its
+   * child ends and the SAME conversation resumes as a TUI under the same row, ready to attach. A
+   * session already in a terminal says so. The next web reopen of the row runs structured again.
+   */
+  openInTerminal?(id: string): Promise<ActionResult>
 
   /**
    * Restore a session's conversation to the point BEFORE one of the person's own prompts, using the
@@ -1906,6 +1917,12 @@ export interface SpawnSessionRequest {
    * guarantee a caller sent a boolean, and a truthy STRING must never read as consent.
    */
   force?: boolean
+  /**
+   * F2.0 — where the request was born. `web` (the browser's `/api/fleet/new`, Nay): with the
+   * `adapter-chat` flag on and a ready structured driver for the harness, the session runs over the
+   * harness's protocol instead of a TUI. Absent = a terminal-born session, always a TUI.
+   */
+  origin?: 'web' | 'terminal'
 }
 
 export interface ResumeSessionRequest {
@@ -1931,6 +1948,11 @@ export interface ResumeSessionRequest {
    */
   prompt?: string
   attach: boolean
+  /**
+   * F2.0 — `web`: the browser's reopen. The new row runs structured again when the row it replaces
+   * did (`ManagedSession.structuredDriver`); a terminal-born row always reopens as a TUI.
+   */
+  origin?: 'web' | 'terminal'
 }
 
 export interface SpawnSessionResult {

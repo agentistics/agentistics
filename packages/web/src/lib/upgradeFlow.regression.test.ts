@@ -154,3 +154,19 @@ describe('"the update did not finish" never shows beside the version it asked fo
     expect(reloads).toBe(1)
   })
 })
+
+describe('the finale is continuous with the overlay across the reload', () => {
+  test('it is mounted outside App, so App\'s boot states cannot hide or restart it', () => {
+    expect(src('main.tsx')).toContain('<FinaleHost />')
+    expect(src('App.tsx')).not.toContain('<UpdateFinale')
+  })
+  test('the boot splash shows no loader while an upgrade restore is pending', () => {
+    const s = src('boot/preboot.ts')
+    expect(s).toContain("'agentistics-upgrade-restore'")
+    expect(s).toContain('upgradeFinalePending()')
+  })
+  test('the preboot key is the one the flow writes', async () => {
+    const { RESTORE_KEY } = await import('./updateToast')
+    expect(src('boot/preboot.ts')).toContain(`'${RESTORE_KEY}'`)
+  })
+})

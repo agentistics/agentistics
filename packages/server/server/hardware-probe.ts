@@ -25,6 +25,7 @@ import {
 import { otelWatcherHosted } from './watcher-state'
 import { procAvailable } from './sessions/proc-liveness'
 import { readManagedSessionHardware, type ManagedSessionsSnapshot } from './hardware-sessions'
+import type { SessionSnapshot } from './sessions/sessions-host'
 
 export interface ProcessMetrics {
   pid: number | null
@@ -422,6 +423,8 @@ export async function readAgentopMetrics(
 /** Collect full hardware resources snapshot. */
 export async function getHardwareSnapshot(
   prevStatsMap: Map<number, ProcStatSample>,
+  /** The SessionHub's last snapshot, when the process has one — see `hardware-sessions.ts`. */
+  hubSnapshot?: () => SessionSnapshot | null | undefined,
 ): Promise<HardwareResourcesSnapshot> {
   const canReadProc = await procAvailable()
   const sampledAtMs = Date.now()
@@ -439,7 +442,7 @@ export async function getHardwareSnapshot(
         dockerAvailable: false,
       }
 
-  const sessions = await readManagedSessionHardware(prevStatsMap, sampledAtMs)
+  const sessions = await readManagedSessionHardware(prevStatsMap, sampledAtMs, hubSnapshot)
 
   return {
     procAvailable: canReadProc,

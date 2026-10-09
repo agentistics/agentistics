@@ -65,6 +65,30 @@ const poller = (o: {
 })
 
 describe('createSessionsPoller', () => {
+  it('measures only a row with a living command — an exited or lost row never borrows a neighbour\'s pid', async () => {
+    // A live claude process in the SAME folder as two dead rows: before F1.2b the directory match handed
+    // its pid (and memory) to both, re-attributed on every poll, and every fleet push re-sent them.
+    const p = poller({
+      backend: fakeBackend({
+        sessions: [backendSession('live'), backendSession('dead', { alive: false })],
+        frames: { live: ['❯ '] },
+        panePids: { live: process.pid },
+      }),
+      registry: [managed('live'), managed('dead'), managed('gone')],
+      processes: [{ harness: 'claude', cwd: '/repo/a', pid: process.pid } as HarnessProcess],
+    })
+    const snap = await p.poll()
+    const by = new Map(snap.sessions.map(s => [s.id, s]))
+    expect(by.get('dead')!.status).toBe('exited')
+    expect(by.get('gone')!.status).toBe('lost')
+    for (const id of ['dead', 'gone']) {
+      expect(by.get(id)!.pid).toBeUndefined()
+      expect(by.get(id)!.rssBytes).toBeUndefined()
+      expect(by.get(id)!.cpuPercent).toBeUndefined()
+    }
+    if (process.platform === 'linux') expect(by.get('live')!.pid).toBe(process.pid)
+  })
+
   it('reports a quiet session as waiting and counts it', async () => {
     const p = poller({
       backend: fakeBackend({ sessions: [backendSession('a')], frames: { a: ['❯ '] } }),
@@ -202,6 +226,28 @@ describe('createSessionsPoller', () => {
     expect((await p.poll()).sessions[0]!.activity).toBe('waiting')
     frames.a = ['esc to interrupt']
     expect((await p.poll()).sessions[0]!.activity).toBe('working')
+  })
+
+  it('a request the PROTOCOL states is carried as stated — its options, picked by number, with no keystroke spec asked (F2.1)', async () => {
+    const backend: SessionBackend = {
+      ...fakeBackend({ sessions: [backendSession('g')] }),
+      activityOf: () => 'waiting-approval',
+      dialogOf: () => ['Allow for this session', 'Allow', 'Reject'],
+    }
+    const p = poller({ backend, registry: [managed('g', { harness: 'gemini' })] })
+    const row = (await p.poll()).sessions[0]!
+    expect(row.activity).toBe('waiting-approval')
+    expect(row.dialogOptions?.map(o => o.label)).toEqual(['Allow for this session', 'Allow', 'Reject'])
+    expect(row.dialogSelect).toBe('numbered')
+    expect(row.dialogStated).toBe(true)
+  })
+
+  it('a dialog read off a SCREEN is not marked stated', async () => {
+    const p = poller({
+      backend: fakeBackend({ sessions: [backendSession('c')], frames: { c: ['Do you want to proceed?', ' ❯ 1. Yes', '   2. No', 'Esc to cancel · Tab to amend'] } }),
+      registry: [managed('c')],
+    })
+    expect((await p.poll()).sessions[0]!.dialogStated).toBeUndefined()
   })
 
   it('never captures a dead pane', async () => {
@@ -898,7 +944,7 @@ describe('a process-log link follows the conversation the process moves to', () 
   it('the same conversation again writes nothing', async () => {
     expect(await run({ conversationId: 'old', conversationLinkVia: 'process-log' }, 'old')).toEqual([])
   })
-  it('a link that was not produced by the log (spawn-assigned) is never replaced', async () => {
+  it('an assigned link is never replaced from agy\'s SHARED (non-managed) log — not exclusive', async () => {
     expect(await run({ conversationId: 'old', conversationLinkVia: 'assigned-id' }, 'new')).toEqual([])
   })
   it('no conversation named yet changes nothing', async () => {
@@ -926,11 +972,11 @@ describe('exclusive managed agy log', () => {
     await p.poll()
     expect(writes).toEqual([[rows[0]!.id, 'new-conversation', 'assigned', 'process-log']])
   })
-  it('preserves a reopened link and never asks another harness for a managed log', async () => {
+  it('never asks another harness for a managed log', async () => {
     const reads: string[] = []
     const p = createSessionsPoller({
       backend: fakeBackend({ sessions: [] }),
-      readRegistry: async () => [managed('0123456789', { harness: 'antigravity', conversationId: 'resumed', conversationLinkVia: 'resumed-id' }), managed('abcdef0123', { harness: 'codex' })],
+      readRegistry: async () => [managed('abcdef0123', { harness: 'codex' }), managed('fedcba9876', { harness: 'kimi' })],
       scanProcesses: async () => ({ procs: [] }), now: () => NOW,
       readManagedConversation: async (_h, id) => { reads.push(id); return 'other' },
       recordConversation: async () => { throw new Error('must not write') },
@@ -950,5 +996,97 @@ describe('exclusive managed agy log', () => {
     })
     await p.poll()
     expect(writes).toEqual(['from-db-or-old-log'])
+  })
+})
+
+describe('AGY.RELINK — a row reopened by id follows its process to a new conversation', () => {
+  const OLD = 'fbd845b8-0000-4000-8000-000000000001'
+  const NEW = 'e4da8024-0000-4000-8000-000000000002'
+  const run = async (o: {
+    rows: ManagedSession[]
+    logs: Record<string, string | null>
+    panePids?: Record<string, number>
+  }) => {
+    const writes: Array<[string, string, string, string | undefined]> = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: Object.keys(o.panePids ?? {}).map(id => backendSession(id)), panePids: o.panePids ?? {} }),
+      readRegistry: async () => o.rows,
+      scanProcesses: async () => ({ procs: [] }), now: () => NOW,
+      readManagedConversation: async (_h, id) => o.logs[id] ?? null,
+      readProcessConversation: async () => null,
+      recordConversation: async (id, conv, link, via) => { writes.push([id, conv, link, via]) },
+    })
+    await p.poll()
+    return writes
+  }
+  for (const via of ['resumed-id', 'assigned-id'] as const) {
+    it(`REPRODUCTION (${via}): its own managed log names the conversation /new created -> re-linked`, async () => {
+      const rows = [managed('34e8bb8d76', { harness: 'antigravity', conversationId: OLD, conversationLinkVia: via })]
+      expect(await run({ rows, logs: { '34e8bb8d76': NEW }, panePids: { '34e8bb8d76': 777 } }))
+        .toEqual([['34e8bb8d76', NEW, 'assigned', 'process-log']])
+    })
+  }
+  it('a log still streaming the reopened conversation writes nothing', async () => {
+    const rows = [managed('34e8bb8d76', { harness: 'antigravity', conversationId: OLD, conversationLinkVia: 'resumed-id' })]
+    expect(await run({ rows, logs: { '34e8bb8d76': OLD }, panePids: { '34e8bb8d76': 777 } })).toEqual([])
+  })
+  it('follows after the server restarts too — the decision is the registry plus the log, nothing in memory', async () => {
+    const rows = () => [managed('34e8bb8d76', { harness: 'antigravity', conversationId: OLD, conversationLinkVia: 'resumed-id' })]
+    expect(await run({ rows: rows(), logs: { '34e8bb8d76': NEW } })).toEqual([['34e8bb8d76', NEW, 'assigned', 'process-log']])
+  })
+  it('COLLISION: never moves onto a conversation another LIVE row drives', async () => {
+    const rows = [
+      managed('34e8bb8d76', { harness: 'antigravity', conversationId: OLD, conversationLinkVia: 'resumed-id' }),
+      managed('99602d0d00', { harness: 'antigravity', conversationId: NEW, conversationLinkVia: 'process-log' }),
+    ]
+    expect(await run({ rows, logs: { '34e8bb8d76': NEW, '99602d0d00': NEW }, panePids: { '34e8bb8d76': 777, '99602d0d00': 778 } })).toEqual([])
+  })
+  it('a RETIRED row on that conversation is not live and blocks nothing', async () => {
+    const rows = [
+      managed('34e8bb8d76', { harness: 'antigravity', conversationId: OLD, conversationLinkVia: 'resumed-id' }),
+      managed('11afc7304f', { harness: 'antigravity', conversationId: NEW, conversationLinkVia: 'process-log' }),
+    ]
+    expect(await run({ rows, logs: { '34e8bb8d76': NEW, '11afc7304f': NEW }, panePids: { '34e8bb8d76': 777 } }))
+      .toEqual([['34e8bb8d76', NEW, 'assigned', 'process-log']])
+  })
+  it('COLLISION: two rows whose logs name the same NEW conversation -> neither moves', async () => {
+    const rows = [
+      managed('34e8bb8d76', { harness: 'antigravity', conversationId: OLD, conversationLinkVia: 'resumed-id' }),
+      managed('abcdef0123', { harness: 'antigravity', conversationId: 'c-2', conversationLinkVia: 'assigned-id' }),
+    ]
+    expect(await run({ rows, logs: { '34e8bb8d76': NEW, abcdef0123: NEW }, panePids: { '34e8bb8d76': 777, abcdef0123: 778 } })).toEqual([])
+  })
+  it('a link with no provenance, or one from the harness\'s own file, is never moved', async () => {
+    const rows = [
+      managed('34e8bb8d76', { harness: 'antigravity', conversationId: OLD }),
+      managed('abcdef0123', { harness: 'antigravity', conversationId: 'c-2', conversationLinkVia: 'harness-session-file' }),
+    ]
+    expect(await run({ rows, logs: { '34e8bb8d76': NEW, abcdef0123: 'c-3' } })).toEqual([])
+  })
+})
+
+describe('AGY.REOPEN — the exact-link reopen through the poller', () => {
+  it('asks findExactLinks only about rows with nothing running, and offers their reopen', async () => {
+    const asked: string[] = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [backendSession('live')], frames: { live: ['❯ '] } }),
+      readRegistry: async () => [
+        managed('live', { harness: 'antigravity', cwd: '/w', conversationId: 'conv-live' }),
+        managed('dead', { harness: 'antigravity', cwd: '/w', conversationId: 'conv-dead' }),
+      ],
+      scanProcesses: async () => ({ procs: [] }),
+      // The store does not hold the agy conversation — the case agy's missing history.jsonl causes.
+      loadConversations: async () => [],
+      findExactLinks: async entries => {
+        for (const e of entries) asked.push(e.conversationId ?? '')
+        return new Set(entries.map(e => e.conversationId!).filter(Boolean))
+      },
+      now: () => NOW,
+    })
+    const snap = await p.poll()
+    expect(asked).toEqual(['conv-dead'])
+    const dead = snap.sessions.find(s => s.id === 'dead')
+    expect(dead?.resume?.sessionId).toBe('conv-dead')
+    expect(snap.sessions.find(s => s.id === 'live')?.resume).toBeUndefined()
   })
 })

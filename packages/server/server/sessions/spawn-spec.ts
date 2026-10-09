@@ -65,6 +65,9 @@ import { HARNESS_PROCESS_TRANSCRIPTS, HARNESS_SESSION_SOURCES } from './harness-
 import { prependContext } from './agentistics-context'
 import type { InitialPrompt, SpawnRequest, SpawnPlanResult, SpawnSpec } from './types'
 
+/** A canonical UUID. Local so this module stays free of the server's git helpers. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
   // `Usage: claude [options] [command] [prompt]` / `Arguments: prompt  Your prompt`
   claude: {
@@ -100,8 +103,8 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
   },
 
   // `Usage: codex [OPTIONS] [PROMPT]` / `[PROMPT]  Optional user prompt to start the session`
-  // No `--effort`: the reasoning effort is a `-c key=value` override whose key is not verifiable
-  // from the CLI (`-c` accepts unknown keys silently), so it is absent rather than guessed.
+  // 0.161.0: app-server ThreadStartParams.config.model_reasoning_effort / TurnStartParams.effort.
+  // `model/list` publishes the supported values below (2026-10-09); low verified by a real turn.
   codex: {
     bin: 'codex',
     // `codex --help` (0.161.0): `--no-daemon Run without the shared background server`. This
@@ -117,6 +120,8 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     // `{"detail":"The '…' model is not supported when using Codex with a ChatGPT account."}` — so a
     // list lifted from it would offer models this user cannot run. Nothing to name honestly.
     modelSuggestions: [],
+    effortArgs: effort => ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`],
+    efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
     // A SUBCOMMAND, not a flag: `codex resume [OPTIONS] [SESSION_ID] [PROMPT]`, whose argument is
     // documented as "Conversation/session id (UUID) or thread name".
     resume: id => ['resume', id],
@@ -140,22 +145,21 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     // machine and not of the CLI. `kimi provider list` prints them for whoever is asking (here:
     // one provider, `Default model: ollama-local/qwen2.5-3b-instruct`); there is no list to ship.
     modelSuggestions: [],
-    // `-S, --session [id]  Resume a session. With ID: resume that session.`
-    resume: id => ['-S', id],
-    // `--agent-file <path>  Load an agent definition from a Markdown file and select it for the new
-    // session` (kimi 0.38). The body is a prompt TEMPLATE and `${base_prompt}` embeds kimi's builtin default
-    // prompt (read from the binary), so the context is APPENDED, not substituted. Frontmatter needs `name` and
-    // `description`; an empty body is refused ("Missing prompt body"). VERIFIED LIVE 2026-10-08. It sits
-    // under the agentistics data dir, never the user's project. Not combinable with --session, which
-    // is a resume and carries no context anyway.
-    context: {
-      kind: 'files',
-      files: (_dir, text) => [{
-        name: 'agentistics-agent.md',
-        text: `---\nname: agentistics-session\ndescription: Background context from agentistics\n---\n\${base_prompt}\n\n${text}`,
-      }],
-      args: dir => ['--agent-file', `${dir}/agentistics-agent.md`],
-    },
+    // `-S, --session [id]  Resume a session. With ID: resume that session.` kimi 2.1.1 takes the id AS ITS DIRECTORY
+    // NAMES IT — `session_<uuid>`: `-S <bare-uuid>` answers `Session "…" not found` (measured 2026-10-09, the
+    // same conversation resumed with the prefix). The store and this product key on the bare uuid
+    // (`adapters/kimi.ts`), so the prefix is added here, once, and an id that already has it is left alone.
+    resume: id => ['-S', id.startsWith('session_') ? id : `session_${id}`],
+    // NO invisible channel on kimi 2.1.1 (RE-VERIFIED 2026-10-09; it was `--agent-file` on 0.38–0.41, and that
+    // flag is GONE from the interactive TUI): `kimi --agent-file <f>` still parses the file and `kimi --agent-file
+    // <f> -p "…"` still selects it (wire `profile.bind` → profileName from the file, the marker reaches the
+    // model's system prompt), but the INTERACTIVE session — which creates itself lazily on the first message —
+    // binds the default profile (`profileName: "agent"`) and the file's text never reaches the model. Measured
+    // twice in a trusted folder, same file, same throwaway KIMI_CODE_HOME, against a mock model that logged the
+    // request. Keeping the flag would deliver NOTHING and report `contextVia: 'files'`, which is the worst
+    // answer, so kimi takes the fenced first message with the header (the gemini/antigravity route). `--agent`
+    // only names profiles discovered from the USER's agents dir, which this product must not write. Under
+    // `kimi acp` there is no channel either (`structured/acp-structured.ts` cites the measurement).
   },
 
   // `-i, --prompt-interactive  Execute the provided prompt and continue in interactive mode`.
@@ -182,14 +186,30 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     // is no longer available to new users." A list nothing local can check goes stale silently, so
     // there is none — the picker is absent instead of confidently wrong.
     modelSuggestions: [],
-    // No effort flag exists, and no `resume`: gemini's `-r, --resume` takes "latest" or an index
-    // number, never a session id. Offering it would be a verb that reopens the wrong conversation.
+    // No effort flag exists.
     //
-    // And deliberately NO `assignId`, although `--session-id  Start a new session with a manually
-    // provided UUID` exists: the id agentistics knows a gemini conversation by is SYNTHETIC —
-    // `gemini.ts` builds `${dirName}/${fileBase}` from the chat file's path, because the files
-    // carry no id of their own. A recorded UUID would therefore match no session in the store, and
-    // an id that resolves to nothing is worse than no id at all: it looks like an exact link.
+    // `--session-id  Start a new session with a manually provided UUID` — VERIFIED LIVE 2026-10-09
+    // (gemini 0.63.0, throwaway HOME): `gemini --session-id <uuid> -p …` wrote
+    // `tmp/<project>/chats/session-<ts>-<uuid8>.jsonl` whose header line is `{"sessionId":"<uuid>",…}`
+    // — the very uuid passed, and its first eight characters are the file name's suffix. The adapter
+    // still keys the STORE by the synthetic `${project}/${file}` (the files had no id of their own
+    // when it was written, and re-keying would duplicate every stored session), so the assigned UUID
+    // is bridged to it by `SessionMeta.native_session_id` (the header's `sessionId`), not by changing
+    // either key — see `conversations.ts`'s `findConversation` and `harness-transcript.ts`'s
+    // `resolveGeminiTranscript`.
+    assignId: id => ['--session-id', id],
+    // `-r, --resume` is documented as "latest | index", but the CLI's own refusal text says
+    // "use --resume {number}, --resume {uuid}, or --resume latest", and that was VERIFIED the same
+    // day: `--resume <uuid>` reopened the conversation (the model recalled the earlier turn, one chat
+    // file, no new session), while an unknown uuid answered `Error resuming session: Invalid session
+    // identifier` and wrote nothing. The uuid form is used rather than mapping the id to the index
+    // `--list-sessions` prints, because that index is relative to the project and SHIFTS whenever
+    // another session is born between the listing and the launch — it would reopen a neighbour.
+    // Only a UUID is acceptable (`resumeIdOk`): an old synthetic `${project}/${file}` id names no
+    // conversation the CLI can open, and passing it would fall through to the CLI's own error on a
+    // pane nobody is watching.
+    resume: id => ['--resume', id],
+    resumeIdOk: id => UUID_RE.test(id),
   },
 
   // `-p, --prompt <text>  Execute a prompt in non-interactive mode (exits after completion)` — the
@@ -255,9 +275,10 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
       'gemini-3.1-pro-low', 'gemini-3.1-pro-high',
     ],
     effortFlag: '--effort',
-    // `--effort  Reasoning effort for the current CLI session (low|medium|high)` — printed by the
-    // CLI itself, so unlike codex's `-c` override this one IS verifiable and IS validated.
-    efforts: ['low', 'medium', 'high'],
+    // `--effort  Reasoning effort for the current CLI session (low|medium|high|xhigh|max)` — printed
+    // by the CLI itself (agy 1.3.2 `--help`, 2026-10-09; it was `low|medium|high` on 1.1.x, P-23), so
+    // unlike codex's `-c` override this one IS verifiable and IS validated.
+    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
     resume: id => ['--conversation', id], // `--conversation  Resume a previous conversation by ID`
   },
   // opencode is not spawnable through the session manager — no adapter exists to link a spawned
@@ -287,7 +308,7 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
  * to match on. It was widened to codex and kimi (P-17) because their only link was a first-sighting
  * claim that waits for the data rebuild and refuses whenever two rows share a folder.
  *
- * `false` is still the answer for gemini (F0.2 gives it an assigned id), and it must be SAID rather
+ * `false` is the answer for a harness with none of the three, and it must be SAID rather
  * than papered over: everything downstream then falls back to `conversationForProcess`, which matches by harness
  * and directory and therefore gives every session of one repository the same conversation. That
  * guess is good enough to OFFER a reopen a person confirms by title, and not good enough to be
@@ -322,7 +343,7 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
   if (req.model && !spec.modelFlag) {
     return { ok: false, error: { code: 'model-unsupported', harness: req.harness } }
   }
-  if (req.effort && (!spec.effortFlag || !spec.efforts)) {
+  if (req.effort && ((!spec.effortFlag && !spec.effortArgs) || !spec.efforts)) {
     return { ok: false, error: { code: 'effort-unsupported', harness: req.harness } }
   }
   if (req.effort && spec.efforts && !spec.efforts.includes(req.effort)) {
@@ -336,6 +357,10 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
     return { ok: false, error: { code: 'resume-unsupported', harness: req.harness } }
   }
 
+  if (req.resumeId && spec.resumeIdOk && !spec.resumeIdOk(req.resumeId)) {
+    return { ok: false, error: { code: 'resume-id-unusable', harness: req.harness, id: req.resumeId } }
+  }
+
   const argv: string[] = [spec.bin, ...(spec.startupArgs ?? [])]
   // The resume argv goes FIRST because one of these is a subcommand (`codex resume <id>`), and a
   // subcommand that follows a flag is not a subcommand any more.
@@ -346,7 +371,8 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
   if (assigned && spec.assignId) argv.push(...spec.assignId(assigned))
   if (req.logFile && spec.logFileFlag) argv.push(spec.logFileFlag, req.logFile)
   if (req.model && spec.modelFlag) argv.push(spec.modelFlag, req.model)
-  if (req.effort && spec.effortFlag) argv.push(spec.effortFlag, req.effort)
+  if (req.effort && spec.effortArgs) argv.push(...spec.effortArgs(req.effort))
+  else if (req.effort && spec.effortFlag) argv.push(spec.effortFlag, req.effort)
 
   // THE AGENTISTICS CONTEXT — fresh sessions only (a reopened conversation already has its history).
   // Official channel first; a harness with none gets the fenced block ahead of its first message.

@@ -226,3 +226,12 @@ export function consumeRestore(currentVersion: string, now = Date.now()): Restor
   if (r) { try { sessionStorage.removeItem(RESTORE_KEY) } catch { /* blocked */ } }
   return r
 }
+
+/**
+ * Like `consumeRestore` but READS ONLY: the finale is mounted by `FinaleHost` on the very first
+ * render of the new bundle (before any data), while `App` still consumes the snapshot later to put
+ * the route and scroll back. Peeking leaves the key for that one consumer.
+ */
+export function peekRestore(currentVersion: string, now = Date.now()): RestoreState | null {
+  try { return decodeRestore(sessionStorage.getItem(RESTORE_KEY), now, currentVersion) } catch { return null }
+}

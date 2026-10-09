@@ -9,14 +9,19 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Info } from 'lucide-react'
+import { ChevronDown, ChevronRight, Info, Search } from 'lucide-react'
+import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { scrollIsOutside } from '../../lib/popoverScroll'
 import { sessionPath } from '../../lib/sessionRoute'
-import type { SessionLinks } from '../../lib/sessionParent'
+import { filterByTitle, newestFirst, type SessionLinks } from '../../lib/sessionParent'
+import { messageTime } from '../../lib/messageTime'
+import { STATE_COLOR } from '../../lib/sessionCardStyle'
+import { inputStyle } from './formBits'
+import { HarnessMark } from './HarnessMark'
 
-export interface LinkTarget { kind: 'parent' | 'child' | 'task'; key: string; label: string; harness?: string; state?: string; path: string | null }
+export interface LinkTarget { kind: 'parent' | 'child' | 'task'; key: string; label: string; harness?: string; state?: string; stateLabel?: string; startedAt?: number; path: string | null }
 
 export function linkTargets(links: SessionLinks): LinkTarget[] {
   const out: LinkTarget[] = []
@@ -24,8 +29,8 @@ export function linkTargets(links: SessionLinks): LinkTarget[] {
     out.push({ kind: 'parent', key: `p:${links.parent.id}`, label: links.parent.title ?? links.parent.id.slice(0, 8),
       path: links.parent.openable ? sessionPath(links.parent.id) : null })
   }
-  for (const c of links.children) {
-    out.push({ kind: 'child', key: `c:${c.id}`, label: c.title, harness: c.harness, state: c.state, path: sessionPath(c.id) })
+  for (const c of newestFirst(links.children)) {
+    out.push({ kind: 'child', key: `c:${c.id}`, label: c.title, harness: c.harness, state: c.state, ...(c.stateLabel ? { stateLabel: c.stateLabel } : {}), ...(c.startedAt ? { startedAt: c.startedAt } : {}), path: sessionPath(c.id) })
   }
   if (links.task) out.push({ kind: 'task', key: `t:${links.task.id}`, label: links.task.label ?? links.task.id, path: `/tasks/${encodeURIComponent(links.task.id)}` })
   return out
@@ -39,9 +44,45 @@ function when(ms: number | undefined, pt: boolean): string | null {
 
 const SECTION = { fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)', margin: '8px 0 2px' } as const
 
-export function SessionLinkPanel({ links, startedAt, pt, onGo }: {
-  links: SessionLinks; startedAt?: number; pt: boolean; onGo: (path: string) => void
+const ROW_STYLE = {
+  all: 'unset', boxSizing: 'border-box', display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+  padding: '5px 6px', borderRadius: 6, fontSize: 12.5, color: 'var(--text-primary)', minHeight: 28,
+} as const
+
+function Row({ t, pt, onGo, touch }: { t: LinkTarget; pt: boolean; onGo: (path: string) => void; touch: boolean }) {
+  const harness = t.harness ? (HARNESS_LABELS as Record<string, string>)[t.harness] ?? t.harness : null
+  const at = t.startedAt ? messageTime(new Date(t.startedAt).toISOString(), pt ? 'pt' : 'en') : null
+  // The TITLE wins the width; the meta keeps its natural size and wraps under the title when it must.
+  const inner = (
+    <>
+      <span style={{ minWidth: 0, flexBasis: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.label}</span>
+      <span style={{ fontSize: 11, color: 'var(--text-tertiary)', flex: '0 1 auto', display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
+        {t.harness && <span role="img" aria-label={harness ?? ''} title={harness ?? ''} style={{ display: 'inline-flex' }}><HarnessMark harness={t.harness} size={12} /></span>}
+        {at && <span title={at.full}>· {at.label}</span>}
+        {t.state && <span data-state-word={t.state}
+          style={{ color: STATE_COLOR[t.state as keyof typeof STATE_COLOR] ?? 'var(--text-tertiary)' }}>· {t.stateLabel ?? t.state}</span>}
+      </span>
+    </>
+  )
+  const min = touch ? { minHeight: 44 } : {}
+  const wrap = { flexWrap: 'wrap', rowGap: 2, alignContent: 'center' } as const
+  return t.path ? (
+    <button type="button" data-link-kind={t.kind} onClick={() => onGo(t.path!)} style={{ ...ROW_STYLE, ...wrap, ...min, cursor: 'pointer' }}>{inner}</button>
+  ) : (
+    <div data-link-kind={t.kind} style={{ ...ROW_STYLE, ...wrap, ...min, color: 'var(--text-tertiary)' }}
+      title={pt ? 'Não está mais na frota' : 'No longer in the fleet'}>{inner}</div>
+  )
+}
+
+export function SessionLinkPanel({ links, startedAt, pt, onGo, isMobile = false }: {
+  links: SessionLinks; startedAt?: number; pt: boolean; onGo: (path: string) => void; isMobile?: boolean
 }) {
+  const [searching, setSearching] = useState(false)
+  const [query, setQuery] = useState('')
+  const [endedOpen, setEndedOpen] = useState(false)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  useEffect(() => { if (searching) inputRef.current?.focus() }, [searching])
+
   const targets = linkTargets(links)
   const groups: Array<[LinkTarget['kind'], string]> = [
     ['parent', pt ? 'Sessão de origem' : 'Started by'],
@@ -49,34 +90,50 @@ export function SessionLinkPanel({ links, startedAt, pt, onGo }: {
     ['task', pt ? 'Tarefa' : 'Task'],
   ]
   const started = when(startedAt, pt)
+  const rowOf = (t: LinkTarget) => <Row key={t.key} t={t} pt={pt} onGo={onGo} touch={isMobile} />
+  const searchLabel = pt ? 'Buscar nas sessões' : 'Search sessions'
+  const close = () => { setSearching(false); setQuery('') }
   return (
     <div data-testid="session-link-panel">
       {groups.map(([kind, title]) => {
-        const rows = targets.filter(t => t.kind === kind)
+        let rows = targets.filter(t => t.kind === kind)
         if (!rows.length) return null
+        if (kind !== 'child') return <div key={kind}><div style={SECTION}>{title}</div>{rows.map(rowOf)}</div>
+        const total = rows.length
+        { const keep = new Set(filterByTitle(rows.map(t => ({ title: t.label, t })), query).map(x => x.t)); rows = rows.filter(t => keep.has(t)) }
+        const running = rows.filter(t => sessionRunning({ state: (t.state ?? 'unknown') as never }))
+        const ended = rows.filter(t => !running.includes(t))
+        const showEnded = endedOpen || query.trim() !== ''
+        const size = isMobile ? 44 : 24
         return (
           <div key={kind}>
-            <div style={SECTION}>{title}</div>
-            {rows.map(t => {
-              const meta = [t.harness ? (HARNESS_LABELS as Record<string, string>)[t.harness] ?? t.harness : null, t.state].filter(Boolean).join(' · ')
-              const inner = (
-                <>
-                  <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.label}</span>
-                  {meta && <span style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}>{meta}</span>}
-                </>
-              )
-              const style = {
-                all: 'unset', boxSizing: 'border-box', display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-                padding: '5px 6px', borderRadius: 6, fontSize: 12.5, color: 'var(--text-primary)', minHeight: 28,
-              } as const
-              return t.path ? (
-                <button key={t.key} type="button" data-link-kind={t.kind} onClick={() => onGo(t.path!)}
-                  style={{ ...style, cursor: 'pointer' }}>{inner}</button>
-              ) : (
-                <div key={t.key} data-link-kind={t.kind} style={{ ...style, color: 'var(--text-tertiary)' }}
-                  title={pt ? 'Não está mais na frota' : 'No longer in the fleet'}>{inner}</div>
-              )
-            })}
+            <div style={{ ...SECTION, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>{title}</span>
+              <button type="button" aria-label={searchLabel} title={searchLabel} aria-expanded={searching}
+                data-testid="link-search-toggle" onClick={() => (searching ? close() : setSearching(true))}
+                style={{ all: 'unset', boxSizing: 'border-box', cursor: 'pointer', width: size, height: size, display: 'inline-flex',
+                  alignItems: 'center', justifyContent: 'center', color: 'var(--text-tertiary)' }}><Search size={13} /></button>
+            </div>
+            {searching && (
+              <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)} data-testid="link-search"
+                onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); close() } }}
+                placeholder={searchLabel} aria-label={searchLabel}
+                style={{ ...inputStyle, paddingLeft: 10, marginBottom: 4, ...(isMobile ? { fontSize: 16, minHeight: 44 } : {}) }} />
+            )}
+            {running.map(rowOf)}
+            {rows.length === 0 && total > 0 && (
+              <div style={{ fontSize: 12, color: 'var(--text-tertiary)', padding: '5px 6px' }}>{pt ? 'Nenhuma sessão encontrada' : 'No sessions found'}</div>
+            )}
+            {ended.length > 0 && (
+              <>
+                <button type="button" data-testid="ended-toggle" aria-expanded={showEnded} onClick={() => setEndedOpen(o => !o)}
+                  style={{ ...ROW_STYLE, cursor: 'pointer', color: 'var(--text-tertiary)', ...(isMobile ? { minHeight: 44 } : {}) }}>
+                  {showEnded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  <span>{pt ? `Encerradas (${ended.length})` : `Ended (${ended.length})`}</span>
+                </button>
+                {showEnded && ended.map(rowOf)}
+              </>
+            )}
           </div>
         )
       })}
@@ -147,7 +204,7 @@ export function SessionLinkInfo({ session, links, lang, onGo, isMobile = false }
           maxHeight: '60vh', overflowY: 'auto', padding: '4px 10px 10px', borderRadius: 10,
           background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
         }}>
-          <SessionLinkPanel links={links} {...(session.startedAt ? { startedAt: session.startedAt } : {})} pt={pt}
+          <SessionLinkPanel links={links} {...(session.startedAt ? { startedAt: session.startedAt } : {})} pt={pt} isMobile={isMobile}
             onGo={p => { setOpen(false); onGo(p) }} />
         </div>, document.body)}
     </>

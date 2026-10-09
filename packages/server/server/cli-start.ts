@@ -1,3 +1,4 @@
+import { sessionNotify, type ControlSession } from '@agentistics/tui/control/session-fleet'
 /**
  * cli-start.ts — the logic behind the `agentop` control center.
  *
@@ -41,7 +42,7 @@ import type { CodeStartLaunch } from './code-launch'
 import { homedir, platform } from 'node:os'
 import { accountHome } from './account-home'
 import {
-  HARNESS_ORDER, repoShortName, sendNowDelivered,
+  followFleet, HARNESS_ORDER, repoShortName, sendNowDelivered,
   type ConversationLinkReason, type HarnessId,
 } from '@agentistics/core'
 import type {
@@ -126,6 +127,8 @@ import { scanProcesses, type HarnessProcess } from './live-sessions'
 import { resolveBackend } from './sessions'
 import { inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
 import { SPAWN_SPECS, planSpawn } from './sessions/spawn-spec'
+import { answerStructured, structuredIntentOf, structuredReopenOrigin } from './sessions/structured-route'
+import { agentisticsMcpLaunch } from './mcp-launch'
 import { prependContext } from './sessions/agentistics-context'
 import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextParent, resolveContextTask, writeContextFile } from './sessions/spawn-context'
 import { availableHarnesses } from './sessions/harness-available'
@@ -157,7 +160,7 @@ import { needsChoice, parseDialogOptions, readDialog } from './sessions/dialog-c
 import { answerFollowUp } from './sessions/answer-followup'
 import { liveTranscriptDeps, runTranscriptSearch } from './sessions/transcript-run'
 import { rulesFor } from './sessions/attention-rules'
-import { classifyCodexSendFailure, codexIsBlockingFrame } from './sessions/codex-send'
+import { classifySendFailure, promptIsBlocked } from './sessions/prompt-guard'
 import { planCrashGroup, planFellOffer } from './sessions/crash-group'
 import { selectFell } from './sessions/fell-selection'
 import {
@@ -184,12 +187,17 @@ import {
   addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession, touchSessions,
 } from './sessions/registry'
 import {
-  createSessionsPoller, linkProcessConversation, sampleProcessLinks, type SessionsPoller, type SessionSnapshot,
+  createSessionsPoller, linkProcessConversation, sampleProcessLinks, SESSION_POLL_MS, type SessionsPoller,
+  type SessionSnapshot,
 } from './sessions/sessions-host'
+import { createSessionHub, setProcessSessionHub, type SessionHub } from './sessions/session-hub'
+import { hostAdapterState, onAdapterStateChange } from './sessions/adapter-state-host'
 import { HARNESS_PROCESS_TRANSCRIPTS } from './sessions/harness-session-file'
 import { modeSpecFor } from './sessions/mode-spec'
 import { isServerProcess, readServerSnapshot } from './sessions/shared-snapshot'
 import { conversationForProcess, forgetConversations, loadConversations } from './sessions/conversations'
+import { exactLinksOnDisk } from './sessions/reopen-link'
+import { reopenTargetFor } from './sessions/reopen-target'
 
 export type StartResult = number | 'foreground'
 
@@ -1551,6 +1559,9 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
   return {
     backend, readRegistry, scanProcesses, loadConversations, touchSessions,
     loadHarnessSessions,
+    // The exact-link reopen (`reopen-target.ts`): without it a row whose conversation the store
+    // lacks — every agy session agentop started — offers no reopen.
+    findExactLinks: exactLinksOnDisk,
     // Written once per session, not once per poll — the poller only calls this when the harness's
     // own record disagrees with the registry.
     // The link kind travels WITH the id. Dropping it here would persist a first-sighting claim as
@@ -1584,6 +1595,8 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
     // Take back a running session whose registry record was lost. Called only with a non-empty
     // list, so a healthy fleet never writes. See `session-adopt.ts` for what may be adopted.
     adoptSessions: async records => { for (const r of records) await addSession(r) },
+    // ENGINE.MAP F1.2: the harness's own statement of its state, with the `adapter-chat` flag on only.
+    adapterState: hostAdapterState,
   }
 }
 
@@ -1593,6 +1606,52 @@ async function ensureSessionsPoller(): Promise<SessionsPoller> {
   const backend = await resolveBackend()
   sessionsPoller = createSessionsPoller(sessionsPollerOptions(backend))
   return sessionsPoller
+}
+
+/**
+ * The ONE fleet poller of this process, behind its hub (`session-hub.ts`). Every reader in the process —
+ * `/api/fleet`, `/api/fleet/snapshot`, `/api/fleet/events`, the chat streams, a send's `record()`, the
+ * event producer — reads THIS, so the server never runs two pollers (ENGINE.MAP P-01) and never polls
+ * once per request (P-02). The engine's fleet view observes every poll passively: it plans nothing
+ * while no engine listens (`fleet-hub.ts`), and it no longer depends on which route happened to poll.
+ */
+let sessionHub: Promise<SessionHub> | null = null
+
+export function ensureSessionHub(): Promise<SessionHub> {
+  if (!sessionHub) {
+    sessionHub = (async () => {
+      const poller = await ensureSessionsPoller()
+      const hub = createSessionHub({ poll: () => poller.poll(), intervalMs: SESSION_POLL_MS })
+      // A harness stating a change (a turn ended) is pushed NOW, not at the next tick (flag on only).
+      onAdapterStateChange(() => { void hub.refresh().catch(() => {}) })
+      const { fleetHub } = await import('./engine/fleet-hub')
+      // Only a FRESH reading says anything new: an `unavailable` snapshot is the previous one again.
+      hub.observe(snap => { if (!snap.unavailable) fleetHub.observe(snap.sessions, snap.polledAtMs) })
+      setProcessSessionHub(hub)
+      return hub
+    })()
+    void sessionHub.catch(() => { sessionHub = null })
+  }
+  return sessionHub
+}
+
+/**
+ * The tmux prefix the detach hint names, read ONCE and kept (ENGINE.MAP P-09: it was a `show-options`
+ * per fleet poll — 12 to 59 a minute — to learn a value that changes only when somebody edits their tmux
+ * config). Re-read after `DETACH_HINT_TTL_MS`, so an edited prefix still reaches the screen.
+ */
+const DETACH_HINT_TTL_MS = 10 * 60_000
+let detachHintCache: { value: Promise<string>; atMs: number } | null = null
+
+function cachedDetachHint(): Promise<string> {
+  const nowMs = Date.now()
+  if (!detachHintCache || nowMs - detachHintCache.atMs >= DETACH_HINT_TTL_MS) {
+    const value = resolveBackend().then(b => b.detachHint()).catch(() => '')
+    detachHintCache = { value, atMs: nowMs }
+    // A failed read is not remembered for ten minutes.
+    void value.then(v => { if (!v && detachHintCache?.value === value) detachHintCache = null })
+  }
+  return detachHintCache.value
 }
 
 /**
@@ -1606,6 +1665,7 @@ function explainSpawnError(e: SpawnPlanError, s: CliStrings): string {
   switch (e.code) {
     case 'unsupported-harness': return s.sessSpawnUnsupported(e.harness)
     case 'resume-unsupported': return s.sessSpawnNoResume(e.harness)
+    case 'resume-id-unusable': return s.sessSpawnNoResumeId(e.harness)
     case 'model-unsupported': return s.sessSpawnNoModel(e.harness)
     case 'effort-unsupported': return s.sessSpawnNoEffort(e.harness)
     case 'unknown-effort': return s.sessSpawnBadEffort(e.harness, e.value, e.accepted)
@@ -1658,7 +1718,7 @@ const WHILE_WRITING_SPAWN_WINDOW_MS = 20_000
 const WHILE_WRITING_ACTIVITY_WINDOW_MS = 3_000
 
 /** One dense sampling run over this machine's own rows of `harness` — see `sampleProcessLinks`. */
-async function sampleLinksFor(harness: HarnessId, deadline: () => number, onlyIds?: ReadonlySet<string>): Promise<number> {
+async function sampleLinksFor(harness: HarnessId, deadline: () => number, onlyIds?: ReadonlySet<string>, follow = false): Promise<number> {
   const backend = await resolveBackend()
   // Other live processes of this harness join the collision guard; scanned ONCE per run, because a
   // full `/proc` scan every 100 ms is exactly the cost this loop must not have.
@@ -1673,6 +1733,7 @@ async function sampleLinksFor(harness: HarnessId, deadline: () => number, onlyId
     deadline,
     intervalMs: WHILE_WRITING_INTERVAL_MS,
     ...(onlyIds ? { onlyIds } : {}),
+    ...(follow ? { follow } : {}),
     otherPids: procs.filter(p => p.harness === harness && p.pid !== undefined).map(p => p.pid!),
   })
 }
@@ -1684,8 +1745,9 @@ function recordProcessLink(sid: string, conversationId: string, link: 'assigned'
 }
 
 /**
- * Burst-sample whenever the watcher reports a write under a `while-writing` harness's session tree.
- * One run per harness at a time: a write during a run EXTENDS it rather than starting another.
+ * Burst-sample whenever the watcher reports a write under a `while-writing` harness's session tree —
+ * the unlinked rows AND the linked rows that follow their process, so a kimi that moved to a new
+ * session (`/new`, even on a reopened row) is caught while it writes. One run per harness at a time: a write during a run EXTENDS it rather than starting another.
  * Installed once, by the first poller this process builds — the same process that runs the watcher
  * (`agentop server`); a process with no watcher simply never hears of any activity.
  */
@@ -1701,7 +1763,7 @@ function listenForTranscriptActivity(): void {
     if (running) { running.until = until; return }
     const burst = { until }
     activityBursts.set(harness, burst)
-    void sampleLinksFor(harness, () => burst.until)
+    void sampleLinksFor(harness, () => burst.until, undefined, true)
       .catch(() => 0)
       .finally(() => activityBursts.delete(harness))
   })
@@ -1890,6 +1952,8 @@ async function spawnManaged(req: {
   harness: HarnessId
   cwd: string
   attach: boolean
+  /** F2.0 — `web`: may run structured (`structured-route.ts`). Absent: a TUI, as always. */
+  origin?: 'web' | 'terminal'
   resumeId?: string
   prompt?: string
   model?: string
@@ -1982,10 +2046,12 @@ async function spawnManaged(req: {
   const ctx = buildSpawnContext({
       sessionId: id,
       cwd: req.cwd,
+      harness: req.harness,
       ...(await resolveContextTask(req.contextTaskId ?? req.taskId, req.contextSubtaskId, req.task)),
       ...(await resolveContextParent(req.parentSessionId ?? req.inherit?.parentConversationId ?? req.inherit?.parentSessionId)),
     })
   const logFile = managedProcessLogPath(req.harness, id, AGENTISTICS_DATA_DIR)
+  const offeredConversationId = randomUUID()
   const planned = planSpawn({
     harness: req.harness,
     cwd: req.cwd,
@@ -1997,7 +2063,7 @@ async function spawnManaged(req: {
     ...(effort ? { effort } : {}),
     // Offered for a FRESH session; `planSpawn` applies it only where the CLI accepts one and reports
     // back what it actually did. A resume ignores it — that conversation already has an id.
-    conversationId: randomUUID(),
+    conversationId: offeredConversationId,
   })
   if (!planned.ok) return { ok: false, message: explainSpawnError(planned.error, s) }
 
@@ -2044,6 +2110,13 @@ async function spawnManaged(req: {
       ...(planned.plan.initialPrompt
         ? { initialPrompt: { ...planned.plan.initialPrompt, ...(rulesFor(req.harness) ? { rules: rulesFor(req.harness)! } : {}) } }
         : {}),
+      // F2.0 — the same spawn in a structured driver's terms; tmux ignores it (`structured-backend.ts`).
+      structured: structuredIntentOf(req, {
+        model, effort, ctx, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } },
+        // The driver applies it only where its declaration says the protocol assigns ids; the row is
+        // linked by what the protocol then STATES (`onConversation`), never by this offer.
+        conversationId: offeredConversationId,
+      }),
     })
   } catch (e) {
     await abandon()
@@ -2063,6 +2136,10 @@ async function spawnManaged(req: {
       : died.message ? s.sessDiedAtSpawn(died.message) : s.sessDiedAtSpawnStatus(died.status)
     return { ok: false, message }
   }
+
+  // F2.0 — a STRUCTURED session got the opening context from its driver (its declared channel), so a
+  // first-message context left pending for the TUI must not be prepended to its first prompt again.
+  if (backend.chatOf?.(id) && pendingContextFor(planned.plan, ctx)) await patchSession(id, { pendingContext: null }).catch(() => {})
 
   // Give this harness's one exact-link chance its own several seconds, independent of whichever
   // client happens to be polling — see the header above `linkProcessConversationSoon`.
@@ -2193,20 +2270,12 @@ async function reopenEntries(
   // apart, so a set of five rows used to start five copies of one conversation. A row that RECORDED
   // which conversation it drives is exact and takes that one.
   const taken = new Set<string>()
+  const onDisk = await exactLinksOnDisk(entries, conversations)
   const plan = planTaskReopen({
     entries,
     liveIds: live,
     inUse,
-    conversationFor: entry => {
-      const own = entry.conversationId
-        ? conversations.find(c => c.sessionId === entry.conversationId)
-        : undefined
-      const conv = own ?? conversations.find(c =>
-        !taken.has(c.sessionId) && c.harness === entry.harness && c.cwd === entry.cwd)
-      if (!conv?.resumable) return null
-      taken.add(conv.sessionId)
-      return { sessionId: conv.sessionId, title: conv.title }
-    },
+    conversationFor: entry => reopenTargetFor({ entry, pool: conversations, onDisk, taken }),
   })
 
   // GATE THE WHOLE SET, before spawning any of it — see spawn-admission.ts. `plan.reopen.length` is
@@ -2316,22 +2385,14 @@ async function restorableSessions(fell: readonly ManagedSession[]): Promise<Rest
   if (fell.length === 0) return []
   const conversations = await loadConversations()
   const taken = new Set<string>()
+  const onDisk = await exactLinksOnDisk(fell, conversations)
 
   // The DECISION is the pure `planFellOffer`; this is the I/O around it — the conversation store,
   // and the claiming that stops four fallen rows in one repository being offered four copies of one
   // conversation.
   return planFellOffer({
     entries: fell,
-    conversationFor: m => {
-      const own = m.conversationId
-        ? conversations.find(c => c.sessionId === m.conversationId)
-        : undefined
-      const conv = own ?? conversations.find(c =>
-        !taken.has(c.sessionId) && c.harness === m.harness && c.cwd === m.cwd)
-      if (!conv?.resumable) return null
-      taken.add(conv.sessionId)
-      return { sessionId: conv.sessionId, title: conv.title }
-    },
+    conversationFor: m => reopenTargetFor({ entry: m, pool: conversations, onDisk, taken }),
   }).map(o => ({
     id: o.entry.id,
     label: o.label,
@@ -2723,6 +2784,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // to bring back, which is worse than never having gated it. An ordinary resume (no holder to
       // end, `plan.kind !== 'takeover'`) has no such offset and is gated normally.
       ...(plan.kind === 'takeover' ? { skipAdmission: true } : {}),
+      // F2.0 — a web reopen of a row that ran STRUCTURED runs structured again; anything else is a TUI.
+      ...(structuredReopenOrigin(req.origin, previous?.structuredDriver) ? { origin: 'web' as const } : {}),
     }, s, lang)
     if (spawned.ok) {
       // We handed this id to the CLI, so the new row KNOWS which conversation it drives — there
@@ -3358,6 +3421,43 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       }
     },
 
+    followSessions(receive, history) {
+      let previous: Set<string> | null = null
+      let lastFall: number | undefined
+      let first = true
+      let closed = false
+      let latest: ControlSessions | undefined
+      const stream = followFleet(`http://127.0.0.1:${PORT}/api/fleet/events?lang=${lang}&closed=0`, wire => {
+        const rows = wire.rows as ControlSession[]
+        const waiting = new Set(rows.filter(sessionNotify).map(r => r.id))
+        const rang = previous === null ? [] : [...waiting].filter(id => !previous!.has(id))
+        previous = waiting
+        const fall = (wire.fell as ControlSessions['fell'])?.atMs
+        latest = {
+          sessions: rows, attention: wire.attention as number, rang,
+          finishedTasks: wire.finishedTasks as string[],
+          unavailable: wire.unavailable as string | undefined,
+          fell: wire.fell as ControlSessions['fell'],
+          baseline: wire.baseline as ControlSessions['baseline'],
+          detachHint: latest?.detachHint,
+          restorable: fall === lastFall ? latest?.restorable : undefined,
+        }
+        receive(latest)
+        if (first || fall !== lastFall) {
+          // Crash offers include the host's dismissal and resumability rules. Read them once
+          // on connection and when the fall changes. Late reads contribute host metadata only.
+          void this.sessions?.().then(next => {
+            if (!closed && next && latest && lastFall === fall) {
+              latest = { ...latest, detachHint: next.detachHint, restorable: next.restorable, rang: [] }
+              receive(latest)
+            }
+          }).catch(() => { /* A later fallback retries host metadata; the pushed rows stay current. */ })
+        }
+        first = false; lastFall = fall
+      }, { history })
+      return { ...stream, close: () => { closed = true; stream.close() } }
+    },
+
     async sessions(): Promise<ControlSessions> {
       // `S()` rather than `this.lang`: the language is a closure variable `setLang` reassigns, and
       // reading it through `this` would break the moment a caller detached the method.
@@ -3387,17 +3487,17 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
           'sessions: readServerSnapshot',
           () => readServerSnapshot<SessionSnapshot>(lang),
         )
-      const poller = shared
+      const hub = shared
         ? null
-        : await timeFleetPhase('sessions: ensureSessionsPoller', ensureSessionsPoller)
+        : await timeFleetPhase('sessions: ensureSessionHub', ensureSessionHub)
       const snap = shared
-        ?? await timeFleetPhase('sessions: poller.poll', () => poller!.poll())
+        ?? await timeFleetPhase('sessions: hub.read', () => hub!.read())
       // Carried on every snapshot so the cockpit can state it permanently: a user who cannot get
       // out of a session is stranded in a buffer that hides their shell, and a line printed once
       // before the handover scrolls away the moment anything else happens.
       const detachHint = await timeFleetPhase(
         'sessions: detachHint',
-        async () => (await resolveBackend()).detachHint().catch(() => ''),
+        cachedDetachHint,
       )
       // Read on every snapshot rather than cached: the toggle and the verb both write it, and a
       // stale copy would leave a task the user just finished still heading a live section.
@@ -3465,6 +3565,10 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // The label comes from the registry so the sentence printed on the way in names what the user
       // selected, not an id they never typed.
       const managed = (await readRegistry()).find(r => r.id === id)
+      // F2.0b — attaching to a LIVE structured session IS "open in terminal": its child ends and the
+      // same conversation resumes as a TUI under this id first. A failure leaves the attach command
+      // saying, in a sentence, that there is no terminal to enter.
+      if (backend.toTerminal) await backend.toTerminal(id).catch(() => null)
       return {
         argv: backend.attachCommand(id),
         detachHint: await backend.detachHint(),
@@ -3563,6 +3667,23 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // The outcome is read off the screen, not assumed from the keystroke — see `sendNow.ts`.
       const outcome = await backend.sendQueuedNow(id)
       return { ok: sendNowDelivered(outcome), message: s.sessSendNowOutcome(outcome, id) }
+    },
+
+    async openInTerminal(id: string): Promise<ActionResult> {
+      const s = S()
+      const backend = await resolveBackend()
+      if (!backend.toTerminal) return { ok: false, message: s.sessTerminalNotStructured }
+      const out = await backend.toTerminal(id).catch(() => ({ ok: false as const, why: 'spawn-failed' as const }))
+      if (out.ok) return { ok: true, message: s.sessTerminalOpened }
+      if (out.why === 'no-resume') {
+        const row = (await readRegistry()).find(r => r.id === id)
+        return { ok: false, message: s.sessTerminalNoResume(row ? row.harness : id) }
+      }
+      return {
+        ok: false,
+        message: out.why === 'not-structured' ? s.sessTerminalNotStructured
+          : out.why === 'no-conversation' ? s.sessTerminalNoConversation : s.sessTerminalFailed,
+      }
     },
 
     async interruptSession(id: string): Promise<ActionResult> {
@@ -3966,13 +4087,21 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const live = (await backend.list().catch(() => [])).find(b => b.id === id)
       if (!live?.alive) return { ok: false, message: s.sessNotRunning }
 
-      const frame = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
-      const rules = rulesFor(managed.harness)
-      if (managed.harness === 'codex' && codexIsBlockingFrame(frame)) {
-        return { ok: false, message: s.sessCodexBlocked }
+      // F3.3 — a STRUCTURED session states its open request; a prompt then would race the answer the
+      // person is being asked for (the screen rules below read a TUI footer it never draws).
+      if (backend.attentionOf?.(id)) return { ok: false, message: s.sessPromptBlocked }
+
+      // The structured protocol states whether input is blocked. Send through its driver;
+      // Codex's TUI-only reliable paste method cannot address a structured process.
+      if (backend.chatOf?.(id)) {
+        return await backend.sendText(id, body)
+          ? { ok: true, message: s.sessPrompted(id) }
+          : { ok: false, message: s.sessSendFailed(id) }
       }
-      if (managed.harness !== 'codex' && rules && rules.approval.some(re => re.test(frame.join('\n')))) {
-        return { ok: false, message: s.sessPromptBlocked }
+
+      const frame = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
+      if (promptIsBlocked(managed.harness, frame)) {
+        return { ok: false, message: managed.harness === 'codex' ? s.sessCodexBlocked : s.sessPromptBlocked, failure: 'prompt' as const }
       }
 
       // A context HELD at spawn (no invisible channel, no first message then) rides in front of the
@@ -3989,15 +4118,12 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // startup/daemon prompt is explained as a question, while a dead pane gets the reopen path.
       const after = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
       const aliveAfter = (await backend.list().catch(() => [])).some(b => b.id === id && b.alive)
-      if (managed.harness === 'codex') {
-        const failure = classifyCodexSendFailure(after, aliveAfter)
-        return failure === 'prompt'
-          ? { ok: false, message: s.sessCodexBlocked, failure }
-          : { ok: false, message: s.sessSessionEnded, failure }
-      }
-      return aliveAfter
-        ? { ok: false, message: s.sessSendFailed(id), failure: 'ended' as const }
-        : { ok: false, message: s.sessSessionEnded, failure: 'ended' as const }
+      const failure = classifySendFailure(managed.harness, after, aliveAfter)
+      if (failure === 'prompt') return { ok: false, message: managed.harness === 'codex' ? s.sessCodexBlocked : s.sessPromptBlocked, failure }
+      // `ended` only for a pane that is gone: a live one that did not take the keys is unconfirmed.
+      return failure === 'unconfirmed'
+        ? { ok: false, message: s.sessSendUnconfirmed(id), failure }
+        : { ok: false, message: s.sessSessionEnded, failure }
     },
 
     /**
@@ -4016,6 +4142,20 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
 
       const managed = (await readRegistry()).find(m => m.id === id)
       if (!managed) return { ok: false, message: s.sessNoRegistryEntry }
+
+      // F2.0 — a STRUCTURED session's request is stated by its protocol and answered THROUGH ITS
+      // DRIVER: no screen is read and no keystroke is sent. The same refusals as the screen path.
+      const stated = backend.attentionOf?.(id)
+      if (stated !== undefined) {
+        const out = answerStructured(stated, choice, text)
+        if (!out.ok) {
+          return { ok: false, message: out.why === 'not-asking' ? s.sessNotAsking
+            : out.why === 'needs-choice' ? s.sessNeedsChoice(stated?.options.length ?? 0)
+            : out.why === 'needs-text' ? s.sessAnswerNeedsText : s.sessChoiceGone }
+        }
+        if (!backend.answer || !await backend.answer(id, out.answer)) return { ok: false, message: s.sessChoiceGone }
+        return { ok: true, message: s.sessAnswered(out.said) }
+      }
 
       const spec = approvalFor(managed.harness)
       if (!spec) return { ok: false, message: s.sessApproveUnknown(managed.harness) }
@@ -4271,6 +4411,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.subtaskId ? { contextSubtaskId: req.subtaskId } : {}),
         ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
         ...(req.force ? { force: true } : {}),
+        ...(req.origin ? { origin: req.origin } : {}),
       }, S(), lang).then(async r => {
         // NW-02: a session started for a BOARD task is filed there by id, not only named after it.
         if (r.ok && r.id && req.taskId) {
@@ -4304,15 +4445,9 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
  * It is the SAME poller `sessions()` uses, so the server still holds exactly one.
  */
 export async function readRawFleetSnapshot(): Promise<SessionSnapshot> {
-  const snap = await (await ensureSessionsPoller()).poll()
-  // The engine's view of the fleet (engine-api 1.4 `fleet`): only a FRESH reading says anything new —
-  // an `unavailable` snapshot is the previous one answered again. The hub plans nothing while no
-  // engine listens.
-  if (!snap.unavailable) {
-    const { fleetHub } = await import('./engine/fleet-hub')
-    fleetHub.observe(snap.sessions, snap.polledAtMs)
-  }
-  return snap
+  // The hub's snapshot: while anything keeps it ticking this is the last tick, never a poll of its own.
+  // The engine's fleet view observes every poll from inside the hub (`ensureSessionHub`).
+  return (await ensureSessionHub()).read()
 }
 
 /**

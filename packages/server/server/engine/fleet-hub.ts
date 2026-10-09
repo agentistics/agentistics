@@ -38,7 +38,7 @@ export interface FleetHubRow {
   harness?: HarnessId
   conversationId?: string
   activity?: SessionActivity
-  dialogOptions?: readonly { label: string }[]
+  dialogOptions?: readonly { label: string; freeText?: boolean }[]
   dialogUnreadable?: unknown
 }
 
@@ -58,7 +58,7 @@ export function dialogOf(row: FleetHubRow): FleetDialog | undefined {
     // reliably today; a count is. `unknown` says so rather than guessing.
     kind: 'unknown',
     optionCount: row.dialogOptions.length,
-    hasFreeText: row.dialogOptions.some(o => isFreeTextOption(row.harness, o.label)),
+    hasFreeText: row.dialogOptions.some(o => o.freeText === true || isFreeTextOption(row.harness, o.label)),
   }
 }
 

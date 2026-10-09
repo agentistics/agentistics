@@ -139,7 +139,6 @@ import { promptDismissedFor, promptExit, shouldShowToast, versionRefetchDue, typ
 import { consumeRestore, snoozeUpdate, startUpgrade, upgradeInFlight, useUpdateSnooze, useUpgradeFlow } from './lib/upgradeFlow'
 import { NayUpdateCard, type UpdateCardPlacement } from './components/nay/NayUpdateCard'
 import { UpgradeOverlay } from './components/UpgradeOverlay'
-import { UpdateFinale } from './components/UpdateFinale'
 import { bootWatchdog, fetchWithTimeout, loadErrorText, SMALL_TIMEOUT_MS, startupStripText, type BootVerdict, type LoadError } from './lib/startupLoad'
 import { bootReleased, scheduleBootRelease, setBootStatus, useBootHold } from './lib/bootSplash'
 
@@ -2355,8 +2354,6 @@ export default function AppLayout() {
   const [promptGone, setPromptGone] = useState<string | null>(null)
   const updateSnooze = useUpdateSnooze()
   const upgradeFlow = useUpgradeFlow()
-  const [finaleVersion, setFinaleVersion] = useState<string | null>(null)
-  const [finaleFrom, setFinaleFrom] = useState('')
   // First-run archive consent gate: undefined = prefs not loaded, null = loaded but
   // not yet chosen (blocks the app), ArchiveMode = chosen.
   const [archiveChoice, setArchiveChoice] = useState<ArchiveMode | null | undefined>(undefined)
@@ -2606,8 +2603,6 @@ export default function AppLayout() {
           const here = `${window.location.pathname}${window.location.search}${window.location.hash}`
           if (back.url !== here) navigate(back.url, { replace: true })
           if (back.scrollY > 0) window.setTimeout(() => window.scrollTo({ top: back.scrollY }), 120)
-          setFinaleFrom(back.from ?? '')
-          setFinaleVersion(info.current)
         })
         .catch(() => {})
     }
@@ -4745,9 +4740,8 @@ export default function AppLayout() {
         return entries.length > 0 ? <WhatsNewModal entries={entries} lang={lang === 'pt' ? 'pt' : 'en'} isMobile={isMobile} onClose={() => setWhatsNew(null)} /> : null
       })()}
 
-      {/* The one install flow's loader, and the finale on the bundle that arrived. */}
+      {/* The one install flow's loader. The finale on the bundle that arrived is `FinaleHost` (main.tsx): it must outlive this component's boot states. */}
       <UpgradeOverlay lang={lang} isMobile={isMobile} />
-      {finaleVersion && <UpdateFinale lang={lang} isMobile={isMobile} version={finaleVersion} from={finaleFrom} onDone={() => setFinaleVersion(null)} />}
 
       {/* Info Modal */}
       {infoModalIndex !== null && (

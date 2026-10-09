@@ -493,19 +493,25 @@ const ID_FLAGS = new Set([
  *  Returns undefined for a fresh session (no id on the command line yet), for a bare `--resume`
  *  (that opens the interactive picker), or for anything that is not a session id. */
 export function sessionIdFromArgv(argv: string[]): string | undefined {
+  // kimi 2.1.1 resumes by `session_<uuid>` (the bare uuid is "not found"), while the store keys on the
+  // bare uuid — the prefix is the directory name's, not part of the id.
+  const idOf = (v: string | undefined): string | undefined => {
+    const bare = v?.replace(/^session_/, '')
+    return bare && UUID_RE.test(bare) ? bare : undefined
+  }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!
     const eq = arg.indexOf('=')
     if (eq > 0) {
       if (ID_FLAGS.has(arg.slice(0, eq))) {
-        const v = arg.slice(eq + 1)
-        if (UUID_RE.test(v)) return v
+        const v = idOf(arg.slice(eq + 1))
+        if (v) return v
       }
       continue
     }
     if (ID_FLAGS.has(arg)) {
-      const v = argv[i + 1]
-      if (v && UUID_RE.test(v)) return v
+      const v = idOf(argv[i + 1])
+      if (v) return v
     }
   }
   return undefined

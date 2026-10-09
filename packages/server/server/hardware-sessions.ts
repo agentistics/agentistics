@@ -11,12 +11,22 @@
  * every dashboard poll would be the expensive way to learn nothing. What it needs is the registry
  * (which session is which), the backend (which of them is alive, and its pane pid) and `/proc`.
  *
+ * **The fleet poller's own snapshot is preferred when one is FRESH** (`hardwareFromSnapshot`). The poller
+ * already lists the sessions, reads the pane pids and samples `/proc` for every live row on every tick,
+ * so while anything keeps the SessionHub ticking (a `/sessions` tab, a fleet stream, the event producer)
+ * a hardware read costs no tmux call at all — it was a `list-sessions` + `list-panes` PER REQUEST,
+ * outside the hub, 33 a minute each with two tabs open (QA.F1.2 step 4; ENGINE.MAP P-01/P-02). It only
+ * PEEKS: reading the hub here would put the hardware page on the hub's demand lease and buy a full poll
+ * (a screen capture per session) every five seconds to learn what two cheap calls answer, so with no
+ * fresh snapshot the direct read below runs exactly as before.
+ *
  * Two states it must never confuse — the rule `sessions-host.ts` states and `liveEmptyNotice`
  * enforces on the dashboard: "nothing is running" and "this machine cannot tell". Every path that
  * cannot answer returns a REASON, and the reason is rendered as a sentence.
  */
 
 import type { HarnessId } from '@agentistics/core'
+import type { SessionSnapshot } from './sessions/sessions-host'
 import { calculateProcCpu, type ProcStatSample } from './hardware-pure'
 import { readProcRss, readProcStat } from './hardware-probe'
 import { procAvailable } from './sessions/proc-liveness'
@@ -63,6 +73,55 @@ export interface ManagedSessionsSnapshot {
 }
 
 /**
+ * How old the hub's snapshot may be and still answer a hardware read: two poll intervals, i.e. the hub
+ * is ticking. Older means nothing is keeping it ticking, and the direct read is the cheaper truth.
+ */
+export const HUB_SNAPSHOT_MAX_AGE_MS = 10_000
+
+/**
+ * PURE. The managed fleet's hardware, read off the fleet poller's snapshot — or `null` when that
+ * snapshot cannot answer (none yet, too old, or one the poller itself marked `unavailable`), and the
+ * caller reads the backend directly instead.
+ *
+ * A live row is one the backend hosts with a living command: `running` (registered) or `unregistered`
+ * (the backend has it, the registry forgot it) whose activity is not `exited` — the same rows the
+ * direct read keeps with its `b.alive` test.
+ */
+export function hardwareFromSnapshot(
+  snap: SessionSnapshot | null | undefined,
+  o: { nowMs: number; canReadProc: boolean; maxAgeMs?: number },
+): ManagedSessionsSnapshot | null {
+  if (!snap || snap.unavailable !== undefined) return null
+  if (o.nowMs - snap.polledAtMs > (o.maxAgeMs ?? HUB_SNAPSHOT_MAX_AGE_MS)) return null
+  const sessions: ManagedSessionHardware[] = []
+  for (const s of snap.sessions) {
+    if (s.status !== 'running' && s.status !== 'unregistered') continue
+    if (s.activity === 'exited') continue
+    const pid = s.pid !== undefined && Number.isFinite(s.pid) && s.pid > 0 ? s.pid : null
+    const cpuPercent = s.cpuPercent ?? null
+    const rssBytes = s.rssBytes ?? null
+    let metricsReason: HardwareSessionMetricsReason | undefined
+    if (!o.canReadProc) metricsReason = 'no-proc'
+    else if (pid === null) metricsReason = 'no-pid'
+    else if (cpuPercent === null) metricsReason = 'first-sample'
+    sessions.push({
+      id: s.id,
+      ...(s.harness ? { harness: s.harness } : {}),
+      ...(s.label ? { label: s.label } : {}),
+      ...(s.cwd ? { cwd: s.cwd } : {}),
+      ...(s.task ? { task: s.task } : {}),
+      alive: true,
+      pid,
+      cpuPercent: o.canReadProc ? cpuPercent : null,
+      rssBytes: o.canReadProc ? rssBytes : null,
+      ...(metricsReason ? { metricsReason } : {}),
+    })
+  }
+  sessions.sort((a, b) => (b.rssBytes ?? -1) - (a.rssBytes ?? -1))
+  return { sessions, procAvailable: o.canReadProc }
+}
+
+/**
  * Sample every LIVE managed session's CPU and RSS.
  *
  * `prevStats` is the caller's memory between calls: CPU is a delta over wall time, so the first
@@ -71,8 +130,13 @@ export interface ManagedSessionsSnapshot {
 export async function readManagedSessionHardware(
   prevStats: Map<number, ProcStatSample>,
   timestampMs = Date.now(),
+  /** The SessionHub's last snapshot, PEEKED (never read: see the header). */
+  hubSnapshot?: () => SessionSnapshot | null | undefined,
 ): Promise<ManagedSessionsSnapshot> {
   const canReadProc = await procAvailable()
+
+  const fromHub = hardwareFromSnapshot(hubSnapshot?.(), { nowMs: timestampMs, canReadProc })
+  if (fromHub) return fromHub
 
   let backend
   try {

@@ -23,27 +23,13 @@
  * fixed once. An output whose input is outside the read window stays the note it always was.
  */
 
-/** What the chat carries for one executed `!` command. */
-export interface ShellRun {
-  /** The command line exactly as the person ran it, without the `!`. */
-  command: string
-  /** One line naming what it did — `commandSummary`'s rule, so a `cd x && y` reads as `y`. */
-  summary: string
-  /**
-   * The output has been written to the transcript. `false` only on the NEWEST entry of the file,
-   * where the command is still running; an older input with no output is simply not known to have
-   * printed anything, and says nothing either way (`output` absent, `running` false).
-   */
-  running: boolean
-  output?: ShellOutput
-}
+import type { ShellOutput, ShellRun } from '@agentistics/core'
+import { commandSummary } from './shell-writes'
 
-export interface ShellOutput {
-  stdout: string
-  stderr: string
-  /** Either stream was cut to its last `MAX_SHELL_OUTPUT` characters. */
-  truncated?: boolean
-}
+/** The shapes live in core beside `ChatTurn` (engine-api 1.9); re-exported so nothing that imports them from here moves. */
+export type { ShellOutput, ShellRun } from '@agentistics/core'
+
+
 
 /**
  * The most of each stream the chat carries. A `!cat` of a large file is a legitimate thing to run,
@@ -106,4 +92,48 @@ export function bashEntryText(e: Record<string, unknown>): string | null {
   if (e.type !== 'user' || e.isMeta === true) return null
   const c = (e.message as Record<string, unknown> | undefined)?.content
   return typeof c === 'string' ? c : null
+}
+
+/*
+ * `!` in the OTHER harnesses (P-24). Each one records the person's shell command in its own shape, and
+ * unlike Claude's the command and its output arrive in ONE entry, so there is no pairing to do.
+ *
+ * MEASURED 2026-10-09: codex 0.161 writes a `user` message `<user_shell_command><command>…</command>
+ * <result>Exit code: N / Duration: … / Output: …</result>` (no stderr split — the output is the merged
+ * stream), gemini 0.63.0 writes a `user` message `I ran the following shell command:\n```sh\n…\n```
+ * \n\nThis produced the following result:\n```\n…\n```` (also merged). Both are rebuilt into the
+ * `ShellRun` the Claude path produces, with the `!line` as the turn's text so the composer's echo
+ * reconciles against it. A merged stream is carried as `stdout`: nothing here can honestly say which
+ * half was stderr, and inventing a split is the expensive direction.
+ */
+
+const CODEX_SHELL_RE = /^<user_shell_command>\s*<command>\n?([\s\S]*?)\n?<\/command>\s*(?:<result>([\s\S]*?)<\/result>)?\s*<\/user_shell_command>$/
+const CODEX_RESULT_RE = /^\s*Exit code:\s*(-?\d+)\s*\n\s*Duration:[^\n]*\n\s*Output:\n?([\s\S]*)$/
+const GEMINI_SHELL_RE = /^I ran the following shell command:\n```[a-z]*\n([\s\S]*?)\n```\n\nThis produced the following result:\n```\n?([\s\S]*?)\n?```\s*$/
+
+function runOf(command: string, raw: string | null): ShellRun {
+  const cmd = command.trim()
+  const out = raw === null ? null : capTail(cleanShellText(raw))
+  return {
+    command: cmd,
+    summary: commandSummary(cmd.split('\n')[0]!),
+    running: false,
+    ...(out ? { output: { stdout: out.text, stderr: '', ...(out.cut ? { truncated: true } : {}) } } : {}),
+  }
+}
+
+/** A codex `<user_shell_command>` envelope as a `ShellRun`, or `null` when the text is not one. */
+export function parseCodexShell(text: string): ShellRun | null {
+  const m = CODEX_SHELL_RE.exec(text.trim())
+  if (!m || m[1]!.trim() === '') return null
+  if (m[2] === undefined) return runOf(m[1]!, null)
+  const r = CODEX_RESULT_RE.exec(m[2])
+  return runOf(m[1]!, r ? r[2]! : m[2])
+}
+
+/** A gemini "I ran the following shell command" message as a `ShellRun`, or `null` when it is not one. */
+export function parseGeminiShell(text: string): ShellRun | null {
+  const m = GEMINI_SHELL_RE.exec(text.trim())
+  if (!m || m[1]!.trim() === '') return null
+  return runOf(m[1]!, m[2] ?? '')
 }

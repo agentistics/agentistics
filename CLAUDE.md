@@ -295,19 +295,45 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          after `agentop session open` put it back. Negatives expire
   │                          (`NEGATIVE_TTL_MS`); a MISSING directory never spawns git at all.
   │                          **The conversation link is recorded at SPAWN wherever the CLI accepts an
-  │                          id** — `SpawnSpec.assignId`, `claude --session-id <uuid>` and
-  │                          `copilot --session-id <uuid>`, both verified by running them and
-  │                          checking that the file the adapter reads back carries that very id.
+  │                          id** — `SpawnSpec.assignId`, `claude --session-id <uuid>`,
+  │                          `copilot --session-id <uuid>` and `gemini --session-id <uuid>`, each
+  │                          verified by running it and checking that the file the adapter reads back
+  │                          carries that very id.
   │                          Before this it existed only for a REOPENED row plus, for claude alone,
   │                          whatever `harness-sessions.ts` could read out of `~/.claude/sessions/
   │                          <pid>.json` while the process lived — so a session started with the
   │                          cockpit closed had nothing but the harness-and-directory guess, which
-  │                          gives every session of one repository the same conversation. Gemini
-  │                          accepts a UUID and is deliberately EXCLUDED: its id in this product is
-  │                          synthetic (`${dir}/${file}`), so a recorded UUID would resolve to
-  │                          nothing while LOOKING like an exact link. Where no link can ever exist
-  │                          (codex, kimi, gemini) `conversationLinkable` is false and the row
-  │                          SAYS so. **AGY IS NO LONGER ONE OF THEM.** It has no assign flag —
+  │                          gives every session of one repository the same conversation.
+  │                          **GEMINI HAS TWO IDS and the bridge is explicit (F0.2, measured on
+  │                          0.63.0, 2026-10-09).** The store keys a chat by the synthetic
+  │                          `${project}/${file}` (the files had no id of their own when the adapter
+  │                          was written, and re-keying would duplicate every stored session), but
+  │                          `--session-id <uuid>` makes the chat's HEADER `sessionId` that uuid and
+  │                          `--resume <uuid>` reopens it (the CLI documents "latest | index"; its own
+  │                          refusal text lists `{uuid}` and a live reopen recalled the earlier turn —
+  │                          the index is not used because it shifts when another session is born).
+  │                          So `SessionMeta.native_session_id` (the header's id) is a LOOKUP ALIAS,
+  │                          never a second key: `findConversation`/`resumeIdOf` (conversations.ts)
+  │                          answer to either id and offer the one the CLI takes,
+  │                          `withNativeAliases` (native-id-alias.ts) does the same for the task
+  │                          board's metas map without making the map iterate a session twice, and
+  │                          `SpawnSpec.resumeIdOk` makes `planSpawn` REFUSE (`resume-id-unusable`) an
+  │                          old synthetic id instead of launching a CLI that fails unseen.
+  │                          **A REOPEN IS NOT AN APPEND**: interactive `--resume` writes the new
+  │                          turns to a NEW headerless file (`session-<minute>-[N-]<uuid8>.jsonl`) and
+  │                          leaves the original with a `$set.sessionId` patch and a snapshot of its
+  │                          own turns (a headless `-p --resume` was seen appending in place). A
+  │                          conversation is therefore a FAMILY of files, grouped by the pure
+  │                          `gemini-family.ts` (suffix = hint, header = proof; a headerless file
+  │                          joins a family only when exactly ONE headed conversation in the
+  │                          directory carries its suffix) and read by `gemini-family-io.ts`; the
+  │                          adapter folds a family into ONE session keyed by its FIRST file (a
+  │                          never-reopened chat keeps the exact id it always had — identical on
+  │                          this machine's 24 real chats), the transcript resolver returns the
+  │                          NEWEST member and the reader concatenates the family, deduplicating the
+  │                          repeated snapshot by message id. Where no link can ever exist
+  │                          (opencode, which has no spawn spec) `conversationLinkable` is false and
+  │                          the row SAYS so. **AGY IS NO LONGER ONE OF THEM.** It has no assign flag —
   │                          measured against agy 1.1.27 on 2026-09-08, `agy --conversation
   │                          <fresh-uuid>` answers `warning: conversation "…" not found` and creates
   │                          one under an id of its OWN — and no session record; and the
@@ -338,6 +364,25 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          time-and-directory claim. STATED LIMIT: it is a `/proc` read, so off
   │                          Linux there is no link and `chat-web.ts` says "this session has no linked
   │                          conversation yet", which is true.
+  │                          **THE LINK NOW CARRIES THE REOPEN AND THE PROJECT PATH TOO** (AGY.REOPEN,
+  │                          2026-10-09). An exact link was not enough to REOPEN: `claimResume` required
+  │                          the conversation in the store pool, and `loadConversations` drops a record
+  │                          with no `cwd`. Measured: 32 of 75 agy records in the real store had
+  │                          `project_path: ""`. Two fixes. (1) `reopen-target.ts` (pure) is the ONE
+  │                          reopen resolver — it replaced FOUR copies (`claimResume`, the task reopen
+  │                          and the fell offer in cli-start, `agentop session open`), three of which
+  │                          still fell back to the directory guess for a row that KNEW its id. A row
+  │                          with an exact id the store lacks reopens from the link itself when its
+  │                          harness resumes by id, the row has a `cwd`, and the harness's OWN transcript
+  │                          reader finds that id on disk (`reopen-link.ts`, IO, found remembered / miss
+  │                          expires) — so `claude --session-id` that died before writing anything is
+  │                          not offered a reopen that can only fail. Every harness, not agy only.
+  │                          (2) the agy adapter reads `project_path` from history, then agentop's own
+  │                          registry (`managedAntigravityCwds`, conversationId -> cwd of the newest
+  │                          row; the MAP, not the file mtime, joins the cache fingerprint because the
+  │                          heartbeat moves the mtime every minute), then the `Project folder:` agentop
+  │                          wrote into the context block — and that block is never the `first_prompt`.
+  │                          The frozen replay (`integrations/antigravity`) still reads history only.
   │                          **CODEX AND KIMI RIDE THE SAME ROUTE, read by NAME** (P-17, measured
   │                          2026-10-08 against codex 0.161.0 / kimi 0.41.0, `process-transcript.ts`).
   │                          codex's NATIVE binary — two levels under the node shim tmux reports as
@@ -487,17 +532,10 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          `commandSummary`**, never a first-line truncation: on a real codex
   │                          rollout five consecutive chips read `cd /home/…/embark`, saying where
   │                          the work happened and never what it was.
-  │                          **GEMINI HAS NO READER AND MAY NOT GET ONE**, and that is a LINK fact,
-  │                          not a format one. A reader is only ever offered a `conversationId`, and
-  │                          only a harness with `assignId` or an id-taking `resume` can ever have
-  │                          one — claude and copilot have `assignId`; codex, kimi and agy have
-  │                          `resume`; **gemini has neither** (`-r, --resume` takes "latest" or an
-  │                          index, and `--session-id` is excluded because gemini's id here is
-  │                          synthetic). So an entry for it would be unreachable code plus a claim
-  │                          the product cannot honour; `conversationBlind` already says so on the
-  │                          row and `SessionsPage` hides the chat tab. Its format WAS measured and
-  │                          the finding is recorded in `harness-transcript.ts` so nobody spends it
-  │                          twice: a patch log, not one message per line. See docs/session-manager.md
+  │                          **GEMINI HAS A READER SINCE F0.2** — it was withheld for a LINK fact
+  │                          (a reader is only ever offered a `conversationId`, and gemini could
+  │                          neither be handed one nor report one), which `assignId` + `resume` by
+  │                          uuid removed; see the two-ids paragraph above. See docs/session-manager.md
   │                          **THE PER-SESSION UTILITY SHELL is not a session, and the separation
   │                          is structural** (`shell-spec.ts` / `shell-gate.ts` / `shell-store.ts` /
   │                          `shell-backend.ts` / `shell-web.ts` / `shell-terminal.ts` /
@@ -730,6 +768,54 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          may approve anything for anyone. `events-frontier.test.ts` asserts it
   │                          over the module SOURCE, so a field named `action` or an imperative
   │                          sentence fails the build. See docs/session-events.md
+  ├── sessions/session-hub.ts → **ONE fleet poller per process** (ENGINE.MAP F1.2, P-01/P-02/P-03/
+  │                          P-08). `ensureSessionHub()` (cli-start.ts) wraps the poller: SINGLE FLIGHT
+  │                          (a poll never runs twice at once — its frame-digest memory must move one
+  │                          poll at a time), TIMER-DRIVEN ON DEMAND (ticks every `SESSION_POLL_MS`
+  │                          while something subscribes — the in-server event producer, an
+  │                          `/api/fleet/events` stream, a chat waiting for its link — or a reader asked
+  │                          within the 30 s lease; with no demand it polls NOTHING), and `refresh()`
+  │                          after an act (`kickFleet`, a poll that STARTS after the act). `/api/fleet`,
+  │                          `/api/fleet/snapshot`, the chat streams, a send's `record()` and the event
+  │                          producer all READ it — the producer no longer runs a poller of its own in
+  │                          the server (`events/daemon.ts` `startHubProducer`; `agentop watch` /
+  │                          `events run` keep theirs). Never add a second `createSessionsPoller` in the
+  │                          server process: two pollers disagree about working/waiting by construction.
+  │                          `fleet-events.ts` is the PUSH (`GET /api/fleet/events`: a `snapshot` of the
+  │                          requested view, then `delta` row upserts/removes; closed rows windowed by
+  │                          `closed=`, older ones paged by `GET /api/fleet/closed`); its planner is
+  │                          pure. A delta carries only rows whose content changed — `cpuPercent`/
+  │                          `rssBytes` are compared with HYSTERESIS against what that stream last sent
+  │                          (≥ 5 points / ≥ 64 MiB), or a real fleet re-sends every live row every tick —
+  │                          and `meta.closedVersion` (a hash of the PAGED closed rows) tells a client to
+  │                          re-ask for its open pages. A kill is an `exited` UPSERT (the row stays,
+  │                          reopenable); `remove` is for a row that left the fleet. The poller measures
+  │                          hardware ONLY for a row with a living command (an exited row used to borrow
+  │                          a neighbour's pid by directory). A fresh `read()` never waits for a poll in
+  │                          flight. `/api/hardware-resources` PEEKS the hub's last snapshot
+  │                          (`processSessionHub()`, never `read()` — that would buy a full poll per
+  │                          GET) and falls back to its own two tmux calls only when none is fresh. The
+  │                          adapter chat stream reads its ONE row off the snapshot
+  │                          (`adapterRowOf`), never `host.sessions()` (a whole-fleet build per tick per
+  │                          stream). `adapter-chat.ts` serves the chat from engine-api 1.9 `HarnessChat`
+  │                          behind the experimental `adapter-chat` row (`AGENTISTICS_ADAPTER_CHAT=1`) —
+  │                          same `chat`/`chat-delta` events + `live`/`state`, `source: 'adapter'`, and
+  │                          the SAME post-processing (`finishChatRead`); an error closes the stream and
+  │                          refuses that conversation for 5 min so the client lands on the legacy one.
+  │                          Flag off, the chat routes are the legacy readers byte for byte.
+  │                          **With the flag on, the HARNESS states its own turns** (`adapter-state.ts`
+  │                          + `adapter-state-host.ts`, the poller's `adapterState` option): every live,
+  │                          linked row whose harness declares `state` in its file (claude, codex,
+  │                          copilot, kimi, antigravity) is followed through the engine's channel, its
+  │                          `state` deltas ARE the row's activity — believed at once (`exact` in
+  │                          `confirmActivities`), and a change makes the hub poll NOW — and its screen
+  │                          is read only where it still says something (`planScreen`): never while
+  │                          idle (a dialog lives inside a turn), while working only if the file
+  │                          cannot state a pending dialog (claude, codex, agy), always when the file
+  │                          says a person is waited on (the options are read off the screen), every
+  │                          `SCREEN_REFRESH_MS` (2 min) for the mode chip/limit banner/tail, and on
+  │                          the poll after an act (`kickFleet(id)`). Gemini (no state declared),
+  │                          opencode (no chat), unlinked rows and the flag off: the screen, unchanged.
   ├── sessions/fleet-baseline.ts → the IO boundary in front of the pure `session-profile.ts`: read
   │                          the consolidate store, compute the baseline, hold it for 5 minutes and
   │                          share the SCAN IN FLIGHT. `/api/fleet` is polled every five seconds by
@@ -1339,6 +1425,14 @@ failed step can never increment `tool_errors` twice. `files_modified` is the cou
 `TargetContent` (hence `gitLines: true` — these are edit deltas, not `git diff`; agy stores no git
 metadata).
 
+**Structured mode (F3.2).** A web-born agy session runs `agy -p --input-format stream-json
+--output-format stream-json` (engine driver `agy-stream-json`, `docs/f2-structured-backend.md`): the
+conversation id, live text and turn ends come from the stream; print mode has NO permission or question
+events (a tool needing approval is soft-denied and shown as refused), no interrupt (a cancel ends the child
+and the next prompt resumes with `--conversation`), and no system-prompt channel (the opening context is a
+hidden first message). The agentistics MCP is registered globally with `agy mcp add` (`agy-mcp.ts`). The
+"No chat driver" note below describes the older `chat-drivers/` path, which this does not touch.
+
 **No chat driver.** `chat-drivers/` spawns a CLI in non-interactive *streaming* mode and needs a
 machine-readable event stream (`-o stream-json`), a session id and MCP registration. `agy` offers
 `--print` but no structured output format, no session-id emission and no documented MCP config, so a
@@ -1384,11 +1478,14 @@ no title, so every gemini session was listed with a blank name.
 
 **Gemini HAS a chat reader** (`sessions/gemini-chat.ts`, pure). It was `null` in
 `HARNESS_TRANSCRIPTS` for a long time and the reason was a LINK fact, not a format one — a reader is
-only ever offered a `conversationId`, and gemini has no `assignId` and no id-taking `resume`. What
-made it reachable is that `planFirstSightingClaims` deliberately includes gemini and claims the
-**synthetic** id the store is already keyed on (`${dirName}/${fileBase}`), which is not a UUID
-resolving to nothing but the chat file's own path. That id is therefore treated as untrusted input
-by `resolve`: exactly two segments, no traversal, or it answers `null`. `info` and `error` records
+only ever offered a `conversationId`, and gemini then had no `assignId` and no id-taking `resume`
+(it has both since F0.2: `--session-id <uuid>` / `--resume <uuid>`). Two ids reach `resolve`: the
+**synthetic** id the store is keyed on (`${dirName}/${fileBase}`, which `planFirstSightingClaims`
+claims and which is the chat file's own path) and the header **uuid** agentop assigned. The first is
+treated as untrusted input — exactly two segments, no traversal, or it answers `null`; the second is
+found by the file name's `-<uuid8>` suffix and CONFIRMED by the header, memoized with the shared
+miss-TTL rule. A reopened conversation spans several files (see the paragraph on the two ids), so
+`resolve` returns the newest and `read` concatenates the family. `info` and `error` records
 are the harness talking about itself and are dropped rather than given a speaker, and the
 `<session_context>` block gemini writes under the USER role is injected context, not something the
 person said.
@@ -2054,6 +2151,18 @@ Claude Code deletes session transcripts (`~/.claude/projects/**/*.jsonl`) older 
   (authenticated) returns `EngineStatus`.
 - **A failed or mismatched engine never takes the product down** — it is logged and the host runs as
   a community build. `AGENTISTICS_ENGINE=0` switches a present engine off.
+- **The chat channel (engine-api 1.9, ENGINE.MAP F1.1)** — `HarnessIntegration.chat` (or
+  `chatAbsent`, the one sentence why not) serves a conversation's turns, state and in-flight text
+  from ONE incremental cursor per source, NEVER journaled: `resolve(ref)` → `ChatSourceRef | null`,
+  `follow(src, max, on)` → unsubscribe, deltas `window | append | grow | live | state | fork`
+  (`HarnessChatDelta` — core already has an unrelated `ChatDelta`). Each harness DECLARES which of
+  state / attention / live / fork it can say (`ChatDeclaration`); the host never assumes.
+  `applyHarnessChatDeltas` is the one receiver rule. The turn is core's `ChatTurn`
+  (`packages/core/src/chatTurn.ts`, moved from `server/sessions/chat-turn.ts`), mirrored as
+  `EngineChatTurn` and kept EQUAL by `engine-api-mirrors.test.ts`. The engine's copies of the
+  `sessions/*-chat.ts` / `chat-tail.ts` readers are held byte-equal to these by the engine's chat
+  differential, so a fix to a reader here must land in the engine too (its differential fails until it
+  does). The host switch (`adapter-chat` flag) is F1.2.
 - `engine/in-tree.ts` is TRANSITIONAL: the integrations and the provider verb still live in this tree
   and are packaged behind the contract there, so nothing else in the host imports them. When that
   code moves out, the file goes and the generator falls back to the null slot on its own.
@@ -2882,6 +2991,16 @@ by the compiler.
   unverified poster keeps its free-text `author` and never becomes a recipient. A request carrying a
   session identity can never send (`session_fanout`, 403) — only the person delivers to N. Sessions
   may OPEN a thread only for a `handback` or a `block`.
+  **The proof must survive a harness that FILTERS its MCP's environment**: codex hands an MCP only
+  `HOME LANG LC_ALL LOGNAME PATH SHELL TERM USER` (measured, 0.161.0), so `AGENTOP_MANAGED_ID` never
+  arrived and every `agentistics_session_message` from a Codex session was `unverified_sender`.
+  `session-proof.ts` reads the id (and a relocated `AGENTISTICS_DIR`) from the nearest ANCESTOR's
+  `/proc/<pid>/environ` when its own environment lacks it — no registration change, no weaker proof.
+  **Delivery tells three failures apart** (`prompt-guard.ts`, per harness): `prompt` (a dialog is open,
+  `target_blocked` 409), `ended` (the pane is gone), `unconfirmed` (alive, the submit could not be
+  shown — `not_confirmed`); `ended` is never said of a live pane. Codex's composer is the LAST `›` on
+  the screen (a delivered message is echoed in the history with the same marker) and the screen's
+  bottom — never a `NN% left` line, which codex 0.161 dropped — is the anchor for dialogs.
 - **New `/api/tasks` sub-routes ride the existing `capability-guard.ts` entries** (`/api/tasks`,
   `/api/task-files` → `localShell`). `GET /api/tasks/next` and `/api/tasks/activity` are matched
   BEFORE the generic `<ref>` GET, or they resolve as task references and 404.
@@ -3608,3 +3727,13 @@ an update the first load announces "Updated to vX — see what's new" and opens 
 file (`whatsNew/select.ts` picks every version between the one last seen and the running one). Only
 changes a person can notice belong there — `features` and `fixes`, 3–8 short plain-language lines each,
 PT and EN, no refactors/tests/internal items. A version with no entry announces nothing.
+
+
+## Clients on the adapter seam (F1.3)
+
+See `docs/f1-3-clients.md`. Browser, VS Code and cockpit consume fleet snapshots/deltas through
+core's `fleetStream`; unhealthy SSE restores their poll fallback. Do not add an independent
+fleet poll to a surface. History is read from `/api/fleet/closed` when requested.
+`source: 'adapter'` chat consumes structured `live`/`state`; it never opens a terminal stream.
+Local dashboard patches are versioned and flag-gated; a central keeps its scoped GET path.
+Never put unscoped team data on the shared `/api/events` broadcast.

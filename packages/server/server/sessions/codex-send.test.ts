@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { classifyCodexSendFailure, codexIsBlockingFrame, planCodexSend } from './codex-send'
+import { classifyCodexSendFailure, codexComposerInput, codexIsBlockingFrame, planCodexSend } from './codex-send'
 
 const idle = ['› Find and fix a bug in @filename', '', 'gpt-5.4-mini low · 100% left · /tmp/scratchpad']
 const update = [
@@ -14,6 +14,10 @@ describe('Codex send decision', () => {
   test('a failed write names the prompt when the pane is still asking', () => {
     expect(classifyCodexSendFailure(update, true)).toBe('prompt')
     expect(classifyCodexSendFailure(idle, false)).toBe('ended')
+  })
+  test('a LIVE pane that is not on a dialog is unconfirmed, never ended', () => {
+    expect(classifyCodexSendFailure(idle, true)).toBe('unconfirmed')
+    expect(classifyCodexSendFailure(update, false)).toBe('ended')
   })
   test('real update prompt is blocked before any paste', () => {
     expect(codexIsBlockingFrame(update)).toBe(true)
@@ -63,5 +67,98 @@ describe('Codex send decision', () => {
       ...idle,
     ]
     expect(codexIsBlockingFrame(scrollback)).toBe(false)
+  })
+})
+
+// A message Codex has just taken is drawn in the history with the SAME `›` marker the composer uses,
+// directly above an empty composer. Measured on codex 0.160.1 / 0.161.0.
+const SENT = '[from session child-1 · handback]\nfinished the migration, all green'
+const echoed = [
+  '• Done with the previous task.',
+  '',
+  '› [from session child-1 · handback]',
+  '  finished the migration, all green',
+  '',
+  '• Working (2s • esc to interrupt)',
+  '',
+  '› Find and fix a bug in @filename',
+  '',
+  'gpt-5.4-mini low · 100% left · /tmp/scratchpad',
+]
+const stillTyped = [
+  '• Done with the previous task.',
+  '',
+  '› [from session child-1 · handback]',
+  '  finished the migration, all green',
+  '',
+  'gpt-5.4-mini low · 100% left · /tmp/scratchpad',
+]
+
+describe('Codex composer vs history echo (the false "session ended")', () => {
+  test('the composer input is the LAST marker on the screen, down', () => {
+    expect(codexComposerInput(echoed)).toEqual(['› Find and fix a bug in @filename', '', 'gpt-5.4-mini low · 100% left · /tmp/scratchpad'])
+    expect(codexComposerInput(stillTyped)[0]).toBe('› [from session child-1 · handback]')
+  })
+  test('a delivered message echoed in the history is NOT read as still typed', () => {
+    expect(planCodexSend('after-enter', echoed, SENT)).toBe('delivered')
+    expect(planCodexSend('after-retry', echoed, SENT)).toBe('delivered')
+  })
+  test('text really still in the composer after the retry is a failed verification', () => {
+    expect(planCodexSend('after-enter', stillTyped, SENT)).toBe('retry-enter')
+    expect(planCodexSend('after-retry', stillTyped, SENT)).toBe('failed')
+  })
+  test('a stale chip echoed in the history does not satisfy the next paste', () => {
+    const staleChip = ['› [Pasted Content 900 chars]', '', '• Working (1s)', '', '› Find and fix a bug in @filename', '', 'gpt-5.4-mini low · 100% left · /tmp']
+    expect(planCodexSend('after-paste', staleChip, 'the next message')).toBe('wait')
+  })
+  test('with no marker at all the bottom of the screen is the area', () => {
+    const noMarker = ['plain', 'finished the migration, all green', 'gpt-5.4-mini low · 100% left · /tmp']
+    expect(planCodexSend('after-enter', noMarker, SENT)).toBe('retry-enter')
+  })
+})
+
+// codex 0.161.0, captured live (fixtures/codex-0.161.0/README.md): no `NN% left` status line — the
+// only "% left" on screen is a rate-limit warning ABOVE the composer.
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+const live = (name: string) => readFileSync(join(import.meta.dir, 'fixtures/codex-0.161.0', `${name}.txt`), 'utf8').split('\n')
+const SENT_LIVE = '[from session livesender · handback]\nreply with exactly: ok'
+
+describe('codex 0.161.0 (live captures)', () => {
+  test('an idle screen is not blocked and takes a paste', () => {
+    expect(codexIsBlockingFrame(live('idle'))).toBe(false)
+    expect(planCodexSend('before-paste', live('idle'), SENT_LIVE)).toBe('paste')
+  })
+  test('the pasted text is seen in the composer even though there is no status line', () => {
+    expect(planCodexSend('after-paste', live('idle'), SENT_LIVE)).toBe('wait')
+    expect(planCodexSend('after-paste', live('typed'), SENT_LIVE)).toBe('enter')
+    expect(planCodexSend('after-enter', live('typed'), SENT_LIVE)).toBe('retry-enter')
+    expect(planCodexSend('after-retry', live('typed'), SENT_LIVE)).toBe('failed')
+  })
+  test('a delivered message (echo in the history, empty composer) is delivered, working or idle', () => {
+    expect(planCodexSend('after-enter', live('delivered'), SENT_LIVE)).toBe('delivered')
+    expect(planCodexSend('after-enter', live('working'), SENT_LIVE)).toBe('delivered')
+    expect(codexIsBlockingFrame(live('delivered'))).toBe(false)
+  })
+  test('a failed write on a live pane here is unconfirmed, not ended', () => {
+    expect(classifyCodexSendFailure(live('typed'), true)).toBe('unconfirmed')
+  })
+})
+
+// codex 0.161.0 while a turn is RUNNING (captured live, QA.CODEX.SEND): Enter queues the message
+// ("Messages to be submitted after next tool call", each as `↳ text`) and the composer empties, so
+// the queued copy above the composer must never read as "still typed".
+describe('codex 0.161.0 busy (Enter queues)', () => {
+  const A = 'queued message A'
+  test('short text pasted while working is seen in the composer', () => {
+    expect(planCodexSend('after-paste', live('busy-typed'), A)).toBe('enter')
+  })
+  test('after Enter the message sits in the queue block, composer empty -> delivered', () => {
+    expect(planCodexSend('after-enter', live('busy-queued'), A)).toBe('delivered')
+    expect(planCodexSend('after-retry', live('busy-queued'), A)).toBe('delivered')
+    expect(codexIsBlockingFrame(live('busy-queued'))).toBe(false)
+  })
+  test('a long message queued (truncated with …) is delivered, not retried', () => {
+    expect(planCodexSend('after-enter', live('busy-chip-after-enter'), 'long message line. '.repeat(40))).toBe('delivered')
   })
 })

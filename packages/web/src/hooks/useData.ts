@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { activeInDays, activeInWindow, dayKey, daysBetween, expandHours, MAX_RANGE_DAYS, sliceSession, type DayUsage } from '../lib/sessionDaySlice'
 import type { AppData, Filters, DateRange, AgentInvocation, SurfaceHarnessId, SessionMeta, TokenBreakdown } from '@agentistics/core'
-import { calcStreak, calcCost, canonicalProjectPath, cutSessionUsage, sessionModelUsage, sessionCostUSD, unpricedTokens, getModelPrice, MODEL_PRICING, withoutHiddenNative, surfaceHarnesses, NATIVE_HARNESS_ID, HARNESS_CAPABILITIES, filterByUsers, filterByHarnesses, filterByTeams, filterByMachines, resolveMachineCacheScope, distinctHarnesses, mergeStatsCaches, repoShortName, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
+import { applyDataPatch, type DataPatch, calcStreak, calcCost, canonicalProjectPath, cutSessionUsage, sessionModelUsage, sessionCostUSD, unpricedTokens, getModelPrice, MODEL_PRICING, withoutHiddenNative, surfaceHarnesses, NATIVE_HARNESS_ID, HARNESS_CAPABILITIES, filterByUsers, filterByHarnesses, filterByTeams, filterByMachines, resolveMachineCacheScope, distinctHarnesses, mergeStatsCaches, repoShortName, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
 import { subDays, isAfter, isBefore, parseISO, format, differenceInCalendarDays, addDays, getDay } from 'date-fns'
 import { makeTagFilter, type TagDef } from '../lib/tagMatch'
-import { subscribeEvent } from '../lib/eventStream'
+import { eventStream, subscribeEvent } from '../lib/eventStream'
 import { isUsableDataCache } from '../lib/dataCache'
 import { acceptPayload, classifyLoadError, DATA_TIMEOUT_MS, fetchWithTimeout, LIVENESS_MS, LIVENESS_TIMEOUT_MS, livenessStep, partialPollMs, retryDelayMs, dataUrl, SLIM_FOLLOWUP_MS, type LoadError, type StartupStripState } from '../lib/startupLoad'
 import { cacheFiguresOf } from '../lib/cacheFigures'
@@ -394,6 +394,9 @@ export function useData() {
   const [liveUpdates, setLiveUpdates] = useState(true)
   const [updateInterval, setUpdateInterval] = useState(30)
   const streamRef = useRef<EventSource | null>(null)
+  const refreshFlightRef = useRef({ inFlight: false, pending: false })
+  const patchEpochRef = useRef(0)
+  const dataRevisionRef = useRef<string | null>(null)
   const dataRef = useRef<AppData | null>(data)
   const pollRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; partial: number; failures: number }>({ timer: null, partial: 0, failures: 0 })
   const refreshRef = useRef<() => Promise<void>>(async () => {})
@@ -428,6 +431,10 @@ export function useData() {
    * which retries on its own.
    */
   const refresh = useCallback(async () => {
+    const flight = refreshFlightRef.current
+    if (flight.inFlight) { flight.pending = true; return }
+    flight.inFlight = true
+    const epoch = patchEpochRef.current
     try {
       let res: Response
       try { res = await fetchWithTimeout(dataUrl(dataRef.current !== null), DATA_TIMEOUT_MS) } catch (err) { throw classifyLoadError(err) }
@@ -435,7 +442,9 @@ export function useData() {
       let fresh: unknown
       try { fresh = await res.json() } catch (err) { throw classifyLoadError(err) }
       if (!isUsableDataCache(fresh)) throw classifyLoadError(new Error("the answer is not this app's data"))
+      if (epoch !== patchEpochRef.current) return
       const next = fresh as AppData
+      dataRevisionRef.current = res.headers.get('X-Agentistics-Data-Revision')
       if (acceptPayload(dataRef.current, next)) {
         dataRef.current = next
         setData(next)
@@ -464,6 +473,9 @@ export function useData() {
       }
       // 401/403 are an AUTH state the app resolves (a login screen); asking again cannot change them.
       if (!(e.kind === 'server' && (e.status === 401 || e.status === 403))) schedule(retryDelayMs(attempt))
+    } finally {
+      flight.inFlight = false
+      if (flight.pending) { flight.pending = false; void refreshRef.current() }
     }
   }, [openProgress, schedule])
   refreshRef.current = refresh
@@ -488,13 +500,39 @@ export function useData() {
   // sockets to the same URL spent two of the browser's ~6 per-origin slots that live terminals need.
   useEffect(() => {
     if (!liveUpdates) return
-    return subscribeEvent('change', () => { void fetchData() })
+    const offConnected = subscribeEvent('connected', () => {
+      if (dataRevisionRef.current) void fetchData()
+    })
+    const offPatch = subscribeEvent('data-patch', event => {
+      try {
+        const patch = JSON.parse(event.data) as DataPatch
+        const held = dataRef.current
+        if (!held || held.partial) { void fetchData(); return }
+        const next = applyDataPatch(held, dataRevisionRef.current, patch)
+        if (!next || !isUsableDataCache(next)) { void fetchData(); return }
+        patchEpochRef.current++
+        dataRevisionRef.current = patch.revision
+        dataRef.current = next; setData(next); setOffline(null)
+        writeDataCache(next)
+      } catch { void fetchData() }
+    })
+    const offChange = subscribeEvent('change', event => {
+      try {
+        const { revision } = JSON.parse(event.data)
+        if (revision && revision === dataRevisionRef.current) return
+      } catch { /* Legacy change events ask for a full read. */ }
+      void fetchData()
+    })
+    return () => { offConnected(); offPatch(); offChange() }
   }, [liveUpdates, fetchData])
 
   // Fallback polling at the selected interval when live updates are enabled.
   useEffect(() => {
     if (!liveUpdates) return
-    const id = setInterval(() => { void fetchData() }, updateInterval * 1000)
+    const id = setInterval(() => {
+      if (dataRevisionRef.current && eventStream.healthy()) return
+      void fetchData()
+    }, updateInterval * 1000)
     return () => { clearInterval(id) }
   }, [liveUpdates, updateInterval, fetchData])
 

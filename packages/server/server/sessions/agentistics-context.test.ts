@@ -6,6 +6,11 @@ import {
 } from './agentistics-context'
 import { SPAWN_SPECS, planSpawn } from './spawn-spec'
 import { pendingContextFor } from './spawn-context'
+import { CONTEXT_TOOL_NAMES } from './agentistics-context'
+import { clearSpecificationSkillCache, specificationSkillsFor } from './specification-skills'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const base = { sessionId: 'abc123', cwd: '/w/proj' }
 const ctx = (over: Partial<ContextInput> = {}) => {
@@ -23,6 +28,28 @@ describe('context text', () => {
     const t = contextText(base)
     for (const w of ['abc123', '/w/proj', 'agentistics_task_comment', 'agentistics_session_group_edit', 'agentistics_harnesses', 'vault://', '47291', 'agentop upgrade', 'tunnels', 'SUGGEST', 'Clean up after yourself', 'git worktree remove', 'agentop session kill', 'Ask before removing anything you did not create']) expect(t).toContain(w)
     expect(t).toContain('outside /w/proj')
+  })
+  test('role guidance, session opening, model balance, isolated tests, and milestone commits are explicit', () => {
+    const t = contextText(base)
+    for (const w of ['Your role here: decide from the request', 'LEADER organises', 'WORKER implements one defined piece', 'AUTO:', 'Becoming leader:', '[ LEADER ]', '[ LÍDER ]', 'agentop session <harness>', 'agentop session batch', 'QA must use a different model', 'ASK the user', 'never make it automatic', 'agentop run --rm -- <command>', 'Commit at every green milestone', 'Do NOT suggest or ask about a specification skill when a brief, specification, or plan already exists', 'pass the specification path or text in the worker prompt', 'never asks about specification skills', 'No usage rules are saved yet:', 'so the new session is marked as leader', 'real harness in a terminal', '"Terminal" tab', 'OAuth login of an MCP via `/mcp`', 'login prompt', 'TUI menu', 'type `/mcp`', 'pick the server', 'Authenticate', 'browser opens for the login', 'Never say the session is not interactive', 'never send the user to an outside terminal']) expect(t).toContain(w)
+    expect(t).not.toContain('Use superpowers')
+  })
+  test('model-facing context contains no internal TODO or phase notes', () => {
+    const t = contextText(base)
+    expect(t).not.toContain('TODO')
+    expect(t).not.toContain('Phase 2')
+  })
+  test('the context lists every registered MCP tool', () => {
+    // Read from the source: importing agentistics-mcp.ts starts the stdio server and ends the test process.
+    const source = readFileSync(join(import.meta.dir, '../../../mcp/agentistics-mcp.ts'), 'utf8')
+    const registered = [...source.matchAll(/^\s*name: "(agentistics_[a-z_]+)",$/gm)].map(m => m[1] as string)
+    expect(registered.length).toBeGreaterThan(30)
+    expect(new Set<string>(CONTEXT_TOOL_NAMES)).toEqual(new Set<string>(registered))
+  })
+  test('specification skills are printed only when detected', () => {
+    const t = contextText({ ...base, specSkills: ['superpowers'] })
+    expect(t).toContain('Specification skills installed for this harness: superpowers')
+    expect(contextText(base)).not.toContain('Specification skills installed')
   })
   test('no task: says so and offers to file it; with task: names it, never done before validation', () => {
     expect(contextText(base)).toContain('not linked to a task')
@@ -50,6 +77,34 @@ describe('context text', () => {
   })
   test('the UI label stays PT/EN', () => {
     expect(CONTEXT_LABEL.pt).toBe('contexto do agentistics'); expect(CONTEXT_LABEL.en).toBe('agentistics context')
+  })
+})
+
+describe('specification skill detection', () => {
+  test('reads Claude superpowers from a fake plugin registry and caches by mtime', () => {
+    const home = mkdtempSync(join(tmpdir(), 'agentop-spec-skills-'))
+    try {
+      const file = join(home, '.claude/plugins/installed_plugins.json')
+      mkdirSync(join(home, '.claude/plugins'), { recursive: true })
+      writeFileSync(file, JSON.stringify({ plugins: { 'superpowers@local': [{ installPath: '/fake' }] } }))
+      clearSpecificationSkillCache()
+      expect(specificationSkillsFor('claude', home)).toEqual(['superpowers'])
+      writeFileSync(file, JSON.stringify({ plugins: { 'other@local': [] } }))
+      utimesSync(file, new Date(Date.now() + 2000), new Date(Date.now() + 2000))
+      expect(specificationSkillsFor('claude', home)).toEqual([])
+      expect(specificationSkillsFor('gemini', home)).toEqual([])
+    } finally { rmSync(home, { recursive: true, force: true }); clearSpecificationSkillCache() }
+  })
+  test('reads fake skill directories for a harness with a known location', () => {
+    const home = mkdtempSync(join(tmpdir(), 'agentop-spec-skills-'))
+    try {
+      mkdirSync(join(home, '.codex/skills/spec-a'), { recursive: true })
+      writeFileSync(join(home, '.codex/skills/spec-a/SKILL.md'), '# a')
+      mkdirSync(join(home, '.codex/skills/not-a-skill'), { recursive: true })
+      clearSpecificationSkillCache()
+      expect(specificationSkillsFor('codex', home)).toEqual(['spec-a'])
+      expect(specificationSkillsFor('unknown', home)).toEqual([])
+    } finally { rmSync(home, { recursive: true, force: true }); clearSpecificationSkillCache() }
   })
 })
 
@@ -96,18 +151,8 @@ describe('delivery per harness', () => {
     expect(r.plan.contextFile).toEqual({ dir: '/data/session-context/abc123', name: 'AGENTS.md', text: ctx().text })
     expect(r.plan.initialPrompt).toEqual({ mode: 'type', text: 'oi' })
   })
-  test('kimi: invisible — --agent-file whose body keeps the default prompt and appends the context; the typed prompt is untouched', () => {
-    const r = plan('kimi'); if (!r.ok) throw new Error('x')
-    expect(r.plan.contextVia).toBe('files')
-    expect(r.plan.argv).toContain('--agent-file')
-    expect(r.plan.argv[r.plan.argv.indexOf('--agent-file') + 1]).toBe('/data/session-context/abc123/agentistics-agent.md')
-    const f = r.plan.contextFile!
-    expect(f.text.startsWith('---\nname: agentistics-session\ndescription: ')).toBe(true)
-    expect(f.text).toContain('---\n${base_prompt}\n\n' + CONTEXT_HEADER)
-    expect(r.plan.initialPrompt).toEqual({ mode: 'type', text: 'oi' })
-  })
-  test('antigravity and gemini (no invisible channel exists): fenced block, header first, user text AFTER the closing fence', () => {
-    for (const h of ['antigravity', 'gemini'] as const) {
+  test('antigravity, gemini and kimi (no invisible channel exists — kimi 2.1.1\'s interactive TUI drops --agent-file): fenced block, header first, user text AFTER the closing fence', () => {
+    for (const h of ['antigravity', 'gemini', 'kimi'] as const) {
       const r = plan(h); if (!r.ok) throw new Error('x')
       expect(r.plan.contextVia).toBe('first-message')
       const sent = r.plan.initialPrompt?.text ?? r.plan.argv.at(-1)!
@@ -117,7 +162,7 @@ describe('delivery per harness', () => {
     }
   })
   test('no first message: NOTHING is sent (context is held, never sent alone)', () => {
-    for (const h of ['antigravity', 'gemini'] as const) {
+    for (const h of ['antigravity', 'gemini', 'kimi'] as const) {
       const r = plan(h, { prompt: undefined }); if (!r.ok) throw new Error('x')
       expect(r.plan.contextVia).toBe('none'); expect(r.plan.initialPrompt).toBeUndefined()
       expect(r.plan.argv.join(' ')).not.toContain(CONTEXT_OPEN)
@@ -127,7 +172,7 @@ describe('delivery per harness', () => {
     expect(pendingContextFor(g.plan, ctx())).toBeUndefined()
   })
   test('every channel but the fallback keeps the context out of the prompt', () => {
-    for (const h of ['claude', 'codex', 'copilot', 'kimi'] as const) {
+    for (const h of ['claude', 'codex', 'copilot'] as const) {
       const r = plan(h); if (!r.ok) throw new Error(h)
       const sent = r.plan.initialPrompt?.text ?? r.plan.argv.at(-1)!
       expect(sent).toBe('oi')
@@ -136,7 +181,7 @@ describe('delivery per harness', () => {
   test('a resume carries no context at all', () => {
     for (const h of HARNESS_ORDER) {
       if (!SPAWN_SPECS[h]?.resume) continue
-      const r = plan(h, { resumeId: 'x', prompt: undefined }); if (!r.ok) throw new Error(h)
+      const r = plan(h, { resumeId: '04d97770-e53f-4b7d-86d2-63bd12ec32eb', prompt: undefined }); if (!r.ok) throw new Error(h)
       expect(r.plan.contextVia).toBeUndefined(); expect(r.plan.env).toBeUndefined()
     }
   })

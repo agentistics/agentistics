@@ -16,6 +16,8 @@ export type ConversationLinkProvenance = 'spawn' | 'recovered' | 'unrecoverable'
 export type ConversationLinkReason =
   | 'assigned-id' | 'resumed-id'
   | 'harness-session-file' | 'process-log' | 'first-sighting'
+  /** F2.0 — a STRUCTURED session's protocol stated it (the driver's `conversationId()`): exact. */
+  | 'protocol-stated'
   | 'no-id-route' | 'platform-unsupported' | 'external-process'
 
 export interface SessionConversationLink {
@@ -28,6 +30,7 @@ export interface SessionConversationLink {
 const PROVENANCE: Record<ConversationLinkReason, ConversationLinkProvenance> = {
   'assigned-id': 'spawn', 'resumed-id': 'spawn',
   'harness-session-file': 'recovered', 'process-log': 'recovered', 'first-sighting': 'recovered',
+  'protocol-stated': 'spawn',
   'no-id-route': 'unrecoverable', 'platform-unsupported': 'unrecoverable', 'external-process': 'unrecoverable',
 }
 
