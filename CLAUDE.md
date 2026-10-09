@@ -1406,6 +1406,14 @@ failed step can never increment `tool_errors` twice. `files_modified` is the cou
 `TargetContent` (hence `gitLines: true` — these are edit deltas, not `git diff`; agy stores no git
 metadata).
 
+**Structured mode (F3.2).** A web-born agy session runs `agy -p --input-format stream-json
+--output-format stream-json` (engine driver `agy-stream-json`, `docs/f2-structured-backend.md`): the
+conversation id, live text and turn ends come from the stream; print mode has NO permission or question
+events (a tool needing approval is soft-denied and shown as refused), no interrupt (a cancel ends the child
+and the next prompt resumes with `--conversation`), and no system-prompt channel (the opening context is a
+hidden first message). The agentistics MCP is registered globally with `agy mcp add` (`agy-mcp.ts`). The
+"No chat driver" note below describes the older `chat-drivers/` path, which this does not touch.
+
 **No chat driver.** `chat-drivers/` spawns a CLI in non-interactive *streaming* mode and needs a
 machine-readable event stream (`-o stream-json`), a session id and MCP registration. `agy` offers
 `--print` but no structured output format, no session-id emission and no documented MCP config, so a

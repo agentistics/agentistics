@@ -255,9 +255,10 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
       'gemini-3.1-pro-low', 'gemini-3.1-pro-high',
     ],
     effortFlag: '--effort',
-    // `--effort  Reasoning effort for the current CLI session (low|medium|high)` — printed by the
-    // CLI itself, so unlike codex's `-c` override this one IS verifiable and IS validated.
-    efforts: ['low', 'medium', 'high'],
+    // `--effort  Reasoning effort for the current CLI session (low|medium|high|xhigh|max)` — printed
+    // by the CLI itself (agy 1.3.2 `--help`, 2026-10-09; it was `low|medium|high` on 1.1.x, P-23), so
+    // unlike codex's `-c` override this one IS verifiable and IS validated.
+    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
     resume: id => ['--conversation', id], // `--conversation  Resume a previous conversation by ID`
   },
   // opencode is not spawnable through the session manager — no adapter exists to link a spawned
