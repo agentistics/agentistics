@@ -70,6 +70,18 @@ export interface StructuredDeclaration {
    * leaves the files / the harness's own store as the source of tokens, exactly as before).
    */
   usage?: StructuredFeature
+  /**
+   * F4.D — the permission mode, stated and set through the PROTOCOL (claude `--permission-mode` +
+   * `set_permission_mode`, codex `approvalPolicy`/`sandbox`, ACP `session/set_mode`). A driver that
+   * leaves it out has no mode on its rows and the chip is not drawn — never a guessed one.
+   */
+  mode?: StructuredFeature
+}
+
+/** F4.D — one permission mode, in the protocol's own id and the words the chip shows. */
+export interface StructuredMode {
+  id: string
+  label: string
 }
 
 /**
@@ -128,6 +140,8 @@ export interface StructuredSpawn {
    */
   instructions?: { text: string; block: string }
   mcp?: readonly StructuredMcpServer[]
+  /** F4.D — start in this mode (one of the driver's `modes()` ids); ignored where `declares().mode` is absent. */
+  mode?: string
   /**
    * Extra environment for the child, over the inherited one (a context-file directory, …). It may be
    * passed on the child's command line (`env(1)`: the engine reads no environment of its own), so it
@@ -230,6 +244,12 @@ export interface StructuredSession {
   lastActivityMs(): number
   /** The usage the protocol has stated so far, or null (F2.1, optional: absent = this driver states none). */
   usage?(): StructuredUsage | null
+  /** F4.D — the modes this session can be set to, in the protocol's order; absent/empty = none. */
+  modes?(): readonly StructuredMode[]
+  /** F4.D — the mode the protocol last stated, or null until it has said one. */
+  mode?(): StructuredMode | null
+  /** F4.D — set the mode DIRECTLY (no cycling). False when the id is not in `modes()` or the session is gone. */
+  setMode?(id: string): boolean
   /** Queues a prompt. False when not running or the queue is full. */
   prompt(text: string): boolean
   /** Answers the open request. False when none is open, the id is stale, or the answer does not fit it. */

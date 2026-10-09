@@ -37,4 +37,16 @@ describe('modeStyle', () => {
       for (const v of [s.fg, s.bg, s.border]) expect(v.length).toBeGreaterThan(0)
     }
   })
+
+  it('F4.D — the ids structured protocols state sit on the same autonomy gradient, never the fault colour', () => {
+    expect(modeStyle('default')).toEqual(modeStyle('manual'))
+    expect(modeStyle('read-only')).toEqual(modeStyle('plan'))
+    expect(modeStyle('workspace')).toEqual(modeStyle('accept-edits'))
+    expect(modeStyle('autoEdit')).toEqual(modeStyle('accept-edits'))
+    expect(modeStyle('yolo')).toEqual(modeStyle('auto'))
+    expect(modeStyle('full-access')).toEqual(modeStyle('auto'))
+    for (const id of ['read-only', 'workspace', 'autoEdit', 'yolo', 'full-access']) {
+      expect(JSON.stringify(modeStyle(id))).not.toContain('accent-red')
+    }
+  })
 })

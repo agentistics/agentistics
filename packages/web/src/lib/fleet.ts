@@ -40,6 +40,8 @@ export type FleetActionId =
   | 'terminal'
   /** Advance the harness to its NEXT mode. It cycles; there is no key that picks one. */
   | 'cycleMode'
+  /** F4.D — set a structured row's mode directly; `text` is one of its `modes` ids. */
+  | 'setMode'
   /**
    * FLEET verbs — they act on a SET, not on the row whose `id` is in the request.
    *
@@ -97,6 +99,8 @@ export interface FleetRow {
   effort?: string
   /** The harness mode, in its own words. Absent where nobody has driven that harness's modes. */
   mode?: { id: string; label: string }
+  /** F4.D — the modes a structured row can be set to directly; absent: only `cycleMode` exists. */
+  modes?: { id: string; label: string }[]
   conversationId?: string
   approvalLines?: string[]
   /** `freeText` marks the option that is a FIELD — picking it opens one. See `approval-spec.ts`. */

@@ -470,6 +470,7 @@ export function createSessionsPoller(o: {
       const approvals = new Map<string, string[]>()
       /** The harness mode each running session is in — see `mode-spec.ts`. */
       const modes = new Map<string, { id: string; label: string }>()
+      const modeChoices = new Map<string, { id: string; label: string }[]>()
       const dialogOptions = new Map<string, DialogOption[]>()
       const dialogSelect = new Map<string, 'numbered' | 'marker'>()
       const dialogStated = new Set<string>()
@@ -527,6 +528,15 @@ export function createSessionsPoller(o: {
         const b = r.backend
         if (!b) return // `lost`: the backend has nothing to capture and nothing to report.
         if (!b.alive) { activity.set(r.id, 'exited'); return }
+
+        // F4.D — a STRUCTURED session states its mode (and the ones it can be set to) itself: it has no
+        // footer to read, and what the protocol said outranks anything a screen could.
+        {
+          const stated = o.backend.modeOf?.(r.id)
+          const choices = o.backend.modesOf?.(r.id)
+          if (stated) modes.set(r.id, stated)
+          if (choices && choices.length > 0) modeChoices.set(r.id, choices)
+        }
 
         const reading = adapter?.reading(r.id)
         const readScreen = !adapter || planScreen({
@@ -961,6 +971,7 @@ export function createSessionsPoller(o: {
         chatTails,
         approvals,
         modes,
+        modeChoices,
         ...(structured.size > 0 ? { structured } : {}),
         dialogOptions,
         dialogSelect,

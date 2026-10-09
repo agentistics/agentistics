@@ -449,6 +449,9 @@ async function runFleetActionOnce(
     case 'cycleMode':
       if (!host.cycleSessionMode) return { ok: false, message: s.sessionsNoHost }
       return await host.cycleSessionMode(req.id)
+    case 'setMode':
+      if (!host.setSessionMode) return { ok: false, message: s.sessionsNoHost }
+      return await host.setSessionMode(req.id, text)
     case 'rename':
       if (!host.renameSession) return { ok: false, message: s.sessionsNoHost }
       return await host.renameSession(req.id, text)

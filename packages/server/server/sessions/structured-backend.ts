@@ -487,6 +487,9 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     },
     isStructured(id) { return structuredOnly(id) !== undefined || (!!durable && durable.isAlive(id)) },
     attentionOf(id) { const l = structuredOnly(id); return l ? l.s.attention() : base.attentionOf?.(id) },
+    modeOf(id) { const l = structuredOnly(id); return l ? (l.s.mode?.() ?? null) : base.modeOf?.(id) },
+    modesOf(id) { const l = structuredOnly(id); return l ? (l.s.modes ? [...l.s.modes()] : undefined) : base.modesOf?.(id) },
+    async setMode(id, modeId) { const l = structuredOnly(id); return l ? (l.s.setMode?.(modeId) ?? false) : (base.setMode?.(id, modeId) ?? false) },
     async answer(id, a: StructuredAnswer) { const l = structuredOnly(id); return l ? l.s.answer(a) : (base.answer?.(id, a) ?? false) },
     chatOf(id) {
       const l = structuredOnly(id)

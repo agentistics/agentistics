@@ -49,6 +49,14 @@ const BY_ID: Record<string, ModeStyle> = {
   plan: tinted('var(--accent-blue)', 'var(--accent-blue-dim)'),
   'accept-edits': tinted('var(--anthropic-orange)', 'var(--anthropic-orange-dim)'),
   auto: tinted('var(--accent-green)', 'var(--accent-green-dim)'),
+  // F4.D — the ids structured protocols state themselves, on the same autonomy gradient: read-only and
+  // plan touch nothing (blue), edits-without-asking is orange, everything-without-asking is green.
+  default: NEUTRAL,
+  'read-only': tinted('var(--accent-blue)', 'var(--accent-blue-dim)'),
+  workspace: tinted('var(--anthropic-orange)', 'var(--anthropic-orange-dim)'),
+  autoEdit: tinted('var(--anthropic-orange)', 'var(--anthropic-orange-dim)'),
+  yolo: tinted('var(--accent-green)', 'var(--accent-green-dim)'),
+  'full-access': tinted('var(--accent-green)', 'var(--accent-green-dim)'),
 }
 
 /** The chip's colours for a mode id. Neutral for `manual` and for anything this file has not met. */

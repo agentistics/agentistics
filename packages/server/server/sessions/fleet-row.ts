@@ -116,6 +116,8 @@ export type FleetActionId =
    * order.
    */
   | 'cycleMode'
+  /** F4.D — set a structured session's mode DIRECTLY; `text` is one of the row's `modes` ids. */
+  | 'setMode'
   /**
    * RESTORE the conversation to the point before one of the person's own prompts (`text` is that
    * prompt, `occurrence` which appearance counting from the latest) — the harness's OWN rewind,
@@ -214,6 +216,8 @@ export interface FleetRow {
   effort?: string
   /** The harness mode, in the harness's own words — see `mode-spec.ts`. */
   mode?: { id: string; label: string }
+  /** F4.D — the modes this STRUCTURED row can be set to directly (`setMode`); absent: cycle with `cycleMode`. */
+  modes?: { id: string; label: string }[]
   conversationId?: string
   /** WHERE the conversation link came from (LIVE.1). Not relayed to a central. */
   link?: SessionConversationLink | null
@@ -314,6 +318,7 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
     ...(row.model ? { model: row.model } : {}),
     ...(row.effort ? { effort: row.effort } : {}),
     ...(row.mode ? { mode: row.mode } : {}),
+    ...(row.modeChoices ? { modes: row.modeChoices } : {}),
     ...(row.conversationId ? { conversationId: row.conversationId } : {}),
     ...(row.link !== undefined ? { link: row.link } : {}),
     ...(row.conversationId && row.link ? { conversationLinkVia: row.link.reason } : {}),

@@ -646,6 +646,15 @@ export interface SessionBackend {
    * this FIRST and answers through `answer` — no keystroke reaches anything.
    */
   attentionOf?(id: string): StructuredAttention | null | undefined
+  /**
+   * F4.D — a STRUCTURED session's permission mode as its protocol states it (`null`: not stated yet);
+   * `undefined` for every session that is not structured, whose mode is read off the footer instead.
+   */
+  modeOf?(id: string): { id: string; label: string } | null | undefined
+  /** F4.D — the modes a structured session can be set to directly (the chip's menu); undefined: none. */
+  modesOf?(id: string): { id: string; label: string }[] | undefined
+  /** F4.D — set a structured session's mode THROUGH its driver, by id, no cycling. False: refused / unknown id. */
+  setMode?(id: string, modeId: string): Promise<boolean>
   /** F2.0 — answer a structured session's open request through its driver. False: refused / stale. */
   answer?(id: string, a: StructuredAnswer): Promise<boolean>
   /**

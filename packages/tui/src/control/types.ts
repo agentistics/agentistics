@@ -873,6 +873,8 @@ export interface ControlSession {
    * keypress nobody asked for.
    */
   mode?: { id: string; label: string }
+  /** F4.D — the modes a structured session can be set to directly; absent: only cycling exists. */
+  modeChoices?: { id: string; label: string }[]
   /** F2.0b — running over its harness's protocol right now (not a pane): the web offers "open in terminal". */
   structured?: true
   /**
@@ -1618,6 +1620,13 @@ export interface ControlHost {
    * nobody has driven: a guessed key is a keypress nobody asked for. See `mode-spec.ts`.
    */
   cycleSessionMode?(id: string): Promise<ActionResult>
+
+  /**
+   * F4.D — set a STRUCTURED session's permission mode DIRECTLY, through its protocol (`modeId` is one of
+   * the row's `modeChoices`). Refused, in words, for a session that is not structured: a terminal one
+   * only cycles. No keystroke is sent anywhere.
+   */
+  setSessionMode?(id: string, modeId: string): Promise<ActionResult>
 
   /**
    * Type one line into a session and submit it, WITHOUT attaching to it.

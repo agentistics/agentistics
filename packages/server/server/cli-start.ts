@@ -3609,6 +3609,15 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
 
       const managed = (await readRegistry()).find(m => m.id === id)
       if (!managed) return { ok: false, message: s.sessNoRegistryEntry }
+      // F4.D — a structured session has no footer and no cycle key: "next" is the next entry of the
+      // modes its protocol lists, set directly.
+      const choices = backend.modesOf?.(id)
+      if (choices && choices.length > 0 && backend.setMode) {
+        const now = backend.modeOf?.(id)?.id
+        const at = choices.findIndex(m => m.id === now)
+        const next = choices[(at + 1) % choices.length]!
+        return (await backend.setMode(id, next.id)) ? { ok: true, message: s.sessModeCycled } : { ok: false, message: s.sessSendFailed(id) }
+      }
       const spec = modeSpecFor(managed.harness)
       if (!spec) return { ok: false, message: s.sessModeUnknown(managed.harness) }
 
@@ -3620,6 +3629,25 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       return (await backend.sendKey(id, spec.cycleKey))
         ? { ok: true, message: s.sessModeCycled }
         : { ok: false, message: s.sessSendFailed(id) }
+    },
+
+    /**
+     * F4.D — set a structured session's mode through its driver. The id must be one the protocol listed
+     * for THIS session: an id the driver does not know is refused by the driver, never guessed at here.
+     */
+    async setSessionMode(id: string, modeId: string): Promise<ActionResult> {
+      const s = S()
+      const backend = await resolveBackend()
+      const blocked = await backend.unavailable()
+      if (blocked) return { ok: false, message: blocked }
+      const managed = (await readRegistry()).find(m => m.id === id)
+      if (!managed) return { ok: false, message: s.sessNoRegistryEntry }
+      const live = (await backend.list().catch(() => [])).find(b => b.id === id)
+      if (!live?.alive) return { ok: false, message: s.sessNotRunning }
+      const choices = backend.modesOf?.(id)
+      if (!choices || !backend.setMode) return { ok: false, message: s.sessModeUnknown(managed.harness) }
+      if (!choices.some(m => m.id === modeId)) return { ok: false, message: s.sessModeUnknown(managed.harness) }
+      return (await backend.setMode(id, modeId)) ? { ok: true, message: choices.find(m => m.id === modeId)!.label } : { ok: false, message: s.sessSendFailed(id) }
     },
 
     async rewindSession(id: string, prompt: string, occurrence: number): Promise<ActionResult> {

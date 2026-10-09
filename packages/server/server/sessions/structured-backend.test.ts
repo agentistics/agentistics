@@ -56,6 +56,10 @@ function fakeSession(req: StructuredSpawn) {
     prompt(t: string) { if (state === 'exited') return false; s.prompts.push(t); state = 'working'; for (const f of subs) f({ kind: 'live', text: 'thin' }); return true },
     answer(a: StructuredAnswer) { const fit = answerFits(open, a); if (!fit.ok) return false; s.answers.push(a); open = null; state = 'working'; return true },
     cancel() { s.cancelled++; open = null; state = 'waiting' },
+    modeNow: 'default',
+    modes: () => [{ id: 'default', label: 'Default' }, { id: 'plan', label: 'Plan' }],
+    mode() { return s.modes().find(m => m.id === s.modeNow) ?? null },
+    setMode(id: string) { if (!s.modes().some(m => m.id === id)) return false; s.modeNow = id; return true },
     follow(_max: number, on: (d: HarnessChatDelta) => void) {
       on({ kind: 'window', turns: [{ role: 'user', text: req.initialPrompt ?? '' }], older: false })
       on({ kind: 'state', working: state === 'working' })
@@ -300,6 +304,28 @@ describe('withStructured — answering through the driver', () => {
     expect(answerStructured(Q, 3, ' capivara ')).toEqual({ ok: true, answer: { requestId: 'q1', choice: 3, text: ' capivara ' }, said: ' capivara ' })
     expect(answerStructured(Q, 1, 'ignored')).toEqual({ ok: true, answer: { requestId: 'q1', choice: 1 }, said: 'Only my fix' })
     expect(answerStructured({ ...Q, options: [], freeText: true }, undefined, 'free')).toEqual({ ok: true, answer: { requestId: 'q1', text: 'free' }, said: 'free' })
+  })
+})
+
+describe('withStructured — the permission mode (F4.D)', () => {
+  test('a structured session states its mode and its choices, and is set directly through the driver', async () => {
+    const base = fakeBase()
+    const eng = fakeEngine()
+    const b = withStructured(base, provider(eng.reg))
+    await b.spawn(web('gemini'))
+    expect(b.modeOf!('m-1')).toEqual({ id: 'default', label: 'Default' })
+    expect(b.modesOf!('m-1')).toEqual([{ id: 'default', label: 'Default' }, { id: 'plan', label: 'Plan' }])
+    expect(await b.setMode!('m-1', 'plan')).toBe(true)
+    expect(b.modeOf!('m-1')).toEqual({ id: 'plan', label: 'Plan' })
+    expect(await b.setMode!('m-1', 'yolo')).toBe(false) // an id the protocol did not list is refused
+    expect(b.modeOf!('m-1')).toEqual({ id: 'plan', label: 'Plan' })
+    expect(base.calls).toEqual([]) // no keystroke reached tmux
+  })
+  test('a session that is not structured answers undefined (its mode is read off the footer)', async () => {
+    const b = withStructured(fakeBase(), provider(fakeEngine().reg))
+    expect(b.modeOf!('t-1')).toBeUndefined()
+    expect(b.modesOf!('t-1')).toBeUndefined()
+    expect(await b.setMode!('t-1', 'plan')).toBe(false)
   })
 })
 
