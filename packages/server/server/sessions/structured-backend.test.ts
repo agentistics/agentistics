@@ -26,6 +26,7 @@ function fakeBase(): SessionBackend & { calls: Array<[string, unknown?]> } {
     captureTerminal: rec('captureTerminal', null),
     sendText: rec('sendText', true), sendTextRaw: rec('sendTextRaw', true), sendKey: rec('sendKey', true), sendPaste: rec('sendPaste', true),
     sendChoiceText: rec('sendChoiceText', 'sent'),
+    sendTextReliable: rec('sendTextReliable', false),
     kill: rec('kill', true), attachCommand: () => ['tmux', 'attach'], detachHint: rec('detachHint', 'C-b d'),
   } as unknown as SessionBackend & { calls: Array<[string, unknown?]> }
 }
@@ -296,7 +297,7 @@ describe('withStructured — answering through the driver', () => {
     expect(answerStructured(Q, undefined, undefined)).toEqual({ ok: false, why: 'needs-choice' })
     expect(answerStructured(Q, 9, undefined)).toEqual({ ok: false, why: 'gone' })
     expect(answerStructured(Q, 3, '  ')).toEqual({ ok: false, why: 'needs-text' })
-    expect(answerStructured(Q, 3, ' capivara ')).toEqual({ ok: true, answer: { requestId: 'q1', choice: 3, text: 'capivara' }, said: 'capivara' })
+    expect(answerStructured(Q, 3, ' capivara ')).toEqual({ ok: true, answer: { requestId: 'q1', choice: 3, text: ' capivara ' }, said: ' capivara ' })
     expect(answerStructured(Q, 1, 'ignored')).toEqual({ ok: true, answer: { requestId: 'q1', choice: 1 }, said: 'Only my fix' })
     expect(answerStructured({ ...Q, options: [], freeText: true }, undefined, 'free')).toEqual({ ok: true, answer: { requestId: 'q1', text: 'free' }, said: 'free' })
   })
@@ -355,4 +356,29 @@ describe('the one-line route switch (STRUCTURED_ROUTE_OFF)', () => {
     expect(base.calls).toEqual([['spawn', req]])
     expect(started).toEqual([])
   })
+})
+
+test('the Codex reliable-send method also routes through the structured driver', async () => {
+  const base = fakeBase()
+  const eng = fakeEngine()
+  const b = withStructured(base, provider(eng.reg))
+  await b.spawn(web('gemini'))
+  expect(await b.sendTextReliable!('m-1', 'structured prompt', 'codex')).toBe(true)
+  expect(eng.sessions[0]!.prompts).toEqual(['structured prompt'])
+  expect(base.calls.some(c => c[0] === 'sendTextReliable')).toBe(false)
+  expect(await b.sendTextReliable!('t-1', 'terminal prompt', 'codex')).toBe(false)
+  expect(base.calls).toContainEqual(['sendTextReliable', 't-1'])
+})
+
+test('structured MCP launch carries the host endpoint explicitly (throwaway ports never target production)', () => {
+  const intent = structuredIntentOf({ harness: 'codex', origin: 'web' }, { mcp: { command: 'agentop', args: ['mcp'], env: { AGENTISTICS_API: 'http://localhost:49991' } } })
+  expect(intent.mcp).toEqual([{ name: 'agentistics', command: 'agentop', args: ['mcp'], env: { AGENTISTICS_API: 'http://localhost:49991' } }])
+})
+
+test('structured free text preserves whitespace while refusing an empty answer', () => {
+  const open = { requestId: 'q1', kind: 'question' as const, freeText: true, options: [{ id: 'other', label: 'Other', freeText: true }] }
+  const text = '  exact\nanswer  '
+  expect(answerStructured(open, 1, text)).toEqual({ ok: true, answer: { requestId: 'q1', choice: 1, text }, said: text })
+  expect(answerStructured(open, undefined, text)).toEqual({ ok: true, answer: { requestId: 'q1', text }, said: text })
+  expect(answerStructured(open, 1, ' \n ')).toEqual({ ok: false, why: 'needs-text' })
 })

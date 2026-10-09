@@ -2111,7 +2111,7 @@ async function spawnManaged(req: {
         : {}),
       // F2.0 — the same spawn in a structured driver's terms; tmux ignores it (`structured-backend.ts`).
       structured: structuredIntentOf(req, {
-        model, effort, ctx, mcp: agentisticsMcpLaunch(),
+        model, effort, ctx, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } },
         // The driver applies it only where its declaration says the protocol assigns ids; the row is
         // linked by what the protocol then STATES (`onConversation`), never by this offer.
         conversationId: offeredConversationId,
@@ -4089,6 +4089,14 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // F3.3 — a STRUCTURED session states its open request; a prompt then would race the answer the
       // person is being asked for (the screen rules below read a TUI footer it never draws).
       if (backend.attentionOf?.(id)) return { ok: false, message: s.sessPromptBlocked }
+
+      // The structured protocol states whether input is blocked. Send through its driver;
+      // Codex's TUI-only reliable paste method cannot address a structured process.
+      if (backend.chatOf?.(id)) {
+        return await backend.sendText(id, body)
+          ? { ok: true, message: s.sessPrompted(id) }
+          : { ok: false, message: s.sessSendFailed(id) }
+      }
 
       const frame = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
       const rules = rulesFor(managed.harness)

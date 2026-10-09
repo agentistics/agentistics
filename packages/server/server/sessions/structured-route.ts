@@ -78,7 +78,7 @@ export function structuredIntentOf(
     effort?: string | undefined
     conversationId?: string
     ctx?: { text: string; block: string }
-    mcp?: { command: string; args: readonly string[] }
+    mcp?: { command: string; args: readonly string[]; env?: Readonly<Record<string, string>> }
   },
 ): StructuredIntent {
   return {
@@ -90,7 +90,7 @@ export function structuredIntentOf(
     ...(req.resumeId ? { resumeId: req.resumeId } : {}),
     ...(req.prompt ? { prompt: req.prompt } : {}),
     ...(o.ctx && !req.resumeId ? { instructions: { text: o.ctx.text, block: o.ctx.block } } : {}),
-    ...(o.mcp ? { mcp: [{ name: 'agentistics', command: o.mcp.command, args: [...o.mcp.args] }] } : {}),
+    ...(o.mcp ? { mcp: [{ name: 'agentistics', command: o.mcp.command, args: [...o.mcp.args], ...(o.mcp.env ? { env: o.mcp.env } : {}) }] } : {}),
   }
 }
 
@@ -106,15 +106,15 @@ export function answerStructured(
   text: string | undefined,
 ): { ok: true; answer: StructuredAnswer; said: string } | { ok: false; why: 'not-asking' | 'needs-choice' | 'needs-text' | 'gone' } {
   if (!open) return { ok: false, why: 'not-asking' }
-  const words = (text ?? '').trim()
+  const words = text ?? ''
   if (choice === undefined) {
-    if (open.freeText && words) return { ok: true, answer: { requestId: open.requestId, text: words }, said: words }
+    if (open.freeText && words.trim()) return { ok: true, answer: { requestId: open.requestId, text: words }, said: words }
     return { ok: false, why: open.options.length > 0 ? 'needs-choice' : 'needs-text' }
   }
   const picked = open.options[choice - 1]
   if (!Number.isInteger(choice) || !picked) return { ok: false, why: 'gone' }
   if (picked.freeText) {
-    if (!words) return { ok: false, why: 'needs-text' }
+    if (!words.trim()) return { ok: false, why: 'needs-text' }
     return { ok: true, answer: { requestId: open.requestId, choice, text: words }, said: words }
   }
   return { ok: true, answer: { requestId: open.requestId, choice }, said: picked.label }

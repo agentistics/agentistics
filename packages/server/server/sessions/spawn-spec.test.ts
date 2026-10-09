@@ -80,7 +80,7 @@ describe('SPAWN_SPECS', () => {
     for (const id of HARNESS_ORDER) {
       const spec = SPAWN_SPECS[id]
       if (!spec) continue
-      expect(Boolean(spec.effortFlag)).toBe(Boolean(spec.efforts?.length))
+      expect(Boolean(spec.effortFlag || spec.effortArgs)).toBe(Boolean(spec.efforts?.length))
     }
   })
 })

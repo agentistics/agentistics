@@ -496,6 +496,10 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
   }
   // Optional verbs: a structured session answers a free-text option through its driver; the rest it
   // has none of. A tmux session keeps its own.
+  if (base.sendTextReliable) backend.sendTextReliable = (id, text, harness) => {
+    const s = of(id)
+    return s ? Promise.resolve(s.prompt(text)) : base.sendTextReliable!(id, text, harness)
+  }
   if (base.sendChoiceText) {
     backend.sendChoiceText = (id, k, t, opened) => {
       const s = of(id)

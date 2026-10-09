@@ -25,6 +25,7 @@ import { conversationForProcess, findConversation, resumeIdOf } from './conversa
 import { reopenTargetFor } from './reopen-target'
 import type { ManagedSession, SessionActivity } from './types'
 import type { ChatTurn } from './chat-tail'
+import { SPAWN_SPECS } from './spawn-spec'
 
 /**
  * The registry's own record of when a session began, as epoch ms — PURE.
@@ -553,6 +554,17 @@ export function buildSessionViews(o: {
      */
     exactId?: string,
   ): { resume?: { sessionId: string; title: string } } => {
+    // A protocol-stated id is already exact (Codex's thread id, F3.1): a freshly completed rollout may not be
+    // in the metrics cache yet, so reopen it by id without waiting for that independent file scan.
+    {
+      const pool = o.conversations ?? []
+      const knownId = exactId ?? managed?.conversationId
+      if (knownId && !findConversation(pool, knownId) && managed?.conversationLinkVia === 'protocol-stated'
+          && SPAWN_SPECS[harness]?.resume && !claimed.has(knownId)) {
+        claimed.add(knownId)
+        return { resume: { sessionId: knownId, title: managed.label ?? knownId } }
+      }
+    }
     // The rule lives in `reopen-target.ts`, shared with every other reopen path. A row that KNOWS
     // which conversation it drives never falls back to the directory guess — not even when the
     // store does not hold it — and reopens straight from that exact link when the harness's own

@@ -394,7 +394,7 @@ async function runFleetActionOnce(
       // next actual marker turn, and forces that turn's count to disagree with its own markers:
       // a turn that would otherwise resolve draws a chip instead. It also cost a background fleet
       // read on every text answer for a record nothing could ever use.
-      const answered = await host.answerSession(req.id, req.choice, text)
+      const answered = await host.answerSession(req.id, req.choice, req.text ?? '')
       // The engine's attention producer learns the wait ended HERE, with the option index (never its
       // label) — carried on the next confirmed transition out of `waiting-approval` (`fleet-hub.ts`).
       if (answered.ok && typeof req.choice === 'number') {

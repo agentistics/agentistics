@@ -103,8 +103,8 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
   },
 
   // `Usage: codex [OPTIONS] [PROMPT]` / `[PROMPT]  Optional user prompt to start the session`
-  // No `--effort`: the reasoning effort is a `-c key=value` override whose key is not verifiable
-  // from the CLI (`-c` accepts unknown keys silently), so it is absent rather than guessed.
+  // 0.161.0: app-server ThreadStartParams.config.model_reasoning_effort / TurnStartParams.effort.
+  // `model/list` publishes the supported values below (2026-10-09); low verified by a real turn.
   codex: {
     bin: 'codex',
     // `codex --help` (0.161.0): `--no-daemon Run without the shared background server`. This
@@ -120,6 +120,8 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     // `{"detail":"The '…' model is not supported when using Codex with a ChatGPT account."}` — so a
     // list lifted from it would offer models this user cannot run. Nothing to name honestly.
     modelSuggestions: [],
+    effortArgs: effort => ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`],
+    efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
     // A SUBCOMMAND, not a flag: `codex resume [OPTIONS] [SESSION_ID] [PROMPT]`, whose argument is
     // documented as "Conversation/session id (UUID) or thread name".
     resume: id => ['resume', id],
@@ -341,7 +343,7 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
   if (req.model && !spec.modelFlag) {
     return { ok: false, error: { code: 'model-unsupported', harness: req.harness } }
   }
-  if (req.effort && (!spec.effortFlag || !spec.efforts)) {
+  if (req.effort && ((!spec.effortFlag && !spec.effortArgs) || !spec.efforts)) {
     return { ok: false, error: { code: 'effort-unsupported', harness: req.harness } }
   }
   if (req.effort && spec.efforts && !spec.efforts.includes(req.effort)) {
@@ -369,7 +371,8 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
   if (assigned && spec.assignId) argv.push(...spec.assignId(assigned))
   if (req.logFile && spec.logFileFlag) argv.push(spec.logFileFlag, req.logFile)
   if (req.model && spec.modelFlag) argv.push(spec.modelFlag, req.model)
-  if (req.effort && spec.effortFlag) argv.push(spec.effortFlag, req.effort)
+  if (req.effort && spec.effortArgs) argv.push(...spec.effortArgs(req.effort))
+  else if (req.effort && spec.effortFlag) argv.push(spec.effortFlag, req.effort)
 
   // THE AGENTISTICS CONTEXT — fresh sessions only (a reopened conversation already has its history).
   // Official channel first; a harness with none gets the fenced block ahead of its first message.

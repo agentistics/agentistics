@@ -821,3 +821,8 @@ describe('a gemini row whose recorded id is the uuid agentop assigned (F0.2)', (
     expect(filterSessions(views, 'zzz-only-in-transcript', new Set(['other'])).length).toBe(0)
   })
 })
+
+it('reopens a protocol-stated Codex thread before the file/metrics cache catches up', () => {
+  const views = buildSessionViews({ activity: new Map(), reconciled: [row('codex-web', { status: 'lost', backend: undefined, managed: managed('codex-web', { harness: 'codex', conversationId: 'thread-from-protocol', conversationLinkVia: 'protocol-stated', label: 'Codex task' }) })], processes: [], conversations: [] })
+  expect(views.find(v => v.id === 'codex-web')?.resume).toEqual({ sessionId: 'thread-from-protocol', title: 'Codex task' })
+})

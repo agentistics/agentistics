@@ -51,6 +51,8 @@ export interface SpawnSpec {
   defaultModel?: string
   /** Absent when the CLI has no effort flag. Paired with `efforts`; never one without the other. */
   effortFlag?: string
+  /** Config-based effort selection where the CLI has no dedicated flag (Codex `-c`). */
+  effortArgs?: (effort: string) => string[]
   /** A genuine closed enum, printed by the CLI itself — so this one IS validated. */
   efforts?: string[]
   /** The effort used when `--effort` is not passed, under exactly `defaultModel`'s rule. */

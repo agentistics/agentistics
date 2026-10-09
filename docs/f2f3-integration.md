@@ -106,3 +106,13 @@ Also (no textual conflict, stale assertion): `agy-structured.test.ts` asserted `
 | `sessions/sessions-host.ts` | Both blocks kept: smallfixes' `exactLinksOnDisk` (exact-link reopen candidates) and terminal-button's `structured` set fed to `buildSessionViews`. |
 | `sessions/fleet-row.test.ts` | Both describes kept (`conversationLinkVia`, "open in terminal"). |
 
+## 8. F3.1 Codex (`feat/f3-1-codex` 8988243f)
+
+| File | Resolution |
+|---|---|
+| `docs/f2-structured-backend.md` | Harness table: Codex row from F3.1 (ready); Agy and Claude rows from integ (each branch had the others as stubs). F3.1's evidence page `docs/f3-1-codex.md` comes along. |
+| `sessions/cli-start.ts` (`promptSession`) | F3.3's "refuse a prompt while a structured session states an open request" kept FIRST (it covers every session with a stated request); F3.1's "send a structured session's prompt through its driver, never the TUI paste" kept after it (its own duplicate refusal removed — the first check already ran). |
+| `sessions/fleet-web.ts` | `origin: 'web'` on the reopen — present on integ (F2.1) and on the Codex branch; one copy (the commented one) kept. |
+| `sessions/session-view.ts` (`claimResume`) | integ's `reopenTargetFor` (the shared reopen resolver, exact link + on-disk check) kept as the rule; F3.1's shortcut — a PROTOCOL-STATED id (Codex thread id) reopens straight from the link before the file/metrics cache has the rollout — put in front of it, using `findConversation` (uuid-alias aware) instead of a bare `sessionId` match. |
+| `sessions/session-view.test.ts` | Both tests kept (gemini alias describe, Codex protocol-stated reopen). |
+
