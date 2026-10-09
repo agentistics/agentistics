@@ -116,3 +116,11 @@ Also (no textual conflict, stale assertion): `agy-structured.test.ts` asserted `
 | `sessions/session-view.ts` (`claimResume`) | integ's `reopenTargetFor` (the shared reopen resolver, exact link + on-disk check) kept as the rule; F3.1's shortcut — a PROTOCOL-STATED id (Codex thread id) reopens straight from the link before the file/metrics cache has the rollout — put in front of it, using `findConversation` (uuid-alias aware) instead of a bare `sessionId` match. |
 | `sessions/session-view.test.ts` | Both tests kept (gemini alias describe, Codex protocol-stated reopen). |
 
+### Engine side — merge 8, F3.1 Codex (`1b0c4c16`)
+
+| File | Resolution |
+|---|---|
+| `engine/src/structured/engine-structured.ts` | Registry = acp, claude (F3.3), the stub list with `codex-app-server` replaced by its real driver (F3.1), agy (F3.2). After this merge `structuredStubs()` holds no driver that is still a stub. |
+| `engine/src/structured/acp-structured.test.ts` | Registry test: four ready drivers (acp, claude, codex, agy); opencode none. |
+| `public.pin` | Public integ commit. |
+
