@@ -1588,6 +1588,13 @@ export interface ControlHost {
   interruptSession?(id: string): Promise<ActionResult>
 
   /**
+   * F2.0b — "open in terminal" on a STRUCTURED session (one driven over its harness's protocol): its
+   * child ends and the SAME conversation resumes as a TUI under the same row, ready to attach. A
+   * session already in a terminal says so. The next web reopen of the row runs structured again.
+   */
+  openInTerminal?(id: string): Promise<ActionResult>
+
+  /**
    * Restore a session's conversation to the point BEFORE one of the person's own prompts, using the
    * harness's own rewind. `occurrence` picks among identical prompts, 0 = the latest. Refused, in a
    * sentence, where no rewind was measured for the harness, while a dialog is open, or when the
@@ -1941,6 +1948,11 @@ export interface ResumeSessionRequest {
    */
   prompt?: string
   attach: boolean
+  /**
+   * F2.0 — `web`: the browser's reopen. The new row runs structured again when the row it replaces
+   * did (`ManagedSession.structuredDriver`); a terminal-born row always reopens as a TUI.
+   */
+  origin?: 'web' | 'terminal'
 }
 
 export interface SpawnSessionResult {

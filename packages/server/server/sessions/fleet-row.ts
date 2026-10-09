@@ -92,6 +92,12 @@ export type FleetActionId =
    */
   | 'interrupt'
   /**
+   * F2.0b — "open in terminal" on a STRUCTURED session: end its protocol child and resume the same
+   * conversation as a TUI under the same row (`backend.toTerminal`). Chat first; the terminal only
+   * when the person asks for it. A session already in a terminal answers so, in a sentence.
+   */
+  | 'terminal'
+  /**
    * Advance the harness to its NEXT mode — `auto` → `manual` → `accept edits` → `plan` → back.
    *
    * It CYCLES rather than picking, because that is all the harness offers: one keystroke, no way to

@@ -104,6 +104,14 @@ is never prepended twice.
 `SpawnSessionRequest`; every other door leaves it absent. The spawn carries a
 `BackendSpawn.structured: StructuredIntent` built by `structuredIntentOf` (tmux ignores it).
 
+**Reopen.** A row hosted structurally is stamped `ManagedSession.structuredDriver`. A WEB reopen of
+such a row runs structured again (`structuredReopenOrigin`); a terminal-born row reopened from the web
+stays a TUI, and every non-web reopen (cockpit, `agentop session open`) is a TUI resume of the same
+conversation id — "open in terminal".
+
+**`StructuredSpawn.env` is never a secret**: the engine reads no environment of its own, so extra
+variables reach the child through `env(1)` on its command line.
+
 ## Fallback
 
 - **A refused start** (stub, login needed, `session/new` error, launch failure) → `base.spawn(req)`,
@@ -112,6 +120,47 @@ is never prepended twice.
   conversation in tmux under the SAME managed id (`provider.resumeSpawn` = `planSpawn({ resumeId })`)
   and logs it; a kill (`disposed`) or an ordinary end never triggers it. A harness with no id-taking
   resume cannot fall back this way, and says so in the log.
+
+## Surviving a server restart, and "open in terminal" (F2.0b)
+
+**A structured session survives `agentop server` restarting, like every tmux session does.** The child
+is never the server's own: the driver starts it through `StructuredSpawn.transport` (engine-api 1.10,
+optional), which the host implements with a detached RELAY (`structured-relay.ts`, `agentop
+__structured-relay <dir>` / `bun run` in a checkout). The relay owns the child's stdio and records both
+directions in `<data dir>/structured/<managed id>/` (0700; `out.jsonl` every stdout line, `in.jsonl`
+every delivered write); the server talks to it over a unix socket. Under the unit's `KillMode=process`
+the relay outlives the server exactly as the tmux server does.
+
+- **Record.** Every call the host makes on the session (prompt / answer / cancel) is appended to
+  `calls.jsonl` with the number of lines the driver had read when it was made (`recordingSession`).
+  Lines are handed to the driver ONE PER MACROTASK, live and in replay alike — that is what makes a call
+  land between the same two lines in both.
+- **Re-attach** (`agentop server` boot → `reattachStructuredSessions`; `list()` waits for it, so no
+  poll reads `lost`): a fresh driver is started for the SAME saved request over a REPLAY pipe — the
+  recorded lines and calls in order, every write CHECKED against `in.jsonl` (`structured-replay.ts`),
+  then live from where the record ends (output the child wrote while nobody listened is in the file).
+  No event is lost and none is repeated: the session is registered only once the replay is done, so
+  the replay emits to nobody. Turns keep their original times (`StructuredPipe.now`). A replay that
+  diverges (a non-deterministic driver, a tampered record) ends the child and falls back to the
+  conversation-id resume in tmux, as a failed driver always did.
+- **Any other process** (the cockpit, a one-shot `agentop session …`) lists a relayed row as running
+  and never connects to it (one client per relay; a newer one replaces the older).
+- **Driver rule (every driver, the F3 ones included):** start the child through `req.transport` when
+  given, stamp turns with `pipe.now()`, and be deterministic over the pipe (ids in order, no timer or
+  randomness in what it writes). `acp-structured.ts` is the worked example; `stubs.ts` states it.
+
+**"Open in terminal"** on a LIVE structured session = fleet action `terminal`, `GET /api/fleet/attach`,
+the cockpit's attach and `agentop session attach` (`backend.toTerminal`): the child is ended FIRST
+(marked `ending`, so its exit is never read as a failure to fall back from — from any process), then
+the same conversation resumes as a TUI under the SAME managed id (`resumeSpawn`). `structuredDriver`
+stays on the row, so the next web reopen runs structured again. A harness with no id-taking TUI resume
+(gemini: `-r` takes "latest" or an index) is refused in words and left running.
+
+Verified 2026-10-09 on a throwaway server (own HOME/data/tmux, free ports) with the real engine `acp`
+driver: a gemini session re-attached after two restarts (SIGTERM to the server's PID) with its prompts
+replayed exactly once and the next prompt delivered once; a kimi session opened in a terminal as
+`kimi -S session_…` under the same id. Mid-turn restart is covered by the fake-driver tests (real
+processes: relay + fake protocol peer), as the throwaway harnesses had no usable quota/login.
 
 ## What the host reads from a structured session
 
@@ -156,7 +205,7 @@ JSON, `curl -N /api/fleet/chat-stream?id=` frames with arrival times.
 | # | Structured-session expectation |
 |---|---|
 | Q1 New session | Web → New session (no prompt): row < 2 s, `waiting`; `conversationId` present as soon as the protocol states it (`conversationLinkVia: protocol-stated`); send "QA-1 say only OK": echo < 500 ms, **`live` frames while the answer streams**, the finished turn lands as `append`, state back to waiting ≤ 1.5 s after the protocol's turn end; the opening context is NOT a visible user turn; 390 px usable. |
-| Q2 Reopen | Kill from the web → `exited` + Reopen. Reopen → resumes the same conversation (structured when web-born, `resume` via the driver), previous turns in the window. Restart the throwaway server: a structured child dies with the server — record that the row reopens by id (documented limit: no tmux survival). |
+| Q2 Reopen | Kill from the web → `exited` + Reopen. Reopen → resumes the same conversation (structured when web-born, `resume` via the driver), previous turns in the window. Restart the throwaway server (idle AND mid-turn): the row stays live, the chat continues, no turn lost or repeated (F2.0b). "Open in terminal" → a TUI resume of the same id under the same row. |
 | Q3 Reboot sim | Kill the throwaway tmux socket: TUI rows `lost`; structured rows are unaffected while the server lives; record. |
 | Q4 Parallel | 3 structured sessions of H in one folder, a distinct message each: every chat shows only its own conversation (no first-sighting guess — each link is protocol-stated). |
 | Q5 Account switch | Record the harness's behaviour in structured mode (most have no in-protocol login: say so). |
@@ -171,3 +220,18 @@ Plus the **fallback checks** for every harness: (F1) flag OFF → the web spawn 
 (compare the argv and registry row with a pre-F2.0 build); (F2) make the driver refuse (e.g. revoke the
 login) → the session starts as a TUI with no error to the person; (F3) kill the structured child
 process by its PID (never by name) → the row continues as a TUI resume of the same conversation.
+
+## Open items for the integrator / next pieces
+
+- **Public branch not pushed** (weekday business hours): `feat/f2-0-structured-backend` is local only;
+  push after 17h BRT. The engine's `public.pin` names that local commit.
+- **Done in F2.0b** (above): survival across a server restart, and "open in terminal" on a live
+  structured session. The web has the `terminal` action but no BUTTON yet (a UI decision).
+- **The relay's record grows with the session** (every protocol line) and is deleted when the session
+  ends; a re-attach replays all of it. Fine for ordinary sessions; a compaction of the record is the
+  next step if a very long-lived one makes the boot re-attach slow.
+- **The web composer and cards** were not changed: a structured row's `dialogOptions` / `attentionOf`
+  feed the existing approve path; the free-text affordance of a protocol `question` (`freeText`
+  without an option) needs a UI decision when a driver first states one (F3.3 AskUserQuestion, F3.1).
+- **gemini `storeIdOf`** must map the ACP sessionId to the store's synthetic `${dir}/${file}` (F2.1),
+  or the row links to an id no reader resolves.

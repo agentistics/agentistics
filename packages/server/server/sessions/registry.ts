@@ -78,6 +78,8 @@ export interface SessionPatch {
   harnessName?: string
   /** Written alongside `harnessName`, never on its own — see `ManagedSession.harnessNameSince`. */
   harnessNameSince?: number
+  /** See `ManagedSession.structuredDriver`. */
+  structuredDriver?: string
 }
 
 export interface SessionRegistry {
@@ -163,6 +165,7 @@ function sanitize(raw: unknown): ManagedSession | null {
     ...(typeof s.harnessNameSince === 'number' && Number.isFinite(s.harnessNameSince)
       ? { harnessNameSince: s.harnessNameSince }
       : {}),
+    ...(typeof s.structuredDriver === 'string' && s.structuredDriver ? { structuredDriver: s.structuredDriver } : {}),
     ...(typeof s.lastSeenMs === 'number' && Number.isFinite(s.lastSeenMs)
       ? { lastSeenMs: s.lastSeenMs }
       : {}),

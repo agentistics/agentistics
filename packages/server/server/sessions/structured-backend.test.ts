@@ -11,7 +11,7 @@ import type {
 } from '@agentistics/engine-api'
 import { answerFits, structuredRegistry, stubDriver } from '@agentistics/engine-api'
 import { acpAsStructured, structuredSpawnOf, withStructured, type StructuredProvider } from './structured-backend'
-import { answerStructured, routeSpawn, structuredIntentOf } from './structured-route'
+import { answerStructured, routeSpawn, structuredIntentOf, structuredReopenOrigin } from './structured-route'
 import type { BackendSpawn, SessionBackend } from './types'
 
 function fakeBase(): SessionBackend & { calls: Array<[string, unknown?]> } {
@@ -115,6 +115,11 @@ describe('routeSpawn (pure)', () => {
     expect(routeSpawn({ ...base, flagOn: true, origin: 'web', driver: null })).toBe('tmux')
     expect(routeSpawn({ ...base, harness: null, flagOn: true, origin: 'web' })).toBe('tmux')
   })
+  test('a web reopen is structured only when the replaced row ran structured', () => {
+    expect(structuredReopenOrigin('web', 'acp')).toBe(true)
+    expect(structuredReopenOrigin('web', undefined)).toBe(false)
+    expect(structuredReopenOrigin(undefined, 'acp')).toBe(false)
+  })
   test('A5.4 opt-in routes as before, flag or no flag', () => {
     expect(routeSpawn({ ...base, flagOn: false, acpDriven: true, acpOptIn: ['gemini'] })).toBe('acp-legacy')
     expect(routeSpawn({ ...base, flagOn: true, origin: 'terminal', acpDriven: true, acpOptIn: ['gemini'] })).toBe('acp-legacy')
@@ -155,7 +160,8 @@ describe('withStructured — routing', () => {
     const base = fakeBase()
     const eng = fakeEngine()
     const conv: Array<[string, string]> = []
-    const b = withStructured(base, provider(eng.reg, { onConversation: (id, c) => conv.push([id, c]) }))
+    const startedAs: Array<[string, string]> = []
+    const b = withStructured(base, provider(eng.reg, { onConversation: (id, c) => conv.push([id, c]), onStarted: (id, d) => startedAs.push([id, d]) }))
     await b.spawn(web('gemini'))
     expect(base.calls.map(c => c[0])).not.toContain('spawn')
     expect(eng.started).toEqual([{
@@ -164,6 +170,7 @@ describe('withStructured — routing', () => {
       mcp: [{ name: 'agentistics', command: 'agentop', args: ['mcp'] }],
     }])
     expect(conv).toEqual([['m-1', 'offered']])
+    expect(startedAs).toEqual([['m-1', 'acp']])
     expect(b.structuredSessions()).toEqual([{ id: 'm-1', route: 'structured', driver: 'acp' }])
     expect((await b.list()).map(s => [s.id, s.alive])).toEqual([['t-1', true], ['m-1', true]])
     expect(b.activityOf!('m-1')).toBe('waiting')

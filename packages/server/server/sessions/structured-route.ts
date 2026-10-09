@@ -40,6 +40,15 @@ export function routeSpawn(i: RouteInput): SpawnRoute {
 }
 
 /**
+ * PURE. Whether a REOPEN is a web-born spawn: only when the browser asked AND the row it replaces ran
+ * structured. A terminal-born row reopened from the web stays a TUI (owner, 11 Q1): the web never
+ * turns a TUI session into a structured one behind the person's back.
+ */
+export function structuredReopenOrigin(origin: SpawnOrigin | undefined, previousDriver: string | undefined): boolean {
+  return origin === 'web' && !!previousDriver
+}
+
+/**
  * PURE. The spawn, in a structured driver's terms. The prompt is the person's ALONE (the TUI plan may
  * prepend the context to it for a first-message harness; a driver chooses its own channel from its
  * declaration), and the opening context travels as `instructions` on a fresh session only. The
