@@ -1,6 +1,6 @@
 /** Which settings sections a viewer can see. UX-only gate — the server enforces real authz. */
 export type SettingsSectionId =
-  | 'preferences' | 'accessibility' | 'sessions' | 'data-sources' | 'harnesses' | 'pricing' | 'billing' | 'install' | 'connection' | 'live'
+  | 'preferences' | 'accessibility' | 'sessions' | 'data-sources' | 'harnesses' | 'mcp' | 'pricing' | 'billing' | 'install' | 'connection' | 'live'
   | 'chat' | 'providers' | 'memory' | 'notifications' | 'backup'
   | 'users' | 'teams' | 'machines' | 'repositories'
 
@@ -31,6 +31,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'data-sources', labelEn: 'Data & sources', labelPt: 'Dados & fontes', group: 'personal' },
   { id: 'backup', labelEn: 'Backup', labelPt: 'Backup', group: 'personal' },
   { id: 'harnesses', labelEn: 'Harnesses', labelPt: 'Harnesses', group: 'personal' },
+  { id: 'mcp', labelEn: 'MCP servers', labelPt: 'Servidores MCP', group: 'personal' },
   { id: 'pricing', labelEn: 'Pricing', labelPt: 'Preços', group: 'personal' },
   { id: 'billing', labelEn: 'Billing', labelPt: 'Cobrança', group: 'personal' },
   { id: 'install', labelEn: 'Install', labelPt: 'Instalação', group: 'personal' },
@@ -60,6 +61,7 @@ export function visibleSettingsSections(v: SettingsViewer): SettingsSection[] {
       // Two gates, not one. `chatEnabled` (the user's switch) gates the ROWS inside the section;
       // this gates the SECTION. Collapsing them would hide the enable switch whenever chat is off,
       // which is a one-way door: there would be no way to turn it back on.
+      case 'mcp': return !v.central
       case 'chat': return !v.central && v.localChat !== false
       // Billing describes how ONE machine is paid for. A central aggregates many, and pricing a
       // whole fleet from its operator's own timeline would be a fabricated number — so the plan

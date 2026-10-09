@@ -2289,6 +2289,12 @@ function McpTab({ lang, list, error, cwd, onChanged }: {
   const [working, setWorking] = useState<string | null>(null)
   /** The row being edited, and the JSON as it is being typed. */
   const [editing, setEditing] = useState<McpEntry | null>(null)
+  /**
+   * The no-duplicate rule, asked of the person: the paste points at an address already listed under
+   * another name (`dupOf`). The server refused it once with a sentence; pressing the button again —
+   * now labelled "Add anyway" — is the confirmation, sent as `allowDuplicate`.
+   */
+  const [dupOf, setDupOf] = useState<string | null>(null)
   const scopes = offerableScopes(cwd)
 
   /**
@@ -2345,8 +2351,9 @@ function McpTab({ lang, list, error, cwd, onChanged }: {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...body, lang, ...(cwd ? { projectPath: cwd } : {}) }),
       })
-      const out = await res.json() as { ok: boolean; names?: string[]; message?: string }
+      const out = await res.json() as { ok: boolean; names?: string[]; message?: string; code?: string; existing?: string }
       if (out.ok) {
+        setDupOf(null)
         setSaid({ tone: 'ok', text: (out.names ?? []).join(', ') })
         setPaste(''); setName(''); setAdding(false); setEditing(null)
         onChanged()
@@ -2371,6 +2378,7 @@ function McpTab({ lang, list, error, cwd, onChanged }: {
         // The SERVER's own sentence, verbatim — including the harness command's own error, which
         // says far more about a refused config than any wording invented here.
         setSaid({ tone: 'bad', text: out.message ?? (pt ? 'não deu certo' : 'that did not work') })
+        setDupOf(out.code === 'duplicate' ? (out.existing ?? '') : null)
       }
     } catch {
       setSaid({ tone: 'bad', text: pt ? 'não foi possível falar com o servidor' : 'the server could not be reached' })
@@ -2463,7 +2471,7 @@ function McpTab({ lang, list, error, cwd, onChanged }: {
 
       {adding && (
         <form
-          onSubmit={e => { e.preventDefault(); void write('/api/mcp/install', { paste, scope, ...(name ? { name } : {}) }) }}
+          onSubmit={e => { e.preventDefault(); void write('/api/mcp/install', { paste, scope, ...(name ? { name } : {}), ...(dupOf !== null ? { allowDuplicate: true } : {}) }) }}
           style={{
             marginTop: 8, padding: 8, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 7,
             border: '1px solid var(--border-subtle)',
@@ -2502,7 +2510,7 @@ function McpTab({ lang, list, error, cwd, onChanged }: {
           </div>
           <textarea
             value={paste}
-            onChange={e => setPaste(e.target.value)}
+            onChange={e => { setPaste(e.target.value); setDupOf(null) }}
             rows={5}
             spellCheck={false}
             placeholder={'{"mcpServers":{"sentry":{"type":"http","url":"https://mcp.sentry.dev/mcp"}}}'}
@@ -2568,11 +2576,11 @@ function McpTab({ lang, list, error, cwd, onChanged }: {
                 border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange)', color: '#fff',
               }}
             >
-              <Plus size={12} /> {busy ? (pt ? 'Adicionando…' : 'Adding…') : (pt ? 'Adicionar' : 'Add')}
+              <Plus size={12} /> {busy ? (pt ? 'Adicionando…' : 'Adding…') : dupOf !== null ? (pt ? 'Adicionar mesmo assim' : 'Add anyway') : (pt ? 'Adicionar' : 'Add')}
             </button>
             <button className="ag-tap"
               type="button"
-              onClick={() => { setAdding(false); setSaid(null) }}
+              onClick={() => { setAdding(false); setSaid(null); setDupOf(null) }}
               style={{
                 padding: isMobile ? '6px 14px' : '5px 11px',
                 borderRadius: 7, fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600,

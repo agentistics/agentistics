@@ -4,7 +4,7 @@ import { visibleSettingsSections, SETTINGS_SECTIONS } from './settingsSections'
 const ids = (v: Parameters<typeof visibleSettingsSections>[0]) => visibleSettingsSections(v).map(s => s.id)
 
 test('solo/member: personal sections + live, no governance', () => {
-  expect(ids({ central: false })).toEqual(['preferences', 'accessibility', 'notifications', 'sessions', 'data-sources', 'backup', 'harnesses', 'pricing', 'billing', 'install', 'live', 'chat'])
+  expect(ids({ central: false })).toEqual(['preferences', 'accessibility', 'notifications', 'sessions', 'data-sources', 'backup', 'harnesses', 'mcp', 'pricing', 'billing', 'install', 'live', 'chat'])
 })
 
 test('central owner: personal (no live) + all governance sections', () => {
@@ -99,4 +99,9 @@ test('experimental is not a settings section in any viewer mode', () => {
   ]) {
     expect(ids(viewer)).not.toContain('experimental')
   }
+})
+
+test('mcp is a machine section — MCP servers are the assistants installed HERE; a central has none to sign in', () => {
+  expect(ids({ central: false })).toContain('mcp')
+  expect(ids({ central: true, role: 'owner' })).not.toContain('mcp')
 })

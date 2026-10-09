@@ -31,6 +31,7 @@ const SessionsSettings = lazy(() => import('./pages/settings/SessionsSettings'))
 const DataSourcesSettings = lazy(() => import('./pages/settings/DataSourcesSettings'))
 const BackupSettings = lazy(() => import('./pages/settings/BackupSettings'))
 const HarnessesSettings = lazy(() => import('./pages/settings/HarnessesSettings'))
+const McpSettings = lazy(() => import('./pages/settings/McpSettings'))
 const InstallSettings = lazy(() => import('./pages/settings/InstallSettings'))
 const LiveSettings = lazy(() => import('./pages/settings/LiveSettings'))
 const ChatSettings = lazy(() => import('./pages/settings/ChatSettings'))
@@ -103,6 +104,7 @@ export default function AppRouter() {
             <Route path="data-sources" element={<Suspense fallback={<PageFallback />}><DataSourcesSettings /></Suspense>} />
             <Route path="backup" element={<Suspense fallback={<PageFallback />}><BackupSettings /></Suspense>} />
             <Route path="harnesses" element={<Suspense fallback={<PageFallback />}><HarnessesSettings /></Suspense>} />
+            <Route path="mcp" element={<Suspense fallback={<PageFallback />}><McpSettings /></Suspense>} />
             <Route path="pricing" element={<Suspense fallback={<PageFallback />}><PricingSettings /></Suspense>} />
             <Route path="billing" element={<Suspense fallback={<PageFallback />}><BillingSettings /></Suspense>} />
             <Route path="install" element={<Suspense fallback={<PageFallback />}><InstallSettings /></Suspense>} />
