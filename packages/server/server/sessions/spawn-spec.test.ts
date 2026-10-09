@@ -242,12 +242,8 @@ describe('conversationLinkable', () => {
 })
 
 describe('conversationLinkGoneForever', () => {
-  it('is true ONLY for the harness whose sole route needs the live process', () => {
-    // antigravity has neither `assignId` nor a session-file route — `HARNESS_PROCESS_TRANSCRIPTS` (a
-    // `/proc/<pid>/fd` read) is its only way to an exact link, and that answer stops existing the
-    // moment the process exits. See the header above the function for why this must be a DIFFERENT
-    // question from `conversationLinkable`, which stays true for antigravity throughout.
-    expect(conversationLinkGoneForever('antigravity')).toBe(true)
+  it('keeps agy recoverable after exit because its managed log outlives the process', () => {
+    expect(conversationLinkGoneForever('antigravity')).toBe(false)
   })
 
   it('is false for a harness with an assign flag or a session-file route', () => {
@@ -307,4 +303,25 @@ it('never pairs a default with a flag the CLI does not have', () => {
     if (spec.defaultModel !== undefined) expect(spec.modelFlag, harness).toBeDefined()
     if (spec.defaultEffort !== undefined) expect(spec.effortFlag, harness).toBeDefined()
   }
+})
+
+describe('exclusive managed process log', () => {
+  it('agy receives the log override on a fresh spawn and on reopen', () => {
+    for (const resumeId of [undefined, 'existing-conversation']) {
+      const r = planSpawn({ harness: 'antigravity', cwd: '/r', logFile: '/data/agy-logs/0123456789.log', ...(resumeId ? { resumeId } : {}) })
+      expect(r.ok).toBe(true)
+      if (r.ok) {
+        expect(r.plan.argv).toContain('--log-file')
+        expect(r.plan.argv).toContain('/data/agy-logs/0123456789.log')
+        expect(r.plan.conversationId).toBe(resumeId)
+        if (resumeId) expect(r.plan.argv.slice(1, 3)).toEqual(['--conversation', resumeId])
+      }
+    }
+  })
+  it('leaves every other harness argv unchanged', () => {
+    for (const harness of ['claude', 'codex', 'gemini', 'copilot', 'kimi', 'opencode'] as const) {
+      expect(planSpawn({ harness, cwd: '/r', logFile: '/data/agy-logs/0123456789.log' }))
+        .toEqual(planSpawn({ harness, cwd: '/r' }))
+    }
+  })
 })

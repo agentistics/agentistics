@@ -230,6 +230,7 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
   // real closed effort enum — the only harness besides claude that documents one.
   antigravity: {
     bin: 'agy',
+    logFileFlag: '--log-file', // agy 1.3.2 --help, probed 2026-10-09
     prompt: { kind: 'flag', flag: '--prompt-interactive' },
     modelFlag: '--model', // `--model  Model for the current CLI session`
     // The only harness here with a real listing command: `agy models` ("List available models",
@@ -303,30 +304,14 @@ export function conversationLinkable(harness: HarnessId): boolean {
     || HARNESS_PROCESS_TRANSCRIPTS[harness] !== null
 }
 
-/**
- * Once a session of this harness has ENDED with no exact link, will one ever arrive?
- *
- * Narrower than `!conversationLinkable`, and a DIFFERENT fact. `conversationLinkable` answers for
- * the HARNESS as a whole, and is `true` for antigravity because route 3 above exists — but route 3
- * is a `/proc/<pid>/fd` read, so it only ever answers while the process is still alive to ask. A row
- * whose harness has ONLY route 3 (no `assignId`, no `HARNESS_SESSION_SOURCES` entry — antigravity
- * today) and whose process has already exited unlinked has exhausted its one chance: the fd is gone,
- * and nothing can recover the id it would have named. `conversationLinkable('antigravity')` stays
- * `true` throughout — a LIVE antigravity row within its capture window (see
- * `linkProcessConversationSoon` in `cli-start.ts`) must not be told it can never be linked — so a
- * caller needs BOTH this and the row's own ended state to tell "not yet" from "not ever".
- *
- * `false` for a harness with `assignId` or a session-file route: those record the link at spawn or
- * while the process runs through a DIFFERENT mechanism than the process's own open fd, so a session
- * ending unlinked there is either impossible or a fact about right now, not a permanent one this
- * function should be asked about.
- */
+/** A process-only route is lost after exit unless its exclusive managed log can still be read. */
 export function conversationLinkGoneForever(harness: HarnessId): boolean {
   return SPAWN_SPECS[harness]?.assignId === undefined
     && HARNESS_SESSION_SOURCES[harness] === null
     // Only where route 3 is the ONLY route: a codex or kimi conversation that ended unlinked is
     // still claimed by first sighting once the store has it, so it is not gone.
     && HARNESS_PROCESS_TRANSCRIPTS[harness]?.onlyRoute === true
+    && !HARNESS_PROCESS_TRANSCRIPTS[harness]?.managedLog
 }
 
 /** Decide the exact argv (and any text to type in) for a requested session. */
@@ -359,6 +344,7 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
   // Never alongside a resume: the conversation already exists and already has an id.
   const assigned = !req.resumeId && req.conversationId && spec.assignId ? req.conversationId : undefined
   if (assigned && spec.assignId) argv.push(...spec.assignId(assigned))
+  if (req.logFile && spec.logFileFlag) argv.push(spec.logFileFlag, req.logFile)
   if (req.model && spec.modelFlag) argv.push(spec.modelFlag, req.model)
   if (req.effort && spec.effortFlag) argv.push(spec.effortFlag, req.effort)
 

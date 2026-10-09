@@ -1264,6 +1264,13 @@ Codex JSONL files wrap events in `event_msg` / `response_item` envelopes; the se
 
 ### Antigravity (agy) — shares ~/.gemini, but is a separate harness
 
+Managed Antigravity links: see `docs/antigravity-link.md`. Always use the per-id `--log-file`
+under `AGENTISTICS_DATA_DIR/agy-logs`; read it without `/proc`, including after exit. F0.3's
+`HARNESS_PROCESS_TRANSCRIPTS.antigravity` also decodes the UUID of an open conversation DB/brain
+path before falling back to legacy log content. Never infer a link from a directory listing or cwd.
+Keep `onlyRoute: true`, the relink of process-derived links, and `--conversation` on reopen.
+
+
 Antigravity lives at `~/.gemini/antigravity-cli` (inside the Gemini CLI home) while the Gemini
 adapter reads only `~/.gemini/tmp` — the two never overlap or double-count. Per-conversation
 transcripts are step-based JSONL at
