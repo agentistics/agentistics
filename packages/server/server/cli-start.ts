@@ -157,7 +157,7 @@ import { needsChoice, parseDialogOptions, readDialog } from './sessions/dialog-c
 import { answerFollowUp } from './sessions/answer-followup'
 import { liveTranscriptDeps, runTranscriptSearch } from './sessions/transcript-run'
 import { rulesFor } from './sessions/attention-rules'
-import { classifyCodexSendFailure, codexIsBlockingFrame } from './sessions/codex-send'
+import { classifySendFailure, promptIsBlocked } from './sessions/prompt-guard'
 import { planCrashGroup, planFellOffer } from './sessions/crash-group'
 import { selectFell } from './sessions/fell-selection'
 import {
@@ -3967,12 +3967,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       if (!live?.alive) return { ok: false, message: s.sessNotRunning }
 
       const frame = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
-      const rules = rulesFor(managed.harness)
-      if (managed.harness === 'codex' && codexIsBlockingFrame(frame)) {
-        return { ok: false, message: s.sessCodexBlocked }
-      }
-      if (managed.harness !== 'codex' && rules && rules.approval.some(re => re.test(frame.join('\n')))) {
-        return { ok: false, message: s.sessPromptBlocked }
+      if (promptIsBlocked(managed.harness, frame)) {
+        return { ok: false, message: managed.harness === 'codex' ? s.sessCodexBlocked : s.sessPromptBlocked, failure: 'prompt' as const }
       }
 
       // A context HELD at spawn (no invisible channel, no first message then) rides in front of the
@@ -3989,15 +3985,12 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // startup/daemon prompt is explained as a question, while a dead pane gets the reopen path.
       const after = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
       const aliveAfter = (await backend.list().catch(() => [])).some(b => b.id === id && b.alive)
-      if (managed.harness === 'codex') {
-        const failure = classifyCodexSendFailure(after, aliveAfter)
-        return failure === 'prompt'
-          ? { ok: false, message: s.sessCodexBlocked, failure }
-          : { ok: false, message: s.sessSessionEnded, failure }
-      }
-      return aliveAfter
-        ? { ok: false, message: s.sessSendFailed(id), failure: 'ended' as const }
-        : { ok: false, message: s.sessSessionEnded, failure: 'ended' as const }
+      const failure = classifySendFailure(managed.harness, after, aliveAfter)
+      if (failure === 'prompt') return { ok: false, message: managed.harness === 'codex' ? s.sessCodexBlocked : s.sessPromptBlocked, failure }
+      // `ended` only for a pane that is gone: a live one that did not take the keys is unconfirmed.
+      return failure === 'unconfirmed'
+        ? { ok: false, message: managed.harness === 'codex' ? s.sessSendUnconfirmed(id) : s.sessSendFailed(id), failure }
+        : { ok: false, message: s.sessSessionEnded, failure }
     },
 
     /**
