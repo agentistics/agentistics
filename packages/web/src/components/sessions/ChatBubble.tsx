@@ -26,7 +26,7 @@ import remarkGfm from 'remark-gfm'
 // message written across several lines renders as one run-on paragraph — which is what "the
 // messages are not formatted" turned out to mean. `HarnessChat` has always used it.
 import remarkBreaks from 'remark-breaks'
-import { ArrowUpRight, Check, ChevronDown, Clock, Copy, CornerUpLeft, Ellipsis, Forward, Image as ImageIcon, KeyRound, ListChecks, Loader, Mic, User } from 'lucide-react'
+import { ArrowUpRight, Check, ChevronDown, Clock, Copy, CornerUpLeft, Ellipsis, ExternalLink, Forward, Image as ImageIcon, KeyRound, Link2, ListChecks, Loader, Mic, User } from 'lucide-react'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import { chatNote, type ChatNoteTab } from '../../lib/chatNote'
 import { openArtifacts } from '../../lib/artifactsStore'
@@ -36,6 +36,7 @@ import { hasPastedContent, pastePreview, splitPastedContent, stripInjectedBlocks
 import { resolveMarkerPaths, splitImageAttachments, splitImageMarkers } from '../../lib/attachmentPreview'
 import type { AttachmentMessage, AttachmentSend } from '@agentistics/core'
 import { copyText } from '../../lib/clipboard'
+import { linkHrefFrom } from '../../lib/linkTarget'
 import { bubbleMenuHeight, bubbleMenuTop } from '../../lib/bubbleMenu'
 import { echoStatus } from '../../lib/echoStatus'
 import { messageTime } from '../../lib/messageTime'
@@ -381,7 +382,7 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessio
    * selected and puts it on their own clipboard. It touches no session, decides nothing, and is the
    * gesture the right-click was reached for in the first place. The rest of the list stays refused.
    */
-  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null)
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number; href?: string } | null>(null)
   /** The last copy's outcome, cleared on a timer — see the note beside the button. */
   const [copied, setCopied] = useState<'ok' | 'fail' | null>(null)
   useEffect(() => {
@@ -398,6 +399,7 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessio
   const hasMenu = !provisional && !awaiting && Boolean(onReply || onForward || onSelectStart)
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pressAt = useRef<{ x: number; y: number } | null>(null)
+  const pressHref = useRef<string | null>(null)
   /** The long press OPENED the menu — so the touch's end must not become a click. */
   const longFired = useRef(false)
   const cancelPress = useCallback(() => {
@@ -406,9 +408,9 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessio
   }, [])
   useEffect(() => cancelPress, [cancelPress])
   /** Open the menu at a point inside this bubble, flipping it up when it would go under the composer. */
-  const openMenuAt = useCallback((x: number, localY: number) => {
+  const openMenuAt = useCallback((x: number, localY: number, href?: string | null) => {
     const r = bodyRef.current?.getBoundingClientRect()
-    const rows = [onReply, onForward, onSelectStart].filter(Boolean).length + 1
+    const rows = [onReply, onForward, onSelectStart].filter(Boolean).length + 1 + (href ? 2 : 0)
     const ground = document.querySelector('.ag-composer-ground')?.getBoundingClientRect().top
     const floor = Math.min(window.innerHeight, ground ?? window.innerHeight)
     const y = r
@@ -417,7 +419,7 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessio
     // Inside the viewport horizontally too — a narrow bubble on the right of a phone put the menu's
     // right half off screen. 170 is the menu's own `minWidth`.
     const left = r ? Math.max(8 - r.left, Math.min(x, window.innerWidth - 8 - 170 - r.left)) : x
-    setMenuAt({ x: left, y })
+    setMenuAt({ x: left, y, ...(href ? { href } : {}) })
   }, [onReply, onForward, onSelectStart, isMobile])
   useEffect(() => {
     if (menuAt === null) return
@@ -574,13 +576,14 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessio
           if (!hasMenu || selectMode) return
           const t = e.touches[0]
           const r = bodyRef.current?.getBoundingClientRect()
+          pressHref.current = linkHrefFrom(e.target)
           pressAt.current = t && r ? { x: t.clientX - r.left, y: t.clientY - r.top } : { x: 8, y: 8 }
           cancelPress()
           longFired.current = false
           pressTimer.current = setTimeout(() => {
             pressTimer.current = null
             longFired.current = true
-            if (pressAt.current) openMenuAt(pressAt.current.x, pressAt.current.y)
+            if (pressAt.current) openMenuAt(pressAt.current.x, pressAt.current.y, pressHref.current)
           }, LONG_PRESS_MS)
         }}
         onTouchMove={cancelPress}
@@ -601,7 +604,7 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessio
           if (!hasMenu || selectMode) return
           e.preventDefault()
           const r = bodyRef.current?.getBoundingClientRect()
-          if (r) openMenuAt(e.clientX - r.left, e.clientY - r.top); else setMenuAt({ x: 8, y: 8 })
+          if (r) openMenuAt(e.clientX - r.left, e.clientY - r.top, linkHrefFrom(e.target)); else setMenuAt({ x: 8, y: 8 })
         }}
         style={{
         // `minWidth: 0` is what actually keeps wide content inside the card: without it a flex item
@@ -736,6 +739,39 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessio
               boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
             }}
           >
+            {menuAt.href && (
+              <>
+                <button
+                  role="menuitem"
+                  data-testid="bubble-copy-link"
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => {
+                    const href = menuAt.href!
+                    setMenuAt(null)
+                    void copyText(href).then(ok => setCopied(ok ? 'ok' : 'fail'))
+                  }}
+                  style={menuItemStyle(isMobile)}
+                >
+                  <Link2 size={13} style={{ flexShrink: 0 }} />
+                  {pt ? 'Copiar link' : 'Copy link'}
+                </button>
+                <button
+                  role="menuitem"
+                  data-testid="bubble-open-link"
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => {
+                    const href = menuAt.href!
+                    setMenuAt(null)
+                    window.open(href, '_blank', 'noopener,noreferrer')
+                  }}
+                  style={menuItemStyle(isMobile)}
+                >
+                  <ExternalLink size={13} style={{ flexShrink: 0 }} />
+                  {pt ? 'Abrir em nova aba' : 'Open in new tab'}
+                </button>
+              </>
+            )}
+
             {onReply && (
             <button
               role="menuitem"
