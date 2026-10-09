@@ -9,7 +9,7 @@ import type { LiveProcess, LiveUnavailableReason, SessionMeta } from '@agentisti
 import { getRates } from './rates'
 import { getVersionInfo, startVersionRecheck } from './version'
 import { sendTelemetry } from './telemetry'
-import { handleUpgradeRoute, upgradableHint } from './upgrade-web'
+import { handleUpgradeRoute, upgradableHint, versionWithRestart } from './upgrade-web'
 import { compressResponse, negotiateEncoding } from './http-compress'
 import { encodedBody, etagMatches, versionOf } from './data-response-cache'
 import { slimApiResponse, slimSerialized } from './data-slim'
@@ -766,7 +766,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 
     if (url.pathname === '/api/version' && req.method === 'GET') {
       try {
-        const info = await getVersionInfo()
+        const info = versionWithRestart(await getVersionInfo())
         // `upgradable`: whether THIS machine could press "install now" — the very gate the route
         // applies, so the update toast is never offered where the route would refuse. Additive.
         return new Response(JSON.stringify({ ...info, upgradable: upgradableHint(info) }), {

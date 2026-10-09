@@ -31,6 +31,19 @@ import { writeAudit } from './audit'
 import type { CliLang } from './cli-lang'
 import { UPGRADE_PROGRESS_FILE, reconcileUpgradeState } from './upgrade'
 import { parseUpgradeProgress, progressForWire } from './upgrade-progress'
+import { withRestartPending } from './restart-pending'
+import { readDiskVersion } from './restart-pending-io'
+
+/** `getVersionInfo` told what the binary on disk adds: a pending restart makes the update real. */
+export function versionWithRestart<T extends { current: string; latest: string; hasUpdate: boolean }>(info: T) {
+  const bin = upgradeBinary(process.execPath)
+  return withRestartPending(info, bin ? readDiskVersion(process.execPath) : null)
+}
+
+/** The args of the detached child: the plain restart when the new binary is already installed. */
+export function upgradeArgs(restartOnly: boolean): string[] {
+  return restartOnly ? ['restart', 'server'] : ['upgrade']
+}
 
 /** Set while a detached upgrade is in flight, so a second press is refused rather than racing. */
 let running: { version: string; startedMs: number } | null = null
@@ -115,7 +128,11 @@ export async function handleUpgradeRoute(
   // published answered `up-to-date` from a cache minted before the release existed. It is one
   // round trip per press, on a press, which is exactly what `agentop upgrade` already does for the
   // same reason (`force live GitHub release check during manual upgrade`).
-  const info = await getVersionInfo({ force: true }).catch(() => null)
+  const rawInfo = await getVersionInfo({ force: true }).catch(() => null)
+  // The new binary may already be on disk under an old process: then there is nothing to download,
+  // only a restart (the 2026-10-09 "spins forever" case).
+  const info = rawInfo ? versionWithRestart(rawInfo) : null
+  const restartOnly = info?.restartNeeded === true
   const decision = upgradeFromUiDecision({
     capable: CAPS.localShell,
     central: TEAM_CENTRAL,
@@ -144,7 +161,7 @@ export async function handleUpgradeRoute(
   try {
     // DETACHED — see this module's header. `setsid` is not enough on its own: the handles must go
     // too, or the child holds this server's stdio open across its own restart.
-    const child = spawn(bin, ['upgrade'], { detached: true, stdio: 'ignore' })
+    const child = spawn(bin, upgradeArgs(restartOnly), { detached: true, stdio: 'ignore' })
     child.unref()
   } catch {
     running = null
@@ -153,5 +170,5 @@ export async function handleUpgradeRoute(
 
   void writeAudit({ action: 'upgrade.started', ip, targetId: decision.version })
   // `started`, never `done`: the process that would say "done" is the one this upgrade restarts.
-  return json({ ok: true, started: true, version: decision.version })
+  return json({ ok: true, started: true, version: decision.version, ...(restartOnly ? { restartOnly: true } : {}) })
 }
