@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import type { ChatDeclaration, HarnessChat, HarnessChatDelta } from '@agentistics/engine-api'
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import {
-  adapterActivity, createAdapterStateFeed, planScreen, SCREEN_REFRESH_MS, type AdapterReading, type AdapterStateFeed,
+  adapterActivity, createAdapterStateFeed, planScreen, SCREEN_REFRESH_MS, TAIL_WINDOW, type AdapterReading, type AdapterStateFeed,
 } from './adapter-state'
 import { createSessionsPoller } from './sessions-host'
 import type { BackendSession, ManagedSession, SessionActivity, SessionBackend } from './types'
@@ -63,6 +63,7 @@ function fakeEngine() {
     state: (conv: string, working: boolean, attention = false) =>
       emitters.get(conv)?.({ kind: 'state', working, ...(attention ? { attention: { kind: 'permission' } } : {}) }),
     following: (conv: string) => emitters.has(conv),
+    emit: (conv: string, d: HarnessChatDelta) => emitters.get(conv)?.(d),
   }
 }
 
@@ -111,7 +112,8 @@ describe('the poller, per harness — the harness states its state when ON; the 
       await poller.poll() // first poll: subscribes; the screen is read (no reading yet)
       await flush()
       expect(captures.length).toBe(1)
-      expect(eng.following(`conv-${h}`)).toBe(stated)
+      // F4.A: every harness with a chat (not opencode) is followed for the row's tail; only a stated one decides.
+      expect(eng.following(`conv-${h}`)).toBe(h !== 'opencode')
       if (!stated) {
         t += 5_000
         await poller.poll()
@@ -194,20 +196,36 @@ describe('the poller, per harness — the harness states its state when ON; the 
 })
 
 describe('createAdapterStateFeed', () => {
-  it('follows only live linked rows of harnesses that state their state, and releases gone ones', async () => {
+  it('follows every live linked row whose harness serves a chat, and releases gone ones', async () => {
     const eng = fakeEngine()
     const feed = createAdapterStateFeed({ chatOf: eng.chatOf, setTimer: () => 0, clearTimer: () => {} })
     feed.sync([
       { id: 'a', harness: 'claude', conversationId: 'c-a' },
-      { id: 'b', harness: 'gemini', conversationId: 'c-b' }, // declares no state
+      { id: 'b', harness: 'gemini', conversationId: 'c-b' }, // declares no state: followed for the tail
       { id: 'c', harness: 'codex' }, // no link
       { id: 'd', harness: 'opencode', conversationId: 'c-d' }, // no chat
     ])
     await flush()
-    expect(feed.followed()).toEqual(['a'])
+    expect(feed.followed()).toEqual(['a', 'b'])
+    expect(feed.reading('b')).toBeUndefined()
     feed.sync([])
     expect(feed.followed()).toEqual([])
     expect(eng.following('c-a')).toBe(false)
+  })
+
+  it('keeps the row\'s last TAIL_WINDOW turns from the same cursor (F4.A: the poll reads no file)', async () => {
+    const eng = fakeEngine()
+    const feed = createAdapterStateFeed({ chatOf: eng.chatOf, setTimer: () => 0, clearTimer: () => {} })
+    feed.sync([{ id: 'g', harness: 'gemini', conversationId: 'c-g' }])
+    await flush()
+    expect(feed.tail('g')).toBeUndefined()
+    const turn = (i: number) => ({ role: 'assistant' as const, text: `t${i}` })
+    eng.emit('c-g', { kind: 'window', turns: [turn(1), turn(2)], older: false })
+    eng.emit('c-g', { kind: 'append', turns: [3, 4, 5, 6, 7].map(turn) })
+    expect(feed.tail('g')!.map(t => t.text)).toEqual(['t2', 't3', 't4', 't5', 't6', 't7'])
+    expect(TAIL_WINDOW).toBe(6)
+    feed.sync([])
+    expect(feed.tail('g')).toBeUndefined()
   })
 
   it('a change is announced (debounced); an unchanged reading is not', async () => {

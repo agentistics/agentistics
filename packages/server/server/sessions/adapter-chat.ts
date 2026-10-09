@@ -333,26 +333,39 @@ export async function readAdapterChat(o: {
       pending: o.pending,
     })
     if (!src) return adapterPayload(await o.finish({ turns: [], older: false }, live), o.row.link)
-    const window = await new Promise<{ turns: ChatTurn[]; older: boolean } | null>(resolve => {
-      let done = false
-      let unfollow: (() => void) | null = null
-      const finish = (v: { turns: ChatTurn[]; older: boolean } | null) => {
-        if (done) return
-        done = true
-        clearTimeout(timer)
-        // `follow` may deliver the window synchronously, before it has returned its unsubscribe.
-        queueMicrotask(() => { try { unfollow?.() } catch { /* total by contract */ } })
-        resolve(v)
-      }
-      const timer = setTimeout(() => finish(null), o.timeoutMs ?? ADAPTER_FIRST_WINDOW_MS)
-      unfollow = o.chat.follow(src, o.max, d => {
-        if (d.kind === 'window') finish(applyHarnessChatDeltas({ turns: [], older: false }, [d], o.max))
-      })
-      if (done) { try { unfollow() } catch { /* total */ } }
-    })
+    const window = await firstWindow(o.chat, src, o.max, o.timeoutMs)
     if (!window) return null
     return adapterPayload(await o.finish(window, live), o.row.link)
   } catch {
     return null
   }
+}
+
+/**
+ * Follow a source until its first `window`, then stop following: one read of the last `max` turns.
+ * `null` when no window arrived within `timeoutMs` (the channel could not answer in time).
+ */
+export function firstWindow(
+  chat: HarnessChat,
+  src: ChatSourceRef,
+  max: number,
+  timeoutMs: number = ADAPTER_FIRST_WINDOW_MS,
+): Promise<{ turns: ChatTurn[]; older: boolean } | null> {
+  return new Promise(resolve => {
+    let done = false
+    let unfollow: (() => void) | null = null
+    const finish = (v: { turns: ChatTurn[]; older: boolean } | null) => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      // `follow` may deliver the window synchronously, before it has returned its unsubscribe.
+      queueMicrotask(() => { try { unfollow?.() } catch { /* total by contract */ } })
+      resolve(v)
+    }
+    const timer = setTimeout(() => finish(null), timeoutMs)
+    unfollow = chat.follow(src, max, d => {
+      if (d.kind === 'window') finish(applyHarnessChatDeltas({ turns: [], older: false }, [d], max))
+    })
+    if (done) { try { unfollow() } catch { /* total */ } }
+  })
 }

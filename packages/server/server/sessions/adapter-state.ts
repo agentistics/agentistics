@@ -22,15 +22,18 @@
  * Pure decisions (`planScreen`, `adapterActivity`) are exported and tested; the feed holds one engine
  * subscription per conversation and drops it when the row stops running.
  */
-import type { ChatSourceRef, HarnessChat } from '@agentistics/engine-api'
+import { applyHarnessChatDeltas, type ChatSourceRef, type EngineChatTurn, type HarnessChat } from '@agentistics/engine-api'
 import type { SessionActivity } from './types'
 
 /** How often an adapter-stated row's screen is read anyway, for what only the frame carries. */
 export const SCREEN_REFRESH_MS = 120_000
 /** Collapses a burst of state changes (several sessions ending a turn together) into one poll. */
 export const CHANGE_DEBOUNCE_MS = 50
-/** How few turns the state subscription asks for: it reads state, not the conversation. */
-const STATE_WINDOW = 1
+/**
+ * How many turns the subscription keeps: the fleet row's six-turn tail (F4.A — this replaced the
+ * poll's own `readRecent` file read, so the row's tail and its state come from ONE engine cursor).
+ */
+export const TAIL_WINDOW = 6
 
 /** What the harness said, as the poller reads it. */
 export interface AdapterReading {
@@ -77,6 +80,8 @@ export interface AdapterStateFeed {
   sync(rows: readonly AdapterStateRow[]): void
   /** The latest reading for a row, or `undefined` (not followed, or nothing said yet). */
   reading(id: string): AdapterReading | undefined
+  /** The row's last `TAIL_WINDOW` turns, or `undefined` (not followed, or no window yet). */
+  tail(id: string): EngineChatTurn[] | undefined
   /** Read this row's screen on the next poll (an act was just performed on it). */
   forceScreen(id: string): void
   /** Consumes the force. */
@@ -103,6 +108,7 @@ export function createAdapterStateFeed(o: {
     key: string
     unfollow: (() => void) | null
     reading: AdapterReading | undefined
+    turns: { turns: EngineChatTurn[]; older: boolean } | undefined
     alive: boolean
   }
   const entries = new Map<string, Entry>()
@@ -128,7 +134,7 @@ export function createAdapterStateFeed(o: {
 
   function follow(row: AdapterStateRow & { harness: string; conversationId: string }, chat: HarnessChat) {
     const key = `${row.harness}\0${row.conversationId}`
-    const e: Entry = { key, unfollow: null, reading: undefined, alive: true }
+    const e: Entry = { key, unfollow: null, reading: undefined, turns: undefined, alive: true }
     entries.set(row.id, e)
     const coversAttention = chat.declares.attention.from !== undefined
     void (async () => {
@@ -142,8 +148,13 @@ export function createAdapterStateFeed(o: {
         entries.delete(row.id)
         return
       }
-      e.unfollow = chat.follow(src, STATE_WINDOW, d => {
-        if (!e.alive || d.kind !== 'state') return
+      e.unfollow = chat.follow(src, TAIL_WINDOW, d => {
+        if (!e.alive) return
+        if (d.kind === 'window' || d.kind === 'append' || d.kind === 'grow') {
+          e.turns = applyHarnessChatDeltas(e.turns ?? { turns: [], older: false }, [d], TAIL_WINDOW)
+          return
+        }
+        if (d.kind !== 'state') return
         const next: AdapterReading = { working: d.working, attention: d.attention !== undefined, coversAttention }
         const prev = e.reading
         e.reading = next
@@ -158,7 +169,9 @@ export function createAdapterStateFeed(o: {
       for (const row of rows) {
         if (!row.harness || !row.conversationId) continue
         const chat = o.chatOf(row.harness)
-        if (!chat || chat.declares.state.from === undefined) continue
+        // Followed for the tail even when the harness cannot state its turns (gemini): the reading
+        // then stays `undefined` and the screen decides the activity, exactly as before.
+        if (!chat) continue
         live.add(row.id)
         const key = `${row.harness}\0${row.conversationId}`
         const cur = entries.get(row.id)
@@ -169,6 +182,7 @@ export function createAdapterStateFeed(o: {
       for (const id of [...entries.keys()]) if (!live.has(id)) release(id)
     },
     reading: id => entries.get(id)?.reading,
+    tail: id => entries.get(id)?.turns?.turns,
     forceScreen(id) { forced.add(id) },
     takeForced(id) { return forced.delete(id) },
     screenRead(id, atMs) { screens.set(id, atMs) },
