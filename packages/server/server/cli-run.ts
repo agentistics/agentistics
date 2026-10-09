@@ -7,6 +7,7 @@ import { createServer } from 'node:net'
 const REAL_API_PORT = 47291
 const REAL_WEB_PORT = 47292
 const DEFAULT_TTL = '2h'
+const THROWAWAY_PORT_BASE = 48100
 const STATE_ROOT_NAME = 'agentistics-throwaway'
 
 export function isRealAgentopPort(port: number): boolean { return port === REAL_API_PORT || port === REAL_WEB_PORT }
@@ -22,7 +23,7 @@ export type ThrowawayState = {
   command: string[]
 }
 
-type RunOptions = { name: string; ttl: string; portOffset: number; remove: boolean; command: string[] }
+type RunOptions = { name: string; ttl: string; portOffset: number | null; remove: boolean; command: string[] }
 
 function usage(): string {
   return `Usage: agentop run --rm [--ttl 2h] [--port-offset N] [--name x] -- <command...>
@@ -54,7 +55,7 @@ function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { action: 's
   }
   let name = `run-${Date.now().toString(36)}`
   let ttl = DEFAULT_TTL
-  let portOffset = 0
+  let portOffset: number | null = null
   let remove = false
   let command: string[] = []
   for (let i = 0; i < args.length; i++) {
@@ -127,7 +128,11 @@ async function startRun(options: RunOptions): Promise<number> {
   let apiPort: number
   let webPort: number
   try {
-    apiPort = await freePort(REAL_API_PORT + options.portOffset, new Set())
+    const preferred = options.portOffset === null ? THROWAWAY_PORT_BASE : REAL_API_PORT + options.portOffset
+    if (isRealAgentopPort(preferred) || isRealAgentopPort(preferred + 1)) {
+      throw new Error(`--port-offset ${options.portOffset} would land on the real agentop ports ${REAL_API_PORT}/${REAL_WEB_PORT}; refused`)
+    }
+    apiPort = await freePort(preferred, new Set())
     webPort = await freePort(apiPort + 1, new Set([apiPort]))
   } catch (error) {
     rmSync(home, { recursive: true, force: true })
@@ -138,9 +143,9 @@ async function startRun(options: RunOptions): Promise<number> {
   const argv = options.command.length ? options.command : (script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script, 'server'] : [process.execPath, 'server'])
   const env = { ...process.env, HOME: home, USERPROFILE: home, AGENTISTICS_DIR: agentistics, PORT: String(apiPort), WEB_PORT: String(webPort), SERVE_STATIC: '1', AGENTISTICS_SERVER_FOREGROUND: '1', AGENTISTICS_EXPERIMENTAL: '0', TMUX_TMPDIR: join(home, 'tmp'), TMPDIR: join(home, 'tmp'), AGENTISTICS_THROWAWAY: options.name }
   mkdirSync(env.TMPDIR, { recursive: true, mode: 0o700 })
-  const unit = `agentistics-throwaway-${options.name}`
+  const unit = `agentistics-throwaway-${options.name}.scope`
   const systemd = process.platform === 'linux' && !!process.env.XDG_RUNTIME_DIR && await commandExists('systemd-run')
-  const childArgs = systemd ? ['--user', '--scope', '--unit', unit, '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...argv] : argv
+  const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...argv] : argv
   const child = spawn(systemd ? 'systemd-run' : argv[0]!, systemd ? childArgs : argv.slice(1), { env, stdio: 'inherit', detached: !systemd })
   state.pid = child.pid
   if (systemd) state.unit = unit
@@ -151,8 +156,10 @@ async function startRun(options: RunOptions): Promise<number> {
   console.log(`  home: ${home}`)
   console.log(`  stop: agentop run stop ${options.name}`)
 
-  let cleaned = false
-  const cleanup = async () => { if (!cleaned) { cleaned = true; await stopState(state) } }
+  // One shared promise: a signal handler and the normal exit path both call this, and the second
+  // caller must wait for the first one's removal instead of exiting the process under it.
+  let cleaning: Promise<void> | undefined
+  const cleanup = () => (cleaning ??= stopState(state))
   const childExit = new Promise<number>(resolve => { child.once('exit', (status, sig) => resolve(status ?? (sig ? 1 : 0))); child.once('error', () => resolve(1)) })
   const signal = async (sig: NodeJS.Signals) => { try { process.kill(child.pid!, sig) } catch {} ; await childExit; await cleanup(); process.exit(128 + (sig === 'SIGINT' ? 2 : 15)) }
   process.once('SIGINT', () => void signal('SIGINT'))

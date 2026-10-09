@@ -58,4 +58,31 @@ describe('agentop run --rm', () => {
     const removedHome = removed!.slice('removed '.length)
     expect(() => readFileSync(join(removedHome, '.agentistics', 'missing'))).toThrow()
   }, 10_000)
+
+  integration('refuses a --port-offset that lands on the real ports', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'agentop-run-offset-'))
+    for (const offset of ['0', '1']) {
+      const result = await runCli(home, ['--rm', '--name', `test-offset-${offset}`, '--port-offset', offset, '--', 'true'])
+      expect(result.code).toBe(2)
+      expect(result.out).toContain('refused')
+    }
+  }, 15_000)
+
+  integration('SIGTERM stops the command and removes the throwaway home before exiting', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'agentop-run-sig-'))
+    const child = spawn(process.execPath, ['packages/server/bin/cli.ts', 'run', '--rm', '--name', 'test-sig', '--', 'sleep', '30'], {
+      cwd: join(import.meta.dir, '../../..'),
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let out = ''
+    child.stdout.on('data', data => { out += data })
+    child.stderr.on('data', data => { out += data })
+    const exited = new Promise<number | null>(resolve => child.once('exit', code => resolve(code)))
+    for (let i = 0; i < 100 && !out.includes('stop:'); i++) await Bun.sleep(100)
+    await Bun.sleep(500)
+    child.kill('SIGTERM')
+    expect(await exited).toBe(143)
+    expect(out).toContain('removed ')
+  }, 15_000)
 })
