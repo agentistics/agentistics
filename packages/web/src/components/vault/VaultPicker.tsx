@@ -137,11 +137,15 @@ export function VaultPicker({ lang, isMobile, initial, onConfirm, onClear, onClo
           )}
         </>
       )}
-      <DialogActions>
-        <button type="button" onClick={onClose} style={dialogButtonStyle('secondary', isMobile)}>{t('cancel', lang)}</button>
-        {phase === 'ready' && initial && <button type="button" onClick={onClear} style={dialogButtonStyle('secondary', isMobile)}>{t('clear', lang)}</button>}
-        {phase === 'ready' && <button type="button" onClick={confirm} disabled={pick.size === 0 && pickG.size === 0} style={dialogButtonStyle('primary', isMobile, pick.size === 0 && pickG.size === 0)}>{t('confirm', lang)}</button>}
-      </DialogActions>
+      {/* Pinned to the bottom of the scrolling card: with 50+ secrets, "Confirm" must not sit at the
+          end of the list (owner 08/10). Bottom/padding cancel the card's 22px padding. */}
+      <div style={{ position: 'sticky', bottom: -22, margin: '0 -22px -22px', padding: '0 22px 22px', background: 'var(--bg-card)', borderTop: '1px solid var(--border)' }}>
+        <DialogActions>
+          <button type="button" onClick={onClose} style={dialogButtonStyle('secondary', isMobile)}>{t('cancel', lang)}</button>
+          {phase === 'ready' && initial && <button type="button" onClick={onClear} style={dialogButtonStyle('secondary', isMobile)}>{t('clear', lang)}</button>}
+          {phase === 'ready' && <button type="button" onClick={confirm} disabled={pick.size === 0 && pickG.size === 0} style={dialogButtonStyle('primary', isMobile, pick.size === 0 && pickG.size === 0)}>{t('confirm', lang)}</button>}
+        </DialogActions>
+      </div>
     </Shell>
   )
 }

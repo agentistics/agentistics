@@ -44,8 +44,6 @@ export interface AgentToolPolicy {
   capability?: AgentCapability
   /** True when a route is registered in `capability-guard.ts`, i.e. it touches the machine itself. */
   host: boolean
-  /** How the tool behaves against a central: refused there, works on both, or central-only. */
-  central: 'refuse' | 'allow' | 'only'
   /** The standing allowance (§4.4) that may cover it. Every existing tool: `null`. */
   allowance: 'prompt' | 'spawn' | null
 }
@@ -99,16 +97,13 @@ export const AGENT_TOOL_NAMES = [
   // Tags (2)
   'agentistics_tags',
   'agentistics_tag_detail',
-  // Team (2)
-  'agentistics_team_status',
-  'agentistics_team_members',
 ] as const
 
 export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number]
 
-const TASKS = { capability: 'localShell', host: true, central: 'refuse', allowance: null } as const
+const TASKS = { capability: 'localShell', host: true, allowance: null } as const
 const GROUPS = TASKS
-const DATA = { host: false, central: 'allow', allowance: null } as const
+const DATA = { host: false, allowance: null } as const
 const PREFS = DATA
 
 export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
@@ -191,9 +186,6 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   // ------------------------------------------------------------------ Tags
   agentistics_tags: { ...DATA, risk: 'R', routes: ['GET /api/tags'], reason: 'reads aggregate-only tag cards' },
   agentistics_tag_detail: { ...DATA, risk: 'R', routes: ['GET /api/tags', 'GET /api/tags/:id'], reason: 'reads one tag aggregate (counts and sums only)' },
-  // ------------------------------------------------------------------ Team
-  agentistics_team_status: { ...PREFS, risk: 'R', routes: ['GET /api/preferences'], reason: 'reads mode and connection endpoints; returns no token' },
-  agentistics_team_members: { ...DATA, central: 'only', risk: 'R', routes: ['GET /api/team/members'], reason: 'reads the member list; central only' },
 }
 
 /**

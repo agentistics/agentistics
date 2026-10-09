@@ -17,8 +17,6 @@ export const NOTIFICATION_CATEGORIES: readonly CategoryInfo[] = [
   { id: 'idle', pt: 'Sessões paradas', en: 'Idle sessions', hintPt: 'Sugestões de encerrar sessões paradas há muito tempo.', hintEn: 'Suggestions to end sessions idle for a long time.' },
   { id: 'tasks', pt: 'Agentask', en: 'Agentask', hintPt: 'Avisos do Agentask, como um arquivamento bloqueado.', hintEn: 'Notices from Agentask, such as a blocked filing.' },
   { id: 'backup', pt: 'Backup', en: 'Backup', hintPt: 'Quando um backup começa, termina ou falha.', hintEn: 'When a backup starts, finishes or fails.' },
-  { id: 'team', pt: 'Central e máquinas', en: 'Central and machines', hintPt: 'Conexão com a central, máquinas que entram, saem ou mudam.', hintEn: 'The central connection, machines that join, leave or change.' },
-  { id: 'accounts', pt: 'Contas e senhas', en: 'Accounts and passwords', hintPt: 'Pedidos de troca e recuperação de senha.', hintEn: 'Password reset and recovery requests.' },
   { id: 'hardware', pt: 'Memória da máquina', en: 'Machine memory', hintPt: 'Quando a máquina está ficando sem memória.', hintEn: 'When the machine is running low on memory.' },
 ]
 

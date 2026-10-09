@@ -68,13 +68,6 @@ export interface CliStrings {
   lang: 'en' | 'pt'
   tagline: string
   configSolo: string
-  /** The member sentence WITHOUT the endpoint, for surfaces that print the endpoint themselves. */
-  configMemberBare: string
-  configMember: (endpoint: string) => string
-  configMembers: (n: number) => string
-  configMemberLine: (endpoint: string, suffix: string) => string
-  deniedSuffix: (n: number) => string
-  configCentral: string
   nothingRunning: string
 
   confirmKill: string
@@ -90,12 +83,9 @@ export interface CliStrings {
   containerUp: string
   stoppingLocal: string
   stopNoTarget: string
-  stoppingCentral: string
   stoppingMachine: string
   restartingLocal: string
-  restartingCentral: string
   restartingMachine: string
-  rebuildingCentral: string
   rebuildingMachine: string
   rebuildingLocal: string
   localRebuildHint: string
@@ -122,7 +112,6 @@ export interface CliStrings {
 
   /** The two LOGICAL service names — one row each, whichever runtime they happen to be using. */
   svcAgentistics: string
-  svcCentral: string
   /**
    * More than one runtime of the same logical service is up.
    *
@@ -406,26 +395,6 @@ export interface CliStrings {
   /** `machine` runtime, detached — the same, in the background. */
   optDockerBackground: string
   optDockerBackgroundHint: string
-  optCentral: string
-  optCentralHint: string
-  /** One verb per SHAPE of central. They are separate deployments of one program, so they get
-   *  separate labels — "Start" alone left the user to infer which one this box would pick. */
-  optCentralImage: string
-  optCentralImageHint: string
-  optCentralBuild: string
-  optCentralBuildHint: string
-  /** Why a shape is NOT offered. The verb stays absent; the reason is said in the detail pane. */
-  centralBlockedImageNoDocker: string
-  centralBlockedBuildNoDocker: string
-  centralBlockedBuildNoCheckout: string
-  centralBlockedNativeBundled: string
-  centralBlockedNativeNoEnv: string
-  /** A native central (external Mongo, standalone path) — foreground, Ctrl-C to stop. */
-  optCentralNativeForeground: string
-  optCentralNativeForegroundHint: string
-  /** Same, detached — returns immediately, runs in the background. */
-  optCentralNativeBackground: string
-  optCentralNativeBackgroundHint: string
   /** `Stop (native)` / `Stop (docker)` — offered only to break a conflict. */
   stopRuntime: (runtime: string) => string
 
@@ -449,15 +418,6 @@ export interface CliStrings {
   bootDisabled: (unit: string) => string
   bootDisableFailed: (unit: string) => string
 
-  /**
-   * Why a setup mode cannot be chosen right now.
-   *
-   * `central` re-runs `central.sh init`, which rewrites the environment file and recreates the
-   * containers — on a central that is up that is a teardown of the thing being used. The sentence
-   * names what to do instead, because a greyed row that explains nothing is indistinguishable from
-   * a broken one.
-   */
-  setupBlockedCentralUp: string
 
   /**
    * The restarts a RUNNING service offers — composed here for the same reason the starts are: only
@@ -490,15 +450,6 @@ export interface CliStrings {
   restartStarted: (unit: string, pid: number) => string
   restartConfirmedByVersion: (unit: string, version: string) => string
   restartNotStopped: (pid: number) => string
-  centralStarted: string
-  centralFailed: string
-  centralInitDone: string
-  centralInitFailed: string
-  connected: string
-  connectFailed: string
-  /** The one-line outcome of a disconnect that left the machine with no central at all. */
-  disconnected: string
-  disconnectFailed: string
   stoppedAll: string
   stoppedDone: string
   soloSet: string
@@ -535,22 +486,6 @@ export interface CliStrings {
 
   // multi-central member commands (Task 6 — spec §8.2)
   cancel: string
-  leaveWhich: string
-  leaveAll: string
-  leftOne: (endpoint: string) => string
-  leftAll: (n: number) => string
-  stillConnected: (n: number) => string
-  noConnections: string
-  ambiguousLeave: (n: number) => string
-  connectedAs: (user: string, n: number) => string
-  updatedExisting: (endpoint: string) => string
-  tokenInUse: (endpoint: string) => string
-  noMatchEndpoint: (endpoint: string) => string
-  localServerUnknown: string
-  stateAuthRejected: string
-  stateNetUnreachable: string
-  stateOk: string
-  neverSynced: string
 
   // `agentop backup` / `agentop restore` — see backup/daemon.ts and cli-backup.ts
   backupScheduleOff: string
@@ -590,12 +525,6 @@ const EN: CliStrings = {
   lang: 'en',
   tagline: 'AI coding-assistant analytics · agentop',
   configSolo: 'solo — nothing leaves this machine',
-  configMemberBare: 'member — sends metrics to a central',
-  configMember: (e) => `member — sends metrics to a central at ${e}`,
-  configMembers: (n) => `member — sends metrics to ${n} centrals`,
-  configMemberLine: (endpoint, suffix) => `  ↳ ${endpoint}${suffix}`,
-  deniedSuffix: (n) => ` · ${n} repo(s) blocked`,
-  configCentral: 'central — this machine hosts the team central',
   nothingRunning: 'nothing running',
 
   confirmKill: 'Kill it and start fresh?',
@@ -611,12 +540,9 @@ const EN: CliStrings = {
   containerUp: 'machine container is up.',
   stoppingLocal: 'stopping the local server…',
   stopNoTarget: 'no server of this data dir could be named (no port listener visible, no server.lock holder) — nothing was signalled. Stop it by its pid if one is still running.',
-  stoppingCentral: 'stopping the central container…',
   stoppingMachine: 'stopping the machine container…',
   restartingLocal: 'restarting the local server…',
-  restartingCentral: 'restarting the central container…',
   restartingMachine: 'restarting the machine container…',
-  rebuildingCentral: 'rebuilding the central image and recreating…',
   rebuildingMachine: 'rebuilding the machine image and recreating…',
   rebuildingLocal: 'rebuilding the native server (bun run bin)…',
   localRebuildHint: '--rebuild needs the repo to rebuild the native server. Run this from the agentistics checkout, or `agentop upgrade`. Restarting the existing build.',
@@ -634,7 +560,6 @@ const EN: CliStrings = {
   urlOpenFailed: 'could not open a browser from here',
 
   svcAgentistics: 'agentistics',
-  svcCentral: 'agentistics central',
   svcConflict: (runtimes) => `conflict: ${runtimes.join(' + ')} both running — stop one`,
   svcIdleServer: pids => pids.length === 1
     ? `a second server (pid ${pids[0]}) is running and serving nothing — "Stop extra copies" removes it`
@@ -875,21 +800,6 @@ const EN: CliStrings = {
   optDockerForegroundHint: 'attached — Ctrl-C stops it',
   optDockerBackground: 'Start (docker, background)',
   optDockerBackgroundHint: 'detached — the same server, in a container',
-  optCentral: 'Start',
-  optCentralHint: 'the team central, in Docker',
-  optCentralImage: 'Start (docker · published image)',
-  optCentralImageHint: 'pulls ghcr.io/agentistics/agentistics — no build, no checkout needed',
-  optCentralBuild: 'Start (docker · build from source)',
-  optCentralBuildHint: 'builds the image from this checkout, then recreates the container',
-  centralBlockedImageNoDocker: 'Published image: needs Docker, and `docker` is not on PATH here.',
-  centralBlockedBuildNoDocker: 'Build from source: needs Docker, and `docker` is not on PATH here.',
-  centralBlockedBuildNoCheckout: 'Build from source: needs an agentistics checkout — this is the installed binary. The published image runs the same central.',
-  centralBlockedNativeBundled: 'Native: needs an external database. This central uses the bundled Mongo, which only Docker starts — re-run setup and choose an external URI to switch.',
-  centralBlockedNativeNoEnv: 'Native: this central is not configured yet, so its database is unknown.',
-  optCentralNativeForeground: 'Start (this terminal)',
-  optCentralNativeForegroundHint: 'runs here until you quit — no Docker needed',
-  optCentralNativeBackground: 'Start (background)',
-  optCentralNativeBackgroundHint: 'detached — keeps running, no Docker needed',
   stopRuntime: (runtime) => `Stop (${runtime})`,
   optBootOn: (mech) => (mech ? `Start at boot (${mech})` : 'Start at boot'),
   optBootOnHint: 'register a systemd user service so it comes back after a reboot',
@@ -902,7 +812,6 @@ const EN: CliStrings = {
     `${service} is stopped, but ${unit} still starts it at boot. Remove that registration too?`,
   bootDisabled: (unit) => `${unit} removed — it no longer starts at boot.`,
   bootDisableFailed: (unit) => `Could not remove ${unit}.`,
-  setupBlockedCentralUp: 'the central is running — stop it before reconfiguring it',
   optRestart: 'Restart',
   optRestartHint: 'bounce it — same build',
   optRebuild: 'Rebuild & restart',
@@ -931,14 +840,6 @@ const EN: CliStrings = {
   restartNotStopped: (pid) =>
     `The old server (pid ${pid}) is still running — it did not stop, so nothing was restarted. ` +
     `Stop it yourself (\`kill ${pid}\`) and start it again with \`agentop server\`.`,
-  centralStarted: 'agentistics central is up.',
-  centralFailed: 'the central did not start.',
-  centralInitDone: 'central configured.',
-  centralInitFailed: 'central init did not complete.',
-  connected: 'connected — this machine is now a member.',
-  connectFailed: 'could not connect to the central.',
-  disconnected: 'disconnected — this machine is back to solo.',
-  disconnectFailed: 'could not disconnect from the central.',
   stoppedAll: 'stopped every running service.',
   stoppedDone: 'service stopped.',
   soloSet: 'solo mode set — nothing leaves this machine.',
@@ -972,22 +873,6 @@ const EN: CliStrings = {
     `v${version} is installed and the restart command succeeded, but nothing has confirmed it is actually running yet:`,
 
   cancel: 'Cancel',
-  leaveWhich: 'Leave which central?',
-  leaveAll: 'Leave all centrals',
-  leftOne: (endpoint) => `left ${endpoint}`,
-  leftAll: (n) => `left all ${n} central${n === 1 ? '' : 's'} — back to solo.`,
-  stillConnected: (n) => `still connected to ${n} central(s).`,
-  noConnections: 'not connected to any central.',
-  ambiguousLeave: (n) => `connected to ${n} centrals — pass --endpoint <url> or --all.`,
-  connectedAs: (user, n) => `connected as ${user} — ${n} central(s) total.`,
-  updatedExisting: (endpoint) => `updated the existing connection to ${endpoint}`,
-  tokenInUse: (endpoint) => `that token already belongs to ${endpoint}`,
-  noMatchEndpoint: (endpoint) => `no connection matches endpoint ${endpoint}`,
-  localServerUnknown: 'unknown (local server not running)',
-  stateAuthRejected: 'token rejected by central',
-  stateNetUnreachable: 'central unreachable',
-  stateOk: 'ok',
-  neverSynced: 'never',
 
   backupScheduleOff: 'schedule: off',
   backupScheduleNoServer: 'schedule: inactive — the server is not running, so nothing will fire',
@@ -1043,12 +928,6 @@ const PT: CliStrings = {
   lang: 'pt',
   tagline: 'Analytics de assistentes de código IA · agentop',
   configSolo: 'solo — nada sai desta máquina',
-  configMemberBare: 'member — envia métricas para uma central',
-  configMember: (e) => `member — envia métricas para uma central em ${e}`,
-  configMembers: (n) => `member — envia métricas para ${n} centrais`,
-  configMemberLine: (endpoint, suffix) => `  ↳ ${endpoint}${suffix}`,
-  deniedSuffix: (n) => ` · ${n} repo(s) bloqueado(s)`,
-  configCentral: 'central — esta máquina hospeda a central do time',
   nothingRunning: 'nada rodando',
 
   confirmKill: 'Matar e subir de novo?',
@@ -1064,12 +943,9 @@ const PT: CliStrings = {
   containerUp: 'container da máquina está no ar.',
   stoppingLocal: 'parando o server local…',
   stopNoTarget: 'nenhum server deste diretório de dados pôde ser identificado (nenhum processo visível na porta, ninguém com o server.lock) — nada foi sinalizado. Se ainda houver um rodando, pare-o pelo pid.',
-  stoppingCentral: 'parando o container da central…',
   stoppingMachine: 'parando o container da máquina…',
   restartingLocal: 'reiniciando o server local…',
-  restartingCentral: 'reiniciando o container da central…',
   restartingMachine: 'reiniciando o container da máquina…',
-  rebuildingCentral: 'reconstruindo a imagem da central e recriando…',
   rebuildingMachine: 'reconstruindo a imagem da máquina e recriando…',
   rebuildingLocal: 'reconstruindo o server nativo (bun run bin)…',
   localRebuildHint: '--rebuild precisa do repo para reconstruir o server nativo. Rode de dentro do checkout do agentistics, ou use `agentop upgrade`. Reiniciando o build atual.',
@@ -1087,7 +963,6 @@ const PT: CliStrings = {
   urlOpenFailed: 'não foi possível abrir um navegador daqui',
 
   svcAgentistics: 'agentistics',
-  svcCentral: 'agentistics central',
   svcConflict: (runtimes) => `conflito: ${runtimes.join(' + ')} rodando juntos — pare um`,
   svcIdleServer: pids => pids.length === 1
     ? `um segundo servidor (pid ${pids[0]}) está rodando sem servir nada — "Parar cópias extras" o encerra`
@@ -1315,21 +1190,6 @@ const PT: CliStrings = {
   optDockerForegroundHint: 'em primeiro plano — Ctrl-C para parar',
   optDockerBackground: 'Iniciar (docker, background)',
   optDockerBackgroundHint: 'destacado — o mesmo server, em um container',
-  optCentral: 'Iniciar',
-  optCentralHint: 'a central do time, em Docker',
-  optCentralImage: 'Iniciar (docker · imagem publicada)',
-  optCentralImageHint: 'baixa ghcr.io/agentistics/agentistics — sem build, sem clone do repo',
-  optCentralBuild: 'Iniciar (docker · build do código)',
-  optCentralBuildHint: 'constrói a imagem a partir deste checkout e recria o container',
-  centralBlockedImageNoDocker: 'Imagem publicada: precisa de Docker, e `docker` não está no PATH aqui.',
-  centralBlockedBuildNoDocker: 'Build do código: precisa de Docker, e `docker` não está no PATH aqui.',
-  centralBlockedBuildNoCheckout: 'Build do código: precisa de um checkout do agentistics — aqui só existe o binário instalado. A imagem publicada roda a mesma central.',
-  centralBlockedNativeBundled: 'Nativo: precisa de um banco externo. Esta central usa o Mongo embutido, que só o Docker sobe — refaça o setup e escolha uma URI externa para trocar.',
-  centralBlockedNativeNoEnv: 'Nativo: esta central ainda não foi configurada, então o banco é desconhecido.',
-  optCentralNativeForeground: 'Iniciar (neste terminal)',
-  optCentralNativeForegroundHint: 'roda aqui até você sair — sem Docker',
-  optCentralNativeBackground: 'Iniciar (background)',
-  optCentralNativeBackgroundHint: 'destacado — continua rodando, sem Docker',
   stopRuntime: (runtime) => `Parar (${runtime})`,
   optBootOn: (mech) => (mech ? `Iniciar no boot (${mech})` : 'Iniciar no boot'),
   optBootOnHint: 'registra um serviço systemd de usuário para voltar depois de reiniciar',
@@ -1342,7 +1202,6 @@ const PT: CliStrings = {
     `${service} está parado, mas ${unit} ainda o inicia no boot. Remover esse registro também?`,
   bootDisabled: (unit) => `${unit} removido — não inicia mais no boot.`,
   bootDisableFailed: (unit) => `Não foi possível remover ${unit}.`,
-  setupBlockedCentralUp: 'a central está rodando — pare ela antes de reconfigurá-la',
   optRestart: 'Reiniciar',
   optRestartHint: 'só reinicia — mesmo build',
   optRebuild: 'Reconstruir & reiniciar',
@@ -1371,14 +1230,6 @@ const PT: CliStrings = {
   restartNotStopped: (pid) =>
     `O server antigo (pid ${pid}) continua rodando — não parou, então nada foi reiniciado. ` +
     `Pare-o você mesmo (\`kill ${pid}\`) e inicie de novo com \`agentop server\`.`,
-  centralStarted: 'agentistics central está no ar.',
-  centralFailed: 'a central não subiu.',
-  centralInitDone: 'central configurada.',
-  centralInitFailed: 'o init da central não terminou.',
-  connected: 'conectado — esta máquina agora é member.',
-  connectFailed: 'não consegui conectar na central.',
-  disconnected: 'desconectado — esta máquina voltou para solo.',
-  disconnectFailed: 'não consegui desconectar da central.',
   stoppedAll: 'todos os serviços no ar foram parados.',
   stoppedDone: 'serviço parado.',
   soloSet: 'modo solo definido — nada sai desta máquina.',
@@ -1412,22 +1263,6 @@ const PT: CliStrings = {
     `a v${version} foi instalada e o comando de reinício teve sucesso, mas nada confirmou que ela está realmente no ar ainda:`,
 
   cancel: 'Cancelar',
-  leaveWhich: 'Sair de qual central?',
-  leaveAll: 'Sair de todas as centrais',
-  leftOne: (endpoint) => `saiu de ${endpoint}`,
-  leftAll: (n) => `saiu de todas as ${n} ${n === 1 ? 'central' : 'centrais'} — de volta para solo.`,
-  stillConnected: (n) => `ainda conectado a ${n} central(is).`,
-  noConnections: 'sem conexão com nenhuma central.',
-  ambiguousLeave: (n) => `conectado a ${n} centrais — use --endpoint <url> ou --all.`,
-  connectedAs: (user, n) => `conectado como ${user} — ${n} central(is) no total.`,
-  updatedExisting: (endpoint) => `atualizou a conexão existente com ${endpoint}`,
-  tokenInUse: (endpoint) => `esse token já pertence a ${endpoint}`,
-  noMatchEndpoint: (endpoint) => `nenhuma conexão corresponde ao endpoint ${endpoint}`,
-  localServerUnknown: 'desconhecido (o server local não está rodando)',
-  stateAuthRejected: 'token rejeitado pela central',
-  stateNetUnreachable: 'central inacessível',
-  stateOk: 'ok',
-  neverSynced: 'nunca',
 
   backupScheduleOff: 'agenda: desligada',
   backupScheduleNoServer: 'agenda: inativa — o servidor não está rodando, então nada vai disparar',
@@ -1487,9 +1322,9 @@ export function cliStrings(lang: CliLang): CliStrings {
 
 /**
  * Resolve the CLI language: `--lang en|pt` wins, else `preferences.lang` (shared with the web
- * toggle), else English. Lives here (not in cli-start.ts, its original home) so cli-member.ts can
- * share it without a circular import — cli-start.ts already imports memberConnect/memberLeave
- * from cli-member.ts, so the reverse import would form a cycle.
+ * toggle), else English. Lives here (not in cli-start.ts, its original home) so other modules can
+ * share it without a circular import — cli-start.ts already imports from here
+ *, so the reverse import would form a cycle.
  */
 export async function resolveLang(): Promise<CliLang> {
   const i = process.argv.indexOf('--lang')

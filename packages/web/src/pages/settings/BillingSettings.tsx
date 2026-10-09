@@ -251,8 +251,8 @@ export default function BillingSettings() {
       <SectionHeader label={pt ? 'Como você é cobrado' : 'How you are billed'} />
       <p style={{ fontSize: 12.5, color: 'var(--text-tertiary)', lineHeight: 1.55, margin: '0 0 14px' }}>
         {pt
-          ? 'Todo custo no app é uma estimativa de preço de API. Cadastre o que você realmente paga e o app passa a poder mostrar o custo do seu plano — e quanto de valor você extraiu dele. Tudo fica local, nada disso vai para uma central.'
-          : 'Every cost in the app is an API-price estimate. Register what you actually pay and the app can show your plan cost instead — and how much value you got out of it. It all stays local; none of this travels to a central.'}
+          ? 'Todo custo no app é uma estimativa de preço de API. Cadastre o que você realmente paga e o app passa a poder mostrar o custo do seu plano — e quanto de valor você extraiu dele. Tudo fica nesta máquina.'
+          : 'Every cost in the app is an API-price estimate. Register what you actually pay and the app can show your plan cost instead — and how much value you got out of it. It all stays on this machine.'}
       </p>
 
       {harnesses.length > 1 && (

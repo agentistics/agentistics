@@ -26,7 +26,15 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { Err, card, overlay } from '../components/MfaSetup'
 import { codeComplete, loadVault, vaultPost, type Reply, type VaultItem } from '../lib/vaultApi'
 import { itemStateKey, kindKey, orderItems, reasonKey, vt } from '../lib/vaultText'
-import { resolvePaging } from '../components/team/tablePaging'
+
+function resolvePaging(input: { mode: 'maximized'; total: number; page: number; size: number }) {
+  const sizes = [10, 25, 50] as const
+  const size = sizes.reduce((best, candidate) => candidate <= input.size ? candidate : best, sizes[0])
+  const total = Math.max(0, Math.floor(input.total))
+  const pageCount = Math.max(1, Math.ceil(total / size))
+  const page = Math.min(pageCount - 1, Math.max(0, Math.floor(input.page)))
+  return { size, page, pageCount, start: page * size, end: Math.min(total, page * size + size), sizes, paged: total > size }
+}
 import {
   KIND_FIELDS, PERSONAL_KINDS, REVEAL_HIDE_MS, copyWithAutoClear, createGroup, createPersonal, defaultImportChoices, deleteGroup, editPersonal,
   filterPersonal, importCommit, importPreview, importReady, listPersonal, listVersions, movePersonal, parseTags, purgePersonal, renameGroup,

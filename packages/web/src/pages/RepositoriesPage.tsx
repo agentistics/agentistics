@@ -12,7 +12,7 @@ import { planAllocation } from '@agentistics/core'
 
 export default function RepositoriesPage() {
   const ctx = useOutletContext<AppContext>()
-  const { derived, currency, brlRate, lang, isCentral, deniedRepoLabels } = ctx
+  const { derived, currency, brlRate, lang } = ctx
   const planFactors = ctx.costBasis === 'plan' && ctx.planBasis.basis
     ? planAllocation(ctx.planBasis.basis).byHarness
     : null
@@ -130,12 +130,10 @@ export default function RepositoriesPage() {
       >
         <RepositoriesList
           repos={sorted}
-          isCentral={isCentral}
           currency={currency}
           brlRate={brlRate}
           lang={lang}
           onOpen={openRepo}
-          deniedRepoLabels={deniedRepoLabels}
           planFactors={planFactors}
         />
         <MetricNote>

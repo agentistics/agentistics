@@ -189,7 +189,7 @@ export type LinkState =
   /** Nothing is listening — the server is not running, or it is somewhere else. */
   | 'down'
   /**
-   * It answered, and said no. A central (which hosts no sessions) or an exposure profile with no
+   * It answered, and said no. An exposure profile with no
    * host power. Distinct from `down` on purpose: "cannot ask" and "nobody answered" are different
    * facts and send the user to different places.
    */

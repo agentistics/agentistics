@@ -40,16 +40,12 @@ const HELP_EN: ContentSection[] = [
     title: 'Commands',
     rows: [
       { cmd: 'start', text: "Same control center as bare agentop (non-interactive: runs like 'server')" },
-      { cmd: 'setup', text: 'Interactive first-run wizard (solo / central / member)' },
+      { cmd: 'setup', text: 'Interactive first-run wizard (archive consent and boot)' },
       { cmd: 'server', text: 'Start the web dashboard + background daemon (non-interactive)' },
-      { text: 'add --central to run the team central natively (no Docker); --bg to detach' },
       { cmd: 'restart', text: "Restart a running mode's service so it picks up new code/config" },
-      { cmd: 'status', text: 'Show services (server/central/member) + health' },
+      { cmd: 'status', text: 'Show services + health' },
       { cmd: 'tui', text: 'Alias for `start` — the metrics are the Dashboard screen of this app' },
       { cmd: 'watch', text: 'Start the background metrics daemon only' },
-      { cmd: 'central', text: 'Manage the team central (Docker; runs from anywhere)' },
-      { cmd: 'member', text: 'Configure this machine as a team member' },
-      { cmd: 'ci-push', text: "One-shot push of a CI runner's metrics to a central" },
       { cmd: 'upgrade', text: 'Upgrade agentop to the latest version' },
       { cmd: 'autostart', text: 'Start a mode with the system (systemd user service on Linux)' },
       { cmd: 'check-update', text: 'Print a notice if a newer version is available (else silent)' },
@@ -63,8 +59,6 @@ const HELP_EN: ContentSection[] = [
       { cmd: '--version, -v', text: 'Show the current version' },
       { cmd: '--port <n>', text: 'Port for the api + mcp server (default: 47291) — server only' },
       { text: 'the dashboard is served on that port + 1, so --port 4000 opens on 4001' },
-      { cmd: '--central', text: 'Run as the team central natively, no Docker — server only' },
-      { text: 'reads central.env for MONGO_URL + secrets; needs an external MONGO_URL' },
       { cmd: '--bg', text: 'Start detached in the background, logs to ~/.agentistics — server only' },
     ],
   },
@@ -110,30 +104,6 @@ const HELP_EN: ContentSection[] = [
     ],
   },
   {
-    title: 'Central',
-    rows: [
-      { cmd: 'agentop central', text: '<up|init|down|logs|status|restart|pull>' },
-      { text: 'Manage the team central via Docker. In a repo checkout it uses central.sh; from the standalone binary it pulls the published image (ghcr.io/agentistics/agentistics) and materializes a compose in ~/.agentistics/central — no clone required.' },
-    ],
-  },
-  {
-    title: 'Member',
-    rows: [
-      { cmd: 'agentop member connect', text: '--endpoint <url> --token <token> [--org <org>]' },
-      { text: 'Verify the token against the central and save this machine as a member.' },
-      { cmd: 'agentop member leave', text: 'Notify the central and reset back to solo.' },
-      { cmd: 'agentop member status', text: 'Show the current mode/endpoint/user and the last sync state.' },
-    ],
-  },
-  {
-    title: 'CI (GitHub Actions)',
-    rows: [
-      { cmd: 'agentop ci-push', text: '[--endpoint <url>] [--token <ci-token>] [--org <org>]' },
-      { text: "One-shot push of this runner's metrics to a central. Prefers keyless GitHub OIDC (needs permissions: id-token: write); falls back to a static token." },
-      { text: 'Reads AGENTISTICS_CENTRAL_URL / AGENTISTICS_CI_TOKEN / AGENTISTICS_OIDC_AUDIENCE / AGENTISTICS_TEAM_ORG when the flags are omitted. Never fails the job on a push error.' },
-    ],
-  },
-  {
     title: 'Updates',
     rows: [
       { cmd: 'agentop upgrade', text: '' },
@@ -154,15 +124,6 @@ const HELP_EN: ContentSection[] = [
       { cmd: 'status', text: 'show enabled/active state — omit the mode to list all' },
     ],
   },
-  {
-    title: 'Native central (no Docker)',
-    rows: [
-      { cmd: 'agentop server --central', text: '[--bg] [--port <n>]' },
-      { text: 'Runs the same server process with AGENTISTICS_TEAM_CENTRAL=1, loading central.env (searched as $AGENTISTICS_CENTRAL_ENV, ./central.env, ~/.agentistics/central.env).' },
-      { text: 'There is no bundled Mongo — set MONGO_URL to an external cluster. Use --bg to run in the background like the local server.' },
-      { text: 'For the all-in-one Docker flow with a bundled Mongo, use `agentop central up`.' },
-    ],
-  },
 ]
 
 const HELP_PT: ContentSection[] = [
@@ -170,16 +131,12 @@ const HELP_PT: ContentSection[] = [
     title: 'Comandos',
     rows: [
       { cmd: 'start', text: "O mesmo control center do agentop sem argumentos (não interativo: roda como 'server')" },
-      { cmd: 'setup', text: 'Assistente de primeira execução (solo / central / member)' },
+      { cmd: 'setup', text: 'Assistente de primeira execução (histórico e boot)' },
       { cmd: 'server', text: 'Sobe o dashboard web + o daemon em background (não interativo)' },
-      { text: 'use --central para rodar a central nativamente (sem Docker); --bg para desanexar' },
       { cmd: 'restart', text: 'Reinicia o serviço do modo em execução para pegar código/config novos' },
-      { cmd: 'status', text: 'Mostra os serviços (server/central/member) + a saúde' },
+      { cmd: 'status', text: 'Mostra os serviços e a saúde' },
       { cmd: 'tui', text: 'Apelido de `start` — as métricas são a tela Dashboard deste app' },
       { cmd: 'watch', text: 'Sobe apenas o daemon de métricas em background' },
-      { cmd: 'central', text: 'Gerencia a central do time (Docker; roda de qualquer lugar)' },
-      { cmd: 'member', text: 'Configura esta máquina como membro de um time' },
-      { cmd: 'ci-push', text: 'Envio único das métricas de um runner de CI para uma central' },
       { cmd: 'upgrade', text: 'Atualiza o agentop para a última versão' },
       { cmd: 'autostart', text: 'Inicia um modo junto com o sistema (serviço systemd de usuário no Linux)' },
       { cmd: 'check-update', text: 'Avisa se existe versão nova (caso contrário, fica em silêncio)' },
@@ -193,8 +150,6 @@ const HELP_PT: ContentSection[] = [
       { cmd: '--version, -v', text: 'Mostra a versão atual' },
       { cmd: '--port <n>', text: 'Porta do servidor de api + mcp (padrão: 47291) — só no server' },
       { text: 'o dashboard sobe nessa porta + 1, então --port 4000 abre na 4001' },
-      { cmd: '--central', text: 'Roda como central do time nativamente, sem Docker — só no server' },
-      { text: 'lê o central.env com MONGO_URL + segredos; exige um MONGO_URL externo' },
       { cmd: '--bg', text: 'Sobe desanexado em background, com log em ~/.agentistics — só no server' },
     ],
   },
@@ -237,30 +192,6 @@ const HELP_PT: ContentSection[] = [
     ],
   },
   {
-    title: 'Central',
-    rows: [
-      { cmd: 'agentop central', text: '<up|init|down|logs|status|restart|pull>' },
-      { text: 'Gerencia a central do time via Docker. Num checkout do repositório usa o central.sh; a partir do binário avulso baixa a imagem publicada (ghcr.io/agentistics/agentistics) e materializa um compose em ~/.agentistics/central — sem precisar clonar nada.' },
-    ],
-  },
-  {
-    title: 'Member',
-    rows: [
-      { cmd: 'agentop member connect', text: '--endpoint <url> --token <token> [--org <org>]' },
-      { text: 'Valida o token na central e salva esta máquina como membro.' },
-      { cmd: 'agentop member leave', text: 'Avisa a central e volta esta máquina para solo.' },
-      { cmd: 'agentop member status', text: 'Mostra modo/endpoint/usuário atuais e o último estado de sincronização.' },
-    ],
-  },
-  {
-    title: 'CI (GitHub Actions)',
-    rows: [
-      { cmd: 'agentop ci-push', text: '[--endpoint <url>] [--token <ci-token>] [--org <org>]' },
-      { text: 'Envio único das métricas deste runner para uma central. Prefere OIDC do GitHub, sem chave (precisa de permissions: id-token: write); cai para um token estático.' },
-      { text: 'Lê AGENTISTICS_CENTRAL_URL / AGENTISTICS_CI_TOKEN / AGENTISTICS_OIDC_AUDIENCE / AGENTISTICS_TEAM_ORG quando as flags são omitidas. Nunca quebra o job por erro no envio.' },
-    ],
-  },
-  {
     title: 'Atualizações',
     rows: [
       { cmd: 'agentop upgrade', text: '' },
@@ -281,15 +212,6 @@ const HELP_PT: ContentSection[] = [
       { cmd: 'status', text: 'mostra se está habilitado/ativo — omita o modo para listar todos' },
     ],
   },
-  {
-    title: 'Central nativa (sem Docker)',
-    rows: [
-      { cmd: 'agentop server --central', text: '[--bg] [--port <n>]' },
-      { text: 'Roda o mesmo processo de servidor com AGENTISTICS_TEAM_CENTRAL=1, carregando o central.env (procurado em $AGENTISTICS_CENTRAL_ENV, ./central.env, ~/.agentistics/central.env).' },
-      { text: 'Não há Mongo embutido — aponte MONGO_URL para um cluster externo. Use --bg para rodar em background como o servidor local.' },
-      { text: 'Para o fluxo Docker completo, com Mongo embutido, use `agentop central up`.' },
-    ],
-  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -305,16 +227,6 @@ const CHEAT_EN: ContentSection[] = [
       { cmd: 'agentop server --bg', text: 'same, detached — logs to ~/.agentistics' },
       { cmd: 'agentop server --port 4000', text: 'another port — dashboard on 4001' },
       { cmd: 'agentop watch', text: 'metrics daemon only, headless' },
-    ],
-  },
-  {
-    title: 'Team',
-    rows: [
-      { cmd: 'agentop central up', text: 'start the team central (Docker, port 48080)' },
-      { cmd: 'agentop central logs', text: "follow the central's container logs" },
-      { cmd: 'agentop member connect --endpoint <url> --token <token>', text: 'join a central' },
-      { cmd: 'agentop member status', text: 'mode, endpoint, user and last sync' },
-      { cmd: 'agentop member leave', text: 'reset this machine back to solo' },
     ],
   },
   {
@@ -339,7 +251,6 @@ const CHEAT_EN: ContentSection[] = [
     title: 'Diagnose',
     rows: [
       { cmd: 'agentop status', text: 'mode, services and health at a glance' },
-      { cmd: 'agentop central status', text: 'the central containers only' },
       { cmd: 'agentop check-update', text: 'silent unless a newer release exists' },
       { cmd: 'agentop --version', text: 'the version this binary is' },
     ],
@@ -355,16 +266,6 @@ const CHEAT_PT: ContentSection[] = [
       { cmd: 'agentop server --bg', text: 'o mesmo, desanexado — log em ~/.agentistics' },
       { cmd: 'agentop server --port 4000', text: 'outra porta — dashboard na 4001' },
       { cmd: 'agentop watch', text: 'só o daemon de métricas, sem interface' },
-    ],
-  },
-  {
-    title: 'Time',
-    rows: [
-      { cmd: 'agentop central up', text: 'sobe a central do time (Docker, porta 48080)' },
-      { cmd: 'agentop central logs', text: 'acompanha os logs do container da central' },
-      { cmd: 'agentop member connect --endpoint <url> --token <token>', text: 'entra numa central' },
-      { cmd: 'agentop member status', text: 'modo, endpoint, usuário e última sincronização' },
-      { cmd: 'agentop member leave', text: 'devolve esta máquina para o modo solo' },
     ],
   },
   {
@@ -389,7 +290,6 @@ const CHEAT_PT: ContentSection[] = [
     title: 'Diagnosticar',
     rows: [
       { cmd: 'agentop status', text: 'modo, serviços e saúde de uma vez' },
-      { cmd: 'agentop central status', text: 'apenas os containers da central' },
       { cmd: 'agentop check-update', text: 'silencioso, a menos que exista release nova' },
       { cmd: 'agentop --version', text: 'a versão deste binário' },
     ],

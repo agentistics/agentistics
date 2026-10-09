@@ -94,8 +94,8 @@ export function BillingIntroModal({ open, mode, gaps, lang, onClose, onNeverShow
 
         <p style={{ fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.55, margin: '0 0 14px' }}>
           {pt
-            ? 'Tudo fica nesta máquina. Nada disso é enviado para uma central.'
-            : 'It all stays on this machine. None of it is sent to a central.'}
+            ? 'Tudo fica nesta máquina. Nada disso sai dela.'
+            : 'It all stays on this machine. None of it leaves it.'}
         </p>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

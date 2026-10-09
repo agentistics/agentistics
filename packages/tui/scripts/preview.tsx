@@ -74,9 +74,9 @@ import { createLineDecoder } from '../src/control/stream'
  * therefore the ones most likely to ship wrong — a box running the server natively AND in a
  * container, and a box with no docker at all.
  */
-type Case = 'solo' | 'central' | 'member' | 'conflict' | 'nodocker' | 'norepo'
+type Case = 'solo' | 'conflict' | 'nodocker' | 'norepo'
 
-const CASES: readonly Case[] = ['solo', 'central', 'member', 'conflict', 'nodocker', 'norepo'] as const
+const CASES: readonly Case[] = ['solo', 'conflict', 'nodocker', 'norepo'] as const
 
 /**
  * What a previewed task is doing when the frame is captured.
@@ -275,7 +275,6 @@ const ESC = String.fromCharCode(27)
 const MINUTES = 60_000
 
 /** A long, real-shaped tailnet endpoint — the one whose sentence used to blow the header apart. */
-const LONG_ENDPOINT = 'http://198.51.100.199:48080'
 
 const LOCAL_URLS = { webUrl: 'http://localhost:47292', apiUrl: 'http://localhost:47291' }
 
@@ -287,7 +286,7 @@ const LOCAL_URLS = { webUrl: 'http://localhost:47292', apiUrl: 'http://localhost
  * of the model rather than being written down here.
  */
 function services(mode: Case, s: CliStrings, apiUrl?: string): ControlService[] {
-  const nativeUp = mode !== 'central'
+  const nativeUp = true
   const machineUp = mode === 'conflict'
   const noDocker = mode === 'nodocker'
 
@@ -314,16 +313,6 @@ function services(mode: Case, s: CliStrings, apiUrl?: string): ControlService[] 
     reason: noDocker ? s.dockerMissing : undefined,
     ...(machineUp ? { ...LOCAL_URLS, pid: 61044, startedAt: Date.now() - 12 * MINUTES } : {}),
   }
-  const central: ServiceRuntimeState = {
-    id: 'central',
-    kind: 'docker',
-    state: noDocker ? 'unknown' : mode === 'central' ? 'up' : 'down',
-    available: !noDocker,
-    reason: noDocker ? s.dockerMissing : undefined,
-    ...(mode === 'central'
-      ? { webUrl: 'http://localhost:48080', pid: 71120, startedAt: Date.now() - 3 * 24 * 60 * MINUTES }
-      : {}),
-  }
 
   // What a REBUILD needs, which is a fact about the box rather than about the service: a repo
   // checkout for the native binary, a compose file for the container. `norepo` is the box that has
@@ -346,15 +335,6 @@ function services(mode: Case, s: CliStrings, apiUrl?: string): ControlService[] 
       ], s, true, s.svcAgentistics),
       rebuild: { local: canRebuild, machine: canRebuild },
     }),
-    // No `boot` at all — the state this must render as NO boot row rather than as "does not start
-    // at boot", and therefore with no boot verb either.
-    buildService('central', s.svcCentral, [central], s, {
-      rebuild: { central: true },
-      bootOptions: bootOptionsFor(
-        [{ unit: 'agentop-central.service', runtime: 'central', mech: '', on: false, installable: true }],
-        s, true, s.svcCentral,
-      ),
-    }),
   ]
 }
 
@@ -362,20 +342,11 @@ function fakeStatus(opts: Options, apiUrl?: string): ControlStatus {
   const s = cliStrings(opts.lang)
   return {
     // The two extra cases are arrangements of SERVICES, not team modes; they show a solo machine.
-    mode: opts.mode === 'central' || opts.mode === 'member' ? opts.mode : 'solo',
-    modeLabel: opts.mode === 'member' ? s.configMemberBare : opts.mode === 'central' ? s.configCentral : s.configSolo,
-    endpoint: opts.mode === 'member' ? LONG_ENDPOINT : undefined,
+    mode: 'solo',
+    modeLabel: s.configSolo,
     services: services(opts.mode, s, apiUrl),
     // A member machine carries a NAME and a latency; the sweep has to see the header at its widest,
     // or the fit is only ever checked in the shape that happens to be shortest.
-    ...(opts.mode === 'member'
-      ? {
-          machineName: 'wsl-mithrandir',
-          accountName: 'blpsoares',
-          linkState: 'ok' as const,
-          pushMs: 468,
-        }
-      : {}),
     version: '1.7.3',
     latestVersion: '1.7.4',
     // The parallel-sessions budget, so the width sweep exercises the header WITH it. A calm one:
@@ -384,7 +355,6 @@ function fakeStatus(opts: Options, apiUrl?: string): ControlStatus {
     archiveMode: 'consolidate',
     // The wizard's blocked row, stated whenever the fake central is up: it is the case the fold
     // exists for, and a preview that only ever drew three selectable modes would never show it.
-    setupBlocked: opts.mode === 'central' ? { central: s.setupBlockedCentralUp } : {},
     // `--group` arrives as a stored arrangement, exactly as a real machine's preferences would —
     // the screen reads its own default otherwise. It is the only way to LOOK at an arrangement
     // without driving the menu by keystroke, and the cascade is the one arrangement whose whole
@@ -421,11 +391,6 @@ const LOG: Record<string, string[]> = {
   machine: [
     '20:31:08 [container] listening on 47291 (api + mcp)',
     '20:31:09 [container] dashboard on 47292 — ADDRESS ALREADY IN USE, retrying',
-  ],
-  central: [
-    '20:12:02 mongo connected',
-    '20:12:02 central listening on 47291',
-    '20:44:19 member push accepted · 214 sessions',
   ],
 }
 
@@ -489,12 +454,9 @@ function fakeHost(opts: Options, apiUrl?: string): ControlHost {
     ...(opts.code ? { editDraft: async (draft: string) => ({ ok: true as const, text: draft, sentence: 'preview — no editor was opened' }) } : {}),
     refresh: async () => fakeStatus(opts, apiUrl),
     start: act,
-    connect: done,
-    disconnect: done,
     restart: act,
     stop: done,
     setMode: done,
-    initCentral: done,
     // `null` is "already answered", so the preview only opens on the consent gate when asked to.
     pendingArchiveMode: async () => (opts.pending ? 'consolidate' : null),
     upgrade: done,

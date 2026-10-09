@@ -14,6 +14,11 @@ export function diskLabel(d: DiskInfo, pt: boolean): string {
   return d.install ? (pt ? 'Este disco' : 'This disk') : `${pt ? 'Disco' : 'Drive'} ${d.letter ?? d.label}:`
 }
 
+/** The browser follows the picker's disk filter; the install disk starts at the home listing. */
+export function startFolderPath(startDisk: { path: string; install: boolean } | null | undefined, home?: string): string {
+  return startDisk && !startDisk.install ? startDisk.path : (home ?? '')
+}
+
 /**
  * What each browsable root is called: an enabled disk by the filter's label, and the home (the first
  * root, which is not a disk's path) by the install disk's label. A root no disk names keeps `undefined`.

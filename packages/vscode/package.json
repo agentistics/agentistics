@@ -131,7 +131,7 @@
         "agentistics.readProjections": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Read today's totals from the projections (`/api/runtime/metrics`, the journal): a few hundred bytes instead of the whole `/api/data`. On by default; turn it off to read `/api/data` instead. When the server serves no projections (`AGENTISTICS_PROJECTIONS` off, a central), the extension reads `/api/data` by itself. `AGENTISTICS_PROJECTIONS_SURFACES=legacy` in the editor's environment also turns it off."
+          "markdownDescription": "Read today's totals from the projections (`/api/runtime/metrics`, the journal): a few hundred bytes instead of the whole `/api/data`. On by default; turn it off to read `/api/data` instead. When the server serves no projections (`AGENTISTICS_PROJECTIONS` off), the extension reads `/api/data` by itself. `AGENTISTICS_PROJECTIONS_SURFACES=legacy` in the editor's environment also turns it off."
         },
         "agentistics.currency": {
           "type": "string",

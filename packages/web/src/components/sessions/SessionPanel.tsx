@@ -25,7 +25,6 @@ import { createdByLabel, type SessionParent } from '../../lib/sessionParent'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { BellOff, ChevronDown, ChevronUp } from 'lucide-react'
 import { mutedTooltip, useSessionMuted } from '../../lib/notifyMenu'
-import { getCentralMachine } from '../../lib/centralMachinePick'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useElementWidth } from '../../hooks/useElementWidth'
 import { useViewportWidth } from '../../hooks/useViewportWidth'
@@ -42,8 +41,6 @@ import {
   type PanelBarEntry, type PanelBarGates, type PanelBarId,
 } from '../../lib/panelBar'
 import type { TerminalTarget } from '../../lib/terminalTarget'
-import { RelayedScreen } from './RelayedScreen'
-import { RelayedComposer } from './RelayedComposer'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
 import { SessionChat, type SessionChatProps, type SessionComposerMetrics } from './SessionChat'
@@ -214,7 +211,7 @@ export function SessionPanel({
    * offered, exactly as it is not offered for a harness that can never name its conversation — a
    * segmented control with one working segment is a label pretending to be a control.
    */
-  const relayed = getCentralMachine() !== null
+  const relayed = false
   const pt = lang === 'pt'
   const muted = useSessionMuted(session)
 
@@ -509,16 +506,6 @@ export function SessionPanel({
             {...(onOpened ? { onReopened: onOpened } : {})}
             {...(onOpenTerminal ? { onOpenTerminal } : {})}
           />
-        ) : relayed ? (
-          /* ANOTHER MACHINE's session. The live stream is the machine's own SSE route, refused on a
-             central and not relayed — so `TerminalRegion` would connect to nothing and say so,
-             which is honest and useless. What the machine sends is its last captured frame, and
-             `RelayedScreen` draws that while saying it is a snapshot. */
-          <>
-            <RelayedScreen {...(session.lastLines ? { lines: session.lastLines } : {})} lang={lang} />
-            {/* The field that screen's own header points at — see `RelayedComposer`. */}
-            <RelayedComposer row={row} act={act} lang={lang} {...(authorName ? { authorName } : {})} />
-          </>
         ) : (
           <div style={{ flex: 1, minHeight: 0, padding: 16, display: 'flex', flexDirection: 'column' }}>
             <ShellBand

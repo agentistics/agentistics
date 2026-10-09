@@ -18,14 +18,18 @@ import type { Baseline } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { fleetSeedNotice, fleetStaleNotice } from './fleetStale'
 import { cacheIsUsable, stripVolatile } from './fleetCache'
-import { getCentralMachine } from './centralMachinePick'
-import { relayedToSessions, type RelayedRow } from './relayedSessions'
 import { notifyFleetTransitions, type SessionActivity } from './sessionNotifications'
 import { confirmSendLanded, parseActResult, sendUnconfirmedMessage, textInUserTurns } from './fleetAct'
-import { parseRelayActResult } from './relayAct'
 import { nativeAct, readNativeFleet } from './nativeFleet'
 import { withNativeSessions } from './nativeFleetRow'
 import { isNativeSessionId } from './sessionRoute'
+
+// Central relay support was removed with the member UI. These local-only placeholders keep the
+// old transport branch inert while the shared fleet state remains a machine-local concern.
+const getCentralMachine = (): string | null => null
+type RelayedRow = Record<string, unknown>
+const relayedToSessions = (_rows: RelayedRow[]): ControlSession[] => []
+const parseRelayActResult = parseActResult
 
 /** Mirrors `SessionAction` in `@agentistics/tui/control/sessions`, minus the verbs a page cannot do. */
 export type FleetActionId =

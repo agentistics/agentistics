@@ -3,7 +3,7 @@
  *
  * The third thing that can occupy the cockpit's detail region, beside the facts and a question — and
  * the one that replaced leaving the application. The commands worth watching (`docker compose up
- * --build`, `central.sh up`, `bun run bin`) used to take the terminal: the app stepped out of the
+ * --build`, `bun run bin`) used to take the terminal: the app stepped out of the
  * alternate screen, the child inherited the tty, and the user pressed Enter to come back, having
  * lost their place. Now their output arrives on the host's output channel, already sanitised
  * (`control/stream.ts`), and lands here.

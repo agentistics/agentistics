@@ -23,6 +23,7 @@ import {
 } from '../../lib/projectTabs'
 import { Muted, inputStyle } from './formBits'
 import { diskLabel, shortPath } from '../../lib/folderBrowser'
+import { chooseFolderLabel } from '../../lib/projectPickerCopy'
 import { FolderBrowser } from './FolderBrowser'
 
 export interface ProjectPickerOption {
@@ -43,7 +44,7 @@ export interface ProjectPickerProps {
    *  server does not say. */
   projectTotals: Record<ProjectKind, number> | undefined
   projectIndexing?: boolean
-  projectIndexProgress?: { visited: number; queued: number }[]
+  projectIndexProgress?: { root: string; visited: number; queued: number; complete: boolean }[]
   projectDisks?: { id: string; label: string; letter?: string; install: boolean; count: number }[]
   projectDisk?: string
   onProjectDiskChange?: (disk: string) => void
@@ -130,14 +131,6 @@ export function ProjectPicker({
           onCancel={() => setBrowsing(false)}
         />
       ) : (<>
-      <button type="button" onClick={() => setBrowsing(true)} style={{
-        display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8, minHeight: isMobile ? 44 : 30,
-        padding: '0 12px', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12,
-        border: '1px dashed var(--border-subtle)', background: 'transparent', color: 'var(--anthropic-orange)',
-      }}>
-        <FolderOpen size={14} />{pt ? 'Procurar pasta…' : 'Browse folder…'}
-      </button>
-
       {projectDisks && projectDisks.length > 1 && (
         <div role="tablist" aria-label={pt ? 'Disco' : 'Disk'} style={{
           display: 'flex', gap: 3, marginBottom: 8, padding: 3, borderRadius: 9,
@@ -237,7 +230,13 @@ export function ProjectPicker({
         {shownProjects.length === 0 && !value ? (
           /* A SENTENCE PER REASON. "Nothing matched this search" and "nothing of this kind is here"
              send a reader to two different actions — clear the box, or switch tab. */
-          <Muted text={kindEmpty(kindTab, query, projects.length > 0, pt)} />
+          <Muted text={kindEmpty(kindTab, query, projects.length > 0, pt, (() => {
+            const selected = projectDisk && projectDisk !== 'all'
+            const progress = selected ? projectIndexProgress?.find(p => p.root === projectDisk) : undefined
+            return selected && progress
+              ? { selected: true, indexing: !progress.complete, visited: progress.visited }
+              : undefined
+          })())} />
         ) : shownProjects.map(p => {
           const on = value === p.path
           return (
@@ -274,6 +273,19 @@ export function ProjectPicker({
             </button>
           )
         })}
+        <button
+          type="button"
+          onClick={() => setBrowsing(true)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
+            padding: '8px 10px', borderRadius: 8, border: 'none', minWidth: 0,
+            background: 'transparent', color: 'var(--anthropic-orange)', cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          <FolderOpen size={15} style={{ flexShrink: 0 }} />
+          <span style={{ fontSize: 12.5 }}>{chooseFolderLabel(pt)}</span>
+        </button>
       </div>
       </>)}
     </div>

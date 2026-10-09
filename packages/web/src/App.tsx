@@ -23,7 +23,6 @@ import { bootLoading } from './lib/bootPhase'
 import { editorEnabledFor } from './lib/editorGate'
 import { useProjectedDerived } from './hooks/useProjectedDerived'
 import { journalBackfillText, type JournalBackfillSummary } from './lib/journalBackfill'
-import { resolveTeamSessionRefresh } from './lib/teamSessionRefresh'
 import { DEFAULT_CARD_ORDER, migrateCardOrder, type CardId } from './lib/cardOrder'
 import { BillingIntroModal } from './components/BillingIntroModal'
 import type { LoadProgress } from './hooks/useData'
@@ -33,8 +32,7 @@ import type { TagDef } from './lib/tagMatch'
 import { canCreateTagFromFilters, filtersToTagDraft } from './lib/filtersToTag'
 import type { BillingSettings, CostBasis, Filters, SurfaceHarnessId, HealthIssue, SavedComparison, SessionPreset, TeamConfig } from '@agentistics/core'
 import type { Lang, Theme } from '@agentistics/core'
-import { isAdapterHarness, billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, normalizeSessionPresets, planAllocation, formatProjectName, MODEL_PRICING, distinctUsers, distinctHarnesses, filterByUsers, fmtCost, surfaceHarnesses, NATIVE_HARNESS_ID, readTeamConnections, fmt, totalTokens, totalTokensExplained } from '@agentistics/core'
-import { buildDeniedRepoLabels } from './lib/shareRepos'
+import { isAdapterHarness, billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, normalizeSessionPresets, planAllocation, formatProjectName, MODEL_PRICING, distinctUsers, distinctHarnesses, filterByUsers, fmtCost, surfaceHarnesses, NATIVE_HARNESS_ID, fmt, totalTokens, totalTokensExplained } from '@agentistics/core'
 import { StatCard } from './components/StatCard'
 import { StreakBreakdownButton } from './components/StreakBreakdownButton'
 import { ActivityHeatmap } from './components/ActivityHeatmap'
@@ -79,8 +77,6 @@ import { planWhatsNew, releasesBetween, SEEN_KEY } from './whatsNew/select'
 import { InstallModal } from './components/InstallModal'
 import { ArchiveConsentModal, type ArchiveMode } from './components/ArchiveConsentModal'
 import { resolveArchiveChoice } from './lib/archive'
-import { TeamLogin } from './components/TeamLogin'
-import { Login } from './components/Login'
 import { ModeSwitch } from './components/nav/ModeSwitch'
 import { MobilePillBar } from './components/nav/MobilePillBar'
 import { TopBar } from './components/nav/TopBar'
@@ -110,8 +106,6 @@ import { OUTER_GAP, PANEL_BORDER, PANEL_GAP, PANEL_RADIUS } from './lib/panelLay
 import { useFleet, useFleetIndex, type FleetActionId } from './lib/fleet'
 import { BandSegment, BandSegmentTab } from './components/sessions/bandControls'
 import { SessionActions } from './components/sessions/SessionActions'
-import { MemberConnectionStatus } from './components/MemberConnectionStatus'
-import { OwnerSetup } from './components/OwnerSetup'
 import { ChangePassword } from './components/ChangePassword'
 import { ChangePasswordSelf } from './components/ChangePasswordSelf'
 import { MfaSetup } from './components/MfaSetup'
@@ -128,7 +122,6 @@ import {
 import { useRightAsideEdge } from './lib/rightAsideEdge'
 import { setLeftAsideEdge } from './lib/leftAsideEdge'
 import { setLeftAsideOpen } from './lib/leftAsideOpen'
-import { CentralSessions } from './components/sessions/CentralSessions'
 // The sessions workspace's container geometry, named ONCE (see FleetOverview's header): the
 // filter row in the strip and the body under it have to move together at every width.
 import { PAGE_INSET } from './components/sessions/FleetOverview'
@@ -812,7 +805,6 @@ function MobileBottomNav({
             <span style={{ minWidth: 0, flex: 1 }}>
               <span style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</span>
               <span style={{ display: 'block', fontSize: '0.625rem', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</span>
-              {!isCentral && <span style={{ display: 'block', marginTop: 3 }}><MemberConnectionStatus lang={lang} compact /></span>}
             </span>
             <ChevronDown size={16} style={{ flexShrink: 0, color: 'var(--text-tertiary)', transform: accountOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
           </button>
@@ -1230,7 +1222,6 @@ function SideNav({
       <div style={{ padding: '0 2px 10px' }}>
         <ModeSwitch lang={lang} collapsed={collapsed} attention={attention} />
         {/* Member machine: live connection status + latency to the central. Null unless connected. */}
-        {!collapsed && !isCentral && <div style={{ marginTop: 8 }}><MemberConnectionStatus lang={lang} compact /></div>}
       </div>
 
       {/* ONE aside, two bodies — never two asides. The shell above is shared; only what sits below
@@ -1269,15 +1260,12 @@ function SideNav({
             {collapsed ? (
               <SessionsRail
                 rows={railRows} allRows={fleet.rows} lang={pt ? 'pt' : 'en'}
-                {...(isCentral ? { hideNew: true } : {})} {...(sessionId ? { selectedId: sessionId } : {})}
+                {...(sessionId ? { selectedId: sessionId } : {})}
                 filtersOpen={filtersOpen} filtersCount={filtersCount}
                 onToggleFilters={onToggleFilters} filtersButtonRef={filtersButtonRef}
               />
             ) : (
               <>
-                {/* On a central the workspace is ABOUT a machine, so the choice sits above the list
-                    it governs. Absent on a machine, which is its own. */}
-                {isCentral && <div style={{ padding: '8px 2px 0' }}><CentralSessions lang={pt ? 'pt' : 'en'} /></div>}
                 <SessionsAside
                   lang={pt ? 'pt' : 'en'}
                   rows={fleet.rows}
@@ -1288,7 +1276,6 @@ function SideNav({
                   activeOnly={sessionsActiveOnly}
                   {...(fleet.unavailable ? { unavailable: fleet.unavailable } : {})}
                   stale={fleetStale}
-                  {...(isCentral ? { hideNew: true } : {})}
                   rowsById={asideRowIndex}
                   act={req => fleetAct({ ...req, action: req.action as FleetActionId })}
                   filtersOpen={filtersOpen} filtersCount={filtersCount}
@@ -1476,7 +1463,10 @@ export default function AppLayout() {
 
   // Team session gate
   // undefined = not yet fetched, TeamSessionState after fetch
-  const [teamSession, setTeamSession] = useState<TeamSessionState | undefined>(undefined)
+  const [teamSession] = useState<TeamSessionState>({ required: false, authed: true })
+  const iam: IamState = { needsBootstrap: false, authed: false }
+  const refreshTeamSession = useCallback(() => Promise.resolve(), [])
+  useEffect(() => { void refreshTeamSession() }, [refreshTeamSession])
   /**
    * Whether to offer the chat at all.
    *
@@ -1487,9 +1477,6 @@ export default function AppLayout() {
    */
   const chatOffered = teamSession?.chatEnabled ?? true
 
-  // IAM gate (central only)
-  const [iam, setIam] = useState<IamState | undefined>(undefined)
-
   // `useAccessibility` is mounted here — ABOVE the `if (!iam.authed) return <Login/>` gate below —
   // so its own load effect always runs before that gate can block anything. On a central,
   // `/api/accessibility` answers 401 before sign-in and 403 before an owner's MFA enrolment
@@ -1499,63 +1486,8 @@ export default function AppLayout() {
   // becomes available, instead of being stuck forever with whatever its first, pre-auth fetch saw.
   // On a non-central machine the route is never gated, so a constant identity is correct: the
   // effect runs once, exactly as it always has.
-  const a11yIdentity = !teamSession?.central
-    ? 'solo'
-    : (iam?.authed && !iam.mfaEnrollmentRequired ? (iam.account?.id ?? 'unknown-account') : undefined)
+  const a11yIdentity = 'solo'
   const a11y = useAccessibility(a11yIdentity)
-
-  const reloadIam = useCallback(() => {
-    Promise.all([
-      fetch('/api/iam/status').then(r => r.ok ? r.json() : { needsBootstrap: false }),
-      fetch('/api/iam/me').then(r => r.ok ? r.json() : { authed: false }),
-    ]).then(([st, me]) => setIam({ needsBootstrap: !!st.needsBootstrap, authed: !!me.authed, account: me.account, mfaEnrollmentRequired: !!me.mfaEnrollmentRequired }))
-      .catch(() => setIam({ needsBootstrap: false, authed: false }))
-  }, [])
-  useEffect(() => { if (teamSession?.central) reloadIam() }, [teamSession?.central, reloadIam])
-
-  /**
-   * Re-reads the session so every capability+preference the server resolves — `editorEnabled`
-   * (through `editorGate.ts`), `shellEnabled`, `chatEnabled`, `central`, … — can catch up without a
-   * reload. This used to be a mount-only effect, so a switch flipped in Settings (`SessionsSettings`)
-   * never reached a page that had already read the old answer: the settings screen itself updated
-   * (it re-reads `/api/preferences` on its own), but every Studio entry stayed gone, or stayed
-   * present, exactly as it was at boot. The browser must not re-derive the resolved flag from a
-   * capability plus a preference itself — that is what `editorGate.ts`'s own header warns against —
-   * so the fix is to ask the SERVER again rather than mirror a guess into context.
-   *
-   * `resolveTeamSessionRefresh` is what keeps a transient failure from wiping out everything already
-   * known (`central`, `capabilities`, …) back to the bare boot default — see its own header.
-   */
-  const refreshTeamSession = useCallback(() => {
-    // Bounded: the boot screen waits on this answer, and a request that never settles (a phone
-    // whose computer went to sleep mid-request) would otherwise hold it forever.
-    return fetchWithTimeout('/api/team/session', SMALL_TIMEOUT_MS)
-      .then(r => r.ok ? (r.json() as Promise<TeamSessionState>) : null)
-      .then(s => setTeamSession(prev => resolveTeamSessionRefresh(prev, s, { required: false, authed: true })))
-      .catch(() => setTeamSession(prev => resolveTeamSessionRefresh(prev, null, { required: false, authed: true })))
-  }, [])
-  useEffect(() => { void refreshTeamSession() }, [refreshTeamSession])
-
-  // Flip to login screen when any API call returns 401 (team password set but cookie expired)
-  useEffect(() => {
-    if (error && error.includes('401') && teamSession?.required) {
-      // SPREAD, never a fresh object. This line predates centrals (it was written when the only
-      // gate was the shared team password) and replacing the whole state dropped `central`, which
-      // is the flag deciding WHICH login screen renders. On a central every /api/data call 401s
-      // until an account signs in, so the first one erased `central` and the app fell through to
-      // the legacy shared-password form — a form the server retired ("shared-password login
-      // retired; use account login"), so it could never succeed. Measured on a live central: the
-      // account login screen was unreachable, with a working `/api/team/session` reporting
-      // `central: true` on every poll.
-      setTeamSession(s => ({ ...(s ?? {}), required: true, authed: false }))
-    }
-    // 403 too, and for a reason that cost someone their whole first-run: the moment an owner
-    // account is created, the gate starts refusing /api/data with `mfa_enrollment_required`
-    // until a second factor exists. The data layer only sees "HTTP 403" and renders "Failed to
-    // load data" — a dead end, on the screen right after signing up. Re-reading the IAM state is
-    // what turns that into the enrolment screen, which is the only thing that can clear it.
-    if (teamSession?.central && (String(error).includes('401') || String(error).includes('403'))) reloadIam()
-  }, [error, teamSession?.required, teamSession?.central, reloadIam])
   const [theme, setThemeState] = useState<Theme>(() => {
     // The LOCAL copy decides the first paint; `/api/preferences` corrects it a moment later if they
     // disagree. Starting from a constant meant a light-theme user got a dark flash on every load.
@@ -1576,8 +1508,7 @@ export default function AppLayout() {
 
   // A central updates in real time via SSE (presence + ingest), so it hides the Live toggle
   // and keeps live updates always on (the SSE 'change' subscription is gated on liveUpdates).
-  const isCentral = teamSession?.central === true
-  useEffect(() => { if (isCentral) setLiveUpdates(true) }, [isCentral, setLiveUpdates])
+  const isCentral = false
 
   /**
    * Set the language AND remember it — the same defect `setTheme`/`setCurrency` below had. It only
@@ -2435,12 +2366,6 @@ export default function AppLayout() {
    *  `/repositories` still claiming "Hidden from 1 central" until a manual reload — told hidden,
    *  not hidden. Fired by `ConnectionsPanel`'s `onConnectionsChanged` after EVERY write it makes,
    *  which is the single source both `RepositoriesList` and `RepoDetailPage` read through. */
-  const refreshDeniedRepoLabels = useCallback(() => {
-    fetch('/api/preferences')
-      .then(r => (r.ok ? r.json() : null))
-      .then(prefs => { if (prefs) setDeniedRepoLabels(buildDeniedRepoLabels(readTeamConnections(prefs))) })
-      .catch(() => { /* a failed refresh keeps the last-known map — never wipes the badges */ })
-  }, [])
   // THE SHARED PREFERENCES ARE READ HERE and re-read whenever this tab comes back to the front: a
   // pin made on the phone, a warning dismissed on the tablet, a notification switched off at the
   // desk must all reach the other devices without a reload, or "the same application from three
@@ -2594,9 +2519,6 @@ export default function AppLayout() {
       // Resolve the archive mode (migrates the legacy archiveSessions boolean). Only reached on
       // a successful load — a failed fetch is retried in `load`, never funneled through here.
       setArchiveChoice(resolveArchiveChoice(prefs))
-      // Task 13 — the hidden-repo badge map, rebuilt from the same load (readTeamConnections
-      // tolerates a missing/malformed `connections` array instead of `.map`-ing `undefined`).
-      setDeniedRepoLabels(buildDeniedRepoLabels(readTeamConnections(prefs)))
       if (!isCentral && prefs.telemetryNoticeDismissed !== true) {
         pushNotification({ type: 'info', code: 'telemetry.first_use' })
         // Mark it at emission time: an auto-dismiss, reload, or notification-history clear must not
@@ -3426,45 +3348,6 @@ export default function AppLayout() {
   }, [filters.projects.length, filters.repos?.length, filters.models.length,
     filters.tags?.length, filters.harnesses?.length, lang])
 
-  // Team auth gate takes precedence over the data loading/error states below:
-  // on a gated central /api/data returns 401 until the operator logs in, so we
-  // must resolve the session and show the login screen FIRST — otherwise the
-  // expected 401 surfaces as a "failed to load" error and the login never shows.
-  if (teamSession === undefined) {
-    // Still resolving the session — show the honest boot loader, not a silent blank. We also can't
-    // yet tell a 403 auth-hold from a real error (that needs `teamSession.central`), so holding the
-    // loader here is correct as well as honest.
-    return <LoadingScreen lang={lang} />
-  }
-  // Central: account-based IAM gate (bootstrap → login → app).
-  if (teamSession.central) {
-    if (iam === undefined) return <LoadingScreen lang={lang} />
-    if (iam.needsBootstrap) return <OwnerSetup lang={lang} onDone={() => { reloadIam(); refetch() }} />
-    if (!iam.authed) return <Login onAuthed={() => { reloadIam(); refetch() }} />
-    // Changing a password is step-up-protected (`server/stepup.ts`), and this screen is returned
-    // BEFORE the app tree that mounts the prompter at the root — so it mounts its own. Without it
-    // the forced first-login change would answer 403 with nobody able to answer the challenge,
-    // which is a lockout on the one screen a new account cannot get past.
-    if (iam.account?.mustChangePassword) {
-      return (
-        <>
-          <ChangePassword onDone={() => { reloadIam(); refetch() }} />
-          <StepUpPrompt lang={lang} />
-        </>
-      )
-    }
-    // An owner owes a second factor. The gate in index.ts is already refusing everything else,
-    // so this is not an extra restriction — it is the screen that says WHY, and the only way the
-    // owner can satisfy it. It also carries the recovery codes that make the account
-    // self-recoverable, which is the other half of why it is mandatory.
-    if (iam.mfaEnrollmentRequired) {
-      return <MfaSetup lang={lang} required onClose={() => { reloadIam(); refetch() }} />
-    }
-  } else if (teamSession.required && !teamSession.authed) {
-    // Non-central (member/solo) keeps the legacy password gate.
-    return <TeamLogin onAuthed={() => { setTeamSession(s => ({ ...(s ?? { required: true }), required: true, authed: true })); refetch() }} />
-  }
-
   // Errors are checked BEFORE the boot loader below: an error means the load settled (`complete()`
   // cleared `loading`), and it must win — otherwise a failed load would spin the loader forever.
 
@@ -3472,9 +3355,6 @@ export default function AppLayout() {
   // enrolment (or the sign-in) it is waiting for happens, and the effect above is already
   // re-reading that state. Showing "Failed to load data — HTTP 403" in that gap turns the
   // moment right after signing up into a dead end with a Retry button that cannot help.
-  if (error && teamSession.central && String(error).includes('403')) {
-    return <LoadingScreen lang={lang} />
-  }
 
   if (error) {
     // Said in plain words, by what actually happened — "can't reach the server" and "the server had a
@@ -3618,8 +3498,6 @@ export default function AppLayout() {
     // central term, so the server says `true` there while the whole `/api/fleet` prefix is refused.
     // Publishing the narrowed value closes every consumer at once — see `lib/editorGate.ts`.
     editorEnabled: editorEnabledFor(teamSession?.editorEnabled, isCentral),
-    // The one way a page can make the line above catch up after `SessionsSettings` flips the
-    // preference: ask the server again, never mirror the toggle's own guess into context.
     refreshTeamSession,
     studioSeen,
     editorAutosave, setEditorAutosave,
@@ -3627,7 +3505,6 @@ export default function AppLayout() {
     teams: teamsList,
     machines: machinesList,
     deniedRepoLabels,
-    refreshDeniedRepoLabels,
     a11y,
   }
 
