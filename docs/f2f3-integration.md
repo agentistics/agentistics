@@ -27,3 +27,11 @@ Auto-merged but SEMANTICALLY duplicated (tsc caught it; no textual conflict):
 | `fleet-web.ts` reopen action | Both sides passed `origin: 'web'` — one kept (F2.1's, with its comment). |
 | `cli-start.ts` `resumeSession` → `spawnManaged` | F2.1 forwarded `req.origin` unconditionally; F2.0b forwards it only through `structuredReopenOrigin(req.origin, previous?.structuredDriver)`. **F2.0b's rule kept** (a web reopen is structured only when the row it replaces was; a terminal-born row stays a TUI — the documented decision). F2.1's unconditional line removed. |
 
+### Engine side (`agentistics-engine`, branch `integ/f2-f3`) — merge 2, F2.1 (`ad856714`)
+
+| File | Resolution |
+|---|---|
+| `engine/src/acp/launch.ts` | Both additions kept: F2.0's `withEnvArgv` / `launchAcpWith` and F2.1's `killTree` (kill the child's whole process group; gemini relaunches its worker). |
+| `engine/src/structured/acp-structured.ts` | F2.0b's transport-aware `launch` / `now` (pipe clock) kept AND F2.1's `usage` accumulator; F2.1's `acpChatFold(emit, deps.now, …)` now uses the merged `now` (so replay-time stamps stay original); the driver gets both `now` and F2.1's `replaySettleMs`. |
+| `public.pin` | Set to the public integ commit (see "Pins"). |
+
