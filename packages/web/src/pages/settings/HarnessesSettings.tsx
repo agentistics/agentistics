@@ -1,9 +1,12 @@
 import React, { useState } from 'react'
-import { useOutletContext } from 'react-router-dom'
+import { useNavigate, useOutletContext } from 'react-router-dom'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { Cpu, Copy, CheckCheck, AlertCircle, CircleDot, ExternalLink } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
-import { installHarness, useChatHarnesses, type HarnessChatStatus } from '../../hooks/useChatHarnesses'
-import { ConfirmModal, SectionHeader } from './primitives'
+import { loginHarness, useChatHarnesses, type HarnessChatStatus } from '../../hooks/useChatHarnesses'
+import { SectionHeader } from './primitives'
+import { HarnessInstallDialog } from '../../components/HarnessInstallDialog'
+import { sessionPath } from '../../lib/sessionRoute'
 import { CenteredLoader } from '../../components/CenteredLoader'
 
 function CopyableCode({ text }: { text: string }) {
@@ -41,7 +44,7 @@ function CopyableCode({ text }: { text: string }) {
 
 export function HarnessStatusBadge({ h, pt = false }: { h: HarnessChatStatus; pt?: boolean }) {
   if (h.updateAvailable) {
-    return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: '#f97316', background: 'rgba(249,115,22,0.10)', border: '1px solid rgba(249,115,22,0.28)', padding: '2px 8px', borderRadius: 20 }}>{pt ? 'Atualização disponível' : 'Update available'}</span>
+    return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: 'var(--anthropic-orange)', background: 'color-mix(in srgb, var(--anthropic-orange) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--anthropic-orange) 30%, transparent)', padding: '2px 8px', borderRadius: 20 }}>{pt ? 'Atualização disponível' : 'Update available'}</span>
   }
   if (h.ready) {
     return (
@@ -77,9 +80,9 @@ export function HarnessStatusBadge({ h, pt = false }: { h: HarnessChatStatus; pt
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: 4,
       fontSize: 11, fontWeight: 700,
-      color: '#f97316',
-      background: 'rgba(249,115,22,0.10)',
-      border: '1px solid rgba(249,115,22,0.28)',
+      color: 'var(--anthropic-orange)',
+      background: 'color-mix(in srgb, var(--anthropic-orange) 12%, transparent)',
+      border: '1px solid color-mix(in srgb, var(--anthropic-orange) 30%, transparent)',
       padding: '2px 8px', borderRadius: 20,
     }}>
       <AlertCircle size={10} />
@@ -181,15 +184,17 @@ export default function HarnessesSettings() {
   const ctx = useOutletContext<AppContext>()
   const pt = ctx.lang === 'pt'
   const { harnesses, loading, reload } = useChatHarnesses()
+  const navigate = useNavigate()
+  const isMobile = useIsMobile()
   const [target, setTarget] = useState<HarnessChatStatus | null>(null)
-  const [progress, setProgress] = useState<string[]>([])
-  const [running, setRunning] = useState(false)
-  const begin = async () => {
-    if (!target) return
-    setRunning(true); setProgress([])
-    const result = await installHarness(target.id, target.installed, line => setProgress(p => [...p, line]))
-    if (!result.ok) setProgress(p => [...p, result.error ?? (pt ? 'Falha na instalação.' : 'Installation failed.')])
-    setRunning(false); if (result.ok) { setTarget(null); reload() }
+  const [signingIn, setSigningIn] = useState<string | null>(null)
+  const [notice, setNotice] = useState('')
+  const signIn = async (h: HarnessChatStatus) => {
+    setSigningIn(h.id); setNotice('')
+    const out = await loginHarness(h.id, pt ? 'pt' : 'en')
+    setSigningIn(null)
+    if (out.ok && out.id) navigate(sessionPath(out.id))
+    else setNotice(out.message || (pt ? 'Não consegui abrir o login agora. Tente de novo.' : 'Could not open the sign-in right now. Try again.'))
   }
   const readyCount = harnesses.filter(h => h.ready).length
 
@@ -213,10 +218,10 @@ export default function HarnessesSettings() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {harnesses.map(h => <div key={h.id}>
               <HarnessCard h={h} pt={pt} />
-              {(!h.ready || h.updateAvailable === true) && <button type="button" onClick={() => {
-                if (h.installed && !h.authReady) { window.location.assign('/sessions'); return }
+              {(!h.ready || h.updateAvailable === true) && <button type="button" disabled={signingIn === h.id} onClick={() => {
+                if (h.installed && !h.authReady) { void signIn(h); return }
                 setTarget(h)
-              }} style={{ margin: '6px 0 8px 42px', padding: '7px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12 }}>
+              }} style={{ margin: '6px 0 8px 42px', minHeight: isMobile ? 44 : undefined, padding: '7px 14px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12 }}>
                 {h.installed && !h.authReady ? (pt ? 'Entrar' : 'Sign in') : h.installed ? (pt ? 'Atualizar' : 'Update') : (pt ? 'Instalar' : 'Install')}
               </button>}
             </div>)}
@@ -232,17 +237,8 @@ export default function HarnessesSettings() {
           </div>
         </>
       )}
-      <ConfirmModal
-        open={target !== null}
-        title={target ? `${pt ? 'Instalar' : 'Install'} ${target.label}?` : ''}
-        message={target ? (pt ? `Vamos instalar ${target.label}, pelo instalador oficial, como seu usuário. Nenhum sudo será usado.` : `We will install ${target.label} from its official installer, as your user. sudo will not be used.`) : ''}
-        confirmLabel={running ? (pt ? 'Instalando…' : 'Installing…') : (pt ? 'Continuar' : 'Continue')}
-        cancelLabel={pt ? 'Cancelar' : 'Cancel'}
-        onCancel={() => { if (!running) setTarget(null) }}
-        onConfirm={() => { void begin() }}
-      >
-        {progress.length > 0 && <div aria-live="polite" style={{ fontSize: 12, color: 'var(--text-secondary)', background: 'var(--bg-elevated)', padding: 8, borderRadius: 7 }}>{progress.map((p, i) => <div key={`${p}-${i}`}>{p}</div>)}</div>}
-      </ConfirmModal>
+      {notice && <div role="alert" style={{ marginTop: 10, fontSize: 12, color: 'var(--text-secondary)' }}>{notice}</div>}
+      <HarnessInstallDialog target={target} pt={pt} onClose={() => setTarget(null)} onDone={() => reload()} />
     </div>
   )
 }

@@ -66,7 +66,6 @@ export function useChatHarnesses(): UseChatHarnessesResult {
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
     fetch('/api/chat-harnesses')
       .then(r => r.json() as Promise<HarnessChatStatus[]>)
       .then(data => {
@@ -78,32 +77,52 @@ export function useChatHarnesses(): UseChatHarnessesResult {
       .catch(() => {
         if (!cancelled) setLoading(false)
       })
-    const timer = window.setInterval(() => { if (!cancelled) setGeneration(n => n + 1) }, 3000)
-    return () => { cancelled = true; window.clearInterval(timer) }
+    return () => { cancelled = true }
   }, [generation])
+
+  // The badge must flip by itself after an install or a sign-in, so re-check while anything is not
+  // ready — and stop the moment everything is, so a settled machine pays nothing.
+  const settled = harnesses.length > 0 && harnesses.every(h => h.ready)
+  useEffect(() => {
+    if (settled) return
+    const timer = window.setInterval(() => setGeneration(n => n + 1), 4000)
+    return () => window.clearInterval(timer)
+  }, [settled])
 
   return { harnesses, loading, reload: () => setGeneration(n => n + 1) }
 }
 
-export async function installHarness(id: string, update = false, onProgress?: (line: string) => void): Promise<{ ok: boolean; version?: string; error?: string }> {
-  const response = await fetch(`/api/harnesses/${encodeURIComponent(id)}/${update ? 'update' : 'install'}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmed: true }),
-  })
+export interface InstallResult {
+  ok: boolean
+  version?: string
+  /** A plain sentence for the person, or the code `node-required` / `unsupported-platform` / `busy`. */
+  error?: string
+  code?: 'node-required' | 'unsupported-platform' | 'busy' | 'failed'
+}
+
+/** Runs the official installer on the server and streams its progress lines. Never call this
+ *  without the person having confirmed — the server refuses a body without `confirmed`. */
+export async function installHarness(
+  id: string, update = false, onProgress?: (line: string) => void, opts: { installNode?: boolean } = {},
+): Promise<InstallResult> {
+  let response: Response
+  try {
+    response = await fetch(`/api/harnesses/${encodeURIComponent(id)}/${update ? 'update' : 'install'}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmed: true, ...(opts.installNode ? { installNode: true } : {}) }),
+    })
+  } catch { return { ok: false, code: 'failed' } }
   if (!response.ok || !response.body) {
-    const raw = await response.text().catch(() => '')
-    try {
-      const detail = JSON.parse(raw) as { error?: string }
-      const messages: Record<string, string> = {
-        'node-required': 'Node.js é necessário para instalar este backend.',
-        'unsupported-platform': 'Esta instalação funciona no Linux e no macOS.',
-      }
-      return { ok: false, error: messages[detail.error ?? ''] ?? detail.error ?? 'install_failed' }
-    } catch { return { ok: false, error: raw || 'install_failed' } }
+    const detail = await response.json().catch(() => ({})) as { error?: string }
+    if (detail.error === 'node-required') return { ok: false, code: 'node-required' }
+    if (detail.error === 'unsupported-platform') return { ok: false, code: 'unsupported-platform' }
+    if (response.status === 409) return { ok: false, code: 'busy' }
+    return { ok: false, code: 'failed' }
   }
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
   let buffer = ''
   while (true) {
-    const next = await reader.read()
+    const next = await reader.read().catch(() => ({ done: true, value: undefined }))
     if (next.done) break
     buffer += next.value
     const records = buffer.split('\n\n')
@@ -111,13 +130,27 @@ export async function installHarness(id: string, update = false, onProgress?: (l
     for (const record of records) {
       const line = record.split('\n').find(x => x.startsWith('data: '))
       if (!line) continue
-      const event = JSON.parse(line.slice(6)) as { type: string; message?: string; version?: string }
+      let event: { type: string; message?: string; version?: string }
+      try { event = JSON.parse(line.slice(6)) } catch { continue }
+      if (event.type === 'done') return { ok: true, ...(event.version ? { version: event.version } : {}) }
+      if (event.type === 'error') return { ok: false, code: 'failed', ...(event.message ? { error: event.message } : {}) }
       if (event.message) onProgress?.(event.message)
-      if (event.type === 'done') return { ok: true, version: event.version }
-      if (event.type === 'error') return { ok: false, error: event.message }
     }
   }
-  return { ok: false, error: 'install_failed' }
+  return { ok: false, code: 'failed' }
+}
+
+/** "Entrar": starts the harness (its own login prompt) in an ordinary session; resolves to its id. */
+export async function loginHarness(id: string, lang: 'pt' | 'en'): Promise<{ ok: boolean; id?: string; message: string }> {
+  try {
+    const res = await fetch(`/api/fleet/harness-login?lang=${lang}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ harness: id }),
+    })
+    const json = await res.json() as { ok: boolean; id?: string; message?: string }
+    return { ok: json.ok === true, ...(json.id ? { id: json.id } : {}), message: json.message ?? '' }
+  } catch {
+    return { ok: false, message: lang === 'pt' ? 'Não consegui falar com esta máquina.' : 'Could not reach this machine.' }
+  }
 }
 
 /** Returns the ids of harnesses that are ready (installed + authed). */

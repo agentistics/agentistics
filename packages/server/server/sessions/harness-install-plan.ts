@@ -9,6 +9,48 @@ export interface HarnessInstallFacts {
   nodePresent: boolean
   npmGlobalWritable: boolean
   npmPrefix: string
+  /** `process.arch` — only the Node.js tarball name depends on it. */
+  arch?: string
+  /** The user's home; the Node.js tarball is unpacked under it, never system-wide. */
+  home?: string
+}
+
+/** Official Node.js LTS the user-level fallback unpacks (nodejs.org/dist, checked 2026-10). */
+export const NODE_LTS_VERSION = '22.11.0'
+
+/** Directories (relative to home) put in front of PATH for every install step and version check. */
+export const USER_BIN_DIRS = ['.local/bin']
+
+export function withUserBin(path: string | undefined, home: string): string {
+  const dirs = USER_BIN_DIRS.map(d => `${home}/${d}`)
+  const rest = (path ?? '').split(':').filter(p => p && !dirs.includes(p))
+  return [...dirs, ...rest].join(':')
+}
+
+/** Strips ANSI escapes and bounds a line so a noisy installer cannot flood the modal. */
+export function cleanInstallLine(raw: string): string {
+  // eslint-disable-next-line no-control-regex
+  return raw.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r/g, '').trim().slice(0, 200)
+}
+
+/**
+ * Node.js prerequisite for the npm-based harnesses, installed for the USER only (official tarball
+ * from nodejs.org unpacked under ~/.local, symlinks in ~/.local/bin). No sudo, no package manager.
+ */
+export function planNodeInstall(facts: HarnessInstallFacts): { reason: HarnessInstallReason; command?: string[] } {
+  const platform = installPlatform(facts.platform)
+  if (platform === 'unsupported') return { reason: 'unsupported-platform' }
+  const arch = facts.arch === 'arm64' ? 'arm64' : facts.arch === 'x64' ? 'x64' : null
+  if (!arch || !facts.home) return { reason: 'unsupported-platform' }
+  const name = `node-v${NODE_LTS_VERSION}-${platform}-${arch}`
+  const dest = `${facts.home}/.local/share/agentistics`
+  const script = [
+    'set -e',
+    `mkdir -p "${dest}" "${facts.home}/.local/bin"`,
+    `curl -fsSL "https://nodejs.org/dist/v${NODE_LTS_VERSION}/${name}.tar.gz" | tar -xz -C "${dest}"`,
+    `for b in node npm npx; do ln -sf "${dest}/${name}/bin/$b" "${facts.home}/.local/bin/$b"; done`,
+  ].join(' && ')
+  return { reason: 'ok', command: ['sh', '-c', script] }
 }
 
 export interface HarnessInstallPlan {

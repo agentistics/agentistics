@@ -32,6 +32,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, Check, ClipboardList, Lock, Pap
 import { attachmentRoom, MAX_ATTACHMENTS, planPaste } from '../../lib/pastePlan'
 import { Field, inputStyle } from './formBits'
 import { HarnessPicker } from './HarnessPicker'
+import { HarnessInstallDialog } from '../HarnessInstallDialog'
 import { ModelSelect, ModelId } from './ModelSelect'
 import { EffortPicker } from './EffortPicker'
 import { ProjectPicker } from './ProjectPicker'
@@ -147,6 +148,8 @@ export function NewSessionModal({
 
   const [harness, setHarness] = useState<HarnessOption | null>(null)
   const [dirty, setDirty] = useState(false)
+  // A harness missing on this machine is listed greyed with Install; this is that flow's target.
+  const [installing, setInstalling] = useState<string | null>(null)
   const [confirmClose, setConfirmClose] = useState(false)
   // Prefer a PRESET's own harness when this machine can actually start it; otherwise pre-select the
   // only assistant there is — a one-item picker is a question with one answer. Runs whenever the
@@ -807,9 +810,15 @@ export function NewSessionModal({
               onChange={id => { setHarness(harnesses?.find(h => h.id === id) ?? null); setDirty(true) }}
               {...(unavailable ? { notice: unavailable } : {})}
               {...(retryable ? { onRetry: retry } : {})}
-              onInstall={() => { window.location.assign('/settings/harnesses') }}
+              onInstall={id => setInstalling(id)}
             />
           </Field>
+          <HarnessInstallDialog
+            target={installing ? { id: installing, label: harnesses?.find(h => h.id === installing)?.label ?? installing } : null}
+            pt={pt}
+            onClose={() => setInstalling(null)}
+            onDone={() => retry()}
+          />
 
           {isNative && (
             <Field label={pt ? 'Provedor' : 'Provider'} hint={nativeOptions.unavailable ?? (pt
