@@ -730,6 +730,28 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          may approve anything for anyone. `events-frontier.test.ts` asserts it
   │                          over the module SOURCE, so a field named `action` or an imperative
   │                          sentence fails the build. See docs/session-events.md
+  ├── sessions/session-hub.ts → **ONE fleet poller per process** (ENGINE.MAP F1.2, P-01/P-02/P-03/
+  │                          P-08). `ensureSessionHub()` (cli-start.ts) wraps the poller: SINGLE FLIGHT
+  │                          (a poll never runs twice at once — its frame-digest memory must move one
+  │                          poll at a time), TIMER-DRIVEN ON DEMAND (ticks every `SESSION_POLL_MS`
+  │                          while something subscribes — the in-server event producer, an
+  │                          `/api/fleet/events` stream, a chat waiting for its link — or a reader asked
+  │                          within the 30 s lease; with no demand it polls NOTHING), and `refresh()`
+  │                          after an act (`kickFleet`, a poll that STARTS after the act). `/api/fleet`,
+  │                          `/api/fleet/snapshot`, the chat streams, a send's `record()` and the event
+  │                          producer all READ it — the producer no longer runs a poller of its own in
+  │                          the server (`events/daemon.ts` `startHubProducer`; `agentop watch` /
+  │                          `events run` keep theirs). Never add a second `createSessionsPoller` in the
+  │                          server process: two pollers disagree about working/waiting by construction.
+  │                          `fleet-events.ts` is the PUSH (`GET /api/fleet/events`: a `snapshot` of the
+  │                          requested view, then `delta` row upserts/removes; closed rows windowed by
+  │                          `closed=`, older ones paged by `GET /api/fleet/closed`); its planner is
+  │                          pure. `adapter-chat.ts` serves the chat from engine-api 1.9 `HarnessChat`
+  │                          behind the experimental `adapter-chat` row (`AGENTISTICS_ADAPTER_CHAT=1`) —
+  │                          same `chat`/`chat-delta` events + `live`/`state`, `source: 'adapter'`, and
+  │                          the SAME post-processing (`finishChatRead`); an error closes the stream and
+  │                          refuses that conversation for 5 min so the client lands on the legacy one.
+  │                          Flag off, the chat routes are the legacy readers byte for byte.
   ├── sessions/fleet-baseline.ts → the IO boundary in front of the pure `session-profile.ts`: read
   │                          the consolidate store, compute the baseline, hold it for 5 minutes and
   │                          share the SCAN IN FLIGHT. `/api/fleet` is polled every five seconds by
