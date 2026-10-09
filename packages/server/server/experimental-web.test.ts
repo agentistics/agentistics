@@ -17,8 +17,8 @@ describe('buildExperimentalReport', () => {
     expect(provider.on).toBe(false)
     expect(provider.description.en.length).toBeGreaterThan(10)
     expect(provider.description.pt.length).toBeGreaterThan(10)
-    // journal/projections are on by default: the preference is not what decides them
-    expect(r.features.filter(f => !f.switchable).map(f => f.id).sort()).toEqual(['journal', 'projections'])
+    // journal/projections/adapter-chat are on by default: the preference is not what decides them
+    expect(r.features.filter(f => !f.switchable).map(f => f.id).sort()).toEqual(['adapter-chat', 'journal', 'projections'])
   })
 })
 

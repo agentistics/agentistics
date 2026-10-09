@@ -69,9 +69,10 @@ export const EXPERIMENTAL_FEATURES: readonly ExperimentalFeature[] = [
   {
     id: 'adapter-chat',
     env: 'AGENTISTICS_ADAPTER_CHAT',
-    // Opt-in: only '1' (ENGINE.MAP 09 §4). Read by the chat routes (`/api/fleet/chat-stream`,
-    // `/api/fleet/chat`); off, they are the legacy readers byte for byte.
-    isOn: raw => raw === '1',
+    // DEFAULT ON since F4.A (ENGINE.MAP 13 §Phase 4): every harness's chat comes from the engine's
+    // channel. The variable stays as the override that turns it OFF (`AGENTISTICS_ADAPTER_CHAT=0`).
+    isOn: onUnlessOff,
+    defaultOn: true,
     description: {
       en: 'Session chat from the engine\'s chat channel (one reader per transcript, live text and state) instead of the host\'s own readers, for every harness whose integration serves it.',
       pt: 'Chat das sessões pelo canal de chat do engine (um leitor por transcrição, texto ao vivo e estado) em vez dos leitores do próprio host, para todo harness cuja integração o oferece.',

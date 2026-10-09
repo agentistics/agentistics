@@ -46,7 +46,7 @@ export interface StructuredProvider {
   acp(): Promise<EngineAcp | null>
   /** `preferences.acpHarnesses`, read fresh each spawn. */
   allowed(): Promise<readonly string[]>
-  /** `featureOn('adapter-chat')`, read each spawn. Absent = off. */
+  /** `featureOn('adapter-chat')`, read each spawn. Absent = on (F4.A); '0' turns it off. */
   flagOn?(): boolean
   /** The tmux spawn that resumes `conversationId` under the same managed id; null = no resume possible. */
   resumeSpawn?(req: BackendSpawn, conversationId: string): Promise<BackendSpawn | null>
