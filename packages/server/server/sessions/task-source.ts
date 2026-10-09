@@ -7,7 +7,6 @@
 
 import { TASKS_FILE } from '../config'
 import { loadConsolidated } from '../consolidate'
-import { sessionCostUSD } from '../member-metrics'
 import { readPreferences } from '../preferences'
 import { readRegistry } from './registry'
 import { createTaskStore, type TaskStore } from './task-store'
@@ -15,7 +14,7 @@ import { migrateLegacyTasks, type TaskBook } from './task-model'
 import { historicalRows } from './task-historical'
 import { nativeRows } from './task-native'
 import type { BoardRow, ManagedSession } from './types'
-import { CORE_TYPE_ID, coreStatusMigration, planStatusMigration, planTypeMigration, type SessionMeta } from '@agentistics/core'
+import { CORE_TYPE_ID, coreStatusMigration, planStatusMigration, planTypeMigration, sessionCostUSD, type SessionMeta } from '@agentistics/core'
 
 /**
  * THE BOARD'S TWO ROW SETS, and why there is no field called plain `rows`.
@@ -158,7 +157,7 @@ export async function loadTaskWorld(): Promise<TaskWorld> {
     loadConsolidated().catch(() => new Map<string, SessionMeta>()),
   ])
   return {
-    store, book, registryRows, metas, costOf: sessionCostUSD,
+    store, book, registryRows, metas, costOf: m => sessionCostUSD(m) ?? 0,
     rollupRows: [...registryRows, ...historicalRows(book.historicalSessions, metas), ...nativeRows(book.nativeSessions)],
   }
 }

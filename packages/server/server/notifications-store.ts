@@ -31,7 +31,7 @@
 import { join } from 'path'
 import { AGENTISTICS_DATA_DIR, TEAM_CENTRAL } from './config'
 import { subjectVisibleTo, type NotificationSubject, type NotificationAuthorityContext } from './notifications-authority'
-import type { Principal } from './iam-types'
+import type { Principal } from './notifications-authority'
 
 export type { NotificationSubject } from './notifications-authority'
 

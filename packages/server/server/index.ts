@@ -83,7 +83,7 @@ import { applyBaselineHeaders, OPAQUE_MEDIA_CSP } from './response-policy'
 import { TRUST_PROXY, ALLOWED_ORIGINS, TEAM_TLS, TEAM_SESSION_SECRET_ENV, TEAM_SESSION_SECRET, setResolvedSessionSecret } from './config'
 import { validateSecret, ensureSessionSecret } from './secret-store'
 import { requiresStepUp, verifyStepUp, STEPUP_HEADER } from './stepup'
-import { writeAudit, ensureAuditIndexes, listAudit } from './audit'
+import { writeAudit, listAudit } from './audit'
 import { safeError } from './errors'
 import { LIMITS, readJsonLimited } from './limits'
 // Type only, and from the LEAF: `sessions/fleet-web.ts` reaches `cli-start.ts` and through it Ink
@@ -109,8 +109,6 @@ import {
 import { wsInputOriginOk } from './sessions/input-protocol'
 // Type only: the module itself reaches `cli-start` → `@agentistics/tui/control` → Ink, and is
 // loaded by dynamic import inside the two /api/fleet handlers.
-import { canSeeMemberNames } from './iam-view'
-import { buildNotificationAuthorityContext } from './notifications-context'
 import {
   readEnvConfig,
   writeEnvConfig,
@@ -135,10 +133,6 @@ import { fullSync } from './archive'
 import { getArchiveMode } from './preferences'
 import { handleAccessibility } from './a11y-routes'
 import { handleUserUiPrefs } from './user-ui-prefs-routes'
-import { registerAgent, unregisterAgent, onAgentMessage, onAgentPong, setPresenceChangeHook } from './team-agent'
-import { validateIngestToken } from './team-tokens'
-import { getAccount } from './accounts'
-import { getTeam } from './teams'
 import { discoverProjectDisks } from './disk-picker'
 import { allowedRoots, listFolders, rootListing } from './fs-folders'
 import { forgetProjects } from './sessions/project-source'
@@ -247,122 +241,6 @@ if (!TEAM_CENTRAL) {
     .catch(() => {})
 }
 void setupFileWatcher()
-if (TEAM_CENTRAL) {
-  import('./team-watch').then(m => m.startTeamWatch()).catch(err => console.error('[team-watch] failed to start:', err))
-  // Push an IMMEDIATE SSE update when a member connects/disconnects so the dashboard's
-  // online/offline dots and the members panel refresh instantly. Presence is computed fresh
-  // per request (not cached), so this needs no cache invalidation and no debounce.
-  setPresenceChangeHook(() => notifySseClients())
-}
-
-// IAM bootstrap init (central only): ensure indexes + Default team, backfill teamId, and —
-// when no owner exists yet — mint a one-time setup token and print it to the logs.
-if (TEAM_CENTRAL) {
-  // Resolve the session-signing secret before anything can mint a cookie. A bad explicit value
-  // is fatal on purpose: booting with a session key equal to the shared dashboard password is
-  // worse than not booting, because every account becomes forgeable and nobody notices.
-  if (TEAM_SESSION_SECRET_ENV) {
-    const v = validateSecret(TEAM_SESSION_SECRET_ENV, TEAM_PASSWORD)
-    if (!v.ok) {
-      console.error(`[server] refusing to start: AGENTISTICS_TEAM_SESSION_SECRET is invalid (${v.reason}).`)
-      console.error('[server] generate one with: openssl rand -hex 32')
-      process.exit(1)
-    }
-    setResolvedSessionSecret(TEAM_SESSION_SECRET_ENV)
-  } else {
-    // Bounded: the secret must be settled before any cookie is minted, but an unreachable
-    // database must not keep the server from ever listening. On timeout we keep the
-    // per-process random secret already in config.ts — safe, just not durable.
-    try {
-      const secret = await Promise.race([
-        ensureSessionSecret(),
-        new Promise<null>(resolve => setTimeout(() => resolve(null), 10_000)),
-      ])
-      if (secret) {
-        setResolvedSessionSecret(secret)
-        console.log('[server] using the persisted random session secret (set AGENTISTICS_TEAM_SESSION_SECRET to pin your own).')
-      } else {
-        console.warn('[server] database unreachable — using a per-process session secret; sessions will not survive a restart.')
-      }
-    } catch {
-      console.warn('[server] could not persist a session secret — using a per-process one; sessions will not survive a restart.')
-    }
-  }
-
-  void (async () => {
-    try {
-      const { ensureAccountIndexes, hasAnyOwner, purgeUnknownTeamsFromAccounts } = await import('./accounts')
-      const { backfillTokenTeamIds, purgeUnknownTeamsFromMachines } = await import('./team-tokens')
-      const { backfillRepoTeamIds } = await import('./team-repos')
-      await ensureAccountIndexes()
-      await (await import('./reset-requests')).ensureResetRequestIndexes().catch(() => {})
-      // Convert any date still stored as a STRING into a BSON Date. Runs before everything that
-      // reads a timestamp, is idempotent (a migrated DB matches no documents), and never throws —
-      // a central must still boot when it cannot run. See mongo-dates.ts.
-      try {
-        const { migrateStringDatesToBson } = await import('./mongo-dates')
-        const { getMongoDb } = await import('./mongo')
-        const changed = await migrateStringDatesToBson(await getMongoDb(), { log: m => console.log(m) })
-        if (changed.length > 0) {
-          const total = changed.reduce((n, r) => n + r.converted, 0)
-          const stuck = changed.reduce((n, r) => n + r.unconvertible, 0)
-          console.log(`[mongo-dates] migrated ${total} string date(s) to BSON Date` +
-            (stuck > 0 ? ` — ${stuck} value(s) were not parseable and were left untouched for inspection` : ''))
-        }
-      } catch (e) { console.warn('[mongo-dates] migration skipped:', e instanceof Error ? e.message : e) }
-      await ensureAuditIndexes()
-      // No Default team is seeded — machines/accounts are loose until assigned to real teams.
-      await backfillTokenTeamIds()
-      await backfillRepoTeamIds()
-      // Retroactively purge references to deleted teams (orphaned before the delete-cascade existed).
-      try {
-        const { listTeams } = await import('./teams')
-        const validTeamIds = (await listTeams()).map(t => t._id)
-        await purgeUnknownTeamsFromMachines(validTeamIds)
-        await purgeUnknownTeamsFromAccounts(validTeamIds)
-      } catch { /* best-effort */ }
-      if (!(await hasAnyOwner())) {
-        const { getBootstrapDoc, generateBootstrapToken } = await import('./bootstrap')
-        const existing = await getBootstrapDoc()
-        if (!existing || existing.consumedAt || !existing.tokenHash) {
-          const token = await generateBootstrapToken(new Date())
-          console.log(
-            '\n' +
-            '========================================================\n' +
-            '  agentistics — OWNER SETUP REQUIRED\n' +
-            '  No owner account exists yet. Create it with this\n' +
-            '  one-time setup token (POST /api/iam/bootstrap):\n\n' +
-            `      ${token}\n\n` +
-            '  Keep it secret. It is shown only once.\n' +
-            '========================================================\n',
-          )
-        } else {
-          // Deliberately NOT reissued here: a boot that minted a second token would silently
-          // invalidate one the operator may still be holding. Name the command that does it.
-          // Named by HOW this central was deployed. It used to lead with `./central.sh
-          // setup-token`, which does not exist for the majority of installs — the published-image
-          // path needs no checkout — so the first command the operator was told to run was one
-          // their machine could not run. The compose files set AGENTISTICS_DEPLOY_HINT for exactly
-          // this; absent (a hand-rolled compose), both are named and each is labelled.
-          const hint = process.env.AGENTISTICS_DEPLOY_HINT
-          const reissue = hint === 'central.sh'
-            ? '  logs). Lost it? Reissue with:  ./central.sh setup-token\n'
-            : hint === 'agentop'
-              ? '  logs). Lost it? Reissue with:  agentop central setup-token\n'
-              : '  logs). Lost it? Reissue it from the host that started this central:\n' +
-                '    agentop central setup-token     (deployed with the agentop CLI)\n' +
-                '    ./central.sh setup-token        (deployed from a repo checkout)\n'
-          console.log(
-            '\n[agentistics] Owner setup pending — a setup token was already issued (see earlier\n' +
-            reissue,
-          )
-        }
-      }
-    } catch (err) {
-      console.error('[agentistics] IAM bootstrap init skipped:', err instanceof Error ? err.message : err)
-    }
-  })()
-}
 
 maybeSpawnWatcher()
 // The engine is judged at boot so a refused or failed one is logged when the server starts, not on
@@ -439,18 +317,18 @@ const _wsHandlers = {
   open(ws: ServerWebSocket<WSData>) {
     if (ws.data.fleetInput) { openInputSocket(ws); return }
     if (ws.data.shellInput) { openShellInputSocket(ws); return }
-    if (!ws.data.isAgent) return; registerAgent(ws)
+    return
   },
   message(ws: ServerWebSocket<WSData>, msg: string | Buffer) {
     if (ws.data.fleetInput) { onInputMessage(ws, msg); return }
     if (ws.data.shellInput) { onShellInputMessage(ws, msg); return }
-    if (!ws.data.isAgent) return; onAgentMessage(ws, msg)
+    return
   },
-  pong(ws: ServerWebSocket<WSData>) { if (!ws.data.isAgent) return; onAgentPong(ws) },
+  pong(_ws: ServerWebSocket<WSData>) {},
   close(ws: ServerWebSocket<WSData>) {
     if (ws.data.fleetInput) { closeInputSocket(ws); return }
     if (ws.data.shellInput) { closeShellInputSocket(ws); return }
-    if (!ws.data.isAgent) return; unregisterAgent(ws)
+    return
   },
 }
 
@@ -650,64 +528,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
-    // ---------------------------------------------------------------------------
-    // Auth gate (Phase 5): account-principal auth on the central.
-    // All /api/* routes require a valid account session except the public allowlist.
-    // Static assets are always served (the SPA + login UI must load without auth).
-    // ---------------------------------------------------------------------------
-    if (TEAM_CENTRAL && url.pathname.startsWith('/api/') && !AUTH_PUBLIC.has(url.pathname)) {
-      const session = await getPrincipalSession(req)
-      if (!session) {
-        return new Response(JSON.stringify({ error: 'auth required' }), { status: 401, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } })
-      }
-      // Admin routes require the owner.
-      if (isAdminPath(url.pathname) && session.principal.role !== 'owner') {
-        void writeAudit({ action: 'authz.denied', ip: clientIp, actorId: session.principal.accountId, meta: { path: url.pathname } })
-        return new Response(JSON.stringify({ error: 'forbidden' }), { status: 403, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } })
-      }
-      // On an internet-exposed instance an owner must hold a second factor: their account can
-      // reach every team's data and every admin route, so a single leaked password would be the
-      // whole instance. Until they enrol, only the enrolment and identity routes answer.
-      if (CAPS.requireMfaForOwner && session.principal.role === 'owner' && !MFA_EXEMPT.has(url.pathname)) {
-        const { isMfaEnabled } = await import('./mfa-store')
-        if (!(await isMfaEnabled(session.principal.accountId).catch(() => true))) {
-          return new Response(JSON.stringify({ error: 'mfa_enrollment_required' }), {
-            status: 403,
-            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-          })
-        }
-      }
-      // Step-up ("sudo mode"): a session cookie proves who you are, not that you are still at
-      // the keyboard. Operations that destroy data or mint a credential additionally require a
-      // fresh grant from POST /api/iam/stepup, presented in X-Stepup. This does not prevent a
-      // cookie being stolen — it bounds what the theft is worth.
-      if (requiresStepUp(req.method, url.pathname)) {
-        const granted = verifyStepUp(
-          req.headers.get(STEPUP_HEADER),
-          session.principal.accountId,
-          session.sessionVersion,
-          TEAM_SESSION_SECRET,
-          Date.now(),
-        )
-        if (!granted) {
-          void writeAudit({
-            action: 'stepup.missing',
-            ip: clientIp,
-            actorId: session.principal.accountId,
-            meta: { path: url.pathname, method: req.method },
-          })
-          return new Response(JSON.stringify({ error: 'stepup_required' }), {
-            status: 403,
-            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-          })
-        }
-      }
-      // Sliding session: reissue the cookie periodically so an active user is never logged out
-      // at the idle wall, while an abandoned session still dies IDLE_TIMEOUT_MS after last use.
-      if (Date.now() - session.issuedAtMs > SESSION_REFRESH_MS) {
-        refreshedCookies.set(req, makePrincipalSessionCookieHeader(session.principal.accountId, session.sessionVersion))
-      }
-    }
 
 
     if (url.pathname === '/api/events' && req.method === 'GET') {
@@ -885,18 +705,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // Who is asking. On a central every request carries a principal, and read/dismiss state is
         // per account; on a solo/member machine there are no accounts at all and `getPrincipal`
         // is always null — that instance has exactly one user, represented by `localViewer`.
-        const principal = await getPrincipal(req)
-        const viewer = principal
-          ? {
-              id: principal.accountId,
-              canSeeNames: canSeeMemberNames(principal),
-              multiTenant: true,
-              // Role/team scoping (owner sees all; a manager sees their teams' subjects; a plain
-              // user sees their own machines and teams) — see notifications-authority.ts. Built
-              // fresh per request, same as `canSeeMemberNames` above.
-              entitlement: { principal, ctx: await buildNotificationAuthorityContext() },
-            }
-          : localViewer
+        const viewer = localViewer
 
         if (req.method === 'GET') {
           return json(await readStoredNotifications(viewer))
@@ -1733,12 +1542,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // otherwise have to remember to join a second table, and the one that forgot would be a central
     // answering a question about sessions it does not host.
     if (url.pathname === '/api/fleet' || url.pathname.startsWith('/api/fleet/')) {
-      if (TEAM_CENTRAL) {
-        return new Response(JSON.stringify({ error: 'fleet_central' }), {
-          status: 404,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
     }
 
     // THE REPOSITORY EXPLORER. Same shape as the utility shell's own gate a few lines up: two
@@ -1789,7 +1592,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname === '/api/runtime/metrics') {
       try {
         const { handleRuntimeMetricsRequest, liveRuntimeMetricsDeps } = await import('./runtime-metrics-web')
-        const out = await handleRuntimeMetricsRequest(req, url, await liveRuntimeMetricsDeps(TEAM_CENTRAL))
+        const out = await handleRuntimeMetricsRequest(req, url, await liveRuntimeMetricsDeps(false))
         return json(out.body, out.status)
       } catch (err) {
         const safe = safeError(err, { verbose: PROFILE === 'local' })
@@ -3331,14 +3134,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // only in the UI: a hidden button is not a closed door, and this endpoint is what actually
     // spawns `$SHELL` on the host.
     if (url.pathname === '/api/shell' || url.pathname.startsWith('/api/shell/')) {
-      // A CENTRAL NEVER OFFERS ONE. It aggregates other machines and has no host to serve — the
-      // same refusal, in the same shape, the `/api/fleet` block gives.
-      if (TEAM_CENTRAL) {
-        return new Response(JSON.stringify({ error: 'shell_central' }), {
-          status: 404,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
       // "ENABLE NOW" — the disabled-shell empty state's temporary button. It sets the in-memory
       // override (`shell-override-store.ts`) and nothing else: never `preferences.json`, which is
       // "Enable permanently"'s own door (`PUT /api/preferences`, unchanged). Checked BEFORE the
@@ -3681,30 +3476,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // entirely — but the route still answers, because on a central its other half is the
         // members' own self-reported snapshots, which are not host state and stay available.
         const snapshot = await readLocalLiveSnapshot(data.sessions)
-        // Same member merge as /api/data — this is the endpoint the Sessions page polls, so
-        // without it a central's "Open now" would only ever move on a full data rebuild.
-        if (TEAM_CENTRAL) {
-          try {
-            const { collectMemberLive } = await import('./team-live')
-            const { scopeAppDataToTeams, dataTeamIdsOf } = await import('./team-scope')
-            const principal = await getPrincipal(req)
-            let visibleUsers: Set<string> | null = null
-            if (principal && principal.role !== 'owner') {
-              const { listMachines } = await import('./team-tokens')
-              const machines = await listMachines().catch(() => [])
-              const owned = new Set(machines.filter(m => m.accountIds.includes(principal.accountId)).map(m => m.id))
-              const scoped = scopeAppDataToTeams(data, dataTeamIdsOf(principal), owned)
-              visibleUsers = new Set(scoped.sessions.map(s => s.user).filter((u): u is string => !!u))
-            }
-            const team = collectMemberLive(visibleUsers)
-            snapshot.liveSessionIds = [...new Set([...snapshot.liveSessionIds, ...team.liveSessionIds])]
-            snapshot.liveProcesses = [...snapshot.liveProcesses, ...team.liveProcesses]
-            snapshot.liveSessionActivities = {
-              ...(snapshot.liveSessionActivities ?? {}),
-              ...(team.liveSessionActivities ?? {}),
-            }
-          } catch { /* best-effort — the local snapshot still stands */ }
-        }
         return new Response(JSON.stringify(snapshot), {
           status: 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
@@ -3727,32 +3498,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const wantSlim = wantPartial && url.searchParams.get('slim') === '1'
         let data = wantPartial ? await buildApiResponseForClient() : await buildApiResponse()
         const unscoped = data
-        // Presence is live (in-memory sockets + heartbeat) — merge it in AFTER the cached
-        // build so online/offline + latency stay fresh without recomputing the whole response.
-        let extra: { presence?: unknown; includeOfflineData?: boolean } = {}
-        if (TEAM_CENTRAL) {
-          const [{ computePresence }, { getCentralConfig }] = await Promise.all([
-            import('./team-presence'),
-            import('./central-config'),
-          ])
-          const [presence, cfg] = await Promise.all([
-            computePresence().catch(() => ({})),
-            getCentralConfig().catch(() => null),
-          ])
-          extra = { presence, includeOfflineData: cfg?.includeOfflineData ?? true }
-          // Apply per-team scoping for non-owner principals. A non-owner sees sessions from the
-          // teams they MANAGE (see dataTeamIdsOf — belonging is not reading) PLUS any machine they
-          // own — so a plain user keeps their own data, and their machines never disappear just
-          // because they have no team.
-          const principal = await getPrincipal(req)
-          if (principal && principal.role !== 'owner') {
-            const { scopeAppDataToTeams, dataTeamIdsOf } = await import('./team-scope')
-            const { listMachines } = await import('./team-tokens')
-            const machines = await listMachines().catch(() => [])
-            const owned = new Set(machines.filter(m => m.accountIds.includes(principal.accountId)).map(m => m.id))
-            data = scopeAppDataToTeams(data, dataTeamIdsOf(principal), owned)
-          }
-        }
         // Live open-session detection — computed per request (not part of the cached build)
         // so it reflects `claude` processes in real time.
         const local = await readLocalLiveSnapshot(data.sessions)
@@ -3762,21 +3507,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // getLiveSnapshot reads /proc and a member's processes are not on this machine. Scoped to
         // the members whose sessions survived the scoping above, so a principal never learns that
         // a machine they cannot see is running, nor reads its cwd off an unmatched process.
-        if (TEAM_CENTRAL) {
-          try {
-            const { collectMemberLive } = await import('./team-live')
-            const principal = await getPrincipal(req)
-            const visibleUsers = principal && principal.role !== 'owner'
-              ? new Set(data.sessions.map(s => s.user).filter((u): u is string => !!u))
-              : null
-            const team = collectMemberLive(visibleUsers)
-            liveSessionIds = [...new Set([...liveSessionIds, ...team.liveSessionIds])]
-            liveProcesses = [...liveProcesses, ...team.liveProcesses]
-          } catch { /* best-effort — the local snapshot still stands */ }
-        }
         // The build is serialized once (`serializedData`); only the live fields are added per request.
         // A central's response is scoped per principal, so it keeps the plain path.
-        const live = { liveSessionIds, liveProcesses, ...(liveUnavailable ? { liveUnavailable } : {}), ...extra }
+        const live = { liveSessionIds, liveProcesses, ...(liveUnavailable ? { liveUnavailable } : {}) }
         if (!TEAM_CENTRAL && data.sessions) {
           // ONE encoding of this build for every client (data-response-cache.ts): a validator the
           // client can revalidate with, a 304 when its copy is current, and the same bytes otherwise.

@@ -38,7 +38,6 @@ import type { CodeHostPort } from '@agentistics/engine-api'
 import type { CodeLaunch } from '@agentistics/tui/control/code-types'
 import type { CodeStartLaunch } from './code-launch'
 import { homedir, platform } from 'node:os'
-import { accountHome } from './account-home'
 import {
   HARNESS_ORDER, repoShortName, sendNowDelivered,
   type HarnessId,
@@ -79,7 +78,7 @@ import type {
   RestoreCandidate,
 } from '@agentistics/tui/control'
 import { DEFAULT_SESSION_VIEW, TAB_ORDER } from '@agentistics/tui/control'
-import { AGENTISTICS_DATA_DIR, PORT, WEB_PORT, serverLockFile } from './config'
+import { AGENTISTICS_DATA_DIR, HOME_DIR, PORT, WEB_PORT, serverLockFile } from './config'
 import { probeInstanceLock } from './single-instance'
 import {
   readPreferences, writePreferences, resolveArchiveMode, type ArchiveMode,
@@ -1233,7 +1232,7 @@ export async function restartForConfigChange(): Promise<{ state: 'nothing-runnin
 
 /** The account's own home, which an overridden `HOME` does not move (`account-home.ts`). */
 function ownerHome(): string {
-  return accountHome()
+  return HOME_DIR
 }
 
 /**

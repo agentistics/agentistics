@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { subjectVisibleTo, INSTANCE_WIDE_CODES, type NotificationAuthorityContext } from './notifications-authority'
-import type { Principal } from './iam-types'
+import type { Principal } from './notifications-authority'
 
 const emptyCtx: NotificationAuthorityContext = {
   machines: {},

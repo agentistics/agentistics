@@ -5,8 +5,7 @@ import { stat } from 'fs/promises'
 import { watch as fsWatch, statSync } from 'fs'
 import { watchedEvent, WATCH_DEPTH } from './watch-filter'
 import chokidar from 'chokidar'
-import { SESSION_META_DIR, PROJECTS_DIR, STATS_CACHE_FILE, PORT, TEAM_CENTRAL, CODEX_SESSIONS_DIR, GEMINI_DIR, COPILOT_DIR, ANTIGRAVITY_BRAIN_DIR, ANTIGRAVITY_CONVERSATIONS_DIR } from './config'
-import { centralManifest, centralHtml } from './central-branding'
+import { SESSION_META_DIR, PROJECTS_DIR, STATS_CACHE_FILE, PORT, CODEX_SESSIONS_DIR, GEMINI_DIR, COPILOT_DIR, ANTIGRAVITY_BRAIN_DIR, ANTIGRAVITY_CONVERSATIONS_DIR } from './config'
 import { invalidateCache, rebuildNow, useWatcherDrivenRefresh } from './data'
 import { createRebuildScheduler } from './rebuild-scheduler'
 import { mirrorFile } from './archive'
@@ -277,16 +276,6 @@ export function serveStatic(pathname: string, ifNoneMatch?: string | null): Resp
     asset.encoding === 'base64'
       ? Buffer.from(asset.content, 'base64')
       : asset.content
-  // A central serves the same bundle as a machine, so its installed PWA was identical in the
-  // dock — same icon, same name. Re-brand the two files the browser reads for that identity as
-  // they go out; the mode is only known at runtime, so it cannot be baked into the build.
-  if (TEAM_CENTRAL && (pathname === '/manifest.webmanifest' || pathname === '/index.html')) {
-    // Read through WHICHEVER encoding the embedder chose. `.webmanifest` was not on its text-
-    // extension list, so it arrived here base64-encoded and a `typeof body === 'string'` guard
-    // skipped the rewrite in silence — the central installed with the machine's icon anyway.
-    const text = typeof body === 'string' ? body : body.toString('utf-8')
-    body = pathname === '/index.html' ? centralHtml(text) : centralManifest(text)
-  }
   // What a browser may keep is decided by `static-cache.ts`: the shell never, hashed assets and
   // fonts for a year, and everything whose URL stays put while its artwork changes (icons,
   // favicons, logos) is revalidated — a year-long lifetime there pinned a rebranded logo, and an

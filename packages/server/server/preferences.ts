@@ -4,7 +4,7 @@ import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR, CLAUDE_DIR } from '
 import type { AccessibilityPrefs, BillingSettings, SavedComparison, SessionPreset } from '@agentistics/core'
 
 type TeamConnection = { id: string; endpoint: string; token: string; deniedRepos?: string[]; [key: string]: unknown }
-type TeamConfig = { connections: TeamConnection[]; [key: string]: unknown }
+export type TeamConfig = { connections: TeamConnection[]; [key: string]: unknown }
 const migrateTeamConfig = (raw: unknown): TeamConfig => (raw && typeof raw === 'object' && Array.isArray((raw as { connections?: unknown }).connections)
   ? raw as TeamConfig
   : { mode: 'solo', connections: [] })

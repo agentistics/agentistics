@@ -30,9 +30,27 @@ import { randomBytes } from 'node:crypto'
 import { rename, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from './config'
-import type { TagDoc } from './tags-store'
-import { toBsonDate } from './mongo-dates'
 import type { TagSource, TagWindow } from './tags-resolve'
+
+export interface TagDoc {
+  _id: string
+  name: string
+  color?: string
+  sources: TagSource[]
+  filters?: TagSource[]
+  window?: TagWindow
+  sharedWith: string[]
+  createdBy: string
+  createdAt: Date
+  updatedAt: Date
+}
+
+function toDate(value: unknown): Date | undefined {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value
+  if (typeof value !== 'string') return undefined
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? undefined : date
+}
 
 export const LOCAL_TAGS_FILE = join(AGENTISTICS_DATA_DIR, 'tags.json')
 
@@ -105,8 +123,8 @@ function sanitize(raw: unknown): TagDoc | null {
     createdBy: typeof d.createdBy === 'string' ? d.createdBy : 'local',
     // Revive the ISO strings the file holds back into Dates. An absent or unparseable value
     // falls back to `now` rather than propagating a bogus timestamp.
-    createdAt: toBsonDate(d.createdAt as string | undefined) ?? now,
-    updatedAt: toBsonDate(d.updatedAt as string | undefined) ?? now,
+    createdAt: toDate(d.createdAt) ?? now,
+    updatedAt: toDate(d.updatedAt) ?? now,
   }
 }
 

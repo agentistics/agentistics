@@ -246,7 +246,7 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
   try {
     const { readPreferences } = await import('../preferences')
     const prefs = await readPreferences()
-    const mode: string | undefined = prefs.team?.mode
+    const mode = typeof prefs.team?.mode === 'string' ? prefs.team.mode : undefined
     centralPref = mode === 'central'
     lang = prefs.lang === 'pt' ? 'pt' : 'en'
   } catch { /* an unreadable preferences file leaves the defaults */ }

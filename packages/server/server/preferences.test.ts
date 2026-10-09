@@ -7,6 +7,7 @@ import {
   LOCK_STALE_MS, LOCK_ACQUIRE_TIMEOUT_MS, __setTestOnlyDisableLock,
   __setTestOnlyForceLockVanished, __setTestOnlyAcquireTimeoutMs, PreferencesLockTimeoutError,
 } from './preferences'
+import type { TeamConfig } from './preferences'
 
 // Regression: preferences were stored under CLAUDE_DIR, which in Docker (machine +
 // self-contributing central) is the host ~/.claude mounted READ-ONLY at /host-claude.
@@ -667,8 +668,6 @@ test('a stale lock file (planted, mtime far in the past) is reclaimed — a writ
 // ---------------------------------------------------------------------------
 
 import { guardTeamConnectionsWipe } from './preferences'
-type TeamConfig = { connections?: Array<Record<string, unknown>>; [key: string]: unknown }
-
 function guardConn(id: string, endpoint: string) {
   return { id, endpoint, org: 'default', user: 'lucas', token: `tok-${id}`, deniedRepos: [] }
 }

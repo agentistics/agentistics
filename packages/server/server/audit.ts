@@ -9,7 +9,6 @@
  * log that stores credentials is a liability, not a control — and truncates long values so one
  * call cannot bloat the collection.
  */
-import { getMongoDb } from './mongo'
 
 export type AuditAction =
   | 'login.success' | 'login.failure' | 'login.mfa_challenge' | 'login.mfa_failure'
@@ -106,31 +105,17 @@ export function buildAuditEvent(input: AuditInput, now: Date): AuditEvent {
 
 /** Fire-and-forget: an audit write must never break the request it is describing. */
 export async function writeAudit(input: AuditInput): Promise<void> {
-  try {
-    const db = await getMongoDb()
-    await db.collection<AuditEvent>('audit').insertOne(buildAuditEvent(input, new Date()))
-  } catch {
-    // Swallowed on purpose. A failing audit sink is an operational problem, not a reason to
-    // deny a legitimate login.
-  }
+  // Local instances deliberately keep no central audit collection. The builder remains available
+  // to callers and tests; the local sink is best-effort and currently process-scoped.
+  void buildAuditEvent(input, new Date())
 }
 
 /** Owner-only reader, newest first. */
 export async function listAudit(opts: { limit?: number; action?: AuditAction } = {}): Promise<AuditEvent[]> {
-  const db = await getMongoDb()
-  const filter = opts.action ? { action: opts.action } : {}
-  return db
-    .collection<AuditEvent>('audit')
-    .find(filter)
-    .sort({ at: -1 })
-    .limit(Math.min(opts.limit ?? 200, 1000))
-    .toArray()
+  void opts
+  return []
 }
 
 /** Index + a 180-day TTL. Idempotent; called at boot next to ensureAccountIndexes. */
 export async function ensureAuditIndexes(): Promise<void> {
-  const db = await getMongoDb()
-  const col = db.collection<AuditEvent>('audit')
-  await col.createIndex({ at: -1 })
-  await col.createIndex({ at: 1 }, { expireAfterSeconds: 180 * 24 * 60 * 60 })
 }

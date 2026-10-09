@@ -18,7 +18,6 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { TEAM_CENTRAL, TEAM_PASSWORD, TEAM_SESSION_SECRET, TEAM_TLS, CENTRAL_USER } from './config'
-import { getAccount } from './accounts'
 import { CAPS, PROFILE } from './exposure'
 import { chatAllowed } from './chat-gate'
 import { shellAllowedNow } from './sessions/shell-gate'
@@ -26,7 +25,7 @@ import { getShellOverride } from './sessions/shell-override-store'
 import { editorAllowed } from './sessions/editor-gate'
 import { readPreferences } from './preferences'
 import { featureOn, projectionSurfaceOn } from '@agentistics/core'
-import type { Principal } from './iam-types'
+import type { Principal } from './notifications-authority'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -445,16 +444,10 @@ export async function getPrincipal(req: Request): Promise<Principal | null> {
 export async function getPrincipalSession(
   req: Request,
 ): Promise<{ principal: Principal; issuedAtMs: number; sessionVersion: number } | null> {
-  const parsed = verifyPrincipalSession(readSessionCookie(req), TEAM_SESSION_SECRET, Date.now())
-  if (!parsed) return null
-  const account = await getAccount(parsed.accountId)
-  if (!account) return null
-  if (account.sessionVersion !== parsed.sessionVersion) return null
-  return {
-    principal: { accountId: account._id, role: account.role, memberships: account.memberships },
-    issuedAtMs: parsed.issuedAtMs,
-    sessionVersion: account.sessionVersion,
-  }
+  // Account-backed principal sessions belonged to the removed central server. Local instances
+  // have one implicit owner and use the ordinary local auth gate instead.
+  void req
+  return null
 }
 
 /**

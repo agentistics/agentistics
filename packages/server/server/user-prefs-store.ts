@@ -5,9 +5,7 @@
  * panels and mapped to `PublicAccount`, and UI preferences have no business travelling with an
  * identity record.
  */
-import type { Collection } from 'mongodb'
 import type { AccessibilityPrefs } from '@agentistics/core'
-import { getMongoDb } from './mongo'
 
 export interface UserPrefsDoc {
   /** The accountId. */
@@ -15,41 +13,32 @@ export interface UserPrefsDoc {
   accessibility?: AccessibilityPrefs
   /** A person's own interface arrangement, by key — see user-ui-prefs.ts for the closed list. */
   ui?: Record<string, unknown>
-  /** BSON Date — see mongo-dates.ts. */
+  /** Local write timestamp. */
   updatedAt: Date
 }
 
-async function collection(): Promise<Collection<UserPrefsDoc>> {
-  const db = await getMongoDb()
-  return db.collection<UserPrefsDoc>('userPrefs')
-}
+const localPrefs = new Map<string, UserPrefsDoc>()
 
 export async function readUserAccessibility(accountId: string): Promise<AccessibilityPrefs | null> {
-  const doc = await (await collection()).findOne({ _id: accountId })
-  return doc?.accessibility ?? null
+  return localPrefs.get(accountId)?.accessibility ?? null
 }
 
 export async function writeUserAccessibility(accountId: string, prefs: AccessibilityPrefs): Promise<void> {
-  await (await collection()).updateOne(
-    { _id: accountId },
-    { $set: { accessibility: prefs, updatedAt: new Date() } },
-    { upsert: true },
-  )
+  const current = localPrefs.get(accountId) ?? { _id: accountId, updatedAt: new Date() }
+  localPrefs.set(accountId, { ...current, accessibility: prefs, updatedAt: new Date() })
 }
 
 export async function readUserUi(accountId: string): Promise<unknown> {
-  const doc = await (await collection()).findOne({ _id: accountId })
-  return doc?.ui ?? null
+  return localPrefs.get(accountId)?.ui ?? null
 }
 
 /** Each named key is replaced whole (`$set` on `ui.<key>`); keys not named are left as they are. */
 export async function writeUserUi(accountId: string, patch: Record<string, unknown>): Promise<void> {
-  const set: Record<string, unknown> = { updatedAt: new Date() }
-  for (const [k, v] of Object.entries(patch)) set[`ui.${k}`] = v
-  await (await collection()).updateOne({ _id: accountId }, { $set: set }, { upsert: true })
+  const current = localPrefs.get(accountId) ?? { _id: accountId, updatedAt: new Date() }
+  localPrefs.set(accountId, { ...current, ui: { ...(current.ui ?? {}), ...patch }, updatedAt: new Date() })
 }
 
 /** Called when an account is deleted — its preferences have no owner left. */
 export async function deleteUserPrefs(accountId: string): Promise<void> {
-  await (await collection()).deleteOne({ _id: accountId })
+  localPrefs.delete(accountId)
 }
