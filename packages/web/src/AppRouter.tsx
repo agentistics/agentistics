@@ -114,6 +114,9 @@ export default function AppRouter() {
             <Route path="providers" element={<Suspense fallback={<PageFallback />}><ProvidersSettings /></Suspense>} />
             <Route path="memory" element={<Suspense fallback={<PageFallback />}><MemorySettings /></Suspense>} />
             <Route path="teams" element={<Suspense fallback={<PageFallback />}><TeamsSettings /></Suspense>} />
+            {/* A removed or unknown section (e.g. the old central `/settings/connection`) lands on
+                Preferences instead of an empty panel. */}
+            <Route path="*" element={<Navigate to="/settings/preferences" replace />} />
           </Route>
         </Route>
       </Routes>

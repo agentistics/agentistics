@@ -12,13 +12,16 @@
  * (a staged draft is allowed to sit with no harness chosen at all, asked at fire time). That
  * decision stays with each caller, over the `harnesses` this hook returns.
  */
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ProjectKind } from '@agentistics/core'
 import { SEARCH_DEBOUNCE_MS } from '../lib/projectTabs'
 import type { HarnessAnswer } from '../lib/wizardSteps'
 import { fetchFleetNewWithRetry } from '../lib/fleetNewRetry'
 import { createSharedPref, PERSONAL_PREFS } from '../lib/sharedPref'
 import { projectDiskAfterResponse } from '../lib/projectDisks'
+
+/** How often the wizard re-asks while a disk index is still running. */
+const INDEX_REFRESH_MS = 3_000
 
 const projectDiskPref = createSharedPref<string>({
   key: 'agentistics-project-disk-v1', prefKey: 'projectDisk', endpoint: PERSONAL_PREFS,
@@ -82,12 +85,26 @@ export function useFleetNewOptions(lang: 'pt' | 'en'): FleetNewOptions {
     return () => window.clearTimeout(t)
   }, [query, debouncedQuery])
 
+  // While a disk is still being indexed, re-ask every few seconds so the count grows on screen
+  // (QA 08/10: it froze at the first answer until the person typed). A refresh keeps what is shown.
+  const [indexTick, setIndexTick] = useState(0)
+  const refreshRef = useRef(false)
+  useEffect(() => {
+    if (!projectIndexing) return
+    const t = window.setTimeout(() => { refreshRef.current = true; setIndexTick(n => n + 1) }, INDEX_REFRESH_MS)
+    return () => window.clearTimeout(t)
+  }, [projectIndexing, indexTick])
+
   useEffect(() => {
     let alive = true
     const controller = new AbortController()
-    setUnavailable(undefined)
-    setRetryable(false)
-    setHarnesses(null)
+    const refresh = refreshRef.current
+    refreshRef.current = false
+    if (!refresh) {
+      setUnavailable(undefined)
+      setRetryable(false)
+      setHarnesses(null)
+    }
     const load = async () => {
       try {
         const json = await fetchFleetNewWithRetry<{
@@ -113,7 +130,7 @@ export function useFleetNewOptions(lang: 'pt' | 'en'): FleetNewOptions {
         if (disks.length > 0 && next !== projectDisk) projectDiskPref.set(next)
         setUnavailable(json.unavailable)
       } catch {
-        if (alive) {
+        if (alive && !refresh) {
           setHarnesses([])
           setProjects([])
           setProjectTotals(undefined)
@@ -131,7 +148,7 @@ export function useFleetNewOptions(lang: 'pt' | 'en'): FleetNewOptions {
     }
     void load()
     return () => { alive = false; controller.abort() }
-  }, [lang, debouncedQuery, retryNumber, projectDisk])
+  }, [lang, debouncedQuery, retryNumber, projectDisk, indexTick])
 
   return { harnesses, projects, projectTotals, projectIndexing, projectIndexProgress, projectDisks, projectDisk,
     setProjectDisk: (disk: string) => projectDiskPref.set(disk), query, setQuery, searching, unavailable,
