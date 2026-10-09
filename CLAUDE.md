@@ -746,7 +746,20 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          `fleet-events.ts` is the PUSH (`GET /api/fleet/events`: a `snapshot` of the
   │                          requested view, then `delta` row upserts/removes; closed rows windowed by
   │                          `closed=`, older ones paged by `GET /api/fleet/closed`); its planner is
-  │                          pure. `adapter-chat.ts` serves the chat from engine-api 1.9 `HarnessChat`
+  │                          pure. A delta carries only rows whose content changed — `cpuPercent`/
+  │                          `rssBytes` are compared with HYSTERESIS against what that stream last sent
+  │                          (≥ 5 points / ≥ 64 MiB), or a real fleet re-sends every live row every tick —
+  │                          and `meta.closedVersion` (a hash of the PAGED closed rows) tells a client to
+  │                          re-ask for its open pages. A kill is an `exited` UPSERT (the row stays,
+  │                          reopenable); `remove` is for a row that left the fleet. The poller measures
+  │                          hardware ONLY for a row with a living command (an exited row used to borrow
+  │                          a neighbour's pid by directory). A fresh `read()` never waits for a poll in
+  │                          flight. `/api/hardware-resources` PEEKS the hub's last snapshot
+  │                          (`processSessionHub()`, never `read()` — that would buy a full poll per
+  │                          GET) and falls back to its own two tmux calls only when none is fresh. The
+  │                          adapter chat stream reads its ONE row off the snapshot
+  │                          (`adapterRowOf`), never `host.sessions()` (a whole-fleet build per tick per
+  │                          stream). `adapter-chat.ts` serves the chat from engine-api 1.9 `HarnessChat`
   │                          behind the experimental `adapter-chat` row (`AGENTISTICS_ADAPTER_CHAT=1`) —
   │                          same `chat`/`chat-delta` events + `live`/`state`, `source: 'adapter'`, and
   │                          the SAME post-processing (`finishChatRead`); an error closes the stream and

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  buildFleetFrame, closedPage, compactView, deltaBody, EMPTY_SENT, fleetEventsResponse, planFleetDelta,
+  buildFleetFrame, closedPage, compactView, deltaBody, EMPTY_SENT, fleetEventsResponse, GAUGE_CPU_POINTS,
+  GAUGE_RSS_BYTES, gaugesMoved, planFleetDelta,
   readClosedLimit, snapshotBody, windowOf, type FleetFrame, type FleetFramePayload,
 } from './fleet-events'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
@@ -38,6 +39,62 @@ describe('windowOf', () => {
 })
 
 describe('planFleetDelta', () => {
+  test('a PAGED closed row that changes (same count) bumps closedVersion — a meta-only delta', () => {
+    const rows = (title: string) => [row('a'), row('closed:1', { endedAt: 100, title }), row('closed:2', { endedAt: 50 })]
+    const f0 = buildFleetFrame(payload(rows('old')), 0)
+    const sent = planFleetDelta(EMPTY_SENT, f0).next
+    const f1 = buildFleetFrame(payload(rows('renamed')), 0)
+    expect(f1.closedTotal).toBe(f0.closedTotal)
+    const d = planFleetDelta(sent, f1)
+    expect(d.empty).toBe(false)
+    expect(d.delta.upsert).toEqual([])
+    expect(Object.keys(d.delta.meta)).toEqual(['closedVersion'])
+    // Nothing changed: no delta. And a re-order by recency is a change of the pages too.
+    expect(planFleetDelta(d.next, buildFleetFrame(payload(rows('renamed')), 0)).empty).toBe(true)
+    const reordered = [row('a'), row('closed:1', { endedAt: 100, title: 'renamed' }), row('closed:2', { endedAt: 500 })]
+    expect(planFleetDelta(d.next, buildFleetFrame(payload(reordered), 0)).delta.meta.closedVersion).toBeDefined()
+  })
+
+  test('a WINDOWED closed row is upserted, and does not also invalidate the paged history', () => {
+    const rows = (title: string) => [row('a'), row('closed:1', { endedAt: 100, title }), row('closed:2', { endedAt: 50 })]
+    const sent = planFleetDelta(EMPTY_SENT, buildFleetFrame(payload(rows('old')), 1)).next
+    const d = planFleetDelta(sent, buildFleetFrame(payload(rows('new')), 1))
+    expect(d.delta.upsert).toEqual(['closed:1'])
+    expect(d.delta.meta.closedVersion).toBeUndefined()
+  })
+
+  test('a GAUGE jitter re-sends nothing; a visible move re-sends the row with the current figures', () => {
+    const MB = 1024 * 1024
+    const at = (cpu: number, rss: number) => buildFleetFrame(payload([row('a', { cpuPercent: cpu, rssBytes: rss } as Partial<ControlSession>), row('b')]), 20)
+    let sent = planFleetDelta(EMPTY_SENT, at(1, 400 * MB)).next
+    // Every poll re-samples: small moves, in both directions, are not a change of the row.
+    for (const [cpu, rss] of [[2, 401], [0.4, 399], [3.9, 430], [1, 410]] as const) {
+      const p = planFleetDelta(sent, at(cpu, rss * MB))
+      expect(p.empty).toBe(true)
+      sent = p.next
+    }
+    // Drift is measured from what was SENT (1 %, 400 MB), so it still arrives once it adds up.
+    const drift = planFleetDelta(sent, at(1, 465 * MB))
+    expect(drift.delta.upsert).toEqual(['a'])
+    const body = deltaBody(1, at(1, 465 * MB), drift.delta) as { upsert: { rows: Array<{ rssBytes: number }> } }
+    expect(body.upsert.rows[0]!.rssBytes).toBe(465 * MB)
+    const cpu = planFleetDelta(drift.next, at(1 + GAUGE_CPU_POINTS, 465 * MB))
+    expect(cpu.delta.upsert).toEqual(['a'])
+    // A real change still goes out at once, gauges or not.
+    const st = planFleetDelta(cpu.next, buildFleetFrame(payload([row('a', { cpuPercent: 6, rssBytes: 465 * MB, state: 'working' } as Partial<ControlSession>), row('b')]), 20))
+    expect(st.delta.upsert).toEqual(['a'])
+  })
+
+  test('gaugesMoved: no figure reads as 0 — a first sample is not a move, a large appearance is', () => {
+    expect(gaugesMoved(undefined, { cpu: 1, rss: 1 })).toBe(true)
+    expect(gaugesMoved({ cpu: null, rss: 5 }, { cpu: 0, rss: 5 })).toBe(false)
+    expect(gaugesMoved({ cpu: null, rss: 5 }, { cpu: GAUGE_CPU_POINTS, rss: 5 })).toBe(true)
+    expect(gaugesMoved({ cpu: undefined, rss: undefined }, { cpu: 0, rss: GAUGE_RSS_BYTES })).toBe(true)
+    expect(gaugesMoved({ cpu: 1, rss: 5 }, { cpu: undefined, rss: 5 })).toBe(false)
+    expect(gaugesMoved({ cpu: 1, rss: 5 }, { cpu: 1 + GAUGE_CPU_POINTS - 0.1, rss: 5 + GAUGE_RSS_BYTES - 1 })).toBe(false)
+    expect(gaugesMoved({ cpu: undefined, rss: undefined }, { cpu: undefined, rss: undefined })).toBe(false)
+  })
+
   test('the first plan upserts the window and sends every meta field', () => {
     const f = buildFleetFrame(payload([row('a'), row('b')], { attention: 1 }), 20)
     const { delta, empty } = planFleetDelta(EMPTY_SENT, f)

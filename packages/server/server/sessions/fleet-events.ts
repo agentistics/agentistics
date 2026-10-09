@@ -22,15 +22,33 @@
  *   was SENT and is no longer in the fleet at all — never a row that merely slid out of the closed window
  *   (it still exists; the client keeps it). **`order`** is the window's ids in the server's order, sent
  *   only when that order changed.
+ * - **`closedVersion` invalidates the PAGED history.** Closed rows outside the window are never pushed —
+ *   a client holds the pages it asked for (`GET /api/fleet/closed`). `closedTotal` alone only moves when
+ *   the COUNT moves, so a paged row whose title, task or metrics changed (or a re-ordering by recency)
+ *   left every open page stale (found by F1.3, with `closed=0`, for all eight harnesses). `closedVersion`
+ *   is a short hash of exactly those rows, in page order: when it changes the client re-asks for the
+ *   pages it has open, and nothing else is sent.
+ * - **A KILL is an `upsert`, not a `remove`.** A stopped session stays in the fleet as an `exited` row —
+ *   it is what the list offers to REOPEN, what the task board counts, and what "show what is not
+ *   running" lists — so it is upserted with its new state. `remove` is for a row that LEFT the fleet: a
+ *   predecessor `collapseSupersededSessions` dropped, a registry entry deleted, an external process gone.
  * - **`meta`** carries a top-level field only when it changed; `null` means it is gone (an `unavailable`
  *   cleared, a `fell` dismissed). `view` (opt-in, the same `view=1` parameters as `/api/fleet`) travels
  *   COMPACT: its groups name row ids (`ids`), never a second copy of every row.
+ * - **A GAUGE moves a row only when it moves VISIBLY.** `cpuPercent` and `rssBytes` are re-sampled on every
+ *   poll and differ on every poll for a real process, so comparing the serialized row re-sent every live
+ *   row on every tick (measured on a real machine: ~420 rows a tick, before the poller stopped measuring
+ *   dead rows). The row is compared WITHOUT them (`base`), and a gauge alone upserts it only past
+ *   `GAUGE_CPU_POINTS` / `GAUGE_RSS_BYTES` from the value this stream last SENT — hysteresis against what
+ *   the client holds, so a slow drift still arrives and a jitter never does. An upserted row always
+ *   carries the current figures.
  * - **One computation per tick, not per client.** The frame for one (language, view) is built once per
  *   hub snapshot (`FleetFrameSource`) and every stream diffs against its own last-sent copy.
  *
  * The planner (`planFleetDelta`, `windowOf`, `compactView`, `metaDelta`) is PURE and tested; the stream
  * takes its clock, timers and source as dependencies.
  */
+import { createHash } from 'node:crypto'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import type { FleetRow } from './fleet-row'
 import type { FleetArrangement } from './fleet-arrange'
@@ -39,6 +57,11 @@ import { CLOSED_ROW_PREFIX } from './row-conversation'
 export const DEFAULT_CLOSED_LIMIT = 20
 export const MAX_CLOSED_LIMIT = 200
 export const FLEET_EVENTS_KEEPALIVE_MS = 15_000
+/** A row's CPU figure re-sends it only when it moved at least this many percentage points. */
+export const GAUGE_CPU_POINTS = 5
+/** …and its memory figure only when it moved at least this much (the UI prints GB to one decimal). */
+export const GAUGE_RSS_BYTES = 64 * 1024 * 1024
+
 /** Fleet streams one server keeps at once; past it the client keeps polling `/api/fleet`. */
 export const MAX_FLEET_STREAMS = 32
 
@@ -60,10 +83,19 @@ export interface CompactArrangement extends Omit<FleetArrangement, 'groups'> {
   groups: Array<{ key: string; label: string; done?: boolean; ids: string[] }>
 }
 
+/** The per-poll figures of a row: compared by `gaugesMoved`, never by string. */
+export interface RowGauges {
+  cpu: number | null | undefined
+  rss: number | null | undefined
+}
+
 /** One frame, computed ONCE per (language, view, hub snapshot) and shared by every stream. */
 export interface FleetFrame {
-  /** Window rows in server order, each with its two shapes and their serialization. */
-  window: Array<{ id: string; session: FleetRow; row: ControlSession; json: string }>
+  /**
+   * Window rows in server order, each with its two shapes, their serialization WITHOUT the gauges
+   * (`base` — what a change is judged on) and the gauges apart.
+   */
+  window: Array<{ id: string; session: FleetRow; row: ControlSession; base: string; gauges: RowGauges }>
   /** Every row id in the whole fleet (window or not) — what `remove` is judged against. */
   allIds: Set<string>
   closedTotal: number
@@ -98,6 +130,29 @@ export function compactView(view: FleetArrangement): CompactArrangement {
   return { ...view, groups: view.groups.map(g => ({ key: g.key, label: g.label, ...(g.done ? { done: true } : {}), ids: g.rows.map(r => r.id) })) }
 }
 
+/** PURE. Did a gauge move far enough from what was SENT to be worth re-sending the row? */
+export function gaugesMoved(sent: RowGauges | undefined, now: RowGauges): boolean {
+  if (!sent) return true
+  // No figure counts as 0: a first sample (`null` -> 0.3 %) is not a visible move, and a figure that
+  // appears or vanishes only matters once it is as large as a step.
+  const far = (a: number | null | undefined, b: number | null | undefined, step: number): boolean =>
+    Math.abs((typeof a === 'number' ? a : 0) - (typeof b === 'number' ? b : 0)) >= step
+  return far(sent.cpu, now.cpu, GAUGE_CPU_POINTS) || far(sent.rss, now.rss, GAUGE_RSS_BYTES)
+}
+
+/**
+ * PURE. A short hash of every closed row OUTSIDE the window (`windowed` = the window's indexes into
+ * `p.rows`), in the order `closedPage` serves them, both shapes — what a client's paged history holds.
+ */
+export function closedVersionOf(p: Pick<FleetFramePayload, 'sessions' | 'rows'>, windowed: ReadonlySet<number>): string {
+  const byId = new Map(p.sessions.map(s => [s.id, s]))
+  const paged = p.rows.map((r, i) => ({ r, i })).filter(x => isClosedRow(x.r.id) && !windowed.has(x.i))
+    .sort((a, b) => recency(b.r) - recency(a.r) || a.i - b.i)
+  const h = createHash('sha1')
+  for (const x of paged) h.update(JSON.stringify([byId.get(x.r.id) ?? null, x.r])).update('\n')
+  return h.digest('hex').slice(0, 16)
+}
+
 /** PURE. Build the shared frame from one `/api/fleet` payload. */
 export function buildFleetFrame(p: FleetFramePayload, closedLimit: number): FleetFrame {
   // `sessions[i]` is `fleetRow(rows[i])` for the managed half and the same object order throughout
@@ -109,13 +164,15 @@ export function buildFleetFrame(p: FleetFramePayload, closedLimit: number): Flee
     const row = p.rows[i]!
     const session = byId.get(row.id)
     if (!session) continue
-    window.push({ id: row.id, session, row, json: JSON.stringify([session, row]) })
+    const { cpuPercent, rssBytes, ...rest } = row
+    window.push({ id: row.id, session, row, base: JSON.stringify([session, rest]), gauges: { cpu: cpuPercent, rss: rssBytes } })
   }
   const metaValues: Record<string, unknown> = {
     attention: p.attention,
     tasks: p.tasks,
     finishedTasks: p.finishedTasks,
     closedTotal,
+    closedVersion: closedVersionOf(p, new Set(indexes)),
     ...(p.unavailable !== undefined ? { unavailable: p.unavailable } : {}),
     ...(p.fell ? { fell: p.fell } : {}),
     ...(p.baseline !== undefined ? { baseline: p.baseline } : {}),
@@ -128,7 +185,10 @@ export function buildFleetFrame(p: FleetFramePayload, closedLimit: number): Flee
 
 /** What one stream remembers having sent. */
 export interface SentState {
+  /** Each sent row's `base` serialization (gauges excluded). */
   rows: Map<string, string>
+  /** Each sent row's gauges, as last SENT — what the hysteresis is measured from. */
+  gauges: Map<string, RowGauges>
   order: string[]
   meta: Record<string, string>
 }
@@ -151,9 +211,14 @@ export interface FleetDelta {
 export function planFleetDelta(sent: SentState, frame: FleetFrame): { delta: FleetDelta; next: SentState; empty: boolean } {
   const upsert: string[] = []
   const nextRows = new Map<string, string>()
+  const nextGauges = new Map<string, RowGauges>()
   for (const w of frame.window) {
-    if (sent.rows.get(w.id) !== w.json) upsert.push(w.id)
-    nextRows.set(w.id, w.json)
+    const sentGauges = sent.gauges.get(w.id)
+    const changed = sent.rows.get(w.id) !== w.base || gaugesMoved(sentGauges, w.gauges)
+    if (changed) upsert.push(w.id)
+    nextRows.set(w.id, w.base)
+    // Unsent figures are not "what the client holds": keep the last SENT ones until the row goes out.
+    nextGauges.set(w.id, changed || !sentGauges ? w.gauges : sentGauges)
   }
   const remove = [...sent.rows.keys()].filter(id => !frame.allIds.has(id))
   const meta: Record<string, unknown> = {}
@@ -163,10 +228,10 @@ export function planFleetDelta(sent: SentState, frame: FleetFrame): { delta: Fle
   const orderChanged = order.length !== sent.order.length || order.some((id, i) => sent.order[i] !== id)
   const delta: FleetDelta = { upsert, remove, meta, ...(orderChanged ? { order } : {}) }
   const empty = upsert.length === 0 && remove.length === 0 && Object.keys(meta).length === 0 && !orderChanged
-  return { delta, next: { rows: nextRows, order, meta: { ...frame.meta } }, empty }
+  return { delta, next: { rows: nextRows, gauges: nextGauges, order, meta: { ...frame.meta } }, empty }
 }
 
-export const EMPTY_SENT: SentState = { rows: new Map(), order: [], meta: {} }
+export const EMPTY_SENT: SentState = { rows: new Map(), gauges: new Map(), order: [], meta: {} }
 
 /** PURE. The `snapshot` event body for a frame. */
 export function snapshotBody(seq: number, frame: FleetFrame): Record<string, unknown> {

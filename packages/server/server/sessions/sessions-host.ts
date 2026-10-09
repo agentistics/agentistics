@@ -814,6 +814,13 @@ export function createSessionsPoller(o: {
       if (canReadProc) {
         const seenPids = new Set<number>()
         for (const r of reconciled) {
+          // Only a row with a LIVING command has a process to measure. An exited or lost row used to
+          // fall through to the `processes` lookup below, whose directory match then handed it the pid
+          // of whichever assistant was running in or around that folder — measured on a real machine:
+          // 236 exited rows wearing one live claude's pid, re-attributed every poll as processes came
+          // and went, so every fleet push re-sent hundreds of rows whose only "change" was a stranger's
+          // memory figure (F1.2b).
+          if (!r.backend?.alive) continue
           const own = harnessSessions.byManagedId.get(r.id)
           const harness = r.managed?.harness
           const cwd = r.managed?.cwd
