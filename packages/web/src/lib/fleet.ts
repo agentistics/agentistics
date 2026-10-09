@@ -36,6 +36,8 @@ export type FleetActionId =
   | 'resume' | 'approve' | 'prompt' | 'rename' | 'note' | 'task' | 'kill'
   /** Stop the current turn without ending the session. See the server's own union. */
   | 'interrupt'
+  /** F2.0b — "open in terminal" on a structured session (protocol-driven): the same conversation as a TUI. */
+  | 'terminal'
   /** Advance the harness to its NEXT mode. It cycles; there is no key that picks one. */
   | 'cycleMode'
   /**

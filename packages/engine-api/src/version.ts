@@ -104,7 +104,9 @@
  * cancel); a session states its activity and the open request, answers by option number / free text,
  * and follows on the chat seam (`HarnessChatDelta`). `structuredRegistry` / `stubDriver` / `answerFits`
  * are the pure helpers. All optional: a 1.9 engine still loads (the host keeps `Engine.acp` and tmux),
- * and a 1.10 engine on a 1.9 host is simply never asked.
+ * and a 1.10 engine on a 1.9 host is simply never asked. F2.0b (same minor — 1.10 had not shipped):
+ * `StructuredSpawn.transport` lets the host own WHERE the child runs (a relay that survives a restart);
+ * a driver that ignores it still works, its child simply dies with the server.
  */
 export const ENGINE_API_VERSION = '1.10.0'
 

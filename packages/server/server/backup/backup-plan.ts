@@ -432,6 +432,12 @@ const RUNTIME: ExcludeRule[] = [
     why: 'The heavy-job queue: one file per waiting or running job, by pid. Nothing in it outlives its process.',
   },
   {
+    pattern: '.agentistics/structured', match: 'prefix', reason: 'runtime',
+    why: 'One directory per running structured session: the relay holding its child (by pid, with a socket) '
+      + 'and that session\'s protocol record, kept only so a restarted server can re-attach. The process '
+      + 'does not exist on the new machine; the conversation itself is in the harness\'s own store.',
+  },
+  {
     pattern: '.agentistics/managed-sessions.json', match: 'prefix', reason: 'runtime',
     why: 'Names tmux sessions that will not exist on the new machine. Restoring it yields rows pointing at nothing.',
   },

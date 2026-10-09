@@ -21,6 +21,16 @@
 const command = process.argv[2] === 'tui' ? 'start' : process.argv[2]
 const args = process.argv.slice(3)
 
+// F2.0b — the relay that holds a structured session's child so it outlives `agentop server`
+// (`server/sessions/structured-relay.ts`). Internal: started detached by the server, never typed.
+// First, before anything writes a file or prints: it is its own long-lived process.
+if (command === '__structured-relay') {
+  const { runRelay } = await import('../server/sessions/structured-relay.ts')
+  if (!args[0]) process.exit(2)
+  runRelay(args[0])
+  await new Promise<never>(() => {})
+}
+
 // RES.1 — declare this process to the governor. Bun makes its processes non-dumpable, so the
 // environment the governor would read (HOME, CLAUDE_PID) is unreadable from outside; the card is how
 // it learns who owns this process. Synchronous and tiny; never throws.

@@ -27,6 +27,7 @@
 import { tmuxBackend } from './backend-tmux'
 import type { SessionBackend } from './types'
 
+
 /**
  * The tmux backend, wrapped so that on Windows the reason names the actual remedy.
  *
@@ -56,7 +57,10 @@ export async function resolveBackend(): Promise<SessionBackend> {
     const { withStructured } = await import('./structured-backend')
     const { featureOn } = await import('@agentistics/core')
     composite = withStructured(tmuxBackend, {
-      structured: async () => (await import('../engine/load')).engine()?.structured ?? null,
+      // The load is awaited (memoized; asked only for a web spawn with the flag on, and by the boot
+      // re-attach, which can run before the server's own `loadEngine()` settles — reading "no engine"
+      // then would end every surviving session).
+      structured: async () => { const m = await import('../engine/load'); await m.loadEngine(); return m.engine()?.structured ?? null },
       acp: async () => (await import('../engine/load')).engine()?.acp ?? null,
       allowed: async () => ((await (await import('../preferences')).readPreferences()).acpHarnesses ?? []),
       flagOn: () => featureOn('adapter-chat'),
@@ -86,9 +90,29 @@ export async function resolveBackend(): Promise<SessionBackend> {
       onFallback(id, o) {
         console.warn(`[sessions] structured session ${id} fell back to tmux (${o.resumed ? 'resumed by conversation id' : 'could not resume'}): ${o.reason}`)
       },
+      // F2.0b — a structured child runs under a relay that outlives this process (`structured-durable.ts`).
+      durable: (await import('./structured-durable')).defaultDurableStore(),
+      async conversationOf(id) {
+        const row = (await (await import('./registry')).readRegistry()).find(r => r.id === id)
+        return row?.conversationId ?? null
+      },
+      onReattach(id, o) {
+        if (o.ok) console.log(`[sessions] structured session ${id} re-attached after the restart`)
+        else console.warn(`[sessions] structured session ${id} could not be re-attached (${o.resumed ? 'resumed in tmux by conversation id' : 'not resumed'}): ${o.reason}`)
+      },
     })
   }
   return composite
+}
+
+/**
+ * F2.0b — take back the structured sessions whose child outlived the previous server. Called ONCE, by
+ * `agentop server` at boot: the server is the process that owns them. Any other process (the cockpit,
+ * a one-shot `agentop session …`) lists such a row as running and never drives it.
+ */
+export async function reattachStructuredSessions(): Promise<void> {
+  const b = await resolveBackend()
+  await b.reattach?.()
 }
 
 export * from './types'
