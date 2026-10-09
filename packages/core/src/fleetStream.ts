@@ -1,6 +1,7 @@
 /** The fleet wire reducer, shared by browser, editor and cockpit. No harness-specific rules. */
 export interface FleetWire {
   seq: number
+  closedVersion?: string
   sessions: Array<{ id: string }>
   rows: Array<{ id: string }>
   [key: string]: unknown
@@ -55,46 +56,77 @@ export function followFleet(url: string, onFrame: (wire: FleetWire) => void, opt
   let closed = false
   let paging = false
   let pagedTotal: number | null = null
+  let pagedVersion: string | undefined | null = null
+  let pagedEnd = 0
+  let historyOpened = false
+  let refreshPending = false
+  let pagingVersion: string | undefined
+  let pagingTotal = 0
   let initialClosedSent = 0
-  async function loadClosed(): Promise<void> {
-    if (!wire || closed || paging) return
+  const closedTotal = () => wire?.closedTotal as number ?? (wire?.closed as { total?: number } | undefined)?.total ?? 0
+  async function loadClosed(refreshOnly = false): Promise<void> {
+    if (!wire || closed) return
+    historyOpened = true
+    if (paging) {
+      if (!refreshOnly || wire.closedVersion !== pagingVersion || closedTotal() !== pagingTotal) refreshPending = true
+      return
+    }
     paging = true
     try {
-      let total = wire.closedTotal as number ?? (wire.closed as { total?: number } | undefined)?.total ?? 0
-      // A new closed row is inserted at the beginning, shifting every page offset. Re-read the
-      // paged part when the count changes so a closed=0 subscriber does not skip that new row.
-      let offset = pagedTotal !== null && pagedTotal !== total ? initialClosedSent : (wire.closed as { sent?: number } | undefined)?.sent ?? 0
+      let total = closedTotal()
+      const closedTotalAtStart = total
+      const version = wire.closedVersion
+      pagingVersion = version; pagingTotal = total
+      const invalidated = pagedTotal !== null && (pagedTotal !== total || pagedVersion !== version)
+      // The version covers closed rows outside the SSE window, including same-count edits and
+      // page ordering. Refresh only pages already opened; a closed history makes no page GETs.
+      let offset = Math.min(total, invalidated ? initialClosedSent : (wire.closed as { sent?: number } | undefined)?.sent ?? 0)
+      const end = refreshOnly && pagedTotal !== null ? pagedEnd : Infinity
       const historyOrder = wire.rows.filter(r => r.id.startsWith('closed:')).slice(0, offset).map(r => r.id)
-      while (offset < total && !closed) {
+      const before = wire
+      const sessions: FleetWire['sessions'] = []
+      const rows: FleetWire['rows'] = []
+      while (offset < Math.min(total, end) && !closed) {
         const pageUrl = new URL(url, typeof location === 'undefined' ? 'http://localhost' : location.href)
         pageUrl.pathname = '/api/fleet/closed'; pageUrl.searchParams.set('offset', String(offset)); pageUrl.searchParams.set('limit', '100')
         const res = await fetch(pageUrl, { signal: controller.signal })
         if (!res.ok) throw new Error('Closed fleet unavailable')
         const page = await res.json() as { sessions: FleetWire['sessions']; rows: FleetWire['rows']; total: number }
-        if (!Array.isArray(page.rows) || !Array.isArray(page.sessions) || !page.rows.length) break
-        total = page.total; offset += page.rows.length
-        historyOrder.push(...page.rows.map(r => r.id))
-        const merge = (old: FleetWire['rows'], added: FleetWire['rows']) => {
-          const rows = new Map(old.map(r => [r.id, r]))
-          for (const row of added) if (!rows.has(row.id)) rows.set(row.id, row)
-          const paged = new Set(historyOrder)
-          return [
-            ...[...rows.values()].filter(r => !r.id.startsWith('closed:')),
-            ...[...paged].flatMap(id => rows.has(id) ? [rows.get(id)!] : []),
-            ...[...rows.values()].filter(r => r.id.startsWith('closed:') && !paged.has(r.id) && offset < total),
-          ]
-        }
         if (!wire || closed) return
-        wire = { ...wire, sessions: merge(wire.sessions, page.sessions), rows: merge(wire.rows, page.rows), closed: { total, sent: offset } }
-        onFrame(expandFleetView(wire))
+        if (wire.closedVersion !== version || closedTotal() !== closedTotalAtStart) { refreshPending = true; return }
+        if (!Array.isArray(page.rows) || !Array.isArray(page.sessions)) throw new Error('Invalid closed fleet page')
+        total = page.total
+        if (!page.rows.length) break
+        offset += page.rows.length
+        sessions.push(...page.sessions); rows.push(...page.rows)
+        historyOrder.push(...page.rows.map(r => r.id))
       }
-      if (total === 0 && wire.rows.some(r => r.id.startsWith('closed:'))) {
-        wire = { ...wire, sessions: wire.sessions.filter(r => !r.id.startsWith('closed:')), rows: wire.rows.filter(r => !r.id.startsWith('closed:')), closed: { total: 0, sent: 0 } }
+      if (!wire || closed) return
+      const merge = (held: FleetWire['rows'], added: FleetWire['rows'], prior: FleetWire['rows']) => {
+        const current = new Map(held.map(r => [r.id, r]))
+        const original = new Map(prior.map(r => [r.id, r]))
+        // Replace paged facts, but retain a newer SSE upsert received during this GET.
+        for (const row of added) if (!current.has(row.id) || current.get(row.id) === original.get(row.id)) current.set(row.id, row)
+        return [
+          ...[...current.values()].filter(r => !r.id.startsWith('closed:')),
+          ...[...new Set(historyOrder)].flatMap(id => current.has(id) ? [current.get(id)!] : []),
+        ]
+      }
+      if (rows.length || invalidated || total === 0 && wire.rows.some(r => r.id.startsWith('closed:'))) {
+        wire = { ...wire, sessions: merge(wire.sessions, sessions, before.sessions), rows: merge(wire.rows, rows, before.rows), closed: { total, sent: offset } }
         onFrame(expandFleetView(wire))
       }
       pagedTotal = total
+      pagedVersion = version
+      pagedEnd = Math.max(pagedEnd, initialClosedSent + Math.ceil((offset - initialClosedSent) / 100) * 100)
     } catch { controller.abort() }
-    finally { paging = false }
+    finally {
+      paging = false
+      if (refreshPending && !closed && !controller.signal.aborted) {
+        refreshPending = false
+        void loadClosed(pagedTotal !== null)
+      }
+    }
   }
   const watchdog = setInterval(() => { if (Date.now() - at > 45_000) controller.abort() }, 5_000)
   void (async () => {
@@ -118,9 +150,9 @@ export function followFleet(url: string, onFrame: (wire: FleetWire) => void, opt
           if (event === 'ping') { at = Date.now(); continue }
           if (event !== 'snapshot' && event !== 'delta') continue
           wire = applyFleetWire(wire, event, JSON.parse(data))
-          if (event === 'snapshot') { initialClosedSent = (wire.closed as { sent?: number } | undefined)?.sent ?? 0; pagedTotal = null }
+          if (event === 'snapshot') { initialClosedSent = (wire.closed as { sent?: number } | undefined)?.sent ?? 0; pagedTotal = null; pagedVersion = null; pagedEnd = initialClosedSent }
           at = Date.now()
-          if (!closed) { onFrame(expandFleetView(wire)); if (options.history) void loadClosed() }
+          if (!closed) { onFrame(expandFleetView(wire)); if (options.history || historyOpened) void loadClosed(true) }
         }
         if (buffer.length > 8 * 1024 * 1024) throw new Error('Fleet frame too large')
       }
