@@ -122,7 +122,8 @@ export interface StructuredSpawn {
   /**
    * The opening context (QUAL.8), through `declares(h).instructions`: `text` for an official channel
    * (protocol field / system-prompt flag), `block` — the fenced form — for the first-message fallback,
-   * where the driver sends it ahead of `initialPrompt` (or alone) and the chat hides it as context.
+   * where the driver sends it ahead of the person's FIRST words — never as a message of its own, which the
+   * model would answer (F2.1) — and the chat hides it as context.
    * Ignored beside `resumeId`: a reopened conversation already has it.
    */
   instructions?: { text: string; block: string }

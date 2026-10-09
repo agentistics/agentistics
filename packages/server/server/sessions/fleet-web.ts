@@ -552,6 +552,9 @@ async function runFleetActionOnce(
         // conversation's is the harness's own, so retiring either would name a registry row that
         // does not exist.
         ...(row.actionable ? { replaces: row.id } : {}),
+        // A reopen pressed in the browser is a web-born spawn of that conversation: structured again
+        // where the harness has a driver (and the flag is on), a TUI resume otherwise.
+        origin: 'web',
         attach: false,
       })
       // THE NEW ID TRAVELS. A reopen mints a new managed row and retires the old one, so a caller

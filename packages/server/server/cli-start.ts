@@ -2784,6 +2784,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       ...(req.label ? { label: req.label } : {}),
       ...(previous ? { inherit: previous } : {}),
       attach: req.attach,
+      ...(req.origin ? { origin: req.origin } : {}),
       ...(previous?.task ? { task: previous.task } : {}),
       // A TAKEOVER just ENDED the process this spawn replaces (`endProcess` above) — the net memory
       // cost of proceeding is ~zero, and refusing here would destroy the very session the user asked
