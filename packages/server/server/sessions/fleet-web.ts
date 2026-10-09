@@ -36,6 +36,11 @@ import { planFleetSpawn, type FleetSpawnBody } from './fleet-spawn'
 import type { AdmissionRefusal } from './spawn-admission'
 import { arrangeFleet, type FleetArrangement, type FleetViewRequest } from './fleet-arrange'
 import { markFleetPhase, timeFleetPhase } from './fleet-profile'
+import type { SessionHub } from './session-hub'
+import { forceRowScreen } from './adapter-state-host'
+import {
+  buildFleetFrame, closedPage, fleetEventsResponse, type FleetFrame,
+} from './fleet-events'
 import { cachedBaseline } from './fleet-baseline'
 import { loadConsolidated } from '../consolidate'
 import { readHarnessSkills, skillsReason, type HarnessSkill } from './harness-skills'
@@ -172,24 +177,64 @@ async function hostFor(lang: CliLang): Promise<StartHost> {
   // So the snapshot is memoized for a moment. The window is deliberately far below the UI's own 5s
   // poll, so nothing anyone looks at gets slower to update: this only collapses calls that were
   // always going to be the same answer, made within the same gesture.
+  //
+  // Since the SessionHub (`session-hub.ts`), `host.sessions()` no longer POLLS — it maps the hub's last
+  // snapshot. The memo is therefore also keyed on WHICH snapshot it mapped: a new hub tick (or a
+  // `refresh()` after an act) is never answered with the mapping of the previous one, however recent.
   const cachedSessions = host.sessions
   if (cachedSessions) {
     let at = 0
+    let mapped: unknown = undefined
     let inflight: ReturnType<typeof cachedSessions> | null = null
     host.sessions = () => {
       const now = Date.now()
+      const current = lastHubSnapshot()
       // The IN-FLIGHT promise is shared too, not just the settled result: the burst arrives inside
       // one read, so a TTL alone would still start four of them.
-      if (inflight && now - at < SNAPSHOT_TTL_MS) return inflight
+      if (inflight && now - at < SNAPSHOT_TTL_MS && current === mapped) return inflight
       at = now
+      mapped = current
       inflight = cachedSessions.call(host)
       // A failed read must not be remembered as the answer for the next second.
       void inflight.catch(() => { inflight = null; at = 0 })
       return inflight
     }
   }
+  // The hub is resolved with the host, so the memo above can key on its snapshot from the first call.
+  await fleetSessionHub().catch(() => null)
   HOSTS.set(lang, host)
   return host
+}
+
+// ---------------------------------------------------------------------------
+// The ONE poller (`session-hub.ts`), as this module reaches it.
+
+let hubRef: SessionHub | null = null
+
+/** The process's session hub. Through `cli-start` (dynamic: it carries Ink), resolved once. */
+export async function fleetSessionHub(): Promise<SessionHub> {
+  if (hubRef) return hubRef
+  const { ensureSessionHub } = await import('../cli-start')
+  hubRef = await ensureSessionHub()
+  return hubRef
+}
+
+/** The hub's last snapshot without waiting, or `undefined` before the hub exists. */
+function lastHubSnapshot(): unknown {
+  return hubRef?.last() ?? undefined
+}
+
+/**
+ * The fleet just changed under an act (a spawn, a kill, a sent prompt): poll NOW rather than at the next
+ * tick, so every `/api/fleet/events` stream gets the change on the same push path as any tick, and a
+ * one-shot reader right after the act is answered by a poll that started after it. Never awaited by the
+ * act's own response, and never throws.
+ */
+export function kickFleet(id?: string): void {
+  // The acted-on row's SCREEN is read on that poll even when its harness states its state
+  // (`adapter-state.ts`): an act can change what only the frame shows (a mode, a dialog closing).
+  if (id) forceRowScreen(id)
+  void fleetSessionHub().then(h => h.refresh()).catch(() => {})
 }
 
 /** Only the two languages exist; anything else reads as English, as everywhere else. */
@@ -253,6 +298,51 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
   }
 }
 
+// ---------------------------------------------------------------------------
+// The session list PUSHED (`fleet-events.ts`).
+
+/** One frame per (language, view, closed window), rebuilt only when the hub has a new snapshot. */
+const FRAMES = new Map<string, { snap: unknown; frame: Promise<FleetFrame> }>()
+const MAX_FRAME_KEYS = 16
+
+function fleetFrame(lang: CliLang, view: FleetViewRequest | undefined, closedLimit: number): Promise<FleetFrame> {
+  const key = `${lang}|${closedLimit}|${JSON.stringify(view ?? null)}`
+  const snap = lastHubSnapshot()
+  const hit = FRAMES.get(key)
+  if (hit && snap !== undefined && hit.snap === snap) return hit.frame
+  const frame = readFleet(lang, view).then(p => buildFleetFrame(p, closedLimit))
+  if (!FRAMES.has(key) && FRAMES.size >= MAX_FRAME_KEYS) FRAMES.delete(FRAMES.keys().next().value as string)
+  // Keyed on the snapshot the frame will map: read AFTER `readFleet`, which may itself have polled.
+  const entry = { snap, frame }
+  FRAMES.set(key, entry)
+  void frame.then(() => { entry.snap = lastHubSnapshot() }, () => { if (FRAMES.get(key) === entry) FRAMES.delete(key) })
+  return frame
+}
+
+/**
+ * `GET /api/fleet/events` — the snapshot, then row deltas on every hub tick. `null` past the stream cap
+ * (the client keeps polling `/api/fleet`). Holding the stream keeps the hub ticking; closing it lets the
+ * hub stop when nothing else wants it.
+ */
+export async function openFleetEvents(
+  lang: CliLang,
+  view: FleetViewRequest | undefined,
+  closedLimit: number,
+  signal: AbortSignal,
+): Promise<Response | null> {
+  await hostFor(lang)
+  const hub = await fleetSessionHub()
+  return fleetEventsResponse({
+    frame: () => fleetFrame(lang, view, closedLimit),
+    onTick: cb => hub.subscribe(() => cb()),
+  }, signal)
+}
+
+/** `GET /api/fleet/closed` — one page of the closed rows the stream did not send, most recent first. */
+export async function readClosedFleet(lang: CliLang, offset: number, limit: number): Promise<ReturnType<typeof closedPage>> {
+  return closedPage(await readFleet(lang), offset, limit)
+}
+
 /**
  * Perform one verb on one row — through the host, so every refusal the cockpit makes is made here.
  *
@@ -262,6 +352,16 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
  * spawning a session against a guess.
  */
 export async function runFleetAction(
+  lang: CliLang,
+  req: FleetActionRequest,
+): Promise<FleetActionResponse> {
+  const out = await runFleetActionOnce(lang, req)
+  // Every verb that worked changed something a row shows (a state, a label, a dialog that closed).
+  if (out.ok) kickFleet(req.id)
+  return out
+}
+
+async function runFleetActionOnce(
   lang: CliLang,
   req: FleetActionRequest,
 ): Promise<FleetActionResponse> {
@@ -934,6 +1034,7 @@ export async function runFleetSpawn(
   }
 
   const out = await host.spawnSession(decision.plan)
+  if (out.ok) kickFleet()
   return {
     ok: out.ok,
     message: out.message,

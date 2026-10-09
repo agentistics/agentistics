@@ -1543,6 +1543,8 @@ export interface ControlHost {
    * contract exists to prevent.
    */
   sessions?(): Promise<ControlSessions>
+  /** Pushed rows while the server answers; the cockpit polls when unhealthy. */
+  followSessions?(receive: (next: ControlSessions) => void, history?: boolean): { healthy(): boolean; retryable(): boolean; close(): void }
 
   /**
    * Which conversations SAID this — the deep half of the sessions search.

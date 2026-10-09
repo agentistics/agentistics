@@ -32,7 +32,7 @@ import { classifyUserEntry, type UserEntry } from './chat-envelope'
 import { bashEntryText, parseBashInput, parseBashOutput, type ShellOutput } from './bash-mode'
 import { parseImageCompanion, resolveCompanionImages } from './attachment-companion'
 import { resolveViewedImagePath, VIEWED_IMAGE_RE } from './viewed-image'
-import type { ChatTurn } from './chat-turn'
+import type { ChatTurn } from '@agentistics/core'
 import { MAX_TAIL_BYTES, TAIL_BYTES, readTailBytes, windowLines } from './transcript-window'
 import { createTranscriptPathMemo, resolveMemoizedPath } from './transcript-path-memo'
 
@@ -40,9 +40,9 @@ import { createTranscriptPathMemo, resolveMemoizedPath } from './transcript-path
  *  several entries (text, tool calls, results), so the budget must cover more than one each. */
 const BRANCH_BUDGET_PER_TURN = 4
 
-// The turn shape now lives in `chat-turn.ts` — every harness reader produces it, and this module
+// The turn shape now lives in core's `chatTurn.ts` — every harness reader produces it, and this module
 // is only one of them. Re-exported so nothing that already imports it from here has to move.
-export type { ChatTurn } from './chat-turn'
+export type { ChatTurn } from '@agentistics/core'
 
 /**
  * Where each conversation's transcript is — POSITIVES forever, misses only briefly.

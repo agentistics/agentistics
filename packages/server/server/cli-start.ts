@@ -1,3 +1,4 @@
+import { sessionNotify, type ControlSession } from '@agentistics/tui/control/session-fleet'
 /**
  * cli-start.ts — the logic behind the `agentop` control center.
  *
@@ -41,7 +42,7 @@ import type { CodeStartLaunch } from './code-launch'
 import { homedir, platform } from 'node:os'
 import { accountHome } from './account-home'
 import {
-  HARNESS_ORDER, repoShortName, sendNowDelivered,
+  followFleet, HARNESS_ORDER, repoShortName, sendNowDelivered,
   type ConversationLinkReason, type HarnessId,
 } from '@agentistics/core'
 import type {
@@ -184,8 +185,11 @@ import {
   addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession, touchSessions,
 } from './sessions/registry'
 import {
-  createSessionsPoller, linkProcessConversation, sampleProcessLinks, type SessionsPoller, type SessionSnapshot,
+  createSessionsPoller, linkProcessConversation, sampleProcessLinks, SESSION_POLL_MS, type SessionsPoller,
+  type SessionSnapshot,
 } from './sessions/sessions-host'
+import { createSessionHub, setProcessSessionHub, type SessionHub } from './sessions/session-hub'
+import { hostAdapterState, onAdapterStateChange } from './sessions/adapter-state-host'
 import { HARNESS_PROCESS_TRANSCRIPTS } from './sessions/harness-session-file'
 import { modeSpecFor } from './sessions/mode-spec'
 import { isServerProcess, readServerSnapshot } from './sessions/shared-snapshot'
@@ -1584,6 +1588,8 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
     // Take back a running session whose registry record was lost. Called only with a non-empty
     // list, so a healthy fleet never writes. See `session-adopt.ts` for what may be adopted.
     adoptSessions: async records => { for (const r of records) await addSession(r) },
+    // ENGINE.MAP F1.2: the harness's own statement of its state, with the `adapter-chat` flag on only.
+    adapterState: hostAdapterState,
   }
 }
 
@@ -1593,6 +1599,52 @@ async function ensureSessionsPoller(): Promise<SessionsPoller> {
   const backend = await resolveBackend()
   sessionsPoller = createSessionsPoller(sessionsPollerOptions(backend))
   return sessionsPoller
+}
+
+/**
+ * The ONE fleet poller of this process, behind its hub (`session-hub.ts`). Every reader in the process —
+ * `/api/fleet`, `/api/fleet/snapshot`, `/api/fleet/events`, the chat streams, a send's `record()`, the
+ * event producer — reads THIS, so the server never runs two pollers (ENGINE.MAP P-01) and never polls
+ * once per request (P-02). The engine's fleet view observes every poll passively: it plans nothing
+ * while no engine listens (`fleet-hub.ts`), and it no longer depends on which route happened to poll.
+ */
+let sessionHub: Promise<SessionHub> | null = null
+
+export function ensureSessionHub(): Promise<SessionHub> {
+  if (!sessionHub) {
+    sessionHub = (async () => {
+      const poller = await ensureSessionsPoller()
+      const hub = createSessionHub({ poll: () => poller.poll(), intervalMs: SESSION_POLL_MS })
+      // A harness stating a change (a turn ended) is pushed NOW, not at the next tick (flag on only).
+      onAdapterStateChange(() => { void hub.refresh().catch(() => {}) })
+      const { fleetHub } = await import('./engine/fleet-hub')
+      // Only a FRESH reading says anything new: an `unavailable` snapshot is the previous one again.
+      hub.observe(snap => { if (!snap.unavailable) fleetHub.observe(snap.sessions, snap.polledAtMs) })
+      setProcessSessionHub(hub)
+      return hub
+    })()
+    void sessionHub.catch(() => { sessionHub = null })
+  }
+  return sessionHub
+}
+
+/**
+ * The tmux prefix the detach hint names, read ONCE and kept (ENGINE.MAP P-09: it was a `show-options`
+ * per fleet poll — 12 to 59 a minute — to learn a value that changes only when somebody edits their tmux
+ * config). Re-read after `DETACH_HINT_TTL_MS`, so an edited prefix still reaches the screen.
+ */
+const DETACH_HINT_TTL_MS = 10 * 60_000
+let detachHintCache: { value: Promise<string>; atMs: number } | null = null
+
+function cachedDetachHint(): Promise<string> {
+  const nowMs = Date.now()
+  if (!detachHintCache || nowMs - detachHintCache.atMs >= DETACH_HINT_TTL_MS) {
+    const value = resolveBackend().then(b => b.detachHint()).catch(() => '')
+    detachHintCache = { value, atMs: nowMs }
+    // A failed read is not remembered for ten minutes.
+    void value.then(v => { if (!v && detachHintCache?.value === value) detachHintCache = null })
+  }
+  return detachHintCache.value
 }
 
 /**
@@ -3358,6 +3410,43 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       }
     },
 
+    followSessions(receive, history) {
+      let previous: Set<string> | null = null
+      let lastFall: number | undefined
+      let first = true
+      let closed = false
+      let latest: ControlSessions | undefined
+      const stream = followFleet(`http://127.0.0.1:${PORT}/api/fleet/events?lang=${lang}&closed=0`, wire => {
+        const rows = wire.rows as ControlSession[]
+        const waiting = new Set(rows.filter(sessionNotify).map(r => r.id))
+        const rang = previous === null ? [] : [...waiting].filter(id => !previous!.has(id))
+        previous = waiting
+        const fall = (wire.fell as ControlSessions['fell'])?.atMs
+        latest = {
+          sessions: rows, attention: wire.attention as number, rang,
+          finishedTasks: wire.finishedTasks as string[],
+          unavailable: wire.unavailable as string | undefined,
+          fell: wire.fell as ControlSessions['fell'],
+          baseline: wire.baseline as ControlSessions['baseline'],
+          detachHint: latest?.detachHint,
+          restorable: fall === lastFall ? latest?.restorable : undefined,
+        }
+        receive(latest)
+        if (first || fall !== lastFall) {
+          // Crash offers include the host's dismissal and resumability rules. Read them once
+          // on connection and when the fall changes. Late reads contribute host metadata only.
+          void this.sessions?.().then(next => {
+            if (!closed && next && latest && lastFall === fall) {
+              latest = { ...latest, detachHint: next.detachHint, restorable: next.restorable, rang: [] }
+              receive(latest)
+            }
+          }).catch(() => { /* A later fallback retries host metadata; the pushed rows stay current. */ })
+        }
+        first = false; lastFall = fall
+      }, { history })
+      return { ...stream, close: () => { closed = true; stream.close() } }
+    },
+
     async sessions(): Promise<ControlSessions> {
       // `S()` rather than `this.lang`: the language is a closure variable `setLang` reassigns, and
       // reading it through `this` would break the moment a caller detached the method.
@@ -3387,17 +3476,17 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
           'sessions: readServerSnapshot',
           () => readServerSnapshot<SessionSnapshot>(lang),
         )
-      const poller = shared
+      const hub = shared
         ? null
-        : await timeFleetPhase('sessions: ensureSessionsPoller', ensureSessionsPoller)
+        : await timeFleetPhase('sessions: ensureSessionHub', ensureSessionHub)
       const snap = shared
-        ?? await timeFleetPhase('sessions: poller.poll', () => poller!.poll())
+        ?? await timeFleetPhase('sessions: hub.read', () => hub!.read())
       // Carried on every snapshot so the cockpit can state it permanently: a user who cannot get
       // out of a session is stranded in a buffer that hides their shell, and a line printed once
       // before the handover scrolls away the moment anything else happens.
       const detachHint = await timeFleetPhase(
         'sessions: detachHint',
-        async () => (await resolveBackend()).detachHint().catch(() => ''),
+        cachedDetachHint,
       )
       // Read on every snapshot rather than cached: the toggle and the verb both write it, and a
       // stale copy would leave a task the user just finished still heading a live section.
@@ -4304,15 +4393,9 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
  * It is the SAME poller `sessions()` uses, so the server still holds exactly one.
  */
 export async function readRawFleetSnapshot(): Promise<SessionSnapshot> {
-  const snap = await (await ensureSessionsPoller()).poll()
-  // The engine's view of the fleet (engine-api 1.4 `fleet`): only a FRESH reading says anything new —
-  // an `unavailable` snapshot is the previous one answered again. The hub plans nothing while no
-  // engine listens.
-  if (!snap.unavailable) {
-    const { fleetHub } = await import('./engine/fleet-hub')
-    fleetHub.observe(snap.sessions, snap.polledAtMs)
-  }
-  return snap
+  // The hub's snapshot: while anything keeps it ticking this is the last tick, never a poll of its own.
+  // The engine's fleet view observes every poll from inside the hub (`ensureSessionHub`).
+  return (await ensureSessionHub()).read()
 }
 
 /**

@@ -142,6 +142,10 @@ import { SourceSettings } from './SourceSettings'
 const SEND_NOW_RESULT_MS = 6000
 
 interface ChatPayload {
+  source?: 'adapter'
+  liveText?: string
+  liveReasoning?: string
+  working?: boolean
   turns: ChatTurn[]
   unavailable?: string
   /** Already-localized: why the conversation link is slower on this OS (off Linux, codex/kimi). */
@@ -1284,9 +1288,12 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * leak a capture loop — and the case where it holds longest, a message sitting in the harness's
    * queue, is precisely the one somebody is watching the screen to understand.
    */
-  const working = source ? source.working : session.state === 'working'
+  const adapter = payload?.source === 'adapter'
+  const working = source ? source.working : adapter && payload.working !== undefined ? payload.working : session.state === 'working'
+  const structuredText = source?.liveText ?? (adapter ? payload.liveText : undefined)
+  const structuredReasoning = source?.liveReasoning ?? (adapter ? payload.liveReasoning : undefined)
   // No screen behind a source: the stream is never opened (a null id is the hook's "off").
-  const { state: term } = useTerminalStream(source ? null : session.id)
+  const { state: term } = useTerminalStream(source || adapter || payload === null ? null : session.id)
 
   // A turn just ENDED. The live bubble is gone the moment `working` drops, and the real one is up
   // to `CHAT_POLL_MS` away — a gap where neither source is showing the answer that just finished.
@@ -1425,7 +1432,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     .find(t => t.role === 'assistant' && !t.pending && !t.task && t.text.trim() !== '')
 
   const live = useMemo(() => {
-    if (source) return source.liveText
+    if (source || adapter) return structuredText
     if (!term.frame) return null
     return liveTurnText({
       // The frame carries the emulator's escape sequences; the chat wants the words.
@@ -1434,7 +1441,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       working,
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [term.frame, lastAssistant, working, source?.liveText])
+  }, [term.frame, lastAssistant, working, source?.liveText, adapter, structuredText])
 
   /**
    * Whether the frame is showing Claude Code's OWN compaction screen right now — see
@@ -1443,9 +1450,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * writes nothing to the transcript while it runs, so this is the only signal there is.
    */
   const compacting = useMemo(() => {
-    if (!working || !term.frame) return null
+    if (adapter || source || !working || !term.frame) return null
     return detectCompacting(stripAnsi(term.frame.content).split('\n'))
-  }, [term.frame, working])
+  }, [term.frame, working, adapter, source])
 
   const toTail = useCallback((smooth = true) => {
     const el = scrollRef.current
@@ -2537,8 +2544,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               those as chat entries buried the sentences actually addressed to the user. */}
           {/* A SOURCE's live text is the model's own stream — exact, unlike a screen read — so it
               is drawn as the bubble it will become (`chatSource.ts`). */}
-          {(source?.liveText || source?.liveReasoning) && (
-            <ChatBubble turn={{ role: 'assistant', text: source.liveText ?? '', ...(source.liveReasoning ? { reasoning: source.liveReasoning } : {}) }} lang={lang} harness={session.harness} sessionId={session.id} />
+          {(structuredText || structuredReasoning) && (
+            <ChatBubble turn={{ role: 'assistant', text: structuredText ?? '', ...(structuredReasoning ? { reasoning: structuredReasoning } : {}) }} lang={lang} harness={session.harness} sessionId={session.id} />
           )}
 
           {showWorking && (

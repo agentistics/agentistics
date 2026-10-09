@@ -7,6 +7,7 @@
 export * from './version'
 export * from './mirrors'
 export * from './integration'
+export * from './chat'
 export * from './host'
 export * from './floor'
 export * from './reuse'

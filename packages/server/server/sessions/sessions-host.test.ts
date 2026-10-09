@@ -65,6 +65,30 @@ const poller = (o: {
 })
 
 describe('createSessionsPoller', () => {
+  it('measures only a row with a living command — an exited or lost row never borrows a neighbour\'s pid', async () => {
+    // A live claude process in the SAME folder as two dead rows: before F1.2b the directory match handed
+    // its pid (and memory) to both, re-attributed on every poll, and every fleet push re-sent them.
+    const p = poller({
+      backend: fakeBackend({
+        sessions: [backendSession('live'), backendSession('dead', { alive: false })],
+        frames: { live: ['❯ '] },
+        panePids: { live: process.pid },
+      }),
+      registry: [managed('live'), managed('dead'), managed('gone')],
+      processes: [{ harness: 'claude', cwd: '/repo/a', pid: process.pid } as HarnessProcess],
+    })
+    const snap = await p.poll()
+    const by = new Map(snap.sessions.map(s => [s.id, s]))
+    expect(by.get('dead')!.status).toBe('exited')
+    expect(by.get('gone')!.status).toBe('lost')
+    for (const id of ['dead', 'gone']) {
+      expect(by.get(id)!.pid).toBeUndefined()
+      expect(by.get(id)!.rssBytes).toBeUndefined()
+      expect(by.get(id)!.cpuPercent).toBeUndefined()
+    }
+    if (process.platform === 'linux') expect(by.get('live')!.pid).toBe(process.pid)
+  })
+
   it('reports a quiet session as waiting and counts it', async () => {
     const p = poller({
       backend: fakeBackend({ sessions: [backendSession('a')], frames: { a: ['❯ '] } }),

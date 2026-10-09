@@ -11,7 +11,7 @@ afterAll(async () => { __resetVaultForTests({ dir: await fresh() }) })
 
 describe('engine-api 1.5 secrets', () => {
   test('is a minor, optional bump: a 1.5 engine loads on a 1.6 host, a 1.3 engine too, not the reverse', () => {
-    expect(ENGINE_API_VERSION).toBe('1.8.0') // 1.8 (VAULT.PERSONAL vaultRefs) is optional too
+    expect(ENGINE_API_VERSION).toBe('1.9.0') // 1.8 (VAULT.PERSONAL vaultRefs) and 1.9 (the chat channel) are optional too
     expect(apiCompatible('1.8.0', '1.7.0')).toBe(true)
     // This host speaks 1.6 or later (1.7 added tasks.board and native-session usage); a 1.6 engine loads on it.
     expect(apiCompatible(ENGINE_API_VERSION, '1.6.0')).toBe(true)

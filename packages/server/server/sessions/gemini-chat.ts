@@ -37,7 +37,7 @@
  * injected entry, and showing it would open every session on a wall of context nobody typed.
  */
 
-import type { ChatTurn } from './chat-turn'
+import type { ChatTurn } from '@agentistics/core'
 
 /** The bootstrap block gemini writes under the user role on startup. Not a person talking. */
 const SESSION_CONTEXT = /^<session_context>/

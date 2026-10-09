@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises'
 import { PORT, WEB_PORT, TEAM_CENTRAL, TEAM_PASSWORD, TEAM_ORG, INGEST_ONLY } from './config'
 import type { Server, ServerWebSocket } from 'bun'
 import type { LiveProcess, LiveUnavailableReason, SessionMeta } from '@agentistics/core'
+import { featureOn } from '@agentistics/core'
 import { getRates } from './rates'
 import { getVersionInfo, startVersionRecheck } from './version'
 import { sendTelemetry } from './telemetry'
@@ -527,6 +528,33 @@ function readFilters(raw: string | null): { filters?: Record<string, string[]> }
   }
 }
 
+/**
+ * The fleet ARRANGEMENT a caller asked for (`view=1` and its parameters), or `undefined` for the flat
+ * list. Shared by `/api/fleet` and `/api/fleet/events`, so the pushed view and the polled one are the
+ * same view. The type is `fleet-arrange.ts`'s `FleetViewRequest`, structurally (this file names no
+ * fleet module statically — see the note on the `fleet-row` import).
+ */
+function readFleetView(url: URL): {
+  grouping?: string; sort?: string; dir?: string; query?: string; scopes?: string[]; marked?: string[]
+  onlyActive?: boolean; filters?: Record<string, string[]>
+} | undefined {
+  const q = url.searchParams
+  if (q.get('view') === null) return undefined
+  return {
+    ...(q.get('group') ? { grouping: q.get('group')! } : {}),
+    ...(q.get('sort') ? { sort: q.get('sort')! } : {}),
+    ...(q.get('dir') ? { dir: q.get('dir')! } : {}),
+    ...(q.get('q') ? { query: q.get('q')! } : {}),
+    ...(q.get('scopes') ? { scopes: q.get('scopes')!.split(',') } : {}),
+    ...(q.get('marked') ? { marked: q.get('marked')!.split(',') } : {}),
+    ...(q.get('active') === '1' ? { onlyActive: true } : {}),
+    // `filters` is JSON because it is a map of dimension to VALUES, and values are arbitrary
+    // strings — a project path, a model id. Flattening that into query parameters would need
+    // an escaping convention nobody would remember.
+    ...(readFilters(q.get('filters'))),
+  }
+}
+
 async function handleRequestInner(req: Request, server: Server<WSData>): Promise<Response | undefined> {
     const url = new URL(req.url)
     // Collapse repeated slashes in the path. A member whose endpoint has a trailing slash
@@ -731,8 +759,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         start(controller) {
           sseClients.add(controller)
           controller.enqueue(sseEncoder.encode('event: connected\ndata: {}\n\n'))
+          const ping = featureOn('adapter-chat') && !TEAM_CENTRAL ? setInterval(() => {
+            try { controller.enqueue(sseEncoder.encode('event: ping\ndata: {}\n\n')) }
+            catch { clearInterval(ping); sseClients.delete(controller) }
+          }, 15_000) : undefined
 
           req.signal.addEventListener('abort', () => {
+            clearInterval(ping)
             sseClients.delete(controller)
             try { controller.close() } catch { /* already closed */ }
           })
@@ -794,7 +827,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname === '/api/hardware-resources' && req.method === 'GET') {
       try {
         const { getHardwareSnapshot } = await import('./hardware-probe')
-        const snapshot = await getHardwareSnapshot(serverProcStatsMap)
+        // The fleet half comes from the SessionHub's last snapshot when it is fresh (no tmux call), and
+        // is never a reason to create or wake the hub — see `hardware-sessions.ts`.
+        const { processSessionHub } = await import('./sessions/session-hub')
+        const snapshot = await getHardwareSnapshot(serverProcStatsMap, () => processSessionHub()?.last())
         return new Response(JSON.stringify(snapshot), {
           status: 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
@@ -2473,23 +2509,47 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       // The ARRANGEMENT is opt-in: a caller that sends `view=1` gets the fleet grouped, ordered and
       // filtered the way the cockpit would (`fleet-arrange.ts`); everyone else gets the flat list
       // they already read, and pays nothing for a grouping they do not draw.
-      const payload = await readFleet(
-        fleetLang(url.searchParams.get('lang')),
-        url.searchParams.get('view') === null ? undefined : {
-          ...(url.searchParams.get('group') ? { grouping: url.searchParams.get('group')! } : {}),
-          ...(url.searchParams.get('sort') ? { sort: url.searchParams.get('sort')! } : {}),
-          ...(url.searchParams.get('dir') ? { dir: url.searchParams.get('dir')! } : {}),
-          ...(url.searchParams.get('q') ? { query: url.searchParams.get('q')! } : {}),
-          ...(url.searchParams.get('scopes') ? { scopes: url.searchParams.get('scopes')!.split(',') } : {}),
-          ...(url.searchParams.get('marked') ? { marked: url.searchParams.get('marked')!.split(',') } : {}),
-          ...(url.searchParams.get('active') === '1' ? { onlyActive: true } : {}),
-          // `filters` is JSON because it is a map of dimension to VALUES, and values are arbitrary
-          // strings — a project path, a model id. Flattening that into query parameters would need
-          // an escaping convention nobody would remember.
-          ...(readFilters(url.searchParams.get('filters'))),
-        },
-      )
+      const payload = await readFleet(fleetLang(url.searchParams.get('lang')), readFleetView(url))
       return new Response(JSON.stringify(payload), {
+        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // The same list PUSHED (ENGINE.MAP 09 §6): a `snapshot` of the requested view (every live row and
+    // the `closed` most recent closed ones), then `delta` events — row upserts/removes and changed
+    // fields — on every tick of the server's ONE poller (`session-hub.ts`). Protocol: `fleet-events.ts`.
+    // 503 past the stream cap: the client keeps polling `/api/fleet`. Rides the `/api/fleet` prefix in
+    // `capability-guard.ts` (localShell) and the central refusal above, like every fleet route.
+    if (url.pathname === '/api/fleet/events' && req.method === 'GET') {
+      const { openFleetEvents, fleetLang } = await import('./sessions/fleet-web')
+      const { readClosedLimit } = await import('./sessions/fleet-events')
+      const res = await openFleetEvents(
+        fleetLang(url.searchParams.get('lang')),
+        readFleetView(url),
+        readClosedLimit(url.searchParams.get('closed')),
+        req.signal,
+      )
+      if (!res) {
+        return new Response(JSON.stringify({ error: 'too_many_streams' }), {
+          status: 503,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+      for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v)
+      return res
+    }
+
+    // Older CLOSED rows, paged most recent first — what the events stream does not re-send (P-13).
+    if (url.pathname === '/api/fleet/closed' && req.method === 'GET') {
+      const { readClosedFleet, fleetLang } = await import('./sessions/fleet-web')
+      const { readClosedLimit } = await import('./sessions/fleet-events')
+      const offset = Math.max(0, Math.floor(Number(url.searchParams.get('offset') ?? 0)) || 0)
+      const page = await readClosedFleet(
+        fleetLang(url.searchParams.get('lang')),
+        offset,
+        readClosedLimit(url.searchParams.get('limit')),
+      )
+      return new Response(JSON.stringify(page), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
     }
@@ -3056,11 +3116,26 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           return rows
         }
       }
+      // ENGINE.MAP F1.2: with `adapter-chat` on and an engine whose integration serves this harness's
+      // chat, the conversation comes from the engine's channel (`adapter-chat.ts`). Flag off — the
+      // default — and nothing below this branch changes, byte for byte.
+      if (featureOn('adapter-chat')) {
+        const { openAdapterChatStream } = await import('./sessions/adapter-chat-web')
+        const adapted = await openAdapterChatStream(host, lang, id, req.signal)
+        if (adapted) {
+          for (const [k, v] of Object.entries(CORS_HEADERS)) adapted.headers.set(k, v)
+          return adapted
+        }
+      }
       // LIVE.2: the pushed payload carries the same surface marks as the GET (absent = legacy).
       const { liveSessionSurfaceDeps } = await import('./sessions/session-surface-deps')
       const surface = await liveSessionSurfaceDeps(process.env, () => engineStatus().present)
+      const { fleetSessionHub } = await import('./sessions/fleet-web')
+      const hub = await fleetSessionHub().catch(() => null)
       const res = chatStreamResponse(id, {
         read: (fresh, onPath) => { if (fresh) rows = null; return readSessionChat(memo, lang, id, undefined, onPath, surface) },
+        // A path not on disk yet is retried on the ONE poller's ticks, never by fresh polls (P-03).
+        ...(hub ? { onFleetTick: (cb: () => void) => hub.subscribe(() => cb()) } : {}),
       }, req.signal)
       if (!res) {
         return new Response(JSON.stringify({ error: 'too_many_streams' }), {
@@ -3121,6 +3196,16 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // LIVE.2: the journal's word on this conversation, only with an engine present AND the opt-in
         // `sessions` surface on; otherwise `undefined` and the payload is the legacy one, byte for byte.
         const { liveSessionSurfaceDeps } = await import('./sessions/session-surface-deps')
+        if (featureOn('adapter-chat')) {
+          const lang = fleetLang(url.searchParams.get('lang'))
+          const { readAdapterChatPayload } = await import('./sessions/adapter-chat-web')
+          const adapted = await readAdapterChatPayload(await hostForFleet(lang), lang, id)
+          if (adapted) {
+            return new Response(JSON.stringify(adapted), {
+              headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+            })
+          }
+        }
         const surface = await liveSessionSurfaceDeps(process.env, () => engineStatus().present)
         const payload = await readSessionChat(
           await hostForFleet(fleetLang(url.searchParams.get('lang'))),
@@ -3856,7 +3941,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           const enc = negotiateEncoding(req.headers.get('Accept-Encoding'))
           const { etag, bytes } = encodedBody(versionOf(unscoped), liveJson, enc, wantSlim, () =>
             `${(wantSlim ? slimSerialized(unscoped) : serializedData(data)).slice(0, -1)},${liveJson.slice(1)}`)
-          const baseHeaders = { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', ETag: etag, Vary: [CORS_HEADERS['Vary' as keyof typeof CORS_HEADERS], 'Accept-Encoding'].filter(Boolean).join(', ') }
+          const patchHeaders: Record<string, string> = {}
+          if (!wantSlim && !data.partial && featureOn('adapter-chat')) {
+            const { dataRevision, rememberDataBuild } = await import('./data-patch')
+            rememberDataBuild(unscoped)
+            patchHeaders['X-Agentistics-Data-Revision'] = dataRevision(unscoped)
+          }
+          const baseHeaders = { ...CORS_HEADERS, ...patchHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', ETag: etag, Vary: [CORS_HEADERS['Vary' as keyof typeof CORS_HEADERS], 'Accept-Encoding'].filter(Boolean).join(', ') }
           if (etagMatches(req.headers.get('If-None-Match'), etag)) return new Response(null, { status: 304, headers: baseHeaders })
           const out = await bytes
           return new Response(out as BodyInit, {

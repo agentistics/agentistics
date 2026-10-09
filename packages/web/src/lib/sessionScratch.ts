@@ -37,6 +37,10 @@ import { parseReplies, type ReplyTarget } from './replyQuote'
 
 /** The shape this module keeps for a conversation. Structural, so it never imports the chat view. */
 export interface CachedChat {
+  source?: 'adapter'
+  liveText?: string
+  liveReasoning?: string
+  working?: boolean
   turns: unknown[]
   live?: boolean
   unavailable?: string

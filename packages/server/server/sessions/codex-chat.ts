@@ -53,7 +53,7 @@
 
 import type { HarnessId } from '@agentistics/core'
 import { canonicalTool } from '../harness-activity'
-import type { ChatTurn } from './chat-turn'
+import type { ChatTurn } from '@agentistics/core'
 import { commandSummary } from './shell-writes'
 import { existsSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'

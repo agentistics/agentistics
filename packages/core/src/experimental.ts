@@ -66,6 +66,17 @@ export const EXPERIMENTAL_FEATURES: readonly ExperimentalFeature[] = [
       pt: 'Projeções: métricas de runtime derivadas do journal num armazenamento local.',
     },
   },
+  {
+    id: 'adapter-chat',
+    env: 'AGENTISTICS_ADAPTER_CHAT',
+    // Opt-in: only '1' (ENGINE.MAP 09 §4). Read by the chat routes (`/api/fleet/chat-stream`,
+    // `/api/fleet/chat`); off, they are the legacy readers byte for byte.
+    isOn: raw => raw === '1',
+    description: {
+      en: 'Session chat from the engine\'s chat channel (one reader per transcript, live text and state) instead of the host\'s own readers, for every harness whose integration serves it.',
+      pt: 'Chat das sessões pelo canal de chat do engine (um leitor por transcrição, texto ao vivo e estado) em vez dos leitores do próprio host, para todo harness cuja integração o oferece.',
+    },
+  },
 ]
 
 export type ExperimentalSource =

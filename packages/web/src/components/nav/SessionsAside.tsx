@@ -1,3 +1,4 @@
+import { loadClosedFleet } from '../../lib/fleet'
 /**
  * SessionsAside — the fleet, in the sidebar's body.
  *
@@ -247,6 +248,7 @@ export function SessionsAside({
   onOpenRow, hideNew, rowsById, act, filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
   onCreated, selectedId, onGoToSession,
 }: SessionsAsideProps) {
+  useEffect(() => { if (!activeOnly) loadClosedFleet() }, [activeOnly, rows])
   const pt = lang === 'pt'
   const mutedKeys = useMutedKeys()
   const mutedRows = useMemo(() => mutedSessionRows(rows, mutedKeys), [rows, mutedKeys])

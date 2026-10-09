@@ -730,6 +730,54 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          may approve anything for anyone. `events-frontier.test.ts` asserts it
   │                          over the module SOURCE, so a field named `action` or an imperative
   │                          sentence fails the build. See docs/session-events.md
+  ├── sessions/session-hub.ts → **ONE fleet poller per process** (ENGINE.MAP F1.2, P-01/P-02/P-03/
+  │                          P-08). `ensureSessionHub()` (cli-start.ts) wraps the poller: SINGLE FLIGHT
+  │                          (a poll never runs twice at once — its frame-digest memory must move one
+  │                          poll at a time), TIMER-DRIVEN ON DEMAND (ticks every `SESSION_POLL_MS`
+  │                          while something subscribes — the in-server event producer, an
+  │                          `/api/fleet/events` stream, a chat waiting for its link — or a reader asked
+  │                          within the 30 s lease; with no demand it polls NOTHING), and `refresh()`
+  │                          after an act (`kickFleet`, a poll that STARTS after the act). `/api/fleet`,
+  │                          `/api/fleet/snapshot`, the chat streams, a send's `record()` and the event
+  │                          producer all READ it — the producer no longer runs a poller of its own in
+  │                          the server (`events/daemon.ts` `startHubProducer`; `agentop watch` /
+  │                          `events run` keep theirs). Never add a second `createSessionsPoller` in the
+  │                          server process: two pollers disagree about working/waiting by construction.
+  │                          `fleet-events.ts` is the PUSH (`GET /api/fleet/events`: a `snapshot` of the
+  │                          requested view, then `delta` row upserts/removes; closed rows windowed by
+  │                          `closed=`, older ones paged by `GET /api/fleet/closed`); its planner is
+  │                          pure. A delta carries only rows whose content changed — `cpuPercent`/
+  │                          `rssBytes` are compared with HYSTERESIS against what that stream last sent
+  │                          (≥ 5 points / ≥ 64 MiB), or a real fleet re-sends every live row every tick —
+  │                          and `meta.closedVersion` (a hash of the PAGED closed rows) tells a client to
+  │                          re-ask for its open pages. A kill is an `exited` UPSERT (the row stays,
+  │                          reopenable); `remove` is for a row that left the fleet. The poller measures
+  │                          hardware ONLY for a row with a living command (an exited row used to borrow
+  │                          a neighbour's pid by directory). A fresh `read()` never waits for a poll in
+  │                          flight. `/api/hardware-resources` PEEKS the hub's last snapshot
+  │                          (`processSessionHub()`, never `read()` — that would buy a full poll per
+  │                          GET) and falls back to its own two tmux calls only when none is fresh. The
+  │                          adapter chat stream reads its ONE row off the snapshot
+  │                          (`adapterRowOf`), never `host.sessions()` (a whole-fleet build per tick per
+  │                          stream). `adapter-chat.ts` serves the chat from engine-api 1.9 `HarnessChat`
+  │                          behind the experimental `adapter-chat` row (`AGENTISTICS_ADAPTER_CHAT=1`) —
+  │                          same `chat`/`chat-delta` events + `live`/`state`, `source: 'adapter'`, and
+  │                          the SAME post-processing (`finishChatRead`); an error closes the stream and
+  │                          refuses that conversation for 5 min so the client lands on the legacy one.
+  │                          Flag off, the chat routes are the legacy readers byte for byte.
+  │                          **With the flag on, the HARNESS states its own turns** (`adapter-state.ts`
+  │                          + `adapter-state-host.ts`, the poller's `adapterState` option): every live,
+  │                          linked row whose harness declares `state` in its file (claude, codex,
+  │                          copilot, kimi, antigravity) is followed through the engine's channel, its
+  │                          `state` deltas ARE the row's activity — believed at once (`exact` in
+  │                          `confirmActivities`), and a change makes the hub poll NOW — and its screen
+  │                          is read only where it still says something (`planScreen`): never while
+  │                          idle (a dialog lives inside a turn), while working only if the file
+  │                          cannot state a pending dialog (claude, codex, agy), always when the file
+  │                          says a person is waited on (the options are read off the screen), every
+  │                          `SCREEN_REFRESH_MS` (2 min) for the mode chip/limit banner/tail, and on
+  │                          the poll after an act (`kickFleet(id)`). Gemini (no state declared),
+  │                          opencode (no chat), unlinked rows and the flag off: the screen, unchanged.
   ├── sessions/fleet-baseline.ts → the IO boundary in front of the pure `session-profile.ts`: read
   │                          the consolidate store, compute the baseline, hold it for 5 minutes and
   │                          share the SCAN IN FLIGHT. `/api/fleet` is polled every five seconds by
@@ -2054,6 +2102,18 @@ Claude Code deletes session transcripts (`~/.claude/projects/**/*.jsonl`) older 
   (authenticated) returns `EngineStatus`.
 - **A failed or mismatched engine never takes the product down** — it is logged and the host runs as
   a community build. `AGENTISTICS_ENGINE=0` switches a present engine off.
+- **The chat channel (engine-api 1.9, ENGINE.MAP F1.1)** — `HarnessIntegration.chat` (or
+  `chatAbsent`, the one sentence why not) serves a conversation's turns, state and in-flight text
+  from ONE incremental cursor per source, NEVER journaled: `resolve(ref)` → `ChatSourceRef | null`,
+  `follow(src, max, on)` → unsubscribe, deltas `window | append | grow | live | state | fork`
+  (`HarnessChatDelta` — core already has an unrelated `ChatDelta`). Each harness DECLARES which of
+  state / attention / live / fork it can say (`ChatDeclaration`); the host never assumes.
+  `applyHarnessChatDeltas` is the one receiver rule. The turn is core's `ChatTurn`
+  (`packages/core/src/chatTurn.ts`, moved from `server/sessions/chat-turn.ts`), mirrored as
+  `EngineChatTurn` and kept EQUAL by `engine-api-mirrors.test.ts`. The engine's copies of the
+  `sessions/*-chat.ts` / `chat-tail.ts` readers are held byte-equal to these by the engine's chat
+  differential, so a fix to a reader here must land in the engine too (its differential fails until it
+  does). The host switch (`adapter-chat` flag) is F1.2.
 - `engine/in-tree.ts` is TRANSITIONAL: the integrations and the provider verb still live in this tree
   and are packaged behind the contract there, so nothing else in the host imports them. When that
   code moves out, the file goes and the generator falls back to the null slot on its own.
@@ -3608,3 +3668,13 @@ an update the first load announces "Updated to vX — see what's new" and opens 
 file (`whatsNew/select.ts` picks every version between the one last seen and the running one). Only
 changes a person can notice belong there — `features` and `fixes`, 3–8 short plain-language lines each,
 PT and EN, no refactors/tests/internal items. A version with no entry announces nothing.
+
+
+## Clients on the adapter seam (F1.3)
+
+See `docs/f1-3-clients.md`. Browser, VS Code and cockpit consume fleet snapshots/deltas through
+core's `fleetStream`; unhealthy SSE restores their poll fallback. Do not add an independent
+fleet poll to a surface. History is read from `/api/fleet/closed` when requested.
+`source: 'adapter'` chat consumes structured `live`/`state`; it never opens a terminal stream.
+Local dashboard patches are versioned and flag-gated; a central keeps its scoped GET path.
+Never put unscoped team data on the shared `/api/events` broadcast.
