@@ -752,6 +752,7 @@ export interface FleetNewOptions {
   /** Progress for each configured disk; present while and after indexing for the wizard note. */
   projectIndexProgress?: { root: string; visited: number; queued: number; candidates: number; complete: boolean }[]
   projectDisks?: { id: string; label: string; letter?: string; install: boolean; count: number }[]
+  projectDisk?: string
   /** The tasks that already exist here, so filing the new session is a pick, not a spelling test. */
   tasks: string[]
   /**
@@ -834,6 +835,7 @@ export async function readNewOptions(lang: CliLang, query: string, disk?: string
       ...(projects.indexing ? { projectIndexing: true } : {}),
       ...(projects.indexProgress ? { projectIndexProgress: projects.indexProgress } : {}),
       ...(projects.disks ? { projectDisks: projects.disks } : {}),
+      ...(disk !== undefined ? { projectDisk: disk } : {}),
       tasks,
     }
   } catch (e) {

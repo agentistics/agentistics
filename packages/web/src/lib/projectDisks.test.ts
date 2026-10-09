@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { diskSub, diskTitle, formatDiskSize, legacyRoots, toggleRoot, type ProjectDisk } from './projectDisks'
+import { diskSub, diskTitle, formatDiskSize, legacyRoots, projectDiskAfterResponse, toggleRoot, type ProjectDisk } from './projectDisks'
 
 const ROOT: ProjectDisk = { path: '/', kind: 'root', label: '/', isInstallDisk: true, freeBytes: 200 * 1024 ** 3, totalBytes: 1024 ** 4 }
 const C: ProjectDisk = { path: '/mnt/c', kind: 'drive', letter: 'C', label: 'C:', isInstallDisk: false }
@@ -23,6 +23,11 @@ describe('labels', () => {
 })
 
 describe('scanRoots', () => {
+  test('the all-disks filter survives a response that only lists concrete disks', () => {
+    expect(projectDiskAfterResponse('all', DISKS)).toBe('all')
+    expect(projectDiskAfterResponse('/mnt/c', DISKS)).toBe('/mnt/c')
+    expect(projectDiskAfterResponse('/missing', DISKS)).toBe('/')
+  })
   test('old typed roots that are not disks survive as their own rows', () => {
     expect(legacyRoots(['/srv/code', '/mnt/c'], DISKS)).toEqual(['/srv/code'])
   })

@@ -18,6 +18,7 @@ import { SEARCH_DEBOUNCE_MS } from '../lib/projectTabs'
 import type { HarnessAnswer } from '../lib/wizardSteps'
 import { fetchFleetNewWithRetry } from '../lib/fleetNewRetry'
 import { createSharedPref, PERSONAL_PREFS } from '../lib/sharedPref'
+import { projectDiskAfterResponse } from '../lib/projectDisks'
 
 const projectDiskPref = createSharedPref<string>({
   key: 'agentistics-project-disk-v1', prefKey: 'projectDisk', endpoint: PERSONAL_PREFS,
@@ -44,7 +45,7 @@ export interface FleetNewOptions {
    *  server does not say. */
   projectTotals: Record<ProjectKind, number> | undefined
   projectIndexing: boolean
-  projectIndexProgress: { visited: number; queued: number }[]
+  projectIndexProgress: { root: string; visited: number; queued: number; complete: boolean }[]
   projectDisks: { id: string; label: string; letter?: string; install: boolean; count: number }[]
   projectDisk: string
   setProjectDisk: (disk: string) => void
@@ -64,7 +65,7 @@ export function useFleetNewOptions(lang: 'pt' | 'en'): FleetNewOptions {
   const [projects, setProjects] = useState<FleetProjectOption[]>([])
   const [projectTotals, setProjectTotals] = useState<Record<ProjectKind, number> | undefined>(undefined)
   const [projectIndexing, setProjectIndexing] = useState(false)
-  const [projectIndexProgress, setProjectIndexProgress] = useState<{ visited: number; queued: number }[]>([])
+  const [projectIndexProgress, setProjectIndexProgress] = useState<{ root: string; visited: number; queued: number; complete: boolean }[]>([])
   const projectDisk = useSyncExternalStore(projectDiskPref.subscribe, projectDiskPref.get, projectDiskPref.serverSnapshot)
   const [projectDisks, setProjectDisks] = useState<{ id: string; label: string; letter?: string; install: boolean; count: number }[]>([])
   const [query, setQuery] = useState('')
@@ -93,8 +94,9 @@ export function useFleetNewOptions(lang: 'pt' | 'en'): FleetNewOptions {
           harnesses: HarnessAnswer[]; projects: FleetProjectOption[]
           projectTotals?: Record<ProjectKind, number>
           projectIndexing?: boolean
-          projectIndexProgress?: { visited: number; queued: number }[]
+          projectIndexProgress?: { root: string; visited: number; queued: number; complete: boolean }[]
           projectDisks?: { id: string; label: string; letter?: string; install: boolean; count: number }[]
+          projectDisk?: string
           unavailable?: string
         }>(`/api/fleet/new?lang=${lang}&q=${encodeURIComponent(debouncedQuery)}${projectDisk ? `&disk=${encodeURIComponent(projectDisk)}` : ''}`, { signal: controller.signal })
         if (!alive) return
@@ -106,9 +108,9 @@ export function useFleetNewOptions(lang: 'pt' | 'en'): FleetNewOptions {
         // The first response establishes the install-disk default when no personal choice exists.
         const disks = json.projectDisks ?? []
         setProjectDisks(disks)
-        if (disks.length > 0 && (!projectDisk || !disks.some(d => d.id === projectDisk))) {
-          projectDiskPref.set(disks.find(d => d.install)?.id ?? disks[0]!.id)
-        }
+        if (json.projectDisk !== undefined) projectDiskPref.set(json.projectDisk)
+        const next = projectDiskAfterResponse(projectDisk, disks.map(d => ({ path: d.id, isInstallDisk: d.install })))
+        if (disks.length > 0 && next !== projectDisk) projectDiskPref.set(next)
         setUnavailable(json.unavailable)
       } catch {
         if (alive) {

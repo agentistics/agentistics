@@ -19,7 +19,10 @@ describe('project disk filtering', () => {
   })
 
   it('uses all disks only for the explicit all value', () => {
-    expect(filterCandidatesByDisk(candidates, disks, 'all').candidates).toEqual(candidates)
+    const result = filterCandidatesByDisk(candidates, disks, 'all')
+    expect(result.candidates).toEqual(candidates)
+    // `all` is an explicit filter, not an unknown disk that the client should replace with install.
+    expect(result.selectedDisk).toBeUndefined()
   })
 
   it('never exposes the bare home directory or temporary trees', () => {

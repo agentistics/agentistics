@@ -25,7 +25,7 @@ export function ScopeNote({ children }: { children: React.ReactNode }) {
 // ConfirmModal
 // Centered confirmation dialog for destructive actions (delete/revoke/remove). Renders nothing
 // when `open` is false. Backdrop click + Escape = cancel. The confirm button is red (danger).
-export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint }: {
+export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel }: {
   open: boolean
   title: string
   message: string
@@ -38,6 +38,7 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
   requireText?: string
   /** Prompt shown above the input, e.g. `Type "Client X" to confirm`. */
   requireTextHint?: string
+  focusCancel?: boolean
 }) {
   const isMobile = useIsMobile()
   const [typed, setTyped] = React.useState('')
@@ -92,7 +93,7 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
           display: 'flex', gap: 8, marginTop: 2, justifyContent: 'flex-end',
           flexDirection: isMobile ? 'column-reverse' : 'row',
         }}>
-          <button type="button" onClick={onCancel} style={dialogButtonStyle('secondary', isMobile)}>{cancelLabel}</button>
+          <button type="button" autoFocus={focusCancel} onClick={onCancel} style={dialogButtonStyle('secondary', isMobile)}>{cancelLabel}</button>
           <button type="button" onClick={() => { if (armed) onConfirm() }} disabled={!armed} style={dialogButtonStyle('danger', isMobile, !armed)}>{confirmLabel}</button>
         </div>
       </div>
