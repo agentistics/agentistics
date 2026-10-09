@@ -72,24 +72,38 @@ async function childrenOf(pid: number): Promise<number[]> {
 const HOLDER_MAX_DEPTH = 5
 
 /**
+ * The executable's basename, as `/proc/<pid>/exe` names it NOW — with the kernel's ` (deleted)`
+ * suffix removed. A CLI that updates itself in place leaves its running process pointing at a file
+ * that is gone (measured 2026-10-08: kimi 0.41 swapped its binary mid-probe and the pane process
+ * read `…/bin/kimi.bak (deleted)`), and that process is still the harness.
+ */
+async function exeName(pid: number): Promise<string | null> {
+  try {
+    return basename((await readlink(`/proc/${pid}/exe`)).replace(/ \(deleted\)$/, ''))
+  } catch {
+    return null
+  }
+}
+
+/**
  * The processes under (and including) `pid` whose executable is named one of `holders`.
  *
- * Descends through anything else — a node shim, a login shell — and STOPS at a holder: what runs
- * below a holder is the commands it executes, and their descriptors must never be read as the
- * harness's own (a `cat` of another session's rollout would otherwise link this row to it). The
- * name is `/proc/<pid>/exe`'s basename and never `comm`: node renames its main thread (`MainThread`,
- * measured on the codex shim) and the kernel truncates `comm` to 15 bytes.
+ * Descends through anything else — a node shim, a login shell — and, below a holder, ONLY into
+ * children that are holders themselves: what else runs below a holder is the commands it executes,
+ * and their descriptors must never be read as the harness's own (a `cat` of another session's
+ * rollout would otherwise link this row to it). The holder-under-holder case is real: the same
+ * self-update left the old kimi as a wrapper holding nothing and a new `kimi-code` child, on the new
+ * binary, holding the session files. The name is `/proc/<pid>/exe`'s basename and never `comm`: node
+ * renames its main thread (`MainThread`, measured on the codex shim) and the kernel truncates `comm`
+ * to 15 bytes.
  */
-async function holderPids(pid: number, holders: readonly string[], depth = 0): Promise<number[]> {
-  let exe: string | null = null
-  try {
-    exe = basename(await readlink(`/proc/${pid}/exe`))
-  } catch {
-  }
-  if (exe && holders.includes(exe)) return [pid]
-  if (depth >= HOLDER_MAX_DEPTH) return []
-  const out: number[] = []
-  for (const c of await childrenOf(pid)) out.push(...await holderPids(c, holders, depth + 1))
+async function holderPids(pid: number, holders: readonly string[], depth = 0, underHolder = false): Promise<number[]> {
+  const exe = await exeName(pid)
+  const isHolder = exe !== null && holders.includes(exe)
+  if (underHolder && !isHolder) return []
+  const out: number[] = isHolder ? [pid] : []
+  if (depth >= HOLDER_MAX_DEPTH) return out
+  for (const c of await childrenOf(pid)) out.push(...await holderPids(c, holders, depth + 1, underHolder || isHolder))
   return out
 }
 
@@ -134,7 +148,9 @@ export async function resolveHolderFile(
   for (const holder of pids) {
     const file = fileFromFds(await openFiles(holder))
     if (!file) continue
-    if (found) return null
+    // Two holders on DIFFERENT files is two conversations under one pane: no answer. Two on the same
+    // file (a descriptor inherited by a relaunched child) is one fact, kept on the first holder.
+    if (found) { if (found.file !== file) return null; continue }
     found = { file, holder }
   }
   return found

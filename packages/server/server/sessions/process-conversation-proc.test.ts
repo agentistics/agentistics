@@ -85,6 +85,19 @@ describe.skipIf(!linux)('resolveHolderFile on the real /proc', () => {
     expect(await resolveHolderFile(pid, [sh], kimiTranscriptFromFds)).toBeNull()
   })
 
+  it('follows a holder into a child that is a holder too — a self-updated CLI relaunching itself', async () => {
+    // Measured on kimi: after an in-place update the old process stays as a wrapper holding nothing
+    // and a new child on the new binary holds the session files. Here the wrapper is `sh` and the
+    // child an inner `sh` holding fd 3; the grandchild `sleep` (not a holder) inherits it and must
+    // NOT be the answer.
+    const pid = await pane(`(exec 3>>"$F"; exec /bin/sh -c 'sleep 30; true'); true`, { F: F1 })
+    const sh = basename(await readlink(`/proc/${pid}/exe`))
+    const got = await resolveHolderFile(pid, [sh], kimiTranscriptFromFds)
+    expect(got?.file).toBe(F1)
+    expect(got?.holder).not.toBe(pid)
+    expect(basename(await readlink(`/proc/${got!.holder}/exe`))).toBe(sh)
+  })
+
   it('refuses when two holders under one pane each name a session', async () => {
     const pid = await pane(HOLD('$F1') + ' & ' + HOLD('$F2') + '; wait', { F1, F2 })
     expect(await resolveHolderFile(pid, ['sleep'], kimiTranscriptFromFds)).toBeNull()
