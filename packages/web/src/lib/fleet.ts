@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Baseline } from '@agentistics/core'
+import { followFleet, type Baseline, type FleetWire } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { fleetSeedNotice, fleetStaleNotice } from './fleetStale'
 import { cacheIsUsable, stripVolatile } from './fleetCache'
@@ -368,7 +368,9 @@ let lastActivity: Record<string, SessionActivity> | null = null
  */
 const ACT_TIMEOUT_MS = 20_000
 
+let fleetEpoch = 0
 async function pollOnce(): Promise<void> {
+  const epoch = fleetEpoch
   if (pollCentral) return pollCentralOnce()
   try {
     // NATIVE sessions ride the same poll (UI.UNIFY, `nativeFleet.ts`): asked in parallel, folded in
@@ -389,6 +391,7 @@ async function pollOnce(): Promise<void> {
     // one, because an empty one is obviously wrong.
     if (!res.ok) { snapFailures++; return }
     const json = withNativeSessions(normalizeFleetPayload(await res.json() as FleetPayload), await nativeP)
+    if (epoch !== fleetEpoch) return
     snapUnsupported = false
     snapshot = json
     snapFailures = 0
@@ -410,6 +413,43 @@ async function pollOnce(): Promise<void> {
   }
 }
 
+let fleetStream: ReturnType<typeof followFleet> | null = null
+let fleetStreamUrl = ''
+let nextStreamTry = 0
+let streamedFleet: FleetPayload | null = null
+
+function openFleetStream(): void {
+  const url = `/api/fleet/events?lang=${pollLang}`
+  if (fleetStream && fleetStreamUrl === url) return
+  fleetStream?.close()
+  fleetStreamUrl = url
+  fleetStream = followFleet(url, wire => {
+    fleetEpoch++
+    streamedFleet = normalizeFleetPayload(wire as unknown as FleetPayload)
+    // Native rows already folded in by the server are retained by id; the separate runtime's
+    // first read remains available against older hosts.
+    snapshot = streamedFleet
+    snapLoading = false; snapUnsupported = false; snapFailures = 0
+    snapLastOkMs = Date.now(); cachedAt = 0
+    lastActivity = notifyFleetTransitions(lastActivity, snapshot.rows, pollLang)
+    writeFleetCache(snapshot)
+    emit()
+  })
+}
+
+/** History is loaded in pages when an existing list asks to draw inactive sessions. */
+export function loadClosedFleet(): void { void fleetStream?.loadClosed() }
+
+function fleetTick(): void {
+  if (fleetStream?.healthy()) return
+  if ((!fleetStream || fleetStream.retryable()) && Date.now() >= nextStreamTry) {
+    fleetStream?.close(); fleetStream = null
+    nextStreamTry = Date.now() + 10_000
+    openFleetStream()
+  }
+  void pollOnce()
+}
+
 /** The visibility listener, held beside the timer so the two are added and removed together. */
 let onVisible: (() => void) | null = null
 
@@ -418,11 +458,12 @@ function ensurePolling(lang: 'pt' | 'en'): void {
     // The payload is localized by the server, so a language change invalidates the snapshot's
     // words but not its facts. Re-request rather than translate here.
     pollLang = lang
+    openFleetStream()
     void pollOnce()
   }
   if (timer !== null) return
-  void pollOnce()
-  timer = setInterval(() => { void pollOnce() }, FLEET_POLL_MS)
+  openFleetStream()
+  timer = setInterval(fleetTick, FLEET_POLL_MS)
   /*
    * A HIDDEN TAB IS NOT POLLING, whatever this interval says.
    *
@@ -436,12 +477,13 @@ function ensurePolling(lang: 'pt' | 'en'): void {
    * requests on every return to the tab.
    */
   if (onVisible === null) {
-    onVisible = () => { if (document.visibilityState === 'visible') void pollOnce() }
+    onVisible = () => { if (document.visibilityState === 'visible') fleetTick() }
     document.addEventListener('visibilitychange', onVisible)
   }
 }
 
 function stopPolling(): void {
+  fleetStream?.close(); fleetStream = null; streamedFleet = null; nextStreamTry = 0
   if (timer === null) return
   clearInterval(timer)
   timer = null
@@ -473,7 +515,7 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
     // `/api/fleet/act` has no row by that id. The answer has the same shape, so the menu needs no branch.
     if (isNativeSessionId(req.id)) {
       const out = await nativeAct(req, lang)
-      void pollOnce()
+      if (!fleetStream?.healthy()) void pollOnce()
       return out
     }
     try {
@@ -559,7 +601,7 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
        * mounted `useFleet` still redraws the instant it lands; only the caller's own busy state
        * stops being held hostage to a walk of every OTHER session on the machine.
        */
-      void pollOnce()
+      if (!fleetStream?.healthy()) void pollOnce()
       return out
     } catch (err) {
       // A poll settles what actually happened — see the note above. It runs even here.

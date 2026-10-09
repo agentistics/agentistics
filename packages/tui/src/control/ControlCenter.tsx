@@ -307,7 +307,9 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
    * performed has to be visible before the next tick — a list that ignores you for five seconds
    * reads as a list that ignored you.
    */
+  const fleetEpoch = useRef(0)
   const pollFleet = useCallback(async () => {
+    const epoch = fleetEpoch.current
     const read = host.sessions
     if (!read) return
     let next: ControlSessions
@@ -316,6 +318,10 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
     } catch {
       // `sessions()` is contracted never to throw. If it does anyway, the stale list beats a blank
       // one — reporting an empty fleet would say every running session had ended.
+      return
+    }
+    if (epoch !== fleetEpoch.current) {
+      setFleet(prev => ({ ...next, ...prev }))
       return
     }
     setFleet(next)
@@ -341,12 +347,28 @@ export function ControlCenter({ host, lang: initialLang, initial, onExit, mouse 
 
   useEffect(() => {
     if (!host.sessions) return
+    let stream = host.followSessions?.(next => {
+      fleetEpoch.current++
+      setFleet(prev => ({ ...prev, ...next }))
+      if (next.rang.length > 0) writeFrame(BEL)
+    }, status?.sessionView?.showClosed)
     void pollFleet()
     // Re-armed whenever `sessionPollMs` changes, so pressing the config row's action takes effect
     // on the very next tick rather than waiting out whatever interval was already running.
-    const timer = setInterval(() => { void pollFleet() }, sessionPollMs)
-    return () => clearInterval(timer)
-  }, [host, pollFleet, sessionPollMs])
+    const timer = setInterval(() => {
+      if (stream?.healthy()) return
+      if (!stream || stream.retryable()) {
+        stream?.close()
+        stream = host.followSessions?.(next => {
+          fleetEpoch.current++
+          setFleet(prev => ({ ...prev, ...next }))
+          if (next.rang.length > 0) writeFrame(BEL)
+        }, status?.sessionView?.showClosed)
+      }
+      void pollFleet()
+    }, sessionPollMs)
+    return () => { clearInterval(timer); stream?.close() }
+  }, [host, pollFleet, sessionPollMs, status?.sessionView?.showClosed, lang])
 
   /**
    * The task the last action started, or `null` when nothing has been performed yet.

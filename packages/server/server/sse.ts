@@ -6,7 +6,7 @@ import { watch as fsWatch, statSync } from 'fs'
 import { watchedEvent, WATCH_DEPTH } from './watch-filter'
 import chokidar from 'chokidar'
 import { SESSION_META_DIR, PROJECTS_DIR, STATS_CACHE_FILE, PORT, TEAM_CENTRAL, CODEX_SESSIONS_DIR, GEMINI_DIR, COPILOT_DIR, ANTIGRAVITY_BRAIN_DIR, ANTIGRAVITY_CONVERSATIONS_DIR, KIMI_DIR } from './config'
-import type { HarnessId } from '@agentistics/core'
+import { featureOn, type HarnessId } from '@agentistics/core'
 import { harnessOfPath, noteTranscriptActivity } from './sessions/transcript-activity'
 import { centralManifest, centralHtml } from './central-branding'
 import { invalidateCache, rebuildNow, useWatcherDrivenRefresh } from './data'
@@ -21,8 +21,16 @@ export type SseController = ReadableStreamDefaultController<Uint8Array>
 export const sseClients = new Set<SseController>()
 export const sseEncoder = new TextEncoder()
 
-export function notifySseClients() {
-  const payload = sseEncoder.encode('event: change\ndata: {}\n\n')
+export async function notifySseClients() {
+  let event = 'event: change\ndata: {}\n\n'
+  if (!TEAM_CENTRAL && featureOn('adapter-chat')) {
+    try {
+      const [{ buildApiResponse }, { patchDataBuild }] = await Promise.all([import('./data'), import('./data-patch')])
+      const patch = patchDataBuild(await buildApiResponse())
+      if (patch) event = `event: data-patch\ndata: ${JSON.stringify(patch)}\n\nevent: change\ndata: ${JSON.stringify({ revision: patch.revision })}\n\n`
+    } catch { /* A client can recover through its ordinary data GET. */ }
+  }
+  const payload = sseEncoder.encode(event)
   for (const ctrl of [...sseClients]) {
     try {
       ctrl.enqueue(payload)

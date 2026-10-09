@@ -153,3 +153,16 @@ describe('streamHealthy (PERF.1: no interval reads while the push stream carries
     expect(streamHealthy({ stream: null, streamAt: 1000 }, 1001)).toBe(false)
   })
 })
+
+describe('adapter chat signals', () => {
+  it('replaces structured partial text and retires it at turn end', async () => {
+    const { applyChatSignal } = await import('./chatFeed')
+    const held = { turns: [], source: 'adapter' as const, live: true }
+    const live = applyChatSignal(held, 'live', { text: 'exact text', reasoning: 'thinking' })
+    expect(live.liveText).toBe('exact text')
+    expect(() => applyChatSignal(held, 'state', {})).toThrow()
+    expect(() => applyChatSignal(held, 'live', {})).toThrow()
+    expect(applyChatSignal(live, 'live', { text: 'replacement' }).liveText).toBe('replacement')
+    expect(applyChatSignal(live, 'state', { working: false })).toEqual({ ...live, working: false, liveText: '', liveReasoning: '' })
+  })
+})

@@ -77,6 +77,9 @@ export class SessionsHub implements vscode.Disposable {
   private readonly streams: TerminalStreams
   private readonly inputs: InputSockets
   private timer: ReturnType<typeof setInterval> | undefined
+  private fleetStream?: ReturnType<AgentopClient['followFleet']>
+  private streamKey = ''
+  private fleetEpoch = 0
   private memory: AttentionMemory = null
   private link: LinkStatus = { state: 'down', url: '' }
   private fleet: FleetPayload = EMPTY
@@ -145,11 +148,17 @@ export class SessionsHub implements vscode.Disposable {
    */
   private start(): void {
     if (this.timer) return
-    void this.poll()
-    this.timer = setInterval(() => void this.poll(), POLL_MS)
+    this.openFleetStream()
+    this.timer = setInterval(() => {
+      const key = this.deps.api() + this.deps.lang() + JSON.stringify(this.arrangement())
+      if (this.fleetStream?.healthy() && key === this.streamKey) return
+      if (!this.fleetStream || this.fleetStream.retryable() || key !== this.streamKey) this.openFleetStream()
+      void this.poll()
+    }, POLL_MS)
   }
 
   private stop(): void {
+    this.fleetStream?.close(); this.fleetStream = undefined
     if (!this.timer) return
     clearInterval(this.timer)
     this.timer = undefined
@@ -164,8 +173,31 @@ export class SessionsHub implements vscode.Disposable {
     this.broadcast({ type: 'openWizard', ...(cwd ? { cwd } : {}) })
   }
 
+  private openFleetStream(): void {
+    this.fleetStream?.close()
+    this.streamKey = this.deps.api() + this.deps.lang() + JSON.stringify(this.arrangement())
+    this.fleetStream = this.deps.client().followFleet(this.arrangement(), payload => {
+      this.fleetEpoch++
+      this.fleet = payload
+      this.link = { state: 'ok', url: this.deps.api() }
+      this.publishFleet()
+    })
+  }
+
+  private publishFleet(): void {
+    const update = readAttention(this.memory, this.fleet.sessions)
+    this.memory = update.memory
+    this.deps.onAttention(update.count + nativeAttention(this.fleet.native ?? []))
+    if (this.deps.notifyOnAttention()) {
+      for (const row of update.announce) this.announce(row.id, row.title)
+    }
+    this.broadcast(this.stateMessage())
+  }
+
   private async poll(): Promise<void> {
+    const epoch = this.fleetEpoch
     const { link, payload } = await this.deps.client().fleet(this.arrangement())
+    if (epoch !== this.fleetEpoch) return
     this.link = link
     // A failed poll keeps the PREVIOUS fleet, exactly as the cockpit's poller does: the last known
     // truth beats a confident empty list, and the banner above it already says the link is down.
@@ -175,13 +207,7 @@ export class SessionsHub implements vscode.Disposable {
     if (native) this.fleet = { ...this.fleet, native }
     else if (this.fleet.native) { const { native: _gone, ...rest } = this.fleet; this.fleet = rest }
 
-    const update = readAttention(this.memory, this.fleet.sessions)
-    this.memory = update.memory
-    this.deps.onAttention(update.count + nativeAttention(this.fleet.native ?? []))
-    if (this.deps.notifyOnAttention()) {
-      for (const row of update.announce) this.announce(row.id, row.title)
-    }
-    this.broadcast(this.stateMessage())
+    this.publishFleet()
   }
 
   private stateMessage(): HostMessage {
@@ -208,6 +234,7 @@ export class SessionsHub implements vscode.Disposable {
    */
   private async setArrangement(change: Partial<Arrangement>): Promise<void> {
     await this.context.globalState.update(ARRANGE_KEY, { ...this.arrangement(), ...change })
+    this.openFleetStream()
     await this.poll()
   }
 
@@ -268,7 +295,7 @@ export class SessionsHub implements vscode.Disposable {
         this.broadcast({ type: 'result', ok: out.ok, message: out.message })
         // Re-read straight away rather than waiting up to five seconds: the user just did
         // something and the list is the only evidence it happened.
-        await this.poll()
+        if (!this.fleetStream?.healthy()) await this.poll()
         return
       }
       case 'input':

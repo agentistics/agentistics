@@ -52,7 +52,7 @@ import { MENTION_ADDED_TOAST } from '../lib/mentionInsert'
 import type { HarnessId, SessionPreset } from '@agentistics/core'
 import { freedBytes } from '@agentistics/core'
 import type { AppContext } from '../lib/app-context'
-import { useFleet, useFleetIndex, type FleetActionId } from '../lib/fleet'
+import { loadClosedFleet, useFleet, useFleetIndex, type FleetActionId } from '../lib/fleet'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { FleetOverview } from '../components/sessions/FleetOverview'
 import { SessionCreating } from '../components/sessions/SessionCreating'
@@ -437,6 +437,9 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   // Never on a central: it aggregates many machines and hosts none of their sessions, so the only
   // fleet it could read is its own box's, drawn under someone else's rows.
   const { fleet, loading, unsupported: pollUnsupported, stale, act, refresh } = useFleet(pt ? 'pt' : 'en')
+  useEffect(() => {
+    if (sessionId && !loading && !fleet.sessions.some(r => r.id === sessionId || r.conversationId === sessionId)) loadClosedFleet()
+  }, [sessionId, loading, fleet.sessions])
   /**
    * A CENTRAL cannot list a fleet, and must SAY so.
    *

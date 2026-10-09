@@ -759,8 +759,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         start(controller) {
           sseClients.add(controller)
           controller.enqueue(sseEncoder.encode('event: connected\ndata: {}\n\n'))
+          const ping = featureOn('adapter-chat') && !TEAM_CENTRAL ? setInterval(() => {
+            try { controller.enqueue(sseEncoder.encode('event: ping\ndata: {}\n\n')) }
+            catch { clearInterval(ping); sseClients.delete(controller) }
+          }, 15_000) : undefined
 
           req.signal.addEventListener('abort', () => {
+            clearInterval(ping)
             sseClients.delete(controller)
             try { controller.close() } catch { /* already closed */ }
           })
@@ -3908,7 +3913,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           const enc = negotiateEncoding(req.headers.get('Accept-Encoding'))
           const { etag, bytes } = encodedBody(versionOf(unscoped), liveJson, enc, wantSlim, () =>
             `${(wantSlim ? slimSerialized(unscoped) : serializedData(data)).slice(0, -1)},${liveJson.slice(1)}`)
-          const baseHeaders = { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', ETag: etag, Vary: [CORS_HEADERS['Vary' as keyof typeof CORS_HEADERS], 'Accept-Encoding'].filter(Boolean).join(', ') }
+          const patchHeaders: Record<string, string> = {}
+          if (!wantSlim && !data.partial && featureOn('adapter-chat')) {
+            const { dataRevision, rememberDataBuild } = await import('./data-patch')
+            rememberDataBuild(unscoped)
+            patchHeaders['X-Agentistics-Data-Revision'] = dataRevision(unscoped)
+          }
+          const baseHeaders = { ...CORS_HEADERS, ...patchHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', ETag: etag, Vary: [CORS_HEADERS['Vary' as keyof typeof CORS_HEADERS], 'Accept-Encoding'].filter(Boolean).join(', ') }
           if (etagMatches(req.headers.get('If-None-Match'), etag)) return new Response(null, { status: 304, headers: baseHeaders })
           const out = await bytes
           return new Response(out as BodyInit, {

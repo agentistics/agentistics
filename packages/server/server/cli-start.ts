@@ -1,3 +1,4 @@
+import { sessionNotify, type ControlSession } from '@agentistics/tui/control/session-fleet'
 /**
  * cli-start.ts — the logic behind the `agentop` control center.
  *
@@ -40,7 +41,7 @@ import type { CodeStartLaunch } from './code-launch'
 import { homedir, platform } from 'node:os'
 import { accountHome } from './account-home'
 import {
-  HARNESS_ORDER, repoShortName, sendNowDelivered,
+  followFleet, HARNESS_ORDER, repoShortName, sendNowDelivered,
   type ConversationLinkReason, type HarnessId,
 } from '@agentistics/core'
 import type {
@@ -3393,6 +3394,23 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         failed: r.failed,
         ...(r.unavailable ? { unavailable: r.unavailable } : {}),
       }
+    },
+
+    followSessions(receive, history) {
+      let previous: Set<string> | null = null
+      return followFleet(`http://127.0.0.1:${PORT}/api/fleet/events?lang=${lang}`, wire => {
+        const rows = wire.rows as ControlSession[]
+        const waiting = new Set(rows.filter(sessionNotify).map(r => r.id))
+        const rang = previous === null ? [] : [...waiting].filter(id => !previous!.has(id))
+        previous = waiting
+        receive({
+          sessions: rows, attention: wire.attention as number, rang,
+          finishedTasks: wire.finishedTasks as string[],
+          unavailable: wire.unavailable as string | undefined,
+          fell: wire.fell as ControlSessions['fell'],
+          baseline: wire.baseline as ControlSessions['baseline'],
+        })
+      }, { history })
     },
 
     async sessions(): Promise<ControlSessions> {

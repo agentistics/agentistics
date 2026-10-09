@@ -3648,3 +3648,13 @@ an update the first load announces "Updated to vX — see what's new" and opens 
 file (`whatsNew/select.ts` picks every version between the one last seen and the running one). Only
 changes a person can notice belong there — `features` and `fixes`, 3–8 short plain-language lines each,
 PT and EN, no refactors/tests/internal items. A version with no entry announces nothing.
+
+
+## Clients on the adapter seam (F1.3)
+
+See `docs/f1-3-clients.md`. Browser, VS Code and cockpit consume fleet snapshots/deltas through
+core's `fleetStream`; unhealthy SSE restores their poll fallback. Do not add an independent
+fleet poll to a surface. History is read from `/api/fleet/closed` when requested.
+`source: 'adapter'` chat consumes structured `live`/`state`; it never opens a terminal stream.
+Local dashboard patches are versioned and flag-gated; a central keeps its scoped GET path.
+Never put unscoped team data on the shared `/api/events` broadcast.
