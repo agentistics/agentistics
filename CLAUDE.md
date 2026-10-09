@@ -338,6 +338,25 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          time-and-directory claim. STATED LIMIT: it is a `/proc` read, so off
   │                          Linux there is no link and `chat-web.ts` says "this session has no linked
   │                          conversation yet", which is true.
+  │                          **THE LINK NOW CARRIES THE REOPEN AND THE PROJECT PATH TOO** (AGY.REOPEN,
+  │                          2026-10-09). An exact link was not enough to REOPEN: `claimResume` required
+  │                          the conversation in the store pool, and `loadConversations` drops a record
+  │                          with no `cwd`. Measured: 32 of 75 agy records in the real store had
+  │                          `project_path: ""`. Two fixes. (1) `reopen-target.ts` (pure) is the ONE
+  │                          reopen resolver — it replaced FOUR copies (`claimResume`, the task reopen
+  │                          and the fell offer in cli-start, `agentop session open`), three of which
+  │                          still fell back to the directory guess for a row that KNEW its id. A row
+  │                          with an exact id the store lacks reopens from the link itself when its
+  │                          harness resumes by id, the row has a `cwd`, and the harness's OWN transcript
+  │                          reader finds that id on disk (`reopen-link.ts`, IO, found remembered / miss
+  │                          expires) — so `claude --session-id` that died before writing anything is
+  │                          not offered a reopen that can only fail. Every harness, not agy only.
+  │                          (2) the agy adapter reads `project_path` from history, then agentop's own
+  │                          registry (`managedAntigravityCwds`, conversationId -> cwd of the newest
+  │                          row; the MAP, not the file mtime, joins the cache fingerprint because the
+  │                          heartbeat moves the mtime every minute), then the `Project folder:` agentop
+  │                          wrote into the context block — and that block is never the `first_prompt`.
+  │                          The frozen replay (`integrations/antigravity`) still reads history only.
   │                          **CODEX AND KIMI RIDE THE SAME ROUTE, read by NAME** (P-17, measured
   │                          2026-10-08 against codex 0.161.0 / kimi 0.41.0, `process-transcript.ts`).
   │                          codex's NATIVE binary — two levels under the node shim tmux reports as

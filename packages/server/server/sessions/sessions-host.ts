@@ -248,6 +248,15 @@ export function createSessionsPoller(o: {
    */
   loadHarnessSessions?: () => Promise<HarnessSessionIndex>
   /**
+   * Which recorded conversation ids, absent from the store, the harness's own transcript reader can
+   * find on disk — `reopen-link.ts`'s `exactLinksOnDisk`. Injected and optional for the same reason
+   * as the two above; without it a row whose conversation the store lacks offers no reopen.
+   */
+  findExactLinks?: (
+    entries: readonly { harness?: HarnessId; cwd?: string; conversationId?: string }[],
+    pool: readonly Conversation[],
+  ) => Promise<Set<string>>
+  /**
    * Stamp `lastSeenMs` on the sessions that are alive right now — the HEARTBEAT.
    *
    * Injected and optional for the same reason `loadConversations` is: it writes to disk, and the
@@ -888,8 +897,24 @@ export function createSessionsPoller(o: {
       confirmMemory = confirm.memory
       const confirmedActivity = confirm.activities
 
+      // Rows that could be offered a reopen from their EXACT link — not running, holding a recorded
+      // id. `findExactLinks` asks only about ids the store does not carry, and memoizes.
+      const exactLinksOnDisk = o.findExactLinks
+        ? await o.findExactLinks(
+          reconciled
+            .filter(r => r.managed && (r.managed.endedAt || r.status === 'lost' || r.status === 'exited'))
+            .map(r => ({
+              ...(r.managed!.harness ? { harness: r.managed!.harness } : {}),
+              ...(r.managed!.cwd ? { cwd: r.managed!.cwd } : {}),
+              ...(r.managed!.conversationId ? { conversationId: r.managed!.conversationId } : {}),
+            })),
+          conversations,
+        ).catch(() => new Set<string>())
+        : undefined
+
       const sessions = buildSessionViews({
         reconciled,
+        ...(exactLinksOnDisk ? { exactLinksOnDisk } : {}),
         activity: confirmedActivity,
         background,
         tails,

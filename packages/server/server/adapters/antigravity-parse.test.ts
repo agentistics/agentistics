@@ -10,8 +10,11 @@ import {
   parseAntigravityTranscriptDetailed,
   rollUpAntigravitySessions,
   fileUriToPath,
+  managedAntigravityCwds,
+  projectFolderFromContext,
   type AntigravityTokenTotals,
 } from './antigravity-parse'
+import { contextBlock } from '../sessions/agentistics-context'
 import { calcCost, sessionModelUsage } from '@agentistics/core'
 
 const CONV = '20aa768c-36a0-456c-86d5-d97d4eb09194'
@@ -704,4 +707,86 @@ test('a requested command and its execution are ONE command, never two', () => {
   const s = parseAntigravityTranscript(lines, 'c3', '/repo')!
   expect(s.tool_counts['Bash']).toBe(1)
   expect(s.git_commits).toBe(1)
+})
+
+// ---------------------------------------------------------------------------
+// AGY.REOPEN — a conversation agentop STARTED. agy writes history.jsonl only for a prompt typed in
+// its own UI, so these arrive with no workspace there; the project path must come from what
+// agentop itself controls: its session registry, then the context block it prepended.
+// ---------------------------------------------------------------------------
+
+const AGENTOP_CONV = 'c2cc0410-62b8-46fe-890f-48bc9886df8f'
+const CTX = contextBlock({ sessionId: '90b6e4d348', cwd: '/home/u/my.project/work' })
+
+test('projectFolderFromContext reads the folder agentop wrote, dots in the path included', () => {
+  expect(projectFolderFromContext(CTX)).toBe('/home/u/my.project/work')
+  expect(projectFolderFromContext('no context here')).toBe('')
+})
+
+test('an agentop-started conversation takes its project path from the registry', () => {
+  const transcript = userInput(0, '2026-10-09T04:37:55Z', `${CTX}\n\nsay hi`)
+  const s = parseAntigravityTranscript(transcript, AGENTOP_CONV, '', { managedCwd: '/registry/cwd' })
+  expect(s!.project_path).toBe('/registry/cwd')
+})
+
+test('with no registry row, the context block names the project folder', () => {
+  const transcript = userInput(0, '2026-10-09T04:37:55Z', `${CTX}\n\nsay hi`)
+  const s = parseAntigravityTranscript(transcript, AGENTOP_CONV, '')
+  expect(s!.project_path).toBe('/home/u/my.project/work')
+})
+
+test('history.jsonl (the harness\'s own statement) still outranks the registry and the context', () => {
+  const transcript = userInput(0, '2026-10-09T04:37:55Z', `${CTX}\n\nsay hi`)
+  const s = parseAntigravityTranscript(transcript, AGENTOP_CONV, '/from/history', { managedCwd: '/registry/cwd' })
+  expect(s!.project_path).toBe('/from/history')
+})
+
+test('the context block never becomes the first_prompt — the person\'s words do', () => {
+  const transcript = userInput(0, '2026-10-09T04:37:55Z', `${CTX}\n\nsay hi`)
+  const s = parseAntigravityTranscript(transcript, AGENTOP_CONV, '')
+  expect(s!.first_prompt).toBe('say hi')
+})
+
+test('context sent ALONE: still a real conversation, first_prompt from the next message', () => {
+  const transcript = [
+    userInput(0, '2026-10-09T04:37:55Z', CTX),
+    userInput(1, '2026-10-09T04:38:10Z', 'now the real question'),
+  ].join('\n')
+  const s = parseAntigravityTranscript(transcript, AGENTOP_CONV, '')
+  expect(s).not.toBeNull()
+  expect(s!.first_prompt).toBe('now the real question')
+  expect(s!.project_path).toBe('/home/u/my.project/work')
+})
+
+test('context alone and nothing else: kept (its tokens are real), first_prompt empty', () => {
+  const s = parseAntigravityTranscript(userInput(0, '2026-10-09T04:37:55Z', CTX), AGENTOP_CONV, '')
+  expect(s).not.toBeNull()
+  expect(s!.first_prompt).toBe('')
+})
+
+test('a history line that is only agentop\'s context is not taken as the first prompt', () => {
+  const history = parseAntigravityHistory(JSON.stringify({
+    display: CTX, timestamp: 1, workspace: '/w', conversationId: AGENTOP_CONV,
+  }))
+  const s = parseAntigravityTranscript(userInput(0, '2026-10-09T04:37:55Z', CTX), AGENTOP_CONV, '', { historyEntries: history })
+  expect(s!.first_prompt).toBe('')
+})
+
+test('managedAntigravityCwds: agy rows with an exact id and a cwd, newest row wins', () => {
+  const raw = JSON.stringify([
+    { id: 'a', harness: 'antigravity', cwd: '/old', conversationId: 'X', createdAt: '2026-10-01T00:00:00Z' },
+    { id: 'b', harness: 'antigravity', cwd: '/new', conversationId: 'X', createdAt: '2026-10-02T00:00:00Z' },
+    { id: 'c', harness: 'antigravity', cwd: '/older', conversationId: 'X', createdAt: '2026-09-01T00:00:00Z' },
+    { id: 'd', harness: 'claude', cwd: '/claude', conversationId: 'Y' },
+    { id: 'e', harness: 'antigravity', cwd: '/no-id' },
+    { id: 'f', harness: 'antigravity', conversationId: 'Z' },
+  ])
+  const m = managedAntigravityCwds(raw)
+  expect([...m]).toEqual([['X', '/new']])
+})
+
+test('managedAntigravityCwds is total: missing, broken or non-array input is an empty map', () => {
+  expect(managedAntigravityCwds('').size).toBe(0)
+  expect(managedAntigravityCwds('{not json').size).toBe(0)
+  expect(managedAntigravityCwds('{"a":1}').size).toBe(0)
 })

@@ -194,6 +194,8 @@ import { HARNESS_PROCESS_TRANSCRIPTS } from './sessions/harness-session-file'
 import { modeSpecFor } from './sessions/mode-spec'
 import { isServerProcess, readServerSnapshot } from './sessions/shared-snapshot'
 import { conversationForProcess, forgetConversations, loadConversations } from './sessions/conversations'
+import { exactLinksOnDisk } from './sessions/reopen-link'
+import { reopenTargetFor } from './sessions/reopen-target'
 
 export type StartResult = number | 'foreground'
 
@@ -1555,6 +1557,9 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
   return {
     backend, readRegistry, scanProcesses, loadConversations, touchSessions,
     loadHarnessSessions,
+    // The exact-link reopen (`reopen-target.ts`): without it a row whose conversation the store
+    // lacks — every agy session agentop started — offers no reopen.
+    findExactLinks: exactLinksOnDisk,
     // Written once per session, not once per poll — the poller only calls this when the harness's
     // own record disagrees with the registry.
     // The link kind travels WITH the id. Dropping it here would persist a first-sighting claim as
@@ -2245,20 +2250,12 @@ async function reopenEntries(
   // apart, so a set of five rows used to start five copies of one conversation. A row that RECORDED
   // which conversation it drives is exact and takes that one.
   const taken = new Set<string>()
+  const onDisk = await exactLinksOnDisk(entries, conversations)
   const plan = planTaskReopen({
     entries,
     liveIds: live,
     inUse,
-    conversationFor: entry => {
-      const own = entry.conversationId
-        ? conversations.find(c => c.sessionId === entry.conversationId)
-        : undefined
-      const conv = own ?? conversations.find(c =>
-        !taken.has(c.sessionId) && c.harness === entry.harness && c.cwd === entry.cwd)
-      if (!conv?.resumable) return null
-      taken.add(conv.sessionId)
-      return { sessionId: conv.sessionId, title: conv.title }
-    },
+    conversationFor: entry => reopenTargetFor({ entry, pool: conversations, onDisk, taken }),
   })
 
   // GATE THE WHOLE SET, before spawning any of it — see spawn-admission.ts. `plan.reopen.length` is
@@ -2368,22 +2365,14 @@ async function restorableSessions(fell: readonly ManagedSession[]): Promise<Rest
   if (fell.length === 0) return []
   const conversations = await loadConversations()
   const taken = new Set<string>()
+  const onDisk = await exactLinksOnDisk(fell, conversations)
 
   // The DECISION is the pure `planFellOffer`; this is the I/O around it — the conversation store,
   // and the claiming that stops four fallen rows in one repository being offered four copies of one
   // conversation.
   return planFellOffer({
     entries: fell,
-    conversationFor: m => {
-      const own = m.conversationId
-        ? conversations.find(c => c.sessionId === m.conversationId)
-        : undefined
-      const conv = own ?? conversations.find(c =>
-        !taken.has(c.sessionId) && c.harness === m.harness && c.cwd === m.cwd)
-      if (!conv?.resumable) return null
-      taken.add(conv.sessionId)
-      return { sessionId: conv.sessionId, title: conv.title }
-    },
+    conversationFor: m => reopenTargetFor({ entry: m, pool: conversations, onDisk, taken }),
   }).map(o => ({
     id: o.entry.id,
     label: o.label,

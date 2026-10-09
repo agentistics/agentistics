@@ -11,6 +11,7 @@ import {
   ANTIGRAVITY_HISTORY_FILE,
   ANTIGRAVITY_CONVERSATIONS_DIR,
   ANTIGRAVITY_SUMMARIES_DB,
+  MANAGED_SESSIONS_FILE,
 } from '../config'
 import { createLimiter, safeReadDir } from '../utils'
 import { parseGenMetadataBlob } from './antigravity-protobuf'
@@ -268,11 +269,18 @@ export const antigravityAdapter: HarnessAdapter = {
       buildAntigravityParentMap,
       parseAntigravityTranscriptDetailed,
       rollUpAntigravitySessions,
+      managedAntigravityCwds,
     } = await import('./antigravity-parse')
     type Parsed = import('./antigravity-parse').AntigravityParsed
 
+    // Where agentop STARTED each agy conversation it opened, from its own session registry. agy
+    // writes `history.jsonl` only for a prompt typed in its UI, so a conversation agentop started
+    // has no workspace there and was filed with no project path — which `loadConversations` drops,
+    // taking its reopen, its project and its repository with it. Read-only; the map (not the
+    // file's mtime, which the 60 s heartbeat moves) joins the fingerprint, so the cache still hits.
+    const managedCwds = managedAntigravityCwds(await readFile(MANAGED_SESSIONS_FILE, 'utf-8').catch(() => ''))
     const fpIds = (await safeReadDir(ANTIGRAVITY_BRAIN_DIR)).sort()
-    const fp = await antigravityFingerprint(fpIds)
+    const fp = `${await antigravityFingerprint(fpIds)}\n${JSON.stringify([...managedCwds].sort())}`
     if (lastLoad && lastLoad.fp === fp) return structuredClone(lastLoad.sessions)
 
     // history.jsonl is global (all conversations) — read it once and index by conversationId.
@@ -311,6 +319,7 @@ export const antigravityAdapter: HarnessAdapter = {
         tokens,
         summary: summaryById.get(id) ?? null,
         allowNoUserTurn: parentOf.has(id),
+        ...(managedCwds.get(id) ? { managedCwd: managedCwds.get(id)! } : {}),
       })
       return parsed ? ([id, parsed] as const) : null
     })))
