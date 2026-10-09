@@ -1,46 +1,13 @@
 import React, { useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { Cpu, Copy, CheckCheck, AlertCircle, CircleDot, ExternalLink } from 'lucide-react'
+import { Cpu, AlertCircle, CircleDot, ExternalLink } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
 import { loginHarness, useChatHarnesses, type HarnessChatStatus } from '../../hooks/useChatHarnesses'
 import { SectionHeader } from './primitives'
 import { HarnessInstallDialog } from '../../components/HarnessInstallDialog'
 import { sessionPath } from '../../lib/sessionRoute'
 import { CenteredLoader } from '../../components/CenteredLoader'
-
-function CopyableCode({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
-  const copy = () => {
-    void navigator.clipboard.writeText(text).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1800)
-    })
-  }
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 6,
-      background: 'var(--bg-card)', border: '1px solid var(--border)',
-      borderRadius: 6, padding: '5px 10px', marginTop: 5,
-    }}>
-      <code style={{ flex: 1, fontSize: 11.5, color: 'var(--text-primary)', fontFamily: 'monospace', wordBreak: 'break-all' }}>
-        {text}
-      </code>
-      <button
-        onClick={copy}
-        title="Copy"
-        style={{
-          background: 'transparent', border: 'none', cursor: 'pointer',
-          color: copied ? 'var(--accent-green)' : 'var(--text-tertiary)',
-          display: 'flex', alignItems: 'center', padding: 2, flexShrink: 0,
-          transition: 'color 0.15s',
-        }}
-      >
-        {copied ? <CheckCheck size={13} /> : <Copy size={13} />}
-      </button>
-    </div>
-  )
-}
 
 export function HarnessStatusBadge({ h, pt = false }: { h: HarnessChatStatus; pt?: boolean }) {
   if (h.updateAvailable) {
@@ -93,7 +60,7 @@ export function HarnessStatusBadge({ h, pt = false }: { h: HarnessChatStatus; pt
 
 function HarnessCard({ h, pt }: { h: HarnessChatStatus; pt: boolean }) {
   const { setup } = h
-  const hasGuidance = !h.ready && (setup.installCmd || setup.loginCmd || setup.docUrl || setup.note)
+  const hasGuidance = !h.ready && (setup.docUrl || setup.note)
 
   return (
     <div style={{
@@ -130,25 +97,7 @@ function HarnessCard({ h, pt }: { h: HarnessChatStatus; pt: boolean }) {
       {/* Setup guidance for non-ready harnesses */}
       {hasGuidance && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingLeft: 42 }}>
-          {!h.installed && setup.installCmd && (
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: 1 }}>Install</div>
-              <CopyableCode text={setup.installCmd} />
-            </div>
-          )}
-          {h.installed && !h.authReady && setup.loginCmd && (
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: 1 }}>Authenticate</div>
-              <CopyableCode text={setup.loginCmd} />
-            </div>
-          )}
-          {/* Show login cmd even when not installed, as reference */}
-          {!h.installed && setup.loginCmd && (
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: 1 }}>Then login</div>
-              <CopyableCode text={setup.loginCmd} />
-            </div>
-          )}
+          {/* Install / sign in are buttons now — people are never asked to type a command. */}
           {setup.note && (
             <div style={{
               fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.5,

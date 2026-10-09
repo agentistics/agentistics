@@ -6,7 +6,7 @@ import { geminiDriver } from './gemini'
 import { copilotDriver } from './copilot'
 import { modelCatalog } from '../model-catalog'
 import { readHarnessDefaults } from '../sessions/harness-defaults'
-import { parseHarnessVersion } from '../sessions/harness-install-plan'
+import { readHarnessVersion } from '../sessions/harness-version'
 
 /**
  * Registry of all chat drivers in display order: claude, codex, gemini, copilot.
@@ -35,13 +35,7 @@ export async function chatHarnessStatus(): Promise<HarnessChatStatus[]> {
   return Promise.all(ALL_DRIVERS.map(async d => {
     const installed = d.isAvailable()
     const authReady = d.authReady()
-    let version: string | undefined
-    if (installed) {
-      const proc = Bun.spawn([d.id === 'claude' ? 'claude' : d.id, '--version'], { stdout: 'pipe', stderr: 'pipe' })
-      const output = await new Response(proc.stdout).text().catch(() => '')
-      await proc.exited.catch(() => 1)
-      version = parseHarnessVersion(output) ?? undefined
-    }
+    const version = installed ? await readHarnessVersion(d.id) : undefined
     const catalog = await modelCatalog(d.id)
     return {
       id: d.id,

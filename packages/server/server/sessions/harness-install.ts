@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
 import { getChatDriver } from '../chat-drivers'
+import { forgetHarnessVersion } from './harness-version'
 import {
   cleanInstallLine, planHarnessInstall, planNodeInstall, parseHarnessVersion, withUserBin,
   type HarnessInstallFacts, type HarnessInstallPlan,
@@ -167,6 +168,7 @@ export async function handleHarnessInstallRoute(
       const verifyCode = await runner(current.verify, line => { output += `${line}\n` }, 30_000).catch(() => 1)
       const version = parseHarnessVersion(output)
       if (verifyCode !== 0 || !version) { yield { type: 'error', message: 'Instalou, mas não consegui confirmar a versão. Tente de novo.' }; return }
+      forgetHarnessVersion()
       yield { type: 'done', message: 'Instalação concluída.', version }
     } finally { busy = false }
   }
