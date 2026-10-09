@@ -80,3 +80,13 @@ structured child (so the Agy driver's own addition is now redundant but harmless
 `DialogOption.freeText` to the row/fleet-hub, `promptSession` refuses a prompt while a request is open, P-07 restored
 in the chat-tail reader, `acp/launch.ts` ends children on host exit.
 
+### Engine side — merge 5, F3.3 (`7a91dc41`)
+
+| File | Resolution |
+|---|---|
+| `engine/src/acp/launch.ts` | Both kept: F2.1's child-as-own-process-group (`detached`, `killTree`) and F3.3's "end live children on the host's exit". **Semantic fix on top**: the exit hook now signals the GROUP (`process.kill(-pid)`) for a detached child — signalling only the launcher's pid would have recreated the gemini worker leak F2.1 fixed. |
+| `engine/src/acp/launch.test.ts` | Both files had a test of this name (add/add). F2.1's kept under the name; F3.3's moved to `launch-exit.test.ts`. |
+| `engine/src/structured/engine-structured.ts` | Both deps fields (`agyHistory`, `claude`) and both driver registrations. |
+| `engine/src/structured/acp-structured.test.ts` | Registry test updated for the union: claude ready (F3.3), antigravity ready (F3.2), codex still a stub. |
+| `public.pin` | Public integ commit (see "Pins"). |
+
