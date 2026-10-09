@@ -243,6 +243,11 @@ process by its PID (never by name) → the row continues as a TUI resume of the 
   tmux pane), `StructuredProvider.prepare` ensures the session-identity key, `DialogOption.freeText`
   carries a protocol-stated free-text option to the row, and `promptSession` refuses a prompt while a
   structured session states an open request. P-07 restored (d851b3fa reverted) in the public reader and
-  the engine copy. Mode cycle (`control_request set_permission_mode`) and `!` bash are not wired (Q10).
+  the engine copy. F2.0b hook: the driver launches through `req.transport`, stamps turns by `pipe.now()`,
+  writes fixed/ordered request ids (`agentistics-init`, `agentistics-interrupt-<n>`), and a re-attach of a
+  RESUMED session dedupes the transcript tail against the replayed frames by entry uuid (the protocol's
+  frames carry the transcript's uuids, 11/11 measured). Without a transport (F2.0 path) the engine's
+  launcher ends live children on the host's exit (a `claude -p` child noticed its parent's death only
+  ~3 s later). Mode cycle (`control_request set_permission_mode`) and `!` bash are not wired (Q10).
 - **gemini `storeIdOf`** must map the ACP sessionId to the store's synthetic `${dir}/${file}` (F2.1),
   or the row links to an id no reader resolves.
