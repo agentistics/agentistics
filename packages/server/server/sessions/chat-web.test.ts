@@ -8,8 +8,8 @@
  * session created from the workspace stayed un-chattable for its whole life.
  */
 
-import { test, expect } from 'bun:test'
-import { readSessionChat } from './chat-web'
+import { describe, it, test, expect } from 'bun:test'
+import { processLinkNote, readSessionChat } from './chat-web'
 
 /** A cwd that is not a project on any machine, so no transcript can ever resolve for it. */
 const NO_PROJECT = '/nonexistent/agentistics-chat-web-test'
@@ -198,4 +198,23 @@ test('EXT.OPEN: an EXTERNAL row is a running process — its conversation reads 
   const id = 'external:claude:00000000-0000-4000-8000-000000000001'
   const out = await readSessionChat(hostWithRow({ id, state: 'unknown' }), 'en', id)
   expect(out.live).toBe(true)
+})
+
+describe('processLinkNote — off Linux, the row says why its link is slower', () => {
+  it('is silent on Linux, where the process names the conversation', () => {
+    expect(processLinkNote(false, 'linux', 'codex', 'en')).toBeUndefined()
+  })
+
+  it('names the harness and the fallback off Linux for codex and kimi', () => {
+    for (const h of ['codex', 'kimi'] as const) {
+      const en = processLinkNote(false, 'darwin', h, 'en')!
+      expect(en).toContain(h)
+      expect(en).toContain('only works on Linux')
+      expect(processLinkNote(false, 'win32', h, 'pt')).toContain('só funciona no Linux')
+    }
+  })
+
+  it('is silent for a harness whose process route is its ONLY route — that row is unrecoverable, said elsewhere', () => {
+    expect(processLinkNote(true, 'darwin', 'antigravity', 'en')).toBeUndefined()
+  })
 })

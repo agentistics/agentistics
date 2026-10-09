@@ -321,8 +321,8 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          exactly the ones agentop had opened — so EVERY agy session agentop
   │                          started was unlinkable BY CONSTRUCTION, and its chat view was
   │                          permanently empty while its terminal worked perfectly. The THIRD route
-  │                          is `HARNESS_PROCESS_LOGS` (pure `agy-conversation.ts` + IO
-  │                          `process-conversation.ts`): agy opens
+  │                          is `HARNESS_PROCESS_TRANSCRIPTS` (pure `agy-conversation.ts` /
+  │                          `process-transcript.ts` + IO `process-conversation.ts`): agy opens
   │                          `~/.gemini/antigravity-cli/log/cli-<YYYYMMDD_HHMMSS>.log` per process and
   │                          HOLDS IT OPEN (verified in `/proc/<pid>/fd` of a live agy under tmux),
   │                          writing `Created conversation <uuid>` into it — so the chain `managed row
@@ -338,6 +338,26 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          time-and-directory claim. STATED LIMIT: it is a `/proc` read, so off
   │                          Linux there is no link and `chat-web.ts` says "this session has no linked
   │                          conversation yet", which is true.
+  │                          **CODEX AND KIMI RIDE THE SAME ROUTE, read by NAME** (P-17, measured
+  │                          2026-10-08 against codex 0.161.0 / kimi 0.41.0, `process-transcript.ts`).
+  │                          codex's NATIVE binary — two levels under the node shim tmux reports as
+  │                          the pane pid — holds `thread-writer-locks/<id>.lock` from spawn and
+  │                          `rollout-…-<id>.jsonl` from ~0.9 s after the first message; kimi opens
+  │                          `sessions/<ws>/session_<id>/…` ONLY WHILE WRITING (10–300 ms per write,
+  │                          sampled at 5 ms). So each entry says WHO holds (`holders`: executable
+  │                          basenames, walked down from the pane pid and NEVER below a holder — its
+  │                          children are the commands it runs, and a `cat` of another session's
+  │                          rollout must not link this row), HOW LONG (`holds: always |
+  │                          while-writing`; the second is sampled densely by `sampleProcessLinks`,
+  │                          on spawn and on every watcher event under kimi's tree via
+  │                          `transcript-activity.ts`), and whether it is the ONLY route (agy yes;
+  │                          codex/kimi keep first sighting, so off Linux they are slower, not blind,
+  │                          and `ChatPayload.linkNote` says so). The collision guard keys on the
+  │                          HOLDER pid, never the asked pid — `scanProcesses` reports a codex's shim
+  │                          AND its binary, and keyed by asked pid every codex collided with itself —
+  │                          and compares the CONVERSATION for a path-named harness, the file for agy.
+  │                          gemini (synchronous appends, never seen open) and opencode (one SQLite
+  │                          for every session) were probed and have no such route.
   │                          guess even when the store has not caught up: "not yet" and "some other
   │                          conversation in this directory" are different answers.
   │                          **A MANAGED row now carries the conversation's metrics too** — tokens,
@@ -960,7 +980,7 @@ session manager cannot spawn, attach to or read a transcript for — which is ev
 - `packages/server/server/sessions/harness-defaults.ts` — a `switch (harness)`, not a `Record`; add
   a `case` (a function-lacks-ending-return-statement error, not a `TS2741`)
 - `packages/server/server/sessions/harness-session-file.ts` — `HARNESS_SESSION_SOURCES`,
-  `HARNESS_PROCESS_LOGS`
+  `HARNESS_PROCESS_TRANSCRIPTS`
 - `packages/server/server/sessions/harness-transcript.ts` — `HARNESS_TRANSCRIPTS` (a `null` here
   must be refused IN WORDS by its caller, naming the harness — see that file's own rule)
 - `packages/server/server/sessions/limit.ts` — its per-harness rate-limit-banner table

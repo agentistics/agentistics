@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { HARNESS_ORDER } from '@agentistics/core'
 import {
-  HARNESS_PROCESS_LOGS, HARNESS_SESSION_SOURCES, chosenName, parseHarnessSessionFile, pickTitle,
+  HARNESS_PROCESS_TRANSCRIPTS, HARNESS_SESSION_SOURCES, chosenName, parseHarnessSessionFile, pickTitle,
   tmuxSessionName,
 } from './harness-session-file'
 
@@ -218,25 +218,28 @@ describe('chosenName — the nameSource values seen in real files', () => {
  * into `HARNESS_SESSION_SOURCES`, whose every rule ("a directory of JSON records keyed by pid")
  * would have had to be qualified — two shapes under one name is two sets of rules.
  */
-describe('HARNESS_PROCESS_LOGS', () => {
+describe('HARNESS_PROCESS_TRANSCRIPTS', () => {
   it('has decided about every harness — absence is a decision', () => {
-    expect(Object.keys(HARNESS_PROCESS_LOGS).sort()).toEqual([...HARNESS_ORDER].sort())
+    expect(Object.keys(HARNESS_PROCESS_TRANSCRIPTS).sort()).toEqual([...HARNESS_ORDER].sort())
   })
 
-  it('is antigravity only, because it is the one harness with no other way to be linked', () => {
+  it('is exactly the harnesses whose own process was measured naming its conversation in an open file', () => {
+    // agy (its log), codex (rollout + thread lock), kimi (session dir, while writing) — see
+    // `process-transcript.ts` for the 2026-10-08 measurements; the rest are null with a reason.
     for (const id of HARNESS_ORDER) {
-      if (id === 'antigravity') expect(HARNESS_PROCESS_LOGS[id]).not.toBeNull()
-      else expect(HARNESS_PROCESS_LOGS[id], id).toBeNull()
+      const expected = id === 'antigravity' || id === 'codex' || id === 'kimi'
+      expect(HARNESS_PROCESS_TRANSCRIPTS[id] !== null, id).toBe(expected)
     }
   })
 
-  it('reads a real captured line through the table, not only through the module', () => {
-    const src = HARNESS_PROCESS_LOGS.antigravity!
-    expect(src.conversationFrom(
+  it('reads a real captured agy line through the table, not only through the module', () => {
+    const src = HARNESS_PROCESS_TRANSCRIPTS.antigravity!
+    expect(src.conversation.from).toBe('content')
+    expect(src.conversation.read(
       'ERROR: logging before google.Init: I0908 10:03:58.569478     218 server.go:1153] '
       + 'Created conversation 39783297-b1b0-49bf-9f56-b809ee1933db',
     )).toBe('39783297-b1b0-49bf-9f56-b809ee1933db')
-    expect(src.logFromFds([
+    expect(src.fileFromFds([
       '/dev/pts/3', '/home/mithrandir/.gemini/antigravity-cli/log/cli-20260908_100356.log',
     ])).toBe('/home/mithrandir/.gemini/antigravity-cli/log/cli-20260908_100356.log')
   })

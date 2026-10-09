@@ -251,8 +251,18 @@ while its terminal worked perfectly. The limit worth stating: this is a `/proc` 
 there is no link and the chat view says "this session has no linked conversation yet", which is
 true.
 
-For codex, kimi and gemini no such link can exist — those CLIs invent an id and never
-report it — so the row says so rather than showing a guess. The fallback everything else uses matches
+**codex and kimi are linked the same way, by the file NAME.** Neither can be told an id, but each
+one's own process names its conversation in a path it opens (measured 2026-10-08 against codex
+0.161.0 and kimi 0.41.0): codex's native binary holds `~/.codex/thread-writer-locks/<id>.lock` from
+the moment it starts and `~/.codex/sessions/…/rollout-…-<id>.jsonl` from its first message; kimi
+opens `~/.kimi-code/sessions/<workspace>/session_<id>/…` only while it writes, so agentop samples it
+densely while kimi's session tree is being written. Each row is resolved through its OWN pane's
+process, so several sessions of one harness in one folder each get their own conversation — the case
+the directory-and-time fallback has to refuse. That fallback stays behind it, which is also what
+links codex and kimi off Linux (more slowly; the chat says so).
+
+For gemini no such link exists yet — the CLI invents an id, never reports it, and holds no file open
+long enough to read — so the row says so rather than showing a guess. The fallback everything else uses matches
 by harness and directory, which gives *every* session of one repository the same conversation: good
 enough to offer a reopen you confirm by its title, not good enough to be presented as the conversation
 you are in. A row that does know its conversation never falls back to that guess, even in the minutes

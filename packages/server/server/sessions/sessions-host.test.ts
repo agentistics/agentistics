@@ -535,8 +535,8 @@ describe('linkProcessConversation', () => {
     id: string
     harness: HarnessId
     pid: number
-    knownLog: string | null
-    readProcessConversation: (harness: HarnessId, pid: number, knownLog?: string | null) => Promise<string | null>
+    knownLog: { file: string; holder: number } | null
+    readProcessConversation: (harness: HarnessId, pid: number, knownLog?: { file: string; holder: number } | null) => Promise<string | null>
     recordConversation: (id: string, conversationId: string, link: 'assigned') => Promise<unknown>
   }> = {}) => ({
     id: 'm1',
@@ -603,8 +603,8 @@ describe('linkProcessConversation', () => {
   it('trusts a pre-resolved log instead of asking `readProcessConversation` to resolve it again', async () => {
     const seen: Array<string | null | undefined> = []
     await linkProcessConversation(args({
-      knownLog: '/some/cli-20260917_120000.log',
-      readProcessConversation: async (_h, _pid, knownLog) => { seen.push(knownLog); return 'conv-1' },
+      knownLog: { file: '/some/cli-20260917_120000.log', holder: 4242 },
+      readProcessConversation: async (_h, _pid, knownLog) => { seen.push(knownLog?.file); return 'conv-1' },
     }))
     expect(seen).toEqual(['/some/cli-20260917_120000.log'])
   })
@@ -688,7 +688,7 @@ describe('poll: the same-second log collision', () => {
       ],
       scanProcesses: async () => ({ procs: [] }),
       now: () => NOW,
-      resolveProcessLog: async () => 'cli-20260917_203310.log', // the SAME log for both pids
+      resolveProcessLog: async (_h, pid) => ({ file: 'cli-20260917_203310.log', holder: pid }), // the SAME log for both pids
       readProcessConversation: async (_h, pid) => `conv-of-${pid}`,
       recordConversation: async (id, cid, link) => { calls.push([id, cid, link]) },
     })
@@ -710,7 +710,7 @@ describe('poll: the same-second log collision', () => {
       ],
       scanProcesses: async () => ({ procs: [] }),
       now: () => NOW,
-      resolveProcessLog: async (_h, pid) => `cli-log-for-${pid}.log`, // DIFFERENT logs
+      resolveProcessLog: async (_h, pid) => ({ file: `cli-log-for-${pid}.log`, holder: pid }), // DIFFERENT logs
       readProcessConversation: async (_h, pid) => `conv-of-${pid}`,
       recordConversation: async (id, cid, link) => { calls.push([id, cid, link]) },
     })
@@ -737,7 +737,7 @@ describe('poll: the same-second log collision', () => {
         procs: [{ harness: 'antigravity' as const, cwd: '/elsewhere', pid: 999 }],
       }),
       now: () => NOW,
-      resolveProcessLog: async () => 'cli-20260917_203310.log', // same log as the unmanaged one
+      resolveProcessLog: async (_h, pid) => ({ file: 'cli-20260917_203310.log', holder: pid }), // same log as the unmanaged one
       readProcessConversation: async () => 'agy-conv',
       recordConversation: async (id, cid, link) => { calls.push([id, cid, link]) },
     })
@@ -758,7 +758,7 @@ describe('poll: the same-second log collision', () => {
         procs: [{ harness: 'antigravity' as const, cwd: '/elsewhere', pid: 999 }],
       }),
       now: () => NOW,
-      resolveProcessLog: async (_h, pid) => (pid === 999 ? 'cli-20260917_203310.log' : 'cli-20260917_203310.log'),
+      resolveProcessLog: async (_h, pid) => ({ file: 'cli-20260917_203310.log', holder: pid }),
       readProcessConversation: async () => 'agy-conv',
       recordConversation: async (id, cid, link) => { calls.push([id, cid, link]) },
     })
@@ -775,7 +775,7 @@ describe('poll: the same-second log collision', () => {
       readRegistry: async () => [managed('m1', { harness: 'antigravity' })],
       scanProcesses: async () => ({ procs: [] }),
       now: () => NOW,
-      resolveProcessLog: async () => 'cli-20260917_203310.log',
+      resolveProcessLog: async (_h, pid) => ({ file: 'cli-20260917_203310.log', holder: pid }),
       readProcessConversation: async () => 'agy-conv',
       recordConversation: async (id, cid, link) => { calls.push([id, cid, link]) },
     })
