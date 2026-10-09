@@ -228,6 +228,28 @@ describe('createSessionsPoller', () => {
     expect((await p.poll()).sessions[0]!.activity).toBe('working')
   })
 
+  it('a request the PROTOCOL states is carried as stated — its options, picked by number, with no keystroke spec asked (F2.1)', async () => {
+    const backend: SessionBackend = {
+      ...fakeBackend({ sessions: [backendSession('g')] }),
+      activityOf: () => 'waiting-approval',
+      dialogOf: () => ['Allow for this session', 'Allow', 'Reject'],
+    }
+    const p = poller({ backend, registry: [managed('g', { harness: 'gemini' })] })
+    const row = (await p.poll()).sessions[0]!
+    expect(row.activity).toBe('waiting-approval')
+    expect(row.dialogOptions?.map(o => o.label)).toEqual(['Allow for this session', 'Allow', 'Reject'])
+    expect(row.dialogSelect).toBe('numbered')
+    expect(row.dialogStated).toBe(true)
+  })
+
+  it('a dialog read off a SCREEN is not marked stated', async () => {
+    const p = poller({
+      backend: fakeBackend({ sessions: [backendSession('c')], frames: { c: ['Do you want to proceed?', ' ❯ 1. Yes', '   2. No', 'Esc to cancel · Tab to amend'] } }),
+      registry: [managed('c')],
+    })
+    expect((await p.poll()).sessions[0]!.dialogStated).toBeUndefined()
+  })
+
   it('never captures a dead pane', async () => {
     const captured: string[] = []
     const p = poller({

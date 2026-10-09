@@ -118,6 +118,13 @@ export interface SessionView {
    */
   dialogSelect?: 'numbered' | 'marker'
   /**
+   * The dialog's options were STATED by the session's protocol (a structured session, F2.0) rather than
+   * read off a screen — so they are answered through its driver by NUMBER whatever the harness's
+   * keystroke spec (`approval-spec.ts`) says. Without this a harness with no verified key (gemini, kimi…)
+   * showed the card and refused every option with "attach to answer it there".
+   */
+  dialogStated?: true
+  /**
    * WHY the dialog on screen could not be read, when it could not be.
    *
    * Distinct from an empty `dialogOptions`, and that distinction is the whole point: no options
@@ -482,6 +489,8 @@ export function buildSessionViews(o: {
   dialogOptions?: ReadonlyMap<string, DialogOption[]>
   /** How those options are picked, keyed by session id — see `SessionView.dialogSelect`. */
   dialogSelect?: ReadonlyMap<string, 'numbered' | 'marker'>
+  /** The ids whose dialog the protocol STATED — see `SessionView.dialogStated`. */
+  dialogStated?: ReadonlySet<string>
   /** Why the dialog could not be read, keyed by session id — see `SessionView.dialogUnreadable`. */
   dialogUnreadable?: ReadonlyMap<string, DialogUnreadable>
   /** The ids `crash-group.ts` decided fell together. A set, because the question is about a set. */
@@ -631,6 +640,7 @@ export function buildSessionViews(o: {
       ...(activity === 'waiting-approval' && o.dialogSelect?.get(r.id)
         ? { dialogSelect: o.dialogSelect.get(r.id)! }
         : {}),
+      ...(activity === 'waiting-approval' && o.dialogStated?.has(r.id) ? { dialogStated: true as const } : {}),
       ...(activity === 'waiting-approval' && o.dialogUnreadable?.get(r.id)
         ? { dialogUnreadable: o.dialogUnreadable.get(r.id)! }
         : {}),

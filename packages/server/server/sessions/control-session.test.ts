@@ -234,3 +234,37 @@ describe('a dialog agentop can SEE and cannot READ', () => {
     expect(c.canApprove).toBeUndefined()
   })
 })
+
+describe('a dialog the PROTOCOL stated (a structured session, F2.1)', () => {
+  /*
+   * Found by the first live run of gemini over ACP: the card listed the three options the protocol
+   * stated, and the row said "nobody has verified how to pick an option on gemini — attach to answer
+   * it there" — because `canChoose` asked the KEYSTROKE spec, and a structured session sends no key.
+   * The driver answers by number; the spec is irrelevant.
+   */
+  const stated = (over: Partial<SessionView> = {}) => view({
+    harness: 'gemini',
+    status: 'running',
+    activity: 'waiting-approval',
+    approvalLines: ['Permission needed: Writing to note.txt'],
+    dialogOptions: [
+      { number: 1, label: 'Allow for this session', selected: true },
+      { number: 2, label: 'Allow', selected: false },
+      { number: 3, label: 'Reject', selected: false },
+    ],
+    dialogSelect: 'numbered',
+    ...over,
+  })
+
+  it('is pickable by number, with no refusal, on a harness whose keystrokes nobody verified', () => {
+    const c = toControlSession(stated({ dialogStated: true }), S, LIVE)
+    expect(c.canChoose).toBe(true)
+    expect(c.chooseBlind).toBeUndefined()
+  })
+
+  it('a dialog READ off a screen on that same harness is still refused in words (nothing changed for tmux)', () => {
+    const c = toControlSession(stated(), S, LIVE)
+    expect(c.canChoose).toBeUndefined()
+    expect(c.chooseBlind).toBe(S.sessChooseBlind('gemini'))
+  })
+})

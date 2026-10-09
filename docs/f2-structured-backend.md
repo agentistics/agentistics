@@ -182,7 +182,7 @@ Legend: **D** declared in code · **V** verified on a real session (date + CLI v
 
 | Harness | Driver | Worker | status | assignId | resume | model | effort | MCP | instructions | live | permissions | questions | cancel | storeIdOf | Q1–Q11 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Gemini | `acp` | F2.1 | ready | — (verify `--session-id` under `--acp`) | D `session/load` | D `-m` | — | D `mcpServers` | first-message (ACP v1 has no field; gemini has no flag) | D chunks | D `request_permission` | — | D `session/cancel` | **map ACP id → synthetic `${dir}/${file}`** | |
+| Gemini | `acp` | F2.1 | ready | — (V 2026-10-09: `--session-id` is ignored under `--acp` and leaves a stray file; the link is the sessionId `session/new` states = the chat header's `sessionId` = `native_session_id`) | V `session/load` (same chat file appended; replay streams on AFTER the load result) | V `-m` before `--acp` (`_meta.quota.model_usage` names it) | — (no flag, gemini --help 0.63.0) | V `session/new mcpServers` (TRUSTED folder only; every MCP call is a permission request) | first-message, HELD and joined to the person's first words (ACP v1 has no field; no gemini flag; `GEMINI_SYSTEM_MD` would replace the system prompt) | V `agent_message_chunk` + `agent_thought_chunk` → `thinking` | V `request_permission` (`proceed_always` / `proceed_once` / `cancel`) | — (`ask_user` is EXCLUDED by gemini in `--acp`: `if (!interactive \|\| isAcpMode) extraExcludes.push(ASK_USER_TOOL_NAME)`) | V `session/cancel` (`stopReason: cancelled`, next prompt works) | identity: the ACP uuid (host bridges to the synthetic `<project>/<file>` by `native_session_id`) | see § F2.1 |
 | Kimi | `acp` | F2.2 | ready | — | D `session/load` | — (verify a flag) | — | D | first-message (verify `--agent-file` under `kimi acp`) | D | D | — | D | verify `session_<uuid>` | |
 | Copilot | `acp` | F2.3 | ready (re-verify `--acp` on 1.0.93) | — (verify `--session-id`) | D | D `--model` | — | D | flag: env `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` (verify) | D | D | — | D | verify | |
 | Codex | `codex-app-server` | F3.1 | **stub** | — (server mints the thread id) | TARGET `thread/resume` | TARGET | TARGET | TARGET `-c mcp_servers` | TARGET protocol `developerInstructions` | TARGET item deltas | TARGET approvals | TARGET | TARGET `turn/interrupt` | thread id = rollout id? | |
@@ -235,3 +235,43 @@ process by its PID (never by name) → the row continues as a TUI resume of the 
   without an option) needs a UI decision when a driver first states one (F3.3 AskUserQuestion, F3.1).
 - **gemini `storeIdOf`** must map the ACP sessionId to the store's synthetic `${dir}/${file}` (F2.1),
   or the row links to an id no reader resolves.
+
+## F2.1 — Gemini: what was measured (gemini 0.63.0, 2026-10-09) and what it changed
+
+Live script: `~/.agentistics/leader/qa/f2-1-gemini-live.sh` (throwaway server, flag ON, the engine worktree in the
+slot, real gemini on `gemini-3.5-flash-lite`). Recorded frames: engine `test/fixtures/live-probe/acp/gemini-f21.jsonl`.
+
+- **The link is the uuid itself.** `session/new` → `sessionId`; the chat file is
+  `tmp/<project>/chats/session-<ts>-<first 8 of uuid>.jsonl` and its header `sessionId` is that uuid
+  (= `SessionMeta.native_session_id`, F0.2). The file is written on the FIRST message, so the store's synthetic
+  `<project>/<file>` cannot exist at second zero; `withNativeAliases` / `resolveGeminiTranscript` bridge the uuid to
+  it on lookup. `--session-id <uuid> --acp` is **ignored** (the ACP session mints its own) and leaves an empty
+  stray file for the offered uuid, so the driver never passes it. `gemini --acp` additionally writes a
+  *bootstrap-only* second chat file per session (just `<session_context>`); `gemini-parse` already drops it.
+- **`session/load` answers after the FIRST replayed frame**; the rest of the replay streams on afterwards (a
+  prompt sent at once was answered among old frames). `AcpDriverDeps.replaySettleMs` (gemini: 300 ms quiet, cap 5 s)
+  keeps frames flagged as replay until the stream goes quiet. The replay carries gemini's `<session_context>`
+  bootstrap and each tool result (`[Function Response: <tool>]`) as USER chunks — both dropped; one user chunk is one
+  whole message (`userChunksAreMessages`). Thought chunks of the replay become the turn's `thinking`.
+- **Opening context: held, never alone.** First-message harnesses (gemini, kimi) used to send the fenced block as a
+  message of its own when there was no initial prompt — and the model *answered it* (ran `git status`, called an
+  MCP tool). It is now held and joined to the person's first `prompt()` (same moment the TUI path prepends it),
+  hidden from the chat.
+- **Questions are absent, cited**: gemini excludes its own `ask_user` tool in `--acp` mode. A question is message
+  text; the answer is the next prompt. Permissions are fully covered (3 options for file edits; MCP tools add
+  `proceed_always_server` / `proceed_always_tool`).
+- **MCP** reaches gemini only in a folder gemini *trusts* (`trustedFolders.json`); an untrusted folder drops
+  `session/new.mcpServers` silently. Declared on the row; not worked around (trust is the person's decision).
+- **Tokens**: the prompt result's `_meta.quota.token_count` (+ per-model `model_usage`) is the protocol's statement;
+  `StructuredSession.usage?()` (engine-api, additive, optional) accumulates it, and `input` equals the chat file's
+  `tokens.input` for the same turn, so the store keeps reading the full breakdown from the file. A refused turn states
+  nothing (never a 0).
+- **A model error is a turn**: a quota/503 comes back as a JSON-RPC error on `session/prompt` with no frames; the
+  chat shows `⚠ <message>` instead of silence.
+- **Process tree**: gemini relaunches its worker (`--max-old-space-size`) and the MCP servers live under that, so
+  killing the launcher pid leaked two node processes and a bun per session. `launchAcp` now starts the child as its own
+  process group and `kill` signals the group (TERM, KILL after 3 s).
+- **Host fixes this surfaced (shared, additive)**: (1) `SessionView.dialogStated` — a dialog the protocol stated is
+  pickable by number on every harness; `canChoose` used to ask the *keystroke* spec, so gemini's card was shown with
+  "nobody has verified how to pick an option on gemini — attach"; (2) a reopen pressed in the browser carries
+  `origin: 'web'` (`ResumeSessionRequest.origin`), so it resumes structured again (it was a TUI resume).

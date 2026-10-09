@@ -235,10 +235,12 @@ export function toControlSession(
     // move for a numberless one. Asking only about `choice` withheld the picker from claude's trust
     // prompt — which prints no numbers — and left the bare confirm in its place, so the only
     // reachable answer was the highlighted `No, exit`.
-    ...(needsChoice(v.dialogOptions ?? []) && canPick(approvalFor(v.harness), v.dialogSelect ?? null)
+    // A dialog the PROTOCOL stated (a structured session) is picked by number through the driver, on
+    // every harness that has one — the keystroke spec is not asked, because no key is sent.
+    ...(needsChoice(v.dialogOptions ?? []) && (v.dialogStated || canPick(approvalFor(v.harness), v.dialogSelect ?? null))
       ? { canChoose: true as const }
       : {}),
-    ...(needsChoice(v.dialogOptions ?? []) && !canPick(approvalFor(v.harness), v.dialogSelect ?? null) && harness
+    ...(needsChoice(v.dialogOptions ?? []) && !v.dialogStated && !canPick(approvalFor(v.harness), v.dialogSelect ?? null) && harness
       ? { chooseBlind: s.sessChooseBlind(harness) }
       : {}),
     // The verb exists only where BOTH halves are true: the session is asking, and somebody has read
