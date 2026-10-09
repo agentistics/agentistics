@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Pencil, Check, AlertTriangle, Info, ChevronDown } from 'lucide-react'
+import { Pencil, Check, AlertTriangle, Info, ChevronDown, Download } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { RevealButton, REVEAL_PAD } from '../../components/PasswordReveal'
 
@@ -25,7 +25,7 @@ export function ScopeNote({ children }: { children: React.ReactNode }) {
 // ConfirmModal
 // Centered confirmation dialog for destructive actions (delete/revoke/remove). Renders nothing
 // when `open` is false. Backdrop click + Escape = cancel. The confirm button is red (danger).
-export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel }: {
+export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, children, tone = 'danger' }: {
   open: boolean
   title: string
   message: string
@@ -39,6 +39,10 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
   /** Prompt shown above the input, e.g. `Type "Client X" to confirm`. */
   requireTextHint?: string
   focusCancel?: boolean
+  children?: React.ReactNode
+  /** `danger` (default): red button + warning triangle, for delete/revoke. `default`: the app's
+   *  accent button + a neutral icon, for a confirmation that destroys nothing (an install). */
+  tone?: 'danger' | 'default'
 }) {
   const isMobile = useIsMobile()
   const [typed, setTyped] = React.useState('')
@@ -63,12 +67,15 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
         display: 'flex', flexDirection: 'column', gap: 14,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ display: 'inline-flex', padding: 8, borderRadius: 9, background: 'color-mix(in srgb, #ef4444 15%, transparent)', color: '#ef4444' }}>
-            <AlertTriangle size={17} />
+          <span style={tone === 'danger'
+            ? { display: 'inline-flex', padding: 8, borderRadius: 9, background: 'color-mix(in srgb, #ef4444 15%, transparent)', color: '#ef4444' }
+            : { display: 'inline-flex', padding: 8, borderRadius: 9, background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)' }}>
+            {tone === 'danger' ? <AlertTriangle size={17} /> : <Download size={17} />}
           </span>
           <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
         </div>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, margin: 0 }}>{message}</p>
+        {children}
         {requireText !== undefined && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {requireTextHint && (
@@ -94,7 +101,7 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
           flexDirection: isMobile ? 'column-reverse' : 'row',
         }}>
           <button type="button" autoFocus={focusCancel} onClick={onCancel} style={dialogButtonStyle('secondary', isMobile)}>{cancelLabel}</button>
-          <button type="button" onClick={() => { if (armed) onConfirm() }} disabled={!armed} style={dialogButtonStyle('danger', isMobile, !armed)}>{confirmLabel}</button>
+          <button type="button" onClick={() => { if (armed) onConfirm() }} disabled={!armed} style={dialogButtonStyle(tone === 'danger' ? 'danger' : 'primary', isMobile, !armed)}>{confirmLabel}</button>
         </div>
       </div>
     </div>

@@ -171,6 +171,7 @@ export interface HarnessAnswer {
   /** What the CLI uses when the flag is not passed, and ONLY where the CLI publishes it. */
   defaultModel?: string
   defaultEffort?: string
+  installed?: boolean
 }
 
 /**

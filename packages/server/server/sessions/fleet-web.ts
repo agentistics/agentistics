@@ -801,9 +801,16 @@ export async function readNewOptions(lang: CliLang, query: string, disk?: string
     )))
     // An EMPTY list with a reason is a fault the wizard must say out loud — see `harnessNotice`.
     const notice = harnesses.length === 0 ? host.harnessNotice?.() : undefined
+    // Harnesses with an official one-click installer stay listed (greyed, with Install) when missing.
+    const labels: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini', copilot: 'Copilot' }
+    type NewHarness = { id: string; label: string; modelSuggestions: string[]; supportsModel: boolean; efforts: string[]; installed?: boolean; defaultModel?: string; defaultEffort?: string }
+    const missing: NewHarness[] = Object.keys(labels).filter(id => !harnesses.some(h => h.id === id)).map(id => ({
+      id, label: labels[id]!, modelSuggestions: [], supportsModel: false, efforts: [], installed: false,
+    }))
+    const visibleHarnesses: NewHarness[] = [...harnesses as NewHarness[], ...missing]
     return {
       ...(notice ? { unavailable: notice } : {}),
-      harnesses: harnesses.map(h => {
+      harnesses: visibleHarnesses.map(h => {
         const here = configured.get(h.id) ?? {}
         // The tool's own published default outranks the machine's, on the rare day one publishes
         // one: it is a fact about every machine, where this is a fact about ours.
@@ -816,6 +823,7 @@ export async function readNewOptions(lang: CliLang, query: string, disk?: string
           ...(defaultModel ? { defaultModel } : {}),
           supportsModel: h.supportsModel,
           efforts: [...h.efforts],
+          ...(h.installed === false ? { installed: false } : { installed: true }),
           ...(defaultEffort ? { defaultEffort } : {}),
         }
       }),

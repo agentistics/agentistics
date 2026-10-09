@@ -1,4 +1,5 @@
 import { Check } from 'lucide-react'
+import { harnessActionHint, harnessSetupNote } from '../lib/harnessNotes'
 import { t } from '@agentistics/core'
 import type { SurfaceHarnessId, HarnessCapabilities, Lang } from '@agentistics/core'
 import { HARNESS_INFO, HARNESS_LABELS, HARNESS_COLORS, HARNESS_PROVIDERS, capable } from '../lib/harness'
@@ -287,42 +288,18 @@ export function HarnessInfoPanel({ harness, lang }: Props) {
               </div>
 
               {/* Setup guidance */}
-              {chatStatus.setup.installCmd && !chatStatus.installed && (
-                <div>
-                  <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 3 }}>
-                    {t('harness.panel.install_label', lang)}
-                  </div>
-                  <div style={{
-                    fontFamily: MONO, fontSize: 11, color: 'var(--text-secondary)',
-                    background: 'var(--bg-surface)', border: '1px solid var(--border)',
-                    borderRadius: 5, padding: '4px 8px', wordBreak: 'break-all',
-                  }}>
-                    {chatStatus.setup.installCmd}
-                  </div>
-                </div>
+              {!chatStatus.ready && (
+                <p style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
+                  {harnessActionHint(chatStatus.installed, lang)}
+                </p>
               )}
 
-              {chatStatus.setup.loginCmd && chatStatus.installed && !chatStatus.authReady && (
-                <div>
-                  <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 3 }}>
-                    {t('harness.panel.login_label', lang)}
-                  </div>
-                  <div style={{
-                    fontFamily: MONO, fontSize: 11, color: 'var(--text-secondary)',
-                    background: 'var(--bg-surface)', border: '1px solid var(--border)',
-                    borderRadius: 5, padding: '4px 8px', wordBreak: 'break-all',
-                  }}>
-                    {chatStatus.setup.loginCmd}
-                  </div>
-                </div>
-              )}
-
-              {chatStatus.setup.note && (
+              {harnessSetupNote(chatStatus.id, lang) && (
                 <p style={{
                   fontSize: 11, color: 'var(--text-tertiary)', fontStyle: 'italic',
                   lineHeight: 1.5, margin: 0,
                 }}>
-                  {chatStatus.setup.note}
+                  {harnessSetupNote(chatStatus.id, lang)}
                 </p>
               )}
 

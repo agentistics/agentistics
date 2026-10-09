@@ -1,45 +1,19 @@
 import React, { useState } from 'react'
-import { useOutletContext } from 'react-router-dom'
-import { Cpu, Copy, CheckCheck, AlertCircle, CircleDot, ExternalLink } from 'lucide-react'
+import { useNavigate, useOutletContext } from 'react-router-dom'
+import { useIsMobile } from '../../hooks/useIsMobile'
+import { Cpu, AlertCircle, CircleDot, ExternalLink } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
-import { useChatHarnesses, type HarnessChatStatus } from '../../hooks/useChatHarnesses'
-import { SectionHeader } from './primitives'
+import { loginHarness, useChatHarnesses, type HarnessChatStatus } from '../../hooks/useChatHarnesses'
+import { SectionHeader, dialogButtonStyle } from './primitives'
+import { HarnessInstallDialog } from '../../components/HarnessInstallDialog'
+import { sessionPath } from '../../lib/sessionRoute'
+import { harnessSetupNote } from '../../lib/harnessNotes'
 import { CenteredLoader } from '../../components/CenteredLoader'
 
-function CopyableCode({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
-  const copy = () => {
-    void navigator.clipboard.writeText(text).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1800)
-    })
+export function HarnessStatusBadge({ h, pt = false }: { h: HarnessChatStatus; pt?: boolean }) {
+  if (h.updateAvailable) {
+    return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: 'var(--anthropic-orange)', background: 'color-mix(in srgb, var(--anthropic-orange) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--anthropic-orange) 30%, transparent)', padding: '2px 8px', borderRadius: 20 }}>{pt ? 'Atualização disponível' : 'Update available'}</span>
   }
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 6,
-      background: 'var(--bg-card)', border: '1px solid var(--border)',
-      borderRadius: 6, padding: '5px 10px', marginTop: 5,
-    }}>
-      <code style={{ flex: 1, fontSize: 11.5, color: 'var(--text-primary)', fontFamily: 'monospace', wordBreak: 'break-all' }}>
-        {text}
-      </code>
-      <button
-        onClick={copy}
-        title="Copy"
-        style={{
-          background: 'transparent', border: 'none', cursor: 'pointer',
-          color: copied ? 'var(--accent-green)' : 'var(--text-tertiary)',
-          display: 'flex', alignItems: 'center', padding: 2, flexShrink: 0,
-          transition: 'color 0.15s',
-        }}
-      >
-        {copied ? <CheckCheck size={13} /> : <Copy size={13} />}
-      </button>
-    </div>
-  )
-}
-
-function HarnessStatusBadge({ h }: { h: HarnessChatStatus }) {
   if (h.ready) {
     return (
       <span style={{
@@ -51,7 +25,7 @@ function HarnessStatusBadge({ h }: { h: HarnessChatStatus }) {
         padding: '2px 8px', borderRadius: 20,
       }}>
         <CircleDot size={10} />
-        Ready
+        {h.version ? `${pt ? 'Instalado' : 'Installed'} · v${h.version}` : (pt ? 'Instalado' : 'Installed')}
       </span>
     )
   }
@@ -66,7 +40,7 @@ function HarnessStatusBadge({ h }: { h: HarnessChatStatus }) {
         padding: '2px 8px', borderRadius: 20,
       }}>
         <AlertCircle size={10} />
-        Not installed
+        {pt ? 'Não instalado' : 'Not installed'}
       </span>
     )
   }
@@ -74,20 +48,21 @@ function HarnessStatusBadge({ h }: { h: HarnessChatStatus }) {
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: 4,
       fontSize: 11, fontWeight: 700,
-      color: '#f97316',
-      background: 'rgba(249,115,22,0.10)',
-      border: '1px solid rgba(249,115,22,0.28)',
+      color: 'var(--anthropic-orange)',
+      background: 'color-mix(in srgb, var(--anthropic-orange) 12%, transparent)',
+      border: '1px solid color-mix(in srgb, var(--anthropic-orange) 30%, transparent)',
       padding: '2px 8px', borderRadius: 20,
     }}>
       <AlertCircle size={10} />
-      Not authenticated
+        {pt ? 'Precisa entrar na conta' : 'Needs sign-in'}{h.version ? ` · v${h.version}` : ''}
     </span>
   )
 }
 
-function HarnessCard({ h }: { h: HarnessChatStatus }) {
+function HarnessCard({ h, pt, action }: { h: HarnessChatStatus; pt: boolean; action?: React.ReactNode }) {
   const { setup } = h
-  const hasGuidance = !h.ready && (setup.installCmd || setup.loginCmd || setup.docUrl || setup.note)
+  const note = harnessSetupNote(h.id, pt ? 'pt' : 'en')
+  const hasGuidance = !h.ready && (setup.docUrl || note)
 
   return (
     <div style={{
@@ -110,7 +85,7 @@ function HarnessCard({ h }: { h: HarnessChatStatus }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{h.label}</span>
-            <HarnessStatusBadge h={h} />
+            <HarnessStatusBadge h={h} pt={pt} />
           </div>
           {h.ready && h.models.length > 0 && (
             <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
@@ -119,38 +94,21 @@ function HarnessCard({ h }: { h: HarnessChatStatus }) {
             </div>
           )}
         </div>
+        {action}
       </div>
 
       {/* Setup guidance for non-ready harnesses */}
       {hasGuidance && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingLeft: 42 }}>
-          {!h.installed && setup.installCmd && (
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: 1 }}>Install</div>
-              <CopyableCode text={setup.installCmd} />
-            </div>
-          )}
-          {h.installed && !h.authReady && setup.loginCmd && (
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: 1 }}>Authenticate</div>
-              <CopyableCode text={setup.loginCmd} />
-            </div>
-          )}
-          {/* Show login cmd even when not installed, as reference */}
-          {!h.installed && setup.loginCmd && (
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: 1 }}>Then login</div>
-              <CopyableCode text={setup.loginCmd} />
-            </div>
-          )}
-          {setup.note && (
+          {/* Install / sign in are buttons now — people are never asked to type a command. */}
+          {note && (
             <div style={{
               fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.5,
               padding: '5px 8px', borderRadius: 6,
               background: 'var(--bg-secondary)', border: '1px solid var(--border)',
               marginTop: 2,
             }}>
-              {setup.note}
+              {note}
             </div>
           )}
           {setup.docUrl && (
@@ -165,7 +123,7 @@ function HarnessCard({ h }: { h: HarnessChatStatus }) {
               }}
             >
               <ExternalLink size={11} />
-              Learn more / check eligibility
+              {pt ? 'Saiba mais / confira a elegibilidade' : 'Learn more / check eligibility'}
             </a>
           )}
         </div>
@@ -177,7 +135,19 @@ function HarnessCard({ h }: { h: HarnessChatStatus }) {
 export default function HarnessesSettings() {
   const ctx = useOutletContext<AppContext>()
   const pt = ctx.lang === 'pt'
-  const { harnesses, loading } = useChatHarnesses()
+  const { harnesses, loading, reload } = useChatHarnesses()
+  const navigate = useNavigate()
+  const isMobile = useIsMobile()
+  const [target, setTarget] = useState<HarnessChatStatus | null>(null)
+  const [signingIn, setSigningIn] = useState<string | null>(null)
+  const [notice, setNotice] = useState('')
+  const signIn = async (h: HarnessChatStatus) => {
+    setSigningIn(h.id); setNotice('')
+    const out = await loginHarness(h.id, pt ? 'pt' : 'en')
+    setSigningIn(null)
+    if (out.ok && out.id) navigate(sessionPath(out.id))
+    else setNotice(out.message || (pt ? 'Não consegui abrir o login agora. Tente de novo.' : 'Could not open the sign-in right now. Try again.'))
+  }
   const readyCount = harnesses.filter(h => h.ready).length
 
   return (
@@ -198,7 +168,19 @@ export default function HarnessesSettings() {
       ) : (
         <>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {harnesses.map(h => <HarnessCard key={h.id} h={h} />)}
+            {harnesses.map(h => {
+              const needsSignIn = h.installed && !h.authReady
+              const actionable = !h.ready || h.updateAvailable === true
+              const action = actionable ? (
+                <button type="button" disabled={signingIn === h.id} onClick={() => {
+                  if (needsSignIn) { void signIn(h); return }
+                  setTarget(h)
+                }} style={{ ...dialogButtonStyle('secondary', isMobile), width: undefined, flexShrink: 0, color: 'var(--text-primary)', background: 'var(--bg-card)' }}>
+                  {needsSignIn ? (pt ? 'Entrar' : 'Sign in') : h.installed ? (pt ? 'Atualizar' : 'Update') : (pt ? 'Instalar' : 'Install')}
+                </button>
+              ) : undefined
+              return <HarnessCard key={h.id} h={h} pt={pt} action={action} />
+            })}
           </div>
           <div style={{
             marginTop: 14, padding: '10px 14px', borderRadius: 8,
@@ -206,11 +188,13 @@ export default function HarnessesSettings() {
             fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.6,
           }}>
             {pt
-              ? `${readyCount} de ${harnesses.length} backends prontos. Instalação e autenticação devem ser feitas no terminal — o Agentistics não executa comandos automaticamente.`
-              : `${readyCount} of ${harnesses.length} backend${harnesses.length !== 1 ? 's' : ''} ready. Install and authenticate in your terminal — Agentistics does not run commands on your behalf.`}
+              ? `${readyCount} de ${harnesses.length} backends prontos. Instale e entre na conta pelos botões acima.`
+              : `${readyCount} of ${harnesses.length} backends ready. Install and sign in with the buttons above.`}
           </div>
         </>
       )}
+      {notice && <div role="alert" style={{ marginTop: 10, fontSize: 12, color: 'var(--text-secondary)' }}>{notice}</div>}
+      <HarnessInstallDialog target={target} pt={pt} onClose={() => setTarget(null)} onDone={() => reload()} />
     </div>
   )
 }
