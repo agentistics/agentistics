@@ -10,6 +10,36 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.113.0': {
+    features: [
+      {
+        pt: 'Toda sessão nova abre direto no chat, em qualquer assistente (Codex, Gemini, Kimi, Copilot…), mesmo antes da primeira mensagem. O terminal fica a um clique.',
+        en: 'Every new session opens straight on the chat, in any assistant (Codex, Gemini, Kimi, Copilot…), even before the first message. The terminal is one click away.',
+      },
+      {
+        pt: 'Um ⓘ ao lado do título mostra quem iniciou a sessão, as sessões que ela iniciou e a tarefa ligada; clique para ir até elas.',
+        en: 'An ⓘ next to the title shows who started the session, the sessions it started and its linked task; click to go to them.',
+      },
+      {
+        pt: 'Clique com o botão direito (ou toque longo) num link de uma mensagem para copiar só o link ou abrir numa nova aba.',
+        en: 'Right-click (or long-press) a link in a message to copy just the link or open it in a new tab.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'A primeira mensagem de uma sessão nova, com ou sem anexo, aparece uma vez só e não se perde.',
+        en: 'The first message of a new session, with or without an attachment, shows once and is never lost.',
+      },
+      {
+        pt: 'As respostas do Codex e do Kimi chegam ao chat em segundos, não mais depois de vários minutos.',
+        en: 'Codex and Kimi replies reach the chat in seconds, no longer after several minutes.',
+      },
+      {
+        pt: '"Esta sessão" mostra o nome real do modelo (por exemplo, Opus 5.5).',
+        en: '"This session" shows the real model name (for example, Opus 5.5).',
+      },
+    ],
+  },
   '2.112.1': {
     features: [
       {
