@@ -1716,7 +1716,7 @@ const WHILE_WRITING_SPAWN_WINDOW_MS = 20_000
 const WHILE_WRITING_ACTIVITY_WINDOW_MS = 3_000
 
 /** One dense sampling run over this machine's own rows of `harness` — see `sampleProcessLinks`. */
-async function sampleLinksFor(harness: HarnessId, deadline: () => number, onlyIds?: ReadonlySet<string>): Promise<number> {
+async function sampleLinksFor(harness: HarnessId, deadline: () => number, onlyIds?: ReadonlySet<string>, follow = false): Promise<number> {
   const backend = await resolveBackend()
   // Other live processes of this harness join the collision guard; scanned ONCE per run, because a
   // full `/proc` scan every 100 ms is exactly the cost this loop must not have.
@@ -1731,6 +1731,7 @@ async function sampleLinksFor(harness: HarnessId, deadline: () => number, onlyId
     deadline,
     intervalMs: WHILE_WRITING_INTERVAL_MS,
     ...(onlyIds ? { onlyIds } : {}),
+    ...(follow ? { follow } : {}),
     otherPids: procs.filter(p => p.harness === harness && p.pid !== undefined).map(p => p.pid!),
   })
 }
@@ -1742,8 +1743,9 @@ function recordProcessLink(sid: string, conversationId: string, link: 'assigned'
 }
 
 /**
- * Burst-sample whenever the watcher reports a write under a `while-writing` harness's session tree.
- * One run per harness at a time: a write during a run EXTENDS it rather than starting another.
+ * Burst-sample whenever the watcher reports a write under a `while-writing` harness's session tree —
+ * the unlinked rows AND the linked rows that follow their process, so a kimi that moved to a new
+ * session (`/new`, even on a reopened row) is caught while it writes. One run per harness at a time: a write during a run EXTENDS it rather than starting another.
  * Installed once, by the first poller this process builds — the same process that runs the watcher
  * (`agentop server`); a process with no watcher simply never hears of any activity.
  */
@@ -1759,7 +1761,7 @@ function listenForTranscriptActivity(): void {
     if (running) { running.until = until; return }
     const burst = { until }
     activityBursts.set(harness, burst)
-    void sampleLinksFor(harness, () => burst.until)
+    void sampleLinksFor(harness, () => burst.until, undefined, true)
       .catch(() => 0)
       .finally(() => activityBursts.delete(harness))
   })
