@@ -7,6 +7,7 @@ import { loginHarness, useChatHarnesses, type HarnessChatStatus } from '../../ho
 import { SectionHeader, dialogButtonStyle } from './primitives'
 import { HarnessInstallDialog } from '../../components/HarnessInstallDialog'
 import { sessionPath } from '../../lib/sessionRoute'
+import { harnessSetupNote } from '../../lib/harnessNotes'
 import { CenteredLoader } from '../../components/CenteredLoader'
 
 export function HarnessStatusBadge({ h, pt = false }: { h: HarnessChatStatus; pt?: boolean }) {
@@ -60,7 +61,8 @@ export function HarnessStatusBadge({ h, pt = false }: { h: HarnessChatStatus; pt
 
 function HarnessCard({ h, pt, action }: { h: HarnessChatStatus; pt: boolean; action?: React.ReactNode }) {
   const { setup } = h
-  const hasGuidance = !h.ready && (setup.docUrl || setup.note)
+  const note = harnessSetupNote(h.id, pt ? 'pt' : 'en')
+  const hasGuidance = !h.ready && (setup.docUrl || note)
 
   return (
     <div style={{
@@ -99,14 +101,14 @@ function HarnessCard({ h, pt, action }: { h: HarnessChatStatus; pt: boolean; act
       {hasGuidance && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingLeft: 42 }}>
           {/* Install / sign in are buttons now — people are never asked to type a command. */}
-          {setup.note && (
+          {note && (
             <div style={{
               fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.5,
               padding: '5px 8px', borderRadius: 6,
               background: 'var(--bg-secondary)', border: '1px solid var(--border)',
               marginTop: 2,
             }}>
-              {setup.note}
+              {note}
             </div>
           )}
           {setup.docUrl && (
@@ -121,7 +123,7 @@ function HarnessCard({ h, pt, action }: { h: HarnessChatStatus; pt: boolean; act
               }}
             >
               <ExternalLink size={11} />
-              Learn more / check eligibility
+              {pt ? 'Saiba mais / confira a elegibilidade' : 'Learn more / check eligibility'}
             </a>
           )}
         </div>
