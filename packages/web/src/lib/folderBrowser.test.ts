@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { breadcrumbs, diskLabel, rootLabels, shortPath } from './folderBrowser'
+import { breadcrumbs, diskLabel, rootLabels, shortPath, startFolderPath } from './folderBrowser'
 
 describe('breadcrumbs', () => {
   test('top only for the disk list', () => {
@@ -53,5 +53,10 @@ describe('disk names', () => {
     const labels = rootLabels(['/home/a', '/mnt/d'], disks, true)
     expect(breadcrumbs('/mnt/d/work', ['/home/a', '/mnt/d'], 'Discos', labels).map(c => c.label)).toEqual(['Discos', 'Disco D:', 'work'])
     expect(breadcrumbs('/home/a/x', ['/home/a', '/mnt/d'], 'Discos', labels).map(c => c.label)).toEqual(['Discos', 'Este disco', 'x'])
+  })
+  test('the folder browser starts on the selected non-install disk', () => {
+    expect(startFolderPath({ path: '/mnt/c', install: false }, '/home/me')).toBe('/mnt/c')
+    expect(startFolderPath({ path: '/', install: true }, '/home/me')).toBe('/home/me')
+    expect(startFolderPath(null, '/home/me')).toBe('/home/me')
   })
 })

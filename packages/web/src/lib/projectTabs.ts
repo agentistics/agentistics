@@ -66,7 +66,10 @@ export function kindHint(tab: ProjectTab, pt: boolean): string {
  * `anyProjects` is what tells the last two apart, and it is why this takes the whole picture rather
  * than just the tab's own rows.
  */
-export function kindEmpty(tab: ProjectTab, query: string, anyProjects: boolean, pt: boolean): string {
+export function kindEmpty(
+  tab: ProjectTab, query: string, anyProjects: boolean, pt: boolean,
+  disk?: { selected: boolean; indexing: boolean; visited: number },
+): string {
   const searching = query.trim() !== ''
   if (searching) {
     return pt
@@ -78,9 +81,19 @@ export function kindEmpty(tab: ProjectTab, query: string, anyProjects: boolean, 
       ? `Nenhum item desta aba. ${kindHint(tab, pt)} As outras abas têm itens.`
       : `Nothing of this kind. ${kindHint(tab, pt)} The other tabs have items.`
   }
+  if (disk?.selected && disk.indexing) {
+    return pt
+      ? `Procurando projetos neste disco… (${disk.visited} pastas vistas)`
+      : `Looking for projects on this disk… (${disk.visited} folders seen)`
+  }
+  if (disk?.selected && !disk.indexing) {
+    return pt
+      ? 'Nenhum projeto encontrado neste disco. Use "Procurar pasta…" para escolher qualquer pasta.'
+      : 'No projects found on this disk. Use "Browse folder…" to choose any folder.'
+  }
   return pt
-    ? 'Nada para abrir aqui ainda. Digite um caminho completo para usar qualquer pasta da máquina.'
-    : 'Nothing to open here yet. Type a full path to use any folder on the machine.'
+    ? 'Nada para abrir aqui ainda. Use "Procurar pasta…" para escolher qualquer pasta.'
+    : 'Nothing to open here yet. Use "Browse folder…" to choose any folder.'
 }
 
 /** How long the field runs ahead of the search. Imperceptible, and one request per word. */

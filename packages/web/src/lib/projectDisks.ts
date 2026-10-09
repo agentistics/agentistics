@@ -67,3 +67,10 @@ export function toggleRoot(roots: string[], path: string, on: boolean, disks: Pr
     : roots.filter(r => !samePath(r, path))
   return next.filter(r => r.trim() && !disks.some(d => d.isInstallDisk && samePath(d.path, r)))
 }
+
+/** Keep the explicit all-disks tab; it is not a missing disk id. */
+export function projectDiskAfterResponse(current: string, disks: Pick<ProjectDisk, 'path' | 'isInstallDisk'>[]): string {
+  if (current === 'all') return 'all'
+  if (current && disks.some(d => d.path === current)) return current
+  return disks.find(d => d.isInstallDisk)?.path ?? disks[0]?.path ?? current
+}

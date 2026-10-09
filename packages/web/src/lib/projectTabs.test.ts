@@ -48,8 +48,15 @@ describe('kindEmpty — never one shared empty box', () => {
   })
 
   it('answers in Portuguese too', () => {
-    expect(kindEmpty('all', '', false, true)).toContain('Nada para abrir aqui ainda')
+    expect(kindEmpty('all', '', false, true)).toContain('Use "Procurar pasta…"')
     expect(kindEmpty('repo', 'x', true, true)).toContain('repositórios')
+  })
+
+  it('describes the selected disk while indexing and after an empty scan', () => {
+    expect(kindEmpty('all', '', false, true, { selected: true, indexing: true, visited: 7 }))
+      .toBe('Procurando projetos neste disco… (7 pastas vistas)')
+    expect(kindEmpty('all', '', false, false, { selected: true, indexing: false, visited: 7 }))
+      .toContain('No projects found on this disk')
   })
 })
 
@@ -155,4 +162,3 @@ describe('kindCount / kindMore — the tabs say what is THERE, not what fits', (
     expect(kindMore(12, 5, true)).toBe(null)
   })
 })
-

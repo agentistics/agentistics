@@ -48,6 +48,7 @@ import { attachSession, createTask, useTaskList, type TaskDetail } from '../../l
 import { BlockedSubtaskResolve } from '../tasks/BlockedSubtaskResolve'
 import { deliveryHint, suggestDelivery } from '../../lib/taskSuggest'
 import { useFleetNewOptions, type FleetProjectOption } from '../../hooks/useFleetNewOptions'
+import { ConfirmModal } from '../../pages/settings/primitives'
 import { forcedNote, isAdmissionRefusal } from '../../lib/spawnAdmission'
 import { pushNotification } from '../../lib/notifications'
 import {
@@ -145,6 +146,8 @@ export function NewSessionModal({
   }, [nativeOptions.providers, nativeProvider])
 
   const [harness, setHarness] = useState<HarnessOption | null>(null)
+  const [dirty, setDirty] = useState(false)
+  const [confirmClose, setConfirmClose] = useState(false)
   // Prefer a PRESET's own harness when this machine can actually start it; otherwise pre-select the
   // only assistant there is — a one-item picker is a question with one answer. Runs whenever the
   // list changes rather than only once, so a slow first fetch still resolves it the moment it lands.
@@ -216,7 +219,7 @@ export function NewSessionModal({
    * session is actually FILED, not merely labelled. See spec 2026-09-11 §C.2.
    */
   function acceptHint(h: NonNullable<typeof hint>): void {
-    setTask(h.title)
+    setTask(h.title); setDirty(true)
     const matchedId = taskRows?.find(r => r.task.title === h.title)?.task.id
     setSubtaskTarget(matchedId ? { taskId: matchedId } : null)
   }
@@ -250,6 +253,8 @@ export function NewSessionModal({
   const [attachments, setAttachments] = useState<{ name: string; path: string }[]>([])
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const requestClose = () => { if (dirty) setConfirmClose(true); else onClose() }
 
   /** The selected assistant in the pure module's shape. One mapping, read by everything below —
    *  see `toWizardHarness`, shared with `StagedSessionCompose`. */
@@ -327,11 +332,11 @@ export function NewSessionModal({
       // already given, over a keypress the user meant for the dropdown.
       if (modelOpen) setModelOpen(false)
       else if (providerOpen) setProviderOpen(false)
-      else onClose()
+      else requestClose()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [onClose, modelOpen, providerOpen])
+  }, [modelOpen, providerOpen, dirty])
 
   /**
    * Wait for the row to exist before handing the caller its id.
@@ -388,6 +393,7 @@ export function NewSessionModal({
         const json = await res.json() as { ok: boolean; path?: string; name?: string; message?: string }
         if (json.ok && json.path && json.name) {
           setAttachments(a => [...a, { name: json.name!, path: json.path! }])
+          setDirty(true)
         } else {
           setNotice(json.message ?? (pt ? 'O anexo falhou.' : 'The attachment failed.'))
         }
@@ -691,7 +697,7 @@ export function NewSessionModal({
       role="dialog"
       aria-modal="true"
       aria-label={pt ? 'Nova sessão' : 'New session'}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+      onClick={e => { if (e.target === e.currentTarget) requestClose() }}
       style={{
         position: 'fixed', inset: 0, zIndex: 400,
         background: 'var(--ag-scrim)', backdropFilter: 'blur(3px)',
@@ -711,7 +717,7 @@ export function NewSessionModal({
             {pt ? 'Nova sessão' : 'New session'}
           </h2>
           <button
-            onClick={onClose}
+            onClick={requestClose}
             aria-label={pt ? 'Fechar' : 'Close'}
             style={{
               display: 'flex', width: 30, height: 30, alignItems: 'center', justifyContent: 'center',
@@ -798,7 +804,7 @@ export function NewSessionModal({
               lang={lang}
               harnesses={harnesses}
               value={harness?.id ?? ''}
-              onChange={id => setHarness(harnesses?.find(h => h.id === id) ?? null)}
+              onChange={id => { setHarness(harnesses?.find(h => h.id === id) ?? null); setDirty(true) }}
               {...(unavailable ? { notice: unavailable } : {})}
               {...(retryable ? { onRetry: retry } : {})}
             />
@@ -813,7 +819,7 @@ export function NewSessionModal({
                 open={providerOpen}
                 onOpenChange={setProviderOpen}
                 value={nativeProvider}
-                onChange={id => { setNativeProvider(id); setModel('') }}
+                onChange={id => { setNativeProvider(id); setModel(''); setDirty(true) }}
                 ariaLabel={pt ? 'Provedor' : 'Provider'}
                 options={nativeOptions.providers ?? []}
                 unsetLabel={nativeOptions.providers === null ? (pt ? 'Carregando…' : 'Loading…') : (pt ? 'Nenhum' : 'None')}
@@ -849,7 +855,7 @@ export function NewSessionModal({
                 open={modelOpen}
                 onOpenChange={setModelOpen}
                 value={model}
-                onChange={setModel}
+                onChange={v => { setModel(v); setDirty(true) }}
                 options={wizardHarness!.models}
                 unsetLabel={modelUnset}
                 freeText={wizardHarness!.modelFreeText === true}
@@ -861,7 +867,7 @@ export function NewSessionModal({
             <Field label={pt ? 'Esforço (opcional)' : 'Effort (optional)'} hint={pt
               ? `Mais esforço pensa por mais tempo e custa mais. Sem escolha: ${effortUnset}.`
               : `More effort thinks for longer and costs more. Left unset: ${effortUnset}.`}>
-              <EffortPicker efforts={wizardHarness!.efforts} value={effort} onChange={setEffort} />
+              <EffortPicker efforts={wizardHarness!.efforts} value={effort} onChange={v => { setEffort(v); setDirty(true) }} />
             </Field>
           )}
 
@@ -873,7 +879,7 @@ export function NewSessionModal({
             : 'It is how you find this session in the list later.'}>
             <input
               value={label}
-              onChange={e => setLabel(e.target.value)}
+              onChange={e => { setLabel(e.target.value); setDirty(true) }}
               placeholder={pt ? 'O que esta sessão é…' : 'What this session is…'}
               aria-label={pt ? 'Título' : 'Title'}
               aria-required
@@ -900,7 +906,7 @@ export function NewSessionModal({
               onQueryChange={setQuery}
               searching={searching}
               value={cwd}
-              onChange={setCwd}
+              onChange={v => { setCwd(v); setDirty(true) }}
             />
           </Field>
 
@@ -966,7 +972,7 @@ export function NewSessionModal({
               title={boardCopy(lang).fileUnder}
               lang={lang}
               onPick={pick => {
-                setTask(pick.taskTitle)
+                setTask(pick.taskTitle); setDirty(true)
                 setSubtaskTarget({ taskId: pick.taskId, subtaskId: pick.subtaskId })
                 setPickingTask(false)
               }}
@@ -985,7 +991,7 @@ export function NewSessionModal({
           >
             <textarea
               value={prompt}
-              onChange={e => setPrompt(e.target.value)}
+              onChange={e => { setPrompt(e.target.value); setDirty(true) }}
               onPaste={onPastePrompt}
               onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault() }}
               onDrop={e => {
@@ -1019,7 +1025,7 @@ export function NewSessionModal({
                   <Paperclip size={11} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />
                   <span style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
                   <button
-                    onClick={() => setAttachments(list => list.filter(x => x.path !== a.path))}
+                    onClick={() => { setAttachments(list => list.filter(x => x.path !== a.path)); setDirty(true) }}
                     aria-label={pt ? `Remover ${a.name}` : `Remove ${a.name}`}
                     style={{
                       display: 'flex', border: 'none', background: 'transparent', cursor: 'pointer',
@@ -1070,7 +1076,7 @@ export function NewSessionModal({
             </span>
           )}
           <button
-            onClick={() => (stepIndex === 0 ? onClose() : setStep(prevStep(step)))}
+            onClick={() => (stepIndex === 0 ? requestClose() : setStep(prevStep(step)))}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
               padding: '9px 14px', borderRadius: 9, cursor: 'pointer',
@@ -1141,6 +1147,18 @@ export function NewSessionModal({
           </>)}
         </footer>
       </div>
+      <ConfirmModal
+        open={confirmClose}
+        title={pt ? 'Fechar nova sessão?' : 'Close new session?'}
+        message={pt
+          ? 'Você não terminou de criar a sessão. Fechar vai descartar o que você preencheu.'
+          : "You haven't finished creating the session. Closing will discard what you filled in."}
+        cancelLabel={pt ? 'Continuar criando' : 'Keep creating'}
+        confirmLabel={pt ? 'Descartar e fechar' : 'Discard and close'}
+        onCancel={() => setConfirmClose(false)}
+        onConfirm={() => { setConfirmClose(false); onClose() }}
+        focusCancel
+      />
     </div>
   )
 }

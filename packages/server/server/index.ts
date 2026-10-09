@@ -142,6 +142,7 @@ import { getAccount } from './accounts'
 import { getTeam } from './teams'
 import { discoverProjectDisks } from './disk-picker'
 import { allowedRoots, listFolders, rootListing } from './fs-folders'
+import { forgetProjects } from './sessions/project-source'
 
 // ---------------------------------------------------------------------------
 // Reads the first `cwd` field found in a JSONL session file.
@@ -1034,6 +1035,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           }
         }
         await writePreferences(body)
+        if (body.scanRoots !== undefined) forgetProjects()
         // On an archive-mode change, refresh the cache and immediately persist:
         // 'full' also mirrors raw files; any non-off mode warms a build that
         // writes the consolidated metrics store.

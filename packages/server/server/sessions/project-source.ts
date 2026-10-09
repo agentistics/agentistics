@@ -32,6 +32,8 @@ import {
 /** Long enough that reopening the wizard is instant, short enough that a repo cloned a minute ago
  *  shows up without restarting the control center. */
 const CACHE_TTL_MS = 60_000
+/** A slow/unreachable filesystem must not own the background refresh forever. */
+const BACKGROUND_STEP_TIMEOUT_MS = 2_000
 
 interface ProjectCache { at: number; candidates: ProjectCandidate[]; indexing: boolean; indexProgress: DiskIndexProgress[] }
 let cache: ProjectCache | null = null
@@ -59,11 +61,26 @@ async function readHistoryAndRoots(): Promise<{ history: ProjectCandidate[]; roo
     loadConsolidated().then(m => buildCandidates([...m.values()])).catch(() => [] as ProjectCandidate[]),
     readPreferences().then(p => p.scanRoots ?? []).catch(() => [] as string[]),
   ])
-  const scanRoots = [...new Map(
+  return { history, roots: normalizeScanRoots(roots) }
+}
+
+function normalizeScanRoots(roots: string[]): string[] {
+  return [...new Map(
     [homedir(), ...roots.map(root => pathForHost(root, process.platform === 'win32' ? 'win32' : 'linux'))]
       .filter(Boolean).map(root => [projectPathKey(root), root] as const),
   ).values()]
-  return { history, roots: scanRoots }
+}
+
+async function readScanRoots(): Promise<string[]> {
+  const roots = await readPreferences().then(p => p.scanRoots ?? []).catch(() => [])
+  return normalizeScanRoots(roots)
+}
+
+function withTimeout<T>(promise: Promise<T>, fallback: T, timeoutMs = BACKGROUND_STEP_TIMEOUT_MS): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>(resolve => setTimeout(() => resolve(fallback), timeoutMs)),
+  ])
 }
 
 function startBackgroundIndex(history: ProjectCandidate[], scanRoots: string[]): void {
@@ -84,7 +101,7 @@ function startBackgroundIndex(history: ProjectCandidate[], scanRoots: string[]):
     diskIndex.start()
     const scannedGroups = await Promise.all(regularRoots.map(root => {
       const options: ScanOptions = { timeBudgetMs: 1_000 }
-      return scanDirectories(root, options).catch(() => [])
+      return withTimeout(scanDirectories(root, options).catch(() => []), [])
     }))
     regularWalked = scannedGroups.flat().map(d => ({
       path: d.path, name: d.name, remote: '', lastSeenMs: 0, sessions: 0,
@@ -97,7 +114,7 @@ function startBackgroundIndex(history: ProjectCandidate[], scanRoots: string[]):
     let candidates = mergeWalkedAndHistory(visibleCandidates([...regularWalked, ...diskWalked]), visibleCandidates(history))
     const unresolved = candidates.filter(c => c.worktree === undefined)
     if (unresolved.length > 0) {
-      const flags = await Promise.all(unresolved.map(c => isWorktreeDir(c.path)))
+      const flags = await Promise.all(unresolved.map(c => withTimeout(isWorktreeDir(c.path), false)))
       const resolved = new Map(unresolved.map((c, i) => [c.path, flags[i]!]))
       candidates = candidates.map(c => resolved.has(c.path) ? { ...c, worktree: resolved.get(c.path) } : c)
     }
@@ -110,7 +127,17 @@ function startBackgroundIndex(history: ProjectCandidate[], scanRoots: string[]):
 
 async function allCandidates(): Promise<ProjectCache> {
   const now = Date.now()
+  // Preferences can change while a refresh is running (or while a healthy cache is still warm).
+  // Keep the crawler ownership in sync on EVERY request, independently of the slow regular scan.
+  const currentRoots = await readScanRoots()
+  diskIndex.configure(currentRoots.filter(isWholeDiskRoot))
   if (cache) {
+    const diskSnapshot = diskIndex.snapshot()
+    cache = {
+      ...cache,
+      indexing: cache.indexing || diskSnapshot.indexing || !!indexingPromise,
+      indexProgress: diskSnapshot.progress,
+    }
     if (now - cache.at >= CACHE_TTL_MS && !indexingPromise) {
       const { history, roots } = await readHistoryAndRoots()
       cache = { ...cache, indexing: true }
@@ -119,7 +146,7 @@ async function allCandidates(): Promise<ProjectCache> {
     return cache
   }
   const { history, roots } = await readHistoryAndRoots()
-  cache = { at: now, candidates: visibleCandidates(history), indexing: true, indexProgress: [] }
+  cache = { at: now, candidates: visibleCandidates(history), indexing: true, indexProgress: diskIndex.snapshot().progress }
   startBackgroundIndex(history, roots)
   return cache
 }
