@@ -51,6 +51,8 @@ export interface StructuredProvider {
   resumeSpawn?(req: BackendSpawn, conversationId: string): Promise<BackendSpawn | null>
   /** The protocol stated the conversation id (once per session). */
   onConversation?(id: string, conversationId: string): void
+  /** A session is now hosted over its protocol (route `structured` only). */
+  onStarted?(id: string, driver: StructuredDriverId): void
   /** A structured session fell back to tmux (or could not), for the log / the row's note. */
   onFallback?(id: string, outcome: { reason: string; resumed: boolean }): void
 }
@@ -229,7 +231,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     const l: Live = { s: r.session, route, createdMs: Date.now(), req, declares: route === 'structured' ? reg.declares(harness) : null, reported: false, off: () => {} }
     live.set(req.id, l)
     l.off = r.session.onExit(e => { void onExit(req.id, l)(e) })
-    if (route === 'structured') report(req.id, l)
+    if (route === 'structured') { provider.onStarted?.(req.id, r.session.driver); report(req.id, l) }
     return true
   }
 

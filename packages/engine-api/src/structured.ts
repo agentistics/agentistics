@@ -109,7 +109,11 @@ export interface StructuredSpawn {
    */
   instructions?: { text: string; block: string }
   mcp?: readonly StructuredMcpServer[]
-  /** Extra environment for the child, over the host's. */
+  /**
+   * Extra environment for the child, over the inherited one (a context-file directory, …). It may be
+   * passed on the child's command line (`env(1)`: the engine reads no environment of its own), so it
+   * NEVER carries a secret — those reach a session through the vault's references.
+   */
   env?: Readonly<Record<string, string>>
 }
 

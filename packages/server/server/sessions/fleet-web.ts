@@ -553,6 +553,7 @@ async function runFleetActionOnce(
         // does not exist.
         ...(row.actionable ? { replaces: row.id } : {}),
         attach: false,
+        origin: 'web',
       })
       // THE NEW ID TRAVELS. A reopen mints a new managed row and retires the old one, so a caller
       // that stays on the id it asked about is looking at a dead session — which is exactly how

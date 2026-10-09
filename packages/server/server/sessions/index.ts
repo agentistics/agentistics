@@ -71,6 +71,9 @@ export async function resolveBackend(): Promise<SessionBackend> {
         if (!planned.ok) return null
         return { id: req.id, cwd: req.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}) }
       },
+      onStarted(id, driver) {
+        void import('./registry').then(r => r.patchSession(id, { structuredDriver: driver })).catch(() => {})
+      },
       onConversation(id, conversationId) {
         void import('./registry').then(r => r.patchSession(id, {
           conversationId, conversationLink: 'assigned', conversationLinkVia: 'protocol-stated',

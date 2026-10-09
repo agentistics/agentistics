@@ -126,7 +126,7 @@ import { scanProcesses, type HarnessProcess } from './live-sessions'
 import { resolveBackend } from './sessions'
 import { inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
 import { SPAWN_SPECS, planSpawn } from './sessions/spawn-spec'
-import { answerStructured, structuredIntentOf } from './sessions/structured-route'
+import { answerStructured, structuredIntentOf, structuredReopenOrigin } from './sessions/structured-route'
 import { agentisticsMcpLaunch } from './mcp-launch'
 import { prependContext } from './sessions/agentistics-context'
 import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextParent, resolveContextTask, writeContextFile } from './sessions/spawn-context'
@@ -2778,6 +2778,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // to bring back, which is worse than never having gated it. An ordinary resume (no holder to
       // end, `plan.kind !== 'takeover'`) has no such offset and is gated normally.
       ...(plan.kind === 'takeover' ? { skipAdmission: true } : {}),
+      // F2.0 — a web reopen of a row that ran STRUCTURED runs structured again; anything else is a TUI.
+      ...(structuredReopenOrigin(req.origin, previous?.structuredDriver) ? { origin: 'web' as const } : {}),
     }, s, lang)
     if (spawned.ok) {
       // We handed this id to the CLI, so the new row KNOWS which conversation it drives — there

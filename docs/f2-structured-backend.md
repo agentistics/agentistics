@@ -104,6 +104,14 @@ is never prepended twice.
 `SpawnSessionRequest`; every other door leaves it absent. The spawn carries a
 `BackendSpawn.structured: StructuredIntent` built by `structuredIntentOf` (tmux ignores it).
 
+**Reopen.** A row hosted structurally is stamped `ManagedSession.structuredDriver`. A WEB reopen of
+such a row runs structured again (`structuredReopenOrigin`); a terminal-born row reopened from the web
+stays a TUI, and every non-web reopen (cockpit, `agentop session open`) is a TUI resume of the same
+conversation id — "open in terminal".
+
+**`StructuredSpawn.env` is never a secret**: the engine reads no environment of its own, so extra
+variables reach the child through `env(1)` on its command line.
+
 ## Fallback
 
 - **A refused start** (stub, login needed, `session/new` error, launch failure) → `base.spawn(req)`,
@@ -171,3 +179,17 @@ Plus the **fallback checks** for every harness: (F1) flag OFF → the web spawn 
 (compare the argv and registry row with a pre-F2.0 build); (F2) make the driver refuse (e.g. revoke the
 login) → the session starts as a TUI with no error to the person; (F3) kill the structured child
 process by its PID (never by name) → the row continues as a TUI resume of the same conversation.
+
+## Open items for the integrator / next pieces
+
+- **Public branch not pushed** (weekday business hours): `feat/f2-0-structured-backend` is local only;
+  push after 17h BRT. The engine's `public.pin` names that local commit.
+- **"Open in terminal" on a LIVE structured session** (end the child, TUI-resume the same id) is not a
+  verb yet; a closed structured row already reopens as a TUI from every non-web door.
+- **A structured child dies with `agentop server`** (no tmux survival); the row reads `lost` and
+  reopens by its protocol-stated id. Hosting the child inside tmux (11 Q1 option c) is not done.
+- **The web composer and cards** were not changed: a structured row's `dialogOptions` / `attentionOf`
+  feed the existing approve path; the free-text affordance of a protocol `question` (`freeText`
+  without an option) needs a UI decision when a driver first states one (F3.3 AskUserQuestion, F3.1).
+- **gemini `storeIdOf`** must map the ACP sessionId to the store's synthetic `${dir}/${file}` (F2.1),
+  or the row links to an id no reader resolves.

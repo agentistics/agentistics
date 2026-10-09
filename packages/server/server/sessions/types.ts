@@ -421,6 +421,12 @@ export interface ManagedSession {
    *  whether the session is alive (live file) or finished (this persisted copy). Absent on a claude
    *  older than 2.1.232, which writes the name with no timestamp. */
   harnessNameSince?: number
+  /**
+   * F2.0 — the structured driver this session ran under (`acp`, `claude-stream-json`, …), stamped when
+   * it was hosted over its harness's protocol. A web reopen of such a row runs structured again; a row
+   * without it (terminal-born) reopens as a TUI.
+   */
+  structuredDriver?: string
 }
 
 /**

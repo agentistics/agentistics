@@ -1939,6 +1939,11 @@ export interface ResumeSessionRequest {
    */
   prompt?: string
   attach: boolean
+  /**
+   * F2.0 — `web`: the browser's reopen. The new row runs structured again when the row it replaces
+   * did (`ManagedSession.structuredDriver`); a terminal-born row always reopens as a TUI.
+   */
+  origin?: 'web' | 'terminal'
 }
 
 export interface SpawnSessionResult {
