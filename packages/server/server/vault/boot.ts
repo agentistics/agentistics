@@ -21,11 +21,9 @@ import { installVaultOps } from './ops'
 import { hardeningLines } from './hardening'
 import { startVaultSocket } from './socket'
 import { sealedPathFor } from './whole-file'
-import { tokensFileFor } from './prefs-tokens'
 import { STANDALONE_CENTRAL_ENV, centralSecretsFile, splitCentralEnv } from './central-env'
 import { GITHUB_BACKUP_SEALED_FILE } from '../backup/github-store'
 import { PREFERENCES_FILE } from '../preferences'
-import '../envelope-keys'
 
 /** Import every module that registers a migrator, so the pass and the pending count see them all. */
 export async function loadVaultConsumers(): Promise<void> {
@@ -41,7 +39,6 @@ export function sealedFiles(): string[] {
   return [
     GITHUB_BACKUP_SEALED_FILE,
     sealedPathFor(envelopeKeyFile()),
-    tokensFileFor(PREFERENCES_FILE),
     centralSecretsFile(STANDALONE_CENTRAL_ENV),
   ].filter(p => existsSync(p))
 }

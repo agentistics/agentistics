@@ -14,7 +14,7 @@ import { compressResponse, negotiateEncoding } from './http-compress'
 import { encodedBody, etagMatches, versionOf } from './data-response-cache'
 import { slimApiResponse, slimSerialized } from './data-slim'
 import { buildApiResponse, buildApiResponseForClient, buildApiResponseStream, invalidateCache, loadDataSnapshot, prepareQuickPayload, serializedData } from './data'
-import { readPreferences, writePreferences, redactPreferences, guardTeamConnectionsWipe, PreferencesLockTimeoutError, type Preferences } from './preferences'
+import { readPreferences, writePreferences, PreferencesLockTimeoutError, type Preferences } from './preferences'
 import {
   readStoredNotifications, addStoredNotification, markStoredNotificationsRead,
   dismissStoredNotification, clearStoredNotifications, localViewer, type NotificationInput,
@@ -136,7 +136,6 @@ import { getArchiveMode } from './preferences'
 import { handleAccessibility } from './a11y-routes'
 import { handleUserUiPrefs } from './user-ui-prefs-routes'
 import { registerAgent, unregisterAgent, onAgentMessage, onAgentPong, setPresenceChangeHook } from './team-agent'
-import { startAgentClient, reconcileNow } from './team-agent-client'
 import { validateIngestToken } from './team-tokens'
 import { getAccount } from './accounts'
 import { getTeam } from './teams'
@@ -238,11 +237,6 @@ void (async () => {
     .then(() => console.log(`[boot] +${Math.round(performance.now())} ms first /api/data built (${Math.round(performance.now() - warmStart)} ms)`))
     .catch(err => console.warn('[startup] cache warm-up failed:', String(err)))
 })()
-
-// Once-per-install move of the legacy single-connection team state files into the
-// per-connection layout (see team-migrate.ts). Never call this from readPreferencesFrom.
-await import('./team-migrate').then(m => m.migrateTeamStateOnce()).catch(err =>
-  console.warn('[team-migrate] state migration failed (will retry next boot):', err instanceof Error ? err.message : String(err)))
 
 enableRebuildOnChange()
 void import('./mem-log').then(m => m.startMemLog())
@@ -370,8 +364,6 @@ if (TEAM_CENTRAL) {
   })()
 }
 
-import('./team-uploader').then(m => m.startUploader()).catch(err => console.error('[team-uploader] failed to start:', err))
-startAgentClient()
 maybeSpawnWatcher()
 // The engine is judged at boot so a refused or failed one is logged when the server starts, not on
 // the first request that happens to reach a reserved prefix. `loadEngine` never throws.
@@ -962,9 +954,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 
     if (url.pathname === '/api/preferences' && req.method === 'GET') {
       try {
-        // Secrets never leave the process: the UI adds a connection by POSTing a token and every
-        // other use (probe, leave, test) runs server-side, so nothing here needs one.
-        const prefs = redactPreferences(await readPreferences())
+        const prefs = await readPreferences()
         return new Response(JSON.stringify(prefs), {
           status: 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
@@ -1019,21 +1009,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname === '/api/preferences' && req.method === 'PUT') {
       try {
         let body = await req.json() as Preferences
-        // C1: never let a PUT wipe `connections[]`. An old cached tab still PUTs a full flat solo
-        // `team` object to disconnect (the current UI uses DELETE /api/team/connections/:id), and
-        // that payload carries `connections: []` — which mergeTeamPayload honours as an explicit
-        // replacement, deleting every OTHER central and its token in the process.
-        if (body.team !== undefined) {
-          const storedCount = (await readPreferences()).team?.connections?.length ?? 0
-          const guard = guardTeamConnectionsWipe(body.team, storedCount)
-          if (guard.guarded) {
-            console.warn(
-              `[preferences] PUT carried an empty connections array while ${storedCount} connection(s) are stored — ` +
-              'preserving them. Use DELETE /api/team/connections/:id to disconnect one.',
-            )
-            body = { ...body, team: guard.team }
-          }
-        }
         await writePreferences(body)
         if (body.scanRoots !== undefined) forgetProjects()
         // On an archive-mode change, refresh the cache and immediately persist:
@@ -1048,16 +1023,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             buildApiResponse().catch(err => console.warn('[archive] post-consent consolidation failed:', String(err)))
           }
         }
-        // When the team config changes (e.g. connecting to a central from the web), don't wait
-        // for the next poll/timer: open the reverse-channel WebSocket now so the member shows
-        // up online on the central within ~a second, and kick an immediate push so its metrics
-        // land right away instead of ~5 s later.
-        if (body.team !== undefined) {
-          reconcileNow()
-          import('./team-uploader').then(m => m.pushNow()).catch(() => {})
-        }
-        // Redacted on the way out too — the response is the same document the GET returns.
-        const updated = redactPreferences(await readPreferences())
+        const updated = await readPreferences()
         return new Response(JSON.stringify(updated), {
           status: 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
@@ -1104,7 +1070,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       // machines and would only ever see its operator's — has no use for it and does not serve it.
       // The capability guard (localTranscripts) has already run by here; this is the second gate,
       // not the only one.
-      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
       const { detectBillingLocal } = await import('./billing-detect')
       const adapters = await getEnabledAdapters()
       const detections = await detectBillingLocal(adapters.map(a => a.id))
@@ -1123,7 +1088,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       // GET: what this server booted with. PUT `{ enabled }`: the switch used by the `agentop experimental` command — it
       // persists the preference and applies it to this process WITHOUT a restart (`experimental-web.ts`).
       // `capability-guard.ts` has already refused both on an exposed profile; a central answers 404.
-      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
       try {
         const web = await import('./experimental-web')
         if (req.method === 'PUT') {
@@ -1155,7 +1119,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // action asks (code / gesture / grant). No value ever leaves — only metadata, and the two
     // show-once secrets of an enrolment (`no-store`).
     if (url.pathname === '/api/vault' || url.pathname.startsWith('/api/vault/')) {
-      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
       const json = { ...CORS_HEADERS, 'Content-Type': 'application/json' }
       try {
         const { handleVaultHttp } = await import('./vault/http')
@@ -1176,7 +1139,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       // A central aggregates other machines and has no local harness directories of its own to
       // back up — the same reason Settings hides the `billing` and `live` sections there. The
       // capability guard (localShell) has already run by here; this is the second gate.
-      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
       try {
         const { readBackupStatus } = await import('./backup-routes')
         const status = await readBackupStatus()
@@ -1193,7 +1155,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     }
 
     if (url.pathname === '/api/backup/run' && req.method === 'POST') {
-      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
       try {
         const { runBackupNow } = await import('./backup-routes')
         const result = await runBackupNow()
@@ -1215,7 +1176,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // the repository up genuinely needs a token and stays with `agentop backup github setup`,
     // which verifies it against the API and refuses a public repository.
     if (url.pathname === '/api/backup/github' && req.method === 'GET') {
-      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
       try {
         const { readGithubSection } = await import('./backup-routes')
         return new Response(JSON.stringify(await readGithubSection()), {
@@ -1236,7 +1196,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // browser, or both, and the only thing worse than a slow restore is one whose outcome nobody
     // learns.
     if (url.pathname === '/api/backup/restore/list' && req.method === 'POST') {
-      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
       try {
         const { restoreCredential, restoreListing } = await import('./backup/restore-routes')
         const body = await readJsonLimited<{ url?: unknown; token?: unknown }>(req, LIMITS.bodyBytes)
@@ -1275,7 +1234,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     }
 
     if (url.pathname === '/api/backup/restore/start' && req.method === 'POST') {
-      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
       try {
         const { startRestore } = await import('./backup-routes')
         const body = await readJsonLimited<{
@@ -1306,7 +1264,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     }
 
     if (url.pathname === '/api/backup/restore/status' && req.method === 'GET') {
-      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
       const { readRestoreJob } = await import('./backup-routes')
       return new Response(JSON.stringify({ job: readRestoreJob() }), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
@@ -1319,7 +1276,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // already requires `localShell`, which is false on `public` and opt-in on `lan`, so on a
     // dashboard someone else can open this route does not exist at all.
     if (url.pathname === '/api/backup/github/setup' && req.method === 'POST') {
-      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
       try {
         const { connectGithub } = await import('./backup-routes')
         const body = await readJsonLimited<{
@@ -1362,7 +1318,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // irreversible-looking action here and the method should say so — though it only removes the
     // LOCAL config: the releases on GitHub are untouched, and the interface says that before asking.
     if (url.pathname === '/api/backup/github' && req.method === 'DELETE') {
-      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
       try {
         const { disconnectGithub } = await import('./backup-routes')
         const result = await disconnectGithub()
@@ -1380,7 +1335,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     }
 
     if (url.pathname === '/api/backup/github' && req.method === 'POST') {
-      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
       try {
         const { updateGithubSection } = await import('./backup-routes')
         const body = await readJsonLimited<Parameters<typeof updateGithubSection>[0]>(req, LIMITS.bodyBytes)
@@ -1406,7 +1360,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // The format/recurrence pickers — see `BackupSettings.tsx`. Same decisions as
     // `agentop backup config` and the cockpit's layer editor, through the same three writers.
     if (url.pathname === '/api/backup/config' && req.method === 'POST') {
-      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
       try {
         const { updateBackupConfig } = await import('./backup-routes')
         const body = await readJsonLimited<Parameters<typeof updateBackupConfig>[0]>(req, LIMITS.bodyBytes)
@@ -3854,382 +3807,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
-    // ---------------------------------------------------------------------------
-    // Auth routes (public — NOT behind the gate)
-    // ---------------------------------------------------------------------------
-
-    if (url.pathname === '/api/team/login' && req.method === 'POST') {
-      return new Response(JSON.stringify({ ok: false, error: 'shared-password login retired; use account login' }), { status: 410, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } })
-    }
-
-    if (url.pathname === '/api/team/logout' && req.method === 'POST') {
-      const res = handleLogout(req)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/team/session' && req.method === 'GET') {
-      const res = await handleSession(req)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/iam/login/mfa' && req.method === 'POST') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleIamLoginMfa } = await import('./iam-handlers')
-      const res = await handleIamLoginMfa(req)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/iam/stepup' && req.method === 'POST') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleStepUp } = await import('./iam-handlers')
-      const res = await handleStepUp(req, clientIp)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/iam/reset-request' && req.method === 'POST') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleResetRequest } = await import('./iam-handlers')
-      const res = await handleResetRequest(req, clientIp)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/iam/reset-requests') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleResetRequests } = await import('./iam-handlers')
-      const res = await handleResetRequests(req, url)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/iam/recover' && req.method === 'POST') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleRecover } = await import('./iam-handlers')
-      const res = await handleRecover(req, clientIp)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/iam/mfa' || url.pathname.startsWith('/api/iam/mfa/')) {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleMfa } = await import('./iam-handlers')
-      const res = await handleMfa(req, url.pathname, clientIp)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    // Owner-only (enforced by isAdminPath in the gate above): the security event log.
-    if (url.pathname === '/api/iam/audit' && req.method === 'GET') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const limit = parseInt(url.searchParams.get('limit') ?? '200', 10)
-      const events = await listAudit({ limit: Number.isFinite(limit) ? limit : 200 })
-      return new Response(JSON.stringify({ events }), {
-        status: 200,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      })
-    }
-
-    if (url.pathname === '/api/iam/status' && req.method === 'GET') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleIamStatus } = await import('./iam-handlers')
-      const res = await handleIamStatus()
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/iam/bootstrap' && req.method === 'POST') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleBootstrap } = await import('./iam-handlers')
-      const res = await handleBootstrap(req, { ip: clientIp })
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/iam/login' && req.method === 'POST') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleIamLogin } = await import('./iam-handlers')
-      // A successful login clears this IP's login bucket, so someone who mistyped twice
-      // before getting it right is not left one attempt away from a block.
-      const res = await handleIamLogin(req, {
-        ip: clientIp,
-        onSuccess: () => limiter.reset(`ip:${clientIp}:${url.pathname}`),
-      })
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/iam/logout' && req.method === 'POST') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleLogout } = await import('./auth')
-      const res = handleLogout(req)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/iam/me' && req.method === 'GET') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleIamMe } = await import('./iam-handlers')
-      const res = await handleIamMe(req)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/iam/change-password' && req.method === 'POST') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleChangePassword } = await import('./iam-handlers')
-      const res = await handleChangePassword(req)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/iam/accounts' && (req.method === 'GET' || req.method === 'POST' || req.method === 'PATCH' || req.method === 'DELETE')) {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleAccounts } = await import('./iam-handlers')
-      const res = await handleAccounts(req, clientIp)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/iam/teams' && (req.method === 'GET' || req.method === 'POST' || req.method === 'DELETE')) {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleTeams } = await import('./iam-handlers')
-      const res = await handleTeams(req)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/iam/machines' && (req.method === 'GET' || req.method === 'POST' || req.method === 'DELETE')) {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleMachines } = await import('./iam-handlers')
-      const res = await handleMachines(req, clientIp)
-      // Revoke/rotate change the member set — refresh dashboards.
-      if ((req.method === 'DELETE' || req.method === 'POST') && res.status >= 200 && res.status < 300) {
-        const { triggerSseNotification } = await import('./sse'); triggerSseNotification()
-      }
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    // GET /api/team/status — member-side connection status for the settings panel + status
-    // pill, one entry per connection (see team-connections.ts). Reads cached values only — the
-    // uploader's own push cycle measures latency, so this route never blocks on the network.
-    if (url.pathname === '/api/team/status' && req.method === 'GET') {
-      const { handleTeamStatus } = await import('./team-connections')
-      const res = await handleTeamStatus(req)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    // GET /api/team/profile — which machine profile this server serves. `agentop member connect`
-    // prefers to hand a new connection to a running server (so it is picked up without a restart)
-    // but can only find one by PORT, and a machine's identity is its DATA DIR: a second profile
-    // (an isolated HOME / AGENTISTICS_DIR, or the Docker machine beside the native one) holding
-    // this port would otherwise be handed another machine's connection, token included. The CLI
-    // asks here first and delegates only on an exact match; a server too old to answer is treated
-    // as "not ours". The caller states the dir it means and gets back only yes/no — the route
-    // never discloses a filesystem path, so it stays harmless on an exposed central.
-    if (url.pathname === '/api/team/profile' && req.method === 'GET') {
-      const want = url.searchParams.get('dataDir') ?? ''
-      return new Response(JSON.stringify({ match: !!want && want === AGENTISTICS_DATA_DIR }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-      })
-    }
-
-    // Connection lifecycle — add/rotate, rename, delete, probe. See team-connections.ts for the
-    // uniqueness rules (known endpoint updates in place; a token owned by another connection is
-    // refused) and why DELETE calls the central's /api/team/leave before removing state.
-    if (url.pathname === '/api/team/connections' && req.method === 'POST') {
-      const { handleAddConnection } = await import('./team-connections')
-      const res = await handleAddConnection(req)
-      if (res.status === 200) { const { triggerSseNotification } = await import('./sse'); triggerSseNotification() }
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname.startsWith('/api/team/connections/') && req.method === 'PATCH') {
-      const id = url.pathname.slice('/api/team/connections/'.length)
-      const { handlePatchConnection } = await import('./team-connections')
-      // handlePatchConnection notifies internally (its own `deps.notify`), and only when the
-      // write actually changed something — a blind trigger here on every 200 would also wake
-      // dashboards for a no-op PATCH (e.g. re-sending the same label).
-      const res = await handlePatchConnection(req, id)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname.startsWith('/api/team/connections/') && url.pathname.endsWith('/probe') && req.method === 'POST') {
-      const id = url.pathname.slice('/api/team/connections/'.length, -'/probe'.length)
-      const { handleProbeConnection } = await import('./team-connections')
-      const res = await handleProbeConnection(req, id)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname.startsWith('/api/team/connections/') && req.method === 'DELETE') {
-      const id = url.pathname.slice('/api/team/connections/'.length)
-      const { handleDeleteConnection } = await import('./team-connections')
-      const res = await handleDeleteConnection(req, id)
-      if (res.status === 200) { const { triggerSseNotification } = await import('./sse'); triggerSseNotification() }
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    // ---------------------------------------------------------------------------
-    // Admin routes (behind the gate — index.ts gate already enforces isAuthed)
-    // ---------------------------------------------------------------------------
-
-    // GET /api/team/tasks — the delivery boards the machines of this central opted to share.
-    // Read-only by construction: a board lives on the machine that owns it.
-    if (url.pathname === '/api/team/tasks' && req.method === 'GET') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { buildCentralTaskBoard } = await import('./team-task-routes')
-      // Scoped to the VIEWER, exactly as `/api/data` scopes the sessions these deliveries are
-      // measured from: a board carries free text, and handing every signed-in principal every
-      // machine's would cross the team boundary with the most readable data in the product.
-      const body = await buildCentralTaskBoard(await getPrincipal(req))
-      return json(body)
-    }
-
-    if (url.pathname === '/api/team/members' && req.method === 'GET') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleMembers } = await import('./team-admin')
-      const res = await handleMembers(req)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    // PUT /api/team/members — rename a member (update the token doc's user field).
-    // Body: { id: string, user: string }  →  Response: { ok: boolean }
-    // ADMIN-gated (already in ADMIN_PATHS). The new name is reflected at next read via
-    // getMemberNameMap() without requiring any re-ingest of existing session docs.
-    if (url.pathname === '/api/team/members' && req.method === 'PUT') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      let body: unknown
-      try {
-        body = await req.json()
-      } catch {
-        return new Response(JSON.stringify({ error: 'invalid JSON' }), {
-          status: 400,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
-      const b = body as Record<string, unknown>
-      if (typeof b.id !== 'string' || !b.id || typeof b.user !== 'string' || !b.user.trim()) {
-        return new Response(JSON.stringify({ error: 'id and user are required strings' }), {
-          status: 400,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
-      const { setMemberName } = await import('./team-tokens')
-      const ok = await setMemberName(b.id, b.user.trim())
-      if (ok) {
-        // Rename re-labels all of the member's history (resolved at read time), so the
-        // cached dashboard must be invalidated + connected dashboards notified to refresh.
-        const { triggerSseNotification } = await import('./sse')
-        triggerSseNotification()
-      }
-      return new Response(JSON.stringify({ ok }), {
-        status: ok ? 200 : 404,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      })
-    }
-
-    if (url.pathname === '/api/team/tokens' && req.method === 'POST') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleMintToken } = await import('./team-admin')
-      const res = await handleMintToken(req)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/team/tokens' && req.method === 'DELETE') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleRevokeToken } = await import('./team-admin')
-      const res = await handleRevokeToken(req)
-      // Revoke cascades to the member's sessions — refresh the dashboard immediately.
-      if (res.status === 200) { const { triggerSseNotification } = await import('./sse'); triggerSseNotification() }
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/team/tokens/rotate' && req.method === 'POST') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleRotateToken } = await import('./team-admin')
-      const res = await handleRotateToken(req)
-      // Rotation migrates the member's history to the new identity key — refresh the dashboard.
-      if (res.status === 200) { const { triggerSseNotification } = await import('./sse'); triggerSseNotification() }
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    // Repositories — GitHub Actions registration (admin-gated on the central).
-    if (url.pathname === '/api/team/repos' && req.method === 'GET') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleListRepos } = await import('./team-admin')
-      const res = await handleListRepos(req)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/team/repos' && req.method === 'POST') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleRegisterRepo } = await import('./team-admin')
-      const res = await handleRegisterRepo(req)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/team/repos' && req.method === 'DELETE') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleUnregisterRepo } = await import('./team-admin')
-      const res = await handleUnregisterRepo(req)
-      if (res.status === 200) { const { triggerSseNotification } = await import('./sse'); triggerSseNotification() }
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    // Tags (B5) — saved groupings of repos/projects/machines/teams/accounts. The handler owns the
-    // authority rules: writes require every source to be visible to the caller, and every response
-    // is aggregate-only (never the sessions behind a tag).
-    //
-    // Served in EVERY mode, not just on a central. On a solo/member machine the handler swaps the
-    // Mongo store for ~/.agentistics/tags.json and the team session set for the local one; the
-    // central's cookie gate above is untouched. This used to 404 with a plain-TEXT body, which the
-    // frontend then fed to JSON.parse — the Tags page died on a SyntaxError instead of working.
     if ((url.pathname === '/api/tags' || url.pathname.startsWith('/api/tags/'))
         && ['GET', 'POST', 'PATCH', 'DELETE'].includes(req.method)) {
       const { handleTags } = await import('./tags-handlers')
@@ -4237,466 +3814,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const headers = new Headers(res.headers)
       for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
       return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/team/test-connection' && req.method === 'POST') {
-      const { handleTeamTestConnection } = await import('./team-uploader')
-      const res = await handleTeamTestConnection(req)
-      // Re-wrap to attach CORS headers (handler sets only Content-Type)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/team/push-now' && req.method === 'POST') {
-      const { handlePushNow } = await import('./team-uploader')
-      const res = await handlePushNow(req)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    if (url.pathname === '/api/team/ingest' && req.method === 'POST') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleTeamIngest } = await import('./team-ingest')
-      const res = await handleTeamIngest(req)
-      // Re-wrap to attach CORS headers (handler sets only Content-Type)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    // POST /api/team/leave — central: a member removes ITS OWN data (token-gated).
-    if (url.pathname === '/api/team/leave' && req.method === 'POST') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleTeamLeave } = await import('./team-ingest')
-      const res = await handleTeamLeave(req)
-      if (res.status === 200) { const { triggerSseNotification } = await import('./sse'); triggerSseNotification() }
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    // POST /api/team/forget — a member deletes NAMED sessions of its own (repository sharing
-    // rules, §7). Minted-token-only, inside the handler; see team-forget.ts for why there is no
-    // legacy branch. Central-only, like every other team ingest route.
-    if (url.pathname === '/api/team/forget' && req.method === 'POST') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleTeamForget } = await import('./team-forget')
-      const res = await handleTeamForget(req)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    // GET /api/team/account-repos — a member asks what repositories this central holds for ITS
-    // OWN ACCOUNT, so it can detect locally that a sibling machine still sends one it just hid.
-    // The request names no repository and carries no rule; the comparison happens on the caller.
-    // Minted-token-only, scoped to the token's owner accounts. See team-account-repos.ts.
-    if (url.pathname === '/api/team/account-repos' && req.method === 'GET') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleAccountRepos } = await import('./team-account-repos')
-      const res = await handleAccountRepos(req)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    // /api/team/keys — the sealed-envelope public-key directory (CENTRAL). Minted-token-only
-    // inside the handler, scoped to the token's owner accounts. Public keys only; the private half
-    // never leaves the machine that generated it. See envelope-routes.ts.
-    if (url.pathname === '/api/team/keys' && (req.method === 'GET' || req.method === 'POST')) {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleEnvelopeKeys } = await import('./envelope-routes')
-      const res = await handleEnvelopeKeys(req)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    // /api/team/envelopes — the sealed mailbox (CENTRAL): deposit for the account's other
-    // machines, fetch mine, delete on acknowledgement. The central stores ciphertext and routing
-    // metadata only, and cannot open any of it.
-    if (url.pathname === '/api/team/envelopes' && (req.method === 'GET' || req.method === 'POST' || req.method === 'DELETE')) {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleEnvelopes } = await import('./envelope-routes')
-      const res = await handleEnvelopes(req)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    // GET /api/team/machine-fleet?machineId=… — one machine's session fleet, RELAYED.
-    //
-    // Central-only, and it does no host work: the fleet comes from the machine over the reverse
-    // channel, never from this box's own tmux (which is what the TEAM_CENTRAL block on
-    // /api/fleet* exists to prevent, and that block stays). Deliberately NOT in
-    // capability-guard.ts — it spawns nothing, reads no transcript and touches no dotfile; the
-    // reasoning is written down in machine-fleet-route.ts and pinned by capability-guard.test.ts,
-    // so the absence is a decision rather than an omission.
-    if (url.pathname === '/api/team/machine-fleet' && req.method === 'GET') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const principal = await getPrincipal(req)
-      if (!principal) {
-        return new Response(JSON.stringify({ error: 'unauthorized' }), {
-          status: 401, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
-      const machineId = url.searchParams.get('machineId') ?? ''
-      const [{ resolveMachineFleet }, { listMachines }, agent, consent, relay] = await Promise.all([
-        import('./machine-fleet-route'),
-        import('./team-tokens'),
-        import('./team-agent'),
-        import('./machine-consent'),
-        import('./machine-fleet-relay'),
-      ])
-      const answer = await resolveMachineFleet(principal, machineId, {
-        listMachines,
-        isOnline: id => agent.hasAgentSocket(id),
-        consentOf: id => consent.effectiveConsent(id),
-        // `notifyMember` is the same send every central→member push already uses; the relay owns
-        // the correlation and the timeout.
-        request: id => relay.requestMachineFleet(id, payload => agent.notifyMember(id, payload)),
-      })
-      return new Response(JSON.stringify(answer), {
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      })
-    }
-
-    // POST /api/team/machine-fleet/act — perform ONE verb on one of that machine's sessions.
-    //
-    // Same three gates as the read plus the verb allowlist, and the machine checks all of it again:
-    // a central is the party whose behaviour a machine cannot verify, so the check here only spares
-    // a pointless round trip. Audited on the way out, and the MACHINE is told too — an action that
-    // is invisible on the machine it happened to is the failure this whole feature has to avoid.
-    if (url.pathname === '/api/team/machine-fleet/act' && req.method === 'POST') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const principal = await getPrincipal(req)
-      if (!principal) {
-        return new Response(JSON.stringify({ error: 'unauthorized' }), {
-          status: 401, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
-      const parsed = await readJsonLimited<unknown>(req, LIMITS.bodyBytes)
-      if (!parsed.ok) {
-        return new Response(JSON.stringify({ error: parsed.error }), {
-          status: parsed.error === 'too_large' ? 413 : 400,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
-      const b = (parsed.value ?? {}) as Record<string, unknown>
-      const machineId = typeof b.machineId === 'string' ? b.machineId : ''
-      const action = typeof b.action === 'string' ? b.action : ''
-      const sessionId = typeof b.id === 'string' ? b.id : ''
-      const [{ resolveMachineAction }, { listMachines }, agent, consent, relay] = await Promise.all([
-        import('./machine-fleet-route'),
-        import('./team-tokens'),
-        import('./team-agent'),
-        import('./machine-consent'),
-        import('./machine-fleet-relay'),
-      ])
-      const answer = await resolveMachineAction(principal, machineId, {
-        action, id: sessionId,
-        ...(typeof b.text === 'string' ? { text: b.text } : {}),
-        // The dialog option the person picked. Validated as a finite number here and re-resolved
-        // against the LIVE screen by the machine, which refuses when the options changed — a poll
-        // is five seconds old, and five seconds is enough for one dialog to become another.
-        ...(typeof b.choice === 'number' && Number.isFinite(b.choice) ? { choice: b.choice } : {}),
-      }, {
-        listMachines,
-        isOnline: id => agent.hasAgentSocket(id),
-        consentOf: id => consent.effectiveConsent(id),
-        request: id => relay.requestMachineFleet(id, payload => agent.notifyMember(id, payload)),
-        act: (id, a) => relay.requestMachineAction(id, a, payload => agent.notifyMember(id, payload)),
-      })
-      // Audited whenever the verb actually REACHED the machine — a refusal decided here is not an
-      // action on anybody's session, and recording one would make the log describe things that
-      // never happened. The session id is recorded, never the text: a rename or a note is the
-      // user's own words about their own work.
-      if (answer.reply) {
-        void writeAudit({
-          action: 'machine.session_action', ip: clientIp, actorId: principal.accountId,
-          targetId: machineId, meta: { verb: action, session: sessionId, ok: answer.reply.ok },
-        })
-        // And the machine says so itself, so the person sitting at it learns that somebody acted
-        // on their session without having to read a central's audit log.
-        agent.notifyMember(machineId, { type: 'session-acted', verb: action, sessionId })
-      }
-      return new Response(JSON.stringify(answer), {
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      })
-    }
-
-    // /api/team/proposals — LOCAL, same-origin: the restriction proposals this machine has
-    // received and decrypted, and the dismissal of one. Reading them changes nothing; APPLYING one
-    // is the ordinary PATCH /api/team/connections/:id the user's click performs, never a server
-    // path triggered by a message arriving (see envelope-inbox.ts).
-    if (url.pathname === '/api/team/proposals' && (req.method === 'GET' || req.method === 'DELETE')) {
-      const { handleProposals } = await import('./envelope-proposals')
-      const res = await handleProposals(req)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    // POST /api/team/leave-central — member proxy: tells the central to drop this member's
-    // data, then the web resets the local config to solo. Keeps the token server-side.
-    if (url.pathname === '/api/team/leave-central' && req.method === 'POST') {
-      const { handleLeaveCentral } = await import('./team-uploader')
-      const res = await handleLeaveCentral(req)
-      const headers = new Headers(res.headers)
-      for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-      return new Response(res.body, { status: res.status, headers })
-    }
-
-    // ---------------------------------------------------------------------------
-    // GET /api/team/deploy — generate a ready-to-use .env + docker compose command.
-    // Only available in central mode. Protected by auth gate when a password is set.
-    // Generates fresh random password + session secret on each call (shown once).
-    // ---------------------------------------------------------------------------
-    if (url.pathname === '/api/team/deploy' && req.method === 'GET') {
-      if (!TEAM_CENTRAL) {
-        return new Response(JSON.stringify({ error: 'central mode only' }), {
-          status: 403,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
-      try {
-        const { randomBytes } = await import('node:crypto')
-        const { generateEnvFile } = await import('./deploy')
-
-        const sessionSecret = randomBytes(32).toString('hex')
-        const mongoUrl = 'mongodb://mongo:27017/?replicaSet=rs0'
-
-        const env = generateEnvFile({
-          sessionSecret,
-          mongoUrl,
-          mongoDb: 'agentistics',
-          // Read org and port from query params; the client-side counterpart is
-          // AUTOSTART_SNIPPETS in packages/web/src/components/DeployCentral.tsx
-          teamOrg: url.searchParams.get('org') || 'default',
-          appPort: parseInt(url.searchParams.get('port') || '47291', 10),
-        })
-
-        return new Response(JSON.stringify({
-          env,
-          command: 'docker compose --env-file central.env up -d',
-          sessionSecret,
-        }), {
-          status: 200,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      } catch (err) {
-        const safe = safeError(err, { verbose: PROFILE === 'local' })
-        console.error(safe.logLine)
-        return new Response(JSON.stringify(safe.body), {
-          status: 500,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
-    }
-
-    // ---------------------------------------------------------------------------
-    // GET /api/team/policy — PUBLIC: returns the central push interval.
-    // Members poll this before each push cycle to get the current cadence.
-    // Non-central instances return the default so members degrade gracefully.
-    // ---------------------------------------------------------------------------
-    if (url.pathname === '/api/team/policy' && req.method === 'GET') {
-      const { getCentralConfig, getInstanceId } = await import('./central-config')
-      const { CENTRAL_CAPABILITIES } = await import('./team-capabilities')
-      const [config, instanceId] = await Promise.all([getCentralConfig(), getInstanceId()])
-      return new Response(JSON.stringify({
-        pushIntervalSec: config.pushIntervalSec,
-        instanceId,
-        capabilities: CENTRAL_CAPABILITIES,
-      }), {
-        status: 200,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      })
-    }
-
-    // ---------------------------------------------------------------------------
-    // GET /api/team/config — ADMIN (TEAM_CENTRAL + hasValidSession): read config.
-    // PUT /api/team/config — ADMIN: update pushIntervalSec.
-    // ---------------------------------------------------------------------------
-    if (url.pathname === '/api/team/config' && req.method === 'GET') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { getCentralConfig } = await import('./central-config')
-      const config = await getCentralConfig()
-      return new Response(JSON.stringify(config), {
-        status: 200,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      })
-    }
-
-    if (url.pathname === '/api/team/config' && req.method === 'PUT') {
-      if (!TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      let body: { pushIntervalSec?: unknown; includeOfflineData?: unknown; publicUrl?: unknown; requireDeleteConfirmText?: unknown; includeDeletedMembers?: unknown }
-      try {
-        body = await req.json() as { pushIntervalSec?: unknown; includeOfflineData?: unknown; publicUrl?: unknown; requireDeleteConfirmText?: unknown; includeDeletedMembers?: unknown }
-      } catch {
-        return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
-          status: 400,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
-      if (body.publicUrl !== undefined && typeof body.publicUrl !== 'string') {
-        return new Response(JSON.stringify({ error: 'publicUrl must be a string' }), {
-          status: 400,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
-      if (body.pushIntervalSec !== undefined && typeof body.pushIntervalSec !== 'number') {
-        return new Response(JSON.stringify({ error: 'pushIntervalSec must be a number' }), {
-          status: 400,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
-      if (body.includeOfflineData !== undefined && typeof body.includeOfflineData !== 'boolean') {
-        return new Response(JSON.stringify({ error: 'includeOfflineData must be a boolean' }), {
-          status: 400,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
-      // Turning the typed-delete guard OFF weakens a safety net for everyone on this central, so
-      // it is owner-only — unlike the other fields, which any admin session may set.
-      // Same owner-only rule: this changes what EVERY viewer of this central sees.
-      if (body.includeDeletedMembers !== undefined) {
-        if (typeof body.includeDeletedMembers !== 'boolean') {
-          return new Response(JSON.stringify({ error: 'includeDeletedMembers must be a boolean' }), {
-            status: 400,
-            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-          })
-        }
-        const { getPrincipal } = await import('./auth')
-        const { can } = await import('./iam-caps')
-        const principal = await getPrincipal(req)
-        if (!principal || !can(principal, 'central:config')) {
-          return new Response(JSON.stringify({ error: 'forbidden' }), {
-            status: 403,
-            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-          })
-        }
-      }
-      if (body.requireDeleteConfirmText !== undefined) {
-        if (typeof body.requireDeleteConfirmText !== 'boolean') {
-          return new Response(JSON.stringify({ error: 'requireDeleteConfirmText must be a boolean' }), {
-            status: 400,
-            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-          })
-        }
-        const { getPrincipal } = await import('./auth')
-        const { can } = await import('./iam-caps')
-        const principal = await getPrincipal(req)
-        if (!principal || !can(principal, 'central:config')) {
-          return new Response(JSON.stringify({ error: 'forbidden' }), {
-            status: 403,
-            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-          })
-        }
-      }
-      const { setPushInterval, setIncludeOfflineData, setPublicUrl, setRequireDeleteConfirmText, setIncludeDeletedMembers, getCentralConfig } = await import('./central-config')
-      if (typeof body.pushIntervalSec === 'number') await setPushInterval(body.pushIntervalSec)
-      if (typeof body.includeOfflineData === 'boolean') await setIncludeOfflineData(body.includeOfflineData)
-      if (typeof body.publicUrl === 'string') await setPublicUrl(body.publicUrl)
-      if (typeof body.requireDeleteConfirmText === 'boolean') await setRequireDeleteConfirmText(body.requireDeleteConfirmText)
-      if (typeof body.includeDeletedMembers === 'boolean') await setIncludeDeletedMembers(body.includeDeletedMembers)
-      const config = await getCentralConfig()
-      // A policy change (offline-data default) affects every viewer → nudge them to refetch.
-      // Both policies change what everyone sees → nudge open dashboards to refetch.
-      if (typeof body.includeOfflineData === 'boolean' || typeof body.includeDeletedMembers === 'boolean') triggerSseNotification()
-      return new Response(JSON.stringify(config), {
-        status: 200,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      })
-    }
-
-    // ---------------------------------------------------------------------------
-    // WebSocket upgrade — member ↔ central reverse channel (Phase 7)
-    // POST/GET /api/team/agent — upgrade to WebSocket for connected members.
-    // Auth: validateIngestToken (Bearer in Authorization header), NOT session cookie.
-    // This path is in AUTH_PUBLIC so the cookie gate above does not block it.
-    // ---------------------------------------------------------------------------
-    if (url.pathname === '/api/team/agent') {
-      if (!TEAM_CENTRAL) {
-        return new Response(JSON.stringify({ error: 'not found' }), {
-          status: 404,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
-      const authHeader = req.headers.get('authorization') ?? ''
-      const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
-      const tokenResult = await validateIngestToken(bearer)
-      if (!tokenResult.ok || !tokenResult.user) {
-        return new Response(JSON.stringify({ error: 'unauthorized' }), {
-          status: 401,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
-      // memberId (the token hash) identifies the MACHINE, and travels so the live-session registry
-      // can key snapshots per machine — a person with two machines sends two independent snapshots.
-      const upgraded = server.upgrade(req, {
-        data: { user: tokenResult.user, memberId: tokenResult.memberId, isAgent: true as const },
-      })
-      if (upgraded) return // WebSocket handshake handed off to the websocket: {} handler
-      return new Response(JSON.stringify({ error: 'upgrade failed' }), {
-        status: 500,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      })
-    }
-
-    // ---------------------------------------------------------------------------
-    // GET /api/team/session-chat — REMOVED. Central no longer views member chat;
-    // always returns 410 Gone regardless of TEAM_CENTRAL.
-    // ---------------------------------------------------------------------------
-    if (url.pathname === '/api/team/session-chat' && req.method === 'GET') {
-      return new Response(JSON.stringify({ ok: false, error: 'chat_disabled' }), {
-        status: 410,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      })
-    }
-
-
-    // ---------------------------------------------------------------------------
-    // GET /api/team/whoami — PUBLIC (token-gated): resolves identity from bearer.
-    // Members call this after a test-connection to learn their user + org.
-    // The token is validated server-side; the plaintext is never logged.
-    // ---------------------------------------------------------------------------
-    if (url.pathname === '/api/team/whoami' && req.method === 'GET') {
-      const authHeader = req.headers.get('authorization') ?? ''
-      const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
-      const tokenResult = await validateIngestToken(bearer)
-      if (tokenResult.ok) {
-        // For machine tokens (bound to an account), also surface the machine's
-        // bound identity: machineName (token label), teamId, team name, and the owner's email.
-        // Only non-secret account fields are exposed — never passwordHash.
-        const body: { ok: true; user: string; org: string; machineName?: string; teamId?: string; email?: string; team?: string } = {
-          ok: true,
-          user: tokenResult.user,
-          org: TEAM_ORG,
-        }
-        // machineName (token label) + teamId are available for EVERY machine token, not just
-        // account-bound ones — so a machine always shows its own name + owner user, even legacy
-        // (no-account) tokens. email requires the linked account.
-        if (tokenResult.label) body.machineName = tokenResult.label
-        if (tokenResult.teamId) {
-          body.teamId = tokenResult.teamId
-          const t = await getTeam(tokenResult.teamId)
-          if (t) body.team = t.name
-        }
-        if (tokenResult.accountId) {
-          const account = await getAccount(tokenResult.accountId)
-          if (account?.email) body.email = account.email
-        }
-        return new Response(JSON.stringify(body), {
-          status: 200,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
-      return new Response(JSON.stringify({ ok: false }), {
-        status: 200,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      })
     }
 
     // Serve embedded frontend assets (binary mode only)

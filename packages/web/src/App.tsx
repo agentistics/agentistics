@@ -30,7 +30,7 @@ import { useIsMobile } from './hooks/useIsMobile'
 import { useAccessibility } from './hooks/useAccessibility'
 import type { TagDef } from './lib/tagMatch'
 import { canCreateTagFromFilters, filtersToTagDraft } from './lib/filtersToTag'
-import type { BillingSettings, CostBasis, Filters, SurfaceHarnessId, HealthIssue, SavedComparison, SessionPreset, TeamConfig } from '@agentistics/core'
+import type { BillingSettings, CostBasis, Filters, SurfaceHarnessId, HealthIssue, SavedComparison, SessionPreset } from '@agentistics/core'
 import type { Lang, Theme } from '@agentistics/core'
 import { isAdapterHarness, billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, normalizeSessionPresets, planAllocation, formatProjectName, MODEL_PRICING, distinctUsers, distinctHarnesses, filterByUsers, fmtCost, surfaceHarnesses, NATIVE_HARNESS_ID, fmt, totalTokens, totalTokensExplained } from '@agentistics/core'
 import { StatCard } from './components/StatCard'
@@ -2484,7 +2484,7 @@ export default function AppLayout() {
     // only a real 200 response with no archiveMode may set it. On failure we retry with
     // backoff and leave state at `undefined` (neutral loading bg) so nothing false-gates.
     let cancelled = false
-    const apply = (prefs: { cardPrecision?: Record<string, boolean>; lang?: Lang; theme?: Theme; currency?: 'USD' | 'BRL'; textScale?: number; cardOrder?: string[]; monthlyBudgetUSD?: number | null; chatModel?: string; chatSoundEnabled?: boolean; editorAutosave?: boolean; archiveMode?: ArchiveMode; archiveSessions?: boolean; installDismissed?: boolean; telemetryEnabled?: boolean; telemetryNoticeDismissed?: boolean; team?: TeamConfig; billing?: unknown }) => {
+    const apply = (prefs: { cardPrecision?: Record<string, boolean>; lang?: Lang; theme?: Theme; currency?: 'USD' | 'BRL'; textScale?: number; cardOrder?: string[]; monthlyBudgetUSD?: number | null; chatModel?: string; chatSoundEnabled?: boolean; editorAutosave?: boolean; archiveMode?: ArchiveMode; archiveSessions?: boolean; installDismissed?: boolean; telemetryEnabled?: boolean; telemetryNoticeDismissed?: boolean; billing?: unknown }) => {
       if (prefs.cardPrecision) setCardPrecisionState(prefs.cardPrecision)
       // Total and never throws: a hand-edited preferences.json must not blank the dashboard.
       const nextBilling = normalizeBillingSettings(prefs.billing)

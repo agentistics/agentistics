@@ -667,7 +667,7 @@ test('a stale lock file (planted, mtime far in the past) is reclaimed — a writ
 // ---------------------------------------------------------------------------
 
 import { guardTeamConnectionsWipe } from './preferences'
-import type { TeamConfig } from '@agentistics/core'
+type TeamConfig = { connections?: Array<Record<string, unknown>>; [key: string]: unknown }
 
 function guardConn(id: string, endpoint: string) {
   return { id, endpoint, org: 'default', user: 'lucas', token: `tok-${id}`, deniedRepos: [] }
