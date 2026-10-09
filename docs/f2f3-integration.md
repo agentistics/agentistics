@@ -124,3 +124,7 @@ Also (no textual conflict, stale assertion): `agy-structured.test.ts` asserted `
 | `engine/src/structured/acp-structured.test.ts` | Registry test: four ready drivers (acp, claude, codex, agy); opencode none. |
 | `public.pin` | Public integ commit. |
 
+Also (engine, no textual conflict): `reuse-surface.lint.test.ts` "the engine reads no environment" failed on
+`structured/fixtures/codex-app-server-peer.ts` (F3.1's fake peer reads a QA log path from the environment). The lint now
+treats `/fixtures/` as test material, like `*.test.ts` and `test/`.
+
