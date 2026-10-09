@@ -33,7 +33,18 @@ export const readWizardSnapshot = (): WizardSnapshot | null => snapshot
 /** The wizard ended (closed or started): forget it. */
 export const clearWizard = (): void => { snapshot = null; orphaned = false }
 /** The modal unmounted without ending — the layout swapped under it. */
-export const orphanWizard = (): void => { if (snapshot) orphaned = true }
+export const orphanWizard = (): void => {
+  if (!snapshot) return
+  orphaned = true
+  for (const l of [...listeners]) l()
+}
+const listeners = new Set<() => void>()
+/** Called whenever a wizard is orphaned — lets a list that is ALREADY mounted adopt it, whatever
+ *  the order React ran the swap's unmount and mount effects in. */
+export function onWizardOrphaned(fn: () => void): () => void {
+  listeners.add(fn)
+  return () => { listeners.delete(fn) }
+}
 /** A list that just mounted takes the orphan over; true exactly once per orphan. */
 export function claimOrphanWizard(): boolean {
   if (!orphaned) return false

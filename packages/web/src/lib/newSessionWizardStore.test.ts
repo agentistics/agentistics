@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
-import { claimOrphanWizard, clearWizard, orphanWizard, readWizardSnapshot, saveWizardSnapshot, type WizardSnapshot } from './newSessionWizardStore'
+import { onWizardOrphaned, claimOrphanWizard, clearWizard, orphanWizard, readWizardSnapshot, saveWizardSnapshot, type WizardSnapshot } from './newSessionWizardStore'
 
 const snap: WizardSnapshot = {
   harnessId: 'claude', nativeProvider: '', cwd: '/work/x', task: 'T', subtaskTarget: null,
@@ -28,5 +28,15 @@ describe('new-session wizard store', () => {
   test('nothing is orphaned without a snapshot', () => {
     orphanWizard()
     expect(claimOrphanWizard()).toBe(false)
+  })
+
+  test('a list already mounted is told when the wizard is orphaned', () => {
+    let adopted = 0
+    const off = onWizardOrphaned(() => { if (claimOrphanWizard()) adopted++ })
+    saveWizardSnapshot(snap)
+    orphanWizard()
+    off()
+    orphanWizard()
+    expect(adopted).toBe(1)
   })
 })

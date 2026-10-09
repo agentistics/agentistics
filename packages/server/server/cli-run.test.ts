@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
-import { isRealAgentopPort } from './cli-run'
+import { isRealAgentopPort, runRun } from './cli-run'
 
 const canBindLocalhost = await new Promise<boolean>(resolve => {
   const server = createServer()
@@ -85,4 +85,16 @@ describe('agentop run --rm', () => {
     expect(await exited).toBe(143)
     expect(out).toContain('removed ')
   }, 15_000)
+})
+
+describe('agentop run --help', () => {
+  for (const flag of ['--help', '-h']) {
+    test(`${flag} prints usage and exits 0`, async () => {
+      const lines: string[] = []
+      const orig = console.log
+      console.log = (...a: unknown[]) => { lines.push(a.join(' ')) }
+      try { expect(await runRun([flag])).toBe(0) } finally { console.log = orig }
+      expect(lines.join('\n')).toContain('Usage: agentop run')
+    })
+  }
 })

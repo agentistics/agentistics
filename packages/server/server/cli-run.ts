@@ -47,7 +47,8 @@ function parseTtl(value: string): number {
   return n * ({ s: 1, m: 60, h: 3600, d: 86400 } as Record<string, number>)[m[2]!]!
 }
 
-function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { action: 'stop'; name: string } {
+function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { action: 'help' } | { action: 'stop'; name: string } {
+  if (args[0] === '--help' || args[0] === '-h') return { action: 'help' }
   if (args[0] === 'ls') return { action: 'ls' }
   if (args[0] === 'stop') {
     if (!args[1]) throw new Error('run stop needs a name')
@@ -180,6 +181,7 @@ export async function runRun(args: string[]): Promise<number> {
   try {
     const parsed = parseArgs(args)
     if ('action' in parsed) {
+      if (parsed.action === 'help') { console.log(usage()); return 0 }
       if (parsed.action === 'ls') return listRuns()
       const stateFile = statePath(parsed.name)
       if (!existsSync(stateFile)) throw new Error(`no throwaway run named ${parsed.name}`)
