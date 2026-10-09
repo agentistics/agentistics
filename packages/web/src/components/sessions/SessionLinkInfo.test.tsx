@@ -34,3 +34,44 @@ describe('SessionLinkInfo', () => {
     expect(html).toContain('<button')
   })
 })
+
+import { STATE_COLOR } from '../../lib/sessionCardStyle'
+import { filterByTitle, newestFirst } from '../../lib/sessionParent'
+
+const many: SessionLinks = {
+  parent: null, task: null,
+  children: [
+    { id: 'a', title: 'Old running', harness: 'claude', state: 'working', startedAt: 1000 },
+    { id: 'b', title: 'Ação nova', harness: 'claude', state: 'waiting', startedAt: 3000 },
+    { id: 'c', title: 'Dead one', harness: 'claude', state: 'exited', startedAt: 2000 },
+  ],
+}
+
+describe('link popover polish', () => {
+  it('orders newest first', () => {
+    expect(newestFirst(many.children).map(c => c.id)).toEqual(['b', 'c', 'a'])
+    expect(linkTargets(many).map(t => t.key)).toEqual(['c:b', 'c:c', 'c:a'])
+  })
+  it('splits running from a collapsed ended group', () => {
+    const html = renderToStaticMarkup(<SessionLinkPanel links={many} pt={false} onGo={() => {}} />)
+    expect(html).toContain('Ended (1)')
+    expect(html).toContain('Ação nova')
+    expect(html).not.toContain('Dead one')
+    expect(html.indexOf('Ação nova')).toBeLessThan(html.indexOf('Old running'))
+    expect(renderToStaticMarkup(<SessionLinkPanel links={many} pt onGo={() => {}} />)).toContain('Encerradas (1)')
+  })
+  it('colours the state word from STATE_COLOR, text only', () => {
+    const html = renderToStaticMarkup(<SessionLinkPanel links={many} pt={false} onGo={() => {}} />)
+    expect(html).toContain(`color:${STATE_COLOR.working}`)
+    expect(html).toContain(`color:${STATE_COLOR.waiting}`)
+  })
+  it('filters by title ignoring case and accents', () => {
+    expect(filterByTitle(many.children, 'ACAO').map(c => c.id)).toEqual(['b'])
+    expect(filterByTitle(many.children, '').length).toBe(3)
+  })
+  it('has a search toggle that is closed by default', () => {
+    const html = renderToStaticMarkup(<SessionLinkPanel links={many} pt={false} onGo={() => {}} />)
+    expect(html).toContain('data-testid="link-search-toggle"')
+    expect(html).not.toContain('data-testid="link-search"')
+  })
+})

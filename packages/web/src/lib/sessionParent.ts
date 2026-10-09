@@ -33,7 +33,7 @@ export function createdByLabel(p: SessionParent, pt: boolean): string {
   return pt ? `criada por ${who}` : `created by ${who}`
 }
 
-type LinkRow = Pick<ControlSession, 'id' | 'conversationId' | 'title' | 'harness' | 'state'> & {
+type LinkRow = Pick<ControlSession, 'id' | 'conversationId' | 'title' | 'harness' | 'state' | 'startedAt'> & {
   parentSessionId?: string
   parentConversationId?: string
 }
@@ -68,4 +68,20 @@ export function sessionLinks(
   const children = sessionChildren(session, rows)
   const task = session.taskId ? { id: session.taskId, ...(session.task ? { label: session.task } : {}) } : null
   return parent || children.length || task ? { parent, children, task } : null
+}
+
+const fold = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+
+/** Newest first; a row with no start time sorts after every dated one, ties keep fleet order. */
+export function newestFirst<R extends { startedAt?: number | undefined }>(rows: readonly R[]): R[] {
+  return rows.map((r, i) => ({ r, i })).sort((a, b) => {
+    const x = a.r.startedAt ?? -Infinity, y = b.r.startedAt ?? -Infinity
+    return x === y ? a.i - b.i : y - x
+  }).map(o => o.r)
+}
+
+/** Case- and accent-insensitive title filter; an empty query keeps everything. */
+export function filterByTitle<R extends { title: string }>(rows: readonly R[], query: string): R[] {
+  const q = fold(query).trim()
+  return q ? rows.filter(r => fold(r.title).includes(q)) : [...rows]
 }
