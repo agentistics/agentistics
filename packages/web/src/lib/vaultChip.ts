@@ -51,6 +51,13 @@ export function vaultTrigger(before: string): number | null {
   return m ? before.length - m[1]!.length : null
 }
 
+/**
+ * The picker's search box never holds the trigger that opened it: `:vault` is the composer's token,
+ * not a query. Drops every `:vault` (any case) from what the box is given, so the search starts empty
+ * and carries only what was typed after the trigger.
+ */
+export const stripVaultTrigger = (q: string): string => q.replace(/:vault/gi, '').replace(/^\s+/, '')
+
 export function vaultChipLabel(sel: VaultSelection, pt: boolean): string {
   const parts: string[] = []
   const n = sel.items.length

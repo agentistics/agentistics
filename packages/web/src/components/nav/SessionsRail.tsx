@@ -23,6 +23,7 @@ import { HarnessMark } from '../sessions/HarnessMark'
 import { SessionFacts } from '../sessions/SessionFacts'
 import { sessionPath } from '../../lib/sessionRoute'
 import { NewSessionModal } from '../sessions/NewSessionModal'
+import { claimOrphanWizard } from '../../lib/newSessionWizardStore'
 import { markSessionPending } from '../../lib/pendingSessionStore'
 import { Filter, Folder, Pin, Plus } from 'lucide-react'
 import { getPinnedIds, subscribePinnedSessions } from '../../lib/pinnedSessions'
@@ -82,6 +83,8 @@ export function SessionsRail({
   // The wizard lives HERE too: the expanded aside owns its own copy, and it is unmounted while the
   // rail is showing, so a rail button that only set a flag would open nothing.
   const [creating, setCreating] = useState(false)
+  // A layout swap unmounted the open wizard: take it over (see `newSessionWizardStore`).
+  useEffect(() => { if (claimOrphanWizard()) setCreating(true) }, [])
   const [tip, setTip] = useState<{ top: number; left: number; session: ControlSession } | null>(null)
   const [folderTip, setFolderTip] = useState<{ top: number; left: number; folder: FolderItem } | null>(null)
   /** The folder whose sessions are open as a dropdown — replaces its tooltip while open. */

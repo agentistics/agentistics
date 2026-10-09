@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { applyVaultChip, expandVaultChip, hasVaultChip, removeVaultChip, vaultChipLabel, vaultChipTokens, vaultGrantMessage, vaultTrigger } from './vaultChip'
+import { applyVaultChip, expandVaultChip, hasVaultChip, removeVaultChip, vaultChipLabel, vaultChipTokens, vaultGrantMessage, vaultTrigger, stripVaultTrigger } from './vaultChip'
 
 const sel = { items: [{ id: 'it_a', name: 'OpenAI' }, { id: 'it_b', name: 'Banco' }, { id: 'it_c', name: 'Wi-Fi' }], groups: [{ id: 'gr_p', name: 'pelvie' }] }
 
@@ -38,5 +38,14 @@ describe(':vault chip', () => {
     })
     expect(JSON.stringify(model)).not.toContain('value')
     expect(JSON.stringify(model)).not.toContain('MARKER')
+  })
+})
+
+describe('stripVaultTrigger', () => {
+  test('the trigger never reaches the search box', () => {
+    expect(stripVaultTrigger(':vault')).toBe('')
+    expect(stripVaultTrigger(':VAULT')).toBe('')
+    expect(stripVaultTrigger(':vault pelvie')).toBe('pelvie')
+    expect(stripVaultTrigger('pelvie')).toBe('pelvie')
   })
 })
