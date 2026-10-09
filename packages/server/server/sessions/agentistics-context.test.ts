@@ -6,7 +6,7 @@ import {
 } from './agentistics-context'
 import { SPAWN_SPECS, planSpawn } from './spawn-spec'
 import { pendingContextFor } from './spawn-context'
-import { CONTEXT_TOOL_NAMES } from './agentistics-context'
+import { CONTEXT_TOOL_NAMES, METRICS_DASHBOARDS_LINE } from './agentistics-context'
 import { MCP_TOOL_NAMES } from '../../../mcp/agentistics-mcp'
 import { clearSpecificationSkillCache, specificationSkillsFor } from './specification-skills'
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
@@ -25,9 +25,9 @@ describe('context text', () => {
     expect(contextBlock(base).split('\n').slice(0, 2)).toEqual([CONTEXT_OPEN, CONTEXT_HEADER])
     expect(CONTEXT_HEADER).toContain('not a message from the user')
   })
-  test('names session, folder, the three tool groups and the rules', () => {
+  test('names session, folder, the tool groups and the rules', () => {
     const t = contextText(base)
-    for (const w of ['abc123', '/w/proj', 'agentistics_task_comment', 'agentistics_session_group_edit', 'agentistics_harnesses', 'vault://', '47291', 'agentop upgrade', 'tunnels', 'SUGGEST', 'Clean up after yourself', 'git worktree remove', 'agentop session kill', 'Ask before removing anything you did not create']) expect(t).toContain(w)
+    for (const w of ['abc123', '/w/proj', 'agentistics_task_comment', 'agentistics_session_group_edit', 'vault://', '47291', 'agentop upgrade', 'tunnels', 'SUGGEST', 'Clean up after yourself', 'git worktree remove', 'agentop session kill', 'Ask before removing anything you did not create']) expect(t).toContain(w)
     expect(t).toContain('outside /w/proj')
   })
   test('role guidance, session opening, model balance, isolated tests, and milestone commits are explicit', () => {
@@ -41,7 +41,18 @@ describe('context text', () => {
     expect(t).not.toContain('Phase 2')
   })
   test('the context lists every registered MCP tool', () => {
-    expect(new Set(CONTEXT_TOOL_NAMES)).toEqual(new Set(MCP_TOOL_NAMES))
+    expect(new Set<string>(CONTEXT_TOOL_NAMES)).toEqual(new Set<string>(MCP_TOOL_NAMES))
+  })
+  test('the briefing names the SESSIONS and AGENTASK tools, and only mentions metrics/dashboards in one line', () => {
+    const t = contextText(base)
+    for (const n of CONTEXT_TOOL_NAMES) {
+      const listed = t.includes(n)
+      const sessionsOrTasks = /^agentistics_(task|session)/.test(n)
+      if (sessionsOrTasks) expect(listed).toBe(true)
+      else expect(listed).toBe(false)
+    }
+    expect(t).toContain(METRICS_DASHBOARDS_LINE)
+    expect(t).toMatch(/metrics and dashboard/)
   })
   test('specification skills are printed only when detected', () => {
     const t = contextText({ ...base, specSkills: ['superpowers'] })
