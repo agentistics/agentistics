@@ -139,6 +139,7 @@ import { promptDismissedFor, promptExit, shouldShowToast, versionRefetchDue, typ
 import { consumeRestore, snoozeUpdate, startUpgrade, upgradeInFlight, useUpdateSnooze, useUpgradeFlow } from './lib/upgradeFlow'
 import { NayUpdateCard, type UpdateCardPlacement } from './components/nay/NayUpdateCard'
 import { UpgradeOverlay } from './components/UpgradeOverlay'
+import { HOST_SESSION_PATH, resolveHostSessionRefresh } from './lib/hostSession'
 import { bootWatchdog, fetchWithTimeout, loadErrorText, SMALL_TIMEOUT_MS, startupStripText, type BootVerdict, type LoadError } from './lib/startupLoad'
 import { bootReleased, scheduleBootRelease, setBootStatus, useBootHold } from './lib/bootSplash'
 
@@ -159,6 +160,8 @@ import { bootReleased, scheduleBootRelease, setBootStatus, useBootHold } from '.
 const SESSIONS_FILTER_DIMS = SESSION_FILTER_DIMS as unknown as Array<'activeOnly' | 'harnesses' | 'repos' | 'projects' | 'models'>
 
 // Team session state
+const HOST_SESSION_BOOT: TeamSessionState = { required: false, authed: true }
+
 interface TeamSessionState {
   required: boolean
   authed: boolean
@@ -1466,9 +1469,19 @@ export default function AppLayout() {
 
   // Team session gate
   // undefined = not yet fetched, TeamSessionState after fetch
-  const [teamSession] = useState<TeamSessionState>({ required: false, authed: true })
+  const [teamSession, setTeamSession] = useState<TeamSessionState>(HOST_SESSION_BOOT)
   const iam: IamState = { needsBootstrap: false, authed: false }
-  const refreshTeamSession = useCallback(() => Promise.resolve(), [])
+  /**
+   * Reads the host gates the server has already resolved — `shellEnabled`, `editorEnabled`,
+   * `chatEnabled`, `capabilities` — and re-reads them after a switch flips in Settings. NOT a central
+   * leftover: without it every gate reads OFF and the Shell/Studio tabs vanish (`lib/hostSession.ts`).
+   */
+  const refreshTeamSession = useCallback(() => {
+    return fetchWithTimeout(HOST_SESSION_PATH, SMALL_TIMEOUT_MS)
+      .then(r => r.ok ? (r.json() as Promise<TeamSessionState>) : null)
+      .then(s => setTeamSession(prev => resolveHostSessionRefresh(prev, s, HOST_SESSION_BOOT)))
+      .catch(() => setTeamSession(prev => resolveHostSessionRefresh(prev, null, HOST_SESSION_BOOT)))
+  }, [])
   useEffect(() => { void refreshTeamSession() }, [refreshTeamSession])
   /**
    * Whether to offer the chat at all.
