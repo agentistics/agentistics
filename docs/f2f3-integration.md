@@ -35,3 +35,9 @@ Auto-merged but SEMANTICALLY duplicated (tsc caught it; no textual conflict):
 | `engine/src/structured/acp-structured.ts` | F2.0b's transport-aware `launch` / `now` (pipe clock) kept AND F2.1's `usage` accumulator; F2.1's `acpChatFold(emit, deps.now, …)` now uses the merged `now` (so replay-time stamps stay original); the driver gets both `now` and F2.1's `replaySettleMs`. |
 | `public.pin` | Set to the public integ commit (see "Pins"). |
 
+## 3. F2.2 Kimi (`feat/f2-2-kimi` 6409c39b, already contains F2.1)
+
+| File | Resolution |
+|---|---|
+| `docs/f2-structured-backend.md` | Both kept: F2.0 "Open items" then the "Kimi 2.1.1 findings" section (placed before the F2.1 Gemini section, as on the Kimi branch). No code conflict in the public tree. |
+

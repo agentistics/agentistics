@@ -15,7 +15,7 @@ test('every harness with a verified resume syntax gets a command', () => {
   expect(resumeCommand(s('antigravity'))).toBe("cd '/home/u/proj' && agy --conversation abc-123")
   expect(resumeCommand(s('codex'))).toBe("cd '/home/u/proj' && codex resume abc-123")
   expect(resumeCommand(s('copilot'))).toBe("cd '/home/u/proj' && copilot --resume abc-123")
-  expect(resumeCommand(s('kimi'))).toBe("cd '/home/u/proj' && kimi -S abc-123")
+  expect(resumeCommand(s('kimi'))).toBe("cd '/home/u/proj' && kimi -S session_abc-123")
 })
 
 test('gemini resumes by the chat header UUID, never by the store key', () => {

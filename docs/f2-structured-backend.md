@@ -183,7 +183,7 @@ Legend: **D** declared in code · **V** verified on a real session (date + CLI v
 | Harness | Driver | Worker | status | assignId | resume | model | effort | MCP | instructions | live | permissions | questions | cancel | storeIdOf | Q1–Q11 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | Gemini | `acp` | F2.1 | ready | — (V 2026-10-09: `--session-id` is ignored under `--acp` and leaves a stray file; the link is the sessionId `session/new` states = the chat header's `sessionId` = `native_session_id`) | V `session/load` (same chat file appended; replay streams on AFTER the load result) | V `-m` before `--acp` (`_meta.quota.model_usage` names it) | — (no flag, gemini --help 0.63.0) | V `session/new mcpServers` (TRUSTED folder only; every MCP call is a permission request) | first-message, HELD and joined to the person's first words (ACP v1 has no field; no gemini flag; `GEMINI_SYSTEM_MD` would replace the system prompt) | V `agent_message_chunk` + `agent_thought_chunk` → `thinking` | V `request_permission` (`proceed_always` / `proceed_once` / `cancel`) | — (`ask_user` is EXCLUDED by gemini in `--acp`: `if (!interactive \|\| isAcpMode) extraExcludes.push(ASK_USER_TOOL_NAME)`) | V `session/cancel` (`stopReason: cancelled`, next prompt works) | identity: the ACP uuid (host bridges to the synthetic `<project>/<file>` by `native_session_id`) | see § F2.1 |
-| Kimi | `acp` | F2.2 | ready | — | D `session/load` | — (verify a flag) | — | D | first-message (verify `--agent-file` under `kimi acp`) | D | D | — | D | verify `session_<uuid>` | |
+| Kimi | `acp` | F2.2 | ready (**V** kimi 2.1.1, 2026-10-09) | — **V** (ACP `session/new` has no id parameter; `kimi acp` has only `--login/--region`) | **V** `session/load` with `session_<uuid>` | **V** `session/set_config_option model` (no `-m` under `acp`) | **V** `set_config_option thinking` (only for a thinking-capable model) | **V** stdio `mcpServers` → `mcp__<name>__*` | first-message, **V measured**: `--agent-file` is not read by `kimi acp` — and since 2.1.1 not by the interactive TUI either | **V** chunks | **V** `request_permission` (approve_once/approve_always/reject) | **V** AskUserQuestion as `request_permission` (`q0_opt_N`+`q0_skip`; first question, no free text) | **V** `session/cancel`, also with a permission open | **V** uuid (store) ↔ `session_<uuid>` (ACP) | see "Kimi 2.1.1 findings" |
 | Copilot | `acp` | F2.3 | ready (re-verify `--acp` on 1.0.93) | — (verify `--session-id`) | D | D `--model` | — | D | flag: env `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` (verify) | D | D | — | D | verify | |
 | Codex | `codex-app-server` | F3.1 | **stub** | — (server mints the thread id) | TARGET `thread/resume` | TARGET | TARGET | TARGET `-c mcp_servers` | TARGET protocol `developerInstructions` | TARGET item deltas | TARGET approvals | TARGET | TARGET `turn/interrupt` | thread id = rollout id? | |
 | Antigravity | `agy-stream-json` | F3.2 | **stub** | — (agy mints it) | TARGET `--conversation` | TARGET | TARGET `xhigh/max` | TARGET (P-20) | TARGET first-message unless a field exists | TARGET | TARGET | TARGET | TARGET | from the stream | |
@@ -235,6 +235,38 @@ process by its PID (never by name) → the row continues as a TUI resume of the 
   without an option) needs a UI decision when a driver first states one (F3.3 AskUserQuestion, F3.1).
 - **gemini `storeIdOf`** must map the ACP sessionId to the store's synthetic `${dir}/${file}` (F2.1),
   or the row links to an id no reader resolves.
+## Kimi 2.1.1 findings (F2.2, 2026-10-09)
+
+Recordings of three real sessions live in the engine (`engine/test/fixtures/live-probe/acp/kimi-2.1.1-*.jsonl`) and are
+played back through the driver by `kimi-structured.test.ts`; the live script is
+`~/.agentistics/leader/qa/f2-2-kimi-live.sh` (real kimi, mock model, throwaway server).
+
+- **The conversation id has two spellings.** ACP and the TUI's `-S` use `session_<uuid>` (the directory name); the
+  store, the registry and every reader use the bare `<uuid>`. `storeIdOf` strips the prefix and `acpIdOf` re-adds it
+  on `resumeId`. **`kimi -S <bare-uuid>` answers "Session … not found" on 2.1.1** — the tmux resume was broken for
+  every kimi session until `spawn-spec.ts` (and the copyable command in `resumeCommand.ts`, and the argv reader in
+  `live-sessions.ts`) learned the prefix.
+- **No opening-context channel survives.** `--agent-file` is a root option that `kimi acp` does not read, and on 2.1.1
+  the *interactive* TUI binds the default profile too (`kimi --agent-file f -p …` still works; the lazily created
+  interactive session does not). MCP `instructions` are not injected. Kimi therefore takes the fenced first message
+  (hidden from the chat, replays stripped) on both paths.
+- **Model and effort are session options**, not launch flags: `session/set_config_option` `model` / `thinking`, applied
+  right after the session opens; a refused value is a refused start (host falls back to tmux, same sentence).
+- **A question is a permission request** with `kind: question` on our side: `AskUserQuestion` → `request_permission`
+  (options `q0_opt_N` + `q0_skip`). Only the first question, single-select, no free text. With the `elicitation` client
+  capability kimi sends the full multi-question/multi-select form instead (`elicitation/create`, verified) — the
+  contract has no shape for several questions yet, so it is not used.
+- **There is no trust dialog under ACP.** Project-level MCP servers (`.mcp.json`) of an untrusted folder are skipped
+  silently. The TUI (the tmux fallback) still shows it, and on 2.1.1 it is bigger: its footer sits under the title and
+  the old attention rule could not see it. Three footers are now matched (trust, tool approval, question) with verbatim
+  frames in `attention-rules.test.ts`. Reading the OPTIONS of those numbered dialogs (`▶ 1.`, `→ [1]`) is not done:
+  `dialog-choice.ts` has no marker for them, so a keystroke answer stays refused in words (attach), as before.
+- **P-20**: `kimi-mcp.ts` writes the agentistics MCP into `$KIMI_CODE_HOME/mcp.json` (verified: the tools appear in a
+  TUI/ACP session), merge-preserving, idempotent, canonical-server only.
+- Not done / follow-ups: replayed tool calls are not drawn in a resumed window (shared fold ignores them in replay);
+  `usage_update` (context gauge) and `session_info_update` (title) are ignored; `mode` (default/plan/auto/yolo) is a
+  config option the structured spawn has no field for; the spawn wizard offers no effort for kimi because the TUI has
+  no flag (the structured path could offer `thinking`).
 
 ## F2.1 — Gemini: what was measured (gemini 0.63.0, 2026-10-09) and what it changed
 
