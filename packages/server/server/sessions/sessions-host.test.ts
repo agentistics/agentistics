@@ -535,8 +535,8 @@ describe('linkProcessConversation', () => {
     id: string
     harness: HarnessId
     pid: number
-    knownLog: string | null
-    readProcessConversation: (harness: HarnessId, pid: number, knownLog?: string | null) => Promise<string | null>
+    knownLog: { file: string; holder: number } | null
+    readProcessConversation: (harness: HarnessId, pid: number, knownLog?: { file: string; holder: number } | null) => Promise<string | null>
     recordConversation: (id: string, conversationId: string, link: 'assigned') => Promise<unknown>
   }> = {}) => ({
     id: 'm1',
@@ -603,8 +603,8 @@ describe('linkProcessConversation', () => {
   it('trusts a pre-resolved log instead of asking `readProcessConversation` to resolve it again', async () => {
     const seen: Array<string | null | undefined> = []
     await linkProcessConversation(args({
-      knownLog: '/some/cli-20260917_120000.log',
-      readProcessConversation: async (_h, _pid, knownLog) => { seen.push(knownLog); return 'conv-1' },
+      knownLog: { file: '/some/cli-20260917_120000.log', holder: 4242 },
+      readProcessConversation: async (_h, _pid, knownLog) => { seen.push(knownLog?.file); return 'conv-1' },
     }))
     expect(seen).toEqual(['/some/cli-20260917_120000.log'])
   })
@@ -688,7 +688,7 @@ describe('poll: the same-second log collision', () => {
       ],
       scanProcesses: async () => ({ procs: [] }),
       now: () => NOW,
-      resolveProcessLog: async () => 'cli-20260917_203310.log', // the SAME log for both pids
+      resolveProcessLog: async (_h, pid) => ({ file: 'cli-20260917_203310.log', holder: pid }), // the SAME log for both pids
       readProcessConversation: async (_h, pid) => `conv-of-${pid}`,
       recordConversation: async (id, cid, link) => { calls.push([id, cid, link]) },
     })
@@ -710,7 +710,7 @@ describe('poll: the same-second log collision', () => {
       ],
       scanProcesses: async () => ({ procs: [] }),
       now: () => NOW,
-      resolveProcessLog: async (_h, pid) => `cli-log-for-${pid}.log`, // DIFFERENT logs
+      resolveProcessLog: async (_h, pid) => ({ file: `cli-log-for-${pid}.log`, holder: pid }), // DIFFERENT logs
       readProcessConversation: async (_h, pid) => `conv-of-${pid}`,
       recordConversation: async (id, cid, link) => { calls.push([id, cid, link]) },
     })
@@ -737,7 +737,7 @@ describe('poll: the same-second log collision', () => {
         procs: [{ harness: 'antigravity' as const, cwd: '/elsewhere', pid: 999 }],
       }),
       now: () => NOW,
-      resolveProcessLog: async () => 'cli-20260917_203310.log', // same log as the unmanaged one
+      resolveProcessLog: async (_h, pid) => ({ file: 'cli-20260917_203310.log', holder: pid }), // same log as the unmanaged one
       readProcessConversation: async () => 'agy-conv',
       recordConversation: async (id, cid, link) => { calls.push([id, cid, link]) },
     })
@@ -758,7 +758,7 @@ describe('poll: the same-second log collision', () => {
         procs: [{ harness: 'antigravity' as const, cwd: '/elsewhere', pid: 999 }],
       }),
       now: () => NOW,
-      resolveProcessLog: async (_h, pid) => (pid === 999 ? 'cli-20260917_203310.log' : 'cli-20260917_203310.log'),
+      resolveProcessLog: async (_h, pid) => ({ file: 'cli-20260917_203310.log', holder: pid }),
       readProcessConversation: async () => 'agy-conv',
       recordConversation: async (id, cid, link) => { calls.push([id, cid, link]) },
     })
@@ -775,7 +775,7 @@ describe('poll: the same-second log collision', () => {
       readRegistry: async () => [managed('m1', { harness: 'antigravity' })],
       scanProcesses: async () => ({ procs: [] }),
       now: () => NOW,
-      resolveProcessLog: async () => 'cli-20260917_203310.log',
+      resolveProcessLog: async (_h, pid) => ({ file: 'cli-20260917_203310.log', holder: pid }),
       readProcessConversation: async () => 'agy-conv',
       recordConversation: async (id, cid, link) => { calls.push([id, cid, link]) },
     })
@@ -903,5 +903,52 @@ describe('a process-log link follows the conversation the process moves to', () 
   })
   it('no conversation named yet changes nothing', async () => {
     expect(await run({ conversationId: 'old', conversationLinkVia: 'first-sighting' }, null)).toEqual([])
+  })
+})
+
+describe('exclusive managed agy log', () => {
+  it('links three same-folder/same-second rows without a live pid, then follows a new conversation', async () => {
+    const rows = ['0123456789', 'abcdef0123', 'fedcba9876'].map(id => managed(id, { harness: 'antigravity' }))
+    const logs = new Map(rows.map((r, i) => [r.id, `conversation-${i}`]))
+    const writes: unknown[] = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [] }), readRegistry: async () => rows,
+      scanProcesses: async () => ({ procs: [] }), now: () => NOW,
+      readManagedConversation: async (_h, id) => logs.get(id) ?? null,
+      recordConversation: async (id, conv, link, via) => { writes.push([id, conv, link, via]) },
+    })
+    await p.poll()
+    expect(writes).toEqual(rows.map((r, i) => [r.id, `conversation-${i}`, 'assigned', 'process-log']))
+    writes.length = 0
+    await p.poll()
+    expect(writes).toEqual([])
+    logs.set(rows[0]!.id, 'new-conversation')
+    await p.poll()
+    expect(writes).toEqual([[rows[0]!.id, 'new-conversation', 'assigned', 'process-log']])
+  })
+  it('preserves a reopened link and never asks another harness for a managed log', async () => {
+    const reads: string[] = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [] }),
+      readRegistry: async () => [managed('0123456789', { harness: 'antigravity', conversationId: 'resumed', conversationLinkVia: 'resumed-id' }), managed('abcdef0123', { harness: 'codex' })],
+      scanProcesses: async () => ({ procs: [] }), now: () => NOW,
+      readManagedConversation: async (_h, id) => { reads.push(id); return 'other' },
+      recordConversation: async () => { throw new Error('must not write') },
+    })
+    await p.poll()
+    expect(reads).toEqual([])
+  })
+  it('keeps the process route when the managed log is absent or unreadable', async () => {
+    const writes: string[] = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [backendSession('0123456789')], panePids: { '0123456789': 777 } }),
+      readRegistry: async () => [managed('0123456789', { harness: 'antigravity' })],
+      scanProcesses: async () => ({ procs: [] }), now: () => NOW,
+      readManagedConversation: async () => { throw new Error('unreadable') },
+      readProcessConversation: async () => 'from-db-or-old-log',
+      recordConversation: async (_id, conv) => { writes.push(conv) },
+    })
+    await p.poll()
+    expect(writes).toEqual(['from-db-or-old-log'])
   })
 })

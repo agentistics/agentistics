@@ -39,9 +39,12 @@
 
 import type { HarnessId } from '@agentistics/core'
 import {
-  SPAWN_LOG_AFTER_MS, SPAWN_LOG_BEFORE_MS, agyLogFromFds, agyLogStartMs, conversationFromAgyLog,
-  conversationFromSpawnWindow,
+  SPAWN_LOG_AFTER_MS, SPAWN_LOG_BEFORE_MS, agyLogStartMs, conversationFromAgyLog,
+  conversationFromSpawnWindow, agyTranscriptFromFds, agyConversationFromPath, conversationFromManagedAgyLog,
 } from './agy-conversation'
+import {
+  codexConversationFromPath, codexTranscriptFromFds, kimiConversationFromPath, kimiTranscriptFromFds,
+} from './process-transcript'
 
 /** One harness session record, reduced to the fields anything here may rely on. */
 export interface HarnessSessionFile {
@@ -272,33 +275,61 @@ export const HARNESS_SESSION_SOURCES: Record<HarnessId, HarnessSessionSource | n
 }
 
 /**
- * The OTHER shape a harness can betray its own live conversation in: a log it keeps OPEN.
+ * The OTHER shape a harness can betray its own live conversation in: a file its process holds OPEN.
  *
  * `HARNESS_SESSION_SOURCES` above is one shape — a directory of JSON records a harness writes ABOUT
- * its sessions — and every rule it carries is about that shape. antigravity has nothing of the
- * kind, and it has no assign flag either (`agy --conversation <fresh-uuid>` answers
- * `warning: conversation "…" not found` and creates one under an id of its own; measured against
- * agy 1.1.27 on 2026-09-08). What it DOES have is one log per process, held open for the life of
- * that process, naming the conversation it created. See `agy-conversation.ts` for why that is the
- * only exact answer available for this harness.
+ * its sessions — and every rule it carries is about that shape. Three harnesses have nothing of the
+ * kind and no assign flag either, yet each one's own process names its conversation in a file it
+ * opens, and the pane pid tmux already reports leads straight to that process:
+ *
+ * - **antigravity** names it INSIDE a per-process log (`Created conversation <uuid>`), so the file's
+ *   CONTENT is read — see `agy-conversation.ts`.
+ * - **codex** names it in the FILE NAME of its rollout and of its thread writer-lock, both held for
+ *   the life of the process — see `process-transcript.ts`.
+ * - **kimi** names it in the path of its session directory, but opens those files only while it
+ *   writes — see `process-transcript.ts` for the 5 ms sampling that established it.
  *
  * Two tables rather than one widened table: "a file per session, keyed by pid, parsed as JSON" and
- * "the process's own open log, read by regex" share no rule beyond the question they answer, and
- * folding them together would qualify every sentence in both.
- *
- * The functions live with the harness that needs them, so the day a second harness turns out to do
- * this its reader lands beside its own parser and not in here.
+ * "the process's own open file" share no rule beyond the question they answer, and folding them
+ * together would qualify every sentence in both.
  */
-export interface HarnessProcessLog {
-  /** Pick this harness's own log out of a process's open fd targets. Refuses on ambiguity. */
-  logFromFds(targets: readonly string[]): string | null
-  /** The conversation that log says the process created, or `null`. */
-  conversationFrom(text: string): string | null
+export interface HarnessProcessTranscript {
+  /**
+   * WHICH process holds the file. `null` = the pane pid itself (agy, whose binary is what tmux
+   * runs). Otherwise the executable basenames of the holder: the walk descends from the pane pid
+   * through anything else (a node shim, a login shell) until it reaches a process whose `/proc/<pid>/
+   * exe` is named one of these, reads THAT process's descriptors, and never descends below it — the
+   * holder's own children are the commands it runs, and a `cat` of some other session's transcript
+   * must never be read as this session's.
+   */
+  readonly holders: readonly string[] | null
+  /**
+   * `always`: held open for the life of the process, so one read per poll sees it. `while-writing`:
+   * opened only for the length of each write (kimi: 10–300 ms), so a single read per poll mostly
+   * misses it and the host samples densely while that harness's transcript tree is being written.
+   */
+  readonly holds: 'always' | 'while-writing'
+  /**
+   * Is this the harness's ONLY route to a link? agy: yes — its store records carry no cwd for a
+   * session agentop started, so first sighting can never see it, and off Linux the row is
+   * unrecoverable. codex and kimi: no — first sighting still claims their conversations off Linux,
+   * so off Linux they are slower and refuse on a shared folder, not blind.
+   */
+  readonly onlyRoute: boolean
+  /** Agentop chooses an exclusive log per managed id, also readable after exit and off Linux. */
+  readonly managedLog?: { directory: string; conversationFrom(text: string): string | null }
+  /** Pick this harness's own file out of the holder's open fd targets. Refuses on ambiguity. */
+  fileFromFds(targets: readonly string[]): string | null
+  /** How that file names the conversation: by its PATH (no read) or by its CONTENT (one read). */
+  readonly conversation:
+    | { readonly from: 'path'; read(path: string): string | null }
+    | { readonly from: 'content'; read(text: string): string | null; fromPath?: (path: string) => string | null }
   /**
    * The POST-MORTEM read: the same fact, recovered from the log a process LEFT BEHIND, for a row
-   * whose process ended before anything read it. See `conversationFromSpawnWindow`.
+   * whose process ended before anything read it. See `conversationFromSpawnWindow`. agy only — a
+   * codex rollout or a kimi session directory is found by first sighting once it is in the store.
    */
-  readonly afterTheFact: {
+  readonly afterTheFact?: {
     /** When a log file of this harness was opened, from its name; `null` for any other file. */
     logStartMs(path: string): number | null
     /** How far around the spawn a log may have been opened for it to be that spawn's. */
@@ -313,23 +344,48 @@ export interface HarnessProcessLog {
   }
 }
 
-export const HARNESS_PROCESS_LOGS: Record<HarnessId, HarnessProcessLog | null> = {
+export const HARNESS_PROCESS_TRANSCRIPTS: Record<HarnessId, HarnessProcessTranscript | null> = {
   antigravity: {
-    logFromFds: agyLogFromFds,
-    conversationFrom: conversationFromAgyLog,
+    holders: null,
+    holds: 'always',
+    onlyRoute: true,
+    managedLog: { directory: 'agy-logs', conversationFrom: conversationFromManagedAgyLog },
+    fileFromFds: agyTranscriptFromFds,
+    conversation: { from: 'content', read: conversationFromAgyLog, fromPath: agyConversationFromPath },
     afterTheFact: {
       logStartMs: agyLogStartMs,
       windowMs: { before: SPAWN_LOG_BEFORE_MS, after: SPAWN_LOG_AFTER_MS },
       conversationFromSpawn: conversationFromSpawnWindow,
     },
   },
-  // Nobody has read a per-process log for the other five, and one that has not been read is one
-  // that must not be guessed at. claude is `null` HERE and non-null above: it already has two exact
-  // links and needs no third.
+  // codex 0.161.0, measured 2026-10-08: the native `codex` binary under the node shim holds
+  // `thread-writer-locks/<id>.lock` from spawn and `sessions/…/rollout-…-<id>.jsonl` from ~0.9 s after
+  // the first message.
+  codex: {
+    holders: ['codex'],
+    holds: 'always',
+    onlyRoute: false,
+    fileFromFds: codexTranscriptFromFds,
+    conversation: { from: 'path', read: codexConversationFromPath },
+  },
+  // kimi 0.41.0, measured 2026-10-08: the `kimi` binary IS the pane process, and it opens its
+  // `sessions/<ws>/session_<id>/…` files only while writing them.
+  kimi: {
+    holders: ['kimi'],
+    holds: 'while-writing',
+    onlyRoute: false,
+    fileFromFds: kimiTranscriptFromFds,
+    conversation: { from: 'path', read: kimiConversationFromPath },
+  },
+  // claude and copilot are `null` HERE because each already has an exact link at spawn
+  // (`SpawnSpec.assignId`), and claude a second one in its session file; a third adds nothing.
   claude: null,
-  codex: null,
-  gemini: null,
   copilot: null,
-  kimi: null,
+  // gemini 0.63.0, probed 2026-10-08: it appends to `chats/session-*.jsonl` synchronously — zero
+  // sightings in 2054 samples at 5 ms across a whole turn — so there is no open file to read. Its
+  // route is an assigned id (F0.2), not this.
+  gemini: null,
+  // opencode 1.17.9, probed 2026-10-08: one `opencode.db` (+ its -wal/-shm) for EVERY session, so
+  // the open file names the store, never the session.
   opencode: null,
 }

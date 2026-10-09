@@ -10,6 +10,52 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.113.0': {
+    features: [
+      {
+        pt: 'Toda sessão nova abre direto no chat, em qualquer assistente (Codex, Gemini, Kimi, Copilot…), mesmo antes da primeira mensagem. O terminal fica a um clique.',
+        en: 'Every new session opens straight on the chat, in any assistant (Codex, Gemini, Kimi, Copilot…), even before the first message. The terminal is one click away.',
+      },
+      {
+        pt: 'Um ⓘ ao lado do título mostra quem iniciou a sessão, as sessões que ela iniciou e a tarefa ligada; clique para ir até elas.',
+        en: 'An ⓘ next to the title shows who started the session, the sessions it started and its linked task; click to go to them.',
+      },
+      {
+        pt: 'Clique com o botão direito (ou toque longo) num link de uma mensagem para copiar só o link ou abrir numa nova aba.',
+        en: 'Right-click (or long-press) a link in a message to copy just the link or open it in a new tab.',
+      },
+      {
+        pt: 'Instale o Claude Code, o Codex, o Gemini ou o Copilot com um clique em Configurações → Harnesses ou na Nova sessão, com progresso na tela e o Node.js incluído quando faltar. "Entrar" abre o login do assistente.',
+        en: 'Install Claude Code, Codex, Gemini or Copilot with one click in Settings → Harnesses or in New session, with progress on screen and Node.js included when missing. "Sign in" opens the assistant\'s login.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'A primeira mensagem de uma sessão nova, com ou sem anexo, aparece uma vez só e não se perde.',
+        en: 'The first message of a new session, with or without an attachment, shows once and is never lost.',
+      },
+      {
+        pt: 'As respostas do Codex, do Kimi e do Antigravity aparecem no chat em poucos segundos, não mais depois de vários minutos.',
+        en: 'Codex, Kimi and Antigravity replies show in the chat within seconds, no longer after several minutes.',
+      },
+      {
+        pt: '"Esta sessão" mostra o nome real do modelo (por exemplo, Opus 5.5).',
+        en: '"This session" shows the real model name (for example, Opus 5.5).',
+      },
+      {
+        pt: 'Atualizar o app não fica mais preso na animação: se a versão nova já está instalada, o app só reinicia, e se algo demorar aparece o botão "Reiniciar agora".',
+        en: 'Updating the app no longer gets stuck on the animation: if the new version is already installed the app just restarts, and if something takes too long a "Restart now" button appears.',
+      },
+      {
+        pt: 'A Nova sessão não perde o que você preencheu quando a janela muda de tamanho.',
+        en: 'New session keeps what you filled in when the window changes size.',
+      },
+      {
+        pt: 'Os avisos de instalar o app e de "como você paga" não voltam a cada recarga depois de fechados.',
+        en: 'The install-the-app and "how do you pay" notices no longer come back on every reload once closed.',
+      },
+    ],
+  },
   '2.112.1': {
     features: [
       {

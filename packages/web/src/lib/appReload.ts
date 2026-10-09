@@ -20,6 +20,18 @@
  *  past this, something went wrong and a spinner that never ends is not an answer. */
 export const UPGRADE_WAIT_MS = 4 * 60_000
 
+/** Without the version changing for this long — and nothing actually moving server-side (no download,
+ *  verify, swap or restart in progress) — the page stops animating and offers "Restart now". The case it
+ *  exists for: the new binary was already on disk under an old process, so nothing ever restarts. */
+export const UPGRADE_STALL_MS = 90_000
+
+const ACTIVE_STAGES = new Set(['downloading', 'verifying', 'swapping', 'restarting'])
+
+/** PURE. Has the wait stalled — long, and the server reports no stage that is genuinely working? */
+export function upgradeStalled(elapsedMs: number, stage: string | null | undefined): boolean {
+  return elapsedMs >= UPGRADE_STALL_MS && !(stage && ACTIVE_STAGES.has(stage))
+}
+
 /** How often to ask. Short enough to feel immediate, long enough that a restarting server is not
  *  hammered by a page that cannot help it. */
 export const UPGRADE_POLL_MS = 1500

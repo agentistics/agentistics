@@ -54,6 +54,20 @@ describe('parseAttachmentLog', () => {
       .toEqual({ sends: [{ sessionId: 'ab407b77de', atMs: 1, path: '/s/old.png' }], messages: [] })
   })
 
+  it('a message filed under the row id before the link shows once the conversation is linked', () => {
+    const l = [
+      JSON.stringify({ conversationId: 'row1', atMs: 9, paths: ['/s/pre.png'], images: 1 }),
+      JSON.stringify({ conversationId: 'conv1', atMs: 12, paths: ['/s/post.png'], images: 1 }),
+    ].join('\n')
+    const out = parseAttachmentLog(l, { sessionId: 'row1', conversationId: 'conv1', pendingId: 'row1' })
+    expect(out.messages).toEqual([
+      { conversationId: 'conv1', atMs: 9, paths: ['/s/pre.png'], images: 1 },
+      { conversationId: 'conv1', atMs: 12, paths: ['/s/post.png'], images: 1 },
+    ])
+    expect(parseAttachmentLog(l, { sessionId: 'row1', conversationId: '', pendingId: 'row1' }).messages).toEqual([])
+    expect(parseAttachmentLog(l, { sessionId: 'row1', conversationId: 'conv1' }).messages.map(m => m.atMs)).toEqual([12])
+  })
+
   it('an empty key matches nothing', () => {
     expect(parseAttachmentLog(log, { sessionId: '', conversationId: '' })).toEqual({ sends: [], messages: [] })
   })

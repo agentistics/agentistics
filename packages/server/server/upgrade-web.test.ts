@@ -79,6 +79,6 @@ describe('a press on the version this server already runs', () => {
     const at = src.indexOf("decision.reason === 'up-to-date'")
     expect(at).toBeGreaterThan(-1)
     // The answer comes BEFORE the spawn of `agentop upgrade`.
-    expect(at).toBeLessThan(src.indexOf("spawn(bin, ['upgrade']"))
+    expect(at).toBeLessThan(src.indexOf('spawn(bin, upgradeArgs('))
   })
 })

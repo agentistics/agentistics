@@ -5,7 +5,9 @@ import { stat } from 'fs/promises'
 import { watch as fsWatch, statSync } from 'fs'
 import { watchedEvent, WATCH_DEPTH } from './watch-filter'
 import chokidar from 'chokidar'
-import { SESSION_META_DIR, PROJECTS_DIR, STATS_CACHE_FILE, PORT, TEAM_CENTRAL, CODEX_SESSIONS_DIR, GEMINI_DIR, COPILOT_DIR, ANTIGRAVITY_BRAIN_DIR, ANTIGRAVITY_CONVERSATIONS_DIR } from './config'
+import { SESSION_META_DIR, PROJECTS_DIR, STATS_CACHE_FILE, PORT, TEAM_CENTRAL, CODEX_SESSIONS_DIR, GEMINI_DIR, COPILOT_DIR, ANTIGRAVITY_BRAIN_DIR, ANTIGRAVITY_CONVERSATIONS_DIR, KIMI_DIR } from './config'
+import type { HarnessId } from '@agentistics/core'
+import { harnessOfPath, noteTranscriptActivity } from './sessions/transcript-activity'
 import { centralManifest, centralHtml } from './central-branding'
 import { invalidateCache, rebuildNow, useWatcherDrivenRefresh } from './data'
 import { createRebuildScheduler } from './rebuild-scheduler'
@@ -107,11 +109,39 @@ export function triggerSseNotification() {
 /** Default noise filter for harness roots. */
 const DEFAULT_IGNORED = /(^|[/\\])(\.git|node_modules|plugins|cache|\.tmp|shell_snapshots|skills|memories|log|logs|bin|antigravity|history|ide|pkg)([/\\]|$)/
 
+/**
+ * Each harness's SESSION directory — the only part of its data root worth watching. NOT the whole
+ * root (adapter.dataRoot): roots like ~/.codex hold .tmp plugin clones, an 18MB sqlite log and caches,
+ * and watching them recursively saturates the watcher and starves the request handler.
+ *
+ * A `Record<HarnessId, …>` so a harness added later has to say, rather than being absent by omission
+ * — kimi WAS absent by omission (P-30): its writes refreshed nothing, so its metrics and its
+ * first-sighting link waited for some other harness to trigger a rebuild. claude is watched above
+ * through its own two directories; opencode has no adapter here and keeps every session in one
+ * SQLite file, which this per-directory watch has nothing to say about.
+ */
+const HARNESS_SESSION_DIRS: Record<HarnessId, string | null> = {
+  claude: null,
+  codex: CODEX_SESSIONS_DIR,
+  gemini: join(GEMINI_DIR, 'tmp'),
+  copilot: join(COPILOT_DIR, 'session-state'),
+  antigravity: ANTIGRAVITY_BRAIN_DIR,
+  kimi: join(KIMI_DIR, 'sessions'),
+  opencode: null,
+}
+
 /** Mirror a new/changed source file into the archive, then tell the rebuild scheduler. */
 function onSourceChange(path: string | undefined, isWrite: boolean): void {
   // Mirror new/changed source files into the archive before notifying clients,
   // so deleted-by-cleanup history is preserved as it is written.
   if (typeof path === 'string' && isWrite) void mirrorFile(path)
+  // Tell whoever links conversations that this harness is writing RIGHT NOW: kimi holds its session
+  // files open only while it writes, so this is the moment its process can be caught naming its
+  // conversation (`transcript-activity.ts`, `process-transcript.ts`).
+  if (typeof path === 'string') {
+    const harness = harnessOfPath(path, HARNESS_SESSION_DIRS)
+    if (harness) noteTranscriptActivity(harness)
+  }
   triggerSseNotification()
 }
 
@@ -167,18 +197,9 @@ export async function setupFileWatcher() {
   watch(PROJECTS_DIR, DEFAULT_IGNORED, true)
   watch(STATS_CACHE_FILE)
 
-  // Additional harnesses: watch ONLY each harness's session directory — NOT its
-  // whole data root (adapter.dataRoot). Roots like ~/.codex contain .tmp plugin
-  // clones, an 18MB sqlite log, caches, etc.; watching them recursively saturates
-  // chokidar and starves the request handler. Claude is already covered above.
+  // Additional harnesses: watch ONLY each harness's session directory (`HARNESS_SESSION_DIRS`).
   // Inside brain/<conversation-id>/ only .git / node_modules noise is worth skipping.
   const ANTIGRAVITY_IGNORED = /(^|[/\\])(\.git|node_modules)([/\\]|$)/
-  const HARNESS_SESSION_DIRS: Partial<Record<string, string>> = {
-    codex: CODEX_SESSIONS_DIR,
-    gemini: join(GEMINI_DIR, 'tmp'),
-    copilot: join(COPILOT_DIR, 'session-state'),
-    antigravity: ANTIGRAVITY_BRAIN_DIR,
-  }
   try {
     const adapters = await getEnabledAdapters()
     const seen = new Set<string>([SESSION_META_DIR, PROJECTS_DIR, STATS_CACHE_FILE])

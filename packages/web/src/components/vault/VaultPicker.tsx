@@ -14,7 +14,7 @@ import { CodeField } from './VaultUnlock'
 import { VaultStage } from './VaultStage'
 import { Checkbox, DialogActions, dialogButtonStyle } from '../../pages/settings/primitives'
 import { filterPersonal, listPersonal, type PersonalGroup, type PersonalMeta } from '../../lib/vaultPersonal'
-import type { VaultSelection } from '../../lib/vaultChip'
+import { stripVaultTrigger, type VaultSelection } from '../../lib/vaultChip'
 import { pt_, type PKey } from '../../lib/personalText'
 
 type Lang = 'en' | 'pt'
@@ -113,7 +113,7 @@ export function VaultPicker({ lang, isMobile, initial, onConfirm, onClear, onClo
         <>
           {items.length === 0 ? <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('none', lang)}</div> : (
             <>
-              <input value={q} onChange={e => setQ(e.target.value)} placeholder={t('search', lang)} aria-label={t('search', lang)} autoFocus
+              <input value={q} onChange={e => setQ(stripVaultTrigger(e.target.value))} placeholder={t('search', lang)} aria-label={t('search', lang)} autoFocus
                 style={{ ...input, letterSpacing: 'normal', minHeight: isMobile ? 44 : undefined }} />
               {groups.length > 0 && <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '8px 0 2px' }}>{t('groups', lang)}</div>}
               {groups.filter(g => !q || g.name.toLowerCase().includes(q.toLowerCase())).map(g => (

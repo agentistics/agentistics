@@ -75,6 +75,7 @@ import { WhatsNewModal } from './components/WhatsNewModal'
 import { OPEN_WHATS_NEW_EVENT, type WhatsNewRequest } from './whatsNew/open'
 import { planWhatsNew, releasesBetween, SEEN_KEY } from './whatsNew/select'
 import { InstallModal } from './components/InstallModal'
+import { isNoticeSnoozed, snoozeNotice } from './lib/noticeSnooze'
 import { ArchiveConsentModal, type ArchiveMode } from './components/ArchiveConsentModal'
 import { resolveArchiveChoice } from './lib/archive'
 import { ModeSwitch } from './components/nav/ModeSwitch'
@@ -127,7 +128,10 @@ import { setLeftAsideOpen } from './lib/leftAsideOpen'
 import { PAGE_INSET } from './components/sessions/FleetOverview'
 import { setFleetSourceCentral } from './lib/fleet'
 import { reopenedSessionRoute, sessionPath } from './lib/sessionRoute'
+import { initialSessionView } from './lib/sessionView'
 import { SessionTitleFlag } from './components/sessions/SessionTitleFlag'
+import { SessionLinkInfo } from './components/sessions/SessionLinkInfo'
+import { sessionLinks } from './lib/sessionParent'
 import { ChatSelectionOverlay } from './components/sessions/ChatSelectionBar'
 import { brandAsset } from './lib/brand'
 import { BUNDLE_VERSION, healStaleBundle, takeUpdatedToast } from './lib/bundleVersion'
@@ -2313,7 +2317,7 @@ export default function AppLayout() {
   const sessionOpen = inSessionsWorkspace && selectedSessionId !== undefined
 
   const [sessionViewParams, setSessionViewParams] = useSearchParams()
-  const sessionView: 'chat' | 'terminal' = sessionViewParams.get('view') === 'terminal' ? 'terminal' : 'chat'
+  const sessionView = initialSessionView({ requested: sessionViewParams.get('view') })
   const setSessionView = useCallback((v: 'chat' | 'terminal') => {
     setSessionViewParams(prev => {
       const next = new URLSearchParams(prev)
@@ -2414,6 +2418,7 @@ export default function AppLayout() {
   }, [])
 
   const INSTALL_DISMISSED_KEY = 'agentistics-install-dismissed'
+  const INSTALL_SNOOZE_KEY = 'agentistics-install-snoozed-until'
   const [showInstallModal, setShowInstallModal] = useState(false)
   // Dismissal is persisted SERVER-SIDE (survives incognito, where localStorage is wiped).
   // undefined = prefs not loaded yet → don't show until we know; true = don't show.
@@ -2430,6 +2435,7 @@ export default function AppLayout() {
     if (installDismissedPref === undefined) return // wait for prefs to load
     if (installDismissedPref) return
     try { if (localStorage.getItem(INSTALL_DISMISSED_KEY) === 'true') return } catch {}
+    if (isNoticeSnoozed(INSTALL_SNOOZE_KEY)) return // closed with "Not now": back only after the delay
     installModalShownRef.current = true
     setShowInstallModal(true)
   }, [data, loading, pwaInstalled, installDismissedPref, isCentral])
@@ -2842,13 +2848,15 @@ export default function AppLayout() {
     [billing.profiles, brlRate, isCentral],
   )
 
-  // The first-run invite repeats every load until dismissed for good — but only once preferences
+  // The first-run invite returns after a week (snoozed on close) until dismissed for good — but only once preferences
   // have actually loaded (`introDismissed` absent during loading would flash it at someone who
   // dismissed it months ago), only with nothing registered yet, and never on a central.
+  const BILLING_INTRO_SNOOZE_KEY = 'agentistics-billing-intro-snoozed-until'
   const [billingIntroSeen, setBillingIntroSeen] = useState(false)
   const showBillingIntro =
     !isCentral
     && !billingIntroSeen
+    && !isNoticeSnoozed(BILLING_INTRO_SNOOZE_KEY)
     && archiveChoice !== null
     && billing.introDismissed !== true
     && Object.keys(billing.profiles).length === 0
@@ -3547,6 +3555,7 @@ export default function AppLayout() {
       <ChatSelectionOverlay lang={lang === 'pt' ? 'pt' : 'en'} padX={PAGE_INSET} />
       {headerSession && (
         <div style={{ minWidth: 0, flexShrink: 1, display: 'flex', alignItems: 'baseline', gap: 7 }}>
+          <SessionLinkInfo session={headerSession} links={sessionLinks(headerSession, headerFleet.rows)} lang={lang === 'pt' ? 'pt' : 'en'} onGo={p => navigate(p)} />
           <span style={{
             fontSize: '0.8438rem', fontWeight: 650, color: 'var(--text-primary)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
@@ -4349,7 +4358,11 @@ export default function AppLayout() {
         mode={billingSetupOpen ? 'setup' : 'intro'}
         gaps={billingSetupOpen ? billingReady.gaps : []}
         lang={lang}
-        onClose={() => { setBillingSetupOpen(false); setBillingIntroSeen(true) }}
+        onClose={() => {
+          // Closing the first-run invite snoozes it; the 'setup' entrance was opened on purpose.
+          if (!billingSetupOpen) snoozeNotice(BILLING_INTRO_SNOOZE_KEY)
+          setBillingSetupOpen(false); setBillingIntroSeen(true)
+        }}
         onNeverShowAgain={() => {
           setBillingIntroSeen(true)
           void saveBilling({ ...billing, introDismissed: true })
@@ -4698,6 +4711,7 @@ export default function AppLayout() {
           pwaPrompt={pwaPrompt}
           onClose={(dontShowAgain) => {
             setShowInstallModal(false)
+            if (!dontShowAgain) snoozeNotice(INSTALL_SNOOZE_KEY)
             if (dontShowAgain) {
               setInstallDismissedPref(true)
               try { localStorage.setItem(INSTALL_DISMISSED_KEY, 'true') } catch {}

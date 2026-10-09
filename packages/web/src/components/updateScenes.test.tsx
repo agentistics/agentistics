@@ -29,10 +29,10 @@ test('the loader renders its stage', () => {
   resetFlow()
 })
 
-test('a timeout offers retry instead of sending a non-technical user to reload', () => {
+test('a timeout offers a plain Restart now button instead of sending a non-technical user to reload', () => {
   setFlowForTest({ ...IDLE_FLOW, phase: 'timeout', target: '2.31.0', from: '2.30.0', startedAt: 1 })
   const html = renderToStaticMarkup(<UpgradeOverlay lang="en" isMobile />)
-  expect(html).toContain('Try again')
+  expect(html).toContain('Restart now')
   expect(html).not.toContain('Reload')
   resetFlow()
 })

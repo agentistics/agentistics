@@ -32,6 +32,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, Check, ClipboardList, Lock, Pap
 import { attachmentRoom, MAX_ATTACHMENTS, planPaste } from '../../lib/pastePlan'
 import { Field, inputStyle } from './formBits'
 import { HarnessPicker } from './HarnessPicker'
+import { HarnessInstallDialog } from '../HarnessInstallDialog'
 import { ModelSelect, ModelId } from './ModelSelect'
 import { EffortPicker } from './EffortPicker'
 import { ProjectPicker } from './ProjectPicker'
@@ -40,6 +41,7 @@ import { useEngineCaps } from '../../hooks/useEngineCaps'
 import { useNativeProviders } from '../../hooks/useNativeProviders'
 import { CREATE_URL, NATIVE_HARNESS_ID, createBody, filingSentence, messagesUrl, refusalSentence, withNativeHarness } from '../../lib/nativeSession'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { clearWizard, orphanWizard, readWizardSnapshot, saveWizardSnapshot } from '../../lib/newSessionWizardStore'
 import { HarnessMark } from './HarnessMark'
 import { TaskPicker } from '../tasks/TaskPicker'
 import { boardCopy } from '../tasks/copy'
@@ -120,9 +122,17 @@ export interface NewSessionModalProps {
 }
 
 export function NewSessionModal({
-  lang, onClose, onStarted, initialTask, initialTaskId, initialSubtaskId, initialPreset,
+  lang, onClose: closeProp, onStarted: startedProp, initialTask, initialTaskId, initialSubtaskId, initialPreset,
 }: NewSessionModalProps) {
   const pt = lang === 'pt'
+  // The wizard survives a layout swap (desktop list <-> mobile list) — see `newSessionWizardStore`.
+  // Only the plain "+ new" wizard persists; one opened from a preset or a task carries its own seed.
+  const persists = !initialPreset && !initialTask && !initialTaskId
+  const restored = useRef(persists ? readWizardSnapshot() : null).current
+  const ended = useRef(false)
+  const onClose = () => { ended.current = true; clearWizard(); closeProp() }
+  const onStarted: NewSessionModalProps['onStarted'] = (id, started) => { ended.current = true; clearWizard(); startedProp(id, started) }
+  useEffect(() => () => { if (persists && !ended.current) orphanWizard() }, [persists])
   // The wizard's own data source — harnesses, matching projects, and the search that drives them
   // both. Shared with `StagedSessionCompose`, which needs the same fetch for the same reason —
   // see `useFleetNewOptions`'s own header.
@@ -133,7 +143,7 @@ export function NewSessionModal({
    * provider is its own answer on the first step; see `lib/nativeSession.ts`.
    */
   const { nativeRuntime } = useEngineCaps()
-  const [nativeProvider, setNativeProvider] = useState('')
+  const [nativeProvider, setNativeProvider] = useState(restored?.nativeProvider ?? '')
   const [providerOpen, setProviderOpen] = useState(false)
   const nativeOptions = useNativeProviders(nativeRuntime === true, nativeProvider, lang)
   const harnesses = useMemo(
@@ -146,7 +156,9 @@ export function NewSessionModal({
   }, [nativeOptions.providers, nativeProvider])
 
   const [harness, setHarness] = useState<HarnessOption | null>(null)
-  const [dirty, setDirty] = useState(false)
+  const [dirty, setDirty] = useState(restored?.dirty ?? false)
+  // A harness missing on this machine is listed greyed with Install; this is that flow's target.
+  const [installing, setInstalling] = useState<string | null>(null)
   const [confirmClose, setConfirmClose] = useState(false)
   // Prefer a PRESET's own harness when this machine can actually start it; otherwise pre-select the
   // only assistant there is — a one-item picker is a question with one answer. Runs whenever the
@@ -154,11 +166,12 @@ export function NewSessionModal({
   useEffect(() => {
     if (harnesses === null) return
     setHarness(h => h
+      ?? (restored?.harnessId ? harnesses.find(x => x.id === restored.harnessId) ?? null : null)
       ?? (initialPreset?.harness ? harnesses.find(x => x.id === initialPreset.harness) ?? null : null)
       ?? (harnesses.length === 1 ? harnesses[0]! : null))
   }, [harnesses])
-  const [cwd, setCwd] = useState('')
-  const [task, setTask] = useState(initialTask ?? '')
+  const [cwd, setCwd] = useState(restored?.cwd ?? '')
+  const [task, setTask] = useState(restored?.task ?? initialTask ?? '')
   /**
    * The exact TASK (and, when the picker was used, SUBTASK) this session will be filed under, once
    * it exists. `subtaskId` is absent for a bare task-level attach — set either by `initialTaskId`
@@ -169,7 +182,7 @@ export function NewSessionModal({
    * created. See spec 2026-09-11 §C.2.
    */
   const [subtaskTarget, setSubtaskTarget] = useState<{ taskId: string; subtaskId?: string } | null>(
-    initialTaskId ? { taskId: initialTaskId, ...(initialSubtaskId ? { subtaskId: initialSubtaskId } : {}) } : null,
+    restored ? restored.subtaskTarget : initialTaskId ? { taskId: initialTaskId, ...(initialSubtaskId ? { subtaskId: initialSubtaskId } : {}) } : null,
   )
   /** Set when that automatic attach comes back refused because the subtask is still blocked. */
   const [subtaskBlocked, setSubtaskBlocked] = useState<
@@ -179,10 +192,10 @@ export function NewSessionModal({
   const [blockedDetail, setBlockedDetail] = useState<TaskDetail | null>(null)
   /** Open when the delivery picker is up. */
   const [pickingTask, setPickingTask] = useState(false)
-  const [model, setModel] = useState(initialPreset?.model ?? '')
-  const [effort, setEffort] = useState(initialPreset?.effort ?? '')
-  const [prompt, setPrompt] = useState(initialPreset?.prompt ?? '')
-  const [label, setLabel] = useState(initialPreset?.label ?? '')
+  const [model, setModel] = useState(restored?.model ?? initialPreset?.model ?? '')
+  const [effort, setEffort] = useState(restored?.effort ?? initialPreset?.effort ?? '')
+  const [prompt, setPrompt] = useState(restored?.prompt ?? initialPreset?.prompt ?? '')
+  const [label, setLabel] = useState(restored?.label ?? initialPreset?.label ?? '')
 
   /**
    * The delivery this session probably belongs to, from the folder that is selected RIGHT NOW.
@@ -236,7 +249,7 @@ export function NewSessionModal({
   const [forceable, setForceable] = useState(false)
 
   /** Which question is on screen. The ORDER and the gating are `wizardSteps.ts`'s, not this file's. */
-  const [step, setStep] = useState<StepId>('assistant')
+  const [step, setStep] = useState<StepId>(restored?.step ?? 'assistant')
   /**
    * The model picker's own open state, held HERE rather than inside it, because the modal owns the
    * keyboard: `esc` has to close the picker before it closes the wizard, and two listeners racing
@@ -250,7 +263,7 @@ export function NewSessionModal({
    * there is no channel a byte array could travel down — but every one of these CLIs reads a file
    * it is pointed at. The chip says the name; the message carries the path.
    */
-  const [attachments, setAttachments] = useState<{ name: string; path: string }[]>([])
+  const [attachments, setAttachments] = useState<{ name: string; path: string }[]>(restored?.attachments ?? [])
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -275,6 +288,11 @@ export function NewSessionModal({
     () => ({ harness: harness?.id ?? '', cwd, task, model, effort, prompt, label, attachments }),
     [harness, cwd, task, model, effort, prompt, label, attachments],
   )
+
+  useEffect(() => {
+    if (!persists) return
+    saveWizardSnapshot({ harnessId: harness?.id ?? '', nativeProvider, cwd, task, subtaskTarget, model, effort, prompt, label, attachments, step, dirty })
+  }, [persists, harness, nativeProvider, cwd, task, subtaskTarget, model, effort, prompt, label, attachments, step, dirty])
 
   // The "start anyway" override is a DELIBERATE act on ONE attempt — editing any answer means this
   // is no longer the request the machine refused, so the override is cleared rather than carried
@@ -807,8 +825,15 @@ export function NewSessionModal({
               onChange={id => { setHarness(harnesses?.find(h => h.id === id) ?? null); setDirty(true) }}
               {...(unavailable ? { notice: unavailable } : {})}
               {...(retryable ? { onRetry: retry } : {})}
+              onInstall={id => setInstalling(id)}
             />
           </Field>
+          <HarnessInstallDialog
+            target={installing ? { id: installing, label: harnesses?.find(h => h.id === installing)?.label ?? installing } : null}
+            pt={pt}
+            onClose={() => setInstalling(null)}
+            onDone={() => retry()}
+          />
 
           {isNative && (
             <Field label={pt ? 'Provedor' : 'Provider'} hint={nativeOptions.unavailable ?? (pt

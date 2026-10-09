@@ -20,7 +20,7 @@ import { cliStrings } from './cli-i18n'
 import type { BootMechanism } from './cli-start'
 import type { RuntimeId, ServiceRuntimeState } from '@agentistics/tui/control'
 import type { SessionBackend } from './sessions/types'
-import { readProcessConversation, resolveProcessLog } from './sessions/process-conversation'
+import { readManagedConversation, readProcessConversation, resolveProcessLog } from './sessions/process-conversation'
 import { stripComments } from './strip-comments'
 
 // Regression for the "kill and restart" self-termination bug: the CLI health check
@@ -538,7 +538,7 @@ test('boot options are offered whatever the service state, unlike starts and res
 // (needsProcessLinkRetry(...))` guard, or getting its condition wrong, is now something a test can
 // catch without spawning anything real.
 test('needsProcessLinkRetry fires only for a harness with a process-log route and no id yet', () => {
-  // antigravity: the one harness with a `HARNESS_PROCESS_LOGS` entry and no `assignId` — the exact
+  // antigravity: the one harness with a `HARNESS_PROCESS_TRANSCRIPTS` entry and no `assignId` — the exact
   // shape the retry exists for.
   expect(needsProcessLinkRetry('antigravity', undefined)).toBe(true)
 })
@@ -555,12 +555,20 @@ test('needsProcessLinkRetry is a no-op once assignId/resumeId already settled th
   expect(needsProcessLinkRetry('antigravity', 'agy-1')).toBe(false)
 })
 
-test('needsProcessLinkRetry is a no-op for a harness with no process-log route at all', () => {
-  // codex/kimi/gemini have neither `assignId` nor a `HARNESS_PROCESS_LOGS` entry — scheduling the
-  // retry for them would spend the whole ~12s budget finding nothing, poll after poll.
-  for (const harness of ['codex', 'kimi', 'gemini'] as const) {
+test('needsProcessLinkRetry is a no-op for a harness with no process-transcript route at all', () => {
+  // gemini and opencode have neither `assignId` nor a `HARNESS_PROCESS_TRANSCRIPTS` entry — scheduling
+  // the retry for them would spend the whole budget finding nothing, poll after poll.
+  for (const harness of ['gemini', 'opencode'] as const) {
     expect(needsProcessLinkRetry(harness, undefined)).toBe(false)
   }
+})
+
+test('needsProcessLinkRetry fires for codex and kimi, which their own process can now link', () => {
+  // codex holds its thread lock from spawn, so the retry links it within a tick; kimi is sampled
+  // densely through its first prompt (see `linkProcessConversationSoon`).
+  expect(needsProcessLinkRetry('codex', undefined)).toBe(true)
+  expect(needsProcessLinkRetry('kimi', undefined)).toBe(true)
+  expect(needsProcessLinkRetry('codex', 'c-1')).toBe(false)
 })
 
 // FIXWAVE 1 round 2, Finding 1 (CRITICAL): the collision guard in `sessions-host.ts`'s poll loop is
@@ -635,4 +643,8 @@ test('spawnManaged still fires the process-link retry when needsProcessLinkRetry
   // somewhere else in the function.
   const after = body.slice(gateIndex, gateIndex + 200)
   expect(after).toContain('linkProcessConversationSoon(')
+})
+
+test('production poller wires the exclusive managed log reader', () => {
+  expect(sessionsPollerOptions({} as SessionBackend).readManagedConversation).toBe(readManagedConversation)
 })

@@ -21,7 +21,6 @@
  * branch passes neither prop, and the header below returns.
  */
 
-import { createdByLabel, type SessionParent } from '../../lib/sessionParent'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { BellOff, ChevronDown, ChevronUp } from 'lucide-react'
 import { mutedTooltip, useSessionMuted } from '../../lib/notifyMenu'
@@ -58,9 +57,10 @@ import {
 import { NativeChatHost } from './NativeChatHost'
 import { isNativeSessionId } from '../../lib/sessionRoute'
 import { PanelGapDots } from './PanelGap'
+import { chatOffered, initialSessionView, type SessionView } from '../../lib/sessionView'
 import { PANEL_FULLSCREEN_Z } from '../../lib/zLayers'
 
-export type SessionView = 'chat' | 'terminal'
+export type { SessionView }
 
 /**
  * THE ONE "cover the whole viewport in place" full-screen overlay z-index — below every modal
@@ -99,10 +99,6 @@ export interface SessionPanelProps {
    * ela". `SessionActions` has always answered with the new id; only this surface was not listening.
    */
   onOpened?: (id: string) => void
-  /** Who started this session (`sessionParent`). Absent for one a person started. */
-  parent?: SessionParent | null
-  /** Open the parent session. The line is plain text when this is absent or the parent is gone. */
-  onOpenParent?: () => void
   /** Provided together — see the module header. Their presence means "a shared header up in
    *  App.tsx already shows the title/tabs/actions for this session; draw none of your own." */
   view?: SessionView
@@ -190,7 +186,7 @@ export interface SessionPanelProps {
 }
 
 export function SessionPanel({
-  session, row, lang, theme, act, authorName, onGone, onOpened, parent, onOpenParent, view: viewProp, onViewChange,
+  session, row, lang, theme, act, authorName, onGone, onOpened, view: viewProp, onViewChange,
   onArtifacts, metrics, shellEnabled, shellCapable, onShellEnabledChange, editorEnabled, onOpenTerminal,
   onOpenShellFullscreen, onStudioBandRef, hardwareOffered, studioSeen = true,
   studioFullscreen, onStudioFullscreenChange,
@@ -222,7 +218,7 @@ export function SessionPanel({
    * conversation it is writing. Reused rather than re-derived: the row, the chat view and this
    * toggle must give one answer, and this is the one place that could quietly disagree.
    */
-  const chattable = session.conversationBlind === undefined && !relayed
+  const chattable = chatOffered({ relayed })
   /**
    * A NATIVE Agentistics session (UI.UNIFY) opens in THIS shell like every harness. What it lacks is
    * a SCREEN — the runtime is no process in a pane — so the one view and the one tab that are a
@@ -240,11 +236,11 @@ export function SessionPanel({
   // Uncontrolled (mobile, self-contained) unless the caller hands in `onViewChange` — see the
   // module header. The local state is still declared unconditionally (hooks can't be), it is just
   // never read when a controlled view is in play.
-  const [localView, setLocalView] = useState<SessionView>(chattable ? 'chat' : 'terminal')
+  const [localView, setLocalView] = useState<SessionView>(initialSessionView({ requested: null, relayed, screenless }))
   const controlled = onViewChange !== undefined
   const view = controlled ? (viewProp ?? 'chat') : localView
   const setView = controlled ? onViewChange! : setLocalView
-  const active: SessionView = screenless && chattable ? 'chat' : chattable ? view : 'terminal'
+  const active: SessionView = initialSessionView({ requested: view, relayed, screenless })
 
   /**
    * WHERE THE STUDIO SITS — `lib/panelSlots.ts`, design §1. Read through `resolveForViewport` with
@@ -402,23 +398,7 @@ export function SessionPanel({
     // element does nothing) and the jump-to-latest arrow never appearing (`scrollHeight` equals
     // `clientHeight`, so the reader always measures as "at the tail").
     <div ref={measureColumn} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      {/* MOBILE ONLY now — see the module header. PINNED exactly as before: `flexShrink: 0` plus
-          `position: sticky` as the second, independent guarantee. */}
-      {parent && (
-        <div data-testid="session-parent" style={{
-          flexShrink: 0, padding: '4px 20px', fontSize: 11.5, color: 'var(--text-tertiary)',
-          borderBottom: '1px solid var(--border)', background: 'var(--bg-surface)',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {parent.openable && onOpenParent ? (
-            <button type="button" onClick={onOpenParent} style={{
-              all: 'unset', cursor: 'pointer', color: 'var(--accent-blue, var(--text-secondary))',
-              textDecoration: 'underline', minHeight: isMobile ? 44 : undefined, display: 'inline-flex', alignItems: 'center',
-            }}>{createdByLabel(parent, pt)}</button>
-          ) : createdByLabel(parent, pt)}
-        </div>
-      )}
-      {!controlled && (
+            {!controlled && (
       <header style={{
         display: 'flex', alignItems: 'center', gap: 12,
         padding: '12px 20px', borderBottom: '1px solid var(--border)',

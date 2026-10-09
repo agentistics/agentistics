@@ -28,12 +28,13 @@
  * then starts the in-process server and does not exit).
  */
 
+import { adoptUserBinOnPath } from './sessions/user-path'
 import { loadNativeFleet, runNativeVerb, isNativeSessionId } from './sessions/native-fleet'
 import { spawn } from 'node:child_process'
 import { rekeyMutedSession } from './sessions/session-notify-web'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, writeSync } from 'node:fs'
-import { join, resolve as resolvePath } from 'node:path'
+import { dirname, join, resolve as resolvePath } from 'node:path'
 import type { CodeHostPort } from '@agentistics/engine-api'
 import type { CodeLaunch } from '@agentistics/tui/control/code-types'
 import type { CodeStartLaunch } from './code-launch'
@@ -41,7 +42,7 @@ import { homedir, platform } from 'node:os'
 import { accountHome } from './account-home'
 import {
   HARNESS_ORDER, repoShortName, sendNowDelivered,
-  type HarnessId,
+  type ConversationLinkReason, type HarnessId,
 } from '@agentistics/core'
 import type {
   ActionResult,
@@ -116,12 +117,12 @@ import {
 import { confirm } from './cli-ui'
 import { compareVersions, CURRENT_VERSION, getVersionInfo } from './version'
 import { budgetFromEnv, decideSelfGuard, exeWasReplaced, parseProcStatusMemory, planRestartArgv, selfGuardMessage, type SelfSample } from './self-guard'
-import { readlink, readFile as readFileText } from 'node:fs/promises'
+import { mkdir, readlink, readFile as readFileText } from 'node:fs/promises'
 import { execInPlace } from './exec-in-place'
 import { cliStrings, type CliLang, type CliStrings } from './cli-i18n'
 import { awaitReplacement, type RestartVerdict, type ServingObservation } from './service-manager'
 import { resolveLang } from './cli-lang'
-import { scanProcesses } from './live-sessions'
+import { scanProcesses, type HarnessProcess } from './live-sessions'
 import { resolveBackend } from './sessions'
 import { inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
 import { SPAWN_SPECS, planSpawn } from './sessions/spawn-spec'
@@ -165,8 +166,11 @@ import {
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import { controlStrings } from '@agentistics/tui/control/i18n'
 import { loadHarnessSessions } from './sessions/harness-sessions'
-import { readProcessConversation, readSpawnWindowConversation, resolveProcessLog } from './sessions/process-conversation'
-import { agyLogCollisions } from './sessions/agy-conversation'
+import {
+  collisionKey, managedProcessLogPath, readManagedConversation, readProcessConversation, readSpawnWindowConversation, resolveProcessLog, type ProcessTranscriptFile,
+} from './sessions/process-conversation'
+import { holderCollisions } from './sessions/process-transcript'
+import { onTranscriptActivity } from './sessions/transcript-activity'
 import { extraServers, isServerCommand } from './idle-servers'
 import { planTaskDelete, taskDeleteIsNoop } from './sessions/task-delete'
 import { readSpawnBudget } from './sessions/memory-probe'
@@ -180,9 +184,9 @@ import {
   addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession, touchSessions,
 } from './sessions/registry'
 import {
-  createSessionsPoller, linkProcessConversation, type SessionsPoller, type SessionSnapshot,
+  createSessionsPoller, linkProcessConversation, sampleProcessLinks, type SessionsPoller, type SessionSnapshot,
 } from './sessions/sessions-host'
-import { HARNESS_PROCESS_LOGS } from './sessions/harness-session-file'
+import { HARNESS_PROCESS_TRANSCRIPTS } from './sessions/harness-session-file'
 import { modeSpecFor } from './sessions/mode-spec'
 import { isServerProcess, readServerSnapshot } from './sessions/shared-snapshot'
 import { conversationForProcess, forgetConversations, loadConversations } from './sessions/conversations'
@@ -1561,6 +1565,7 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
     // `cli-session.ts`'s poller: that one is a one-shot command and writes nothing, exactly as it
     // takes no heartbeat.
     readProcessConversation,
+    readManagedConversation,
     // Which log a live pid holds open, WITHOUT reading its content — the collision guard's own
     // input (see `sessions-host.ts`'s `createSessionsPoller` doc for `resolveProcessLog`, and
     // `agy-conversation.ts` for what it protects). This is the ONE production caller of
@@ -1584,6 +1589,7 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
 
 async function ensureSessionsPoller(): Promise<SessionsPoller> {
   if (sessionsPoller) return sessionsPoller
+  listenForTranscriptActivity()
   const backend = await resolveBackend()
   sessionsPoller = createSessionsPoller(sessionsPollerOptions(backend))
   return sessionsPoller
@@ -1641,6 +1647,67 @@ const PROC_LINK_ATTEMPTS = 10
 const PROC_LINK_INTERVAL_MS = 1_200
 
 /**
+ * The dense sampler's cadence and windows, for a harness that holds its file only while writing
+ * (kimi, measured: 10–300 ms per open, several opens in the first ~1.2 s of a turn). 100 ms sees the
+ * first burst; the spawn window covers a first prompt typed in once the TUI is drawn (kimi takes
+ * ~5 s to draw it on this machine); the activity window is extended by every write the watcher
+ * reports, so a burst lives exactly as long as the harness keeps writing, plus a little.
+ */
+const WHILE_WRITING_INTERVAL_MS = 100
+const WHILE_WRITING_SPAWN_WINDOW_MS = 20_000
+const WHILE_WRITING_ACTIVITY_WINDOW_MS = 3_000
+
+/** One dense sampling run over this machine's own rows of `harness` — see `sampleProcessLinks`. */
+async function sampleLinksFor(harness: HarnessId, deadline: () => number, onlyIds?: ReadonlySet<string>): Promise<number> {
+  const backend = await resolveBackend()
+  // Other live processes of this harness join the collision guard; scanned ONCE per run, because a
+  // full `/proc` scan every 100 ms is exactly the cost this loop must not have.
+  const { procs } = await scanProcesses().catch(() => ({ procs: [] as HarnessProcess[] }))
+  return sampleProcessLinks({
+    harness,
+    readRegistry,
+    listPanePids: () => backend.listPanePids?.() ?? Promise.resolve(undefined),
+    resolveProcessLog,
+    readProcessConversation,
+    recordConversation: recordProcessLink,
+    deadline,
+    intervalMs: WHILE_WRITING_INTERVAL_MS,
+    ...(onlyIds ? { onlyIds } : {}),
+    otherPids: procs.filter(p => p.harness === harness && p.pid !== undefined).map(p => p.pid!),
+  })
+}
+
+/** The one write a process-transcript link makes, wherever it was found. */
+function recordProcessLink(sid: string, conversationId: string, link: 'assigned', via?: ConversationLinkReason): Promise<unknown> {
+  return patchSession(sid, { conversationId, conversationLink: link, ...(via ? { conversationLinkVia: via } : {}) })
+    .then(async r => { await rekeyMutedSession(sid, conversationId).catch(() => {}); return r })
+}
+
+/**
+ * Burst-sample whenever the watcher reports a write under a `while-writing` harness's session tree.
+ * One run per harness at a time: a write during a run EXTENDS it rather than starting another.
+ * Installed once, by the first poller this process builds — the same process that runs the watcher
+ * (`agentop server`); a process with no watcher simply never hears of any activity.
+ */
+const activityBursts = new Map<HarnessId, { until: number }>()
+let activityListening = false
+function listenForTranscriptActivity(): void {
+  if (activityListening) return
+  activityListening = true
+  onTranscriptActivity(harness => {
+    if (HARNESS_PROCESS_TRANSCRIPTS[harness]?.holds !== 'while-writing') return
+    const until = Date.now() + WHILE_WRITING_ACTIVITY_WINDOW_MS
+    const running = activityBursts.get(harness)
+    if (running) { running.until = until; return }
+    const burst = { until }
+    activityBursts.set(harness, burst)
+    void sampleLinksFor(harness, () => burst.until)
+      .catch(() => 0)
+      .finally(() => activityBursts.delete(harness))
+  })
+}
+
+/**
  * Should `linkProcessConversationSoon` run at all for this plan? PURE, so a test can assert the
  * exact gate without spawning anything real — see FIXWAVE 1, Finding 3: the trigger call below was
  * the one piece of this whole fix with no test anywhere, and deleting it left `bun tsc --noEmit`
@@ -1649,15 +1716,15 @@ const PROC_LINK_INTERVAL_MS = 1_200
  * `true` only where BOTH hold: nothing already settled the link (`assignId`/`resumeId` already
  * stamped a `conversationId` onto the plan — retrying would be pointless, and calling it anyway
  * would cost a `/proc` sweep and a `scanProcesses()` every spawn of every harness, not only
- * antigravity's), and the harness has a `HARNESS_PROCESS_LOGS` entry at all (today: antigravity
- * only — claude/copilot never reach here because they always have a `conversationId`; codex/kimi/
- * gemini have no entry and would spend the retry's whole budget finding nothing, poll after poll).
+ * antigravity's), and the harness has a `HARNESS_PROCESS_TRANSCRIPTS` entry at all (antigravity, codex,
+ * kimi — claude/copilot never reach here because they always have a `conversationId`; gemini and
+ * opencode have no entry and would spend the retry's whole budget finding nothing).
  */
 export function needsProcessLinkRetry(
   harness: HarnessId,
   conversationId: string | undefined,
 ): boolean {
-  return !conversationId && HARNESS_PROCESS_LOGS[harness] !== null
+  return !conversationId && HARNESS_PROCESS_TRANSCRIPTS[harness] !== null
 }
 
 /**
@@ -1667,7 +1734,7 @@ export function needsProcessLinkRetry(
  * ## Why the ordinary 5s poll is not enough
  *
  * `readProcessConversation` is this harness's ONLY chance at an exact link (see
- * `HARNESS_PROCESS_LOGS` — antigravity has no `assignId` and no session record of its own), and it
+ * `HARNESS_PROCESS_TRANSCRIPTS` — antigravity has no `assignId` and no session record of its own), and it
  * is a `/proc/<pid>/fd` read: once the process exits, the chance is gone forever, and nothing can
  * recover it after the fact (see `session-view.ts`'s `metricsOf`, which refuses to guess one back
  * from a directory). That chance was being handed entirely to whichever browser tab happened to be
@@ -1695,7 +1762,15 @@ export function needsProcessLinkRetry(
  * poll loop now does.
  */
 function linkProcessConversationSoon(id: string, harness: HarnessId): void {
-  if (!HARNESS_PROCESS_LOGS[harness]) return
+  const source = HARNESS_PROCESS_TRANSCRIPTS[harness]
+  if (!source) return
+  // A harness that holds its file only while WRITING (kimi) is invisible to a read every 1.2 s: it
+  // is sampled densely instead, for long enough to cover a first prompt typed in after its TUI is up.
+  if (source.holds === 'while-writing') {
+    const until = Date.now() + WHILE_WRITING_SPAWN_WINDOW_MS
+    void sampleLinksFor(harness, () => until, new Set([id])).catch(() => 0)
+    return
+  }
   void (async () => {
     for (let attempt = 0; attempt < PROC_LINK_ATTEMPTS; attempt++) {
       await new Promise(r => setTimeout(r, PROC_LINK_INTERVAL_MS))
@@ -1704,31 +1779,41 @@ function linkProcessConversationSoon(id: string, harness: HarnessId): void {
       // something else took the id) is no longer this loop's to touch.
       const row = (await readRegistry().catch(() => [])).find(m => m.id === id)
       if (!row || row.conversationId) return
+      const managedConversation = await readManagedConversation(harness, id)
+      if (managedConversation) {
+        try {
+          await recordProcessLink(id, managedConversation, 'assigned', 'process-log')
+          return
+        } catch { continue } // retry if the registry write failed
+      }
       const backend = await resolveBackend()
       const panePids = await backend.listPanePids?.().catch(() => undefined)
       const pid = panePids?.get(id)
       if (!pid) continue
 
-      // THE COLLISION GUARD — see the header above. Every live process-log-capable pid this machine
-      // can see, ours included, resolved to its log BEFORE any content is read.
+      // THE COLLISION GUARD — see the header above. Every live process-transcript-capable pid this
+      // machine can see, ours included, resolved to its file BEFORE any content is read, and compared
+      // by the process that HOLDS it (a codex shim and its native binary are one holder).
       const candidates = new Map<number, HarnessId>([[pid, harness]])
       const { procs } = await scanProcesses().catch(() => ({ procs: [] }))
       for (const p of procs) {
-        if (p.pid !== undefined && HARNESS_PROCESS_LOGS[p.harness]) candidates.set(p.pid, p.harness)
+        if (p.pid !== undefined && HARNESS_PROCESS_TRANSCRIPTS[p.harness]) candidates.set(p.pid, p.harness)
       }
-      const logByPid = new Map<number, string | null>()
+      const logByPid = new Map<number, ProcessTranscriptFile | null>()
+      const keyByHolder = new Map<number, string | null>()
       await Promise.all([...candidates].map(async ([candPid, candHarness]) => {
-        logByPid.set(candPid, await resolveProcessLog(candHarness, candPid).catch(() => null))
+        const resolved = await resolveProcessLog(candHarness, candPid).catch(() => null)
+        logByPid.set(candPid, resolved)
+        if (resolved) keyByHolder.set(resolved.holder, collisionKey(candHarness, resolved))
       }))
-      if (agyLogCollisions(logByPid).has(pid)) continue // refuse this attempt; retry next tick
+      const own = logByPid.get(pid)
+      if (own && holderCollisions(keyByHolder).has(own.holder)) continue // refuse; retry next tick
 
       const linked = await linkProcessConversation({
         id, harness, pid,
         knownLog: logByPid.get(pid),
         readProcessConversation,
-        recordConversation: (sid, conversationId, link, via) =>
-          patchSession(sid, { conversationId, conversationLink: link, ...(via ? { conversationLinkVia: via } : {}) })
-            .then(async r => { await rekeyMutedSession(sid, conversationId).catch(() => {}); return r }),
+        recordConversation: recordProcessLink,
       }).catch(() => false)
       if (linked) return
     }
@@ -1900,9 +1985,11 @@ async function spawnManaged(req: {
       ...(await resolveContextTask(req.contextTaskId ?? req.taskId, req.contextSubtaskId, req.task)),
       ...(await resolveContextParent(req.parentSessionId ?? req.inherit?.parentConversationId ?? req.inherit?.parentSessionId)),
     })
+  const logFile = managedProcessLogPath(req.harness, id, AGENTISTICS_DATA_DIR)
   const planned = planSpawn({
     harness: req.harness,
     cwd: req.cwd,
+    ...(logFile ? { logFile } : {}),
     ...(req.resumeId ? { resumeId: req.resumeId } : {}),
     context: ctx,
     ...(req.prompt ? { prompt: req.prompt } : {}),
@@ -1919,6 +2006,7 @@ async function spawnManaged(req: {
   // server whose PATH cannot reach the harness (a systemd unit that predates `Environment=PATH`)
   // otherwise spawns a pane that dies in the same second, silently, since a failed `execvp` inside
   // tmux prints nothing. Refused here, before any row exists, with the PATH named.
+  adoptUserBinOnPath()
   const bin = planned.plan.argv[0]
   if (bin && !Bun.which(bin, { PATH: process.env.PATH ?? '' })) {
     return { ok: false, message: s.sessNotOnPath(bin, process.env.PATH ?? '') }
@@ -1945,6 +2033,7 @@ async function spawnManaged(req: {
   const abandon = () => removeSession(id).catch(() => {})
   await writeContextFile(planned.plan)
   try {
+    if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
     await backend.spawn({
       id,
       cwd: req.cwd,

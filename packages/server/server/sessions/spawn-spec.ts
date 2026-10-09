@@ -61,7 +61,7 @@
  */
 
 import type { HarnessId } from '@agentistics/core'
-import { HARNESS_PROCESS_LOGS, HARNESS_SESSION_SOURCES } from './harness-session-file'
+import { HARNESS_PROCESS_TRANSCRIPTS, HARNESS_SESSION_SOURCES } from './harness-session-file'
 import { prependContext } from './agentistics-context'
 import type { InitialPrompt, SpawnRequest, SpawnPlanResult, SpawnSpec } from './types'
 
@@ -230,6 +230,7 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
   // real closed effort enum — the only harness besides claude that documents one.
   antigravity: {
     bin: 'agy',
+    logFileFlag: '--log-file', // agy 1.3.2 --help, probed 2026-10-09
     prompt: { kind: 'flag', flag: '--prompt-interactive' },
     modelFlag: '--model', // `--model  Model for the current CLI session`
     // The only harness here with a real listing command: `agy models` ("List available models",
@@ -276,17 +277,18 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
  *  2. the harness keeps a record of its own live sessions that can be matched back to our row
  *     (`HARNESS_SESSION_SOURCES` — Claude's `~/.claude/sessions/<pid>.json`, which carries the tmux
  *     session name we started it under);
- *  3. the harness holds a per-process LOG open that names the conversation it created
- *     (`HARNESS_PROCESS_LOGS` — antigravity, reached through the tmux pane pid's own file
- *     descriptors; see `agy-conversation.ts`).
+ *  3. the harness's own process holds a FILE open that names the conversation
+ *     (`HARNESS_PROCESS_TRANSCRIPTS`, reached through the tmux pane pid: antigravity's per-process
+ *     log, read by content — `agy-conversation.ts`; codex's rollout and thread lock and kimi's
+ *     session directory, read by name — `process-transcript.ts`).
  *
- * The third was added because agy has neither of the first two and the fallback everything else
- * leans on is closed for it in particular: its store record carries no `project_path` for a session
- * agentop started, so even the harness-and-directory guess had nothing to match on. Its chat view
- * was therefore permanently empty while its terminal worked, which is the defect this answers.
+ * The third was added for agy, which has neither of the first two and whose store record carries no
+ * `project_path` for a session agentop started, so even the harness-and-directory guess had nothing
+ * to match on. It was widened to codex and kimi (P-17) because their only link was a first-sighting
+ * claim that waits for the data rebuild and refuses whenever two rows share a folder.
  *
- * `false` is still the answer for codex, kimi and gemini, and it must be SAID rather than papered
- * over: everything downstream then falls back to `conversationForProcess`, which matches by harness
+ * `false` is still the answer for gemini (F0.2 gives it an assigned id), and it must be SAID rather
+ * than papered over: everything downstream then falls back to `conversationForProcess`, which matches by harness
  * and directory and therefore gives every session of one repository the same conversation. That
  * guess is good enough to OFFER a reopen a person confirms by title, and not good enough to be
  * presented as the conversation this row is in. The same rule `HARNESS_CAPABILITIES` applies to a
@@ -299,31 +301,17 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
 export function conversationLinkable(harness: HarnessId): boolean {
   return SPAWN_SPECS[harness]?.assignId !== undefined
     || HARNESS_SESSION_SOURCES[harness] !== null
-    || HARNESS_PROCESS_LOGS[harness] !== null
+    || HARNESS_PROCESS_TRANSCRIPTS[harness] !== null
 }
 
-/**
- * Once a session of this harness has ENDED with no exact link, will one ever arrive?
- *
- * Narrower than `!conversationLinkable`, and a DIFFERENT fact. `conversationLinkable` answers for
- * the HARNESS as a whole, and is `true` for antigravity because route 3 above exists — but route 3
- * is a `/proc/<pid>/fd` read, so it only ever answers while the process is still alive to ask. A row
- * whose harness has ONLY route 3 (no `assignId`, no `HARNESS_SESSION_SOURCES` entry — antigravity
- * today) and whose process has already exited unlinked has exhausted its one chance: the fd is gone,
- * and nothing can recover the id it would have named. `conversationLinkable('antigravity')` stays
- * `true` throughout — a LIVE antigravity row within its capture window (see
- * `linkProcessConversationSoon` in `cli-start.ts`) must not be told it can never be linked — so a
- * caller needs BOTH this and the row's own ended state to tell "not yet" from "not ever".
- *
- * `false` for a harness with `assignId` or a session-file route: those record the link at spawn or
- * while the process runs through a DIFFERENT mechanism than the process's own open fd, so a session
- * ending unlinked there is either impossible or a fact about right now, not a permanent one this
- * function should be asked about.
- */
+/** A process-only route is lost after exit unless its exclusive managed log can still be read. */
 export function conversationLinkGoneForever(harness: HarnessId): boolean {
   return SPAWN_SPECS[harness]?.assignId === undefined
     && HARNESS_SESSION_SOURCES[harness] === null
-    && HARNESS_PROCESS_LOGS[harness] !== null
+    // Only where route 3 is the ONLY route: a codex or kimi conversation that ended unlinked is
+    // still claimed by first sighting once the store has it, so it is not gone.
+    && HARNESS_PROCESS_TRANSCRIPTS[harness]?.onlyRoute === true
+    && !HARNESS_PROCESS_TRANSCRIPTS[harness]?.managedLog
 }
 
 /** Decide the exact argv (and any text to type in) for a requested session. */
@@ -356,6 +344,7 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
   // Never alongside a resume: the conversation already exists and already has an id.
   const assigned = !req.resumeId && req.conversationId && spec.assignId ? req.conversationId : undefined
   if (assigned && spec.assignId) argv.push(...spec.assignId(assigned))
+  if (req.logFile && spec.logFileFlag) argv.push(spec.logFileFlag, req.logFile)
   if (req.model && spec.modelFlag) argv.push(spec.modelFlag, req.model)
   if (req.effort && spec.effortFlag) argv.push(spec.effortFlag, req.effort)
 

@@ -36,8 +36,8 @@ import type { AttachmentMessage, AttachmentSend, HarnessId } from '@agentistics/
 import { ATTACHMENT_DIR, readAttachmentLog } from './attachment-web'
 import { transcriptReaderFor } from './harness-transcript'
 import { conversationOfRow } from './row-conversation'
-import { pendingFor, type PendingPrompt } from './pending-prompts'
-import { HARNESS_PROCESS_LOGS } from './harness-session-file'
+import { migratePrompts, pendingFor, type PendingPrompt } from './pending-prompts'
+import { HARNESS_PROCESS_TRANSCRIPTS } from './harness-session-file'
 import { transcriptAvailability, transcriptSentence, type TranscriptAvailability } from './transcript-availability'
 import type { SessionConversationLink } from '@agentistics/core'
 import type { SurfaceMark } from '../projections/session-surface'
@@ -82,6 +82,15 @@ export interface ChatPayload {
    * conversation has not said anything yet" are different facts, and the second is temporary.
    */
   unavailable?: string
+  /**
+   * Already-localized: why this row's conversation link is SLOWER here than it would be elsewhere.
+   * Present only off Linux on a live, unlinked row of a harness whose exact link is a `/proc` read
+   * but which still has first sighting to fall back on (codex, kimi — `HARNESS_PROCESS_TRANSCRIPTS`,
+   * `onlyRoute: false`). Not a refusal: the composer stays, the first message still creates the
+   * conversation, and the store claims it once it lands — the row just cannot be linked by its own
+   * process, and saying nothing would leave a slow link reading as a broken one.
+   */
+  linkNote?: string
   /**
    * WHY there is no transcript, as a state the UI can branch on (`present` / `not-yet-written` /
    * `expired` / `deleted` / `unreadable`). `unavailable` is the sentence for it; this is the fact,
@@ -200,6 +209,9 @@ async function readSessionChatCore(
   // every finished conversation with "no linked conversation yet", which is the one row people open
   // precisely to read one. `conversationOfRow` is the single place both shapes are known.
   const conversationId = conversationOfRow(row)
+  // An echo recorded before the link existed is held under the ROW id; once the link is there it
+  // moves to the conversation (never duplicated, never lost).
+  if (conversationId) migratePrompts(row.id, conversationId)
   if (!conversationId) {
     // A session sitting on a question (agy's "do you trust this folder?") has not CREATED its
     // conversation yet — the harness makes it only after the answer. Saying "no linked
@@ -220,8 +232,21 @@ async function readSessionChatCore(
     // one act the chat withheld, and the person had to open the terminal. Same "not yet" against
     // "never" rule as the missing-transcript branch below; the link lands on the poll after the
     // message does (measured: under 6s).
-    if (live && !row.conversationBlind && HARNESS_PROCESS_LOGS[row.harness as HarnessId]) {
-      return { turns: [], live }
+    // The same holds for EVERY harness, linked-by-process-log or not: codex, kimi and gemini name
+    // no conversation until their first message is claimed (`conversationBlind`), and a session
+    // that is RUNNING and has said nothing is an empty chat — "waiting for the first message" —
+    // not an unlinkable one. Refusing here replaced the composer, so the one act that creates the
+    // conversation was the one the chat withheld (CHAT.FIRST). A session that is NOT running keeps
+    // its sentence: nothing more is coming.
+    // F0.3: where the process names the conversation, a row that is not linked yet may carry a
+    // sentence saying why its link is slower on this platform.
+    if (live && row.harness) {
+      const queued = pendingFor(row.id, [])
+      const procRoute = HARNESS_PROCESS_TRANSCRIPTS[row.harness as HarnessId]
+      const linkNote = procRoute && !row.conversationBlind
+        ? processLinkNote(procRoute.onlyRoute, process.platform, row.harness as HarnessId, lang)
+        : undefined
+      return { turns: [], live, ...(queued.length > 0 ? { pending: queued } : {}), ...(linkNote ? { linkNote } : {}) }
     }
     return {
       turns: [],
@@ -354,7 +379,7 @@ async function readSessionChatCore(
   // Read once per chat load, not per turn: the log is one small append-only file and the view
   // resolves against it locally. Omitted when there is nothing recorded, so a machine that never
   // attached anything carries no field at all.
-  const { sends, messages } = await readAttachmentLog({ sessionId: id, conversationId })
+  const { sends, messages } = await readAttachmentLog({ sessionId: id, conversationId, pendingId: row.id })
   // VAULT.PERSONAL §8.4: a session granted vault secrets is served with every value — and its
   // base64/url/hex forms — replaced by «vault:NAME». No grant, no work: the same objects come back.
   if (anyGrant()) {
@@ -455,4 +480,22 @@ export async function readSessionChat(
     ...(link !== undefined ? { link } : {}),
   }
   return mergeSessionSurface(merged, who, surface)
+}
+
+/**
+ * The off-Linux sentence for `ChatPayload.linkNote`, or `undefined` where there is nothing to say.
+ * PURE, so the platform rule is pinned without running on another OS.
+ */
+export function processLinkNote(
+  onlyRoute: boolean,
+  platform: NodeJS.Platform,
+  harness: HarnessId,
+  lang: CliLang,
+): string | undefined {
+  if (platform === 'linux' || onlyRoute) return undefined
+  // The id, as every other row sentence names a harness (`sessConversationBlind`, `sessConversationLost`).
+  const name = harness
+  return lang === 'pt'
+    ? `O vínculo exato desta sessão de ${name} lê os arquivos abertos do processo, o que só funciona no Linux. Aqui a conversa é vinculada quando chega ao histórico local — mais devagar, e não quando outra sessão de ${name} está aberta na mesma pasta.`
+    : `This ${name} session's exact link reads the process's open files, which only works on Linux. Here the conversation is linked once it reaches the local history — more slowly, and not while another ${name} session is open in the same folder.`
 }
