@@ -62,3 +62,11 @@ describe('prompt guard, per harness', () => {
     })
   }
 })
+
+describe('gemini usage-limit dialog (live capture)', () => {
+  const frame = require('node:fs').readFileSync(require('node:path').join(import.meta.dir, 'fixtures/gemini-quota/limit.txt'), 'utf8').split('\n') as string[]
+  test('is a blocking dialog although it has no select footer', () => {
+    expect(promptIsBlocked('gemini', frame)).toBe(true)
+    expect(classifySendFailure('gemini', frame, true)).toBe('prompt')
+  })
+})

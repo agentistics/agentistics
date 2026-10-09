@@ -144,3 +144,21 @@ describe('codex 0.161.0 (live captures)', () => {
     expect(classifyCodexSendFailure(live('typed'), true)).toBe('unconfirmed')
   })
 })
+
+// codex 0.161.0 while a turn is RUNNING (captured live, QA.CODEX.SEND): Enter queues the message
+// ("Messages to be submitted after next tool call", each as `↳ text`) and the composer empties, so
+// the queued copy above the composer must never read as "still typed".
+describe('codex 0.161.0 busy (Enter queues)', () => {
+  const A = 'queued message A'
+  test('short text pasted while working is seen in the composer', () => {
+    expect(planCodexSend('after-paste', live('busy-typed'), A)).toBe('enter')
+  })
+  test('after Enter the message sits in the queue block, composer empty -> delivered', () => {
+    expect(planCodexSend('after-enter', live('busy-queued'), A)).toBe('delivered')
+    expect(planCodexSend('after-retry', live('busy-queued'), A)).toBe('delivered')
+    expect(codexIsBlockingFrame(live('busy-queued'))).toBe(false)
+  })
+  test('a long message queued (truncated with …) is delivered, not retried', () => {
+    expect(planCodexSend('after-enter', live('busy-chip-after-enter'), 'long message line. '.repeat(40))).toBe('delivered')
+  })
+})

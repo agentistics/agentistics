@@ -3989,7 +3989,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       if (failure === 'prompt') return { ok: false, message: managed.harness === 'codex' ? s.sessCodexBlocked : s.sessPromptBlocked, failure }
       // `ended` only for a pane that is gone: a live one that did not take the keys is unconfirmed.
       return failure === 'unconfirmed'
-        ? { ok: false, message: managed.harness === 'codex' ? s.sessSendUnconfirmed(id) : s.sessSendFailed(id), failure }
+        ? { ok: false, message: s.sessSendUnconfirmed(id), failure }
         : { ok: false, message: s.sessSessionEnded, failure }
     },
 

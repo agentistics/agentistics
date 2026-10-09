@@ -22,10 +22,18 @@ import { classifyCodexSendFailure, codexIsBlockingFrame } from './codex-send'
 
 export type SendFailure = 'prompt' | 'ended' | 'unconfirmed'
 
+/**
+ * gemini's "Usage limit reached … 1. Keep trying / 2. Stop" box (captured live 2026-10-09, gemini
+ * 0.5x, `fixtures/gemini-quota/limit.txt`) has no `Enter to select` footer, so the attention rules
+ * never see it — yet it swallows typed text, which is how a send read "typed, not sent".
+ */
+const GEMINI_QUOTA_DIALOG = /Usage limit reached[\s\S]*1\. Keep trying[\s\S]*2\. Stop/
+
 /** Is this screen a dialog a typed line would answer instead of being a message? */
 export function promptIsBlocked(harness: HarnessId, frame: readonly string[]): boolean {
   if (harness === 'codex') return codexIsBlockingFrame(frame)
   const text = frame.join('\n')
+  if (harness === 'gemini' && GEMINI_QUOTA_DIALOG.test(text)) return true
   return rulesFor(harness)?.approval.some(re => re.test(text)) === true
 }
 

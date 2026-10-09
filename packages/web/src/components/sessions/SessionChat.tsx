@@ -218,7 +218,7 @@ export interface SessionChatProps {
   row?: FleetRow
   lang: 'pt' | 'en'
   act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; occurrence?: number; confirm?: boolean })
-    => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' }>
+    => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' | 'unconfirmed' }>
   /** Switch to the live terminal when a failed write found a blocking prompt. */
   onOpenTerminal?: () => void
   /**
@@ -2334,6 +2334,15 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       // goes when the row stops reporting the dialog, which is the server's answer and not ours.
       // Everything else was already cleared on the keystroke — see the optimistic clear above.
       setAnswering(null)
+      return
+    }
+    // UNCONFIRMED: the keys were written to a pane that is alive and the submit could not be shown to
+    // have landed — the message MAY be in the session (or sitting typed in its box, where the person
+    // submits it from the terminal). Handing the words back would turn that into a second copy the
+    // next time they press send, so the echo stays (the transcript retires it when the message
+    // lands), the field stays empty, and the server's sentence says to look before resending.
+    if (out.failure === 'unconfirmed') {
+      setNotice(out.message)
       return
     }
     // It did not go. Take the echo back out — leaving it would show a message that is waiting for
