@@ -34,7 +34,6 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'pricing', labelEn: 'Pricing', labelPt: 'Preços', group: 'personal' },
   { id: 'billing', labelEn: 'Billing', labelPt: 'Cobrança', group: 'personal' },
   { id: 'install', labelEn: 'Install', labelPt: 'Instalação', group: 'personal' },
-  { id: 'connection', labelEn: 'Central connection', labelPt: 'Conexão com a central', group: 'personal' },
   { id: 'live', labelEn: 'Live', labelPt: 'Ao vivo', group: 'personal' },
   { id: 'chat', labelEn: 'Chat', labelPt: 'Chat', group: 'personal' },
   // Runtime provider credentials (Anthropic, OpenAI, OpenRouter, DeepSeek, LiteLLM, 9Router,
