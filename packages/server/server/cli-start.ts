@@ -127,6 +127,8 @@ import { scanProcesses, type HarnessProcess } from './live-sessions'
 import { resolveBackend } from './sessions'
 import { inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
 import { SPAWN_SPECS, planSpawn } from './sessions/spawn-spec'
+import { answerStructured, structuredIntentOf, structuredReopenOrigin } from './sessions/structured-route'
+import { agentisticsMcpLaunch } from './mcp-launch'
 import { prependContext } from './sessions/agentistics-context'
 import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextParent, resolveContextTask, writeContextFile } from './sessions/spawn-context'
 import { availableHarnesses } from './sessions/harness-available'
@@ -1950,6 +1952,8 @@ async function spawnManaged(req: {
   harness: HarnessId
   cwd: string
   attach: boolean
+  /** F2.0 — `web`: may run structured (`structured-route.ts`). Absent: a TUI, as always. */
+  origin?: 'web' | 'terminal'
   resumeId?: string
   prompt?: string
   model?: string
@@ -2046,6 +2050,7 @@ async function spawnManaged(req: {
       ...(await resolveContextParent(req.parentSessionId ?? req.inherit?.parentConversationId ?? req.inherit?.parentSessionId)),
     })
   const logFile = managedProcessLogPath(req.harness, id, AGENTISTICS_DATA_DIR)
+  const offeredConversationId = randomUUID()
   const planned = planSpawn({
     harness: req.harness,
     cwd: req.cwd,
@@ -2057,7 +2062,7 @@ async function spawnManaged(req: {
     ...(effort ? { effort } : {}),
     // Offered for a FRESH session; `planSpawn` applies it only where the CLI accepts one and reports
     // back what it actually did. A resume ignores it — that conversation already has an id.
-    conversationId: randomUUID(),
+    conversationId: offeredConversationId,
   })
   if (!planned.ok) return { ok: false, message: explainSpawnError(planned.error, s) }
 
@@ -2104,6 +2109,13 @@ async function spawnManaged(req: {
       ...(planned.plan.initialPrompt
         ? { initialPrompt: { ...planned.plan.initialPrompt, ...(rulesFor(req.harness) ? { rules: rulesFor(req.harness)! } : {}) } }
         : {}),
+      // F2.0 — the same spawn in a structured driver's terms; tmux ignores it (`structured-backend.ts`).
+      structured: structuredIntentOf(req, {
+        model, effort, ctx, mcp: agentisticsMcpLaunch(),
+        // The driver applies it only where its declaration says the protocol assigns ids; the row is
+        // linked by what the protocol then STATES (`onConversation`), never by this offer.
+        conversationId: offeredConversationId,
+      }),
     })
   } catch (e) {
     await abandon()
@@ -2123,6 +2135,10 @@ async function spawnManaged(req: {
       : died.message ? s.sessDiedAtSpawn(died.message) : s.sessDiedAtSpawnStatus(died.status)
     return { ok: false, message }
   }
+
+  // F2.0 — a STRUCTURED session got the opening context from its driver (its declared channel), so a
+  // first-message context left pending for the TUI must not be prepended to its first prompt again.
+  if (backend.chatOf?.(id) && pendingContextFor(planned.plan, ctx)) await patchSession(id, { pendingContext: null }).catch(() => {})
 
   // Give this harness's one exact-link chance its own several seconds, independent of whichever
   // client happens to be polling — see the header above `linkProcessConversationSoon`.
@@ -2767,6 +2783,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // to bring back, which is worse than never having gated it. An ordinary resume (no holder to
       // end, `plan.kind !== 'takeover'`) has no such offset and is gated normally.
       ...(plan.kind === 'takeover' ? { skipAdmission: true } : {}),
+      // F2.0 — a web reopen of a row that ran STRUCTURED runs structured again; anything else is a TUI.
+      ...(structuredReopenOrigin(req.origin, previous?.structuredDriver) ? { origin: 'web' as const } : {}),
     }, s, lang)
     if (spawned.ok) {
       // We handed this id to the CLI, so the new row KNOWS which conversation it drives — there
@@ -3546,6 +3564,10 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // The label comes from the registry so the sentence printed on the way in names what the user
       // selected, not an id they never typed.
       const managed = (await readRegistry()).find(r => r.id === id)
+      // F2.0b — attaching to a LIVE structured session IS "open in terminal": its child ends and the
+      // same conversation resumes as a TUI under this id first. A failure leaves the attach command
+      // saying, in a sentence, that there is no terminal to enter.
+      if (backend.toTerminal) await backend.toTerminal(id).catch(() => null)
       return {
         argv: backend.attachCommand(id),
         detachHint: await backend.detachHint(),
@@ -3644,6 +3666,23 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // The outcome is read off the screen, not assumed from the keystroke — see `sendNow.ts`.
       const outcome = await backend.sendQueuedNow(id)
       return { ok: sendNowDelivered(outcome), message: s.sessSendNowOutcome(outcome, id) }
+    },
+
+    async openInTerminal(id: string): Promise<ActionResult> {
+      const s = S()
+      const backend = await resolveBackend()
+      if (!backend.toTerminal) return { ok: false, message: s.sessTerminalNotStructured }
+      const out = await backend.toTerminal(id).catch(() => ({ ok: false as const, why: 'spawn-failed' as const }))
+      if (out.ok) return { ok: true, message: s.sessTerminalOpened }
+      if (out.why === 'no-resume') {
+        const row = (await readRegistry()).find(r => r.id === id)
+        return { ok: false, message: s.sessTerminalNoResume(row ? row.harness : id) }
+      }
+      return {
+        ok: false,
+        message: out.why === 'not-structured' ? s.sessTerminalNotStructured
+          : out.why === 'no-conversation' ? s.sessTerminalNoConversation : s.sessTerminalFailed,
+      }
     },
 
     async interruptSession(id: string): Promise<ActionResult> {
@@ -4098,6 +4137,20 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const managed = (await readRegistry()).find(m => m.id === id)
       if (!managed) return { ok: false, message: s.sessNoRegistryEntry }
 
+      // F2.0 — a STRUCTURED session's request is stated by its protocol and answered THROUGH ITS
+      // DRIVER: no screen is read and no keystroke is sent. The same refusals as the screen path.
+      const stated = backend.attentionOf?.(id)
+      if (stated !== undefined) {
+        const out = answerStructured(stated, choice, text)
+        if (!out.ok) {
+          return { ok: false, message: out.why === 'not-asking' ? s.sessNotAsking
+            : out.why === 'needs-choice' ? s.sessNeedsChoice(stated?.options.length ?? 0)
+            : out.why === 'needs-text' ? s.sessAnswerNeedsText : s.sessChoiceGone }
+        }
+        if (!backend.answer || !await backend.answer(id, out.answer)) return { ok: false, message: s.sessChoiceGone }
+        return { ok: true, message: s.sessAnswered(out.said) }
+      }
+
       const spec = approvalFor(managed.harness)
       if (!spec) return { ok: false, message: s.sessApproveUnknown(managed.harness) }
 
@@ -4352,6 +4405,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.subtaskId ? { contextSubtaskId: req.subtaskId } : {}),
         ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
         ...(req.force ? { force: true } : {}),
+        ...(req.origin ? { origin: req.origin } : {}),
       }, S(), lang).then(async r => {
         // NW-02: a session started for a BOARD task is filed there by id, not only named after it.
         if (r.ok && r.id && req.taskId) {

@@ -482,6 +482,9 @@ async function runFleetActionOnce(
       if (!host.sendQueuedNow) return { ok: false, message: s.sessionsNoHost }
       return await host.sendQueuedNow(req.id)
     }
+    case 'terminal':
+      if (!host.openInTerminal) return { ok: false, message: s.sessionsNoHost }
+      return await host.openInTerminal(req.id)
     case 'interrupt': {
       // Only meaningful on a session that is actually doing something: pressing Escape into an idle
       // prompt closes whatever the harness has open, which is not what "stop" means.
@@ -556,6 +559,7 @@ async function runFleetActionOnce(
         // does not exist.
         ...(row.actionable ? { replaces: row.id } : {}),
         attach: false,
+        origin: 'web',
       })
       // THE NEW ID TRAVELS. A reopen mints a new managed row and retires the old one, so a caller
       // that stays on the id it asked about is looking at a dead session — which is exactly how
@@ -1033,7 +1037,8 @@ export async function runFleetSpawn(
     return { ok: false, message }
   }
 
-  const out = await host.spawnSession(decision.plan)
+  // F2.0: born in the browser — with `adapter-chat` on and a ready driver it runs structured.
+  const out = await host.spawnSession({ ...decision.plan, origin: 'web' })
   if (out.ok) kickFleet()
   return {
     ok: out.ok,

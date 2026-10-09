@@ -8,6 +8,7 @@
 import type { CodeHostPort } from './code-host'
 import type { HarnessId, ProviderId, CapabilityName, EngineEvent, EngineHealthIssue } from './mirrors'
 import type { IntegrationRegistry } from './integration'
+import type { EngineStructured } from './structured'
 import type { EngineHostServices, PersonAsker } from './host'
 import { apiCompatible } from './version'
 
@@ -134,6 +135,8 @@ export interface Engine<E extends EngineEvent = EngineEvent> {
   codeHost?: (askerFor: (sessionId: string) => PersonAsker) => Promise<CodeHost>
   /** 1.7 — drive a harness over ACP instead of a terminal. Absent: every session is a terminal one. */
   acp?: EngineAcp
+  /** 1.10 — STRUCTURED sessions: one backend, a driver per protocol (`structured.ts`). Absent: `acp` / tmux. */
+  structured?: EngineStructured
   /** Health checks the engine contributes. */
   health?: () => Promise<EngineHealthIssue[]>
   dispose(): Promise<void>

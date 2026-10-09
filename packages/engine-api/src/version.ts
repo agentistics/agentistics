@@ -95,7 +95,20 @@
  * `manifest.provides.chat` lists who serves one. All optional: a 1.8 engine still loads (it serves no
  * chat and the host keeps its own readers), and a 1.9 engine on a 1.8 host is simply never asked.
  */
-export const ENGINE_API_VERSION = '1.9.0'
+/**
+ * 1.10.0 — ENGINE.MAP F2.0: STRUCTURED sessions (`structured.ts`). `Engine.structured` (optional) is ONE
+ * backend for every harness with an official machine protocol, driven by a per-harness DRIVER (`acp`,
+ * `claude-stream-json`, `codex-app-server`, `agy-stream-json`; a driver not written yet is a `stub` that
+ * refuses every start in a sentence). A driver DECLARES per harness what it carries (assigned id, resume,
+ * model, effort, MCP, the opening context `instructions` channel, live text, permissions, questions,
+ * cancel); a session states its activity and the open request, answers by option number / free text,
+ * and follows on the chat seam (`HarnessChatDelta`). `structuredRegistry` / `stubDriver` / `answerFits`
+ * are the pure helpers. All optional: a 1.9 engine still loads (the host keeps `Engine.acp` and tmux),
+ * and a 1.10 engine on a 1.9 host is simply never asked. F2.0b (same minor — 1.10 had not shipped):
+ * `StructuredSpawn.transport` lets the host own WHERE the child runs (a relay that survives a restart);
+ * a driver that ignores it still works, its child simply dies with the server.
+ */
+export const ENGINE_API_VERSION = '1.10.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

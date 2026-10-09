@@ -420,6 +420,10 @@ async function execAttach(
   id: string,
   backend: SessionBackend,
 ): Promise<number> {
+  // F2.0b — a live STRUCTURED session has no pane: attaching to it is "open in terminal" — its child
+  // ends and the same conversation resumes as a TUI under this id, then the attach enters that.
+  const switched = backend.toTerminal ? await backend.toTerminal(id).catch(() => null) : null
+  if (switched?.ok) console.log(`Session ${id} was running over its harness's protocol; it now runs in a terminal (the same conversation, resumed).`)
   const hint = await backend.detachHint()
   console.log(`Attaching to ${id}. To leave the session running and come back here, press ${hint}.`)
   const [bin, ...rest] = backend.attachCommand(id)
