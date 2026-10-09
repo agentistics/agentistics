@@ -207,6 +207,13 @@ export interface FleetRow {
   conversationId?: string
   /** WHERE the conversation link came from (LIVE.1). Not relayed to a central. */
   link?: SessionConversationLink | null
+  /**
+   * HOW the conversation id was learned, as a flat field — `link.reason` when the row HAS a
+   * conversation. It lived only inside `link`, so a client reading `conversationLinkVia` got null
+   * for every row. Absent while there is no id: `no-id-route` and friends say why there is NONE,
+   * which is not a way the link was established.
+   */
+  conversationLinkVia?: SessionConversationLink['reason']
   /** The dialog this session is blocked on, verbatim, and the options read off it. */
   approvalLines?: string[]
   dialogOptions?: { number: number; label: string; selected: boolean; freeText?: boolean }[]
@@ -298,6 +305,7 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
     ...(row.mode ? { mode: row.mode } : {}),
     ...(row.conversationId ? { conversationId: row.conversationId } : {}),
     ...(row.link !== undefined ? { link: row.link } : {}),
+    ...(row.conversationId && row.link ? { conversationLinkVia: row.link.reason } : {}),
     ...(row.approvalLines?.length ? { approvalLines: row.approvalLines } : {}),
     ...(row.dialogOptions?.length ? { dialogOptions: [...row.dialogOptions] } : {}),
     ...(row.approvalBlind ? { approvalBlind: row.approvalBlind } : {}),

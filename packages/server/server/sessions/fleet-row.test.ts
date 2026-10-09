@@ -122,3 +122,20 @@ describe('fleetRow — an EXTERNAL session takes a write when it can be continue
     expect(verb(ext({ conversationId: 'c-1' }), 'kill').enabled).toBe(false)
   })
 })
+
+describe('fleetRow — conversationLinkVia is a flat field, not only link.reason', () => {
+  const link = (reason: 'assigned-id' | 'process-log' | 'first-sighting' | 'no-id-route') =>
+    ({ provenance: reason === 'no-id-route' ? 'unrecoverable' : 'spawn', reason, exact: reason !== 'no-id-route' }) as const
+
+  it('fills it from link.reason whenever the row has a conversation, whatever the harness', () => {
+    for (const harness of ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi'] as const) {
+      const r = fleetRow(row({ harness, conversationId: 'conv-1', link: link('process-log') }), S)
+      expect(r.conversationLinkVia).toBe('process-log')
+    }
+  })
+
+  it('says nothing while there is no id: no-id-route explains an absence, not a way of linking', () => {
+    expect(fleetRow(row({ link: link('no-id-route') }), S).conversationLinkVia).toBeUndefined()
+    expect(fleetRow(row({ conversationId: 'conv-1' }), S).conversationLinkVia).toBeUndefined()
+  })
+})

@@ -92,3 +92,10 @@ in the chat-tail reader, `acp/launch.ts` ends children on host exit.
 
 Also (no textual conflict, stale assertion): `agy-structured.test.ts` asserted `driverFor('claude')` is null "F3.3 still a stub" — true on the F3.2 branch alone, false after F3.3. Updated to `claude-stream-json`.
 
+## 6. `fix/adapter-smallfixes` (fb96a1e4: KILL.ESCALATE, WATCH.LATEDIR, LINK.VIA, AVAILABILITY)
+
+| File | Resolution |
+|---|---|
+| `sessions/harness-available.ts` | AVAILABILITY's 15 s TTL memo (`availableHarnesses(now)`) AND integ's `adoptUserBinOnPath()` + `userSearchPath()` — the adoption now runs on each refresh, not once per process. |
+| `sessions/harness-available.test.ts` | Auto-merged with duplicated imports (removed). The TTL test now isolates `HOME` (like its sibling test): with `~/.local/bin` adopted onto PATH, a real home holding `agy` made `['claude']` read `['claude','antigravity']`. |
+
