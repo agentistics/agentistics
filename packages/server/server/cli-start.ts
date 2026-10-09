@@ -28,6 +28,7 @@
  * then starts the in-process server and does not exit).
  */
 
+import { adoptUserBinOnPath } from './sessions/user-path'
 import { loadNativeFleet, runNativeVerb, isNativeSessionId } from './sessions/native-fleet'
 import { spawn } from 'node:child_process'
 import { rekeyMutedSession } from './sessions/session-notify-web'
@@ -1919,6 +1920,7 @@ async function spawnManaged(req: {
   // server whose PATH cannot reach the harness (a systemd unit that predates `Environment=PATH`)
   // otherwise spawns a pane that dies in the same second, silently, since a failed `execvp` inside
   // tmux prints nothing. Refused here, before any row exists, with the PATH named.
+  adoptUserBinOnPath()
   const bin = planned.plan.argv[0]
   if (bin && !Bun.which(bin, { PATH: process.env.PATH ?? '' })) {
     return { ok: false, message: s.sessNotOnPath(bin, process.env.PATH ?? '') }

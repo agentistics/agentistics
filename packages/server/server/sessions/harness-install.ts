@@ -4,8 +4,10 @@ import { join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
 import { getChatDriver } from '../chat-drivers'
 import { forgetHarnessVersion } from './harness-version'
+import { resetHarnessAvailability } from './harness-available'
+import { userSearchPath } from './user-path'
 import {
-  cleanInstallLine, planHarnessInstall, planNodeInstall, parseHarnessVersion, withUserBin,
+  cleanInstallLine, planHarnessInstall, planNodeInstall, parseHarnessVersion,
   type HarnessInstallFacts, type HarnessInstallPlan,
 } from './harness-install-plan'
 
@@ -35,7 +37,7 @@ async function npmPrefixWritable(env: Record<string, string | undefined>): Promi
 }
 
 export function installEnv(): Record<string, string | undefined> {
-  return { ...process.env, PATH: withUserBin(process.env.PATH, homedir()) }
+  return { ...process.env, PATH: userSearchPath() }
 }
 
 async function realFacts(): Promise<HarnessInstallFacts> {
@@ -169,6 +171,8 @@ export async function handleHarnessInstallRoute(
       const version = parseHarnessVersion(output)
       if (verifyCode !== 0 || !version) { yield { type: 'error', message: 'Instalou, mas não consegui confirmar a versão. Tente de novo.' }; return }
       forgetHarnessVersion()
+      // A harness that appeared must show in the picker now, not at the next server restart.
+      resetHarnessAvailability()
       yield { type: 'done', message: 'Instalação concluída.', version }
     } finally { busy = false }
   }

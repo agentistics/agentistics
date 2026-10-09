@@ -87,6 +87,7 @@ export function HarnessInstallDialog({ target, pt, onClose, onDone }: {
       confirmLabel={confirmLabel}
       cancelLabel={pt ? 'Cancelar' : 'Cancel'}
       focusCancel
+      tone="default"
       onCancel={() => { if (phase !== 'running') onClose() }}
       onConfirm={() => {
         if (phase === 'running') return

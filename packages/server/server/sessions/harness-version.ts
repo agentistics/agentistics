@@ -1,5 +1,5 @@
-import { homedir } from 'node:os'
-import { parseHarnessVersion, withUserBin } from './harness-install-plan'
+import { parseHarnessVersion } from './harness-install-plan'
+import { userSearchPath } from './user-path'
 
 const TTL_MS = 30_000
 const cache = new Map<string, { at: number; version: string | undefined }>()
@@ -16,7 +16,7 @@ export async function readHarnessVersion(bin: string, now = Date.now()): Promise
   if (hit && now - hit.at < TTL_MS) return hit.version
   let version: string | undefined
   try {
-    const env = { ...process.env, PATH: withUserBin(process.env.PATH, homedir()) }
+    const env = { ...process.env, PATH: userSearchPath() }
     const proc = Bun.spawn([bin, '--version'], { stdout: 'pipe', stderr: 'ignore', stdin: 'ignore', env })
     const timer = setTimeout(() => proc.kill(), 5_000)
     const output = await new Response(proc.stdout).text().catch(() => '')

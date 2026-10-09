@@ -4,7 +4,7 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { Cpu, AlertCircle, CircleDot, ExternalLink } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
 import { loginHarness, useChatHarnesses, type HarnessChatStatus } from '../../hooks/useChatHarnesses'
-import { SectionHeader } from './primitives'
+import { SectionHeader, dialogButtonStyle } from './primitives'
 import { HarnessInstallDialog } from '../../components/HarnessInstallDialog'
 import { sessionPath } from '../../lib/sessionRoute'
 import { CenteredLoader } from '../../components/CenteredLoader'
@@ -58,7 +58,7 @@ export function HarnessStatusBadge({ h, pt = false }: { h: HarnessChatStatus; pt
   )
 }
 
-function HarnessCard({ h, pt }: { h: HarnessChatStatus; pt: boolean }) {
+function HarnessCard({ h, pt, action }: { h: HarnessChatStatus; pt: boolean; action?: React.ReactNode }) {
   const { setup } = h
   const hasGuidance = !h.ready && (setup.docUrl || setup.note)
 
@@ -92,6 +92,7 @@ function HarnessCard({ h, pt }: { h: HarnessChatStatus; pt: boolean }) {
             </div>
           )}
         </div>
+        {action}
       </div>
 
       {/* Setup guidance for non-ready harnesses */}
@@ -165,15 +166,19 @@ export default function HarnessesSettings() {
       ) : (
         <>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {harnesses.map(h => <div key={h.id}>
-              <HarnessCard h={h} pt={pt} />
-              {(!h.ready || h.updateAvailable === true) && <button type="button" disabled={signingIn === h.id} onClick={() => {
-                if (h.installed && !h.authReady) { void signIn(h); return }
-                setTarget(h)
-              }} style={{ margin: '6px 0 8px 42px', minHeight: isMobile ? 44 : undefined, padding: '7px 14px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12 }}>
-                {h.installed && !h.authReady ? (pt ? 'Entrar' : 'Sign in') : h.installed ? (pt ? 'Atualizar' : 'Update') : (pt ? 'Instalar' : 'Install')}
-              </button>}
-            </div>)}
+            {harnesses.map(h => {
+              const needsSignIn = h.installed && !h.authReady
+              const actionable = !h.ready || h.updateAvailable === true
+              const action = actionable ? (
+                <button type="button" disabled={signingIn === h.id} onClick={() => {
+                  if (needsSignIn) { void signIn(h); return }
+                  setTarget(h)
+                }} style={{ ...dialogButtonStyle('secondary', isMobile), width: undefined, flexShrink: 0, color: 'var(--text-primary)', background: 'var(--bg-card)' }}>
+                  {needsSignIn ? (pt ? 'Entrar' : 'Sign in') : h.installed ? (pt ? 'Atualizar' : 'Update') : (pt ? 'Instalar' : 'Install')}
+                </button>
+              ) : undefined
+              return <HarnessCard key={h.id} h={h} pt={pt} action={action} />
+            })}
           </div>
           <div style={{
             marginTop: 14, padding: '10px 14px', borderRadius: 8,

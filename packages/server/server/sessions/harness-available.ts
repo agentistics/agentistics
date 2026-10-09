@@ -22,6 +22,7 @@
  * broken wizard; a full list whose every entry fails is.
  */
 
+import { adoptUserBinOnPath, userSearchPath } from './user-path'
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { SPAWN_SPECS } from './spawn-spec'
 
@@ -46,8 +47,9 @@ let blind = false
  */
 export function availableHarnesses(): { ids: HarnessId[]; narrowed: boolean; blind: boolean } {
   if (cached === null) {
+    adoptUserBinOnPath()
     const startable = startableHarnessIds()
-    const installed = startable.filter(h => !!Bun.which(SPAWN_SPECS[h]!.bin, { PATH: process.env.PATH ?? '' }))
+    const installed = startable.filter(h => !!Bun.which(SPAWN_SPECS[h]!.bin, { PATH: userSearchPath() }))
     cached = installed.length > 0 ? installed : startable
     blind = installed.length === 0
   }
