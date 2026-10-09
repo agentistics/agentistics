@@ -33,7 +33,7 @@ import { spawn } from 'node:child_process'
 import { rekeyMutedSession } from './sessions/session-notify-web'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, writeSync } from 'node:fs'
-import { join, resolve as resolvePath } from 'node:path'
+import { dirname, join, resolve as resolvePath } from 'node:path'
 import type { CodeHostPort } from '@agentistics/engine-api'
 import type { CodeLaunch } from '@agentistics/tui/control/code-types'
 import type { CodeStartLaunch } from './code-launch'
@@ -116,7 +116,7 @@ import {
 import { confirm } from './cli-ui'
 import { compareVersions, CURRENT_VERSION, getVersionInfo } from './version'
 import { budgetFromEnv, decideSelfGuard, exeWasReplaced, parseProcStatusMemory, planRestartArgv, selfGuardMessage, type SelfSample } from './self-guard'
-import { readlink, readFile as readFileText } from 'node:fs/promises'
+import { mkdir, readlink, readFile as readFileText } from 'node:fs/promises'
 import { execInPlace } from './exec-in-place'
 import { cliStrings, type CliLang, type CliStrings } from './cli-i18n'
 import { awaitReplacement, type RestartVerdict, type ServingObservation } from './service-manager'
@@ -166,7 +166,7 @@ import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import { controlStrings } from '@agentistics/tui/control/i18n'
 import { loadHarnessSessions } from './sessions/harness-sessions'
 import {
-  collisionKey, readProcessConversation, readSpawnWindowConversation, resolveProcessLog, type ProcessTranscriptFile,
+  collisionKey, managedProcessLogPath, readManagedConversation, readProcessConversation, readSpawnWindowConversation, resolveProcessLog, type ProcessTranscriptFile,
 } from './sessions/process-conversation'
 import { holderCollisions } from './sessions/process-transcript'
 import { onTranscriptActivity } from './sessions/transcript-activity'
@@ -1564,6 +1564,7 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
     // `cli-session.ts`'s poller: that one is a one-shot command and writes nothing, exactly as it
     // takes no heartbeat.
     readProcessConversation,
+    readManagedConversation,
     // Which log a live pid holds open, WITHOUT reading its content — the collision guard's own
     // input (see `sessions-host.ts`'s `createSessionsPoller` doc for `resolveProcessLog`, and
     // `agy-conversation.ts` for what it protects). This is the ONE production caller of
@@ -1777,6 +1778,13 @@ function linkProcessConversationSoon(id: string, harness: HarnessId): void {
       // something else took the id) is no longer this loop's to touch.
       const row = (await readRegistry().catch(() => [])).find(m => m.id === id)
       if (!row || row.conversationId) return
+      const managedConversation = await readManagedConversation(harness, id)
+      if (managedConversation) {
+        try {
+          await recordProcessLink(id, managedConversation, 'assigned', 'process-log')
+          return
+        } catch { continue } // retry if the registry write failed
+      }
       const backend = await resolveBackend()
       const panePids = await backend.listPanePids?.().catch(() => undefined)
       const pid = panePids?.get(id)
@@ -1976,9 +1984,11 @@ async function spawnManaged(req: {
       ...(await resolveContextTask(req.contextTaskId ?? req.taskId, req.contextSubtaskId, req.task)),
       ...(await resolveContextParent(req.parentSessionId ?? req.inherit?.parentConversationId ?? req.inherit?.parentSessionId)),
     })
+  const logFile = managedProcessLogPath(req.harness, id, AGENTISTICS_DATA_DIR)
   const planned = planSpawn({
     harness: req.harness,
     cwd: req.cwd,
+    ...(logFile ? { logFile } : {}),
     ...(req.resumeId ? { resumeId: req.resumeId } : {}),
     context: ctx,
     ...(req.prompt ? { prompt: req.prompt } : {}),
@@ -2021,6 +2031,7 @@ async function spawnManaged(req: {
   const abandon = () => removeSession(id).catch(() => {})
   await writeContextFile(planned.plan)
   try {
+    if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
     await backend.spawn({
       id,
       cwd: req.cwd,

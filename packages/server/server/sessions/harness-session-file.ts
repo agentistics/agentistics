@@ -39,8 +39,8 @@
 
 import type { HarnessId } from '@agentistics/core'
 import {
-  SPAWN_LOG_AFTER_MS, SPAWN_LOG_BEFORE_MS, agyLogFromFds, agyLogStartMs, conversationFromAgyLog,
-  conversationFromSpawnWindow,
+  SPAWN_LOG_AFTER_MS, SPAWN_LOG_BEFORE_MS, agyLogStartMs, conversationFromAgyLog,
+  conversationFromSpawnWindow, agyTranscriptFromFds, agyConversationFromPath, conversationFromManagedAgyLog,
 } from './agy-conversation'
 import {
   codexConversationFromPath, codexTranscriptFromFds, kimiConversationFromPath, kimiTranscriptFromFds,
@@ -316,12 +316,14 @@ export interface HarnessProcessTranscript {
    * so off Linux they are slower and refuse on a shared folder, not blind.
    */
   readonly onlyRoute: boolean
+  /** Agentop chooses an exclusive log per managed id, also readable after exit and off Linux. */
+  readonly managedLog?: { directory: string; conversationFrom(text: string): string | null }
   /** Pick this harness's own file out of the holder's open fd targets. Refuses on ambiguity. */
   fileFromFds(targets: readonly string[]): string | null
   /** How that file names the conversation: by its PATH (no read) or by its CONTENT (one read). */
   readonly conversation:
     | { readonly from: 'path'; read(path: string): string | null }
-    | { readonly from: 'content'; read(text: string): string | null }
+    | { readonly from: 'content'; read(text: string): string | null; fromPath?: (path: string) => string | null }
   /**
    * The POST-MORTEM read: the same fact, recovered from the log a process LEFT BEHIND, for a row
    * whose process ended before anything read it. See `conversationFromSpawnWindow`. agy only — a
@@ -347,8 +349,9 @@ export const HARNESS_PROCESS_TRANSCRIPTS: Record<HarnessId, HarnessProcessTransc
     holders: null,
     holds: 'always',
     onlyRoute: true,
-    fileFromFds: agyLogFromFds,
-    conversation: { from: 'content', read: conversationFromAgyLog },
+    managedLog: { directory: 'agy-logs', conversationFrom: conversationFromManagedAgyLog },
+    fileFromFds: agyTranscriptFromFds,
+    conversation: { from: 'content', read: conversationFromAgyLog, fromPath: agyConversationFromPath },
     afterTheFact: {
       logStartMs: agyLogStartMs,
       windowMs: { before: SPAWN_LOG_BEFORE_MS, after: SPAWN_LOG_AFTER_MS },

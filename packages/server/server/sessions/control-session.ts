@@ -137,7 +137,8 @@ export function toControlSession(
         platform: process.platform,
         noIdRoute: !conversationLinkable(v.harness!),
         needsProc: HARNESS_PROCESS_TRANSCRIPTS[v.harness!]?.onlyRoute === true && SPAWN_SPECS[v.harness!]?.assignId === undefined
-          && HARNESS_SESSION_SOURCES[v.harness!] === null,
+          && HARNESS_SESSION_SOURCES[v.harness!] === null
+          && !HARNESS_PROCESS_TRANSCRIPTS[v.harness!]?.managedLog,
       })
     : undefined
   const conversationBlind = v.status === 'external' || v.status === 'closed' || v.conversationId || !harness

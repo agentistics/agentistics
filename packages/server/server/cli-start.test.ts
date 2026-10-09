@@ -20,7 +20,7 @@ import { cliStrings } from './cli-i18n'
 import type { BootMechanism } from './cli-start'
 import type { RuntimeId, ServiceRuntimeState } from '@agentistics/tui/control'
 import type { SessionBackend } from './sessions/types'
-import { readProcessConversation, resolveProcessLog } from './sessions/process-conversation'
+import { readManagedConversation, readProcessConversation, resolveProcessLog } from './sessions/process-conversation'
 import { stripComments } from './strip-comments'
 
 // Regression for the "kill and restart" self-termination bug: the CLI health check
@@ -643,4 +643,8 @@ test('spawnManaged still fires the process-link retry when needsProcessLinkRetry
   // somewhere else in the function.
   const after = body.slice(gateIndex, gateIndex + 200)
   expect(after).toContain('linkProcessConversationSoon(')
+})
+
+test('production poller wires the exclusive managed log reader', () => {
+  expect(sessionsPollerOptions({} as SessionBackend).readManagedConversation).toBe(readManagedConversation)
 })
