@@ -65,6 +65,24 @@ export interface StructuredDeclaration {
   questions: StructuredFeature
   /** Cancel the turn in flight. */
   cancel: StructuredFeature
+  /**
+   * Token usage the PROTOCOL states per turn (F2.1, additive and optional: a driver that says nothing
+   * leaves the files / the harness's own store as the source of tokens, exactly as before).
+   */
+  usage?: StructuredFeature
+}
+
+/**
+ * Cumulative token usage a session's protocol has stated so far (F2.1). Counters a protocol does not
+ * state are ABSENT, never 0 — the harness's store stays the source of the full breakdown.
+ */
+export interface StructuredUsage {
+  /** Prompt turns whose end carried a usage statement. */
+  turns: number
+  input: number
+  output: number
+  /** Per model, when the protocol names it. */
+  byModel?: Record<string, { input: number; output: number }>
 }
 
 /** A driver's state in this build. `stub` = the interface exists, every start is refused in a sentence. */
@@ -169,6 +187,8 @@ export interface StructuredSession {
   /** A bounded rendered view for the Terminal tab and the fleet tail (never journaled). */
   screen(lines: number): string[]
   lastActivityMs(): number
+  /** The usage the protocol has stated so far, or null (F2.1, optional: absent = this driver states none). */
+  usage?(): StructuredUsage | null
   /** Queues a prompt. False when not running or the queue is full. */
   prompt(text: string): boolean
   /** Answers the open request. False when none is open, the id is stale, or the answer does not fit it. */

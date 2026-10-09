@@ -446,6 +446,7 @@ export function createSessionsPoller(o: {
       const modes = new Map<string, { id: string; label: string }>()
       const dialogOptions = new Map<string, DialogOption[]>()
       const dialogSelect = new Map<string, 'numbered' | 'marker'>()
+      const dialogStated = new Set<string>()
       /*
        * WHY THE REFUSAL IS CARRIED AND NOT JUST THE OPTIONS.
        *
@@ -581,6 +582,7 @@ export function createSessionsPoller(o: {
           approvals.set(r.id, tail())
           dialogOptions.set(r.id, statedDialog.map((label, i) => ({ number: i + 1, label: anyGrant() ? scrubTerminalLine(r.id, label) : label, selected: i === 0 })))
           dialogSelect.set(r.id, 'numbered')
+          dialogStated.add(r.id)
         } else if (state === 'waiting-approval') {
           approvals.set(r.id, tail())
           // Read from the SAME frame that decided the state, so what is offered and what the state
@@ -898,6 +900,7 @@ export function createSessionsPoller(o: {
         modes,
         dialogOptions,
         dialogSelect,
+        dialogStated,
         dialogUnreadable,
         processes,
         conversations,
