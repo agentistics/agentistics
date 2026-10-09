@@ -22,7 +22,7 @@
  * sentence in `chat-web.ts` is what the user sees. Nothing here may throw into the poll.
  */
 
-import { readFile, readdir, readlink } from 'node:fs/promises'
+import { readFile, readdir, readlink, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, ANTIGRAVITY_DIR } from '../config'
@@ -273,10 +273,27 @@ export function managedProcessLogPath(harness: HarnessId, id: string, dataDir: s
   return dir && /^[0-9a-f]{10}$/.test(id) ? join(dataDir, dir, `${id}.log`) : null
 }
 
+/**
+ * The answer per managed log, keyed on its (mtime, size): the poll asks EVERY row of a managed-log
+ * harness each five seconds — reopened rows included, since their link follows the log too
+ * (`relink-policy.ts`) — and a log that has not changed names the same conversation, so it costs a
+ * `stat`, not a read. Bounded: dropped whole past `MANAGED_MEMO_MAX`, which costs one re-read each.
+ */
+const managedMemo = new Map<string, { mtimeMs: number; size: number; value: string | null }>()
+const MANAGED_MEMO_MAX = 512
+
 /** The log WE asked the CLI to write: no process walk, timestamp guess or cwd attribution. */
 export async function readManagedConversation(harness: HarnessId, id: string, dataDir = AGENTISTICS_DATA_DIR): Promise<string | null> {
   const file = managedProcessLogPath(harness, id, dataDir)
   const source = HARNESS_PROCESS_TRANSCRIPTS[harness]
   if (!file || !source?.managedLog) return null
-  try { return source.managedLog.conversationFrom(await readFile(file, 'utf-8')) } catch { return null }
+  try {
+    const st = await stat(file)
+    const hit = managedMemo.get(file)
+    if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.value
+    const value = source.managedLog.conversationFrom(await readFile(file, 'utf-8'))
+    if (managedMemo.size >= MANAGED_MEMO_MAX) managedMemo.clear()
+    managedMemo.set(file, { mtimeMs: st.mtimeMs, size: st.size, value })
+    return value
+  } catch { return null }
 }
