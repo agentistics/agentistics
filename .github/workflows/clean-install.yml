@@ -1,0 +1,49 @@
+name: Clean install gate
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  clean-install:
+    name: Build, install and smoke-test the binary
+    runs-on: ubuntu-latest
+    container: oven/bun:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build binary
+        run: bun run build:binary
+
+      - name: Install as a new user
+        run: |
+          install -Dm755 release/agentop /usr/local/bin/agentop
+          mkdir -p "$HOME/.agentistics" "$HOME/.claude" "$HOME/.codex" "$HOME/.gemini" "$HOME/.copilot"
+
+      - name: Start and verify the installed server
+        run: |
+          export PORT=47391 WEB_PORT=47392 AGENTISTICS_SERVER_FOREGROUND=1
+          agentop server >"$RUNNER_TEMP/agentop.log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 60); do
+            curl -fsS "http://127.0.0.1:$PORT/api/version" > /tmp/version.json && break
+            kill -0 "$pid" 2>/dev/null || { cat "$RUNNER_TEMP/agentop.log"; exit 1; }
+            sleep 0.5
+          done
+          curl -fsS "http://127.0.0.1:$PORT/api/version" | grep -q '"version"'
+          curl -fsS "http://127.0.0.1:$WEB_PORT/" > /tmp/index.html
+          test -s /tmp/index.html
+          ! grep -Eqi 'native-experimental|central-dashboard|central-login' /tmp/index.html
+          curl -fsS "http://127.0.0.1:$PORT/api/experimental" | grep -q '"enabled":false'
+
+      - name: Verify the community bundle has no native or central entry markers
+        run: |
+          # The native marker is the component's guarded refusal state, not an exposed surface. Its
+          # presence proves the gate shipped; the central-only entry markers must not be present.
+          grep -R -q 'native-experimental' packages/web/dist
+          ! grep -R -Eqi 'central-dashboard|central-login' packages/web/dist
