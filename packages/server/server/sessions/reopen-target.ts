@@ -27,7 +27,7 @@
 
 import type { HarnessId } from '@agentistics/core'
 import { sessionAtCwd } from '../live-sessions'
-import type { Conversation } from './conversations'
+import { findConversation, resumeIdOf, type Conversation } from './conversations'
 import { SPAWN_SPECS } from './spawn-spec'
 
 export interface ReopenEntry {
@@ -50,6 +50,19 @@ export function resumableById(harness: HarnessId | undefined): boolean {
   return harness !== undefined && SPAWN_SPECS[harness]?.resume !== undefined
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Whether THIS id can be handed to the harness's resume. Gemini resumes by its own uuid (`--resume
+ * <uuid>`, F0.2), but a gemini row can also carry the store's SYNTHETIC id (`<project>/<file>`),
+ * which names a file and no conversation the CLI knows — offering a reopen with it would be a
+ * button whose only outcome is an error. Every other harness's recorded id is its own.
+ */
+export function resumableWithId(harness: HarnessId | undefined, id: string): boolean {
+  if (!resumableById(harness)) return false
+  return harness !== 'gemini' || UUID_RE.test(id)
+}
+
 export function reopenTargetFor(o: {
   entry: ReopenEntry
   /** What the harness itself says this row drives — outranks the registry's record. */
@@ -63,13 +76,15 @@ export function reopenTargetFor(o: {
   const { entry, pool, taken } = o
   const knownId = o.exactId ?? entry.conversationId
   if (knownId) {
-    const own = pool.find(c => c.sessionId === knownId)
+    // Either of the conversation's two ids: a gemini row records the harness's OWN uuid
+    // (`nativeId`), every other row the store key. A resume is always given the harness's own.
+    const own = findConversation(pool, knownId)
     if (own) {
       if (!own.resumable) return null
       taken.add(own.sessionId)
-      return { sessionId: own.sessionId, title: own.title, via: 'store' }
+      return { sessionId: resumeIdOf(own), title: own.title, via: 'store' }
     }
-    if (!resumableById(entry.harness) || !entry.cwd || !o.onDisk?.has(knownId)) return null
+    if (!resumableWithId(entry.harness, knownId) || !entry.cwd || !o.onDisk?.has(knownId)) return null
     taken.add(knownId)
     return { sessionId: knownId, title: entry.harnessName ?? '', via: 'exact-link' }
   }
@@ -80,5 +95,5 @@ export function reopenTargetFor(o: {
     && sessionAtCwd({ current_cwd: c.cwd, project_path: c.cwd }, entry.cwd ?? ''))
   if (!conv?.resumable) return null
   taken.add(conv.sessionId)
-  return { sessionId: conv.sessionId, title: conv.title, via: 'directory' }
+  return { sessionId: resumeIdOf(conv), title: conv.title, via: 'directory' }
 }

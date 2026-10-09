@@ -73,7 +73,7 @@ export async function openAdapterChatStream(
     max: MAX_TURNS,
     row: () => findRow(hub, lang, id),
     pending: () => pendingFor(conversationId, []).map(p => p.text),
-    finish: (read, live) => finishChatRead(id, conversationId, read, live, lang),
+    finish: (read, live) => finishChatRead(id, conversationId, read, live, lang, row.id),
     onFleetTick: cb => hub.subscribe(() => cb()),
     onWake: cb => onChatWake(id, cb),
   }, signal, failed => {
@@ -96,7 +96,7 @@ export async function readAdapterChatPayload(host: StartHost, lang: CliLang, id:
     row,
     pending: pendingFor(conversationId, []).map(p => p.text),
     max: MAX_TURNS,
-    finish: (read, live) => finishChatRead(id, conversationId, read, live, lang),
+    finish: (read, live) => finishChatRead(id, conversationId, read, live, lang, row.id),
   })
   if (!out) refuseAdapter(row.harness ?? '', conversationId)
   return out

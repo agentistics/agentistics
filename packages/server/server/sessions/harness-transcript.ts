@@ -23,7 +23,7 @@
  */
 
 import { readFile, readdir, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
 import { ANTIGRAVITY_BRAIN_DIR, CODEX_SESSIONS_DIR, COPILOT_DIR, GEMINI_DIR, KIMI_DIR } from '../config'
 import { UUID_RE } from '../git'
@@ -37,6 +37,8 @@ import { readChatWindow, readRecentChatTurns, resolveChatTranscriptPath } from '
 import { readTailWindow } from './transcript-window'
 import { followFork } from './transcript-fork'
 import { createTranscriptPathMemo, resolveMemoizedPath } from './transcript-path-memo'
+import { parseChatName } from './gemini-family'
+import { listGeminiFamilies } from './gemini-family-io'
 
 /** Everything a reader is told about the session whose conversation is wanted. */
 export interface TranscriptRef {
@@ -285,30 +287,110 @@ export async function resolveCopilotTranscript(
 }
 
 /**
- * Gemini files a chat at `~/.gemini/tmp/<project>/chats/<file>.jsonl`, and the conversation id this
- * product uses IS `<project>/<file>` — so the path needs no directory listing and no memo, unlike
- * codex's and kimi's. It is also the reason the id has to be checked rather than interpolated: it
- * is the only conversation id in this table that is a path fragment.
+ * Gemini files a chat at `~/.gemini/tmp/<project>/chats/<file>.jsonl`, and a conversation is named
+ * by ONE OF TWO ids in this product:
+ *
+ *  - `<project>/<file>` — the store's synthetic key, which IS the path and needs no directory
+ *    listing. It is the only conversation id in this table that is a path fragment, so it is checked
+ *    rather than interpolated.
+ *  - the chat header's `sessionId` UUID — what `gemini --session-id <uuid>` assigned at spawn and
+ *    what `--resume <uuid>` takes (`spawn-spec.ts`). The file is
+ *    `…/chats/session-<timestamp>-<first 8 of the uuid>.jsonl` (verified live, gemini 0.63.0), so the
+ *    scan is a `readdir` per project for that suffix, and the HEADER is then read to confirm — eight
+ *    hex characters are a hint, the header's `sessionId` is the proof, and two chats sharing a
+ *    suffix must never be confused. Memoized with the shared miss-TTL rule: a freshly assigned
+ *    session has no file until its first turn, and that miss must not outlive the wait.
  */
-async function resolveGeminiTranscript(ref: TranscriptRef): Promise<string | null> {
+const geminiPathMemo = createTranscriptPathMemo()
+
+/** Reset the memo. Tests only. */
+export function forgetGeminiTranscriptPaths(): void {
+  geminiPathMemo.clear()
+}
+
+/**
+ * The chat of an assigned uuid — the NEWEST file of its family, which is the one gemini is writing
+ * now. A reopen continues in a new headerless file (`gemini-family.ts`), so the file whose header
+ * names the uuid is the oldest member, not the live one; `GEMINI.read` expands whichever member it
+ * is handed to the whole family.
+ */
+async function findGeminiChatByUuid(uuid: string, tmpDir: string): Promise<string | null> {
+  const suffix = uuid.slice(0, 8).toLowerCase()
+  for (const project of await subdirs(tmpDir)) {
+    const chats = join(tmpDir, project, 'chats')
+    const family = (await listGeminiFamilies(chats, { suffix })).find(f => f.id?.toLowerCase() === uuid.toLowerCase())
+    const last = family?.members.at(-1)
+    if (last) return join(chats, last)
+  }
+  return null
+}
+
+export async function resolveGeminiTranscript(
+  ref: TranscriptRef,
+  tmpDir: string = join(GEMINI_DIR, 'tmp'),
+  // Injectable only so a test can step past the miss TTL without waiting it out.
+  now: number = Date.now(),
+): Promise<string | null> {
+  if (UUID_RE.test(ref.conversationId)) {
+    return resolveMemoizedPath(geminiPathMemo, ref.conversationId, {
+      exists,
+      scan: () => findGeminiChatByUuid(ref.conversationId, tmpDir),
+      now,
+    })
+  }
   const parts = ref.conversationId.split('/')
   // Exactly `<project>/<file>`, and neither half may leave the chats directory. A `.` or `..`, an
   // empty segment or a nested path is refused outright — an id that cannot be trusted is an id
   // that names no file, which is the same answer as a conversation nobody has written yet.
   if (parts.length !== 2) return null
   if (parts.some(p => p === '' || p === '.' || p === '..' || p.includes('\\'))) return null
-  const path = join(GEMINI_DIR, 'tmp', parts[0]!, 'chats', `${parts[1]!}.jsonl`)
+  const path = join(tmpDir, parts[0]!, 'chats', `${parts[1]!}.jsonl`)
   return (await exists(path)) ? path : null
+}
+
+/**
+ * Every line of a gemini conversation, oldest file first. `path` may be ANY member: the family is
+ * derived from its name and the headers beside it, so the synthetic-id route (which names the
+ * original file) and the uuid route (which names the newest) read the same conversation. A chat that
+ * was never reopened is one file and costs exactly what it always did.
+ */
+async function geminiConversationLines(path: string): Promise<string[] | null> {
+  const name = basename(path)
+  const parsed = parseChatName(name)
+  let members = [name]
+  if (parsed) {
+    const dir = dirname(path)
+    const family = (await listGeminiFamilies(dir, { suffix: parsed.suffix })).find(f => f.members.includes(name))
+    if (family && family.members.length > 1) members = family.members
+  }
+  const dir = dirname(path)
+  const lines: string[] = []
+  for (const m of members) {
+    let content: string
+    try { content = await readFile(join(dir, m), 'utf-8') } catch { if (m === name) return null; continue }
+    lines.push(...content.split('\n'))
+  }
+  return lines
 }
 
 const GEMINI: HarnessTranscript = {
   resolve: ref => resolveGeminiTranscript(ref),
   async read(path, max) {
-    let content: string
-    try { content = await readFile(path, 'utf-8') } catch { return { turns: [], older: false } }
-    return windowed(parseGeminiChatTurns(content.split('\n'), max + 1), max)
+    const lines = await geminiConversationLines(path)
+    if (!lines) return { turns: [], older: false }
+    return windowed(parseGeminiChatTurns(lines, max + 1), max)
   },
   async readRecent(path, max) {
+    // One file keeps the byte-tail read; a reopened conversation spans several, whose seed snapshot
+    // and continuation have to be read together to be deduplicated, so it is read whole.
+    const parsed = parseChatName(basename(path))
+    if (parsed) {
+      const family = (await listGeminiFamilies(dirname(path), { suffix: parsed.suffix })).find(f => f.members.includes(basename(path)))
+      if (family && family.members.length > 1) {
+        const lines = await geminiConversationLines(path)
+        return lines ? parseGeminiChatTurns(lines, max) : []
+      }
+    }
     return readTailWindow(path, max, lines => parseGeminiChatTurns(lines, max))
   },
 }
@@ -406,11 +488,13 @@ const CLAUDE: HarnessTranscript = {
 /**
  * The reader for each harness, and the one `null` that is not a gap.
  *
- * GEMINI IS READ THROUGH THE ID THIS PRODUCT ALREADY KEYS IT BY, and it took a link to get here.
+ * GEMINI IS READ THROUGH EITHER OF ITS TWO IDS, and it took a link to get here.
  * This entry was `null` for a long time, with a reason that was a LINK fact and not a format one: a
- * reader is only ever offered a `conversationId`, gemini has no `assignId` and its `-r, --resume`
- * takes "latest" or an index rather than an id, so an entry would have been code nothing could
- * reach. What changed is that `planFirstSightingClaims` deliberately includes gemini, and the id it
+ * reader is only ever offered a `conversationId`, and gemini had no way to be given or to report one.
+ * Since F0.2 it has: `--session-id <uuid>` assigns the id at spawn and `--resume <uuid>` reopens by
+ * it (`spawn-spec.ts`), so a session agentop starts carries the header UUID, which
+ * `resolveGeminiTranscript` finds by the file name's `-<uuid8>` suffix and confirms against the
+ * header. The older route survives for chats first seen by the store: that `planFirstSightingClaims` deliberately includes gemini, and the id it
  * claims is the SYNTHETIC one the store is keyed on — `${dirName}/${fileBase}` — which is not a
  * UUID resolving to nothing but the chat file's own path in the only form this product knew it by.
  *

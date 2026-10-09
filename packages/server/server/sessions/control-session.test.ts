@@ -82,12 +82,21 @@ describe('which conversation a row continues from', () => {
   })
 
   it('says so where the harness can never report one', () => {
-    // gemini invents its own id, never hands it back and holds no file open to read it from, so
+    // opencode has no spawn spec, no session record and no open file to read an id from, so
     // everything downstream falls to the harness-and-directory guess. That is fine to OFFER and not
     // fine to state as fact.
-    const c = toControlSession(view({ harness: 'gemini' }), S, LIVE)
+    const c = toControlSession(view({ harness: 'opencode' }), S, LIVE)
     expect(c.conversationId).toBeUndefined()
-    expect(c.conversationBlind).toBe(S.sessConversationBlind('gemini'))
+    expect(c.conversationBlind).toBe(S.sessConversationBlind('opencode'))
+  })
+
+  it('is not blind on a gemini row: the id is assigned at spawn (F0.2)', () => {
+    const id = '04d97770-e53f-4b7d-86d2-63bd12ec32eb'
+    const c = toControlSession(view({ harness: 'gemini', conversationId: id }), S, LIVE)
+    expect(c.conversationId).toBe(id)
+    expect(c.conversationBlind).toBeUndefined()
+    // nor before the id is recorded: "not yet", never "never" — first sighting still claims it.
+    expect(toControlSession(view({ harness: 'gemini' }), S, LIVE).conversationBlind).toBeUndefined()
   })
 
   it('stays quiet on a codex or kimi row not linked YET — their own process names it', () => {

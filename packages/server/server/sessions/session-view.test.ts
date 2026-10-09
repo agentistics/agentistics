@@ -4,6 +4,8 @@ import { rulesFor } from './attention-rules'
 import type { HarnessProcess } from '../live-sessions'
 import type { ManagedSession, SessionActivity } from './types'
 import type { ReconciledSession } from './session-ref'
+import { toConversation } from './conversations'
+import type { SessionMeta } from '@agentistics/core'
 import {
   attentionCount, bellTransitions, buildSessionViews, collapseSupersededSessions,
   needsAttention, type SessionView, dedupeExternalProcesses, externalId
@@ -421,7 +423,7 @@ describe('a row that KNOWS which conversation it drives', () => {
     }
   })
 
-  it('offers nothing from the exact link for a harness that cannot resume by id (gemini)', () => {
+  it('offers nothing from the exact link for gemini\'s SYNTHETIC id — its resume takes only the uuid', () => {
     const reconciled = [row('a', {
       status: 'lost',
       backend: undefined,
@@ -770,5 +772,43 @@ describe('dedupeExternalProcesses — one row per SESSION, not per process', () 
       .toBe(externalId(proc(2, { sessionId: 'abc', startedMs: 9999 }) as never))
     // And falls back to the old key exactly when there is none.
     expect(externalId(proc(1) as never)).not.toBe(externalId(proc(1, { startedMs: 2000 }) as never))
+  })
+})
+
+describe('a gemini row whose recorded id is the uuid agentop assigned (F0.2)', () => {
+  const UUID = '04d97770-e53f-4b7d-86d2-63bd12ec32eb'
+  const conv = toConversation({
+    session_id: 'work/session-2026-10-09T10-49-04d97770', native_session_id: UUID,
+    project_path: '/repo/g', start_time: '2026-10-09T10:49:54.676Z', first_prompt: 'hello',
+    user_message_count: 2, harness: 'gemini', input_tokens: 0, output_tokens: 0,
+  } as unknown as SessionMeta)
+  const reconciled = [row('g1', { managed: managed('g1', { harness: 'gemini', cwd: '/repo/g', conversationId: UUID, conversationLink: 'assigned' }) })]
+
+  it('finds its conversation in the store through the alias and links the two ids', () => {
+    const views = buildSessionViews({ reconciled, activity: new Map(), processes: [], conversations: [conv] })
+    const g = views.find(v => v.id === 'g1')!
+    expect(g.conversationId).toBe(UUID)
+    expect(g.conversationStoreId).toBe(conv.sessionId)
+    expect(g.turns).toBe(2)
+  })
+
+  it('offers the UUID — not the store key — as the reopen target once the process is gone', () => {
+    // A reboot leaves the registry row as `lost`: the shape that is reopened.
+    const lost = [row('g1', { status: 'lost', backend: undefined,
+      managed: managed('g1', { harness: 'gemini', cwd: '/repo/g', conversationId: UUID, conversationLink: 'assigned' }) })]
+    const g = buildSessionViews({ reconciled: lost, activity: new Map(), processes: [], conversations: [conv] }).find(v => v.id === 'g1')!
+    expect(g.resume).toEqual({ sessionId: UUID, title: conv.title })
+  })
+
+  it('does not list the same conversation a second time as a closed row', () => {
+    const views = buildSessionViews({ reconciled, activity: new Map(), processes: [], conversations: [conv] })
+    expect(views.filter(v => v.harness === 'gemini').map(v => v.id)).toEqual(['g1'])
+  })
+
+  it('a transcript-search hit named by the store key still finds the live row', async () => {
+    const { filterSessions } = await import('./session-view')
+    const views = buildSessionViews({ reconciled, activity: new Map(), processes: [], conversations: [conv] })
+    expect(filterSessions(views, 'zzz-only-in-transcript', new Set([conv.sessionId])).map(v => v.id)).toEqual(['g1'])
+    expect(filterSessions(views, 'zzz-only-in-transcript', new Set(['other'])).length).toBe(0)
   })
 })

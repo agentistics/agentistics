@@ -282,6 +282,14 @@ export interface SessionDayUsage {
 
 export interface SessionMeta {
   session_id: string
+  /**
+   * The id the HARNESS ITSELF calls this conversation, when it is not `session_id`. Gemini only: the
+   * store keys its chats by the synthetic `<project>/<file>` (the files predate any id of their own
+   * and re-keying would duplicate every stored session), while the CLI takes and writes a UUID
+   * (`--session-id`, `--resume <uuid>`) in the chat file's header. This is the bridge between the
+   * two — a lookup ALIAS, never a second key: nothing may group or sum by it.
+   */
+  native_session_id?: string
   project_path: string
   /** The directory the session is in NOW, when it differs from `project_path` — a session that
    *  moved into a git worktree (or any subdirectory) keeps `project_path` at the directory it was

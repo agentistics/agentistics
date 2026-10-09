@@ -295,19 +295,45 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          after `agentop session open` put it back. Negatives expire
   │                          (`NEGATIVE_TTL_MS`); a MISSING directory never spawns git at all.
   │                          **The conversation link is recorded at SPAWN wherever the CLI accepts an
-  │                          id** — `SpawnSpec.assignId`, `claude --session-id <uuid>` and
-  │                          `copilot --session-id <uuid>`, both verified by running them and
-  │                          checking that the file the adapter reads back carries that very id.
+  │                          id** — `SpawnSpec.assignId`, `claude --session-id <uuid>`,
+  │                          `copilot --session-id <uuid>` and `gemini --session-id <uuid>`, each
+  │                          verified by running it and checking that the file the adapter reads back
+  │                          carries that very id.
   │                          Before this it existed only for a REOPENED row plus, for claude alone,
   │                          whatever `harness-sessions.ts` could read out of `~/.claude/sessions/
   │                          <pid>.json` while the process lived — so a session started with the
   │                          cockpit closed had nothing but the harness-and-directory guess, which
-  │                          gives every session of one repository the same conversation. Gemini
-  │                          accepts a UUID and is deliberately EXCLUDED: its id in this product is
-  │                          synthetic (`${dir}/${file}`), so a recorded UUID would resolve to
-  │                          nothing while LOOKING like an exact link. Where no link can ever exist
-  │                          (codex, kimi, gemini) `conversationLinkable` is false and the row
-  │                          SAYS so. **AGY IS NO LONGER ONE OF THEM.** It has no assign flag —
+  │                          gives every session of one repository the same conversation.
+  │                          **GEMINI HAS TWO IDS and the bridge is explicit (F0.2, measured on
+  │                          0.63.0, 2026-10-09).** The store keys a chat by the synthetic
+  │                          `${project}/${file}` (the files had no id of their own when the adapter
+  │                          was written, and re-keying would duplicate every stored session), but
+  │                          `--session-id <uuid>` makes the chat's HEADER `sessionId` that uuid and
+  │                          `--resume <uuid>` reopens it (the CLI documents "latest | index"; its own
+  │                          refusal text lists `{uuid}` and a live reopen recalled the earlier turn —
+  │                          the index is not used because it shifts when another session is born).
+  │                          So `SessionMeta.native_session_id` (the header's id) is a LOOKUP ALIAS,
+  │                          never a second key: `findConversation`/`resumeIdOf` (conversations.ts)
+  │                          answer to either id and offer the one the CLI takes,
+  │                          `withNativeAliases` (native-id-alias.ts) does the same for the task
+  │                          board's metas map without making the map iterate a session twice, and
+  │                          `SpawnSpec.resumeIdOk` makes `planSpawn` REFUSE (`resume-id-unusable`) an
+  │                          old synthetic id instead of launching a CLI that fails unseen.
+  │                          **A REOPEN IS NOT AN APPEND**: interactive `--resume` writes the new
+  │                          turns to a NEW headerless file (`session-<minute>-[N-]<uuid8>.jsonl`) and
+  │                          leaves the original with a `$set.sessionId` patch and a snapshot of its
+  │                          own turns (a headless `-p --resume` was seen appending in place). A
+  │                          conversation is therefore a FAMILY of files, grouped by the pure
+  │                          `gemini-family.ts` (suffix = hint, header = proof; a headerless file
+  │                          joins a family only when exactly ONE headed conversation in the
+  │                          directory carries its suffix) and read by `gemini-family-io.ts`; the
+  │                          adapter folds a family into ONE session keyed by its FIRST file (a
+  │                          never-reopened chat keeps the exact id it always had — identical on
+  │                          this machine's 24 real chats), the transcript resolver returns the
+  │                          NEWEST member and the reader concatenates the family, deduplicating the
+  │                          repeated snapshot by message id. Where no link can ever exist
+  │                          (opencode, which has no spawn spec) `conversationLinkable` is false and
+  │                          the row SAYS so. **AGY IS NO LONGER ONE OF THEM.** It has no assign flag —
   │                          measured against agy 1.1.27 on 2026-09-08, `agy --conversation
   │                          <fresh-uuid>` answers `warning: conversation "…" not found` and creates
   │                          one under an id of its OWN — and no session record; and the
@@ -506,17 +532,10 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          `commandSummary`**, never a first-line truncation: on a real codex
   │                          rollout five consecutive chips read `cd /home/…/embark`, saying where
   │                          the work happened and never what it was.
-  │                          **GEMINI HAS NO READER AND MAY NOT GET ONE**, and that is a LINK fact,
-  │                          not a format one. A reader is only ever offered a `conversationId`, and
-  │                          only a harness with `assignId` or an id-taking `resume` can ever have
-  │                          one — claude and copilot have `assignId`; codex, kimi and agy have
-  │                          `resume`; **gemini has neither** (`-r, --resume` takes "latest" or an
-  │                          index, and `--session-id` is excluded because gemini's id here is
-  │                          synthetic). So an entry for it would be unreachable code plus a claim
-  │                          the product cannot honour; `conversationBlind` already says so on the
-  │                          row and `SessionsPage` hides the chat tab. Its format WAS measured and
-  │                          the finding is recorded in `harness-transcript.ts` so nobody spends it
-  │                          twice: a patch log, not one message per line. See docs/session-manager.md
+  │                          **GEMINI HAS A READER SINCE F0.2** — it was withheld for a LINK fact
+  │                          (a reader is only ever offered a `conversationId`, and gemini could
+  │                          neither be handed one nor report one), which `assignId` + `resume` by
+  │                          uuid removed; see the two-ids paragraph above. See docs/session-manager.md
   │                          **THE PER-SESSION UTILITY SHELL is not a session, and the separation
   │                          is structural** (`shell-spec.ts` / `shell-gate.ts` / `shell-store.ts` /
   │                          `shell-backend.ts` / `shell-web.ts` / `shell-terminal.ts` /
@@ -1451,11 +1470,14 @@ no title, so every gemini session was listed with a blank name.
 
 **Gemini HAS a chat reader** (`sessions/gemini-chat.ts`, pure). It was `null` in
 `HARNESS_TRANSCRIPTS` for a long time and the reason was a LINK fact, not a format one — a reader is
-only ever offered a `conversationId`, and gemini has no `assignId` and no id-taking `resume`. What
-made it reachable is that `planFirstSightingClaims` deliberately includes gemini and claims the
-**synthetic** id the store is already keyed on (`${dirName}/${fileBase}`), which is not a UUID
-resolving to nothing but the chat file's own path. That id is therefore treated as untrusted input
-by `resolve`: exactly two segments, no traversal, or it answers `null`. `info` and `error` records
+only ever offered a `conversationId`, and gemini then had no `assignId` and no id-taking `resume`
+(it has both since F0.2: `--session-id <uuid>` / `--resume <uuid>`). Two ids reach `resolve`: the
+**synthetic** id the store is keyed on (`${dirName}/${fileBase}`, which `planFirstSightingClaims`
+claims and which is the chat file's own path) and the header **uuid** agentop assigned. The first is
+treated as untrusted input — exactly two segments, no traversal, or it answers `null`; the second is
+found by the file name's `-<uuid8>` suffix and CONFIRMED by the header, memoized with the shared
+miss-TTL rule. A reopened conversation spans several files (see the paragraph on the two ids), so
+`resolve` returns the newest and `read` concatenates the family. `info` and `error` records
 are the harness talking about itself and are dropped rather than given a speaker, and the
 `<session_context>` block gemini writes under the USER role is injected context, not something the
 person said.

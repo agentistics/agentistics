@@ -136,7 +136,7 @@ describe('delivery per harness', () => {
   test('a resume carries no context at all', () => {
     for (const h of HARNESS_ORDER) {
       if (!SPAWN_SPECS[h]?.resume) continue
-      const r = plan(h, { resumeId: 'x', prompt: undefined }); if (!r.ok) throw new Error(h)
+      const r = plan(h, { resumeId: '04d97770-e53f-4b7d-86d2-63bd12ec32eb', prompt: undefined }); if (!r.ok) throw new Error(h)
       expect(r.plan.contextVia).toBeUndefined(); expect(r.plan.env).toBeUndefined()
     }
   })

@@ -1663,6 +1663,7 @@ function explainSpawnError(e: SpawnPlanError, s: CliStrings): string {
   switch (e.code) {
     case 'unsupported-harness': return s.sessSpawnUnsupported(e.harness)
     case 'resume-unsupported': return s.sessSpawnNoResume(e.harness)
+    case 'resume-id-unusable': return s.sessSpawnNoResumeId(e.harness)
     case 'model-unsupported': return s.sessSpawnNoModel(e.harness)
     case 'effort-unsupported': return s.sessSpawnNoEffort(e.harness)
     case 'unknown-effort': return s.sessSpawnBadEffort(e.harness, e.value, e.accepted)

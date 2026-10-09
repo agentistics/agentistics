@@ -365,7 +365,7 @@ async function readSessionChatCore(
       live,
     }
   }
-  return finishChatRead(id, conversationId, read, live, lang)
+  return finishChatRead(id, conversationId, read, live, lang, row.id)
 }
 
 /**
@@ -383,6 +383,8 @@ export async function finishChatRead(
   read: { turns: ChatTurn[]; older?: boolean },
   live: boolean,
   lang: CliLang,
+  /** The managed ROW id: an attachment message filed before the conversation was linked is keyed by it. */
+  pendingId: string = id,
 ): Promise<ChatPayload> {
   // The fenced agentistics context (a harness with no invisible channel gets it in its first message)
   // never reaches a bubble: the person's own words stay, and one small chip says it was sent.
@@ -405,7 +407,7 @@ export async function finishChatRead(
   // Read once per chat load, not per turn: the log is one small append-only file and the view
   // resolves against it locally. Omitted when there is nothing recorded, so a machine that never
   // attached anything carries no field at all.
-  const { sends, messages } = await readAttachmentLog({ sessionId: id, conversationId, pendingId: row.id })
+  const { sends, messages } = await readAttachmentLog({ sessionId: id, conversationId, pendingId })
   // VAULT.PERSONAL §8.4: a session granted vault secrets is served with every value — and its
   // base64/url/hex forms — replaced by «vault:NAME». No grant, no work: the same objects come back.
   if (anyGrant()) {

@@ -141,6 +141,8 @@ function explainPlanError(e: SpawnPlanError): string {
       return `${e.harness} cannot be started by agentop yet. Supported: ${STARTABLE.join(', ')}.`
     case 'resume-unsupported':
       return `${e.harness} cannot reopen a conversation by id, so it cannot be resumed.`
+    case 'resume-id-unusable':
+      return `${e.harness} cannot reopen conversation ${e.id}: its id is not one the CLI accepts (only sessions agentop started or sessions with a recorded id can be reopened).`
     case 'model-unsupported':
       return `${e.harness} has no model flag, so --model cannot be applied.`
     case 'effort-unsupported':

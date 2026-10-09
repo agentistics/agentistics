@@ -37,12 +37,12 @@ describe('exactLinksOnDisk', () => {
     ])
   })
 
-  it('asks nothing for an id the store already holds, a row with no directory, or gemini', async () => {
-    const d = disk(['in-pool', 'no-cwd', 'g'])
+  it('asks nothing for an id the store already holds, a row with no directory, or a gemini synthetic id', async () => {
+    const d = disk(['in-pool', 'no-cwd', 'proj/g'])
     const out = await exactLinksOnDisk([
       { harness: 'claude', cwd: '/w', conversationId: 'in-pool' },
       { harness: 'claude', conversationId: 'no-cwd' },
-      { harness: 'gemini', cwd: '/w', conversationId: 'g' },
+      { harness: 'gemini', cwd: '/w', conversationId: 'proj/g' },
       { harness: 'claude', cwd: '/w' },
     ], [conv('in-pool')], 0, d.resolve)
     expect(out.size).toBe(0)

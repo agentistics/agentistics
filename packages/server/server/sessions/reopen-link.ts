@@ -13,7 +13,7 @@
 import type { HarnessId } from '@agentistics/core'
 import type { Conversation } from './conversations'
 import { transcriptReaderFor } from './harness-transcript'
-import { resumableById } from './reopen-target'
+import { resumableWithId } from './reopen-target'
 
 export const REOPEN_LINK_MISS_TTL_MS = 60_000
 
@@ -39,11 +39,12 @@ export async function exactLinksOnDisk(
   /** The harness's own resolver. Overridable only so a test needs no transcript tree on disk. */
   resolve: (harness: HarnessId, ref: { conversationId: string; cwd: string }) => Promise<string | null> = defaultResolve,
 ): Promise<Set<string>> {
-  const inPool = new Set(pool.map(c => c.sessionId))
+  // Either id a conversation goes by (gemini: the store key AND the harness's own uuid).
+  const inPool = new Set(pool.flatMap(c => c.nativeId ? [c.sessionId, c.nativeId] : [c.sessionId]))
   const out = new Set<string>()
   await Promise.all(entries.map(async e => {
     const id = e.conversationId
-    if (!id || inPool.has(id) || !e.cwd || !resumableById(e.harness)) return
+    if (!id || inPool.has(id) || !e.cwd || !resumableWithId(e.harness, id)) return
     const key = `${e.harness}\u0000${id}`
     if (found.has(key)) { out.add(id); return }
     const missed = missedAt.get(key)

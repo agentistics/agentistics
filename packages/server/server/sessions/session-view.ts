@@ -21,7 +21,7 @@ import { idFromTmuxName } from './tmux-cli'
 import type { RepoFacts } from './repo-facts'
 import type { ReconciledSession } from './session-ref'
 import type { Conversation } from './conversations'
-import { conversationForProcess } from './conversations'
+import { conversationForProcess, findConversation, resumeIdOf } from './conversations'
 import { reopenTargetFor } from './reopen-target'
 import type { ManagedSession, SessionActivity } from './types'
 import type { ChatTurn } from './chat-tail'
@@ -161,6 +161,12 @@ export interface SessionView {
    * event channel deduplicates on. Absent is absent.
    */
   conversationId?: string
+  /**
+   * The conversation STORE's key for `conversationId`, only when the two differ (gemini: the id
+   * agentop assigned is the header uuid, the store key is `<project>/<file>`). Lets a search hit,
+   * which is named by the store key, still find this row.
+   */
+  conversationStoreId?: string
   /** How `conversationId` was recorded (LIVE.1) — read by `conversationLinkOf`; absent keeps the legacy meaning. */
   conversationLink?: 'assigned' | 'observed'
   conversationLinkVia?: ConversationLinkReason
@@ -194,7 +200,7 @@ export interface SessionView {
    * The conversation this row could REOPEN, when there is one.
    *
    * Present on an `external` row (the conversation it appears to be driving) and on a `closed` one
-   * (itself). Absent when the harness cannot reopen by id — gemini takes "latest" or an index, never
+   * (itself). Absent when the harness cannot reopen by id — or, for gemini, when the chat has no header id
    * an id — so the verb is simply not offered rather than offered and wrong.
    */
   resume?: { sessionId: string; title: string }
@@ -447,6 +453,7 @@ export function filterSessions(
 function hasTranscriptHit(v: SessionView, hits?: ReadonlySet<string>): boolean {
   if (!hits || hits.size === 0) return false
   return (v.conversationId !== undefined && hits.has(v.conversationId))
+    || (v.conversationStoreId !== undefined && hits.has(v.conversationStoreId))
     || (v.resume !== undefined && hits.has(v.resume.sessionId))
 }
 
@@ -575,7 +582,7 @@ export function buildSessionViews(o: {
   ): Conversation | undefined => {
     const pool = o.conversations ?? []
     const id = exactId ?? managed?.conversationId
-    return id ? pool.find(c => c.sessionId === id) : undefined
+    return id ? findConversation(pool, id) : undefined
   }
 
   const managed: SessionView[] = o.reconciled.map(r => {
@@ -644,6 +651,8 @@ export function buildSessionViews(o: {
       ...(r.managed?.parentSessionId ? { parentSessionId: r.managed.parentSessionId } : {}),
       ...(r.managed?.parentConversationId ? { parentConversationId: r.managed.parentConversationId } : {}),
       ...(r.managed?.conversationId ? { conversationId: r.managed.conversationId } : {}),
+      ...(conv && r.managed?.conversationId && conv.sessionId !== r.managed.conversationId
+        ? { conversationStoreId: conv.sessionId } : {}),
       ...(r.managed?.conversationLink ? { conversationLink: r.managed.conversationLink } : {}),
       ...(r.managed?.conversationLinkVia ? { conversationLinkVia: r.managed.conversationLinkVia } : {}),
       ...(r.managed?.repo ? { recordedRepo: r.managed.repo } : {}),
@@ -814,7 +823,7 @@ export function buildSessionViews(o: {
       ...(p.startedMs !== undefined ? { createdMs: p.startedMs } : {}),
       attached: false,
       approvalDetection: false,
-      ...(conv?.resumable ? { resume: { sessionId: conv.sessionId, title: conv.title } } : {}),
+      ...(conv?.resumable ? { resume: { sessionId: resumeIdOf(conv), title: conv.title } } : {}),
       ...(conv?.tokens !== undefined ? { tokens: conv.tokens } : {}),
       ...(conv?.tokenParts ? { tokenParts: conv.tokenParts } : {}),
       ...(conv?.turns ? { turns: conv.turns } : {}),
@@ -841,7 +850,13 @@ export function buildSessionViews(o: {
   // `working` and again as `closed` — the same title, the same directory, twice. Every LIVE row
   // covers its conversation, whether that row is one we host or one we merely observed.
   const shown = new Set<string>()
-  for (const v of external) if (v.resume) shown.add(v.resume.sessionId)
+  // `resume.sessionId` is the id the CLI takes, which for gemini is the header uuid and not the
+  // store key the `shown` filter below compares against — add the key too.
+  for (const v of external) if (v.resume) {
+    shown.add(v.resume.sessionId)
+    const key = findConversation(conversations, v.resume.sessionId)?.sessionId
+    if (key) shown.add(key)
+  }
   //
   // A row that RECORDED its conversation covers exactly that one. The rest fall back to the
   // harness+directory inference, and it is CLAIMED — because that inference answers with the FIRST
@@ -857,7 +872,13 @@ export function buildSessionViews(o: {
     // history where it can be reopened.
     if (!m || (m.status !== 'running' && m.status !== 'unregistered')) continue
     const own = r.managed?.conversationId
-    if (own) { shown.add(own); coveredConv.add(own); continue }
+    if (own) {
+      shown.add(own); coveredConv.add(own)
+      // A recorded id may be the harness's own (gemini's assigned uuid) rather than the store key.
+      const key = findConversation(conversations, own)?.sessionId
+      if (key) { shown.add(key); coveredConv.add(key) }
+      continue
+    }
     if (!m.harness) continue
     const conv = conversations.find(c =>
       !coveredConv.has(c.sessionId)
@@ -917,7 +938,7 @@ export function buildSessionViews(o: {
       endedMs: c.lastActivityMs,
       attached: false,
       approvalDetection: false,
-      ...(c.resumable ? { resume: { sessionId: c.sessionId, title: c.title } } : {}),
+      ...(c.resumable ? { resume: { sessionId: resumeIdOf(c), title: c.title } } : {}),
       ...(c.tokens !== undefined ? { tokens: c.tokens } : {}),
       ...(c.tokenParts ? { tokenParts: c.tokenParts } : {}),
       ...(c.turns ? { turns: c.turns } : {}),
