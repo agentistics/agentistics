@@ -148,7 +148,8 @@ export interface ChatTurn {
   /**
    * A `!` command the PERSON ran in Claude Code's bash mode, paired with what it printed — see
    * `bash-mode.ts`. `text` is then the `!line` exactly as typed, which is also what the composer's
-   * echo holds, so the "delivered — not read yet" bubble reconciles against it. Claude only.
+   * echo holds, so the "delivered — not read yet" bubble reconciles against it. Claude, codex and gemini
+   * (P-24); the last two carry one merged stream as `stdout`.
    */
   shell?: ShellRun
 }

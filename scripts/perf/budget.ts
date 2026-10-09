@@ -15,7 +15,8 @@ import { quantiles, startPerfServer } from './server-harness.ts'
 
 const home = process.argv[2]
 if (!home) { console.error('usage: budget.ts <home>'); process.exit(2) }
-const budgets = await Bun.file(join(import.meta.dir, 'budgets.json')).json() as Record<string, number>
+// `engineMap` is an object (F0.4, checked by engine-map/check.ts); budget.ts reads only the plain ceilings.
+const budgets = Object.fromEntries(Object.entries(await Bun.file(join(import.meta.dir, 'budgets.json')).json() as Record<string, unknown>).filter(([, v]) => typeof v === 'number')) as Record<string, number>
 
 const files: { id: string; path: string; size: number }[] = []
 const projects = join(home, '.claude', 'projects')

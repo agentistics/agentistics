@@ -7,6 +7,16 @@ on:
   push:
     branches: ['**']
   pull_request:
+  # A run on a branch with no PR (the QA of the engine-map bench job). `bench_plan` / `bench_soak_min`
+  # only steer that job.
+  workflow_dispatch:
+    inputs:
+      bench_plan:
+        description: 'ENGINE.MAP bench plan (smoke | quick | full)'
+        default: 'quick'
+      bench_soak_min:
+        description: 'Soak minutes for the ENGINE.MAP bench (0 = none)'
+        default: '0'
 
 jobs:
   # The paths in .github/frozen-engine-paths.txt are owned by the ENGINE repo
@@ -135,3 +145,46 @@ jobs:
 
       - name: Startup budget (slow git)
         run: bun scripts/perf/startup.ts "$RUNNER_TEMP/storm-home" --slow-git 20000 --budget
+
+  # F0.4: the ENGINE.MAP bench. A mixed fleet of FAKE claude/codex/gemini/copilot/kimi/agy sessions
+  # (scripts/perf/engine-map/fake-harness — never a real CLI) on a throwaway server over a synthetic
+  # home, driven by simulated web clients. Its tables are published as a job summary and as the
+  # `engine-map-bench` artifact; the 09 §8 budgets (budgets.json -> engineMap) are FAILURES (F4.B,
+  # level "fail", above max x 1.1; inside that tolerance is a warning annotation). A separate job from perf-budgets so neither delays the other.
+  engine-map-bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Ensure type stub
+        run: bun run stub
+
+      - name: tmux (the fake sessions run in it)
+        run: sudo apt-get install -y tmux
+
+      - name: Bench unit tests (budget arithmetic, copies in sync)
+        run: bun test scripts/perf/engine-map
+
+      - name: ENGINE.MAP bench
+        env:
+          PLAN: ${{ github.event.inputs.bench_plan || 'quick' }}
+          SOAK_MIN: ${{ github.event.inputs.bench_soak_min || '0' }}
+          LABEL: ci
+          OUT_DIR: ${{ runner.temp }}/engine-map-out
+        run: scripts/perf/engine-map/run.sh
+
+      - name: Upload the bench tables
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-map-bench
+          path: ${{ runner.temp }}/engine-map-out
+          if-no-files-found: warn
