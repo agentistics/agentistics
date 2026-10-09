@@ -39,6 +39,7 @@
  */
 
 import type { ChatTurn } from '@agentistics/core'
+import { parseGeminiShell } from './bash-mode'
 
 /** The bootstrap block gemini writes under the user role on startup. Not a person talking. */
 const SESSION_CONTEXT = /^<session_context>/
@@ -93,9 +94,12 @@ export function parseGeminiChatTurns(lines: readonly string[], max: number): Cha
     const text = textOf(msg).trim()
     if (!text) return
     if (role === 'user' && SESSION_CONTEXT.test(text)) return
+    // A `!` the person ran in the CLI: one entry holding the command AND what it printed.
+    const shell = role === 'user' ? parseGeminiShell(text) : null
     turns.push({
       role,
-      text,
+      text: shell ? `!${shell.command}` : text,
+      ...(shell ? { shell } : {}),
       ...(typeof msg.timestamp === 'string' && msg.timestamp ? { at: msg.timestamp } : {}),
     })
   }
