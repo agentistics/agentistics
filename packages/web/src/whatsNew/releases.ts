@@ -10,6 +10,32 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.112.1': {
+    features: [
+      {
+        pt: 'Fechar a Nova sessão sem querer não perde mais o que você preencheu: o app pergunta antes de descartar.',
+        en: 'Closing New session by accident no longer loses what you filled in: the app asks before discarding.',
+      },
+      {
+        pt: 'Na Nova sessão, "Não achou? Escolher outra pasta…" fica no fim da lista e abre no disco escolhido.',
+        en: 'In New session, "Not here? Choose another folder…" sits at the end of the list and opens on the chosen disk.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Ligar um disco (como o C:) passa a procurar projetos nele na hora, sem ficar em zero.',
+        en: 'Switching on a disk (like C:) now searches it for projects right away instead of staying at zero.',
+      },
+      {
+        pt: '"Todos os discos" fica selecionado.',
+        en: '"All disks" stays selected.',
+      },
+      {
+        pt: 'O agentistics agora é um app só: a "central" e o modo "membro" saíram das telas e dos comandos.',
+        en: 'agentistics is now one app: the "central" and "member" modes are gone from the screens and commands.',
+      },
+    ],
+  },
   '2.112.0': {
     features: [
       {
