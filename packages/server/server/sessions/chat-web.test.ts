@@ -10,6 +10,7 @@
 
 import { test, expect } from 'bun:test'
 import { readSessionChat } from './chat-web'
+import { pendingFor, recordPrompt, resetPrompts } from './pending-prompts'
 
 /** A cwd that is not a project on any machine, so no transcript can ever resolve for it. */
 const NO_PROJECT = '/nonexistent/agentistics-chat-web-test'
@@ -180,9 +181,20 @@ test('a RUNNING agy session with no conversation yet is an EMPTY chat — the co
   expect(out.turns).toEqual([])
 })
 
-test('a harness that can never link keeps its refusal even while running', async () => {
+test('CHAT.FIRST: every RUNNING harness with no conversation yet opens an EMPTY chat, never a refusal', async () => {
+  for (const harness of ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi', 'opencode']) {
+    const out = await readSessionChat(
+      hostWithRow({ harness, state: 'waiting', conversationId: undefined, conversationBlind: 'no link ever' }), 'en', 'sess1',
+    )
+    expect(out.unavailable).toBeUndefined()
+    expect(out.live).toBe(true)
+    expect(out.turns).toEqual([])
+  }
+})
+
+test('CHAT.FIRST: an ENDED unlinkable harness keeps its sentence — nothing more is coming', async () => {
   const out = await readSessionChat(
-    hostWithRow({ harness: 'gemini', state: 'working', conversationId: undefined, conversationBlind: 'no link ever' }), 'en', 'sess1',
+    hostWithRow({ harness: 'codex', state: 'exited', conversationId: undefined, conversationBlind: 'no link ever' }), 'en', 'sess1',
   )
   expect(out.unavailable).toBe('no link ever')
 })
@@ -198,4 +210,20 @@ test('EXT.OPEN: an EXTERNAL row is a running process — its conversation reads 
   const id = 'external:claude:00000000-0000-4000-8000-000000000001'
   const out = await readSessionChat(hostWithRow({ id, state: 'unknown' }), 'en', id)
   expect(out.live).toBe(true)
+})
+
+test('CHAT.FIRST: a message sent before the link shows as pending, and moves to the conversation when it lands', async () => {
+  resetPrompts()
+  recordPrompt('sess1', 'first message')
+  const before = await readSessionChat(
+    hostWithRow({ harness: 'codex', state: 'waiting', conversationId: undefined, conversationBlind: 'no link ever' }), 'en', 'sess1',
+  )
+  expect(before.unavailable).toBeUndefined()
+  expect(before.pending?.map(p => p.text)).toEqual(['first message'])
+  // The link lands: the entry is migrated, held once.
+  const conv = '00000000-0000-4000-8000-0000000000aa'
+  await readSessionChat(hostWithRow({ harness: 'codex', state: 'waiting', conversationId: conv }), 'en', 'sess1')
+  expect(pendingFor('sess1', [])).toEqual([])
+  expect(pendingFor(conv, []).map(p => p.text)).toEqual(['first message'])
+  resetPrompts()
 })

@@ -322,7 +322,10 @@ export async function runFleetAction(
           try {
             const row = (await host.sessions?.())?.sessions.find(r => r.id === req.id || r.conversationId === req.id)
             const conv = row ? conversationOfRow(row) : ''
+            // No link yet (codex, gemini, kimi, antigravity before their first message is claimed):
+            // hold the echo under the ROW id; `readSessionChat` migrates it when the link lands.
             if (conv) recordPrompt(conv, text)
+            else if (row) recordPrompt(row.id, text)
             const carried = attachmentMessageOf(conv ?? '', sentAtMs, text)
             if (carried) await recordAttachmentMessage(carried)
           } catch { /* the message went; the queue is a view of it, not the record */ }

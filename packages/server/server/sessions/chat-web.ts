@@ -32,12 +32,11 @@ import { applyPendingRewind, forgetRewind, pendingRewindFor } from './rewind-pen
 import type { CliLang } from '../cli-lang'
 import { controlStrings } from '@agentistics/tui/control/i18n'
 import type { ChatTurn } from './chat-turn'
-import type { AttachmentMessage, AttachmentSend, HarnessId } from '@agentistics/core'
+import type { AttachmentMessage, AttachmentSend } from '@agentistics/core'
 import { ATTACHMENT_DIR, readAttachmentLog } from './attachment-web'
 import { transcriptReaderFor } from './harness-transcript'
 import { conversationOfRow } from './row-conversation'
-import { pendingFor, type PendingPrompt } from './pending-prompts'
-import { HARNESS_PROCESS_LOGS } from './harness-session-file'
+import { migratePrompts, pendingFor, type PendingPrompt } from './pending-prompts'
 import { transcriptAvailability, transcriptSentence, type TranscriptAvailability } from './transcript-availability'
 import type { SessionConversationLink } from '@agentistics/core'
 import type { SurfaceMark } from '../projections/session-surface'
@@ -200,6 +199,9 @@ async function readSessionChatCore(
   // every finished conversation with "no linked conversation yet", which is the one row people open
   // precisely to read one. `conversationOfRow` is the single place both shapes are known.
   const conversationId = conversationOfRow(row)
+  // An echo recorded before the link existed is held under the ROW id; once the link is there it
+  // moves to the conversation (never duplicated, never lost).
+  if (conversationId) migratePrompts(row.id, conversationId)
   if (!conversationId) {
     // A session sitting on a question (agy's "do you trust this folder?") has not CREATED its
     // conversation yet — the harness makes it only after the answer. Saying "no linked
@@ -220,8 +222,15 @@ async function readSessionChatCore(
     // one act the chat withheld, and the person had to open the terminal. Same "not yet" against
     // "never" rule as the missing-transcript branch below; the link lands on the poll after the
     // message does (measured: under 6s).
-    if (live && !row.conversationBlind && HARNESS_PROCESS_LOGS[row.harness as HarnessId]) {
-      return { turns: [], live }
+    // The same holds for EVERY harness, linked-by-process-log or not: codex, kimi and gemini name
+    // no conversation until their first message is claimed (`conversationBlind`), and a session
+    // that is RUNNING and has said nothing is an empty chat — "waiting for the first message" —
+    // not an unlinkable one. Refusing here replaced the composer, so the one act that creates the
+    // conversation was the one the chat withheld (CHAT.FIRST). A session that is NOT running keeps
+    // its sentence: nothing more is coming.
+    if (live && row.harness) {
+      const queued = pendingFor(row.id, [])
+      return { turns: [], live, ...(queued.length > 0 ? { pending: queued } : {}) }
     }
     return {
       turns: [],

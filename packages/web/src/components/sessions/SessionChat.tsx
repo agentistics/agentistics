@@ -2422,7 +2422,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
           {loading ? (
             <Loading pt={pt} />
           ) : turns.length === 0 && live === null && echo.length === 0 ? (
-            <Muted text={pt ? 'Esta conversa ainda não tem mensagens.' : 'This conversation has no messages yet.'} />
+            <Muted text={pt ? 'Esta conversa ainda não tem mensagens — escreva a primeira abaixo.' : 'Waiting for the first message — write it below.'} />
           ) : null}
 
           {/* Where the window BEGINS, said at the top of the scroll — the one place a reader looks

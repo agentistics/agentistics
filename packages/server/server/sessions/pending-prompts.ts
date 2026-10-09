@@ -82,6 +82,26 @@ export function pendingFor(
   return kept
 }
 
+/**
+ * Move what is held under `fromKey` to `toKey`, keeping order and dropping nothing.
+ *
+ * A message sent BEFORE its conversation is linked (codex / gemini / kimi / antigravity name no
+ * conversation until the first one is claimed) is held under the managed ROW id. When the link
+ * appears the entry belongs to the conversation, so it moves there — appended after what the
+ * conversation already holds, and an identical (text, at) pair is never duplicated. Called on every
+ * read, and idempotent: with nothing under `fromKey` it does nothing.
+ */
+export function migratePrompts(fromKey: string, toKey: string): void {
+  if (fromKey === '' || toKey === '' || fromKey === toKey) return
+  const moved = byConversation.get(fromKey)
+  if (moved === undefined) return
+  byConversation.delete(fromKey)
+  const into = byConversation.get(toKey) ?? []
+  for (const p of moved) if (!into.some(q => q.text === p.text && q.at === p.at)) into.push(p)
+  into.sort((a, b) => a.at - b.at)
+  byConversation.set(toKey, into.slice(-MAX_PER_SESSION))
+}
+
 /** Drop everything for a conversation — used when a session is killed. */
 export function clearPrompts(conversationId: string): void {
   byConversation.delete(conversationId)
