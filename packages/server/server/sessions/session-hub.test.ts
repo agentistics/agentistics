@@ -52,6 +52,37 @@ function instantPoller(clock: { now(): number }) {
 }
 
 describe('session hub — single flight', () => {
+  test('a TICKING hub answers a reader from the last snapshot while the next poll is still running', async () => {
+    const time = fakeTime()
+    const p = gatedPoller(time)
+    const hub = createSessionHub({ poll: p.poll, intervalMs: 5000, ...time })
+    hub.subscribe(() => {})
+    await time.advance(0) // the first tick starts
+    p.release(); await flush()
+    expect(hub.last()?.attention).toBe(1)
+    await time.advance(5000) // the second tick is now in flight, and slow
+    expect(p.open()).toBe(1)
+    let answered: SessionSnapshot | null = null
+    void hub.read().then(s => { answered = s })
+    await flush()
+    // Not held behind the slow poll: the last tick (5 s old) is fresh for a ticking hub.
+    expect(answered!.attention).toBe(1)
+    expect(p.calls()).toBe(2)
+    p.release(); await flush()
+  })
+
+  test('with NOTHING fresh, a reader still joins the poll in flight instead of starting a second', async () => {
+    const time = fakeTime()
+    const p = gatedPoller(time)
+    const hub = createSessionHub({ poll: p.poll, intervalMs: 5000, ...time })
+    const first = hub.read()
+    await time.advance(100)
+    const second = hub.read()
+    expect(p.calls()).toBe(1)
+    p.release()
+    expect((await first).attention).toBe((await second).attention)
+  })
+
   test('concurrent readers share ONE poll', async () => {
     const time = fakeTime()
     const p = gatedPoller(time)

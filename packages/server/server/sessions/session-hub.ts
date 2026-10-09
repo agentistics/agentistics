@@ -56,8 +56,9 @@ export interface SessionHub {
   last(): SessionSnapshot | null
   /**
    * A snapshot fresh enough for a reader: the last one while the hub is ticking (it is at most one
-   * interval old), otherwise one no older than `maxAgeMs` (default `idleMaxAgeMs`). Joins a poll in
-   * flight rather than starting a second. Every read extends the demand lease.
+   * interval old), otherwise one no older than `maxAgeMs` (default `idleMaxAgeMs`). A fresh snapshot is
+   * returned even while a poll is in flight; without one, the read joins that poll rather than starting
+   * a second. Every read extends the demand lease.
    */
   read(opts?: { maxAgeMs?: number }): Promise<SessionSnapshot>
   /** A poll that starts AFTER this call — for a caller that just changed the fleet. */
@@ -148,13 +149,18 @@ export function createSessionHub(o: SessionHubOptions): SessionHub {
     last: () => last,
 
     read(opts) {
+      // A tick in flight leaves no timer armed, so "is the hub ticking" is the demand BEFORE this read.
+      const ticks = ticking() || (inflight !== null && demand())
       leaseUntil = Math.max(leaseUntil, now() + leaseMs)
-      if (inflight) return inflight
-      const maxAge = opts?.maxAgeMs ?? (ticking() ? o.intervalMs * 2 : idleMaxAgeMs)
+      // A fresh enough snapshot answers AT ONCE, even while a poll is in flight: a reader joining that
+      // poll waited out its whole duration (seconds, on a busy machine) to learn what the last tick
+      // already said. Only a reader with nothing fresh joins it (F1.2b).
+      const maxAge = opts?.maxAgeMs ?? (ticks ? o.intervalMs * 2 : idleMaxAgeMs)
       if (last && now() - lastAt <= maxAge) {
         ensureTicking()
         return Promise.resolve(last)
       }
+      if (inflight) return inflight
       return start()
     },
 
@@ -194,3 +200,12 @@ export function createSessionHub(o: SessionHubOptions): SessionHub {
     },
   }
 }
+
+/**
+ * The process's hub, once `ensureSessionHub` (cli-start.ts) has built it — for a reader that may only
+ * PEEK at the last snapshot and must neither create the hub nor extend its demand lease (the hardware
+ * page: `hardware-sessions.ts`). `null` before the hub exists, and in a process that never builds one.
+ */
+let processHub: SessionHub | null = null
+export function setProcessSessionHub(hub: SessionHub | null): void { processHub = hub }
+export function processSessionHub(): SessionHub | null { return processHub }
