@@ -7,7 +7,7 @@ import { forgetHarnessVersion } from './harness-version'
 import { resetHarnessAvailability } from './harness-available'
 import { userSearchPath } from './user-path'
 import {
-  cleanInstallLine, planHarnessInstall, planNodeInstall, parseHarnessVersion,
+  cleanInstallLine, HARNESS_INSTALLERS, planHarnessInstall, planNodeInstall, parseHarnessVersion,
   type HarnessInstallFacts, type HarnessInstallPlan,
 } from './harness-install-plan'
 
@@ -115,7 +115,7 @@ export async function handleHarnessInstallRoute(
     ? { runner: deps, facts: realFacts }
     : { runner: deps.runner ?? defaultRunner, facts: deps.facts ?? realFacts }
   const { runner } = resolved
-  const driver = ['claude', 'codex', 'gemini', 'copilot'].includes(id) ? getChatDriver(id as Harness) : null
+  const driver = Object.hasOwn(HARNESS_INSTALLERS, id) ? getChatDriver(id as Harness) : null
   if (!driver) return json(404, { error: 'unknown_harness' })
   const body = await req.json().catch(() => null) as { confirmed?: boolean; installNode?: boolean; lang?: string } | null
   if (body?.confirmed !== true) return json(400, { error: 'confirmation_required' })
@@ -192,7 +192,7 @@ export async function handleHarnessLoginRoute(
   spawn: (lang: 'pt' | 'en', body: { harness: string; cwd: string; label: string }) => Promise<{ ok: boolean; message: string; id?: string }>,
 ): Promise<{ status: number; body: { ok: boolean; message: string; id?: string } }> {
   const id = typeof body?.harness === 'string' ? body.harness : ''
-  if (!['claude', 'codex', 'gemini', 'copilot'].includes(id)) return { status: 404, body: { ok: false, message: 'unknown_harness' } }
+  if (!Object.hasOwn(HARNESS_INSTALLERS, id)) return { status: 404, body: { ok: false, message: 'unknown_harness' } }
   const name = ({ claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini', copilot: 'Copilot' } as Record<string, string>)[id]!
   const out = await spawn(lang, { harness: id, cwd: homedir(), label: `${lang === 'pt' ? 'Entrar' : 'Sign in'} · ${name}` })
   return { status: 200, body: out }

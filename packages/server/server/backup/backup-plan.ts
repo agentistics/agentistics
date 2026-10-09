@@ -366,6 +366,11 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
       + 'The prefix also catches its `-wal` / `-shm`.',
   },
   {
+    pattern: '.agentistics/harness-install.log', match: 'prefix', reason: 'regenerable',
+    restoreWith: 'nothing',
+    why: 'A log.',
+  },
+  {
     pattern: '.agentistics/auto-upgrade.log', match: 'prefix', reason: 'regenerable',
     restoreWith: 'nothing',
     why: 'A log.',
