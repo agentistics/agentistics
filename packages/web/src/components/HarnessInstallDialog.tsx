@@ -9,7 +9,7 @@ export interface HarnessInstallTarget {
   installed?: boolean
 }
 
-type Phase = 'confirm' | 'running' | 'failed' | 'needs-node'
+type Phase = 'confirm' | 'running' | 'failed' | 'needs-node' | 'success'
 
 const VENDOR: Record<string, string> = { claude: 'Anthropic', codex: 'OpenAI', gemini: 'Google', copilot: 'GitHub' }
 const MAX_LINES = 8
@@ -46,14 +46,14 @@ export function HarnessInstallDialog({ target, pt, onClose, onDone }: {
 
   const run = async () => {
     if (!target) return
-    setPhase('running'); setLines([]); setFailure('')
+    setPhase('running'); setLines([]); setFailure('')  // clears the previous failure
     const result = await installHarness(target.id, update, line => setLines(prev => [...prev, line].slice(-MAX_LINES)), { installNode: withNode.current, lang: pt ? 'pt' : 'en' })
-    if (result.ok) { onDone(result.version); onClose(); return }
+    if (result.ok) { onDone(result.version); setPhase('success'); return }
     if (result.code === 'node-required') { setPhase('needs-node'); return }
     setFailure(
       result.code === 'unsupported-platform' ? (pt ? 'Por enquanto a instalação automática funciona no Linux e no macOS.' : 'Automatic install currently works on Linux and macOS.')
         : result.code === 'busy' ? (pt ? 'Outra instalação está em andamento. Espere terminar e tente de novo.' : 'Another install is running. Wait for it to finish and try again.')
-        : (pt ? 'Não consegui terminar. Verifique a internet e tente de novo.' : 'It did not finish. Check your internet connection and try again.'),
+        : (result.error ?? (pt ? 'Não consegui terminar. Verifique a internet e tente de novo.' : 'It did not finish. Check your internet connection and try again.')),
     )
     setPhase('failed')
   }
@@ -66,6 +66,7 @@ export function HarnessInstallDialog({ target, pt, onClose, onDone }: {
         : `${name} needs Node.js, which is not on this computer. I can install Node.js for your user only (official installer from nodejs.org, no sudo), then ${name}.`
     }
     if (phase === 'failed') return failure
+    if (phase === 'success') return pt ? `Pronto! O ${name} está disponível para usar.` : `Done! ${name} is ready to use.`
     if (phase === 'running') return pt ? `${update ? 'Atualizando' : 'Instalando'} ${name}… pode levar alguns minutos.` : `${update ? 'Updating' : 'Installing'} ${name}… this can take a few minutes.`
     const from = vendor ? (pt ? `, da ${vendor},` : ` from ${vendor}`) : ''
     return pt
@@ -74,7 +75,8 @@ export function HarnessInstallDialog({ target, pt, onClose, onDone }: {
   })()
 
   const confirmLabel =
-    phase === 'running' ? (pt ? 'Instalando…' : 'Installing…')
+    phase === 'success' ? (pt ? 'Fechar' : 'Close')
+    : phase === 'running' ? (pt ? 'Instalando…' : 'Installing…')
     : phase === 'failed' ? (pt ? 'Tentar de novo' : 'Try again')
     : phase === 'needs-node' ? (pt ? 'Instalar Node.js e continuar' : 'Install Node.js and continue')
     : update ? (pt ? 'Atualizar' : 'Update') : (pt ? 'Instalar' : 'Install')
@@ -82,7 +84,7 @@ export function HarnessInstallDialog({ target, pt, onClose, onDone }: {
   return (
     <ConfirmModal
       open={target !== null}
-      title={target ? `${update ? (pt ? 'Atualizar' : 'Update') : (pt ? 'Instalar' : 'Install')} ${name}?` : ''}
+      title={target ? phase === 'success' ? (pt ? 'Tudo certo' : 'All set') : `${update ? (pt ? 'Atualizar' : 'Update') : (pt ? 'Instalar' : 'Install')} ${name}?` : ''}
       message={message}
       confirmLabel={confirmLabel}
       cancelLabel={pt ? 'Cancelar' : 'Cancel'}
@@ -91,6 +93,7 @@ export function HarnessInstallDialog({ target, pt, onClose, onDone }: {
       onCancel={() => { if (phase !== 'running') onClose() }}
       onConfirm={() => {
         if (phase === 'running') return
+        if (phase === 'success') { onClose(); return }
         if (phase === 'needs-node') withNode.current = true
         void run()
       }}

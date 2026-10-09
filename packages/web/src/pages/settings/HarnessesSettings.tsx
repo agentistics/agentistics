@@ -54,7 +54,7 @@ export function HarnessStatusBadge({ h, pt = false }: { h: HarnessChatStatus; pt
       padding: '2px 8px', borderRadius: 20,
     }}>
       <AlertCircle size={10} />
-        {pt ? 'Precisa entrar na conta' : 'Needs sign-in'}
+        {pt ? 'Precisa entrar na conta' : 'Needs sign-in'}{h.version ? ` · v${h.version}` : ''}
     </span>
   )
 }

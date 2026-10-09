@@ -6,14 +6,17 @@ const base = { platform: 'linux', nodePresent: true, npmGlobalWritable: true, np
 describe('harness installer plan', () => {
   test('uses the official installer table for every supported harness', () => {
     expect(planHarnessInstall('claude', base).command).toEqual(['sh', '-c', 'curl -fsSL https://claude.ai/install.sh | bash'])
-    expect(planHarnessInstall('codex', base).command).toEqual(['npm', 'i', '-g', '@openai/codex'])
-    expect(planHarnessInstall('gemini', base).command).toEqual(['npm', 'i', '-g', '@google/gemini-cli'])
-    expect(planHarnessInstall('copilot', base).command).toEqual(['npm', 'i', '-g', '@github/copilot'])
+    expect(planHarnessInstall('codex', base).command).toEqual(['npm', 'i', '-g', '--prefix', '/tmp/.local', '@openai/codex'])
+    expect(planHarnessInstall('gemini', base).command).toEqual(['npm', 'i', '-g', '--prefix', '/tmp/.local', '@google/gemini-cli'])
+    expect(planHarnessInstall('copilot', base).command).toEqual(['npm', 'i', '-g', '--prefix', '/tmp/.local', '@github/copilot'])
   })
 
-  test('falls back to a user npm prefix and refuses npm installs without Node', () => {
-    expect(planHarnessInstall('codex', { ...base, npmGlobalWritable: false }).command)
-      .toEqual(['npm', 'i', '-g', '--prefix', '/tmp/.local', '@openai/codex'])
+  test('always uses the user npm prefix (even when the private Node makes the global one writable) and refuses npm installs without Node', () => {
+    for (const writable of [true, false]) {
+      expect(planHarnessInstall('gemini', { ...base, npmGlobalWritable: writable }).command)
+        .toEqual(['npm', 'i', '-g', '--prefix', '/tmp/.local', '@google/gemini-cli'])
+    }
+    expect(withUserBin('/usr/bin', '/tmp')).toBe('/tmp/.local/bin:/usr/bin')  // bin of that prefix is first on PATH
     expect(planHarnessInstall('gemini', { ...base, nodePresent: false }).reason).toBe('node-required')
   })
 

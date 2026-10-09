@@ -45,7 +45,7 @@ describe('harness install route', () => {
   test('failure is a plain sentence and releases the lock for a retry', async () => {
     const res = await handleHarnessInstallRoute(post(ok), 'codex', 'install', { runner: fake({ code: 1 }), facts: facts() })
     const text = await res.text()
-    expect(text).toContain('A instalação não terminou')
+    expect(text).toContain('Não consegui terminar')
     expect(text).not.toContain('"type":"done"')
     const retry = await handleHarnessInstallRoute(post(ok), 'codex', 'install', { runner: fake(), facts: facts() })
     expect(retry.status).toBe(200)
@@ -55,13 +55,15 @@ describe('harness install route', () => {
   test('the route speaks the language the UI asked for', async () => {
     const res = await handleHarnessInstallRoute(post({ ...ok, lang: 'en' }), 'codex', 'install', { runner: fake({ code: 1 }), facts: facts() })
     const text = await res.text()
-    expect(text).toContain('The installation did not finish')
+    expect(text).toContain('It did not finish')
     expect(text).not.toContain('Instalando')
   })
 
   test('a version that cannot be read back is a failure, not a success', async () => {
     const res = await handleHarnessInstallRoute(post(ok), 'codex', 'install', { runner: fake({ verify: 'command not found' }), facts: facts() })
-    expect(await res.text()).toContain('não consegui confirmar a versão')
+    const t = await res.text()
+    expect(t).toContain('não consegui abri-lo para confirmar')
+    expect(t).not.toContain('internet')
   })
 
   test('one install at a time', async () => {

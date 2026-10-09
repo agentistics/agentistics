@@ -7,7 +7,8 @@ export type HarnessInstallReason = 'ok' | 'unsupported-platform' | 'node-require
 export interface HarnessInstallFacts {
   platform: string
   nodePresent: boolean
-  npmGlobalWritable: boolean
+  /** @deprecated unused: npm installs always target `npmPrefix` (see npmCommand). */
+  npmGlobalWritable?: boolean
   npmPrefix: string
   /** `process.arch` — only the Node.js tarball name depends on it. */
   arch?: string
@@ -71,10 +72,12 @@ export const HARNESS_INSTALLERS: Record<HarnessInstallPlan['harness'], HarnessPl
   copilot: { package: '@github/copilot', command: f => npmCommand('@github/copilot', f) },
 }
 
+/**
+ * ALWAYS the user prefix: with the app's private Node on PATH, `npm i -g` is "writable" yet lands
+ * the binary in node-vX/bin, outside the PATH the app and the user's shell use (~/.local/bin).
+ */
 function npmCommand(pkg: string, facts: HarnessInstallFacts): string[] {
-  return facts.npmGlobalWritable
-    ? ['npm', 'i', '-g', pkg]
-    : ['npm', 'i', '-g', '--prefix', facts.npmPrefix, pkg]
+  return ['npm', 'i', '-g', '--prefix', facts.npmPrefix, pkg]
 }
 
 export function installPlatform(platform: string): HarnessInstallPlatform {

@@ -95,8 +95,8 @@ function sse(events: AsyncGenerator<Event>): ReadableStream<Uint8Array> {
 
 /** The sentences the route itself says (the installer's own lines are passed through untouched). */
 const SAY = {
-  pt: { updating: 'Atualizando…', installing: 'Instalando…', node: 'Instalando o Node.js, que este assistente precisa…', nodeFail: 'Não consegui instalar o Node.js. Tente de novo.', fail: 'A instalação não terminou. Tente de novo.', verifying: 'Verificando a versão…', noVersion: 'Instalou, mas não consegui confirmar a versão. Tente de novo.', done: 'Instalação concluída.' },
-  en: { updating: 'Updating…', installing: 'Installing…', node: 'Installing Node.js, which this assistant needs…', nodeFail: 'Could not install Node.js. Try again.', fail: 'The installation did not finish. Try again.', verifying: 'Checking the version…', noVersion: 'It installed, but the version could not be confirmed. Try again.', done: 'Installation complete.' },
+  pt: { updating: 'Atualizando…', installing: 'Instalando…', node: 'Instalando o Node.js, que este assistente precisa…', nodeFail: 'Não consegui instalar o Node.js. Tente de novo.', fail: 'Não consegui terminar. Verifique a internet e tente de novo.', verifying: 'Verificando a versão…', noVersion: 'O assistente foi instalado, mas não consegui abri-lo para confirmar. Tente de novo; se persistir, reinicie o app.', done: 'Instalação concluída.' },
+  en: { updating: 'Updating…', installing: 'Installing…', node: 'Installing Node.js, which this assistant needs…', nodeFail: 'Could not install Node.js. Try again.', fail: 'It did not finish. Check your internet connection and try again.', verifying: 'Checking the version…', noVersion: 'The assistant was installed, but I could not open it to confirm. Try again; if it persists, restart the app.', done: 'Installation complete.' },
 } as const
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
