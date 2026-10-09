@@ -57,6 +57,11 @@ export interface StructuredProvider {
   /** A structured session fell back to tmux (or could not), for the log / the row's note. */
   onFallback?(id: string, outcome: { reason: string; resumed: boolean }): void
   /**
+   * F3.3 — before a structured start: what the tmux backend does before every pane (the session-identity
+   * key the agentistics MCP proves its session with, `session-identity.ts`). Absent = nothing.
+   */
+  prepare?(): Promise<void>
+  /**
    * F2.0b — where a structured child lives so it SURVIVES the server (`structured-durable.ts`). Absent:
    * the driver spawns its child itself and it dies with this process (F2.0's behaviour).
    */
@@ -191,6 +196,14 @@ export function acpAsStructured(acp: EngineAcp): EngineStructured {
   }
 }
 
+/**
+ * The variable every session agentop starts carries — `session-identity.ts`'s `SESSION_ID_ENV`, named
+ * here (not imported: that module reads the data dir at import). The tmux backend sets it on the pane;
+ * a structured child gets it the same way, so the agentistics MCP it starts proves the same session
+ * (F3.3, measured: an MCP started by `claude -p` saw the variable its parent was given through env(1)).
+ */
+export const STRUCTURED_SESSION_ENV = 'AGENTOP_MANAGED_ID'
+
 /** PURE. The driver request for a spawn routed `structured`. */
 export function structuredSpawnOf(req: BackendSpawn, harness: HarnessId): StructuredSpawn {
   const i = req.structured
@@ -204,7 +217,7 @@ export function structuredSpawnOf(req: BackendSpawn, harness: HarnessId): Struct
     ...(prompt ? { initialPrompt: prompt } : {}),
     ...(i?.instructions && !i.resumeId ? { instructions: i.instructions } : {}),
     ...(i?.mcp?.length ? { mcp: i.mcp } : {}),
-    ...(req.env ? { env: req.env } : {}),
+    env: { [STRUCTURED_SESSION_ENV]: req.id, ...(req.env ?? {}) },
   }
 }
 
@@ -302,6 +315,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
   }
 
   async function startVia(req: BackendSpawn, route: Exclude<SpawnRoute, 'tmux'>, harness: HarnessId, reg: EngineStructured, acp: EngineAcp | null): Promise<boolean> {
+    if (route === 'structured') await provider.prepare?.().catch(() => {})
     // F2.0b — a structured child is launched through a relay that outlives this process.
     const sspawn = route === 'structured' ? structuredSpawnOf(req, harness) : null
     const transport: DurableTransport | null = sspawn && durable

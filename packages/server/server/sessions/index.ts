@@ -83,6 +83,10 @@ export async function resolveBackend(): Promise<SessionBackend> {
           conversationId, conversationLink: 'assigned', conversationLinkVia: 'protocol-stated',
         })).catch(() => {})
       },
+      async prepare() {
+        const { ensureSessionIdentityKey } = await import('./session-identity')
+        await ensureSessionIdentityKey()
+      },
       onFallback(id, o) {
         console.warn(`[sessions] structured session ${id} fell back to tmux (${o.resumed ? 'resumed by conversation id' : 'could not resume'}): ${o.reason}`)
       },

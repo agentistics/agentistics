@@ -68,3 +68,15 @@ directly, NOT through `req.transport`, and stamps turns with its own clock — i
 cover. A structured agy session would therefore NOT survive an `agentop server` restart. Nothing routes to it while
 `STRUCTURED_ROUTE_OFF.antigravity` is set; moving it onto the transport is a prerequisite for deleting that entry.
 
+## 5. F3.3 Claude Code (`feat/f3-3-claude` 550b75ab)
+
+| File | Resolution |
+|---|---|
+| `docs/f2-structured-backend.md` | Harness table: Agy row from F3.2 (ready) AND Claude row from F3.3 (ready) — each branch had the other's row still as a stub. F3.3's open-item bullet kept in place. |
+| `packages/server/server/sessions/control-session.test.ts` | Both describes kept (F2.1 `dialogStated`, F3.3 `freeText`) — they sat at the same spot in the file. |
+
+Shared host changes F3.3 brings (additive, all drivers): `structuredSpawnOf` sets `AGENTOP_MANAGED_ID` on every
+structured child (so the Agy driver's own addition is now redundant but harmless), `StructuredProvider.prepare`,
+`DialogOption.freeText` to the row/fleet-hub, `promptSession` refuses a prompt while a request is open, P-07 restored
+in the chat-tail reader, `acp/launch.ts` ends children on host exit.
+

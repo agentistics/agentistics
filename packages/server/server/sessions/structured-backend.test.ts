@@ -167,6 +167,7 @@ describe('withStructured — routing', () => {
       id: 'm-1', harness: 'gemini', cwd: '/w', model: 'm', conversationId: 'offered', initialPrompt: 'hi',
       instructions: { text: 'CTX', block: '<ctx>CTX</ctx>' },
       mcp: [{ name: 'agentistics', command: 'agentop', args: ['mcp'] }],
+      env: { AGENTOP_MANAGED_ID: 'm-1' },
     }])
     expect(conv).toEqual([['m-1', 'offered']])
     expect(startedAs).toEqual([['m-1', 'acp']])
@@ -328,8 +329,12 @@ describe('withStructured — the session is its own chat source', () => {
 describe('structuredSpawnOf (pure)', () => {
   test('a resume carries no assigned id and no context; a bare argv-only request keeps its initial prompt', () => {
     const r = structuredSpawnOf({ ...web('kimi'), structured: structuredIntentOf({ harness: 'kimi', origin: 'web', resumeId: 'c9' }, { ctx: { text: 'x', block: 'y' }, conversationId: 'o' }) }, 'kimi')
-    expect(r).toEqual({ id: 'm-1', harness: 'kimi', cwd: '/w', resumeId: 'c9' })
-    expect(structuredSpawnOf({ id: 'a', cwd: '/w', argv: ['kimi'], initialPrompt: { text: 'p' } as never }, 'kimi')).toEqual({ id: 'a', harness: 'kimi', cwd: '/w', initialPrompt: 'p' })
+    expect(r).toEqual({ id: 'm-1', harness: 'kimi', cwd: '/w', resumeId: 'c9', env: { AGENTOP_MANAGED_ID: 'm-1' } })
+    expect(structuredSpawnOf({ id: 'a', cwd: '/w', argv: ['kimi'], initialPrompt: { text: 'p' } as never }, 'kimi')).toEqual({ id: 'a', harness: 'kimi', cwd: '/w', initialPrompt: 'p', env: { AGENTOP_MANAGED_ID: 'a' } })
+  })
+
+  test('F3.3 — every structured child carries the managed id the tmux pane carries (the MCP proves its session with it)', () => {
+    expect(structuredSpawnOf({ id: 'm-9', cwd: '/w', argv: ['claude'], env: { X: '1' } }, 'claude').env).toEqual({ AGENTOP_MANAGED_ID: 'm-9', X: '1' })
   })
 })
 

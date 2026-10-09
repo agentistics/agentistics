@@ -4086,6 +4086,10 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const live = (await backend.list().catch(() => [])).find(b => b.id === id)
       if (!live?.alive) return { ok: false, message: s.sessNotRunning }
 
+      // F3.3 — a STRUCTURED session states its open request; a prompt then would race the answer the
+      // person is being asked for (the screen rules below read a TUI footer it never draws).
+      if (backend.attentionOf?.(id)) return { ok: false, message: s.sessPromptBlocked }
+
       const frame = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
       const rules = rulesFor(managed.harness)
       if (managed.harness === 'codex' && codexIsBlockingFrame(frame)) {

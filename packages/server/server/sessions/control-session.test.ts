@@ -268,3 +268,17 @@ describe('a dialog the PROTOCOL stated (a structured session, F2.1)', () => {
     expect(c.chooseBlind).toBe(S.sessChooseBlind('gemini'))
   })
 })
+
+describe('F3.3 — which option is a field, as a structured session states it', () => {
+  it('keeps the protocol\'s freeText mark on a label no screen rule names', () => {
+    const c = toControlSession(view({
+      status: 'running', activity: 'waiting-approval',
+      dialogOptions: [
+        { number: 1, label: 'Yes', selected: true },
+        { number: 2, label: 'No, and tell Claude what to do differently', selected: false, freeText: true },
+        { number: 3, label: 'No', selected: false },
+      ],
+    }), S, LIVE)
+    expect(c.dialogOptions?.map(o => !!o.freeText)).toEqual([false, true, false])
+  })
+})

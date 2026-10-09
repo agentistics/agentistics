@@ -65,6 +65,11 @@ describe('the fleet hub — confirmed transitions only', () => {
     expect(JSON.stringify(got)).not.toContain('SECRET')
   })
 
+  test('F3.3 — a free-text option the PROTOCOL marked counts, whatever its label', () => {
+    expect(dialogOf(row('waiting-approval', { dialogOptions: [{ label: 'Yes' }, { label: 'No, and tell Claude what to do differently', freeText: true }] }))!.hasFreeText).toBe(true)
+    expect(dialogOf(row('waiting-approval', { dialogOptions: [{ label: 'Yes' }, { label: 'No' }] }))!.hasFreeText).toBe(false)
+  })
+
   test('an unreadable dialog says nothing about options', () => {
     expect(dialogOf(row('waiting-approval', { dialogUnreadable: { reason: 'x' }, dialogOptions: [{ label: 'a' }] }))).toBeUndefined()
     expect(dialogOf(row('waiting-approval', { dialogOptions: [] }))).toBeUndefined()
