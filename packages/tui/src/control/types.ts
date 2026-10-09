@@ -1938,6 +1938,12 @@ export interface ResumeSessionRequest {
    * still coming up.
    */
   prompt?: string
+  /**
+   * F2.1 — the reopen was asked for FROM THE WEB. With the `adapter-chat` flag on and a ready structured
+   * driver for the harness, the conversation is resumed over its protocol (`session/load`) instead of a
+   * TUI in tmux — the same rule a web-born NEW session follows. Every other door leaves it absent.
+   */
+  origin?: 'web'
   attach: boolean
 }
 

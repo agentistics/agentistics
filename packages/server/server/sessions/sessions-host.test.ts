@@ -228,6 +228,28 @@ describe('createSessionsPoller', () => {
     expect((await p.poll()).sessions[0]!.activity).toBe('working')
   })
 
+  it('a request the PROTOCOL states is carried as stated — its options, picked by number, with no keystroke spec asked (F2.1)', async () => {
+    const backend: SessionBackend = {
+      ...fakeBackend({ sessions: [backendSession('g')] }),
+      activityOf: () => 'waiting-approval',
+      dialogOf: () => ['Allow for this session', 'Allow', 'Reject'],
+    }
+    const p = poller({ backend, registry: [managed('g', { harness: 'gemini' })] })
+    const row = (await p.poll()).sessions[0]!
+    expect(row.activity).toBe('waiting-approval')
+    expect(row.dialogOptions?.map(o => o.label)).toEqual(['Allow for this session', 'Allow', 'Reject'])
+    expect(row.dialogSelect).toBe('numbered')
+    expect(row.dialogStated).toBe(true)
+  })
+
+  it('a dialog read off a SCREEN is not marked stated', async () => {
+    const p = poller({
+      backend: fakeBackend({ sessions: [backendSession('c')], frames: { c: ['Do you want to proceed?', ' ❯ 1. Yes', '   2. No', 'Esc to cancel · Tab to amend'] } }),
+      registry: [managed('c')],
+    })
+    expect((await p.poll()).sessions[0]!.dialogStated).toBeUndefined()
+  })
+
   it('never captures a dead pane', async () => {
     const captured: string[] = []
     const p = poller({
@@ -927,5 +949,52 @@ describe('a process-log link follows the conversation the process moves to', () 
   })
   it('no conversation named yet changes nothing', async () => {
     expect(await run({ conversationId: 'old', conversationLinkVia: 'first-sighting' }, null)).toEqual([])
+  })
+})
+
+describe('exclusive managed agy log', () => {
+  it('links three same-folder/same-second rows without a live pid, then follows a new conversation', async () => {
+    const rows = ['0123456789', 'abcdef0123', 'fedcba9876'].map(id => managed(id, { harness: 'antigravity' }))
+    const logs = new Map(rows.map((r, i) => [r.id, `conversation-${i}`]))
+    const writes: unknown[] = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [] }), readRegistry: async () => rows,
+      scanProcesses: async () => ({ procs: [] }), now: () => NOW,
+      readManagedConversation: async (_h, id) => logs.get(id) ?? null,
+      recordConversation: async (id, conv, link, via) => { writes.push([id, conv, link, via]) },
+    })
+    await p.poll()
+    expect(writes).toEqual(rows.map((r, i) => [r.id, `conversation-${i}`, 'assigned', 'process-log']))
+    writes.length = 0
+    await p.poll()
+    expect(writes).toEqual([])
+    logs.set(rows[0]!.id, 'new-conversation')
+    await p.poll()
+    expect(writes).toEqual([[rows[0]!.id, 'new-conversation', 'assigned', 'process-log']])
+  })
+  it('preserves a reopened link and never asks another harness for a managed log', async () => {
+    const reads: string[] = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [] }),
+      readRegistry: async () => [managed('0123456789', { harness: 'antigravity', conversationId: 'resumed', conversationLinkVia: 'resumed-id' }), managed('abcdef0123', { harness: 'codex' })],
+      scanProcesses: async () => ({ procs: [] }), now: () => NOW,
+      readManagedConversation: async (_h, id) => { reads.push(id); return 'other' },
+      recordConversation: async () => { throw new Error('must not write') },
+    })
+    await p.poll()
+    expect(reads).toEqual([])
+  })
+  it('keeps the process route when the managed log is absent or unreadable', async () => {
+    const writes: string[] = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [backendSession('0123456789')], panePids: { '0123456789': 777 } }),
+      readRegistry: async () => [managed('0123456789', { harness: 'antigravity' })],
+      scanProcesses: async () => ({ procs: [] }), now: () => NOW,
+      readManagedConversation: async () => { throw new Error('unreadable') },
+      readProcessConversation: async () => 'from-db-or-old-log',
+      recordConversation: async (_id, conv) => { writes.push(conv) },
+    })
+    await p.poll()
+    expect(writes).toEqual(['from-db-or-old-log'])
   })
 })

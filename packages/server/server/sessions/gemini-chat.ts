@@ -4,8 +4,9 @@
  * ## Why this exists now and did not before
  *
  * `harness-transcript.ts` carried `gemini: null` with a reason, and the reason was a LINK fact
- * rather than a format one: a reader is only ever offered a `conversationId`, gemini has no
- * `assignId` and no id-taking `resume`, so the entry would have been code nothing could reach.
+ * rather than a format one: a reader is only ever offered a `conversationId`, and gemini then had no
+ * `assignId` and no id-taking `resume` (it has both since F0.2 — the header UUID is resolved by
+ * `resolveGeminiTranscript` beside the synthetic id described below).
  *
  * What changed is that the link arrived from the other side. `planFirstSightingClaims` deliberately
  * includes gemini, and the id it claims is the SYNTHETIC one this product already keys the store on

@@ -1,7 +1,7 @@
 // packages/server/server/sessions/conversations.test.ts
 import { test, expect } from 'bun:test'
 import { sessionCostUSD, type SessionMeta } from '@agentistics/core'
-import { toConversation } from './conversations'
+import { findConversation, resumeIdOf, toConversation } from './conversations'
 
 let seq = 0
 function session(over: Partial<SessionMeta> = {}): SessionMeta {
@@ -79,4 +79,42 @@ test('no model and no usage yields no costUSD at all — never a confident 0', (
   const s = session({ input_tokens: 0, output_tokens: 0, model: undefined })
   const c = toConversation(s)
   expect(c.costUSD).toBeUndefined()
+})
+
+// F0.2 — gemini's two ids ---------------------------------------------------------------------
+
+const G_UUID = '04d97770-e53f-4b7d-86d2-63bd12ec32eb'
+
+test('a gemini conversation is resumable by its header uuid, and offers THAT id — not the store key', () => {
+  const c = toConversation(session({ harness: 'gemini', session_id: 'work/session-x', native_session_id: G_UUID }))
+  expect(c.sessionId).toBe('work/session-x')
+  expect(c.nativeId).toBe(G_UUID)
+  expect(c.resumable).toBe(true)
+  expect(resumeIdOf(c)).toBe(G_UUID)
+})
+
+test('a gemini conversation with no header id lists but cannot be resumed', () => {
+  // The synthetic key is not something `gemini --resume` can open; the verb is withheld, not broken.
+  const c = toConversation(session({ harness: 'gemini', session_id: 'work/session-old' }))
+  expect(c.resumable).toBe(false)
+  expect(resumeIdOf(c)).toBe('work/session-old')
+})
+
+test('every other harness keeps resuming by its store key', () => {
+  const c = toConversation(session({ harness: 'claude', session_id: 'abc' }))
+  expect(c.resumable).toBe(true)
+  expect(c.nativeId).toBeUndefined()
+  expect(resumeIdOf(c)).toBe('abc')
+})
+
+test('findConversation answers to either id, and the store key wins', () => {
+  const a = toConversation(session({ harness: 'gemini', session_id: 'work/a', native_session_id: G_UUID }))
+  const b = toConversation(session({ harness: 'claude', session_id: 'b' }))
+  expect(findConversation([a, b], G_UUID)).toBe(a)
+  expect(findConversation([a, b], 'work/a')).toBe(a)
+  expect(findConversation([a, b], 'b')).toBe(b)
+  expect(findConversation([a, b], 'missing')).toBeUndefined()
+  // an id that is somebody's store key is never captured by another row's alias
+  const shadow = toConversation(session({ harness: 'gemini', session_id: 'z', native_session_id: 'b' }))
+  expect(findConversation([shadow, b], 'b')).toBe(b)
 })

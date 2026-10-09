@@ -352,6 +352,7 @@ export interface CliStrings {
   sessNoHarnessOnPath: (path: string) => string
   sessSpawnUnsupported: (harness: string) => string
   sessSpawnNoResume: (harness: string) => string
+  sessSpawnNoResumeId: (harness: string) => string
   sessSpawnNoModel: (harness: string) => string
   sessSpawnNoEffort: (harness: string) => string
   sessSpawnBadEffort: (harness: string, value: string, accepted: string[]) => string
@@ -772,6 +773,7 @@ const EN: CliStrings = {
     'If it runs as a service, run `agentop restart server` from a terminal where the assistants work.',
   sessSpawnUnsupported: (harness: string) => `agentop cannot start ${harness} yet.`,
   sessSpawnNoResume: (harness: string) => `${harness} cannot reopen a conversation by id.`,
+  sessSpawnNoResumeId: (harness: string) => `this ${harness} conversation has no id the CLI can reopen — it was recorded before agentop could assign one. Start a new session instead.`,
   sessSpawnNoModel: (harness: string) => `${harness} has no model flag, so a model cannot be set.`,
   sessSpawnNoEffort: (harness: string) => `${harness} has no effort flag, so an effort cannot be set.`,
   sessSpawnBadEffort: (harness: string, value: string, accepted: string[]) =>
@@ -1162,6 +1164,7 @@ const PT: CliStrings = {
     'Se ele roda como serviço, rode `agentop restart server` num terminal onde os assistentes funcionam.',
   sessSpawnUnsupported: (harness: string) => `o agentop ainda não inicia ${harness}.`,
   sessSpawnNoResume: (harness: string) => `${harness} não reabre conversa por id.`,
+  sessSpawnNoResumeId: (harness: string) => `esta conversa do ${harness} não tem um id que o CLI consiga reabrir — foi gravada antes de o agentop poder atribuir um. Comece uma sessão nova.`,
   sessSpawnNoModel: (harness: string) => `${harness} não tem flag de modelo, então não dá para definir um.`,
   sessSpawnNoEffort: (harness: string) => `${harness} não tem flag de effort, então não dá para definir um.`,
   sessSpawnBadEffort: (harness: string, value: string, accepted: string[]) =>

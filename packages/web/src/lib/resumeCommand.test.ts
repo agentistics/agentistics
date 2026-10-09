@@ -18,10 +18,15 @@ test('every harness with a verified resume syntax gets a command', () => {
   expect(resumeCommand(s('kimi'))).toBe("cd '/home/u/proj' && kimi -S session_abc-123")
 })
 
-test('a harness that cannot reopen a session by id yields null', () => {
-  // Gemini's --resume takes "latest" or a list index, never a session id, and --session-id starts a
-  // NEW session with that id. A wrong-but-plausible command would be worse than admitting it is
-  // unavailable.
+test('gemini resumes by the chat header UUID, never by the store key', () => {
+  // The store key is the synthetic `<project>/<file>`; `gemini --resume` takes the header's UUID.
+  const g = { session_id: 'proj/session-2026-10-09T10-49-04d97770', native_session_id: '04d97770-e53f-4b7d-86d2-63bd12ec32eb',
+    project_path: '/home/u/proj', harness: 'gemini' } as SessionMeta
+  expect(resumeCommand(g)).toBe("cd '/home/u/proj' && gemini --resume 04d97770-e53f-4b7d-86d2-63bd12ec32eb")
+})
+
+test('a gemini session recorded without a header id yields null rather than a wrong command', () => {
+  // Passing the synthetic key (or an index, which shifts) would reopen nothing or a neighbour.
   expect(resumeCommand(s('gemini'))).toBeNull()
 })
 

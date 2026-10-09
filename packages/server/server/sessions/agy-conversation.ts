@@ -41,11 +41,13 @@
  * leaves the row exactly as it behaves today; a wrong one puts somebody else's conversation on
  * screen under this session's name, which the reader cannot detect and the user cannot either.
  *
- * ## The stated limit
+ * ## agy 1.3.2 (2026-10-09)
  *
- * The fd is a `/proc` read, so this works on Linux and answers nothing anywhere else. That is a
- * degradation, not a lie: with no link the chat view says "this session has no linked conversation
- * yet" (`chat-web.ts`), which is true.
+ * Default cli logs stopped naming conversations. Agentop now supplies --log-file to an exclusive
+ * agy-logs/<managedId>.log; print AND TUI probes wrote Created conversation into that file.
+ * agy also holds conversations/<uuid>.db open; that path names its conversation without a log
+ * read. The owned log works after exit and off Linux; the fd route is Linux-only. The original
+ * cli log and spawn-window readers stay as fallbacks. See docs/antigravity-link.md.
  */
 
 /** A conversation id as agy writes it: a plain lowercase UUID. */
@@ -69,7 +71,7 @@ const CREATED_RE = new RegExp(String.raw`Created conversation (${UUID})\b`, 'g')
  * ITS name is a crash id, not a conversation. Keying on the `log/cli-<timestamp>.log` shape is what
  * keeps the two apart.
  */
-const AGY_LOG_RE = new RegExp(String.raw`/antigravity-cli/log/cli-\d{8}_\d{6}\.log$`)
+const AGY_LOG_RE = new RegExp(String.raw`(?:/antigravity-cli/log/cli-\d{8}_\d{6}|/agy-logs/[0-9a-f]{10})\.log$`)
 
 /**
  * The conversation agy last said it CREATED, or `null`.
@@ -246,4 +248,31 @@ export function conversationFromSpawnWindow(o: {
   if (mine.length !== 1) return null
   const conv = mine[0]!.conv
   return o.taken?.has(conv) ? null : conv
+}
+
+/** agy 1.3.2 keeps its conversation SQLite database open throughout a turn.
+ * Measured 2026-10-09 in a throwaway HOME: DB at +2.836s, brain transcript at +3.239s.
+ * Only a process's OPEN paths count; a stale brain directory elsewhere is never a candidate. */
+const AGY_DB_RE = new RegExp(String.raw`/antigravity-cli/conversations/(${UUID})\.db(?:-wal|-shm)?$`)
+const AGY_BRAIN_RE = new RegExp(String.raw`/antigravity-cli/brain/(${UUID})(?:/|$)`)
+export function agyConversationFromPath(path: string): string | null {
+  return AGY_DB_RE.exec(path)?.[1] ?? AGY_BRAIN_RE.exec(path)?.[1] ?? null
+}
+
+/** One conversation held open, otherwise the legacy process log. Multiple conversations refuse. */
+export function agyTranscriptFromFds(targets: readonly string[]): string | null {
+  const paths = targets.filter(p => agyConversationFromPath(p) !== null)
+  const ids = new Set(paths.map(agyConversationFromPath))
+  if (ids.size > 1) return null
+  if (ids.size === 1) return paths.find(p => p.endsWith('.db')) ?? paths[0]!
+  return agyLogFromFds(targets)
+}
+
+/** In an exclusive log, Streaming means the CLI selected this conversation, including /new and
+ * a switch to an existing conversation. GetConversationDetail alone remains only a lookup. */
+export function conversationFromManagedAgyLog(text: string): string | null {
+  const re = new RegExp(String.raw`(?:Created conversation|Streaming conversation) (${UUID})\b`, 'g')
+  let last: string | null = null
+  for (const m of text.matchAll(re)) last = m[1] ?? last
+  return last
 }

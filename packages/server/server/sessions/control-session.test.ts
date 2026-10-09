@@ -82,12 +82,21 @@ describe('which conversation a row continues from', () => {
   })
 
   it('says so where the harness can never report one', () => {
-    // gemini invents its own id, never hands it back and holds no file open to read it from, so
+    // opencode has no spawn spec, no session record and no open file to read an id from, so
     // everything downstream falls to the harness-and-directory guess. That is fine to OFFER and not
     // fine to state as fact.
-    const c = toControlSession(view({ harness: 'gemini' }), S, LIVE)
+    const c = toControlSession(view({ harness: 'opencode' }), S, LIVE)
     expect(c.conversationId).toBeUndefined()
-    expect(c.conversationBlind).toBe(S.sessConversationBlind('gemini'))
+    expect(c.conversationBlind).toBe(S.sessConversationBlind('opencode'))
+  })
+
+  it('is not blind on a gemini row: the id is assigned at spawn (F0.2)', () => {
+    const id = '04d97770-e53f-4b7d-86d2-63bd12ec32eb'
+    const c = toControlSession(view({ harness: 'gemini', conversationId: id }), S, LIVE)
+    expect(c.conversationId).toBe(id)
+    expect(c.conversationBlind).toBeUndefined()
+    // nor before the id is recorded: "not yet", never "never" — first sighting still claims it.
+    expect(toControlSession(view({ harness: 'gemini' }), S, LIVE).conversationBlind).toBeUndefined()
   })
 
   it('stays quiet on a codex or kimi row not linked YET — their own process names it', () => {
@@ -117,7 +126,7 @@ describe('which conversation a row continues from', () => {
     }
   })
 
-  describe('a harness whose only link needs the LIVE process (antigravity)', () => {
+  describe('antigravity can recover its exclusive log after exit', () => {
     it('stays quiet while the row is still running — it is within its own capture window', () => {
       // `linkProcessConversationSoon` (cli-start.ts) gives a fresh antigravity spawn several
       // seconds of its own before giving up. Telling a session a few seconds old that its link is
@@ -138,31 +147,21 @@ describe('which conversation a row continues from', () => {
       expect(c.conversationBlind).toBeUndefined()
     })
 
-    it('says the link is gone FOREVER once the row has actually ended unlinked', () => {
+    it('can still recover a link after the row has ended unlinked', () => {
       // `v.status === 'exited'` is `session-view.ts`'s own reading of `Boolean(managed.endedAt)` —
       // the one moment this machine can be sure the process (and with it, `/proc/<pid>/fd`) is gone.
       const c = toControlSession(
         view({ harness: 'antigravity', status: 'exited', activity: 'exited' }), S, LIVE,
       )
       expect(c.conversationId).toBeUndefined()
-      expect(c.conversationBlind).toBe(S.sessConversationLost('antigravity'))
+      expect(c.conversationBlind).toBeUndefined()
       // A different sentence from the structural one — this harness CAN link, in principle.
       expect(c.conversationBlind).not.toBe(S.sessConversationBlind('antigravity'))
     })
 
-    /**
-     * FIXWAVE 1 — Finding 2. `v.status === 'lost'` is `session-ref.ts`'s `!found` branch: the
-     * BACKEND has no record of this row at all. CLAUDE.md names the ordinary way this happens — a
-     * reboot takes tmux and leaves the registry, so every managed session reconciles to `lost` —
-     * and it is also what a raw `tmux kill-session` (outside agentop's own kill flow) produces.
-     * There is no pid left here to ever read `/proc/<pid>/fd` from again, which is exactly the fact
-     * `conversationLinkGoneForever`'s own doc comment asks about. Reproduced live: a synthetic
-     * antigravity row with no matching tmux session, no `conversationId`, no `endedAt`, answered
-     * `GET /api/fleet` with a disabled Reopen carrying NO reason at all, before this fix.
-     */
-    it('ALSO says the link is gone forever on a row the backend has lost entirely', () => {
+    it('can still recover the exclusive log after the backend has lost the row', () => {
       const c = toControlSession(view({ harness: 'antigravity', status: 'lost' }), S, LIVE)
-      expect(c.conversationBlind).toBe(S.sessConversationLost('antigravity'))
+      expect(c.conversationBlind).toBeUndefined()
     })
 
     it('says nothing once ended WITH a link — there is nothing left to explain', () => {
@@ -233,5 +232,39 @@ describe('a dialog agentop can SEE and cannot READ', () => {
     const c = toControlSession(view({ status: 'running', activity: 'working' }), S, LIVE)
     expect(c.dialogBlind).toBeUndefined()
     expect(c.canApprove).toBeUndefined()
+  })
+})
+
+describe('a dialog the PROTOCOL stated (a structured session, F2.1)', () => {
+  /*
+   * Found by the first live run of gemini over ACP: the card listed the three options the protocol
+   * stated, and the row said "nobody has verified how to pick an option on gemini — attach to answer
+   * it there" — because `canChoose` asked the KEYSTROKE spec, and a structured session sends no key.
+   * The driver answers by number; the spec is irrelevant.
+   */
+  const stated = (over: Partial<SessionView> = {}) => view({
+    harness: 'gemini',
+    status: 'running',
+    activity: 'waiting-approval',
+    approvalLines: ['Permission needed: Writing to note.txt'],
+    dialogOptions: [
+      { number: 1, label: 'Allow for this session', selected: true },
+      { number: 2, label: 'Allow', selected: false },
+      { number: 3, label: 'Reject', selected: false },
+    ],
+    dialogSelect: 'numbered',
+    ...over,
+  })
+
+  it('is pickable by number, with no refusal, on a harness whose keystrokes nobody verified', () => {
+    const c = toControlSession(stated({ dialogStated: true }), S, LIVE)
+    expect(c.canChoose).toBe(true)
+    expect(c.chooseBlind).toBeUndefined()
+  })
+
+  it('a dialog READ off a screen on that same harness is still refused in words (nothing changed for tmux)', () => {
+    const c = toControlSession(stated(), S, LIVE)
+    expect(c.canChoose).toBeUndefined()
+    expect(c.chooseBlind).toBe(S.sessChooseBlind('gemini'))
   })
 })

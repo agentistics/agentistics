@@ -283,6 +283,8 @@ export function createSessionsPoller(o: {
    *
    * Injected like every other read here, so the poller stays testable without a `/proc`.
    */
+  /** Exclusive managed log; also works without a live pid. */
+  readManagedConversation?: (harness: HarnessId, id: string) => Promise<string | null>
   readProcessConversation?: (harness: HarnessId, pid: number, knownLog?: ProcessTranscriptFile | null) => Promise<string | null>
   /**
    * Which log a pid holds open, WITHOUT reading its content — see `process-conversation.ts`'s
@@ -444,6 +446,7 @@ export function createSessionsPoller(o: {
       const modes = new Map<string, { id: string; label: string }>()
       const dialogOptions = new Map<string, DialogOption[]>()
       const dialogSelect = new Map<string, 'numbered' | 'marker'>()
+      const dialogStated = new Set<string>()
       /*
        * WHY THE REFUSAL IS CARRIED AND NOT JUST THE OPTIONS.
        *
@@ -579,6 +582,7 @@ export function createSessionsPoller(o: {
           approvals.set(r.id, tail())
           dialogOptions.set(r.id, statedDialog.map((label, i) => ({ number: i + 1, label: anyGrant() ? scrubTerminalLine(r.id, label) : label, selected: i === 0 })))
           dialogSelect.set(r.id, 'numbered')
+          dialogStated.add(r.id)
         } else if (state === 'waiting-approval') {
           approvals.set(r.id, tail())
           // Read from the SAME frame that decided the state, so what is offered and what the state
@@ -638,6 +642,25 @@ export function createSessionsPoller(o: {
       // fleet without agy, codex or kimi: this whole block is a no-op there. kimi holds its files
       // only while writing, so this once-a-poll read mostly misses it; `sampleProcessLinks` below is
       // what catches it, run in bursts while kimi's transcript tree is being written.
+      // Exclusive managed logs cannot collide even when three rows start in the same second/cwd.
+      // Keep following process-derived links; resumed/assigned links retain their conversation.
+      const managedLogLinked = new Set<string>()
+      if (o.recordConversation && o.readManagedConversation) {
+        for (const m of registry) {
+          if (!HARNESS_PROCESS_TRANSCRIPTS[m.harness]?.managedLog) continue
+          if (m.conversationId && m.conversationLinkVia !== 'process-log' && m.conversationLinkVia !== 'first-sighting') continue
+          const found = await o.readManagedConversation(m.harness, m.id).catch(() => null)
+          if (!found) continue
+          managedLogLinked.add(m.id)
+          if (found === m.conversationId) continue
+          try {
+            await o.recordConversation(m.id, found, 'assigned', 'process-log')
+            // The fallback below must not overwrite the newer managed log with an old open DB.
+            m.conversationId = found
+            m.conversationLinkVia = 'process-log'
+          } catch { /* retry next poll */ }
+        }
+      }
       const procLinkStart = performance.now()
       let procLinkWrites = 0
       if (o.recordConversation && o.readProcessConversation) {
@@ -682,7 +705,7 @@ export function createSessionsPoller(o: {
         const collidedHolders = holderCollisions(keyByHolder)
 
         for (const m of registry) {
-          if (!HARNESS_PROCESS_TRANSCRIPTS[m.harness]) continue
+          if (!HARNESS_PROCESS_TRANSCRIPTS[m.harness] || managedLogLinked.has(m.id)) continue
           // A link the process log itself produced is not final: the SAME process can go on to
           // create another conversation (agy after a model switch, a /clear, a resume), and the pane
           // then shows answers that the old, "exact" link never will — the web chat sat on
@@ -877,6 +900,7 @@ export function createSessionsPoller(o: {
         modes,
         dialogOptions,
         dialogSelect,
+        dialogStated,
         dialogUnreadable,
         processes,
         conversations,
