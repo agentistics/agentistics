@@ -1,18 +1,18 @@
 import { cacheKind, etagMatches, etagOf, staticCacheControl } from './static-cache'
 import { join } from 'path'
 import { spawn } from 'child_process'
-import { stat } from 'fs/promises'
 import { watch as fsWatch, statSync } from 'fs'
 import { watchedEvent, WATCH_DEPTH } from './watch-filter'
 import chokidar from 'chokidar'
 import { SESSION_META_DIR, PROJECTS_DIR, STATS_CACHE_FILE, PORT, TEAM_CENTRAL, CODEX_SESSIONS_DIR, GEMINI_DIR, COPILOT_DIR, ANTIGRAVITY_BRAIN_DIR, ANTIGRAVITY_CONVERSATIONS_DIR, KIMI_DIR } from './config'
-import { featureOn, type HarnessId } from '@agentistics/core'
+import { featureOn, HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { harnessOfPath, noteTranscriptActivity } from './sessions/transcript-activity'
 import { centralManifest, centralHtml } from './central-branding'
 import { invalidateCache, rebuildNow, useWatcherDrivenRefresh } from './data'
 import { createRebuildScheduler } from './rebuild-scheduler'
 import { mirrorFile } from './archive'
-import { getEnabledAdapters } from './adapters/types'
+import { harnessEnabled } from './adapters/types'
+import { LATE_WATCH_INTERVAL_MS, planLateWatches, type WatchWant } from './watch-plan'
 import { addStoredNotification } from './notifications-store'
 import type { NotificationSubject } from './notifications-authority'
 
@@ -179,7 +179,7 @@ function watchNative(dir: string, ignored: RegExp): boolean {
   }
 }
 
-export async function setupFileWatcher() {
+export async function setupFileWatcher(opts: { lateIntervalMs?: number } = {}) {
   const watch = (dir: string, ignored: RegExp = DEFAULT_IGNORED, native = false) => {
     if (native && watchNative(dir, ignored)) return
     const watcher = chokidar.watch(dir, {
@@ -209,45 +209,58 @@ export async function setupFileWatcher() {
   // Additional harnesses: watch ONLY each harness's session directory (`HARNESS_SESSION_DIRS`).
   // Inside brain/<conversation-id>/ only .git / node_modules noise is worth skipping.
   const ANTIGRAVITY_IGNORED = /(^|[/\\])(\.git|node_modules)([/\\]|$)/
-  try {
-    const adapters = await getEnabledAdapters()
-    const seen = new Set<string>([SESSION_META_DIR, PROJECTS_DIR, STATS_CACHE_FILE])
-    for (const adapter of adapters) {
-      const dir = HARNESS_SESSION_DIRS[adapter.id]
-      if (!dir || seen.has(dir)) continue
-      seen.add(dir)
-      try {
-        await stat(dir)
-        // Antigravity's transcripts live in .system_generated/logs/, which the default
-        // filter's `logs` rule would drop — watch that tree with a narrower filter.
-        // Antigravity stays on chokidar: its conversation folders can hold whole repositories
-        // (`.git`, `node_modules`), and a recursive native watch would add a watch per directory
-        // in them, where chokidar never descends into an ignored tree.
-        if (adapter.id === 'antigravity') watch(dir, ANTIGRAVITY_IGNORED)
-        else watch(dir, DEFAULT_IGNORED, true)
-        if (adapter.id === 'antigravity') {
-          // Antigravity's tokens / model / cost live ONLY in conversations/<id>.db, in a
-          // different tree from the transcripts. Without this, a turn that only updates
-          // gen_metadata (no new transcript step) never refreshes the dashboard.
-          // The `-wal`/`-shm` sidecars agy itself writes are ignored: they change constantly and
-          // carry no data we read (we open the DBs immutable).
-          try {
-            await stat(ANTIGRAVITY_CONVERSATIONS_DIR)
-            if (!seen.has(ANTIGRAVITY_CONVERSATIONS_DIR)) {
-              seen.add(ANTIGRAVITY_CONVERSATIONS_DIR)
-              watch(ANTIGRAVITY_CONVERSATIONS_DIR, /(-wal|-shm|-journal)$/)
-            }
-          } catch {
-            console.log(`[watcher] Skipping ${ANTIGRAVITY_CONVERSATIONS_DIR} (not found)`)
-          }
-        }
-      } catch {
-        // Directory doesn't exist yet — skip; data.ts re-scans on every request.
-        console.log(`[watcher] Skipping ${dir} (not found)`)
+  const watched = new Set<string>([SESSION_META_DIR, PROJECTS_DIR, STATS_CACHE_FILE])
+  const wanted: WatchWant[] = []
+  for (const id of HARNESS_ORDER) {
+    const dir = HARNESS_SESSION_DIRS[id]
+    if (dir && harnessEnabled(id)) wanted.push({ dir, label: id })
+  }
+  // Antigravity's tokens / model / cost live ONLY in conversations/<id>.db, in a different tree from
+  // the transcripts. Without this, a turn that only updates gen_metadata (no new transcript step)
+  // never refreshes the dashboard. The `-wal`/`-shm` sidecars agy itself writes are ignored: they
+  // change constantly and carry no data we read (we open the DBs immutable).
+  if (harnessEnabled('antigravity')) wanted.push({ dir: ANTIGRAVITY_CONVERSATIONS_DIR, label: 'antigravity' })
+
+  const isDir = (dir: string): boolean => { try { return statSync(dir).isDirectory() } catch { return false } }
+  const reported = new Set<string>()
+  /**
+   * One pass over the wanted directories. Run at boot AND on a timer: a harness first used after the
+   * server started (gemini's `~/.gemini/tmp`, kimi's `sessions/`) creates its directory later, and a
+   * boot-only decision left it unwatched until a restart. Whatever the harness wrote before the
+   * watcher attached is picked up by the rebuild this triggers.
+   */
+  const watchWhatExists = (late: boolean): void => {
+    for (const w of planLateWatches(wanted, watched, isDir)) {
+      watched.add(w.dir)
+      // Antigravity's transcripts live in .system_generated/logs/, which the default filter's `logs`
+      // rule would drop — watch that tree with a narrower filter, on chokidar: its conversation
+      // folders can hold whole repositories (`.git`, `node_modules`), and a recursive native watch
+      // would add a watch per directory in them, where chokidar never descends into an ignored tree.
+      if (w.dir === ANTIGRAVITY_CONVERSATIONS_DIR) watch(w.dir, /(-wal|-shm|-journal)$/)
+      else if (w.label === 'antigravity') watch(w.dir, ANTIGRAVITY_IGNORED)
+      else watch(w.dir, DEFAULT_IGNORED, true)
+      if (late) {
+        console.log(`[watcher] ${w.label}: ${w.dir} appeared after boot — now watched`)
+        triggerSseNotification()
       }
     }
-  } catch (err) {
-    console.warn('[watcher] Could not resolve harness adapters:', String(err))
+    if (!late) {
+      for (const w of wanted) {
+        if (!watched.has(w.dir) && !reported.has(w.dir)) {
+          reported.add(w.dir)
+          console.log(`[watcher] Skipping ${w.dir} (not found yet — will watch it when it appears)`)
+        }
+      }
+    }
+  }
+  watchWhatExists(false)
+  if (wanted.some(w => !watched.has(w.dir))) {
+    const timer = setInterval(() => {
+      watchWhatExists(true)
+      if (wanted.every(w => watched.has(w.dir))) clearInterval(timer)
+    }, opts.lateIntervalMs ?? LATE_WATCH_INTERVAL_MS)
+    // Never the reason the process stays up.
+    timer.unref?.()
   }
 }
 
