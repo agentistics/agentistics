@@ -1022,7 +1022,8 @@ export async function runFleetSpawn(
     return { ok: false, message }
   }
 
-  const out = await host.spawnSession(decision.plan)
+  // F2.0: born in the browser — with `adapter-chat` on and a ready driver it runs structured.
+  const out = await host.spawnSession({ ...decision.plan, origin: 'web' })
   if (out.ok) kickFleet()
   return {
     ok: out.ok,

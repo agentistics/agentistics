@@ -42,19 +42,43 @@ const windowsBackend: SessionBackend = {
 }
 
 /**
- * A5.4: once, the tmux backend wrapped by the ACP composite (`acp-backend.ts`). The composite only
- * takes a spawn when the person opted the harness into ACP (`preferences.acpHarnesses`) AND the
- * engine drives it (`engine.acp`, engine-api 1.7); otherwise every verb is tmux's, unchanged.
+ * Once, the tmux backend wrapped by the STRUCTURED composite (`structured-backend.ts`, F2.0 — which
+ * generalises A5.4's ACP composite). A web-born spawn with the `adapter-chat` flag on runs over its
+ * harness's protocol when a driver is ready (`engine.structured`, or a 1.9 engine's `engine.acp`);
+ * A5.4's opt-in (`preferences.acpHarnesses`) still routes as before; every other verb is tmux's,
+ * unchanged. A structured session whose driver fails is resumed in tmux by its conversation id.
  */
 let composite: SessionBackend | null = null
 
 export async function resolveBackend(): Promise<SessionBackend> {
   if (process.platform === 'win32') return windowsBackend
   if (!composite) {
-    const { withAcp } = await import('./acp-backend')
-    composite = withAcp(tmuxBackend, {
+    const { withStructured } = await import('./structured-backend')
+    const { featureOn } = await import('@agentistics/core')
+    composite = withStructured(tmuxBackend, {
+      structured: async () => (await import('../engine/load')).engine()?.structured ?? null,
       acp: async () => (await import('../engine/load')).engine()?.acp ?? null,
       allowed: async () => ((await (await import('../preferences')).readPreferences()).acpHarnesses ?? []),
+      flagOn: () => featureOn('adapter-chat'),
+      async resumeSpawn(req, conversationId) {
+        const i = req.structured
+        if (!i) return null
+        const { planSpawn } = await import('./spawn-spec')
+        const planned = planSpawn({
+          harness: i.harness, cwd: req.cwd, resumeId: conversationId,
+          ...(i.model ? { model: i.model } : {}), ...(i.effort ? { effort: i.effort } : {}),
+        })
+        if (!planned.ok) return null
+        return { id: req.id, cwd: req.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}) }
+      },
+      onConversation(id, conversationId) {
+        void import('./registry').then(r => r.patchSession(id, {
+          conversationId, conversationLink: 'assigned', conversationLinkVia: 'protocol-stated',
+        })).catch(() => {})
+      },
+      onFallback(id, o) {
+        console.warn(`[sessions] structured session ${id} fell back to tmux (${o.resumed ? 'resumed by conversation id' : 'could not resume'}): ${o.reason}`)
+      },
     })
   }
   return composite

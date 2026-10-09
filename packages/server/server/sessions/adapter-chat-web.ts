@@ -29,6 +29,15 @@ function chatOf(harness: string): HarnessChat | undefined {
 }
 
 /**
+ * F2.0 — a STRUCTURED session is its own chat source (the protocol: turns, `live` text, `state`), so
+ * it is served from the backend's session before any engine integration or file link is asked.
+ */
+async function structuredChatOf(id: string): Promise<{ chat: HarnessChat; conversationId: string } | undefined> {
+  const { resolveBackend } = await import('./index')
+  return (await resolveBackend().catch(() => null))?.chatOf?.(id)
+}
+
+/**
  * PURE. One row of the poller's RAW snapshot, mapped by the same `toControlSession` `host.sessions()`
  * uses — for the fields the adapter stream reads (state, link, conversation, cwd). `null` when the
  * snapshot does not hold it (gone, or a native row: those are not the poller's and keep the legacy path).
@@ -61,7 +70,7 @@ export async function openAdapterChatStream(
   const hub = await fleetSessionHub().catch(() => null)
   if (!hub) return null
   const row = await findRow(hub, lang, id).catch(() => null)
-  const picked = pickAdapterChat(row ?? undefined, true, chatOf)
+  const picked = (row ? await structuredChatOf(id) : undefined) ?? pickAdapterChat(row ?? undefined, true, chatOf)
   if (!row || !picked) return null
   if (!acquireChatSlot()) return null
   const { chat, conversationId } = picked
@@ -87,7 +96,7 @@ export async function readAdapterChatPayload(host: StartHost, lang: CliLang, id:
   const hub = await fleetSessionHub().catch(() => null)
   if (!hub) return null
   const row = await findRow(hub, lang, id).catch(() => null)
-  const picked = pickAdapterChat(row ?? undefined, true, chatOf)
+  const picked = (row ? await structuredChatOf(id) : undefined) ?? pickAdapterChat(row ?? undefined, true, chatOf)
   if (!row || !picked) return null
   const { chat, conversationId } = picked
   const out = await readAdapterChat({

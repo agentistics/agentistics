@@ -1908,6 +1908,12 @@ export interface SpawnSessionRequest {
    * guarantee a caller sent a boolean, and a truthy STRING must never read as consent.
    */
   force?: boolean
+  /**
+   * F2.0 — where the request was born. `web` (the browser's `/api/fleet/new`, Nay): with the
+   * `adapter-chat` flag on and a ready structured driver for the harness, the session runs over the
+   * harness's protocol instead of a TUI. Absent = a terminal-born session, always a TUI.
+   */
+  origin?: 'web' | 'terminal'
 }
 
 export interface ResumeSessionRequest {

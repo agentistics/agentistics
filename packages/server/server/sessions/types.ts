@@ -8,6 +8,7 @@
 
 import type { ConversationLinkReason, HarnessId, SendNowOutcome } from '@agentistics/core'
 import type { RepoFacts } from './repo-facts'
+import type { HarnessChat, StructuredAnswer, StructuredAttention, StructuredMcpServer } from '@agentistics/engine-api'
 
 /**
  * How a harness accepts an initial prompt while starting an INTERACTIVE session.
@@ -196,6 +197,27 @@ export interface BackendSpawn {
    * resolves the rules. Absent when there is nothing to deliver.
    */
   initialPrompt?: BackendInitialPrompt
+  /**
+   * F2.0 — what a STRUCTURED driver needs to start the same session over its harness's protocol
+   * (`structured-backend.ts`). Ignored by tmux. Absent = route on the argv alone (A5.4's rule).
+   */
+  structured?: StructuredIntent
+}
+
+/** F2.0 — the spawn, in the terms a structured driver takes (`StructuredSpawn` minus the host's own id/cwd). */
+export interface StructuredIntent {
+  harness: HarnessId
+  /** `web` = born in the browser: structured when the flag is on and a driver is ready. */
+  origin?: 'web' | 'terminal'
+  model?: string
+  effort?: string
+  /** The id offered for assignment (fresh sessions). */
+  conversationId?: string
+  resumeId?: string
+  /** The person's first prompt alone — the context travels in `instructions`, never prepended here. */
+  prompt?: string
+  instructions?: { text: string; block: string }
+  mcp?: StructuredMcpServer[]
 }
 
 export interface BackendInitialPrompt extends InitialPrompt {
@@ -597,6 +619,19 @@ export interface SessionBackend {
   activityOf?(id: string): SessionActivity | undefined
   /** A5.4 — the open dialog's option labels, numbered from 1, when the backend knows them. */
   dialogOf?(id: string): string[] | undefined
+  /**
+   * F2.0 — a STRUCTURED session's open request as its protocol states it (`null`: none open);
+   * `undefined` for every session that is not structured (tmux, A5.4's ACP). The approve path asks
+   * this FIRST and answers through `answer` — no keystroke reaches anything.
+   */
+  attentionOf?(id: string): StructuredAttention | null | undefined
+  /** F2.0 — answer a structured session's open request through its driver. False: refused / stale. */
+  answer?(id: string, a: StructuredAnswer): Promise<boolean>
+  /**
+   * F2.0 — a structured session's own chat channel (the protocol, not a file), for the adapter chat
+   * stream; `undefined` for any other session.
+   */
+  chatOf?(id: string): { chat: HarnessChat; conversationId: string } | undefined
 }
 
 /** What a rewind did. `not-found`: the prompt is not in the menu; `unexpected`: the harness drew a
