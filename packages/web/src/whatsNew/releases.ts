@@ -31,8 +31,8 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'The first message of a new session, with or without an attachment, shows once and is never lost.',
       },
       {
-        pt: 'As respostas do Codex e do Kimi chegam ao chat em segundos, não mais depois de vários minutos.',
-        en: 'Codex and Kimi replies reach the chat in seconds, no longer after several minutes.',
+        pt: 'As respostas do Codex e do Kimi aparecem no chat em menos de um minuto, não mais depois de vários minutos.',
+        en: 'Codex and Kimi replies show in the chat in under a minute, no longer after several minutes.',
       },
       {
         pt: '"Esta sessão" mostra o nome real do modelo (por exemplo, Opus 5.5).',
