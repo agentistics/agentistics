@@ -44,10 +44,11 @@ describe('every reopen path inherits identity', () => {
 describe('inheritedLaunch — a reopen keeps the model and effort', () => {
   it('re-applies both where the harness takes them', () => {
     expect(inheritedLaunch({ ...prev, model: 'sonnet', effort: 'high' }, 'claude')).toEqual({ model: 'sonnet', effort: 'high' })
+    expect(inheritedLaunch({ ...prev, harness: 'codex', model: 'm', effort: 'high' }, 'codex')).toEqual({ model: 'm', effort: 'high' })
   })
   it('drops only the option the CLI cannot take', () => {
     expect(inheritedLaunch({ ...prev, model: 'sonnet', effort: 'bogus' }, 'claude')).toEqual({ model: 'sonnet' })
-    expect(inheritedLaunch({ ...prev, harness: 'codex', model: 'm', effort: 'high' }, 'codex')).toEqual({ model: 'm' })
+    expect(inheritedLaunch({ ...prev, harness: 'codex', model: 'm', effort: 'bogus' }, 'codex')).toEqual({ model: 'm' })
   })
   it('is empty without a row or without recorded options', () => {
     expect(inheritedLaunch(undefined, 'claude')).toEqual({})

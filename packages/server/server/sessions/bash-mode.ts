@@ -23,27 +23,12 @@
  * fixed once. An output whose input is outside the read window stays the note it always was.
  */
 
-/** What the chat carries for one executed `!` command. */
-export interface ShellRun {
-  /** The command line exactly as the person ran it, without the `!`. */
-  command: string
-  /** One line naming what it did — `commandSummary`'s rule, so a `cd x && y` reads as `y`. */
-  summary: string
-  /**
-   * The output has been written to the transcript. `false` only on the NEWEST entry of the file,
-   * where the command is still running; an older input with no output is simply not known to have
-   * printed anything, and says nothing either way (`output` absent, `running` false).
-   */
-  running: boolean
-  output?: ShellOutput
-}
+import type { ShellOutput } from '@agentistics/core'
 
-export interface ShellOutput {
-  stdout: string
-  stderr: string
-  /** Either stream was cut to its last `MAX_SHELL_OUTPUT` characters. */
-  truncated?: boolean
-}
+/** The shapes live in core beside `ChatTurn` (engine-api 1.9); re-exported so nothing that imports them from here moves. */
+export type { ShellOutput, ShellRun } from '@agentistics/core'
+
+
 
 /**
  * The most of each stream the chat carries. A `!cat` of a large file is a legitimate thing to run,

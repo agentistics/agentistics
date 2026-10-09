@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { mkdtemp, mkdir, rename, rm, writeFile, utimes } from 'node:fs/promises'
 import {
   forgetChatTailContent, forgetChatTailPaths, readChatWindow, readRecentChatTurns,
-  resolveChatTranscriptPath,
+  resolveChatTranscriptPath, encodeProjectDir,
 } from './chat-tail'
 import { ATTACHMENT_DIR } from './attachment-web'
 
@@ -50,6 +50,22 @@ describe('resolveChatTranscriptPath', () => {
 
     const resolved = await resolveChatTranscriptPath('/home/user/my-project', SESSION_ID, root)
     expect(resolved).toBe(file)
+  })
+
+  test('Claude Code encodes EVERY non-alphanumeric as "-": a cwd with "_" or a space resolves DIRECTLY, even right after a miss', async () => {
+    const cwd = '/home/runner/work/_temp/my proj.x'
+    // nothing there yet: a scan comes back empty and the miss is remembered for 30 s
+    expect(await resolveChatTranscriptPath(cwd, SESSION_ID, root)).toBeNull()
+    const projectDir = join(root, '-home-runner-work--temp-my-proj-x')
+    await mkdir(projectDir, { recursive: true })
+    const file = join(projectDir, `${SESSION_ID}.jsonl`)
+    await writeFile(file, userTurn('hi') + '\n')
+    // the file now exists under the directly encoded name: found at once, never waiting on the scan's TTL
+    expect(await resolveChatTranscriptPath(cwd, SESSION_ID, root)).toBe(file)
+  })
+
+  test('encodeProjectDir replaces every character that is not a letter or a digit', () => {
+    expect(encodeProjectDir('/a_b/c d.e-f')).toBe('-a-b-c-d-e-f')
   })
 
   test('falls back to a scan when the directly encoded path does not exist', async () => {

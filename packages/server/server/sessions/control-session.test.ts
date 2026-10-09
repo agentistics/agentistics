@@ -82,12 +82,21 @@ describe('which conversation a row continues from', () => {
   })
 
   it('says so where the harness can never report one', () => {
-    // gemini invents its own id, never hands it back and holds no file open to read it from, so
+    // opencode has no spawn spec, no session record and no open file to read an id from, so
     // everything downstream falls to the harness-and-directory guess. That is fine to OFFER and not
     // fine to state as fact.
-    const c = toControlSession(view({ harness: 'gemini' }), S, LIVE)
+    const c = toControlSession(view({ harness: 'opencode' }), S, LIVE)
     expect(c.conversationId).toBeUndefined()
-    expect(c.conversationBlind).toBe(S.sessConversationBlind('gemini'))
+    expect(c.conversationBlind).toBe(S.sessConversationBlind('opencode'))
+  })
+
+  it('is not blind on a gemini row: the id is assigned at spawn (F0.2)', () => {
+    const id = '04d97770-e53f-4b7d-86d2-63bd12ec32eb'
+    const c = toControlSession(view({ harness: 'gemini', conversationId: id }), S, LIVE)
+    expect(c.conversationId).toBe(id)
+    expect(c.conversationBlind).toBeUndefined()
+    // nor before the id is recorded: "not yet", never "never" — first sighting still claims it.
+    expect(toControlSession(view({ harness: 'gemini' }), S, LIVE).conversationBlind).toBeUndefined()
   })
 
   it('stays quiet on a codex or kimi row not linked YET — their own process names it', () => {
@@ -223,5 +232,53 @@ describe('a dialog agentop can SEE and cannot READ', () => {
     const c = toControlSession(view({ status: 'running', activity: 'working' }), S, LIVE)
     expect(c.dialogBlind).toBeUndefined()
     expect(c.canApprove).toBeUndefined()
+  })
+})
+
+describe('a dialog the PROTOCOL stated (a structured session, F2.1)', () => {
+  /*
+   * Found by the first live run of gemini over ACP: the card listed the three options the protocol
+   * stated, and the row said "nobody has verified how to pick an option on gemini — attach to answer
+   * it there" — because `canChoose` asked the KEYSTROKE spec, and a structured session sends no key.
+   * The driver answers by number; the spec is irrelevant.
+   */
+  const stated = (over: Partial<SessionView> = {}) => view({
+    harness: 'gemini',
+    status: 'running',
+    activity: 'waiting-approval',
+    approvalLines: ['Permission needed: Writing to note.txt'],
+    dialogOptions: [
+      { number: 1, label: 'Allow for this session', selected: true },
+      { number: 2, label: 'Allow', selected: false },
+      { number: 3, label: 'Reject', selected: false },
+    ],
+    dialogSelect: 'numbered',
+    ...over,
+  })
+
+  it('is pickable by number, with no refusal, on a harness whose keystrokes nobody verified', () => {
+    const c = toControlSession(stated({ dialogStated: true }), S, LIVE)
+    expect(c.canChoose).toBe(true)
+    expect(c.chooseBlind).toBeUndefined()
+  })
+
+  it('a dialog READ off a screen on that same harness is still refused in words (nothing changed for tmux)', () => {
+    const c = toControlSession(stated(), S, LIVE)
+    expect(c.canChoose).toBeUndefined()
+    expect(c.chooseBlind).toBe(S.sessChooseBlind('gemini'))
+  })
+})
+
+describe('F3.3 — which option is a field, as a structured session states it', () => {
+  it('keeps the protocol\'s freeText mark on a label no screen rule names', () => {
+    const c = toControlSession(view({
+      status: 'running', activity: 'waiting-approval',
+      dialogOptions: [
+        { number: 1, label: 'Yes', selected: true },
+        { number: 2, label: 'No, and tell Claude what to do differently', selected: false, freeText: true },
+        { number: 3, label: 'No', selected: false },
+      ],
+    }), S, LIVE)
+    expect(c.dialogOptions?.map(o => !!o.freeText)).toEqual([false, true, false])
   })
 })

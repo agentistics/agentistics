@@ -116,9 +116,48 @@ describe('fleetRow — an EXTERNAL session takes a write when it can be continue
   })
   it('no conversation named, or a harness with no resume: prompt keeps its sentence — read-only live', () => {
     expect(verb(ext({}), 'prompt').enabled).toBe(false)
-    expect(verb(ext({ conversationId: 'c-1', harness: 'gemini' }), 'prompt').enabled).toBe(false)
+    expect(verb(ext({ conversationId: 'c-1', harness: 'opencode' }), 'prompt').enabled).toBe(false)
   })
   it('the destructive verbs are untouched: an external row is never killed from its row', () => {
     expect(verb(ext({ conversationId: 'c-1' }), 'kill').enabled).toBe(false)
+  })
+})
+
+describe('fleetRow — conversationLinkVia is a flat field, not only link.reason', () => {
+  const link = (reason: 'assigned-id' | 'process-log' | 'first-sighting' | 'no-id-route') =>
+    ({ provenance: reason === 'no-id-route' ? 'unrecoverable' : 'spawn', reason, exact: reason !== 'no-id-route' }) as const
+
+  it('fills it from link.reason whenever the row has a conversation, whatever the harness', () => {
+    for (const harness of ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi'] as const) {
+      const r = fleetRow(row({ harness, conversationId: 'conv-1', link: link('process-log') }), S)
+      expect(r.conversationLinkVia).toBe('process-log')
+    }
+  })
+
+  it('says nothing while there is no id: no-id-route explains an absence, not a way of linking', () => {
+    expect(fleetRow(row({ link: link('no-id-route') }), S).conversationLinkVia).toBeUndefined()
+    expect(fleetRow(row({ conversationId: 'conv-1' }), S).conversationLinkVia).toBeUndefined()
+  })
+})
+
+describe('fleetRow — "open in terminal" (F2.0b)', () => {
+  it('is offered on a row running over its protocol, in the row\'s language, and enabled', () => {
+    const r = fleetRow(row({ structured: true, state: 'waiting' }), S)
+    expect(verb(r, 'terminal')).toEqual({ action: 'terminal' as never, label: 'Open in terminal', enabled: true })
+    expect(verb(fleetRow(row({ structured: true }), controlStrings('pt')), 'terminal').label).toBe('Abrir no terminal')
+  })
+
+  it('is ABSENT (not dimmed) on a pane session — it already is a terminal', () => {
+    expect(fleetRow(row(), S).verbs.some(v => (v.action as string) === 'terminal')).toBe(false)
+  })
+
+  it('is absent on a row agentop does not host, even if flagged', () => {
+    expect(fleetRow(row({ structured: true, actionable: false, state: 'unknown' }), S).verbs.some(v => (v.action as string) === 'terminal')).toBe(false)
+  })
+
+  it('is the same for every harness — the server action, not the row, decides who can resume', () => {
+    for (const harness of ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi']) {
+      expect(fleetRow(row({ harness, structured: true }), S).verbs.some(v => (v.action as string) === 'terminal')).toBe(true)
+    }
   })
 })

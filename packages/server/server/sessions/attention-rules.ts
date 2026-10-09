@@ -109,8 +109,19 @@ export const ATTENTION_RULES: Record<HarnessId, AttentionRules | null> = {
     // `working` deliberately absent — see the header.
   },
   kimi: {
-    probed: 'kimi 0.35.0, 2026-08-13',
-    approval: [/↑↓ navigate · Enter select · Esc exit/],
+    probed: 'kimi 2.1.1, 2026-10-09 (the first, 0.35.0 2026-08-13)',
+    approval: [
+      /↑↓ navigate · Enter select · Esc exit/, // 0.35.0's folder-trust dialog, footer under the title
+      // 2.1.1 has THREE blocking dialogs and each draws its footer differently — captured live from a tmux pane:
+      //  - folder trust: the `↑↓ navigate …` line moved to the TOP, under the title, with the folder, a paragraph
+      //    and four option lines below it, so it sits ~14 rows above the bottom. The last line the dialog owns is
+      //    the description of its last option, which is stable text of its own;
+      /Exit Kimi Code\. Asked again next launch\./,
+      //  - a tool approval (`▶ Run this command?`, `▶ 1. Approve once` … `4. Reject with feedback`);
+      /↑\/↓ select · [\d/]+ choose · ↵ confirm/,
+      //  - AskUserQuestion (`→ [1] red` … `[4] Other`).
+      /↑↓ select\s+[\d-]+ \/ ↵ choose/,
+    ],
   },
   gemini: {
     probed: 'gemini 0.55.1, 2026-08-13',

@@ -31,7 +31,7 @@ import type { StartHost } from '../cli-start'
 import { applyPendingRewind, forgetRewind, pendingRewindFor } from './rewind-pending'
 import type { CliLang } from '../cli-lang'
 import { controlStrings } from '@agentistics/tui/control/i18n'
-import type { ChatTurn } from './chat-turn'
+import type { ChatTurn } from '@agentistics/core'
 import type { AttachmentMessage, AttachmentSend, HarnessId } from '@agentistics/core'
 import { ATTACHMENT_DIR, readAttachmentLog } from './attachment-web'
 import { transcriptReaderFor } from './harness-transcript'
@@ -116,6 +116,13 @@ export interface ChatPayload {
   /** True while the session is running, so the view knows whether to expect more. */
   live: boolean
   /**
+   * ENGINE.MAP F1.2: `'adapter'` when these turns came from the engine's chat channel (`HarnessChat`,
+   * the `adapter-chat` experimental flag) rather than from the host's own transcript readers. Absent on
+   * the legacy path, which stays byte for byte what it was. A client seeing it may take `working` from
+   * the stream's `state` events and draw `live` text, and need not watch the terminal.
+   */
+  source?: 'adapter'
+  /**
    * Messages handed to this session that its transcript does not carry yet.
    *
    * Held by the SERVER (`pending-prompts.ts`) rather than by the tab that sent them, which is what
@@ -147,7 +154,7 @@ export interface ChatPayload {
 }
 
 /** The most turns one read returns. A conversation of thousands must not arrive as one response. */
-const MAX_TURNS = 400
+export const MAX_TURNS = 400
 
 /** "All of it" for the conversation search — a bound only so no arithmetic on it can overflow. */
 export const FULL_TRANSCRIPT_TURNS = 1_000_000
@@ -358,6 +365,27 @@ async function readSessionChatCore(
       live,
     }
   }
+  return finishChatRead(id, conversationId, read, live, lang, row.id)
+}
+
+/**
+ * Everything a chat payload gets AFTER its turns were read, whichever reader produced them: the
+ * context fence stripped, a pending rewind applied, the composer's own messages marked, what is still
+ * waiting to be echoed, the attachments log, the vault scrub and the window notice.
+ *
+ * Shared by the legacy readers (`readSessionChatCore`) and the engine's chat channel
+ * (`adapter-chat.ts`), so the two payloads differ only in where the turns came from — never in what a
+ * person is shown about them.
+ */
+export async function finishChatRead(
+  id: string,
+  conversationId: string,
+  read: { turns: ChatTurn[]; older?: boolean },
+  live: boolean,
+  lang: CliLang,
+  /** The managed ROW id: an attachment message filed before the conversation was linked is keyed by it. */
+  pendingId: string = id,
+): Promise<ChatPayload> {
   // The fenced agentistics context (a harness with no invisible channel gets it in its first message)
   // never reaches a bubble: the person's own words stay, and one small chip says it was sent.
   read.turns = stripContextTurns(read.turns)
@@ -379,7 +407,7 @@ async function readSessionChatCore(
   // Read once per chat load, not per turn: the log is one small append-only file and the view
   // resolves against it locally. Omitted when there is nothing recorded, so a machine that never
   // attached anything carries no field at all.
-  const { sends, messages } = await readAttachmentLog({ sessionId: id, conversationId, pendingId: row.id })
+  const { sends, messages } = await readAttachmentLog({ sessionId: id, conversationId, pendingId })
   // VAULT.PERSONAL §8.4: a session granted vault secrets is served with every value — and its
   // base64/url/hex forms — replaced by «vault:NAME». No grant, no work: the same objects come back.
   if (anyGrant()) {

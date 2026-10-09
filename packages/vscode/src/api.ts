@@ -13,7 +13,7 @@
  */
 
 import { nativeRowsFrom, nativeVisible, type NativeRow } from './native'
-import type { SessionMeta } from '@agentistics/core'
+import { followFleet, type SessionMeta } from '@agentistics/core'
 import type {
   Arrangement, FleetActionId, FleetPayload, LinkStatus, NewOptions, SpawnRequest,
 } from './protocol'
@@ -87,6 +87,10 @@ export class AgentopClient {
     } catch (err) {
       return { link: { state: isTimeout(err) ? 'slow' : 'down', url: this.api } }
     }
+  }
+
+  followFleet(view: Arrangement, receive: (payload: FleetPayload) => void): ReturnType<typeof followFleet> {
+    return followFleet(this.url('/api/fleet/events', { ...viewParams(view), closed: '0' }), wire => receive(wire as unknown as FleetPayload), { history: !view.onlyActive })
   }
 
   /**

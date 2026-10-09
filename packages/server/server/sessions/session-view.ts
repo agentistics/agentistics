@@ -21,9 +21,11 @@ import { idFromTmuxName } from './tmux-cli'
 import type { RepoFacts } from './repo-facts'
 import type { ReconciledSession } from './session-ref'
 import type { Conversation } from './conversations'
-import { conversationForProcess } from './conversations'
+import { conversationForProcess, findConversation, resumeIdOf } from './conversations'
+import { reopenTargetFor } from './reopen-target'
 import type { ManagedSession, SessionActivity } from './types'
 import type { ChatTurn } from './chat-tail'
+import { SPAWN_SPECS } from './spawn-spec'
 
 /**
  * The registry's own record of when a session began, as epoch ms — PURE.
@@ -101,6 +103,8 @@ export interface SessionView {
    * chip naming the wrong mode is worse than no chip, so absence is the honest answer for both.
    */
   mode?: { id: string; label: string }
+  /** F2.0b — running over its harness's protocol right now: the web offers "open in terminal". */
+  structured?: true
   /**
    * The OPTIONS that dialog is offering, when they could be read with confidence.
    *
@@ -116,6 +120,13 @@ export interface SessionView {
    * harness and a surface that assumes "numbered" offers a digit the dialog never printed.
    */
   dialogSelect?: 'numbered' | 'marker'
+  /**
+   * The dialog's options were STATED by the session's protocol (a structured session, F2.0) rather than
+   * read off a screen — so they are answered through its driver by NUMBER whatever the harness's
+   * keystroke spec (`approval-spec.ts`) says. Without this a harness with no verified key (gemini, kimi…)
+   * showed the card and refused every option with "attach to answer it there".
+   */
+  dialogStated?: true
   /**
    * WHY the dialog on screen could not be read, when it could not be.
    *
@@ -160,6 +171,12 @@ export interface SessionView {
    * event channel deduplicates on. Absent is absent.
    */
   conversationId?: string
+  /**
+   * The conversation STORE's key for `conversationId`, only when the two differ (gemini: the id
+   * agentop assigned is the header uuid, the store key is `<project>/<file>`). Lets a search hit,
+   * which is named by the store key, still find this row.
+   */
+  conversationStoreId?: string
   /** How `conversationId` was recorded (LIVE.1) — read by `conversationLinkOf`; absent keeps the legacy meaning. */
   conversationLink?: 'assigned' | 'observed'
   conversationLinkVia?: ConversationLinkReason
@@ -193,7 +210,7 @@ export interface SessionView {
    * The conversation this row could REOPEN, when there is one.
    *
    * Present on an `external` row (the conversation it appears to be driving) and on a `closed` one
-   * (itself). Absent when the harness cannot reopen by id — gemini takes "latest" or an index, never
+   * (itself). Absent when the harness cannot reopen by id — or, for gemini, when the chat has no header id
    * an id — so the verb is simply not offered rather than offered and wrong.
    */
   resume?: { sessionId: string; title: string }
@@ -446,6 +463,7 @@ export function filterSessions(
 function hasTranscriptHit(v: SessionView, hits?: ReadonlySet<string>): boolean {
   if (!hits || hits.size === 0) return false
   return (v.conversationId !== undefined && hits.has(v.conversationId))
+    || (v.conversationStoreId !== undefined && hits.has(v.conversationStoreId))
     || (v.resume !== undefined && hits.has(v.resume.sessionId))
 }
 
@@ -470,10 +488,14 @@ export function buildSessionViews(o: {
   approvals?: ReadonlyMap<string, string[]>
   /** The harness MODE each running session is in, keyed by row id — see `mode-spec.ts`. */
   modes?: ReadonlyMap<string, { id: string; label: string }>
+  /** The ids running structured right now (`SessionBackend.isStructured`) — see `SessionView.structured`. */
+  structured?: ReadonlySet<string>
   /** The options that dialog offers, keyed by session id. Absent where they could not be read. */
   dialogOptions?: ReadonlyMap<string, DialogOption[]>
   /** How those options are picked, keyed by session id — see `SessionView.dialogSelect`. */
   dialogSelect?: ReadonlyMap<string, 'numbered' | 'marker'>
+  /** The ids whose dialog the protocol STATED — see `SessionView.dialogStated`. */
+  dialogStated?: ReadonlySet<string>
   /** Why the dialog could not be read, keyed by session id — see `SessionView.dialogUnreadable`. */
   dialogUnreadable?: ReadonlyMap<string, DialogUnreadable>
   /** The ids `crash-group.ts` decided fell together. A set, because the question is about a set. */
@@ -491,6 +513,11 @@ export function buildSessionViews(o: {
   /** Everything this machine has ever recorded, newest first. Used to name what an external process
    *  is driving, and to offer the conversations that are not running at all. */
   conversations?: readonly Conversation[]
+  /**
+   * Exact conversation ids the store does not hold but whose transcript the harness's own reader
+   * found on disk — see `reopen-link.ts`. What lets a row reopen from its exact link alone.
+   */
+  exactLinksOnDisk?: ReadonlySet<string>
   /**
    * How many closed conversations to offer.
    *
@@ -527,26 +554,35 @@ export function buildSessionViews(o: {
      */
     exactId?: string,
   ): { resume?: { sessionId: string; title: string } } => {
-    const pool = o.conversations ?? []
-    const knownId = exactId ?? managed?.conversationId
-    const own = knownId ? pool.find(c => c.sessionId === knownId) : undefined
-    // A row that KNOWS which conversation it drives never falls back to the guess — not even when
-    // the store does not hold that conversation yet. Since the id is recorded at SPAWN (not only at
-    // reopen), that gap is now ordinary: a session minutes old has an id and no transcript written
-    // under it. "Not yet" and "some other conversation in this directory" are not the same answer,
-    // and taking the second is the guess that handed three rows one conversation after a crash.
-    if (knownId) {
-      if (!own?.resumable) return {}
-      claimed.add(own.sessionId)
-      return { resume: { sessionId: own.sessionId, title: own.title } }
+    // A protocol-stated id is already exact (Codex's thread id, F3.1): a freshly completed rollout may not be
+    // in the metrics cache yet, so reopen it by id without waiting for that independent file scan.
+    {
+      const pool = o.conversations ?? []
+      const knownId = exactId ?? managed?.conversationId
+      if (knownId && !findConversation(pool, knownId) && managed?.conversationLinkVia === 'protocol-stated'
+          && SPAWN_SPECS[harness]?.resume && !claimed.has(knownId)) {
+        claimed.add(knownId)
+        return { resume: { sessionId: knownId, title: managed.label ?? knownId } }
+      }
     }
-    const conv = pool.find(c =>
-      !claimed.has(c.sessionId)
-      && c.harness === harness
-      && sessionAtCwd({ current_cwd: c.cwd, project_path: c.cwd }, managed?.cwd ?? ''))
-    if (!conv?.resumable) return {}
-    claimed.add(conv.sessionId)
-    return { resume: { sessionId: conv.sessionId, title: conv.title } }
+    // The rule lives in `reopen-target.ts`, shared with every other reopen path. A row that KNOWS
+    // which conversation it drives never falls back to the directory guess — not even when the
+    // store does not hold it — and reopens straight from that exact link when the harness's own
+    // transcript for it is on disk (`exactLinksOnDisk`), which is how an agy session agentop
+    // started gets its reopen back: agy files no project path for it, so the store cannot offer it.
+    const t = reopenTargetFor({
+      entry: {
+        harness,
+        ...(managed?.cwd ? { cwd: managed.cwd } : {}),
+        ...(managed?.conversationId ? { conversationId: managed.conversationId } : {}),
+        ...(managed?.harnessName ? { harnessName: managed.harnessName } : {}),
+      },
+      ...(exactId ? { exactId } : {}),
+      pool: o.conversations ?? [],
+      ...(o.exactLinksOnDisk ? { onDisk: o.exactLinksOnDisk } : {}),
+      taken: claimed,
+    })
+    return t ? { resume: { sessionId: t.sessionId, title: t.title } } : {}
   }
 
   /**
@@ -571,7 +607,7 @@ export function buildSessionViews(o: {
   ): Conversation | undefined => {
     const pool = o.conversations ?? []
     const id = exactId ?? managed?.conversationId
-    return id ? pool.find(c => c.sessionId === id) : undefined
+    return id ? findConversation(pool, id) : undefined
   }
 
   const managed: SessionView[] = o.reconciled.map(r => {
@@ -620,6 +656,7 @@ export function buildSessionViews(o: {
       ...(activity === 'waiting-approval' && o.dialogSelect?.get(r.id)
         ? { dialogSelect: o.dialogSelect.get(r.id)! }
         : {}),
+      ...(activity === 'waiting-approval' && o.dialogStated?.has(r.id) ? { dialogStated: true as const } : {}),
       ...(activity === 'waiting-approval' && o.dialogUnreadable?.get(r.id)
         ? { dialogUnreadable: o.dialogUnreadable.get(r.id)! }
         : {}),
@@ -627,6 +664,7 @@ export function buildSessionViews(o: {
       // it works, while it waits, and while it is asking. It is gated on the frame having named
       // one, which `modeOf` already answers.
       ...(o.modes?.get(r.id) ? { mode: o.modes.get(r.id)! } : {}),
+      ...(!finished && r.status === 'running' && o.structured?.has(r.id) ? { structured: true as const } : {}),
       ...(o.fell?.has(r.id) ? { fell: true as const } : {}),
       ...(r.managed?.label ? { label: r.managed.label } : {}),
       ...(r.managed?.labelSince !== undefined ? { labelSince: r.managed.labelSince } : {}),
@@ -640,6 +678,8 @@ export function buildSessionViews(o: {
       ...(r.managed?.parentSessionId ? { parentSessionId: r.managed.parentSessionId } : {}),
       ...(r.managed?.parentConversationId ? { parentConversationId: r.managed.parentConversationId } : {}),
       ...(r.managed?.conversationId ? { conversationId: r.managed.conversationId } : {}),
+      ...(conv && r.managed?.conversationId && conv.sessionId !== r.managed.conversationId
+        ? { conversationStoreId: conv.sessionId } : {}),
       ...(r.managed?.conversationLink ? { conversationLink: r.managed.conversationLink } : {}),
       ...(r.managed?.conversationLinkVia ? { conversationLinkVia: r.managed.conversationLinkVia } : {}),
       ...(r.managed?.repo ? { recordedRepo: r.managed.repo } : {}),
@@ -810,7 +850,7 @@ export function buildSessionViews(o: {
       ...(p.startedMs !== undefined ? { createdMs: p.startedMs } : {}),
       attached: false,
       approvalDetection: false,
-      ...(conv?.resumable ? { resume: { sessionId: conv.sessionId, title: conv.title } } : {}),
+      ...(conv?.resumable ? { resume: { sessionId: resumeIdOf(conv), title: conv.title } } : {}),
       ...(conv?.tokens !== undefined ? { tokens: conv.tokens } : {}),
       ...(conv?.tokenParts ? { tokenParts: conv.tokenParts } : {}),
       ...(conv?.turns ? { turns: conv.turns } : {}),
@@ -837,7 +877,13 @@ export function buildSessionViews(o: {
   // `working` and again as `closed` — the same title, the same directory, twice. Every LIVE row
   // covers its conversation, whether that row is one we host or one we merely observed.
   const shown = new Set<string>()
-  for (const v of external) if (v.resume) shown.add(v.resume.sessionId)
+  // `resume.sessionId` is the id the CLI takes, which for gemini is the header uuid and not the
+  // store key the `shown` filter below compares against — add the key too.
+  for (const v of external) if (v.resume) {
+    shown.add(v.resume.sessionId)
+    const key = findConversation(conversations, v.resume.sessionId)?.sessionId
+    if (key) shown.add(key)
+  }
   //
   // A row that RECORDED its conversation covers exactly that one. The rest fall back to the
   // harness+directory inference, and it is CLAIMED — because that inference answers with the FIRST
@@ -853,7 +899,13 @@ export function buildSessionViews(o: {
     // history where it can be reopened.
     if (!m || (m.status !== 'running' && m.status !== 'unregistered')) continue
     const own = r.managed?.conversationId
-    if (own) { shown.add(own); coveredConv.add(own); continue }
+    if (own) {
+      shown.add(own); coveredConv.add(own)
+      // A recorded id may be the harness's own (gemini's assigned uuid) rather than the store key.
+      const key = findConversation(conversations, own)?.sessionId
+      if (key) { shown.add(key); coveredConv.add(key) }
+      continue
+    }
     if (!m.harness) continue
     const conv = conversations.find(c =>
       !coveredConv.has(c.sessionId)
@@ -913,7 +965,7 @@ export function buildSessionViews(o: {
       endedMs: c.lastActivityMs,
       attached: false,
       approvalDetection: false,
-      ...(c.resumable ? { resume: { sessionId: c.sessionId, title: c.title } } : {}),
+      ...(c.resumable ? { resume: { sessionId: resumeIdOf(c), title: c.title } } : {}),
       ...(c.tokens !== undefined ? { tokens: c.tokens } : {}),
       ...(c.tokenParts ? { tokenParts: c.tokenParts } : {}),
       ...(c.turns ? { turns: c.turns } : {}),

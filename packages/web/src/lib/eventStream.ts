@@ -23,11 +23,13 @@ export type StreamEventHandler = (e: MessageEvent) => void
 export interface EventStream {
   /** Subscribe to one event type. Returns an unsubscribe fn; the shared socket closes when the last
    *  subscriber (of any type) unsubscribes. */
+  healthy(): boolean
   subscribe(type: string, handler: StreamEventHandler): () => void
 }
 
 export function createEventStream(makeES: () => EventSource): EventStream {
   let es: EventSource | null = null
+  let lastFrameAt = 0
   // type → the app handlers waiting on it
   const handlers = new Map<string, Set<StreamEventHandler>>()
   // type → the ONE native listener bound to the current socket that fans out to `handlers`
@@ -41,7 +43,11 @@ export function createEventStream(makeES: () => EventSource): EventStream {
   }
 
   function open() {
+    lastFrameAt = 0
     es = makeES()
+    const mark = () => { lastFrameAt = Date.now() }
+    es.addEventListener('connected', mark)
+    es.addEventListener('ping', mark)
     // Re-bind every type that already has subscribers to the fresh socket.
     for (const type of handlers.keys()) bind(type)
   }
@@ -76,7 +82,7 @@ export function createEventStream(makeES: () => EventSource): EventStream {
     }
   }
 
-  return { subscribe }
+  return { subscribe, healthy: () => es?.readyState === 1 && Date.now() - lastFrameAt < 45_000 }
 }
 
 /**

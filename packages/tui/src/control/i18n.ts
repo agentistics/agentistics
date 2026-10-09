@@ -314,6 +314,8 @@ export interface ControlStrings {
   sessionsStopManyConfirm: (n: number) => string
   /** Stop the current turn without ending the session — the web's own verb. See `fleet-row.ts`. */
   sessionsInterrupt: string
+  /** The web's "open in terminal" on a session running over its harness's protocol. */
+  sessionsOpenTerminal: string
   /** Why it is off: nothing is running to stop. */
   sessionsInterruptIdle: string
   /** Why a verb is off on a row agentop does not host. */
@@ -1057,6 +1059,7 @@ const EN: ControlStrings = {
   sessionsStopManyConfirm: (n: number) =>
     `Stop the ${n} selected session${n === 1 ? '' : 's'}? The assistant running in each is ended.`,
   sessionsInterrupt: 'Stop what it is doing',
+  sessionsOpenTerminal: 'Open in terminal',
   sessionsInterruptIdle: 'Nothing is running right now, so there is nothing to stop.',
   sessionsExternalRow: 'This session was started outside agentop, so nothing here can act on it.',
   sessionsUnknownHarness: 'harness unknown',
@@ -1679,6 +1682,7 @@ const PT: ControlStrings = {
       ? 'Encerrar a 1 sessão selecionada? O assistente que roda nela é finalizado.'
       : `Encerrar as ${n} sessões selecionadas? O assistente que roda em cada uma é finalizado.`),
   sessionsInterrupt: 'Parar o que está fazendo',
+  sessionsOpenTerminal: 'Abrir no terminal',
   sessionsInterruptIdle: 'Nada está rodando agora, então não há o que parar.',
   sessionsExternalRow: 'Esta sessão foi iniciada fora do agentop, então nada aqui age sobre ela.',
   sessionsUnknownHarness: 'harness desconhecido',
