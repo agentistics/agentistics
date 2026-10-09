@@ -129,6 +129,8 @@ import { setFleetSourceCentral } from './lib/fleet'
 import { reopenedSessionRoute, sessionPath } from './lib/sessionRoute'
 import { initialSessionView } from './lib/sessionView'
 import { SessionTitleFlag } from './components/sessions/SessionTitleFlag'
+import { SessionLinkInfo } from './components/sessions/SessionLinkInfo'
+import { sessionLinks } from './lib/sessionParent'
 import { ChatSelectionOverlay } from './components/sessions/ChatSelectionBar'
 import { brandAsset } from './lib/brand'
 import { BUNDLE_VERSION, healStaleBundle, takeUpdatedToast } from './lib/bundleVersion'
@@ -3548,6 +3550,7 @@ export default function AppLayout() {
       <ChatSelectionOverlay lang={lang === 'pt' ? 'pt' : 'en'} padX={PAGE_INSET} />
       {headerSession && (
         <div style={{ minWidth: 0, flexShrink: 1, display: 'flex', alignItems: 'baseline', gap: 7 }}>
+          <SessionLinkInfo session={headerSession} links={sessionLinks(headerSession, headerFleet.rows)} lang={lang === 'pt' ? 'pt' : 'en'} onGo={p => navigate(p)} />
           <span style={{
             fontSize: '0.8438rem', fontWeight: 650, color: 'var(--text-primary)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,

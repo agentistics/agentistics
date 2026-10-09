@@ -17,7 +17,8 @@
  * a session's state by one poll interval — which is a bug people report as flicker.
  */
 
-import { sessionParent } from '../lib/sessionParent'
+import { sessionLinks } from '../lib/sessionParent'
+import { SessionLinkInfo } from '../components/sessions/SessionLinkInfo'
 import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
   type CSSProperties, type ReactElement, type ReactNode,
@@ -1977,8 +1978,6 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       // Follow a reopen to the row it created. Without it the panel keeps an id the fleet no longer
       // carries — see `SessionPanel`'s own `onOpened`.
       onOpened={goToReopened}
-      parent={sessionParent(selected, fleet.rows)}
-      {...(sessionParent(selected, fleet.rows)?.openable ? { onOpenParent: () => navigate(sessionPath(sessionParent(selected, fleet.rows)!.id)) } : {})}
       {...(composerMetrics ? { metrics: composerMetrics } : {})}
       // CONTROLLED on both layouts now. Passing `onViewChange` is what suppresses SessionPanel's
       // own header, and mobile draws the same three things in the row that already holds the back
@@ -2533,6 +2532,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           </button>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <SessionLinkInfo session={selected} links={sessionLinks(selected, fleet.rows)} lang={pt ? 'pt' : 'en'} isMobile onGo={p => navigate(p)} />
               <div style={{
                 fontSize: 13, fontWeight: 650, color: 'var(--text-primary)', minWidth: 0,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -2660,6 +2660,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
 
         <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+            <SessionLinkInfo session={selected} links={sessionLinks(selected, fleet.rows)} lang={pt ? 'pt' : 'en'} isMobile onGo={p => navigate(p)} />
             <span style={{
               fontSize: 13, fontWeight: 650, color: 'var(--text-primary)', minWidth: 0,
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
