@@ -752,6 +752,19 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          the SAME post-processing (`finishChatRead`); an error closes the stream and
   │                          refuses that conversation for 5 min so the client lands on the legacy one.
   │                          Flag off, the chat routes are the legacy readers byte for byte.
+  │                          **With the flag on, the HARNESS states its own turns** (`adapter-state.ts`
+  │                          + `adapter-state-host.ts`, the poller's `adapterState` option): every live,
+  │                          linked row whose harness declares `state` in its file (claude, codex,
+  │                          copilot, kimi, antigravity) is followed through the engine's channel, its
+  │                          `state` deltas ARE the row's activity — believed at once (`exact` in
+  │                          `confirmActivities`), and a change makes the hub poll NOW — and its screen
+  │                          is read only where it still says something (`planScreen`): never while
+  │                          idle (a dialog lives inside a turn), while working only if the file
+  │                          cannot state a pending dialog (claude, codex, agy), always when the file
+  │                          says a person is waited on (the options are read off the screen), every
+  │                          `SCREEN_REFRESH_MS` (2 min) for the mode chip/limit banner/tail, and on
+  │                          the poll after an act (`kickFleet(id)`). Gemini (no state declared),
+  │                          opencode (no chat), unlinked rows and the flag off: the screen, unchanged.
   ├── sessions/fleet-baseline.ts → the IO boundary in front of the pure `session-profile.ts`: read
   │                          the consolidate store, compute the baseline, hold it for 5 minutes and
   │                          share the SCAN IN FLIGHT. `/api/fleet` is polled every five seconds by
