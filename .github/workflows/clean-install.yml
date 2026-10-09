@@ -13,6 +13,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install curl (the bun image ships without it)
+        run: apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
