@@ -25,7 +25,20 @@ export async function ensureArchiveModeChosen(): Promise<void> {
   process.stdout.write(`\n  ${D}archive mode set to ${mode}.${R}\n`)
 }
 
-export async function runSetup(): Promise<number> {
+export const SETUP_USAGE = `Usage: agentop setup
+
+Interactive first-run wizard: history consent, start on boot, Claude Code hooks hint.
+Needs an interactive terminal.
+
+Options:
+  -h, --help   Show this help
+`
+
+export async function runSetup(args: string[] = []): Promise<number> {
+  if (args.includes('--help') || args.includes('-h')) {
+    process.stdout.write(SETUP_USAGE)
+    return 0
+  }
   if (!process.stdin.isTTY) {
     process.stderr.write('setup needs an interactive terminal.\n')
     return 1

@@ -348,7 +348,7 @@ if (!command) {
 
 if (command === 'setup') {
   const { runSetup } = await import('../server/cli-setup.ts')
-  const code = await runSetup()
+  const code = await runSetup(process.argv.slice(3))
   process.exit(code)
 }
 
