@@ -9,7 +9,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { ChevronRight, Folder, HardDrive, Loader } from 'lucide-react'
-import { breadcrumbs, diskLabel, fetchFolders, rootLabels, type DiskInfo, type FolderListing } from '../../lib/folderBrowser'
+import { breadcrumbs, fetchFolders, rootLabels, startFolderPath, type DiskInfo, type FolderListing } from '../../lib/folderBrowser'
 import { Muted } from './formBits'
 
 export interface FolderBrowserProps {
@@ -54,7 +54,7 @@ export function FolderBrowser({ lang, isMobile, startDisk, disks = [], onUse, on
       await go('', ac.signal)
       if (ac.signal.aborted) return
       const home = rootsRef.current[0]
-      const start = startDisk && !startDisk.install ? startDisk.path : home
+      const start = startFolderPath(startDisk, home)
       if (start) await go(start, ac.signal)
     })()
     return () => ac.abort()

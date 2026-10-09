@@ -1,59 +1,16 @@
 import React from 'react'
-import { useNavigate } from 'react-router-dom'
-import { GitBranch, Users, Zap, GitCommit, Clock, Link2Off, EyeOff } from 'lucide-react'
+import { GitBranch, Zap, GitCommit, Clock, Link2Off } from 'lucide-react'
 import { fmt, fmtCost, formatProjectName, NO_REPO_KEY, totalTokens, totalTokensExplained } from '@agentistics/core'
 import type { RepoStat } from '../hooks/useData'
-import { canonicalRepoKey } from '../lib/shareRepos'
-import { PLURAL_COPY, interpolate, plural } from './team/copy'
-import { withheldMarkStyle } from './team/withheldStyle'
 import { planCostOf } from '../lib/topUsage'
 
 interface Props {
   repos: RepoStat[]
-  isCentral?: boolean
   currency?: 'USD' | 'BRL'
   brlRate?: number
   lang: 'pt' | 'en'
   onOpen: (repo: RepoStat) => void
-  /** Task 13 — canonical repo key (or `NO_REPO_KEY`) -> labels of the connections hiding it.
-   *  Absent/empty means nothing is hidden from anywhere. */
-  deniedRepoLabels?: Map<string, string[]>
   planFactors?: Readonly<Record<string, number | null>> | null
-}
-
-/** The `EyeOff` badge: "Hidden from N central(s)" plus the names on a second line. Clicking it
- *  (without also opening the repo card underneath) goes to the Settings page that owns the rule. */
-function HiddenBadge({ labels, lang }: { labels: string[]; lang: 'pt' | 'en' }) {
-  const navigate = useNavigate()
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      title={labels.join(', ')}
-      onClick={e => { e.stopPropagation(); navigate('/settings/connection') }}
-      onKeyDown={e => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); navigate('/settings/connection') }
-      }}
-      style={{
-        display: 'flex', flexDirection: 'column', gap: 1, padding: '4px 8px', borderRadius: 7,
-        background: withheldMarkStyle().background,
-        cursor: 'pointer', minWidth: 0,
-      }}
-    >
-      <span style={{
-        display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontWeight: 700,
-        color: withheldMarkStyle().color,
-      }}>
-        <EyeOff size={11} />
-        {interpolate(plural(PLURAL_COPY.hiddenFromN[lang], labels.length), { n: labels.length })}
-      </span>
-      <span style={{
-        fontSize: 9.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-      }}>
-        {labels.join(', ')}
-      </span>
-    </div>
-  )
 }
 
 /** Colour a host chip by its provider so github / gitlab / bitbucket read at a glance. */
@@ -133,7 +90,7 @@ function ProviderLogo({ host, linked, size = 15, color }: { host: string; linked
   return <GitBranch size={size} color={color} style={{ flexShrink: 0 }} />
 }
 
-export function RepositoriesList({ repos, isCentral, currency = 'USD', brlRate = 1, lang, onOpen, deniedRepoLabels, planFactors = null }: Props) {
+export function RepositoriesList({ repos, currency = 'USD', brlRate = 1, lang, onOpen, planFactors = null }: Props) {
   const pt = lang === 'pt'
   if (repos.length === 0) {
     return (
@@ -149,11 +106,6 @@ export function RepositoriesList({ repos, isCentral, currency = 'USD', brlRate =
         const title = r.name || (pt ? 'Sem repositório' : 'No repository')
         const subtitle = r.path ? formatProjectName(r.path) : ''
         const accent = r.linked ? 'var(--anthropic-orange)' : 'var(--text-tertiary)'
-        // Keyed by the CANONICAL repo key, the same one the denylist and the picker use — keying
-        // by the raw (already-normalized) remote would silently miss a rule stored under a
-        // differently-cased or SSH-aliased spelling of the same repository.
-        const hiddenKey = r.linked ? canonicalRepoKey(r.remote) : NO_REPO_KEY
-        const hiddenLabels = deniedRepoLabels?.get(hiddenKey)
         return (
           <div
             key={r.id}
@@ -189,19 +141,13 @@ export function RepositoriesList({ repos, isCentral, currency = 'USD', brlRate =
                   }}>{host}</span>
                 )}
               </div>
-              {/* The path is a machine-local detail — meaningless on the central, where a repo is
-                  keyed by its remote and the title already shows org/repo. Hide it there. */}
-              {subtitle && !isCentral && (
+              {subtitle && (
                 <span title={r.path} style={{
                   fontSize: 10.5, color: 'var(--text-tertiary)', paddingLeft: 23,
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
                 }}>{subtitle}</span>
               )}
             </div>
-
-            {hiddenLabels && hiddenLabels.length > 0 && (
-              <HiddenBadge labels={hiddenLabels} lang={lang} />
-            )}
 
             {/* Sparkline */}
             <Sparkline byDay={r.activityByDay} color={accent} />
@@ -222,11 +168,6 @@ export function RepositoriesList({ repos, isCentral, currency = 'USD', brlRate =
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }} title={pt ? 'commits' : 'commits'}>
                 <GitCommit size={11} /> {r.gitCommits}
               </span>
-              {isCentral && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }} title={pt ? 'membros' : 'members'}>
-                  <Users size={11} /> {r.members.length}
-                </span>
-              )}
               {r.ciSessions > 0 && (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--accent-blue)' }} title="GitHub Actions">
                   <Zap size={11} /> {r.ciSessions}

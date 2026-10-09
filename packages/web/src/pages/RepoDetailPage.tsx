@@ -2,18 +2,15 @@ import { runStatusText } from '../lib/workflows'
 import React, { useMemo, useState } from 'react'
 import { useOutletContext, useParams, useNavigate } from 'react-router-dom'
 import {
-  GitBranch, ArrowLeft, ExternalLink, Link2Off, Users, Zap, Workflow as WorkflowIcon, GitCompare,
+  GitBranch, ArrowLeft, ExternalLink, Link2Off, Workflow as WorkflowIcon,
   Clock, GitCommit, ChevronDown, DollarSign, Cpu, Wrench, Bot, FileCode, MessageSquare, Database, AlertTriangle,
-  EyeOff, ClipboardList,
+  ClipboardList,
 } from 'lucide-react'
 import type { AppContext, } from '../lib/app-context'
 import type { SessionMeta, MemberPresence, SurfaceHarnessId, WorkflowRun, WorkflowAgent } from '@agentistics/core'
 import { repoShortName, fmt, fmtCost, fmtDuration, formatProjectName, formatModel, calcCost, sessionCostUSD, sessionLabel, workflowTokens, NO_REPO_KEY, sessionTokenTotal, totalTokens, totalTokensExplained } from '@agentistics/core'
 import { TokenBreakdownLine } from '../components/TokenBreakdownLine'
 import { capable, HARNESS_LABELS, HARNESS_COLORS, DYNAMIC_WORKFLOWS_DOC } from '../lib/harness'
-import { canonicalRepoKey } from '../lib/shareRepos'
-import { PLURAL_COPY, interpolate, plural } from '../components/team/copy'
-import { withheldMarkStyle } from '../components/team/withheldStyle'
 import { DocLink } from '../components/DocLink'
 import { buildWorkflowSteps, groupRunsBySession } from '../lib/workflowSteps'
 import { useDerivedStats, computeMemberSummaries, type MemberSummary } from '../hooks/useData'
@@ -30,11 +27,11 @@ import { RepoTasksTab } from '../components/tasks/RepoTasksTab'
 import { repoTaskTotals, tasksOfRepo } from '../lib/repoTasks'
 import { useTaskList } from '../lib/tasks'
 
-type Tab = 'overview' | 'members' | 'compare' | 'actions' | 'sessions' | 'tasks' | 'workflows'
+type Tab = 'overview' | 'sessions' | 'tasks' | 'workflows'
 
 export default function RepoDetailPage() {
   const ctx = useOutletContext<AppContext>()
-  const { data, filters, currency, brlRate, lang, theme, isCentral, setSelectedSession, deniedRepoLabels } = ctx
+  const { data, filters, currency, brlRate, lang, theme, setSelectedSession } = ctx
   const { id } = useParams()
   const navigate = useNavigate()
   const pt = lang === 'pt'
@@ -86,17 +83,8 @@ export default function RepoDetailPage() {
 
   const title = linked ? repoShortName(remote) : (folderPath.split('/').filter(Boolean).pop() || (pt ? 'Sem repositório' : 'No repository'))
   const host = linked ? remote.split('/')[0]! : ''
-  // Task 13 — the hidden-repo badge. Keyed by the CANONICAL repo key, same as RepositoriesList and
-  // the sharing picker — `remote` here is already `normalizeGitRemote`'d (see the routing comment
-  // above), so only the further canonicalization (case/ssh-alias folding) is needed.
-  const hiddenKey = linked ? canonicalRepoKey(remote) : NO_REPO_KEY
-  const hiddenLabels = deniedRepoLabels?.get(hiddenKey)
-
   const tabs: { id: Tab; label: string; icon: React.ReactNode; show: boolean; badge?: number; beta?: boolean }[] = [
     { id: 'overview', label: pt ? 'Visão geral' : 'Overview', icon: <GitBranch size={13} />, show: true },
-    { id: 'members', label: pt ? 'Membros' : 'Members', icon: <Users size={13} />, show: isCentral, badge: scoped.repoStats[0]?.members.length },
-    { id: 'compare', label: pt ? 'Comparar' : 'Compare', icon: <GitCompare size={13} />, show: isCentral && (scoped.repoStats[0]?.members.length ?? 0) > 1 },
-    { id: 'actions', label: 'Actions', icon: <Zap size={13} />, show: ciSessions.length > 0, badge: ciSessions.length || undefined },
     { id: 'sessions', label: pt ? 'Sessões' : 'Sessions', icon: <Clock size={13} />, show: true },
     { id: 'tasks', label: pt ? 'Tarefas' : 'Tasks', icon: <ClipboardList size={13} />, show: repoTasks.length > 0, badge: repoTasks.length || undefined, beta: true },
     { id: 'workflows', label: 'Dynamic Workflows', icon: <WorkflowIcon size={13} />, show: workflows.length > 0 && workflows.some(w => capable(harnessOf(w), 'dynamicWorkflows')), badge: workflows.length },
@@ -130,29 +118,11 @@ export default function RepoDetailPage() {
               {remote} <ExternalLink size={11} />
             </a>
           )}
-          {hiddenLabels && hiddenLabels.length > 0 && (
-            <span
-              role="button"
-              tabIndex={0}
-              title={hiddenLabels.join(', ')}
-              onClick={() => navigate('/settings/connection')}
-              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/settings/connection') } }}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700,
-                ...withheldMarkStyle(),
-                padding: '3px 8px', borderRadius: 6, cursor: 'pointer',
-              }}
-            >
-              <EyeOff size={11} />
-              {interpolate(plural(PLURAL_COPY.hiddenFromN[lang], hiddenLabels.length), { n: hiddenLabels.length })}
-              {' · '}{hiddenLabels.join(', ')}
-            </span>
-          )}
         </div>
         {/* Full folder path subtitle — a machine-local detail, hidden on the central where a repo
             is keyed by its remote (the title/host chip already identify it). Shown on machines,
             where the same repo can live at several local paths. */}
-        {!isCentral && (folderPath || scoped.repoStats[0]?.path) && (
+        {(folderPath || scoped.repoStats[0]?.path) && (
           <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
             {formatProjectName(folderPath || scoped.repoStats[0]!.path)}
           </span>
@@ -178,7 +148,6 @@ export default function RepoDetailPage() {
         />
         <StatTile label="Commits" value={String(scoped.gitCommits)} />
         <StatTile label={pt ? 'Linhas' : 'Lines'} value={`+${fmt(scoped.linesAdded)} −${fmt(scoped.linesRemoved)}`} />
-        {isCentral && <StatTile label={pt ? 'Membros' : 'Members'} value={String(scoped.repoStats[0]?.members.length ?? 0)} />}
         <StatTile label="Agents" value={String(scoped.totalAgentInvocations)} />
       </div>
       {/* What the Tokens tile above is made of. A wrapping line has no cell count, so unlike four
@@ -230,44 +199,6 @@ export default function RepoDetailPage() {
             />
           </Section>
         </>
-      )}
-
-      {tab === 'members' && isCentral && (
-        <Section title={<><Users size={14} /> {pt ? 'Quem trabalha neste repositório' : 'Who works on this repository'}</>}>
-          <MembersTable sessions={sessions} presence={data.presence} lang={lang} currency={currency} brlRate={brlRate} />
-        </Section>
-      )}
-
-      {tab === 'compare' && (
-        <Section title={<><GitCompare size={14} /> {pt ? 'Comparar membros' : 'Compare members'}</>}>
-          <MemberComparePanel sessions={sessions} lang={lang} currency={currency} brlRate={brlRate} />
-        </Section>
-      )}
-
-      {tab === 'actions' && (
-        <Section title={<><Zap size={14} /> {pt ? 'GitHub Actions (runners de CI)' : 'GitHub Actions (CI runners)'}</>}>
-          {ciSessions.length === 0 ? (
-            <div style={{ color: 'var(--text-tertiary)', fontSize: 13, padding: 20, textAlign: 'center', lineHeight: 1.6 }}>
-              {pt
-                ? 'Nenhum run de GitHub Actions registrado para este repositório ainda. Configure o workflow do agentistics para enviar as métricas do Claude Code Actions à central.'
-                : 'No GitHub Actions runs recorded for this repository yet. Configure the agentistics workflow to push Claude Code Actions metrics to the central.'}
-            </div>
-          ) : (
-            <>
-              <div style={{ display: 'grid', gridTemplateColumns: STAT_TILE_GRID, gap: 10, marginBottom: 14 }}>
-                <StatTile label={pt ? 'Runs' : 'Runs'} value={String(ciSessions.length)} />
-                <StatTile label={pt ? 'Tokens' : 'Tokens'} value={fmt(ciSessions.reduce((a, s) => a + sessionTokenTotal(s), 0))} />
-                <StatTile label="Commits" value={String(ciSessions.reduce((a, s) => a + (s.git_commits ?? 0), 0))} />
-              </div>
-              <MetricNote style={{ marginTop: 0, marginBottom: 12 }}>
-                {pt
-                  ? 'Tokens somam os quatro contadores cobrados: entrada nova, saída, leitura e escrita de cache.'
-                  : 'Tokens add all four billed counters: fresh input, output, cache read and cache write.'}
-              </MetricNote>
-              <RecentSessions sessions={ciSessions} lang={lang} onSelect={setSelectedSession} />
-            </>
-          )}
-        </Section>
       )}
 
       {tab === 'sessions' && (
