@@ -179,6 +179,42 @@ async function scanCodexRollout(id: string, root: string): Promise<string | null
   return null
 }
 
+/**
+ * PURE. The day directories a JUST-WRITTEN rollout can be in: today and yesterday, by the local clock
+ * AND by UTC (codex names the directory from its own clock; both readings cost one `readdir` each and a
+ * session that crossed midnight is still found). Deduplicated, newest first.
+ */
+export function recentCodexDayDirs(now: number, tzOffsetMin: number = new Date(now).getTimezoneOffset()): string[] {
+  const out: string[] = []
+  const day = (ms: number) => {
+    const d = new Date(ms)
+    return `${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}`
+  }
+  for (const back of [0, 1]) {
+    const t = now - back * 86_400_000
+    for (const v of [day(t - tzOffsetMin * 60_000), day(t)]) if (!out.includes(v)) out.push(v)
+  }
+  return out
+}
+
+/**
+ * The CHEAP probe, tried on every resolve before the TTL-gated full scan: the recent day directories
+ * only. Without it a chat opened before codex had written its rollout (it does so ~1 s after the first
+ * message) cached that MISS for `TRANSCRIPT_MISS_TTL_MS`, and the answer stayed off screen for up to
+ * 30 s — measured on a real codex session: written in ~1 s, shown ~26 s later (Claude, whose path is
+ * direct, ~2.7 s).
+ */
+async function recentCodexRollout(id: string, root: string, now: number): Promise<string | null> {
+  const suffix = `-${id}.jsonl`
+  for (const rel of recentCodexDayDirs(now)) {
+    let names: string[]
+    try { names = await readdir(join(root, rel)) } catch { continue }
+    const hit = names.find(n => n.startsWith('rollout-') && n.endsWith(suffix))
+    if (hit) return join(root, rel, hit)
+  }
+  return null
+}
+
 export async function resolveCodexTranscript(
   ref: TranscriptRef,
   // Overridable for tests only — see `resolveAntigravityTranscript`'s note.
@@ -196,6 +232,7 @@ export async function resolveCodexTranscript(
   // what the TTL paces.
   return resolveMemoizedPath(codexPathMemo, ref.conversationId, {
     exists,
+    direct: () => recentCodexRollout(ref.conversationId, sessionsDir, now),
     scan: () => scanCodexRollout(ref.conversationId, sessionsDir),
     now,
   })
@@ -328,10 +365,14 @@ export async function resolveKimiTranscript(
   now: number = Date.now(),
 ): Promise<string | null> {
   if (!UUID_RE.test(ref.conversationId)) return null
-  // A MISS EXPIRES and a HIT IS VERIFIED — same reasons as codex's above.
+  // A MISS EXPIRES and a HIT IS VERIFIED — same reasons as codex's above. The search IS the cheap
+  // probe here (one `readdir` of the workspaces plus a `stat` or two each — a machine holds a handful),
+  // so it runs on every resolve: gating it behind the miss TTL kept a wire written ~1 s after the first
+  // message off screen for up to 30 s, exactly as it did for codex.
   return resolveMemoizedPath(kimiPathMemo, ref.conversationId, {
     exists,
-    scan: () => findKimiWire(ref.conversationId, sessionsDir),
+    direct: () => findKimiWire(ref.conversationId, sessionsDir),
+    scan: async () => null,
     now,
   })
 }

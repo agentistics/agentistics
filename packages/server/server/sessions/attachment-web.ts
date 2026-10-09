@@ -111,7 +111,7 @@ export async function recordAttachmentMessage(msg: AttachmentMessage): Promise<v
  * both at once is what keeps that a one-line difference rather than two reads of the same file.
  */
 export async function readAttachmentLog(
-  key: { sessionId: string; conversationId: string },
+  key: { sessionId: string; conversationId: string; pendingId?: string },
 ): Promise<{ sends: AttachmentSend[]; messages: AttachmentMessage[] }> {
   return parseAttachmentLog(await readFile(ATTACHMENT_LOG, 'utf-8').catch(() => ''), key)
 }
@@ -119,7 +119,7 @@ export async function readAttachmentLog(
 /** The parse behind `readAttachmentLog` — PURE, so the keying is testable without a data dir. */
 export function parseAttachmentLog(
   raw: string,
-  key: { sessionId: string; conversationId: string },
+  key: { sessionId: string; conversationId: string; pendingId?: string },
 ): { sends: AttachmentSend[]; messages: AttachmentMessage[] } {
   const sends: AttachmentSend[] = []
   const messages: AttachmentMessage[] = []
@@ -131,11 +131,15 @@ export function parseAttachmentLog(
       if (d.sessionId === key.sessionId && d.sessionId !== '' && typeof d.path === 'string') {
         sends.push({ sessionId: d.sessionId, atMs: d.atMs, path: d.path })
       } else if (
-        d.conversationId === key.conversationId && d.conversationId !== ''
+        typeof d.conversationId === 'string' && d.conversationId !== ''
+        // `pendingId` is the managed ROW id a message was filed under before its conversation was
+        // linked; it reads as the conversation's own, so the link needs no rewrite of the log.
+        && (d.conversationId === key.conversationId
+          || (key.conversationId !== '' && key.pendingId !== undefined && key.pendingId !== '' && d.conversationId === key.pendingId))
         && Array.isArray(d.paths) && typeof d.images === 'number'
       ) {
         messages.push({
-          conversationId: d.conversationId,
+          conversationId: key.conversationId,
           atMs: d.atMs,
           paths: d.paths.filter((p): p is string => typeof p === 'string'),
           images: d.images,
@@ -143,6 +147,7 @@ export function parseAttachmentLog(
       }
     } catch { /* one bad line is not a reason to lose the rest */ }
   }
+  messages.sort((a, b) => a.atMs - b.atMs)
   return { sends, messages }
 }
 

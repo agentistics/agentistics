@@ -110,7 +110,7 @@ export function SplitPaneHeader(p: SplitPaneHeaderProps) {
 
       {/* The chat/terminal switch — a segmented control, because the two are alternatives. Absent
           where the harness can never name its conversation, exactly as in the session strip. */}
-      {s.conversationBlind === undefined && (
+      {(
         <div role="tablist" aria-label={pt ? 'Vista' : 'View'} style={{
           display: 'flex', gap: 2, padding: 2, borderRadius: 8,
           background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', flexShrink: 0,

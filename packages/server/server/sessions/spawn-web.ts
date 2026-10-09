@@ -39,6 +39,8 @@ export interface WebHarnessOption {
   modelFreeText: boolean
   supportsModel: boolean
   efforts: string[]
+  /** False keeps an installable harness visible without pretending it can start. */
+  installed?: boolean
 }
 
 export interface WebProjectOption {
@@ -74,7 +76,7 @@ export async function webHarnesses(
 ): Promise<WebHarnessOption[]> {
   if (!host.startableHarnesses) return []
   const found = await host.startableHarnesses()
-  return Promise.all(found.map(async h => ({ ...h, ...catalogFields(h.modelSuggestions, await catalogOf(h.id as HarnessId)) })))
+  return Promise.all(found.map(async h => ({ ...h, installed: true, ...catalogFields(h.modelSuggestions, await catalogOf(h.id as HarnessId)) })))
 }
 
 /** Directories to offer, from the LOCAL store — so the picker works with the server's data cold. */

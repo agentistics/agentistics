@@ -8,6 +8,7 @@
  * target every other row in these dialogs meets. This is a row of cards instead: the same shape
  * `NewSessionModal` always used, just no longer copied by hand.
  */
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { HarnessMark } from './HarnessMark'
 import { Muted } from './formBits'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
@@ -15,6 +16,7 @@ import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 export interface HarnessPickerOption {
   id: string
   label: string
+  installed?: boolean
 }
 
 export interface HarnessPickerProps {
@@ -33,10 +35,12 @@ export interface HarnessPickerProps {
    */
   notice?: string
   onRetry?: () => void
+  onInstall?: (id: string) => void
 }
 
-export function HarnessPicker({ lang, harnesses, value, onChange, notice, onRetry }: HarnessPickerProps) {
+export function HarnessPicker({ lang, harnesses, value, onChange, notice, onRetry, onInstall }: HarnessPickerProps) {
   const pt = lang === 'pt'
+  const isMobile = useIsMobile()
 
   if (harnesses === null) {
     return <Muted text={pt ? 'Vendo o que está instalado…' : 'Checking what is installed…'} />
@@ -60,22 +64,33 @@ export function HarnessPicker({ lang, harnesses, value, onChange, notice, onRetr
         const on = value === h.id
         const color = (HARNESS_COLORS as Record<string, string>)[h.id] ?? 'var(--text-secondary)'
         const name = (HARNESS_LABELS as Record<string, string>)[h.id] ?? h.label
+        const missing = h.installed === false
+        // ONE chip per harness. A missing one is greyed and its click opens the install flow, with a
+        // small inline "Instalar" saying so — it is never a second control beside the chip.
         return (
           <button
             key={h.id}
             type="button"
-            onClick={() => onChange(h.id)}
+            title={missing ? (pt ? `${name} não está instalado — clique para instalar` : `${name} is not installed — click to install`) : undefined}
+            onClick={() => (missing ? onInstall?.(h.id) : onChange(h.id))}
             style={{
               display: 'flex', alignItems: 'center', gap: 8,
               padding: '9px 13px', borderRadius: 10, cursor: 'pointer',
-              border: `1px solid ${on ? color : 'var(--border-subtle)'}`,
+              border: `1px ${missing ? 'dashed' : 'solid'} ${on ? color : 'var(--border-subtle)'}`,
               background: on ? `color-mix(in srgb, ${color} 14%, transparent)` : 'var(--bg-elevated)',
               color: on ? 'var(--text-primary)' : 'var(--text-secondary)',
               fontFamily: 'inherit', fontSize: 13, fontWeight: on ? 650 : 500,
+              opacity: missing ? 0.62 : 1,
+              minHeight: isMobile ? 44 : undefined,
             }}
           >
             <HarnessMark harness={h.id} size={18} />
             {name}
+            {missing && (
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--anthropic-orange)', marginLeft: 2 }}>
+                {pt ? 'Instalar' : 'Install'}
+              </span>
+            )}
           </button>
         )
       })}

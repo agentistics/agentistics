@@ -26,6 +26,7 @@ import { costBasisLabel, viewCost } from '../../lib/costBasis'
 import { sessionReferences, type SessionReference } from '../../lib/sessionReferences'
 import { useArtifactLive } from '../../lib/artifactsStore'
 import { scrollIsOutside } from '../../lib/popoverScroll'
+import { modelDisplay } from '../../lib/modelDisplay'
 
 /**
  * The trigger button's own percentage colour — a THREE-tier ramp, deliberately not the same as the
@@ -458,12 +459,14 @@ export function SessionStatsMenu({
 
           {/* HOW THIS SESSION IS RUNNING — before the numbers, because it is what the numbers are
               OF. `model` has two sources and they are not the same claim: what agentop was asked to
-              start (the row) and what the transcript recorded (the store). The row wins when it has
-              one, and an absent flag is said in words — a blank cell would read as "none". */}
+              start (the spawn ALIAS, "opus") and what the transcript recorded ("claude-opus-5-5").
+              The OBSERVED one wins, through `modelLabel` ("Opus 5.5"); the alias is only the fallback
+              for a session that has not said anything yet. An absent flag is said in words — a blank
+              cell would read as "none". */}
           <Block title={pt ? 'Como está rodando' : 'How it is running'}>
             <Line
               k={pt ? 'Modelo' : 'Model'}
-              v={startedModel ?? s.model ?? (pt ? 'padrão do harness' : 'the harness default')}
+              v={modelDisplay(harness, s.model, startedModel) ?? (pt ? 'padrão do harness' : 'the harness default')}
             />
             <Line
               k={pt ? 'Esforço' : 'Effort'}

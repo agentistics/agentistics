@@ -22,7 +22,7 @@ import { pickTitle } from './harness-session-file'
 import type { ResolvedRepoFacts } from './repo-facts'
 import type { SessionView } from './session-view'
 import { conversationLinkGoneForever, conversationLinkable, SPAWN_SPECS } from './spawn-spec'
-import { HARNESS_PROCESS_LOGS, HARNESS_SESSION_SOURCES } from './harness-session-file'
+import { HARNESS_PROCESS_TRANSCRIPTS, HARNESS_SESSION_SOURCES } from './harness-session-file'
 
 /** The state word each session wears, and the machine-readable state beside it. */
 export function sessionState(v: SessionView): SessionState {
@@ -136,8 +136,9 @@ export function toControlSession(
         external: v.status === 'external',
         platform: process.platform,
         noIdRoute: !conversationLinkable(v.harness!),
-        needsProc: HARNESS_PROCESS_LOGS[v.harness!] != null && SPAWN_SPECS[v.harness!]?.assignId === undefined
-          && HARNESS_SESSION_SOURCES[v.harness!] === null,
+        needsProc: HARNESS_PROCESS_TRANSCRIPTS[v.harness!]?.onlyRoute === true && SPAWN_SPECS[v.harness!]?.assignId === undefined
+          && HARNESS_SESSION_SOURCES[v.harness!] === null
+          && !HARNESS_PROCESS_TRANSCRIPTS[v.harness!]?.managedLog,
       })
     : undefined
   const conversationBlind = v.status === 'external' || v.status === 'closed' || v.conversationId || !harness

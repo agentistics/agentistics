@@ -21,7 +21,7 @@
 
 import { useSyncExternalStore } from 'react'
 import { createSharedPref } from './sharedPref'
-import { UPGRADE_POLL_MS, UPGRADE_WAIT_MS, browserReloadEnv, clearAppCaches, upgradeArrived } from './appReload'
+import { UPGRADE_POLL_MS, UPGRADE_WAIT_MS, browserReloadEnv, clearAppCaches, upgradeArrived, upgradeStalled } from './appReload'
 import { measureRate, type ByteSample } from './updateAnim'
 import { restartStep, type RestartPhase } from './upgradeRestart'
 import { advance, rawStep, type ServerProgress, type StepView } from './upgradeSteps'
@@ -199,6 +199,7 @@ export async function startUpgrade(target: string, lang: 'pt' | 'en'): Promise<v
       if (!bytes || next.received !== bytes.received) { rate = measureRate(bytes, next, rate); bytes = next }
     }
     set({ view, bytes, rate, restartPhase: waiting })
+    if (!arrived && upgradeStalled(Date.now() - startedAt, progress?.stage)) { set({ phase: 'timeout' }); return }
     if (arrived) {
       const ready = await updateReady()
       const readyPhase = restartStep(waiting, { type: 'poll', version: 'new', serviceWorkerReady: ready, bundleReady: ready })

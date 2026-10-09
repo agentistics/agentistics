@@ -9,7 +9,7 @@ import type { LiveProcess, LiveUnavailableReason, SessionMeta } from '@agentisti
 import { getRates } from './rates'
 import { getVersionInfo, startVersionRecheck } from './version'
 import { sendTelemetry } from './telemetry'
-import { handleUpgradeRoute, upgradableHint } from './upgrade-web'
+import { handleUpgradeRoute, upgradableHint, versionWithRestart } from './upgrade-web'
 import { compressResponse, negotiateEncoding } from './http-compress'
 import { encodedBody, etagMatches, versionOf } from './data-response-cache'
 import { slimApiResponse, slimSerialized } from './data-slim'
@@ -766,7 +766,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 
     if (url.pathname === '/api/version' && req.method === 'GET') {
       try {
-        const info = await getVersionInfo()
+        const info = versionWithRestart(await getVersionInfo())
         // `upgradable`: whether THIS machine could press "install now" — the very gate the route
         // applies, so the update toast is never offered where the route would refuse. Additive.
         return new Response(JSON.stringify({ ...info, upgradable: upgradableHint(info) }), {
@@ -2662,6 +2662,25 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
+    // "Entrar": the harness's own login, in an ordinary managed session started in the user's home.
+    // Under the `/api/fleet` prefix, so it carries the same `localShell` guard as starting a session.
+    if (url.pathname === '/api/fleet/harness-login' && req.method === 'POST') {
+      try {
+        const { runFleetSpawn, fleetLang } = await import('./sessions/fleet-web')
+        const { handleHarnessLoginRoute } = await import('./sessions/harness-install')
+        const read = await readJsonLimited<{ harness?: unknown }>(req, 1024)
+        const lang = fleetLang(url.searchParams.get('lang')) === 'pt' ? 'pt' : 'en'
+        const out = await handleHarnessLoginRoute(read.ok ? read.value : null, lang, runFleetSpawn)
+        return new Response(JSON.stringify(out.body), {
+          status: out.status, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      } catch (err) {
+        return new Response(JSON.stringify({ ok: false, ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
+          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+    }
+
     if (url.pathname === '/api/fleet/new' && req.method === 'POST') {
       try {
         const { runFleetSpawn, fleetLang } = await import('./sessions/fleet-web')
@@ -3512,6 +3531,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return new Response(JSON.stringify(await chatHarnessStatus()), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
+    }
+
+    const harnessInstall = url.pathname.match(/^\/api\/harnesses\/([^/]+)\/(install|update)$/)
+    if (harnessInstall && req.method === 'POST') {
+      const { handleHarnessInstallRoute } = await import('./sessions/harness-install')
+      return handleHarnessInstallRoute(req, decodeURIComponent(harnessInstall[1]!), harnessInstall[2] as 'install' | 'update')
     }
 
     if (url.pathname === '/api/chat-tty' && req.method === 'POST') {
