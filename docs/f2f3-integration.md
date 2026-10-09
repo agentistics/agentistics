@@ -128,3 +128,13 @@ Also (engine, no textual conflict): `reuse-surface.lint.test.ts` "the engine rea
 `structured/fixtures/codex-app-server-peer.ts` (F3.1's fake peer reads a QA log path from the environment). The lint now
 treats `/fixtures/` as test material, like `*.test.ts` and `test/`.
 
+## Pins
+
+- `engine.pin` (public): ref = engine `integ/f2-f3` commit `3a0a7e9c37d7f1518ff4e7e76a797620f7558522`, `api` stays `^1.9.0`. The engine's `BUILT_AGAINST_API` is
+  still `'1.9.0'` on purpose: the 1.10 surface (`Engine.structured`, `StructuredSpawn.transport`, `usage`) is OPTIONAL and the
+  host reads `engine.structured` directly (no version gate), so a 1.10-aware engine still declares what it was built
+  against — the range `^1.9.0` is satisfied and a 1.9 host would simply never ask. No bump needed; if the engine is
+  ever made to REQUIRE 1.10 from the host, raise both.
+- `public.pin` (engine): the public commit `51cd26de4182d131b3abffea08a109a5a01209a8` it was built and tested against. The public commit that adds `engine.pin` differs
+  from it by this pin file only (the two pins are circular; this is the fixed point).
+
