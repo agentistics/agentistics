@@ -18,6 +18,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Lang } from '@agentistics/core'
 import { ut } from '../lib/updateI18n'
+import { advanceFinaleClock } from '../lib/finaleClock'
 import { finaleBeat, REDUCED_FINALE_BEAT } from '../lib/updateAnim'
 import { createScene } from '../lib/updateScene'
 import { UPDATE_ANIMATION } from '../lib/upgradeSteps'
@@ -40,12 +41,14 @@ export function UpdateFinale({ lang, version, from = '', onDone, isMobile = fals
   const doneRef = useRef(onDone)
   doneRef.current = onDone
   useEffect(() => {
-    const t1 = window.setTimeout(() => setLeaving(true), FINALE_MS - 450)
-    const t2 = window.setTimeout(() => doneRef.current(), FINALE_MS)
+    // Reduced motion draws one still frame, so wall-clock timers are right there; otherwise the
+    // timeline's own clock (`finaleClock.ts`) decides when to leave, so a boot stall cannot eat it.
+    const t1 = reduced ? window.setTimeout(() => setLeaving(true), FINALE_MS - 450) : 0
+    const t2 = reduced ? window.setTimeout(() => doneRef.current(), FINALE_MS) : 0
     const key = (e: KeyboardEvent) => { if (e.key === 'Escape') doneRef.current() }
     window.addEventListener('keydown', key)
     return () => { window.clearTimeout(t1); window.clearTimeout(t2); window.removeEventListener('keydown', key) }
-  }, [])
+  }, [reduced])
 
   useEffect(() => {
     const cv = canvas.current
@@ -59,10 +62,13 @@ export function UpdateFinale({ lang, version, from = '', onDone, isMobile = fals
     scene.setInk([...ink(refs.hud.current), ...ink(refs.foot.current)])
     const onResize = () => { scene.resize(); draw(performance.now(), 16) }
     window.addEventListener('resize', onResize)
-    const t0 = performance.now()
-    let raf = 0, last = t0, gone = false, shown = false
+    let raf = 0, last = performance.now(), gone = false, shown = false, t = 0, leave = false, done = false
     const draw = (now: number, dt: number) => {
-      const t = (now - t0) / 1000
+      if (!reduced) {
+        t = advanceFinaleClock(t, dt)
+        if (!leave && t * 1000 >= FINALE_MS - 450) { leave = true; setLeaving(true) }
+        if (!done && t * 1000 >= FINALE_MS) { done = true; doneRef.current() }
+      }
       scene.drawFinale({ t, now, dt })
       const beat = reduced ? REDUCED_FINALE_BEAT : finaleBeat(t)
       if (beat.chromeGone && !gone) { gone = true; if (refs.hud.current) refs.hud.current.style.opacity = '0'; if (refs.foot.current) refs.foot.current.style.opacity = '0' }
@@ -75,7 +81,7 @@ export function UpdateFinale({ lang, version, from = '', onDone, isMobile = fals
       const dt = Math.min(64, now - last); last = now
       draw(now, dt)
     }
-    if (reduced) { draw(t0, 16); logo.onload = () => draw(performance.now(), 16) } else raf = requestAnimationFrame(loop)
+    if (reduced) { draw(last, 16); logo.onload = () => draw(performance.now(), 16) } else raf = requestAnimationFrame(loop)
     return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', onResize); scene.dispose() }
   }, [reduced, refs])
 

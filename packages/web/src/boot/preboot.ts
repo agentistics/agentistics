@@ -48,11 +48,28 @@ function bootLang(): 'pt' | 'en' {
   return (navigator.language || '').toLowerCase().startsWith('pt') ? 'pt' : 'en'
 }
 
+/** `lib/updateToast.ts` RESTORE_KEY (this file may import nothing else): an in-app upgrade left a
+ *  snapshot for this tab, so what follows is the update finale, not a cold start. */
+const UPGRADE_RESTORE_KEY = 'agentistics-upgrade-restore'
+
+function upgradeFinalePending(): boolean {
+  try {
+    const raw = sessionStorage.getItem(UPGRADE_RESTORE_KEY)
+    if (!raw) return false
+    const savedAt = Number((JSON.parse(raw) as { savedAt?: unknown }).savedAt)
+    return Number.isFinite(savedAt) && Date.now() - savedAt < 15 * 60_000
+  } catch { return false }
+}
+
 function startPreboot(): void {
   stampTheme()
   const root = document.getElementById('ag-preboot')
   const svg = root?.querySelector<SVGSVGElement>('svg.ag-preboot-mark')
   if (!root || !svg || typeof svg.animate !== 'function') return
+  // The update overlay was on screen a moment ago and the finale is next: a default boot loader in
+  // between is the flash the person saw. Keep the splash as a plain dark ground (the overlay's own)
+  // that the finale takes over (`components/FinaleHost.tsx`).
+  if (upgradeFinalePending()) { svg.style.display = 'none'; root.style.background = '#0a0a0f'; return }
   root.setAttribute('aria-label', bootLang() === 'pt' ? 'Carregando o Agentistics' : 'Loading Agentistics')
   const reduced = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
   const accent = document.documentElement.hasAttribute('data-central') ? CENTRAL_ACCENT : undefined
