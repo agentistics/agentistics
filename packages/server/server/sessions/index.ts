@@ -57,7 +57,10 @@ export async function resolveBackend(): Promise<SessionBackend> {
     const { withStructured } = await import('./structured-backend')
     const { featureOn } = await import('@agentistics/core')
     composite = withStructured(tmuxBackend, {
-      structured: async () => (await import('../engine/load')).engine()?.structured ?? null,
+      // The load is awaited (memoized; asked only for a web spawn with the flag on, and by the boot
+      // re-attach, which can run before the server's own `loadEngine()` settles — reading "no engine"
+      // then would end every surviving session).
+      structured: async () => { const m = await import('../engine/load'); await m.loadEngine(); return m.engine()?.structured ?? null },
       acp: async () => (await import('../engine/load')).engine()?.acp ?? null,
       allowed: async () => ((await (await import('../preferences')).readPreferences()).acpHarnesses ?? []),
       flagOn: () => featureOn('adapter-chat'),

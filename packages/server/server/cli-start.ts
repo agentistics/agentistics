@@ -3669,6 +3669,10 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       if (!backend.toTerminal) return { ok: false, message: s.sessTerminalNotStructured }
       const out = await backend.toTerminal(id).catch(() => ({ ok: false as const, why: 'spawn-failed' as const }))
       if (out.ok) return { ok: true, message: s.sessTerminalOpened }
+      if (out.why === 'no-resume') {
+        const row = (await readRegistry()).find(r => r.id === id)
+        return { ok: false, message: s.sessTerminalNoResume(row ? row.harness : id) }
+      }
       return {
         ok: false,
         message: out.why === 'not-structured' ? s.sessTerminalNotStructured
