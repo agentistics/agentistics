@@ -160,6 +160,7 @@ export function toControlSession(
     ...(v.model ? { model: v.model } : {}),
     ...(v.effort ? { effort: v.effort } : {}),
     ...(v.mode ? { mode: v.mode } : {}),
+    ...(v.structured ? { structured: true as const } : {}),
     ...(v.note ? { note: v.note } : {}),
     state,
     // The mark rides ON the state word rather than in a cell of its own, so it reaches every

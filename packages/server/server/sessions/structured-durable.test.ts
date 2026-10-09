@@ -361,6 +361,18 @@ describe('open in terminal, kill, and the flag', () => {
     expect(await A.b.toTerminal('m-1')).toEqual({ ok: false, why: 'not-structured' })
   }, 20000)
 
+  test('isStructured is true while the child runs — here or in another process — and false after the switch', async () => {
+    const r = rig()
+    const owner = r.server()
+    await owner.b.spawn(webSpawn(r.root, 'one'))
+    await until(() => prompts(r).length === 1)
+    expect(owner.b.isStructured!('m-1')).toBe(true)
+    expect(r.server().b.isStructured!('m-1')).toBe(true) // a process that does not drive it still sees it run
+    expect(owner.b.isStructured!('nobody')).toBe(false)
+    expect(await owner.b.toTerminal('m-1')).toEqual({ ok: true })
+    expect(owner.b.isStructured!('m-1')).toBe(false) // a TUI now
+  }, 20000)
+
   test('toTerminal from ANOTHER process (one that does not drive the session) — the owner does not fall back', async () => {
     const r = rig()
     const owner = r.server()

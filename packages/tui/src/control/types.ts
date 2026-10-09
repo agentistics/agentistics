@@ -873,6 +873,8 @@ export interface ControlSession {
    * keypress nobody asked for.
    */
   mode?: { id: string; label: string }
+  /** F2.0b — running over its harness's protocol right now (not a pane): the web offers "open in terminal". */
+  structured?: true
   /**
    * Whether this row can be acted on at all.
    *

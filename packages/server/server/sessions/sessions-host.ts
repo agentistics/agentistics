@@ -867,6 +867,10 @@ export function createSessionsPoller(o: {
       confirmMemory = confirm.memory
       const confirmedActivity = confirm.activities
 
+      // F2.0b — which of them run over their harness's protocol right now (cheap, in-memory).
+      const structured = new Set<string>()
+      if (o.backend.isStructured) for (const r of reconciled) if (o.backend.isStructured(r.id)) structured.add(r.id)
+
       const sessions = buildSessionViews({
         reconciled,
         activity: confirmedActivity,
@@ -875,6 +879,7 @@ export function createSessionsPoller(o: {
         chatTails,
         approvals,
         modes,
+        ...(structured.size > 0 ? { structured } : {}),
         dialogOptions,
         dialogSelect,
         dialogUnreadable,

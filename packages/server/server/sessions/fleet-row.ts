@@ -72,6 +72,16 @@ function interruptVerb(v: ControlSession, s: ControlStrings): FleetVerb {
 }
 
 /**
+ * F2.0b — "Open in terminal", offered ONLY on a row running over its harness's protocol right now.
+ * Absent (not disabled) everywhere else: a pane session already is a terminal, and a refused verb on
+ * every row would be noise. The server action still answers in a sentence when it cannot be done
+ * (a harness with no resume by id), which the menu shows.
+ */
+function terminalVerb(s: ControlStrings): FleetVerb {
+  return { action: 'terminal' as SessionAction, label: s.sessionsOpenTerminal, enabled: true }
+}
+
+/**
  * What the page may ask to be done to one row — a strict subset of the cockpit's verbs.
  *
  * It lives HERE, in the leaf, rather than beside its implementation in `fleet-web.ts`: `index.ts`
@@ -280,6 +290,7 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
   // Appended rather than folded into `sessionActions`: the cockpit answers "stop" with the Escape
   // key inside an attached pane, so it never needed a listed verb. The browser has no pane.
   verbs.push(interruptVerb(row, s))
+  if (row.structured && row.actionable) verbs.push(terminalVerb(s))
   if (isNativeRow(row)) verbs.push(...nativeStoreVerbs(row, s))
   return {
     id: row.id,
