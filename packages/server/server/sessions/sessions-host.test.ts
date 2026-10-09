@@ -952,3 +952,29 @@ describe('exclusive managed agy log', () => {
     expect(writes).toEqual(['from-db-or-old-log'])
   })
 })
+
+describe('AGY.REOPEN — the exact-link reopen through the poller', () => {
+  it('asks findExactLinks only about rows with nothing running, and offers their reopen', async () => {
+    const asked: string[] = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [backendSession('live')], frames: { live: ['❯ '] } }),
+      readRegistry: async () => [
+        managed('live', { harness: 'antigravity', cwd: '/w', conversationId: 'conv-live' }),
+        managed('dead', { harness: 'antigravity', cwd: '/w', conversationId: 'conv-dead' }),
+      ],
+      scanProcesses: async () => ({ procs: [] }),
+      // The store does not hold the agy conversation — the case agy's missing history.jsonl causes.
+      loadConversations: async () => [],
+      findExactLinks: async entries => {
+        for (const e of entries) asked.push(e.conversationId ?? '')
+        return new Set(entries.map(e => e.conversationId!).filter(Boolean))
+      },
+      now: () => NOW,
+    })
+    const snap = await p.poll()
+    expect(asked).toEqual(['conv-dead'])
+    const dead = snap.sessions.find(s => s.id === 'dead')
+    expect(dead?.resume?.sessionId).toBe('conv-dead')
+    expect(snap.sessions.find(s => s.id === 'live')?.resume).toBeUndefined()
+  })
+})

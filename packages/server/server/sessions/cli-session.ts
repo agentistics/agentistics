@@ -38,7 +38,9 @@ import { renameInHarness, renameMessage } from './rename'
 import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefCandidate } from './session-ref'
 import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
 import { addSession, newSessionId, patchSession, readRegistry, retireFallenSessions, retireSession } from './registry'
-import { conversationForProcess, loadConversations } from './conversations'
+import { loadConversations } from './conversations'
+import { exactLinksOnDisk } from './reopen-link'
+import { reopenTargetFor } from './reopen-target'
 import { resolveBackend } from './index'
 import { scanProcesses } from '../live-sessions'
 import { loadHarnessSessions } from './harness-sessions'
@@ -642,6 +644,9 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
   // of a task filed in that repository. The drift `planTaskReopen` was extracted to end, met again
   // one layer out.
   const taken = new Set<string>()
+  // A row that knows its conversation reopens it from that exact link even when the store does not
+  // hold it — see `reopen-target.ts`.
+  const onDisk = await exactLinksOnDisk(wanted, conversations)
   // The DECISION is the pure `planTaskReopen`, shared with the cockpit's verb. The two used to be
   // separate implementations and had drifted: only one retired the row it replaced, so the same
   // gesture left a different registry depending on where you pressed it.
@@ -649,18 +654,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
     entries: wanted,
     liveIds: live,
     inUse,
-    conversationFor: m => {
-      const own = m.conversationId
-        ? conversations.find(c => c.sessionId === m.conversationId)
-        : undefined
-      const conv = own ?? conversationForProcess(
-        conversations.filter(c => !taken.has(c.sessionId)),
-        { harness: m.harness, cwd: m.cwd },
-      )
-      if (!conv?.resumable) return null
-      taken.add(conv.sessionId)
-      return { sessionId: conv.sessionId, title: conv.title }
-    },
+    conversationFor: m => reopenTargetFor({ entry: m, pool: conversations, onDisk, taken }),
   })
 
   // The memory GATE, for the WHOLE reopen — `requested` is only `plan.reopen`, the rows this call
@@ -810,6 +804,7 @@ async function pollFleet(backend: SessionBackend): Promise<SessionSnapshot> {
 
   const poller = createSessionsPoller({
     backend, readRegistry, scanProcesses, loadConversations, loadHarnessSessions,
+    findExactLinks: exactLinksOnDisk,
   })
   // Poll TWICE, and return the second. The cockpit debounces the noisy per-frame reading by
   // confirming a `waiting` state across two polls (`attention-confirm.ts`), but a one-shot command
