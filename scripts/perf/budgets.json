@@ -24,49 +24,49 @@
     "switchFirstP95Ms": {
       "label": "Switch session — first chat frame p95",
       "max": 400,
-      "level": "warn",
+      "level": "fail",
       "unit": "ms"
     },
     "sendToEchoP95Ms": {
       "label": "Send → echo p95",
       "max": 500,
-      "level": "warn",
+      "level": "fail",
       "unit": "ms"
     },
     "writeToShownP95Ms": {
       "label": "Harness write → shown p95",
       "max": 300,
-      "level": "warn",
+      "level": "fail",
       "unit": "ms"
     },
     "idleCpuPct": {
       "label": "Idle server CPU (N=10, C=0)",
       "max": 1,
-      "level": "warn",
+      "level": "fail",
       "unit": "%"
     },
     "perClientCpuPct": {
       "label": "CPU per client (N=10)",
       "max": 1,
-      "level": "warn",
+      "level": "fail",
       "unit": "%"
     },
     "tmuxPerMinN50": {
       "label": "tmux invocations per minute (N=50, C=1)",
       "max": 60,
-      "level": "warn",
+      "level": "fail",
       "unit": "/min"
     },
     "fleetFirstFrameKB": {
       "label": "/api/fleet first frame",
       "max": 50,
-      "level": "warn",
+      "level": "fail",
       "unit": "KB"
     },
     "soakSlopeMBh": {
       "label": "Memory growth in the soak (5 clients)",
       "max": 5,
-      "level": "warn",
+      "level": "fail",
       "unit": "MB/h"
     }
   }

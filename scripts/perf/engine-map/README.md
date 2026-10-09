@@ -13,11 +13,12 @@ show up. Job: `engine-map-bench` in `.github/workflows/ci.yml` (push, PR and `wo
 | `budgets.ts`, `check.ts` | **pure** budget arithmetic + the CLI that prints the verdicts and the `::warning::` annotations |
 | `SOURCE.json`, `sync.ts` | where the copies came from and the hashes that stop them drifting |
 
-## Budgets: warnings now, failures at Phase 4
+## Budgets: failures (F4.B)
 
 `scripts/perf/budgets.json` → `engineMap` holds the 09 §8 ceilings, each with a `level`:
-`warn` (annotation + job summary, job stays green) or `fail` (job fails). **F4 flips the levels; no code
-changes.** `budget.ts` (PERF.1) ignores that object. A budget the plan did not measure is reported
+`warn` (annotation + job summary, job stays green) or `fail` (job fails). **Every budget is `fail` since F4.B.**
+A value above `max` but within the **tolerance** (default 10 %, `tolerance` per budget; a shared 2-core runner is noisy) is
+reported `near` — a warning annotation — and only a value above `max × (1 + tolerance)` fails the job. `budget.ts` (PERF.1) ignores that object. A budget the plan did not measure is reported
 `not measured`, never `ok` — `quick` stops at N=10 and has no soak, so `tmuxPerMinN50` and `soakSlopeMBh`
 stay un-measured until a `full` run (`workflow_dispatch`, `bench_plan=full`, `bench_soak_min=30`).
 

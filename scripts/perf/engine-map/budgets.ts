@@ -27,6 +27,13 @@ export interface BudgetDef {
   /** What the number is, in the words of 09 §8. */
   label: string
   max: number
+  /**
+   * Noise allowance as a fraction of `max` (default `DEFAULT_TOLERANCE`): a measured value fails only
+   * above `max × (1 + tolerance)`. The budget stays the number 09 §8 states; the tolerance is what a
+   * shared 2-core CI runner needs so a good build is not failed by one slow tick. A value between
+   * `max` and the ceiling is reported `near` (annotation, job stays green).
+   */
+  tolerance?: number
   level: Level
   unit: string
   /** Where the value comes from — documentation for the table, not logic. */
@@ -36,8 +43,11 @@ export interface BudgetDef {
 }
 export type Budgets = Record<string, BudgetDef>
 
-export type Verdict = 'ok' | 'over' | 'skipped'
-export interface BudgetResult { key: string; label: string; unit: string; max: number; level: Level; value: number | null; verdict: Verdict; note?: string }
+export type Verdict = 'ok' | 'near' | 'over' | 'skipped'
+
+/** 10 %: documented in README.md § Budgets. */
+export const DEFAULT_TOLERANCE = 0.1
+export interface BudgetResult { key: string; label: string; unit: string; max: number; level: Level; value: number | null; verdict: Verdict; note?: string; ceiling: number }
 
 const fin = (x: number | undefined | null): x is number => typeof x === 'number' && Number.isFinite(x)
 const round1 = (x: number) => Math.round(x * 10) / 10
@@ -97,8 +107,9 @@ export function evaluate(result: BenchResult, budgets: Budgets): BudgetResult[] 
   return Object.entries(budgets).map(([key, def]) => {
     const got = m[key]
     const value = got?.value ?? null
-    const verdict: Verdict = value === null ? 'skipped' : value <= def.max ? 'ok' : 'over'
-    return { key, label: def.label, unit: def.unit, max: def.max, level: def.level, value, verdict, note: got?.note }
+    const ceiling = Math.round(def.max * (1 + (def.tolerance ?? DEFAULT_TOLERANCE)) * 1000) / 1000
+    const verdict: Verdict = value === null ? 'skipped' : value <= def.max ? 'ok' : value <= ceiling ? 'near' : 'over'
+    return { key, label: def.label, unit: def.unit, max: def.max, level: def.level, value, verdict, note: got?.note, ceiling }
   })
 }
 
@@ -107,22 +118,24 @@ export function exitCode(results: BudgetResult[]): number {
   return results.some(r => r.verdict === 'over' && r.level === 'fail') ? 1 : 0
 }
 
-const ICON: Record<Verdict, string> = { ok: '✅', over: '⚠️', skipped: '➖' }
+const ICON: Record<Verdict, string> = { ok: '✅', near: '🟡', over: '⚠️', skipped: '➖' }
 
 /** A GitHub-flavoured markdown table for the job summary. */
 export function renderBudgets(results: BudgetResult[]): string {
   const lines = ['| budget | measured | ceiling | level | |', '|---|---|---|---|---|']
   for (const r of results) {
     const mark = r.verdict === 'over' ? (r.level === 'fail' ? '❌' : ICON.over) : ICON[r.verdict]
-    lines.push(`| ${r.label} | ${r.value === null ? 'not measured' : `${r.value} ${r.unit}`}${r.note ?? ''} | ≤ ${r.max} ${r.unit} | ${r.level} | ${mark} ${r.verdict} |`)
+    lines.push(`| ${r.label} | ${r.value === null ? 'not measured' : `${r.value} ${r.unit}`}${r.note ?? ''} | ≤ ${r.max} ${r.unit}${r.ceiling !== r.max ? ` (fails > ${r.ceiling})` : ''} | ${r.level} | ${mark} ${r.verdict} |`)
   }
   return lines.join('\n')
 }
 
 /** `::warning::` / `::error::` workflow commands — one line per exceeded budget. */
 export function annotations(results: BudgetResult[]): string[] {
-  return results.filter(r => r.verdict === 'over').map(r =>
-    `::${r.level === 'fail' ? 'error' : 'warning'} title=ENGINE.MAP bench budget::${r.label}: ${r.value} ${r.unit} > ${r.max} ${r.unit} (${r.level})`)
+  return results.filter(r => r.verdict === 'over' || r.verdict === 'near').map(r =>
+    r.verdict === 'near'
+      ? `::warning title=ENGINE.MAP bench budget::${r.label}: ${r.value} ${r.unit} > ${r.max} ${r.unit}, inside the ${r.ceiling} ${r.unit} tolerance`
+      : `::${r.level === 'fail' ? 'error' : 'warning'} title=ENGINE.MAP bench budget::${r.label}: ${r.value} ${r.unit} > ${r.ceiling} ${r.unit} (${r.level})`)
 }
 
 /** The six CLI harnesses the fleet is built from (bench.ts's `HARNESSES`; the native one has no CLI to fake). */

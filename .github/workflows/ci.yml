@@ -149,9 +149,8 @@ jobs:
   # F0.4: the ENGINE.MAP bench. A mixed fleet of FAKE claude/codex/gemini/copilot/kimi/agy sessions
   # (scripts/perf/engine-map/fake-harness — never a real CLI) on a throwaway server over a synthetic
   # home, driven by simulated web clients. Its tables are published as a job summary and as the
-  # `engine-map-bench` artifact; the 09 §8 budgets (budgets.json -> engineMap) are WARNINGS today
-  # (level "warn": annotation + summary, job stays green) and become failures at Phase 4 by flipping
-  # the level, not this job. A separate job from perf-budgets so neither delays the other.
+  # `engine-map-bench` artifact; the 09 §8 budgets (budgets.json -> engineMap) are FAILURES (F4.B,
+  # level "fail", above max x 1.1; inside that tolerance is a warning annotation). A separate job from perf-budgets so neither delays the other.
   engine-map-bench:
     runs-on: ubuntu-latest
     timeout-minutes: 25
