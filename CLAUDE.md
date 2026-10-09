@@ -2047,6 +2047,18 @@ Claude Code deletes session transcripts (`~/.claude/projects/**/*.jsonl`) older 
   (authenticated) returns `EngineStatus`.
 - **A failed or mismatched engine never takes the product down** — it is logged and the host runs as
   a community build. `AGENTISTICS_ENGINE=0` switches a present engine off.
+- **The chat channel (engine-api 1.9, ENGINE.MAP F1.1)** — `HarnessIntegration.chat` (or
+  `chatAbsent`, the one sentence why not) serves a conversation's turns, state and in-flight text
+  from ONE incremental cursor per source, NEVER journaled: `resolve(ref)` → `ChatSourceRef | null`,
+  `follow(src, max, on)` → unsubscribe, deltas `window | append | grow | live | state | fork`
+  (`HarnessChatDelta` — core already has an unrelated `ChatDelta`). Each harness DECLARES which of
+  state / attention / live / fork it can say (`ChatDeclaration`); the host never assumes.
+  `applyHarnessChatDeltas` is the one receiver rule. The turn is core's `ChatTurn`
+  (`packages/core/src/chatTurn.ts`, moved from `server/sessions/chat-turn.ts`), mirrored as
+  `EngineChatTurn` and kept EQUAL by `engine-api-mirrors.test.ts`. The engine's copies of the
+  `sessions/*-chat.ts` / `chat-tail.ts` readers are held byte-equal to these by the engine's chat
+  differential, so a fix to a reader here must land in the engine too (its differential fails until it
+  does). The host switch (`adapter-chat` flag) is F1.2.
 - `engine/in-tree.ts` is TRANSITIONAL: the integrations and the provider verb still live in this tree
   and are packaged behind the contract there, so nothing else in the host imports them. When that
   code moves out, the file goes and the generator falls back to the null slot on its own.

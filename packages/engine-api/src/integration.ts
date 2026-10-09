@@ -8,6 +8,7 @@
  * **A missing `replay` is a DECLARED ABSENCE, never a crash.** An entry says either "here is my
  * replay" or, in one sentence, why it has none; an entry that says neither does not compile.
  */
+import type { HarnessChat } from './chat'
 import type { EngineCapabilityState, EngineEvent, HarnessId } from './mirrors'
 
 /** One thing a replay can be pointed at — a transcript, a database, a session directory. */
@@ -58,6 +59,15 @@ interface IntegrationBase<E extends EngineEvent> {
   live?: HarnessLive<E>
   /** Absent = the store import skips this harness's orphaned conversations, and says so. */
   entityIds?: HarnessEntityIds
+  /**
+   * 1.9 — the chat channel (`chat.ts`): the conversation's turns, state and in-flight text, NOT
+   * journaled. Optional here (an engine built against 1.8 has none, and a community build has no
+   * integrations at all); an engine's own CI holds each entry to "`chat` XOR `chatAbsent`", exactly as
+   * it holds `live`, so a harness can never be silently without one.
+   */
+  chat?: HarnessChat
+  /** The one sentence saying why there is no `chat`. */
+  chatAbsent?: string
 }
 
 export type HarnessIntegration<E extends EngineEvent = EngineEvent> = IntegrationBase<E> &
@@ -77,4 +87,11 @@ export function hasReplay<E extends EngineEvent>(
   integration: HarnessIntegration<E>,
 ): integration is IntegrationBase<E> & { replay: HarnessReplay<E>; replayAbsent?: undefined } {
   return integration.replay !== undefined
+}
+
+/** PURE. Narrows an entry to one that serves its conversation (1.9). False is a declared absence. */
+export function hasChat<E extends EngineEvent>(
+  integration: HarnessIntegration<E>,
+): integration is HarnessIntegration<E> & { chat: HarnessChat } {
+  return integration.chat !== undefined
 }

@@ -84,7 +84,18 @@
  * (B9.1) and `NativeSessionUsage.byModel` (H24). All optional: a 1.7 engine never reads them, and a
  * 1.8 engine on an older host runs without memory, artifacts index or vault references.
  */
-export const ENGINE_API_VERSION = '1.8.0'
+/**
+ * 1.9.0 — ENGINE.MAP F1.1: the chat channel (`chat.ts`). `HarnessIntegration.chat` (or `chatAbsent`,
+ * the one sentence why not) serves a conversation's turns, in-flight text and state from ONE
+ * incremental cursor per source, never journaled: `resolve(ref) → ChatSourceRef | null` and
+ * `follow(src, max, on) → unsubscribe` with `HarnessChatDelta`s `window | append | grow | live | state |
+ * fork`, each harness DECLARING which of state / attention / live / fork it can say (`ChatDeclaration`).
+ * `EngineChatTurn` mirrors core's `ChatTurn`, which moved to `@agentistics/core` so host and engine share
+ * it; `applyHarnessChatDeltas` is the one definition of how a receiver applies the deltas;
+ * `manifest.provides.chat` lists who serves one. All optional: a 1.8 engine still loads (it serves no
+ * chat and the host keeps its own readers), and a 1.9 engine on a 1.8 host is simply never asked.
+ */
+export const ENGINE_API_VERSION = '1.9.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 
