@@ -4,8 +4,9 @@
  * ## Why this exists now and did not before
  *
  * `harness-transcript.ts` carried `gemini: null` with a reason, and the reason was a LINK fact
- * rather than a format one: a reader is only ever offered a `conversationId`, gemini has no
- * `assignId` and no id-taking `resume`, so the entry would have been code nothing could reach.
+ * rather than a format one: a reader is only ever offered a `conversationId`, and gemini then had no
+ * `assignId` and no id-taking `resume` (it has both since F0.2 — the header UUID is resolved by
+ * `resolveGeminiTranscript` beside the synthetic id described below).
  *
  * What changed is that the link arrived from the other side. `planFirstSightingClaims` deliberately
  * includes gemini, and the id it claims is the SYNTHETIC one this product already keys the store on
@@ -37,7 +38,8 @@
  * injected entry, and showing it would open every session on a wall of context nobody typed.
  */
 
-import type { ChatTurn } from './chat-turn'
+import type { ChatTurn } from '@agentistics/core'
+import { parseGeminiShell } from './bash-mode'
 
 /** The bootstrap block gemini writes under the user role on startup. Not a person talking. */
 const SESSION_CONTEXT = /^<session_context>/
@@ -92,9 +94,12 @@ export function parseGeminiChatTurns(lines: readonly string[], max: number): Cha
     const text = textOf(msg).trim()
     if (!text) return
     if (role === 'user' && SESSION_CONTEXT.test(text)) return
+    // A `!` the person ran in the CLI: one entry holding the command AND what it printed.
+    const shell = role === 'user' ? parseGeminiShell(text) : null
     turns.push({
       role,
-      text,
+      text: shell ? `!${shell.command}` : text,
+      ...(shell ? { shell } : {}),
       ...(typeof msg.timestamp === 'string' && msg.timestamp ? { at: msg.timestamp } : {}),
     })
   }

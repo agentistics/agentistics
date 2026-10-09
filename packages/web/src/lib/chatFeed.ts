@@ -172,6 +172,7 @@ interface LiveEntry extends FeedEntry {
    * holds ten parsed conversations by design.
    */
   raw: string | null
+  signals?: CachedChat
   /**
    * The PUSHED chat (PERF.1): `/api/fleet/chat-stream` sends the conversation once, then only what
    * changed. While it is healthy the interval reads stop; when it fails the interval is back at once.
@@ -284,6 +285,16 @@ function openStream(e: LiveEntry, now: number): void {
       accept(e, JSON.stringify({ ...d.meta, turns }))
     } catch { closeStream(e) }
   })
+  for (const kind of ['live', 'state'] as const) es.addEventListener(kind, ev => {
+    e.streamAt = Date.now()
+    try {
+      const held = sessionScratch.readChat(e.key)
+      if (!held) { e.signals = applyChatSignal({ turns: [], ...e.signals }, kind, JSON.parse((ev as MessageEvent<string>).data)); return }
+      const next = applyChatSignal(held, kind, JSON.parse((ev as MessageEvent<string>).data))
+      e.raw = null
+      publishChat(e, next)
+    } catch { closeStream(e) }
+  })
   es.onerror = () => { closeStream(e); e.streamRetryAt = Date.now() + STREAM_RETRY_MS }
 }
 
@@ -308,6 +319,14 @@ async function read(e: LiveEntry): Promise<void> {
   }
 }
 
+/** PURE: structured text replaces the previous partial; a completed turn retires it. */
+export function applyChatSignal(held: CachedChat, kind: 'live' | 'state', signal: { text?: string; reasoning?: string; working?: boolean }): CachedChat {
+  if (kind === 'live' && (typeof signal.text !== 'string' || (signal.reasoning !== undefined && typeof signal.reasoning !== 'string'))) throw new Error('Invalid live chat frame')
+  if (kind === 'state' && typeof signal.working !== 'boolean') throw new Error('Invalid chat state')
+  if (kind === 'live') return { ...held, source: 'adapter', liveText: signal.text ?? '', liveReasoning: signal.reasoning ?? '' }
+  return { ...held, source: 'adapter', working: signal.working, ...(signal.working === false ? { liveText: '', liveReasoning: '' } : {}) }
+}
+
 /** One answer, from a read or from the stream: the same bytes keep the same instance. */
 function accept(e: LiveEntry, text: string): void {
   try {
@@ -322,19 +341,34 @@ function accept(e: LiveEntry, text: string): void {
       for (const cb of [...e.listeners]) cb(held)
       return
     }
-    const next = JSON.parse(text) as CachedChat
+    let next = JSON.parse(text) as CachedChat
+    const prev = sessionScratch.readChat(e.key)
+    if (next.source === 'adapter' && prev?.source === 'adapter') {
+      next = { ...prev, ...next }
+      if (JSON.stringify(prev.turns) !== JSON.stringify(next.turns)) next = { ...next, liveText: '', liveReasoning: '' }
+    }
+    if (next.source === 'adapter' && e.signals) {
+      const { turns: _ignored, ...signals } = e.signals
+      next = { ...next, ...signals }; e.signals = undefined
+    }
     e.raw = text
     e.ended = next.live === false
-    // The gallery's `galleryFileUrl` needs the server's REAL attachments directory to route a
-    // `viewed` file correctly under a relocated `AGENTISTICS_DIR` — set here, before the listeners
-    // (which render the gallery from these very turns) are notified.
-    if (next.attachmentsDir) setAttachmentsDir(next.attachmentsDir)
-    // Write through, so the NEXT visit starts where this one ended.
-    sessionScratch.writeChat(e.key, next)
-    for (const cb of [...e.listeners]) cb(next)
+    publishChat(e, next)
   } catch {
     /* a frame that does not parse is dropped; the next one, or the interval, replaces it */
   }
+}
+
+/** Publish a signal without serializing/re-parsing the entire transcript on each token chunk. */
+function publishChat(e: LiveEntry, next: CachedChat): void {
+  stampRead(e.key, Date.now())
+    // The gallery's `galleryFileUrl` needs the server's REAL attachments directory to route a
+    // `viewed` file correctly under a relocated `AGENTISTICS_DIR` — set here, before the listeners
+    // (which render the gallery from these very turns) are notified.
+  if (next.attachmentsDir) setAttachmentsDir(next.attachmentsDir)
+    // Write through, so the NEXT visit starts where this one ended.
+  sessionScratch.writeChat(e.key, next)
+  for (const cb of [...e.listeners]) cb(next)
 }
 
 /**

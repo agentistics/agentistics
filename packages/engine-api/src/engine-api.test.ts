@@ -140,8 +140,8 @@ describe('ES.6h — the typed code host (1.8)', () => {
     resume: async () => ({ ok: false as const, sentence: 'x' }), subscribe: () => () => {}, submit: () => ({ ok: true as const }),
     answer: () => ({ ok: false as const, sentence: 'x' }), cancel: () => ({ ok: false as const, sentence: 'x' }), end: async () => {},
   })
-  test('the engine-api is 1.8 and a 1.7 engine\'s opaque handle still satisfies CodeHost but is not a port', () => {
-    expect(ENGINE_API_VERSION).toBe('1.8.0')
+  test('the engine-api is 1.9 (1.8 + the chat channel) and a 1.7 engine\'s opaque handle still satisfies CodeHost but is not a port', () => {
+    expect(ENGINE_API_VERSION).toBe('1.10.0')
     const opaque: CodeHost = { kind: 'code-host', dispose: async () => {} }
     expect(asCodePort(opaque)).toBeNull()
     expect(asCodePort(null)).toBeNull()

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# tmux-shim — logs every tmux invocation agentop makes (epoch ms + subcommand), then runs real tmux.
+# Put its directory FIRST on the throwaway server's PATH as `tmux`. Log: $TMUX_SHIM_LOG.
+# The subcommand is the first argument that is not a socket/flag option (-L x, -S x, -f x).
+sub=""; skip=0
+for a in "$@"; do
+  if [ $skip = 1 ]; then skip=0; continue; fi
+  case "$a" in -L|-S|-f) skip=1 ;; -*) ;; *) sub="$a"; break ;; esac
+done
+printf '%s %s\n' "$(date +%s%3N)" "${sub:-?}" >> "${TMUX_SHIM_LOG:-/dev/null}"
+exec /usr/bin/tmux "$@"

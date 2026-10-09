@@ -8,6 +8,7 @@ import { harnessEnabled } from './types'
 import { GEMINI_DIR } from '../config'
 import { createLimiter, safeReadDir, safeReadJson } from '../utils'
 import { createFileMemo, registerMemo, versionOf } from './file-memo'
+import { listGeminiFamilies } from '../sessions/gemini-family-io'
 
 /** One parsed chat per (file version, project path) — see file-memo.ts. */
 const memo = registerMemo(createFileMemo<SessionMeta | null>())
@@ -28,17 +29,16 @@ async function buildProjectMap(): Promise<Map<string, string>> {
   return map
 }
 
-/** Recursively collect *.jsonl and *.json chat files under <dir>/chats/. */
-async function collectChatFiles(dir: string): Promise<string[]> {
-  const out: string[] = []
+/**
+ * The chat files of one project, GROUPED INTO CONVERSATIONS. A reopened gemini session continues in
+ * a NEW headerless file (`gemini-family.ts`), so reading each file as a session dropped every turn
+ * after a reopen and listed nothing for the continuation — a conversation is a family of files.
+ * The first member keeps naming the session, so a conversation that was never reopened keeps the
+ * exact id it always had.
+ */
+async function collectChatFamilies(dir: string): Promise<string[][]> {
   const chatsDir = join(dir, 'chats')
-  const entries = await safeReadDir(chatsDir)
-  for (const name of entries) {
-    if (name.endsWith('.jsonl') || name.endsWith('.json')) {
-      out.push(join(chatsDir, name))
-    }
-  }
-  return out
+  return (await listGeminiFamilies(chatsDir)).map(f => f.members.map(name => join(chatsDir, name)))
 }
 
 export const geminiAdapter: HarnessAdapter = {
@@ -55,7 +55,7 @@ export const geminiAdapter: HarnessAdapter = {
 
     // Walk ~/.gemini/tmp/<projectDirName>/ entries
     const topDirs = await safeReadDir(GEMINI_TMP_DIR)
-    const allFiles: Array<{ file: string; projectPath: string }> = []
+    const allFiles: Array<{ files: string[]; projectPath: string }> = []
 
     await Promise.all(topDirs.map(async dirName => {
       const dirPath = join(GEMINI_TMP_DIR, dirName)
@@ -63,18 +63,18 @@ export const geminiAdapter: HarnessAdapter = {
       if (dirName === 'bin') return
 
       const projectPath = projectMap.get(dirName) ?? ''
-      const files = await collectChatFiles(dirPath)
-      for (const file of files) {
-        allFiles.push({ file, projectPath })
+      for (const files of await collectChatFamilies(dirPath)) {
+        allFiles.push({ files, projectPath })
       }
     }))
 
     // Sorted: the walk pushes in completion order, and the build's output order follows this list.
-    allFiles.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))
+    allFiles.sort((a, b) => (a.files[0]! < b.files[0]! ? -1 : a.files[0]! > b.files[0]! ? 1 : 0))
     const limit = createLimiter(20)
-    const sessions = await Promise.all(allFiles.map(({ file, projectPath }) =>
-      limit(async () => memo.get(file, `${await versionOf([file])}|${projectPath}`, async () => {
-        const content = await readFile(file, 'utf-8').catch(() => '')
+    const sessions = await Promise.all(allFiles.map(({ files, projectPath }) =>
+      limit(async () => memo.get(files[0]!, `${await versionOf(files)}|${projectPath}`, async () => {
+        const file = files[0]!
+        const content = (await Promise.all(files.map(f => readFile(f, 'utf-8').catch(() => '')))).join('\n')
         // Derive a stable fallback ID from the file path: <dirName>/<filename-no-ext>
         const dirName = basename(file.replace(/\/chats\/[^/]+$/, ''))
         const fileBase = basename(file).replace(/\.(jsonl|json)$/, '')

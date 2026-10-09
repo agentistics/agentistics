@@ -86,6 +86,12 @@ export interface ProducerTick {
 export interface Producer {
   /** One poll. Returns what it wrote and what it delivered. */
   tick(): Promise<ProducerTick>
+  /**
+   * One snapshot somebody ELSE polled — the server's SessionHub (`session-hub.ts`), so the server runs
+   * ONE poller rather than two that disagree (ENGINE.MAP P-01). Same rules as `tick`; the caller must
+   * hand each poll over once and in order.
+   */
+  consume(snap: SessionSnapshot): Promise<ProducerTick>
   /** Loop until `stop()`. Resolves when the loop has ended. */
   run(): Promise<void>
   stop(): void
@@ -118,7 +124,10 @@ export function createProducer(o: {
   let desktop = o.desktop
 
   async function tick(): Promise<ProducerTick> {
-    const snap: SessionSnapshot = await o.poller.poll()
+    return consume(await o.poller.poll())
+  }
+
+  async function consume(snap: SessionSnapshot): Promise<ProducerTick> {
     const sessions = snap.sessions.map(toCandidate)
 
     // A failed poll returns the PREVIOUS list plus a reason. Comparing against it would report
@@ -178,7 +187,7 @@ export function createProducer(o: {
     }
   }
 
-  return { tick, run, stop: () => { stopped = true }, memory: () => memory }
+  return { tick, consume, run, stop: () => { stopped = true }, memory: () => memory }
 }
 
 /**
@@ -218,6 +227,32 @@ export async function createHostProducer(o?: {
       poller,
       readSubscriptions: o?.readSubscriptions ?? readSubscriptions,
       ...(o?.onError ? { onError: o.onError } : {}),
+    }),
+  }
+}
+
+/**
+ * The producer INSIDE the server: it polls nothing of its own and consumes the snapshots of the
+ * server's ONE poller (`session-hub.ts`) — the caller subscribes it to the hub. Null-equivalent
+ * (`unavailable`) under the same condition as `createHostProducer`: a backend that cannot run here.
+ */
+export async function createHubProducer(o: {
+  hub: { read(): Promise<SessionSnapshot> }
+  readSubscriptions?: () => Promise<Subscription[]>
+  onError?: (message: string) => void
+}): Promise<{ producer: Producer } | { unavailable: string }> {
+  const { resolveBackend } = await import('../sessions/index')
+  const backend = await resolveBackend()
+  const blocked = await backend.unavailable()
+  if (blocked) return { unavailable: blocked }
+  const { readSubscriptions } = await import('./subscription-store')
+  return {
+    producer: createProducer({
+      // `tick()` is never driven on this producer (the hub drives `consume`); a stray call reads the
+      // hub's last snapshot rather than polling.
+      poller: { poll: () => o.hub.read() },
+      readSubscriptions: o.readSubscriptions ?? readSubscriptions,
+      ...(o.onError ? { onError: o.onError } : {}),
     }),
   }
 }

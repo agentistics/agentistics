@@ -119,6 +119,87 @@ const KIMI_APPROVAL = [
   "     Don't trust",
 ]
 
+// ── kimi 2.1.1 — verbatim from a real TUI under tmux, 2026-10-09 (throwaway KIMI_CODE_HOME, mock model). ──
+// The folder-trust dialog GREW: its footer is now under the title, ~14 rows above the bottom, where the
+// 4-row footer window cannot see it.
+const KIMI_211_TRUST = [
+  ' ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────',
+  '  Trust this folder?',
+  '  ↑↓ navigate · Enter select · Esc exit',
+  '',
+  '  /tmp/qa/work',
+  '  chpad/work5',
+  '',
+  '  Project-level MCP servers are disabled until you explicitly choose Trust. Trust starts the listed project MCP',
+  '  targets and remembers this folder.',
+  '',
+  '   ❯ Trust this folder',
+  '     Enable project MCP servers. Remembered for this folder.',
+  '',
+  "     Don't trust",
+  '     Exit Kimi Code. Asked again next launch.',
+  '',
+  ' ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────',
+]
+
+/** A tool approval — numbered `▶ 1. Approve once … 4. Reject with feedback`. */
+const KIMI_211_TOOL = [
+  ' ✨ please run TOOL',
+  '',
+  ' ● Running a command · $ pwd',
+  ' ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────',
+  '   ▶ Run this command?',
+  '',
+  '   cwd: /tmp/qa/work',
+  '   $ pwd',
+  '     print cwd',
+  '',
+  '   ▶ 1. Approve once',
+  '     2. Approve for this session',
+  '     3. Reject',
+  '     4. Reject with feedback',
+  '',
+  '   ↑/↓ select · 1/2/3/4 choose · ↵ confirm',
+  ' ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────',
+  ' mock  …/4d5647da-07a4-41c0-8001-f360f5d32874/scratchpad/work4                                            ctrl+o expand',
+  '                                                                                                   context: 1% (15/32k)',
+]
+
+/** AskUserQuestion — `→ [1] red … [4] Other`. */
+const KIMI_211_ASK = [
+  ' ✨ please ASK me',
+  ' ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────',
+  '  question',
+  '',
+  '   Colour    Submit',
+  '',
+  '  ? Which colour?',
+  '',
+  '   → [1] red',
+  '         warm',
+  '     [2] green',
+  '         calm',
+  '     [3] blue',
+  '         cool',
+  '     [4] Other',
+  '',
+  '   ↑↓ select  1-4 / ↵ choose  ←/→/tab switch  esc cancel',
+  ' ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────',
+  ' mock  …/4d5647da-07a4-41c0-8001-f360f5d32874/scratchpad/work4                                            ctrl+o expand',
+  '                                                                                                   context: 1% (15/32k)',
+]
+
+/** The same screen once the dialog is gone: the input box, its status line. */
+const KIMI_211_IDLE = [
+  '',
+  ' ● done after tool: Wall time: 0.015 seconds',
+  ' ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮',
+  ' │ >                                                                                                                  │',
+  ' ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯',
+  ' mock  …/work4                                                                                        ctrl+o expand',
+  '                                                                                                   context: 1% (15/32k)',
+]
+
 describe('ATTENTION_RULES', () => {
   it('declares an entry for every harness, so a new one cannot be forgotten', () => {
     for (const h of HARNESS_ORDER) {
@@ -198,6 +279,18 @@ describe('codex', () => {
 describe('kimi', () => {
   it('sees the blocking dialog', () => {
     expect(quiet(KIMI_APPROVAL, 'kimi')).toBe('waiting-approval')
+  })
+  it('2.1.1: sees all THREE of its blocking dialogs, each with a footer in a different place', () => {
+    expect(quiet(KIMI_211_TRUST, 'kimi')).toBe('waiting-approval')
+    expect(quiet(KIMI_211_TOOL, 'kimi')).toBe('waiting-approval')
+    expect(quiet(KIMI_211_ASK, 'kimi')).toBe('waiting-approval')
+  })
+  it('2.1.1: the same screen once the dialog is gone is just waiting', () => {
+    expect(quiet(KIMI_211_IDLE, 'kimi')).toBe('waiting')
+  })
+  it('2.1.1: a session that merely QUOTES a footer high up in its transcript is not blocked', () => {
+    const quoting = [' ● the rule is /↑\\/↓ select · [\\d/]+ choose · ↵ confirm/ in attention-rules.ts', ' Exit Kimi Code. Asked again next launch.', ...Array(8).fill(' ...'), ...KIMI_211_IDLE]
+    expect(quiet(quoting, 'kimi')).toBe('waiting')
   })
 })
 

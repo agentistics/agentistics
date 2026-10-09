@@ -262,8 +262,14 @@ process, so several sessions of one harness in one folder each get their own con
 the directory-and-time fallback has to refuse. That fallback stays behind it, which is also what
 links codex and kimi off Linux (more slowly; the chat says so).
 
-For gemini no such link exists yet — the CLI invents an id, never reports it, and holds no file open
-long enough to read — so the row says so rather than showing a guess. The fallback everything else uses matches
+**gemini is handed its id at spawn** (`--session-id <uuid>`, verified on 0.63.0): the chat's header
+`sessionId` is that uuid, so the link is exact from the first turn and `--resume <uuid>` reopens it.
+The store still keys a gemini chat by the synthetic `<project>/<file>`; the uuid is bridged to it
+through `SessionMeta.native_session_id` (a lookup alias, never a key). A reopen continues in a NEW
+headerless file, so a gemini conversation is read and counted as a family of files
+(`gemini-family.ts`). A session whose chat has no header id lists but offers no reopen.
+
+Where nothing links a row (opencode) the row says so rather than showing a guess. The fallback everything else uses matches
 by harness and directory, which gives *every* session of one repository the same conversation: good
 enough to offer a reopen you confirm by its title, not good enough to be presented as the conversation
 you are in. A row that does know its conversation never falls back to that guess, even in the minutes
@@ -420,16 +426,13 @@ empty conversation.
 | codex | `codex resume <id>` | `~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl` |
 | kimi | `--resume <id>` | `~/.kimi-code/sessions/*/session_<id>/agents/main/wire.jsonl` |
 | antigravity | `--conversation <id>` | `brain/<id>/.system_generated/logs/transcript_full.jsonl` |
-| **gemini** | **never** | — |
+| gemini | `--session-id` at spawn (the header `sessionId`), `--resume <uuid>` at reopen | `~/.gemini/tmp/<project>/chats/session-<minute>-[N-]<uuid8>.jsonl`, every file of the family |
 
-**Gemini can never be read here, and that is a fact about the LINK.** Its `-r, --resume` takes
-`latest` or an index rather than an id, and `--session-id` is deliberately not used because gemini's
-session id in this product is synthetic (`<dir>/<file>`), so a recorded UUID would resolve to nothing
-while looking exact. A gemini row therefore never carries a conversation id at all; the row says so
-(`conversationBlind`) and the workspace hides the chat tab rather than offering one that cannot work.
-A reader for its file format would be code nothing can reach. Its format is nonetheless recorded in
-`harness-transcript.ts` so the measurement is not spent twice: it is a patch log rather than one
-message per line.
+**Gemini's two ids.** The store keys a chat by `<project>/<file>`; the CLI takes and writes the header
+uuid. `SessionMeta.native_session_id` bridges them and `findConversation` / the transcript resolver /
+the task board's metas answer to either. A reopen is not an append: interactive `--resume` writes
+the new turns to a new headerless file, so the reader concatenates the family and the adapter folds
+it into one session keyed by its first file.
 
 The same applies, per row, to any harness whose session was **started fresh** without an id.
 codex and kimi only gain the link on a reopen (or once the first-sighting claim can settle it), so a

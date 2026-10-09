@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { contextBlock, contextText, type ContextInput } from './agentistics-context'
 import { availableHarnesses } from './harness-available'
+import { specificationSkillsFor } from './specification-skills'
 import type { SpawnPlan, SpawnRequest } from './types'
 
 const HARNESS_NAMES: Record<string, string> = {
@@ -119,8 +120,12 @@ export function pendingContextFor(plan: SpawnPlan, context: SpawnRequest['contex
   return context && plan.contextVia === 'none' ? context.block : undefined
 }
 
-export function buildSpawnContext(i: Omit<ContextInput, 'harnesses'> & { harnesses?: readonly string[] }): NonNullable<SpawnRequest['context']> {
-  const full: ContextInput = { ...i, harnesses: i.harnesses ?? installedHarnessNames() }
+export function buildSpawnContext(i: Omit<ContextInput, 'harnesses' | 'specSkills'> & { harnesses?: readonly string[]; specSkills?: readonly string[]; harness?: string }): NonNullable<SpawnRequest['context']> {
+  const full: ContextInput = {
+    ...i,
+    ...(i.harness ? { specSkills: i.specSkills ?? specificationSkillsFor(i.harness) } : {}),
+    harnesses: i.harnesses ?? installedHarnessNames(),
+  }
   return { text: contextText(full), block: contextBlock(full), dir: join(AGENTISTICS_DATA_DIR, 'session-context', i.sessionId) }
 }
 

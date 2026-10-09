@@ -4,7 +4,7 @@
  *
  * ## Why this exists
  *
- * Neither CLI can be told an id at spawn (`SpawnSpec.assignId` is claude and copilot only; `kimi -S
+ * Neither CLI can be told an id at spawn (`SpawnSpec.assignId` is claude, copilot and gemini only; `kimi -S
  * <fresh-uuid>` answers `Session "…" not found`, measured against kimi 0.41.0 on 2026-10-08), and
  * neither writes a record about its own live session the way claude's `~/.claude/sessions/<pid>.json`
  * does. Until this module the only link they had was `task-attribution.ts`'s first-sighting claim,

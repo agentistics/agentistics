@@ -1,17 +1,17 @@
 /**
- * chat-turn.ts — what ONE turn of a conversation is, whatever harness wrote it.
+ * chatTurn.ts — what ONE turn of a conversation is, whatever harness wrote it.
  *
  * It lived inside `chat-tail.ts`, the CLAUDE transcript reader, for as long as Claude was the only
- * harness whose conversation could be read at all. It is now the shape every reader in
- * `harness-transcript.ts` produces, and a second harness importing the first one's module to learn
- * what a turn is would make Claude's reader the thing the others are defined against rather than
- * one of them.
+ * harness whose conversation could be read at all, then in `server/sessions/chat-turn.ts` once every
+ * reader in `harness-transcript.ts` produced it. It is in core now (engine-api 1.9, `HarnessChat`)
+ * because the ENGINE's chat channel produces it too: the host and the engine must agree on one shape,
+ * and a second harness — or a second package — importing the first one's module to learn what a turn
+ * is would make that module the thing the others are defined against rather than one of them.
  *
  * Nothing here is Claude-specific. Where a field only ever applies to one harness that is said on
- * the field, not enforced by which module owns it.
+ * the field, not enforced by which module owns it. `@agentistics/engine-api` re-declares it
+ * structurally (`EngineChatTurn`); `engine-api-mirrors.test.ts` keeps the two EQUAL.
  */
-
-import type { ShellRun } from './bash-mode'
 
 export interface ChatTurn {
   /**
@@ -148,7 +148,30 @@ export interface ChatTurn {
   /**
    * A `!` command the PERSON ran in Claude Code's bash mode, paired with what it printed — see
    * `bash-mode.ts`. `text` is then the `!line` exactly as typed, which is also what the composer's
-   * echo holds, so the "delivered — not read yet" bubble reconciles against it. Claude only.
+   * echo holds, so the "delivered — not read yet" bubble reconciles against it. Claude, codex and gemini
+   * (P-24); the last two carry one merged stream as `stdout`.
    */
   shell?: ShellRun
+}
+
+/** What the chat carries for one executed `!` command. */
+export interface ShellRun {
+  /** The command line exactly as the person ran it, without the `!`. */
+  command: string
+  /** One line naming what it did — `commandSummary`'s rule, so a `cd x && y` reads as `y`. */
+  summary: string
+  /**
+   * The output has been written to the transcript. `false` only on the NEWEST entry of the file,
+   * where the command is still running; an older input with no output is simply not known to have
+   * printed anything, and says nothing either way (`output` absent, `running` false).
+   */
+  running: boolean
+  output?: ShellOutput
+}
+
+export interface ShellOutput {
+  stdout: string
+  stderr: string
+  /** Either stream was cut to its last `MAX_SHELL_OUTPUT` characters. */
+  truncated?: boolean
 }

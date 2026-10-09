@@ -57,6 +57,12 @@ export interface DialogOption {
   label: string
   /** True for the one the dialog is currently highlighting. */
   selected: boolean
+  /**
+   * F3.3 — the option is a FIELD (picking it means typing an answer), as a structured session's
+   * PROTOCOL states it (`StructuredOption.freeText`). Absent on a screen read: there the label decides
+   * (`isFreeTextOption`).
+   */
+  freeText?: boolean
 }
 
 /**

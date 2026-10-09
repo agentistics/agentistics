@@ -80,7 +80,7 @@ describe('SPAWN_SPECS', () => {
     for (const id of HARNESS_ORDER) {
       const spec = SPAWN_SPECS[id]
       if (!spec) continue
-      expect(Boolean(spec.effortFlag)).toBe(Boolean(spec.efforts?.length))
+      expect(Boolean(spec.effortFlag || spec.effortArgs)).toBe(Boolean(spec.efforts?.length))
     }
   })
 })
@@ -102,6 +102,14 @@ describe('planSpawn', () => {
       ok: true,
       plan: { argv: ['codex', '--no-daemon', '--model', 'o3', 'implement X'], initialPrompt: { mode: 'submit' } },
     })
+  })
+
+  it('kimi 2.1.1 resumes by the session DIRECTORY name: the bare uuid the store keys on gets its `session_` prefix, once', () => {
+    const uuid = '7b280b0b-d8ae-4922-b165-07dc06f3c909'
+    for (const id of [uuid, `session_${uuid}`]) {
+      const r = planSpawn({ harness: 'kimi', cwd: '/tmp', resumeId: id })
+      expect(r).toMatchObject({ ok: true, plan: { argv: ['kimi', '-S', `session_${uuid}`] } })
+    }
   })
 
   it('types a kimi prompt in, because kimi has no interactive prompt flag', () => {
@@ -144,11 +152,17 @@ describe('planSpawn', () => {
     expect(r).toEqual({ ok: true, plan: { argv: ['agy', '--effort', 'high'] } })
   })
 
+  it('accepts agy 1.3.2\'s two extra levels, xhigh and max (P-23)', () => {
+    for (const effort of ['xhigh', 'max']) {
+      expect(planSpawn({ harness: 'antigravity', cwd: '/tmp', effort })).toEqual({ ok: true, plan: { argv: ['agy', '--effort', effort] } })
+    }
+  })
+
   it('refuses an agy effort outside that set', () => {
-    const r = planSpawn({ harness: 'antigravity', cwd: '/tmp', effort: 'xhigh' })
+    const r = planSpawn({ harness: 'antigravity', cwd: '/tmp', effort: 'extreme' })
     expect(r).toEqual({
       ok: false,
-      error: { code: 'unknown-effort', harness: 'antigravity', value: 'xhigh', accepted: ['low', 'medium', 'high'] },
+      error: { code: 'unknown-effort', harness: 'antigravity', value: 'extreme', accepted: ['low', 'medium', 'high', 'xhigh', 'max'] },
     })
   })
 
@@ -184,16 +198,28 @@ describe('assigning the conversation id at spawn', () => {
   })
 
   it('records NOTHING for a harness that invents its own id and never reports it', () => {
-    // codex, kimi, gemini and antigravity. An id recorded here would be one nothing in the store
-    // resolves to, which is worse than none: it LOOKS like an exact link. The UI says so instead —
-    // see `conversationLinkable`.
-    for (const harness of ['codex', 'kimi', 'gemini', 'antigravity'] as const) {
+    // codex, kimi and antigravity. An id recorded here would be one nothing in the store
+    // resolves to, which is worse than none: it LOOKS like an exact link. They are linked another
+    // way instead — see `conversationLinkable`.
+    for (const harness of ['codex', 'kimi', 'antigravity'] as const) {
       const r = planSpawn({ harness, cwd: '/r', conversationId: 'u-3' })
       expect(r.ok).toBe(true)
       if (!r.ok) continue
       expect(r.plan.argv).not.toContain('u-3')
       expect(r.plan.conversationId).toBeUndefined()
     }
+  })
+
+  it('assigns the id to gemini through --session-id, and records it', () => {
+    // gemini 0.63.0, VERIFIED LIVE 2026-10-09: `gemini --session-id <uuid>` wrote a chat whose
+    // header `sessionId` is that uuid and whose file name ends in its first eight characters. The
+    // store keys the chat by `<project>/<file>`, bridged by `SessionMeta.native_session_id`.
+    const id = '04d97770-e53f-4b7d-86d2-63bd12ec32eb'
+    const r = planSpawn({ harness: 'gemini', cwd: '/r', conversationId: id, prompt: 'hi' })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.plan.argv).toEqual(['gemini', '--session-id', id, '--prompt-interactive', 'hi'])
+    expect(r.plan.conversationId).toBe(id)
   })
 
   it('never assigns an id beside a resume — that conversation already has one', () => {
@@ -235,9 +261,12 @@ describe('conversationLinkable', () => {
   it('is false where every answer would be a harness-and-directory guess', () => {
     // The guess gives every session of one repository the same conversation — the bug that reopened
     // three rows onto one conversation. It is fine to OFFER, and this flag is what stops it being
-    // presented as the conversation the row is in. gemini holds no file open to read (probed
-    // 2026-10-08) and is not assigned an id yet.
-    expect(conversationLinkable('gemini')).toBe(false)
+    // presented as the conversation the row is in. opencode has no spawn spec at all.
+    expect(conversationLinkable('opencode')).toBe(false)
+  })
+
+  it('is true for gemini, which is handed its id at spawn (F0.2)', () => {
+    expect(conversationLinkable('gemini')).toBe(true)
   })
 })
 
@@ -256,10 +285,10 @@ describe('conversationLinkGoneForever', () => {
   })
 
   it('is false for a harness that was never linkable in the first place', () => {
-    // gemini is `!conversationLinkable` already — `sessConversationBlind` names that, and this
+    // opencode is `!conversationLinkable` already — `sessConversationBlind` names that, and this
     // function exists for the narrower, DIFFERENT case: a harness that CAN link, in principle, but
     // only within a window that has closed.
-    expect(conversationLinkGoneForever('gemini')).toBe(false)
+    expect(conversationLinkGoneForever('opencode')).toBe(false)
   })
 
   it('is false for codex and kimi, whose process route is not their ONLY route', () => {
@@ -323,5 +352,29 @@ describe('exclusive managed process log', () => {
       expect(planSpawn({ harness, cwd: '/r', logFile: '/data/agy-logs/0123456789.log' }))
         .toEqual(planSpawn({ harness, cwd: '/r' }))
     }
+  })
+})
+
+
+describe('reopening a gemini conversation by id (F0.2)', () => {
+  const id = '04d97770-e53f-4b7d-86d2-63bd12ec32eb'
+
+  it('passes the uuid to --resume, which the CLI accepts beside "latest" and an index', () => {
+    // VERIFIED LIVE 2026-10-09, gemini 0.63.0: `--resume <uuid>` reopened the conversation (the
+    // model recalled the earlier turn, one chat file) and an unknown uuid was refused by the CLI.
+    const r = planSpawn({ harness: 'gemini', cwd: '/r', resumeId: id })
+    expect(r).toEqual({ ok: true, plan: { argv: ['gemini', '--resume', id], conversationId: id } })
+  })
+
+  it('REFUSES an old synthetic <project>/<file> id instead of launching a CLI that fails unseen', () => {
+    const r = planSpawn({ harness: 'gemini', cwd: '/r', resumeId: 'work/session-2026-10-09T10-49-04d97770' })
+    expect(r).toEqual({
+      ok: false,
+      error: { code: 'resume-id-unusable', harness: 'gemini', id: 'work/session-2026-10-09T10-49-04d97770' },
+    })
+  })
+
+  it('does not refuse an id for a harness that declares no restriction', () => {
+    expect(planSpawn({ harness: 'claude', cwd: '/r', resumeId: 'anything' }).ok).toBe(true)
   })
 })

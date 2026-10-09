@@ -8,6 +8,7 @@
 
 import type { ConversationLinkReason, HarnessId, SendNowOutcome } from '@agentistics/core'
 import type { RepoFacts } from './repo-facts'
+import type { HarnessChat, StructuredAnswer, StructuredAttention, StructuredMcpServer } from '@agentistics/engine-api'
 
 /**
  * How a harness accepts an initial prompt while starting an INTERACTIVE session.
@@ -50,6 +51,8 @@ export interface SpawnSpec {
   defaultModel?: string
   /** Absent when the CLI has no effort flag. Paired with `efforts`; never one without the other. */
   effortFlag?: string
+  /** Config-based effort selection where the CLI has no dedicated flag (Codex `-c`). */
+  effortArgs?: (effort: string) => string[]
   /** A genuine closed enum, printed by the CLI itself — so this one IS validated. */
   efforts?: string[]
   /** The effort used when `--effort` is not passed, under exactly `defaultModel`'s rule. */
@@ -59,8 +62,9 @@ export interface SpawnSpec {
    *
    * A function rather than a flag string because the shapes genuinely differ: codex takes a
    * SUBCOMMAND (`codex resume <id>`), the rest take a flag, and they do not agree on which. Absent
-   * when the CLI cannot reopen a conversation by id at all — gemini's `--resume` takes "latest" or
-   * an index, never an id, so it has none and the verb is simply not offered for it.
+   * when the CLI cannot reopen a conversation by id at all, and the verb is then simply not offered.
+   * (Gemini's `--resume` is documented as "latest | index" but takes the session UUID too, which is
+   * what is passed — see its entry in `SPAWN_SPECS`.)
    */
   resume?: (id: string) => string[]
   /**
@@ -90,10 +94,17 @@ export interface SpawnSpec {
    * this harness rather than showing the harness-and-directory guess as though it were a fact.
    *
    * Only ever set where the id the CLI accepts is EXACTLY the id the adapter reads sessions back
-   * by, verified by running it. Gemini accepts a UUID and is deliberately absent for that reason —
-   * see its entry in `SPAWN_SPECS`.
+   * by, verified by running it. Gemini is the case that needed a bridge: it accepts a UUID, but the
+   * store keys its chats by a synthetic path id, so the UUID is matched through
+   * `SessionMeta.native_session_id` — see its entry in `SPAWN_SPECS`.
    */
   assignId?: (id: string) => string[]
+  /**
+   * Which conversation ids `resume` can be given. Absent = any. A harness whose store holds ids the
+   * CLI cannot open (gemini's old synthetic `<project>/<file>`) sets it, and `planSpawn` then
+   * REFUSES `resume-id-unusable` instead of launching a CLI that fails on a pane nobody watches.
+   */
+  resumeIdOk?: (id: string) => boolean
 }
 
 export interface SpawnRequest {
@@ -176,6 +187,7 @@ export interface SpawnPlan {
 export type SpawnPlanError =
   | { code: 'unsupported-harness'; harness: HarnessId }
   | { code: 'resume-unsupported'; harness: HarnessId }
+  | { code: 'resume-id-unusable'; harness: HarnessId; id: string }
   | { code: 'model-unsupported'; harness: HarnessId }
   | { code: 'effort-unsupported'; harness: HarnessId }
   | { code: 'unknown-effort'; harness: HarnessId; value: string; accepted: string[] }
@@ -200,6 +212,27 @@ export interface BackendSpawn {
    * resolves the rules. Absent when there is nothing to deliver.
    */
   initialPrompt?: BackendInitialPrompt
+  /**
+   * F2.0 — what a STRUCTURED driver needs to start the same session over its harness's protocol
+   * (`structured-backend.ts`). Ignored by tmux. Absent = route on the argv alone (A5.4's rule).
+   */
+  structured?: StructuredIntent
+}
+
+/** F2.0 — the spawn, in the terms a structured driver takes (`StructuredSpawn` minus the host's own id/cwd). */
+export interface StructuredIntent {
+  harness: HarnessId
+  /** `web` = born in the browser: structured when the flag is on and a driver is ready. */
+  origin?: 'web' | 'terminal'
+  model?: string
+  effort?: string
+  /** The id offered for assignment (fresh sessions). */
+  conversationId?: string
+  resumeId?: string
+  /** The person's first prompt alone — the context travels in `instructions`, never prepended here. */
+  prompt?: string
+  instructions?: { text: string; block: string }
+  mcp?: StructuredMcpServer[]
 }
 
 export interface BackendInitialPrompt extends InitialPrompt {
@@ -403,6 +436,12 @@ export interface ManagedSession {
    *  whether the session is alive (live file) or finished (this persisted copy). Absent on a claude
    *  older than 2.1.232, which writes the name with no timestamp. */
   harnessNameSince?: number
+  /**
+   * F2.0 — the structured driver this session ran under (`acp`, `claude-stream-json`, …), stamped when
+   * it was hosted over its harness's protocol. A web reopen of such a row runs structured again; a row
+   * without it (terminal-born) reopens as a TUI.
+   */
+  structuredDriver?: string
 }
 
 /**
@@ -601,6 +640,32 @@ export interface SessionBackend {
   activityOf?(id: string): SessionActivity | undefined
   /** A5.4 — the open dialog's option labels, numbered from 1, when the backend knows them. */
   dialogOf?(id: string): string[] | undefined
+  /**
+   * F2.0 — a STRUCTURED session's open request as its protocol states it (`null`: none open);
+   * `undefined` for every session that is not structured (tmux, A5.4's ACP). The approve path asks
+   * this FIRST and answers through `answer` — no keystroke reaches anything.
+   */
+  attentionOf?(id: string): StructuredAttention | null | undefined
+  /** F2.0 — answer a structured session's open request through its driver. False: refused / stale. */
+  answer?(id: string, a: StructuredAnswer): Promise<boolean>
+  /**
+   * F2.0 — a structured session's own chat channel (the protocol, not a file), for the adapter chat
+   * stream; `undefined` for any other session.
+   */
+  chatOf?(id: string): { chat: HarnessChat; conversationId: string } | undefined
+  /**
+   * F2.0b — "open in terminal" on a live STRUCTURED session: end its child, then resume the same
+   * conversation as a TUI under the same managed id. `not-structured` for every other session.
+   */
+  toTerminal?(id: string): Promise<{ ok: true } | { ok: false; why: 'not-structured' | 'no-conversation' | 'no-resume' | 'still-running' | 'spawn-failed' }>
+  /**
+   * F2.0b — whether this session is RUNNING over its harness's protocol right now (one this process
+   * drives, or one a surviving relay still owns). The web's "open in terminal" is offered on exactly
+   * these rows; `undefined`/false for every other session, a TUI that came back from `toTerminal` included.
+   */
+  isStructured?(id: string): boolean
+  /** F2.0b — take back the structured sessions that outlived the previous server (the owner process only). */
+  reattach?(): Promise<void>
 }
 
 /** What a rewind did. `not-found`: the prompt is not in the menu; `unexpected`: the harness drew a

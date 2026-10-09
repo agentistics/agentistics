@@ -72,6 +72,16 @@ function interruptVerb(v: ControlSession, s: ControlStrings): FleetVerb {
 }
 
 /**
+ * F2.0b — "Open in terminal", offered ONLY on a row running over its harness's protocol right now.
+ * Absent (not disabled) everywhere else: a pane session already is a terminal, and a refused verb on
+ * every row would be noise. The server action still answers in a sentence when it cannot be done
+ * (a harness with no resume by id), which the menu shows.
+ */
+function terminalVerb(s: ControlStrings): FleetVerb {
+  return { action: 'terminal' as SessionAction, label: s.sessionsOpenTerminal, enabled: true }
+}
+
+/**
  * What the page may ask to be done to one row — a strict subset of the cockpit's verbs.
  *
  * It lives HERE, in the leaf, rather than beside its implementation in `fleet-web.ts`: `index.ts`
@@ -91,6 +101,12 @@ export type FleetActionId =
    * probed rules rather than assumed.
    */
   | 'interrupt'
+  /**
+   * F2.0b — "open in terminal" on a STRUCTURED session: end its protocol child and resume the same
+   * conversation as a TUI under the same row (`backend.toTerminal`). Chat first; the terminal only
+   * when the person asks for it. A session already in a terminal answers so, in a sentence.
+   */
+  | 'terminal'
   /**
    * Advance the harness to its NEXT mode — `auto` → `manual` → `accept edits` → `plan` → back.
    *
@@ -201,6 +217,13 @@ export interface FleetRow {
   conversationId?: string
   /** WHERE the conversation link came from (LIVE.1). Not relayed to a central. */
   link?: SessionConversationLink | null
+  /**
+   * HOW the conversation id was learned, as a flat field — `link.reason` when the row HAS a
+   * conversation. It lived only inside `link`, so a client reading `conversationLinkVia` got null
+   * for every row. Absent while there is no id: `no-id-route` and friends say why there is NONE,
+   * which is not a way the link was established.
+   */
+  conversationLinkVia?: SessionConversationLink['reason']
   /** The dialog this session is blocked on, verbatim, and the options read off it. */
   approvalLines?: string[]
   dialogOptions?: { number: number; label: string; selected: boolean; freeText?: boolean }[]
@@ -274,6 +297,7 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
   // Appended rather than folded into `sessionActions`: the cockpit answers "stop" with the Escape
   // key inside an attached pane, so it never needed a listed verb. The browser has no pane.
   verbs.push(interruptVerb(row, s))
+  if (row.structured && row.actionable) verbs.push(terminalVerb(s))
   if (isNativeRow(row)) verbs.push(...nativeStoreVerbs(row, s))
   return {
     id: row.id,
@@ -292,6 +316,7 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
     ...(row.mode ? { mode: row.mode } : {}),
     ...(row.conversationId ? { conversationId: row.conversationId } : {}),
     ...(row.link !== undefined ? { link: row.link } : {}),
+    ...(row.conversationId && row.link ? { conversationLinkVia: row.link.reason } : {}),
     ...(row.approvalLines?.length ? { approvalLines: row.approvalLines } : {}),
     ...(row.dialogOptions?.length ? { dialogOptions: [...row.dialogOptions] } : {}),
     ...(row.approvalBlind ? { approvalBlind: row.approvalBlind } : {}),

@@ -104,3 +104,21 @@ describe('parseGeminiChatTurns', () => {
     expect(parseGeminiChatTurns([], 50)).toEqual([])
   })
 })
+
+describe('`!` shell commands (P-24)', () => {
+  // VERBATIM from a throwaway gemini 0.63.0 session, 2026-10-09: `!echo hello-bang`.
+  const BANG = JSON.stringify({
+    id: '446100b6-fa2f-4290-b151-432a22bf5106', timestamp: '2026-10-09T18:09:57.332Z', type: 'user',
+    content: [{ text: 'I ran the following shell command:\n```sh\necho hello-bang\n```\n\nThis produced the following result:\n```\nhello-bang\n```' }],
+  })
+  it('is drawn as the `!line` with its output, not as a prose message', () => {
+    const [turn] = parseGeminiChatTurns([HEADER, BANG], 10)
+    expect(turn!.text).toBe('!echo hello-bang')
+    expect(turn!.shell).toMatchObject({ command: 'echo hello-bang', running: false, output: { stdout: 'hello-bang', stderr: '' } })
+  })
+  it('a normal user message that merely mentions the phrase is left alone', () => {
+    const [turn] = parseGeminiChatTurns([JSON.stringify({ id: 'x', type: 'user', content: 'I ran the following shell command yesterday' })], 10)
+    expect(turn!.text).toBe('I ran the following shell command yesterday')
+    expect(turn!.shell).toBeUndefined()
+  })
+})

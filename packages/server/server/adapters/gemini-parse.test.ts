@@ -432,3 +432,65 @@ describe('gemini journal — appended message records', () => {
     expect(parseGeminiChat(onlyPatches, 'agentistics/session-z', '/p')).toBeNull()
   })
 })
+
+// ---------------------------------------------------------------------------
+// F0.2 — the chat header's sessionId is kept as the lookup ALIAS (never as the key)
+// ---------------------------------------------------------------------------
+
+describe('native_session_id', () => {
+  const UUID = '04d97770-e53f-4b7d-86d2-63bd12ec32eb'
+  const jsonl = (header: object) => [
+    JSON.stringify(header),
+    JSON.stringify({ id: 'u1', timestamp: '2026-10-09T10:49:55.000Z', type: 'user', content: [{ text: 'hello there' }] }),
+    JSON.stringify({ id: 'g1', timestamp: '2026-10-09T10:49:58.000Z', type: 'gemini', content: 'hi', model: 'gemini-3-flash-preview' }),
+  ].join('\n')
+
+  test('a journal header sessionId becomes the alias while the store key stays the synthetic id', () => {
+    const s = parseGeminiChat(
+      jsonl({ sessionId: UUID, projectHash: 'h', startTime: '2026-10-09T10:49:54.676Z', lastUpdated: '2026-10-09T10:49:58.000Z', kind: 'main' }),
+      'work/session-2026-10-09T10-49-04d97770', '/p/work')
+    expect(s?.session_id).toBe('work/session-2026-10-09T10-49-04d97770')
+    expect(s?.native_session_id).toBe(UUID)
+  })
+
+  test('the rich-JSON format carries it too', () => {
+    const s = parseGeminiChat(RICH_JSON_SAMPLE, 'p/chat', '/p')
+    expect(s?.native_session_id).toBe('6fa861f9-c282-4aef-a436-25f97419462b')
+  })
+
+  test('a header without a usable sessionId leaves the alias ABSENT, never empty', () => {
+    const s = parseGeminiChat(jsonl({ projectHash: 'h', startTime: '2026-10-09T10:49:54.676Z', kind: 'main' }), 'work/x', '/p/work')
+    expect(s).not.toBeNull()
+    expect('native_session_id' in (s as object)).toBe(false)
+  })
+})
+
+describe('a reopened conversation read as ONE family (F0.2)', () => {
+  // The adapter hands the parser the family's files joined oldest first (`gemini.ts`).
+  const original = [
+    JSON.stringify({ sessionId: '550dc3a6-6fb8-42b5-9ad3-22dc68f74e88', projectHash: 'h', startTime: '2026-10-09T11:02:06.822Z', kind: 'main' }),
+    JSON.stringify({ id: 'u1', timestamp: '2026-10-09T11:02:07.000Z', type: 'user', content: [{ text: 'reply with ok' }] }),
+    JSON.stringify({ id: 'g1', timestamp: '2026-10-09T11:02:09.000Z', type: 'gemini', content: 'ok', model: 'gemini-3-flash-preview' }),
+    JSON.stringify({ $set: { messages: [
+      { id: 'u1', timestamp: '2026-10-09T11:02:07.000Z', type: 'user', content: [{ text: 'reply with ok' }] },
+      { id: 'g1', timestamp: '2026-10-09T11:02:09.000Z', type: 'gemini', content: 'ok' },
+    ] } }),
+  ].join('\n')
+  const continuation = [
+    JSON.stringify({ id: 'u2', timestamp: '2026-10-09T11:03:20.000Z', type: 'user', content: [{ text: 'reply with third' }] }),
+    JSON.stringify({ id: 'g2', timestamp: '2026-10-09T11:03:22.000Z', type: 'gemini', content: 'third' }),
+  ].join('\n')
+
+  test('the continuation file ALONE is dropped — it has no header and so no start time', () => {
+    expect(parseGeminiChat(continuation, 'work/session-2026-10-09T11-03-550dc3a6', '/p/work')?.start_time ?? '').toBe('')
+  })
+
+  test('joined with its original, the turns after the reopen are counted once and the key is unchanged', () => {
+    const s = parseGeminiChat(`${original}\n${continuation}`, 'work/session-2026-10-09T11-02-550dc3a6', '/p/work')
+    expect(s?.session_id).toBe('work/session-2026-10-09T11-02-550dc3a6')
+    expect(s?.native_session_id).toBe('550dc3a6-6fb8-42b5-9ad3-22dc68f74e88')
+    expect(s?.user_message_count).toBe(2)
+    expect(s?.assistant_message_count).toBe(2)
+    expect(s?.user_message_timestamps).toEqual(['2026-10-09T11:02:07.000Z', '2026-10-09T11:03:20.000Z'])
+  })
+})

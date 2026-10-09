@@ -176,8 +176,10 @@ describe('parseCodexChat', () => {
       msg('user', '<user_shell_command>\n<command>\nls -la\n</command>\n<result>\nExit code: 0\n</result>\n</user_shell_command>'),
     ])
     // Same call `chat-envelope.ts` makes for Claude's `<bash-input>`: dropping it would erase a
-    // turn that happened.
-    expect(turn).toEqual({ role: 'user', text: 'ls -la', at: AT })
+    // turn that happened. P-24: it is the `!line` the person typed, carrying the run.
+    expect(turn!.text).toBe('!ls -la')
+    expect(turn!.shell).toMatchObject({ command: 'ls -la', running: false })
+    expect(turn!.at).toBe(AT)
   })
 
   it('the harness loading a FILE into the user role is a note, though nothing tags it', () => {
@@ -238,5 +240,20 @@ describe('parseCodexChat', () => {
       type: 'response_item', payload: { type: 'message', role: 'user', content: [{ text: 'oi' }] },
     })])
     expect(turn!.at).toBeUndefined()
+  })
+})
+
+describe('`!` shell commands (P-24)', () => {
+  it('shows the command as typed with its output, from the measured envelope', () => {
+    const [turn] = parseCodexChat([
+      msg('user', '<user_shell_command>\n<command>\nls -la\n</command>\n<result>\nExit code: 0\nDuration: 0.0055 seconds\nOutput:\ntotal 8\nfile.txt\n\n</result>\n</user_shell_command>'),
+    ])
+    expect(turn!.text).toBe('!ls -la')
+    expect(turn!.shell!.output).toEqual({ stdout: 'total 8\nfile.txt', stderr: '' })
+  })
+  it('an envelope with no result yet still names the command', () => {
+    const [turn] = parseCodexChat([msg('user', '<user_shell_command>\n<command>\nsleep 5\n</command>\n</user_shell_command>')])
+    expect(turn!.text).toBe('!sleep 5')
+    expect(turn!.shell!.output).toBeUndefined()
   })
 })

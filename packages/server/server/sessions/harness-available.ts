@@ -32,10 +32,15 @@ export function startableHarnessIds(): HarnessId[] {
 }
 
 /**
- * Memoized: the wizard asks on every mount and the skill on every install, while a CLI appearing on
- * PATH mid-process is not a thing that happens. `Bun.which` is a filesystem walk per harness.
+ * Memoized, but only for `AVAILABILITY_TTL_MS`: the wizard asks on every mount and the skill on every
+ * install, and `Bun.which` is a filesystem walk per harness. The first version kept the answer for the
+ * life of the process on the reasoning that a CLI does not appear on PATH mid-process — but a person
+ * installs one (kimi) while the server runs, and the wizard then offered nothing for it until a
+ * restart. A short TTL keeps the walk off the hot path and lets the next ask after an install see it.
  */
+export const AVAILABILITY_TTL_MS = 15_000
 let cached: HarnessId[] | null = null
+let cachedAt = 0
 /** Set with `cached`: true when not one startable CLI resolved on this process's PATH. */
 let blind = false
 
@@ -45,8 +50,9 @@ let blind = false
  * `narrowed` says which of the two answers this is; `blind` says NONE resolved, which a caller that
  * STARTS something must treat as "offer nothing", never as "offer everything" — see the header.
  */
-export function availableHarnesses(): { ids: HarnessId[]; narrowed: boolean; blind: boolean } {
-  if (cached === null) {
+export function availableHarnesses(now: number = Date.now()): { ids: HarnessId[]; narrowed: boolean; blind: boolean } {
+  if (cached === null || now - cachedAt >= AVAILABILITY_TTL_MS || now < cachedAt) {
+    cachedAt = now
     adoptUserBinOnPath()
     const startable = startableHarnessIds()
     const installed = startable.filter(h => !!Bun.which(SPAWN_SPECS[h]!.bin, { PATH: userSearchPath() }))
@@ -59,5 +65,6 @@ export function availableHarnesses(): { ids: HarnessId[]; narrowed: boolean; bli
 /** Test seam — the memo is per process, and a test that changes PATH must be able to clear it. */
 export function resetHarnessAvailability(): void {
   cached = null
+  cachedAt = 0
   blind = false
 }

@@ -87,6 +87,9 @@ test('sessionIdFromArgv reads the id each harness passes', () => {
   expect(sessionIdFromArgv(['claude', '--session-id', UUID_B])).toBe(UUID_B)
   expect(sessionIdFromArgv(['claude', '-r', UUID_B])).toBe(UUID_B)
   expect(sessionIdFromArgv(['agy', '--conversation', UUID_A])).toBe(UUID_A)
+  // kimi 2.1.1 is resumed by `session_<uuid>` (its directory name); the id the store keys on is the bare uuid
+  expect(sessionIdFromArgv(['kimi', '-S', `session_${UUID_B}`])).toBe(UUID_B)
+  expect(sessionIdFromArgv(['kimi', `--session=session_${UUID_A}`])).toBe(UUID_A)
 })
 
 test('sessionIdFromArgv returns nothing when there is no id to read', () => {
