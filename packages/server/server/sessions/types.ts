@@ -638,6 +638,13 @@ export interface SessionBackend {
    * stream; `undefined` for any other session.
    */
   chatOf?(id: string): { chat: HarnessChat; conversationId: string } | undefined
+  /**
+   * F2.0b — "open in terminal" on a live STRUCTURED session: end its child, then resume the same
+   * conversation as a TUI under the same managed id. `not-structured` for every other session.
+   */
+  toTerminal?(id: string): Promise<{ ok: true } | { ok: false; why: 'not-structured' | 'no-conversation' | 'no-resume' | 'still-running' | 'spawn-failed' }>
+  /** F2.0b — take back the structured sessions that outlived the previous server (the owner process only). */
+  reattach?(): Promise<void>
 }
 
 /** What a rewind did. `not-found`: the prompt is not in the menu; `unexpected`: the harness drew a

@@ -3559,6 +3559,10 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // The label comes from the registry so the sentence printed on the way in names what the user
       // selected, not an id they never typed.
       const managed = (await readRegistry()).find(r => r.id === id)
+      // F2.0b — attaching to a LIVE structured session IS "open in terminal": its child ends and the
+      // same conversation resumes as a TUI under this id first. A failure leaves the attach command
+      // saying, in a sentence, that there is no terminal to enter.
+      if (backend.toTerminal) await backend.toTerminal(id).catch(() => null)
       return {
         argv: backend.attachCommand(id),
         detachHint: await backend.detachHint(),
@@ -3657,6 +3661,19 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // The outcome is read off the screen, not assumed from the keystroke — see `sendNow.ts`.
       const outcome = await backend.sendQueuedNow(id)
       return { ok: sendNowDelivered(outcome), message: s.sessSendNowOutcome(outcome, id) }
+    },
+
+    async openInTerminal(id: string): Promise<ActionResult> {
+      const s = S()
+      const backend = await resolveBackend()
+      if (!backend.toTerminal) return { ok: false, message: s.sessTerminalNotStructured }
+      const out = await backend.toTerminal(id).catch(() => ({ ok: false as const, why: 'spawn-failed' as const }))
+      if (out.ok) return { ok: true, message: s.sessTerminalOpened }
+      return {
+        ok: false,
+        message: out.why === 'not-structured' ? s.sessTerminalNotStructured
+          : out.why === 'no-conversation' ? s.sessTerminalNoConversation : s.sessTerminalFailed,
+      }
     },
 
     async interruptSession(id: string): Promise<ActionResult> {

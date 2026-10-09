@@ -28,6 +28,7 @@ import type {
 } from '@agentistics/engine-api'
 import { answerFits } from '@agentistics/engine-api'
 import { SPAWN_SPECS } from './spawn-spec'
+import type { DurableStore, DurableTransport, SavedSpawn } from './structured-durable'
 import { routeSpawn, type SpawnRoute } from './structured-route'
 import type { BackendSession, BackendSpawn, SessionActivity, SessionBackend, TerminalCapture } from './types'
 
@@ -55,6 +56,46 @@ export interface StructuredProvider {
   onStarted?(id: string, driver: StructuredDriverId): void
   /** A structured session fell back to tmux (or could not), for the log / the row's note. */
   onFallback?(id: string, outcome: { reason: string; resumed: boolean }): void
+  /**
+   * F2.0b — where a structured child lives so it SURVIVES the server (`structured-durable.ts`). Absent:
+   * the driver spawns its child itself and it dies with this process (F2.0's behaviour).
+   */
+  durable?: DurableStore
+  /** F2.0b — the conversation a row is linked to, from the registry (for a session this process does not drive). */
+  conversationOf?(id: string): Promise<string | null>
+  /** F2.0b — a session was re-attached after a restart (or could not be), for the log. */
+  onReattach?(id: string, outcome: { ok: true } | { ok: false; reason: string; resumed: boolean }): void
+}
+
+/** F2.0b — what `toTerminal` did. */
+export type ToTerminalOutcome =
+  | { ok: true }
+  | { ok: false; why: 'not-structured' | 'no-conversation' | 'no-resume' | 'still-running' | 'spawn-failed' }
+
+/**
+ * F2.0b — the session as the host drives it, with every call RECORDED (`calls.jsonl`) so a re-attach
+ * can make the same calls on a re-created driver. A call is recorded after it returns: its writes are
+ * then queued, not yet sent, so the record is on disk before the bytes leave this process.
+ */
+export function recordingSession(s: StructuredSession, t: Pick<DurableTransport, 'record'>): StructuredSession {
+  return {
+    id: s.id, driver: s.driver, harness: s.harness,
+    conversationId: () => s.conversationId(),
+    activity: () => s.activity(),
+    attention: () => s.attention(),
+    screen: n => s.screen(n),
+    lastActivityMs: () => s.lastActivityMs(),
+    prompt(text) { const ok = s.prompt(text); if (ok) t.record({ op: 'prompt', text }); return ok },
+    answer(a) {
+      const ok = s.answer(a)
+      if (ok) t.record({ op: 'answer', ...(a.choice !== undefined ? { choice: a.choice } : {}), ...(a.text !== undefined ? { text: a.text } : {}), ...(a.requestId !== undefined ? { requestId: a.requestId } : {}) })
+      return ok
+    },
+    cancel() { s.cancel(); t.record({ op: 'cancel' }) },
+    follow: (max, on) => s.follow(max, on),
+    onExit: cb => s.onExit(cb),
+    dispose: () => s.dispose(),
+  }
 }
 
 const toActivity = (a: string): SessionActivity => (a === 'starting' ? 'working' : a as SessionActivity)
@@ -167,6 +208,15 @@ export function structuredSpawnOf(req: BackendSpawn, harness: HarnessId): Struct
   }
 }
 
+/** PURE. What a re-attach needs to start the same driver again (no transport, no secret). */
+export function savedOf(req: BackendSpawn, harness: HarnessId, spawn: StructuredSpawn): SavedSpawn {
+  const { transport: _t, ...rest } = spawn
+  return {
+    v: 1, harness, spawn: rest,
+    backend: { id: req.id, cwd: req.cwd, ...(req.env ? { env: req.env } : {}), ...(req.structured ? { structured: req.structured } : {}) },
+  }
+}
+
 /** A structured session's own chat channel: resolve is the session itself, follow is the protocol's. */
 function sessionChat(s: StructuredSession, declares: StructuredDeclaration | null): HarnessChat {
   const feat = (from: string | undefined, absent: string) => (from ? { from } : { absent })
@@ -195,6 +245,18 @@ interface Live {
 export type StructuredBackend = SessionBackend & {
   /** Managed ids hosted structurally, with their route. */
   structuredSessions(): Array<{ id: string; route: Exclude<SpawnRoute, 'tmux'>; driver: StructuredDriverId }>
+  /**
+   * F2.0b — take back every structured session whose child outlived the previous server: replay its
+   * record into a re-created driver, then continue live. Called ONCE, by the process that owns the
+   * sessions (`agentop server`); `list()` waits for it, so no poll reads such a row as `lost` meanwhile.
+   */
+  reattach(): Promise<void>
+  /**
+   * F2.0b — "open in terminal" on a LIVE structured session: end its child cleanly, then resume the
+   * SAME conversation as a TUI in tmux under the SAME managed id. Works from any process (a session
+   * this process does not drive is ended through its relay). A web reopen later runs structured again.
+   */
+  toTerminal(id: string): Promise<ToTerminalOutcome>
 }
 
 export function withStructured(base: SessionBackend, provider: StructuredProvider): StructuredBackend {
@@ -210,35 +272,127 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     provider.onConversation?.(id, c)
   }
 
-  const onExit = (id: string, l: Live) => async (e: StructuredExit) => {
-    if (live.get(id) !== l || e.kind !== 'failed') return
-    live.delete(id)
-    l.off()
-    const conv = l.s.conversationId() ?? l.req.structured?.resumeId ?? l.req.structured?.conversationId ?? null
-    const resume = conv && provider.resumeSpawn ? await provider.resumeSpawn(l.req, conv).catch(() => null) : null
+  const durable = provider.durable
+  /** Ended ON PURPOSE (a kill, "open in terminal" — from any process): its exit is not a failure. */
+  const endedOnPurpose = (id: string) => !!durable && (durable.ending(id) !== null || durable.saved(id) === null)
+
+  const fallBack = async (id: string, req: BackendSpawn, conv: string | null, reason: string): Promise<boolean> => {
+    const resume = conv && provider.resumeSpawn ? await provider.resumeSpawn(req, conv).catch(() => null) : null
     let resumed = false
     if (resume) resumed = await base.spawn({ ...resume, id }).then(() => true, () => false)
-    provider.onFallback?.(id, { reason: e.reason, resumed })
+    provider.onFallback?.(id, { reason, resumed })
+    return resumed
+  }
+
+  const onExit = (id: string, l: Live) => async (e: StructuredExit) => {
+    if (live.get(id) !== l) return
+    if (e.kind !== 'failed') {
+      if (durable && l.route === 'structured') { live.delete(id); l.off(); durable.remove(id) }
+      return
+    }
+    live.delete(id)
+    l.off()
+    if (durable && l.route === 'structured') {
+      const purposeful = endedOnPurpose(id)
+      durable.remove(id)
+      if (purposeful) return
+    }
+    const conv = l.s.conversationId() ?? l.req.structured?.resumeId ?? l.req.structured?.conversationId ?? null
+    await fallBack(id, l.req, conv, e.reason)
   }
 
   async function startVia(req: BackendSpawn, route: Exclude<SpawnRoute, 'tmux'>, harness: HarnessId, reg: EngineStructured, acp: EngineAcp | null): Promise<boolean> {
+    // F2.0b — a structured child is launched through a relay that outlives this process.
+    const sspawn = route === 'structured' ? structuredSpawnOf(req, harness) : null
+    const transport: DurableTransport | null = sspawn && durable
+      ? durable.create(req.id, savedOf(req, harness, sspawn))
+      : null
     const r: StructuredStart = route === 'structured'
-      ? await reg.start(structuredSpawnOf(req, harness)).catch((e: unknown) => ({ ok: false as const, reason: e instanceof Error ? e.message : 'start failed' }))
+      ? await reg.start({ ...sspawn!, ...(transport ? { transport } : {}) }).catch((e: unknown) => ({ ok: false as const, reason: e instanceof Error ? e.message : 'start failed' }))
       // A5.4, exactly as before: id, harness, cwd and the initial prompt's text.
       : await acp!.start({ id: req.id, harness, cwd: req.cwd, ...(req.initialPrompt ? { initialPrompt: req.initialPrompt.text } : {}) })
         .then(x => (x.ok ? { ok: true as const, session: acpSessionAsStructured(x.session, harness) } : x), () => ({ ok: false as const, reason: 'start failed' }))
-    if (!r.ok) return false
-    const l: Live = { s: r.session, route, createdMs: Date.now(), req, declares: route === 'structured' ? reg.declares(harness) : null, reported: false, off: () => {} }
+    if (!r.ok) {
+      // A relay may have started before the refusal: end it, and leave nothing on disk.
+      if (transport && durable) { durable.markEnding(req.id, 'refused'); await durable.terminate(req.id).catch(() => false); durable.remove(req.id) }
+      return false
+    }
+    const session = transport ? recordingSession(r.session, transport) : r.session
+    const l: Live = { s: session, route, createdMs: Date.now(), req, declares: route === 'structured' ? reg.declares(harness) : null, reported: false, off: () => {} }
     live.set(req.id, l)
     l.off = r.session.onExit(e => { void onExit(req.id, l)(e) })
     if (route === 'structured') { provider.onStarted?.(req.id, r.session.driver); report(req.id, l) }
     return true
   }
 
+  /** One re-attach per process; `list()` waits on it. */
+  let reattaching: Promise<void> | null = null
+
+  async function reattachOne(id: string, reg: EngineStructured | null): Promise<void> {
+    if (!durable || live.has(id)) return
+    const saved = durable.saved(id)
+    const rt = durable.replay(id)
+    const req: BackendSpawn = saved
+      ? { id, cwd: saved.backend.cwd, argv: [], ...(saved.backend.env ? { env: saved.backend.env } : {}), ...(saved.backend.structured ? { structured: saved.backend.structured as BackendSpawn['structured'] } : {}) }
+      : { id, cwd: '', argv: [] }
+    const giveUp = async (reason: string, s?: StructuredSession) => {
+      durable.markEnding(id, 'reattach-failed')
+      s?.dispose()
+      await durable.terminate(id).catch(() => false)
+      durable.remove(id)
+      const conv = (await provider.conversationOf?.(id).catch(() => null)) ?? saved?.spawn.resumeId ?? null
+      const resumed = saved ? await fallBack(id, req, conv, reason).catch(() => false) : false
+      provider.onReattach?.(id, { ok: false, reason, resumed })
+    }
+    if (!saved || !rt || !reg) { await giveUp(!reg ? 'no structured driver in this build' : 'nothing to re-attach to'); return }
+    const r = await reg.start({ ...saved.spawn, transport: rt }).catch((e: unknown) => ({ ok: false as const, reason: e instanceof Error ? e.message : 'start failed' }))
+    if (!r.ok) { await giveUp(r.reason); return }
+    rt.bind(r.session)
+    const outcome = await rt.done
+    if (!outcome.ok) { await giveUp(outcome.why, r.session); return }
+    const session = recordingSession(r.session, rt)
+    const l: Live = { s: session, route: 'structured', createdMs: Date.now(), req, declares: reg.declares(saved.harness), reported: false, off: () => {} }
+    live.set(id, l)
+    l.off = r.session.onExit(e => { void onExit(id, l)(e) })
+    report(id, l)
+    provider.onReattach?.(id, { ok: true })
+  }
+
   const backend: StructuredBackend = {
     ...base,
     id: base.id,
     structuredSessions: () => [...live].map(([id, l]) => ({ id, route: l.route, driver: l.s.driver })),
+    reattach() {
+      if (!durable) return Promise.resolve()
+      reattaching ??= (async () => {
+        for (const id of durable.dead()) durable.remove(id)
+        const ids = durable.alive().filter(id => !live.has(id))
+        if (ids.length === 0) return
+        const reg = await provider.structured().catch(() => null)
+        await Promise.all(ids.map(id => reattachOne(id, reg).catch(() => {})))
+      })()
+      return reattaching
+    },
+    async toTerminal(id) {
+      const l = live.get(id)
+      const durableAlive = !l && !!durable && durable.isAlive(id)
+      if (!(l && l.route === 'structured') && !durableAlive) return { ok: false, why: 'not-structured' }
+      const saved = l ? null : durable!.saved(id)
+      const req: BackendSpawn | null = l ? l.req
+        : saved ? { id, cwd: saved.backend.cwd, argv: [], ...(saved.backend.structured ? { structured: saved.backend.structured as BackendSpawn['structured'] } : {}) } : null
+      if (!req) return { ok: false, why: 'not-structured' }
+      const conv = l?.s.conversationId() ?? (await provider.conversationOf?.(id).catch(() => null)) ?? req.structured?.resumeId ?? null
+      if (!conv) return { ok: false, why: 'no-conversation' }
+      const resume = provider.resumeSpawn ? await provider.resumeSpawn(req, conv).catch(() => null) : null
+      if (!resume) return { ok: false, why: 'no-resume' }
+      // End the child FIRST and wait until it is gone: two processes must never write one conversation.
+      durable?.markEnding(id, 'terminal')
+      if (l) { live.delete(id); l.off(); l.s.dispose() }
+      if (durable && !await durable.terminate(id).catch(() => false)) return { ok: false, why: 'still-running' }
+      durable?.remove(id)
+      const ok = await base.spawn({ ...resume, id }).then(() => true, () => false)
+      return ok ? { ok: true } : { ok: false, why: 'spawn-failed' }
+    },
     async spawn(req) {
       const harness = req.structured?.harness ?? harnessOfArgv(req.argv)
       const flagOn = provider.flagOn?.() ?? false
@@ -263,12 +417,19 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
       return base.spawn(req)
     },
     async list() {
+      if (reattaching) await reattaching
       const rows = await base.list()
       const mine: BackendSession[] = [...live].map(([id, l]) => {
         if (l.route === 'structured') report(id, l)
         return { id, createdMs: l.createdMs, attached: false, alive: l.s.activity() !== 'exited', lastActivityMs: l.s.lastActivityMs() }
       })
-      return [...rows, ...mine]
+      // F2.0b — a structured child this process does not drive (another process owns it, or the
+      // re-attach has not run here) is still RUNNING: it must not read as lost.
+      const known = new Set([...rows.map(r => r.id), ...mine.map(r => r.id)])
+      const elsewhere: BackendSession[] = durable
+        ? durable.alive().filter(id => !known.has(id)).map(id => ({ id, createdMs: Date.now(), attached: false, alive: true, lastActivityMs: durable.lastActivityMs(id) }))
+        : []
+      return [...rows, ...mine, ...elsewhere]
     },
     async capture(id, lines) { const s = of(id); return s ? s.screen(lines) : base.capture(id, lines) },
     async captureTerminal(id, lines): Promise<TerminalCapture | null> {
@@ -289,14 +450,18 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     },
     async kill(id) {
       const l = live.get(id)
-      if (!l) return base.kill(id)
-      live.delete(id)
-      l.off()
-      l.s.dispose()
-      return true
+      const relayed = !!durable && (l ? l.route === 'structured' : durable.isAlive(id))
+      if (!l && !relayed) return base.kill(id)
+      if (relayed) durable!.markEnding(id, 'killed')
+      if (l) { live.delete(id); l.off(); l.s.dispose() }
+      if (!relayed) return true
+      const gone = await durable!.terminate(id).catch(() => false)
+      if (gone) durable!.remove(id)
+      return gone
     },
     attachCommand(id) {
       const l = live.get(id)
+      if (!l && durable?.isAlive(id)) return ['sh', '-c', `echo "${STRUCTURED_ATTACH}"`]
       if (!l) return base.attachCommand(id)
       return ['sh', '-c', `echo "${l.route === 'acp-legacy' ? LEGACY_ATTACH : STRUCTURED_ATTACH}"`]
     },

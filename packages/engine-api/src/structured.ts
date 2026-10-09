@@ -115,6 +115,42 @@ export interface StructuredSpawn {
    * NEVER carries a secret — those reach a session through the vault's references.
    */
   env?: Readonly<Record<string, string>>
+  /**
+   * F2.0b — WHERE the child process runs. When present, the driver starts its protocol peer through
+   * `transport.launch(...)` instead of spawning it itself, and speaks to it only through the returned
+   * pipe. The host uses it to keep the child alive across a server restart (a detached relay that holds
+   * the child's stdio) and to re-attach to it afterwards by REPLAYING what the pipe carried — so the
+   * driver must be deterministic over its pipe: the same lines read and the same calls made produce
+   * the same lines written (no timers, no randomness in what it writes). Absent: the driver spawns as
+   * before. Every driver honours it the same way; it is never a per-harness choice.
+   */
+  transport?: StructuredTransport
+}
+
+/**
+ * F2.0b — one child process's stdio, as a driver speaks to it. Newline-delimited: every protocol a
+ * driver speaks here (ACP, claude stream-json, codex app-server, agy stream-json) is one JSON value per
+ * line. Structurally the engine's own `AcpLaunch`.
+ */
+export interface StructuredPipe {
+  /** Text from the child's stdout. */
+  source: AsyncIterable<string>
+  /** One write to the child's stdin (a whole line, `\n` included). */
+  write(line: string): void
+  kill(): void
+  /** The child's exit code; null when it could not be read (the relay went away). */
+  exited: Promise<number | null>
+  /**
+   * The instant the line being read ARRIVED, in ms. During a replay it is the original arrival time,
+   * so a turn rebuilt on re-attach keeps its real timestamp; absent (or live) it is now. A driver that
+   * stamps turns reads it instead of its own clock.
+   */
+  now?(): number
+}
+
+/** F2.0b — the host's way of starting a driver's child (see `StructuredSpawn.transport`). */
+export interface StructuredTransport {
+  launch(bin: string, args: readonly string[], cwd: string, env?: Readonly<Record<string, string>>): StructuredPipe
 }
 
 export type StructuredActivity = 'starting' | 'working' | 'waiting' | 'waiting-approval' | 'exited'

@@ -479,6 +479,9 @@ async function runFleetActionOnce(
       if (!host.sendQueuedNow) return { ok: false, message: s.sessionsNoHost }
       return await host.sendQueuedNow(req.id)
     }
+    case 'terminal':
+      if (!host.openInTerminal) return { ok: false, message: s.sessionsNoHost }
+      return await host.openInTerminal(req.id)
     case 'interrupt': {
       // Only meaningful on a session that is actually doing something: pressing Escape into an idle
       // prompt closes whatever the harness has open, which is not what "stop" means.

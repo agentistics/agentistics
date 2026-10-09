@@ -4822,6 +4822,12 @@ Bun.serve<WSData>({ hostname: '0.0.0.0', port: PORT, idleTimeout: 60, maxRequest
 if (SERVE_STATIC) {
   Bun.serve<WSData>({ hostname: '0.0.0.0', port: WEB_PORT, idleTimeout: 60, maxRequestBodySize: LIMITS.ingestBodyBytes, websocket: _wsHandlers, fetch: handleCompressed })
 }
+// F2.0b — take back the structured sessions whose child outlived the previous server (a relay held
+// it). This process owns them; the fleet's first poll waits for the re-attach, so none reads `lost`.
+if (!TEAM_CENTRAL) {
+  void import('./sessions/index').then(m => m.reattachStructuredSessions())
+    .catch(e => console.warn(`[sessions] structured re-attach failed: ${e instanceof Error ? e.message : 'unknown'}`))
+}
 
 const _ESC = '\x1b'
 const _R   = `${_ESC}[0m`
