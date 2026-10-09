@@ -89,15 +89,15 @@ export function answerStructured(
   text: string | undefined,
 ): { ok: true; answer: StructuredAnswer; said: string } | { ok: false; why: 'not-asking' | 'needs-choice' | 'needs-text' | 'gone' } {
   if (!open) return { ok: false, why: 'not-asking' }
-  const words = (text ?? '').trim()
+  const words = text ?? ''
   if (choice === undefined) {
-    if (open.freeText && words) return { ok: true, answer: { requestId: open.requestId, text: words }, said: words }
+    if (open.freeText && words.trim()) return { ok: true, answer: { requestId: open.requestId, text: words }, said: words }
     return { ok: false, why: open.options.length > 0 ? 'needs-choice' : 'needs-text' }
   }
   const picked = open.options[choice - 1]
   if (!Number.isInteger(choice) || !picked) return { ok: false, why: 'gone' }
   if (picked.freeText) {
-    if (!words) return { ok: false, why: 'needs-text' }
+    if (!words.trim()) return { ok: false, why: 'needs-text' }
     return { ok: true, answer: { requestId: open.requestId, choice, text: words }, said: words }
   }
   return { ok: true, answer: { requestId: open.requestId, choice }, said: picked.label }
