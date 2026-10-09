@@ -10,6 +10,24 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.114.0': {
+    features: [
+      {
+        pt: 'O ⓘ ao lado do título mostra as sessões mais recentes primeiro, com a hora, separa as que estão rodando das encerradas e tem busca.',
+        en: 'The ⓘ next to the title lists the newest sessions first, with their time, keeps running ones apart from ended ones and has a search.',
+      },
+      {
+        pt: 'Cada assistente agora começa sabendo trabalhar como líder ou como executor, quais ferramentas do agentistics tem e quando sugerir uma skill de especificação.',
+        en: 'Every assistant now starts knowing how to work as a leader or a worker, which agentistics tools it has and when to suggest a specification skill.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'A animação de atualização vai até o fim sem piscar nem mostrar a tela de carregamento no meio.',
+        en: 'The update animation plays to the end without flashing or showing the loading screen in the middle.',
+      },
+    ],
+  },
   '2.113.0': {
     features: [
       {
