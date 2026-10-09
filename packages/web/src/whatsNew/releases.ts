@@ -43,6 +43,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: '"This session" shows the real model name (for example, Opus 5.5).',
       },
       {
+        pt: 'Atualizar o app não fica mais preso na animação: se a versão nova já está instalada, o app só reinicia, e se algo demorar aparece o botão "Reiniciar agora".',
+        en: 'Updating the app no longer gets stuck on the animation: if the new version is already installed the app just restarts, and if something takes too long a "Restart now" button appears.',
+      },
+      {
         pt: 'A Nova sessão não perde o que você preencheu quando a janela muda de tamanho.',
         en: 'New session keeps what you filled in when the window changes size.',
       },
