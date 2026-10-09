@@ -6,8 +6,11 @@ OpenCode and native Agentistics. The adapter flag stays off by default.
 The browser, VS Code extension host and terminal cockpit subscribe to `/api/fleet/events?closed=0`.
 The first frame carries active rows; history is paged when the consumer displays closed sessions.
 `fleetStream.ts` applies the first snapshot and sequential deltas, keeping both row shapes,
-server ordering and metadata deletion. Closed-count changes refresh paged history and prune deleted
-rows; edits with an unchanged count remain the integration defect recorded below.
+server ordering and metadata deletion. Closed-count changes and `closedVersion` changes refresh
+only previously opened history pages and prune deleted rows. The snapshot carries `closedVersion`;
+a meta-only delta updates it when closed rows outside the stream window change, including page
+ordering and edits with an unchanged count. Unopened history causes no page GETs. A page response
+invalidated during its GET is discarded and retried; newer SSE upserts survive a page refresh.
 A sequence gap or invalid frame closes the stream. Silence
 for 45 seconds also closes it. Existing polling is the fallback while a stream is unhealthy;
 a healthy stream suppresses periodic fleet GETs. Connections belong to mounted consumers and
@@ -82,11 +85,12 @@ harness limitations: ENGINE.MAP 12 identifies the unused Gemini `--session-id` r
 the broken Antigravity link (P-16). Kimi, Copilot and Codex reported adapter sources. Do not infer
 real eight-harness adapter coverage from fixture tags; verify each source in independent Q1/Q11.
 
-**Known integration defect:** a `closed=0` stream does not notify edits to previously paged closed
-rows when the closed count stays unchanged. Count changes reload history; same-count edits still
-need a server invalidation or a delta for those rows. A pure planner reproduction confirms this
-for all eight harness tags in `.cache/f1-3-history-proof.json`. Resolve this before relying on
-push for closed-history edits; it is a protocol gap, not a harness limitation.
+The previous same-count closed-history defect is covered by the shared consumer's HTTP tests:
+meta-only invalidation refreshes titles and page ordering for all eight harnesses, unchanged
+versions make no page GETs, and growth does not open additional pages until explicitly requested.
+The tests also cover deletion and version/upsert changes during a pending page GET.
+The earlier `.cache/f1-3-history-proof.json` records the protocol before F1.2b's `closedVersion`;
+it is historical evidence, not a result for the updated protocol.
 
 ## Independent QA handoff
 
@@ -108,4 +112,4 @@ subscription must apply data-patch without `/api/data` refetch. Disconnect SSE, 
 then reconnect and check snapshots replace stale state and polling stops again. Real-harness QA
 and budget compliance are reported separately from fixture/browser contract checks.
 Also edit a previously paged closed session from the other client and verify its new title arrives
-without changing the closed count; the protocol gap above currently blocks this check.
+without changing the closed count, via a `closedVersion` meta delta and a history-page GET.
