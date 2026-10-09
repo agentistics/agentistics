@@ -127,6 +127,7 @@ import { setLeftAsideOpen } from './lib/leftAsideOpen'
 import { PAGE_INSET } from './components/sessions/FleetOverview'
 import { setFleetSourceCentral } from './lib/fleet'
 import { reopenedSessionRoute, sessionPath } from './lib/sessionRoute'
+import { initialSessionView } from './lib/sessionView'
 import { SessionTitleFlag } from './components/sessions/SessionTitleFlag'
 import { ChatSelectionOverlay } from './components/sessions/ChatSelectionBar'
 import { brandAsset } from './lib/brand'
@@ -2313,7 +2314,7 @@ export default function AppLayout() {
   const sessionOpen = inSessionsWorkspace && selectedSessionId !== undefined
 
   const [sessionViewParams, setSessionViewParams] = useSearchParams()
-  const sessionView: 'chat' | 'terminal' = sessionViewParams.get('view') === 'terminal' ? 'terminal' : 'chat'
+  const sessionView = initialSessionView({ requested: sessionViewParams.get('view') })
   const setSessionView = useCallback((v: 'chat' | 'terminal') => {
     setSessionViewParams(prev => {
       const next = new URLSearchParams(prev)

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
-import { PENDING_TTL_MS, clearPrompts, pendingFor, recordPrompt, resetPrompts } from './pending-prompts'
+import { PENDING_TTL_MS, clearPrompts, migratePrompts, pendingFor, recordPrompt, resetPrompts } from './pending-prompts'
 
 const CONV = 'conv-1'
 
@@ -61,5 +61,32 @@ describe('pendingFor', () => {
     recordPrompt(CONV, 'a')
     clearPrompts(CONV)
     expect(pendingFor(CONV, [])).toEqual([])
+  })
+})
+
+describe('CHAT.FIRST — an echo recorded before the conversation is linked', () => {
+  const ROW = 'row-abc'
+  it('is held under the managed row id until a link exists', () => {
+    recordPrompt(ROW, 'first message', 1000)
+    expect(pendingFor(ROW, [], 2000).map(p => p.text)).toEqual(['first message'])
+  })
+  it('migrates to the conversation id when the link appears, losing nothing', () => {
+    recordPrompt(ROW, 'one', 1000)
+    recordPrompt(ROW, 'two', 2000)
+    migratePrompts(ROW, CONV)
+    expect(pendingFor(ROW, [], 3000)).toEqual([])
+    expect(pendingFor(CONV, [], 3000).map(p => p.text)).toEqual(['one', 'two'])
+  })
+  it('does not duplicate on a repeated migration, nor against what the conversation already holds', () => {
+    recordPrompt(CONV, 'same', 1000)
+    recordPrompt(ROW, 'same', 1000)
+    migratePrompts(ROW, CONV)
+    migratePrompts(ROW, CONV)
+    expect(pendingFor(CONV, [], 2000)).toHaveLength(1)
+  })
+  it('retires once the transcript carries the message, after migration', () => {
+    recordPrompt(ROW, 'hello', 1000)
+    migratePrompts(ROW, CONV)
+    expect(pendingFor(CONV, ['hello'], 2000)).toEqual([])
   })
 })

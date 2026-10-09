@@ -105,6 +105,7 @@ import type { Artifact } from '../lib/sessionArtifacts'
 import { liveEvents, type LiveTurn } from '../lib/artifactTabs'
 import { FiltersBar } from '../components/FiltersBar'
 import { PANEL_FULLSCREEN_Z, SessionPanel, type SessionView } from '../components/sessions/SessionPanel'
+import { initialSessionView } from '../lib/sessionView'
 import { SessionsAside } from '../components/nav/SessionsAside'
 import { SessionActions } from '../components/sessions/SessionActions'
 import { filterFleet } from '../lib/fleetFilter'
@@ -689,7 +690,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const [viewParams, setViewParams] = useSearchParams()
   // Per pane: the split side's own choice is `?splitView=`, beside the main pane's `?view=`.
   const viewKey = pane === 'split' ? SPLIT_VIEW_PARAM : 'view'
-  const sessionView: SessionView = viewParams.get(viewKey) === 'terminal' ? 'terminal' : 'chat'
+  const sessionView: SessionView = initialSessionView({ requested: viewParams.get(viewKey) })
   const setSessionView = (v: SessionView) => setViewParams(prev => {
     const next = new URLSearchParams(prev)
     if (v === 'chat') next.delete(viewKey)
@@ -2744,7 +2745,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
                Absent for a harness that can never name its conversation, exactly as before. */
             /* `!isCentral` is dev's gate, kept: on a central the conversation is not relayed, so a
                Chat tab there cannot do what it says. It moves with the control. */
-            {...(!isCentral && selected.conversationBlind === undefined ? {
+            {...(!isCentral ? {
               extraTop: (close: () => void) => (
                 <div role="tablist" style={{
                   display: 'flex', gap: 3, padding: 3, borderRadius: 10,

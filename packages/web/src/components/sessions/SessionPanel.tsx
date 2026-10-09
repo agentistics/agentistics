@@ -58,9 +58,10 @@ import {
 import { NativeChatHost } from './NativeChatHost'
 import { isNativeSessionId } from '../../lib/sessionRoute'
 import { PanelGapDots } from './PanelGap'
+import { chatOffered, initialSessionView, type SessionView } from '../../lib/sessionView'
 import { PANEL_FULLSCREEN_Z } from '../../lib/zLayers'
 
-export type SessionView = 'chat' | 'terminal'
+export type { SessionView }
 
 /**
  * THE ONE "cover the whole viewport in place" full-screen overlay z-index — below every modal
@@ -222,7 +223,7 @@ export function SessionPanel({
    * conversation it is writing. Reused rather than re-derived: the row, the chat view and this
    * toggle must give one answer, and this is the one place that could quietly disagree.
    */
-  const chattable = session.conversationBlind === undefined && !relayed
+  const chattable = chatOffered({ relayed })
   /**
    * A NATIVE Agentistics session (UI.UNIFY) opens in THIS shell like every harness. What it lacks is
    * a SCREEN — the runtime is no process in a pane — so the one view and the one tab that are a
@@ -240,11 +241,11 @@ export function SessionPanel({
   // Uncontrolled (mobile, self-contained) unless the caller hands in `onViewChange` — see the
   // module header. The local state is still declared unconditionally (hooks can't be), it is just
   // never read when a controlled view is in play.
-  const [localView, setLocalView] = useState<SessionView>(chattable ? 'chat' : 'terminal')
+  const [localView, setLocalView] = useState<SessionView>(initialSessionView({ requested: null, relayed, screenless }))
   const controlled = onViewChange !== undefined
   const view = controlled ? (viewProp ?? 'chat') : localView
   const setView = controlled ? onViewChange! : setLocalView
-  const active: SessionView = screenless && chattable ? 'chat' : chattable ? view : 'terminal'
+  const active: SessionView = initialSessionView({ requested: view, relayed, screenless })
 
   /**
    * WHERE THE STUDIO SITS — `lib/panelSlots.ts`, design §1. Read through `resolveForViewport` with
