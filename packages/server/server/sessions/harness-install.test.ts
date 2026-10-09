@@ -52,6 +52,13 @@ describe('harness install route', () => {
     await retry.text()
   })
 
+  test('the route speaks the language the UI asked for', async () => {
+    const res = await handleHarnessInstallRoute(post({ ...ok, lang: 'en' }), 'codex', 'install', { runner: fake({ code: 1 }), facts: facts() })
+    const text = await res.text()
+    expect(text).toContain('The installation did not finish')
+    expect(text).not.toContain('Instalando')
+  })
+
   test('a version that cannot be read back is a failure, not a success', async () => {
     const res = await handleHarnessInstallRoute(post(ok), 'codex', 'install', { runner: fake({ verify: 'command not found' }), facts: facts() })
     expect(await res.text()).toContain('não consegui confirmar a versão')

@@ -103,13 +103,13 @@ export interface InstallResult {
 /** Runs the official installer on the server and streams its progress lines. Never call this
  *  without the person having confirmed — the server refuses a body without `confirmed`. */
 export async function installHarness(
-  id: string, update = false, onProgress?: (line: string) => void, opts: { installNode?: boolean } = {},
+  id: string, update = false, onProgress?: (line: string) => void, opts: { installNode?: boolean; lang?: 'pt' | 'en' } = {},
 ): Promise<InstallResult> {
   let response: Response
   try {
     response = await fetch(`/api/harnesses/${encodeURIComponent(id)}/${update ? 'update' : 'install'}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ confirmed: true, ...(opts.installNode ? { installNode: true } : {}) }),
+      body: JSON.stringify({ confirmed: true, lang: opts.lang ?? 'pt', ...(opts.installNode ? { installNode: true } : {}) }),
     })
   } catch { return { ok: false, code: 'failed' } }
   if (!response.ok || !response.body) {

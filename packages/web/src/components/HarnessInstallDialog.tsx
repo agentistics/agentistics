@@ -47,7 +47,7 @@ export function HarnessInstallDialog({ target, pt, onClose, onDone }: {
   const run = async () => {
     if (!target) return
     setPhase('running'); setLines([]); setFailure('')
-    const result = await installHarness(target.id, update, line => setLines(prev => [...prev, line].slice(-MAX_LINES)), { installNode: withNode.current })
+    const result = await installHarness(target.id, update, line => setLines(prev => [...prev, line].slice(-MAX_LINES)), { installNode: withNode.current, lang: pt ? 'pt' : 'en' })
     if (result.ok) { onDone(result.version); onClose(); return }
     if (result.code === 'node-required') { setPhase('needs-node'); return }
     setFailure(

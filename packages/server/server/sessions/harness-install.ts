@@ -93,6 +93,12 @@ function sse(events: AsyncGenerator<Event>): ReadableStream<Uint8Array> {
   })
 }
 
+/** The sentences the route itself says (the installer's own lines are passed through untouched). */
+const SAY = {
+  pt: { updating: 'Atualizando…', installing: 'Instalando…', node: 'Instalando o Node.js, que este assistente precisa…', nodeFail: 'Não consegui instalar o Node.js. Tente de novo.', fail: 'A instalação não terminou. Tente de novo.', verifying: 'Verificando a versão…', noVersion: 'Instalou, mas não consegui confirmar a versão. Tente de novo.', done: 'Instalação concluída.' },
+  en: { updating: 'Updating…', installing: 'Installing…', node: 'Installing Node.js, which this assistant needs…', nodeFail: 'Could not install Node.js. Try again.', fail: 'The installation did not finish. Try again.', verifying: 'Checking the version…', noVersion: 'It installed, but the version could not be confirmed. Try again.', done: 'Installation complete.' },
+} as const
+
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
 /**
@@ -111,7 +117,7 @@ export async function handleHarnessInstallRoute(
   const { runner } = resolved
   const driver = ['claude', 'codex', 'gemini', 'copilot'].includes(id) ? getChatDriver(id as Harness) : null
   if (!driver) return json(404, { error: 'unknown_harness' })
-  const body = await req.json().catch(() => null) as { confirmed?: boolean; installNode?: boolean } | null
+  const body = await req.json().catch(() => null) as { confirmed?: boolean; installNode?: boolean; lang?: string } | null
   if (body?.confirmed !== true) return json(400, { error: 'confirmation_required' })
   if (busy) return json(409, { error: 'install_in_progress' })
   // Claimed BEFORE the first await below: two requests arriving together must not both pass.
@@ -119,6 +125,7 @@ export async function handleHarnessInstallRoute(
   let facts: HarnessInstallFacts
   let plan: HarnessInstallPlan
   const wantsNode = body.installNode === true
+  const say = SAY[body.lang === 'en' ? 'en' : 'pt']
   try {
     facts = await resolved.facts()
     plan = planHarnessInstall(id as Harness, facts)
@@ -157,23 +164,23 @@ export async function handleHarnessInstallRoute(
       await log('started')
       let current = plan
       if (plan.reason === 'node-required') {
-        yield { type: 'progress', message: 'Instalando o Node.js, que este assistente precisa…' }
+        yield { type: 'progress', message: say.node }
         const code = yield* run(planNodeInstall(facts).command!, 10 * 60_000)
-        if (code !== 0) { yield { type: 'error', message: 'Não consegui instalar o Node.js. Tente de novo.' }; return }
+        if (code !== 0) { yield { type: 'error', message: say.nodeFail }; return }
         current = planHarnessInstall(id as Harness, { ...facts, nodePresent: true, npmGlobalWritable: false })
       }
-      yield { type: 'progress', message: operation === 'update' ? 'Atualizando…' : 'Instalando…' }
+      yield { type: 'progress', message: operation === 'update' ? say.updating : say.installing }
       const code = yield* run(current.command!, 10 * 60_000)
-      if (code !== 0) { yield { type: 'error', message: 'A instalação não terminou. Tente de novo.' }; return }
-      yield { type: 'progress', message: 'Verificando a versão…' }
+      if (code !== 0) { yield { type: 'error', message: say.fail }; return }
+      yield { type: 'progress', message: say.verifying }
       let output = ''
       const verifyCode = await runner(current.verify, line => { output += `${line}\n` }, 30_000).catch(() => 1)
       const version = parseHarnessVersion(output)
-      if (verifyCode !== 0 || !version) { yield { type: 'error', message: 'Instalou, mas não consegui confirmar a versão. Tente de novo.' }; return }
+      if (verifyCode !== 0 || !version) { yield { type: 'error', message: say.noVersion }; return }
       forgetHarnessVersion()
       // A harness that appeared must show in the picker now, not at the next server restart.
       resetHarnessAvailability()
-      yield { type: 'done', message: 'Instalação concluída.', version }
+      yield { type: 'done', message: say.done, version }
     } finally { busy = false }
   }
   return new Response(sse(events()), { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' } })
