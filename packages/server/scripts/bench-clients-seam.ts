@@ -15,13 +15,20 @@ const binary = join(workspace, 'release/agentop')
 if (!existsSync(binary)) throw new Error('Build the compiled binary first')
 const available = () => Number(readFileSync('/proc/meminfo', 'utf8').match(/MemAvailable:\s+(\d+)/)?.[1] ?? 0)
 if (available() < 3 * 1024 * 1024) throw new Error('Requires at least 3 GB available')
-const apiPort = 48981, webPort = 48982, base = `http://127.0.0.1:${apiPort}`
-for (const port of [apiPort, webPort]) await new Promise<void>((resolve, reject) => {
-  const probe = createServer(); probe.once('error', reject)
-  probe.listen(port, '127.0.0.1', () => probe.close(e => e ? reject(e) : resolve()))
-})
+async function freePort(start: number): Promise<number> {
+  for (let port = start; port < 49120; port++) {
+    const free = await new Promise<boolean>((resolve, reject) => {
+      const probe = createServer()
+      probe.once('error', (error: NodeJS.ErrnoException) => error.code === 'EADDRINUSE' ? resolve(false) : reject(error))
+      probe.listen(port, '::', () => probe.close(error => error ? reject(error) : resolve(true)))
+    })
+    if (free) return port
+  }
+  throw new Error('No free throwaway benchmark ports')
+}
+const apiPort = await freePort(49081), webPort = await freePort(apiPort + 1), base = `http://127.0.0.1:${apiPort}`
 const evidence = mkdtempSync(join(workspace, '.cache/f1-3-bench-'))
-const root = mkdtempSync('/tmp/f13b-')
+const root = mkdtempSync('/var/tmp/f13b-')
 const configs = ['.claude.json', '.codex/config.toml', '.gemini/settings.json', '.copilot/mcp-config.json']
 const config = (f: string) => existsSync(join(realHome, f)) ? readFileSync(join(realHome, f), 'utf8') : ''
 const value = (f: string, text: string) => f === '.claude.json' && text ? JSON.stringify(JSON.parse(text).mcpServers ?? {}) : text
@@ -38,6 +45,7 @@ writeFileSync(join(root, 'data/event-subscriptions.json'), JSON.stringify({ subs
 const env = { HOME: home, USER: process.env.USER ?? 'qa', LOGNAME: process.env.USER ?? 'qa', SHELL: '/bin/bash', LANG: 'C.UTF-8', TERM: 'xterm-256color', PATH: `${root}/bin:${dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin`, TMPDIR: tmp, TMUX_TMPDIR: join(root, 'tmux'), TMUX_SHIM_LOG: join(root, 'logs/tmux-calls.log'), AGENTISTICS_DIR: join(root, 'data'), PORT: String(apiPort), WEB_PORT: String(webPort), AGENTISTICS_THROWAWAY: '1', AGENTISTICS_TELEMETRY: '0', FAKE_THINK_S: '1' }
 const server = spawn(binary, ['server'], { env, stdio: ['ignore', 'pipe', 'pipe'] })
 writeFileSync(join(root, 'server.pid'), String(server.pid))
+writeFileSync(join(evidence, 'server.pid'), String(server.pid))
 let log = '', aborted = false
 const record = (chunk: Buffer) => { log += chunk; writeFileSync(join(root, 'logs/server.log'), log) }
 server.stdout?.on('data', record); server.stderr?.on('data', record)
@@ -59,7 +67,7 @@ function cpu() {
   return Number(fields[11]) + Number(fields[12]) + Number(fields[13]) + Number(fields[14])
 }
 const hz = Number(spawnSync('getconf', ['CLK_TCK'], { encoding: 'utf8' }).stdout.trim())
-interface Client { id: string; bytes: number; dataGets: number; patchCount: number; chatSource?: string; snapshotBytes: number[]; deltaBytes: number[]; stream: ReturnType<typeof followFleet>; close(): void }
+interface Client { id: string; bytes: number; dataGets: number; patchCount: number; chatSource?: string; chatFacts?: Record<string, unknown>; snapshotBytes: number[]; deltaBytes: number[]; stream: ReturnType<typeof followFleet>; close(): void }
 function client(id: string): Client {
   const ac = new AbortController()
   let data: object | null = null, revision: string | null = null
@@ -96,17 +104,26 @@ function client(id: string): Client {
       if (next) { data = next; revision = body.revision; result.patchCount++ } else void readData()
     } else if (event === 'change' && body.revision !== revision) void readData()
   })).catch(error => { if (!ac.signal.aborted) console.error(String(error)) })
-  void sse(`/api/fleet/chat-stream?id=${encodeURIComponent(id)}&lang=en`, (event, body) => { if (event === 'chat') result.chatSource = body.source ?? 'legacy' })
+  void sse(`/api/fleet/chat-stream?id=${encodeURIComponent(id)}&lang=en`, (event, body) => {
+    if (event === 'chat') {
+      result.chatSource = body.source ?? 'legacy'
+      result.chatFacts = { unavailable: body.unavailable, transcript: body.transcript, link: body.link }
+    }
+  })
   const health = setInterval(() => { void fetch(base + '/api/health', { signal: ac.signal }).then(r => r.text()).then(t => { result.bytes += t.length }).catch(() => {}) }, 2_000)
   stops.push(result.close)
   return result
 }
 const results: Array<{ clients: number; cpuPercent: number; snapshotBytes: number[]; deltaBytes: number[]; chatSources: Array<string | undefined> }> = []
+let patchExercise: { applied: number[]; extraGets: number[]; trafficKB: number[] } | null = null
 try {
   let ready = false
   for (let i = 0; i < 120; i++) {
-    try { await json('/api/health'); ready = true; break } catch {}
     if (server.exitCode !== null || server.signalCode !== null) throw new Error(`Server exited: ${log.slice(-4000)}`)
+    // Health from a port peer is insufficient: only our saved process's boot log proves ownership.
+    if (log.includes(`listening on ${apiPort} and ${webPort}`)) {
+      try { await json('/api/health'); ready = true; break } catch {}
+    }
     await wait(1_000)
   }
   if (!ready) throw new Error('Server did not become healthy')
@@ -140,6 +157,7 @@ try {
     await wait(5_000)
   }
   if (!imported) throw new Error('Journal backfill did not finish; CPU baseline would be invalid')
+  await json('/api/data') // Prime the full dashboard/projection after import, before the idle baseline.
   await wait(15_000)
   for (const count of [0, 1, 5, 0]) {
     const clients = Array.from({ length: count }, (_, i) => client(rows[i % rows.length]!.id))
@@ -149,7 +167,16 @@ try {
     await wait(30_000)
     const seconds = (performance.now() - start) / 1000
     const cpuPercent = 100 * (cpu() - ticks) / hz / seconds
-    const result = { sessions: 10, clients: count, seconds, cpuPercent, chatSources: clients.map(c => c.chatSource), chatSessions: clients.map(c => ({ id: c.id, harness: rows.find(r => r.id === c.id)?.harness, source: c.chatSource })), patchCounts: clients.map((c, i) => c.patchCount - patches[i]!), clientKBmin: clients.map((c, i) => (c.bytes - bytes[i]!) / 1024 * 60 / seconds), extraDataGets: clients.map((c, i) => c.dataGets - gets[i]!), snapshotBytes: clients.flatMap(c => c.snapshotBytes), deltaBytes: clients.flatMap(c => c.deltaBytes) }
+    const idleBytes = clients.map(c => c.bytes), idleGets = clients.map(c => c.dataGets)
+    if (count === 5) {
+      const beforePatch = clients.map(c => c.patchCount)
+      const ownClaude = rows.find(r => r.harness === 'claude')
+      if (!ownClaude) throw new Error('No own fake Claude row to exercise the watched transcript')
+      await json('/api/fleet/act?lang=en', { id: ownClaude.id, action: 'prompt', text: 'QA patch verification' })
+      await wait(8_000)
+      patchExercise = { applied: clients.map((c, i) => c.patchCount - beforePatch[i]!), extraGets: clients.map((c, i) => c.dataGets - idleGets[i]!), trafficKB: clients.map((c, i) => (c.bytes - idleBytes[i]!) / 1024) }
+    }
+    const result = { sessions: 10, clients: count, seconds, cpuPercent, chatSources: clients.map(c => c.chatSource), chatSessions: clients.map(c => ({ id: c.id, harness: rows.find(r => r.id === c.id)?.harness, source: c.chatSource, facts: c.chatFacts })), patchCounts: clients.map((c, i) => c.patchCount - patches[i]!), clientKBmin: clients.map((_, i) => (idleBytes[i]! - bytes[i]!) / 1024 * 60 / seconds), extraDataGets: clients.map((_, i) => idleGets[i]! - gets[i]!), snapshotBytes: clients.flatMap(c => c.snapshotBytes), deltaBytes: clients.flatMap(c => c.deltaBytes) }
     results.push(result); console.log(JSON.stringify(result)); for (const c of clients) c.close()
   }
   const baselines = results.filter(r => r.clients === 0)
@@ -161,8 +188,9 @@ try {
     snapshotBytes: results.every(r => r.snapshotBytes.every(n => n <= 51200)),
     deltaBytes: deltaSizes.length ? deltaSizes.every(n => n <= 2048) : null,
     adapterSources: results.every(r => r.chatSources.every(s => s === 'adapter')),
+    dataPatches: patchExercise !== null && patchExercise.applied.length === 5 && patchExercise.applied.every(n => n > 0) && patchExercise.extraGets.every(n => n === 0),
   }
-  writeFileSync(join(root, 'logs/clients.json'), JSON.stringify({ results, checks, baselineCPU, scope: 'compiled server, 10 fake CLI sessions, 6 transcript formats; all 8 browser contracts and 30-minute memory soak are separate', budgets: { idleCPU: 1, perClientCPU: 1, snapshotBytes: 51200, deltaBytes: 2048 } }, null, 2))
+  writeFileSync(join(root, 'logs/clients.json'), JSON.stringify({ results, checks, baselineCPU, patchExercise, ports: { api: apiPort, web: webPort }, scope: 'compiled server, 10 fake CLI sessions, 6 transcript formats; idle CPU/traffic samples exclude the separate controlled activity; all 8 browser contracts and 30-minute memory soak are separate', budgets: { idleCPU: 1, perClientCPU: 1, snapshotBytes: 51200, deltaBytes: 2048 } }, null, 2))
   if (Object.values(checks).some(ok => !ok)) process.exitCode = 1
 } finally {
   clearInterval(watchdog); for (const close of stops) close(); server.kill('SIGTERM')
@@ -177,7 +205,7 @@ try {
   rmSync(root, { recursive: true, force: true })
   for (const f of configs) {
     const after = config(f)
-    if (after.includes(root) || /(?:localhost|127\.0\.0\.1):4898[12]/.test(after) || value(f, after) !== before[configs.indexOf(f)]) throw new Error(`Real config changed: ${f}`)
+    if (after.includes(root) || [apiPort, webPort].some(port => after.includes(`localhost:${port}`) || after.includes(`127.0.0.1:${port}`)) || value(f, after) !== before[configs.indexOf(f)]) throw new Error(`Real config changed: ${f}`)
   }
   console.log(`Benchmark evidence: ${evidence}/logs`)
 }
