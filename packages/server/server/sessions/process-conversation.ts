@@ -48,7 +48,7 @@ async function openFiles(pid: number): Promise<string[]> {
 }
 
 /** The direct children of a pid, from every one of its threads. `[]` when unreadable. */
-async function childrenOf(pid: number): Promise<number[]> {
+export async function childrenOf(pid: number): Promise<number[]> {
   let tasks: string[]
   try {
     tasks = await readdir(`/proc/${pid}/task`)

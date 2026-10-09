@@ -16,6 +16,7 @@ import {
   showPrefixArgs, trimCapture, listPanePidsArgs, parsePanePids,
   type TerminalProfile,
 } from './tmux-cli'
+import { collectOwnPids, escalateKill, procIO } from './kill-escalate'
 import { dependencyCommandLine } from './dependency-plan'
 import { probeDependency } from './dependency-probe'
 import { sessionEnv } from './login-env'
@@ -709,10 +710,17 @@ export const tmuxBackend: SessionBackend = {
   },
 
   async kill(id: string) {
+    // The row's own pids, taken BEFORE the kill: afterwards a survivor is reparented to init and
+    // nothing links it to this row any more. See `kill-escalate.ts` for why tmux's kill is not enough.
+    const own = await collectOwnPids((await tmuxBackend.listPanePids?.().catch(() => undefined))?.get(id))
     const { code, err } = await tmux(killSessionArgs(id))
     // A non-zero exit that ISN'T "already gone" leaves the session running — reporting success
     // anyway is exactly the bug this return value exists to prevent (see types.ts).
-    return code === 0 || isSessionGoneError(err)
+    if (!(code === 0 || isSessionGoneError(err))) return false
+    // …and a session whose harness ignored the hang-up is not gone either: it is an orphan that
+    // blocks the next reopen of the conversation. Escalate on the row's OWN pids, SIGKILL last.
+    const { stuck } = await escalateKill(own, procIO())
+    return stuck.length === 0
   },
 
   attachCommand(id: string) {
