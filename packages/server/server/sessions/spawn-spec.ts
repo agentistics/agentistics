@@ -65,6 +65,9 @@ import { HARNESS_PROCESS_TRANSCRIPTS, HARNESS_SESSION_SOURCES } from './harness-
 import { prependContext } from './agentistics-context'
 import type { InitialPrompt, SpawnRequest, SpawnPlanResult, SpawnSpec } from './types'
 
+/** A canonical UUID. Local so this module stays free of the server's git helpers. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
   // `Usage: claude [options] [command] [prompt]` / `Arguments: prompt  Your prompt`
   claude: {
@@ -182,14 +185,30 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     // is no longer available to new users." A list nothing local can check goes stale silently, so
     // there is none — the picker is absent instead of confidently wrong.
     modelSuggestions: [],
-    // No effort flag exists, and no `resume`: gemini's `-r, --resume` takes "latest" or an index
-    // number, never a session id. Offering it would be a verb that reopens the wrong conversation.
+    // No effort flag exists.
     //
-    // And deliberately NO `assignId`, although `--session-id  Start a new session with a manually
-    // provided UUID` exists: the id agentistics knows a gemini conversation by is SYNTHETIC —
-    // `gemini.ts` builds `${dirName}/${fileBase}` from the chat file's path, because the files
-    // carry no id of their own. A recorded UUID would therefore match no session in the store, and
-    // an id that resolves to nothing is worse than no id at all: it looks like an exact link.
+    // `--session-id  Start a new session with a manually provided UUID` — VERIFIED LIVE 2026-10-09
+    // (gemini 0.63.0, throwaway HOME): `gemini --session-id <uuid> -p …` wrote
+    // `tmp/<project>/chats/session-<ts>-<uuid8>.jsonl` whose header line is `{"sessionId":"<uuid>",…}`
+    // — the very uuid passed, and its first eight characters are the file name's suffix. The adapter
+    // still keys the STORE by the synthetic `${project}/${file}` (the files had no id of their own
+    // when it was written, and re-keying would duplicate every stored session), so the assigned UUID
+    // is bridged to it by `SessionMeta.native_session_id` (the header's `sessionId`), not by changing
+    // either key — see `conversations.ts`'s `findConversation` and `harness-transcript.ts`'s
+    // `resolveGeminiTranscript`.
+    assignId: id => ['--session-id', id],
+    // `-r, --resume` is documented as "latest | index", but the CLI's own refusal text says
+    // "use --resume {number}, --resume {uuid}, or --resume latest", and that was VERIFIED the same
+    // day: `--resume <uuid>` reopened the conversation (the model recalled the earlier turn, one chat
+    // file, no new session), while an unknown uuid answered `Error resuming session: Invalid session
+    // identifier` and wrote nothing. The uuid form is used rather than mapping the id to the index
+    // `--list-sessions` prints, because that index is relative to the project and SHIFTS whenever
+    // another session is born between the listing and the launch — it would reopen a neighbour.
+    // Only a UUID is acceptable (`resumeIdOk`): an old synthetic `${project}/${file}` id names no
+    // conversation the CLI can open, and passing it would fall through to the CLI's own error on a
+    // pane nobody is watching.
+    resume: id => ['--resume', id],
+    resumeIdOk: id => UUID_RE.test(id),
   },
 
   // `-p, --prompt <text>  Execute a prompt in non-interactive mode (exits after completion)` — the
@@ -230,6 +249,7 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
   // real closed effort enum — the only harness besides claude that documents one.
   antigravity: {
     bin: 'agy',
+    logFileFlag: '--log-file', // agy 1.3.2 --help, probed 2026-10-09
     prompt: { kind: 'flag', flag: '--prompt-interactive' },
     modelFlag: '--model', // `--model  Model for the current CLI session`
     // The only harness here with a real listing command: `agy models` ("List available models",
@@ -286,7 +306,7 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
  * to match on. It was widened to codex and kimi (P-17) because their only link was a first-sighting
  * claim that waits for the data rebuild and refuses whenever two rows share a folder.
  *
- * `false` is still the answer for gemini (F0.2 gives it an assigned id), and it must be SAID rather
+ * `false` is the answer for a harness with none of the three, and it must be SAID rather
  * than papered over: everything downstream then falls back to `conversationForProcess`, which matches by harness
  * and directory and therefore gives every session of one repository the same conversation. That
  * guess is good enough to OFFER a reopen a person confirms by title, and not good enough to be
@@ -303,30 +323,14 @@ export function conversationLinkable(harness: HarnessId): boolean {
     || HARNESS_PROCESS_TRANSCRIPTS[harness] !== null
 }
 
-/**
- * Once a session of this harness has ENDED with no exact link, will one ever arrive?
- *
- * Narrower than `!conversationLinkable`, and a DIFFERENT fact. `conversationLinkable` answers for
- * the HARNESS as a whole, and is `true` for antigravity because route 3 above exists — but route 3
- * is a `/proc/<pid>/fd` read, so it only ever answers while the process is still alive to ask. A row
- * whose harness has ONLY route 3 (no `assignId`, no `HARNESS_SESSION_SOURCES` entry — antigravity
- * today) and whose process has already exited unlinked has exhausted its one chance: the fd is gone,
- * and nothing can recover the id it would have named. `conversationLinkable('antigravity')` stays
- * `true` throughout — a LIVE antigravity row within its capture window (see
- * `linkProcessConversationSoon` in `cli-start.ts`) must not be told it can never be linked — so a
- * caller needs BOTH this and the row's own ended state to tell "not yet" from "not ever".
- *
- * `false` for a harness with `assignId` or a session-file route: those record the link at spawn or
- * while the process runs through a DIFFERENT mechanism than the process's own open fd, so a session
- * ending unlinked there is either impossible or a fact about right now, not a permanent one this
- * function should be asked about.
- */
+/** A process-only route is lost after exit unless its exclusive managed log can still be read. */
 export function conversationLinkGoneForever(harness: HarnessId): boolean {
   return SPAWN_SPECS[harness]?.assignId === undefined
     && HARNESS_SESSION_SOURCES[harness] === null
     // Only where route 3 is the ONLY route: a codex or kimi conversation that ended unlinked is
     // still claimed by first sighting once the store has it, so it is not gone.
     && HARNESS_PROCESS_TRANSCRIPTS[harness]?.onlyRoute === true
+    && !HARNESS_PROCESS_TRANSCRIPTS[harness]?.managedLog
 }
 
 /** Decide the exact argv (and any text to type in) for a requested session. */
@@ -351,6 +355,10 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
     return { ok: false, error: { code: 'resume-unsupported', harness: req.harness } }
   }
 
+  if (req.resumeId && spec.resumeIdOk && !spec.resumeIdOk(req.resumeId)) {
+    return { ok: false, error: { code: 'resume-id-unusable', harness: req.harness, id: req.resumeId } }
+  }
+
   const argv: string[] = [spec.bin, ...(spec.startupArgs ?? [])]
   // The resume argv goes FIRST because one of these is a subcommand (`codex resume <id>`), and a
   // subcommand that follows a flag is not a subcommand any more.
@@ -359,6 +367,7 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
   // Never alongside a resume: the conversation already exists and already has an id.
   const assigned = !req.resumeId && req.conversationId && spec.assignId ? req.conversationId : undefined
   if (assigned && spec.assignId) argv.push(...spec.assignId(assigned))
+  if (req.logFile && spec.logFileFlag) argv.push(spec.logFileFlag, req.logFile)
   if (req.model && spec.modelFlag) argv.push(spec.modelFlag, req.model)
   if (req.effort && spec.effortFlag) argv.push(spec.effortFlag, req.effort)
 

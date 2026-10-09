@@ -34,7 +34,7 @@ import { spawn } from 'node:child_process'
 import { rekeyMutedSession } from './sessions/session-notify-web'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, writeSync } from 'node:fs'
-import { join, resolve as resolvePath } from 'node:path'
+import { dirname, join, resolve as resolvePath } from 'node:path'
 import type { CodeHostPort } from '@agentistics/engine-api'
 import type { CodeLaunch } from '@agentistics/tui/control/code-types'
 import type { CodeStartLaunch } from './code-launch'
@@ -117,7 +117,7 @@ import {
 import { confirm } from './cli-ui'
 import { compareVersions, CURRENT_VERSION, getVersionInfo } from './version'
 import { budgetFromEnv, decideSelfGuard, exeWasReplaced, parseProcStatusMemory, planRestartArgv, selfGuardMessage, type SelfSample } from './self-guard'
-import { readlink, readFile as readFileText } from 'node:fs/promises'
+import { mkdir, readlink, readFile as readFileText } from 'node:fs/promises'
 import { execInPlace } from './exec-in-place'
 import { cliStrings, type CliLang, type CliStrings } from './cli-i18n'
 import { awaitReplacement, type RestartVerdict, type ServingObservation } from './service-manager'
@@ -169,7 +169,7 @@ import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import { controlStrings } from '@agentistics/tui/control/i18n'
 import { loadHarnessSessions } from './sessions/harness-sessions'
 import {
-  collisionKey, readProcessConversation, readSpawnWindowConversation, resolveProcessLog, type ProcessTranscriptFile,
+  collisionKey, managedProcessLogPath, readManagedConversation, readProcessConversation, readSpawnWindowConversation, resolveProcessLog, type ProcessTranscriptFile,
 } from './sessions/process-conversation'
 import { holderCollisions } from './sessions/process-transcript'
 import { onTranscriptActivity } from './sessions/transcript-activity'
@@ -194,7 +194,7 @@ import { hostAdapterState, onAdapterStateChange } from './sessions/adapter-state
 import { HARNESS_PROCESS_TRANSCRIPTS } from './sessions/harness-session-file'
 import { modeSpecFor } from './sessions/mode-spec'
 import { isServerProcess, readServerSnapshot } from './sessions/shared-snapshot'
-import { conversationForProcess, forgetConversations, loadConversations } from './sessions/conversations'
+import { conversationForProcess, findConversation, forgetConversations, loadConversations, resumeIdOf } from './sessions/conversations'
 
 export type StartResult = number | 'foreground'
 
@@ -1570,6 +1570,7 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
     // `cli-session.ts`'s poller: that one is a one-shot command and writes nothing, exactly as it
     // takes no heartbeat.
     readProcessConversation,
+    readManagedConversation,
     // Which log a live pid holds open, WITHOUT reading its content — the collision guard's own
     // input (see `sessions-host.ts`'s `createSessionsPoller` doc for `resolveProcessLog`, and
     // `agy-conversation.ts` for what it protects). This is the ONE production caller of
@@ -1658,6 +1659,7 @@ function explainSpawnError(e: SpawnPlanError, s: CliStrings): string {
   switch (e.code) {
     case 'unsupported-harness': return s.sessSpawnUnsupported(e.harness)
     case 'resume-unsupported': return s.sessSpawnNoResume(e.harness)
+    case 'resume-id-unusable': return s.sessSpawnNoResumeId(e.harness)
     case 'model-unsupported': return s.sessSpawnNoModel(e.harness)
     case 'effort-unsupported': return s.sessSpawnNoEffort(e.harness)
     case 'unknown-effort': return s.sessSpawnBadEffort(e.harness, e.value, e.accepted)
@@ -1831,6 +1833,13 @@ function linkProcessConversationSoon(id: string, harness: HarnessId): void {
       // something else took the id) is no longer this loop's to touch.
       const row = (await readRegistry().catch(() => [])).find(m => m.id === id)
       if (!row || row.conversationId) return
+      const managedConversation = await readManagedConversation(harness, id)
+      if (managedConversation) {
+        try {
+          await recordProcessLink(id, managedConversation, 'assigned', 'process-log')
+          return
+        } catch { continue } // retry if the registry write failed
+      }
       const backend = await resolveBackend()
       const panePids = await backend.listPanePids?.().catch(() => undefined)
       const pid = panePids?.get(id)
@@ -2033,9 +2042,11 @@ async function spawnManaged(req: {
       ...(await resolveContextParent(req.parentSessionId ?? req.inherit?.parentConversationId ?? req.inherit?.parentSessionId)),
     })
   const offeredConversationId = randomUUID()
+  const logFile = managedProcessLogPath(req.harness, id, AGENTISTICS_DATA_DIR)
   const planned = planSpawn({
     harness: req.harness,
     cwd: req.cwd,
+    ...(logFile ? { logFile } : {}),
     ...(req.resumeId ? { resumeId: req.resumeId } : {}),
     context: ctx,
     ...(req.prompt ? { prompt: req.prompt } : {}),
@@ -2078,6 +2089,7 @@ async function spawnManaged(req: {
   const abandon = () => removeSession(id).catch(() => {})
   await writeContextFile(planned.plan)
   try {
+    if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
     await backend.spawn({
       id,
       cwd: req.cwd,
@@ -2254,13 +2266,13 @@ async function reopenEntries(
     inUse,
     conversationFor: entry => {
       const own = entry.conversationId
-        ? conversations.find(c => c.sessionId === entry.conversationId)
+        ? findConversation(conversations, entry.conversationId)
         : undefined
       const conv = own ?? conversations.find(c =>
         !taken.has(c.sessionId) && c.harness === entry.harness && c.cwd === entry.cwd)
       if (!conv?.resumable) return null
       taken.add(conv.sessionId)
-      return { sessionId: conv.sessionId, title: conv.title }
+      return { sessionId: resumeIdOf(conv), title: conv.title }
     },
   })
 
@@ -2379,13 +2391,13 @@ async function restorableSessions(fell: readonly ManagedSession[]): Promise<Rest
     entries: fell,
     conversationFor: m => {
       const own = m.conversationId
-        ? conversations.find(c => c.sessionId === m.conversationId)
+        ? findConversation(conversations, m.conversationId)
         : undefined
       const conv = own ?? conversations.find(c =>
         !taken.has(c.sessionId) && c.harness === m.harness && c.cwd === m.cwd)
       if (!conv?.resumable) return null
       taken.add(conv.sessionId)
-      return { sessionId: conv.sessionId, title: conv.title }
+      return { sessionId: resumeIdOf(conv), title: conv.title }
     },
   }).map(o => ({
     id: o.entry.id,

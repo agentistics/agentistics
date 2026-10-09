@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
   agyLogCollisions, agyLogFromFds, agyLogStartMs, agyLogWorkspaces, conversationFromAgyLog,
-  conversationFromSpawnWindow,
+  conversationFromSpawnWindow, agyTranscriptFromFds, agyConversationFromPath, conversationFromManagedAgyLog,
 } from './agy-conversation'
 
 /**
@@ -259,4 +259,42 @@ describe('conversationFromSpawnWindow', () => {
   it('answers null with no logs at all', () => {
     expect(conversationFromSpawnWindow({ ...base, logs: [] })).toBeNull()
   })
+})
+
+describe('agy 1.3.2 open conversation paths', () => {
+  const a = '58a04095-19f8-44eb-8f26-93f778567845'
+  const b = '39783297-b1b0-49bf-9f56-b809ee1933db'
+  const root = '/home/test/.gemini/antigravity-cli'
+  const db = (id: string) => `${root}/conversations/${id}.db`
+  const brain = (id: string) => `${root}/brain/${id}/.system_generated/logs/transcript_full.jsonl`
+
+  it('links one open DB and its sidecars before the brain transcript exists', () => {
+    expect(agyTranscriptFromFds([db(a), `${db(a)}-wal`, `${db(a)}-shm`])).toBe(db(a))
+    expect(agyConversationFromPath(db(a))).toBe(a)
+    expect(agyConversationFromPath(brain(a))).toBe(a)
+  })
+  it('two spawns in the same second have distinct process-owned paths', () => {
+    expect(agyConversationFromPath(agyTranscriptFromFds([db(a)])!)).toBe(a)
+    expect(agyConversationFromPath(agyTranscriptFromFds([db(b)])!)).toBe(b)
+  })
+  it('a stale brain directory is not evidence unless the process holds it open', () => {
+    expect(agyTranscriptFromFds([`${root}/brain`])).toBeNull()
+    expect(agyTranscriptFromFds([])).toBeNull()
+    expect(agyTranscriptFromFds([brain(a)])).toBe(brain(a))
+    expect(agyTranscriptFromFds([brain(a), brain(b)])).toBeNull()
+  })
+  it('keeps the old log fallback and refuses multiple conversations even with a log', () => {
+    const log = `${root}/log/cli-20261009_024823.log`
+    expect(agyTranscriptFromFds([log])).toBe(log)
+    expect(agyTranscriptFromFds([db(a), db(b), log])).toBeNull()
+    expect(agyConversationFromPath(`${root}/conversations/not-a-uuid.db`)).toBeNull()
+    expect(agyConversationFromPath(`/tmp/brain/${a}/notes.md`)).toBeNull()
+  })
+})
+
+it('the exclusive log follows the selected conversation, never a mere lookup', () => {
+  const a = '58a04095-19f8-44eb-8f26-93f778567845'
+  const b = '39783297-b1b0-49bf-9f56-b809ee1933db'
+  expect(conversationFromManagedAgyLog(`Created conversation ${a}\nStreaming conversation ${b}\nGetConversationDetail: found conversation ${a}`)).toBe(b)
+  expect(conversationFromManagedAgyLog(`GetConversationDetail: found conversation ${a}`)).toBeNull()
 })

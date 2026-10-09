@@ -25,7 +25,7 @@
 import { readFile, readdir, readlink } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
-import { ANTIGRAVITY_DIR } from '../config'
+import { AGENTISTICS_DATA_DIR, ANTIGRAVITY_DIR } from '../config'
 import { HARNESS_PROCESS_TRANSCRIPTS } from './harness-session-file'
 
 /** Every path this process currently holds open. `[]` for anything that cannot be read. */
@@ -163,7 +163,8 @@ export async function resolveHolderFile(
 export function collisionKey(harness: HarnessId, resolved: ProcessTranscriptFile | null): string | null {
   const source = HARNESS_PROCESS_TRANSCRIPTS[harness]
   if (!source || !resolved) return null
-  return source.conversation.from === 'path' ? source.conversation.read(resolved.file) : resolved.file
+  return source.conversation.from === 'path' ? source.conversation.read(resolved.file)
+    : source.conversation.fromPath?.(resolved.file) ?? resolved.file
 }
 
 /**
@@ -188,6 +189,8 @@ export async function readProcessConversation(
   const resolved = known !== undefined ? known : await resolveProcessLog(harness, pid)
   if (!resolved) return null
   if (source.conversation.from === 'path') return source.conversation.read(resolved.file)
+  const fromPath = source.conversation.fromPath?.(resolved.file)
+  if (fromPath) return fromPath
 
   try {
     return source.conversation.read(await readFile(resolved.file, 'utf-8'))
@@ -262,4 +265,18 @@ export async function readSpawnWindowConversation(
     ...(o.rivalSpawnsMs ? { rivalSpawnsMs: o.rivalSpawnsMs } : {}),
     ...(o.taken ? { taken: o.taken } : {}),
   })
+}
+
+/** Deterministic, exclusive path; ids with separators are refused before any IO. */
+export function managedProcessLogPath(harness: HarnessId, id: string, dataDir: string): string | null {
+  const dir = HARNESS_PROCESS_TRANSCRIPTS[harness]?.managedLog?.directory
+  return dir && /^[0-9a-f]{10}$/.test(id) ? join(dataDir, dir, `${id}.log`) : null
+}
+
+/** The log WE asked the CLI to write: no process walk, timestamp guess or cwd attribution. */
+export async function readManagedConversation(harness: HarnessId, id: string, dataDir = AGENTISTICS_DATA_DIR): Promise<string | null> {
+  const file = managedProcessLogPath(harness, id, dataDir)
+  const source = HARNESS_PROCESS_TRANSCRIPTS[harness]
+  if (!file || !source?.managedLog) return null
+  try { return source.managedLog.conversationFrom(await readFile(file, 'utf-8')) } catch { return null }
 }

@@ -7,7 +7,9 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
+import { mkdir } from 'node:fs/promises'
+import { managedProcessLogPath } from './process-conversation'
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 // `GROUPINGS` and never a list typed into the usage text: the help is the only place a person can
 // read what `--group` accepts, and a second copy of that list drifts silently — the CLI would go on
@@ -36,7 +38,7 @@ import { renameInHarness, renameMessage } from './rename'
 import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefCandidate } from './session-ref'
 import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
 import { addSession, newSessionId, patchSession, readRegistry, retireFallenSessions, retireSession } from './registry'
-import { conversationForProcess, loadConversations } from './conversations'
+import { conversationForProcess, findConversation, loadConversations, resumeIdOf } from './conversations'
 import { resolveBackend } from './index'
 import { scanProcesses } from '../live-sessions'
 import { loadHarnessSessions } from './harness-sessions'
@@ -45,7 +47,7 @@ import { loadNativeFleet, resolveNativeRef, runNativeVerb } from './native-fleet
 import { isServerProcess, readServerSnapshot } from './shared-snapshot'
 import { needsAttention, type SessionView } from './session-view'
 import { planTaskReopen, taskReopenSucceeded } from './task-reopen'
-import { TASKS_FILE } from '../config'
+import { AGENTISTICS_DATA_DIR, TASKS_FILE } from '../config'
 import { createTaskStore } from './task-store'
 import { newAttemptId, newTaskId, type Attempt, type Task } from './task-model'
 import { liveConversationHolders } from './live-claims'
@@ -137,6 +139,8 @@ function explainPlanError(e: SpawnPlanError): string {
       return `${e.harness} cannot be started by agentop yet. Supported: ${STARTABLE.join(', ')}.`
     case 'resume-unsupported':
       return `${e.harness} cannot reopen a conversation by id, so it cannot be resumed.`
+    case 'resume-id-unusable':
+      return `${e.harness} cannot reopen conversation ${e.id}: its id is not one the CLI accepts (only sessions agentop started or sessions with a recorded id can be reopened).`
     case 'model-unsupported':
       return `${e.harness} has no model flag, so --model cannot be applied.`
     case 'effort-unsupported':
@@ -314,11 +318,13 @@ async function start(
   const cwd = cmd.cwd ? resolve(cmd.cwd) : process.cwd()
   const lang = await resolveLang()
   const id = newSessionId()
+  const logFile = managedProcessLogPath(cmd.harness, id, AGENTISTICS_DATA_DIR)
   const parentLink = await parentLinkOf(callerSessionId())
   const parentSessionId = parentLink.parentSessionId
   const ctx = buildSpawnContext({ sessionId: id, cwd, ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)), ...(await resolveContextParent(parentSessionId)) })
   const planned = planSpawn({
     harness: cmd.harness, cwd, prompt: cmd.prompt, model: cmd.model, effort: cmd.effort,
+    ...(logFile ? { logFile } : {}),
     conversationId: randomUUID(),
     context: ctx,
   })
@@ -344,6 +350,7 @@ async function start(
   const spawnedAt = new Date().toISOString()
   await writeContextFile(planned.plan)
   try {
+    if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
     await backend.spawn({ id, cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...spawnPromptArg(planned.plan, cmd.harness) })
   } catch (e) {
     console.error(`Could not start the session: ${e instanceof Error ? e.message : String(e)}`)
@@ -520,10 +527,12 @@ async function batch(
   for (const spec of cmd.specs) {
     const cwd = spec.cwd ? resolve(spec.cwd) : process.cwd()
     const id = newSessionId()
+    const logFile = managedProcessLogPath(spec.harness, id, AGENTISTICS_DATA_DIR)
     const ctx = buildSpawnContext({ sessionId: id, cwd, ...(await resolveContextParent(parentSessionId)), ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
     const planned = planSpawn({
       harness: spec.harness,
       cwd,
+      ...(logFile ? { logFile } : {}),
       context: ctx,
       ...(spec.prompt ? { prompt: spec.prompt } : {}),
       ...(spec.model ? { model: spec.model } : {}),
@@ -544,6 +553,7 @@ async function batch(
     const spawnedAt = new Date().toISOString()
     await writeContextFile(planned.plan)
     try {
+      if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
       await backend.spawn({
         id, cwd, argv: planned.plan.argv,
         ...(planned.plan.env ? { env: planned.plan.env } : {}),
@@ -643,7 +653,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
     inUse,
     conversationFor: m => {
       const own = m.conversationId
-        ? conversations.find(c => c.sessionId === m.conversationId)
+        ? findConversation(conversations, m.conversationId)
         : undefined
       const conv = own ?? conversationForProcess(
         conversations.filter(c => !taken.has(c.sessionId)),
@@ -651,7 +661,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
       )
       if (!conv?.resumable) return null
       taken.add(conv.sessionId)
-      return { sessionId: conv.sessionId, title: conv.title }
+      return { sessionId: resumeIdOf(conv), title: conv.title }
     },
   })
 
@@ -672,10 +682,12 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
 
   for (const row of plan.reopen) {
     const m = row.entry
-    const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...inheritedLaunch(m, m.harness) })
-    if (!planned.ok) { skipped.push(m.id); continue }
     const id = newSessionId()
+    const logFile = managedProcessLogPath(m.harness, id, AGENTISTICS_DATA_DIR)
+    const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...(logFile ? { logFile } : {}), ...inheritedLaunch(m, m.harness) })
+    if (!planned.ok) { skipped.push(m.id); continue }
     try {
+      if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
       await backend.spawn({ id, cwd: m.cwd, argv: planned.plan.argv })
     } catch { skipped.push(m.id); continue }
     // The path the report came from. Claude refuses to resume a conversation that is already open
@@ -1005,7 +1017,9 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
   const live = await liveAgentFor(ref)
   if (!live) return null
 
-  const planned = planSpawn({ harness: live.harness, cwd: live.cwd, resumeId: live.sessionId })
+  const id = newSessionId()
+  const logFile = managedProcessLogPath(live.harness, id, AGENTISTICS_DATA_DIR)
+  const planned = planSpawn({ harness: live.harness, cwd: live.cwd, resumeId: live.sessionId, ...(logFile ? { logFile } : {}) })
   const plan = planTakeover({
     conversationId: live.sessionId,
     harness: live.harness,
@@ -1036,8 +1050,8 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
     try { process.kill(plan.holder.pid!, 0) } catch { break }
   }
 
-  const id = newSessionId()
   try {
+    if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
     await backend.spawn({ id, cwd: plan.cwd, argv: planned.plan.argv })
   } catch (e) {
     console.error(`Closed it, but could not reopen: ${e instanceof Error ? e.message : String(e)}`)

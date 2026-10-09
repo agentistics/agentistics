@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
-  HARNESS_TRANSCRIPTS, forgetCodexTranscriptPaths, forgetKimiTranscriptPaths,
-  resolveAntigravityTranscript, resolveCodexTranscript, resolveCopilotTranscript,
+  HARNESS_TRANSCRIPTS, forgetCodexTranscriptPaths, forgetGeminiTranscriptPaths, forgetKimiTranscriptPaths,
+  resolveAntigravityTranscript, resolveCodexTranscript, resolveCopilotTranscript, resolveGeminiTranscript,
   resolveKimiTranscript, transcriptReaderFor, recentCodexDayDirs,
 } from './harness-transcript'
 
@@ -368,5 +368,144 @@ describe('a transcript that appears AFTER the first miss', () => {
 
     expect(await resolveKimiTranscript({ conversationId: ID }, root, at + 31_000)).toBe(wire)
     await rm(root, { recursive: true, force: true })
+  })
+})
+
+
+describe('the gemini reader resolves BOTH of its ids', () => {
+  // Layout measured live on gemini 0.63.0 (2026-10-09): `tmp/<project>/chats/session-<ts>-<uuid8>.jsonl`
+  // with a header line `{"sessionId":"<uuid>",…}`.
+  const UUID = '04d97770-e53f-4b7d-86d2-63bd12ec32eb'
+  const SAME_SUFFIX = '04d97770-0000-4000-8000-000000000000' // a different chat sharing the 8-char hint
+  let tmp: string
+  const header = (id: string) => JSON.stringify({ sessionId: id, projectHash: 'h', startTime: '2026-10-09T10:49:54.676Z', kind: 'main' }) + '\n'
+
+  beforeAll(async () => {
+    forgetGeminiTranscriptPaths()
+    tmp = await mkdtemp(join(tmpdir(), 'gemini-tmp-'))
+    const chats = join(tmp, 'work', 'chats')
+    await mkdir(chats, { recursive: true })
+    await writeFile(join(chats, 'session-2026-10-09T10-49-04d97770.jsonl'), header(UUID))
+    // another project holds a chat whose file name carries the SAME eight characters
+    await mkdir(join(tmp, 'other', 'chats'), { recursive: true })
+    await writeFile(join(tmp, 'other', 'chats', 'session-2026-10-08T09-00-04d97770.jsonl'), header(SAME_SUFFIX))
+  })
+  afterAll(async () => { await rm(tmp, { recursive: true, force: true }) })
+
+  it('finds the chat of an assigned uuid by the file-name suffix, CONFIRMED by the header', async () => {
+    expect(await resolveGeminiTranscript({ conversationId: UUID }, tmp))
+      .toBe(join(tmp, 'work', 'chats', 'session-2026-10-09T10-49-04d97770.jsonl'))
+    // eight hex characters are a hint, the header is the proof: the neighbour is its own chat
+    expect(await resolveGeminiTranscript({ conversationId: SAME_SUFFIX }, tmp))
+      .toBe(join(tmp, 'other', 'chats', 'session-2026-10-08T09-00-04d97770.jsonl'))
+  })
+
+  it('answers null for a uuid no header carries, even when a file name matches its suffix', async () => {
+    const liar = '04d97770-ffff-4fff-8fff-ffffffffffff'
+    expect(await resolveGeminiTranscript({ conversationId: liar }, tmp, Date.now() + 1)).toBeNull()
+  })
+
+  it('still resolves the store\'s synthetic <project>/<file> id and refuses traversal', async () => {
+    expect(await resolveGeminiTranscript({ conversationId: 'work/session-2026-10-09T10-49-04d97770' }, tmp))
+      .toBe(join(tmp, 'work', 'chats', 'session-2026-10-09T10-49-04d97770.jsonl'))
+    for (const bad of ['../x/y', 'work/../../etc', 'a/b/c', 'work', '/', 'work/..']) {
+      expect(await resolveGeminiTranscript({ conversationId: bad }, tmp), bad).toBeNull()
+    }
+  })
+
+  it('a MISS expires: the chat appears at the first turn, after the first poll missed it', async () => {
+    forgetGeminiTranscriptPaths()
+    const later = '77777777-7777-4777-8777-777777777777'
+    const t0 = 1_000_000
+    expect(await resolveGeminiTranscript({ conversationId: later }, tmp, t0)).toBeNull()
+    const f = join(tmp, 'work', 'chats', 'session-2026-10-09T11-00-77777777.jsonl')
+    await writeFile(f, header(later))
+    // inside the miss TTL the expensive scan is not repeated…
+    expect(await resolveGeminiTranscript({ conversationId: later }, tmp, t0 + 1_000)).toBeNull()
+    // …and once it expires the file is found. A remembered "nowhere" must not outlive the wait.
+    expect(await resolveGeminiTranscript({ conversationId: later }, tmp, t0 + 31_000)).toBe(f)
+  })
+
+  it('forgets a remembered path whose file is gone', async () => {
+    forgetGeminiTranscriptPaths()
+    const gone = '88888888-8888-4888-8888-888888888888'
+    const f = join(tmp, 'work', 'chats', 'session-2026-10-09T11-30-88888888.jsonl')
+    await writeFile(f, header(gone))
+    expect(await resolveGeminiTranscript({ conversationId: gone }, tmp)).toBe(f)
+    await rm(f)
+    expect(await resolveGeminiTranscript({ conversationId: gone }, tmp)).toBeNull()
+  })
+})
+
+describe('a REOPENED gemini conversation spans several files (measured on 0.63.0)', () => {
+  // Interactive `--resume <uuid>` writes the new turns to a NEW headerless file; the original keeps
+  // its header, a `$set.sessionId` patch and a snapshot of the turns it already had.
+  const UUID = '550dc3a6-6fb8-42b5-9ad3-22dc68f74e88'
+  let tmp: string
+  let chats: string
+  const A = 'session-2026-10-09T11-02-550dc3a6.jsonl'
+  const B = 'session-2026-10-09T11-03-550dc3a6.jsonl'
+  const msg = (id: string, type: string, text: string, ts: string) =>
+    JSON.stringify({ id, timestamp: ts, type, content: type === 'user' ? [{ text }] : text })
+
+  beforeAll(async () => {
+    forgetGeminiTranscriptPaths()
+    tmp = await mkdtemp(join(tmpdir(), 'gemini-family-'))
+    chats = join(tmp, 'work', 'chats')
+    await mkdir(chats, { recursive: true })
+    await writeFile(join(chats, A), [
+      JSON.stringify({ sessionId: UUID, projectHash: 'h', startTime: '2026-10-09T11:02:06.822Z', kind: 'main' }),
+      msg('u1', 'user', 'reply with ok', '2026-10-09T11:02:07.000Z'),
+      msg('g1', 'gemini', 'ok', '2026-10-09T11:02:09.000Z'),
+      JSON.stringify({ $set: { sessionId: UUID } }),
+      // the snapshot the original receives on reopen REPEATS the turns it already has
+      JSON.stringify({ $set: { messages: [
+        { id: 'u1', timestamp: '2026-10-09T11:02:07.000Z', type: 'user', content: [{ text: 'reply with ok' }] },
+        { id: 'g1', timestamp: '2026-10-09T11:02:09.000Z', type: 'gemini', content: 'ok' },
+      ] } }),
+    ].join('\n') + '\n')
+    await writeFile(join(chats, B), [
+      msg('u2', 'user', 'reply with third', '2026-10-09T11:03:20.000Z'),
+      msg('g2', 'gemini', 'third', '2026-10-09T11:03:22.000Z'),
+    ].join('\n') + '\n')
+  })
+  afterAll(async () => { await rm(tmp, { recursive: true, force: true }) })
+
+  it('resolves the uuid to the NEWEST member — the file gemini is writing now', async () => {
+    expect(await resolveGeminiTranscript({ conversationId: UUID }, tmp)).toBe(join(chats, B))
+  })
+
+  it('reads the whole conversation from either member, repeated snapshot turns shown once', async () => {
+    const reader = transcriptReaderFor('gemini')!
+    for (const member of [A, B]) {
+      const r = await reader.read(join(chats, member), 50)
+      expect(r.turns.map(t => `${t.role}:${t.text}`), member)
+        .toEqual(['user:reply with ok', 'assistant:ok', 'user:reply with third', 'assistant:third'])
+      expect(r.older).toBe(false)
+    }
+  })
+
+  it('the recent-tail read spans the family too', async () => {
+    const reader = transcriptReaderFor('gemini')!
+    const turns = await reader.readRecent(join(chats, B), 3)
+    expect(turns.map(t => t.text)).toEqual(['ok', 'reply with third', 'third'])
+  })
+
+  it('the synthetic <project>/<file> id of the ORIGINAL file reads the same conversation', async () => {
+    const p = await resolveGeminiTranscript({ conversationId: `work/${A.replace('.jsonl', '')}` }, tmp)
+    expect(p).toBe(join(chats, A))
+    const r = await transcriptReaderFor('gemini')!.read(p!, 50)
+    expect(r.turns).toHaveLength(4)
+  })
+
+  it('a conversation that was never reopened is read exactly as before (one file)', async () => {
+    const solo = join(chats, 'session-2026-10-09T09-00-aaaaaaaa.jsonl')
+    await writeFile(solo, [
+      JSON.stringify({ sessionId: 'aaaaaaaa-0000-4000-8000-000000000000', projectHash: 'h', startTime: '2026-10-09T09:00:00.000Z' }),
+      msg('s1', 'user', 'solo question', '2026-10-09T09:00:01.000Z'),
+    ].join('\n') + '\n')
+    const reader = transcriptReaderFor('gemini')!
+    expect((await reader.read(solo, 10)).turns.map(t => t.text)).toEqual(['solo question'])
+    expect((await reader.readRecent(solo, 10)).map(t => t.text)).toEqual(['solo question'])
   })
 })

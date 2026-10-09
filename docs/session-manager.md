@@ -234,11 +234,13 @@ its own record while the process lives, which is read as well.
 
 **antigravity is linked a third way.** It has no assign flag — measured against agy 1.1.27 on
 2026-09-08, `agy --conversation <fresh-uuid>` answers `warning: conversation "…" not found` and then
-creates one under an id of its own — and it writes no session record. What it does do is open one
-log per process, `~/.gemini/antigravity-cli/log/cli-<YYYYMMDD_HHMMSS>.log`, **hold it open** for the
-life of that process, and write `Created conversation <uuid>` into it. So the chain *managed row →
-tmux pane pid → open file descriptor → log → conversation* is exact at every step, and agentop reads
-it (`agy-conversation.ts` for the rules, `process-conversation.ts` for the two reads).
+creates one under an id of its own — and it writes no session record. Agentop supplies
+`--log-file <data-dir>/agy-logs/<managed-id>.log`, giving each spawn and reopen an exclusive log.
+agy 1.3.2 wrote `Created conversation <uuid>` into that file in both print and TUI probes. Agentop
+can read it after the process exits and without `/proc`; sessions created in the same second do not
+share it. On Linux, the process's open `conversations/<uuid>.db` (or brain transcript) is another
+exact source. Multiple distinct conversation paths are refused. The old timestamp log and its
+spawn-window recovery remain fallbacks. See [Antigravity linking and QA](antigravity-link.md).
 
 That route mattered more for agy than it would for anyone else, because for a session **agentop
 started** even the harness-and-directory fallback below is closed: the adapter takes a
@@ -247,9 +249,8 @@ prompt typed in its own UI — a session agentop starts is handed its first prom
 `--prompt-interactive`, so its record carries an empty `project_path` and is not a candidate for
 anything. Measured the same day: 15 of 38 agy conversations here had a directory recorded, and the
 23 without were exactly the ones agentop had opened. Its chat view was therefore permanently empty
-while its terminal worked perfectly. The limit worth stating: this is a `/proc` read, so off Linux
-there is no link and the chat view says "this session has no linked conversation yet", which is
-true.
+while its terminal worked perfectly. The exclusive managed log supplies the missing link without
+relying on that project-path hint.
 
 **codex and kimi are linked the same way, by the file NAME.** Neither can be told an id, but each
 one's own process names its conversation in a path it opens (measured 2026-10-08 against codex
@@ -261,8 +262,14 @@ process, so several sessions of one harness in one folder each get their own con
 the directory-and-time fallback has to refuse. That fallback stays behind it, which is also what
 links codex and kimi off Linux (more slowly; the chat says so).
 
-For gemini no such link exists yet — the CLI invents an id, never reports it, and holds no file open
-long enough to read — so the row says so rather than showing a guess. The fallback everything else uses matches
+**gemini is handed its id at spawn** (`--session-id <uuid>`, verified on 0.63.0): the chat's header
+`sessionId` is that uuid, so the link is exact from the first turn and `--resume <uuid>` reopens it.
+The store still keys a gemini chat by the synthetic `<project>/<file>`; the uuid is bridged to it
+through `SessionMeta.native_session_id` (a lookup alias, never a key). A reopen continues in a NEW
+headerless file, so a gemini conversation is read and counted as a family of files
+(`gemini-family.ts`). A session whose chat has no header id lists but offers no reopen.
+
+Where nothing links a row (opencode) the row says so rather than showing a guess. The fallback everything else uses matches
 by harness and directory, which gives *every* session of one repository the same conversation: good
 enough to offer a reopen you confirm by its title, not good enough to be presented as the conversation
 you are in. A row that does know its conversation never falls back to that guess, even in the minutes
@@ -419,16 +426,13 @@ empty conversation.
 | codex | `codex resume <id>` | `~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl` |
 | kimi | `--resume <id>` | `~/.kimi-code/sessions/*/session_<id>/agents/main/wire.jsonl` |
 | antigravity | `--conversation <id>` | `brain/<id>/.system_generated/logs/transcript_full.jsonl` |
-| **gemini** | **never** | — |
+| gemini | `--session-id` at spawn (the header `sessionId`), `--resume <uuid>` at reopen | `~/.gemini/tmp/<project>/chats/session-<minute>-[N-]<uuid8>.jsonl`, every file of the family |
 
-**Gemini can never be read here, and that is a fact about the LINK.** Its `-r, --resume` takes
-`latest` or an index rather than an id, and `--session-id` is deliberately not used because gemini's
-session id in this product is synthetic (`<dir>/<file>`), so a recorded UUID would resolve to nothing
-while looking exact. A gemini row therefore never carries a conversation id at all; the row says so
-(`conversationBlind`) and the workspace hides the chat tab rather than offering one that cannot work.
-A reader for its file format would be code nothing can reach. Its format is nonetheless recorded in
-`harness-transcript.ts` so the measurement is not spent twice: it is a patch log rather than one
-message per line.
+**Gemini's two ids.** The store keys a chat by `<project>/<file>`; the CLI takes and writes the header
+uuid. `SessionMeta.native_session_id` bridges them and `findConversation` / the transcript resolver /
+the task board's metas answer to either. A reopen is not an append: interactive `--resume` writes
+the new turns to a new headerless file, so the reader concatenates the family and the adapter folds
+it into one session keyed by its first file.
 
 The same applies, per row, to any harness whose session was **started fresh** without an id.
 codex and kimi only gain the link on a reopen (or once the first-sighting claim can settle it), so a

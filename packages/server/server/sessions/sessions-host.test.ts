@@ -929,3 +929,50 @@ describe('a process-log link follows the conversation the process moves to', () 
     expect(await run({ conversationId: 'old', conversationLinkVia: 'first-sighting' }, null)).toEqual([])
   })
 })
+
+describe('exclusive managed agy log', () => {
+  it('links three same-folder/same-second rows without a live pid, then follows a new conversation', async () => {
+    const rows = ['0123456789', 'abcdef0123', 'fedcba9876'].map(id => managed(id, { harness: 'antigravity' }))
+    const logs = new Map(rows.map((r, i) => [r.id, `conversation-${i}`]))
+    const writes: unknown[] = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [] }), readRegistry: async () => rows,
+      scanProcesses: async () => ({ procs: [] }), now: () => NOW,
+      readManagedConversation: async (_h, id) => logs.get(id) ?? null,
+      recordConversation: async (id, conv, link, via) => { writes.push([id, conv, link, via]) },
+    })
+    await p.poll()
+    expect(writes).toEqual(rows.map((r, i) => [r.id, `conversation-${i}`, 'assigned', 'process-log']))
+    writes.length = 0
+    await p.poll()
+    expect(writes).toEqual([])
+    logs.set(rows[0]!.id, 'new-conversation')
+    await p.poll()
+    expect(writes).toEqual([[rows[0]!.id, 'new-conversation', 'assigned', 'process-log']])
+  })
+  it('preserves a reopened link and never asks another harness for a managed log', async () => {
+    const reads: string[] = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [] }),
+      readRegistry: async () => [managed('0123456789', { harness: 'antigravity', conversationId: 'resumed', conversationLinkVia: 'resumed-id' }), managed('abcdef0123', { harness: 'codex' })],
+      scanProcesses: async () => ({ procs: [] }), now: () => NOW,
+      readManagedConversation: async (_h, id) => { reads.push(id); return 'other' },
+      recordConversation: async () => { throw new Error('must not write') },
+    })
+    await p.poll()
+    expect(reads).toEqual([])
+  })
+  it('keeps the process route when the managed log is absent or unreadable', async () => {
+    const writes: string[] = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [backendSession('0123456789')], panePids: { '0123456789': 777 } }),
+      readRegistry: async () => [managed('0123456789', { harness: 'antigravity' })],
+      scanProcesses: async () => ({ procs: [] }), now: () => NOW,
+      readManagedConversation: async () => { throw new Error('unreadable') },
+      readProcessConversation: async () => 'from-db-or-old-log',
+      recordConversation: async (_id, conv) => { writes.push(conv) },
+    })
+    await p.poll()
+    expect(writes).toEqual(['from-db-or-old-log'])
+  })
+})
