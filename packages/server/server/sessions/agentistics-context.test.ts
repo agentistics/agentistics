@@ -32,8 +32,13 @@ describe('context text', () => {
   })
   test('role guidance, session opening, model balance, isolated tests, and milestone commits are explicit', () => {
     const t = contextText(base)
-    for (const w of ['Your role here: decide from the request', 'LEADER organises', 'WORKER implements one defined piece', 'AUTO:', 'Becoming leader:', '[ LEADER ]', '[ LÍDER ]', 'agentop session <harness>', 'agentop session batch', 'QA must use a different model', 'ASK the user', 'never make it automatic', 'agentop run --rm -- <command>', 'Commit at every green milestone', 'do NOT suggest or ask about a specification skill when a brief, specification, or plan already exists', 'pass the specification path or text in the worker prompt', 'never asks about specification skills']) expect(t).toContain(w)
+    for (const w of ['Your role here: decide from the request', 'LEADER organises', 'WORKER implements one defined piece', 'AUTO:', 'Becoming leader:', '[ LEADER ]', '[ LÍDER ]', 'agentop session <harness>', 'agentop session batch', 'QA must use a different model', 'ASK the user', 'never make it automatic', 'agentop run --rm -- <command>', 'Commit at every green milestone', 'Do NOT suggest or ask about a specification skill when a brief, specification, or plan already exists', 'pass the specification path or text in the worker prompt', 'never asks about specification skills', 'No usage rules are saved yet:', 'so the new session is marked as leader']) expect(t).toContain(w)
     expect(t).not.toContain('Use superpowers')
+  })
+  test('model-facing context contains no internal TODO or phase notes', () => {
+    const t = contextText(base)
+    expect(t).not.toContain('TODO')
+    expect(t).not.toContain('Phase 2')
   })
   test('the context lists every registered MCP tool', () => {
     expect(new Set(CONTEXT_TOOL_NAMES)).toEqual(new Set(MCP_TOOL_NAMES))
