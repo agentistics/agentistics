@@ -129,9 +129,12 @@ describe('the switch reaches `ctx.editorEnabled` live — re-fetch, never re-der
   )
 
   it('App builds a reusable refresh and runs it at boot', () => {
-    expect(RAW.includes('const refreshTeamSession = useCallback(() => Promise.resolve(), [])')).toBe(true)
+    // A REAL re-read of the server's resolved gates — a no-op here (v2.113.0) left `editorEnabled`
+    // and `shellEnabled` undefined -> OFF and hid the Studio and Shell everywhere.
+    expect(RAW.includes('const refreshTeamSession = useCallback(() => {')).toBe(true)
+    expect(RAW.includes('fetchWithTimeout(HOST_SESSION_PATH')).toBe(true)
+    expect(RAW.includes('() => Promise.resolve(), [])')).toBe(false)
     expect(RAW.includes('useEffect(() => { void refreshTeamSession() }, [refreshTeamSession])')).toBe(true)
-    // The central session refresh no longer exists; the seam remains a no-op for local settings.
   })
 
   it('App publishes it on the context, so any page can ask for a fresh answer', () => {
