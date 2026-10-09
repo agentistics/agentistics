@@ -1183,10 +1183,10 @@ function ResumeCommandModal({
     }
   }, [])
 
-  // `resumeCommand` returns null for a harness with no verified resume-by-id flag, and Gemini is
-  // the reason it is a deliberate null: `gemini --resume` takes "latest" or a list index, not a
-  // session id. The old fallback here invented exactly that command — a plausible line that opens
-  // the WRONG conversation — so there is no fallback: the option says the harness has none.
+  // `resumeCommand` returns null for a harness with no verified resume-by-id flag, or for a gemini
+  // chat recorded without a header id. The old fallback here invented a plausible line from the
+  // store key or a list index — which opens the WRONG conversation — so there is no fallback: the
+  // option says there is no command. (Gemini's is `--resume <header uuid>`, never an index.)
   const nativeCmd = resumeCommand(s)
   const agentopCmd = s.project_path
     ? `cd '${s.project_path}' && agentop session attach ${s.session_id}`

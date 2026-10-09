@@ -464,3 +464,33 @@ describe('native_session_id', () => {
     expect('native_session_id' in (s as object)).toBe(false)
   })
 })
+
+describe('a reopened conversation read as ONE family (F0.2)', () => {
+  // The adapter hands the parser the family's files joined oldest first (`gemini.ts`).
+  const original = [
+    JSON.stringify({ sessionId: '550dc3a6-6fb8-42b5-9ad3-22dc68f74e88', projectHash: 'h', startTime: '2026-10-09T11:02:06.822Z', kind: 'main' }),
+    JSON.stringify({ id: 'u1', timestamp: '2026-10-09T11:02:07.000Z', type: 'user', content: [{ text: 'reply with ok' }] }),
+    JSON.stringify({ id: 'g1', timestamp: '2026-10-09T11:02:09.000Z', type: 'gemini', content: 'ok', model: 'gemini-3-flash-preview' }),
+    JSON.stringify({ $set: { messages: [
+      { id: 'u1', timestamp: '2026-10-09T11:02:07.000Z', type: 'user', content: [{ text: 'reply with ok' }] },
+      { id: 'g1', timestamp: '2026-10-09T11:02:09.000Z', type: 'gemini', content: 'ok' },
+    ] } }),
+  ].join('\n')
+  const continuation = [
+    JSON.stringify({ id: 'u2', timestamp: '2026-10-09T11:03:20.000Z', type: 'user', content: [{ text: 'reply with third' }] }),
+    JSON.stringify({ id: 'g2', timestamp: '2026-10-09T11:03:22.000Z', type: 'gemini', content: 'third' }),
+  ].join('\n')
+
+  test('the continuation file ALONE is dropped — it has no header and so no start time', () => {
+    expect(parseGeminiChat(continuation, 'work/session-2026-10-09T11-03-550dc3a6', '/p/work')?.start_time ?? '').toBe('')
+  })
+
+  test('joined with its original, the turns after the reopen are counted once and the key is unchanged', () => {
+    const s = parseGeminiChat(`${original}\n${continuation}`, 'work/session-2026-10-09T11-02-550dc3a6', '/p/work')
+    expect(s?.session_id).toBe('work/session-2026-10-09T11-02-550dc3a6')
+    expect(s?.native_session_id).toBe('550dc3a6-6fb8-42b5-9ad3-22dc68f74e88')
+    expect(s?.user_message_count).toBe(2)
+    expect(s?.assistant_message_count).toBe(2)
+    expect(s?.user_message_timestamps).toEqual(['2026-10-09T11:02:07.000Z', '2026-10-09T11:03:20.000Z'])
+  })
+})

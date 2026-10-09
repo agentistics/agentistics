@@ -116,7 +116,7 @@ describe('fleetRow — an EXTERNAL session takes a write when it can be continue
   })
   it('no conversation named, or a harness with no resume: prompt keeps its sentence — read-only live', () => {
     expect(verb(ext({}), 'prompt').enabled).toBe(false)
-    expect(verb(ext({ conversationId: 'c-1', harness: 'gemini' }), 'prompt').enabled).toBe(false)
+    expect(verb(ext({ conversationId: 'c-1', harness: 'opencode' }), 'prompt').enabled).toBe(false)
   })
   it('the destructive verbs are untouched: an external row is never killed from its row', () => {
     expect(verb(ext({ conversationId: 'c-1' }), 'kill').enabled).toBe(false)

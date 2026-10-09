@@ -23,7 +23,7 @@
  */
 
 import { readFile, readdir, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
 import { ANTIGRAVITY_BRAIN_DIR, CODEX_SESSIONS_DIR, COPILOT_DIR, GEMINI_DIR, KIMI_DIR } from '../config'
 import { UUID_RE } from '../git'
@@ -37,6 +37,8 @@ import { readChatWindow, readRecentChatTurns, resolveChatTranscriptPath } from '
 import { readTailWindow } from './transcript-window'
 import { followFork } from './transcript-fork'
 import { createTranscriptPathMemo, resolveMemoizedPath } from './transcript-path-memo'
+import { parseChatName } from './gemini-family'
+import { listGeminiFamilies } from './gemini-family-io'
 
 /** Everything a reader is told about the session whose conversation is wanted. */
 export interface TranscriptRef {
@@ -269,23 +271,19 @@ export function forgetGeminiTranscriptPaths(): void {
   geminiPathMemo.clear()
 }
 
-async function readGeminiHeaderId(path: string): Promise<string | null> {
-  try {
-    const first = (await readFile(path, 'utf-8')).split('\n', 1)[0] ?? ''
-    const id = (JSON.parse(first) as { sessionId?: unknown }).sessionId
-    return typeof id === 'string' ? id : null
-  } catch { return null }
-}
-
+/**
+ * The chat of an assigned uuid — the NEWEST file of its family, which is the one gemini is writing
+ * now. A reopen continues in a new headerless file (`gemini-family.ts`), so the file whose header
+ * names the uuid is the oldest member, not the live one; `GEMINI.read` expands whichever member it
+ * is handed to the whole family.
+ */
 async function findGeminiChatByUuid(uuid: string, tmpDir: string): Promise<string | null> {
-  const suffix = `-${uuid.slice(0, 8).toLowerCase()}.jsonl`
+  const suffix = uuid.slice(0, 8).toLowerCase()
   for (const project of await subdirs(tmpDir)) {
     const chats = join(tmpDir, project, 'chats')
-    for (const name of await readdir(chats).catch(() => [] as string[])) {
-      if (!name.startsWith('session-') || !name.toLowerCase().endsWith(suffix)) continue
-      const path = join(chats, name)
-      if ((await readGeminiHeaderId(path))?.toLowerCase() === uuid.toLowerCase()) return path
-    }
+    const family = (await listGeminiFamilies(chats, { suffix })).find(f => f.id?.toLowerCase() === uuid.toLowerCase())
+    const last = family?.members.at(-1)
+    if (last) return join(chats, last)
   }
   return null
 }
@@ -313,14 +311,49 @@ export async function resolveGeminiTranscript(
   return (await exists(path)) ? path : null
 }
 
+/**
+ * Every line of a gemini conversation, oldest file first. `path` may be ANY member: the family is
+ * derived from its name and the headers beside it, so the synthetic-id route (which names the
+ * original file) and the uuid route (which names the newest) read the same conversation. A chat that
+ * was never reopened is one file and costs exactly what it always did.
+ */
+async function geminiConversationLines(path: string): Promise<string[] | null> {
+  const name = basename(path)
+  const parsed = parseChatName(name)
+  let members = [name]
+  if (parsed) {
+    const dir = dirname(path)
+    const family = (await listGeminiFamilies(dir, { suffix: parsed.suffix })).find(f => f.members.includes(name))
+    if (family && family.members.length > 1) members = family.members
+  }
+  const dir = dirname(path)
+  const lines: string[] = []
+  for (const m of members) {
+    let content: string
+    try { content = await readFile(join(dir, m), 'utf-8') } catch { if (m === name) return null; continue }
+    lines.push(...content.split('\n'))
+  }
+  return lines
+}
+
 const GEMINI: HarnessTranscript = {
   resolve: ref => resolveGeminiTranscript(ref),
   async read(path, max) {
-    let content: string
-    try { content = await readFile(path, 'utf-8') } catch { return { turns: [], older: false } }
-    return windowed(parseGeminiChatTurns(content.split('\n'), max + 1), max)
+    const lines = await geminiConversationLines(path)
+    if (!lines) return { turns: [], older: false }
+    return windowed(parseGeminiChatTurns(lines, max + 1), max)
   },
   async readRecent(path, max) {
+    // One file keeps the byte-tail read; a reopened conversation spans several, whose seed snapshot
+    // and continuation have to be read together to be deduplicated, so it is read whole.
+    const parsed = parseChatName(basename(path))
+    if (parsed) {
+      const family = (await listGeminiFamilies(dirname(path), { suffix: parsed.suffix })).find(f => f.members.includes(basename(path)))
+      if (family && family.members.length > 1) {
+        const lines = await geminiConversationLines(path)
+        return lines ? parseGeminiChatTurns(lines, max) : []
+      }
+    }
     return readTailWindow(path, max, lines => parseGeminiChatTurns(lines, max))
   },
 }
