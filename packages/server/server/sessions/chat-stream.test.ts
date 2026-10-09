@@ -99,3 +99,50 @@ describe('chat stream (PERF.1 step 2)', () => {
     expect(chatStreamCount()).toBe(before)
   })
 })
+
+describe('chat stream — an unresolved path (ENGINE.MAP P-03)', () => {
+  test('with a fleet tick source, it re-reads ONLY on ticks — no 1 s loop', async () => {
+    let reads = 0
+    let path: string | null = null
+    let tick: (() => void) | null = null
+    let subscribed = 0, unsubscribed = 0
+    const timers: Array<{ f: () => void; ms: number }> = []
+    const ctl = new AbortController()
+    const res = chatStreamResponse('u1', {
+      async read(_fresh, onPath) { reads++; if (path) onPath(path); return { turns: [], live: true } },
+      onFleetTick: cb => { subscribed++; tick = cb; return () => { unsubscribed++ } },
+      watchFile: () => ({ close() {} }),
+      // The debounce fires at once; every other timer is only recorded.
+      setTimer: (f, ms) => { timers.push({ f, ms }); if (ms === 25) queueMicrotask(f); return timers.length },
+      clearTimer: () => {},
+    }, ctl.signal)!
+    await events(res, e => e.length >= 1, 300)
+    expect(reads).toBe(1)
+    // The only retry timer is the slow safety read — never the old 1 s unresolved loop.
+    expect(timers.some(t => t.ms === 1_000)).toBe(false)
+    expect(subscribed).toBe(1)
+    tick!()
+    await Bun.sleep(60)
+    expect(reads).toBe(2)
+    path = '/tmp/does-not-matter.jsonl'
+    tick!()
+    await Bun.sleep(60)
+    expect(reads).toBe(3)
+    expect(unsubscribed).toBe(1) // resolved: the ticks are released
+    ctl.abort()
+  })
+
+  test('without a tick source, the unresolved retry backs off instead of looping at 1 s', async () => {
+    const waits: number[] = []
+    const ctl = new AbortController()
+    const res = chatStreamResponse('u2', {
+      async read() { return { turns: [], live: true } },
+      setTimer: (f, ms) => { if (ms !== 15_000 && ms !== 25) { waits.push(ms); if (waits.length < 6) queueMicrotask(f) } else if (ms === 25) queueMicrotask(f); return 0 },
+      clearTimer: () => {},
+    }, ctl.signal)!
+    await events(res, e => e.length >= 1, 300)
+    await Bun.sleep(50)
+    expect(waits.slice(0, 5)).toEqual([1_000, 2_000, 4_000, 8_000, 10_000])
+    ctl.abort()
+  })
+})

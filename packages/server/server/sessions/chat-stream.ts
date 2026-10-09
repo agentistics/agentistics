@@ -11,7 +11,11 @@
  * - a send wakes it too (`wakeChat`, from the prompt route), so the server's `pending` echo shows at once;
  * - the fleet row (state, cwd, conversation) is reused for `ROW_TTL_MS` rather than re-walked per change;
  * - a slow safety re-read (`SAFETY_MS`) covers what the file does not say (the session ending, a
- *   transcript that appears only later), and resolves a path that did not exist yet;
+ *   transcript that appears only later);
+ * - a path that does not exist YET (a new session, an unlinked row) is retried on the server's fleet
+ *   TICKS (`onFleetTick`, the SessionHub): that is the only moment its link can change. It used to be a
+ *   1 s loop of FRESH fleet polls — 59 polls and 270 tmux calls a minute for ONE idle chat (ENGINE.MAP
+ *   P-03). Without a tick source the retry backs off (`UNRESOLVED_BACKOFF_MS` doubling to `SAFETY_MS`);
  * - `ping` every `KEEPALIVE_MS`, so the client knows the stream is healthy and only then stops polling.
  *
  * Wakes are coalesced (`DEBOUNCE_MS`) and single-flight: a burst of appends is one read.
@@ -23,7 +27,8 @@ import type { ChatPayload } from './chat-web'
 export const DEBOUNCE_MS = 25
 export const ROW_TTL_MS = 5_000
 export const SAFETY_MS = 10_000
-export const UNRESOLVED_RETRY_MS = 1_000
+/** First retry of an unresolved path when no fleet tick source is wired; doubles up to `SAFETY_MS`. */
+export const UNRESOLVED_BACKOFF_MS = 1_000
 export const KEEPALIVE_MS = 15_000
 /** Chat streams one server keeps at once; past it the client falls back to polling. */
 export const MAX_CHAT_STREAMS = 32
@@ -31,6 +36,11 @@ export const MAX_CHAT_STREAMS = 32
 export interface ChatStreamDeps {
   /** One read of the chat; `fresh` asks for a fleet row that is not memoized. */
   read(fresh: boolean, onPath: (path: string) => void): Promise<ChatPayload>
+  /**
+   * Every completed fleet poll (the SessionHub). Subscribed ONLY while the transcript path is
+   * unresolved — a link can only change on a poll — and released as soon as it resolves.
+   */
+  onFleetTick?: (cb: () => void) => () => void
   watchFile?: (path: string, onChange: () => void) => { close(): void }
   setTimer?: (f: () => void, ms: number) => unknown
   clearTimer?: (t: unknown) => void
@@ -44,7 +54,30 @@ export function wakeChat(id: string): void {
   for (const w of wakers.get(id) ?? []) w()
 }
 
+/** Be woken with this session's streams — for a stream built elsewhere (`adapter-chat.ts`). */
+export function onChatWake(id: string, cb: () => void): () => void {
+  let set = wakers.get(id)
+  if (!set) wakers.set(id, (set = new Set()))
+  set.add(cb)
+  return () => {
+    const cur = wakers.get(id)
+    cur?.delete(cb)
+    if (cur && cur.size === 0) wakers.delete(id)
+  }
+}
+
 export function chatStreamCount(): number { return open }
+
+/**
+ * One slot of the shared stream cap, for a chat stream built elsewhere (`adapter-chat.ts`): both kinds
+ * count against `MAX_CHAT_STREAMS`. `false` = the cap is reached. Release exactly once.
+ */
+export function acquireChatSlot(): boolean {
+  if (open >= MAX_CHAT_STREAMS) return false
+  open++
+  return true
+}
+export function releaseChatSlot(): void { open = Math.max(0, open - 1) }
 
 function defaultWatch(path: string, onChange: () => void): { close(): void } {
   let w: FSWatcher | null = null
@@ -71,6 +104,8 @@ export function chatStreamResponse(id: string, deps: ChatStreamDeps, signal: Abo
   let safety: unknown = null
   let keepalive: unknown = null
   let lastFresh = 0
+  let tickOff: (() => void) | null = null
+  let backoff = UNRESOLVED_BACKOFF_MS
 
   let ctl!: ReadableStreamDefaultController<Uint8Array>
   const send = (event: string, data: string) => { if (!closed) try { ctl.enqueue(enc.encode(`event: ${event}\ndata: ${data}\n\n`)) } catch { close() } }
@@ -89,6 +124,8 @@ export function chatStreamResponse(id: string, deps: ChatStreamDeps, signal: Abo
         watcher?.close()
         path = resolved
         watcher = watchFile(resolved, () => schedule(false))
+        // Resolved: the fleet ticks have nothing more to tell this stream.
+        tickOff?.(); tickOff = null
       }
       const { turns, ...meta } = p
       const metaJson = JSON.stringify(meta)
@@ -113,7 +150,15 @@ export function chatStreamResponse(id: string, deps: ChatStreamDeps, signal: Abo
 
   function armSafety() {
     if (closed) return
-    safety = setTimer(() => { schedule(true); armSafety() }, path ? SAFETY_MS : UNRESOLVED_RETRY_MS)
+    if (!path && deps.onFleetTick) {
+      // Unresolved, with a tick source: every fleet poll is a retry, and nothing else is.
+      if (!tickOff) tickOff = deps.onFleetTick(() => { if (!path) schedule(true) })
+      safety = setTimer(() => { schedule(true); armSafety() }, SAFETY_MS)
+      return
+    }
+    const wait = path ? SAFETY_MS : backoff
+    if (!path) backoff = Math.min(SAFETY_MS, backoff * 2)
+    safety = setTimer(() => { schedule(true); armSafety() }, wait)
   }
 
   function close() {
@@ -121,6 +166,7 @@ export function chatStreamResponse(id: string, deps: ChatStreamDeps, signal: Abo
     closed = true
     open--
     watcher?.close()
+    tickOff?.(); tickOff = null
     for (const t of [debounce, safety, keepalive]) if (t !== null) clearTimer(t)
     const set = wakers.get(id)
     set?.delete(waker)

@@ -183,8 +183,10 @@ import {
   addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession, touchSessions,
 } from './sessions/registry'
 import {
-  createSessionsPoller, linkProcessConversation, sampleProcessLinks, type SessionsPoller, type SessionSnapshot,
+  createSessionsPoller, linkProcessConversation, sampleProcessLinks, SESSION_POLL_MS, type SessionsPoller,
+  type SessionSnapshot,
 } from './sessions/sessions-host'
+import { createSessionHub, type SessionHub } from './sessions/session-hub'
 import { HARNESS_PROCESS_TRANSCRIPTS } from './sessions/harness-session-file'
 import { modeSpecFor } from './sessions/mode-spec'
 import { isServerProcess, readServerSnapshot } from './sessions/shared-snapshot'
@@ -1591,6 +1593,49 @@ async function ensureSessionsPoller(): Promise<SessionsPoller> {
   const backend = await resolveBackend()
   sessionsPoller = createSessionsPoller(sessionsPollerOptions(backend))
   return sessionsPoller
+}
+
+/**
+ * The ONE fleet poller of this process, behind its hub (`session-hub.ts`). Every reader in the process —
+ * `/api/fleet`, `/api/fleet/snapshot`, `/api/fleet/events`, the chat streams, a send's `record()`, the
+ * event producer — reads THIS, so the server never runs two pollers (ENGINE.MAP P-01) and never polls
+ * once per request (P-02). The engine's fleet view observes every poll passively: it plans nothing
+ * while no engine listens (`fleet-hub.ts`), and it no longer depends on which route happened to poll.
+ */
+let sessionHub: Promise<SessionHub> | null = null
+
+export function ensureSessionHub(): Promise<SessionHub> {
+  if (!sessionHub) {
+    sessionHub = (async () => {
+      const poller = await ensureSessionsPoller()
+      const hub = createSessionHub({ poll: () => poller.poll(), intervalMs: SESSION_POLL_MS })
+      const { fleetHub } = await import('./engine/fleet-hub')
+      // Only a FRESH reading says anything new: an `unavailable` snapshot is the previous one again.
+      hub.observe(snap => { if (!snap.unavailable) fleetHub.observe(snap.sessions, snap.polledAtMs) })
+      return hub
+    })()
+    void sessionHub.catch(() => { sessionHub = null })
+  }
+  return sessionHub
+}
+
+/**
+ * The tmux prefix the detach hint names, read ONCE and kept (ENGINE.MAP P-09: it was a `show-options`
+ * per fleet poll — 12 to 59 a minute — to learn a value that changes only when somebody edits their tmux
+ * config). Re-read after `DETACH_HINT_TTL_MS`, so an edited prefix still reaches the screen.
+ */
+const DETACH_HINT_TTL_MS = 10 * 60_000
+let detachHintCache: { value: Promise<string>; atMs: number } | null = null
+
+function cachedDetachHint(): Promise<string> {
+  const nowMs = Date.now()
+  if (!detachHintCache || nowMs - detachHintCache.atMs >= DETACH_HINT_TTL_MS) {
+    const value = resolveBackend().then(b => b.detachHint()).catch(() => '')
+    detachHintCache = { value, atMs: nowMs }
+    // A failed read is not remembered for ten minutes.
+    void value.then(v => { if (!v && detachHintCache?.value === value) detachHintCache = null })
+  }
+  return detachHintCache.value
 }
 
 /**
@@ -3374,17 +3419,17 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
           'sessions: readServerSnapshot',
           () => readServerSnapshot<SessionSnapshot>(lang),
         )
-      const poller = shared
+      const hub = shared
         ? null
-        : await timeFleetPhase('sessions: ensureSessionsPoller', ensureSessionsPoller)
+        : await timeFleetPhase('sessions: ensureSessionHub', ensureSessionHub)
       const snap = shared
-        ?? await timeFleetPhase('sessions: poller.poll', () => poller!.poll())
+        ?? await timeFleetPhase('sessions: hub.read', () => hub!.read())
       // Carried on every snapshot so the cockpit can state it permanently: a user who cannot get
       // out of a session is stranded in a buffer that hides their shell, and a line printed once
       // before the handover scrolls away the moment anything else happens.
       const detachHint = await timeFleetPhase(
         'sessions: detachHint',
-        async () => (await resolveBackend()).detachHint().catch(() => ''),
+        cachedDetachHint,
       )
       // Read on every snapshot rather than cached: the toggle and the verb both write it, and a
       // stale copy would leave a task the user just finished still heading a live section.
@@ -4291,15 +4336,9 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
  * It is the SAME poller `sessions()` uses, so the server still holds exactly one.
  */
 export async function readRawFleetSnapshot(): Promise<SessionSnapshot> {
-  const snap = await (await ensureSessionsPoller()).poll()
-  // The engine's view of the fleet (engine-api 1.4 `fleet`): only a FRESH reading says anything new —
-  // an `unavailable` snapshot is the previous one answered again. The hub plans nothing while no
-  // engine listens.
-  if (!snap.unavailable) {
-    const { fleetHub } = await import('./engine/fleet-hub')
-    fleetHub.observe(snap.sessions, snap.polledAtMs)
-  }
-  return snap
+  // The hub's snapshot: while anything keeps it ticking this is the last tick, never a poll of its own.
+  // The engine's fleet view observes every poll from inside the hub (`ensureSessionHub`).
+  return (await ensureSessionHub()).read()
 }
 
 /**
