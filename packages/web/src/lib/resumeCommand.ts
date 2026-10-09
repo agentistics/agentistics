@@ -16,7 +16,8 @@ const RESUME_BY_HARNESS: Partial<Record<SurfaceHarnessId, (id: string) => string
   antigravity: id => `agy --conversation ${id}`,
   codex: id => `codex resume ${id}`,
   copilot: id => `copilot --resume ${id}`,
-  kimi: id => `kimi -S ${id}`,
+  // kimi 2.1.1 resumes by the session directory's name, `session_<uuid>`; the bare uuid is "not found".
+  kimi: id => `kimi -S ${id.startsWith('session_') ? id : `session_${id}`}`,
 }
 
 /** Copy-ready shell command to resume a session, or null when the harness has no way to do it. */

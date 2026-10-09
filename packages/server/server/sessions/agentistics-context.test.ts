@@ -96,18 +96,8 @@ describe('delivery per harness', () => {
     expect(r.plan.contextFile).toEqual({ dir: '/data/session-context/abc123', name: 'AGENTS.md', text: ctx().text })
     expect(r.plan.initialPrompt).toEqual({ mode: 'type', text: 'oi' })
   })
-  test('kimi: invisible — --agent-file whose body keeps the default prompt and appends the context; the typed prompt is untouched', () => {
-    const r = plan('kimi'); if (!r.ok) throw new Error('x')
-    expect(r.plan.contextVia).toBe('files')
-    expect(r.plan.argv).toContain('--agent-file')
-    expect(r.plan.argv[r.plan.argv.indexOf('--agent-file') + 1]).toBe('/data/session-context/abc123/agentistics-agent.md')
-    const f = r.plan.contextFile!
-    expect(f.text.startsWith('---\nname: agentistics-session\ndescription: ')).toBe(true)
-    expect(f.text).toContain('---\n${base_prompt}\n\n' + CONTEXT_HEADER)
-    expect(r.plan.initialPrompt).toEqual({ mode: 'type', text: 'oi' })
-  })
-  test('antigravity and gemini (no invisible channel exists): fenced block, header first, user text AFTER the closing fence', () => {
-    for (const h of ['antigravity', 'gemini'] as const) {
+  test('antigravity, gemini and kimi (no invisible channel exists — kimi 2.1.1\'s interactive TUI drops --agent-file): fenced block, header first, user text AFTER the closing fence', () => {
+    for (const h of ['antigravity', 'gemini', 'kimi'] as const) {
       const r = plan(h); if (!r.ok) throw new Error('x')
       expect(r.plan.contextVia).toBe('first-message')
       const sent = r.plan.initialPrompt?.text ?? r.plan.argv.at(-1)!
@@ -117,7 +107,7 @@ describe('delivery per harness', () => {
     }
   })
   test('no first message: NOTHING is sent (context is held, never sent alone)', () => {
-    for (const h of ['antigravity', 'gemini'] as const) {
+    for (const h of ['antigravity', 'gemini', 'kimi'] as const) {
       const r = plan(h, { prompt: undefined }); if (!r.ok) throw new Error('x')
       expect(r.plan.contextVia).toBe('none'); expect(r.plan.initialPrompt).toBeUndefined()
       expect(r.plan.argv.join(' ')).not.toContain(CONTEXT_OPEN)
@@ -127,7 +117,7 @@ describe('delivery per harness', () => {
     expect(pendingContextFor(g.plan, ctx())).toBeUndefined()
   })
   test('every channel but the fallback keeps the context out of the prompt', () => {
-    for (const h of ['claude', 'codex', 'copilot', 'kimi'] as const) {
+    for (const h of ['claude', 'codex', 'copilot'] as const) {
       const r = plan(h); if (!r.ok) throw new Error(h)
       const sent = r.plan.initialPrompt?.text ?? r.plan.argv.at(-1)!
       expect(sent).toBe('oi')

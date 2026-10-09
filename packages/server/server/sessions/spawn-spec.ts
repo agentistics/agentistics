@@ -140,22 +140,21 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     // machine and not of the CLI. `kimi provider list` prints them for whoever is asking (here:
     // one provider, `Default model: ollama-local/qwen2.5-3b-instruct`); there is no list to ship.
     modelSuggestions: [],
-    // `-S, --session [id]  Resume a session. With ID: resume that session.`
-    resume: id => ['-S', id],
-    // `--agent-file <path>  Load an agent definition from a Markdown file and select it for the new
-    // session` (kimi 0.38). The body is a prompt TEMPLATE and `${base_prompt}` embeds kimi's builtin default
-    // prompt (read from the binary), so the context is APPENDED, not substituted. Frontmatter needs `name` and
-    // `description`; an empty body is refused ("Missing prompt body"). VERIFIED LIVE 2026-10-08. It sits
-    // under the agentistics data dir, never the user's project. Not combinable with --session, which
-    // is a resume and carries no context anyway.
-    context: {
-      kind: 'files',
-      files: (_dir, text) => [{
-        name: 'agentistics-agent.md',
-        text: `---\nname: agentistics-session\ndescription: Background context from agentistics\n---\n\${base_prompt}\n\n${text}`,
-      }],
-      args: dir => ['--agent-file', `${dir}/agentistics-agent.md`],
-    },
+    // `-S, --session [id]  Resume a session. With ID: resume that session.` kimi 2.1.1 takes the id AS ITS DIRECTORY
+    // NAMES IT — `session_<uuid>`: `-S <bare-uuid>` answers `Session "…" not found` (measured 2026-10-09, the
+    // same conversation resumed with the prefix). The store and this product key on the bare uuid
+    // (`adapters/kimi.ts`), so the prefix is added here, once, and an id that already has it is left alone.
+    resume: id => ['-S', id.startsWith('session_') ? id : `session_${id}`],
+    // NO invisible channel on kimi 2.1.1 (RE-VERIFIED 2026-10-09; it was `--agent-file` on 0.38–0.41, and that
+    // flag is GONE from the interactive TUI): `kimi --agent-file <f>` still parses the file and `kimi --agent-file
+    // <f> -p "…"` still selects it (wire `profile.bind` → profileName from the file, the marker reaches the
+    // model's system prompt), but the INTERACTIVE session — which creates itself lazily on the first message —
+    // binds the default profile (`profileName: "agent"`) and the file's text never reaches the model. Measured
+    // twice in a trusted folder, same file, same throwaway KIMI_CODE_HOME, against a mock model that logged the
+    // request. Keeping the flag would deliver NOTHING and report `contextVia: 'files'`, which is the worst
+    // answer, so kimi takes the fenced first message with the header (the gemini/antigravity route). `--agent`
+    // only names profiles discovered from the USER's agents dir, which this product must not write. Under
+    // `kimi acp` there is no channel either (`structured/acp-structured.ts` cites the measurement).
   },
 
   // `-i, --prompt-interactive  Execute the provided prompt and continue in interactive mode`.

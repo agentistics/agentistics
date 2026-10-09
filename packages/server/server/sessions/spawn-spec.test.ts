@@ -104,6 +104,14 @@ describe('planSpawn', () => {
     })
   })
 
+  it('kimi 2.1.1 resumes by the session DIRECTORY name: the bare uuid the store keys on gets its `session_` prefix, once', () => {
+    const uuid = '7b280b0b-d8ae-4922-b165-07dc06f3c909'
+    for (const id of [uuid, `session_${uuid}`]) {
+      const r = planSpawn({ harness: 'kimi', cwd: '/tmp', resumeId: id })
+      expect(r).toMatchObject({ ok: true, plan: { argv: ['kimi', '-S', `session_${uuid}`] } })
+    }
+  })
+
   it('types a kimi prompt in, because kimi has no interactive prompt flag', () => {
     const r = planSpawn({ harness: 'kimi', cwd: '/tmp', prompt: 'implement X' })
     expect(r).toEqual({ ok: true, plan: { argv: ['kimi'], initialPrompt: { mode: 'type', text: 'implement X' } } })
