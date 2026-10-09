@@ -37,6 +37,7 @@ import type { AdmissionRefusal } from './spawn-admission'
 import { arrangeFleet, type FleetArrangement, type FleetViewRequest } from './fleet-arrange'
 import { markFleetPhase, timeFleetPhase } from './fleet-profile'
 import type { SessionHub } from './session-hub'
+import { forceRowScreen } from './adapter-state-host'
 import {
   buildFleetFrame, closedPage, fleetEventsResponse, type FleetFrame,
 } from './fleet-events'
@@ -229,7 +230,10 @@ function lastHubSnapshot(): unknown {
  * one-shot reader right after the act is answered by a poll that started after it. Never awaited by the
  * act's own response, and never throws.
  */
-export function kickFleet(): void {
+export function kickFleet(id?: string): void {
+  // The acted-on row's SCREEN is read on that poll even when its harness states its state
+  // (`adapter-state.ts`): an act can change what only the frame shows (a mode, a dialog closing).
+  if (id) forceRowScreen(id)
   void fleetSessionHub().then(h => h.refresh()).catch(() => {})
 }
 
@@ -353,7 +357,7 @@ export async function runFleetAction(
 ): Promise<FleetActionResponse> {
   const out = await runFleetActionOnce(lang, req)
   // Every verb that worked changed something a row shows (a state, a label, a dialog that closed).
-  if (out.ok) kickFleet()
+  if (out.ok) kickFleet(req.id)
   return out
 }
 

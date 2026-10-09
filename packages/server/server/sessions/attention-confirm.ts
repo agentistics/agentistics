@@ -102,6 +102,12 @@ export function confirmActivities(
    * tests written against them keep their exact behaviour.
    */
   corroborated?: ReadonlySet<string>,
+  /**
+   * The sessions whose reading is the HARNESS's own statement (its transcript states its turns —
+   * `adapter-state.ts`, ENGINE.MAP F1.2). Believed at once in BOTH directions: the two-poll rule exists
+   * because a screen can lie for one frame, and a harness's own record of its turn ending does not.
+   */
+  exact?: ReadonlySet<string>,
 ): ConfirmResult {
   const lastRaw = new Map<string, SessionActivity>()
   const confirmed = new Map<string, SessionActivity>()
@@ -113,7 +119,9 @@ export function confirmActivities(
     const prevRaw = memory.lastRaw.get(id)
 
     let next: SessionActivity
-    if (!needsPerson(r) && (corroborated === undefined || corroborated.has(id))) {
+    if (exact?.has(id)) {
+      next = r
+    } else if (!needsPerson(r) && (corroborated === undefined || corroborated.has(id))) {
       // Work resumed, or the session exited, AND something corroborates it. Believed at once — see
       // the header's asymmetry and the `corroborated` parameter.
       next = r

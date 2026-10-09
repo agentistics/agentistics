@@ -187,6 +187,7 @@ import {
   type SessionSnapshot,
 } from './sessions/sessions-host'
 import { createSessionHub, type SessionHub } from './sessions/session-hub'
+import { hostAdapterState, onAdapterStateChange } from './sessions/adapter-state-host'
 import { HARNESS_PROCESS_TRANSCRIPTS } from './sessions/harness-session-file'
 import { modeSpecFor } from './sessions/mode-spec'
 import { isServerProcess, readServerSnapshot } from './sessions/shared-snapshot'
@@ -1584,6 +1585,8 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
     // Take back a running session whose registry record was lost. Called only with a non-empty
     // list, so a healthy fleet never writes. See `session-adopt.ts` for what may be adopted.
     adoptSessions: async records => { for (const r of records) await addSession(r) },
+    // ENGINE.MAP F1.2: the harness's own statement of its state, with the `adapter-chat` flag on only.
+    adapterState: hostAdapterState,
   }
 }
 
@@ -1609,6 +1612,8 @@ export function ensureSessionHub(): Promise<SessionHub> {
     sessionHub = (async () => {
       const poller = await ensureSessionsPoller()
       const hub = createSessionHub({ poll: () => poller.poll(), intervalMs: SESSION_POLL_MS })
+      // A harness stating a change (a turn ended) is pushed NOW, not at the next tick (flag on only).
+      onAdapterStateChange(() => { void hub.refresh().catch(() => {}) })
       const { fleetHub } = await import('./engine/fleet-hub')
       // Only a FRESH reading says anything new: an `unavailable` snapshot is the previous one again.
       hub.observe(snap => { if (!snap.unavailable) fleetHub.observe(snap.sessions, snap.polledAtMs) })

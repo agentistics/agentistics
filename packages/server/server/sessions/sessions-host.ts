@@ -45,6 +45,7 @@ import { calculateProcCpu, type ProcStatSample } from '../hardware-pure'
 import { readProcRss, readProcStat } from '../hardware-probe'
 import { procAvailable } from './proc-liveness'
 import { backgroundWork } from './attention'
+import { adapterActivity, planScreen, type AdapterStateFeed } from './adapter-state'
 
 /** How often the cockpit refreshes. Five seconds is the interval the feature was specified at. */
 export const SESSION_POLL_MS = Number(process.env.AGENTISTICS_SESSION_POLL_MS) > 0
@@ -322,6 +323,12 @@ export function createSessionsPoller(o: {
    * What may be adopted at all is the pure `planAdoptions`.
    */
   adoptSessions?: (records: readonly ManagedSession[]) => Promise<unknown>
+  /**
+   * ENGINE.MAP F1.2: what each row's HARNESS says about its own state, through the engine's chat
+   * channel (`adapter-state.ts`) — only with the `adapter-chat` flag on, so `null` (the default) keeps
+   * this poller exactly as it was. Read on every poll: the flag and the engine are runtime facts.
+   */
+  adapterState?: () => AdapterStateFeed | null
   now?: () => number
   captureLines?: number
   /** Overridable so a test can drive several heartbeats without waiting a minute for each. */
@@ -336,6 +343,9 @@ export function createSessionsPoller(o: {
   // first is how movement is detected; the second is what makes the bell a transition.
   let prevDigest = new Map<string, string>()
   let prevActivity = new Map<string, SessionActivity>()
+  // What only a SCREEN read carries, kept for the polls that skip the screen of an adapter-stated row
+  // (`adapter-state.ts`): the mode chip and the raw tail stay what the last read said.
+  const lastFrameFacts = new Map<string, { mode?: { id: string; label: string }; tail: string[] }>()
   // The raw per-poll reading is noisy: a session that just finished, or a pane a plugin repainted,
   // reads `working` then `waiting` across two polls with nothing changed. `confirmActivities` turns
   // that into a CONFIRMED reading — a needs-you state must be seen twice before the counter believes
@@ -444,13 +454,74 @@ export function createSessionsPoller(o: {
       const dialogUnreadable = new Map<string, DialogUnreadable>()
       const chatTails = new Map<string, ChatTurn[]>()
 
+      // The rows the HARNESS states (flag on): follow the new ones, release the gone ones.
+      const adapter = o.adapterState?.() ?? null
+      /** Rows whose activity is the harness's own statement — believed at once, both ways. */
+      const exact = new Set<string>()
+      if (adapter) {
+        adapter.sync(reconciled.filter(r => r.backend?.alive).map(r => {
+          const conversationId = harnessSessions.byManagedId.get(r.id)?.sessionId ?? r.managed?.conversationId
+          const harness = harnessOf.get(r.id)
+          const cwd = r.managed?.cwd
+          return { id: r.id, ...(harness ? { harness } : {}), ...(conversationId ? { conversationId } : {}), ...(cwd ? { cwd } : {}) }
+        }))
+      }
+
+      // Read the harness's own transcript instead of the screen, wherever BOTH halves hold: the
+      // conversation id is EXACT and somebody has written a reader for that harness's format
+      // (`harness-transcript.ts`). Either missing and the raw screen tail stays the row's only
+      // detail content — never a conversation guessed from harness-and-directory.
+      //
+      // TWO exact sources, and they are not interchangeable. Claude's own
+      // `~/.claude/sessions/<pid>.json` names our tmux session, which is the link for a session
+      // we did not start; `ManagedSession.conversationId` is the id agentop handed the CLI
+      // itself, which is the only one the other harnesses can ever have. Claude's own record is
+      // preferred where both exist — it is the LIVE one, while the registry's was recorded once.
+      const readChatTail = async (r: (typeof reconciled)[number]): Promise<void> => {
+        const cwd = r.managed?.cwd
+        const conversationId = harnessSessions.byManagedId.get(r.id)?.sessionId
+          ?? r.managed?.conversationId
+        const transcript = transcriptReaderFor(harnessOf.get(r.id))
+        if (transcript && conversationId) {
+          const path = await transcript
+            .resolve({ conversationId, ...(cwd ? { cwd } : {}) })
+            .catch(() => null)
+          if (path) {
+            const turns = await transcript.readRecent(path, TAIL_CHAT_TURNS).catch(() => [] as ChatTurn[])
+            if (turns.length > 0) chatTails.set(r.id, anyGrant() ? await scrubDeep(r.id, turns) : turns)
+          }
+        }
+      }
+
       const captureStart = performance.now()
       await Promise.all(reconciled.map(r => limit(async () => {
         const b = r.backend
         if (!b) return // `lost`: the backend has nothing to capture and nothing to report.
         if (!b.alive) { activity.set(r.id, 'exited'); return }
 
+        const reading = adapter?.reading(r.id)
+        const readScreen = !adapter || planScreen({
+          reading,
+          lastScreenMs: adapter.lastScreen(r.id),
+          nowMs,
+          forced: adapter.takeForced(r.id),
+        })
+        if (!readScreen && reading) {
+          // The harness said what the row is doing, and nothing on the screen can add to it now.
+          const kept = lastFrameFacts.get(r.id)
+          if (kept?.mode) modes.set(r.id, kept.mode)
+          if (kept) tails.set(r.id, kept.tail)
+          const before = prevDigest.get(r.id)
+          if (before !== undefined) nextDigest.set(r.id, before)
+          await readChatTail(r)
+          activity.set(r.id, adapterActivity(reading, undefined))
+          exact.add(r.id)
+          corroborated.add(r.id)
+          return
+        }
+
         const frame = await o.backend.capture(r.id, lines).catch(() => [] as string[])
+        adapter?.screenRead(r.id, nowMs)
         // WHICH MODE the harness is in, read off the same frame the state came from — see
         // `mode-spec.ts`. `null` for a harness nobody has probed and for a frame with no footer yet,
         // and the row then simply carries none.
@@ -461,32 +532,13 @@ export function createSessionsPoller(o: {
         const frameDigest = digestFrame(frame)
         nextDigest.set(r.id, frameDigest)
         tails.set(r.id, anyGrant() ? frameTail(frame, TAIL_LINES).map(l => scrubTerminalLine(r.id, l)) : frameTail(frame, TAIL_LINES))
+        if (adapter) {
+          const mode = modes.get(r.id)
+          lastFrameFacts.set(r.id, { ...(mode ? { mode } : {}), tail: tails.get(r.id) ?? [] })
+        }
 
         const harness = harnessOf.get(r.id)
-
-        // Read the harness's own transcript instead of the screen, wherever BOTH halves hold: the
-        // conversation id is EXACT and somebody has written a reader for that harness's format
-        // (`harness-transcript.ts`). Either missing and the raw screen tail above stays the row's
-        // only detail content — never a conversation guessed from harness-and-directory.
-        //
-        // TWO exact sources, and they are not interchangeable. Claude's own
-        // `~/.claude/sessions/<pid>.json` names our tmux session, which is the link for a session
-        // we did not start; `ManagedSession.conversationId` is the id agentop handed the CLI
-        // itself, which is the only one the other harnesses can ever have. Claude's own record is
-        // preferred where both exist — it is the LIVE one, while the registry's was recorded once.
-        const cwd = r.managed?.cwd
-        const conversationId = harnessSessions.byManagedId.get(r.id)?.sessionId
-          ?? r.managed?.conversationId
-        const transcript = transcriptReaderFor(harness)
-        if (transcript && conversationId) {
-          const path = await transcript
-            .resolve({ conversationId, ...(cwd ? { cwd } : {}) })
-            .catch(() => null)
-          if (path) {
-            const turns = await transcript.readRecent(path, TAIL_CHAT_TURNS).catch(() => [] as ChatTurn[])
-            if (turns.length > 0) chatTails.set(r.id, anyGrant() ? await scrubDeep(r.id, turns) : turns)
-          }
-        }
+        await readChatTail(r)
 
         const rules = harness ? rulesFor(harness) : undefined
         // CORROBORATED: the harness said so itself. A `working` read from MOVEMENT ALONE, on a
@@ -502,7 +554,7 @@ export function createSessionsPoller(o: {
         // A5.4: a backend that KNOWS the state (an ACP agent states it) is believed over the frame.
         const stated = o.backend.activityOf?.(r.id)
         if (stated) corroborated.add(r.id)
-        const state = stated ?? attentionOf({
+        const screenState = stated ?? attentionOf({
           alive: true,
           lastActivityMs: b.lastActivityMs,
           nowMs,
@@ -511,6 +563,13 @@ export function createSessionsPoller(o: {
           ...(before !== undefined ? { prevDigest: before } : {}),
           ...(rules ? { rules } : {}),
         })
+        // The harness's own statement, where there is one (flag on); a dialog only the screen can see
+        // still wins over it, and is confirmed like any screen reading.
+        const state = reading && !stated ? adapterActivity(reading, screenState) : screenState
+        if (reading && !stated && !(screenState === 'waiting-approval' && !reading.attention)) {
+          exact.add(r.id)
+          corroborated.add(r.id)
+        }
         activity.set(r.id, state)
         // The dialog is kept from the frame that DECIDED the state, so the two can never describe
         // different moments — and it costs nothing extra, the frame is already here.
@@ -797,7 +856,7 @@ export function createSessionsPoller(o: {
       // believed immediately (see `attention-confirm.ts`). The dialog/approval frames captured above
       // are keyed to the RAW `waiting-approval` reading and only reach a row once its CONFIRMED state
       // is `waiting-approval` too — `buildSessionViews` gates them on `activity`.
-      const confirm = confirmActivities(confirmMemory, activity, corroborated)
+      const confirm = confirmActivities(confirmMemory, activity, corroborated, exact)
       confirmMemory = confirm.memory
       const confirmedActivity = confirm.activities
 
@@ -821,6 +880,7 @@ export function createSessionsPoller(o: {
       const rang = bellTransitions(prevActivity, sessions)
 
       prevDigest = nextDigest
+      for (const id of [...lastFrameFacts.keys()]) if (!nextDigest.has(id)) lastFrameFacts.delete(id)
       prevActivity = new Map(
         sessions
           .filter((s): s is SessionView & { activity: SessionActivity } => s.activity !== undefined)
