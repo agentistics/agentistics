@@ -180,6 +180,23 @@ test('a RUNNING agy session with no conversation yet is an EMPTY chat — the co
   expect(out.turns).toEqual([])
 })
 
+test('a RUNNING codex/kimi session with no link yet is an EMPTY chat that still carries its link provenance', async () => {
+  // CHAT.FIRST / F0.3: codex and kimi now have an exact route (the process's open transcript), so an
+  // unlinked running row is "not linked yet" — the composer stays — rather than v2.112.2's refusal with
+  // `link: {provenance: 'unrecoverable', reason: 'no-id-route'}`. The `link` key itself is kept, carrying
+  // the row's own value (`null` = linkable, not linked yet), so a reader of the provenance still finds it.
+  for (const harness of ['codex', 'kimi']) {
+    const out = await readSessionChat(
+      hostWithRow({ harness, state: 'waiting', conversationId: undefined, link: null }), 'en', 'sess1',
+    )
+    expect(out.unavailable).toBeUndefined()
+    expect(out.live).toBe(true)
+    expect(out.turns).toEqual([])
+    expect('link' in out).toBe(true)
+    expect(out.link).toBeNull()
+  }
+})
+
 test('a harness that can never link keeps its refusal even while running', async () => {
   const out = await readSessionChat(
     hostWithRow({ harness: 'gemini', state: 'working', conversationId: undefined, conversationBlind: 'no link ever' }), 'en', 'sess1',
