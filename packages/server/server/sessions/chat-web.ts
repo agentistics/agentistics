@@ -32,7 +32,7 @@ import { applyPendingRewind, forgetRewind, pendingRewindFor } from './rewind-pen
 import type { CliLang } from '../cli-lang'
 import { controlStrings } from '@agentistics/tui/control/i18n'
 import type { ChatTurn } from './chat-turn'
-import type { AttachmentMessage, AttachmentSend } from '@agentistics/core'
+import type { AttachmentMessage, AttachmentSend, HarnessId } from '@agentistics/core'
 import { ATTACHMENT_DIR, readAttachmentLog } from './attachment-web'
 import { transcriptReaderFor } from './harness-transcript'
 import { conversationOfRow } from './row-conversation'
