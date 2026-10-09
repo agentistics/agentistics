@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import {
   HARNESS_TRANSCRIPTS, forgetCodexTranscriptPaths, forgetKimiTranscriptPaths,
   resolveAntigravityTranscript, resolveCodexTranscript, resolveCopilotTranscript,
-  resolveKimiTranscript, transcriptReaderFor,
+  resolveKimiTranscript, transcriptReaderFor, recentCodexDayDirs,
 } from './harness-transcript'
 
 const CONV = '01d0814f-ef39-4838-8461-c50e540e552a'
@@ -154,6 +154,25 @@ describe('the codex reader', () => {
     expect(await resolveCodexTranscript({ conversationId: other }, root)).toBeNull()
   })
 
+  it('a rollout written AFTER a miss is found on the NEXT resolve, not 30 s later', async () => {
+    // The chat is opened before codex writes its rollout (~1 s after the first message): the miss
+    // must not hide the file for the miss TTL — the recent day directories are probed every time.
+    const late = '22222222-3333-4444-8555-666666666666'
+    const now = Date.UTC(2026, 9, 9, 15, 0, 0)
+    expect(await resolveCodexTranscript({ conversationId: late }, root, now)).toBeNull()
+    const dir = join(root, ...recentCodexDayDirs(now)[0]!.split('/'))
+    await mkdir(dir, { recursive: true })
+    const file = join(dir, `rollout-2026-10-09T12-00-00-${late}.jsonl`)
+    await writeFile(file, '')
+    expect(await resolveCodexTranscript({ conversationId: late }, root, now + 1_000)).toBe(file)
+  })
+
+  it('recentCodexDayDirs: today and yesterday, local and UTC, deduplicated', () => {
+    // 01:30 UTC at UTC-3 is still the previous local day.
+    expect(recentCodexDayDirs(Date.UTC(2026, 9, 9, 1, 30), 180)).toEqual(['2026/10/08', '2026/10/09', '2026/10/07'])
+    expect(recentCodexDayDirs(Date.UTC(2026, 9, 9, 15, 0), 0)).toEqual(['2026/10/09', '2026/10/08'])
+  })
+
   it('reads the conversation, taking exactly one copy of the duplicated message', async () => {
     const path = join(root, '2026', '07', '07', `rollout-2026-07-07T19-02-05-${ID}.jsonl`)
     const read = await HARNESS_TRANSCRIPTS.codex!.read(path, 400)
@@ -231,10 +250,19 @@ describe('the kimi reader', () => {
     expect(await resolveKimiTranscript({ conversationId: ID }, root)).toBe(wire)
   })
 
-  it('an unknown conversation resolves to nothing — and the MISS is memoized', async () => {
+  it('an unknown conversation resolves to nothing', async () => {
     const other = '11111111-2222-4333-8444-555555555555'
     expect(await resolveKimiTranscript({ conversationId: other }, root)).toBeNull()
     expect(await resolveKimiTranscript({ conversationId: other }, root)).toBeNull()
+  })
+
+  it('a wire written AFTER a miss is found on the NEXT resolve, not 30 s later', async () => {
+    const late = '33333333-4444-4555-8666-777777777777'
+    expect(await resolveKimiTranscript({ conversationId: late }, root)).toBeNull()
+    const dir = join(root, 'wd_scratchpad_a2dd52466aab', `session_${late}`, 'agents', 'main')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'wire.jsonl'), '')
+    expect(await resolveKimiTranscript({ conversationId: late }, root)).toBe(join(dir, 'wire.jsonl'))
   })
 
   it('reads the conversation, taking exactly one copy of the duplicated prompt', async () => {
