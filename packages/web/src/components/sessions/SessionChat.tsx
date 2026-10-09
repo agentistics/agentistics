@@ -52,13 +52,11 @@ import { approvalIdentity } from '../../lib/approvalQuestion'
 import { dialogAnswersToRetire } from '../../lib/dialogAnswerEcho'
 import { ChatBubble, type ChatTurn } from './ChatBubble'
 import { WorkingNote } from './WorkingNote'
-import { useTerminalStream } from '../../hooks/useTerminalStream'
 import { isImagePath, openComposerLightbox, previousPersonTurnMs } from '../../lib/attachmentPreview'
 import { promptCountLabel } from '../../lib/promptCount'
 import { splitImageAttachments } from '../../lib/attachmentPreview'
 import { attachmentUrl } from '../../lib/attachmentUrl'
 import { AttachmentLightbox } from './AttachmentLightbox'
-import { detectCompacting, liveTurnText, stripAnsi } from '../../lib/liveTurn'
 import { scratchKey, sessionScratch } from '../../lib/sessionScratch'
 import { chatReadAt, firstFrameStale, refreshChat, subscribeChat } from '../../lib/chatFeed'
 import { composerMaxHeight } from '../../lib/composerHeight'
@@ -1315,9 +1313,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const working = source ? source.working : adapter && payload.working !== undefined ? payload.working : session.state === 'working'
   const structuredText = source?.liveText ?? (adapter ? payload.liveText : undefined)
   const structuredReasoning = source?.liveReasoning ?? (adapter ? payload.liveReasoning : undefined)
-  const composing = adapter ? payload.composing ?? null : null
-  // No screen behind a source: the stream is never opened (a null id is the hook's "off").
-  const { state: term } = useTerminalStream(source || adapter || payload === null ? null : session.id)
+ const composing = adapter ? payload.composing ?? null : null
 
   // A turn just ENDED. The live bubble is gone the moment `working` drops, and the real one is up
   // to `CHAT_POLL_MS` away — a gap where neither source is showing the answer that just finished.
@@ -1450,34 +1446,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     })
   }, [turns, echo.length, editEcho])
 
-  // A finished background-task line is `role: 'assistant'` and carries no `pending` any more, so it
-  // would otherwise be taken as the assistant's last MESSAGE — and its label would be compared
-  // against the live terminal frame. It is a status line; nobody said it.
-  const lastAssistant = [...turns].reverse()
-    .find(t => t.role === 'assistant' && !t.pending && !t.task && t.text.trim() !== '')
-
-  const live = useMemo(() => {
-    if (source || adapter) return structuredText
-    if (!term.frame) return null
-    return liveTurnText({
-      // The frame carries the emulator's escape sequences; the chat wants the words.
-      lines: stripAnsi(term.frame.content).split('\n'),
-      ...(lastAssistant ? { lastCommitted: lastAssistant.text } : {}),
-      working,
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [term.frame, lastAssistant, working, source?.liveText, adapter, structuredText])
-
-  /**
-   * Whether the frame is showing Claude Code's OWN compaction screen right now — see
-   * `detectCompacting`. Read over the RAW frame lines rather than `live`'s filtered text: the
-   * progress bar is exactly the kind of line `liveTurnText` strips out as chrome, and compaction
-   * writes nothing to the transcript while it runs, so this is the only signal there is.
-   */
-  const compacting = useMemo(() => {
-    if (adapter || source || !working || !term.frame) return null
-    return detectCompacting(stripAnsi(term.frame.content).split('\n'))
-  }, [term.frame, working, adapter, source])
+  // F4.A: the live text comes from the structured source or the engine's channel, never the screen.
+  const live = source || adapter ? structuredText : null
 
   const toTail = useCallback((smooth = true) => {
     const el = scrollRef.current
@@ -2613,7 +2583,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               lang={lang}
               {...(source?.runningTools?.length ? { tools: source.runningTools } : newestAssistant?.tools ? { tools: newestAssistant.tools } : {})}
               thinking={Boolean(newestAssistant?.thinking)}
-              {...(compacting ? { compacting } : {})}
               {...(composing ? { composing } : {})}
             />
           )}
