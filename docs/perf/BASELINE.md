@@ -99,7 +99,7 @@ Swap was 8.08 of 8 GB. Every number on the real machine includes paging.
 `/api/data`, a paged history open and its size, a change reaching the dashboards, and a live chat (open,
 send → echo, answer → shown). They run over a synthetic home at `--scale 0.1`.
 
-**The ENGINE.MAP bench in CI** (F0.4, `scripts/perf/engine-map/`, job `engine-map-bench`): a mixed fleet of fake claude/codex/gemini/copilot/kimi/agy sessions on a throwaway server; its tables are a job summary and the `engine-map-bench` artifact, and the 09 §8 ceilings in `budgets.json` → `engineMap` are failures since F4.B (10 % noise tolerance; a value inside it is a warning). See `scripts/perf/engine-map/README.md`.
+**The ENGINE.MAP bench in CI** (F0.4, `scripts/perf/engine-map/`, job `engine-map-bench`): a mixed fleet of fake claude/codex/gemini/copilot/kimi/agy sessions on a throwaway server; its tables are a job summary and the `engine-map-bench` artifact, and the 09 §8 ceilings in `budgets.json` → `engineMap` are warnings until Phase 4 flips them to failures. See `scripts/perf/engine-map/README.md`.
 
 **Still open:** the real machine's first `/api/data` (30–78 s) against ~1 s synthetic. The `[data]` phase
 line (32c57900) names its slow phase on the service's next restart.

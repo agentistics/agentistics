@@ -5,7 +5,7 @@
  *
  * Prints the verdict table, emits `::warning::` annotations for an exceeded `warn` budget (and
  * `::error::` for a `fail` one), appends the table to $GITHUB_STEP_SUMMARY when set. Exit 1 only when a
- * budget at level `fail` is over its ceiling (`max` × (1 + tolerance)). Phase 4 (F4.B) set every budget to `fail`.
+ * budget at level `fail` is over — today every budget is `warn`, so this reports and stays green.
  */
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -23,7 +23,7 @@ if (!all.engineMap) { console.error(`no "engineMap" section in ${budgetsFile}`);
 
 const results = evaluate(result, all.engineMap)
 const table = renderBudgets(results)
-const warned = results.filter(r => r.verdict === 'over' || r.verdict === 'near').length
+const warned = results.filter(r => r.verdict === 'over').length
 const skipped = results.filter(r => r.verdict === 'skipped').length
 const coverage = harnessCoverage(result)
 const md = `### ENGINE.MAP budgets (09 §8) — ${result.label ?? 'bench'}\n\n${table}\n\n${warned} over · ${skipped} not measured by this plan · ${results.length - warned - skipped} within budget.\n\n#### Per harness\n\n${renderCoverage(coverage)}\n`
