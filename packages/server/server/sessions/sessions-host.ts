@@ -161,6 +161,9 @@ export async function linkProcessConversation(o: {
  * processes of this harness that agentop did not start, taken from the caller's last process scan —
  * join it, so a kimi resumed by hand in a terminal on our row's session still refuses.
  */
+/** How often a follow-only sampling burst re-reads the registry and the panes — see the loop. */
+export const FOLLOW_REFRESH_MS = 5_000
+
 export async function sampleProcessLinks(o: {
   harness: HarnessId
   readRegistry: () => Promise<ManagedSession[]>
@@ -209,7 +212,12 @@ export async function sampleProcessLinks(o: {
     }
   }
   while (now() < o.deadline()) {
-    if (now() - refreshedAt >= refreshMs) await refresh()
+    // PERF.SLOW: re-reading the registry and the panes (a tmux process) every second is for finding a
+    // row that still needs its FIRST link. A burst that only FOLLOWS linked rows (a kimi turn, which
+    // keeps the burst alive for its whole length) refreshes at `FOLLOW_REFRESH_MS`; a write still
+    // forces a refresh at once (below).
+    const due = open.length === 0 || open.some(r => r.current === undefined) ? refreshMs : Math.max(refreshMs, FOLLOW_REFRESH_MS)
+    if (now() - refreshedAt >= due) await refresh()
     if (open.length === 0) break
     const resolved = new Map<number, ProcessTranscriptFile | null>()
     const pids = new Set<number>([...open.map(r => r.pid), ...(o.otherPids ?? [])])

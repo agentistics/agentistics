@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, appendFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chatStreamCount, chatStreamResponse, MAX_CHAT_STREAMS, wakeChat } from './chat-stream'
+import { chatStreamCount, chatStreamResponse, DEBOUNCE_MS, MAX_CHAT_STREAMS, nextReadDelay, wakeChat } from './chat-stream'
 import type { ChatPayload } from './chat-web'
 
 const dirs: string[] = []
@@ -174,5 +174,19 @@ describe('chat stream — the first send to a session with no transcript yet', (
     await Bun.sleep(30)
     expect(reads).toBe(before + 1)
     ctl.abort()
+  })
+})
+
+describe('nextReadDelay — the per-stream duty cycle (PERF.SLOW)', () => {
+  test('a quiet spell or a fast read: the debounce', () => {
+    expect(nextReadDelay(10_000, -Infinity, 0)).toBe(DEBOUNCE_MS)
+    expect(nextReadDelay(10_000, 9_990, 2)).toBe(DEBOUNCE_MS)
+  })
+  test('a slow read under a writing turn: idle for 4x its duration after it ended', () => {
+    expect(nextReadDelay(10_000, 10_000, 100)).toBe(400)
+    expect(nextReadDelay(10_300, 10_000, 100)).toBe(100)
+  })
+  test('never longer than a second', () => {
+    expect(nextReadDelay(10_000, 10_000, 5_000)).toBe(1_000)
   })
 })
