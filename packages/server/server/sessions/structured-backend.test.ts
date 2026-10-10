@@ -10,7 +10,8 @@ import type {
   StructuredDeclaration, StructuredExit, StructuredSession, StructuredSpawn,
 } from '@agentistics/engine-api'
 import { answerFits, structuredRegistry, stubDriver } from '@agentistics/engine-api'
-import { acpAsStructured, structuredSpawnOf, withStructured, type StructuredProvider } from './structured-backend'
+import { acpAsStructured, recordingSession, structuredSpawnOf, withStructured, type StructuredProvider } from './structured-backend'
+import { isReplayCall } from './structured-replay'
 import { STRUCTURED_ROUTE_OFF, answerStructured, routableDriver, routeSpawn, structuredIntentOf, structuredReopenOrigin } from './structured-route'
 import type { BackendSpawn, SessionBackend } from './types'
 
@@ -437,4 +438,27 @@ test('structured free text preserves whitespace while refusing an empty answer',
   expect(answerStructured(open, 1, text)).toEqual({ ok: true, answer: { requestId: 'q1', choice: 1, text }, said: text })
   expect(answerStructured(open, undefined, text)).toEqual({ ok: true, answer: { requestId: 'q1', text }, said: text })
   expect(answerStructured(open, 1, ' \n ')).toEqual({ ok: false, why: 'needs-text' })
+})
+
+
+describe('MODE.EVERYWHERE — the durable relay\'s session forwards the mode and RECORDS a set', () => {
+  test('mode/modes/setMode reach the driver; setMode is recorded before it writes, so a re-attach makes it again', async () => {
+    const s = fakeSession({ id: 'm', harness: 'gemini', cwd: '/w' }) as unknown as StructuredSession
+    const recorded: unknown[] = []
+    const r = recordingSession(s, { record: c => { recorded.push(c) } })
+    expect(r.modes!().map(m => m.id)).toEqual(['default', 'plan'])
+    expect(r.mode!()?.id).toBe('default')
+    expect(await r.setMode!('plan')).toBe(true)
+    expect(r.mode!()?.id).toBe('plan')
+    expect(recorded).toEqual([{ op: 'setMode', id: 'plan' }])
+    expect(isReplayCall({ op: 'setMode', id: 'plan', at: 3, t: 1 })).toBe(true)
+    expect(isReplayCall({ op: 'setMode', at: 3, t: 1 })).toBe(false)
+  })
+  test('a driver with no modes keeps none through the relay (absent stays absent)', () => {
+    const s = fakeSession({ id: 'm', harness: 'gemini', cwd: '/w' }) as unknown as Record<string, unknown>
+    const bare = { ...s, modes: undefined, mode: undefined, setMode: undefined } as unknown as StructuredSession
+    const r = recordingSession(bare, { record: () => {} })
+    expect(r.modes).toBeUndefined()
+    expect(r.setMode).toBeUndefined()
+  })
 })

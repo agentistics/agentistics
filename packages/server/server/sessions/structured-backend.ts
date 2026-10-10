@@ -90,6 +90,13 @@ export function recordingSession(s: StructuredSession, t: Pick<DurableTransport,
     attention: () => s.attention(),
     screen: n => s.screen(n),
     lastActivityMs: () => s.lastActivityMs(),
+    // Optional members are forwarded only where the driver has them — absent stays absent.
+    ...(s.usage ? { usage: () => s.usage!() } : {}),
+    ...(s.modes ? { modes: () => s.modes!() } : {}),
+    ...(s.mode ? { mode: () => s.mode!() } : {}),
+    // MODE.EVERYWHERE — setting a mode WRITES to the child, so it is recorded (before the write leaves,
+    // like every call here) and a re-attach makes it again in the same place.
+    ...(s.setMode ? { setMode: (id: string) => { t.record({ op: 'setMode', id }); return s.setMode!(id) } } : {}),
     prompt(text) { const ok = s.prompt(text); if (ok) t.record({ op: 'prompt', text }); return ok },
     answer(a) {
       const ok = s.answer(a)

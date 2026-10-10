@@ -3639,7 +3639,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                           aria-checked={current}
                           onClick={() => void chooseMode(option.id)}
                           style={{
-                            display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                            display: 'flex', alignItems: unattended && !current ? 'flex-start' : 'center', gap: 8, width: '100%',
                             minHeight: 36, padding: '7px 9px', border: 'none', borderRadius: 7,
                             background: current ? style.bg : 'transparent',
                             color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 12,
@@ -3648,7 +3648,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         >
                           <span style={{
                             width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                            background: style.fg,
+                            background: style.fg, ...(unattended && !current ? { marginTop: 4 } : {}),
                           }} />
                           <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5 }}>
                             {option.label}

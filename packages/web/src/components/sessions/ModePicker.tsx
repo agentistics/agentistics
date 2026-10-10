@@ -11,6 +11,7 @@
 import { AlertTriangle } from 'lucide-react'
 import { CANONICAL_MODE_TEXT, NO_QUESTIONS_WARNING, type CanonicalMode } from '@agentistics/core'
 import { modeStyle } from '../../lib/modeStyle'
+import { useIsMobile } from '../../hooks/useIsMobile'
 
 export interface ModePickerProps {
   /** The modes this harness can start in, `default` first. */
@@ -21,6 +22,7 @@ export interface ModePickerProps {
 }
 
 export function ModePicker({ modes, value, onChange, lang }: ModePickerProps) {
+  const isMobile = useIsMobile()
   if (modes.length < 2) return null
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -42,7 +44,7 @@ export function ModePicker({ modes, value, onChange, lang }: ModePickerProps) {
               onClick={() => onChange(mode)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 7,
-                padding: '8px 13px', borderRadius: 9, cursor: 'pointer', minHeight: 36,
+                padding: '8px 13px', borderRadius: 9, cursor: 'pointer', minHeight: isMobile ? 44 : 36,
                 border: `1px solid ${on ? (mode === 'default' ? 'var(--border)' : style.border) : 'var(--border-subtle)'}`,
                 background: on ? style.bg : 'var(--bg-elevated)',
                 color: on ? 'var(--text-primary)' : 'var(--text-secondary)',
