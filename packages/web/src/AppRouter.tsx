@@ -32,6 +32,7 @@ const DataSourcesSettings = lazy(() => import('./pages/settings/DataSourcesSetti
 const BackupSettings = lazy(() => import('./pages/settings/BackupSettings'))
 const HarnessesSettings = lazy(() => import('./pages/settings/HarnessesSettings'))
 const InstallSettings = lazy(() => import('./pages/settings/InstallSettings'))
+const WhatsNewSettings = lazy(() => import('./pages/settings/WhatsNewSettings'))
 const LiveSettings = lazy(() => import('./pages/settings/LiveSettings'))
 const ChatSettings = lazy(() => import('./pages/settings/ChatSettings'))
 const ProvidersSettings = lazy(() => import('./pages/settings/ProvidersSettings'))
@@ -106,6 +107,7 @@ export default function AppRouter() {
             <Route path="pricing" element={<Suspense fallback={<PageFallback />}><PricingSettings /></Suspense>} />
             <Route path="billing" element={<Suspense fallback={<PageFallback />}><BillingSettings /></Suspense>} />
             <Route path="install" element={<Suspense fallback={<PageFallback />}><InstallSettings /></Suspense>} />
+            <Route path="whatsnew" element={<Suspense fallback={<PageFallback />}><WhatsNewSettings /></Suspense>} />
             <Route path="live" element={<Suspense fallback={<PageFallback />}><LiveSettings /></Suspense>} />
             <Route path="chat" element={<Suspense fallback={<PageFallback />}><ChatSettings /></Suspense>} />
             {/* VAULT v4 (2026-10-06): the vault has ONE page, `/vault`. The old Settings → Vault screen's

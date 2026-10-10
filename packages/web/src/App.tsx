@@ -72,8 +72,9 @@ import { NayDock } from './components/nay/NayDock'
 import { dockActiveOnly } from './lib/nayDock'
 import { UpdateModal } from './components/UpdateModal'
 import { WhatsNewModal } from './components/WhatsNewModal'
-import { OPEN_WHATS_NEW_EVENT, type WhatsNewRequest } from './whatsNew/open'
-import { planWhatsNew, releasesBetween, SEEN_KEY } from './whatsNew/select'
+import { OPEN_WHATS_NEW_EVENT, openWhatsNew, type WhatsNewRequest } from './whatsNew/open'
+import { releasesBetween, MANUAL_OPEN_COUNT } from './whatsNew/select'
+import { settleWhatsNew, autoOpenStore } from './whatsNew/seen'
 import { InstallModal } from './components/InstallModal'
 import { isNoticeSnoozed, snoozeNotice } from './lib/noticeSnooze'
 import { ArchiveConsentModal, type ArchiveMode } from './components/ArchiveConsentModal'
@@ -2622,14 +2623,15 @@ export default function AppLayout() {
     // The reload above leaves one line behind it: "Agentistics atualizado para vX".
     const updatedTo = takeUpdatedToast()
     // The first load of a new version: when it has curated notes the line leads to them
-    // (`whatsNew/`), otherwise it is the plain "updated" one. The last version seen is
-    // remembered per browser; a first install announces nothing.
-    let seen: string | null = null
-    try { seen = localStorage.getItem(SEEN_KEY) } catch { /* private window: announce nothing */ }
-    const news = BUNDLE_VERSION ? planWhatsNew({ current: BUNDLE_VERSION, seen }) : null
-    if (BUNDLE_VERSION) { try { localStorage.setItem(SEEN_KEY, BUNDLE_VERSION) } catch { /* ignore */ } }
-    if (news) pushNotification({ type: 'success', code: 'app.whats_new', meta: { version: BUNDLE_VERSION, from: news.from } })
-    else if (updatedTo) pushNotification({ type: 'success', code: 'app.updated', meta: { version: updatedTo } })
+    // (`whatsNew/`) AND the sheet opens by itself, once. The last version seen is remembered on the
+    // server per person (`whatsNew/seen.ts`), so it shows on whichever device opens first; a first
+    // install announces nothing.
+    void settleWhatsNew(BUNDLE_VERSION).then(news => {
+      if (news) {
+        pushNotification({ type: 'success', code: 'app.whats_new', meta: { version: BUNDLE_VERSION, from: news.from } })
+        if (autoOpenStore.get()) openWhatsNew({ version: BUNDLE_VERSION, from: news.from }, true)
+      } else if (updatedTo) pushNotification({ type: 'success', code: 'app.updated', meta: { version: updatedTo } })
+    })
     check('interval')
     const tick = window.setInterval(() => check('interval'), 60_000)
     const onVisible = () => check('focus')
@@ -4152,6 +4154,13 @@ export default function AppLayout() {
                 <a
                   href="https://github.com/agentistics/agentistics/releases/latest"
                   target="_blank" rel="noreferrer"
+                  title={lang === 'pt' ? 'Ver novidades' : "See what's new"}
+                  onClick={e => {
+                    // The label opens the release notes in the app; the releases page stays one click away inside the sheet.
+                    if (releasesBetween(null, version).length === 0) return
+                    e.preventDefault()
+                    openWhatsNew({ version, from: '' })
+                  }}
                   style={{
                     display: 'inline-flex', alignItems: 'center', gap: 5,
                     padding: '4px 10px', borderRadius: 20,
@@ -4749,8 +4758,8 @@ export default function AppLayout() {
       )}
 
       {whatsNew && (() => {
-        const entries = releasesBetween(whatsNew.from, whatsNew.version)
-        return entries.length > 0 ? <WhatsNewModal entries={entries} lang={lang === 'pt' ? 'pt' : 'en'} isMobile={isMobile} onClose={() => setWhatsNew(null)} /> : null
+        const entries = releasesBetween(whatsNew.from, whatsNew.version).slice(0, whatsNew.from ? undefined : MANUAL_OPEN_COUNT)
+        return entries.length > 0 ? <WhatsNewModal entries={entries} lang={lang === 'pt' ? 'pt' : 'en'} isMobile={isMobile} autoOpened={whatsNew.auto === true} onDontShow={v => autoOpenStore.set(!v)} onClose={() => setWhatsNew(null)} /> : null
       })()}
 
       {/* The one install flow's loader. The finale on the bundle that arrived is `FinaleHost` (main.tsx): it must outlive this component's boot states. */}
