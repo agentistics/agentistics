@@ -58,7 +58,9 @@ export function runRelay(dir: string): void {
   // `node:child_process`, not `Bun.spawn`: piped stdin delivered nothing to these CLIs under Bun's own
   // spawn (the engine's acp/launch.ts records the 2026-10-02 probe). stderr is discarded — it can carry
   // conversation text and nothing reads it.
-  const child = spawn(spec.bin, spec.args, { cwd: spec.cwd, stdio: ['pipe', 'pipe', 'ignore'], env: { ...process.env, ...extra } })
+  // The ACP CLI may fork helpers of its own. Keeping the child in a detached process group lets the
+  // relay terminate the whole tree, rather than leaving a helper behind when the CLI ignores TERM.
+  const child = spawn(spec.bin, spec.args, { cwd: spec.cwd, detached: true, stdio: ['pipe', 'pipe', 'ignore'], env: { ...process.env, ...extra } })
   writeFileSync(join(dir, RELAY_FILES.pid), JSON.stringify({ relay: process.pid, child: child.pid ?? null }), { mode: 0o600 })
 
   let client: Socket | null = null
@@ -83,10 +85,18 @@ export function runRelay(dir: string): void {
 
   let ended = false
   let killTimer: ReturnType<typeof setTimeout> | null = null
+  const killChild = (signal: 'SIGTERM' | 'SIGKILL'): void => {
+    const pid = child.pid
+    if (pid === undefined) return
+    try { process.kill(-pid, signal) } catch { try { child.kill(signal) } catch { /* already dead */ } }
+  }
   const endChild = (): void => {
+    // A SIGTERM can arrive after the child exit event has already marked the relay ended. The relay
+    // itself still owns a listening socket, so explicitly leave too; otherwise it survives until SIGKILL.
+    if (ended) { process.exit(0); return }
     if (child.exitCode !== null || child.signalCode !== null) return
-    child.kill('SIGTERM')
-    killTimer ??= setTimeout(() => { if (child.exitCode === null) child.kill('SIGKILL') }, KILL_GRACE_MS)
+    killChild('SIGTERM')
+    killTimer ??= setTimeout(() => { if (child.exitCode === null) killChild('SIGKILL') }, KILL_GRACE_MS)
   }
 
   const server = createServer(sock => {
