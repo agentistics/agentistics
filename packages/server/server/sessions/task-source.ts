@@ -16,7 +16,7 @@ import { historicalRows } from './task-historical'
 import { nativeRows } from './task-native'
 import { withNativeAliases } from './native-id-alias'
 import type { BoardRow, ManagedSession } from './types'
-import { CORE_TYPE_ID, coreStatusMigration, planStatusMigration, planTypeMigration, type SessionMeta } from '@agentistics/core'
+import { CORE_TYPE_ID, coreStatusMigration, planInReviewAdd, planStatusMigration, planTypeMigration, type SessionMeta } from '@agentistics/core'
 
 /**
  * THE BOARD'S TWO ROW SETS, and why there is no field called plain `rows`.
@@ -103,6 +103,13 @@ async function ensureStatusesSeeded(store: TaskStore): Promise<void> {
   if (plan) await store.seedStatuses(plan)
 }
 
+/** Add `in_review` once to a book whose list predates it; a fresh book already carries it. */
+async function ensureInReview(store: TaskStore): Promise<void> {
+  const book = await store.read()
+  if (book.inReviewSeeded) return
+  await store.seedInReview(planInReviewAdd(book.statuses))
+}
+
 /** Seed the TYPE list once (CORE) and run the one-time core-status → type migration. Same shape as above. */
 async function ensureTypesSeeded(store: TaskStore): Promise<void> {
   const book = await store.read()
@@ -138,6 +145,7 @@ export async function loadTaskBoard(): Promise<{
   const registryRows = await readRegistry()
   await ensureLegacyTasks(store, registryRows)
   await ensureStatusesSeeded(store)
+  await ensureInReview(store)
   await ensureTypesSeeded(store)
   const book = await store.read()
   // No metas here (see this function's note): the rows carry the FILING, which is all the sharing
@@ -151,6 +159,7 @@ export async function loadTaskWorld(): Promise<TaskWorld> {
   const registryRows = await readRegistry()
   await ensureLegacyTasks(store, registryRows)
   await ensureStatusesSeeded(store)
+  await ensureInReview(store)
   await ensureTypesSeeded(store)
   const [book, metas] = await Promise.all([
     store.read(),
