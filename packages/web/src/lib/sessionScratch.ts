@@ -41,6 +41,8 @@ export interface CachedChat {
   liveText?: string
   liveReasoning?: string
   working?: boolean
+  /** ADAPTER.ESSENTIALS-B: what the assistant is formulating right now (a question card on its way). */
+  composing?: 'question' | null
   turns: unknown[]
   live?: boolean
   unavailable?: string

@@ -5,7 +5,7 @@ import {
   adapterActivity, createAdapterStateFeed, planScreen, SCREEN_REFRESH_MS, type AdapterReading, type AdapterStateFeed,
 } from './adapter-state'
 import { createSessionsPoller } from './sessions-host'
-import type { BackendSession, ManagedSession, SessionBackend } from './types'
+import type { BackendSession, ManagedSession, SessionActivity, SessionBackend } from './types'
 
 const idle: AdapterReading = { working: false, attention: false, coversAttention: false }
 
@@ -69,7 +69,7 @@ function fakeEngine() {
 const NOW = 1_786_600_000_000
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve() }
 
-function harnessPoller(harness: HarnessId, o: { feed: AdapterStateFeed | null; frame: string[]; now: () => number }) {
+function harnessPoller(harness: HarnessId, o: { feed: AdapterStateFeed | null; frame: string[]; now: () => number; activityOf?: () => SessionActivity | undefined }) {
   const captures: string[] = []
   const session: BackendSession = { id: 'r1', createdMs: NOW - 600_000, attached: false, alive: true, lastActivityMs: NOW - 30_000 }
   const backend: SessionBackend = {
@@ -86,6 +86,7 @@ function harnessPoller(harness: HarnessId, o: { feed: AdapterStateFeed | null; f
     async sendTextRaw() { return true },
     async sendKey() { return true },
     async sendPaste() { return true },
+    ...(o.activityOf ? { activityOf: o.activityOf } : {}),
   }
   const managed: ManagedSession = { id: 'r1', harness, cwd: '/repo', createdAt: '2026-10-09T00:00:00Z', conversationId: `conv-${harness}` }
   const poller = createSessionsPoller({
@@ -146,6 +147,31 @@ describe('the poller, per harness — the harness states its state when ON; the 
       const { poller, captures } = harnessPoller(h, { feed: null, frame: ['some output'], now: () => t })
       await poller.poll(); t += 5_000; await poller.poll(); t += 5_000; await poller.poll()
       expect(captures.length).toBe(3)
+    })
+  }
+
+  // ADAPTER.ESSENTIALS-B item 1 — a STRUCTURED row's state is the PROTOCOL's statement (an open turn:
+  // a 634 s Bash beating `tool_progress` heartbeats), never the transcript file's reading. Measured on
+  // 2.116: with the flag on the poller took the file feed's `working: false` and skipped the backend,
+  // so a Claude row running a long Bash read `waiting` for ten minutes. Every harness alike.
+  for (const h of HARNESS_ORDER) {
+    it(`${h}: a structured row's protocol state outranks the file's reading, both ways`, async () => {
+      let t = NOW
+      let said: SessionActivity = 'working'
+      const eng = fakeEngine()
+      const feed = createAdapterStateFeed({ chatOf: eng.chatOf, setTimer: () => 0, clearTimer: () => {} })
+      const { poller } = harnessPoller(h, { feed, frame: [], now: () => t, activityOf: () => said })
+      await poller.poll(); await flush()
+      eng.state(`conv-${h}`, false) // the file: nothing moving
+      for (let i = 0; i < 3; i++) { t += 5_000; expect((await poller.poll()).sessions[0]!.activity).toBe('working') }
+      said = 'waiting' // the protocol: the turn ended
+      eng.state(`conv-${h}`, true) // the file, stale, still says working
+      t += 5_000
+      expect((await poller.poll()).sessions[0]!.activity).toBe('waiting')
+      said = 'waiting-approval'
+      t += 5_000
+      expect((await poller.poll()).sessions[0]!.activity).toBe('waiting-approval')
+      feed.stop()
     })
   }
 
