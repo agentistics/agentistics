@@ -70,6 +70,11 @@ describe('context text', () => {
     expect(t).toContain('never mark it done before the user validates')
     expect(t).not.toContain('not linked to a task')
   })
+  test('a filed session gets the board lifecycle; an unfiled one does not', () => {
+    expect(contextText({ ...base, taskId: 'T-1' })).toContain('Board lifecycle:')
+    expect(contextText({ ...base, taskId: 'T-1' })).toContain('kind=handback')
+    expect(contextText(base)).not.toContain('Board lifecycle:')
+  })
   test('subtask is named only when present', () => {
     const t = contextText({ ...base, taskId: 'T-1', taskTitle: 'Fix login', subtaskId: 'S-9', subtaskTitle: 'Add test' })
     expect(t).toContain('task T-1 "Fix login", subtask S-9 "Add test".')

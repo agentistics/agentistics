@@ -22,7 +22,7 @@ import { getCommitsInWindow } from '../git'
 import { readPreferences, writePreferences } from '../preferences'
 import {
   isGroupMember, legacyTaskId, marksStart, migratePriority, newCommentId, newEventId, newFileId,
-  newLinkId, newSubtaskId, newTaskId, statusAfterAllSubtasksDone, statusAfterAttach,
+  newLinkId, newSubtaskId, newTaskId, statusAfterAllSubtasksDone, statusAfterAttach, statusAfterHandback,
   statusAfterSubtaskProgress, subtaskDone,
   type Task, type TaskEvent, type TaskStatus,
 } from './task-model'
@@ -988,6 +988,13 @@ export async function attachSession(
   // task itself, so it is still that task's current status.
   const advanced = statusAfterAttach(task.status)
   if (advanced) await markTask(task.id, advanced, row.label || sessionId)
+  // The same forward-only nudge for the subtask the session is now filed on (never downgrades
+  // done / in_review / blocked). `patchSubtask` also moves the parent task if still unstarted.
+  if (plan.subtaskId) {
+    const sub = w.book.subtasks.find(s => s.id === plan.subtaskId)
+    const next = sub ? statusAfterAttach(sub.status) : null
+    if (next) await patchSubtask(plan.subtaskId, { status: next })
+  }
 
   // The record first, then LIVE git. Every row written before `ManagedSession.repo` existed carries
   // nothing, which is most of the fleet on a machine that has been running a while — and reading
