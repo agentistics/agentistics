@@ -166,7 +166,7 @@ const TXT: Record<'pt' | 'en', T> = {
     enablePermanently: 'Enable permanently',
     enablePermanentlyBusy: 'Saving…',
     termTitle: 'Open in terminal',
-    termBody: 'This session runs over its harness’s protocol, so it has no terminal screen of its own. Opening it in a terminal resumes this same conversation as a TUI.',
+    termBody: 'This session has no terminal screen. Open the same conversation in a terminal to see it and type directly.',
     termBusy: 'Opening…',
   },
   pt: {
@@ -202,7 +202,7 @@ const TXT: Record<'pt' | 'en', T> = {
     enablePermanently: 'Habilitar permanentemente',
     enablePermanentlyBusy: 'Salvando…',
     termTitle: 'Abrir no terminal',
-    termBody: 'Esta sessão roda pelo protocolo do harness e não tem uma tela de terminal própria. Abrir no terminal retoma esta mesma conversa como TUI.',
+    termBody: 'Esta sessão não tem uma tela de terminal. Abra a mesma conversa num terminal para ver e digitar direto.',
     termBusy: 'Abrindo…',
   },
 }

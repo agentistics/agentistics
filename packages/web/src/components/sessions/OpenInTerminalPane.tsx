@@ -19,13 +19,13 @@ export interface OpenInTerminal {
 const TXT = {
   en: {
     title: 'Open in terminal',
-    body: 'This session runs over its harness’s protocol, so it has no terminal screen of its own. Opening it in a terminal resumes this same conversation as a TUI.',
+    body: 'This session has no terminal screen. Open the same conversation in a terminal to see it and type directly.',
     confirm: 'This session is in the middle of a reply. Opening it in a terminal ends that reply and resumes the same conversation.',
     busy: 'Opening…', cancel: 'Cancel', go: 'Open in terminal',
   },
   pt: {
     title: 'Abrir no terminal',
-    body: 'Esta sessão roda pelo protocolo do harness e não tem uma tela de terminal própria. Abrir no terminal retoma esta mesma conversa como TUI.',
+    body: 'Esta sessão não tem uma tela de terminal. Abra a mesma conversa num terminal para ver e digitar direto.',
     confirm: 'Esta sessão está no meio de uma resposta. Abrir no terminal encerra essa resposta e retoma a mesma conversa.',
     busy: 'Abrindo…', cancel: 'Cancelar', go: 'Abrir no terminal',
   },
