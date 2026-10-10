@@ -55,6 +55,7 @@ import {
   targetStreamId, type TerminalTarget,
 } from '../../lib/terminalTarget'
 import { Watermark } from './Studio'
+import { OpenInTerminalPane, type OpenInTerminal } from './OpenInTerminalPane'
 import {
   atCap, ceilingRows, ceilingTitle, type CeilingRow, type CeilingShell,
 } from '../../lib/shellCeiling'
@@ -223,6 +224,11 @@ export interface ShellBandProps {
    */
   placement?: 'docked' | 'dedicated' | 'aside'
   /**
+   * A STRUCTURED row (F2.0b) has no harness screen: its `cli` pane is replaced by the door to the
+   * same conversation as a TUI. Present only when the server offers the `terminal` verb for the row.
+   */
+  openInTerminal?: OpenInTerminal
+  /**
    * PIN WHICH PANE this mount shows, for the placements that show exactly one: the right slot, a
    * floating window and the dedicated screen each ask for `cli` or `shell` by name. Without it the
    * pane came from the DOCKED band's stored preference, so a right-slot "Claude Code" could open
@@ -365,7 +371,7 @@ export interface ShellBandProps {
 export function ShellBand({
   sessionId, cwd, lang, theme, harness, placement = 'docked', onOpenFullscreen, fixedTarget, cliAvailable,
   barEntries, onBarPick, onBarDrop, onBarMove, studioSeen = true, bottomOccupant = null, shellEnabled = true,
-  shellCapable = true, onShellEnabledChange,
+  shellCapable = true, onShellEnabledChange, openInTerminal,
   columnHeight = 0, open: openSeed, onOpenChange,
 }: ShellBandProps) {
   /** The side of a split view this band belongs to — its prefs are kept per pane. */
@@ -648,7 +654,7 @@ export function ShellBand({
     bandOpen,
     sessionSelected: Boolean(sessionId),
     documentVisible,
-  }) && !excludedFromDocked
+  }) && !excludedFromDocked && !(openInTerminal && target === 'cli')
   /** The pane this band is watching: the session itself, or the shell it opened. `null` while a
    *  shell has not been resolved yet, which is what keeps the stream from asking for a blank. */
   const streamId = targetStreamId(target, { sessionId, shellId: shell?.id ?? null })
@@ -975,8 +981,11 @@ export function ShellBand({
   const shellUnavailable = shellTargetUnavailable(target, shellEnabled)
   // EXCLUDED (C3) still wins: a pane genuinely showing on the right is a different fact from one
   // that cannot be shown at all, and `t.openOnRight`'s own sentence already covers it.
-  const showShellDisabled = shellUnavailable && !excludedFromDocked
-  const shellDisabledPane = (
+  const showOpenInTerminal = Boolean(openInTerminal) && target === 'cli' && !excludedFromDocked
+  const showShellDisabled = (shellUnavailable && !excludedFromDocked) || showOpenInTerminal
+  const shellDisabledPane = showOpenInTerminal && openInTerminal ? (
+    <OpenInTerminalPane lang={lang} theme={theme} isMobile={isMobile} openInTerminal={openInTerminal} />
+  ) : (
     <div style={{
       position: 'relative', flex: 1, minHeight: 0, borderRadius: 8, overflow: 'hidden',
       border: '1px solid var(--border-subtle)',
