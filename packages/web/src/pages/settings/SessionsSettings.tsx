@@ -115,6 +115,14 @@ export default function SessionsSettings() {
   useEffect(() => { setThresholdDraft(String(idlePrefs.thresholdMin)) }, [idlePrefs.thresholdMin])
   useEffect(() => { setPressureDraft(String(idlePrefs.pressureThresholdMin)) }, [idlePrefs.pressureThresholdMin])
 
+  const [replyCostDraft, setReplyCostDraft] = useState(String(idlePrefs.replyCostThreshold))
+  useEffect(() => { setReplyCostDraft(String(idlePrefs.replyCostThreshold)) }, [idlePrefs.replyCostThreshold])
+  const commitReplyCost = () => {
+    const n = Math.round(Number(replyCostDraft))
+    if (Number.isFinite(n) && n >= 0) setIdlePrefs({ replyCostThreshold: n })
+    else setReplyCostDraft(String(idlePrefs.replyCostThreshold))
+  }
+
   const commitThreshold = () =>
     commitMinutesDraft(thresholdDraft, idlePrefs.thresholdMin, setThresholdDraft, n => setIdlePrefs({ thresholdMin: n }))
   const commitPressureThreshold = () =>
@@ -289,6 +297,24 @@ export default function SessionsSettings() {
           isMobile={isMobile}
           onChange={setPressureDraft}
           onCommit={commitPressureThreshold}
+        />
+      </PrefRow>
+
+      <Divider />
+
+      {/* COST PER REPLY. A calm line in the session's metrics card, never a modal. */}
+      <SectionHeader label={pt ? 'Custo por resposta' : 'Cost per reply'} />
+
+      <PrefRow
+        label={pt ? 'Avisar quando uma resposta reenviar mais de (tokens)' : 'Warn when one reply resends more than (tokens)'}
+        sub={pt ? 'Cada resposta reenvia a conversa inteira. 0 desliga o aviso.' : 'Every reply resends the whole conversation. 0 turns the warning off.'}
+      >
+        <MinutesInput
+          value={replyCostDraft}
+          disabled={false}
+          isMobile={isMobile}
+          onChange={setReplyCostDraft}
+          onCommit={commitReplyCost}
         />
       </PrefRow>
 

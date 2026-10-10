@@ -22,6 +22,8 @@ import { Activity, BarChart3, ChevronDown, ChevronRight, ChevronUp, ListChecks, 
 import { fmt, fmtCost, type CostBasis, type HarnessId, type SessionMeta } from '@agentistics/core'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { sessionStats, statReason, type SessionStats } from '../../lib/sessionStats'
+import { replyCost, replyCostExceeds } from '../../lib/replyCost'
+import { useIdlePrefs } from '../../lib/idleSessionsPrefs'
 import { costBasisLabel, viewCost } from '../../lib/costBasis'
 import { sessionReferences, type SessionReference } from '../../lib/sessionReferences'
 import { useArtifactLive } from '../../lib/artifactsStore'
@@ -348,6 +350,9 @@ export function SessionStatsMenu({
     viewCost(usd, { basis: basisHere, factor: canSwitchBasis ? planFactor : null, allocated: true })
   const cost = s.costUSD === null ? null : inBasis(s.costUSD)
   const label = (HARNESS_LABELS as Record<string, string>)[harness] ?? harness
+  const reply = replyCost(h, meta)
+  const replyThreshold = useIdlePrefs().replyCostThreshold
+  const replyWarn = replyCostExceeds(reply.lastTurn, replyThreshold)
 
   /** The sentence for an absent figure — see the header. */
   const na = (metric: Parameters<typeof statReason>[1]) =>
@@ -510,6 +515,25 @@ export function SessionStatsMenu({
                 />
               </>
             ) : <Absent text={na('contextWindow')} />}
+          </Block>
+
+          {/* COST PER REPLY — every reply resends the whole conversation, so the context of the last
+              turn is what one more message costs in tokens. A calm sentence past the threshold,
+              never a modal; absent figures are said, not zeroed. */}
+          <Block title={pt ? 'Custo por resposta' : 'Cost per reply'}>
+            {reply.lastTurn === null && reply.average === null ? <Absent text={na('contextWindow')} /> : (
+              <>
+                <Line k={pt ? 'Última resposta' : 'Last reply'} v={reply.lastTurn === null ? (pt ? 'não informado' : 'not reported') : `${fmt(reply.lastTurn)} tok`} />
+                <Line k={pt ? 'Média da sessão' : 'Session average'} v={reply.average === null ? (pt ? 'não informado' : 'not reported') : `${fmt(reply.average)} tok`} />
+                {replyWarn && (
+                  <div role="status" style={{ marginTop: 6, fontSize: 11, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+                    {pt
+                      ? `Esta sessão custa ${fmt(reply.lastTurn ?? 0)} tokens por resposta; considere passar o bastão para uma sessão nova.`
+                      : `This session costs ${fmt(reply.lastTurn ?? 0)} tokens per reply; consider handing over to a fresh session.`}
+                  </div>
+                )}
+              </>
+            )}
           </Block>
 
           <Block title="Tokens">

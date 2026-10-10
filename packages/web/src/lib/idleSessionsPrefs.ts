@@ -10,10 +10,12 @@ export interface IdleSessionsPrefs {
   enabled: boolean
   thresholdMin: number
   pressureThresholdMin: number
+  /** Warn when one reply resends more than this many tokens (0 = off). Lives here to ride the registered `idleSessions` key. */
+  replyCostThreshold: number
   kept: Record<string, number>
 }
 
-export const DEFAULT_IDLE_PREFS: IdleSessionsPrefs = { enabled: true, thresholdMin: 120, pressureThresholdMin: 30, kept: {} }
+export const DEFAULT_IDLE_PREFS: IdleSessionsPrefs = { enabled: true, thresholdMin: 120, pressureThresholdMin: 30, replyCostThreshold: 300_000, kept: {} }
 
 const posInt = (v: unknown, fallback: number) =>
   typeof v === 'number' && Number.isFinite(v) && v >= 1 ? Math.round(v) : fallback
@@ -32,6 +34,7 @@ export function parseIdlePrefs(raw: unknown): IdleSessionsPrefs | null {
     enabled: typeof r.enabled === 'boolean' ? r.enabled : DEFAULT_IDLE_PREFS.enabled,
     thresholdMin: posInt(r.thresholdMin, DEFAULT_IDLE_PREFS.thresholdMin),
     pressureThresholdMin: posInt(r.pressureThresholdMin, DEFAULT_IDLE_PREFS.pressureThresholdMin),
+    replyCostThreshold: typeof r.replyCostThreshold === 'number' && Number.isFinite(r.replyCostThreshold) && r.replyCostThreshold >= 0 ? Math.round(r.replyCostThreshold) : DEFAULT_IDLE_PREFS.replyCostThreshold,
     kept,
   }
 }

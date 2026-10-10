@@ -1,4 +1,5 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { Checkbox } from '../pages/settings/primitives'
 import { X, Sparkles, ExternalLink } from 'lucide-react'
 import { overlayPadding } from '../lib/mobileOverlay'
 import type { ReleaseEntry } from '../whatsNew/select'
@@ -8,24 +9,21 @@ interface Props {
   lang: 'pt' | 'en'
   isMobile: boolean
   onClose: () => void
+  /** Opened by itself after an update: offers "Don't show again". */
+  autoOpened?: boolean
+  onDontShow?: (dontShow: boolean) => void
 }
 
 export const RELEASES_URL = 'https://github.com/agentistics/agentistics/releases'
 
 const T = {
-  pt: { title: 'Novidades', features: 'Novidades', fixes: 'Correções', all: 'Ver todas as versões', close: 'Fechar' },
-  en: { title: "What's new", features: 'New', fixes: 'Fixes', all: 'See all versions', close: 'Close' },
+  pt: { title: 'Novidades', features: 'Novidades', fixes: 'Correções', all: 'Ver todas as versões', close: 'Fechar', never: 'Não mostrar novamente' },
+  en: { title: "What's new", features: 'New', fixes: 'Fixes', all: 'See all versions', close: 'Close', never: "Don't show again" },
 }
 
-/** The sheet the "Updated to vX" notification opens: curated notes for every version since the last one seen. */
-export function WhatsNewModal({ entries, lang, isMobile, onClose }: Props) {
+/** One version's notes — shared by the modal and Settings → What's new, so the two read the same. */
+export function ReleaseSection({ entry, lang, first }: { entry: ReleaseEntry; lang: 'pt' | 'en'; first?: boolean }) {
   const t = T[lang]
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   const group = (label: string, lines: { pt: string; en: string }[]) => lines.length === 0 ? null : (
     <div style={{ marginTop: 12 }}>
       <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: 6 }}>{label}</div>
@@ -34,6 +32,24 @@ export function WhatsNewModal({ entries, lang, isMobile, onClose }: Props) {
       </ul>
     </div>
   )
+  return (
+    <section data-testid={`release-${entry.version}`} style={{ padding: '14px 0', borderTop: first ? 'none' : '1px solid var(--border)' }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>v{entry.version}</div>
+      {group(t.features, entry.features)}
+      {group(t.fixes, entry.fixes)}
+    </section>
+  )
+}
+
+/** The sheet the "Updated to vX" notification opens: curated notes for every version since the last one seen. */
+export function WhatsNewModal({ entries, lang, isMobile, onClose, autoOpened, onDontShow }: Props) {
+  const t = T[lang]
+  const [never, setNever] = useState(false)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   return (
     <div
@@ -81,15 +97,11 @@ export function WhatsNewModal({ entries, lang, isMobile, onClose }: Props) {
 
         <div style={{ overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '4px 20px 8px', flex: 1, minHeight: 0 }}>
           {entries.map((e, idx) => (
-            <section key={e.version} style={{ padding: '14px 0', borderTop: idx === 0 ? 'none' : '1px solid var(--border)' }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>v{e.version}</div>
-              {group(t.features, e.features)}
-              {group(t.fixes, e.fixes)}
-            </section>
+            <ReleaseSection key={e.version} entry={e} lang={lang} first={idx === 0} />
           ))}
         </div>
 
-        <div style={{ padding: '12px 20px 16px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+        <div style={{ padding: '12px 20px 16px', borderTop: '1px solid var(--border)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
           <a
             href={RELEASES_URL}
             target="_blank"
@@ -98,6 +110,9 @@ export function WhatsNewModal({ entries, lang, isMobile, onClose }: Props) {
           >
             <ExternalLink size={12} /> {t.all}
           </a>
+          {autoOpened && onDontShow && (
+            <Checkbox checked={never} onChange={v => { setNever(v); onDontShow(v) }} label={t.never} />
+          )}
         </div>
       </div>
     </div>

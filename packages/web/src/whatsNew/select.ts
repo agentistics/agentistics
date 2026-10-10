@@ -43,6 +43,23 @@ export function releasesBetween(from: string | null | undefined, to: string, tab
 
 export const SEEN_KEY = 'ag-whats-new-seen'
 
+/** How many releases a MANUAL open (the version label, Settings) shows when no "from" is given. */
+export const MANUAL_OPEN_COUNT = 3
+
+/**
+ * Which version to remember as "last seen" after a load of `current`. It only ever moves FORWARD:
+ * the value is shared by every device of the person, so a stale bundle on one (a downgrade, an
+ * old PWA) must not rewind it and make the others announce the same release again. Returns null
+ * when nothing should be written.
+ */
+export function nextSeen(current: string | null | undefined, seen: string | null | undefined): string | null {
+  const cur = bare(current)
+  if (!cur) return null
+  const was = bare(seen)
+  if (!was) return cur
+  return compareVersions(was, cur) === -1 ? cur : null
+}
+
 export interface WhatsNewPlan { from: string; entries: ReleaseEntry[] }
 
 /**

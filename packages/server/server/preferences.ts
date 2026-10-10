@@ -161,7 +161,7 @@ export interface Preferences {
     groups: { id: string; name: string; sessionKeys: string[]; parentId?: string; hidden?: boolean }[]
   }
   /** Idle-session suggestions — see `web/src/lib/idleSessionsPrefs.ts`. Written only by the web. */
-  idleSessions?: { enabled?: boolean; thresholdMin?: number; pressureThresholdMin?: number; kept?: Record<string, number> }
+  idleSessions?: { enabled?: boolean; thresholdMin?: number; pressureThresholdMin?: number; replyCostThreshold?: number; kept?: Record<string, number> }
   /** Health warnings this person waved away. Shared for the same reason: the warnings are about
    *  THIS machine, which is the same machine from every device. */
   dismissedHealth?: string[]
