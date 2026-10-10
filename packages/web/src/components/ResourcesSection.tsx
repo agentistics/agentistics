@@ -9,6 +9,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Activity, AlertTriangle, Layers } from 'lucide-react'
 import type { Lang } from '@agentistics/core'
 import { ConfirmModal } from '../pages/settings/primitives'
@@ -46,7 +47,8 @@ function useResources(lang: ResLang): { snap: ResourcesSnapshot | null; error: s
   return { snap, error, reload: () => void load() }
 }
 
-export function ResourcesSection({ lang, isMobile }: { lang: Lang; isMobile: boolean }) {
+export function ResourcesSection({ lang, isMobile, onNavigate }: { lang: Lang; isMobile: boolean; onNavigate?: () => void }) {
+  const navigate = useNavigate()
   const l: ResLang = lang === 'pt' ? 'pt' : 'en'
   const { snap, error, reload } = useResources(l)
   const [busy, setBusy] = useState<number | null>(null)
@@ -150,10 +152,10 @@ export function ResourcesSection({ lang, isMobile }: { lang: Lang; isMobile: boo
                       <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}> · pid {g.pids.join(', ')}</span>
                     </span>
                     {g.session ? (
-                      <a style={{ ...btn, color: 'var(--text-secondary)', borderColor: 'var(--border)', background: 'transparent', display: 'inline-flex', alignItems: 'center', textDecoration: 'none' }}
-                        href={`/sessions/${encodeURIComponent(g.session.id)}`} target="_blank" rel="noreferrer">
+                      <button style={{ ...btn, color: 'var(--text-secondary)', borderColor: 'var(--border)', background: 'transparent' }}
+                        onClick={() => { navigate(`/sessions/${encodeURIComponent(g.session!.id)}`); onNavigate?.() }}>
                         {l === 'pt' ? 'Abrir' : 'Open'}
-                      </a>
+                      </button>
                     ) : (
                       <button style={btn} disabled={busy !== null} onClick={() => void stop(g.pids[0]!)}>{l === 'pt' ? 'Encerrar' : 'End'}</button>
                     )}
