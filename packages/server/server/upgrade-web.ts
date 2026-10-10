@@ -53,6 +53,17 @@ let running: { version: string; startedMs: number } | null = null
  *  and the restart is exactly what a SUCCESSFUL one causes. */
 const RUN_TTL_MS = 10 * 60_000
 
+/** A failed child (non-zero exit, a signal, or a spawn error) frees the flag at once, so "restart now"
+ *  works right away; a successful one keeps it, because its restart is what ends this process. */
+export function releaseOnFailure(child: { on(ev: string, cb: (...a: unknown[]) => void): unknown }): void {
+  child.on('error', () => { running = null })
+  child.on('exit', (code: unknown) => { if (code !== 0) running = null })
+}
+
+/** Test hook: whether a start is currently believed in flight. */
+export function upgradeInFlight(): boolean { return inFlight(Date.now()) }
+export function markUpgradeRunningForTest(): void { running = { version: 'x', startedMs: Date.now() } }
+
 function inFlight(now: number): boolean {
   if (!running) return false
   if (now - running.startedMs > RUN_TTL_MS) { running = null; return false }
@@ -163,6 +174,7 @@ export async function handleUpgradeRoute(
     // too, or the child holds this server's stdio open across its own restart.
     const child = spawn(bin, upgradeArgs(restartOnly), { detached: true, stdio: 'ignore' })
     child.unref()
+    releaseOnFailure(child)
   } catch {
     running = null
     return json({ ok: false, reason: 'spawn-failed' }, 500)
