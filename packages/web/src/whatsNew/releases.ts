@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.114.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O terminal da sessão e o Studio voltaram para a barra de baixo e para o painel lateral, em todos os assistentes.',
+        en: 'The session terminal and the Studio are back in the bottom bar and the side panel, for every assistant.',
+      },
+      {
+        pt: 'Um painel fixado e minimizado na barra de baixo agora pode ser desafixado: o mesmo alfinete o devolve ao painel lateral.',
+        en: 'A pinned panel minimized to the bottom bar can now be unpinned: the same pin returns it to the side panel.',
+      },
+    ],
+  },
   '2.114.0': {
     features: [
       {

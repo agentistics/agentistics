@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ArrowDown, ArrowRight, ChevronUp, EyeOff, Maximize2, Minimize2, Minus, MoreHorizontal, PictureInPicture2, Pin,
@@ -7,7 +7,7 @@ import {
 import type { PanelBarEntry, PanelBarId } from '../../lib/panelBar'
 import { hasDragPayload, readDragPayload, setDragPayload } from '../../lib/dragReorder'
 import { panelMoveEntry, type PanelMenuIconId } from '../../lib/panelMenu'
-import type { PanelDropTarget } from '../../lib/panelSlots'
+import { unpinPanel, type PanelDropTarget } from '../../lib/panelSlots'
 import { resolveBandDrag, resolveBandHeight } from '../../lib/shellBand'
 import { isDragEndEvent, PANEL_GAP } from '../../lib/panelLayout'
 import { targetLabel } from '../../lib/terminalTarget'
@@ -498,6 +498,7 @@ export function PanelBar({
   onHide?: (id: PanelBarId) => void
 }) {
   const pt = lang === 'pt'
+  const pane = usePaneId()
   const [dragOver, setDragOver] = useState<PanelBarId | 'bar' | null>(null)
   const [menu, setMenu] = useState<{ id: PanelBarId; at: { x: number; y: number } } | null>(null)
   const dropHere = onDrop && ((e: React.DragEvent, target: PanelDropTarget) => {
@@ -545,9 +546,17 @@ export function PanelBar({
         // small window glyph beside the label, never colour alone. It takes no drag and no move menu:
         // it is floating, and its only verb here is "bring it back".
         const restoreLabel = pt ? `Restaurar a janela — ${label}` : `Restore the window — ${label}`
+        // THE UNPIN: a minimized window is still PINNED (floating), and its tab only restores it. The
+        // same pressed pin the window's own header carries sits beside the tab and docks it back.
+        const unpin = minimized ? (
+          <PanelPinButton
+            key={`${id}-unpin`} lang={lang} panelName={label}
+            pinned={{ active: true, onToggle: () => unpinPanel(id, pane) }}
+          />
+        ) : null
         return (
+          <Fragment key={id}>
           <BandSegmentTab
-            key={id}
             on={on}
             // Stops propagation unconditionally — this bar now renders inside the bottom band's own
             // whole-row collapse toggle (`ShellBand`/`StudioBand`), so an unstopped click would both
@@ -579,6 +588,8 @@ export function PanelBar({
               dropHighlight: dragOver === id,
             } : {})}
           />
+          {unpin}
+          </Fragment>
         )
       })}
       {menu && (onMove || onHide) && (
