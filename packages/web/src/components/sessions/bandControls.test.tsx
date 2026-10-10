@@ -578,3 +578,32 @@ describe('the minimize control follows the collapsed state', () => {
     expect(html).toContain('aria-label="Expandir Claude Code"')
   })
 })
+
+describe('minimized floating window tab — pre-2.114.1 look, no pin beside it', () => {
+  test('the tab carries the window glyph and no dock-back pin', () => {
+    const html = renderToStaticMarkup(
+      <PanelBar
+        entries={[{ id: 'hardware', on: false, minimized: true } as never]}
+        lang="en" studioSeen harness="claude" onPick={() => {}}
+      />,
+    )
+    expect(html).toContain('minimized window')
+    expect(html).not.toContain('Dock')
+    expect(html).not.toContain('aria-pressed')
+  })
+})
+
+describe('floating window header — the pin sits with minimize', () => {
+  test('pressed pin leads the window controls, before minimize', () => {
+    const html = renderToStaticMarkup(
+      <PanelFixedControls
+        lang="en" panelName="Subagents"
+        pinned={{ active: true, onToggle: () => {} }}
+        onMinimize={() => {}} minimizeLabel="Minimize Subagents"
+        gearLabel="Subagents options" gearEntries={[]}
+      />,
+    )
+    expect(html).toContain('Dock Subagents back')
+    expect(html.indexOf('Dock Subagents back')).toBeLessThan(html.indexOf('Minimize Subagents'))
+  })
+})
