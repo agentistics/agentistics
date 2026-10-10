@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, AlertTriangle, Info, CheckCircle2, BellOff, X } from 'lucide-react'
 import { useNotifications, dismissNotification, resolveNotification, type AppNotification, type NotificationType } from '../lib/notifications'
 import { getNotificationSettings, NAY_CARD_CODES } from '../lib/sessionNotifications'
+import { pushLimitAlert } from '../lib/planLimitNotice'
 import { UPDATE_NOTICE_CODE } from '../lib/updateToast'
 import { openWhatsNew } from '../whatsNew/open'
 import { setSessionMuted } from '../lib/mutedSessions'
@@ -79,6 +80,8 @@ export function NotificationToasts({ lang }: Props) {
       // quiet. Both stay in the bell; only the popup is skipped.
       // The update's bell entry is the RECORD of the popup the Nay window already showed — never a toast too.
       if (n.code === UPDATE_NOTICE_CODE) continue
+      // A plan-limit notice is Nay's card when the card can take it; otherwise it is a toast.
+      if (pushLimitAlert(n)) continue
       if (n.code && (NAY_CARD_CODES.has(n.code) || (n.code.startsWith('session.') && n.code !== SESSION_MUTED_CODE && getNotificationSettings().doNotDisturb))) continue
       setToasts(t => [n, ...t])
       setTimeout(() => startLeave(n.id), AUTO_MS[n.type])

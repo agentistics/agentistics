@@ -26,6 +26,8 @@
  * `cardPlacement` put it.
  */
 
+import { limitNoticeText } from '../../lib/planLimits'
+import { PlanLimitMeter } from '../PlanLimitMeter'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { BellOff, X } from 'lucide-react'
@@ -63,6 +65,8 @@ export interface NayNotifyCardProps {
   onReply: (sessionId: string) => void
   /** Above the dock and every detached window: a card behind a window is a card nobody sees. */
   zIndex: number
+  /** PLAN.LIMITS: open the dock on its Limits tab (the limit card's "see limits"). */
+  onOpenLimits?: () => void
 }
 
 interface ButtonNow { rect: AnchorRect; speed: number; landed: number; landSpeed: number }
@@ -124,12 +128,14 @@ const SAY: Record<NayAlert['kind'], { pt: string; en: string }> = {
   turn: { pt: 'Ei, a sessão respondeu.', en: 'Hey, the session replied.' },
   approval: { pt: 'Ei, olha essa sessão: ela pediu permissão.', en: 'Hey, look at this session: it is asking for permission.' },
   stale: { pt: 'Ei, essa sessão está parada faz tempo.', en: 'Hey, this session has been waiting a while.' },
+  limit: { pt: 'Ei, olha o limite do plano.', en: 'Hey, look at the plan limit.' },
 }
 
 const STATE_CHIP: Record<NayAlert['kind'], { pt: string; en: string; fg: string; bg: string }> = {
   turn: { pt: 'precisa de você', en: 'needs you', fg: 'var(--anthropic-orange-light)', bg: 'var(--anthropic-orange-dim)' },
   approval: { pt: 'pede aprovação', en: 'needs approval', fg: 'var(--accent-red)', bg: 'var(--accent-red-dim)' },
   stale: { pt: 'sem abrir', en: 'not opened', fg: 'var(--text-secondary)', bg: 'var(--border)' },
+  limit: { pt: 'limite do plano', en: 'plan limit', fg: 'var(--anthropic-orange-light)', bg: 'var(--anthropic-orange-dim)' },
 }
 
 function hhmm(ms: number): string {
@@ -145,7 +151,7 @@ function lastSaid(row: ControlSession | undefined, kind: NayAlert['kind']): stri
   return turn ? turn.text.trim().slice(0, 240) : null
 }
 
-export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabStyle, onReply, zIndex }: NayNotifyCardProps) {
+export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabStyle, onReply, zIndex, onOpenLimits }: NayNotifyCardProps) {
   const pt = lang === 'pt'
   const alerts = useNayAlerts()
   const alert = alerts.length > 0 ? alerts[alerts.length - 1]! : null
@@ -395,7 +401,8 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
     after()
   }
 
-  const say = SAY[alert.kind][lang]
+  const limitText = alert.limit ? limitNoticeText(alert.limit, lang) : null
+  const say = limitText ? limitText.title : SAY[alert.kind][lang]
   const chip = STATE_CHIP[alert.kind]
   const harnessLabel = alert.harness ? (HARNESS_LABELS[alert.harness as HarnessId] ?? alert.harness) : null
   const harnessColor = alert.harness ? (HARNESS_COLORS[alert.harness as HarnessId] ?? 'var(--text-tertiary)') : null
@@ -526,7 +533,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
         <div data-rise data-say style={{ fontSize: 13.5, fontWeight: 500 }}>{say}</div>
 
         <div data-rise style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '9px 10px', display: 'grid', gap: 6, background: 'var(--bg-surface)' }}>
-          <div title={alert.name} style={{ fontWeight: 650, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{alert.name}</div>
+          <div title={alert.name} style={{ fontWeight: 650, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{alert.limit ? (harnessLabel ?? alert.name) : alert.name}</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
             {harnessLabel && (
               <span style={chipStyle}>
@@ -536,12 +543,22 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
             {alert.model && <span style={chipStyle}>{alert.model}</span>}
             <span style={{ ...chipStyle, border: 'none', background: chip.bg, color: chip.fg }}>{chip[lang]}</span>
           </div>
+          {alert.limit ? (
+            <div data-nay-limit style={{ display: 'grid', gap: 6 }}>
+              <PlanLimitMeter
+                window={{ kind: alert.limit.window, usedPct: alert.limit.pct, resetsAt: alert.limit.resetsAt }}
+                now={Date.now()} lang={lang}
+              />
+              {limitText && <span style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{limitText.message}</span>}
+            </div>
+          ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 10px', fontSize: 11.5, color: 'var(--text-tertiary)' }}>
             <span>{pt ? 'Esperando' : 'Waiting'}</span>
             <b style={numStyle}>{formatWaiting(alert.sinceMs, Date.now(), alert.sinceKnown, lang)}</b>
             <span>{pt ? 'Última mensagem' : 'Last message'}</span>
             <b style={numStyle}>{alert.sinceKnown ? hhmm(alert.sinceMs) : (pt ? 'antes de abrir a página' : 'before this page opened')}</b>
           </div>
+          )}
           {preview && (
             <div style={{
               fontSize: 12.5, color: 'var(--text-secondary)', borderLeft: '2px solid var(--anthropic-orange-dim)', paddingLeft: 8,
@@ -555,17 +572,30 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
         )}
         </div>
         <div data-rise data-nay-actions style={{ display: 'flex', flexWrap: 'wrap', gap: 6, flexShrink: 0 }}>
-          {!alert.demo && (
+          {alert.limit && onOpenLimits && (
+            <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); onOpenLimits() })}>
+              {pt ? 'Ver limites' : 'See limits'}
+            </button>
+          )}
+          {alert.limit?.alt && (
+            <button type="button" style={primary} onClick={() => void close(() => {
+              dismissAlert(alert.key)
+              navigate('/sessions', { state: { newSessionPreset: { harness: alert.limit!.alt } } })
+            })}>
+              {pt ? `Continuar no ${HARNESS_LABELS[alert.limit.alt as HarnessId] ?? alert.limit.alt}` : `Continue in ${HARNESS_LABELS[alert.limit.alt as HarnessId] ?? alert.limit.alt}`}
+            </button>
+          )}
+          {!alert.demo && !alert.limit && (
             <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); onReply(alert.sessionId) })}>
               {pt ? 'Responder' : 'Reply'}
             </button>
           )}
-          {!alert.demo && (
+          {!alert.demo && !alert.limit && (
             <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); navigate(`/sessions/${encodeURIComponent(alert.sessionId)}`) })}>
               {pt ? 'Ir para a sessão' : 'Go to session'}
             </button>
           )}
-          {!alert.demo && (
+          {!alert.demo && !alert.limit && (
             <button
               type="button"
               aria-label={pt ? 'Silenciar esta sessão' : 'Mute this session'}

@@ -254,6 +254,22 @@ if (!TEAM_CENTRAL) {
     .catch(() => {})
 }
 void setupFileWatcher()
+// PLAN.LIMITS: wire the notices and the SSE signal, then read the newest records once.
+if (!TEAM_CENTRAL) {
+  void Promise.all([import('./plan-limits'), import('./sse'), import('./sessions/structured-durable')]).then(([pl, sse, sd]) => {
+    pl.setPlanLimitsSink({
+      changed: () => sse.broadcastPlanLimitsChanged(),
+      notify: (n, alt) => sse.broadcastNotification({
+        type: n.threshold >= 95 ? 'warning' : 'info',
+        code: n.threshold >= 100 ? 'limits.exhausted' : 'limits.threshold',
+        meta: { harness: n.harness, window: n.kind, threshold: n.threshold, pct: Math.round(n.usedPct), resetsAt: n.resetsAt, ...(alt ? { alt } : {}) },
+      }),
+    })
+    // A record another agentop process wrote (it holds no sink) reaches the browser through the file.
+    pl.watchPlanLimitsFile()
+    return pl.seedPlanLimits(sd.STRUCTURED_DIR)
+  }).catch(err => console.warn('[plan-limits] seed failed:', String(err)))
+}
 if (TEAM_CENTRAL) {
   import('./team-watch').then(m => m.startTeamWatch()).catch(err => console.error('[team-watch] failed to start:', err))
   // Push an IMMEDIATE SSE update when a member connects/disconnects so the dashboard's
@@ -753,6 +769,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     }
 
 
+    // PLAN.LIMITS — the 5-hour and weekly windows each harness account last reported, with the
+    // plan registered in Settings → Billing. Reads only what the host already stored.
+    if (url.pathname === '/api/plan-limits' && req.method === 'GET') {
+      const [{ planLimitsPayload }, prefs] = await Promise.all([import('./plan-limits'), readPreferences()])
+      const body = TEAM_CENTRAL ? { limits: [], now: Date.now() } : await planLimitsPayload(prefs.billing)
+      return new Response(JSON.stringify(body), { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
+    }
     if (url.pathname === '/api/events' && req.method === 'GET') {
       // Each SSE client holds a socket and a controller for as long as it stays connected, so an
       // unbounded count is a free way to exhaust the process (OWASP API4).

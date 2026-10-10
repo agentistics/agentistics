@@ -53,6 +53,8 @@ import { useFleetNewOptions, type FleetProjectOption } from '../../hooks/useFlee
 import { ConfirmModal } from '../../pages/settings/primitives'
 import { forcedNote, isAdmissionRefusal } from '../../lib/spawnAdmission'
 import { pushNotification } from '../../lib/notifications'
+import { usePlanLimits } from '../../lib/planLimits'
+import { PlanLimitBars } from '../PlanLimitMeter'
 import {
   STEP_ORDER, modelDisplay, nextStep, prevStep, stepReady, toWizardHarness, unsetText,
   visibleQuestions, type HarnessAnswer, type MissingAnswer, type StepId, type WizardDraft,
@@ -125,6 +127,7 @@ export function NewSessionModal({
   lang, onClose: closeProp, onStarted: startedProp, initialTask, initialTaskId, initialSubtaskId, initialPreset,
 }: NewSessionModalProps) {
   const pt = lang === 'pt'
+  const planSnap = usePlanLimits()
   // The wizard survives a layout swap (desktop list <-> mobile list) — see `newSessionWizardStore`.
   // Only the plain "+ new" wizard persists; one opened from a preset or a task carries its own seed.
   const persists = !initialPreset && !initialTask && !initialTaskId
@@ -497,6 +500,11 @@ export function NewSessionModal({
       {/* No `muted` fallback: the title is required, so the review can never reach this row with
           nothing in it — and offering a sentence for a state the gate forbids would describe a
           choice nobody was allowed to make. */}
+      {/* PLAN.LIMITS: the chosen harness's windows — on a phone the only place they are read (no hover). */}
+      {(() => {
+        const l = harness ? planSnap.limits?.find(x => x.harness === harness.id) : undefined
+        return l ? <ReviewRow label={pt ? 'Limites' : 'Limits'} value={<span style={{ display: 'block', maxWidth: 260 }}><PlanLimitBars limits={l} now={planSnap.now} lang={lang} /></span>} /> : null
+      })()}
       <ReviewRow label={pt ? 'Título' : 'Title'} value={label || null} />
       <ReviewRow label={pt ? 'Onde' : 'Where'} value={cwd || null} mono />
       <ReviewRow label={pt ? 'Tarefa' : 'Task'} value={task || null}
@@ -826,6 +834,8 @@ export function NewSessionModal({
               {...(unavailable ? { notice: unavailable } : {})}
               {...(retryable ? { onRetry: retry } : {})}
               onInstall={id => setInstalling(id)}
+              planLimits={planSnap.limits}
+              now={planSnap.now}
             />
           </Field>
           <HarnessInstallDialog

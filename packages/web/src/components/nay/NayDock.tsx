@@ -30,6 +30,7 @@ import { sessionCardStyle } from '../../lib/sessionCardStyle'
 import { readAsideGroupPrefs, subscribeAsideGroupPrefs } from '../../lib/sessionsAsidePrefs'
 import { VaultExpiryCard } from '../vault/VaultExpiryCard'
 import { AgentisticsLoader } from '../AgentisticsLoader'
+import { NayLimitsTab } from './NayLimitsTab'
 import { VaultGlyph } from '../vault/VaultGlyph'
 import { SessionFacts } from '../sessions/SessionFacts'
 import { SessionRowMenu } from '../sessions/SessionRowMenu'
@@ -74,8 +75,8 @@ import { NAY_UNDOCK_SESSION } from '../../lib/nayDockBridge'
 const QuickVaultBody = lazy(() => import('../../pages/VaultPage').then(m => ({ default: m.QuickVaultBody })))
 
 type Lang = 'pt' | 'en'
-type Tab = 'nay' | 'sessions' | 'vault'
-const DOCK_TABS: readonly Tab[] = ['nay', 'sessions', 'vault']
+type Tab = 'nay' | 'sessions' | 'vault' | 'limits'
+const DOCK_TABS: readonly Tab[] = ['nay', 'sessions', 'vault', 'limits']
 
 const ORANGE = 'var(--anthropic-orange)'
 const ORANGE_DIM = 'var(--anthropic-orange-dim)'
@@ -92,7 +93,7 @@ const ARRIVAL_BUDGET_MS = 20_000
 const windowsStore = createPersonalDoc(WINDOWS_KEY, 'nayDockWindows')
 const tabStore = createSharedPref<Tab>({
   key: TAB_KEY, prefKey: 'nayDockTab', fallback: 'nay', adoptLocalWhenAbsent: true,
-  parse: v => (v === 'sessions' || v === 'nay' || v === 'vault' ? v : null),
+  parse: v => (v === 'sessions' || v === 'nay' || v === 'vault' || v === 'limits' ? v : null),
 })
 
 /** Every storage touch is guarded: a private window makes the accessor itself throw. */
@@ -552,7 +553,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
                 >
                   {id === 'vault' && <VaultGlyph size={13} />}
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {id === 'nay' ? 'Nay' : id === 'vault' ? (pt ? 'Cofre' : 'Vault') : (pt ? 'Sessões' : 'Sessions')}
+                    {id === 'nay' ? 'Nay' : id === 'vault' ? (pt ? 'Cofre' : 'Vault') : id === 'limits' ? (pt ? 'Limites' : 'Limits') : (pt ? 'Sessões' : 'Sessions')}
                   </span>
                 </button>
               )
@@ -591,6 +592,8 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
                 ) : null}
               />
             </>)
+            : tab === 'limits'
+            ? <NayLimitsTab lang={lang} isMobile={isMobile} />
             : tab === 'vault'
             ? (
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: isMobile ? '6px 10px' : '8px 12px' }} data-nay-vault>
@@ -634,7 +637,8 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
           on screen: on a phone inside a session the button can be hidden, and the card then opens
           from the corner it would have occupied. */}
       <VaultExpiryCard lang={lang} isMobile={isMobile} zIndex={dockZ + 1} />
-      <NayNotifyCard lang={lang} isMobile={isMobile} rows={fleet.rows} finishedTasks={fleet.finishedTasks} act={act} fabStyle={cardStyleOf(fabPrefs)} onReply={open} zIndex={dockZ + 1} />
+      <NayNotifyCard lang={lang} isMobile={isMobile} rows={fleet.rows} finishedTasks={fleet.finishedTasks} act={act} fabStyle={cardStyleOf(fabPrefs)} onReply={open} zIndex={dockZ + 1}
+        onOpenLimits={() => { setTab('limits'); setDock(d => ({ ...d, open: true, panelSession: null })) }} />
       {!dock.open && sessionAlerts.length === 0 && renderUpdatePrompt?.('float')}
       {/* The trail/comet outline echoes behind the following dock — drawn by the follow loop. */}
       {echoStyle && [0, 1].map(i => (
