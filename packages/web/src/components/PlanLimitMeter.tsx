@@ -12,7 +12,7 @@ import { windowRenewed, type PlanLimitWindow, type PlanLimits } from '@agentisti
 import { createPortal } from 'react-dom'
 import { HARNESS_LABELS } from '../lib/harness'
 import {
-  currentUsedPct, forecastPhrase, LIMIT_WARN, limitTone, resetPhrase, shortWhen, SOURCE_LABEL, stalePhrase,
+  currentUsedPct, forecastPhrase, LIMIT_HOT, LIMIT_WARN, limitTone, resetPhrase, shortWhen, SOURCE_LABEL, stalePhrase,
   updatedPhrase, warnForecast, windowLabel, windowShort,
 } from '../lib/planLimits'
 
@@ -94,40 +94,40 @@ export function PlanLimitsBlock({ limits, now, lang, forecast = false, header = 
 }
 
 /**
- * The composer circle's two thin OUTER arcs — 5 h inside, week outside — drawn around a gauge of
- * `size` px. Positioned absolutely so the gauge's own layout does not move.
+ * The mini meter beside the composer's context circle (and under the % in the phone's header
+ * button): "5 h ▬ 12%" / "7 d ▬ 47%", 3 px flat bars, tone from `limitTone`. Pure drawing — the
+ * caller wraps it in the button that opens the metrics popover. A window renewed with no reading
+ * says "–" (empty bar), never a zero.
  */
-export function PlanLimitArcs({ limits, now, size }: { limits: PlanLimits; now: number; size: number }) {
-  const stroke = 1.6
-  const gap = 1.4
-  const outer = size + 2 * 2 * (stroke + gap)
-  const ring = (kind: '5h' | 'week', index: number) => {
-    const w = limits.windows.find(x => x.kind === kind)
-    if (!w) return null
-    const pct = currentUsedPct(w, now)
-    const r = size / 2 + gap + stroke / 2 + index * (stroke + gap)
-    const c = 2 * Math.PI * r
-    return (
-      <g key={kind} data-plan-arc={kind}>
-        <circle cx={outer / 2} cy={outer / 2} r={r} fill="none" stroke="var(--border-subtle, var(--border))" strokeWidth={stroke} />
-        <circle
-          cx={outer / 2} cy={outer / 2} r={r} fill="none" stroke={limitTone(pct)} strokeWidth={stroke}
-          strokeDasharray={c} strokeDashoffset={c * (1 - Math.min(1, Math.max(0, pct / 100)))}
-          strokeLinecap="round" transform={`rotate(-90 ${outer / 2} ${outer / 2})`}
-          style={{ transition: 'stroke-dashoffset 0.3s, stroke 0.3s' }}
-        />
-      </g>
-    )
-  }
-  const inset = -(outer - size) / 2
+export function PlanLimitMini({ limits, now, lang, compact = false }: { limits: PlanLimits; now: number; lang: Lang; compact?: boolean }) {
   return (
-    <svg
-      aria-hidden width={outer} height={outer} viewBox={`0 0 ${outer} ${outer}`}
-      style={{ position: 'absolute', top: inset, left: inset, pointerEvents: 'none' }}
+    <span
+      data-plan-mini={limits.harness}
+      style={{
+        display: 'grid', gridTemplateColumns: `auto ${compact ? 18 : 26}px auto`, columnGap: compact ? 3 : 5, rowGap: compact ? 2 : 3,
+        alignItems: 'center', fontSize: compact ? 9 : 10, lineHeight: 1.1, fontVariantNumeric: 'tabular-nums', textAlign: 'left',
+      }}
     >
-      {ring('5h', 0)}
-      {ring('week', 1)}
-    </svg>
+      {limits.windows.map(w => {
+        const pct = currentUsedPct(w, now)
+        const renewed = windowRenewed(w, now)
+        const shown = Math.round(pct)
+        const label = windowShort(w.kind, lang)
+        const hot = !renewed && pct >= LIMIT_HOT
+        return [
+          <span key={`${w.kind}k`} style={{ color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{label}</span>,
+          <span key={`${w.kind}b`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={shown}
+            aria-label={`${windowLabel(w.kind, lang)}: ${renewed ? '–' : `${shown}%`}`}
+            style={{ display: 'block', height: 3, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
+            <span style={{ display: 'block', width: renewed ? 0 : `${Math.min(100, Math.max(0, pct))}%`, height: '100%', borderRadius: 2, background: limitTone(pct) }} />
+          </span>,
+          <span key={`${w.kind}v`} data-plan-window={w.kind} style={{
+            minWidth: compact ? 18 : 22, textAlign: 'right', whiteSpace: 'nowrap',
+            color: hot ? limitTone(pct) : 'var(--text-secondary)', fontWeight: hot ? 600 : 400,
+          }}>{renewed ? '–' : `${shown}%`}</span>,
+        ]
+      })}
+    </span>
   )
 }
 

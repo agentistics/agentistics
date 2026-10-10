@@ -30,7 +30,7 @@ import { useArtifactLive } from '../../lib/artifactsStore'
 import { scrollIsOutside } from '../../lib/popoverScroll'
 import { modelDisplay } from '../../lib/modelDisplay'
 import { usePlanLimits } from '../../lib/planLimits'
-import { PlanLimitArcs, PlanLimitsBlock } from '../PlanLimitMeter'
+import { PlanLimitMini, PlanLimitsBlock } from '../PlanLimitMeter'
 
 /**
  * The trigger button's own percentage colour — a THREE-tier ramp, deliberately not the same as the
@@ -382,6 +382,7 @@ export function SessionStatsMenu({
           {Math.floor(s.context.fraction * 100)}%
         </span>
       )}
+      {touch && plan && <PlanLimitMini limits={plan} now={planSnap.now} lang={lang} compact />}
     </>
   )
 
@@ -709,7 +710,6 @@ export function SessionStatsMenu({
           }}
         >
           <ContextRing fraction={s.context.fraction} size={GAUGE_SIZE} stroke={3} />
-          {plan && <PlanLimitArcs limits={plan} now={planSnap.now} size={GAUGE_SIZE} />}
           <span style={{
             position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: 11, fontWeight: 700, color: 'var(--text-primary)',
@@ -718,6 +718,22 @@ export function SessionStatsMenu({
             {pct}
           </span>
         </button>
+        {plan && (
+          <button
+            data-plan-mini-button
+            onClick={() => setOpen(v => !v)}
+            aria-expanded={open}
+            aria-label={pt ? 'Limites do plano' : 'Plan limits'}
+            title={pt ? 'Limites do plano' : 'Plan limits'}
+            style={{
+              display: 'flex', alignItems: 'center', marginLeft: 4, padding: '2px 4px', borderRadius: 6, flexShrink: 0,
+              border: open ? '1px solid var(--anthropic-orange)' : '1px solid transparent',
+              background: 'transparent', cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            <PlanLimitMini limits={plan} now={planSnap.now} lang={lang} />
+          </button>
+        )}
         {panel}
       </div>
     )

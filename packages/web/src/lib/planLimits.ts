@@ -137,6 +137,9 @@ export function updatedPhrase(l: PlanLimits, now: number, lang: Lang): string {
   return lang === 'pt' ? `atualizado há ${fmtSpan(ago, lang)}` : `updated ${fmtSpan(ago, lang)} ago`
 }
 
+/** The first threshold of that ramp: from here a figure is drawn in its tone, not in the neutral. */
+export const LIMIT_HOT = 75
+
 /** One colour ramp for every limit surface: the notice thresholds (75 / 95). */
 export function limitTone(pct: number): string {
   return pct >= 95 ? 'var(--accent-red)' : pct >= 75 ? 'var(--anthropic-orange)' : 'var(--accent-green)'
