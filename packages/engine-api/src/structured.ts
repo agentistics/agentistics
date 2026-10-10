@@ -70,6 +70,36 @@ export interface StructuredDeclaration {
    * leaves the files / the harness's own store as the source of tokens, exactly as before).
    */
   usage?: StructuredFeature
+  /**
+   * F4.D (additive, optional) — the PERMISSION MODE: how the protocol states it and sets it (`via`), or
+   * why it cannot. Absent = the driver says nothing about modes (the row keeps no chip, as before).
+   */
+  mode?: StructuredFeature
+  /**
+   * F4.D — the canonical modes a session can START in (`StructuredSpawn.mode`). A requested mode this
+   * list lacks is not a structured session: the host starts the TUI, whose flags carry it (Antigravity's
+   * print mode, for one, has no permission request at all, so it lists only `no-questions`).
+   */
+  startModes?: readonly CanonicalMode[]
+}
+
+/**
+ * F4.D — the four modes the owner named for EVERY harness (New session's "Mode" field): ask before
+ * acting, accept edits, plan, and no questions. Each harness's own modes map onto these where they mean
+ * the same thing (`StructuredMode.canonical`); a harness mode that matches none (claude's `auto`) keeps
+ * its own id and no canonical.
+ */
+export type CanonicalMode = 'default' | 'accept-edits' | 'plan' | 'no-questions'
+export const CANONICAL_MODES: readonly CanonicalMode[] = ['default', 'accept-edits', 'plan', 'no-questions']
+
+/** F4.D — one permission mode a session can be in, in the harness's OWN words. */
+export interface StructuredMode {
+  /** The id `setMode` takes (the protocol's own, or a short form of it). */
+  id: string
+  /** The harness's own name for it ("Auto Edit", "plan mode", "YOLO"). */
+  label: string
+  /** The canonical mode it means, when it means one exactly enough to be chosen for it. */
+  canonical?: CanonicalMode
 }
 
 /**
@@ -134,6 +164,11 @@ export interface StructuredSpawn {
    * NEVER carries a secret — those reach a session through the vault's references.
    */
   env?: Readonly<Record<string, string>>
+  /**
+   * F4.D — the canonical mode to START in. Absent = the harness's own default (its config decides). A
+   * driver honours only what `declares(h).startModes` lists; the host never sends anything else.
+   */
+  mode?: CanonicalMode
   /**
    * F2.0b — WHERE the child process runs. When present, the driver starts its protocol peer through
    * `transport.launch(...)` instead of spawning it itself, and speaks to it only through the returned
@@ -230,6 +265,16 @@ export interface StructuredSession {
   lastActivityMs(): number
   /** The usage the protocol has stated so far, or null (F2.1, optional: absent = this driver states none). */
   usage?(): StructuredUsage | null
+  /** F4.D — the modes this session can be set to, in the protocol's order (absent = none stated). */
+  modes?(): readonly StructuredMode[]
+  /** F4.D — the mode the PROTOCOL last stated (or the one just set and acknowledged), or null. */
+  mode?(): StructuredMode | null
+  /**
+   * F4.D — sets the mode by `StructuredMode.id`, through the protocol (never a keystroke). Resolves
+   * false when the id is not listed, the session ended, or the harness refused it — the mode then stays
+   * whatever the protocol last stated.
+   */
+  setMode?(id: string): Promise<boolean>
   /** Queues a prompt. False when not running or the queue is full. */
   prompt(text: string): boolean
   /** Answers the open request. False when none is open, the id is stale, or the answer does not fit it. */
