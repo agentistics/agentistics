@@ -1,21 +1,20 @@
 import { describe, expect, it } from 'bun:test'
 import {
   DEFAULT_TASK_STATUSES, PROTECTED_STATUS_IDS, canDeleteStatus, isKnownStatusId,
-  isProtectedStatusId, isValidStatusColor, nextStatusId, planStatusMigration, sortTaskStatuses,
+  isProtectedStatusId, isValidStatusColor, nextStatusId, planInReviewAdd, planStatusMigration, sortTaskStatuses,
   type TaskStatusDef,
 } from './taskStatus'
 
 describe('PROTECTED_STATUS_IDS / DEFAULT_TASK_STATUSES', () => {
-  it('is exactly the four reserved keys, and the defaults are exactly those four', () => {
+  it('has four reserved keys; the defaults are those plus the non-protected in_review', () => {
     expect(PROTECTED_STATUS_IDS).toEqual(['todo', 'in_progress', 'blocked', 'done'])
-    expect(DEFAULT_TASK_STATUSES.map(s => s.id)).toEqual(['todo', 'in_progress', 'blocked', 'done'])
-    expect(DEFAULT_TASK_STATUSES.every(s => s.protected)).toBe(true)
+    expect(DEFAULT_TASK_STATUSES.map(s => s.id)).toEqual(['todo', 'in_progress', 'blocked', 'in_review', 'done'])
+    expect(DEFAULT_TASK_STATUSES.filter(s => s.protected).map(s => s.id)).toEqual([...PROTECTED_STATUS_IDS])
   })
 
-  it('never seeds the three legacy words as defaults', () => {
+  it('never seeds the other legacy words as defaults', () => {
     const ids = DEFAULT_TASK_STATUSES.map(s => s.id)
     expect(ids).not.toContain('backlog')
-    expect(ids).not.toContain('in_review')
     expect(ids).not.toContain('abandoned')
   })
 
@@ -29,8 +28,8 @@ describe('PROTECTED_STATUS_IDS / DEFAULT_TASK_STATUSES', () => {
 describe('planStatusMigration', () => {
   it('seeds exactly the four protected defaults on a book with no list and nothing legacy in use', () => {
     const plan = planStatusMigration({ existing: undefined, usedStatusIds: ['todo', 'done'] })
-    expect(plan?.map(s => s.id)).toEqual(['todo', 'in_progress', 'blocked', 'done'])
-    expect(plan?.every(s => s.protected)).toBe(true)
+    expect(plan?.map(s => s.id)).toEqual(['todo', 'in_progress', 'blocked', 'in_review', 'done'])
+    expect(plan?.filter(s => s.protected).length).toBe(4)
   })
 
   it('also seeds a legacy word only when it is actually referenced', () => {
@@ -39,7 +38,7 @@ describe('planStatusMigration', () => {
       usedStatusIds: ['todo', 'backlog', 'in_review'],
     })
     const ids = plan?.map(s => s.id)
-    expect(ids).toEqual(['todo', 'in_progress', 'blocked', 'done', 'backlog', 'in_review'])
+    expect(ids).toEqual(['todo', 'in_progress', 'blocked', 'in_review', 'done', 'backlog'])
     const backlog = plan?.find(s => s.id === 'backlog')
     expect(backlog?.protected).toBe(false)
     expect(backlog?.label).toBe('Backlog')
@@ -50,13 +49,13 @@ describe('planStatusMigration', () => {
 
   it('never seeds a legacy word that is not referenced anywhere', () => {
     const plan = planStatusMigration({ existing: undefined, usedStatusIds: ['todo'] })
-    expect(plan?.map(s => s.id)).toEqual(['todo', 'in_progress', 'blocked', 'done'])
+    expect(plan?.map(s => s.id)).toEqual(['todo', 'in_progress', 'blocked', 'in_review', 'done'])
   })
 
   it('seeds an entirely unrecognised in-use status id too, labelled with itself', () => {
     const plan = planStatusMigration({ existing: undefined, usedStatusIds: ['todo', 'triage'] })
     const triage = plan?.find(s => s.id === 'triage')
-    expect(triage).toEqual({ id: 'triage', label: 'triage', color: '#94a3b8', protected: false, order: 4 })
+    expect(triage).toEqual({ id: 'triage', label: 'triage', color: '#94a3b8', protected: false, order: 5 })
   })
 
   it('does nothing once a list already exists — idempotent by construction', () => {
@@ -76,7 +75,20 @@ describe('planStatusMigration', () => {
 
   it('treats an empty existing array the same as absent — a book written before this feature', () => {
     const plan = planStatusMigration({ existing: [], usedStatusIds: [] })
-    expect(plan?.map(s => s.id)).toEqual(['todo', 'in_progress', 'blocked', 'done'])
+    expect(plan?.map(s => s.id)).toEqual(['todo', 'in_progress', 'blocked', 'in_review', 'done'])
+  })
+})
+
+describe('planInReviewAdd', () => {
+  const todo: TaskStatusDef = { id: 'todo', label: 'To do', color: '#3b82f6', protected: true, order: 0 }
+  it('appends in_review after the last entry of a list that lacks it, leaving custom statuses alone', () => {
+    const custom: TaskStatusDef = { id: 'triage', label: 'Triage', color: '#000000', protected: false, order: 7 }
+    const add = planInReviewAdd([todo, custom])
+    expect(add).toMatchObject({ id: 'in_review', protected: false, order: 8 })
+  })
+  it('is null for an empty list (the seed carries it) or a list that has it', () => {
+    expect(planInReviewAdd([])).toBeNull()
+    expect(planInReviewAdd([todo, { ...todo, id: 'in_review', protected: false }])).toBeNull()
   })
 })
 

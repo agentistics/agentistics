@@ -712,6 +712,8 @@ export interface TaskBook {
    * for statuses. Written once by `seedTypes`; absent on a book that predates the feature.
    */
   typesSeeded?: boolean
+  /** `in_review` was added to this book's status list once (see `planInReviewAdd`); never re-added after. */
+  inReviewSeeded?: boolean
   /**
    * The activity log, newest LAST, for every task at once.
    *

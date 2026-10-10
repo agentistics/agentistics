@@ -61,8 +61,21 @@ export const DEFAULT_TASK_STATUSES: readonly TaskStatusDef[] = [
   { id: 'todo', label: 'To do', color: '#3b82f6', protected: true, order: 0 },
   { id: 'in_progress', label: 'In progress', color: '#e8703a', protected: true, order: 1 },
   { id: 'blocked', label: 'Blocked', color: '#ef4444', protected: true, order: 2 },
-  { id: 'done', label: 'Done', color: '#22c55e', protected: true, order: 3 },
+  { id: 'in_review', label: 'In review', color: '#8b5cf6', protected: false, order: 3 },
+  { id: 'done', label: 'Done', color: '#22c55e', protected: true, order: 4 },
 ]
+
+/**
+ * Pure: the entry to ADD to an existing board's list so `in_review` (the hand-back target) exists,
+ * or `null` when the list is empty (the seed will carry it), already has it, or a person has
+ * custom-named another status. Never edits or reorders anything already there. The caller makes it
+ * fire once per book (`inReviewSeeded`), so a deliberate delete is not undone on the next boot.
+ */
+export function planInReviewAdd(existing: readonly TaskStatusDef[]): TaskStatusDef | null {
+  if (existing.length === 0 || existing.some(s => s.id === 'in_review')) return null
+  const def = DEFAULT_TASK_STATUSES.find(s => s.id === 'in_review')!
+  return { ...def, order: Math.max(...existing.map(s => s.order)) + 1 }
+}
 
 /**
  * The three words this board also shipped before the status list became editable. A HINT for the
@@ -71,7 +84,6 @@ export const DEFAULT_TASK_STATUSES: readonly TaskStatusDef[] = [
  */
 const LEGACY_STATUS_HINTS: Readonly<Record<string, { label: string; color: string }>> = {
   backlog: { label: 'Backlog', color: '#94a3b8' },
-  in_review: { label: 'In review', color: '#8b5cf6' },
   abandoned: { label: 'Abandoned', color: '#94a3b8' },
 }
 
