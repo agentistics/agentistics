@@ -446,6 +446,16 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
       return [...rows, ...mine, ...elsewhere]
     },
     async capture(id, lines) { const s = of(id); return s ? s.screen(lines) : base.capture(id, lines) },
+    async captureMany(ids, lines) {
+      const out = new Map<string, string[]>()
+      const rest: string[] = []
+      for (const id of ids) { const s = of(id); if (s) out.set(id, s.screen(lines)); else rest.push(id) }
+      if (rest.length > 0) {
+        const got = base.captureMany ? await base.captureMany(rest, lines) : null
+        for (const id of rest) out.set(id, got?.get(id) ?? await base.capture(id, lines))
+      }
+      return out
+    },
     async captureTerminal(id, lines): Promise<TerminalCapture | null> {
       const s = of(id)
       if (!s) return base.captureTerminal(id, lines)

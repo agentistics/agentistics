@@ -4,6 +4,8 @@
 #   PLAN=quick scripts/perf/engine-map/run.sh                  # CI: ~6 min, N=0/1/10 × C=0/1/5
 #   PLAN=quick SOAK_MIN=5 LABEL=soak scripts/perf/engine-map/run.sh
 #
+# BUN=<path> overrides the bun binary (a Volta shim does not survive `env -i`); SERVER_BUN_FLAGS are passed to the
+# server's bun (e.g. --cpu-prof-md --cpu-prof-dir=…); SERVER_ENV="K=V …" adds variables to the server's env; DRIVER=<script.ts> runs instead of the bench (profiling).
 # ADAPTER_CHAT=1 starts the server with the adapter chat flag ON (default: off) — the F4 on/off comparison.
 #
 # Locally it is a heavy job: >= 5 GB available, one at a time, in a capped scope — and the SERVER never
@@ -29,7 +31,7 @@ ROOT="${ROOT:-${RUNNER_TEMP:+$RUNNER_TEMP/engine-map}}"; ROOT="${ROOT:-$HOME/.ca
 PORT="${PORT:-48881}"; WEB_PORT="${WEB_PORT:-48882}"
 PLAN="${PLAN:-quick}"; SOAK_MIN="${SOAK_MIN:-0}"; LABEL="${LABEL:-ci}"
 SCALE="${SCALE:-0.1}"
-BUN="$(command -v bun)"
+BUN="${BUN:-$(command -v bun)}"
 
 case "$PORT$WEB_PORT" in *47291*|*47292*) echo "refusing the real ports" >&2; exit 2 ;; esac
 for p in "$PORT" "$WEB_PORT"; do
@@ -67,11 +69,12 @@ SRV_ENV=(env -i HOME="$TH" USER="${USER:-runner}" LOGNAME="${USER:-runner}" SHEL
   PATH="$SPATH" TMUX_TMPDIR="$ROOT/tmux" TMUX_SHIM_LOG="$ROOT/logs/tmux-calls.log"
   AGENTISTICS_DIR="$ROOT/data" PORT="$PORT" WEB_PORT="$WEB_PORT"
   $([ "${ADAPTER_CHAT:-0}" = 1 ] && echo AGENTISTICS_ADAPTER_CHAT=1 || true)
-  AGENTISTICS_THROWAWAY=1 AGENTISTICS_TELEMETRY=0 AGENTISTICS_JOURNAL_BACKFILL=0 FAKE_THINK_S="${FAKE_THINK_S:-1}")
+  AGENTISTICS_THROWAWAY=1 AGENTISTICS_TELEMETRY=0 AGENTISTICS_JOURNAL_BACKFILL=0 FAKE_THINK_S="${FAKE_THINK_S:-1}"
+  ${SERVER_ENV:-})
 
 # `--port` is what keeps `agentop server` from delegating to an installed service unit: this one is
 # ours, on our own data dir.
-( cd "$REPO" && exec "${SRV_ENV[@]}" "$BUN" packages/server/bin/cli.ts server --port "$PORT" ) > "$ROOT/logs/server.log" 2>&1 &
+( cd "$REPO" && exec "${SRV_ENV[@]}" "$BUN" ${SERVER_BUN_FLAGS:-} packages/server/bin/cli.ts server --port "$PORT" ) > "$ROOT/logs/server.log" 2>&1 &
 SRV=$!
 echo "$SRV" > "$ROOT/server.pid"
 echo "[run] server started, pid $SRV, :$PORT"
@@ -137,6 +140,11 @@ echo "[run] server up after ${i}s, measuring pid $HOLDER"
 
 # ── the bench, then the budgets ─────────────────────────────────────────────────────────────────
 OUT="$ROOT/logs"
+# DRIVER replaces the bench with another command (a profiling run): it gets BASE, HOLDER_PID and ROOT.
+if [ -n "${DRIVER:-}" ]; then
+  BASE="http://127.0.0.1:$PORT" HOLDER_PID="$HOLDER" ROOT="$ROOT" "$BUN" "$DRIVER"
+  exit $?
+fi
 "$BUN" "$HERE/bench.ts" --base "http://127.0.0.1:$PORT" --pid "$HOLDER" --root "$ROOT" --plan "$PLAN" \
   --soak-min "$SOAK_MIN" --force-spawn --label "$LABEL" --out "$OUT/bench-$LABEL.json" | tee "$OUT/bench-$LABEL.md"
 

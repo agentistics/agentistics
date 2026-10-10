@@ -3,12 +3,13 @@
  * lives in the pure `tmux-cli.ts` beside it.
  */
 
+import { randomUUID } from 'node:crypto'
 import { ensureSessionIdentityKey } from './session-identity'
 import { FOCUS_ATTEMPTS, inputFocusOf } from './input-focus'
 import { highlightedRow, parseRewindMenu, REWIND_MAX_STEPS, rewindRowMatches } from './claude-rewind'
 import type { RewindOutcome } from './types'
 import {
-  attachArgs, capturePaneArgs, capturePaneAnsiArgs, idFromTmuxName, isSessionGoneError,
+  attachArgs, capturePaneArgs, captureManyArgs, splitCaptureMany, capturePaneAnsiArgs, idFromTmuxName, isSessionGoneError,
   killSessionArgs, listSessionsArgs, paneInfoArgs, parsePaneInfo, parsePrefix, parseTmuxList,
   tmuxListIsEmptyState,
   resolveDefaultTerminal, resolveTruecolorTerm, spawnArgs, sendKeysNamedArgs, sendKeysLiteralArgs, sendKeysNamedSequenceArgs,
@@ -472,6 +473,9 @@ async function explainMissingTmux(): Promise<string> {
   }
 }
 
+/** Panes per tmux invocation in `captureMany`: one process for a normal fleet, a bounded argv for a big one. */
+const CAPTURE_MANY_CHUNK = 40
+
 export const tmuxBackend: SessionBackend = {
   id: 'tmux',
 
@@ -687,18 +691,39 @@ export const tmuxBackend: SessionBackend = {
     return trimCapture(out.split('\n'))
   },
 
+  async captureMany(ids: string[], lines: number) {
+    const frames = new Map<string, string[]>()
+    for (let at = 0; at < ids.length; at += CAPTURE_MANY_CHUNK) {
+      const chunk = ids.slice(at, at + CAPTURE_MANY_CHUNK)
+      const sep = `agentop-capture-${randomUUID()}`
+      const { out } = await tmux(captureManyArgs(chunk, lines, sep))
+      const got = splitCaptureMany(out, chunk.length, sep)
+      for (let i = 0; i < chunk.length; i++) {
+        // Not answered by the sequence (it stopped at a session that is gone): its own read, which
+        // answers exactly as a single capture always has.
+        frames.set(chunk[i]!, got[i] ?? await tmuxBackend.capture(chunk[i]!, lines))
+      }
+    }
+    return frames
+  },
+
   async captureTerminal(id: string, lines: number): Promise<TerminalCapture | null> {
     // Content FIRST: a non-zero capture is how we learn the session is gone, and there is no point
     // asking for its geometry once it is. `-e` keeps the colours; the frame is NOT trailing-trimmed
     // because a full-screen TUI's blank rows are part of its layout, not padding to discard.
-    const cap = await tmux(capturePaneAnsiArgs(id, lines))
-    if (cap.code !== 0) return null // tmux no longer has this session — the caller ends the stream
+    //
+    // PERF.SLOW: ONE tmux process for both reads — the capture, then the geometry, as a command
+    // sequence (`capture-pane … ; display-message …`). A watched pane is read up to four times a
+    // second, and two processes a read was most of what a watching client cost. tmux stops the
+    // sequence at the first failure, so a gone session still fails the capture and prints nothing.
+    const cap = await tmux([...capturePaneAnsiArgs(id, lines), ';', ...paneInfoArgs(id).slice(2)])
+    if (cap.code !== 0 && cap.out === '') return null // tmux no longer has this session — the caller ends the stream
     // A trailing '' from the final newline is not a real row; drop only that one.
     const raw = cap.out.split('\n')
     if (raw.length && raw[raw.length - 1] === '') raw.pop()
-
-    const meta = await tmux(paneInfoArgs(id))
-    const info = meta.code === 0 ? parsePaneInfo(meta.out) : null
+    // The last line is display-message's — the geometry, never a row of the pane.
+    const infoLine = cap.code === 0 ? raw.pop() ?? '' : ''
+    const info = infoLine ? parsePaneInfo(infoLine) : null
     if (!info) {
       // The pane exists (capture succeeded) but display-message could not be read or parsed. Rather
       // than ship a confident-wrong cursor, fall back to a minimal honest geometry: the browser

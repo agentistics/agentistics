@@ -523,6 +523,13 @@ export function createSessionsPoller(o: {
       }
 
       const captureStart = performance.now()
+      // PERF.SLOW: every live pane in ONE backend call where the backend can (tmux: one process for
+      // the whole fleet instead of one per pane). Only with the adapter flag off — there the screen is
+      // read for every live row; with it on most rows skip the screen and are read one by one below.
+      // A failed batch is no batch: each row then captures on its own, as it always did.
+      const prefetched = !adapter && o.backend.captureMany
+        ? await o.backend.captureMany(reconciled.filter(r => r.backend?.alive).map(r => r.id), lines).catch(() => null)
+        : null
       await Promise.all(reconciled.map(r => limit(async () => {
         const b = r.backend
         if (!b) return // `lost`: the backend has nothing to capture and nothing to report.
@@ -549,7 +556,7 @@ export function createSessionsPoller(o: {
           return
         }
 
-        const frame = await o.backend.capture(r.id, lines).catch(() => [] as string[])
+        const frame = prefetched?.get(r.id) ?? await o.backend.capture(r.id, lines).catch(() => [] as string[])
         adapter?.screenRead(r.id, nowMs)
         // WHICH MODE the harness is in, read off the same frame the state came from — see
         // `mode-spec.ts`. `null` for a harness nobody has probed and for a frame with no footer yet,
