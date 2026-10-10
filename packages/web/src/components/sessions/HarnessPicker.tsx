@@ -108,6 +108,7 @@ export function HarnessPicker({ lang, harnesses, value, onChange, notice, onRetr
               color: on ? 'var(--text-primary)' : 'var(--text-secondary)',
               fontFamily: 'inherit', fontSize: 13, fontWeight: on ? 650 : 500,
               opacity: missing ? 0.62 : 1,
+              // @touch-intentional: on a phone the chip IS a full grid cell (half the row), a real 44px button — not a pill.
               minHeight: isMobile ? 44 : undefined,
               ...(isMobile ? { minWidth: 0, padding: '9px 10px', position: 'relative' as const } : {}),
             }}
