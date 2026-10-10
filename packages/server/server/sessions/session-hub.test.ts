@@ -239,3 +239,62 @@ describe('session hub — timer on demand', () => {
     hub.stop()
   })
 })
+
+describe('session hub — idle cadence for background demand (PERF.SLOW)', () => {
+  const opts = (time: ReturnType<typeof fakeTime>, poller: ReturnType<typeof instantPoller>, busy: () => boolean) =>
+    ({ poll: poller.poll, intervalMs: 5000, idleIntervalMs: 15_000, busy, leaseMs: 30_000, ...time })
+
+  test('only a background subscriber and a still fleet: polls every idleIntervalMs', async () => {
+    const time = fakeTime(); const p = instantPoller(time)
+    const hub = createSessionHub(opts(time, p, () => false))
+    hub.subscribe(() => {}, { background: true })
+    await time.advance(0)
+    expect(p.calls()).toBe(1)
+    await time.advance(14_000)
+    expect(p.calls()).toBe(1)
+    await time.advance(1_000)
+    expect(p.calls()).toBe(2)
+  })
+
+  test('a turn running keeps the full rate', async () => {
+    const time = fakeTime(); const p = instantPoller(time)
+    const hub = createSessionHub(opts(time, p, () => true))
+    hub.subscribe(() => {}, { background: true })
+    await time.advance(0)
+    await time.advance(10_000)
+    expect(p.calls()).toBe(3)
+  })
+
+  test('a foreground subscriber arriving brings the full rate back at once', async () => {
+    const time = fakeTime(); const p = instantPoller(time)
+    const hub = createSessionHub(opts(time, p, () => false))
+    hub.subscribe(() => {}, { background: true })
+    await time.advance(0)
+    await time.advance(2_000)
+    hub.subscribe(() => {})
+    await time.advance(3_000) // 5 s after the first poll
+    expect(p.calls()).toBe(2)
+  })
+
+  test('a reader inside its lease keeps the full rate; past the lease it idles again', async () => {
+    const time = fakeTime(); const p = instantPoller(time)
+    const hub = createSessionHub(opts(time, p, () => false))
+    hub.subscribe(() => {}, { background: true })
+    await time.advance(0)
+    void hub.read()
+    await time.advance(30_000)
+    const during = p.calls()
+    expect(during).toBeGreaterThanOrEqual(6)
+    await time.advance(45_000)
+    expect(p.calls() - during).toBeLessThanOrEqual(4)
+  })
+
+  test('without idleIntervalMs nothing changes', async () => {
+    const time = fakeTime(); const p = instantPoller(time)
+    const hub = createSessionHub({ poll: p.poll, intervalMs: 5000, ...time })
+    hub.subscribe(() => {}, { background: true })
+    await time.advance(0)
+    await time.advance(10_000)
+    expect(p.calls()).toBe(3)
+  })
+})
