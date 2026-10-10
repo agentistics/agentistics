@@ -31,3 +31,15 @@ describe('terminateAndConfirm', () => {
     expect((await terminateAndConfirm(1, m.d)).ended).toBe(false)
   })
 })
+
+describe('terminateAndConfirm — real process', () => {
+  test('a child that ignores SIGTERM (the stuck relay) is really ended', async () => {
+    const child = Bun.spawn(['sh', '-c', 'trap "" TERM; while :; do sleep 0.2; done'], { stdout: 'ignore', stderr: 'ignore' })
+    await new Promise(res => setTimeout(res, 300))
+    const alive = (p: number) => { try { process.kill(p, 0); return child.exitCode === null } catch { return false } }
+    const r = await terminateAndConfirm(child.pid, {
+      kill: (p, s) => process.kill(p, s), alive, sleep: ms => new Promise(res => setTimeout(res, ms)), graceMs: 500,
+    })
+    expect(r).toEqual({ ended: true, signal: 'SIGKILL' })
+  })
+})
