@@ -82,8 +82,8 @@ test('an incremental rebuild answers byte-for-byte what a full build answers, in
   const home = mkdtempSync(join(tmpdir(), 'rebuild-incremental-'))
   const scripts = [join(import.meta.dir, `.rebuild-inc-${process.pid}.ts`), join(import.meta.dir, `.rebuild-full-${process.pid}.ts`)]
   try {
-    run(['bun', join(REPO, 'scripts/perf/synth-home.ts'), home, '--projects', '120', '--sessions', '120000', '--scale', '0.01', '--big', '0'], {})
-    run(['bun', join(REPO, 'scripts/perf/synth-harnesses.ts'), home, '--codex', '300', '--codex-kb', '12', '--gemini', '6', '--copilot', '6'], {})
+    run([process.execPath, join(REPO, 'scripts/perf/synth-home.ts'), home, '--projects', '120', '--sessions', '120000', '--scale', '0.01', '--big', '0'], {})
+    run([process.execPath, join(REPO, 'scripts/perf/synth-harnesses.ts'), home, '--codex', '300', '--codex-kb', '12', '--gemini', '6', '--copilot', '6'], {})
     mkdirSync(join(home, '.agentistics'), { recursive: true })
     writeFileSync(join(home, '.agentistics', 'preferences.json'), JSON.stringify({ archiveMode: 'consolidate' }))
     writeFileSync(scripts[0]!, INCREMENTAL)
@@ -91,8 +91,8 @@ test('an incremental rebuild answers byte-for-byte what a full build answers, in
     const env = { HOME: home, AGENTISTICS_DIR: join(home, '.agentistics'), AGENTISTICS_TELEMETRY: '0', AGENTISTICS_JOURNAL: '0' }
 
     const a = join(home, 'incremental.json'), b = join(home, 'full.json')
-    run(['bun', scripts[0]!, a], env)
-    run(['bun', scripts[1]!, b], env)
+    run([process.execPath, scripts[0]!, a], env)
+    run([process.execPath, scripts[1]!, b], env)
     const inc = JSON.parse(readFileSync(a, 'utf-8')) as { unchangedSame: boolean; changed: boolean; incMs: number[]; ttlBuilds: number; final: string }
 
     expect(inc.unchangedSame).toBe(true)
