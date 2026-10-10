@@ -265,6 +265,8 @@ if (!TEAM_CENTRAL) {
         meta: { harness: n.harness, window: n.kind, threshold: n.threshold, pct: Math.round(n.usedPct), resetsAt: n.resetsAt, ...(alt ? { alt } : {}) },
       }),
     })
+    // A record another agentop process wrote (it holds no sink) reaches the browser through the file.
+    pl.watchPlanLimitsFile()
     return pl.seedPlanLimits(sd.STRUCTURED_DIR)
   }).catch(err => console.warn('[plan-limits] seed failed:', String(err)))
 }

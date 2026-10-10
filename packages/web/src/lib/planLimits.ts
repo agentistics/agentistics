@@ -60,6 +60,10 @@ function subscribe(l: () => void): () => void {
   }
 }
 
+/** The store, for code outside React (and its test). */
+export const subscribePlanLimits = subscribe
+export const planLimitsSnapshot = (): PlanLimitsSnapshot => snap
+
 export function usePlanLimits(): PlanLimitsSnapshot {
   return useSyncExternalStore(subscribe, () => snap, () => snap)
 }
