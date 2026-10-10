@@ -73,8 +73,9 @@ export function __setPlanLimitsForTest(limits: PlanLimits[] | null, now = Date.n
 
 type Lang = 'pt' | 'en'
 
-export function windowLabel(kind: PlanWindowKind, lang: Lang): string {
-  return kind === '5h' ? '5 h' : lang === 'pt' ? 'Semana' : 'Week'
+export function windowLabel(kind: PlanWindowKind, _lang: Lang): string {
+  // "7 d", paired with "5 h" — "sem" read as the word "sem" (without).
+  return kind === '5h' ? '5 h' : '7 d'
 }
 
 export const SOURCE_LABEL: Record<PlanLimitSource, { pt: string; en: string }> = {
@@ -175,4 +176,30 @@ export function limitNoticeText(m: LimitNoticeMeta, lang: Lang, now = Date.now()
   return pt
     ? { title: `${name}: ${m.threshold}% da ${win}`, message: `Já foram ${Math.round(m.pct)}% da ${win} do plano. Renova ${when}.` }
     : { title: `${name}: ${m.threshold}% of the ${win}`, message: `${Math.round(m.pct)}% of the plan's ${win} is used. It resets ${when}.` }
+}
+
+// ─── The compact reading (new-session cards) and the one warning colour ─────────────────────
+
+/** The forecast's ONLY colour: amber, and only when the window runs out before it renews. */
+export const LIMIT_WARN = 'var(--accent-amber, #f59e0b)'
+
+/** The forecast worth saying: only a window that runs out (or ran out) BEFORE it renews. */
+export function warnForecast(w: PlanLimitWindow, now: number): PlanForecast | null {
+  const f = forecastWindow(w, now)
+  return f.kind === 'runs-out' || f.kind === 'exhausted' ? f : null
+}
+
+/** The short form for a one-line meter: the same "5 h" / "7 d". */
+export function windowShort(kind: PlanWindowKind, lang: Lang): string {
+  return windowLabel(kind, lang)
+}
+
+/** When it renews, as short as it can be said: the clock for the 5-hour window (it renews within
+ *  hours), and for the week "23:53" when that is today, else the weekday ("qui"). */
+export function shortWhen(ms: number, now: number, lang: Lang, kind?: PlanWindowKind): string {
+  const d = new Date(ms)
+  if (kind === '5h' || new Date(now).toDateString() === d.toDateString()) {
+    return d.toLocaleTimeString(lang === 'pt' ? 'pt-BR' : 'en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+  }
+  return d.toLocaleDateString(lang === 'pt' ? 'pt-BR' : 'en-US', { weekday: 'short' }).replace('.', '')
 }

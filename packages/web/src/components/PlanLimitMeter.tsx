@@ -11,8 +11,8 @@
 import { windowRenewed, type PlanLimitWindow, type PlanLimits } from '@agentistics/core'
 import { HARNESS_LABELS } from '../lib/harness'
 import {
-  currentUsedPct, forecastPhrase, forecastWindow, limitTone, resetPhrase, SOURCE_LABEL, stalePhrase,
-  updatedPhrase, windowLabel,
+  currentUsedPct, forecastPhrase, LIMIT_WARN, limitTone, resetPhrase, shortWhen, SOURCE_LABEL, stalePhrase,
+  updatedPhrase, warnForecast, windowLabel, windowShort,
 } from '../lib/planLimits'
 
 type Lang = 'pt' | 'en'
@@ -29,7 +29,8 @@ export function PlanLimitMeter({ window: w, now, lang, forecast = false }: {
   // A window that renewed since the last reading has no figure of its own yet: said, not zeroed.
   const renewed = windowRenewed(w, now)
   const tone = limitTone(pct)
-  const f = forecastWindow(w, now)
+  // The forecast is said ONLY when the window runs out before it renews — in amber, never green.
+  const f = forecast ? warnForecast(w, now) : null
   const label = windowLabel(w.kind, lang)
   return (
     <div data-plan-window={w.kind} style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
@@ -46,8 +47,8 @@ export function PlanLimitMeter({ window: w, now, lang, forecast = false }: {
       </div>
       <div style={{ paddingLeft: 50, fontSize: 10.5, color: 'var(--text-tertiary)', lineHeight: 1.35 }}>
         {resetPhrase(w, now, lang)}
-        {forecast && f.kind !== 'renewed' && (
-          <span style={{ color: f.kind === 'runs-out' || f.kind === 'exhausted' ? tone : undefined }}>
+        {f && (
+          <span data-plan-forecast style={{ color: LIMIT_WARN, fontWeight: 600 }}>
             {' · '}{forecastPhrase(f, now, lang)}
           </span>
         )}
@@ -126,5 +127,39 @@ export function PlanLimitArcs({ limits, now, size }: { limits: PlanLimits; now: 
       {ring('5h', 0)}
       {ring('week', 1)}
     </svg>
+  )
+}
+
+/**
+ * The COMPACT reading for the new-session cards (owner's mock D): one thin bar per window, each on
+ * ONE line — "5 h ▬▬ 2% · 23:53", "sem ▬▬ 32% · qui" — and at most one short amber line, only when
+ * a window runs out before it renews. Same bar, colours and words as `PlanLimitMeter`.
+ */
+export function PlanLimitBars({ limits, now, lang }: { limits: PlanLimits; now: number; lang: Lang }) {
+  const warn = limits.windows.map(w => warnForecast(w, now)).find(Boolean) ?? null
+  return (
+    <div data-plan-limits={limits.harness} data-plan-compact style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', columnGap: 6, rowGap: 3, fontSize: 10.5, minWidth: 0 }}>
+      {limits.windows.map(w => {
+        const pct = currentUsedPct(w, now)
+        const renewed = windowRenewed(w, now)
+        const label = windowShort(w.kind, lang)
+        return [
+          <span key={`${w.kind}l`} style={{ color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{label}</span>,
+          <div key={`${w.kind}b`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)}
+            aria-label={`${windowLabel(w.kind, lang)}: ${Math.round(pct)}%`}
+            style={{ height: 3, minWidth: 16, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
+            <div style={{ width: `${Math.min(100, Math.max(0, pct))}%`, height: '100%', background: limitTone(pct), borderRadius: 2 }} />
+          </div>,
+          <span key={`${w.kind}v`} data-plan-window={w.kind} style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+            {renewed ? '–' : `${Math.round(pct)}%`} · {shortWhen(w.resetsAt, now, lang, w.kind)}
+          </span>,
+        ]
+      })}
+      {warn && (
+        <span data-plan-forecast style={{ gridColumn: '1 / -1', color: LIMIT_WARN, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {forecastPhrase(warn, now, lang)}
+        </span>
+      )}
+    </div>
   )
 }

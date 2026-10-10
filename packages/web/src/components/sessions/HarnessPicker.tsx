@@ -13,7 +13,8 @@ import { HarnessMark } from './HarnessMark'
 import { Muted } from './formBits'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import { mostRoom, type PlanLimits } from '@agentistics/core'
-import { PlanLimitsBlock } from '../PlanLimitMeter'
+import { PlanLimitBars } from '../PlanLimitMeter'
+import { warnForecast } from '../../lib/planLimits'
 
 export interface HarnessPickerOption {
   id: string
@@ -38,8 +39,9 @@ export interface HarnessPickerProps {
   notice?: string
   onRetry?: () => void
   onInstall?: (id: string) => void
-  /** PLAN.LIMITS: each harness's plan windows (`usePlanLimits`). A harness with a record draws
-   *  them under its name, with the at-current-pace forecast; the one with most room is marked. */
+  /** PLAN.LIMITS: each harness's plan windows (`usePlanLimits`). A harness with a record draws two
+   *  one-line bars under its name (owner's mock D); every card reserves the same room, so the row
+   *  keeps its shape with or without data. The one with most room wears a small badge. */
   planLimits?: readonly PlanLimits[] | null
   /** The clock the forecast is read against (the store's minute tick). */
   now?: number
@@ -48,6 +50,11 @@ export interface HarnessPickerProps {
 export function HarnessPicker({ lang, harnesses, value, onChange, notice, onRetry, onInstall, planLimits, now = Date.now() }: HarnessPickerProps) {
   const pt = lang === 'pt'
   const roomiest = planLimits ? mostRoom(planLimits, now) : null
+  const known = (harnesses ?? []).filter(h => h.installed !== false).map(h => h.id)
+  const shown = (planLimits ?? []).filter(l => known.includes(l.harness))
+  // The room EVERY card reserves under its name, so a card with data never outgrows one without:
+  // two bar lines, plus one forecast line when any card has a forecast to say.
+  const bodyRows = shown.length === 0 ? 0 : shown.some(l => l.windows.some(w => warnForecast(w, now))) ? 3 : 2
   const isMobile = useIsMobile()
 
   if (harnesses === null) {
@@ -67,13 +74,16 @@ export function HarnessPicker({ lang, harnesses, value, onChange, notice, onRetr
   }
 
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+    <div style={bodyRows
+      // With limits on screen the cards are a GRID that fills the width: 3 columns, 2 on a phone.
+      ? { display: 'grid', gridTemplateColumns: `repeat(${isMobile ? 2 : 3}, minmax(0, 1fr))`, columnGap: 8, rowGap: 12, paddingTop: 4 }
+      : { display: 'flex', flexWrap: 'wrap', gap: 8 }}>
       {harnesses.map(h => {
         const on = value === h.id
         const color = (HARNESS_COLORS as Record<string, string>)[h.id] ?? 'var(--text-secondary)'
         const name = (HARNESS_LABELS as Record<string, string>)[h.id] ?? h.label
         const missing = h.installed === false
-        const limits = missing ? undefined : planLimits?.find(l => l.harness === h.id)
+        const limits = missing ? undefined : shown.find(l => l.harness === h.id)
         // ONE chip per harness. A missing one is greyed and its click opens the install flow, with a
         // small inline "Instalar" saying so — it is never a second control beside the chip.
         return (
@@ -84,8 +94,12 @@ export function HarnessPicker({ lang, harnesses, value, onChange, notice, onRetr
             onClick={() => (missing ? onInstall?.(h.id) : onChange(h.id))}
             data-harness-card={h.id}
             style={{
-              display: 'flex', alignItems: limits ? 'stretch' : 'center', gap: 8,
-              ...(limits ? { flexDirection: 'column' as const, flex: isMobile ? '1 1 100%' : '1 1 250px', maxWidth: isMobile ? undefined : 340, textAlign: 'left' as const } : {}),
+              display: 'flex', alignItems: 'center', gap: 8,
+              // With limits on screen every card has ONE size (mock D): a fixed width, the same reserved room.
+              ...(bodyRows ? {
+                flexDirection: 'column' as const, alignItems: 'stretch', gap: 6, textAlign: 'left' as const, position: 'relative' as const,
+                boxSizing: 'border-box' as const, minWidth: 0,
+              } : {}),
               padding: '9px 13px', borderRadius: 10, cursor: 'pointer',
               border: `1px ${missing ? 'dashed' : 'solid'} ${on ? color : 'var(--border-subtle)'}`,
               background: on ? `color-mix(in srgb, ${color} 14%, transparent)` : 'var(--bg-elevated)',
@@ -96,19 +110,25 @@ export function HarnessPicker({ lang, harnesses, value, onChange, notice, onRetr
             }}
           >
             <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <HarnessMark harness={h.id} size={18} />
-            {name}
-            {limits && roomiest === h.id && (
-              <span style={{
-                marginLeft: 'auto', fontSize: 10.5, fontWeight: 650, padding: '1px 7px', borderRadius: 999,
-                color: 'var(--accent-green)', background: 'color-mix(in srgb, var(--accent-green) 14%, transparent)',
-              }}>{pt ? 'mais folga' : 'most room'}</span>
-            )}
+              <HarnessMark harness={h.id} size={18} />
+              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+              {limits && roomiest === h.id && (
+                // Seated ON the card's top edge, so it never takes width from the name.
+                <span data-most-room style={{
+                  position: 'absolute', top: -8, right: 10, fontSize: 9.5, fontWeight: 650, padding: '0 6px', borderRadius: 999, lineHeight: '15px',
+                  color: 'var(--accent-green)', background: 'var(--bg-elevated)', border: '1px solid color-mix(in srgb, var(--accent-green) 45%, transparent)',
+                }}>{pt ? 'mais folga' : 'most room'}</span>
+              )}
+              {missing && (
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--anthropic-orange)', marginLeft: 2 }}>
+                  {pt ? 'Instalar' : 'Install'}
+                </span>
+              )}
             </span>
-            {limits && <PlanLimitsBlock limits={limits} now={now} lang={lang} forecast />}
-            {missing && (
-              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--anthropic-orange)', marginLeft: 2 }}>
-                {pt ? 'Instalar' : 'Install'}
+            {/* The reserved room: never widens the card (width 0 / min 100%), same height on every card. */}
+            {bodyRows > 0 && (
+              <span style={{ display: 'block', width: 0, minWidth: '100%', minHeight: bodyRows * 15 }}>
+                {limits && <PlanLimitBars limits={limits} now={now} lang={lang} />}
               </span>
             )}
           </button>
