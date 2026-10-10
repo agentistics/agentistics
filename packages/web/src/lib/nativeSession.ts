@@ -164,9 +164,22 @@ export function refusalSentence(body: unknown, status: number, lang: 'pt' | 'en'
  * "Allow for this session: …", "Deny"); the known ones are translated, anything else passes as is.
  */
 export function optionLabel(label: string, lang: 'pt' | 'en'): string {
+  // Providers do not share a vocabulary here. Codex app-server sends enum ids (and, in
+  // one version, the whole `acceptWithExecpolicyAmendment` object); ACP sends snake_case ids;
+  // Claude usually sends prose. Never expose a wire id as a button label.
+  const raw = label.trim()
+  if (raw === 'Allow once') return lang === 'pt' ? 'Permitir uma vez' : raw
+  if (raw === 'Deny') return lang === 'pt' ? 'Negar' : raw
+  const compact = raw.toLowerCase().replace(/[\s_-]+/g, '')
+  if (compact === 'accept' || compact === 'allow' || compact === 'allowonce' || compact === 'acceptonce') return lang === 'pt' ? 'Permitir' : 'Allow'
+  if (compact === 'acceptforsession' || compact === 'allowforsession' || compact.includes('acceptforsession')) {
+    const suffix = raw.includes(':') ? raw.slice(raw.indexOf(':') + 1).trim() : ''
+    return lang === 'pt' ? `Permitir nesta sessão${suffix ? `: ${suffix}` : ''}` : `Allow for this session${suffix ? `: ${suffix}` : ''}`
+  }
+  if (compact === 'acceptalways' || compact === 'allowalways' || compact.includes('acceptwithexecpolicyamendment') || compact.includes('allowwithexecpolicyamendment')) return lang === 'pt' ? 'Permitir sempre este comando' : 'Always allow this command'
+  if (compact === 'rejectalways' || compact === 'denyalways') return lang === 'pt' ? 'Recusar sempre' : 'Always reject'
+  if (compact === 'rejectonce' || compact === 'reject' || compact === 'deny' || compact === 'decline' || compact === 'cancel') return lang === 'pt' ? 'Recusar' : 'Reject'
   if (lang !== 'pt') return label
-  if (label === 'Allow once') return 'Permitir uma vez'
-  if (label === 'Deny') return 'Negar'
   const s = /^Allow for this session: commands starting with (.+)$/.exec(label)
   if (s) return `Permitir nesta sessão: comandos que começam com ${s[1]}`
   const t = /^Allow for this session: (.+)$/.exec(label)
