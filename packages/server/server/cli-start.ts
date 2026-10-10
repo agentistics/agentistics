@@ -4406,6 +4406,23 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * than a session that starts and immediately dies with a usage error on a screen nobody sees.
      */
     async spawnSession(req: SpawnSessionRequest): Promise<SpawnSessionResult> {
+      let taskId = req.taskId
+      let subtaskId = req.subtaskId
+      // Leader hand-off: no filing of its own → take the parent's. Resolved BEFORE the spawn so the
+      // child's briefing names the same task/subtask it is filed on (it said "not linked" otherwise).
+      if (!taskId && req.handoff && req.parentSessionId) {
+        const { readRegistry } = await import('./sessions/registry')
+        const parent = (await readRegistry()).find(m => m.id === req.parentSessionId)
+        taskId = parent?.taskId
+        subtaskId = parent?.subtaskId
+      }
+      // A group MEMBER can never hold a session (`subtask_in_group`): file it on the member's GROUP
+      // instead of leaving the session unfiled while its briefing claims the member.
+      if (taskId && subtaskId) {
+        const { loadTaskWorld } = await import('./sessions/task-source')
+        const sub = (await loadTaskWorld().catch(() => null))?.book.subtasks.find(s => s.id === subtaskId)
+        if (sub?.parentGroupId) subtaskId = sub.parentGroupId
+      }
       return spawnManaged({
         harness: req.harness as HarnessId,
         cwd: req.cwd,
@@ -4415,27 +4432,16 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.effort ? { effort: req.effort } : {}),
         ...(req.label ? { label: req.label } : {}),
         ...(req.task ? { task: req.task } : {}),
-        ...(req.taskId ? { contextTaskId: req.taskId } : {}),
-        ...(req.subtaskId ? { contextSubtaskId: req.subtaskId } : {}),
+        ...(taskId ? { contextTaskId: taskId } : {}),
+        ...(taskId && subtaskId ? { contextSubtaskId: subtaskId } : {}),
         ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
         ...(req.force ? { force: true } : {}),
         ...(req.origin ? { origin: req.origin } : {}),
       }, S(), lang).then(async r => {
         // NW-02: a session started for a BOARD task is filed there by id, not only named after it.
-        if (r.ok && r.id) {
-          let taskId = req.taskId
-          let subtaskId = req.subtaskId
-          // Leader hand-off: no filing of its own → take the parent's.
-          if (!taskId && req.handoff && req.parentSessionId) {
-            const { readRegistry } = await import('./sessions/registry')
-            const parent = (await readRegistry()).find(m => m.id === req.parentSessionId)
-            taskId = parent?.taskId
-            subtaskId = parent?.subtaskId
-          }
-          if (taskId) {
-            const { attachSession } = await import('./sessions/task-web')
-            await attachSession(taskId, r.id, subtaskId ? { subtaskId } : {}).catch(() => null)
-          }
+        if (r.ok && r.id && taskId) {
+          const { attachSession } = await import('./sessions/task-web')
+          await attachSession(taskId, r.id, subtaskId ? { subtaskId } : {}).catch(() => null)
         }
         return r
       })

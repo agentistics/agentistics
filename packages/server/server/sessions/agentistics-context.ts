@@ -98,7 +98,7 @@ export function contextText(i: ContextInput): string {
     const sub = i.subtaskId ? `, subtask ${i.subtaskId}${i.subtaskTitle ? ` "${i.subtaskTitle}"` : ''}` : ''
     lines.push(
       `This session belongs to Agentask task ${i.taskId}${i.taskTitle ? ` "${i.taskTitle}"` : ''}${sub}. Record progress there: comment on the subtask (or the task) at each milestone and move its status; never mark it done before the user validates.`,
-      'Board lifecycle: (1) you are filed on this task/subtask, which is in_progress; (2) comment at each milestone; (3) when you finish, send kind=handback with agentistics_session_message — your subtask then moves to in_review; (4) it becomes done only after approval.',
+      'Board lifecycle: (1) you are filed on this task/subtask, which is in_progress; (2) comment at each milestone; (3) when you finish, send kind=handback with agentistics_session_message — your subtask then moves to in_review (if the board has that status); (4) it becomes done only after approval.',
     )
   } else {
     lines.push('This session is not linked to a task. If the work grows beyond a quick question, offer to file it in Agentask — ask first.')
