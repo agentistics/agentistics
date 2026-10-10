@@ -73,18 +73,6 @@ export interface ActiveTimeState {
   turnStart: number | null
   /** The last usable timestamp seen. A turn closes HERE, not at the prompt that starts the next. */
   last: number | null
-  /** End of everything already counted: intervals are merged against it, so overlap counts once. */
-  coveredUntil?: number
-  /** First usable timestamp seen — active time can never exceed `last - firstTs`. */
-  firstTs?: number
-}
-
-/** Add [s,e] to the total, counting only what the already-covered frontier has not. */
-function addInterval(state: ActiveTimeState, s: number, e: number): void {
-  if (!(e > s)) return
-  const from = state.coveredUntil === undefined ? s : Math.max(s, state.coveredUntil)
-  if (e > from) state.totalMs += e - from
-  state.coveredUntil = Math.max(state.coveredUntil ?? e, e)
 }
 
 /** A walk that has seen nothing. */
@@ -105,14 +93,13 @@ export function foldActiveTime(state: ActiveTimeState, events: Iterable<TurnEven
     const ts = Number.isFinite(e.ts) ? e.ts : NaN
     // `last` is advanced AFTER the branches below: a turn must be closed at the last event of that
     // turn, not at the prompt that starts the next one — otherwise every idle gap is counted back in.
-    if (!Number.isNaN(ts)) { state.sawTime = true; if (state.firstTs === undefined) state.firstTs = ts }
+    if (!Number.isNaN(ts)) state.sawTime = true
 
     if (typeof e.measuredMs === 'number' && Number.isFinite(e.measuredMs) && e.measuredMs >= 0) {
       // The harness measured this turn. Its number replaces anything we would reconstruct — but
       // only when a turn is actually open, so a stray metric line can't invent a turn.
       if (state.turnStart !== null) {
-        const end = Number.isNaN(ts) ? state.turnStart + e.measuredMs : ts
-        addInterval(state, end - e.measuredMs, end)
+        state.totalMs += e.measuredMs
         state.turns++
         state.measuredTurns++
         state.turnStart = null
@@ -123,7 +110,7 @@ export function foldActiveTime(state: ActiveTimeState, events: Iterable<TurnEven
 
     if (e.turnEnd && !Number.isNaN(ts)) {
       if (state.turnStart !== null) {
-        addInterval(state, state.turnStart, ts)
+        state.totalMs += Math.max(0, ts - state.turnStart)
         state.turns++
         state.turnStart = null
       }
@@ -133,7 +120,7 @@ export function foldActiveTime(state: ActiveTimeState, events: Iterable<TurnEven
 
     if (e.userPrompt && !Number.isNaN(ts)) {
       if (state.turnStart !== null && state.last !== null) {
-        addInterval(state, state.turnStart, state.last)
+        state.totalMs += Math.max(0, state.last - state.turnStart)
         state.turns++
       }
       state.turnStart = ts
@@ -151,15 +138,12 @@ export function foldActiveTime(state: ActiveTimeState, events: Iterable<TurnEven
  * place would make the next fold count the time before it twice.
  */
 export function finishActiveTime(state: ActiveTimeState): ActiveTimeResult {
-  const open = { ...state }
+  let totalMs = state.totalMs
   let turns = state.turns
   if (state.turnStart !== null && state.last !== null) {
-    addInterval(open, state.turnStart, state.last)
+    totalMs += Math.max(0, state.last - state.turnStart)
     turns++
   }
-  let totalMs = open.totalMs
-  // Never longer than the session itself: a measured turn can overrun the events around it.
-  if (state.firstTs !== undefined && state.last !== null) totalMs = Math.min(totalMs, Math.max(0, state.last - state.firstTs))
   if (!state.sawTime) return { activeMinutes: undefined, turns: 0, measuredTurns: 0 }
   return { activeMinutes: Math.round(totalMs / 60000), turns, measuredTurns: state.measuredTurns }
 }

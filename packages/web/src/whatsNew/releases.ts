@@ -30,8 +30,8 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Resources: no repeated rows, and CPU shows from the first reading.',
       },
       {
-        pt: 'O tempo ativo de uma sessão nunca passa da duração dela; "agentop clean" não fica mais pendurado.',
-        en: 'A session\'s active time never exceeds its duration; "agentop clean" no longer hangs.',
+        pt: '"agentop clean" não fica mais pendurado.',
+        en: '"agentop clean" no longer hangs.',
       },
     ],
   },
