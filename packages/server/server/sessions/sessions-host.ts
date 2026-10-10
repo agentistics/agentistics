@@ -34,7 +34,7 @@ import { holderCollisions } from './process-transcript'
 import { collisionKey, type ProcessTranscriptFile } from './process-conversation'
 import { loadConversations, type Conversation } from './conversations'
 import { HEARTBEAT_MS, planCrashGroup, type CrashGroup } from './crash-group'
-import { emptyHarnessSessionIndex, type HarnessSessionIndex } from './harness-sessions'
+import { emptyHarnessSessionIndex, resolveManagedIds, type HarnessSessionIndex } from './harness-sessions'
 import { chosenName } from './harness-session-file'
 import { reconcileSessions } from './session-ref'
 import {
@@ -428,7 +428,7 @@ export function createSessionsPoller(o: {
         const started = performance.now()
         return p.then(v => { markFleetPhase(`poll: gather · ${label}`, started); return v })
       }
-      const [registry, backendSessions, processes, conversations, harnessSessions] = await Promise.all([
+      const [registry, backendSessions, processes, conversations, harnessSessionsRaw, panePidsRead] = await Promise.all([
         timed('readRegistry', o.readRegistry()),
         timed('backend.list', o.backend.list()),
         timed('scanProcesses', o.scanProcesses().then(r => r.procs).catch(() => [] as HarnessProcess[])),
@@ -442,7 +442,11 @@ export function createSessionsPoller(o: {
           o.loadHarnessSessions
             ? o.loadHarnessSessions().catch(() => emptyHarnessSessionIndex())
             : Promise.resolve(emptyHarnessSessionIndex())),
+        // Read here (not after the conversation links) because they decide WHICH harness record is
+        // a pane's own: the record's `tmux` field is an inherited env var (LINK.CROSSTALK).
+        timed('listPanePids', o.backend.listPanePids?.().catch(() => undefined) ?? Promise.resolve(undefined)),
       ])
+      const harnessSessions = resolveManagedIds(harnessSessionsRaw, panePidsRead)
       markFleetPhase('poll: gather (registry/backend.list/scanProcesses/conversations/harnessSessions)', gatherStart)
 
       const reconciled = reconcileSessions(registry, backendSessions)
@@ -459,6 +463,7 @@ export function createSessionsPoller(o: {
         const adopt = planAdoptions({
           rows: reconciled,
           byManagedId: harnessSessions.byManagedId,
+          registry,
           harness: 'claude',
           nowIso: new Date(nowMs).toISOString(),
         })
@@ -656,9 +661,14 @@ export function createSessionsPoller(o: {
       const recordConvStart = performance.now()
       let recordConvWrites = 0
       if (o.recordConversation) {
+        const isLiveRow = (id: string): boolean => panePidsRead ? panePidsRead.has(id) : backendSessions.some(b => b.id === id && b.alive)
+        const owners = liveLinks(registry, isLiveRow)
         for (const m of registry) {
           const exact = harnessSessions.byManagedId.get(m.id)?.sessionId
           if (!exact || m.conversationId === exact) continue
+          // Never take a conversation another LIVE row already drives: that is the other row's chat,
+          // and moving it here is the cross-talk this guards. Keep the current link instead.
+          if (!moveAllowed(m.id, exact, owners)) continue
           recordConvWrites++
           await o.recordConversation(m.id, exact, 'assigned', 'harness-session-file').catch(() => undefined)
         }
@@ -668,7 +678,7 @@ export function createSessionsPoller(o: {
       // The pane pids, read ONCE for the two things below that need them: the per-process
       // conversation link, and the hardware sample further down. Two `tmux list-panes` calls a poll
       // for one answer is a second place for them to disagree about which pid is which row.
-      const panePids = await o.backend.listPanePids?.().catch(() => new Map<string, number>())
+      const panePids = panePidsRead ?? new Map<string, number>()
 
       // The OTHER exact link: the conversation named by a file the harness's own process holds
       // OPEN (`HARNESS_PROCESS_TRANSCRIPTS` — agy's log, codex's rollout and thread lock, kimi's
