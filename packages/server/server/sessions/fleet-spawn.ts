@@ -37,12 +37,20 @@
  * fleet routes load their implementation by dynamic import precisely so a machine that never opens
  * the Sessions page never pays for that graph.
  */
+import { isCanonicalMode, type CanonicalMode } from '@agentistics/core'
+
 export interface SpawnHarness {
   id: string
   /** False when the CLI has no model flag at all — a different fact from an empty suggestion list. */
   supportsModel: boolean
   /** The closed enum the CLI prints. Empty means the tool has no effort flag. */
   efforts: string[]
+  /**
+   * MODE.EVERYWHERE — the canonical permission modes a session of this harness can START in here: the
+   * TUI's flags (`tuiStartModes`) plus what its structured driver takes when a web spawn would run
+   * structured. Absent = only the harness's default (no field shown).
+   */
+  modes?: CanonicalMode[]
 }
 
 /** The request body, as it arrives: every field unknown until it has been read. */
@@ -60,6 +68,8 @@ export interface FleetSpawnBody {
   prompt?: unknown
   model?: unknown
   effort?: unknown
+  /** MODE.EVERYWHERE — one of `CANONICAL_MODES`; absent or `default` = the harness's own configuration. */
+  mode?: unknown
   label?: unknown
   /**
    * Start even if this machine's memory budget refuses. Read with a STRICT `typeof` check — see
@@ -81,6 +91,7 @@ export interface FleetSpawnPlan {
   prompt?: string
   model?: string
   effort?: string
+  mode?: CanonicalMode
   label?: string
   /** Always false — see the header. */
   attach: false
@@ -95,6 +106,7 @@ export type FleetSpawnRefusal =
   | 'cwd_relative'
   | 'unknown_effort'
   | 'model_unsupported'
+  | 'unknown_mode'
 
 export type FleetSpawnDecision =
   | { ok: true; plan: FleetSpawnPlan }
@@ -158,6 +170,15 @@ export function planFleetSpawn(
     return { ok: false, reason: 'unknown_effort', detail: effort }
   }
 
+  // A mode is a closed enum (`CANONICAL_MODES`) narrowed to what THIS harness can start in here. A mode it
+  // cannot honour is refused, never started in another — "no questions" silently becoming "asks" (or the
+  // reverse) is exactly the surprise this field exists to remove.
+  const modeText = text(body.mode)
+  if (modeText !== undefined && (!isCanonicalMode(modeText) || (modeText !== 'default' && !(spec.modes ?? []).includes(modeText)))) {
+    return { ok: false, reason: 'unknown_mode', detail: modeText }
+  }
+  const mode = modeText !== undefined && modeText !== 'default' ? (modeText as CanonicalMode) : undefined
+
   const model = text(body.model)
   if (model && !spec.supportsModel) {
     return { ok: false, reason: 'model_unsupported', detail: harness }
@@ -185,6 +206,7 @@ export function planFleetSpawn(
       ...(prompt ? { prompt } : {}),
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
+      ...(mode ? { mode } : {}),
       ...(label ? { label } : {}),
       ...(force ? { force: true } : {}),
       attach: false,

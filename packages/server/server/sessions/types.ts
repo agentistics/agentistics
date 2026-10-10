@@ -6,7 +6,7 @@
  * planner emits an argv, the backend hosts an argv, and that is the only thing they share.
  */
 
-import type { ConversationLinkReason, HarnessId, SendNowOutcome } from '@agentistics/core'
+import type { CanonicalMode, ConversationLinkReason, HarnessId, SendNowOutcome, SessionMode } from '@agentistics/core'
 import type { RepoFacts } from './repo-facts'
 import type { HarnessChat, StructuredAnswer, StructuredAttention, StructuredMcpServer } from '@agentistics/engine-api'
 
@@ -53,6 +53,12 @@ export interface SpawnSpec {
   effortFlag?: string
   /** Config-based effort selection where the CLI has no dedicated flag (Codex `-c`). */
   effortArgs?: (effort: string) => string[]
+  /**
+   * MODE.EVERYWHERE — the argv that STARTS the TUI in a canonical permission mode, read from the CLI's
+   * own `--help` (dated beside each entry). `default` is never here: it means "pass nothing, the
+   * harness's configuration decides". A canonical mode absent here cannot be started as a TUI.
+   */
+  modeArgs?: Partial<Record<Exclude<CanonicalMode, 'default'>, readonly string[]>>
   /** A genuine closed enum, printed by the CLI itself — so this one IS validated. */
   efforts?: string[]
   /** The effort used when `--effort` is not passed, under exactly `defaultModel`'s rule. */
@@ -136,6 +142,11 @@ export interface SpawnRequest {
   context?: { text: string; block: string; dir: string }
   model?: string
   effort?: string
+  /**
+   * MODE.EVERYWHERE — the permission mode to START in. Absent or `default`: nothing is passed and the
+   * harness's own configuration decides. See `SpawnSpec.modeArgs` / `SpawnPlan.modeNeedsProtocol`.
+   */
+  mode?: CanonicalMode
   label?: string
   task?: string
   /** See `ManagedSession.taskId`: recorded at spawn, the one moment it is a fact. */
@@ -161,6 +172,8 @@ export interface InitialPrompt {
 
 export interface SpawnPlan {
   argv: string[]
+  /** MODE.EVERYWHERE — the requested mode this argv cannot carry (no TUI flag): only a structured start can. */
+  modeNeedsProtocol?: CanonicalMode
   /** Extra environment for the pane (an `env-dir` context channel). */
   env?: Record<string, string>
   /** A file the CALLER must write before spawning (this module is pure). */
@@ -191,6 +204,7 @@ export type SpawnPlanError =
   | { code: 'model-unsupported'; harness: HarnessId }
   | { code: 'effort-unsupported'; harness: HarnessId }
   | { code: 'unknown-effort'; harness: HarnessId; value: string; accepted: string[] }
+  | { code: 'unknown-mode'; harness: HarnessId; value: string }
 
 export type SpawnPlanResult =
   | { ok: true; plan: SpawnPlan }
@@ -217,6 +231,12 @@ export interface BackendSpawn {
    * (`structured-backend.ts`). Ignored by tmux. Absent = route on the argv alone (A5.4's rule).
    */
   structured?: StructuredIntent
+  /**
+   * MODE.EVERYWHERE — the TUI argv does NOT carry this requested mode (its CLI has no flag for it), so
+   * only a structured start can honour it. A spawn that would run as a TUI is then REFUSED in a
+   * sentence, never started in another mode.
+   */
+  modeNeedsProtocol?: CanonicalMode
 }
 
 /** F2.0 — the spawn, in the terms a structured driver takes (`StructuredSpawn` minus the host's own id/cwd). */
@@ -229,6 +249,8 @@ export interface StructuredIntent {
   /** The id offered for assignment (fresh sessions). */
   conversationId?: string
   resumeId?: string
+  /** MODE.EVERYWHERE — the canonical mode to start in (the driver honours only its `startModes`). */
+  mode?: CanonicalMode
   /** The person's first prompt alone — the context travels in `instructions`, never prepended here. */
   prompt?: string
   instructions?: { text: string; block: string }
@@ -652,6 +674,15 @@ export interface SessionBackend {
    * this FIRST and answers through `answer` — no keystroke reaches anything.
    */
   attentionOf?(id: string): StructuredAttention | null | undefined
+  /**
+   * F4.D — a STRUCTURED session's permission mode as its protocol states it (`null`: not stated yet);
+   * `undefined` for every session that is not structured, whose mode is read off the footer instead.
+   */
+  modeOf?(id: string): SessionMode | null | undefined
+  /** F4.D — the modes a structured session can be set to directly (the chip's menu); undefined: none. */
+  modesOf?(id: string): SessionMode[] | undefined
+  /** F4.D — set a structured session's mode THROUGH its driver, by id, no cycling. False: refused / unknown id. */
+  setMode?(id: string, modeId: string): Promise<boolean>
   /** F2.0 — answer a structured session's open request through its driver. False: refused / stale. */
   answer?(id: string, a: StructuredAnswer): Promise<boolean>
   /**

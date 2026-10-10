@@ -17,7 +17,7 @@
  */
 
 import { PROMPT_ACK_MS, withDeadline } from './prompt-deadline'
-import type { HarnessId, ProjectKind } from '@agentistics/core'
+import type { CanonicalMode, HarnessId, ProjectKind } from '@agentistics/core'
 import type { StartHost } from '../cli-start'
 import type { CliLang } from '../cli-lang'
 import { recordPrompt } from './pending-prompts'
@@ -479,6 +479,9 @@ async function runFleetActionOnce(
     case 'cycleMode':
       if (!host.cycleSessionMode) return { ok: false, message: s.sessionsNoHost }
       return await host.cycleSessionMode(req.id)
+    case 'setMode':
+      if (!host.setSessionMode) return { ok: false, message: s.sessionsNoHost }
+      return await host.setSessionMode(req.id, text)
     case 'rename':
       if (!host.renameSession) return { ok: false, message: s.sessionsNoHost }
       return await host.renameSession(req.id, text)
@@ -871,6 +874,8 @@ export interface FleetNewOptions {
     efforts: string[]
     /** The effort used when none is passed, under exactly `defaultModel`'s rule. */
     defaultEffort?: string
+    /** MODE.EVERYWHERE — the permission modes a session of it can start in here; absent = default only. */
+    modes?: CanonicalMode[]
   }[]
   /** Ranked places, from the LOCAL store — so the picker answers with no network and a cold cache.
    *  CAPPED per kind: what fits on screen, never how many there are. See `projectTotals`. */
@@ -939,7 +944,7 @@ export async function readNewOptions(lang: CliLang, query: string, disk?: string
     const notice = harnesses.length === 0 ? host.harnessNotice?.() : undefined
     // Harnesses with an official one-click installer stay listed (greyed, with Install) when missing.
     const labels: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini', copilot: 'Copilot' }
-    type NewHarness = { id: string; label: string; modelSuggestions: string[]; supportsModel: boolean; efforts: string[]; installed?: boolean; defaultModel?: string; defaultEffort?: string }
+    type NewHarness = { id: string; label: string; modelSuggestions: string[]; supportsModel: boolean; efforts: string[]; installed?: boolean; defaultModel?: string; defaultEffort?: string; modes?: CanonicalMode[] }
     const missing: NewHarness[] = Object.keys(labels).filter(id => !harnesses.some(h => h.id === id)).map(id => ({
       id, label: labels[id]!, modelSuggestions: [], supportsModel: false, efforts: [], installed: false,
     }))
@@ -961,6 +966,7 @@ export async function readNewOptions(lang: CliLang, query: string, disk?: string
           efforts: [...h.efforts],
           ...(h.installed === false ? { installed: false } : { installed: true }),
           ...(defaultEffort ? { defaultEffort } : {}),
+          ...(h.modes && h.modes.length > 1 ? { modes: [...h.modes] } : {}),
         }
       }),
       projects: projects.options.map(p => ({
@@ -1065,6 +1071,7 @@ export async function runFleetSpawn(
       : decision.reason === 'cwd_missing' ? s.spawnCwdMissing
       : decision.reason === 'cwd_relative' ? s.spawnCwdRelative(detail)
       : decision.reason === 'unknown_effort' ? s.spawnUnknownEffort(detail)
+      : decision.reason === 'unknown_mode' ? s.spawnUnknownMode(detail)
       : s.spawnModelUnsupported(detail)
     return { ok: false, message }
   }

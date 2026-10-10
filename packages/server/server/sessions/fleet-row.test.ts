@@ -98,6 +98,15 @@ describe('fleetRow — the verbs a web row is offered', () => {
     expect(verb(r, 'approve').reason).toBe('no probed rules for gemini')
   })
 
+  it('F4.D — a structured row carries the modes it can be set to; a terminal row carries none', () => {
+    const choices = [{ id: 'default', label: 'Default' }, { id: 'plan', label: 'Plan' }]
+    const structured = fleetRow(row({ state: 'waiting', mode: choices[0], modeChoices: choices }), S)
+    expect(structured.mode).toEqual(choices[0])
+    expect(structured.modes).toEqual(choices)
+    const terminal = fleetRow(row({ state: 'waiting', mode: { id: 'plan', label: 'plan mode' } }), S)
+    expect(terminal.modes).toBeUndefined()
+  })
+
   it('verbReason says nothing it cannot know', () => {
     expect(verbReason(row(), 'rename', S)).toBeUndefined()
     expect(verbReason(row({ state: 'closed' }), 'kill', S)).toBeUndefined()

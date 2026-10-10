@@ -1845,9 +1845,19 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   // verb is ENABLED when a write can continue it here — the server decides, the row says so.
   const promptOffered = session.actionable || row?.verbs.some(v => v.action === 'prompt' && v.enabled) === true
   const canPrompt = !loading && promptOffered && (!blocked || answeringNow) && payload.live !== false
-  const modeOptions = useMemo(() => modeMenuFor(row?.harness), [row?.harness])
+  // F4.D — a STRUCTURED row lists the modes its protocol can set; those are chosen directly. A terminal
+  // row has only the harness's cycle key, so its menu is the measured table and a choice is N cycles.
+  const directModes = row?.modes && row.modes.length > 0 ? row.modes : null
+  const modeOptions = useMemo(() => directModes ?? modeMenuFor(row?.harness), [directModes, row?.harness])
   const chooseMode = useCallback(async (target: string) => {
     if (!row?.mode || !canPrompt) return
+    if (directModes) {
+      setModeMenuOpen(false)
+      const out = await act({ id: session.id, action: 'setMode', text: target })
+      setNotice(out.ok ? (modeOptions.find(mode => mode.id === target)?.label ?? target) : out.message)
+      if (out.ok) nudgeFleet()
+      return
+    }
     const cycles = modeCycles(row.mode.id, target, modeOptions)
     setModeMenuOpen(false)
     for (let i = 0; i < cycles; i += 1) {
@@ -1861,7 +1871,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       setNotice(modeOptions.find(mode => mode.id === target)?.label ?? target)
       nudgeFleet()
     }
-  }, [act, canPrompt, modeOptions, row?.mode, session.id])
+  }, [act, canPrompt, directModes, modeOptions, row?.mode, session.id])
   /** EXT.OPEN: the one question before a write continues an external session here. */
   const [continueAsk, setContinueAsk] = useState<{ message: string; text: string } | null>(null)
   const [continuing, setContinuing] = useState(false)

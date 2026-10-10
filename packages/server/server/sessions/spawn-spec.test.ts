@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'bun:test'
-import { HARNESS_ORDER, SPAWN_SPECS_MODEL_IDS } from '@agentistics/core'
-import { SPAWN_SPECS, conversationLinkGoneForever, conversationLinkable, planSpawn } from './spawn-spec'
+import { describe, expect, it, test } from 'bun:test'
+import { HARNESS_ORDER, SPAWN_SPECS_MODEL_IDS, type CanonicalMode, type HarnessId } from '@agentistics/core'
+import { SPAWN_SPECS, conversationLinkGoneForever, conversationLinkable, planSpawn, tuiStartModes } from './spawn-spec'
 
 describe('SPAWN_SPECS', () => {
   it('has an entry for every harness', () => {
@@ -376,5 +376,46 @@ describe('reopening a gemini conversation by id (F0.2)', () => {
 
   it('does not refuse an id for a harness that declares no restriction', () => {
     expect(planSpawn({ harness: 'claude', cwd: '/r', resumeId: 'anything' }).ok).toBe(true)
+  })
+})
+
+describe('MODE.EVERYWHERE — the TUI starts in the asked mode, by its own flag', () => {
+  const argvOf = (harness: HarnessId, mode?: CanonicalMode) => {
+    const r = planSpawn({ harness, cwd: '/w', ...(mode ? { mode } : {}) })
+    if (!r.ok) throw new Error(r.error.code)
+    return r.plan
+  }
+  test('each harness, from its own --help (2026-10-10)', () => {
+    expect(argvOf('claude', 'plan').argv).toContain('plan')
+    expect(argvOf('claude', 'no-questions').argv).toContain('--dangerously-skip-permissions')
+    expect(argvOf('codex', 'accept-edits').argv.join(' ')).toContain('--sandbox workspace-write --ask-for-approval on-request')
+    expect(argvOf('codex', 'no-questions').argv).toContain('--dangerously-bypass-approvals-and-sandbox')
+    expect(argvOf('gemini', 'accept-edits').argv.join(' ')).toContain('--approval-mode auto_edit')
+    expect(argvOf('gemini', 'no-questions').argv.join(' ')).toContain('--approval-mode yolo')
+    expect(argvOf('kimi', 'plan').argv).toContain('--plan')
+    expect(argvOf('kimi', 'no-questions').argv).toContain('--auto')
+    expect(argvOf('copilot', 'accept-edits').argv).toContain('--allow-tool=write')
+    expect(argvOf('copilot', 'no-questions').argv).toContain('--autopilot')
+    expect(argvOf('antigravity', 'plan').argv.join(' ')).toContain('--mode plan')
+    expect(argvOf('antigravity', 'no-questions').argv).toContain('--dangerously-skip-permissions')
+  })
+  test('"default" and no mode pass nothing — the harness\'s own configuration decides', () => {
+    for (const h of HARNESS_ORDER) {
+      if (!SPAWN_SPECS[h]) continue
+      expect(argvOf(h, 'default').argv).toEqual(argvOf(h).argv)
+      expect(argvOf(h).modeNeedsProtocol).toBeUndefined()
+    }
+  })
+  test('a mode the TUI has no flag for is SAID (modeNeedsProtocol), never silently dropped', () => {
+    const p = argvOf('codex', 'plan')
+    expect(p.modeNeedsProtocol).toBe('plan')
+    expect(p.argv.join(' ')).not.toContain('plan')
+    expect(tuiStartModes('codex')).toEqual(['default', 'accept-edits', 'no-questions'])
+    expect(tuiStartModes('claude')).toEqual(['default', 'accept-edits', 'plan', 'no-questions'])
+    expect(tuiStartModes('opencode')).toEqual([])
+  })
+  test('an unknown mode is refused in a sentence', () => {
+    const r = planSpawn({ harness: 'claude', cwd: '/w', mode: 'yolo' as CanonicalMode })
+    expect(r).toEqual({ ok: false, error: { code: 'unknown-mode', harness: 'claude', value: 'yolo' } })
   })
 })
