@@ -4445,17 +4445,20 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
           const { attachSession } = await import('./sessions/task-web')
           await attachSession(taskId, r.id, subtaskId ? { subtaskId } : {}).catch(() => null)
         }
-        // A hand-off child also joins the parent's sidebar folder.
+        // A hand-off child also joins the parent's sidebar folder. Never fails the spawn: the session
+        // is already running, and an error here would invite a retry that starts a second leader.
         if (r.ok && r.id && req.handoff && req.parentSessionId) {
-          const { readRegistry } = await import('./sessions/registry')
-          const reg = await readRegistry()
-          const parent = handoffParent ?? reg.find(m => m.id === req.parentSessionId)
-          const child = reg.find(m => m.id === r.id) ?? { id: r.id }
-          if (parent) {
-            const { fileHandoffInParentGroup } = await import('./sessions/handoff-group')
-            const { updatePreferences } = await import('./preferences')
-            await fileHandoffInParentGroup(parent, child, updatePreferences)
-          }
+          try {
+            const { readRegistry } = await import('./sessions/registry')
+            const reg = await readRegistry()
+            const parent = handoffParent ?? reg.find(m => m.id === req.parentSessionId)
+            const child = reg.find(m => m.id === r.id) ?? { id: r.id }
+            if (parent) {
+              const { fileHandoffInParentGroup } = await import('./sessions/handoff-group')
+              const { updatePreferences } = await import('./preferences')
+              await fileHandoffInParentGroup(parent, child, updatePreferences)
+            }
+          } catch { /* a folder is a convenience, not the spawn */ }
         }
         return r
       })
