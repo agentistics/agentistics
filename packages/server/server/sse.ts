@@ -1,4 +1,5 @@
 import { cacheKind, etagMatches, etagOf, staticCacheControl } from './static-cache'
+import { noteCodexRollout } from './plan-limits'
 import { join } from 'path'
 import { spawn } from 'child_process'
 import { watch as fsWatch, statSync } from 'fs'
@@ -150,6 +151,7 @@ function onSourceChange(path: string | undefined, isWrite: boolean): void {
   if (typeof path === 'string') {
     const harness = harnessOfPath(path, HARNESS_SESSION_DIRS)
     if (harness) noteTranscriptActivity(harness)
+    if (harness === 'codex') noteCodexRollout(path)
   }
   triggerSseNotification()
 }
@@ -350,4 +352,14 @@ export function serveStatic(pathname: string, ifNoneMatch?: string | null): Resp
     if (etagMatches(ifNoneMatch, etag)) return new Response(null, { status: 304, headers })
   }
   return new Response(body, { status: 200, headers })
+}
+
+/** A plan-limits record changed: an EMPTY signal on the shared stream — the browser refetches the
+ *  scoped `GET /api/plan-limits`, so nothing per-account travels to every listener. */
+export function broadcastPlanLimitsChanged(): void {
+  if (sseClients.size === 0) return
+  const payload = sseEncoder.encode('event: plan-limits\ndata: {}\n\n')
+  for (const ctrl of [...sseClients]) {
+    try { ctrl.enqueue(payload) } catch { sseClients.delete(ctrl) }
+  }
 }

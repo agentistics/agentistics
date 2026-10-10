@@ -298,8 +298,11 @@ const NUDGE_FOLLOWUP_MS = 450
  * keystroke, and this file does not guess.
  */
 export function nudgeFleet(): void {
+  // A healthy event stream already pushes the change (the server re-polls after an act): a FULL
+  // `/api/fleet` here was two whole-fleet reads per click for nothing (PERF.SLOW).
+  if (fleetStream?.healthy()) return
   void pollOnce()
-  setTimeout(() => { void pollOnce() }, NUDGE_FOLLOWUP_MS)
+  setTimeout(() => { if (!fleetStream?.healthy()) void pollOnce() }, NUDGE_FOLLOWUP_MS)
 }
 
 export function setFleetSourceCentral(on: boolean): void {
@@ -416,6 +419,9 @@ async function pollOnce(): Promise<void> {
   }
 }
 
+/** How long a freshly opened event stream gets to deliver its snapshot before the full poll stands in. */
+const STREAM_GRACE_MS = 1500
+
 let fleetStream: ReturnType<typeof followFleet> | null = null
 let fleetStreamUrl = ''
 let nextStreamTry = 0
@@ -463,7 +469,10 @@ function ensurePolling(lang: 'pt' | 'en'): void {
     fleetEpoch++
     pollLang = lang
     openFleetStream()
-    void pollOnce()
+    // The stream's own snapshot answers in the new language; the full poll is only the fallback for
+    // a stream that has not come up (a central, an old host) — PERF.SLOW.
+    if (pollCentral) void pollOnce()
+    else setTimeout(() => { if (!fleetStream?.healthy()) void pollOnce() }, STREAM_GRACE_MS)
   }
   if (timer !== null) return
   openFleetStream()

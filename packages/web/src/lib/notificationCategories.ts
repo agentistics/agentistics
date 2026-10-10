@@ -8,7 +8,7 @@
  * they have their own master switch and per-kind switches (`NotificationSettings.enabled`/`events`).
  */
 
-export type NotificationCategory = 'updates' | 'idle' | 'tasks' | 'backup' | 'team' | 'accounts' | 'hardware'
+export type NotificationCategory = 'updates' | 'idle' | 'tasks' | 'backup' | 'team' | 'accounts' | 'hardware' | 'limits'
 
 export interface CategoryInfo { id: NotificationCategory; pt: string; en: string; hintPt: string; hintEn: string }
 
@@ -17,12 +17,13 @@ export const NOTIFICATION_CATEGORIES: readonly CategoryInfo[] = [
   { id: 'idle', pt: 'Sessões paradas', en: 'Idle sessions', hintPt: 'Sugestões de encerrar sessões paradas há muito tempo.', hintEn: 'Suggestions to end sessions idle for a long time.' },
   { id: 'tasks', pt: 'Agentask', en: 'Agentask', hintPt: 'Avisos do Agentask, como um arquivamento bloqueado.', hintEn: 'Notices from Agentask, such as a blocked filing.' },
   { id: 'backup', pt: 'Backup', en: 'Backup', hintPt: 'Quando um backup começa, termina ou falha.', hintEn: 'When a backup starts, finishes or fails.' },
+  { id: 'limits', pt: 'Limites do plano', en: 'Plan limits', hintPt: 'Quando uma janela do plano (5 h ou semana) passa de 75%, 85%, 95% e 100%.', hintEn: 'When a plan window (5 hours or week) crosses 75%, 85%, 95% and 100%.' },
   { id: 'hardware', pt: 'Memória da máquina', en: 'Machine memory', hintPt: 'Quando a máquina está ficando sem memória.', hintEn: 'When the machine is running low on memory.' },
 ]
 
 const PREFIX: ReadonlyArray<[string, NotificationCategory]> = [
   ['app.', 'updates'], ['sessions.', 'idle'], ['tasks.', 'tasks'], ['backup.', 'backup'],
-  ['member.', 'team'], ['central.', 'team'], ['machine.', 'team'], ['iam.', 'accounts'], ['hardware.', 'hardware'],
+  ['member.', 'team'], ['central.', 'team'], ['machine.', 'team'], ['iam.', 'accounts'], ['hardware.', 'hardware'], ['limits.', 'limits'],
 ]
 
 /** The category a notification code belongs to, or null when none claims it (then it is never muted). */

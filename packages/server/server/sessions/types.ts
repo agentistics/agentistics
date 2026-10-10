@@ -520,6 +520,12 @@ export interface SessionBackend {
   /** Newest-last lines of the last rendered frame, trailing blanks removed. */
   capture(id: string, lines: number): Promise<string[]>
   /**
+   * OPTIONAL: `capture` for several sessions at once, one frame per id (PERF.SLOW). A backend whose
+   * capture costs a process per pane (tmux) answers the whole fleet poll with one; an absent method
+   * means the poll captures pane by pane, exactly as before.
+   */
+  captureMany?(ids: string[], lines: number): Promise<Map<string, string[]>>
+  /**
    * An ANSI-PRESERVING read of the pane — its rendered lines with colour/attribute escapes intact,
    * plus the geometry and cursor beside them — for the browser terminal channel.
    *

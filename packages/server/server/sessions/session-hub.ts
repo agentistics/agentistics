@@ -32,6 +32,13 @@ export interface SessionHubOptions {
   poll(): Promise<SessionSnapshot>
   /** The tick interval while there is demand. */
   intervalMs: number
+  /**
+   * PERF.SLOW: the interval when the ONLY demand is a BACKGROUND subscriber (the event producer — nobody
+   * is looking) and `busy` says nothing in the last snapshot is moving. Absent: always `intervalMs`.
+   */
+  idleIntervalMs?: number
+  /** Is something in this snapshot in flight (a turn running)? Its transitions are what notify. */
+  busy?: (snap: SessionSnapshot) => boolean
   /** How long one `read()` keeps the hub ticking with no subscriber. Default 30 s. */
   leaseMs?: number
   /**
@@ -63,8 +70,12 @@ export interface SessionHub {
   read(opts?: { maxAgeMs?: number }): Promise<SessionSnapshot>
   /** A poll that starts AFTER this call — for a caller that just changed the fleet. */
   refresh(): Promise<SessionSnapshot>
-  /** Every completed poll, and DEMAND: while held, the hub ticks. */
-  subscribe(cb: (snap: SessionSnapshot) => void): () => void
+  /**
+   * Every completed poll, and DEMAND: while held, the hub ticks. `background`: demand that nobody is
+   * LOOKING at (the event producer) — it keeps the hub ticking, at `idleIntervalMs` while the fleet is
+   * still (see the option).
+   */
+  subscribe(cb: (snap: SessionSnapshot) => void, opts?: { background?: boolean }): () => void
   /** Every completed poll, WITHOUT demand (a passive observer such as the engine's fleet view). */
   observe(cb: (snap: SessionSnapshot) => void): () => void
   stats(): SessionHubStats
@@ -84,6 +95,8 @@ export function createSessionHub(o: SessionHubOptions): SessionHub {
   const idleMaxAgeMs = o.idleMaxAgeMs ?? DEFAULT_IDLE_MAX_AGE_MS
 
   const subs = new Set<(snap: SessionSnapshot) => void>()
+  /** The subset of `subs` nobody is looking at. */
+  const background = new Set<(snap: SessionSnapshot) => void>()
   const observers = new Set<(snap: SessionSnapshot) => void>()
   let last: SessionSnapshot | null = null
   /** When `last` was taken, by the hub's clock (the snapshot's own `polledAtMs` is the poller's). */
@@ -106,12 +119,23 @@ export function createSessionHub(o: SessionHubOptions): SessionHub {
     }
   }
 
+  /** Somebody is looking: a foreground subscriber, or a reader inside its lease. */
+  const watched = (): boolean => subs.size > background.size || now() < leaseUntil
+  function interval(): number {
+    if (o.idleIntervalMs === undefined || watched()) return o.intervalMs
+    // A turn in flight is where the transitions the producer reports happen (working -> waiting,
+    // a permission prompt): those keep the full rate. A fleet where nothing moves only has to notice
+    // that something STARTED moving — a person typed, a session died — and that can wait longer.
+    if (!last || last.unavailable || (o.busy?.(last) ?? true)) return o.intervalMs
+    return Math.max(o.intervalMs, o.idleIntervalMs)
+  }
+
   function schedule(): void {
     if (timer !== null) { clearTimer(timer); timer = null }
     if (!demand()) return
     // From the START of the last poll, so a refresh between ticks does not stretch the cadence and two
     // polls never land closer than one interval apart on their own.
-    const due = Math.max(0, inflightStartedAt + o.intervalMs - now())
+    const due = Math.max(0, inflightStartedAt + interval() - now())
     timer = setTimer(() => {
       timer = null
       if (!demand()) return
@@ -151,7 +175,11 @@ export function createSessionHub(o: SessionHubOptions): SessionHub {
     read(opts) {
       // A tick in flight leaves no timer armed, so "is the hub ticking" is the demand BEFORE this read.
       const ticks = ticking() || (inflight !== null && demand())
+      const wasWatched = watched()
       leaseUntil = Math.max(leaseUntil, now() + leaseMs)
+      // A reader arriving while the hub idles slowly brings it back to the full rate now, not after the
+      // slow tick it would otherwise wait out.
+      if (!wasWatched && timer !== null && !inflight) schedule()
       // A fresh enough snapshot answers AT ONCE, even while a poll is in flight: a reader joining that
       // poll waited out its whole duration (seconds, on a busy machine) to learn what the last tick
       // already said. Only a reader with nothing fresh joins it (F1.2b).
@@ -176,11 +204,15 @@ export function createSessionHub(o: SessionHubOptions): SessionHub {
       return queued
     },
 
-    subscribe(cb) {
+    subscribe(cb, opts) {
+      const wasWatched = watched()
       subs.add(cb)
+      if (opts?.background) background.add(cb)
+      if (!wasWatched && watched() && timer !== null && !inflight) schedule()
       ensureTicking()
       return () => {
         subs.delete(cb)
+        background.delete(cb)
         if (!demand() && timer !== null) { clearTimer(timer); timer = null }
       }
     },
@@ -196,6 +228,7 @@ export function createSessionHub(o: SessionHubOptions): SessionHub {
       stopped = true
       if (timer !== null) { clearTimer(timer); timer = null }
       subs.clear()
+      background.clear()
       observers.clear()
     },
   }
