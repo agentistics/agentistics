@@ -172,3 +172,10 @@ describe('listGroups', () => {
     ])
   })
 })
+
+test('delete with cascade removes the sub-folders too', async () => {
+  const { planGroupOp } = await import('@agentistics/core')
+  const g = { groups: [{ id: 'p', name: 'P', keys: [] }, { id: 'c', name: 'C', keys: [], parentId: 'p' }] } as never
+  const r = planGroupOp(g, [], { type: 'delete', group: 'P', cascade: true })
+  expect(r.ok && r.groups.groups).toEqual([])
+})

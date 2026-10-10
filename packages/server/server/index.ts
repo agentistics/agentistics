@@ -2000,7 +2000,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname.startsWith('/api/session-groups/') && req.method === 'POST') {
       const rest = url.pathname.slice('/api/session-groups/'.length).split('/')
       const group = decodeURIComponent(rest[0] ?? '')
-      const body = await req.json().catch(() => ({})) as { name?: string; session?: string; parent?: string | null }
+      const body = await req.json().catch(() => ({})) as { name?: string; session?: string; parent?: string | null; cascade?: boolean }
       const { groupOp, groupStatus } = await import('./sessions/session-groups-web')
       // `/:group/sessions` files a session into the group; `/:group/parent` nests it (or, with
       // `parent: null`, moves it back to the top level — "Tirar da pasta"); `/:group` renames it.
@@ -2014,7 +2014,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname.startsWith('/api/session-groups/') && req.method === 'DELETE') {
       const group = decodeURIComponent(url.pathname.slice('/api/session-groups/'.length))
       const { groupOp, groupStatus } = await import('./sessions/session-groups-web')
-      const out = await groupOp({ op: 'delete', group })
+      const out = await groupOp({ op: 'delete', group, ...(url.searchParams.get('cascade') === '1' ? { cascade: true } : {}) })
       return json(out, groupStatus(out))
     }
 

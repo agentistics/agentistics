@@ -482,6 +482,7 @@ export function SessionsAside({
   const [renamingGroup, setRenamingGroup] = useState<{ id: string } | null>(null)
   const [renameGroupDraft, setRenameGroupDraft] = useState('')
   const [deletingGroup, setDeletingGroup] = useState<SessionUserGroup | null>(null)
+  const childCount = deletingGroup ? getSessionGroups().groups.filter(g => g.parentId === deletingGroup.id).length : 0
   /** The "⋮" menu on a group's own heading (rename/delete) — reuses `SessionRowMenu`. */
   const [groupMenu, setGroupMenu] = useState<{ id: string; x: number; y: number } | null>(null)
   // Groups whose name is hidden on THIS screen — see `lib/groupNameMask.ts`.
@@ -2246,13 +2247,11 @@ export function SessionsAside({
       <ConfirmModal
         open={deletingGroup !== null}
         title={pt ? 'Excluir grupo' : 'Delete group'}
-        message={pt
-          ? `Excluir o grupo "${deletingGroup ? displayName(deletingGroup.name, hiddenGroups.has(deletingGroup.id)) : ''}"? As sessões não são apagadas, só saem do grupo.`
-          : `Delete the group "${deletingGroup ? displayName(deletingGroup.name, hiddenGroups.has(deletingGroup.id)) : ''}"? Sessions are not deleted, they only leave the group.`}
+        message={deletingGroup ? deleteGroupMessage(pt, displayName(deletingGroup.name, hiddenGroups.has(deletingGroup.id)), childCount) : ''}
         confirmLabel={pt ? 'Excluir' : 'Delete'}
         cancelLabel={pt ? 'Cancelar' : 'Cancel'}
         onConfirm={() => {
-          if (deletingGroup) deleteSessionGroup(deletingGroup.id)
+          if (deletingGroup) deleteSessionGroup(deletingGroup.id, childCount > 0)
           setDeletingGroup(null)
         }}
         onCancel={() => setDeletingGroup(null)}
@@ -2618,4 +2617,16 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
       )}
     </button>
   )
+}
+
+/** The confirmation text for deleting a folder — a folder with sub-folders asks about them too. */
+function deleteGroupMessage(pt: boolean, name: string, children: number): string {
+  if (children > 0) {
+    return pt
+      ? `Apagar a pasta "${name}" e também as ${children} subpastas? As sessões não são apagadas, só voltam para "sem pasta".`
+      : `Delete the folder "${name}" and also its ${children} sub-folders? Sessions are not deleted, they go back to "no folder".`
+  }
+  return pt
+    ? `Excluir o grupo "${name}"? As sessões não são apagadas, só saem do grupo.`
+    : `Delete the group "${name}"? Sessions are not deleted, they only leave the group.`
 }
