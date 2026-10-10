@@ -21,6 +21,7 @@
  * whatever Claude decided to call itself). Everything else on that step has a defensible unset
  * state the CLI resolves; a session nobody can pick out of a list of forty does not.
  */
+import { isCanonicalMode, type CanonicalMode } from '@agentistics/core'
 
 export type StepId = 'assistant' | 'where' | 'message' | 'review'
 
@@ -42,6 +43,8 @@ export interface WizardHarness {
   /** What the CLI itself publishes as its default, where it publishes one. See `unsetAnswer`. */
   defaultModel?: string
   defaultEffort?: string
+  /** MODE.EVERYWHERE — the permission modes a session of it can start in here (default included). */
+  modes?: CanonicalMode[]
 }
 
 export interface WizardDraft {
@@ -72,9 +75,11 @@ export interface StepState {
   missing?: MissingAnswer
 }
 
-export function visibleQuestions(harness: WizardHarness | null): { model: boolean; effort: boolean } {
-  if (!harness) return { model: false, effort: false }
+export function visibleQuestions(harness: WizardHarness | null): { model: boolean; effort: boolean; mode: boolean } {
+  if (!harness) return { model: false, effort: false, mode: false }
   return {
+    // MODE.EVERYWHERE — asked whenever there is a choice to make (more than the harness's default).
+    mode: (harness.modes?.length ?? 0) > 1,
     // A harness that names no model is still asked when a typed id is accepted — otherwise the
     // CLI's `--model` would be unreachable from the wizard for every harness with no list.
     model: harness.supportsModel && (harness.models.length > 0 || harness.modelFreeText === true),
@@ -172,6 +177,8 @@ export interface HarnessAnswer {
   defaultModel?: string
   defaultEffort?: string
   installed?: boolean
+  /** MODE.EVERYWHERE — absent from an older server: the field is then not asked. */
+  modes?: string[]
 }
 
 /**
@@ -195,6 +202,7 @@ export function toWizardHarness(h: HarnessAnswer): WizardHarness {
     efforts: h.efforts,
     ...(h.defaultModel ? { defaultModel: h.defaultModel } : {}),
     ...(h.defaultEffort ? { defaultEffort: h.defaultEffort } : {}),
+    ...(h.modes && h.modes.filter(isCanonicalMode).length > 1 ? { modes: h.modes.filter(isCanonicalMode) } : {}),
   }
 }
 

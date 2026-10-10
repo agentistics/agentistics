@@ -43,6 +43,7 @@ import { AttentionMarkLine, RecordedBlock } from './AttentionMarks'
 import { placeAttention, type ChatAttentionMark, type ChatRecorded } from '../../lib/sessionRecorded'
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
 import { modeStyle } from '../../lib/modeStyle'
+import { NoQuestionsWarning } from './ModePicker'
 import { modeCycles, modeMenuFor, modeMenuPlacement, type MenuPlacement } from '../../lib/modeMenu'
 import { ApprovalCard } from './ApprovalCard'
 import { TypedModel } from './ModelSelect'
@@ -3583,7 +3584,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     className="ag-tap-icon"
                     onClick={() => {
                       const rect = modeButtonRef.current?.getBoundingClientRect()
-                      if (rect) setModeMenuPos(modeMenuPlacement(rect, window.innerWidth, window.innerHeight))
+                      // Wider and taller when a menu carries the "no questions" warning.
+                      const warns = modeOptions.some(m => 'canonical' in m && m.canonical === 'no-questions')
+                      if (rect) setModeMenuPos(modeMenuPlacement(rect, window.innerWidth, window.innerHeight, warns ? 270 : 190, warns ? 320 : 220))
                       setModeMenuOpen(value => !value)
                     }}
                     disabled={!canPrompt}
@@ -3599,9 +3602,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                       // session proceeds without asking, and never the fault colour: `auto` is how
                       // this product is normally used, and a red ordinary state is the cry-wolf
                       // this codebase avoids everywhere else.
-                      border: `1px solid ${modeStyle(row.mode.id).border}`,
-                      background: modeStyle(row.mode.id).bg,
-                      color: modeStyle(row.mode.id).fg,
+                      border: `1px solid ${modeStyle(row.mode).border}`,
+                      background: modeStyle(row.mode).bg,
+                      color: modeStyle(row.mode).fg,
                       fontFamily: 'inherit', fontSize: 11.5,
                       cursor: canPrompt ? 'pointer' : 'default',
                       opacity: canPrompt ? 1 : 0.55,
@@ -3627,7 +3630,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                   >
                     {modeOptions.map(option => {
                       const current = option.id === row.mode?.id
-                      const style = modeStyle(option.id)
+                      const style = modeStyle(option)
+                      const unattended = 'canonical' in option && option.canonical === 'no-questions'
                       return (
                         <button
                           key={option.id}
@@ -3646,7 +3650,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                             width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
                             background: style.fg,
                           }} />
-                          <span style={{ flex: 1 }}>{option.label}</span>
+                          <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                            {option.label}
+                            {/* MODE.EVERYWHERE — "no questions" says what it means before it is picked. */}
+                            {unattended && !current && <NoQuestionsWarning lang={pt ? 'pt' : 'en'} compact />}
+                          </span>
                           {current && <span aria-hidden style={{ color: style.fg }}>✓</span>}
                         </button>
                       )
