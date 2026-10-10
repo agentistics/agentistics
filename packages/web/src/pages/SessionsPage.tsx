@@ -38,10 +38,11 @@ import {
   bottomPanels, hiddenPanels, isPanelShown, isTabPanelId, mountPanel, overlayOutsideAction,
   railPanels, resolveForGates, resolveForViewport, usePanelSlots,
   type OpenPlacement, type PanelGates, type PanelId, type TabPanelId,
+  unpinPanel,
 } from '../lib/panelSlots'
 import { panelIconFor } from '../lib/panelIcons'
 import {
-  dockPanel, floatPanel, minimizeFloatingPanel, placePanel, raisePanel, setFloatingArea, setFloatingSession,
+  floatPanel, minimizeFloatingPanel, placePanel, raisePanel, setFloatingArea, setFloatingSession,
   useFloatingPanels,
 } from '../lib/floatingPanels'
 import { FloatingPanelLayer } from '../components/sessions/FloatingPanelLayer'
@@ -1731,7 +1732,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    * Studio switched off, a relayed session with no terminal) draws no window — the same read-time
    * rule `resolveForGates` applies to the docked slots.
    */
-  const dockBack = (id: PanelId) => { dockPanel(id); openSlotPanel(id) }
+  const dockBack = (id: PanelId) => { unpinPanel(id) }
   /** THE FLOATING WINDOW'S OWN CONTROLS (owner, 2026-09-29): minimize (the window goes back into
    *  the bottom band's tab strip, keeping where and how big it was) and — only where the item is
    *  really closable (`panelClosable`: the Shell) and there is a shell to end — the X beside it. The
