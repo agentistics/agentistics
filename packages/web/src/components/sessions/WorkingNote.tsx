@@ -27,9 +27,15 @@ export interface WorkingNoteProps {
    * have them win. `percent` is `null` when the frame shows the caption but not yet a number.
    */
   compacting?: { percent: number | null } | null
+  /**
+   * The assistant is FORMULATING a question — its question tool has started streaming and the card is
+   * on its way (`structured-composing.ts`). Outranks `tools`/`thinking` (those are the previous turn's);
+   * compaction still outranks it.
+   */
+  composing?: 'question' | null
 }
 
-export function WorkingNote({ lang, tools, thinking, compacting }: WorkingNoteProps) {
+export function WorkingNote({ lang, tools, thinking, compacting, composing }: WorkingNoteProps) {
   const pt = lang === 'pt'
   const names = (tools ?? []).map(t => t.name)
 
@@ -37,6 +43,8 @@ export function WorkingNote({ lang, tools, thinking, compacting }: WorkingNotePr
     ? (compacting.percent === null
         ? (pt ? 'compactando a conversa' : 'compacting the conversation')
         : (pt ? `compactando a conversa · ${compacting.percent}%` : `compacting the conversation · ${compacting.percent}%`))
+    : composing === 'question'
+    ? (pt ? 'formulando perguntas…' : 'formulating questions…')
     : names.length > 0
     // Named, but only up to two: a turn can invoke eight tools and the line is not a manifest.
     ? (names.length <= 2
@@ -64,7 +72,7 @@ export function WorkingNote({ lang, tools, thinking, compacting }: WorkingNotePr
           a command is routinely longer than the pane and this is a status, not content. Withheld
           while compacting: `tools` here is still the PREVIOUS turn's, and a stale command sitting
           next to "compacting the conversation" reads as something happening right now. */}
-      {!compacting && tools?.[0]?.detail && (
+      {!compacting && !composing && tools?.[0]?.detail && (
         <code style={{
           minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           fontFamily: "'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace",

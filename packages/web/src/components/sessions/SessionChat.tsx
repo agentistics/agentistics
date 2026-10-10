@@ -146,6 +146,8 @@ interface ChatPayload {
   liveText?: string
   liveReasoning?: string
   working?: boolean
+  /** ADAPTER.ESSENTIALS-B: a question card is being formulated (the structured stream says so). */
+  composing?: 'question' | null
   turns: ChatTurn[]
   unavailable?: string
   /** Already-localized: why the conversation link is slower on this OS (off Linux, codex/kimi). */
@@ -1292,6 +1294,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const working = source ? source.working : adapter && payload.working !== undefined ? payload.working : session.state === 'working'
   const structuredText = source?.liveText ?? (adapter ? payload.liveText : undefined)
   const structuredReasoning = source?.liveReasoning ?? (adapter ? payload.liveReasoning : undefined)
+  const composing = adapter ? payload.composing ?? null : null
   // No screen behind a source: the stream is never opened (a null id is the hook's "off").
   const { state: term } = useTerminalStream(source || adapter || payload === null ? null : session.id)
 
@@ -2563,6 +2566,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               {...(source?.runningTools?.length ? { tools: source.runningTools } : newestAssistant?.tools ? { tools: newestAssistant.tools } : {})}
               thinking={Boolean(newestAssistant?.thinking)}
               {...(compacting ? { compacting } : {})}
+              {...(composing ? { composing } : {})}
             />
           )}
 

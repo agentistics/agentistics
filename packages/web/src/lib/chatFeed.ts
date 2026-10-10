@@ -285,7 +285,7 @@ function openStream(e: LiveEntry, now: number): void {
       accept(e, JSON.stringify({ ...d.meta, turns }))
     } catch { closeStream(e) }
   })
-  for (const kind of ['live', 'state'] as const) es.addEventListener(kind, ev => {
+  for (const kind of ['live', 'state', 'composing'] as const) es.addEventListener(kind, ev => {
     e.streamAt = Date.now()
     try {
       const held = sessionScratch.readChat(e.key)
@@ -320,11 +320,14 @@ async function read(e: LiveEntry): Promise<void> {
 }
 
 /** PURE: structured text replaces the previous partial; a completed turn retires it. */
-export function applyChatSignal(held: CachedChat, kind: 'live' | 'state', signal: { text?: string; reasoning?: string; working?: boolean }): CachedChat {
+export function applyChatSignal(held: CachedChat, kind: 'live' | 'state' | 'composing', signal: { text?: string; reasoning?: string; working?: boolean; what?: unknown }): CachedChat {
   if (kind === 'live' && (typeof signal.text !== 'string' || (signal.reasoning !== undefined && typeof signal.reasoning !== 'string'))) throw new Error('Invalid live chat frame')
   if (kind === 'state' && typeof signal.working !== 'boolean') throw new Error('Invalid chat state')
+  if (kind === 'composing' && signal.what !== null && signal.what !== 'question') throw new Error('Invalid composing frame')
   if (kind === 'live') return { ...held, source: 'adapter', liveText: signal.text ?? '', liveReasoning: signal.reasoning ?? '' }
-  return { ...held, source: 'adapter', working: signal.working, ...(signal.working === false ? { liveText: '', liveReasoning: '' } : {}) }
+  // What the assistant is FORMULATING (a question card on its way) — until the card or the turn's end.
+  if (kind === 'composing') return { ...held, source: 'adapter', composing: signal.what as 'question' | null }
+  return { ...held, source: 'adapter', working: signal.working, ...(signal.working === false ? { liveText: '', liveReasoning: '', ...(held.composing ? { composing: null } : {}) } : {}) }
 }
 
 /** One answer, from a read or from the stream: the same bytes keep the same instance. */

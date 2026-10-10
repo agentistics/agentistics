@@ -21,6 +21,7 @@ import { finishChatRead, MAX_TURNS } from './chat-web'
 import { acquireChatSlot, onChatWake, releaseChatSlot } from './chat-stream'
 import { pendingFor } from './pending-prompts'
 import { fleetSessionHub } from './fleet-web'
+import { composingOf, onComposing } from './structured-composing'
 
 /** The engine's chat channel for a harness, or `undefined` (no engine, or a declared absence). */
 function chatOf(harness: string): HarnessChat | undefined {
@@ -70,7 +71,8 @@ export async function openAdapterChatStream(
   const hub = await fleetSessionHub().catch(() => null)
   if (!hub) return null
   const row = await findRow(hub, lang, id).catch(() => null)
-  const picked = (row ? await structuredChatOf(id) : undefined) ?? pickAdapterChat(row ?? undefined, true, chatOf)
+  const structured = row ? await structuredChatOf(id) : undefined
+  const picked = structured ?? pickAdapterChat(row ?? undefined, true, chatOf)
   if (!row || !picked) return null
   if (!acquireChatSlot()) return null
   const { chat, conversationId } = picked
@@ -85,6 +87,8 @@ export async function openAdapterChatStream(
     finish: (read, live) => finishChatRead(id, conversationId, read, live, lang, row.id),
     onFleetTick: cb => hub.subscribe(() => cb()),
     onWake: cb => onChatWake(id, cb),
+    // Only a structured session's raw stream can say it (the file channel learns a block when it is FINISHED).
+    ...(structured ? { composing: { now: () => composingOf(id), on: (cb: (c: 'question' | null) => void) => onComposing(id, cb) } } : {}),
   }, signal, failed => {
     releaseChatSlot()
     if (failed) refuseAdapter(harness, conversationId)
