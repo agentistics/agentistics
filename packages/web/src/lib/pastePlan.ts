@@ -18,10 +18,10 @@
  * Above this many characters, pasted text is attached instead of typed.
  *
  * Chosen against what the transport is: `sendKeysLiteralArgs` types the string into a pane. A few
- * thousand characters is a long message; twelve thousand is a file. Erring high — an attachment the
+ * thousand characters is a long message; five thousand (owner, 2026-10-10: a 7.000-character paste must chip) is a file. Erring high — an attachment the
  * user meant as a message is a worse surprise than a slow paste.
  */
-export const PASTE_TEXT_LIMIT = 12_000
+export const PASTE_TEXT_LIMIT = 5_000
 
 /** Or this many lines. A short-lined paste of 300 rows is a log, whatever its character count. */
 export const PASTE_LINE_LIMIT = 200

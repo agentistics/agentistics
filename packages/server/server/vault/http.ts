@@ -18,6 +18,7 @@ import * as gate from './gate'
 import { readVaultView, lockVaultNow } from './inventory'
 import { FRESH_BINDING, extendAutoLock, noteVaultActivity, unlockWithGesture, vaultLang, vaultStatus } from './service'
 import { isLoopbackAddress } from '../native-bind'
+import { opInit } from './ops'
 import { uiReply } from './ui-sentence'
 import { handlePersonalHttp } from './personal-http'
 import { handlePhoneHttp } from './phone-http'
@@ -158,6 +159,21 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     const b = await body()
     const r = await lockVaultNow({ grant, session, code: codeOf(b) })
     return send(r.ok ? { ok: true, vault: await readVaultView([], async () => [], session, loopback) } : { error: r.error, code: r.code, sentence: r.error }, r.ok ? 200 : statusOf(r.code), noStore)
+  }
+  if (path === '/api/vault/init' && req.method === 'POST') {
+    // Create the vault from the page: the very code path `agentop vault init` takes (`opInit`), with
+    // the same auth rules — creating needs no proof (there is nothing to protect yet) but, like an
+    // unlock, only a page on THIS computer may do it. `passphrase` is for a machine with no keychain.
+    if (!loopback) {
+      await req.body?.cancel().catch(() => {})
+      return reply({ ok: false, code: 'init-not-here', sentence: vaultLang() === 'pt'
+        ? 'O cofre só pode ser criado a partir do painel aberto no próprio computador.'
+        : 'The vault can only be created from the dashboard open on this computer itself.' })
+    }
+    const b = await body()
+    if (b.passphrase !== undefined && !str(b.passphrase, 1024)) return bad()
+    const r = await opInit(typeof b.passphrase === 'string' ? { passphrase: b.passphrase } : {})
+    return reply(r.reply as { ok: boolean } & Record<string, unknown>)
   }
   if (path === '/api/vault/unlock' && req.method === 'POST') {
     // Raises the gesture IN THE SERVICE; the code follows on /unlock/code (§2.2). VAULT.PERSONAL §10:

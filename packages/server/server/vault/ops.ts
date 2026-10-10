@@ -324,7 +324,7 @@ async function opCentralEnvWrite(ctx: OpContext): Promise<OpResult> {
 
 const ADMIN_PROTECTORS: ProtectorId[] = ['keychain', 'dpapi', 'libsecret', 'systemd-creds', 'passphrase']
 
-async function opInit(h: Record<string, unknown>): Promise<OpResult> {
+export async function opInit(h: Record<string, unknown>): Promise<OpResult> {
   const asked = h.protector
   if (asked !== undefined && !ADMIN_PROTECTORS.includes(asked as ProtectorId)) return bad()
   if (h.passphrase !== undefined && !str(h.passphrase, 1024)) return bad()
