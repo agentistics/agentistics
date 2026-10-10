@@ -4422,9 +4422,20 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.origin ? { origin: req.origin } : {}),
       }, S(), lang).then(async r => {
         // NW-02: a session started for a BOARD task is filed there by id, not only named after it.
-        if (r.ok && r.id && req.taskId) {
-          const { attachSession } = await import('./sessions/task-web')
-          await attachSession(req.taskId, r.id).catch(() => null)
+        if (r.ok && r.id) {
+          let taskId = req.taskId
+          let subtaskId = req.subtaskId
+          // Leader hand-off: no filing of its own → take the parent's.
+          if (!taskId && req.handoff && req.parentSessionId) {
+            const { readRegistry } = await import('./sessions/registry')
+            const parent = (await readRegistry()).find(m => m.id === req.parentSessionId)
+            taskId = parent?.taskId
+            subtaskId = parent?.subtaskId
+          }
+          if (taskId) {
+            const { attachSession } = await import('./sessions/task-web')
+            await attachSession(taskId, r.id, subtaskId ? { subtaskId } : {}).catch(() => null)
+          }
         }
         return r
       })

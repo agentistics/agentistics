@@ -272,3 +272,27 @@ test('a patch that never touches status does not trigger the nudge, even for a s
     result: { ok: true }, taskStatus: 'todo', taskUpdatedAt: '2026-09-19T10:00:00.000Z',
   })
 })
+
+// --- board lifecycle: filing a session on a subtask starts it; handback reviews it ------------
+
+test('attachSession on a todo subtask moves it to in_progress; done / in_review stay put', async () => {
+  const out = await run(`
+    ${task('t1')}
+    ${subtask('s1', 't1')}
+    ${subtask('s2', 't1', "status: 'done', done: true,")}
+    ${subtask('s3', 't1', "status: 'in_review',")}
+    ${session('a')}${session('b')}${session('c')}
+    await web.attachSession('t1', 'a', { subtaskId: 's1' })
+    await web.attachSession('t1', 'b', { subtaskId: 's2' })
+    await web.attachSession('t1', 'c', { subtaskId: 's3' })
+    const after = await store.read()
+    console.log(JSON.stringify(Object.fromEntries(after.subtasks.map(s => [s.id, s.status]))))
+  `)
+  expect(out).toEqual({ s1: 'in_progress', s2: 'done', s3: 'in_review' })
+})
+
+test('statusAfterHandback: only in_progress → in_review', async () => {
+  const { statusAfterHandback } = await import('./task-model')
+  expect(statusAfterHandback('in_progress')).toBe('in_review')
+  for (const s of ['todo', 'backlog', 'done', 'blocked', 'in_review']) expect(statusAfterHandback(s)).toBeNull()
+})
