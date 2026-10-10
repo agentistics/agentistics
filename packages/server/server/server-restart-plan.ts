@@ -17,6 +17,8 @@
  *    and cannot know whose it is.
  *  - only with no unit at all is a detached handover allowed, and only of processes whose argv IS
  *    `agentop server` — never a pattern over the whole command line.
+ *  - in every case a server counts only when it holds THIS data dir's lock: other `agentop server`
+ *    processes (a worker's throwaway preview, its own data dir and port) are none of our business.
  */
 
 /** One process as `/proc` reports it. */
@@ -74,11 +76,25 @@ export function planServerRestart(o: {
   unitActive: boolean | null
   procs: readonly ServerProc[]
   selfPid: number
+  /**
+   * The pid holding THIS data dir's instance lock (`probeInstanceLock(serverLockFile())`), `null`
+   * when nobody does. A server is this machine's only when it holds that lock: an argv of
+   * `agentop server` is shared by every throwaway preview a worker runs in its own data dir.
+   */
+  lockHolder: number | null
 }): ServerRestartPlan {
   // The PARENT is deliberately not excluded: the dashboard's "update now" spawns the upgrade from the
   // server itself, and that server is exactly the one to restart.
   const servers = o.procs.filter(p => p.pid !== o.selfPid && isAgentopServerArgv(p.argv))
-  const outside = servers.filter(p => !managedByAgentopUnit(p.cgroup)).map(p => p.pid)
+  // ONLY THE SERVER HOLDING THIS DATA DIR (2026-10-09). Any `agentop server` outside the unit used to
+  // count — a worker's throwaway preview on port 49951 with its own data dir included — and then the
+  // plan was `outside-service`: the upgrade "handed it over" with a `systemctl --user start` on a
+  // unit that was already active (a no-op), never restarted the unit's own server, and every upgrade
+  // from the UI ended in "the update did not finish" while the old version kept answering. With no
+  // unit, the same mistake would have SIGTERMed somebody else's server.
+  const outside = servers
+    .filter(p => !managedByAgentopUnit(p.cgroup) && p.pid === o.lockHolder)
+    .map(p => p.pid)
 
   if (o.unitInstalled) {
     if (outside.length > 0) return { kind: 'outside-service', pids: outside }

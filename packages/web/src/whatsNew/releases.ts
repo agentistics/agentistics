@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.115.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Atualizar pela interface volta a reiniciar o agentistics na versão nova; se o reinício falhar, a tela oferece "Reiniciar agora" em vez de baixar tudo de novo.',
+        en: 'Updating from the app restarts agentistics on the new version again; if the restart fails, the screen offers "Restart now" instead of downloading again.',
+      },
+      {
+        pt: 'A janela flutuante tem o alfinete para desafixar ao lado do minimizar, o nome não aparece duplicado e a aba minimizada voltou ao visual de antes.',
+        en: 'The floating window has the pin to unpin next to minimize, its name is no longer shown twice and the minimized tab looks as it did before.',
+      },
+    ],
+  },
   '2.115.0': {
     features: [
       {
