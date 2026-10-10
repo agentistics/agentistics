@@ -189,6 +189,18 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          one, and a guessed key is a keystroke nobody asked for. The web chip
   │                          colours it through `web/src/lib/modeStyle.ts` on an AUTONOMY gradient,
   │                          and never with the fault colour.
+  │                          **MODE.EVERYWHERE (2026-10-10): a STRUCTURED row states its mode itself**
+  │                          (`SessionBackend.modeOf/modesOf/setMode`, from engine-api 1.10's optional
+  │                          `StructuredSession.modes/mode/setMode`) and the chip SETS one directly
+  │                          (`setMode` verb) — the protocol-stated mode outranks any footer read. Every
+  │                          mode carries the CANONICAL one it means (`@agentistics/core` `sessionMode.ts`:
+  │                          default / accept-edits / plan / no-questions), which drives the colour and the
+  │                          New session "Mode" field. A spawn's mode goes to the TUI through its CLI's own
+  │                          flag (`SpawnSpec.modeArgs`, from each `--help`), runs structured only when the
+  │                          driver lists it in `declares(h).startModes` (agy: `no-questions` only), and a
+  │                          mode neither can carry is REFUSED (`modeNeedsProtocol`), never started in
+  │                          another. The F2.0b relay wrapper (`recordingSession`) must forward every
+  │                          optional member and record `setMode` (replay op), or rows lose their chip.
   │                          **AN OPTION CAN BE FREE TEXT.** `isFreeTextOption` names claude's "Type
   │                          something", and answering it is the digit, then a WAIT FOR THE PANE TO
   │                          MOVE, then the literal text (`sendChoiceText`). Sent as one burst the
