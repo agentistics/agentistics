@@ -25,6 +25,23 @@ function fake(over: Partial<MessageDeps> = {}) {
 
 beforeEach(resetMessageRateLimit)
 
+describe('handback moves the sender\'s subtask', () => {
+  test('handback from a session filed on a subtask calls handbackSubtask', async () => {
+    const moved: string[] = []
+    const f = fake({ senderTask: async () => ({ taskId: 't1', subtaskId: 's1' }), handbackSubtask: async id => { moved.push(id) } })
+    await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'done' }, f.deps)
+    expect(moved).toEqual(['s1'])
+  })
+  test('block / question / no subtask never move it', async () => {
+    const moved: string[] = []
+    const hb = async (id: string) => { moved.push(id) }
+    await sendSessionMessage('child-1', { to: 'parent-1', kind: 'block', body: 'x' }, fake({ senderTask: async () => ({ taskId: 't1', subtaskId: 's1' }), handbackSubtask: hb }).deps)
+    resetMessageRateLimit()
+    await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'x' }, fake({ senderTask: async () => ({ taskId: 't1' }), handbackSubtask: hb }).deps)
+    expect(moved).toEqual([])
+  })
+})
+
 describe('agentistics_session_message', () => {
   test('delivers into the target with the header, through the prompt path', async () => {
     const f = fake()

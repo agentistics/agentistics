@@ -43,6 +43,8 @@ export interface MessageDeps {
   senderTask: (senderId: string) => Promise<SenderTask>
   /** Record the mirror comment on the board. */
   comment: (taskId: string, c: { author: string; body: string; subtaskId?: string; kind?: 'handback' | 'block'; session: string }) => Promise<{ ok: boolean }>
+  /** `handback` from a session filed on a subtask: move that subtask in_progress → in_review. */
+  handbackSubtask?: (subtaskId: string) => Promise<void>
   now: () => number
 }
 
@@ -122,6 +124,7 @@ export async function sendSessionMessage(
       session: senderId,
     }).catch(() => ({ ok: false }))
     mirrored = res.ok
+    if (kind === 'handback' && filed.subtaskId && deps.handbackSubtask) await deps.handbackSubtask(filed.subtaskId).catch(() => {})
   }
   return { ok: true, to: target.id, kind, delivered: true, message: sent.message ?? 'Delivered.', mirrored }
 }
@@ -156,6 +159,14 @@ export async function defaultMessageDeps(): Promise<MessageDeps> {
       const { addComment } = await import('./task-web')
       const res = await addComment(taskId, c)
       return { ok: res.ok }
+    },
+    handbackSubtask: async subtaskId => {
+      const tw = await import('./task-web')
+      const { statusAfterHandback } = await import('./task-model')
+      const w = await (await import('./task-source')).loadTaskWorld()
+      const sub = w.book.subtasks.find(s => s.id === subtaskId)
+      const next = sub ? statusAfterHandback(sub.status) : null
+      if (next) await tw.patchSubtask(subtaskId, { status: next })
     },
     now: () => Date.now(),
   }

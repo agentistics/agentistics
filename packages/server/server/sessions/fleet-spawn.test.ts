@@ -167,3 +167,12 @@ describe('planFleetSpawn — parent', () => {
     expect(none.ok && 'parentSessionId' in none.plan).toBe(false)
   })
 })
+
+it('handoff is read only with a parent and a strict true', () => {
+  const h = [{ id: 'claude', supportsModel: true, efforts: [] }]
+  const base = { harness: 'claude', cwd: '/tmp/x' }
+  const ok = (b: object) => { const d = planFleetSpawn({ ...base, ...b }, h); return d.ok ? d.plan : null }
+  expect(ok({ parent: 'p1', handoff: true })?.handoff).toBe(true)
+  expect(ok({ handoff: true })?.handoff).toBeUndefined()
+  expect(ok({ parent: 'p1', handoff: 'true' })?.handoff).toBeUndefined()
+})
