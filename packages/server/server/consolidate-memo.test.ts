@@ -31,7 +31,7 @@ test('the consolidate store remembers by file stamp, hands out copies, and sees 
     const script = join(import.meta.dir, `.consolidate-memo-${process.pid}.ts`)
     await Bun.write(script, SCRIPT)
     try {
-      const p = Bun.spawnSync(['bun', script], { env: { ...process.env, HOME: home, AGENTISTICS_DIR: join(home, '.agentistics') }, cwd: import.meta.dir })
+      const p = Bun.spawnSync([process.execPath, script], { env: { ...process.env, HOME: home, AGENTISTICS_DIR: join(home, '.agentistics') }, cwd: import.meta.dir })
       const lines = p.stdout.toString().trim().split('\n')
       expect(JSON.parse(lines[lines.length - 1]!)).toEqual([1, 0, null, 99, 1, 1])
     } finally { rmSync(script, { force: true }) }
