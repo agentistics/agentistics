@@ -2512,12 +2512,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     }
 
     if (url.pathname === '/api/fleet' && req.method === 'GET') {
-      const { readFleet, fleetLang } = await import('./sessions/fleet-web')
+      const { readFleetBody, fleetLang } = await import('./sessions/fleet-web')
       // The ARRANGEMENT is opt-in: a caller that sends `view=1` gets the fleet grouped, ordered and
       // filtered the way the cockpit would (`fleet-arrange.ts`); everyone else gets the flat list
-      // they already read, and pays nothing for a grouping they do not draw.
-      const payload = await readFleet(fleetLang(url.searchParams.get('lang')), readFleetView(url))
-      return new Response(JSON.stringify(payload), {
+      // they already read, and pays nothing for a grouping they do not draw. The body is the hub
+      // snapshot's, built once per poll however many readers ask (PERF.SLOW, `readFleetBody`).
+      const body = await readFleetBody(fleetLang(url.searchParams.get('lang')), readFleetView(url))
+      return new Response(body, {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
     }
