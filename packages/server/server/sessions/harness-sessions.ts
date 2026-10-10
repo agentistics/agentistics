@@ -34,6 +34,7 @@ import {
 } from './harness-session-file'
 import { idFromTmuxName } from './tmux-cli'
 import { procAvailable, readProcStart, sameProcess } from './proc-liveness'
+import { pickManagedRecord, type ManagedCandidate } from './managed-record'
 
 /**
  * Where each harness's own session records live on THIS machine.
@@ -103,6 +104,13 @@ export interface HarnessSessionIndex {
    * for — because there was no key that fit it.
    */
   byConversation: Map<string, HarnessSessionFile>
+  /**
+   * EVERY record naming each managed id, with its process ancestry (LINK.CROSSTALK). The `tmux`
+   * field is inherited through the environment, so a claude started from inside our pane names it
+   * too; `byManagedId` is already resolved through `pickManagedRecord` without pane pids, and a
+   * caller that knows them (the poller) re-resolves with them. Absent on an index built by hand.
+   */
+  managedCandidates?: Map<string, ManagedCandidate[]>
 }
 
 /**
@@ -131,7 +139,43 @@ const EMPTY: HarnessSessionIndex = {
 
 /** An empty index, for a caller that has nothing to look up. */
 export function emptyHarnessSessionIndex(): HarnessSessionIndex {
-  return { byManagedId: new Map(), byPid: new Map(), byConversation: new Map() }
+  return { byManagedId: new Map(), byPid: new Map(), byConversation: new Map(), managedCandidates: new Map() }
+}
+
+/** A pid's ancestors, nearest first, from `/proc/<pid>/stat`. `[]` when unreadable. */
+async function readAncestors(pid: number): Promise<number[]> {
+  const out: number[] = []
+  let cur = pid
+  for (let i = 0; i < 64; i++) {
+    let stat: string
+    try {
+      stat = await readFile(`/proc/${cur}/stat`, 'utf-8')
+    } catch {
+      break
+    }
+    // `pid (comm) state ppid …` — comm may itself hold spaces and parentheses, so split after the LAST ')'.
+    const ppid = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1])
+    if (!Number.isInteger(ppid) || ppid <= 0) break
+    out.push(ppid)
+    if (ppid === 1) break
+    cur = ppid
+  }
+  return out
+}
+
+/** Re-resolve `byManagedId` once the pane pids are known (`undefined` = nothing known about panes). */
+export function resolveManagedIds(
+  index: HarnessSessionIndex,
+  panePids: ReadonlyMap<string, number> | undefined,
+): HarnessSessionIndex {
+  const cands = index.managedCandidates
+  if (!cands) return index
+  const byManagedId = new Map<string, HarnessSessionFile>()
+  for (const [id, list] of cands) {
+    const picked = pickManagedRecord(list, panePids ? (panePids.get(id) ?? null) : undefined)
+    if (picked) byManagedId.set(id, picked)
+  }
+  return { ...index, byManagedId }
 }
 
 /**
@@ -218,13 +262,16 @@ export async function loadHarnessSessions(
       // `idFromTmuxName` returns null for a tmux session that is not ours, which is the ordinary
       // case for a user's own tmux — claimed rows would then be somebody else's.
       if (!managedId) continue
-      if (mtimeMs < (seenAt.get(managedId) ?? -Infinity)) continue
-      seenAt.set(managedId, mtimeMs)
-      out.byManagedId.set(managedId, file)
+      const ancestors = file.alive === true && pid !== undefined ? await readAncestors(pid) : undefined
+      const list = out.managedCandidates!.get(managedId)
+      const cand: ManagedCandidate = { file, mtimeMs, ...(ancestors ? { ancestors } : {}) }
+      if (list) list.push(cand)
+      else out.managedCandidates!.set(managedId, [cand])
     }
   }
 
-  return out
+  // Resolved without pane pids (the nesting rule alone); the poller refines it with them.
+  return resolveManagedIds(out, undefined)
 }
 
 export { EMPTY as EMPTY_HARNESS_SESSIONS }
