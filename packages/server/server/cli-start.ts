@@ -4408,6 +4408,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
     async spawnSession(req: SpawnSessionRequest): Promise<SpawnSessionResult> {
       let taskId = req.taskId
       let subtaskId = req.subtaskId
+      let handoffParent: ManagedSession | undefined
       // Leader hand-off: no filing of its own → take the parent's. Resolved BEFORE the spawn so the
       // child's briefing names the same task/subtask it is filed on (it said "not linked" otherwise).
       if (!taskId && req.handoff && req.parentSessionId) {
@@ -4415,6 +4416,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         const parent = (await readRegistry()).find(m => m.id === req.parentSessionId)
         taskId = parent?.taskId
         subtaskId = parent?.subtaskId
+        handoffParent = parent
       }
       // A group MEMBER can never hold a session (`subtask_in_group`): file it on the member's GROUP
       // instead of leaving the session unfiled while its briefing claims the member.
@@ -4442,6 +4444,18 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         if (r.ok && r.id && taskId) {
           const { attachSession } = await import('./sessions/task-web')
           await attachSession(taskId, r.id, subtaskId ? { subtaskId } : {}).catch(() => null)
+        }
+        // A hand-off child also joins the parent's sidebar folder.
+        if (r.ok && r.id && req.handoff && req.parentSessionId) {
+          const { readRegistry } = await import('./sessions/registry')
+          const reg = await readRegistry()
+          const parent = handoffParent ?? reg.find(m => m.id === req.parentSessionId)
+          const child = reg.find(m => m.id === r.id) ?? { id: r.id }
+          if (parent) {
+            const { fileHandoffInParentGroup } = await import('./sessions/handoff-group')
+            const { updatePreferences } = await import('./preferences')
+            await fileHandoffInParentGroup(parent, child, updatePreferences)
+          }
         }
         return r
       })
