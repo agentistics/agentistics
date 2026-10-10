@@ -15,8 +15,11 @@ async function until(condition: () => boolean, timeout = 3000): Promise<void> {
   }
 }
 
+/** A killed process whose parent is gone can linger as a zombie until something reaps it (CI
+ *  runners whose PID 1 does not reap): kill(pid, 0) still succeeds there, so a zombie counts as dead. */
 function alive(pid: number): boolean {
-  try { process.kill(pid, 0); return true } catch { return false }
+  try { process.kill(pid, 0) } catch { return false }
+  try { return !/^\d+ \(.*\) Z/.test(readFileSync(`/proc/${pid}/stat`, 'utf8')) } catch { return true }
 }
 
 /** Starts a REAL relay (its own process, like the server does) around a shell script child. */
