@@ -170,3 +170,30 @@ describe('the finale is continuous with the overlay across the reload', () => {
     expect(src('boot/preboot.ts')).toContain(`'${RESTORE_KEY}'`)
   })
 })
+
+describe('2026-10-09: a stop with the new binary already on disk is "restart now", not "try again"', () => {
+  test('a failed run whose /api/version says restartNeeded -> restartReady, so the screen offers the restart', async () => {
+    let versionCalls = 0
+    install(async (url: string) => {
+      if (url.startsWith('/api/upgrade/status')) return json({ progress: { stage: 'failed', version: '2.114.1', reason: 'server still answering as v2.114.0', at: Date.now() + 1000 } })
+      if (url.startsWith('/api/upgrade')) return json({ ok: true, started: true })
+      if (url.startsWith('/api/version')) return json(++versionCalls === 1 ? { current: '2.114.0' } : { current: '2.114.0', restartNeeded: true, diskVersion: '2.114.1' })
+      return json({})
+    })
+    await startUpgrade('2.114.1', 'pt')
+    expect(getFlow()).toMatchObject({ phase: 'failed', restartReady: true })
+    expect(reloads).toBe(0)
+  })
+
+  test('a failure with nothing on disk stays a plain failure (try again)', async () => {
+    let versionCalls = 0
+    install(async (url: string) => {
+      if (url.startsWith('/api/upgrade/status')) return json({ progress: { stage: 'failed', version: '2.114.1', reason: 'download failed', at: Date.now() + 1000 } })
+      if (url.startsWith('/api/upgrade')) return json({ ok: true, started: true })
+      if (url.startsWith('/api/version')) return json({ current: '2.114.0', restartNeeded: ++versionCalls < 0 })
+      return json({})
+    })
+    await startUpgrade('2.114.1', 'en')
+    expect(getFlow()).toMatchObject({ phase: 'failed', restartReady: false })
+  })
+})

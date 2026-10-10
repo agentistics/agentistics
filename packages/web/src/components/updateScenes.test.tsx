@@ -36,3 +36,15 @@ test('a timeout offers a plain Restart now button instead of sending a non-techn
   expect(html).not.toContain('Reload')
   resetFlow()
 })
+
+test('2026-10-09: a failure with the new version installed offers "Restart now" (asked first), never "Try again"', () => {
+  setFlowForTest({ ...IDLE_FLOW, phase: 'failed', target: '2.114.1', from: '2.114.0', startedAt: 1, restartReady: true })
+  for (const [lang, restart, retry, nothing] of [['pt', 'Reiniciar agora', 'Tentar de novo', 'Nada foi trocado'], ['en', 'Restart now', 'Try again', 'Nothing was replaced']] as const) {
+    const html = renderToStaticMarkup(<UpgradeOverlay lang={lang} isMobile={false} />)
+    expect(html).toContain(restart)
+    expect(html).toContain('data-testid="upgrade-restart-now"')
+    expect(html).not.toContain(retry)
+    expect(html).not.toContain(nothing)
+  }
+  resetFlow()
+})
