@@ -158,6 +158,8 @@ export interface TaskStore {
    * whichever one got there first with a list built from stale reads.
    */
   seedStatuses(list: readonly TaskStatusDef[]): Promise<void>
+  /** Once per book: append `def` to the status list unless it is there, and mark the book. */
+  seedInReview(def: TaskStatusDef | null): Promise<void>
   /** Add a new status, or edit an existing one's label/color. The `id` is never rewritten by this —
    *  create mints a fresh entry, edit finds the existing one by `id` and replaces label/color only. */
   upsertStatus(def: TaskStatusDef): Promise<void>
@@ -603,6 +605,7 @@ export function createTaskStore(file: string): TaskStore {
         statuses: arr(raw.statuses).map(sanitizeStatusDef).filter((s): s is TaskStatusDef => s !== null),
         types: arr(raw.types).map(sanitizeTypeDef).filter((s): s is TaskTypeDef => s !== null),
         ...(raw.typesSeeded === true || arr(raw.types).length > 0 ? { typesSeeded: true } : {}),
+        ...(raw.inReviewSeeded === true ? { inReviewSeeded: true } : {}),
       }
     } catch {
       corrupt = true
@@ -808,6 +811,7 @@ export function createTaskStore(file: string): TaskStore {
           statuses: book.statuses,
           types: book.types,
           ...(book.typesSeeded ? { typesSeeded: true } : {}),
+          ...(book.inReviewSeeded ? { inReviewSeeded: true } : {}),
           // Remembered as DELETED, or the legacy migration mints it again on the next read.
           tombstones: [...new Set([...book.tombstones, id])],
         })
@@ -898,6 +902,14 @@ export function createTaskStore(file: string): TaskStore {
         // first one's write and refuses.
         if (book.statuses.length > 0) return
         await write({ ...book, statuses: [...list] })
+      })
+    },
+    seedInReview(def) {
+      return enqueue(async () => {
+        const book = await read()
+        if (book.inReviewSeeded) return
+        const add = def && !book.statuses.some(s => s.id === def.id) ? [def] : []
+        await write({ ...book, statuses: [...book.statuses, ...add], inReviewSeeded: true })
       })
     },
     upsertStatus(def) {

@@ -57,7 +57,7 @@ const subtask = (id: string, taskId: string, over = '') => `
   })
 `
 
-test('a fresh board seeds exactly the four protected defaults, in order', async () => {
+test('a fresh board seeds the four protected defaults plus in_review, in order', async () => {
   const out = await run(`
     const statuses = await web.listStatuses()
     console.log(JSON.stringify({
@@ -65,7 +65,7 @@ test('a fresh board seeds exactly the four protected defaults, in order', async 
       allProtected: statuses.every(s => s.protected === true),
     }))
   `)
-  expect(out).toEqual({ ids: ['todo', 'in_progress', 'blocked', 'done'], allProtected: true })
+  expect(out).toEqual({ ids: ['todo', 'in_progress', 'blocked', 'in_review', 'done'], allProtected: false })
 })
 
 test('a legacy status actually in use is migrated in as a non-protected entry', async () => {
@@ -84,9 +84,26 @@ test('a legacy status NOT in use anywhere is never seeded', async () => {
     console.log(JSON.stringify({ ids: statuses.map(s => s.id) }))
   `)
   const parsed = out as { ids: string[] }
-  expect(parsed.ids).not.toContain('in_review')
   expect(parsed.ids).not.toContain('abandoned')
   expect(parsed.ids).not.toContain('backlog')
+})
+
+test('an existing list lacking in_review gets it ONCE, custom statuses untouched, and a delete sticks', async () => {
+  const out = await run(`
+    await store.seedStatuses([
+      { id: 'todo', label: 'To do', color: '#3b82f6', protected: true, order: 0 },
+      { id: 'in_progress', label: 'In progress', color: '#e8703a', protected: true, order: 1 },
+      { id: 'blocked', label: 'Blocked', color: '#ef4444', protected: true, order: 2 },
+      { id: 'done', label: 'Done', color: '#22c55e', protected: true, order: 3 },
+      { id: 'triage', label: 'Triage', color: '#000000', protected: false, order: 4 },
+    ])
+    const first = (await web.listStatuses()).map(s => s.id)
+    await web.deleteStatus('in_review')
+    const second = (await web.listStatuses()).map(s => s.id)
+    console.log(JSON.stringify({ first, second }))
+  `) as { first: string[]; second: string[] }
+  expect(out.first).toEqual(['todo', 'in_progress', 'blocked', 'done', 'triage', 'in_review'])
+  expect(out.second).toEqual(['todo', 'in_progress', 'blocked', 'done', 'triage'])
 })
 
 test('the migration is idempotent: opening the board twice never seeds it twice', async () => {
@@ -107,7 +124,7 @@ test('createStatus mints a fresh, non-protected entry with an id derived from th
   `)
   expect(out).toEqual({
     ok: true,
-    status: { id: 'waiting_on_client', label: 'Waiting on client', color: '#3b82f6', protected: false, order: 4 },
+    status: { id: 'waiting_on_client', label: 'Waiting on client', color: '#3b82f6', protected: false, order: 5 },
   })
 })
 
