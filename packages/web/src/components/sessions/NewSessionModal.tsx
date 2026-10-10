@@ -54,6 +54,7 @@ import { ConfirmModal } from '../../pages/settings/primitives'
 import { forcedNote, isAdmissionRefusal } from '../../lib/spawnAdmission'
 import { pushNotification } from '../../lib/notifications'
 import { usePlanLimits } from '../../lib/planLimits'
+import { PlanLimitBars } from '../PlanLimitMeter'
 import {
   STEP_ORDER, modelDisplay, nextStep, prevStep, stepReady, toWizardHarness, unsetText,
   visibleQuestions, type HarnessAnswer, type MissingAnswer, type StepId, type WizardDraft,
@@ -499,6 +500,11 @@ export function NewSessionModal({
       {/* No `muted` fallback: the title is required, so the review can never reach this row with
           nothing in it — and offering a sentence for a state the gate forbids would describe a
           choice nobody was allowed to make. */}
+      {/* PLAN.LIMITS: the chosen harness's windows — on a phone the only place they are read (no hover). */}
+      {(() => {
+        const l = harness ? planSnap.limits?.find(x => x.harness === harness.id) : undefined
+        return l ? <ReviewRow label={pt ? 'Limites' : 'Limits'} value={<span style={{ display: 'block', maxWidth: 260 }}><PlanLimitBars limits={l} now={planSnap.now} lang={lang} /></span>} /> : null
+      })()}
       <ReviewRow label={pt ? 'Título' : 'Title'} value={label || null} />
       <ReviewRow label={pt ? 'Onde' : 'Where'} value={cwd || null} mono />
       <ReviewRow label={pt ? 'Tarefa' : 'Task'} value={task || null}

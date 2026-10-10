@@ -9,6 +9,7 @@
  * zero bar: nothing observed is not nothing used.
  */
 import { windowRenewed, type PlanLimitWindow, type PlanLimits } from '@agentistics/core'
+import { createPortal } from 'react-dom'
 import { HARNESS_LABELS } from '../lib/harness'
 import {
   currentUsedPct, forecastPhrase, LIMIT_WARN, limitTone, resetPhrase, shortWhen, SOURCE_LABEL, stalePhrase,
@@ -161,5 +162,30 @@ export function PlanLimitBars({ limits, now, lang }: { limits: PlanLimits; now: 
         </span>
       )}
     </div>
+  )
+}
+
+/**
+ * The hover card over a harness chip (new-session wizard, desktop): the harness, its plan and the
+ * compact bars. Same look as the right rail's tooltip; never takes the pointer.
+ */
+export function PlanLimitsTooltip({ limits, now, lang, x, y }: { limits: PlanLimits; now: number; lang: Lang; x: number; y: number }) {
+  const plan = limits.plan ?? limits.sourcePlan
+  return createPortal(
+    <div role="tooltip" data-plan-tooltip={limits.harness} style={{
+      position: 'fixed', left: Math.min(x, (typeof window === 'undefined' ? 1280 : window.innerWidth) - 248), top: y,
+      width: 240, padding: '8px 10px', borderRadius: 8, boxSizing: 'border-box',
+      background: 'var(--bg-elevated)', color: 'var(--text-primary)',
+      border: '1px solid var(--border)', boxShadow: '0 4px 12px -4px rgba(0,0,0,0.4)',
+      pointerEvents: 'none', zIndex: 4000, display: 'flex', flexDirection: 'column', gap: 6,
+    }}>
+      <div style={{ fontSize: 11.5, display: 'flex', gap: 6, alignItems: 'baseline', minWidth: 0 }}>
+        <span style={{ fontWeight: 700 }}>{HARNESS_LABELS[limits.harness]}</span>
+        {plan && <span style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{plan}</span>}
+      </div>
+      <PlanLimitBars limits={limits} now={now} lang={lang} />
+      {stalePhrase(limits, now, lang) && <span style={{ fontSize: 10, color: 'var(--anthropic-orange)' }}>{stalePhrase(limits, now, lang)}</span>}
+    </div>,
+    document.body,
   )
 }
