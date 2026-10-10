@@ -1,6 +1,15 @@
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { nextSeen, planWhatsNew } from './select'
 import type { ReleaseNotes } from './releases'
+
+// These tests replace globalThis.fetch and localStorage; put the originals back so later files are not affected.
+const realFetch = globalThis.fetch
+const realStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+afterAll(() => {
+  globalThis.fetch = realFetch
+  if (realStorage) Object.defineProperty(globalThis, 'localStorage', realStorage)
+  else delete (globalThis as { localStorage?: Storage }).localStorage
+})
 
 const L = (s: string) => ({ pt: s, en: s })
 const n = (f: string[]): ReleaseNotes => ({ features: f.map(L), fixes: [] })
