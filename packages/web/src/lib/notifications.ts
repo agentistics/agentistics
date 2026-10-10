@@ -121,6 +121,10 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Processo órfão encerrado', message: '{label} (pid {pid}, {size}) não servia mais ninguém — a sessão dona tinha acabado — e foi encerrado.' },
     en: { title: 'Orphaned process stopped', message: '{label} (pid {pid}, {size}) no longer served anyone — its owner session had ended — and was stopped.' },
   },
+  'hardware.process_orphan': {
+    pt: { title: 'Processo órfão que você pode encerrar', message: '{label} (pid {pid}, {size}) ficou para trás: quem o iniciou já acabou. Abra Hardware → Recursos e use "Encerrar órfãos".' },
+    en: { title: 'Orphaned process you can end', message: '{label} (pid {pid}, {size}) was left behind: whoever started it is gone. Open Hardware → Resources and use "End orphans".' },
+  },
   'hardware.helper_stopped': {
     pt: { title: 'Processo auxiliar encerrado', message: '{label} (pid {pid}, {size}) ficou ocioso além do tempo que ele mesmo declarou, ou seu dono acabou, e foi encerrado.' },
     en: { title: 'Helper process stopped', message: '{label} (pid {pid}, {size}) sat idle past its own declared timeout, or its owner ended, and was stopped.' },

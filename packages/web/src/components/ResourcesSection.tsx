@@ -9,10 +9,14 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Activity, AlertTriangle, Layers } from 'lucide-react'
 import type { Lang } from '@agentistics/core'
+import { ConfirmModal } from '../pages/settings/primitives'
+import { useFleet } from '../lib/fleet'
+import { HARNESS_LABELS } from '../lib/harness'
 import {
-  alertSentence, fixFor, fmtAge, fmtMb, groupAlerts, heavyLine, killSentence, kindLabel, ownerText, staleMcpSentence,
+  alertSentence, endNote, fixFor, harnessBreakdown, orphansOf, orphanWhySentence, recommendedActions, recommendedSentence, staleBySession, staleSessionsSentence, fmtAge, fmtMb, groupAlerts, heavyLine, killSentence, kindLabel, ownerText, staleMcpSentence,
   type ResLang, type ResourcesSnapshot,
 } from '../lib/resourcesView'
 
@@ -43,25 +47,46 @@ function useResources(lang: ResLang): { snap: ResourcesSnapshot | null; error: s
   return { snap, error, reload: () => void load() }
 }
 
-export function ResourcesSection({ lang, isMobile }: { lang: Lang; isMobile: boolean }) {
+export function ResourcesSection({ lang, isMobile, onNavigate }: { lang: Lang; isMobile: boolean; onNavigate?: () => void }) {
+  const navigate = useNavigate()
   const l: ResLang = lang === 'pt' ? 'pt' : 'en'
   const { snap, error, reload } = useResources(l)
   const [busy, setBusy] = useState<number | null>(null)
   const [note, setNote] = useState<string | null>(null)
 
-  const stop = async (pid: number) => {
-    setBusy(pid)
+  const { fleet } = useFleet(l)
+  const [confirm, setConfirm] = useState<null | 'orphans'>(null)
+  const fleetMap = new Map<string, { id: string; title: string; harness: string }>()
+  for (const r of fleet?.sessions ?? []) fleetMap.set(r.id, r)
+
+  /** Ends one pid and reports the OBSERVED outcome (the server escalates to SIGKILL). */
+  const endOne = async (pid: number): Promise<boolean> => {
     try {
       const res = await fetch('/api/resources/kill', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid }),
       })
-      setNote(res.ok
-        ? (l === 'pt' ? `pid ${pid} encerrado.` : `pid ${pid} stopped.`)
-        : (l === 'pt' ? `Não foi possível encerrar o pid ${pid} (HTTP ${res.status}).` : `Could not stop pid ${pid} (HTTP ${res.status}).`))
+      const body = await res.json().catch(() => null) as { ended?: boolean } | null
+      return res.ok && body?.ended === true
+    } catch { return false }
+  }
+  const stop = async (pid: number) => {
+    setBusy(pid)
+    try {
+      const ok = await endOne(pid)
+      setNote(endNote(pid, { ended: ok }, l))
     } finally {
       setBusy(null)
       reload()
     }
+  }
+  const endOrphans = async () => {
+    setConfirm(null)
+    const targets = snap ? orphansOf(snap.inventory) : []
+    let ended = 0
+    for (const p of targets) { setBusy(p.pid); if (await endOne(p.pid)) ended++ }
+    setBusy(null)
+    setNote(l === 'pt' ? `${ended} de ${targets.length} órfão(s) encerrado(s).${ended < targets.length ? ' Os que sobraram não encerraram — tente de novo.' : ''}` : `${ended} of ${targets.length} orphan(s) ended.${ended < targets.length ? ' The rest did not end — try again.' : ''}`)
+    reload()
   }
 
   const cancelQueued = async (id: string) => {
@@ -91,19 +116,54 @@ export function ResourcesSection({ lang, isMobile }: { lang: Lang; isMobile: boo
         </div>
       )}
 
+      {snap && (() => {
+        const groups = staleBySession(snap.inventory, snap.alerts, fleetMap)
+        const rec = recommendedActions(snap.inventory, groups)
+        const sentence = recommendedSentence(rec, l)
+        if (!sentence) return null
+        return (
+          <div style={{ ...box, borderColor: 'rgba(59,130,246,0.4)', display: 'flex', gap: 10, flexDirection: 'column' }} data-testid="res-recommended">
+            <strong style={{ color: 'var(--text-primary)' }}>{l === 'pt' ? 'Ações recomendadas' : 'Recommended actions'}</strong>
+            <span style={{ color: 'var(--text-secondary)' }}>{sentence}</span>
+            {rec.orphanCount > 0 && (
+              <div><button style={btn} onClick={() => setConfirm('orphans')} disabled={busy !== null}>
+                {l === 'pt' ? `Encerrar órfãos (${rec.orphanCount})` : `End orphans (${rec.orphanCount})`}
+              </button></div>
+            )}
+            {rec.reopenCount > 0 && <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{l === 'pt' ? 'Para reabrir sessões, use "Abrir" na lista abaixo.' : 'To reopen sessions, use "Open" in the list below.'}</span>}
+          </div>
+        )
+      })()}
+
       {snap && snap.alerts.length > 0 && (() => {
         const { single, staleMcpPids } = groupAlerts(snap.alerts, snap.inventory)
         return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {staleMcpPids.length > 0 && (
-            <div style={{ ...box, borderColor: 'rgba(245,158,11,0.4)', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-              <AlertTriangle size={16} style={{ color: '#f59e0b', flexShrink: 0 }} />
-              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <span style={{ color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>{staleMcpSentence(staleMcpPids, l)}</span>
-                <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{fixFor({ pid: 0, label: '', reason: 'stale-binary', usedBytes: null, fix: { action: 'reconnect-session', pid: 0 } }, l)?.text}</span>
+          {staleMcpPids.length > 0 && (() => {
+            const groups = staleBySession(snap.inventory, snap.alerts, fleetMap)
+            const label = (h: string) => (HARNESS_LABELS as Record<string, string>)[h] ?? h
+            return (
+              <div style={{ ...box, display: 'flex', gap: 10, flexDirection: 'column' }}>
+                <span style={{ color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>{staleSessionsSentence(groups, harnessBreakdown(groups, label), l)}</span>
+                {groups.map(g => (
+                  <div key={g.managedId ?? g.pids[0]} style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                    <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+                      {g.session ? `${g.session.title} · ${label(g.session.harness)}` : (l === 'pt' ? 'Sessão que já acabou' : 'A session that has ended')}
+                      <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}> · pid {g.pids.join(', ')}</span>
+                    </span>
+                    {g.session ? (
+                      <button style={{ ...btn, color: 'var(--text-secondary)', borderColor: 'var(--border)', background: 'transparent' }}
+                        onClick={() => { navigate(`/sessions/${encodeURIComponent(g.session!.id)}`); onNavigate?.() }}>
+                        {l === 'pt' ? 'Abrir' : 'Open'}
+                      </button>
+                    ) : (
+                      <button style={btn} disabled={busy !== null} onClick={() => void stop(g.pids[0]!)}>{l === 'pt' ? 'Encerrar' : 'End'}</button>
+                    )}
+                  </div>
+                ))}
               </div>
-            </div>
-          )}
+            )
+          })()}
           {single.map(a => {
             const fix = fixFor(a, l)
             return (
@@ -162,7 +222,7 @@ export function ResourcesSection({ lang, isMobile }: { lang: Lang; isMobile: boo
                   <tr key={p.pid} style={{ borderBottom: '1px solid var(--border)' }}>
                     <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
                       <strong>{p.label}</strong>{' '}
-                      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{kindLabel(p.kind, l)}{p.stale ? ` · ${l === 'pt' ? 'binário antigo' : 'old binary'}` : ''}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{kindLabel(p.kind, l)}{p.stale ? ` · ${l === 'pt' ? 'binário antigo' : 'old binary'}` : ''}{p.orphanWhy ? ` · ${orphanWhySentence(p, l)}` : ''}</span>
                     </td>
                     <td style={{ padding: '8px 12px', fontVariantNumeric: 'tabular-nums' }}>{p.pid}</td>
                     <td style={{ padding: '8px 12px', fontVariantNumeric: 'tabular-nums' }}>{fmtMb(p.usedBytes)}</td>
@@ -220,6 +280,24 @@ export function ResourcesSection({ lang, isMobile }: { lang: Lang; isMobile: boo
         <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
           {l === 'pt' ? 'Encerramento automático desligado (AGENTISTICS_GOVERNOR=0) — só alertas.' : 'Automatic stopping is off (AGENTISTICS_GOVERNOR=0) — alerts only.'}
         </span>
+      )}
+      {snap && (
+        <ConfirmModal
+          open={confirm === 'orphans'}
+          title={l === 'pt' ? 'Encerrar órfãos?' : 'End orphans?'}
+          message={l === 'pt' ? 'Estes processos ficaram para trás — quem os iniciou já acabou. Nada que esteja em uso será afetado:' : 'These processes were left behind — whoever started them is gone. Nothing in use is affected:'}
+          confirmLabel={l === 'pt' ? 'Encerrar' : 'End them'}
+          cancelLabel={l === 'pt' ? 'Cancelar' : 'Cancel'}
+          focusCancel
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => void endOrphans()}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, maxHeight: 200, overflow: 'auto' }}>
+            {orphansOf(snap.inventory).map(p => (
+              <span key={p.pid} style={{ overflowWrap: 'anywhere' }}>{p.label} · pid {p.pid} · {fmtMb(p.usedBytes)} — {orphanWhySentence(p, l)}</span>
+            ))}
+          </div>
+        </ConfirmModal>
       )}
     </section>
   )

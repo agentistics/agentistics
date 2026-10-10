@@ -23,6 +23,8 @@ export interface ResProcess {
   owner: { kind: 'session' | 'pid'; pid: number; sessionId?: string; alive: boolean } | null
   self: boolean
   isolatedHome: boolean
+  orphanWhy?: 'parent-gone' | 'cwd-deleted'
+  managedId?: string
 }
 
 export interface ResAlert {
@@ -164,4 +166,82 @@ export function staleMcpSentence(pids: number[], lang: ResLang): string {
   return lang === 'pt'
     ? `${pids.length} servidor(es) MCP de sessões abertas ainda rodam o agentop anterior à atualização (pid ${pids.join(', ')}).`
     : `${pids.length} MCP server(s) of open sessions still run the agentop from before the upgrade (pid ${pids.join(', ')}).`
+}
+
+// ── RES.ACTIONS — the buttons that fix what the panel reports ────────────────────────────────────
+
+/** Processes the user can end because whoever started them is gone. Never this server. */
+export const orphansOf = (inv: ResProcess[]): ResProcess[] => inv.filter(p => p.orphanWhy && !p.self)
+
+export interface FleetLite { id: string; title: string; harness: string }
+
+export interface StaleSessionGroup {
+  /** The owning session, when it is still in the fleet; `null` = its session is gone (an orphan). */
+  session: FleetLite | null
+  managedId: string | null
+  pids: number[]
+}
+
+/** Stale MCP processes, grouped by the session that owns them. */
+export function staleBySession(inv: ResProcess[], alerts: ResAlert[], fleet: ReadonlyMap<string, FleetLite>): StaleSessionGroup[] {
+  const stale = new Set(alerts.filter(a => a.reason === 'stale-binary').map(a => a.pid))
+  const groups = new Map<string, StaleSessionGroup>()
+  for (const p of inv) {
+    if (p.kind !== 'mcp' || !stale.has(p.pid)) continue
+    const key = p.managedId ?? `pid:${p.pid}`
+    const g = groups.get(key) ?? { session: p.managedId ? (fleet.get(p.managedId) ?? null) : null, managedId: p.managedId ?? null, pids: [] }
+    g.pids.push(p.pid)
+    groups.set(key, g)
+  }
+  return [...groups.values()]
+}
+
+/** "Claude 3, Gemini 3, Kimi 1" — sessions per harness (a harness label is passed in). */
+export function harnessBreakdown(groups: StaleSessionGroup[], label: (h: string) => string): string {
+  const n = new Map<string, number>()
+  for (const g of groups) if (g.session) n.set(label(g.session.harness), (n.get(label(g.session.harness)) ?? 0) + 1)
+  return [...n].map(([h, c]) => `${h} ${c}`).join(', ')
+}
+
+export function staleSessionsSentence(groups: StaleSessionGroup[], breakdown: string, lang: ResLang): string {
+  const pt = lang === 'pt'
+  const tail = breakdown ? ` (${breakdown})` : ''
+  return pt
+    ? `${groups.length} sessão(ões)${tail} ainda usam o agentop antigo. Continuam funcionando — reabra a sessão quando quiser a versão nova.`
+    : `${groups.length} session(s)${tail} still use the old agentop. They keep working — reopen a session when you want the new version.`
+}
+
+export interface RecommendedActions { orphanCount: number; orphanBytes: number; reopenCount: number }
+
+export function recommendedActions(inv: ResProcess[], groups: StaleSessionGroup[]): RecommendedActions {
+  const o = orphansOf(inv)
+  return {
+    orphanCount: o.length,
+    orphanBytes: o.reduce((a, p) => a + (p.usedBytes ?? 0), 0),
+    reopenCount: groups.filter(g => g.session).length,
+  }
+}
+
+export function recommendedSentence(r: RecommendedActions, lang: ResLang): string | null {
+  const parts: string[] = []
+  const pt = lang === 'pt'
+  if (r.orphanCount > 0) parts.push(pt ? `encerrar ${r.orphanCount} órfão(s)` : `end ${r.orphanCount} orphan(s)`)
+  if (r.reopenCount > 0) parts.push(pt ? `reabrir ${r.reopenCount} sessão(ões)` : `reopen ${r.reopenCount} session(s)`)
+  if (!parts.length) return null
+  const free = r.orphanBytes > 0 ? `${fmtMb(r.orphanBytes)}` : ''
+  return `${pt ? 'Liberar' : 'Free'}${free ? ` ~${free}` : ''}: ${parts.join(' · ')}`
+}
+
+export function orphanWhySentence(p: ResProcess, lang: ResLang): string {
+  const pt = lang === 'pt'
+  return p.orphanWhy === 'cwd-deleted'
+    ? (pt ? 'órfão de uma prévia/teste cuja pasta já foi apagada' : 'orphan of a preview/test whose folder was deleted')
+    : (pt ? 'órfão: quem o iniciou já acabou' : 'orphan: whoever started it is gone')
+}
+
+/** What to tell the user after the kill route answered. Only a CONFIRMED exit says "ended". */
+export function endNote(pid: number, r: { ended: boolean } | null, lang: ResLang): string {
+  const pt = lang === 'pt'
+  if (r?.ended) return pt ? `pid ${pid} encerrado.` : `pid ${pid} ended.`
+  return pt ? `O pid ${pid} não encerrou. Tente de novo.` : `pid ${pid} did not end. Try again.`
 }

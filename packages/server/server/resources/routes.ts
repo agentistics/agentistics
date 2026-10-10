@@ -20,6 +20,7 @@ import { killAllowed } from './governor'
 import { mutateHelpers, parseHelperRegistration } from './helpers'
 import { broadcastNotification } from '../sse'
 import { pidAlive } from './proc-read'
+import { terminateAndConfirm } from './terminate'
 import { registeredSpawnQueue } from '../sessions/spawn-queue'
 
 const deps = {
@@ -47,9 +48,12 @@ export async function handleResources(req: Request, url: URL, cors: Record<strin
     if (!Number.isInteger(pid)) return json(fail('bad_pid'), 400)
     const fresh = await governorTick(deps)
     if (!killAllowed(fresh.inventory, pid)) return json(fail('not_allowed'), 403)
-    try { process.kill(pid, 'SIGTERM') } catch { return json(fail('gone'), 404) }
-    deps.log(`[governor] pid ${pid} stopped on request`)
-    return json({ ok: true })
+    if (!pidAlive(pid)) return json(fail('gone'), 404)
+    const r = await terminateAndConfirm(pid, {
+      kill: (p, sig) => process.kill(p, sig), alive: pidAlive, sleep: ms => new Promise(res => setTimeout(res, ms)),
+    })
+    deps.log(`[governor] pid ${pid} ${r.ended ? 'ended' : 'did NOT end'} on request (${r.signal})`)
+    return json({ ok: r.ended, ended: r.ended, signal: r.signal })
   }
 
   if (path === '/api/resources/helpers' && req.method === 'POST') {
