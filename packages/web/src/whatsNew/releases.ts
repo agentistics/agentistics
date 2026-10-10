@@ -10,6 +10,32 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.116.0': {
+    features: [
+      {
+        pt: 'O círculo de métricas da sessão ganhou dois arcos finos com o uso do plano nas últimas 5 horas e nos últimos 7 dias, e o painel dele mostra quando cada janela renova.',
+        en: 'The session metrics circle gained two thin arcs with your plan\'s usage over the last 5 hours and 7 days, and its panel shows when each window resets.',
+      },
+      {
+        pt: 'Na Nova sessão, passar o mouse sobre um assistente mostra os limites do plano dele; o que tem mais folga ganha a etiqueta "mais folga". No celular, os limites aparecem na revisão.',
+        en: 'In New session, hovering an assistant shows its plan limits; the one with the most room is tagged "most room". On a phone, the limits show on the review step.',
+      },
+      {
+        pt: 'A Nay tem uma aba Limites com cada plano registrado: quanto já foi usado, quando renova e quando foi a última atualização.',
+        en: 'Nay has a Limits tab with every registered plan: how much is used, when it resets and when it was last updated.',
+      },
+      {
+        pt: 'A Nay avisa quando uma janela do plano passa de 75%, 85%, 95% e 100%; no fim, diz quando renova e sugere continuar em outro assistente que ainda tenha folga.',
+        en: 'Nay tells you when a plan window passes 75%, 85%, 95% and 100%; at the end it says when it resets and suggests continuing in another assistant that still has room.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'O servidor ficou mais leve: gasta bem menos CPU parado e a primeira tela carrega com 14 KB.',
+        en: 'The server is lighter: it uses much less CPU while idle and the first screen loads with 14 KB.',
+      },
+    ],
+  },
   '2.115.1': {
     features: [],
     fixes: [
