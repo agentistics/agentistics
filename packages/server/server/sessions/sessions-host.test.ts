@@ -1090,3 +1090,83 @@ describe('AGY.REOPEN — the exact-link reopen through the poller', () => {
     expect(snap.sessions.find(s => s.id === 'live')?.resume).toBeUndefined()
   })
 })
+
+describe('LINK.CROSSTALK — two claude sessions in one folder never trade conversations', () => {
+  const rec = (pid: number, sessionId: string, ancestors: number[]) => ({
+    file: { pid, sessionId, cwd: '/home/u/ws', tmux: 'agentop-m1:@0.%0', alive: true },
+    mtimeMs: pid, ancestors,
+  })
+  const indexOf = (cands: ReturnType<typeof rec>[], newest: ReturnType<typeof rec>) => async () => ({
+    // `byManagedId` as the OLD loader built it: newest wins, so the nested record.
+    byManagedId: new Map([['m1', newest.file]]),
+    byPid: new Map(), byConversation: new Map(),
+    managedCandidates: new Map([['m1', cands]]),
+  } as never)
+
+  it('a claude started from inside the pane (inherited TMUX) never relinks the pane\'s row', async () => {
+    const own = rec(100, 'c-leader', [10, 1])
+    const nested = rec(200, 'c-preview', [150, 100, 10, 1])
+    const calls: Array<[string, string]> = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [backendSession('m1')], frames: { m1: ['x'] }, panePids: { m1: 10 } }),
+      readRegistry: async () => [managed('m1', { conversationId: 'c-leader' })],
+      scanProcesses: async () => ({ procs: [] }),
+      now: () => NOW,
+      loadHarnessSessions: indexOf([own, nested], nested),
+      recordConversation: async (id, cid) => { calls.push([id, cid]) },
+    })
+    const snap = await p.poll()
+    expect(calls).toEqual([])
+    expect(snap.sessions.find(s => s.id === 'm1')?.conversationId ?? 'c-leader').toBe('c-leader')
+  })
+
+  it('a daemonised claude outside the pane tree is ignored too', async () => {
+    const own = rec(100, 'c-leader', [10, 1])
+    const orphan = rec(200, 'c-preview', [1])
+    const calls: Array<[string, string]> = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [backendSession('m1')], frames: { m1: ['x'] }, panePids: { m1: 10 } }),
+      readRegistry: async () => [managed('m1', { conversationId: 'c-leader' })],
+      scanProcesses: async () => ({ procs: [] }),
+      now: () => NOW,
+      loadHarnessSessions: indexOf([own, orphan], orphan),
+      recordConversation: async (id, cid) => { calls.push([id, cid]) },
+    })
+    await p.poll()
+    expect(calls).toEqual([])
+  })
+
+  it('never moves a row onto a conversation another LIVE row already drives', async () => {
+    const calls: Array<[string, string]> = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({
+        sessions: [backendSession('m1'), backendSession('m2')], frames: { m1: ['x'], m2: ['x'] },
+        panePids: { m1: 10, m2: 20 },
+      }),
+      readRegistry: async () => [managed('m1', { conversationId: 'c-1' }), managed('m2', { conversationId: 'c-2' })],
+      scanProcesses: async () => ({ procs: [] }),
+      now: () => NOW,
+      loadHarnessSessions: async () => ({
+        byManagedId: new Map([['m1', { sessionId: 'c-2', cwd: '/home/u/ws' }]]),
+        byPid: new Map(), byConversation: new Map(),
+      } as never),
+      recordConversation: async (id, cid) => { calls.push([id, cid]) },
+    })
+    await p.poll()
+    expect(calls).toEqual([])
+  })
+
+  it('a legitimate /resume inside the same pane process still relinks', async () => {
+    const calls: Array<[string, string]> = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [backendSession('m1')], frames: { m1: ['x'] }, panePids: { m1: 10 } }),
+      readRegistry: async () => [managed('m1', { conversationId: 'c-old' })],
+      scanProcesses: async () => ({ procs: [] }),
+      now: () => NOW,
+      loadHarnessSessions: indexOf([rec(100, 'c-new', [10, 1])], rec(100, 'c-new', [10, 1])),
+      recordConversation: async (id, cid) => { calls.push([id, cid]) },
+    })
+    await p.poll()
+    expect(calls).toEqual([['m1', 'c-new']])
+  })
+})
