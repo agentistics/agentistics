@@ -44,6 +44,7 @@ import { placeAttention, type ChatAttentionMark, type ChatRecorded } from '../..
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
 import { modeStyle } from '../../lib/modeStyle'
 import { NoQuestionsWarning } from './ModePicker'
+import { modeLabel, modeTitle, onlyModeNote } from '../../lib/modeLabel'
 import { modeCycles, modeMenuFor, modeMenuPlacement, type MenuPlacement } from '../../lib/modeMenu'
 import { ApprovalCard } from './ApprovalCard'
 import { TypedModel } from './ModelSelect'
@@ -3592,8 +3593,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     disabled={!canPrompt}
                     aria-haspopup="menu"
                     aria-expanded={modeMenuOpen}
-                    aria-label={pt ? `Modo: ${row.mode.label}` : `Mode: ${row.mode.label}`}
-                    title={row.mode.label}
+                    aria-label={pt ? `Modo: ${modeLabel(row.mode, 'pt')}` : `Mode: ${modeLabel(row.mode, 'en')}`}
+                    title={modeTitle(row.mode, pt ? 'pt' : 'en')}
                     style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
                       height: 30, padding: '0 9px',
@@ -3613,7 +3614,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     <SlidersHorizontal size={13} style={{ flexShrink: 0 }} />
                     {!isMobile && <span style={{
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>{row.mode.label}</span>}
+                    }}>{modeLabel(row.mode, pt ? 'pt' : 'en')}</span>}
                   </button>
                 )}
                 {modeMenuOpen && row?.mode && modeOptions.length > 0 && modeMenuPos && createPortal(
@@ -3651,7 +3652,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                             background: style.fg, ...(unattended && !current ? { marginTop: 4 } : {}),
                           }} />
                           <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5 }}>
-                            {option.label}
+                            {modeLabel(option, pt ? 'pt' : 'en')}
                             {/* MODE.EVERYWHERE — "no questions" says what it means before it is picked. */}
                             {unattended && !current && <NoQuestionsWarning lang={pt ? 'pt' : 'en'} compact />}
                           </span>
@@ -3659,6 +3660,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         </button>
                       )
                     })}
+                    {onlyModeNote(modeOptions, pt ? 'pt' : 'en') && (
+                      <div role="note" data-mode-only-note style={{ padding: '6px 9px', fontSize: 11, lineHeight: 1.45, color: 'var(--text-tertiary)' }}>
+                        {onlyModeNote(modeOptions, pt ? 'pt' : 'en')}
+                      </div>
+                    )}
                   </div>,
                   document.body,
                 )}

@@ -255,10 +255,12 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     // MODE.EVERYWHERE — `copilot --help` 1.0.95: `--allow-tool [<tools>...]  will not prompt for permission` with
     // the example "Allow all file editing: --allow-tool='write'", `--plan  Start in plan mode`, `--autopilot  Start
     // in autopilot mode` (its ACP mode "Autonomous … without user interaction" — the same one structured uses).
+    // Autopilot alone is a MODE, not a permission grant (its help says nothing of prompts), so "no questions" also
+    // carries `--allow-all` ("Enable all permissions", = --allow-all-tools --allow-all-paths --allow-all-urls).
     modeArgs: {
       'accept-edits': ['--allow-tool=write'],
       plan: ['--plan'],
-      'no-questions': ['--autopilot'],
+      'no-questions': ['--autopilot', '--allow-all'],
     },
     // `auto` and nothing else, and copilot 1.0.80 is the case that proves the rule. It is the one
     // value its own `--model` help NAMES, and running it works: `copilot --model auto -p … ` ran

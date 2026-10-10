@@ -6,12 +6,13 @@
  * The same control as the composer's mode chip, in the wizard's terms: the same colours
  * (`modeStyle` by canonical meaning), the same words (`CANONICAL_MODE_TEXT`), and the same warning on
  * "no questions" (`NO_QUESTIONS_WARNING`), which is shown whenever that mode is chosen — never behind a
- * hover, because a phone has none. Built on `EffortPicker`'s button row so the step reads as one form.
+ * hover, because a phone has none. Built on `PillPicker`, the button row `EffortPicker` shares, so the step reads as one form.
  */
 import { AlertTriangle } from 'lucide-react'
 import { CANONICAL_MODE_TEXT, NO_QUESTIONS_WARNING, type CanonicalMode } from '@agentistics/core'
 import { modeStyle } from '../../lib/modeStyle'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { PillPicker } from './PillPicker'
 
 export interface ModePickerProps {
   /** The modes this harness can start in, `default` first. */
@@ -26,38 +27,24 @@ export function ModePicker({ modes, value, onChange, lang }: ModePickerProps) {
   if (modes.length < 2) return null
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div role="radiogroup" aria-label={lang === 'pt' ? 'Modo' : 'Mode'} style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {modes.map(mode => {
-          const on = value === mode
+      <PillPicker
+        radioLabel={lang === 'pt' ? 'Modo' : 'Mode'}
+        minHeight={isMobile ? 44 : 36}
+        value={value}
+        onPick={key => onChange(key as CanonicalMode)}
+        items={modes.map(mode => {
           const style = modeStyle({ id: mode, canonical: mode })
-          // The default chip is neutral by design; its dot still needs a colour to read as a choice.
-          const dot = mode === 'default' ? 'var(--text-tertiary)' : style.fg
-          const text = CANONICAL_MODE_TEXT[mode][lang]
-          return (
-            <button
-              key={mode}
-              type="button"
-              role="radio"
-              aria-checked={on}
-              data-mode={mode}
-              title={text.hint}
-              onClick={() => onChange(mode)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 7,
-                padding: '8px 13px', borderRadius: 9, cursor: 'pointer', minHeight: isMobile ? 44 : 36,
-                border: `1px solid ${on ? (mode === 'default' ? 'var(--border)' : style.border) : 'var(--border-subtle)'}`,
-                background: on ? style.bg : 'var(--bg-elevated)',
-                color: on ? 'var(--text-primary)' : 'var(--text-secondary)',
-                fontFamily: 'inherit', fontSize: 12.5, fontWeight: on ? 650 : 500,
-                transition: 'background 0.15s, border-color 0.15s',
-              }}
-            >
-              <span style={{ width: 8, height: 8, borderRadius: 4, background: dot, flexShrink: 0 }} />
-              {text.label}
-            </button>
-          )
+          return {
+            key: mode,
+            label: CANONICAL_MODE_TEXT[mode][lang].label,
+            title: CANONICAL_MODE_TEXT[mode][lang].hint,
+            color: mode === 'default' ? 'var(--text-tertiary)' : style.fg,
+            border: mode === 'default' ? 'var(--border)' : style.border,
+            bg: style.bg,
+            data: { mode },
+          }
         })}
-      </div>
+      />
       <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.45 }}>
         {CANONICAL_MODE_TEXT[value][lang].hint}
       </div>

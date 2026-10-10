@@ -395,7 +395,7 @@ describe('MODE.EVERYWHERE — the TUI starts in the asked mode, by its own flag'
     expect(argvOf('kimi', 'plan').argv).toContain('--plan')
     expect(argvOf('kimi', 'no-questions').argv).toContain('--auto')
     expect(argvOf('copilot', 'accept-edits').argv).toContain('--allow-tool=write')
-    expect(argvOf('copilot', 'no-questions').argv).toContain('--autopilot')
+    expect(argvOf('copilot', 'no-questions').argv).toEqual(expect.arrayContaining(['--autopilot', '--allow-all']))
     expect(argvOf('antigravity', 'plan').argv.join(' ')).toContain('--mode plan')
     expect(argvOf('antigravity', 'no-questions').argv).toContain('--dangerously-skip-permissions')
   })
