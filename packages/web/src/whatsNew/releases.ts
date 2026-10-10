@@ -10,6 +10,31 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.120.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Apagar uma pasta que tem subpastas pergunta se quer apagar as subpastas também e apaga tudo junto (as sessões continuam).',
+        en: 'Deleting a folder that has sub-folders asks whether to delete them too and removes them together (sessions are kept).',
+      },
+      {
+        pt: 'Pastas criadas ou alteradas por uma sessão aparecem na barra lateral na hora, sem recarregar.',
+        en: 'Folders created or changed by a session show up in the sidebar right away, without reloading.',
+      },
+      {
+        pt: 'Se a atualização falhar, "Reiniciar agora" funciona na hora em vez de responder que já há uma atualização em andamento.',
+        en: 'If an update fails, "Restart now" works right away instead of saying an update is already running.',
+      },
+      {
+        pt: 'Recursos: sem linhas repetidas, e CPU aparece desde a primeira leitura.',
+        en: 'Resources: no repeated rows, and CPU shows from the first reading.',
+      },
+      {
+        pt: 'O tempo ativo de uma sessão nunca passa da duração dela; "agentop clean" não fica mais pendurado.',
+        en: 'A session\'s active time never exceeds its duration; "agentop clean" no longer hangs.',
+      },
+    ],
+  },
   '2.120.0': {
     features: [
       {
