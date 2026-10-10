@@ -85,6 +85,7 @@ export function runRelay(dir: string): void {
 
   let ended = false
   let killTimer: ReturnType<typeof setTimeout> | null = null
+  let termAt = 0
   const killChild = (signal: 'SIGTERM' | 'SIGKILL'): void => {
     const pid = child.pid
     if (pid === undefined) return
@@ -95,6 +96,7 @@ export function runRelay(dir: string): void {
     // itself still owns a listening socket, so explicitly leave too; otherwise it survives until SIGKILL.
     if (ended) { process.exit(0); return }
     if (child.exitCode !== null || child.signalCode !== null) return
+    termAt ||= Date.now()
     killChild('SIGTERM')
     killTimer ??= setTimeout(() => { if (child.exitCode === null) killChild('SIGKILL') }, KILL_GRACE_MS)
   }
@@ -144,12 +146,16 @@ export function runRelay(dir: string): void {
     if (partial !== '') { record(partial); partial = '' }
     ended = true
     if (killTimer) clearTimeout(killTimer)
+    // The direct child may have obeyed TERM while a descendant in its group ignored it: the group is
+    // still killed once the grace is over, and the relay stays until then.
+    const groupGrace = termAt ? Math.max(0, termAt + KILL_GRACE_MS - Date.now()) : 0
     writeFileSync(join(dir, RELAY_FILES.exit), JSON.stringify({ code, at: Date.now() }), { mode: 0o600 })
     send(client, { x: code })
     client?.end()
     server.close()
     try { unlinkSync(sockPath) } catch { /* already gone */ }
-    setTimeout(() => process.exit(0), 200).unref?.()
+    if (termAt) setTimeout(() => { killChild('SIGKILL'); process.exit(0) }, groupGrace + 50)
+    else setTimeout(() => process.exit(0), 200).unref?.()
   })
   child.on('error', () => {
     if (ended) return
