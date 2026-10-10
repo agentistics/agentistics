@@ -277,3 +277,12 @@ describe('the main machine: turning personal confirmation off with the 24 words 
     expect(local.json.code).toBe('recovery-denied')
   })
 })
+
+test('"agentop vault init" is swapped for the page control, never shown as a command', () => {
+  const en = uiSentence('There is no vault on this machine yet. Run `agentop vault init`.', 'en').sentence
+  expect(en).not.toContain('agentop')
+  expect(en).toContain('Create the vault')
+  const pt = uiSentence('Ainda não existe um cofre. Rode `agentop vault init`.', 'pt').sentence
+  expect(pt).not.toContain('agentop')
+  expect(pt).toContain('Criar o cofre')
+})
