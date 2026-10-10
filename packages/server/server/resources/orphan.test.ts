@@ -31,3 +31,9 @@ describe('owner mapping', () => {
     expect(p!.orphanWhy).toBe('parent-gone')
   })
 })
+
+describe('inventory rows', () => {
+  test('the same pid listed twice is one row', () => {
+    expect(buildInventory([entry({}), entry({})], ctx)).toHaveLength(1)
+  })
+})
