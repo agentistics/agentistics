@@ -66,6 +66,21 @@ interface Entry {
   seq: number
   /** A follow-up capture is already scheduled. */
   following: boolean
+  /** Consecutive captures that found the screen unchanged — see `stillStride`. */
+  unchanged: number
+  /** Interval ticks passed over since the last capture. */
+  skipped: number
+}
+
+/**
+ * PERF.SLOW. PURE: how many interval ticks one capture is worth on a STILL screen. A watched pane
+ * that has not moved for a while is read every 2nd, then every 3rd tick (500 ms -> 1 s -> 1.5 s at
+ * the default cadence) instead of every tick: two tmux processes a capture, four captures a second,
+ * was most of what a web client watching an idle session cost the server. Any change resets it, and
+ * a keystroke (`nudge`) captures at once, so typing and a streaming answer keep the full rate.
+ */
+export function stillStride(unchanged: number): number {
+  return unchanged < 4 ? 1 : unchanged < 20 ? 2 : 3
 }
 
 export interface TerminalHub {
@@ -115,7 +130,8 @@ export function createTerminalHub(deps: TerminalHubDeps): TerminalHub {
         return
       }
       const digest = captureDigest(cap.lines, cap.info)
-      if (digest === still.lastDigest) return // nothing changed — send nobody a frame
+      if (digest === still.lastDigest) { still.unchanged++; return } // nothing changed — send nobody a frame
+      still.unchanged = 0
       still.seq += 1
       const frame = buildFrame(still.seq, cap.lines, cap.info, deps.historyLimit, deps.viewLines)
       still.lastDigest = digest
@@ -149,6 +165,8 @@ export function createTerminalHub(deps: TerminalHubDeps): TerminalHub {
     nudge(id) {
       const entry = entries.get(id)
       if (!entry || entry.sinks.size === 0) return
+      entry.unchanged = 0
+      entry.skipped = 0
       void tick(id)
       setTimeout(() => { if (entries.has(id)) void tick(id) }, 60)
       setTimeout(() => { if (entries.has(id)) void tick(id) }, 200)
@@ -161,11 +179,17 @@ export function createTerminalHub(deps: TerminalHubDeps): TerminalHub {
       }
       let entry = entries.get(id)
       if (!entry) {
-        entry = { sinks: new Set(), handle: null, busy: false, lastDigest: null, lastFrame: null, seq: 0, following: false }
+        entry = { sinks: new Set(), handle: null, busy: false, lastDigest: null, lastFrame: null, seq: 0, following: false, unchanged: 0, skipped: 0 }
         entries.set(id, entry)
         // First tick immediately so the first reader is not waiting a whole interval for a screen
-        // that already exists, then on the cadence.
-        entry.handle = setIv(() => { void tick(id) }, deps.pollMs)
+        // that already exists, then on the cadence (slower while the screen stays still).
+        entry.handle = setIv(() => {
+          const e = entries.get(id)
+          if (!e) return
+          if (++e.skipped < stillStride(e.unchanged)) return
+          e.skipped = 0
+          void tick(id)
+        }, deps.pollMs)
         void tick(id)
       } else if (entry.lastFrame) {
         // A newcomer to a running loop gets the current screen now, not at the next change.

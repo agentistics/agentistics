@@ -370,6 +370,15 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const [presetPrefill, setPresetPrefill] = useState<NonNullable<
     Parameters<typeof NewSessionModal>[0]['initialPreset']
   > | null>(null)
+  // PLAN.LIMITS: "continue in another harness" (the Nay card at 100%) lands here with the harness
+  // to pre-select — the ordinary wizard, nothing started on its own.
+  const routeLocation = useLocation()
+  const newSessionPreset = (routeLocation.state as { newSessionPreset?: { harness?: string } } | null)?.newSessionPreset
+  useEffect(() => {
+    if (!newSessionPreset) return
+    setPresetPrefill(newSessionPreset)
+    navigate(routeLocation.pathname, { replace: true, state: null })
+  }, [newSessionPreset, navigate, routeLocation.pathname])
 
   function selectPreset(preset: SessionPreset) {
     if (preset.cwd) {

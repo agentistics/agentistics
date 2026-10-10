@@ -36,7 +36,7 @@ import { planFleetSpawn, type FleetSpawnBody } from './fleet-spawn'
 import type { AdmissionRefusal } from './spawn-admission'
 import { arrangeFleet, type FleetArrangement, type FleetViewRequest } from './fleet-arrange'
 import { markFleetPhase, timeFleetPhase } from './fleet-profile'
-import type { SessionHub } from './session-hub'
+import { processSessionHub, type SessionHub } from './session-hub'
 import { forceRowScreen } from './adapter-state-host'
 import {
   buildFleetFrame, closedPage, fleetEventsResponse, type FleetFrame,
@@ -221,7 +221,8 @@ export async function fleetSessionHub(): Promise<SessionHub> {
 
 /** The hub's last snapshot without waiting, or `undefined` before the hub exists. */
 function lastHubSnapshot(): unknown {
-  return hubRef?.last() ?? undefined
+  // The process hub too: the event producer builds it at boot, before any route here has asked.
+  return (hubRef ?? processSessionHub())?.last() ?? undefined
 }
 
 /**
@@ -296,6 +297,35 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
   } finally {
     markFleetPhase('readFleet: total', totalStart)
   }
+}
+
+/**
+ * PERF.SLOW: `GET /api/fleet`'s BODY, kept per (language, view) for as long as the hub's snapshot is the
+ * same one. Every reader of this route (the web's fallback poll, VS Code, a bench, an assistant) used to
+ * pay a whole-fleet view build and a ~0.2–0.8 MB serialization per request, while the facts underneath
+ * change once per poll. The same rule as the events stream's frames (`fleetFrame`): keyed on the
+ * snapshot the body was built from, so an act (`kickFleet` → a new poll) or the next tick replaces it,
+ * and never older than one poll interval. A hit still READS the hub, which keeps its demand lease — a
+ * reader served from here must not let the hub stop ticking under it.
+ */
+const BODIES = new Map<string, { snap: unknown; atMs: number; body: Promise<string> }>()
+const BODY_MAX_AGE_MS = 5000
+
+export async function readFleetBody(lang: CliLang, view?: FleetViewRequest): Promise<string> {
+  const key = `${lang}|${JSON.stringify(view ?? null)}`
+  const snap = lastHubSnapshot()
+  const hit = BODIES.get(key)
+  if (hit && snap !== undefined && hit.snap === snap && Date.now() - hit.atMs <= BODY_MAX_AGE_MS) {
+    void fleetSessionHub().then(h => h.read()).catch(() => {})
+    return hit.body
+  }
+  const entry = { snap, atMs: Date.now(), body: readFleet(lang, view).then(p => JSON.stringify(p)) }
+  if (!BODIES.has(key) && BODIES.size >= MAX_FRAME_KEYS) BODIES.delete(BODIES.keys().next().value as string)
+  BODIES.set(key, entry)
+  // Keyed on the snapshot the body maps: read AFTER `readFleet`, which may itself have polled. A body
+  // built while the hub had no snapshot (or that failed) is never reused.
+  void entry.body.then(() => { entry.snap = lastHubSnapshot() }, () => { if (BODIES.get(key) === entry) BODIES.delete(key) })
+  return entry.body
 }
 
 // ---------------------------------------------------------------------------

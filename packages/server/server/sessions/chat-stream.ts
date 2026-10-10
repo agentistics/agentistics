@@ -37,6 +37,23 @@ export const UNRESOLVED_BACKOFF_MS = 1_000
  */
 export const AFTER_SEND_RETRY_MS = [700, 1_500, 3_000] as const
 export const KEEPALIVE_MS = 15_000
+/** PERF.SLOW: idle time after a read, per ms that read took, while the file keeps changing. */
+export const READ_LOAD_FACTOR = 4
+/** …and never more than this: a streaming answer still moves at least once a second. */
+export const MAX_READ_GAP_MS = 1_000
+
+/**
+ * PERF.SLOW. PURE: how long a FILE change waits before this stream reads again. The first change after
+ * a quiet spell reads at the debounce; under a turn that keeps writing, the next read waits until the
+ * idle time since the last read ENDED is `READ_LOAD_FACTOR` × that read's duration (capped at
+ * `MAX_READ_GAP_MS`). These readers parse the whole transcript, so a long turn re-read on every append
+ * cost the server tens of seconds of CPU; this holds one stream's duty cycle near 20 % while a small
+ * transcript (a read of a few ms) keeps its debounce-only latency.
+ */
+export function nextReadDelay(nowMs: number, lastEndMs: number, lastDurationMs: number): number {
+  const gap = Math.min(MAX_READ_GAP_MS, READ_LOAD_FACTOR * Math.max(0, lastDurationMs))
+  return Math.max(DEBOUNCE_MS, lastEndMs + gap - nowMs)
+}
 /** Chat streams one server keeps at once; past it the client falls back to polling. */
 export const MAX_CHAT_STREAMS = 32
 
@@ -113,6 +130,8 @@ export function chatStreamResponse(id: string, deps: ChatStreamDeps, signal: Abo
   let lastFresh = 0
   let tickOff: (() => void) | null = null
   let backoff = UNRESOLVED_BACKOFF_MS
+  let lastReadEnd = -Infinity
+  let lastReadMs = 0
 
   let ctl!: ReadableStreamDefaultController<Uint8Array>
   const send = (event: string, data: string) => { if (!closed) try { ctl.enqueue(enc.encode(`event: ${event}\ndata: ${data}\n\n`)) } catch { close() } }
@@ -125,7 +144,10 @@ export function chatStreamResponse(id: string, deps: ChatStreamDeps, signal: Abo
       const useFresh = fresh || Date.now() - lastFresh >= ROW_TTL_MS
       if (useFresh) lastFresh = Date.now()
       let resolved: string | null = null
+      const readStart = Date.now()
       const p = await deps.read(useFresh, x => { resolved = x })
+      lastReadEnd = Date.now()
+      lastReadMs = lastReadEnd - readStart
       if (closed) return
       if (resolved && resolved !== path) {
         watcher?.close()
@@ -152,7 +174,10 @@ export function chatStreamResponse(id: string, deps: ChatStreamDeps, signal: Abo
     if (closed) return
     if (fresh) againFresh = true
     if (debounce !== null) return
-    debounce = setTimer(() => { debounce = null; const f = againFresh; againFresh = false; void pump(f) }, DEBOUNCE_MS)
+    // A person's act (a send, a fresh read) is answered at the debounce; a file change waits out the
+    // duty cycle (`nextReadDelay`).
+    const wait = fresh ? DEBOUNCE_MS : nextReadDelay(Date.now(), lastReadEnd, lastReadMs)
+    debounce = setTimer(() => { debounce = null; const f = againFresh; againFresh = false; void pump(f) }, wait)
   }
 
   function armSafety() {

@@ -443,6 +443,12 @@ const RUNTIME: ExcludeRule[] = [
       + 'does not exist on the new machine; the conversation itself is in the harness\'s own store.',
   },
   {
+    pattern: '.agentistics/plan-limits.json', match: 'prefix', reason: 'regenerable',
+    why: 'The last 5-hour / weekly plan-limit reading per harness and which threshold notices were already '
+      + 'given. Each harness reports its windows again on its next turn, and the readings belong to THIS '
+      + 'machine\'s accounts at the moment they were taken.',
+  },
+  {
     pattern: '.agentistics/managed-sessions.json', match: 'prefix', reason: 'runtime',
     why: 'Names tmux sessions that will not exist on the new machine. Restoring it yields rows pointing at nothing.',
   },
