@@ -118,6 +118,7 @@ import {
 import { markSessionPending } from '../lib/pendingSessionStore'
 import { dedicatedTerminalPath, paneForTarget, readTerminalPane } from '../lib/terminalSurface'
 import { ShellBand } from '../components/sessions/ShellBand'
+import { openInTerminalFor } from '../components/sessions/OpenInTerminalPane'
 import { targetLabel } from '../lib/terminalTarget'
 import { sessionPlanFactor } from '../lib/costBasis'
 
@@ -518,6 +519,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const selected = sessionId === undefined
     ? undefined
     : fleet.rows.find(r => r.id === sessionId || r.conversationId === sessionId)
+  /** A STRUCTURED row's `cli` pane is the door to the same conversation as a TUI — every mount. */
+  const selectedOpenInTerminal = openInTerminalFor(selected ? rowIndex.get(selected.id) : undefined, act)
 
   /**
    * THE DEDICATED TERMINAL — the same page at its own route, showing one screen and nothing else.
@@ -1804,6 +1807,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               placement="aside"
               fixedTarget="cli"
               sessionId={selected.id}
+              {...(selectedOpenInTerminal ? { openInTerminal: selectedOpenInTerminal } : {})}
               {...(selected.cwd ? { cwd: selected.cwd } : {})}
               {...(selected.harness ? { harness: selected.harness } : {})}
               lang={pt ? 'pt' : 'en'}
@@ -1876,6 +1880,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           placement="aside"
           fixedTarget="cli"
           sessionId={selected.id}
+          {...(selectedOpenInTerminal ? { openInTerminal: selectedOpenInTerminal } : {})}
           {...(selected.cwd ? { cwd: selected.cwd } : {})}
           {...(selected.harness ? { harness: selected.harness } : {})}
           lang={pt ? 'pt' : 'en'}
@@ -2600,6 +2605,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               placement="dedicated"
               fixedTarget="cli"
               sessionId={selected.id}
+              {...(selectedOpenInTerminal ? { openInTerminal: selectedOpenInTerminal } : {})}
               {...(selected.cwd ? { cwd: selected.cwd } : {})}
               lang={pt ? 'pt' : 'en'}
               theme={theme === 'light' ? 'light' : 'dark'}

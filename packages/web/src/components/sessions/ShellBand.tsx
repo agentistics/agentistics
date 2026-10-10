@@ -127,9 +127,6 @@ interface T {
   enableNowBusy: string
   enablePermanently: string
   enablePermanentlyBusy: string
-  termTitle: string
-  termBody: string
-  termBusy: string
 }
 
 const TXT: Record<'pt' | 'en', T> = {
@@ -165,9 +162,6 @@ const TXT: Record<'pt' | 'en', T> = {
     enableNowBusy: 'Enabling…',
     enablePermanently: 'Enable permanently',
     enablePermanentlyBusy: 'Saving…',
-    termTitle: 'Open in terminal',
-    termBody: 'This session has no terminal screen. Open the same conversation in a terminal to see it and type directly.',
-    termBusy: 'Opening…',
   },
   pt: {
     title: 'Shell',
@@ -201,9 +195,6 @@ const TXT: Record<'pt' | 'en', T> = {
     enableNowBusy: 'Habilitando…',
     enablePermanently: 'Habilitar permanentemente',
     enablePermanentlyBusy: 'Salvando…',
-    termTitle: 'Abrir no terminal',
-    termBody: 'Esta sessão não tem uma tela de terminal. Abra a mesma conversa num terminal para ver e digitar direto.',
-    termBusy: 'Abrindo…',
   },
 }
 

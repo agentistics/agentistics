@@ -44,7 +44,7 @@ import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
 import { SessionChat, type SessionChatProps, type SessionComposerMetrics } from './SessionChat'
 import { SessionActions } from './SessionActions'
-import type { OpenInTerminal } from './OpenInTerminalPane'
+import { openInTerminalFor } from './OpenInTerminalPane'
 import { ShellBand } from './ShellBand'
 import {
   BAND_MIN_PX, bandPanelFull, keepUsableColumnHeight, readBandPrefs, resolveBandDrag, resolveBandHeight, withBandPanelFull,
@@ -234,9 +234,7 @@ export function SessionPanel({
    */
   const screenless = native || session.id.startsWith('external:')
   // A STRUCTURED row (the server offers `terminal` only there): its cli pane is the door to the same conversation as a TUI.
-  const openInTerminal: OpenInTerminal | undefined = row?.verbs.some(v => v.action === 'terminal' && v.enabled)
-    ? { state: row.state, open: () => act({ id: session.id, action: 'terminal' }) }
-    : undefined
+  const openInTerminal = openInTerminalFor(row ? { ...row, id: session.id } : undefined, act)
 
   // Uncontrolled (mobile, self-contained) unless the caller hands in `onViewChange` — see the
   // module header. The local state is still declared unconditionally (hooks can't be), it is just

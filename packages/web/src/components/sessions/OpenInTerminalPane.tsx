@@ -16,6 +16,18 @@ export interface OpenInTerminal {
   open: () => Promise<{ ok: boolean; message: string }>
 }
 
+/**
+ * The door for a row, or `undefined` when the server does not offer `terminal` on it (a TUI row keeps
+ * its terminal pane unchanged). ONE reading, shared by every mount of the `cli` pane.
+ */
+export function openInTerminalFor(
+  row: { id: string; state: string; verbs: ReadonlyArray<{ action: string; enabled: boolean }> } | undefined,
+  act: (req: { id: string; action: 'terminal' }) => Promise<{ ok: boolean; message: string }>,
+): OpenInTerminal | undefined {
+  if (!row?.verbs.some(v => v.action === 'terminal' && v.enabled)) return undefined
+  return { state: row.state, open: () => act({ id: row.id, action: 'terminal' }) }
+}
+
 const TXT = {
   en: {
     title: 'Open in terminal',
