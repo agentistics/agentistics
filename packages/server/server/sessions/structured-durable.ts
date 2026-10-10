@@ -25,6 +25,7 @@
  * (`StructuredSpawn.env` never carries one). It is deleted when the session ends.
  */
 import { noteStructuredLine } from '../plan-limits'
+import { clearComposing, noteComposingLine } from './structured-composing'
 import { spawn as spawnChild } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createConnection, type Socket } from 'node:net'
@@ -247,8 +248,8 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
           const exited = new Promise<number | null>(r => { exitResolve = r })
           try { startRelay(id, { bin, args: [...args], cwd, ...(env ? { env: { ...env } } : {}) }) } catch { exitResolve(null); lines.end() }
           conn = relayConnection(path.join(dir, FILES.sock), 0, {
-            line: (l, t) => { noteStructuredLine(l, t); lines.push(l, t) },
-            exit: c => { lines.end(); exitResolve(c) },
+            line: (l, t) => { noteStructuredLine(l, t); noteComposingLine(id, saved.harness, l); lines.push(l, t) },
+            exit: c => { clearComposing(id); lines.end(); exitResolve(c) },
             // Another server took the child over: this one goes quiet, and must not read the
             // silence as an exit (that would make it fall back and start a second copy).
             replaced: () => {},
@@ -345,13 +346,15 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
         done,
         launch(bin, args, cwd, env): StructuredPipe {
           // The same child, or the replay is not of this session.
+          const replayHarness = (() => { try { return (JSON.parse(read(id, FILES.saved) ?? '') as SavedSpawn).harness } catch { return '' } })()
           const was = (() => { try { return JSON.parse(read(id, FILES.launch) ?? '') as RelayLaunchSpec } catch { return null } })()
           const same = was && was.bin === bin && was.cwd === cwd && JSON.stringify(was.args) === JSON.stringify([...args])
             && JSON.stringify(was.env ?? {}) === JSON.stringify(env ?? {})
           if (!same) fail('the re-created driver launched a different command')
           conn = relayConnection(path.join(dir, FILES.sock), out.length, {
-            line: (l, ts) => { noteStructuredLine(l, ts); if (replaying) pendingLive.push({ l, t: ts }); else lines.push(l, ts) },
+            line: (l, ts) => { noteStructuredLine(l, ts); noteComposingLine(id, replayHarness, l); if (replaying) pendingLive.push({ l, t: ts }); else lines.push(l, ts) },
             exit: c => {
+              clearComposing(id)
               // Held until the record is replayed: the driver must see the session as it was first.
               if (replaying) { exitedEarly = true; exitCode = c; return }
               lines.end(); exitResolve(c)

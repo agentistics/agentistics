@@ -107,6 +107,11 @@ export interface AdapterChatDeps {
   onFleetTick(cb: () => void): () => void
   /** A send / an answer for this session. */
   onWake(cb: () => void): () => void
+  /**
+   * What the session is FORMULATING (a structured session's raw stream, `structured-composing.ts`):
+   * the current value, then every change. Absent = this source cannot say (the event is never sent).
+   */
+  composing?: { now(): 'question' | null; on(cb: (c: 'question' | null) => void): () => void }
   setTimer?: (f: () => void, ms: number) => unknown
   clearTimer?: (t: unknown) => void
 }
@@ -259,6 +264,11 @@ export function adapterChatResponse(
       keepalive = setTimer(ping, ADAPTER_KEEPALIVE_MS)
       offs.push(deps.onFleetTick(() => { void onTick() }))
       offs.push(deps.onWake(() => schedule()))
+      if (deps.composing) {
+        const say = (c: 'question' | null) => send('composing', JSON.stringify({ what: c }))
+        if (deps.composing.now()) say(deps.composing.now())
+        offs.push(deps.composing.on(say))
+      }
       void (async () => {
         await onTick()
         if (closed) return
