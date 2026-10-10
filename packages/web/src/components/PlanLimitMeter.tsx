@@ -104,7 +104,7 @@ export function PlanLimitMini({ limits, now, lang, compact = false }: { limits: 
     <span
       data-plan-mini={limits.harness}
       style={{
-        display: 'grid', gridTemplateColumns: `auto ${compact ? 18 : 26}px auto`, columnGap: compact ? 3 : 5, rowGap: compact ? 2 : 3,
+        display: 'grid', gridTemplateColumns: `auto ${compact ? 24 : 26}px auto`, columnGap: compact ? 4 : 5, rowGap: compact ? 2 : 3,
         alignItems: 'center', fontSize: compact ? 9 : 10, lineHeight: 1.1, fontVariantNumeric: 'tabular-nums', textAlign: 'left',
       }}
     >
@@ -122,7 +122,7 @@ export function PlanLimitMini({ limits, now, lang, compact = false }: { limits: 
             <span style={{ display: 'block', width: renewed ? 0 : `${Math.min(100, Math.max(0, pct))}%`, height: '100%', borderRadius: 2, background: limitTone(pct) }} />
           </span>,
           <span key={`${w.kind}v`} data-plan-window={w.kind} style={{
-            minWidth: compact ? 18 : 22, textAlign: 'right', whiteSpace: 'nowrap',
+            minWidth: compact ? 20 : 22, textAlign: 'right', whiteSpace: 'nowrap',
             color: hot ? limitTone(pct) : 'var(--text-secondary)', fontWeight: hot ? 600 : 400,
           }}>{renewed ? '–' : `${shown}%`}</span>,
         ]
