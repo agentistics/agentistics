@@ -10,6 +10,27 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.115.0': {
+    features: [
+      {
+        pt: 'As novidades abrem sozinhas uma vez depois de cada atualização, com a opção "Não mostrar novamente"; a escolha fica salva nesta máquina.',
+        en: 'What\'s new opens by itself once after each update, with a "Don\'t show again" option; the choice is saved on this machine.',
+      },
+      {
+        pt: 'Configurações → Novidades mostra a versão atual e o histórico das atualizações; clicar no número da versão também abre as novidades.',
+        en: 'Settings → What\'s new shows the current version and the history of updates; clicking the version number also opens it.',
+      },
+      {
+        pt: 'O cartão de métricas da sessão mostra o custo por resposta e avisa quando a conversa passa do limite de tokens, para passar o bastão a uma sessão nova.',
+        en: 'The session metrics card shows the cost per reply and warns when the conversation passes the token limit, so you can hand off to a fresh session.',
+      },
+      {
+        pt: 'O briefing que cada assistente recebe ficou mais curto: só as ferramentas de sessões e do Agentask, com métricas e painéis em uma linha.',
+        en: 'The briefing each assistant receives is shorter: only the sessions and Agentask tools, with metrics and dashboards in one line.',
+      },
+    ],
+    fixes: [],
+  },
   '2.114.1': {
     features: [],
     fixes: [

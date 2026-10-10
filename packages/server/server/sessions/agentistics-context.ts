@@ -62,6 +62,9 @@ const TOOL_GROUPS = {
   Dashboards: ['agentistics_component_catalog', 'agentistics_get_layouts', 'agentistics_create_layout', 'agentistics_add_component', 'agentistics_remove_component', 'agentistics_set_active_layout', 'agentistics_delete_layout', 'agentistics_export_pdf', 'agentistics_build_layout'],
 } as const
 
+/** Metrics and dashboards are NOT listed tool by tool (token economy): one line, the tools stay discoverable via the MCP. */
+export const METRICS_DASHBOARDS_LINE = 'There are also metrics and dashboard/layout tools available if you need them.'
+
 /** The context's tool inventory, kept explicit so the MCP registry parity test can guard it. */
 export const CONTEXT_TOOL_NAMES = Object.values(TOOL_GROUPS).flat()
 
@@ -74,11 +77,10 @@ export function contextText(i: ContextInput): string {
   const lines = [
     CONTEXT_HEADER,
     `You are running inside agentistics, an app that manages and measures coding-assistant sessions. Session: ${i.sessionId}. Project folder: ${i.cwd}.`,
-    'Tools — the "agentistics" MCP server gives you (grouped by purpose):',
+    'Tools — the "agentistics" MCP server gives you:',
     `- Tasks (Agentask): ${TOOL_GROUPS.Tasks.join(', ')} — plan, claim, edit, link, comment, coordinate, and close work.`,
     `- Sessions: ${TOOL_GROUPS.Sessions.join(', ')} — list, message another session, notify the user, and organise sidebar folders.`,
-    `- Metrics: ${TOOL_GROUPS.Metrics.join(', ')} — summary, costs, projects, repos, harnesses, and tags.`,
-    `- Dashboards: ${TOOL_GROUPS.Dashboards.join(', ')} — layouts, components, and PDF export.`,
+    METRICS_DASHBOARDS_LINE,
   ]
   lines.push(
     'Your role here: decide from the request. LEADER organises: break the request into Agentask tasks/subtasks, propose which sessions to open (harness + model each), follow them, have each delivery QA\'d by a different model, and report to the user; do not implement big pieces yourself. WORKER implements one defined piece, tests, commits, and reports to whoever started it. AUTO: one piece → worker; several fronts → leader; you may become leader if the work grows.',

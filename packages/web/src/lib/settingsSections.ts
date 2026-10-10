@@ -1,6 +1,6 @@
 /** Which settings sections a viewer can see. UX-only gate — the server enforces real authz. */
 export type SettingsSectionId =
-  | 'preferences' | 'accessibility' | 'sessions' | 'data-sources' | 'harnesses' | 'pricing' | 'billing' | 'install' | 'connection' | 'live'
+  | 'preferences' | 'accessibility' | 'sessions' | 'data-sources' | 'harnesses' | 'pricing' | 'billing' | 'install' | 'whatsnew' | 'connection' | 'live'
   | 'chat' | 'providers' | 'memory' | 'notifications' | 'backup'
   | 'users' | 'teams' | 'machines' | 'repositories'
 
@@ -34,6 +34,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'pricing', labelEn: 'Pricing', labelPt: 'Preços', group: 'personal' },
   { id: 'billing', labelEn: 'Billing', labelPt: 'Cobrança', group: 'personal' },
   { id: 'install', labelEn: 'Install', labelPt: 'Instalação', group: 'personal' },
+  { id: 'whatsnew', labelEn: "What's new", labelPt: 'Novidades', group: 'personal' },
   { id: 'live', labelEn: 'Live', labelPt: 'Ao vivo', group: 'personal' },
   { id: 'chat', labelEn: 'Chat', labelPt: 'Chat', group: 'personal' },
   // Runtime provider credentials (Anthropic, OpenAI, OpenRouter, DeepSeek, LiteLLM, 9Router,
