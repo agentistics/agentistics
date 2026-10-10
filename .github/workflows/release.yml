@@ -88,7 +88,7 @@ jobs:
         if: steps.skip_check.outputs.skip != 'true'
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.2  # 1.4.3 shipped 10/10 without the musl cross-compile target; bump when it is published
 
       - name: Install dependencies
         if: steps.skip_check.outputs.skip != 'true'
