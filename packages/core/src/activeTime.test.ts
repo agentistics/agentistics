@@ -101,3 +101,15 @@ describe('computeActiveTime', () => {
     expect(computeActiveTime(events).activeMinutes!).toBeLessThanOrEqual(wall)
   })
 })
+
+describe('active time is a union, capped by duration', () => {
+  test('overlapping measured turns count once and never exceed the span', () => {
+    const r = computeActiveTime([
+      { ts: 0, userPrompt: true },
+      { ts: 600_000, measuredMs: 600_000 },
+      { ts: 60_000, userPrompt: true },
+      { ts: 660_000, measuredMs: 600_000 },
+    ])
+    expect(r.activeMinutes).toBeLessThanOrEqual(11)
+  })
+})

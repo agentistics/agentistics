@@ -188,7 +188,10 @@ export function orphanReason(kind: ProcessKind, e: Pick<ProcEntry, 'ppid' | 'cwd
 export function buildInventory(entries: ProcEntry[], ctx: InventoryContext): AgentopProcess[] {
   const helperPids = new Map([...ctx.helpers].map(([pid, h]) => [pid, h.id] as const))
   const out: AgentopProcess[] = []
+  const seen = new Set<number>()
   for (const e of entries) {
+    if (seen.has(e.pid)) continue // the same pid listed twice is one process
+    seen.add(e.pid)
     const c = classifyProcess(e, helperPids)
     if (!c) continue
     const helper = ctx.helpers.get(e.pid)

@@ -52,11 +52,14 @@ test('a lock left by a dead process is reclaimed, not obeyed forever', async () 
   const file = await lockPath()
   // What a crash or `kill -9` leaves behind. Refusing to ever start again would be a worse
   // failure than the duplicate this guards against.
-  await writeFile(file, '999999')
+  // A pid that PROVABLY is dead: a child we ran and reaped (a fixed number may be alive).
+  const gone = Bun.spawn(['true'])
+  await gone.exited
+  await writeFile(file, String(gone.pid))
 
   const claim = await claimInstanceLock(file, 4444)
   expect(claim.ok).toBe(true)
-  expect((await readFile(file, 'utf-8')).trim()).toBe('4444')
+  expect((await readFile(file, 'utf-8')).trim().split(' ')[0]).toBe('4444')
 })
 
 test('a live holder is obeyed — this process is the liveness proof', async () => {
@@ -190,10 +193,13 @@ test('probe: a live holder is reported, and the probe claims nothing', async () 
 test('probe: no lock, or a lock left by a dead process, is "free" — and is left in place', async () => {
   const file = await lockPath()
   expect(await probeInstanceLock(file)).toBeNull()
-  await writeFile(file, '999999')
+  // A pid that PROVABLY is dead: a child we ran and reaped (a fixed number may be alive).
+  const gone = Bun.spawn(['true'])
+  await gone.exited
+  await writeFile(file, String(gone.pid))
   expect(await probeInstanceLock(file)).toBeNull()
   // Stale-lock cleanup belongs to the claim, under O_EXCL; a probe deleting it would race it.
-  expect((await readFile(file, 'utf-8')).trim()).toBe('999999')
+  expect((await readFile(file, 'utf-8')).trim()).toBe(String(gone.pid))
 })
 
 // ---------------------------------------------------------------------------
