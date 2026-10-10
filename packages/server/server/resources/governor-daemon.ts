@@ -109,10 +109,16 @@ export function governorTick(deps: GovernorDeps): Promise<ResourcesSnapshot> {
     // whenever that count grows. The panel still lists each one.
     const mcpPids = new Set(inventory.filter(p => p.kind === 'mcp').map(p => p.pid))
     const staleMcp = plan.alerts.filter(a => a.reason === 'stale-binary' && mcpPids.has(a.pid))
-    if (staleMcp.length > lastStaleMcpCount) {
-      deps.notify({ type: 'info', code: 'hardware.mcp_stale', meta: { count: staleMcp.length } })
-    }
+    // A stale MCP raises NO notification (owner 10/10: nothing the user can do); the panel keeps a
+    // quiet line. Orphans are different — something the user CAN end — and are announced once.
     lastStaleMcpCount = staleMcp.length
+    for (const o of inventory.filter(p => p.orphanWhy && !p.self)) {
+      const key = `${o.pid}:orphan`
+      live.add(key)
+      if (announced.has(key)) continue
+      announced.add(key)
+      deps.notify({ type: 'info', code: 'hardware.process_orphan', meta: { label: o.label, pid: o.pid, size: mbText(o.usedBytes) } })
+    }
     for (const a of plan.alerts) {
       if (a.reason === 'stale-binary' && mcpPids.has(a.pid)) continue
       const key = `${a.pid}:${a.reason}`

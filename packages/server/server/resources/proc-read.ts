@@ -27,7 +27,7 @@ export function parseStat(text: string): { ppid: number; utime: number; stime: n
 
 /** `KEY=value` entries of interest out of `/proc/<pid>/environ` — PURE. */
 export function pickEnv(environ: string): ProcEntry['env'] {
-  const want = new Set(['CLAUDE_PID', 'CLAUDE_CODE_SESSION_ID', 'TMUX_PANE', 'AGENTISTICS_HELPER_ID', 'AGENTISTICS_HEAVY_JOB', 'HOME'])
+  const want = new Set(['CLAUDE_PID', 'CLAUDE_CODE_SESSION_ID', 'TMUX_PANE', 'AGENTISTICS_HELPER_ID', 'AGENTISTICS_HEAVY_JOB', 'HOME', 'AGENTOP_MANAGED_ID'])
   const out: Record<string, string> = {}
   for (const kv of environ.split('\0')) {
     const eq = kv.indexOf('=')
@@ -93,6 +93,8 @@ export async function readProcEntries(alwaysPids: ReadonlySet<number> = new Set(
       if (!candidate) return
       const stat = parseStat(await readFile(`/proc/${pid}/stat`, 'utf8'))
       if (!stat) return
+      const cwdGone = ((await readlink(`/proc/${pid}/cwd`).catch(() => '')) as string).endsWith(' (deleted)')
+      const ancestorManagedId = env.AGENTOP_MANAGED_ID ? undefined : await ancestorManagedIdOf(stat.ppid)
       // A card counts only for the process that wrote it — same pid AND same start time.
       const own = card && card.starttime === stat.starttime ? card : undefined
       if (own) env = { ...cardEnv(own), ...env }
@@ -112,6 +114,8 @@ export async function readProcEntries(alwaysPids: ReadonlySet<number> = new Set(
         cpuPercent,
         ageSec: up !== null ? Math.max(0, Math.round(up - stat.starttime / CLK_TCK)) : 0,
         env,
+        ...(cwdGone ? { cwdGone } : {}),
+        ...(ancestorManagedId ? { ancestorManagedId } : {}),
         ...(own?.owner ? { cardOwner: own.owner } : {}),
       })
     } catch { /* exited mid-read, or not ours */ }
@@ -132,4 +136,17 @@ function cardEnv(c: ProcCard): ProcEntry['env'] {
     ...(c.claudePid ? { CLAUDE_PID: String(c.claudePid) } : {}),
     ...(c.sessionId ? { CLAUDE_CODE_SESSION_ID: c.sessionId } : {}),
   }
+}
+
+/** Walk up to 6 ancestors for the nearest AGENTOP_MANAGED_ID (the session an MCP was started under). */
+async function ancestorManagedIdOf(ppid: number): Promise<string | undefined> {
+  let pid = ppid
+  for (let i = 0; i < 6 && pid > 1; i++) {
+    const env = pickEnv(await readFile(`/proc/${pid}/environ`, 'utf8').catch(() => ''))
+    if (env.AGENTOP_MANAGED_ID) return env.AGENTOP_MANAGED_ID
+    const st = parseStat(await readFile(`/proc/${pid}/stat`, 'utf8').catch(() => ''))
+    if (!st) return undefined
+    pid = st.ppid
+  }
+  return undefined
 }
