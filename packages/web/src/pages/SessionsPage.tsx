@@ -1738,13 +1738,14 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    *  really closable (`panelClosable`: the Shell) and there is a shell to end — the X beside it. The
    *  gear that used to hold "close" is gone; the pin (dock back) leads the header, see `floatingBar`. */
   const shellCloseEntry = useShellClose(selected?.id)
-  const dockControls = (id: PanelId, name: string): ReactNode => {
+  const dockControls = (id: PanelId, name: string, withPin = false): ReactNode => {
     const closable = panelClosable(id) && selected !== undefined && selected !== null
       && shellCloseEntry.live !== null
     return (
       <PanelFixedControls
         lang={pt ? 'pt' : 'en'}
         panelName={name}
+        {...(withPin ? { pinned: { active: true, onToggle: () => dockBack(id) } } : {})}
         onMinimize={() => minimizeFloatingPanel(id)}
         minimizeLabel={pt ? `Minimizar ${name} para a barra inferior` : `Minimize ${name} to the bottom bar`}
         {...(closable ? {
@@ -1828,11 +1829,11 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           lang={pt ? 'pt' : 'en'}
           onClose={() => dockBack('hardware')}
           hideCloseButton
-          controls={dockControls('hardware', panelTitle('hardware', pt))}
+          controls={dockControls('hardware', panelTitle('hardware', pt), true)}
         />
       )
     }
-    return tabPane(id, { hideCloseButton: true, headerControls: dockControls(id, panelTitle(id, pt)) })
+    return tabPane(id, { hideCloseButton: true, headerControls: dockControls(id, panelTitle(id, pt), true) })
   }
 
   /**
@@ -3201,6 +3202,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             windows={floatingShown}
             render={floatingBody}
             title={floatingTitle}
+            nameInGrip={id => id === 'studio'}
             onRaise={raisePanel}
             onPlace={placePanel}
             onArea={area => setFloatingArea(area, pane)}

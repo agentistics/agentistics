@@ -30,6 +30,10 @@ export function UpgradeOverlay({ lang, isMobile }: { lang: Lang; isMobile: boole
   const flowRef = useRef(flow)
   flowRef.current = flow
   const refs = useStageRefs()
+  // "Restart now" asks first: it takes the app offline for a few seconds (owner rule — a notice
+  // offers the action itself, behind a confirmation).
+  const [confirming, setConfirming] = useState(false)
+  useEffect(() => { if (!stopped) setConfirming(false) }, [stopped])
 
   // A new line every few seconds while a step lasts; a new step starts its own pool from the top.
   useEffect(() => { setTick(0) }, [step])
@@ -63,19 +67,44 @@ export function UpgradeOverlay({ lang, isMobile }: { lang: Lang; isMobile: boole
       ) : (
         <div role="alert" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 16, textAlign: 'center', background: 'rgba(10,10,15,.72)' }}>
           <div style={{ maxWidth: 400 }}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#fca5a5', marginBottom: 6 }}>
-              {ut(lang, flow.phase === 'failed' ? 'loader.failed_title' : 'loader.timeout_title')}
+            <div style={{ fontSize: 16, fontWeight: 700, color: flow.restartReady ? '#fdba74' : '#fca5a5', marginBottom: 6 }}>
+              {ut(lang, flow.restartReady ? 'loader.restart_title' : flow.phase === 'failed' ? 'loader.failed_title' : 'loader.timeout_title')}
             </div>
             <p style={{ fontSize: 13, color: '#cbd5e1', margin: '0 0 16px', lineHeight: 1.6 }}>
-              {flow.message ?? ut(lang, flow.phase === 'failed' ? 'loader.failed_body' : 'loader.timeout_body')}
+              {confirming
+                ? ut(lang, 'loader.restart_confirm')
+                : flow.restartReady
+                  ? ut(lang, 'loader.restart_body')
+                  : flow.message ?? ut(lang, flow.phase === 'failed' ? 'loader.failed_body' : 'loader.timeout_body')}
             </p>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-              <button type="button" onClick={() => { const v = flow.target; dismissFlow(); void startUpgrade(v, lang === 'pt' ? 'pt' : 'en') }} style={primaryBtn}>
-                <RotateCw size={14} /> {ut(lang, flow.phase === 'timeout' ? 'loader.restart_now' : 'loader.retry')}
-              </button>
-              <button type="button" onClick={dismissFlow} style={ghostBtn}>
-                <X size={14} /> {ut(lang, 'loader.dismiss')}
-              </button>
+              {confirming ? (
+                <>
+                  {/* The new binary is already on disk, so the server answers this press with a
+                      restart only (`upgrade-web.ts`'s `restartOnly`) — nothing is downloaded again. */}
+                  <button type="button" data-testid="upgrade-restart-confirm" onClick={() => { const v = flow.target; setConfirming(false); dismissFlow(); void startUpgrade(v, lang === 'pt' ? 'pt' : 'en') }} style={primaryBtn}>
+                    <RotateCw size={14} /> {ut(lang, 'loader.restart_confirm_yes')}
+                  </button>
+                  <button type="button" onClick={() => setConfirming(false)} style={ghostBtn}>
+                    <X size={14} /> {ut(lang, 'loader.cancel')}
+                  </button>
+                </>
+              ) : (
+                <>
+                  {flow.restartReady ? (
+                    <button type="button" data-testid="upgrade-restart-now" onClick={() => setConfirming(true)} style={primaryBtn}>
+                      <RotateCw size={14} /> {ut(lang, 'loader.restart_now')}
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => { const v = flow.target; dismissFlow(); void startUpgrade(v, lang === 'pt' ? 'pt' : 'en') }} style={primaryBtn}>
+                      <RotateCw size={14} /> {ut(lang, flow.phase === 'timeout' ? 'loader.restart_now' : 'loader.retry')}
+                    </button>
+                  )}
+                  <button type="button" onClick={dismissFlow} style={ghostBtn}>
+                    <X size={14} /> {ut(lang, 'loader.dismiss')}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
