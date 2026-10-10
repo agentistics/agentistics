@@ -22,6 +22,7 @@ import { useState } from 'react'
 import { AlertCircle, Check } from 'lucide-react'
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
 import { approvalIdentity, splitApprovalFrame } from '../../lib/approvalQuestion'
+import { optionLabel } from '../../lib/nativeSession'
 
 export interface ApprovalCardProps {
   row: FleetRow
@@ -213,7 +214,7 @@ export function ApprovalCard({ row, lang, act, onWrite, answering = null }: Appr
                 }}>
                   {o.number}
                 </span>
-                <span style={{ minWidth: 0, flex: 1 }}>{o.label}</span>
+                <span style={{ minWidth: 0, flex: 1 }}>{optionLabel(o.label, pt ? 'pt' : 'en')}</span>
                 {/* THE COMPOSER IS THE FIELD, and the row has to say where the answer goes — a row
                     that highlights and grows nothing reads as a click that did nothing. */}
                 {o.freeText && answering === o.number && (
