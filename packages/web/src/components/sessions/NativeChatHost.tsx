@@ -36,6 +36,11 @@ export function NativeChatHost(props: Omit<SessionChatProps, 'source'>) {
   const items = useMemo(() => nativeChatItems(state), [state])
   const turns = useMemo(() => (state.window === null ? null : nativeChatTurns(items, lang)), [state.window, items, lang])
   const asks = useMemo(() => nativeAsks(items), [items])
+  const emptyAnswer = state.emptyAnswerReason !== undefined
+    ? (pt
+      ? `O assistente terminou sem responder${state.emptyAnswerReason ? ` — motivo: ${state.emptyAnswerReason}` : '.'}`
+      : `The assistant finished without answering${state.emptyAnswerReason ? ` — reason: ${state.emptyAnswerReason}` : '.'}`)
+    : null
 
   const act = useCallback<ChatAct>(async req => {
     if (req.action === 'prompt') {
@@ -71,7 +76,7 @@ export function NativeChatHost(props: Omit<SessionChatProps, 'source'>) {
       : null,
     // The gauge is the composer's ring now (`stats`); the strip keeps the per-run lines.
     status: <NativeRunsStrip runs={runs} lang={lang} gauge={false} />,
-    notice: state.notice ?? (state.window !== null ? loadError : null),
+    notice: state.notice ?? emptyAnswer ?? (state.window !== null ? loadError : null),
     ...(controls ? { controls } : {}),
   }
   // The composer's context meter and metrics card, from the engine's real usage (`nativeStats.ts`).

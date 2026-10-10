@@ -135,6 +135,8 @@ export interface NativeChatState {
   pending: { clientRef: string; text: string; attachments?: NativeAttachmentView[] }[]
   /** A sentence to show once (a refused send, a closed stream). */
   notice?: string
+  /** A completed run produced no assistant text. Kept separate from `notice` so it survives a window refresh. */
+  emptyAnswerReason?: string
   closed: boolean
 }
 
@@ -154,6 +156,11 @@ function lastAssistantText(w: NativeWindow | null): string {
   const m = w?.messages.filter(x => x.message.role === 'assistant').at(-1)?.message
   if (!m) return ''
   return typeof m.content === 'string' ? m.content : m.content.flatMap(p => (p.type === 'text' ? [p.text] : [])).join('\n\n')
+}
+function hasAnswerAfterLatestUser(w: NativeWindow | null): boolean {
+  const messages = w?.messages ?? []
+  const lastUser = messages.findLastIndex(m => m.message.role === 'user')
+  return messages.slice(lastUser + 1).some(m => m.message.role === 'assistant' && userText(m.message).trim() !== '')
 }
 
 /**
@@ -199,13 +206,19 @@ function applyFrame(s: NativeChatState, f: NativeFrame): NativeChatState {
   switch (type) {
     case 'run.started': {
       const { stopped: _s, reasoning: _r, ...rest } = next
-      return { ...rest, running: true, ...(runId ? { runId } : {}), liveText: '' }
+      return { ...rest, running: true, emptyAnswerReason: undefined, ...(runId ? { runId } : {}), liveText: '' }
     }
     case 'run.ended': {
       // A stopped call persisted nothing (it was aborted mid-answer): keep what it had written, so the
       // person sees where it stopped rather than the text vanishing.
       const cut = data.status === 'abandoned' && next.liveText !== '' && !persisted(next.window, next.liveText)
-      return { ...next, running: false, liveText: '', asks: {}, ...(cut ? { stopped: next.liveText } : {}) }
+      const reason = typeof data.reason === 'string' ? data.reason : typeof data.status === 'string' ? data.status : undefined
+      return {
+        ...next, running: false, liveText: '', asks: {},
+        ...(cut ? { stopped: next.liveText } : {}),
+        // A tool-only / no-chunk run must not leave the shared chat's spinner behind forever.
+        ...(!cut && next.liveText.trim() === '' && !hasAnswerAfterLatestUser(next.window) ? { emptyAnswerReason: reason } : {}),
+      }
     }
     case 'model.invoked':
       return { ...next, liveText: '' }
@@ -268,7 +281,7 @@ export function nativeChatReducer(s: NativeChatState, a: NativeChatAction): Nati
       }
     }
     case 'sent':
-      return { ...s, pending: [...s.pending, { clientRef: a.clientRef, text: a.text, ...(a.attachments?.length ? { attachments: a.attachments } : {}) }], notice: undefined }
+      return { ...s, pending: [...s.pending, { clientRef: a.clientRef, text: a.text, ...(a.attachments?.length ? { attachments: a.attachments } : {}) }], notice: undefined, emptyAnswerReason: undefined }
     case 'send-failed':
       return { ...s, pending: s.pending.filter(p => p.clientRef !== a.clientRef), notice: a.sentence }
     case 'notice':
