@@ -549,7 +549,11 @@ export function createSessionsPoller(o: {
         if (!b.alive) { activity.set(r.id, 'exited'); return }
 
         const reading = adapter?.reading(r.id)
-        const readScreen = !adapter || planScreen({
+        // A backend that KNOWS the state (a structured session: the protocol's open turn) outranks the
+        // transcript file's reading — the file only learns a turn's progress when a message is FINISHED,
+        // so a 634 s Bash beating `tool_progress` read `waiting` for ten minutes (ADAPTER.ESSENTIALS-B).
+        const statedNow = o.backend.activityOf?.(r.id)
+        const readScreen = !adapter || !!statedNow || planScreen({
           reading,
           lastScreenMs: adapter.lastScreen(r.id),
           nowMs,
@@ -601,8 +605,9 @@ export function createSessionsPoller(o: {
         const before = prevDigest.get(r.id)
         if (backgroundWork({ frame, ...(rules ? { rules } : {}) })) background.add(r.id)
         // A5.4: a backend that KNOWS the state (an ACP agent states it) is believed over the frame.
-        const stated = o.backend.activityOf?.(r.id)
-        if (stated) corroborated.add(r.id)
+        const stated = statedNow
+        // The protocol's statement is EXACT: believed at once, both ways (no two-poll confirmation).
+        if (stated) { corroborated.add(r.id); exact.add(r.id) }
         const screenState = stated ?? attentionOf({
           alive: true,
           lastActivityMs: b.lastActivityMs,
