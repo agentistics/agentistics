@@ -16,6 +16,7 @@
  * host per request would fire one per poll.
  */
 
+import { bounded } from './bounded'
 import { PROMPT_ACK_MS, withDeadline } from './prompt-deadline'
 import type { HarnessId, ProjectKind } from '@agentistics/core'
 import type { StartHost } from '../cli-start'
@@ -905,6 +906,9 @@ export interface FleetNewOptions {
  * The wizard's own data. Never throws — a machine that cannot answer says so in a sentence, and an
  * empty list is only ever a real "there is nothing here".
  */
+/** How long the wizard waits on anything but the harness list itself. */
+const NEW_OPTIONS_BUDGET_MS = 3_000
+
 export async function readNewOptions(lang: CliLang, query: string, disk?: string): Promise<FleetNewOptions> {
   const s = controlStrings(lang)
   try {
@@ -915,11 +919,11 @@ export async function readNewOptions(lang: CliLang, query: string, disk?: string
     const { readHarnessDefaults } = await import('./harness-defaults')
     type Defaults = Awaited<ReturnType<typeof readHarnessDefaults>>
     const [harnesses, projects, tasks] = await Promise.all([
-      host.startableHarnesses(),
+      bounded(host.startableHarnesses(), NEW_OPTIONS_BUDGET_MS * 2, [] as Awaited<ReturnType<NonNullable<typeof host.startableHarnesses>>>),
       host.searchProjects
-        ? host.searchProjects(query, disk).catch(() => EMPTY_PROJECT_SEARCH)
+        ? bounded(host.searchProjects(query, disk), NEW_OPTIONS_BUDGET_MS, EMPTY_PROJECT_SEARCH)
         : Promise.resolve(EMPTY_PROJECT_SEARCH),
-      host.sessionTasks ? host.sessionTasks().catch(() => []) : Promise.resolve([]),
+      host.sessionTasks ? bounded(host.sessionTasks(), NEW_OPTIONS_BUDGET_MS, []) : Promise.resolve([]),
     ])
     // What each CLI will actually do here with no flags, read from THIS MACHINE's own settings
     // files. `spawn-spec.ts` publishes none — no CLI prints its default in `--help` — but the
@@ -927,13 +931,13 @@ export async function readNewOptions(lang: CliLang, query: string, disk?: string
     // what was reported. Never a guess: an unreadable file or a missing key yields nothing and the
     // picker keeps its plain "Default". See `harness-defaults.ts`.
     const configured = new Map(await Promise.all(harnesses.map(async h =>
-      [h.id, await readHarnessDefaults(h.id as HarnessId).catch(() => ({} as Defaults))] as const,
+      [h.id, await bounded(readHarnessDefaults(h.id as HarnessId), NEW_OPTIONS_BUDGET_MS, {} as Defaults)] as const,
     )))
     // The models each harness offers HERE — its own list where it publishes one, the verified
     // table where it does not. Never waits on a command (`agy models` goes to the network).
     const { modelCatalog } = await import('../model-catalog')
     const catalogs = new Map(await Promise.all(harnesses.map(async h =>
-      [h.id, await modelCatalog(h.id as HarnessId)] as const,
+      [h.id, await bounded(modelCatalog(h.id as HarnessId), NEW_OPTIONS_BUDGET_MS, undefined)] as const,
     )))
     // An EMPTY list with a reason is a fault the wizard must say out loud — see `harnessNotice`.
     const notice = harnesses.length === 0 ? host.harnessNotice?.() : undefined
