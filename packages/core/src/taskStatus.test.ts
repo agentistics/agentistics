@@ -90,6 +90,12 @@ describe('planInReviewAdd', () => {
     expect(planInReviewAdd([])).toBeNull()
     expect(planInReviewAdd([todo, { ...todo, id: 'in_review', protected: false }])).toBeNull()
   })
+
+  it('never adds a second review column beside one a person created under another id or label', () => {
+    expect(planInReviewAdd([todo, { ...todo, id: 'em_revisao', label: 'Em revisão', protected: false }])).toBeNull()
+    expect(planInReviewAdd([todo, { ...todo, id: 'qa', label: 'Code review', protected: false }])).toBeNull()
+    expect(planInReviewAdd([todo, { ...todo, id: 'waiting', label: 'Waiting', protected: false }])).not.toBeNull()
+  })
 })
 
 describe('canDeleteStatus', () => {

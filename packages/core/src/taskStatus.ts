@@ -66,13 +66,23 @@ export const DEFAULT_TASK_STATUSES: readonly TaskStatusDef[] = [
 ]
 
 /**
+ * A status a person already created for the same idea under another id ("Em revisão" from the
+ * editor slugifies to `em_revisao`, "Review" to `review`). Adding a second "In review" beside it
+ * would be a duplicate column on their board, so the migration treats it as already present.
+ */
+function namesReview(s: TaskStatusDef): boolean {
+  const norm = (v: string) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  return /review|revis/.test(norm(s.id)) || /review|revis/.test(norm(s.label))
+}
+
+/**
  * Pure: the entry to ADD to an existing board's list so `in_review` (the hand-back target) exists,
  * or `null` when the list is empty (the seed will carry it), already has it, or a person has
  * custom-named another status. Never edits or reorders anything already there. The caller makes it
  * fire once per book (`inReviewSeeded`), so a deliberate delete is not undone on the next boot.
  */
 export function planInReviewAdd(existing: readonly TaskStatusDef[]): TaskStatusDef | null {
-  if (existing.length === 0 || existing.some(s => s.id === 'in_review')) return null
+  if (existing.length === 0 || existing.some(s => s.id === 'in_review' || namesReview(s))) return null
   const def = DEFAULT_TASK_STATUSES.find(s => s.id === 'in_review')!
   return { ...def, order: Math.max(...existing.map(s => s.order)) + 1 }
 }
