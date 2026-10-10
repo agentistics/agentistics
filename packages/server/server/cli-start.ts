@@ -1616,12 +1616,20 @@ async function ensureSessionsPoller(): Promise<SessionsPoller> {
  * while no engine listens (`fleet-hub.ts`), and it no longer depends on which route happened to poll.
  */
 let sessionHub: Promise<SessionHub> | null = null
+/** The hub's cadence when only the event producer wants it and nothing is moving (see above). */
+const HUB_IDLE_POLL_MS = 15_000
 
 export function ensureSessionHub(): Promise<SessionHub> {
   if (!sessionHub) {
     sessionHub = (async () => {
       const poller = await ensureSessionsPoller()
-      const hub = createSessionHub({ poll: () => poller.poll(), intervalMs: SESSION_POLL_MS })
+      const hub = createSessionHub({
+        poll: () => poller.poll(), intervalMs: SESSION_POLL_MS,
+        // PERF.SLOW: with nobody looking and no turn running, the event producer's poll slows to
+        // HUB_IDLE_POLL_MS; any reader, any `working` row or any act brings back the full rate.
+        idleIntervalMs: HUB_IDLE_POLL_MS,
+        busy: snap => snap.sessions.some(v => v.activity === 'working'),
+      })
       // A harness stating a change (a turn ended) is pushed NOW, not at the next tick (flag on only).
       onAdapterStateChange(() => { void hub.refresh().catch(() => {}) })
       const { fleetHub } = await import('./engine/fleet-hub')

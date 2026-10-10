@@ -594,18 +594,31 @@ export async function scanLinuxProcesses(procRoot = '/proc'): Promise<{
   // "nothing is running" from "this configuration cannot see the host at all".
   const foreignPids = numeric.filter(p => p !== own).length
   let cwdDenied = false
+  const notHarness = notHarnessMemo(procRoot)
+  const seen = new Set<string>()
   await Promise.all(numeric.map(async pid => {
     try {
+      // PERF.SLOW: this walk runs every fleet poll over EVERY process on the machine, and almost none
+      // of them is a harness. A process already found not to be one is skipped on one small read: its
+      // identity is the pid + the kernel's start time + its comm (an exec changes the comm), all in
+      // /proc/<pid>/stat. No stat (a fixture, a vanished process) is simply no memo.
+      const identity = await processIdentity(pid, procRoot)
+      if (identity) {
+        seen.add(identity)
+        if (notHarness.has(identity)) return
+      }
       const comm = (await readFile(`${procRoot}/${pid}/comm`, 'utf-8')).trim()
       const exePath = await readlink(`${procRoot}/${pid}/exe`).catch(() => undefined)
       // argv is NUL-separated; a trailing NUL yields an empty last element. Read BEFORE the
       // harness test now, because a script-installed harness is identified from argv.
       const argv = (await readFile(`${procRoot}/${pid}/cmdline`, 'utf-8').catch(() => ''))
         .split('\0').filter(Boolean)
+      // The harness test FIRST: the environment is the largest file read here, and it only matters
+      // for a process that is a harness at all.
+      const harness = harnessOfProcess(comm, exePath, argv)
+      if (!harness) { if (identity) notHarness.add(identity); return }
       const envRaw = await readFile(`${procRoot}/${pid}/environ`, 'utf-8').catch(() => '')
       if (!envRaw || !belongsToServerEnvironment(parseProcEnviron(envRaw))) return
-      const harness = harnessOfProcess(comm, exePath, argv)
-      if (!harness) return
       if (isNonInteractiveInvocation(harness, argv)) return
       // A harness we could identify but whose cwd we may not read is the signature of a container
       // running under a uid that cannot ptrace the host user — record it rather than skipping in
@@ -625,10 +638,29 @@ export async function scanLinuxProcesses(procRoot = '/proc'): Promise<{
       procs.push({ harness, cwd, sessionId, startedMs, pid: pidNum, stdinIsTty })
     } catch { /* process exited or not ours — ignore */ }
   }))
+  // Forget what is gone, so the memo is as large as the process table and no larger.
+  for (const k of notHarness) if (!seen.has(k)) notHarness.delete(k)
   const unavailable = procs.length > 0
     ? null
     : detectionUnavailable({ platform: 'linux', procReadable: true, foreignPids, cwdDenied })
   return { procs, unavailable }
+}
+
+const notHarnessMemos = new Map<string, Set<string>>()
+function notHarnessMemo(procRoot: string): Set<string> {
+  let m = notHarnessMemos.get(procRoot)
+  if (!m) { m = new Set(); notHarnessMemos.set(procRoot, m) }
+  return m
+}
+
+/** `pid:starttime:comm` from /proc/<pid>/stat, or `null` when it cannot be read whole. */
+async function processIdentity(pid: string, procRoot: string): Promise<string | null> {
+  const raw = await readFile(`${procRoot}/${pid}/stat`, 'utf-8').catch(() => '')
+  const open = raw.indexOf('('), close = raw.lastIndexOf(')')
+  if (open < 0 || close < open) return null
+  const ticks = raw.slice(close + 2).split(' ')[19]
+  if (!ticks || !/^\d+$/.test(ticks)) return null
+  return `${pid}:${ticks}:${raw.slice(open + 1, close)}`
 }
 
 /** Read every running harness process (Linux /proc only). [] on non-Linux or unreadable /proc. */

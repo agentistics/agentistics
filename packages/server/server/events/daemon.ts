@@ -127,6 +127,7 @@ async function startHubProducer(log: (line: string) => void): Promise<DaemonProd
       const producer = made.producer
       // One consume at a time, in poll order: the plan's memory only ever moves forward one poll.
       let queue: Promise<void> = Promise.resolve()
+      // BACKGROUND demand: nobody is looking at this one, so the hub may idle slower (PERF.SLOW).
       off = hub.subscribe(snap => {
         queue = queue.then(async () => {
           if (!running) return
@@ -139,7 +140,7 @@ async function startHubProducer(log: (line: string) => void): Promise<DaemonProd
             log(`[events] ${e instanceof Error ? e.message : String(e)}`)
           }
         })
-      })
+      }, { background: true })
       log(`[events] watching sessions on the server's poller (every ${SESSION_POLL_MS}ms) — \`agentop events status\``)
     } catch (e) {
       log(`[events] not watching: ${e instanceof Error ? e.message : String(e)}`)

@@ -411,9 +411,32 @@ async function readRawPrefs(path: string): Promise<Record<string, unknown> | nul
 /** Parse a preferences file and put its SEALED tokens back (see vault/prefs-tokens.ts): every
  *  reader keeps seeing `connections[].token`, while the file itself holds none. */
 async function readJsonPrefs(path: string): Promise<Preferences | null> {
-  const raw = await readRawPrefs(path)
+  // PERF.SLOW: a server reads preferences many times a second (timers, every route, every poll) and
+  // the file changes a few times a day. Re-reading and re-parsing it each time was ~15 % of an idle
+  // server's CPU. The PARSED file is kept against its stat (inode + size + mtime in ns — a write is
+  // an atomic rename, so it is a new inode, and another process's write moves the mtime), and every
+  // caller gets its own CLONE, because callers spread and edit what they are handed.
+  const key = await prefsStatKey(path)
+  let raw: Record<string, unknown> | null
+  const hit = key !== null ? rawPrefsMemo.get(path) : undefined
+  if (hit && hit.key === key) raw = structuredClone(hit.raw)
+  else {
+    raw = await readRawPrefs(path)
+    if (raw && key !== null) rawPrefsMemo.set(path, { key, raw: structuredClone(raw) })
+    else rawPrefsMemo.delete(path)
+  }
   if (!raw) return null
   return injectSealedTokens(path, raw as Preferences)
+}
+
+const rawPrefsMemo = new Map<string, { key: string; raw: Record<string, unknown> }>()
+
+/** `null` when the file cannot be stat'ed (absent): nothing is memoized for a missing file. */
+async function prefsStatKey(path: string): Promise<string | null> {
+  try {
+    const s = await stat(path, { bigint: true })
+    return `${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`
+  } catch { return null }
 }
 
 /** A FRESH defaults object every call — never a shared const. `team` in particular is spread
@@ -493,6 +516,15 @@ function withMigratedTeam(p: Preferences): Preferences {
   return { ...defaultPrefs(), ...p, team: migrateTeamConfig(p.team) }
 }
 
+/**
+ * PERF.SLOW: a cheap "has the preferences file changed?" — one `stat`, the same key the read memo uses.
+ * `null` when the file is absent (a read then falls back to the legacy file or defaults), so a caller
+ * must never treat `null` as "unchanged".
+ */
+export function preferencesStamp(): Promise<string | null> {
+  return prefsStatKey(PREFERENCES_FILE)
+}
+
 export async function readPreferences(): Promise<Preferences> {
   return readPreferencesFrom(PREFERENCES_FILE, LEGACY_PREFERENCES_FILE)
 }
@@ -547,6 +579,7 @@ async function writePrefsFile(primary: string, prefs: Preferences): Promise<void
   const previous = await readRawPrefs(primary).catch(() => null)
   const toWrite = await stripAndSealTokens(primary, prefs as unknown as Record<string, unknown>, previous)
   await writeFileAtomic(primary, JSON.stringify(toWrite, null, 2))
+  rawPrefsMemo.delete(primary)
 }
 
 // ---------------------------------------------------------------------------
