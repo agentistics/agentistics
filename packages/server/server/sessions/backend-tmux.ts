@@ -9,7 +9,7 @@ import { FOCUS_ATTEMPTS, inputFocusOf } from './input-focus'
 import { highlightedRow, parseRewindMenu, REWIND_MAX_STEPS, rewindRowMatches } from './claude-rewind'
 import type { RewindOutcome } from './types'
 import {
-  attachArgs, capturePaneArgs, captureManyArgs, splitCaptureMany, capturePaneAnsiArgs, idFromTmuxName, isSessionGoneError,
+  attachArgs, capturePaneArgs, captureManyArgs, captureTerminalArgs, splitCaptureMany, capturePaneAnsiArgs, idFromTmuxName, isSessionGoneError,
   killSessionArgs, listSessionsArgs, paneInfoArgs, parsePaneInfo, parsePrefix, parseTmuxList,
   tmuxListIsEmptyState,
   resolveDefaultTerminal, resolveTruecolorTerm, spawnArgs, sendKeysNamedArgs, sendKeysLiteralArgs, sendKeysNamedSequenceArgs,
@@ -716,7 +716,7 @@ export const tmuxBackend: SessionBackend = {
     // sequence (`capture-pane … ; display-message …`). A watched pane is read up to four times a
     // second, and two processes a read was most of what a watching client cost. tmux stops the
     // sequence at the first failure, so a gone session still fails the capture and prints nothing.
-    const cap = await tmux([...capturePaneAnsiArgs(id, lines), ';', ...paneInfoArgs(id).slice(2)])
+    const cap = await tmux(captureTerminalArgs(id, lines))
     if (cap.code !== 0 && cap.out === '') return null // tmux no longer has this session — the caller ends the stream
     // A trailing '' from the final newline is not a real row; drop only that one.
     const raw = cap.out.split('\n')

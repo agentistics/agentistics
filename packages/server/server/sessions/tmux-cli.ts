@@ -187,6 +187,15 @@ export function capturePaneArgs(id: string, lines: number): string[] {
 }
 
 /**
+ * PERF.SLOW: the terminal channel's capture AND the pane's geometry in ONE tmux invocation — the
+ * `capturePaneAnsiArgs` read, then `paneInfoArgs`'s display-message, as a command sequence. The
+ * geometry is the output's LAST line; tmux stops at a failing capture, so a gone session prints nothing.
+ */
+export function captureTerminalArgs(id: string, lines: number, socket?: string): string[] {
+  return [...capturePaneAnsiArgs(id, lines, socket), ';', ...paneInfoArgs(id, socket).slice(2)]
+}
+
+/**
  * PERF.SLOW: the same read as `capturePaneArgs` for SEVERAL sessions in ONE tmux invocation — a
  * command sequence (`a ; b ; c`), each capture followed by a `display-message` printing `sep` on a
  * line of its own. The fleet poll captured every pane with its own process every five seconds, and
