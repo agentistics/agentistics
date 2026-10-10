@@ -10,8 +10,13 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.120.1': {
-    features: [],
+  '2.121.0': {
+    features: [
+      {
+        pt: 'Cofre: dá para criar o cofre pela própria tela, com um botão "Criar o cofre", sem precisar de comando.',
+        en: 'Vault: create the vault from the app with a "Create the vault" button, no command needed.',
+      },
+    ],
     fixes: [
       {
         pt: 'Apagar uma pasta que tem subpastas pergunta se quer apagar as subpastas também e apaga tudo junto (as sessões continuam).',
@@ -30,8 +35,16 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Resources: no repeated rows, and CPU shows from the first reading.',
       },
       {
-        pt: '"agentop clean" não fica mais pendurado.',
-        en: '"agentop clean" no longer hangs.',
+        pt: 'Custo "Plano" calculado por harness, em vez de usar o plano do Claude para todos.',
+        en: '"Plan" cost is priced per harness instead of applying the Claude plan to all of them.',
+      },
+      {
+        pt: 'A "Nova sessão" não fica mais presa em "Vendo o que está instalado…": mostra os harnesses que já responderam.',
+        en: '"New session" no longer gets stuck on "Checking what is installed…": it shows the harnesses that already answered.',
+      },
+      {
+        pt: 'Colar um texto longo (mais de 5 mil caracteres) no chat vira o chip "Conteúdo colado".',
+        en: 'Pasting a long text (over 5,000 characters) into the chat becomes the "Pasted content" chip.',
       },
     ],
   },
