@@ -58,7 +58,9 @@ export function runRelay(dir: string): void {
   // `node:child_process`, not `Bun.spawn`: piped stdin delivered nothing to these CLIs under Bun's own
   // spawn (the engine's acp/launch.ts records the 2026-10-02 probe). stderr is discarded — it can carry
   // conversation text and nothing reads it.
-  const child = spawn(spec.bin, spec.args, { cwd: spec.cwd, stdio: ['pipe', 'pipe', 'ignore'], env: { ...process.env, ...extra } })
+  // The ACP CLI may fork helpers of its own. Keeping the child in a detached process group lets the
+  // relay terminate the whole tree, rather than leaving a helper behind when the CLI ignores TERM.
+  const child = spawn(spec.bin, spec.args, { cwd: spec.cwd, detached: true, stdio: ['pipe', 'pipe', 'ignore'], env: { ...process.env, ...extra } })
   writeFileSync(join(dir, RELAY_FILES.pid), JSON.stringify({ relay: process.pid, child: child.pid ?? null }), { mode: 0o600 })
 
   let client: Socket | null = null
@@ -83,10 +85,20 @@ export function runRelay(dir: string): void {
 
   let ended = false
   let killTimer: ReturnType<typeof setTimeout> | null = null
+  let termAt = 0
+  const killChild = (signal: 'SIGTERM' | 'SIGKILL'): void => {
+    const pid = child.pid
+    if (pid === undefined) return
+    try { process.kill(-pid, signal) } catch { try { child.kill(signal) } catch { /* already dead */ } }
+  }
   const endChild = (): void => {
+    // A SIGTERM can arrive after the child exit event has already marked the relay ended. The relay
+    // itself still owns a listening socket, so explicitly leave too; otherwise it survives until SIGKILL.
+    if (ended) { process.exit(0); return }
     if (child.exitCode !== null || child.signalCode !== null) return
-    child.kill('SIGTERM')
-    killTimer ??= setTimeout(() => { if (child.exitCode === null) child.kill('SIGKILL') }, KILL_GRACE_MS)
+    termAt ||= Date.now()
+    killChild('SIGTERM')
+    killTimer ??= setTimeout(() => { if (child.exitCode === null) killChild('SIGKILL') }, KILL_GRACE_MS)
   }
 
   const server = createServer(sock => {
@@ -134,12 +146,16 @@ export function runRelay(dir: string): void {
     if (partial !== '') { record(partial); partial = '' }
     ended = true
     if (killTimer) clearTimeout(killTimer)
+    // The direct child may have obeyed TERM while a descendant in its group ignored it: the group is
+    // still killed once the grace is over, and the relay stays until then.
+    const groupGrace = termAt ? Math.max(0, termAt + KILL_GRACE_MS - Date.now()) : 0
     writeFileSync(join(dir, RELAY_FILES.exit), JSON.stringify({ code, at: Date.now() }), { mode: 0o600 })
     send(client, { x: code })
     client?.end()
     server.close()
     try { unlinkSync(sockPath) } catch { /* already gone */ }
-    setTimeout(() => process.exit(0), 200).unref?.()
+    if (termAt) setTimeout(() => { killChild('SIGKILL'); process.exit(0) }, groupGrace + 50)
+    else setTimeout(() => process.exit(0), 200).unref?.()
   })
   child.on('error', () => {
     if (ended) return

@@ -74,13 +74,16 @@ export interface FloatingPanelLayerProps {
   render: (id: PanelId) => ReactNode
   /** Accessible name for the window. */
   title: (id: PanelId) => string
+  /** Whether the grip bar prints the name. Default: no — the panel's own header already says it,
+   *  and two titles stacked read as a duplicate. Only a panel with no named header (Studio) needs it. */
+  nameInGrip?: (id: PanelId) => boolean
   onRaise: (id: PanelId) => void
   onPlace: (id: PanelId, rect: Rect) => void
   /** Reports the area this layer measured, so a newly floated window can be sized for it. */
   onArea?: (area: Size) => void
 }
 
-export function FloatingPanelLayer({ windows, render, title, onRaise, onPlace, onArea }: FloatingPanelLayerProps) {
+export function FloatingPanelLayer({ windows, render, title, nameInGrip, onRaise, onPlace, onArea }: FloatingPanelLayerProps) {
   const [area, setArea] = useState<Size>({ w: 0, h: 0 })
   const [live, setLive] = useState<{ id: PanelId; rect: Rect } | null>(null)
   const gesture = useRef<Gesture | null>(null)
@@ -208,9 +211,11 @@ export function FloatingPanelLayer({ windows, render, title, onRaise, onPlace, o
                 }}
               >
                 <GripHorizontal size={13} style={{ flexShrink: 0 }} />
-                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {title(id)}
-                </span>
+                {nameInGrip?.(id) && (
+                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {title(id)}
+                  </span>
+                )}
               </div>
               {render(id)}
             </div>

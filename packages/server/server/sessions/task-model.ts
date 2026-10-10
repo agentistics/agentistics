@@ -93,6 +93,14 @@ export function statusAfterAttach(current: TaskStatus): TaskStatus | null {
 }
 
 /**
+ * A session filed on a subtask reported `handback`: that piece is ready for review. Forward only —
+ * `in_progress` → `in_review`; `done`, `blocked` and anything not yet started are left alone.
+ */
+export function statusAfterHandback(current: TaskStatus): TaskStatus | null {
+  return current === 'in_progress' ? 'in_review' : null
+}
+
+/**
  * Does a SUBTASK's (or group member's) new status count as "real work has begun on this piece",
  * for the purpose of nudging the parent task forward?
  *
@@ -704,6 +712,8 @@ export interface TaskBook {
    * for statuses. Written once by `seedTypes`; absent on a book that predates the feature.
    */
   typesSeeded?: boolean
+  /** `in_review` was added to this book's status list once (see `planInReviewAdd`); never re-added after. */
+  inReviewSeeded?: boolean
   /**
    * The activity log, newest LAST, for every task at once.
    *

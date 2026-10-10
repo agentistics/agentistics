@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { idleSessionNoun } from './idleExecution'
 import { notificationMuted } from './notificationCategories'
+import { limitNoticeMeta, limitNoticeText } from './planLimits'
 
 export type NotificationType = 'error' | 'warning' | 'info' | 'success'
 
@@ -24,6 +25,16 @@ type Localized = { title: string; message?: string }
 /** Localized copy for server- and client-emitted notification codes. Resolved at
  *  render time by resolveNotification so switching the language re-translates. */
 export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }> = {
+  // PLAN.LIMITS — the generic copy; `resolveNotification` composes the real sentence from `meta`
+  // (harness, window, percentage, renewal) through `limitNoticeText`.
+  'limits.threshold': {
+    pt: { title: 'Limite do plano se aproximando', message: 'Uma janela do plano passou de um limite de uso.' },
+    en: { title: 'Plan limit approaching', message: 'A plan window crossed a usage threshold.' },
+  },
+  'limits.exhausted': {
+    pt: { title: 'Limite do plano esgotado', message: 'Uma janela do plano chegou a 100%.' },
+    en: { title: 'Plan limit used up', message: 'A plan window reached 100%.' },
+  },
   'telemetry.first_use': {
     pt: { title: 'Uso anônimo do Agentistics', message: 'Enviar um sinal anônimo de uso (um número aleatório, a versão e o sistema) uma vez por dia, para sabermos quantas pessoas usam o Agentistics. Nada do seu trabalho é enviado.' },
     en: { title: 'Anonymous Agentistics usage', message: 'Send an anonymous usage signal (a random number, the version, and the system) once a day, so we can know how many people use Agentistics. None of your work is sent.' },
@@ -327,6 +338,10 @@ export function idleFreedSentence(freed: string | null | undefined, lang: 'pt' |
 const PEER_CODES = new Set(['member.rules_proposed', 'member.peer_pinned', 'member.peer_key_changed'])
 
 export function resolveNotification(n: AppNotification, lang: 'pt' | 'en'): Localized {
+  if (n.code === 'limits.threshold' || n.code === 'limits.exhausted') {
+    const m = limitNoticeMeta(n.meta)
+    if (m) return limitNoticeText(m, lang)
+  }
   const loc = n.code ? NOTIFICATION_TEXT[n.code]?.[lang] : undefined
   // A CODE WITH NO TEXT MUST NOT RENDER AS A BLANK CARD.
   //

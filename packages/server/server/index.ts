@@ -254,6 +254,22 @@ if (!TEAM_CENTRAL) {
     .catch(() => {})
 }
 void setupFileWatcher()
+// PLAN.LIMITS: wire the notices and the SSE signal, then read the newest records once.
+if (!TEAM_CENTRAL) {
+  void Promise.all([import('./plan-limits'), import('./sse'), import('./sessions/structured-durable')]).then(([pl, sse, sd]) => {
+    pl.setPlanLimitsSink({
+      changed: () => sse.broadcastPlanLimitsChanged(),
+      notify: (n, alt) => sse.broadcastNotification({
+        type: n.threshold >= 95 ? 'warning' : 'info',
+        code: n.threshold >= 100 ? 'limits.exhausted' : 'limits.threshold',
+        meta: { harness: n.harness, window: n.kind, threshold: n.threshold, pct: Math.round(n.usedPct), resetsAt: n.resetsAt, ...(alt ? { alt } : {}) },
+      }),
+    })
+    // A record another agentop process wrote (it holds no sink) reaches the browser through the file.
+    pl.watchPlanLimitsFile()
+    return pl.seedPlanLimits(sd.STRUCTURED_DIR)
+  }).catch(err => console.warn('[plan-limits] seed failed:', String(err)))
+}
 if (TEAM_CENTRAL) {
   import('./team-watch').then(m => m.startTeamWatch()).catch(err => console.error('[team-watch] failed to start:', err))
   // Push an IMMEDIATE SSE update when a member connects/disconnects so the dashboard's
@@ -753,6 +769,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     }
 
 
+    // PLAN.LIMITS — the 5-hour and weekly windows each harness account last reported, with the
+    // plan registered in Settings → Billing. Reads only what the host already stored.
+    if (url.pathname === '/api/plan-limits' && req.method === 'GET') {
+      const [{ planLimitsPayload }, prefs] = await Promise.all([import('./plan-limits'), readPreferences()])
+      const body = TEAM_CENTRAL ? { limits: [], now: Date.now() } : await planLimitsPayload(prefs.billing)
+      return new Response(JSON.stringify(body), { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
+    }
     if (url.pathname === '/api/events' && req.method === 'GET') {
       // Each SSE client holds a socket and a controller for as long as it stays connected, so an
       // unbounded count is a free way to exhaust the process (OWASP API4).
@@ -2512,12 +2535,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     }
 
     if (url.pathname === '/api/fleet' && req.method === 'GET') {
-      const { readFleet, fleetLang } = await import('./sessions/fleet-web')
+      const { readFleetBody, fleetLang } = await import('./sessions/fleet-web')
       // The ARRANGEMENT is opt-in: a caller that sends `view=1` gets the fleet grouped, ordered and
       // filtered the way the cockpit would (`fleet-arrange.ts`); everyone else gets the flat list
-      // they already read, and pays nothing for a grouping they do not draw.
-      const payload = await readFleet(fleetLang(url.searchParams.get('lang')), readFleetView(url))
-      return new Response(JSON.stringify(payload), {
+      // they already read, and pays nothing for a grouping they do not draw. The body is the hub
+      // snapshot's, built once per poll however many readers ask (PERF.SLOW, `readFleetBody`).
+      const body = await readFleetBody(fleetLang(url.searchParams.get('lang')), readFleetView(url))
+      return new Response(body, {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
     }

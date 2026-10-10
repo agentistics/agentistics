@@ -509,7 +509,10 @@ async function restartRunningServices(newBin: string, wantVersion?: string, back
     const unitActive = unitInstalled
       ? parseIsActive((await sh(['systemctl', '--user', 'is-active', 'agentop-server'])).out)
       : null
-    serverPlan = planServerRestart({ unitInstalled, unitActive, procs: readProcs(), selfPid: process.pid })
+    const { serverLockFile } = await import('./config.ts')
+    const { probeInstanceLock } = await import('./single-instance.ts')
+    const lockHolder = await probeInstanceLock(serverLockFile()).catch(() => null)
+    serverPlan = planServerRestart({ unitInstalled, unitActive, procs: readProcs(), selfPid: process.pid, lockHolder })
 
     if (serverPlan.kind === 'service') {
       process.stdout.write('  Restarting the agentop-server service…\n')
@@ -1207,8 +1210,11 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
   // Auto-apply: bounce any running services so they run the new version immediately.
   process.stdout.write('Applying the update to running services…\n')
   writeProgress({ stage: 'restarting', version: info.latest })
+  // The helper's own failures are kept: when the version poll below disagrees, they are WHY, and
+  // dropping them is how "server still answering as vX" hid a restart that was never attempted.
+  let restartFailures: string[] = []
   try {
-    await restartRunningServices(currentBin, info.latest, installed.backup)
+    restartFailures = (await restartRunningServices(currentBin, info.latest, installed.backup)).failures
   } catch { /* /api/version below is authoritative even when the helper cannot report a result */ }
 
   // THE SERVER ITSELF IS THE FINAL WORD. A restart verdict is built from side facts (a pid read with
@@ -1244,12 +1250,10 @@ export async function runUpgrade(lang: CliLang = 'en'): Promise<number> {
       lines.map(l => `    ${l}\n`).join('') +
       '\n',
     )
-    recordUpgradeFailure(
-      info.latest,
-      decision.reason === 'mismatch'
-        ? `server still answering as v${verified.observed}`
-        : verified.state === 'busy' ? 'restarted server was still starting at the end of the check window' : 'restarted server never answered /api/version',
-    )
+    const verdict = decision.reason === 'mismatch'
+      ? `server still answering as v${verified.observed}`
+      : verified.state === 'busy' ? 'restarted server was still starting at the end of the check window' : 'restarted server never answered /api/version'
+    recordUpgradeFailure(info.latest, restartFailures.length > 0 ? `${verdict} (${restartFailures[0]})` : verdict)
     return 1
   }
 

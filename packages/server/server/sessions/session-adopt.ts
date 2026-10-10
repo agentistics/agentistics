@@ -61,6 +61,13 @@ export interface AdoptInput {
    * record there is no exact link, and an inexact one is what this module refuses.
    */
   byManagedId: ReadonlyMap<string, HarnessSessionFile>
+  /**
+   * The registry as read this poll. A re-created row (a resume, a takeover) whose record was LOST has
+   * a retired predecessor here carrying the SAME conversation — and with it the filing nobody else
+   * can state again: the session that started it, its task/subtask, its note and label. Matched by
+   * the exact conversation id only, never by directory. Optional so older callers keep working.
+   */
+  registry?: readonly ManagedSession[]
   /** The harness every record in `byManagedId` belongs to. */
   harness: HarnessId
   /** `createdAt` for the records written. The caller's clock, so a test can pin it. */
@@ -86,18 +93,52 @@ export function planAdoptions(input: AdoptInput): ManagedSession[] {
     // No exact link, or a link that names no directory: leave it visible and unregistered rather
     // than filing it under a directory nobody can state.
     if (!file?.cwd) continue
-    const label = chosenName(file)
+    const prior = file.sessionId ? newestOfConversation(input.registry ?? [], file.sessionId) : undefined
+    // Only a name a PERSON chose (`chosenName` drops a derived one); else the predecessor's label.
+    const label = chosenName(file) ?? prior?.label
     out.push({
       id: row.id,
       harness: input.harness,
       cwd: file.cwd,
       createdAt: input.nowIso,
-      // Only a name a PERSON chose. `chosenName` already drops a derived one.
       ...(label ? { label } : {}),
+      ...(prior ? inherited(prior) : {}),
       // The exact conversation, straight from the harness's own record — the whole reason this row
       // is adoptable at all.
-      ...(file.sessionId ? { conversationId: file.sessionId } : {}),
+      ...(file.sessionId
+        ? { conversationId: file.sessionId, conversationLink: 'assigned' as const, conversationLinkVia: 'harness-session-file' as const }
+        : {}),
     })
   }
   return out
+}
+
+/** The newest registry row linked to `conversationId` — the predecessor a re-created row replaced. */
+function newestOfConversation(registry: readonly ManagedSession[], conversationId: string): ManagedSession | undefined {
+  let best: ManagedSession | undefined
+  for (const r of registry) {
+    if (r.conversationId !== conversationId) continue
+    if (!best || r.createdAt > best.createdAt) best = r
+  }
+  return best
+}
+
+/**
+ * What a re-created row carries over from its predecessor: the filing and the lineage, which were
+ * facts at the predecessor's spawn and cannot be re-derived. Never its end, its heartbeat or its
+ * directory (the harness record states the directory now).
+ */
+function inherited(p: ManagedSession): Partial<ManagedSession> {
+  return {
+    ...(p.note ? { note: p.note } : {}),
+    ...(p.task ? { task: p.task } : {}),
+    ...(p.taskId ? { taskId: p.taskId } : {}),
+    ...(p.subtaskId ? { subtaskId: p.subtaskId } : {}),
+    ...(p.attemptId ? { attemptId: p.attemptId } : {}),
+    ...(p.parentSessionId ? { parentSessionId: p.parentSessionId } : {}),
+    ...(p.parentConversationId ? { parentConversationId: p.parentConversationId } : {}),
+    ...(p.model ? { model: p.model } : {}),
+    ...(p.effort ? { effort: p.effort } : {}),
+    ...(p.repo ? { repo: p.repo } : {}),
+  }
 }

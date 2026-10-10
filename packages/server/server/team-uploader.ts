@@ -23,7 +23,7 @@ import { PUSH_INTERVAL, clampPushInterval, defaultTeam, normalizeEndpointKey, no
 import { teamSentFile, teamSyncFile, teamRulesFile, teamForgetFile } from './config'
 import { loadConsolidated } from './consolidate'
 import { loadWorkflowRuns } from './workflow-store'
-import { readPreferences, updateTeamConfig } from './preferences'
+import { preferencesStamp, readPreferences, updateTeamConfig } from './preferences'
 import { safeReadJson } from './utils'
 import { migrateTeamStateOnce, convertSentStateV1, type SentStateV2 } from './team-migrate'
 import { readJsonLimited, LIMITS } from './limits'
@@ -1687,11 +1687,18 @@ function startConnectionChain(conn: TeamConnection): void {
  * `removeConnection`'s serialized preferences write, never from a timer, or a GC here could race
  * a concurrent "add connection" write that reintroduces the same id.
  */
+/** The preferences stamp of the last tick that found NO connection (PERF.SLOW): a solo machine's tick
+ *  is a no-op for as long as the file has not changed, so it is not re-read every five seconds. */
+let _idleStamp: string | null = null
+
 async function supervisorTick(deps: { readPreferences?: typeof readPreferences } = {}): Promise<void> {
   try {
+    const stamp = deps.readPreferences ? null : await preferencesStamp()
+    if (stamp !== null && stamp === _idleStamp && _activeChains.size === 0) return
     const _readPreferences = deps.readPreferences ?? readPreferences
     const prefs = await _readPreferences()
     const conns = prefs.team?.connections ?? []
+    _idleStamp = conns.length === 0 ? stamp : null
     const liveIds = new Set(conns.map(c => c.id))
 
     for (const c of conns) {

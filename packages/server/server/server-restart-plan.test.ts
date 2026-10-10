@@ -51,7 +51,7 @@ describe('planServerRestart — the service manager decides, never pgrep', () =>
   const self = { selfPid: 900 }
 
   test('installed and active → the service manager restarts it', () => {
-    const plan = planServerRestart({ ...self, unitInstalled: true, unitActive: true, procs: [proc(10, ['/b/agentop', 'server'], SERVICE_CGROUP)] })
+    const plan = planServerRestart({ ...self, unitInstalled: true, unitActive: true, lockHolder: 10, procs: [proc(10, ['/b/agentop', 'server'], SERVICE_CGROUP)] })
     expect(plan).toEqual({ kind: 'service' })
   })
 
@@ -59,47 +59,73 @@ describe('planServerRestart — the service manager decides, never pgrep', () =>
     // 2026-10-03 00:38: `systemctl --user is-active` did not answer `active` from where the upgrade
     // ran, so it fell through to `pgrep`, SIGTERMed the unit's own server and spawned a detached one
     // outside the unit. The unit then crash-looped 190 times against it.
-    const plan = planServerRestart({ ...self, unitInstalled: true, unitActive: null, procs: [proc(10, ['/b/agentop', 'server'], SERVICE_CGROUP)] })
+    const plan = planServerRestart({ ...self, unitInstalled: true, unitActive: null, lockHolder: 10, procs: [proc(10, ['/b/agentop', 'server'], SERVICE_CGROUP)] })
     expect(plan).toEqual({ kind: 'manager-unreachable' })
   })
 
   test('installed but stopped → nothing to restart, nothing started', () => {
-    expect(planServerRestart({ ...self, unitInstalled: true, unitActive: false, procs: [] })).toEqual({ kind: 'none' })
+    expect(planServerRestart({ ...self, unitInstalled: true, unitActive: false, lockHolder: null, procs: [] })).toEqual({ kind: 'none' })
   })
 
   test('installed, and a server is running OUTSIDE it → reported, never killed', () => {
-    const plan = planServerRestart({ ...self, unitInstalled: true, unitActive: false, procs: [proc(11, ['/b/agentop', 'server'])] })
+    const plan = planServerRestart({ ...self, unitInstalled: true, unitActive: false, lockHolder: 11, procs: [proc(11, ['/b/agentop', 'server'])] })
     expect(plan).toEqual({ kind: 'outside-service', pids: [11] })
     // …even when the unit is active beside it.
-    const both = planServerRestart({ ...self, unitInstalled: true, unitActive: true, procs: [proc(10, ['/b/agentop', 'server'], SERVICE_CGROUP), proc(11, ['/b/agentop', 'server'])] })
+    const both = planServerRestart({ ...self, unitInstalled: true, unitActive: true, lockHolder: 11, procs: [proc(10, ['/b/agentop', 'server'], SERVICE_CGROUP), proc(11, ['/b/agentop', 'server'])] })
     expect(both).toEqual({ kind: 'outside-service', pids: [11] })
   })
 
   test('no service manager → a detached handover of the unmanaged servers', () => {
-    const plan = planServerRestart({ ...self, unitInstalled: false, unitActive: null, procs: [proc(12, ['/b/agentop', 'server'])] })
+    const plan = planServerRestart({ ...self, unitInstalled: false, unitActive: null, lockHolder: 12, procs: [proc(12, ['/b/agentop', 'server'])] })
     expect(plan).toEqual({ kind: 'detached', pids: [12] })
   })
 
   test('no service manager, no server → nothing', () => {
-    expect(planServerRestart({ ...self, unitInstalled: false, unitActive: null, procs: [] })).toEqual({ kind: 'none' })
+    expect(planServerRestart({ ...self, unitInstalled: false, unitActive: null, lockHolder: null, procs: [] })).toEqual({ kind: 'none' })
   })
 
   test('a process under an agentop unit is never handed over by hand, even with no unit file here', () => {
-    const plan = planServerRestart({ ...self, unitInstalled: false, unitActive: null, procs: [proc(13, ['/b/agentop', 'server'], SERVICE_CGROUP)] })
+    const plan = planServerRestart({ ...self, unitInstalled: false, unitActive: null, lockHolder: 13, procs: [proc(13, ['/b/agentop', 'server'], SERVICE_CGROUP)] })
     expect(plan).toEqual({ kind: 'none' })
   })
 
   test('this process is never a target; non-server processes are ignored', () => {
     const plan = planServerRestart({
-      ...self, unitInstalled: false, unitActive: null,
+      ...self, unitInstalled: false, unitActive: null, lockHolder: 900,
       procs: [proc(900, ['/b/agentop', 'server']), proc(14, ['/b/agentop', 'start'])],
     })
     expect(plan).toEqual({ kind: 'none' })
   })
 
   test('the PARENT is a target: the dashboard spawns the upgrade from the server it must restart', () => {
-    const plan = planServerRestart({ ...self, unitInstalled: false, unitActive: null, procs: [proc(899, ['/b/agentop', 'server'])] })
+    const plan = planServerRestart({ ...self, unitInstalled: false, unitActive: null, lockHolder: 899, procs: [proc(899, ['/b/agentop', 'server'])] })
     expect(plan).toEqual({ kind: 'detached', pids: [899] })
+  })
+
+  // 2026-10-09: every upgrade from the UI ended in "the update did not finish". A throwaway
+  // `bun cli.ts server --port 49xxx` (a worker's preview, its OWN data dir) ran outside the unit; it
+  // was read as "our server, outside the service", the upgrade "handed it over" with a
+  // `systemctl --user start` on a unit that was already active — a no-op — and the unit's own server
+  // went on answering the old version until the version poll gave up.
+  test('THE 2026-10-09 BUG: a server for ANOTHER data dir outside the unit does not stop the service restart', () => {
+    const plan = planServerRestart({
+      ...self, unitInstalled: true, unitActive: true, lockHolder: 10,
+      procs: [
+        proc(10, ['/home/u/.local/bin/agentop', 'server'], SERVICE_CGROUP),
+        proc(20, ['/tmp/perf/bun', 'packages/server/bin/cli.ts', 'server', '--port', '49951'], '0::/user.slice/app.slice/run-r6fe.scope'),
+      ],
+    })
+    expect(plan).toEqual({ kind: 'service' })
+  })
+
+  test('no unit: a server for another data dir is never stopped — only the one holding THIS data dir', () => {
+    const plan = planServerRestart({
+      ...self, unitInstalled: false, unitActive: null, lockHolder: 12,
+      procs: [proc(12, ['/b/agentop', 'server']), proc(21, ['/b/agentop', 'server', '--port', '49952'])],
+    })
+    expect(plan).toEqual({ kind: 'detached', pids: [12] })
+    const none = planServerRestart({ ...self, unitInstalled: false, unitActive: null, lockHolder: null, procs: [proc(21, ['/b/agentop', 'server', '--port', '49952'])] })
+    expect(none).toEqual({ kind: 'none' })
   })
 })
 

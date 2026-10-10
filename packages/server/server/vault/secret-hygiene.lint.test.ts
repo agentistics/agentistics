@@ -93,6 +93,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
   'server/server/preferences.ts': {
     _tmpSeq: 'a counter', _testOnlyDisableLock: 'a test flag', _testOnlyForceLockVanished: 'a test flag',
     _testOnlyAcquireTimeoutMsOverride: 'a test number', _writeChain: 'a promise chain',
+    rawPrefsMemo: 'the file\'s raw JSON keyed by its stat (PERF.SLOW) — tokens are sealed apart and injected AFTER it, never held here',
   },
 }
 

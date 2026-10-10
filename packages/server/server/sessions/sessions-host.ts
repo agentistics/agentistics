@@ -34,7 +34,7 @@ import { holderCollisions } from './process-transcript'
 import { collisionKey, type ProcessTranscriptFile } from './process-conversation'
 import { loadConversations, type Conversation } from './conversations'
 import { HEARTBEAT_MS, planCrashGroup, type CrashGroup } from './crash-group'
-import { emptyHarnessSessionIndex, type HarnessSessionIndex } from './harness-sessions'
+import { emptyHarnessSessionIndex, resolveManagedIds, type HarnessSessionIndex } from './harness-sessions'
 import { chosenName } from './harness-session-file'
 import { reconcileSessions } from './session-ref'
 import {
@@ -161,6 +161,9 @@ export async function linkProcessConversation(o: {
  * processes of this harness that agentop did not start, taken from the caller's last process scan —
  * join it, so a kimi resumed by hand in a terminal on our row's session still refuses.
  */
+/** How often a follow-only sampling burst re-reads the registry and the panes — see the loop. */
+export const FOLLOW_REFRESH_MS = 5_000
+
 export async function sampleProcessLinks(o: {
   harness: HarnessId
   readRegistry: () => Promise<ManagedSession[]>
@@ -209,7 +212,12 @@ export async function sampleProcessLinks(o: {
     }
   }
   while (now() < o.deadline()) {
-    if (now() - refreshedAt >= refreshMs) await refresh()
+    // PERF.SLOW: re-reading the registry and the panes (a tmux process) every second is for finding a
+    // row that still needs its FIRST link. A burst that only FOLLOWS linked rows (a kimi turn, which
+    // keeps the burst alive for its whole length) refreshes at `FOLLOW_REFRESH_MS`; a write still
+    // forces a refresh at once (below).
+    const due = open.length === 0 || open.some(r => r.current === undefined) ? refreshMs : Math.max(refreshMs, FOLLOW_REFRESH_MS)
+    if (now() - refreshedAt >= due) await refresh()
     if (open.length === 0) break
     const resolved = new Map<number, ProcessTranscriptFile | null>()
     const pids = new Set<number>([...open.map(r => r.pid), ...(o.otherPids ?? [])])
@@ -420,7 +428,7 @@ export function createSessionsPoller(o: {
         const started = performance.now()
         return p.then(v => { markFleetPhase(`poll: gather · ${label}`, started); return v })
       }
-      const [registry, backendSessions, processes, conversations, harnessSessions] = await Promise.all([
+      const [registry, backendSessions, processes, conversations, harnessSessionsRaw, panePidsRead] = await Promise.all([
         timed('readRegistry', o.readRegistry()),
         timed('backend.list', o.backend.list()),
         timed('scanProcesses', o.scanProcesses().then(r => r.procs).catch(() => [] as HarnessProcess[])),
@@ -434,7 +442,11 @@ export function createSessionsPoller(o: {
           o.loadHarnessSessions
             ? o.loadHarnessSessions().catch(() => emptyHarnessSessionIndex())
             : Promise.resolve(emptyHarnessSessionIndex())),
+        // Read here (not after the conversation links) because they decide WHICH harness record is
+        // a pane's own: the record's `tmux` field is an inherited env var (LINK.CROSSTALK).
+        timed('listPanePids', o.backend.listPanePids?.().catch(() => undefined) ?? Promise.resolve(undefined)),
       ])
+      const harnessSessions = resolveManagedIds(harnessSessionsRaw, panePidsRead)
       markFleetPhase('poll: gather (registry/backend.list/scanProcesses/conversations/harnessSessions)', gatherStart)
 
       const reconciled = reconcileSessions(registry, backendSessions)
@@ -451,6 +463,7 @@ export function createSessionsPoller(o: {
         const adopt = planAdoptions({
           rows: reconciled,
           byManagedId: harnessSessions.byManagedId,
+          registry,
           harness: 'claude',
           nowIso: new Date(nowMs).toISOString(),
         })
@@ -523,13 +536,24 @@ export function createSessionsPoller(o: {
       }
 
       const captureStart = performance.now()
+      // PERF.SLOW: every live pane in ONE backend call where the backend can (tmux: one process for
+      // the whole fleet instead of one per pane). Only with the adapter flag off — there the screen is
+      // read for every live row; with it on most rows skip the screen and are read one by one below.
+      // A failed batch is no batch: each row then captures on its own, as it always did.
+      const prefetched = !adapter && o.backend.captureMany
+        ? await o.backend.captureMany(reconciled.filter(r => r.backend?.alive).map(r => r.id), lines).catch(() => null)
+        : null
       await Promise.all(reconciled.map(r => limit(async () => {
         const b = r.backend
         if (!b) return // `lost`: the backend has nothing to capture and nothing to report.
         if (!b.alive) { activity.set(r.id, 'exited'); return }
 
         const reading = adapter?.reading(r.id)
-        const readScreen = !adapter || planScreen({
+        // A backend that KNOWS the state (a structured session: the protocol's open turn) outranks the
+        // transcript file's reading — the file only learns a turn's progress when a message is FINISHED,
+        // so a 634 s Bash beating `tool_progress` read `waiting` for ten minutes (ADAPTER.ESSENTIALS-B).
+        const statedNow = o.backend.activityOf?.(r.id)
+        const readScreen = !adapter || !!statedNow || planScreen({
           reading,
           lastScreenMs: adapter.lastScreen(r.id),
           nowMs,
@@ -549,7 +573,7 @@ export function createSessionsPoller(o: {
           return
         }
 
-        const frame = await o.backend.capture(r.id, lines).catch(() => [] as string[])
+        const frame = prefetched?.get(r.id) ?? await o.backend.capture(r.id, lines).catch(() => [] as string[])
         adapter?.screenRead(r.id, nowMs)
         // WHICH MODE the harness is in, read off the same frame the state came from — see
         // `mode-spec.ts`. `null` for a harness nobody has probed and for a frame with no footer yet,
@@ -581,8 +605,9 @@ export function createSessionsPoller(o: {
         const before = prevDigest.get(r.id)
         if (backgroundWork({ frame, ...(rules ? { rules } : {}) })) background.add(r.id)
         // A5.4: a backend that KNOWS the state (an ACP agent states it) is believed over the frame.
-        const stated = o.backend.activityOf?.(r.id)
-        if (stated) corroborated.add(r.id)
+        const stated = statedNow
+        // The protocol's statement is EXACT: believed at once, both ways (no two-poll confirmation).
+        if (stated) { corroborated.add(r.id); exact.add(r.id) }
         const screenState = stated ?? attentionOf({
           alive: true,
           lastActivityMs: b.lastActivityMs,
@@ -641,9 +666,14 @@ export function createSessionsPoller(o: {
       const recordConvStart = performance.now()
       let recordConvWrites = 0
       if (o.recordConversation) {
+        const isLiveRow = (id: string): boolean => panePidsRead ? panePidsRead.has(id) : backendSessions.some(b => b.id === id && b.alive)
+        const owners = liveLinks(registry, isLiveRow)
         for (const m of registry) {
           const exact = harnessSessions.byManagedId.get(m.id)?.sessionId
           if (!exact || m.conversationId === exact) continue
+          // Never take a conversation another LIVE row already drives: that is the other row's chat,
+          // and moving it here is the cross-talk this guards. Keep the current link instead.
+          if (!moveAllowed(m.id, exact, owners)) continue
           recordConvWrites++
           await o.recordConversation(m.id, exact, 'assigned', 'harness-session-file').catch(() => undefined)
         }
@@ -653,7 +683,7 @@ export function createSessionsPoller(o: {
       // The pane pids, read ONCE for the two things below that need them: the per-process
       // conversation link, and the hardware sample further down. Two `tmux list-panes` calls a poll
       // for one answer is a second place for them to disagree about which pid is which row.
-      const panePids = await o.backend.listPanePids?.().catch(() => new Map<string, number>())
+      const panePids = panePidsRead ?? new Map<string, number>()
 
       // The OTHER exact link: the conversation named by a file the harness's own process holds
       // OPEN (`HARNESS_PROCESS_TRANSCRIPTS` — agy's log, codex's rollout and thread lock, kimi's

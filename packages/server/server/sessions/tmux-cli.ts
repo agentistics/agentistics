@@ -187,6 +187,49 @@ export function capturePaneArgs(id: string, lines: number): string[] {
 }
 
 /**
+ * PERF.SLOW: the terminal channel's capture AND the pane's geometry in ONE tmux invocation — the
+ * `capturePaneAnsiArgs` read, then `paneInfoArgs`'s display-message, as a command sequence. The
+ * geometry is the output's LAST line; tmux stops at a failing capture, so a gone session prints nothing.
+ */
+export function captureTerminalArgs(id: string, lines: number, socket?: string): string[] {
+  return [...capturePaneAnsiArgs(id, lines, socket), ';', ...paneInfoArgs(id, socket).slice(2)]
+}
+
+/**
+ * PERF.SLOW: the same read as `capturePaneArgs` for SEVERAL sessions in ONE tmux invocation — a
+ * command sequence (`a ; b ; c`), each capture followed by a `display-message` printing `sep` on a
+ * line of its own. The fleet poll captured every pane with its own process every five seconds, and
+ * a spawn per pane was the largest part of an idle server's CPU. `sep` must be a fresh nonce: it is
+ * what tells one pane's lines from the next one's (see `splitCaptureMany`).
+ */
+export function captureManyArgs(ids: string[], lines: number, sep: string): string[] {
+  const rest: string[] = []
+  ids.forEach((id, i) => {
+    if (i > 0) rest.push(';')
+    rest.push('capture-pane', '-p', '-t', tmuxName(id), '-S', `-${lines}`, ';', 'display-message', '-p', sep)
+  })
+  return sock(rest)
+}
+
+/**
+ * PURE. Cut the output of `captureManyArgs` back into one frame per id (trailing blanks trimmed, as
+ * `capture` does). tmux STOPS a sequence at the first command that fails — a session that died since
+ * the list — so only the panes whose separator arrived are answered; the rest are `null`, which the
+ * caller reads with a capture of their own (the failing one then answers exactly as it always did).
+ */
+export function splitCaptureMany(out: string, count: number, sep: string): (string[] | null)[] {
+  const frames: (string[] | null)[] = Array.from({ length: count }, () => null)
+  let current: string[] = []
+  let i = 0
+  for (const line of out.split('\n')) {
+    if (i >= count) break
+    if (line === sep) { frames[i++] = trimCapture(current); current = []; continue }
+    current.push(line)
+  }
+  return frames
+}
+
+/**
  * The same read as `capturePaneArgs`, but `-e` keeps the SGR escape sequences in the output —
  * colours, bold, reverse — so the browser terminal renders what a person would have seen on attach.
  *

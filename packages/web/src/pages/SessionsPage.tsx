@@ -118,6 +118,7 @@ import {
 import { markSessionPending } from '../lib/pendingSessionStore'
 import { dedicatedTerminalPath, paneForTarget, readTerminalPane } from '../lib/terminalSurface'
 import { ShellBand } from '../components/sessions/ShellBand'
+import { openInTerminalFor } from '../components/sessions/OpenInTerminalPane'
 import { targetLabel } from '../lib/terminalTarget'
 import { sessionPlanFactor } from '../lib/costBasis'
 
@@ -370,6 +371,15 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const [presetPrefill, setPresetPrefill] = useState<NonNullable<
     Parameters<typeof NewSessionModal>[0]['initialPreset']
   > | null>(null)
+  // PLAN.LIMITS: "continue in another harness" (the Nay card at 100%) lands here with the harness
+  // to pre-select — the ordinary wizard, nothing started on its own.
+  const routeLocation = useLocation()
+  const newSessionPreset = (routeLocation.state as { newSessionPreset?: { harness?: string } } | null)?.newSessionPreset
+  useEffect(() => {
+    if (!newSessionPreset) return
+    setPresetPrefill(newSessionPreset)
+    navigate(routeLocation.pathname, { replace: true, state: null })
+  }, [newSessionPreset, navigate, routeLocation.pathname])
 
   function selectPreset(preset: SessionPreset) {
     if (preset.cwd) {
@@ -509,6 +519,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const selected = sessionId === undefined
     ? undefined
     : fleet.rows.find(r => r.id === sessionId || r.conversationId === sessionId)
+  /** A STRUCTURED row's `cli` pane is the door to the same conversation as a TUI — every mount. */
+  const selectedOpenInTerminal = openInTerminalFor(selected ? rowIndex.get(selected.id) : undefined, act)
 
   /**
    * THE DEDICATED TERMINAL — the same page at its own route, showing one screen and nothing else.
@@ -1738,13 +1750,14 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    *  really closable (`panelClosable`: the Shell) and there is a shell to end — the X beside it. The
    *  gear that used to hold "close" is gone; the pin (dock back) leads the header, see `floatingBar`. */
   const shellCloseEntry = useShellClose(selected?.id)
-  const dockControls = (id: PanelId, name: string): ReactNode => {
+  const dockControls = (id: PanelId, name: string, withPin = false): ReactNode => {
     const closable = panelClosable(id) && selected !== undefined && selected !== null
       && shellCloseEntry.live !== null
     return (
       <PanelFixedControls
         lang={pt ? 'pt' : 'en'}
         panelName={name}
+        {...(withPin ? { pinned: { active: true, onToggle: () => dockBack(id) } } : {})}
         onMinimize={() => minimizeFloatingPanel(id)}
         minimizeLabel={pt ? `Minimizar ${name} para a barra inferior` : `Minimize ${name} to the bottom bar`}
         {...(closable ? {
@@ -1794,6 +1807,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               placement="aside"
               fixedTarget="cli"
               sessionId={selected.id}
+              {...(selectedOpenInTerminal ? { openInTerminal: selectedOpenInTerminal } : {})}
               {...(selected.cwd ? { cwd: selected.cwd } : {})}
               {...(selected.harness ? { harness: selected.harness } : {})}
               lang={pt ? 'pt' : 'en'}
@@ -1828,11 +1842,11 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           lang={pt ? 'pt' : 'en'}
           onClose={() => dockBack('hardware')}
           hideCloseButton
-          controls={dockControls('hardware', panelTitle('hardware', pt))}
+          controls={dockControls('hardware', panelTitle('hardware', pt), true)}
         />
       )
     }
-    return tabPane(id, { hideCloseButton: true, headerControls: dockControls(id, panelTitle(id, pt)) })
+    return tabPane(id, { hideCloseButton: true, headerControls: dockControls(id, panelTitle(id, pt), true) })
   }
 
   /**
@@ -1866,6 +1880,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           placement="aside"
           fixedTarget="cli"
           sessionId={selected.id}
+          {...(selectedOpenInTerminal ? { openInTerminal: selectedOpenInTerminal } : {})}
           {...(selected.cwd ? { cwd: selected.cwd } : {})}
           {...(selected.harness ? { harness: selected.harness } : {})}
           lang={pt ? 'pt' : 'en'}
@@ -2590,6 +2605,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               placement="dedicated"
               fixedTarget="cli"
               sessionId={selected.id}
+              {...(selectedOpenInTerminal ? { openInTerminal: selectedOpenInTerminal } : {})}
               {...(selected.cwd ? { cwd: selected.cwd } : {})}
               lang={pt ? 'pt' : 'en'}
               theme={theme === 'light' ? 'light' : 'dark'}
@@ -3201,6 +3217,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             windows={floatingShown}
             render={floatingBody}
             title={floatingTitle}
+            nameInGrip={id => id === 'studio'}
             onRaise={raisePanel}
             onPlace={placePanel}
             onArea={area => setFloatingArea(area, pane)}

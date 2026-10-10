@@ -61,6 +61,12 @@ export interface FlowState {
   message: string | null
   /** Readiness is separate from the visual phase so the overlay survives the server restart. */
   restartPhase: RestartPhase | null
+  /**
+   * On a stop: the new version IS installed on disk and only the restart is missing (`/api/version`'s
+   * `restartNeeded`). The failure screen then offers "Restart now" — pressing it restarts the server
+   * onto the binary already there — instead of "Try again" over the claim that nothing was replaced.
+   */
+  restartReady?: boolean
 }
 
 const IDLE: FlowState = { phase: 'idle', target: '', from: '', startedAt: 0, view: null, bytes: null, rate: null, message: null, restartPhase: null }
@@ -141,6 +147,11 @@ async function reloadOntoCurrent(): Promise<void> {
 }
 
 /** Is an in-app upgrade in flight? It reloads the page itself when the new version arrives. */
+/** `/api/version` says the new binary is on disk and only a restart is missing. */
+export function restartPending(info: { restartNeeded?: unknown } | null): boolean {
+  return info?.restartNeeded === true
+}
+
 export function upgradeInFlight(): boolean {
   return state.phase === 'running' || state.phase === 'arrived'
 }
@@ -159,7 +170,7 @@ export async function startUpgrade(target: string, lang: 'pt' | 'en'): Promise<v
   // restart (two needless restarts on 2026-10-04 took the app and the phone offline). The page is
   // the stale thing — drop its cached bundle and reload onto the server's.
   if (from && upgradeArrived(before, target)) { await reloadOntoCurrent(); return }
-  set({ phase: 'running', target, from, startedAt, restartPhase: 'updating', view: rawStep({ startedAt, progress: null, quietPolls: 0, arrived: false }), bytes: null, rate: null, message: null })
+  set({ phase: 'running', target, from, startedAt, restartPhase: 'updating', view: rawStep({ startedAt, progress: null, quietPolls: 0, arrived: false }), bytes: null, rate: null, message: null, restartReady: false })
   rememberWhereIAm(target, from)
 
   try {
@@ -176,13 +187,15 @@ export async function startUpgrade(target: string, lang: 'pt' | 'en'): Promise<v
   const until = startedAt + UPGRADE_WAIT_MS
   let quiet = 0
   let progress: ServerProgress | null = null
+  let lastInfo: { current?: string; restartNeeded?: unknown } | null = null
   while (Date.now() < until) {
     await sleep(UPGRADE_POLL_MS)
     if (id !== runId) return
     const [status, info] = await Promise.all([
       getJson<{ progress: ServerProgress | null }>('/api/upgrade/status'),
-      getJson<{ current?: string }>('/api/version'),
+      getJson<{ current?: string; restartNeeded?: unknown }>('/api/version'),
     ])
+    if (info) lastInfo = info
     quiet = status || info ? 0 : quiet + 1
     if (status) progress = status.progress
     const arrived = upgradeArrived(info, target)
@@ -192,14 +205,14 @@ export async function startUpgrade(target: string, lang: 'pt' | 'en'): Promise<v
     // `failed` is never the last word when the server ALREADY runs the target: a restart verdict can
     // be wrong while the new version answers (2026-10-05) and the page then said "the update did not
     // finish" beside the very version it had asked for. `arrived` outranks it, as in `rawStep`.
-    if (view.failed && !arrived) { set({ phase: 'failed', view, message: null }); return }
+    if (view.failed && !arrived) { set({ phase: 'failed', view, message: null, restartReady: restartPending(info) }); return }
     let bytes = state.bytes, rate = state.rate
     if (progress?.stage === 'downloading' && progress.total && progress.received !== undefined) {
       const next: ByteSample = { received: progress.received, total: progress.total, at: Date.now() }
       if (!bytes || next.received !== bytes.received) { rate = measureRate(bytes, next, rate); bytes = next }
     }
     set({ view, bytes, rate, restartPhase: waiting })
-    if (!arrived && upgradeStalled(Date.now() - startedAt, progress?.stage)) { set({ phase: 'timeout' }); return }
+    if (!arrived && upgradeStalled(Date.now() - startedAt, progress?.stage)) { set({ phase: 'timeout', restartReady: restartPending(lastInfo) }); return }
     if (arrived) {
       const ready = await updateReady()
       const readyPhase = restartStep(waiting, { type: 'poll', version: 'new', serviceWorkerReady: ready, bundleReady: ready })
@@ -212,7 +225,7 @@ export async function startUpgrade(target: string, lang: 'pt' | 'en'): Promise<v
       return
     }
   }
-  if (id === runId) set({ phase: 'timeout' })
+  if (id === runId) set({ phase: 'timeout', restartReady: restartPending(lastInfo) })
 }
 
 /**

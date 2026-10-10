@@ -3,7 +3,7 @@ import type { ChatSourceRef, HarnessChat, HarnessChatDelta } from '@agentistics/
 import type { ChatTurn } from '@agentistics/core'
 import {
   adapterChatResponse, adapterRefused, clearAdapterRefusals, pickAdapterChat, readAdapterChat, refuseAdapter,
-  rowLive, type AdapterChatRow,
+  rowLive, type AdapterChatDeps, type AdapterChatRow,
 } from './adapter-chat'
 import type { ChatPayload } from './chat-web'
 
@@ -92,7 +92,7 @@ describe('pickAdapterChat — who takes the engine path', () => {
 })
 
 describe('adapterChatResponse', () => {
-  function open(f: ReturnType<typeof fakeChat>, o: { rowAt?: () => AdapterChatRow | null } = {}) {
+  function open(f: ReturnType<typeof fakeChat>, o: { rowAt?: () => AdapterChatRow | null; composing?: AdapterChatDeps['composing'] } = {}) {
     const ticks = new Set<() => void>()
     const wakes = new Set<() => void>()
     let closedWith: boolean | null = null
@@ -104,6 +104,7 @@ describe('adapterChatResponse', () => {
       finish,
       onFleetTick: cb => { ticks.add(cb); return () => ticks.delete(cb) },
       onWake: cb => { wakes.add(cb); return () => wakes.delete(cb) },
+      ...(o.composing ? { composing: o.composing } : {}),
     }, ctl.signal, failed => { closedWith = failed })
     return { res, ctl, tick: () => { for (const t of ticks) t() }, ticks, wakes, closedWith: () => closedWith }
   }
@@ -130,6 +131,32 @@ describe('adapterChatResponse', () => {
     s.ctl.abort()
     expect(f.counts().unfollows).toBe(1)
     expect(s.closedWith()).toBe(false)
+  })
+
+  test('ADAPTER.ESSENTIALS-B item 6: `composing` is sent as it is now, then on every change, and stops with the stream', async () => {
+    const f = fakeChat()
+    let now: 'question' | null = 'question'
+    const cbs = new Set<(c: 'question' | null) => void>()
+    const s = open(f, { composing: { now: () => now, on: cb => { cbs.add(cb); return () => cbs.delete(cb) } } })
+    const first = await events(s.res, e => e.some(x => x.event === 'composing'))
+    expect(JSON.parse(first.find(x => x.event === 'composing')!.data)).toEqual({ what: 'question' })
+    now = null
+    for (const cb of cbs) cb(null)
+    f.emit({ kind: 'window', turns: [], older: false })
+    const next = await events(s.res, e => e.some(x => x.event === 'composing'))
+    expect(JSON.parse(next.find(x => x.event === 'composing')!.data)).toEqual({ what: null })
+    s.ctl.abort()
+    expect(cbs.size).toBe(0)
+  })
+
+  test('a source that cannot say what is being formulated sends no `composing` at all', async () => {
+    const f = fakeChat()
+    const s = open(f)
+    await Bun.sleep(20)
+    f.emit({ kind: 'window', turns: [], older: false })
+    const got = await events(s.res, e => e.some(x => x.event === 'chat'))
+    expect(got.some(x => x.event === 'composing')).toBe(false)
+    s.ctl.abort()
   })
 
   test('a source not written yet: an empty first frame, retried on fleet ticks only', async () => {

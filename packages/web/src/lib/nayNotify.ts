@@ -14,7 +14,7 @@
  */
 
 /** What a card is about. Each maps to one row of the notification settings. */
-export type NayAlertKind = 'turn' | 'approval' | 'stale'
+export type NayAlertKind = 'turn' | 'approval' | 'stale' | 'limit'
 
 export interface NayAlert {
   /** Identity of THIS occurrence: one session can wait many times, and each is its own card. */
@@ -35,6 +35,17 @@ export interface NayAlert {
   demo?: boolean
   /** It comes from a Nay conversation, which always rings the Nay sound (see `resolveSound`). */
   nay?: boolean
+  /** PLAN.LIMITS: a plan window crossed a threshold. No session behind it — `sessionId` is the
+   *  synthetic `limits:<harness>` so one card per harness replaces the last. */
+  limit?: {
+    harness: string
+    window: '5h' | 'week'
+    threshold: number
+    pct: number
+    resetsAt: number
+    /** Another harness with room, offered only at 100%. */
+    alt?: string
+  }
 }
 
 export function alertKey(kind: NayAlertKind, sessionId: string, sinceMs: number): string {
@@ -172,6 +183,8 @@ export function staleDue(o: {
  * session is blocked on a dialog; the other two while it waits on a person in any way.
  */
 export function alertStillTrue(kind: NayAlertKind, state: string | undefined): boolean {
+  // A plan-limit card is about a plan, not a session: true until dismissed or snoozed.
+  if (kind === 'limit') return true
   if (kind === 'approval') return state === 'waiting-approval'
   return state === 'waiting' || state === 'waiting-approval'
 }

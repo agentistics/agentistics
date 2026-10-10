@@ -1616,12 +1616,20 @@ async function ensureSessionsPoller(): Promise<SessionsPoller> {
  * while no engine listens (`fleet-hub.ts`), and it no longer depends on which route happened to poll.
  */
 let sessionHub: Promise<SessionHub> | null = null
+/** The hub's cadence when only the event producer wants it and nothing is moving (see above). */
+const HUB_IDLE_POLL_MS = 15_000
 
 export function ensureSessionHub(): Promise<SessionHub> {
   if (!sessionHub) {
     sessionHub = (async () => {
       const poller = await ensureSessionsPoller()
-      const hub = createSessionHub({ poll: () => poller.poll(), intervalMs: SESSION_POLL_MS })
+      const hub = createSessionHub({
+        poll: () => poller.poll(), intervalMs: SESSION_POLL_MS,
+        // PERF.SLOW: with nobody looking and no turn running, the event producer's poll slows to
+        // HUB_IDLE_POLL_MS; any reader, any `working` row or any act brings back the full rate.
+        idleIntervalMs: HUB_IDLE_POLL_MS,
+        busy: snap => snap.sessions.some(v => v.activity === 'working'),
+      })
       // A harness stating a change (a turn ended) is pushed NOW, not at the next tick (flag on only).
       onAdapterStateChange(() => { void hub.refresh().catch(() => {}) })
       const { fleetHub } = await import('./engine/fleet-hub')
@@ -4398,6 +4406,25 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * than a session that starts and immediately dies with a usage error on a screen nobody sees.
      */
     async spawnSession(req: SpawnSessionRequest): Promise<SpawnSessionResult> {
+      let taskId = req.taskId
+      let subtaskId = req.subtaskId
+      let handoffParent: ManagedSession | undefined
+      // Leader hand-off: no filing of its own → take the parent's. Resolved BEFORE the spawn so the
+      // child's briefing names the same task/subtask it is filed on (it said "not linked" otherwise).
+      if (!taskId && req.handoff && req.parentSessionId) {
+        const { readRegistry } = await import('./sessions/registry')
+        const parent = (await readRegistry()).find(m => m.id === req.parentSessionId)
+        taskId = parent?.taskId
+        subtaskId = parent?.subtaskId
+        handoffParent = parent
+      }
+      // A group MEMBER can never hold a session (`subtask_in_group`): file it on the member's GROUP
+      // instead of leaving the session unfiled while its briefing claims the member.
+      if (taskId && subtaskId) {
+        const { loadTaskWorld } = await import('./sessions/task-source')
+        const sub = (await loadTaskWorld().catch(() => null))?.book.subtasks.find(s => s.id === subtaskId)
+        if (sub?.parentGroupId) subtaskId = sub.parentGroupId
+      }
       return spawnManaged({
         harness: req.harness as HarnessId,
         cwd: req.cwd,
@@ -4407,16 +4434,31 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.effort ? { effort: req.effort } : {}),
         ...(req.label ? { label: req.label } : {}),
         ...(req.task ? { task: req.task } : {}),
-        ...(req.taskId ? { contextTaskId: req.taskId } : {}),
-        ...(req.subtaskId ? { contextSubtaskId: req.subtaskId } : {}),
+        ...(taskId ? { contextTaskId: taskId } : {}),
+        ...(taskId && subtaskId ? { contextSubtaskId: subtaskId } : {}),
         ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
         ...(req.force ? { force: true } : {}),
         ...(req.origin ? { origin: req.origin } : {}),
       }, S(), lang).then(async r => {
         // NW-02: a session started for a BOARD task is filed there by id, not only named after it.
-        if (r.ok && r.id && req.taskId) {
+        if (r.ok && r.id && taskId) {
           const { attachSession } = await import('./sessions/task-web')
-          await attachSession(req.taskId, r.id).catch(() => null)
+          await attachSession(taskId, r.id, subtaskId ? { subtaskId } : {}).catch(() => null)
+        }
+        // A hand-off child also joins the parent's sidebar folder. Never fails the spawn: the session
+        // is already running, and an error here would invite a retry that starts a second leader.
+        if (r.ok && r.id && req.handoff && req.parentSessionId) {
+          try {
+            const { readRegistry } = await import('./sessions/registry')
+            const reg = await readRegistry()
+            const parent = handoffParent ?? reg.find(m => m.id === req.parentSessionId)
+            const child = reg.find(m => m.id === r.id) ?? { id: r.id }
+            if (parent) {
+              const { fileHandoffInParentGroup } = await import('./sessions/handoff-group')
+              const { updatePreferences } = await import('./preferences')
+              await fileHandoffInParentGroup(parent, child, updatePreferences)
+            }
+          } catch { /* a folder is a convenience, not the spawn */ }
         }
         return r
       })

@@ -165,4 +165,15 @@ describe('adapter chat signals', () => {
     expect(applyChatSignal(live, 'live', { text: 'replacement' }).liveText).toBe('replacement')
     expect(applyChatSignal(live, 'state', { working: false })).toEqual({ ...live, working: false, liveText: '', liveReasoning: '' })
   })
+
+  it('ADAPTER.ESSENTIALS-B item 6: `composing` holds what is being formulated; the card (null) or the turn end clears it', async () => {
+    const { applyChatSignal } = await import('./chatFeed')
+    const held = { turns: [], source: 'adapter' as const, live: true, working: true }
+    const asking = applyChatSignal(held, 'composing', { what: 'question' })
+    expect(asking.composing).toBe('question')
+    expect(applyChatSignal(asking, 'composing', { what: null }).composing).toBeNull()
+    expect(applyChatSignal(asking, 'state', { working: false }).composing).toBeNull()
+    expect(applyChatSignal(asking, 'state', { working: true }).composing).toBe('question')
+    expect(() => applyChatSignal(held, 'composing', { what: 'sonnet' })).toThrow()
+  })
 })
