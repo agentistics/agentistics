@@ -71,7 +71,11 @@ export function HarnessPicker({ lang, harnesses, value, onChange, notice, onRetr
   }
 
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+    // On a phone the chips are a two-column grid (owner, 2026-10-10): a wrapped row of chips of
+    // different widths left ragged gaps, worse once the "mais folga" tag widened one of them.
+    <div style={isMobile
+      ? { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', columnGap: 8, rowGap: 12, paddingTop: 4 }
+      : { display: 'flex', flexWrap: 'wrap', gap: 8 }}>
       {harnesses.map(h => {
         const on = value === h.id
         const color = (HARNESS_COLORS as Record<string, string>)[h.id] ?? 'var(--text-secondary)'
@@ -83,7 +87,7 @@ export function HarnessPicker({ lang, harnesses, value, onChange, notice, onRetr
         const peek = (e: React.SyntheticEvent<HTMLElement>) => {
           if (!limits || isMobile) return
           const r = e.currentTarget.getBoundingClientRect()
-          setHover({ id: h.id, x: r.left, y: r.bottom + 6 })
+          setHover({ id: h.id, x: r.left, y: r.top - 6 })
         }
         // ONE chip per harness. A missing one is greyed and its click opens the install flow, with a
         // small inline "Instalar" saying so — it is never a second control beside the chip.
@@ -105,14 +109,17 @@ export function HarnessPicker({ lang, harnesses, value, onChange, notice, onRetr
               fontFamily: 'inherit', fontSize: 13, fontWeight: on ? 650 : 500,
               opacity: missing ? 0.62 : 1,
               minHeight: isMobile ? 44 : undefined,
+              ...(isMobile ? { minWidth: 0, padding: '9px 10px', position: 'relative' as const } : {}),
             }}
           >
             <HarnessMark harness={h.id} size={18} />
-            {name}
+            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }}>{name}</span>
             {limits && roomiest === h.id && (
               <span data-most-room style={{
-                fontSize: 10, fontWeight: 650, padding: '0 6px', borderRadius: 999, lineHeight: '16px',
+                flexShrink: 0, fontSize: 10, fontWeight: 650, padding: '0 6px', borderRadius: 999, lineHeight: '16px',
                 color: 'var(--accent-green)', background: 'color-mix(in srgb, var(--accent-green) 14%, transparent)',
+                // On a phone the tag sits ON the chip's top edge, so a half-width chip keeps its name.
+                ...(isMobile ? { position: 'absolute' as const, top: -8, right: 8, background: 'var(--bg-elevated)', border: '1px solid color-mix(in srgb, var(--accent-green) 45%, transparent)' } : {}),
               }}>{pt ? 'mais folga' : 'most room'}</span>
             )}
             {missing && (

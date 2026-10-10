@@ -167,13 +167,15 @@ export function PlanLimitBars({ limits, now, lang }: { limits: PlanLimits; now: 
 
 /**
  * The hover card over a harness chip (new-session wizard, desktop): the harness, its plan and the
- * compact bars. Same look as the right rail's tooltip; never takes the pointer.
+ * compact bars. Same look as the right rail's tooltip; never takes the pointer; opens upward.
  */
 export function PlanLimitsTooltip({ limits, now, lang, x, y }: { limits: PlanLimits; now: number; lang: Lang; x: number; y: number }) {
   const plan = limits.plan ?? limits.sourcePlan
   return createPortal(
     <div role="tooltip" data-plan-tooltip={limits.harness} style={{
       position: 'fixed', left: Math.min(x, (typeof window === 'undefined' ? 1280 : window.innerWidth) - 248), top: y,
+      // Opens ABOVE the chip (owner, 2026-10-10): `y` is the chip's top edge.
+      transform: 'translateY(-100%)',
       width: 240, padding: '8px 10px', borderRadius: 8, boxSizing: 'border-box',
       background: 'var(--bg-elevated)', color: 'var(--text-primary)',
       border: '1px solid var(--border)', boxShadow: '0 4px 12px -4px rgba(0,0,0,0.4)',
