@@ -516,6 +516,15 @@ function withMigratedTeam(p: Preferences): Preferences {
   return { ...defaultPrefs(), ...p, team: migrateTeamConfig(p.team) }
 }
 
+/**
+ * PERF.SLOW: a cheap "has the preferences file changed?" — one `stat`, the same key the read memo uses.
+ * `null` when the file is absent (a read then falls back to the legacy file or defaults), so a caller
+ * must never treat `null` as "unchanged".
+ */
+export function preferencesStamp(): Promise<string | null> {
+  return prefsStatKey(PREFERENCES_FILE)
+}
+
 export async function readPreferences(): Promise<Preferences> {
   return readPreferencesFrom(PREFERENCES_FILE, LEGACY_PREFERENCES_FILE)
 }

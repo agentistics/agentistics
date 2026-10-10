@@ -17,7 +17,7 @@
 
 import type { TeamConnection } from '@agentistics/core'
 import { readTeamConnections, normalizeTeamConfig, resolveRemoteConsent } from '@agentistics/core'
-import { readPreferences, updateTeamConfig } from './preferences'
+import { preferencesStamp, readPreferences, updateTeamConfig } from './preferences'
 
 // ---------------------------------------------------------------------------
 // Pure helpers (unit-tested in team-agent-client.test.ts)
@@ -756,11 +756,17 @@ const POLL_INTERVAL_MS = 5_000
  * Complements the close/error reconnect-with-backoff path, which only fires once a connection has
  * already been attempted.
  */
+/** The preferences stamp of the last reconcile that found no connection (PERF.SLOW) — see team-uploader. */
+let idleStamp: string | null = null
+
 async function reconcileConnection(): Promise<void> {
   let connections: TeamConnection[]
   try {
+    const stamp = await preferencesStamp()
+    if (stamp !== null && stamp === idleStamp && activeWs.size === 0) return
     const prefs = await readPreferences()
     connections = readTeamConnections(prefs)
+    idleStamp = connections.length === 0 ? stamp : null
   } catch {
     // Preferences unavailable — leave current state untouched.
     return
