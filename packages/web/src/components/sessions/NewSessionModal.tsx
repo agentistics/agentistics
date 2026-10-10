@@ -53,6 +53,7 @@ import { useFleetNewOptions, type FleetProjectOption } from '../../hooks/useFlee
 import { ConfirmModal } from '../../pages/settings/primitives'
 import { forcedNote, isAdmissionRefusal } from '../../lib/spawnAdmission'
 import { pushNotification } from '../../lib/notifications'
+import { usePlanLimits } from '../../lib/planLimits'
 import {
   STEP_ORDER, modelDisplay, nextStep, prevStep, stepReady, toWizardHarness, unsetText,
   visibleQuestions, type HarnessAnswer, type MissingAnswer, type StepId, type WizardDraft,
@@ -125,6 +126,7 @@ export function NewSessionModal({
   lang, onClose: closeProp, onStarted: startedProp, initialTask, initialTaskId, initialSubtaskId, initialPreset,
 }: NewSessionModalProps) {
   const pt = lang === 'pt'
+  const planSnap = usePlanLimits()
   // The wizard survives a layout swap (desktop list <-> mobile list) — see `newSessionWizardStore`.
   // Only the plain "+ new" wizard persists; one opened from a preset or a task carries its own seed.
   const persists = !initialPreset && !initialTask && !initialTaskId
@@ -826,6 +828,8 @@ export function NewSessionModal({
               {...(unavailable ? { notice: unavailable } : {})}
               {...(retryable ? { onRetry: retry } : {})}
               onInstall={id => setInstalling(id)}
+              planLimits={planSnap.limits}
+              now={planSnap.now}
             />
           </Field>
           <HarnessInstallDialog

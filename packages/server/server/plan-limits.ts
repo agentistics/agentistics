@@ -14,7 +14,8 @@ import { readFile, readdir, stat, writeFile, rename, mkdir } from 'node:fs/promi
 import { join } from 'node:path'
 import {
   alternativeWithRoom, newerLimits, parseClaudeRateLimitEvent, parseCodexRateLimits,
-  planThresholdNotices, withPlanLabel,
+  planThresholdNotices, registeredPlanLabel, withPlanLabel,
+  type HarnessId,
   type PlanLimits, type PlanNoticeState, type PlanThresholdNotice,
 } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, CODEX_SESSIONS_DIR } from './config'
@@ -174,12 +175,19 @@ export async function seedPlanLimits(structuredDir: string): Promise<void> {
 export async function planLimitsPayload(
   billing: Parameters<typeof withPlanLabel>[1],
   nowMs = Date.now(),
-): Promise<{ limits: PlanLimits[]; now: number }> {
+): Promise<{ limits: PlanLimits[]; registered: { harness: HarnessId; plan: string }[]; now: number }> {
   await load()
   const limits = Object.values(state.limits)
     .map(l => withPlanLabel(l, billing, nowMs))
     .sort((a, b) => a.harness.localeCompare(b.harness))
-  return { limits, now: nowMs }
+  // Plans registered in Settings → Billing whose harness has reported no window yet: listed by
+  // name with NO meters (nothing observed is not nothing used).
+  const registered: { harness: HarnessId; plan: string }[] = []
+  for (const h of Object.keys(billing?.profiles ?? {}) as HarnessId[]) {
+    const plan = registeredPlanLabel(billing, h, nowMs)
+    if (plan && !limits.some(l => l.harness === h)) registered.push({ harness: h, plan })
+  }
+  return { limits, registered, now: nowMs }
 }
 
 /** Tests only. */
