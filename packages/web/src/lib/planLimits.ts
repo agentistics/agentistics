@@ -103,7 +103,7 @@ export function fmtWhen(ms: number, now: number, lang: Lang): string {
 
 /** "renova 14:30 (em 2 h 10)" / "renovou" */
 export function resetPhrase(w: PlanLimitWindow, now: number, lang: Lang): string {
-  if (windowRenewed(w, now)) return lang === 'pt' ? 'renovado' : 'renewed'
+  if (windowRenewed(w, now)) return lang === 'pt' ? 'renovado — sem leitura desde então' : 'renewed — no reading since'
   const pt = lang === 'pt'
   return pt
     ? `renova ${fmtWhen(w.resetsAt, now, lang)} (em ${fmtSpan(w.resetsAt - now, lang)})`

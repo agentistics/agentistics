@@ -8,7 +8,7 @@
  * A harness with no record draws NOTHING (the callers simply have no `PlanLimits` for it) — never a
  * zero bar: nothing observed is not nothing used.
  */
-import type { PlanLimitWindow, PlanLimits } from '@agentistics/core'
+import { windowRenewed, type PlanLimitWindow, type PlanLimits } from '@agentistics/core'
 import { HARNESS_LABELS } from '../lib/harness'
 import {
   currentUsedPct, forecastPhrase, forecastWindow, limitTone, resetPhrase, SOURCE_LABEL, stalePhrase,
@@ -26,6 +26,8 @@ export function PlanLimitMeter({ window: w, now, lang, forecast = false }: {
 }) {
   const pct = currentUsedPct(w, now)
   const shown = Math.round(pct)
+  // A window that renewed since the last reading has no figure of its own yet: said, not zeroed.
+  const renewed = windowRenewed(w, now)
   const tone = limitTone(pct)
   const f = forecastWindow(w, now)
   const label = windowLabel(w.kind, lang)
@@ -40,7 +42,7 @@ export function PlanLimitMeter({ window: w, now, lang, forecast = false }: {
         >
           <div style={{ width: `${Math.min(100, Math.max(0, pct))}%`, height: '100%', background: tone, borderRadius: 3, transition: 'width 0.3s' }} />
         </div>
-        <span style={{ color: 'var(--text-primary)', fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: 34, textAlign: 'right' }}>{shown}%</span>
+        <span style={{ color: 'var(--text-primary)', fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: 34, textAlign: 'right' }}>{renewed ? '–' : `${shown}%`}</span>
       </div>
       <div style={{ paddingLeft: 50, fontSize: 10.5, color: 'var(--text-tertiary)', lineHeight: 1.35 }}>
         {resetPhrase(w, now, lang)}
