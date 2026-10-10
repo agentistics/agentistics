@@ -177,7 +177,8 @@ export function optionLabel(label: string, lang: 'pt' | 'en'): string {
     return lang === 'pt' ? `Permitir nesta sessão${suffix ? `: ${suffix}` : ''}` : `Allow for this session${suffix ? `: ${suffix}` : ''}`
   }
   if (compact === 'acceptalways' || compact === 'allowalways' || compact.includes('acceptwithexecpolicyamendment') || compact.includes('allowwithexecpolicyamendment')) return lang === 'pt' ? 'Permitir sempre este comando' : 'Always allow this command'
-  if (compact === 'reject' || compact === 'deny' || compact === 'decline' || compact === 'cancel') return lang === 'pt' ? 'Recusar' : 'Reject'
+  if (compact === 'rejectalways' || compact === 'denyalways') return lang === 'pt' ? 'Recusar sempre' : 'Always reject'
+  if (compact === 'rejectonce' || compact === 'reject' || compact === 'deny' || compact === 'decline' || compact === 'cancel') return lang === 'pt' ? 'Recusar' : 'Reject'
   if (lang !== 'pt') return label
   const s = /^Allow for this session: commands starting with (.+)$/.exec(label)
   if (s) return `Permitir nesta sessão: comandos que começam com ${s[1]}`

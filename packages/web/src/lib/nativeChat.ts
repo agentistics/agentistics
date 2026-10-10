@@ -212,12 +212,12 @@ function applyFrame(s: NativeChatState, f: NativeFrame): NativeChatState {
       // A stopped call persisted nothing (it was aborted mid-answer): keep what it had written, so the
       // person sees where it stopped rather than the text vanishing.
       const cut = data.status === 'abandoned' && next.liveText !== '' && !persisted(next.window, next.liveText)
-      const reason = typeof data.reason === 'string' ? data.reason : typeof data.status === 'string' ? data.status : undefined
+      const reason = typeof data.reason === 'string' ? data.reason : ''
       return {
         ...next, running: false, liveText: '', asks: {},
         ...(cut ? { stopped: next.liveText } : {}),
         // A tool-only / no-chunk run must not leave the shared chat's spinner behind forever.
-        ...(!cut && next.liveText.trim() === '' && !hasAnswerAfterLatestUser(next.window) ? { emptyAnswerReason: reason } : {}),
+        ...(data.status === 'completed' && !cut && next.liveText.trim() === '' && !hasAnswerAfterLatestUser(next.window) ? { emptyAnswerReason: reason } : {}),
       }
     }
     case 'model.invoked':
@@ -277,6 +277,8 @@ export function nativeChatReducer(s: NativeChatState, a: NativeChatAction): Nati
         execByUse,
         pending,
         running,
+        // A late-persisted answer (or a new run) retires the empty-answer notice.
+        ...(s.emptyAnswerReason !== undefined && (runningFromWindow || hasAnswerAfterLatestUser(w)) ? { emptyAnswerReason: undefined } : {}),
         ...(lr && (runningFromWindow || s.runId === undefined || s.lastSeq === null) ? { runId: lr.runId } : {}),
       }
     }

@@ -71,6 +71,20 @@ describe('nativeChatReducer + nativeChatItems — the conversation', () => {
     expect(s.emptyAnswerReason).toBe('provider returned no chunks')
   })
 
+  test('a stopped or failed run is not an empty answer; a late window answer retires the notice', () => {
+    const w1 = windowWith([{ seq: 1, message: { role: 'user', content: 'hi' } }])
+    let s = apply(INITIAL_NATIVE_CHAT, { type: 'window', window: w1 }, { type: 'frame', frame: ev(1, 'run.started') },
+      { type: 'frame', frame: ev(2, 'run.ended', { status: 'abandoned' }) })
+    expect(s.emptyAnswerReason).toBeUndefined()
+    s = apply(s, { type: 'frame', frame: ev(3, 'run.started') }, { type: 'frame', frame: ev(4, 'run.ended', { status: 'completed' }) })
+    expect(s.emptyAnswerReason).toBe('')
+    s = apply(s, { type: 'window', window: windowWith([
+      { seq: 1, message: { role: 'user', content: 'hi' } },
+      { seq: 2, message: { role: 'assistant', content: [{ type: 'text', text: 'Hi.' }] } },
+    ]) })
+    expect(s.emptyAnswerReason).toBeUndefined()
+  })
+
   test('a late persisted answer prevents a false empty-answer notice', () => {
     let s = apply(INITIAL_NATIVE_CHAT, { type: 'window', window: windowWith([
       { seq: 1, message: { role: 'user', content: 'hello' } },
