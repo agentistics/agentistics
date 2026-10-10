@@ -239,6 +239,8 @@ export function HardwareBody(p: {
   hardware: HardwareSnapshot | null
   error: string | null
   isMobile: boolean
+  /** Called after the panel navigates away (a modal closes itself). */
+  onNavigate?: () => void
 }) {
   const { lang, hardware, error, isMobile } = p
   const lang2 = lang === 'pt' ? 'pt' : 'en'
@@ -448,7 +450,7 @@ export function HardwareBody(p: {
       </section>
 
       {/* RES.1 — the process governor */}
-      <ResourcesSection lang={lang} isMobile={isMobile} />
+      <ResourcesSection lang={lang} isMobile={isMobile} onNavigate={p.onNavigate} />
 
       {/* Managed fleet */}
       <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -720,7 +722,7 @@ export function HardwareModal({ lang, onClose }: { lang: Lang; onClose: () => vo
               {lang === 'pt' ? 'Atualizado às' : 'Updated'} {lastRefreshed.toLocaleTimeString()}
             </div>
           )}
-          <HardwareBody lang={lang} hardware={hardware} error={error} isMobile={isMobile} />
+          <HardwareBody lang={lang} hardware={hardware} error={error} isMobile={isMobile} onNavigate={onClose} />
         </div>
       </div>
     </div>

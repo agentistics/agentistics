@@ -44,3 +44,35 @@ test('stale MCPs after an upgrade become one line; other alerts stay their own',
   expect(g.single.map(x => [x.pid, x.reason])).toEqual([[3, 'stale-binary'], [1, 'over-budget']])
   expect(staleMcpSentence([1, 2], 'en')).toBe('2 MCP server(s) of open sessions still run the agentop from before the upgrade (pid 1, 2).')
 })
+
+import { endNote, harnessBreakdown, orphansOf, recommendedActions, recommendedSentence, staleBySession, } from './resourcesView'
+
+const rp = (o: Partial<ResProcess>): ResProcess => ({
+  pid: 1, kind: 'mcp', label: 'agentop mcp', usedBytes: 100 * 1024 ** 2, cpuPercent: 0, ageSec: 1,
+  stale: true, orphan: false, owner: null, self: false, isolatedHome: false, ...o,
+})
+const stale = (pid: number): ResAlert => ({ pid, label: 'x', reason: 'stale-binary', usedBytes: 0, fix: null })
+
+describe('RES.ACTIONS view', () => {
+  const fleet = new Map([['a', { id: 'a', title: 'T', harness: 'claude' }], ['b', { id: 'b', title: 'U', harness: 'gemini' }]])
+  test('stale MCPs group by owning session; a vanished session is an orphan group', () => {
+    const inv = [rp({ pid: 1, managedId: 'a' }), rp({ pid: 2, managedId: 'a' }), rp({ pid: 3, managedId: 'b' }), rp({ pid: 4, managedId: 'gone' })]
+    const g = staleBySession(inv, [1, 2, 3, 4].map(stale), fleet)
+    expect(g.length).toBe(3)
+    expect(g.find(x => x.managedId === 'a')!.pids).toEqual([1, 2])
+    expect(g.find(x => x.managedId === 'gone')!.session).toBeNull()
+    expect(harnessBreakdown(g, h => h)).toBe('claude 1, gemini 1')
+  })
+  test('recommended actions count orphans and reopenable sessions', () => {
+    const inv = [rp({ pid: 9, kind: 'cli', orphanWhy: 'parent-gone', stale: false }), rp({ pid: 1, managedId: 'a' })]
+    const r = recommendedActions(inv, staleBySession(inv, [stale(1)], fleet))
+    expect(r).toMatchObject({ orphanCount: 1, reopenCount: 1 })
+    expect(recommendedSentence(r, 'pt')).toContain('encerrar 1 órfão(s) · reabrir 1 sessão(ões)')
+    expect(recommendedSentence({ orphanCount: 0, orphanBytes: 0, reopenCount: 0 }, 'pt')).toBeNull()
+  })
+  test('this server is never an orphan to end; only a confirmed exit says ended', () => {
+    expect(orphansOf([rp({ orphanWhy: 'parent-gone', self: true })])).toEqual([])
+    expect(endNote(5, { ended: false }, 'pt')).toContain('não encerrou')
+    expect(endNote(5, { ended: true }, 'pt')).toBe('pid 5 encerrado.')
+  })
+})

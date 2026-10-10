@@ -10,6 +10,24 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.120.0': {
+    features: [
+      {
+        pt: 'Recursos (Configurações → Hardware) agora resolve o que avisa: um resumo de "Ações recomendadas" mostra quanta memória dá para liberar, "Encerrar órfãos" fecha de uma vez os processos que sobraram de sessões que já acabaram, e cada sessão com o agentop antigo tem o botão "Abrir".',
+        en: 'Resources (Settings → Hardware) now fixes what it reports: a "Recommended actions" summary shows how much memory can be freed, "End orphans" closes at once the processes left by sessions that already ended, and each session still on the old agentop has an "Open" button.',
+      },
+    ],
+    fixes: [
+      {
+        pt: '"Encerrar" encerra de verdade, mesmo um processo que ignora o pedido de fechar, e só diz "encerrado" depois de confirmar.',
+        en: '"End" really ends the process, even one that ignores the request to close, and only says "ended" after confirming it.',
+      },
+      {
+        pt: 'Não aparece mais a notificação de "MCP com agentop antigo", que não tinha nada a fazer; só avisamos de órfãos, que você pode encerrar.',
+        en: 'No more "MCP on an old agentop" notification, which had nothing to act on; only orphans, which you can end, are announced.',
+      },
+    ],
+  },
   '2.116.0': {
     features: [
       {

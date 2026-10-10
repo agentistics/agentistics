@@ -48,7 +48,12 @@ export interface ProcEntry {
     AGENTISTICS_HELPER_ID?: string
     AGENTISTICS_HEAVY_JOB?: string
     HOME?: string
+    AGENTOP_MANAGED_ID?: string
   }
+  /** `/proc/<pid>/cwd` points at a deleted directory. */
+  cwdGone?: boolean
+  /** AGENTOP_MANAGED_ID found on the nearest ancestor that carries one (an MCP's owning session). */
+  ancestorManagedId?: string
   /** The assistant this process declared it was started under (proc-card.ts), with its start time. */
   cardOwner?: { pid: number; starttime: number; harness: string }
 }
@@ -96,6 +101,10 @@ export interface AgentopProcess {
    * unknown is never treated as "isolated".
    */
   isolatedHome: boolean
+  /** Why it is an orphan the user can end (mcp/cli only): parent gone (ppid 1) or cwd deleted. */
+  orphanWhy?: 'parent-gone' | 'cwd-deleted'
+  /** The agentop session (managed id) this process belongs to, when it could be read. */
+  managedId?: string
 }
 
 /** The subcommands the cockpit runs under; the rest is decided by argv. */
@@ -164,6 +173,17 @@ export function isThrowawayHome(home: string | undefined, selfHome: string | und
   return roots.some(r => h.startsWith(r.endsWith('/') ? r : `${r}/`))
 }
 
+/**
+ * Is this process an orphan the user can end? Only mcp and one-shot commands (relays, previews):
+ * a server/cockpit/daemon reparented to init is normal (`nohup`, systemd) and is never offered.
+ */
+export function orphanReason(kind: ProcessKind, e: Pick<ProcEntry, 'ppid' | 'cwdGone'>): 'parent-gone' | 'cwd-deleted' | undefined {
+  if (kind !== 'mcp' && kind !== 'cli') return undefined
+  if (e.cwdGone) return 'cwd-deleted'
+  if (e.ppid === 1) return 'parent-gone'
+  return undefined
+}
+
 /** Build the inventory — PURE over what was read. Sorted by memory, biggest first. */
 export function buildInventory(entries: ProcEntry[], ctx: InventoryContext): AgentopProcess[] {
   const helperPids = new Map([...ctx.helpers].map(([pid, h]) => [pid, h.id] as const))
@@ -196,6 +216,8 @@ export function buildInventory(entries: ProcEntry[], ctx: InventoryContext): Age
         }
       }
     }
+    const managedId = e.env.AGENTOP_MANAGED_ID ?? e.ancestorManagedId
+    const orphanWhy = orphanReason(c.kind, e)
     out.push({
       pid: e.pid,
       ppid: e.ppid,
@@ -212,6 +234,8 @@ export function buildInventory(entries: ProcEntry[], ctx: InventoryContext): Age
       self: e.pid === ctx.selfPid,
       isolatedHome: isThrowawayHome(e.env.HOME, ctx.home, ctx.tempRoots),
       ...(c.helperId ? { helperId: c.helperId } : {}),
+      ...(orphanWhy ? { orphanWhy } : {}),
+      ...(managedId ? { managedId } : {}),
     })
   }
   return out.sort((a, b) => (b.usedBytes ?? 0) - (a.usedBytes ?? 0))
