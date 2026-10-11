@@ -103,8 +103,19 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
   // One request, one reference, one human gesture. Approval never accepts an authenticator code.
   const useDecision = path.match(/^\/api\/vault\/personal\/use\/([^/]+)\/(approve|deny)$/)
   if (useDecision) {
-    if (!loopback && !mobile.consumeGestureToken(session, tokenOf(b), `use-approve:${useDecision[1]}`)) return reply(fail('mobile-gesture-required', 'Confirm this use with your phone biometrics.', 'Confirme este uso com a digital do celular.'))
-    if (loopback && !consumeFreshPresence({ session, token: fresh, binding: `use-approve:${useDecision[1]}` })) return reply(fail('presence-required', 'Confirm this use with Windows Hello.', 'Confirme este uso com o Windows Hello.'))
+    // Approving is the one act that opens a value: it needs the presence gesture. DENYING only closes
+    // (spec §3.5) — an authenticated session is enough, so the owner can always say no without the device.
+    if (useDecision[2] === 'approve') {
+      if (!loopback && !mobile.consumeGestureToken(session, tokenOf(b), `use-approve:${useDecision[1]}`)) return reply(fail('mobile-gesture-required', 'Confirm this use with your phone biometrics.', 'Confirme este uso com a digital do celular.'))
+      if (loopback && !consumeFreshPresence({ session, token: fresh, binding: `use-approve:${useDecision[1]}` })) {
+        // An open vault minted no token at unlock: raise the gesture here, in the service (never a code).
+        const g = await step('personal-use-approve', b, useDecision[1])
+        if (!g.ok) return reply(g)
+      }
+    } else {
+      const g = await step('personal-list', b)
+      if (!g.ok) return reply(g)
+    }
     const r = grants.decideUse(useDecision[1]!, useDecision[2] === 'approve')
     return reply(r.ok ? { ok: true } : fail(r.code, r.code === 'not-found' ? 'That use request no longer exists.' : 'That use request is no longer pending.', r.code === 'not-found' ? 'Esse pedido de uso não existe mais.' : 'Esse pedido de uso não está mais pendente.'))
   }
@@ -363,7 +374,7 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     if (!secure) return reply(notSecure())
     const action = typeof b.action === 'string' ? b.action : ''
     const target = typeof b.target === 'string' ? b.target.slice(0, 200) : ''
-    if (!/^personal-(reveal|edit|trash|restore|restore-version|purge|group-delete|grant)$/.test(action)) return reply(bad())
+    if (!/^(?:personal-(?:reveal|edit|trash|restore|restore-version|purge|group-delete|grant)|use-approve)$/.test(action)) return reply(bad())
     const g = await step('personal-list', b)
     if (!g.ok) return reply(g)
     const r = await mobile.beginAssertion(session, `${action}:${target}`, rpId, origin)

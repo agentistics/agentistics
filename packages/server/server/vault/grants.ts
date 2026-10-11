@@ -27,6 +27,7 @@ let _epoch = 0
 let _requests = new Map<string, UseRequest>()
 let _approvals = new Map<string, number>()
 let _requestSeq = 0
+let _useTtlMs = 90_000
 export type UseCode = 'not-granted' | 'secret-gone' | 'use-denied' | 'use-pending' | 'use-busy' | 'vault-locked' | 'use-unsupported'
 export interface UseContext { command: string | null; harness: string; callId?: string }
 export interface UseRequest {
@@ -94,6 +95,7 @@ export function revokeGrant(sessionId: string): boolean {
 
 export function confirmEachUseEnabled(): boolean { return _confirmEachUseOverride ?? vaultConfirmEachUse() }
 export function __setConfirmEachUseForTests(enabled: boolean): void { _confirmEachUseOverride = enabled }
+export function __setUseTtlForTests(ms: number): void { _useTtlMs = ms }
 export function pendingUseRequests(): UseRequest[] { return [..._requests.values()].filter(r => r.state === 'pending').map(r => ({ ...r, waiters: new Set() })) }
 export function useRequest(id: string): UseRequest | null { const r = _requests.get(id); return r ? { ...r, waiters: new Set() } : null }
 function failUse(code: UseCode): { ok: false; code: UseCode } { return { ok: false, code } }
@@ -125,8 +127,10 @@ export async function authorizeUse(sessionId: string, ref: string, ctx: UseConte
   if (!pending && ([..._requests.values()].filter(x => x.state === 'pending' && x.sessionId === sessionId).length >= 3 || [..._requests.values()].filter(x => x.state === 'pending').length >= 10)) return failUse('use-busy')
   if (!pending) {
     const command = cleanCommand(ctx.command)
-    pending = { id: `use-${++_requestSeq}`, epoch: _epoch, sessionId, itemId: r.itemId, field: r.field, ref: r.ref, name: r.name, sessionTitle: await titleForSession(sessionId), harness: ctx.harness, command, flags: commandFlags(command), count: 1, createdAt: _now(), expiresAt: _now() + 90_000, state: 'pending', waiters: new Set() }
-    _requests.set(pending.id, pending); vaultAudit({ type: 'vault.personal-use-asked', name: r.itemId, purpose: ctx.harness }); broadcastNotification({ type: 'warning', code: 'vault.use-request', meta: { requestId: pending.id, name: r.name } })
+    pending = { id: `use-${++_requestSeq}`, epoch: _epoch, sessionId, itemId: r.itemId, field: r.field, ref: r.ref, name: r.name, sessionTitle: sessionId, harness: ctx.harness, command, flags: commandFlags(command), count: 1, createdAt: _now(), expiresAt: _now() + _useTtlMs, state: 'pending', waiters: new Set() }
+    _requests.set(pending.id, pending) // registered BEFORE any await: concurrent calls for this reference must find it
+    const made = pending; void titleForSession(sessionId).then(t => { made.sessionTitle = t })
+    vaultAudit({ type: 'vault.personal-use-asked', name: r.itemId, purpose: ctx.harness }); broadcastNotification({ type: 'warning', code: 'vault.use-request', meta: { requestId: pending.id, name: r.name } })
   } else pending.count++
   const approved = await waitFor(pending)
   if (!approved || pending.state !== 'approved' || pending.epoch !== _epoch || !_grants.has(sessionId)) return failUse(pending.state === 'denied' ? 'use-denied' : 'use-pending')
@@ -164,7 +168,7 @@ export async function scrubFor(sessionId: string, text: string): Promise<string>
  * Open the values of a session's grant — for an env being built or a scrubber being made, never for a
  * reply. An item deleted or trashed since the grant is skipped (and said, by its absence in `refs`).
  */
-export async function resolveGrant(sessionId: string): Promise<{ ref: GrantRef; value: string }[]> {
+async function resolveGrant(sessionId: string): Promise<{ ref: GrantRef; value: string }[]> {
   const g = _grants.get(sessionId)
   if (!g) return []
   const out: { ref: GrantRef; value: string }[] = []
@@ -175,17 +179,26 @@ export async function resolveGrant(sessionId: string): Promise<{ ref: GrantRef; 
   return out
 }
 
-/** The env a process of this session gets: `VAULT_<KEY>[_<FIELD>]=value`. */
-export async function grantEnv(sessionId: string): Promise<Record<string, string>> {
-  const env: Record<string, string> = {}
-  for (const { ref, value } of await resolveGrant(sessionId)) env[ref.env] = value
-  return env
-}
+/**
+ * The env a NATIVE session gets (legacy `vaultRefs.env`). With confirm-each-use ON, a confirmable secret
+ * is never opened here at all — the filter runs BEFORE any value is read. Its replacement, `vaultRefs.use`
+ * (an approval per use), belongs to the engine.
+ * TODO(E1/E2): the engine adds `vaultRefs.use` → `authorizeUse`; until then a native session has no path to
+ * a confirmable secret with the setting ON (fails closed). Do not touch engine-api/runtime from here.
+ */
 async function legacyNativeEnv(sessionId: string): Promise<Record<string, string>> {
   const env: Record<string, string> = {}
-  for (const { ref, value } of await resolveGrant(sessionId)) {
-    if (!confirmEachUseEnabled()) { env[ref.env] = value; continue }
-    const meta = (await listItems()).find(x => x.id === ref.itemId); if (meta && !needsConfirm(meta)) env[ref.env] = value
+  const g = _grants.get(sessionId)
+  if (!g) return env
+  const confirm = confirmEachUseEnabled()
+  const metas = confirm ? await listItems() : []
+  for (const r of g.refs) {
+    if (confirm) {
+      const meta = metas.find(x => x.id === r.itemId)
+      if (!meta || meta.deletedAt || needsConfirm(meta)) continue
+    }
+    const v = await revealField(r.itemId, r.field)
+    if (v.ok && !v.meta.deletedAt) env[r.env] = v.value
   }
   return env
 }
@@ -201,7 +214,7 @@ export function grantBriefing(g: Grant, lang: 'en' | 'pt' = 'en'): string {
     : `Vault secrets granted to this session (you do NOT see the values):\n${lines.join('\n')}\n${VAULT_REF_INSTRUCTION}\nAny value that shows up in an output is replaced by «vault:NAME». Never ask for a secret to be pasted.`
 }
 
-export function __resetGrantsForTests(now?: () => number): void { _grants = new Map(); _scrubbers = new Map(); _requests = new Map(); _approvals = new Map(); _epoch = 0; _requestSeq = 0; _confirmEachUseOverride = undefined; _now = now ?? (() => Date.now()) }
+export function __resetGrantsForTests(now?: () => number): void { _grants = new Map(); _scrubbers = new Map(); _requests = new Map(); _approvals = new Map(); _epoch = 0; _requestSeq = 0; _useTtlMs = 90_000; _confirmEachUseOverride = undefined; _now = now ?? (() => Date.now()) }
 
 /** A reference as typed (`vault://key` or `vault://key/field`) → the granted ref it names, or null. */
 export function grantedRef(sessionId: string, ref: string): GrantRef | null {

@@ -71,6 +71,10 @@ export type VaultAction =
   | 'phone-enrol-request' | 'phone-enrol-approve'
   // Owner decision 2026-10-06: choosing which proof each kind of action asks (action-policy.ts).
   | 'set-auth-policy'
+  // VAULT.V4: confirm each use of a sensitive secret. Same row as the auto-lock: a setting, code once, 5-min read grant.
+  | 'set-confirm-each-use'
+  // VAULT.V4: approving ONE use request on this computer — the presence gesture, raised in the service (the vault is already open, so no unlock minted a token).
+  | 'personal-use-approve'
 
 export interface ActionRow { code: boolean; gesture: boolean; grant: 'read' | null }
 
@@ -83,6 +87,8 @@ export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
   list: { code: false, gesture: false, grant: null },
   lock: { code: false, gesture: false, grant: null }, // locking only REDUCES exposure
   'set-auto-lock': { code: true, gesture: false, grant: 'read' },
+  'set-confirm-each-use': { code: true, gesture: false, grant: 'read' },
+  'personal-use-approve': { code: false, gesture: true, grant: null },
   // VAULT.UI2: "keep it open" — one more idle window. On this computer the vault is already open and the click
   // is the consent (no proof); from a remote origin it costs the authenticator code, never silently.
   'extend-open': { code: true, gesture: false, grant: null },
@@ -1408,6 +1414,21 @@ export async function setAutoLockMinutes(minutes: unknown, ctx: GateContext): Pr
   o.vault = vault
   setAutoLockPeriod(m)
   vaultAudit({ type: 'vault.set-auto-lock' })
+  return g
+}
+
+/** VAULT.V4: persist `confirmEachUse` (default OFF — absent reads as off). Step-up gated and audited, like the auto-lock. */
+export async function setConfirmEachUse(enabled: unknown, ctx: GateContext): Promise<GateResult> {
+  if (typeof enabled !== 'boolean') return refused('bad-request', vaultLang() === 'pt' ? 'Informe se o cofre deve confirmar cada uso.' : 'Say whether the vault should confirm each use.')
+  const g = await requireVaultStepUp('set-confirm-each-use', ctx)
+  if (!g.ok) return g
+  const o = await ensureVaultOpen({ create: false, migrate: false })
+  if (!o) return refused('locked', sentence('locked'))
+  const { confirmEachUse: _prev, ...rest } = o.vault
+  const vault: VaultJson = { ...rest, v: 2, ...(enabled ? { confirmEachUse: true } : {}) }
+  await writeVaultJson(vault)
+  o.vault = vault
+  vaultAudit({ type: 'vault.set-confirm-each-use' })
   return g
 }
 

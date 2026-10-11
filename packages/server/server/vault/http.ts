@@ -204,6 +204,10 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     const b = await body()
     return reply(await gate.setAutoLockMinutes(b.minutes, { grant, session, code: codeOf(b) }))
   }
+  if (path === '/api/vault/confirm-each-use' && req.method === 'POST') {
+    const b = await body()
+    return reply(await gate.setConfirmEachUse(b.enabled, { grant, session, code: codeOf(b) }))
+  }
   if (path === '/api/vault/unlock-policy' && req.method === 'POST') {
     // Owner decision 2026-10-02: changing what an unlock asks costs the code AND the gesture, fresh.
     const b = await body()
