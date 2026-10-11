@@ -72,6 +72,13 @@ export interface SessionActionsProps {
    * stays open after you have used it is a menu you then have to dismiss.
    */
   extraTop?: (close: () => void) => React.ReactNode
+  /**
+   * DRAWN IN PLACE instead of behind the ⋯ button: no trigger, no popover, no click-away — the
+   * menu's body as a block of the caller's layout. The phone's session panel (a `Drawer`) is
+   * already the menu, so a second popover inside it would be a menu inside a menu. Everything the
+   * popover does — the verbs, their refusals, the confirmations, the notice — is the same code.
+   */
+  inline?: boolean
 }
 
 /** The verbs that take a line of text before they can run. */
@@ -98,7 +105,7 @@ const MENU_ORDER: string[] = ['rename', 'note', 'task', 'resume', 'terminal', 'k
 const TASK_VERBS = new Set<string>(['task'])
 
 export function SessionActions({
-  row, lang, act, onGone, onOpened, extra = [], extraTop,
+  row, lang, act, onGone, onOpened, extra = [], extraTop, inline = false,
 }: SessionActionsProps) {
   /** Open when the `task` verb was picked — see `TEXT_VERBS`. */
   const [linking, setLinking] = useState(false)
@@ -163,9 +170,10 @@ export function SessionActions({
     void run(v.action as FleetActionId)
   }
 
+  const shown = inline || open
   return (
-    <div style={{ position: 'relative', flexShrink: 0 }}>
-      <button
+    <div style={inline ? { display: 'flex', flexDirection: 'column' } : { position: 'relative', flexShrink: 0 }}>
+      {!inline && <button
         onClick={() => setOpen(v => !v)}
         aria-label={pt ? 'Ações da sessão' : 'Session actions'}
         title={pt ? 'Ações da sessão' : 'Session actions'}
@@ -177,7 +185,7 @@ export function SessionActions({
         }}
       >
         <MoreHorizontal size={16} />
-      </button>
+      </button>}
 
       {linking && (
         <SessionFiling
@@ -192,13 +200,13 @@ export function SessionActions({
         />
       )}
 
-      {open && (
+      {shown && (
         <>
           {/* Click-away. A popover that closes only on its own trigger is one people close by
               navigating away from the page. */}
-          <div onClick={() => { setOpen(false); setAsking(null); setConfirming(false) }}
-               style={{ position: 'fixed', inset: 0, zIndex: 20 }} />
-          <div style={{
+          {!inline && <div onClick={() => { setOpen(false); setAsking(null); setConfirming(false) }}
+               style={{ position: 'fixed', inset: 0, zIndex: 20 }} />}
+          <div style={inline ? { display: 'flex', flexDirection: 'column' } : {
             position: 'absolute', top: '100%', right: 0, zIndex: 21, marginTop: 6,
             minWidth: 240, maxWidth: 320,
             background: 'var(--bg-surface)', border: '1px solid var(--border)',
@@ -334,13 +342,15 @@ export function SessionActions({
                     style={{
                       display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2,
                       width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 8,
+                      // In place, on a phone's panel: the 44px row every other entry there has.
+                      ...(inline ? { minHeight: 44, justifyContent: 'center' } : {}),
                       border: 'none', background: 'transparent',
                       color: v.enabled
                         ? (v.action === 'kill' || v.action === 'delete' ? 'var(--accent-red)' : 'var(--text-primary)')
                         : 'var(--text-tertiary)',
                       cursor: v.enabled ? 'pointer' : 'default',
                       opacity: v.enabled ? 1 : 0.6,
-                      fontFamily: 'inherit', fontSize: 12.5,
+                      fontFamily: 'inherit', fontSize: inline ? 14 : 12.5,
                     }}
                     onMouseEnter={e => { if (v.enabled) e.currentTarget.style.background = 'var(--bg-elevated)' }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}

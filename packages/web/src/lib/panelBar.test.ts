@@ -75,10 +75,11 @@ describe('bottomBandFor', () => {
     expect(bottomBandFor({ bottomOccupant: null, relayed: false, isMobile: false, bottomHasPanels: true })).toBe('shell')
   })
 
-  // A PHONE keeps the floor: it has no rail, and ShellBand's segment is its only route to the
-  // session's terminal.
-  test('a local PHONE session with nothing docked keeps ShellBand as the floor', () => {
-    expect(bottomBandFor({ bottomOccupant: null, relayed: false, isMobile: true, bottomHasPanels: false })).toBe('shell')
+  // A PHONE has no band (MOBILE.SESSION): the terminals are reached from the session panel's
+  // "View" group, and the 48px strip goes back to the conversation.
+  test('a local PHONE session draws no band — the panel holds the route to the terminals', () => {
+    expect(bottomBandFor({ bottomOccupant: null, relayed: false, isMobile: true, bottomHasPanels: false })).toBe('none')
+    expect(bottomBandFor({ bottomOccupant: null, relayed: false, isMobile: true, bottomHasPanels: true })).toBe('none')
   })
 
   // COLLAPSED is not EMPTY: a docked panel keeps its band (and the chevron that reopens it)

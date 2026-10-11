@@ -136,17 +136,20 @@ export interface BottomBandInput {
  * still parked in it: caught on a live preview before it shipped. Nothing placed at all is the
  * empty case, and it renders NOTHING.
  *
- * A PHONE KEEPS THE FLOOR. There is no rail there, and `ShellBand`'s own segment at the foot of the
- * chat is how a phone reaches the session's terminal at all; taking it away because a placement
- * decided on a desktop says `rail` would leave a phone with no route to it. A RELAYED session with
- * nothing docked keeps the narrow `'bar-only'` fallback on desktop, `'none'` on a phone.
+ * A PHONE HAS NO BAND AT ALL (MOBILE.SESSION, owner-approved 2026-10-11). It used to keep the floor
+ * — `ShellBand`'s cwd + "Claude Code | Shell" strip at the foot of the chat was the phone's only
+ * route to a terminal, and it cost 48px of every screen for a control used rarely. The route moved
+ * into the session panel's "View" group (Chat / Terminal / Shell / Contents), so the strip goes and
+ * the conversation gets the row. A RELAYED session with nothing docked keeps the narrow
+ * `'bar-only'` fallback on desktop.
  */
 export function bottomBandFor(
   { bottomOccupant, relayed, isMobile, bottomHasPanels }: BottomBandInput,
 ): BottomBandKind {
   if (bottomOccupant !== null) return bottomOccupant
-  if (!relayed) return isMobile || bottomHasPanels ? 'shell' : 'none'
-  return isMobile ? 'none' : 'bar-only'
+  if (isMobile) return 'none'
+  if (!relayed) return bottomHasPanels ? 'shell' : 'none'
+  return 'bar-only'
 }
 
 /**

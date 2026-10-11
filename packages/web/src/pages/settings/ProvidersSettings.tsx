@@ -31,7 +31,7 @@ import {
 import {
   Checkbox, ConfirmModal, RecordCard, RecordCardAction, Select, StatusDot,
 } from './primitives'
-import { Drawer } from './Drawer'
+import { Drawer } from '../../components/Drawer'
 import { ensureVaultOpen } from '../../components/vault/VaultUnlockHost'
 import { isVaultLockedRefusal } from '../../lib/phoneVault'
 

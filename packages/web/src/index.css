@@ -704,6 +704,11 @@ textarea,
 @media (prefers-reduced-motion: reduce) { .ag-hint-pulse { animation: none; } }
 @media (prefers-reduced-motion: reduce) { .ag-working-spin { animation: none; } }
 
+/* The phone's session panel (`Drawer side="left"`) holds cards built for a 344px popover. Inside
+   one of its sections they take the section's width instead — an inline width only an !important
+   rule can narrow, scoped to the panel so the popover itself is untouched. */
+.ag-drawer-fit [data-plan-usage-summary] { width: 100% !important; padding: 0 !important; }
+
 /* --- .ag-resize-handle / .ag-resize-grip: the visible grip on a draggable edge (design item 6) ---
    The HANDLE keeps its own hit area exactly as it was (this class adds no size); the GRIP is a small
    decorative pill inside it, `pointer-events: none` so it never steals the drag. Idle = subtle grey
