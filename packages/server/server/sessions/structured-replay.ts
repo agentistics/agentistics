@@ -26,6 +26,8 @@ export type SessionCall =
   | { op: 'prompt'; text: string }
   | { op: 'answer'; choice?: number; text?: string; requestId?: string }
   | { op: 'cancel' }
+  /** MODE.EVERYWHERE — a mode set through the protocol (it writes to the child, so a replay makes it again). */
+  | { op: 'setMode'; id: string }
 
 /** A call the host made on the session, and when (`at`: lines read; `t`: ms). */
 export type ReplayCall = SessionCall & { at: number; t: number }
@@ -49,6 +51,7 @@ export const isReplayCall = (v: unknown): v is ReplayCall => {
   const c = v as ReplayCall
   if (typeof c.at !== 'number' || typeof c.t !== 'number') return false
   if (c.op === 'prompt') return typeof c.text === 'string'
+  if (c.op === 'setMode') return typeof c.id === 'string'
   return c.op === 'answer' || c.op === 'cancel'
 }
 

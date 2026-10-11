@@ -29,7 +29,7 @@ import type {
 import { answerFits } from '@agentistics/engine-api'
 import { SPAWN_SPECS } from './spawn-spec'
 import type { DurableStore, DurableTransport, SavedSpawn } from './structured-durable'
-import { routableDriver, routeSpawn, type SpawnRoute } from './structured-route'
+import { modeNeedsProtocolSentence, routableDriver, routeSpawn, type SpawnRoute } from './structured-route'
 import type { BackendSession, BackendSpawn, SessionActivity, SessionBackend, TerminalCapture } from './types'
 
 /** Which harness an argv starts — by its binary's base name against the spawn specs. */
@@ -90,6 +90,13 @@ export function recordingSession(s: StructuredSession, t: Pick<DurableTransport,
     attention: () => s.attention(),
     screen: n => s.screen(n),
     lastActivityMs: () => s.lastActivityMs(),
+    // Optional members are forwarded only where the driver has them — absent stays absent.
+    ...(s.usage ? { usage: () => s.usage!() } : {}),
+    ...(s.modes ? { modes: () => s.modes!() } : {}),
+    ...(s.mode ? { mode: () => s.mode!() } : {}),
+    // MODE.EVERYWHERE — setting a mode WRITES to the child, so it is recorded (before the write leaves,
+    // like every call here) and a re-attach makes it again in the same place.
+    ...(s.setMode ? { setMode: (id: string) => { t.record({ op: 'setMode', id }); return s.setMode!(id) } } : {}),
     prompt(text) { const ok = s.prompt(text); if (ok) t.record({ op: 'prompt', text }); return ok },
     answer(a) {
       const ok = s.answer(a)
@@ -214,6 +221,7 @@ export function structuredSpawnOf(req: BackendSpawn, harness: HarnessId): Struct
     ...(i?.effort ? { effort: i.effort } : {}),
     ...(i?.conversationId && !i.resumeId ? { conversationId: i.conversationId } : {}),
     ...(i?.resumeId ? { resumeId: i.resumeId } : {}),
+    ...(i?.mode ? { mode: i.mode } : {}),
     ...(prompt ? { initialPrompt: prompt } : {}),
     ...(i?.instructions && !i.resumeId ? { instructions: i.instructions } : {}),
     ...(i?.mcp?.length ? { mcp: i.mcp } : {}),
@@ -397,7 +405,10 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
       if (!req) return { ok: false, why: 'not-structured' }
       const conv = l?.s.conversationId() ?? (await provider.conversationOf?.(id).catch(() => null)) ?? req.structured?.resumeId ?? null
       if (!conv) return { ok: false, why: 'no-conversation' }
-      const resume = provider.resumeSpawn ? await provider.resumeSpawn(req, conv).catch(() => null) : null
+      // MODE.EVERYWHERE — the mode it is in NOW (the chip may have changed it since the start).
+      const nowMode = l?.s.mode?.()?.canonical
+      const asked: BackendSpawn = nowMode && req.structured ? { ...req, structured: { ...req.structured, mode: nowMode } } : req
+      const resume = provider.resumeSpawn ? await provider.resumeSpawn(asked, conv).catch(() => null) : null
       if (!resume) return { ok: false, why: 'no-resume' }
       // End the child FIRST and wait until it is gone: two processes must never write one conversation.
       durable?.markEnding(id, 'terminal')
@@ -418,16 +429,23 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
         ? (await provider.structured().catch(() => null)) ?? (acp ? acpAsStructured(acp) : null)
         : null
       const acpDriven = !!(acp && harness && acp.harnesses().includes(harness))
+      const mode = req.structured?.mode
+      const startModes = reg && harness ? reg.declares(harness)?.startModes : undefined
       const route = routeSpawn({
         flagOn, ...(origin ? { origin } : {}), harness,
         driver: reg && harness ? routableDriver(harness, reg.driverFor(harness)) : null,
         acpDriven,
         acpOptIn: acpDriven ? await provider.allowed().catch((): readonly string[] => []) : [],
+        ...(mode ? { mode } : {}),
+        ...(startModes ? { startModes } : {}),
       })
       if (route !== 'tmux' && harness) {
         if (await startVia(req, route, harness, reg ?? acpAsStructured(acp!), acp)) return {}
         // A refused structured start: the same request, the usual way.
       }
+      // MODE.EVERYWHERE — the TUI argv cannot carry this mode (its CLI has no flag for it): refused in a
+      // sentence, never started in another mode than the one asked for.
+      if (req.modeNeedsProtocol) throw new Error(modeNeedsProtocolSentence(harness, req.modeNeedsProtocol))
       return base.spawn(req)
     },
     async list() {
@@ -497,6 +515,9 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     },
     isStructured(id) { return structuredOnly(id) !== undefined || (!!durable && durable.isAlive(id)) },
     attentionOf(id) { const l = structuredOnly(id); return l ? l.s.attention() : base.attentionOf?.(id) },
+    modeOf(id) { const l = structuredOnly(id); return l ? (l.s.mode?.() ?? null) : base.modeOf?.(id) },
+    modesOf(id) { const l = structuredOnly(id); return l ? (l.s.modes ? [...l.s.modes()] : undefined) : base.modesOf?.(id) },
+    async setMode(id, modeId) { const l = structuredOnly(id); return l ? (l.s.setMode?.(modeId) ?? false) : (base.setMode?.(id, modeId) ?? false) },
     async answer(id, a: StructuredAnswer) { const l = structuredOnly(id); return l ? l.s.answer(a) : (base.answer?.(id, a) ?? false) },
     chatOf(id) {
       const l = structuredOnly(id)

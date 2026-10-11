@@ -507,6 +507,7 @@ export interface ControlStrings {
   spawnCwdMissing: string
   spawnCwdRelative: (cwd: string) => string
   spawnUnknownEffort: (effort: string) => string
+  spawnUnknownMode: (mode: string) => string
   spawnModelUnsupported: (harness: string) => string
   keySessionsGroup: string
   keySessionsAttach: string
@@ -1255,6 +1256,7 @@ const EN: ControlStrings = {
   spawnCwdMissing: 'no directory given — a session has to start somewhere.',
   spawnCwdRelative: cwd => `${cwd} is not an absolute path, and a relative one would resolve against this server's own directory.`,
   spawnUnknownEffort: e => `${e} is not a reasoning effort this CLI accepts.`,
+  spawnUnknownMode: m => `"${m}" is not a mode this assistant can start in here.`,
   spawnModelUnsupported: h => `${h} has no model flag — a model was asked for and it could not be honoured.`,
   keySessionsGroup: 'v group',
   keySessionsAttach: 'enter open',
@@ -1868,6 +1870,7 @@ const PT: ControlStrings = {
   spawnCwdMissing: 'nenhum diretório informado — uma sessão precisa começar em algum lugar.',
   spawnCwdRelative: cwd => `${cwd} não é um caminho absoluto, e um relativo seria resolvido a partir do diretório do próprio servidor.`,
   spawnUnknownEffort: e => `${e} não é um nível de esforço que esta CLI aceite.`,
+  spawnUnknownMode: m => `"${m}" não é um modo em que este assistente possa iniciar aqui.`,
   spawnModelUnsupported: h => `${h} não tem flag de modelo — um modelo foi pedido e não teria como ser aplicado.`,
   keySessionsGroup: 'v agrupar',
   keySessionsAttach: 'enter abrir',

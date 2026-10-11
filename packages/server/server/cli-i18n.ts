@@ -363,6 +363,7 @@ export interface CliStrings {
   sessSpawnNoModel: (harness: string) => string
   sessSpawnNoEffort: (harness: string) => string
   sessSpawnBadEffort: (harness: string, value: string, accepted: string[]) => string
+  sessSpawnBadMode: (harness: string, value: string) => string
 
   /**
    * What `agentop session ls` says AROUND the table. The table's own chrome — its column headings
@@ -791,6 +792,8 @@ const EN: CliStrings = {
   sessSpawnNoEffort: (harness: string) => `${harness} has no effort flag, so an effort cannot be set.`,
   sessSpawnBadEffort: (harness: string, value: string, accepted: string[]) =>
     `${harness} does not accept effort "${value}". Accepted: ${accepted.join(', ')}.`,
+  sessSpawnBadMode: (harness: string, value: string) =>
+    `"${value}" is not a mode ${harness} can start in. Modes: default, accept-edits, plan, no-questions.`,
 
   sessLs: {
     none: 'No sessions.',
@@ -1188,6 +1191,8 @@ const PT: CliStrings = {
   sessSpawnNoEffort: (harness: string) => `${harness} não tem flag de effort, então não dá para definir um.`,
   sessSpawnBadEffort: (harness: string, value: string, accepted: string[]) =>
     `${harness} não aceita o effort "${value}". Aceitos: ${accepted.join(', ')}.`,
+  sessSpawnBadMode: (harness: string, value: string) =>
+    `"${value}" não é um modo em que o ${harness} possa iniciar. Modos: default, accept-edits, plan, no-questions.`,
 
   sessLs: {
     none: 'Nenhuma sessão.',

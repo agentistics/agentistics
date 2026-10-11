@@ -1,6 +1,8 @@
 export interface ModeMenuEntry {
   id: string
   label: string
+  /** Absent for the terminal table: it is the harness's own words. */
+  canonical?: import('@agentistics/core').CanonicalMode
 }
 
 const MODES: Record<string, ModeMenuEntry[]> = {

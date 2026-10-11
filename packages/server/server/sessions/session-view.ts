@@ -8,7 +8,7 @@
  * no frame to read and no backend to ask. Rendering a state for them would be inventing one.
  */
 
-import type { ConversationLinkReason, HarnessId } from '@agentistics/core'
+import type { ConversationLinkReason, HarnessId, SessionMode } from '@agentistics/core'
 import { closedRowId } from './row-conversation'
 import { capClosedConversations } from './closed-cap'
 import { matchesQuery, type SearchFields } from '@agentistics/tui/control/search-scope'
@@ -102,7 +102,9 @@ export interface SessionView {
    * Absent for a harness nobody has probed and for a frame that has not drawn its footer yet. A
    * chip naming the wrong mode is worse than no chip, so absence is the honest answer for both.
    */
-  mode?: { id: string; label: string }
+  mode?: SessionMode
+  /** F4.D — the modes a STRUCTURED session can be set to directly (its protocol's list); absent: cycle only. */
+  modeChoices?: SessionMode[]
   /** F2.0b — running over its harness's protocol right now: the web offers "open in terminal". */
   structured?: true
   /**
@@ -487,7 +489,9 @@ export function buildSessionViews(o: {
   /** The DIALOG a blocked session is showing, keyed by session id — see `SessionView.approvalLines`. */
   approvals?: ReadonlyMap<string, string[]>
   /** The harness MODE each running session is in, keyed by row id — see `mode-spec.ts`. */
-  modes?: ReadonlyMap<string, { id: string; label: string }>
+  modes?: ReadonlyMap<string, SessionMode>
+  /** F4.D — the modes a structured session can be set to, keyed by row id. */
+  modeChoices?: ReadonlyMap<string, SessionMode[]>
   /** The ids running structured right now (`SessionBackend.isStructured`) — see `SessionView.structured`. */
   structured?: ReadonlySet<string>
   /** The options that dialog offers, keyed by session id. Absent where they could not be read. */
@@ -664,6 +668,7 @@ export function buildSessionViews(o: {
       // it works, while it waits, and while it is asking. It is gated on the frame having named
       // one, which `modeOf` already answers.
       ...(o.modes?.get(r.id) ? { mode: o.modes.get(r.id)! } : {}),
+      ...(o.modeChoices?.get(r.id) ? { modeChoices: o.modeChoices.get(r.id)! } : {}),
       ...(!finished && r.status === 'running' && o.structured?.has(r.id) ? { structured: true as const } : {}),
       ...(o.fell?.has(r.id) ? { fell: true as const } : {}),
       ...(r.managed?.label ? { label: r.managed.label } : {}),

@@ -31,6 +31,8 @@ import { unlockIfLocked } from '../vault/VaultUnlockHost'
 import { ChevronDown, ChevronLeft, ChevronRight, Check, ClipboardList, Lock, Paperclip, X } from 'lucide-react'
 import { attachmentRoom, MAX_ATTACHMENTS, planPaste } from '../../lib/pastePlan'
 import { Field, inputStyle } from './formBits'
+import { ModePicker, NoQuestionsWarning } from './ModePicker'
+import { CANONICAL_MODE_TEXT, type CanonicalMode } from '@agentistics/core'
 import { HarnessPicker } from './HarnessPicker'
 import { HarnessInstallDialog } from '../HarnessInstallDialog'
 import { ModelSelect, ModelId } from './ModelSelect'
@@ -197,6 +199,8 @@ export function NewSessionModal({
   const [pickingTask, setPickingTask] = useState(false)
   const [model, setModel] = useState(restored?.model ?? initialPreset?.model ?? '')
   const [effort, setEffort] = useState(restored?.effort ?? initialPreset?.effort ?? '')
+  /** MODE.EVERYWHERE — the permission mode to start in; `default` = the harness's own configuration. */
+  const [mode, setMode] = useState<CanonicalMode>('default')
   const [prompt, setPrompt] = useState(restored?.prompt ?? initialPreset?.prompt ?? '')
   const [label, setLabel] = useState(restored?.label ?? initialPreset?.label ?? '')
 
@@ -311,6 +315,8 @@ export function NewSessionModal({
     // so a typed model survives its list arriving.
     setModel(m => (wizardHarness && (wizardHarness.models.some(x => x.id === m) || (wizardHarness.id === NATIVE_HARNESS_ID && wizardHarness.modelFreeText))) ? m : '')
     setEffort(e => (wizardHarness && wizardHarness.efforts.includes(e)) ? e : '')
+    // A mode the NEW assistant cannot start in falls back to its default — never sent to be refused.
+    setMode(m => (wizardHarness?.modes?.includes(m) ? m : 'default'))
   }, [wizardHarness])
 
   const ready = stepReady(step, draft, wizardHarness)
@@ -497,6 +503,14 @@ export function NewSessionModal({
       {visibleQuestions(wizardHarness).effort && (
         <ReviewRow label={pt ? 'Esforço' : 'Effort'} value={effort || null} muted={effortUnset} />
       )}
+      {visibleQuestions(wizardHarness).mode && (
+        <ReviewRow label={pt ? 'Modo' : 'Mode'} value={
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {CANONICAL_MODE_TEXT[mode][pt ? 'pt' : 'en'].label}
+            {mode === 'no-questions' && <NoQuestionsWarning lang={pt ? 'pt' : 'en'} compact />}
+          </span>
+        } />
+      )}
       {/* No `muted` fallback: the title is required, so the review can never reach this row with
           nothing in it — and offering a sentence for a state the gate forbids would describe a
           choice nobody was allowed to make. */}
@@ -622,6 +636,8 @@ export function NewSessionModal({
           ...(subtaskTarget ? { taskId: subtaskTarget.taskId, ...(subtaskTarget.subtaskId ? { subtaskId: subtaskTarget.subtaskId } : {}) } : {}),
           ...(model ? { model } : {}),
           ...(effort ? { effort } : {}),
+          // `default` is the absence of a mode: the harness's own configuration decides.
+          ...(mode !== 'default' && wizardHarness?.modes?.includes(mode) ? { mode } : {}),
           // The paths go FIRST, each on its own line, then what was typed — the same order the
           // composer uses. An assistant reads the files it is pointed at, and a path buried inside
           // a sentence is one it can miss.
@@ -903,6 +919,14 @@ export function NewSessionModal({
               ? `Mais esforço pensa por mais tempo e custa mais. Sem escolha: ${effortUnset}.`
               : `More effort thinks for longer and costs more. Left unset: ${effortUnset}.`}>
               <EffortPicker efforts={wizardHarness!.efforts} value={effort} onChange={v => { setEffort(v); setDirty(true) }} />
+            </Field>
+          )}
+
+          {/* MODE.EVERYWHERE — the same four modes for every harness, narrowed to what THIS one can
+              start in here. The composer's mode chip is the same control once the session runs. */}
+          {visibleQuestions(wizardHarness).mode && (
+            <Field label={pt ? 'Modo' : 'Mode'}>
+              <ModePicker modes={wizardHarness!.modes!} value={mode} lang={pt ? 'pt' : 'en'} onChange={v => { setMode(v); setDirty(true) }} />
             </Field>
           )}
 

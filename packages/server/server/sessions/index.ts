@@ -71,6 +71,9 @@ export async function resolveBackend(): Promise<SessionBackend> {
         const planned = planSpawn({
           harness: i.harness, cwd: req.cwd, resumeId: conversationId,
           ...(i.model ? { model: i.model } : {}), ...(i.effort ? { effort: i.effort } : {}),
+          // MODE.EVERYWHERE — the TUI continues in the mode the session was IN, where its CLI has a flag
+          // for it; one it has none for opens in the harness's default, and the chip then says so.
+          ...(i.mode ? { mode: i.mode } : {}),
         })
         if (!planned.ok) return null
         return { id: req.id, cwd: req.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}) }

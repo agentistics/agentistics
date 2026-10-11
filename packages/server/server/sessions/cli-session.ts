@@ -149,6 +149,8 @@ function explainPlanError(e: SpawnPlanError): string {
       return `${e.harness} has no effort flag, so --effort cannot be applied.`
     case 'unknown-effort':
       return `${e.harness} does not accept effort "${e.value}". Accepted: ${e.accepted.join(', ')}.`
+    case 'unknown-mode':
+      return `"${e.value}" is not a mode ${e.harness} can start in. Modes: default, accept-edits, plan, no-questions.`
   }
 }
 

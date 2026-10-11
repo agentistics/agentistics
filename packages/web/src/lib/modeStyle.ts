@@ -20,6 +20,8 @@
  * while one wearing another mode's colour is a wrong answer given confidently.
  */
 
+import type { CanonicalMode, SessionMode } from '@agentistics/core'
+
 export interface ModeStyle {
   /** The chip's text and border colour. */
   fg: string
@@ -44,14 +46,36 @@ const tinted = (colour: string, dim: string): ModeStyle => ({
   border: `color-mix(in srgb, ${colour} 45%, transparent)`,
 })
 
+const BLUE = tinted('var(--accent-blue)', 'var(--accent-blue-dim)')
+const ORANGE = tinted('var(--anthropic-orange)', 'var(--anthropic-orange-dim)')
+const GREEN = tinted('var(--accent-green)', 'var(--accent-green-dim)')
+
+/** A terminal row's mode, by the id `mode-spec.ts` reads off claude's footer. */
 const BY_ID: Record<string, ModeStyle> = {
   manual: NEUTRAL,
-  plan: tinted('var(--accent-blue)', 'var(--accent-blue-dim)'),
-  'accept-edits': tinted('var(--anthropic-orange)', 'var(--anthropic-orange-dim)'),
-  auto: tinted('var(--accent-green)', 'var(--accent-green-dim)'),
+  plan: BLUE,
+  'accept-edits': ORANGE,
+  auto: GREEN,
 }
 
-/** The chip's colours for a mode id. Neutral for `manual` and for anything this file has not met. */
-export function modeStyle(id: string | undefined): ModeStyle {
-  return (id && BY_ID[id]) || NEUTRAL
+/**
+ * MODE.EVERYWHERE — every harness's own mode by the CANONICAL one it means (`@agentistics/core`
+ * `sessionMode.ts`), so gemini's "YOLO", codex's "Full Access" and claude's "bypass permissions" wear the
+ * same green without this file learning each harness's words. Same gradient as above.
+ */
+const BY_CANONICAL: Record<CanonicalMode, ModeStyle> = {
+  default: NEUTRAL,
+  plan: BLUE,
+  'accept-edits': ORANGE,
+  'no-questions': GREEN,
+}
+
+/**
+ * The chip's colours for a mode — its canonical meaning first, else its terminal id. Neutral for
+ * `manual` and for anything this file has not met.
+ */
+export function modeStyle(mode: string | Pick<SessionMode, 'id' | 'canonical'> | undefined): ModeStyle {
+  if (!mode) return NEUTRAL
+  if (typeof mode === 'string') return BY_ID[mode] ?? NEUTRAL
+  return (mode.canonical && BY_CANONICAL[mode.canonical]) || BY_ID[mode.id] || NEUTRAL
 }

@@ -176,3 +176,25 @@ it('handoff is read only with a parent and a strict true', () => {
   expect(ok({ handoff: true })?.handoff).toBeUndefined()
   expect(ok({ parent: 'p1', handoff: 'true' })?.handoff).toBeUndefined()
 })
+
+describe('planFleetSpawn — MODE.EVERYWHERE', () => {
+  const H: SpawnHarness[] = [
+    { id: 'claude', supportsModel: true, efforts: [], modes: ['default', 'accept-edits', 'plan', 'no-questions'] },
+    { id: 'codex', supportsModel: true, efforts: [], modes: ['default', 'accept-edits', 'no-questions'] },
+    { id: 'kimi', supportsModel: false, efforts: [] },
+  ]
+  it('a mode the harness can start in rides the plan', () => {
+    const out = planFleetSpawn({ harness: 'claude', cwd: '/r', mode: 'no-questions' }, H)
+    expect(out.ok && out.plan.mode).toBe('no-questions')
+  })
+  it('"default" is the absence of a mode: nothing is passed', () => {
+    const out = planFleetSpawn({ harness: 'kimi', cwd: '/r', mode: 'default' }, H)
+    expect(out.ok && out.plan.mode).toBeUndefined()
+  })
+  it('a mode this harness cannot start in here is REFUSED, never started in another', () => {
+    expect(planFleetSpawn({ harness: 'codex', cwd: '/r', mode: 'plan' }, H)).toEqual({ ok: false, reason: 'unknown_mode', detail: 'plan' })
+    expect(planFleetSpawn({ harness: 'kimi', cwd: '/r', mode: 'plan' }, H)).toEqual({ ok: false, reason: 'unknown_mode', detail: 'plan' })
+    expect(planFleetSpawn({ harness: 'claude', cwd: '/r', mode: 'yolo' }, H)).toEqual({ ok: false, reason: 'unknown_mode', detail: 'yolo' })
+    expect(planFleetSpawn({ harness: 'claude', cwd: '/r', mode: 7 }, H).ok).toBe(true) // not text: not a mode at all
+  })
+})

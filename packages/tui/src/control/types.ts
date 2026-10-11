@@ -7,7 +7,7 @@
  * lets the whole surface be rewritten without changing a single behaviour.
  */
 
-import type { Baseline, HarnessId, ProjectKind, SessionConversationLink } from '@agentistics/core'
+import type { Baseline, CanonicalMode, HarnessId, ProjectKind, SessionConversationLink, SessionMode } from '@agentistics/core'
 import type { CliLang } from './lang'
 import type { GithubSection } from './backup'
 import type { SearchFields, SearchScope } from './search-scope'
@@ -872,7 +872,9 @@ export interface ControlSession {
    * read yet. See `mode-spec.ts`: the cycle key is a keystroke, so a guessed one would be a
    * keypress nobody asked for.
    */
-  mode?: { id: string; label: string }
+  mode?: SessionMode
+  /** F4.D — the modes a structured session can be set to directly; absent: only cycling exists. */
+  modeChoices?: SessionMode[]
   /** F2.0b — running over its harness's protocol right now (not a pane): the web offers "open in terminal". */
   structured?: true
   /**
@@ -1620,6 +1622,13 @@ export interface ControlHost {
   cycleSessionMode?(id: string): Promise<ActionResult>
 
   /**
+   * F4.D — set a STRUCTURED session's permission mode DIRECTLY, through its protocol (`modeId` is one of
+   * the row's `modeChoices`). Refused, in words, for a session that is not structured: a terminal one
+   * only cycles. No keystroke is sent anywhere.
+   */
+  setSessionMode?(id: string, modeId: string): Promise<ActionResult>
+
+  /**
    * Type one line into a session and submit it, WITHOUT attaching to it.
    *
    * The ordinary case is a session that is working or waiting: the text lands in its prompt and it
@@ -1839,6 +1848,11 @@ export interface SessionHarnessOption {
   efforts: string[]
   /** The effort used when `--effort` is not passed, under exactly `defaultModel`'s rule. */
   defaultEffort?: string
+  /**
+   * MODE.EVERYWHERE — the canonical permission modes a WEB session of this harness can start in: its
+   * TUI's flags plus, with the adapter on, what its structured driver takes. Absent = default only.
+   */
+  modes?: CanonicalMode[]
 }
 
 /** One place a session could start. */
@@ -1908,6 +1922,8 @@ export interface SpawnSessionRequest {
   prompt?: string
   model?: string
   effort?: string
+  /** MODE.EVERYWHERE — the permission mode to start in (absent = the harness's own configuration). */
+  mode?: CanonicalMode
   label?: string
   /** Take the terminal now, versus start detached and stay here. */
   attach: boolean
