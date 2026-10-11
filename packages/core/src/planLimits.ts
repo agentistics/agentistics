@@ -48,6 +48,40 @@ export interface PlanLimits {
   source: PlanLimitSource
 }
 
+export const PLAN_BUDGET_HOLD_5H_PCT = 85
+export const PLAN_BUDGET_HOLD_WEEK_PCT = 95
+export const PLAN_BUDGET_TIGHT_WEEK_PCT = 80
+
+export type PlanBudgetStatus = 'ok' | 'tight' | 'hold'
+export interface PlanBudget {
+  harness: HarnessId
+  plan: string
+  fiveHourPct: number
+  weekPct: number
+  weekResetsAt: number
+  daysToWeekReset: number
+  dailyBudgetPct: number
+  status: PlanBudgetStatus
+}
+
+export type PlanPaceStatus = 'under' | 'on' | 'over'
+export interface PlanPace {
+  paceStatus: PlanPaceStatus
+  burnPctPerHour: number
+  sustainablePctPerHour: number
+  suggestedParallel: number
+  note: string
+}
+
+export type RouteKind = 'lead' | 'hard-bug' | 'design' | 'spec-impl' | 'mechanical' | 'qa' | 'probe'
+export interface RouteRecommendation {
+  harness: HarnessId | null
+  model?: string
+  reason: string
+  alternatives: HarnessId[]
+  cadence: { parallel: number; note: string }
+}
+
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 const obj = (v: unknown): Record<string, unknown> | null =>
   v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
@@ -180,6 +214,107 @@ export function forecastWindow(w: PlanLimitWindow, nowMs: number): PlanForecast 
 /** The fullest window that applies now (the one that binds first). */
 export function bindingPct(l: PlanLimits, nowMs: number): number {
   return Math.max(0, ...l.windows.map(w => currentUsedPct(w, nowMs)))
+}
+
+const windowOf = (l: PlanLimits, kind: PlanWindowKind): PlanLimitWindow | undefined => l.windows.find(w => w.kind === kind)
+
+export function planBudget(l: PlanLimits, nowMs: number): PlanBudget {
+  const five = windowOf(l, '5h')
+  const week = windowOf(l, 'week')
+  const fiveHourPct = five ? currentUsedPct(five, nowMs) : 0
+  const weekPct = week ? currentUsedPct(week, nowMs) : 0
+  const weekResetsAt = week?.resetsAt ?? nowMs
+  const daysToWeekReset = Math.max(0, (weekResetsAt - nowMs) / PLAN_WINDOW_MS.week)
+  const dailyBudgetPct = (100 - weekPct) / Math.max(daysToWeekReset, 0.5)
+  const forecast = week ? forecastWindow(week, nowMs) : { kind: 'lasts' as const }
+  const status: PlanBudgetStatus = fiveHourPct >= PLAN_BUDGET_HOLD_5H_PCT || weekPct >= PLAN_BUDGET_HOLD_WEEK_PCT
+    ? 'hold'
+    : weekPct >= PLAN_BUDGET_TIGHT_WEEK_PCT || forecast.kind === 'runs-out'
+      ? 'tight'
+      : 'ok'
+  return {
+    harness: l.harness,
+    plan: l.plan ?? l.sourcePlan ?? 'unregistered',
+    fiveHourPct, weekPct, weekResetsAt, daysToWeekReset, dailyBudgetPct, status,
+  }
+}
+
+export function planPace(l: PlanLimits, nowMs: number, history: readonly PlanLimits[] = []): PlanPace {
+  const week = windowOf(l, 'week')
+  const weekPct = week ? currentUsedPct(week, nowMs) : 0
+  const hoursToReset = week ? Math.max(0.5, (week.resetsAt - nowMs) / 3_600_000) : 0.5
+  const sustainablePctPerHour = Math.max(0, (100 - weekPct) / hoursToReset)
+  const readings = [...history.filter(x => x.updatedAt !== l.updatedAt), l]
+    .filter(x => x.harness === l.harness && x.account === l.account)
+    .sort((a, b) => a.updatedAt - b.updatedAt)
+  const first = readings.find(x => nowMs - x.updatedAt <= 6 * 3_600_000)
+  const last = readings.at(-1)
+  const firstWeek = first && windowOf(first, 'week')
+  const lastWeek = last && windowOf(last, 'week')
+  const elapsedHours = firstWeek && lastWeek && last!.updatedAt > first!.updatedAt
+    ? Math.max(1 / 60, (last!.updatedAt - first!.updatedAt) / 3_600_000) : 0
+  // With only one reading there is no measured burn yet; classify as on pace until the ring has
+  // a second point, so an unobserved plan does not steal a route merely because its burn is unknown.
+  const burnPctPerHour = elapsedHours > 0
+    ? Math.max(0, (currentUsedPct(lastWeek!, nowMs) - currentUsedPct(firstWeek!, nowMs)) / elapsedHours)
+    : sustainablePctPerHour
+  const ratio = sustainablePctPerHour > 0 ? burnPctPerHour / sustainablePctPerHour : 0
+  const paceStatus: PlanPaceStatus = ratio > 1.2 ? 'over' : ratio < 0.8 ? 'under' : 'on'
+  const suggestedParallel = Math.max(1, Math.min(8, paceStatus === 'under'
+    ? Math.max(2, Math.ceil(sustainablePctPerHour / Math.max(burnPctPerHour, sustainablePctPerHour / 2)))
+    : Math.ceil(Math.max(burnPctPerHour, sustainablePctPerHour) / Math.max(sustainablePctPerHour, 0.01))))
+  const note = paceStatus === 'under'
+    ? `Under pace: keep up to ${suggestedParallel} parallel worker${suggestedParallel === 1 ? '' : 's'} so quota is used before reset.`
+    : paceStatus === 'over'
+      ? 'Over pace: reduce concurrency until burn is sustainable.'
+      : 'On pace: keep the current cadence through the weekly reset.'
+  return { paceStatus, burnPctPerHour, sustainablePctPerHour, suggestedParallel, note }
+}
+
+const ROUTE_PREFERENCES: Record<RouteKind, readonly [HarnessId, string?][]> = {
+  lead: [['claude', 'opus'], ['codex']],
+  'hard-bug': [['claude', 'opus'], ['codex']],
+  design: [['claude', 'opus'], ['codex']],
+  'spec-impl': [['codex'], ['claude', 'sonnet'], ['gemini'], ['copilot']],
+  mechanical: [['codex'], ['claude', 'sonnet'], ['gemini'], ['copilot']],
+  qa: [['gemini'], ['copilot'], ['codex'], ['claude', 'sonnet']],
+  probe: [['claude', 'haiku'], ['gemini']],
+}
+
+export function routeRecommendation(
+  budgets: readonly (PlanBudget & { pace?: PlanPace })[],
+  kind: RouteKind,
+  authorHarness?: string,
+): RouteRecommendation {
+  const allowTight = kind === 'lead'
+  const eligible = budgets.filter(b => b.plan !== 'unregistered' && b.status !== 'hold' && (allowTight || b.status !== 'tight') && b.harness !== (kind === 'qa' ? authorHarness : undefined))
+  const ordered = [...eligible].sort((a, b) => {
+    const ap = a.pace?.paceStatus === 'under' ? 0 : 1
+    const bp = b.pace?.paceStatus === 'under' ? 0 : 1
+    if (ap !== bp) return ap - bp
+    const ai = ROUTE_PREFERENCES[kind].findIndex(([h]) => h === a.harness)
+    const bi = ROUTE_PREFERENCES[kind].findIndex(([h]) => h === b.harness)
+    return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi)
+  })
+  const preference = ROUTE_PREFERENCES[kind]
+  const chosen = ordered.find(b => preference.some(([h]) => h === b.harness))
+  const pick = chosen ?? ordered[0]
+  if (!pick) {
+    const earliest = budgets.filter(b => b.status === 'hold').sort((a, b) => a.weekResetsAt - b.weekResetsAt)[0]
+    const reset = earliest ? new Date(earliest.weekResetsAt).toISOString() : 'the next reset'
+    return { harness: null, reason: `all plans on hold until ${reset}`, alternatives: [], cadence: { parallel: 0, note: 'Wait for a plan to renew.' } }
+  }
+  const selected = preference.find(([h]) => h === pick.harness)
+  const alternatives = ordered.filter(b => b.harness !== pick.harness).map(b => b.harness)
+  const pace = pick.pace
+  const paceText = pace ? ` ${pace.note}` : ''
+  return {
+    harness: pick.harness,
+    ...(selected?.[1] ? { model: selected[1] } : {}),
+    reason: `${pick.harness} is the preferred eligible plan for ${kind}.${paceText}`,
+    alternatives,
+    cadence: { parallel: pace?.suggestedParallel ?? 1, note: pace?.note ?? 'Keep one worker running.' },
+  }
 }
 
 /** The harness with the most room left, or `null` when there is nothing to compare. */

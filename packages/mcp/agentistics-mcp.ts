@@ -20,7 +20,7 @@ import {
 import { createAgentAuditSink } from "./agent-audit.js";
 import { taskCommentRequest } from "./task-comment-args.js";
 import { sessionProof } from "./session-proof.js";
-import { nativeVisibleFrom, projectionSurfaceOn } from "@agentistics/core";
+import { nativeVisibleFrom, projectionSurfaceOn, routeRecommendation, type RouteKind } from "@agentistics/core";
 import { legacyCosts, legacyHarnesses, legacyProjects, legacyRepos, legacySummary } from "./legacy-analytics.js";
 import { PROJECTED_TOOLS, ProjectionUnavailable, type MetricsQueryFn, type ProjectedTool } from "./projected-analytics.js";
 
@@ -609,6 +609,18 @@ const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "agentistics_plan_limits",
+    description: "Read this BEFORE opening sessions; follow the recommendation; a plan on hold gets no new worker. Returns subscription budgets, pacing, and a routing recommendation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["lead", "hard-bug", "design", "spec-impl", "mechanical", "qa", "probe"] },
+        authorHarness: { type: "string" },
+      },
+      required: [],
+    },
+  },
+  {
     name: "agentistics_projects",
     description:
       "List projects with session counts, message counts, token usage, estimated cost, and last active date. Optionally scope to a single harness. Rows tagged source \"projections\" (read from the journal) carry personTurns (the person's turns); there `messages` is a deprecated alias of personTurns, and subagent spend is reported apart (subagentTokens, subagentCostUSD).",
@@ -1100,6 +1112,14 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
           legacy: () => apiGet("/api/data"),
           metrics: (q) => fetch(`${API}/api/runtime/metrics?${q}`),
         }));
+      }
+
+      case "agentistics_plan_limits": {
+        const a = (args ?? {}) as { kind?: RouteKind; authorHarness?: string };
+        const body = await apiGet("/api/plan-limits") as { budgets?: any[]; now?: number };
+        const budgets = body.budgets ?? [];
+        const recommendation = a.kind ? routeRecommendation(budgets, a.kind, a.authorHarness) : undefined;
+        return text({ budgets, ...(recommendation ? { recommendation } : {}), readAt: body.now ?? Date.now() });
       }
 
       case "agentistics_projects": {

@@ -38,6 +38,7 @@ The `AGENTISTICS_API` env var must point to a running agentistics server.
 |------|---------|
 | `agentistics_summary` | All-time totals: tokens, cost, sessions, streak — unified or per-harness |
 | `agentistics_harnesses` | Side-by-side comparison of every tracked harness |
+| `agentistics_plan_limits` | Subscription windows, pacing, and the recommended harness/model before opening sessions |
 | `agentistics_projects` | Per-project token and cost breakdown (optionally per-harness) |
 | `agentistics_sessions` | Recent sessions with harness, duration, model, cost |
 | `agentistics_costs` | Model pricing breakdown and cache savings (optionally per-harness) |

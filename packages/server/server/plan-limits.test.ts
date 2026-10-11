@@ -35,6 +35,18 @@ test('claude: a relayed stream line is stored; older records never replace newer
   expect(await ingestPlanLimits(older)).toBe(false)
 })
 
+test('payload exposes pacing budgets alongside limits', async () => {
+  const now = Date.now()
+  await ingestPlanLimits({ harness: 'codex', account: 'default', plan: 'Plus', windows: [
+    { kind: '5h', usedPct: 11, resetsAt: now + 3_600_000 },
+    { kind: 'week', usedPct: 35, resetsAt: now + 3 * 86_400_000 },
+  ], updatedAt: now, source: 'codex-rollout' })
+  const body = await planLimitsPayload(undefined, now)
+  expect(body).toHaveProperty('budgets')
+  expect(body.budgets[0]).toMatchObject({ harness: 'codex', fiveHourPct: 11, weekPct: 35, paceStatus: 'on' })
+  expect(body.budgets[0]!.suggestedParallel).toBeGreaterThanOrEqual(1)
+})
+
 test('notices fire once per threshold, the 100% one names an alternative with room', async () => {
   const told: [number, string | null][] = []
   setPlanLimitsSink({ changed: () => {}, notify: (n, alt) => told.push([n.threshold, alt]) })

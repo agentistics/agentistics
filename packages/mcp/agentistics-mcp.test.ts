@@ -1,4 +1,6 @@
 import { test, expect } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { HARNESS_ORDER, SURFACE_HARNESS_ORDER, type HarnessId } from "@agentistics/core";
 import { harnessIds, harnessParam } from "./session-tokens.js";
 
@@ -42,4 +44,11 @@ test("harnessParam() includes all harnesses and 'all'", () => {
   for (const harness of SURFACE_HARNESS_ORDER) {
     expect(param.enum).toContain(harness);
   }
+});
+
+test("plan limits MCP tool is registered as a read-only preflight", () => {
+  const source = readFileSync(join(import.meta.dir, "agentistics-mcp.ts"), "utf8");
+  expect(source).toContain('name: "agentistics_plan_limits"');
+  expect(source).toContain('Read this BEFORE opening sessions');
+  expect(source).toContain('apiGet("/api/plan-limits")');
 });
