@@ -22,7 +22,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
   isSessionRole, isSessionRoleRequest, resolveSessionForGroup, roleChangeNote, roleLine, sessionIdentityKey, titleForRole,
-  type RoleLang, type SessionRole,
+  type HarnessId, type RoleLang, type SessionRole,
 } from '@agentistics/core'
 import type { FleetRowForGroups } from './session-groups-web'
 
@@ -248,7 +248,7 @@ export async function defaultRoleDeps(): Promise<RoleDeps> {
       const backend = await (await import('./index')).resolveBackend()
       const { rulesFor } = await import('./attention-rules')
       const { promptSurfaceReady } = await import('./initial-prompt')
-      const rules = rulesFor(row.harness)
+      const rules = rulesFor(row.harness as HarnessId)
       for (let i = 0; i < 40; i++) {
         if (promptSurfaceReady(await backend.capture(rowId, 80), rules)) return true
         await new Promise(resolve => setTimeout(resolve, 250))
