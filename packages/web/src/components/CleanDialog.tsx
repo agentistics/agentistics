@@ -34,11 +34,14 @@ export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: 
   const [error, setError] = useState(false)
   const [retry, setRetry] = useState(0)
   const [scanProgress, setScanProgress] = useState(0)
-  const resultRef = useRef<HTMLParagraphElement>(null)
+  const resultRef = useRef<HTMLElement>(null)
+  const keptPaths = useRef(new Set<string>())
+  const selectFreshItems = (items: Item[]) => new Set(items.filter(i => i.kind !== 'node-modules' && !keptPaths.current.has(i.path)).map(i => i.id))
 
   useEffect(() => {
     if (!open) return
     setPlan(null); setJob(null); setBusy(false); setConfirm(false); setError(false)
+    keptPaths.current = new Set()
     let stopped = false
     const pollPlan = async () => {
       try {
@@ -48,7 +51,7 @@ export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: 
         if (stopped) return
         if ('items' in value) {
           setPlan(value)
-          setPicked(new Set(value.items.filter(i => i.kind !== 'node-modules').map(i => i.id)))
+          setPicked(selectFreshItems(value.items))
           return
         }
         if (typeof value.progress === 'number') setScanProgress(value.progress)
@@ -73,6 +76,7 @@ export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: 
         setJob(value)
         if (value.state !== 'done') window.setTimeout(poll, 350)
         else {
+          keptPaths.current = new Set(value.result?.skipped.map(item => item.path) ?? [])
           setBusy(false)
           window.setTimeout(() => {
             resultRef.current?.scrollIntoView({ block: 'nearest' })
@@ -94,7 +98,7 @@ export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: 
       const value = await response.json() as Plan | { state: string; progress?: number }
       if ('items' in value) {
         setPlan(value)
-        setPicked(new Set(value.items.filter(i => i.kind !== 'node-modules').map(i => i.id)))
+        setPicked(selectFreshItems(value.items))
       } else window.setTimeout(() => void refreshPlan(), 300)
     } catch { /* the completed result remains visible if the refresh fails */ }
   }
@@ -147,7 +151,7 @@ export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: 
       {!error && plan && plan.items.length === 0 && <p>{pt ? 'Nada para limpar.' : 'Nothing to clean.'}</p>}
       {!error && plan && grouped.map(([repo, items]) => <section key={repo}><SectionHeader label={repo} /><div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{items.map(item => <RecordCard key={item.id} title={item.path} subtitle={reasonLabel(item.reason, pt)} leading={<Checkbox checked={picked.has(item.id)} onChange={() => toggle(item.id)} label="" ariaLabel={item.path} disabled={busy} />} fields={[{ label: pt ? 'Tipo' : 'Kind', value: kindLabel(item.kind, pt) }, { label: pt ? 'Tamanho' : 'Size', value: size(item.bytes) }]} />)}</div></section>)}
       {plan && plan.items.length > 0 && <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 0 }}>{size(selectedBytes)}</p>}
-        {job?.state === 'done' && job.result && <p ref={resultRef} role="status">{pt ? `${size(job.result.freedBytes)} liberados; ${job.result.skipped.length} mantidos por segurança.` : `${size(job.result.freedBytes)} freed; ${job.result.skipped.length} kept for safety.`}</p>}
+        {job?.state === 'done' && job.result && <div ref={resultRef} role="status"><p>{pt ? `${size(job.result.freedBytes)} liberados; ${job.result.skipped.length} mantidos por segurança.` : `${size(job.result.freedBytes)} freed; ${job.result.skipped.length} kept for safety.`}</p>{job.result.skipped.length > 0 && <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>{job.result.skipped.map(item => <li key={item.path}><code>{item.path}</code> — {reasonLabel(item.reason, pt)}</li>)}</ul>}</div>}
       </div>
     </ConfirmModal>
   )
