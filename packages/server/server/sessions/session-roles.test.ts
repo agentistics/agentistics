@@ -106,6 +106,13 @@ describe('spawn role assignment and delivery', () => {
     expect((await loadRoles(deps)).lastDeliveredRole).toEqual({ managed: 'worker', conversation: 'worker' })
   })
 
+  test('a rekey never leaves two contradictory entries for one session', async () => {
+    const { deps } = fake([])
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { offered: 'worker', conversation: 'leader' } })
+    await rekeyStoredRole(['offered'], ['conversation', 'managed'], deps)
+    expect((await loadRoles(deps)).roles).toEqual({ conversation: 'leader', managed: 'leader' })
+  })
+
   test('serializes rekey and delivery writes without losing either field', async () => {
     const { deps } = fake([])
     await writeRolesDoc(dir, { version: 1, migrated: true, roles: { old: 'leader' }, lastDeliveredRole: {} })

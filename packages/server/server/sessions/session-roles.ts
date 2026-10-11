@@ -412,8 +412,14 @@ export async function rekeyStoredRole(
     const origins = { ...(doc.origins ?? {}) }
     const fromOrigin = from.map(k => doc.origins?.[k]).find(o => !!o)
     const lastDeliveredRole = { ...(doc.lastDeliveredRole ?? {}) }
+    // A role already stored under ANY target key is the newer statement (e.g. the conversation key set to
+    // leader while the old managed-id key still said worker): every target key takes it, so one session
+    // never ends with two contradictory entries.
+    const heldKey = to.find(k => doc.roles[k])
+    const effective = heldKey ? doc.roles[heldKey] : role
+    const effectiveOrigin = heldKey ? doc.origins?.[heldKey] : fromOrigin
     for (const key of to) {
-      if (role && !roles[key]) { roles[key] = role; if (fromOrigin) origins[key] = fromOrigin }
+      if (effective) { roles[key] = effective; if (effectiveOrigin) origins[key] = effectiveOrigin }
       if (delivered && !lastDeliveredRole[key]) lastDeliveredRole[key] = delivered
     }
     for (const key of from) {
