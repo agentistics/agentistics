@@ -537,7 +537,7 @@ async function opVaultStageBundle(ctx: OpContext): Promise<OpResult> {
 /** The socket verbs a person runs (`agentop vault …`); every other op is machine traffic. */
 const HUMAN_OPS: ReadonlySet<string> = new Set([
   'unlock-code', 'recover', 'authenticator-begin', 'authenticator-confirm', 'recovery-begin', 'setup-code',
-  'recovery-confirm', 'presence-enroll', 'presence-disable', 'view', 'set-auto-lock', 'activity', 'unlock',
+  'recovery-confirm', 'presence-enroll', 'presence-disable', 'require-presence', 'view', 'set-auto-lock', 'activity', 'unlock',
   'vault-init', 'vault-rekey', 'vault-add-passphrase', 'vault-reset',
 ])
 
