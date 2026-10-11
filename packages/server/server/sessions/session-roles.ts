@@ -138,6 +138,7 @@ const MESSAGES: Record<string, string> = {
   not_your_child: 'A session may set another session\'s role only for sessions it started itself.',
 }
 
+const UNVERIFIED = 'unverified_sender'
 const fail = (code: string, matches?: string[]): RoleReply => ({
   ok: false, code, message: MESSAGES[code] ?? code, ...(matches && matches.length > 0 ? { matches } : {}),
 })
@@ -264,8 +265,8 @@ export async function roleSenderFromBody(
   if (!('session' in body)) return { ok: true, sender: null }
   const s = body.session as { id?: unknown; token?: unknown } | null
   const sender = s && typeof s === 'object' ? await verify(s.id, s.token) : null
-  if (!sender) return { ok: false, code: 'unverified_sender', message: MESSAGES.unverified_sender! }
-  return { ok: true, sender }
+  if (sender) return { ok: true, sender }
+  return { ok: false, code: UNVERIFIED, message: MESSAGES[UNVERIFIED]! }
 }
 
 export function roleStatus(out: RoleReply): number {

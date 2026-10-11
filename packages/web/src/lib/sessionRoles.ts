@@ -7,6 +7,11 @@ export type SessionRoles = Record<string, SessionRole>
 export type RoleOrigin = 'manual' | 'auto' | { leader: string }
 export type RoleOrigins = Record<string, RoleOrigin>
 
+/** The title to print for a leader origin: only the current parent can be named, and only when it IS that leader. */
+export function leaderTitleFor(origin: RoleOrigin | undefined, parent: { id: string; title?: string } | null | undefined): string | undefined {
+  return origin && typeof origin === 'object' && parent && parent.id === origin.leader ? parent.title : undefined
+}
+
 /** The ⓘ's wording for who set the role. */
 export function roleOriginLabel(origin: RoleOrigin | undefined, pt: boolean, leaderTitle?: string): string {
   if (origin === 'auto') return pt ? 'definido pela própria sessão' : 'set by the session itself'

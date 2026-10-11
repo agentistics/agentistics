@@ -300,7 +300,7 @@ describe('spawnRoleOrigin (only a proven live parent is a leader origin)', () =>
 describe('roleSenderFromBody (who is asking)', () => {
   const verify = async (id: unknown, token: unknown) => (id === 'm1' && token === 'ok' ? 'm1' : null)
   test('no session field at all = the browser/CLI (manual power)', async () => {
-    expect(await roleSenderFromBody({ ref: 'x' }, verify)).toEqual({ ok: true, sender: null })
+    expect(await roleSenderFromBody({} , verify)).toEqual({ ok: true, sender: null })
   })
   test('a valid proof is the sender', async () => {
     expect(await roleSenderFromBody({ session: { id: 'm1', token: 'ok' } }, verify)).toEqual({ ok: true, sender: 'm1' })

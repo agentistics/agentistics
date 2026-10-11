@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { getSessionRole, isWorkerMuted, roleOriginLabel, setMuteWorkers, setSessionRole } from './sessionRoles'
+import { getSessionRole, isWorkerMuted, leaderTitleFor, roleOriginLabel, setMuteWorkers, setSessionRole } from './sessionRoles'
 
 const ids = ['role-test-worker', 'role-test-leader', 'role-test-unknown']
 
@@ -42,5 +42,14 @@ describe('roleOriginLabel (the ⓘ wording)', () => {
   it('says the session set it itself for auto', () => {
     expect(roleOriginLabel('auto', true)).toBe('definido pela própria sessão')
     expect(roleOriginLabel('auto', false)).toBe('set by the session itself')
+  })
+})
+
+describe('leaderTitleFor', () => {
+  it('names the parent only when it is the leader that set the role', () => {
+    expect(leaderTitleFor({ leader: 'p' }, { id: 'p', title: 'Lead' })).toBe('Lead')
+    expect(leaderTitleFor({ leader: 'p' }, { id: 'other', title: 'Other' })).toBeUndefined()
+    expect(leaderTitleFor({ leader: 'p' }, null)).toBeUndefined()
+    expect(leaderTitleFor('manual', { id: 'p', title: 'Lead' })).toBeUndefined()
   })
 })
