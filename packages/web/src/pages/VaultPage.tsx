@@ -491,7 +491,7 @@ export function QuickVault({ lang, isMobile, onClose }: { lang: Lang; isMobile: 
     background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)', padding: overlayPadding(isMobile, 16),
   }
   const c: React.CSSProperties = {
-    width: '100%', maxWidth: isMobile ? 'none' : 560, maxHeight: isMobile ? '100dvh' : '86vh', height: isMobile ? '100dvh' : undefined,
+    width: '100%', maxWidth: isMobile ? 'none' : 560, maxHeight: isMobile ? 'calc(100dvh / var(--ui-zoom, 1))' : 'calc(86vh / var(--ui-zoom, 1))', height: isMobile ? 'calc(100dvh / var(--ui-zoom, 1))' : undefined,
     background: 'var(--bg-card)', border: isMobile ? 'none' : '1px solid var(--border)', borderRadius: isMobile ? 0 : 12,
     padding: isMobile ? 16 : 22, boxShadow: '0 12px 48px rgba(0,0,0,0.5)', overflowY: 'auto', boxSizing: 'border-box',
     display: 'flex', flexDirection: 'column', gap: 0,

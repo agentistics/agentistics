@@ -235,6 +235,10 @@ async function writeTo(path: string, items: StoredNotification[]): Promise<void>
  *  requests into one row and silently reassigning who it is delivered to. */
 function keyOf(n: NotificationInput | StoredNotification): string {
   const subjectKey = n.subject ? `${n.subject.kind}/${n.subject.id}` : ''
+  // Long-running client notices deliberately carry a stable identity while their state and
+  // progress change.  They must update one bell row instead of appending one row per poll.
+  const stableKey = typeof n.meta?.notificationKey === 'string' ? n.meta.notificationKey : ''
+  if (stableKey) return `k:${stableKey}:${subjectKey}`
   return n.code
     ? `c:${n.code}:${JSON.stringify(n.meta ?? {})}:${subjectKey}`
     : `t:${n.title ?? ''}:${n.message ?? ''}:${subjectKey}`
@@ -266,7 +270,7 @@ export async function addNotificationTo(
     const key = keyOf(n)
     const dupe = items.find(x => keyOf(x) === key)
     const next = dupe
-      ? [{ ...dupe, ts: now, readBy: [], hiddenFor: [], subject: n.subject }, ...items.filter(x => x.id !== dupe.id)]
+      ? [{ ...dupe, ...n, id: dupe.id, ts: now, readBy: [], hiddenFor: [], subject: n.subject }, ...items.filter(x => x.id !== dupe.id)]
       : [{ id: nextId(), ts: now, readBy: [], hiddenFor: [], ...n }, ...items]
     await writeTo(path, next)
     return projectFor(next.slice(0, MAX_ITEMS), viewer)

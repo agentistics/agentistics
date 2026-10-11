@@ -1080,7 +1080,7 @@ function VaultGrantModal({ grant, pt, isMobile, onClose }: { grant: VaultGrantMe
   }, [onClose])
   return (
     <div style={{ ...overlay, zIndex: 3000 }} role="dialog" aria-modal="true" aria-label={pt ? 'Credencial anexada' : 'Credential attached'} onClick={onClose}>
-      <div style={{ ...card, maxWidth: 520, width: '100%', maxHeight: '88vh', overflowY: 'auto', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()}>
+      <div style={{ ...card, maxWidth: 520, width: '100%', maxHeight: 'calc(88vh / var(--ui-zoom, 1))', overflowY: 'auto', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, fontWeight: 700 }}>
           <KeyRound size={16} /> {pt ? 'Credencial anexada' : 'Credential attached'}
         </div>

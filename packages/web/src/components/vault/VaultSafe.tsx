@@ -94,7 +94,7 @@ export function VaultSafe({ phase, from, width = 240, label }: { phase: SafePhas
     <>
       <style>{CSS}</style>
       <svg className={`vs vs-${shown}`} data-safe-phase={shown} viewBox="0 0 140 150" role="img" aria-label={label ?? 'Safe'}
-        style={{ width, maxWidth: '72vw', height: 'auto', color: 'var(--anthropic-orange)', overflow: 'visible' }}>
+        style={{ width, maxWidth: 'calc(72vw / var(--ui-zoom, 1))', height: 'auto', color: 'var(--anthropic-orange)', overflow: 'visible' }}>
         <rect x="6" y="6" width="128" height="122" rx="12" fill="currentColor" opacity=".2" />
         <rect x="6" y="6" width="128" height="122" rx="12" fill="none" stroke="currentColor" strokeWidth="4" />
         <g className="vs-door">

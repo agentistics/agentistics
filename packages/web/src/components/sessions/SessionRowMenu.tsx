@@ -9,9 +9,10 @@
 
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import type { MenuEntry } from '../../lib/rowMenu'
+import { isInsidePortalledMenu, type MenuEntry } from '../../lib/rowMenu'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { BetaTag } from '../BetaTag'
+import { SESSION_ROW_MENU_Z } from '../../lib/zLayers'
 
 export interface SessionRowMenuProps {
   x: number
@@ -36,7 +37,7 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMen
   const isMobile = useIsMobile()
 
   useEffect(() => {
-    const away = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose() }
+    const away = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node) && !isInsidePortalledMenu(e.target)) onClose() }
     const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('mousedown', away)
     document.addEventListener('keydown', key)
@@ -58,8 +59,9 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMen
     <div
       ref={ref}
       role="menu"
+      data-portalled-menu
       style={{
-        position: 'fixed', top, left, width: w, zIndex: 600,
+        position: 'fixed', top, left, width: w, zIndex: SESSION_ROW_MENU_Z,
         background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10,
         padding: 4, boxShadow: 'var(--ag-shadow-pop)',
       }}
@@ -84,7 +86,9 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMen
           onMouseEnter={ev => { if (e.enabled) ev.currentTarget.style.background = 'var(--bg-elevated)' }}
           onMouseLeave={ev => { ev.currentTarget.style.background = 'transparent' }}
         >
+          {e.color && <span aria-hidden style={{ flexShrink: 0, width: 8, height: 8, borderRadius: '50%', background: e.color }} />}
           <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.label}</span>
+          {e.checked && <span aria-hidden style={{ marginLeft: 'auto', flexShrink: 0, width: 12, color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>✓</span>}
           {/* Same rule as the three-dot menu: where the delivery board reaches into a session
               surface, it says it is in beta. `link-task` is the entry that opens the picker. */}
           {TASK_ENTRIES.has(e.action) && i === entries.findIndex(x => TASK_ENTRIES.has(x.action)) && <BetaTag what="Tasks" style={{ marginLeft: 'auto', flexShrink: 0 }} />}

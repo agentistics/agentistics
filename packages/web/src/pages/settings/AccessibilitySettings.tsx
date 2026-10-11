@@ -14,7 +14,8 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { SIZE_SLIDER_MAX_PX, ZOOM_SLIDER_STEP, fmtZoom } from '../../lib/magnifier'
 import { a11yText, type A11yText } from '../../components/a11y/i18n'
 import { PrefRow, SectionHeader } from './primitives'
-import { TEXT_SCALE_MAX, TEXT_SCALE_MIN } from '../../lib/textScale'
+import { TEXT_SCALE_MAX, TEXT_SCALE_MIN, effectiveTextScale } from '../../lib/textScale'
+import { nativeViewportWidth } from '../../lib/zoomGeometry'
 
 /** The preview's fixed footprint — the frame scales DOWN into this, preserving its aspect ratio,
  *  so dragging the size slider always visibly changes the shape (see `StyleEditor`'s preview
@@ -170,6 +171,8 @@ export default function AccessibilitySettings() {
   const pages = Object.entries(a11y.prefs.lensesByPage)
   const globalLenses = a11y.prefs.globalLenses
   const hasGlobal = globalLenses.length > 0
+  // What the screen actually shows: a narrow screen holds the zoom below the chosen size.
+  const shownTextScale = effectiveTextScale(ctx.textScale, nativeViewportWidth())
   const textScalePresets = [
     { value: 0.9, label: text.textSizeSmall },
     { value: 1, label: text.textSizeDefault },
@@ -215,6 +218,9 @@ export default function AccessibilitySettings() {
             </span>
           </div>
         </PrefRow>
+        {shownTextScale < ctx.textScale && (
+          <div role="status" style={{ ...note, marginTop: 6 }}>{text.textSizeLimited(Math.round(shownTextScale * 100))}</div>
+        )}
         <div style={{ marginTop: 6, padding: 12, background: 'var(--bg-base)', borderRadius: 10, color: 'var(--text-secondary)', fontSize: '1rem' }}>
           {text.textSizePreview}
         </div>

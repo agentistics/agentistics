@@ -33,6 +33,7 @@ export function threadCopy(lang: Lang) {
     // inbox
     open: pt ? 'Abertos' : 'Open',
     resolved: pt ? 'Resolvidos' : 'Resolved',
+    resolvedSection: (n: number) => pt ? `Resolvidos · ${n}` : `Resolved · ${n}`,
     loose: pt ? 'Comentários avulsos' : 'Loose comments',
     looseHint: pt ? 'Comentários sem tópico' : 'Comments with no topic',
     newThread: pt ? 'Abrir tópico' : 'Open a topic',
@@ -103,5 +104,7 @@ export function threadCopy(lang: Lang) {
     } satisfies Record<DeliveryReason, string>,
     loading: pt ? 'Carregando…' : 'Loading…',
     failed: pt ? 'Não foi possível salvar.' : 'Could not save.',
+    verbFailed: pt ? 'Não foi possível atualizar este tópico.' : 'Could not update this topic.',
+    retry: pt ? 'Tentar de novo' : 'Try again',
   }
 }

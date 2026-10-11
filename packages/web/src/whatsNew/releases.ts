@@ -10,6 +10,36 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.124.0': {
+    features: [
+      {
+        pt: 'Tipo da sessão: marque uma sessão como Líder ou Worker (na Nova sessão, no ⓘ ou no menu da linha) e, se quiser, silencie os workers que estão rodando — só líderes e sessões sem tipo avisam.',
+        en: 'Session type: mark a session as Leader or Worker (in New session, the ⓘ or the row menu) and, if you like, mute running workers — only leaders and untyped sessions notify.',
+      },
+      {
+        pt: 'O tamanho do texto nas Configurações agora aumenta ou diminui o app inteiro, sem quebrar a tela; no celular há um limite para caber.',
+        en: 'The text size in Settings now scales the whole app without breaking the layout; on the phone it stops where it still fits.',
+      },
+      {
+        pt: 'Conversa da tarefa: resolver um tópico mostra que deu certo e o leva para "Resolvidos"; se falhar, aparece o erro com "Tentar de novo"; o campo de comentário fica sempre visível.',
+        en: 'Task conversation: resolving a topic confirms it and moves it to "Resolved"; a failure shows the error with "Try again"; the comment field is always visible.',
+      },
+      {
+        pt: 'Os avisos de carregamento (dados chegando, git lento, importação do histórico) agora são notificações no sininho que se atualizam sozinhas, em vez de linhas cinzas no topo.',
+        en: 'Loading notices (data arriving, slow git, history import) are now bell notifications that update by themselves, instead of grey lines at the top.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'O botão de idioma mostra o idioma atual, e a primeira abertura segue o idioma do navegador.',
+        en: 'The language button shows the current language, and the first launch follows the browser language.',
+      },
+      {
+        pt: 'A limpeza de worktrees ficou mais rápida em repositórios com muitas worktrees.',
+        en: 'Worktree cleanup is faster in repositories with many worktrees.',
+      },
+    ],
+  },
   '2.123.0': {
     features: [
       {

@@ -17,6 +17,8 @@ export interface CleanIoOpts {
 
 /** Ceiling for one git/du call. */
 export const RUN_TIMEOUT_MS = 60_000
+/** Keep disk walks bounded while allowing independent worktrees to make progress together. */
+export const WORKTREE_POOL_SIZE = 4
 
 let prio: string[] | null = null
 function priority(): string[] {
@@ -82,11 +84,13 @@ export async function worktreeFacts(repo: string, o: CleanIoOpts = {}): Promise<
   const list = await git(['-C', repo, 'worktree', 'list', '--porcelain'], o)
   if (list.code !== 0) return []
   const base = await defaultRef(repo, o)
-  const out: WorktreeFacts[] = []
-  for (const block of list.out.split('\n\n')) {
+  const blocks = list.out.split('\n\n').filter(Boolean)
+  const out: Array<WorktreeFacts | undefined> = []
+  let next = 0
+  const inspect = async (block: string, index: number) => {
     const lines = block.split('\n').filter(Boolean)
     const path = lines.find(l => l.startsWith('worktree '))?.slice(9)
-    if (!path) continue
+    if (!path) return
     const headSha = lines.find(l => l.startsWith('HEAD '))?.slice(5) ?? null
     const branch = lines.find(l => l.startsWith('branch '))?.slice(7).replace(/^refs\/heads\//, '') ?? null
     const isMain = resolve(path) === resolve(repo)
@@ -101,9 +105,15 @@ export async function worktreeFacts(repo: string, o: CleanIoOpts = {}): Promise<
       lastCommitMs = lc.code === 0 && lc.out.trim() ? Number(lc.out.trim()) * 1000 : null
       ;[sizeBytes, nodeModulesBytes] = await Promise.all([duBytes(path, o), duBytes(join(path, 'node_modules'), o)])
     }
-    out.push({ repo, path, branch, isMain, missing, locked, merged, dirty, lastCommitMs, sizeBytes, nodeModulesBytes })
+    out[index] = { repo, path, branch, isMain, missing, locked, merged, dirty, lastCommitMs, sizeBytes, nodeModulesBytes }
   }
-  return out
+  await Promise.all(Array.from({ length: Math.min(WORKTREE_POOL_SIZE, blocks.length) }, async () => {
+    while (next < blocks.length) {
+      const index = next++
+      await inspect(blocks[index]!, index)
+    }
+  }))
+  return out.filter((f): f is WorktreeFacts => f !== undefined)
 }
 
 /** Apply the plan's non-keep items; returns one sentence per item that could not be done. */

@@ -23,7 +23,7 @@ export function progressTooltipModel(done: number, total: number, percent: numbe
 
 export function ProgressTooltip({ model, x, y }: { model: ProgressTooltipModel; x: number; y: number }) {
   return createPortal(
-    <span role="tooltip" style={{ position: 'fixed', left: x, top: y, transform: 'translateY(-100%)', zIndex: 4000, pointerEvents: 'none', width: 360, maxWidth: 'calc(100vw - 16px)', boxSizing: 'border-box', padding: '6px 8px', borderRadius: 5, background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontSize: 10, lineHeight: 1.45, boxShadow: '0 3px 12px rgba(0,0,0,.25)' }}>
+    <span role="tooltip" style={{ position: 'fixed', left: x, top: y, transform: 'translateY(-100%)', zIndex: 4000, pointerEvents: 'none', width: 360, maxWidth: 'calc(100vw / var(--ui-zoom, 1) - 16px)', boxSizing: 'border-box', padding: '6px 8px', borderRadius: 5, background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontSize: 10, lineHeight: 1.45, boxShadow: '0 3px 12px rgba(0,0,0,.25)' }}>
       <span style={{ display: 'block', fontWeight: 650, marginBottom: 3 }}>{model.summary}</span>
       {model.statuses.map(s => <span key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 5 }}><i style={{ width: 7, height: 7, borderRadius: '50%', background: s.color, flex: '0 0 auto' }} />{s.label} {s.count}</span>)}
       {model.titles.length > 0 && <span style={{ display: 'block', marginTop: 4, color: 'var(--text-secondary)' }}>{model.titles.map(title => <span key={title} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>)}{model.moreTitles > 0 && <span style={{ display: 'block' }}>+{model.moreTitles}</span>}</span>}
