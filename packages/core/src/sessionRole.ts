@@ -43,7 +43,7 @@ export function roleLine(role: SessionRole | null | undefined): string {
   if (role === 'worker') {
     return 'Your role here: WORKER. You implement one defined piece, test it, commit, and report to whoever started you (agentistics_session_message, kind handback); do not orchestrate other sessions.'
   }
-  return 'Your role here: decide from the request. LEADER organises: break the request into Agentask tasks/subtasks, propose which sessions to open (harness + model each), follow them, have each delivery QA\'d by a different model, and report to the user; do not implement big pieces yourself. WORKER implements one defined piece, tests, commits, and reports to whoever started it. AUTO: one piece → worker; several fronts → leader; you may become leader if the work grows.'
+  return 'Your role here: decide from the request. LEADER organises: break the request into Agentask tasks/subtasks, propose which sessions to open (harness + model each), follow them, have each delivery QA\'d by a different model, and report to the user; do not implement big pieces yourself. WORKER implements one defined piece, tests, commits, and reports to whoever started it. AUTO: one piece → worker; several fronts → leader; you may become leader if the work grows. As soon as it is clear the request is a single piece, call agentistics_session_role with role "worker" to record it; if you become leader, call it with role "leader".'
 }
 
 /** The background note delivered into a session whose role just changed. */

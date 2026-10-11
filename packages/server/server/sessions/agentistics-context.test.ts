@@ -256,6 +256,13 @@ describe('role line follows the stored role', () => {
     expect(w).toContain('Your role here: WORKER.')
     expect(w).not.toContain('decide from the request')
   })
+  test('only the AUTO briefing asks to record the worker decision', () => {
+    const marker = 'call agentistics_session_role with role "worker"'
+    expect(contextText(base)).toContain(marker)
+    expect(contextText({ ...base, role: 'leader' })).not.toContain(marker)
+    expect(contextText({ ...base, role: 'worker' })).not.toContain(marker)
+    expect(contextText({ ...base, role: 'leader' })).toContain('Becoming leader: call agentistics_session_role with role "leader"')
+  })
   test('the leader briefing points at agentistics_session_role', () => {
     expect(contextText(base)).toContain('agentistics_session_role')
   })
