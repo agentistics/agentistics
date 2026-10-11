@@ -35,6 +35,9 @@ describe('role lines', () => {
     expect(roleLine('leader')).toContain('LEADER')
     expect(roleLine('worker')).toContain('WORKER')
     expect(roleLine(undefined)).toContain('decide from the request')
+  expect(roleLine(undefined)).toContain('agentistics_session_role with role "worker"')
+  expect(roleLine('worker')).not.toContain('agentistics_session_role')
+  expect(roleLine('leader')).not.toContain('agentistics_session_role')
     expect(roleLine('leader')).not.toContain('decide from the request')
   })
   test('the change note quotes the role line', () => {
