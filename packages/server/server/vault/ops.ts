@@ -498,11 +498,11 @@ async function opPersonalRefs(h: Record<string, unknown>): Promise<OpResult> {
 async function opPersonalRef(h: Record<string, unknown>): Promise<OpResult> {
   const sid = sessionIdOf(h)
   if (!sid || typeof h.ref !== 'string') return bad()
-  const r = await useRef(sid, h.ref)
+  const r = await useRef(sid, h.ref, { command: typeof h.command === 'string' ? h.command : null, harness: typeof h.harness === 'string' ? h.harness : 'unknown', callId: typeof h.callId === 'string' ? h.callId : undefined })
   if (!r.ok) {
-    return { reply: refused(r.code === 'not-granted' ? 'not-granted' : 'secret-gone', vaultLang() === 'pt'
-      ? (r.code === 'not-granted' ? 'Este segredo não foi liberado para esta sessão.' : 'Este segredo não existe mais no cofre.')
-      : (r.code === 'not-granted' ? 'This secret was not granted to this session.' : 'This secret no longer exists in the vault.')) }
+    const sentences: Record<string, [string, string]> = { 'not-granted': ['Este segredo não foi liberado para esta sessão.', 'This secret was not granted to this session.'], 'secret-gone': ['Este segredo não existe mais no cofre.', 'This secret no longer exists in the vault.'], 'use-pending': ['A confirmação do uso ainda está pendente.', 'Use confirmation is still pending.'], 'use-busy': ['Há confirmações demais pendentes.', 'Too many use confirmations are pending.'], 'use-denied': ['O uso foi negado.', 'Use was denied.'], 'vault-locked': ['O cofre está trancado.', 'The vault is locked.'] }
+    const s = sentences[r.code] ?? sentences['use-pending']!
+    return { reply: refused(r.code, vaultLang() === 'pt' ? s[0] : s[1]) }
   }
   const ref = grantedRef(sid, h.ref)
   vaultAudit({ type: 'vault.personal-use', name: ref?.itemId })
