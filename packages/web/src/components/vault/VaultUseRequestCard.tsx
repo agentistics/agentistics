@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { ConfirmModal } from '../../pages/settings/primitives'
+import { ConfirmModal, DialogActions, dialogButtonStyle } from '../../pages/settings/primitives'
 import { decideVaultUse, pendingVaultUseRequests, type VaultUseRequest } from '../../lib/vaultApi'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { phoneGesture } from '../../lib/passkey'
 
 /** The words of one request — pure, so the card can be read in both languages without a browser. */
@@ -18,12 +19,13 @@ export function useRequestWords(request: VaultUseRequest, lang: 'pt' | 'en', bus
 /** Uses the app's shared confirmation card. Deny never asks a gesture; Approve does (the server raises it). */
 export function UseRequestDialog({ request, lang, busy, onDecide, onClose }: { request: VaultUseRequest; lang: 'pt' | 'en'; busy: boolean; onDecide: (approve: boolean) => void; onClose: () => void }) {
   const w = useRequestWords(request, lang, busy)
+  const isMobile = useIsMobile()
   // Esc / backdrop only CLOSE the card (the request stays pending); only the explicit Deny button revokes.
   const footer = (
-    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-      <button type="button" disabled={busy} onClick={() => onDecide(false)} style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer' }}>{w.cancel}</button>
-      <button type="button" disabled={busy} onClick={() => onDecide(true)} style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: 'var(--anthropic-orange)', color: '#fff', cursor: 'pointer' }}>{w.confirm}</button>
-    </div>
+    <DialogActions>
+      <button type="button" disabled={busy} onClick={() => onDecide(false)} style={dialogButtonStyle('secondary', isMobile, busy)}>{w.cancel}</button>
+      <button type="button" disabled={busy} onClick={() => onDecide(true)} style={dialogButtonStyle('primary', isMobile, busy)}>{w.confirm}</button>
+    </DialogActions>
   )
   return <ConfirmModal open title={w.title} message={w.message} confirmLabel={w.confirm} cancelLabel={w.cancel} onConfirm={() => onDecide(true)} onCancel={onClose} footer={footer} tone="default" />
 }

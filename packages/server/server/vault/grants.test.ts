@@ -115,9 +115,15 @@ describe('the vault.sock ops a hook calls (§8.3)', () => {
     for (let i = 0; i < 60; i++) last = (await op({ op: 'personal-scrub', managedId: 'lim', text: 'plain' })).reply
     expect(last).toMatchObject({ ok: true })
     const over = (await op({ op: 'personal-scrub', managedId: 'lim', text: 'plain' })).reply as Record<string, unknown>
-    expect(over).toMatchObject({ ok: false, code: 'scrub-limit' })
-    expect(JSON.stringify(over)).not.toContain('plain')
-    expect(String(over.sentence)).toContain('held back by the vault')
+    expect(over).toMatchObject({ ok: true, changed: true })
+    expect(JSON.parse(String(over.text))).toContain('held back by the vault')
+    expect(String(over.text)).not.toContain('plain')
+    // end to end through the hook's own answer: call 61 never reaches the model raw
+    const { postToolAnswer } = await import('./hook-rewrite')
+    const ans = postToolAnswer({ stdout: 'key=sk-SECRET-MARKER' }, String(over.text), over.changed === true)
+    expect(ans).not.toBeNull()
+    expect(ans).not.toContain('SECRET-MARKER')
+    expect(ans).toContain('held back by the vault')
     // another session is not affected
     expect((await op({ op: 'personal-scrub', managedId: 'other', text: 'plain' })).reply).toMatchObject({ ok: true })
   })
