@@ -10,9 +10,15 @@ describe('text scale', () => {
     expect(clampTextScale(1.125)).toBe(1.125)
   })
 
-  test('applies the preference to the document root', () => {
-    const root = { style: { zoom: '' } }
+  test('applies the preference to the document root and compensates layout width', () => {
+    const root = { style: { zoom: '', width: '', maxWidth: '' } }
     expect(applyTextScale(root, 1.4)).toBe(1.4)
     expect(root.style.zoom).toBe('1.4')
+    expect(root.style.width).toBe('calc(100% / 1.4)')
+    expect(root.style.maxWidth).toBe('none')
+    expect(applyTextScale(root, 1)).toBe(1)
+    expect(root.style.zoom).toBe('')
+    expect(root.style.width).toBe('')
+    expect(root.style.maxWidth).toBe('')
   })
 })

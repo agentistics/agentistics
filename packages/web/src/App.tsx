@@ -1516,10 +1516,10 @@ export default function AppLayout() {
   const setTextScale = useCallback((scale: number) => {
     const next = clampTextScale(scale)
     setTextScaleState(next)
-    applyTextScale(document.documentElement, next)
+    applyTextScale(document.getElementById('root') ?? document.documentElement, next)
     putPersonal({ textScale: next })
   }, [])
-  useEffect(() => { applyTextScale(document.documentElement, textScale) }, [textScale])
+  useEffect(() => { applyTextScale(document.getElementById('root') ?? document.documentElement, textScale) }, [textScale])
 
   // Surface server-pushed notifications (member connection/auth errors) as toasts + bell.
   useNotificationStream(lang)

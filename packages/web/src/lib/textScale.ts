@@ -7,9 +7,14 @@ export function clampTextScale(value: unknown): number {
   return Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, value))
 }
 
-export function applyTextScale(root: { style: { zoom: string } }, value: unknown): number {
+export function applyTextScale(root: { style: { zoom: string; width?: string; maxWidth?: string } }, value: unknown): number {
   const scale = clampTextScale(value)
-  // Zoom (not root font-size): most of the UI is sized in px, so only a zoom scales ALL of it.
+  // The UI is mostly sized in px, so a root zoom is the compact way to scale all text and
+  // controls. Apply it to #root rather than <html>: browsers keep the document's computed
+  // font-size unchanged under an html zoom, while the root's rendered bounds do grow. Compensate
+  // the layout width so the visual page remains viewport-wide without horizontal overflow.
   root.style.zoom = scale === 1 ? '' : String(scale)
+  root.style.width = scale === 1 ? '' : `calc(100% / ${scale})`
+  root.style.maxWidth = scale === 1 ? '' : 'none'
   return scale
 }
