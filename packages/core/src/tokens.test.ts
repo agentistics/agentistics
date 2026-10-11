@@ -30,6 +30,14 @@ describe('counting', () => {
     expect(sessionTokenTotal(partial)).toBe(15)
   })
 
+  it('treats tokens_unavailable as absent even when model_usage is present', () => {
+    const unavailable = sess({
+      tokens_unavailable: true,
+      model_usage: { 'claude-opus-5': { inputTokens: 100, outputTokens: 50, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 0 } },
+    })
+    expect(sessionTokenTotal(unavailable)).toBeUndefined()
+  })
+
   it('reads a ModelUsage into the same four counters', () => {
     expect(usageTokens({
       inputTokens: 1, outputTokens: 2, cacheReadInputTokens: 3, cacheCreationInputTokens: 4,

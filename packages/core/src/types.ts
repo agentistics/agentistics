@@ -1233,6 +1233,9 @@ export function sessionModelUsage(
     | 'cache_creation_1h_input_tokens' | 'cache_creation_5m_input_tokens'> & Pick<Partial<SessionMeta>, 'tokens_unavailable'>,
   fallbackModel?: string,
 ): [string, ModelUsage][] {
+  // A provider can leave a stale model_usage object alongside an explicit absence marker. The
+  // marker is authoritative: absent usage must never become a measured model or $0 cost.
+  if (s.tokens_unavailable) return []
   const breakdown = s.model_usage
   if (breakdown && typeof breakdown === 'object') {
     const entries = Object.entries(breakdown).filter(([m, u]) => m && u)
@@ -1240,7 +1243,6 @@ export function sessionModelUsage(
   }
   // The source stated NO usage (a Kimi run that failed before its first response): the zeros below
   // would be stored as a measured $0 under that model. Absent is not zero — no row, no price.
-  if (s.tokens_unavailable) return []
   const model = s.model || fallbackModel || ''
   if (!model) return []
   return [[model, {

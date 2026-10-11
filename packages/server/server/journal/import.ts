@@ -250,9 +250,31 @@ export async function runImport(opts: ImportOptions = {}): Promise<ImportResult>
     }
     const j = journal!
     const droppedBefore = j.status().counters.dropped
-    // The old events of a re-read source go FIRST: the same event id would otherwise keep the old row.
-    // If the append is then dropped the source stays unrecorded under the old version and is redone.
-    if (replaceRef !== undefined && j.deleteBySourcePrefix) await j.deleteBySourcePrefix(replaceRef)
+    if (replaceRef !== undefined && j.replaceBySourcePrefix) {
+      const res = await j.replaceBySourcePrefix(replaceRef, events)
+      half.written += res.written
+      half.duplicates += res.duplicates
+      for (const r of res.rejected) {
+        const reason = `rejected:${r.reason}` as ArtifactFailReason & StoreFailReason
+        bump(half.failed as Record<string, number>, reason)
+        example(reason, ref)
+      }
+      if (!res.ok) {
+        bump(half.failed as Record<string, number>, 'journal-replace-failed')
+        example('journal-replace-failed', ref)
+      }
+      return res.ok
+    }
+    // Compatibility path for older journal implementations. The production journal implements
+    // replaceBySourcePrefix above, so replacements are atomic there.
+    if (replaceRef !== undefined && j.deleteBySourcePrefix) {
+      const removed = await j.deleteBySourcePrefix(replaceRef)
+      if (removed === 0) {
+        bump(half.failed as Record<string, number>, 'journal-delete-failed')
+        example('journal-delete-failed', ref)
+        return false
+      }
+    }
     for (let i = 0; i < events.length; i += flushEvents) {
       const res = await j.append(events.slice(i, i + flushEvents))
       half.written += res.written

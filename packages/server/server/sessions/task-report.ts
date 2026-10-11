@@ -624,7 +624,7 @@ export function buildTaskDetail(o: {
           }
           : {
             model: meta?.model ?? null,
-            tokens: meta ? sessionTokenTotal(meta) : null,
+            tokens: meta ? sessionTokenTotal(meta) ?? null : null,
             costUSD: meta ? o.costOf(meta) : null,
             rounds: meta?.user_message_count ?? null,
           }),

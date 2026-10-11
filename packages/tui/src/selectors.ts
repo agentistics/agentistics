@@ -59,8 +59,8 @@ export interface SessionRow {
   label: string
   harness: SurfaceHarnessId
   project: string
-  tokens: number
-  costUSD: number
+  tokens: number | undefined
+  costUSD: number | undefined
   startTime: string
   live: boolean
 }
@@ -82,7 +82,7 @@ function usageTokens(u: ModelUsage): number {
   return usageTokenTotal(u)
 }
 
-export function sessionTokens(s: SessionMeta): number {
+export function sessionTokens(s: SessionMeta): number | undefined {
   return sessionTokenTotal(s)
 }
 
@@ -128,9 +128,12 @@ function sessionTotals(sessions: SessionMeta[]): Omit<HarnessRow, 'harness'> & {
   let messages = 0
   let unpriced = 0
   for (const s of sessions) {
-    tokens += sessionTokens(s)
-    costUSD += sessionCostUSD(s) ?? 0
-    unpriced += unpricedTokens(s)
+    const measuredTokens = sessionTokens(s)
+    if (measuredTokens !== undefined) {
+      tokens += measuredTokens
+      costUSD += sessionCostUSD(s) ?? 0
+      unpriced += unpricedTokens(s)
+    }
     messages += (s.user_message_count ?? 0) + (s.assistant_message_count ?? 0)
   }
   return { sessions: sessions.length, messages, tokens, costUSD, ...(unpriced > 0 ? { unpricedTokens: unpriced } : {}), agents: agentCount(sessions) }
@@ -200,8 +203,11 @@ export function projectRows(data: AppData): ProjectRow[] {
       acc.set(path, row)
     }
     row.sessions += 1
-    row.tokens += sessionTokens(s)
-    row.costUSD += sessionCostUSD(s) ?? 0
+    const measuredTokens = sessionTokens(s)
+    if (measuredTokens !== undefined) {
+      row.tokens += measuredTokens
+      row.costUSD += sessionCostUSD(s) ?? 0
+    }
     const t = s.end_time || s.start_time || ''
     if (t > row.lastActivity) row.lastActivity = t
   }
@@ -245,7 +251,7 @@ export function sessionRows(data: AppData, opts: { limit?: number } = {}): Sessi
       harness: sessionHarness(s),
       project: basename(s.project_path || ''),
       tokens: sessionTokens(s),
-      costUSD: sessionCostUSD(s) ?? 0,
+      costUSD: s.tokens_unavailable ? undefined : sessionCostUSD(s) ?? 0,
       startTime: s.start_time || '',
       live: live.has(s.session_id),
     }))

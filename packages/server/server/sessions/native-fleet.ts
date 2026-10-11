@@ -137,7 +137,7 @@ export function withNativeUsage(rows: readonly ControlSession[], metas: readonly
     const cost = sessionCostUSD(m)
     return {
       ...r,
-      ...(tokens > 0 ? { tokens: fmt(tokens) } : {}),
+      ...(tokens !== undefined && tokens > 0 ? { tokens: fmt(tokens) } : {}),
       ...(cost !== null ? { cost: fmtCost(cost) } : {}),
     }
   })

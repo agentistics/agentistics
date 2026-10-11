@@ -82,7 +82,8 @@ export function todayFigures(sessions: readonly SessionMeta[], fleet: readonly C
     if (c !== null) cost = (cost ?? 0) + c
     const reported = s.input_tokens !== undefined || s.output_tokens !== undefined
       || s.cache_read_input_tokens !== undefined || s.cache_creation_input_tokens !== undefined
-    if (reported) tokens = (tokens ?? 0) + sessionTokenTotal(s)
+    const measuredTokens = reported ? sessionTokenTotal(s) : undefined
+    if (measuredTokens !== undefined) tokens = (tokens ?? 0) + measuredTokens
   }
   let streak = 0
   let cursor = active.has(today) ? today : dayBefore(today, 1)

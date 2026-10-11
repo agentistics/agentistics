@@ -59,7 +59,8 @@ export function todayTotals(sessions: readonly SessionMeta[], now: Date): TodayT
       day = s
     }
     count += 1
-    tokens += sessionTokenTotal(day)
+    const measuredTokens = sessionTokenTotal(day)
+    if (measuredTokens !== undefined) tokens += measuredTokens
     costUSD += sessionCostUSD(day) ?? 0
   }
   return { costUSD, tokens, sessions: count }

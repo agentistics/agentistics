@@ -68,6 +68,7 @@ import { DEFAULT_STRING_CACHE_BYTES, StringCache } from './string-cache'
 import {
   MAX_PAGE,
   type AppendResult,
+  type ReplaceResult,
   type Journal,
   type JournalCounters,
   type JournalDisabledReason,
@@ -242,6 +243,12 @@ function disabledJournal(where: Where, reason: JournalDisabledReason): Journal {
       return 0
     },
     async deleteBySourcePrefix() { return 0 },
+    async replaceBySourcePrefix(_prefix, events) {
+      const plan = safePlan(events, counters)
+      counters.rejected += plan.rejected.length
+      counters.dropped += plan.rows.length
+      return { ok: false, written: 0, duplicates: 0, rejected: plan.rejected }
+    },
     async epoch() { return 0 },
     status() {
       return { state: 'disabled', reason, ...copyWhere(where), counters: { ...counters } }
@@ -354,6 +361,7 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
     let stringStmt: ReturnType<Database['query']>
     let headStmt: ReturnType<Database['query']>
     let deleteTx: { immediate: (prefix: string) => number }
+    let replaceTx: { immediate: (arg: { prefix: string; rows: JournalRow[] }) => { removed: number; written: number; duplicates: number; fresh: Map<string, number> } }
     let epochStmt: ReturnType<Database['query']>
     try {
       const insert = db.prepare(INSERT_SQL) as unknown as InsertStmt
@@ -404,6 +412,35 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
         if (removed > 0) bumpEpoch.run()
         return removed
       }) as unknown as typeof deleteTx
+      replaceTx = db.transaction((arg: { prefix: string; rows: JournalRow[] }) => {
+        const ids = (refIds.all(arg.prefix) as { id: number }[]).map(r => r.id)
+        let removed = 0
+        for (let i = 0; i < ids.length; i += 500) {
+          const marks = ids.slice(i, i + 500)
+          const q = marks.map(() => '?').join(',')
+          db.prepare(`DELETE FROM rare_events WHERE rowid IN (SELECT rowid FROM events WHERE source_ref IN (${q}))`).run(...marks)
+          removed += Number(db.prepare(`DELETE FROM events WHERE source_ref IN (${q})`).run(...marks).changes)
+        }
+        const fresh = new Map<string, number>()
+        const intern = (s: string): number => {
+          const known = cache.getId(s) ?? fresh.get(s)
+          if (known !== undefined) return known
+          const hit = findString.get(s) as { id: number } | null
+          const id = hit ? hit.id : Number(addString.run(s).lastInsertRowid)
+          fresh.set(s, id)
+          return id
+        }
+        let written = 0
+        let duplicates = 0
+        for (const row of arg.rows) {
+          if (insertRow(insert, encodeRow(row, intern)) === 1) {
+            written++
+            if (rare.has(row.type)) addRare.run(row.type)
+          } else duplicates++
+        }
+        if (removed > 0) bumpEpoch.run()
+        return { removed, written, duplicates, fresh }
+      }) as unknown as typeof replaceTx
       epochStmt = db.query("SELECT v FROM journal_state WHERE k = 'epoch'")
       pageStmt = db.query(PAGE_SQL)
       statsStmt = db.query(
@@ -569,6 +606,30 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
           recoveryPending = false
           counters.failedAppends++
           return 0
+        }
+      },
+
+      async replaceBySourcePrefix(prefix, events): Promise<ReplaceResult> {
+        const plan = safePlan(events, counters)
+        const rejected: Rejection[] = plan.rejected
+        counters.rejected += rejected.length
+        if (state === 'closed' || prefix === '') {
+          counters.dropped += plan.rows.length
+          return { ok: false, written: 0, duplicates: 0, rejected }
+        }
+        try {
+          const res = await withRecoveryRetry(() => replaceTx.immediate({ prefix, rows: plan.rows.map(r => r.row) }), recoveryPending, sleep)
+          recoveryPending = false
+          remember(res.fresh)
+          counters.written += res.written
+          counters.duplicates += res.duplicates
+          if (res.written > 0 || res.removed > 0) armCheckpoint()
+          return { ok: true, written: res.written, duplicates: res.duplicates, rejected }
+        } catch {
+          recoveryPending = false
+          counters.failedAppends++
+          counters.dropped += plan.rows.length
+          return { ok: false, written: 0, duplicates: 0, rejected }
         }
       },
 

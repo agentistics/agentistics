@@ -86,6 +86,12 @@ describe('the boards', () => {
     expect(rankProjects([s({ project_path: '' })], 'sessions').distinct).toBe(0)
   })
 
+  it('skips tokens_unavailable sessions from board sums and costs', () => {
+    const unavailable = s({ tokens_unavailable: true, input_tokens: 1000, output_tokens: 500 })
+    expect(rankSessions([unavailable], 'tokens', label)).toEqual({ entries: [], total: 0, distinct: 0 })
+    expect(rankHarnesses([unavailable], 'cost')).toEqual({ entries: [], total: 0, distinct: 0 })
+  })
+
   it('ranks tools by calls, and totals every tool not just the shown ones', () => {
     const list = [
       s({ session_id: '1', tool_counts: { Bash: 30, Read: 5, Edit: 2 } }),
