@@ -1,4 +1,5 @@
 import { readdir, readlink, readFile } from 'fs/promises'
+import { readFileSync } from 'node:fs'
 import type { HarnessId, LiveUnavailableReason, SessionMeta } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, HOME_DIR } from './config'
 
@@ -602,7 +603,7 @@ export async function scanLinuxProcesses(procRoot = '/proc'): Promise<{
       // of them is a harness. A process already found not to be one is skipped on one small read: its
       // identity is the pid + the kernel's start time + its comm (an exec changes the comm), all in
       // /proc/<pid>/stat. No stat (a fixture, a vanished process) is simply no memo.
-      const identity = await processIdentity(pid, procRoot)
+      const identity = processIdentity(pid, procRoot)
       if (identity) {
         seen.add(identity)
         if (notHarness.has(identity)) return
@@ -618,8 +619,16 @@ export async function scanLinuxProcesses(procRoot = '/proc'): Promise<{
       const harness = harnessOfProcess(comm, exePath, argv)
       if (!harness) { if (identity) notHarness.add(identity); return }
       const envRaw = await readFile(`${procRoot}/${pid}/environ`, 'utf-8').catch(() => '')
-      if (!envRaw || !belongsToServerEnvironment(parseProcEnviron(envRaw))) return
-      if (isNonInteractiveInvocation(harness, argv)) return
+      // Both refusals below rest on what an exec fixes for good — the initial environment and argv —
+      // so they are remembered under the same identity as "not a harness": every assistant of ANOTHER
+      // home or data dir on this machine (the user's own fleet, beside a second server) was otherwise
+      // re-read, environment and all, on every poll (PERF.IDLE). An unreadable environment is not
+      // remembered: that may be a race with the exec, and the next poll asks again.
+      if (!envRaw) return
+      if (!belongsToServerEnvironment(parseProcEnviron(envRaw)) || isNonInteractiveInvocation(harness, argv)) {
+        if (identity) notHarness.add(identity)
+        return
+      }
       // A harness we could identify but whose cwd we may not read is the signature of a container
       // running under a uid that cannot ptrace the host user — record it rather than skipping in
       // silence, or the panel reports an empty, confident zero.
@@ -654,8 +663,11 @@ function notHarnessMemo(procRoot: string): Set<string> {
 }
 
 /** `pid:starttime:comm` from /proc/<pid>/stat, or `null` when it cannot be read whole. */
-async function processIdentity(pid: string, procRoot: string): Promise<string | null> {
-  const raw = await readFile(`${procRoot}/${pid}/stat`, 'utf-8').catch(() => '')
+function processIdentity(pid: string, procRoot: string): string | null {
+  // In line, not through the thread pool: one small procfs read per process on the machine, every
+  // fleet poll — several hundred async reads at once cost ~3x the CPU of reading them here (PERF.IDLE).
+  let raw = ''
+  try { raw = readFileSync(`${procRoot}/${pid}/stat`, 'utf-8') } catch { /* gone, or a fixture without stat */ }
   const open = raw.indexOf('('), close = raw.lastIndexOf(')')
   if (open < 0 || close < open) return null
   const ticks = raw.slice(close + 2).split(' ')[19]

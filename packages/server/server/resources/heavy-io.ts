@@ -17,7 +17,7 @@ import { join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { FLOCK_BUSY_CODE, flockHolders, heavyLockPath, heavySlots, parseFlockArgv, queuePosition, type HeavyWaiter } from './heavy'
 import { stat } from 'node:fs/promises'
-import { pidAlive } from './proc-read'
+import { pidAlive, readProcTable } from './proc-read'
 import { parseMeminfo } from '../sessions/memory-budget'
 
 export const HEAVY_DIR = join(AGENTISTICS_DATA_DIR, 'heavy')
@@ -85,11 +85,11 @@ async function manualJobs(): Promise<{ running: HeavyRunning[]; waiting: HeavyWa
   if (inodes.size === 0) return { running, waiting }
   const holders = new Map<number, number>()
   for (const [ino, slot] of inodes) for (const pid of flockHolders(locks, ino)) holders.set(pid, slot)
-  const pids = (await readdir('/proc').catch(() => [] as string[])).filter(n => /^\d+$/.test(n))
-  for (const n of pids) {
-    const pid = Number(n)
-    const comm = (await readFile(`/proc/${pid}/comm`, 'utf8').catch(() => '')).trim()
-    if (comm !== 'flock') continue
+  // The `flock` processes, out of the process table the governor's tick already read (`comm` is in
+  // `stat`): this used to read `/proc/<pid>/comm` of every process on the machine, every tick.
+  for (const row of readProcTable() ?? []) {
+    if (row.comm !== 'flock') continue
+    const pid = row.pid
     const argv = (await readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => '')).split('\0').filter(Boolean)
     const parsed = parseFlockArgv(argv)
     if (!parsed) continue
