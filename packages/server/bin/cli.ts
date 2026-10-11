@@ -99,6 +99,7 @@ Commands:
                 and across how many sessions ('task ls | show | deliver | abandon')
   hooks         Teach Claude Code to run work in parallel through agentop
                 (installs a skill + SessionStart/Stop hooks; explicit, reversible)
+  briefing      Install or remove agentistics onboarding skills/instruction blocks
   events        Be told when a session starts waiting, blocks on a permission prompt or
                 exits — in an inbox, in another Claude session, and on your desktop
                 ('events watch' to subscribe, 'events status' to see who is watching)
@@ -389,6 +390,19 @@ if (command === 'hooks') {
   const { runHooks } = await import('../server/cli-hooks.ts')
   const code = await runHooks(args)
   process.exit(code)
+}
+
+if (command === 'briefing') {
+  const { installBriefing, uninstallBriefing } = await import('../server/briefing-installer.ts')
+  const mode = args[0] === 'uninstall' ? 'uninstall' : args[0] === 'install' ? 'install' : null
+  if (!mode) {
+    console.error('Usage: agentop briefing <install|uninstall>')
+    process.exit(1)
+  }
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? ''
+  const rows = mode === 'install' ? await installBriefing({ home }) : await uninstallBriefing({ home })
+  for (const row of rows) console.log(`${row.changed ? (mode === 'install' ? 'updated' : 'removed') : 'unchanged'} ${row.path}`)
+  process.exit(0)
 }
 
 if (command === 'events') {
@@ -831,6 +845,13 @@ if (command === 'server' || command === 'start' || !command) {
   {
     const { bootVault } = await import('../server/vault/boot.ts')
     await bootVault()
+  }
+  // Managed onboarding is versioned in agentop's own data directory; harness instruction files
+  // receive only the agentistics-owned blocks/skills and are never used as state.
+  {
+    const { ensureBriefingInstalled } = await import('../server/briefing-installer.ts')
+    const { CONTEXT_TOOL_NAMES } = await import('../server/sessions/agentistics-context.ts')
+    await ensureBriefingInstalled({ toolNames: CONTEXT_TOOL_NAMES })
   }
   // Server, daemon and version check run in parallel — the daemon and the banner only where they
   // belong (a central has no host sessions, a container is upgraded by its image): daemon-plan.ts.
