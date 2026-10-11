@@ -484,18 +484,25 @@ export function QuickVault({ lang, isMobile, onClose }: { lang: Lang; isMobile: 
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h)
   }, [onClose, asking])
-  const o: React.CSSProperties = isMobile ? { ...overlay, padding: 0, zIndex: 3000 } : { ...overlay, zIndex: 3000 }
-  const c: React.CSSProperties = isMobile
-    ? { ...card, maxWidth: 'none', width: '100%', height: '100dvh', maxHeight: '100dvh', borderRadius: 0, border: 'none', overflowY: 'auto', boxSizing: 'border-box' }
-    : { ...card, maxWidth: 560, maxHeight: '86vh', overflowY: 'auto', boxSizing: 'border-box' }
+  // The same frame as the app's ConfirmModal (scrim, card tokens, radius, shadow); full-screen on a phone.
+  const o: React.CSSProperties = {
+    position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent: 'center',
+    background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)', padding: isMobile ? 0 : 16,
+  }
+  const c: React.CSSProperties = {
+    width: '100%', maxWidth: isMobile ? 'none' : 560, maxHeight: isMobile ? '100dvh' : '86vh', height: isMobile ? '100dvh' : undefined,
+    background: 'var(--bg-card)', border: isMobile ? 'none' : '1px solid var(--border)', borderRadius: isMobile ? 0 : 12,
+    padding: isMobile ? 16 : 22, boxShadow: '0 12px 48px rgba(0,0,0,0.5)', overflowY: 'auto', boxSizing: 'border-box',
+    display: 'flex', flexDirection: 'column', gap: 0,
+  }
   return (
     <div style={o} role="dialog" aria-modal="true" aria-label={t('quickTitle')} onClick={onClose} data-quick-vault>
       <div style={c} onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-          <span aria-hidden style={{ width: 30, height: 30, borderRadius: 9, display: 'grid', placeItems: 'center', background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)' }}><VaultIcon size={16} /></span>
-          <strong style={{ fontSize: 15, flex: 1 }}>{t('quickTitle')}</strong>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <span aria-hidden style={{ display: 'inline-flex', padding: 8, borderRadius: 9, background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)' }}><VaultIcon size={17} /></span>
+          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', flex: 1 }}>{t('quickTitle')}</span>
           <button type="button" className="ag-tap-icon" aria-label={t('quickClose')} onClick={onClose}
-            style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: 6 }}><X size={18} /></button>
+            style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: 6, display: 'inline-flex' }}><X size={18} /></button>
         </div>
         <QuickVaultBody lang={lang} isMobile={isMobile} onNavigate={onClose} onAsking={setAsking} />
       </div>
