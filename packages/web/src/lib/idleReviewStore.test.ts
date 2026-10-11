@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'bun:test'
+import { beforeEach, describe, expect, it } from 'bun:test'
 import {
-  dismissIdleReview, getIdleReviewSnapshot, previewIdleReviewVisible, publishIdleReview, snoozeIdleReview,
+  dismissIdleReview, getIdleReviewSnapshot, previewIdleReviewVisible, publishIdleReview, resetIdleReviewForTests, snoozeIdleReview,
 } from './idleReviewStore'
 
 /**
@@ -34,6 +34,7 @@ function stubSessionStorage(): { restore: () => void } {
 // for its own module-level flag. The snooze test is last on purpose: it is the one test that leaves
 // state a later test could not un-do without a fake timer.
 describe('idleReviewStore', () => {
+  beforeEach(() => resetIdleReviewForTests())
   it('starts invisible with nothing published', () => {
     expect(getIdleReviewSnapshot()).toEqual({ count: 0, freedBytes: null, visible: false })
   })
@@ -51,6 +52,7 @@ describe('idleReviewStore', () => {
   })
 
   it('dismissing hides the current batch until a session outside it becomes a candidate', () => {
+    publishIdleReview({ count: 2, freedBytes: null, candidateKeys: ['a', 'b'] }, false)
     dismissIdleReview()
     expect(getIdleReviewSnapshot().visible).toBe(false)
     // Same two sessions republished (a poll tick with nothing new) — stays dismissed.
