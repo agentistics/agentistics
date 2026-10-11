@@ -135,7 +135,7 @@ describe('budgets, pacing, and routing', () => {
   test('routes spec implementation to codex and QA away from its author', () => {
     const claude = planBudget(withPlan('claude', 20, 55, 'Max'), now)
     const codex = planBudget(withPlan('codex', 11, 35, 'Plus'), now)
-    const gemini = { ...planBudget({ ...withPlan('gemini' as any, 10, 20, 'Pro'), harness: 'gemini' as any }, now), pace: planPace(withPlan('gemini' as any, 10, 20, 'Pro'), now) }
+    const gemini = { ...planBudget({ ...withPlan('gemini' as any, 10, 20, 'Pro'), harness: 'gemini' as any }, now), ...planPace(withPlan('gemini' as any, 10, 20, 'Pro'), now) }
     const budgets = [claude, codex, gemini]
     expect(routeRecommendation(budgets, 'spec-impl').harness).toBe('codex')
     expect(routeRecommendation(budgets, 'qa', 'codex').harness).toBe('gemini')
@@ -146,6 +146,6 @@ describe('budgets, pacing, and routing', () => {
     const pace = planPace(l, now, [{ ...l, updatedAt: now - 6 * H, windows: [win('5h', 10, reset5), win('week', 34, resetWeek)] }])
     expect(pace.paceStatus).toBe('under')
     expect(pace.suggestedParallel).toBeGreaterThanOrEqual(2)
-    expect(routeRecommendation([{ ...planBudget(l, now), pace }], 'mechanical').reason).toContain('Under pace')
+    expect(routeRecommendation([{ ...planBudget(l, now), ...pace }], 'mechanical').reason).toContain('Under pace')
   })
 })

@@ -11,11 +11,13 @@ export interface HandoffHintRow {
   contextTokens?: number
   contextWindow?: number
   hintedLevel?: number
+  /** Context size when the last hint was sent; the next reminder is +50k after it. */
+  hintedTokens?: number
 }
 
 export interface HandoffHint {
   id: string
-  level: 1 | 2
+  level: number
   tokens: number
   fraction: number
 }
@@ -25,9 +27,8 @@ export function isLeaderRow(row: Pick<HandoffHintRow, 'title' | 'leader'>): bool
   return row.leader === true || /^(?:\[ LEADER \]|\[ LÍDER \]|Líder)/.test(row.title)
 }
 
-/** Select at most the next level for each row; persistence makes this safe across polls/processes. */
-export function planHandoffHints(rows: readonly HandoffHintRow[], nowLevel = 0): HandoffHint[] {
-  void nowLevel
+/** Level 1 at the first crossing, then one reminder for every further +50k over the last hint. */
+export function planHandoffHints(rows: readonly HandoffHintRow[]): HandoffHint[] {
   return rows.flatMap(row => {
     if (!isLeaderRow(row) || !Number.isFinite(row.contextTokens) || row.contextTokens! < 0) return []
     const tokens = row.contextTokens!
@@ -35,11 +36,11 @@ export function planHandoffHints(rows: readonly HandoffHintRow[], nowLevel = 0):
     const crossed = tokens >= HANDOFF_HINT_DEFAULT_TOKENS || fraction >= HANDOFF_HINT_DEFAULT_FRACTION
     if (!crossed) return []
     const previous = row.hintedLevel ?? 0
-    const level: 1 | 2 = previous < 1
-      ? 1
-      : tokens >= HANDOFF_HINT_DEFAULT_TOKENS + HANDOFF_HINT_REMINDER_DELTA ? 2 : 1
-    if (level <= previous) return []
-    return [{ id: row.id, level, tokens, fraction }]
+    if (previous >= 1) {
+      const since = row.hintedTokens ?? HANDOFF_HINT_DEFAULT_TOKENS
+      if (tokens < since + HANDOFF_HINT_REMINDER_DELTA) return []
+    }
+    return [{ id: row.id, level: previous + 1, tokens, fraction }]
   })
 }
 
@@ -52,20 +53,34 @@ export function handoffHintText(hint: HandoffHint): string {
 export interface HandoffHintDeps {
   rows: () => Promise<readonly HandoffHintRow[]>
   prompt: (id: string, text: string) => Promise<{ ok: boolean }>
-  hintedLevel: (id: string) => Promise<number>
-  markHinted: (id: string, level: number) => Promise<boolean>
+  /** The persisted state, read fresh. */
+  hinted: (id: string) => Promise<{ level: number; tokens?: number }>
+  /** Persists the state; returns false when it could not be written. */
+  markHinted: (id: string, level: number, tokens: number | undefined) => Promise<boolean>
 }
 
-/** Sends through the same prompt path as agentistics_session_message, with an agentistics sender. */
+const inFlight = new Set<string>()
+
+/**
+ * Sends through the same prompt path as agentistics_session_message. The level is MARKED BEFORE the
+ * send (and put back if the send fails), so two overlapping runs can never both deliver one level.
+ */
 export async function sendHandoffHints(deps: HandoffHintDeps): Promise<number> {
   let sent = 0
   for (const row of await deps.rows().catch(() => [])) {
-    const level = await deps.hintedLevel(row.id).catch(() => row.hintedLevel ?? 0)
-    const [hint] = planHandoffHints([{ ...row, hintedLevel: level }])
-    if (!hint) continue
-    const result = await deps.prompt(row.id, `[from agentistics · question]\n${handoffHintText(hint)}`).catch(() => ({ ok: false }))
-    if (!result.ok) continue
-    if (await deps.markHinted(row.id, hint.level).catch(() => false)) sent++
+    if (inFlight.has(row.id)) continue
+    inFlight.add(row.id)
+    try {
+      const prev = await deps.hinted(row.id).catch(() => ({ level: row.hintedLevel ?? 0, tokens: row.hintedTokens }))
+      const [hint] = planHandoffHints([{ ...row, hintedLevel: prev.level, hintedTokens: prev.tokens }])
+      if (!hint) continue
+      if (!(await deps.markHinted(row.id, hint.level, hint.tokens).catch(() => false))) continue
+      const result = await deps.prompt(row.id, `[from agentistics · question]\n${handoffHintText(hint)}`).catch(() => ({ ok: false }))
+      if (result.ok) sent++
+      else await deps.markHinted(row.id, prev.level, prev.tokens).catch(() => false)
+    } finally {
+      inFlight.delete(row.id)
+    }
   }
   return sent
 }

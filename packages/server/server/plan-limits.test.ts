@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, renameSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { routeRecommendation } from '@agentistics/core'
 import {
   __resetPlanLimitsForTest, ingestPlanLimits, latestCodexLimits, noteStructuredLine, planLimitsPayload,
   setPlanLimitsSink, syncPlanLimitsFromFile, watchPlanLimitsFile,
@@ -45,6 +46,12 @@ test('payload exposes pacing budgets alongside limits', async () => {
   expect(body).toHaveProperty('budgets')
   expect(body.budgets[0]).toMatchObject({ harness: 'codex', fiveHourPct: 11, weekPct: 35, paceStatus: 'on' })
   expect(body.budgets[0]!.suggestedParallel).toBeGreaterThanOrEqual(1)
+  // The payload row is the FLAT shape the router reads, with no hand-built nested `pace`.
+  expect(body.budgets[0]).not.toHaveProperty('pace')
+  const rec = routeRecommendation(body.budgets, 'spec-impl')
+  expect(rec.harness).toBe('codex')
+  expect(rec.cadence.parallel).toBe(body.budgets[0]!.suggestedParallel)
+  expect(rec.reason).toContain(body.budgets[0]!.note)
 })
 
 test('notices fire once per threshold, the 100% one names an alternative with room', async () => {

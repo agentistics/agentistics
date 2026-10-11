@@ -282,15 +282,16 @@ const ROUTE_PREFERENCES: Record<RouteKind, readonly [HarnessId, string?][]> = {
 }
 
 export function routeRecommendation(
-  budgets: readonly (PlanBudget & { pace?: PlanPace })[],
+  /** The flat `{ ...planBudget, ...planPace }` row `/api/plan-limits` serves; pace fields are optional. */
+  budgets: readonly (PlanBudget & Partial<PlanPace>)[],
   kind: RouteKind,
   authorHarness?: string,
 ): RouteRecommendation {
   const allowTight = kind === 'lead'
   const eligible = budgets.filter(b => b.plan !== 'unregistered' && b.status !== 'hold' && (allowTight || b.status !== 'tight') && b.harness !== (kind === 'qa' ? authorHarness : undefined))
   const ordered = [...eligible].sort((a, b) => {
-    const ap = a.pace?.paceStatus === 'under' ? 0 : 1
-    const bp = b.pace?.paceStatus === 'under' ? 0 : 1
+    const ap = a.paceStatus === 'under' ? 0 : 1
+    const bp = b.paceStatus === 'under' ? 0 : 1
     if (ap !== bp) return ap - bp
     const ai = ROUTE_PREFERENCES[kind].findIndex(([h]) => h === a.harness)
     const bi = ROUTE_PREFERENCES[kind].findIndex(([h]) => h === b.harness)
@@ -306,14 +307,13 @@ export function routeRecommendation(
   }
   const selected = preference.find(([h]) => h === pick.harness)
   const alternatives = ordered.filter(b => b.harness !== pick.harness).map(b => b.harness)
-  const pace = pick.pace
-  const paceText = pace ? ` ${pace.note}` : ''
+  const paceText = pick.note ? ` ${pick.note}` : ''
   return {
     harness: pick.harness,
     ...(selected?.[1] ? { model: selected[1] } : {}),
     reason: `${pick.harness} is the preferred eligible plan for ${kind}.${paceText}`,
     alternatives,
-    cadence: { parallel: pace?.suggestedParallel ?? 1, note: pace?.note ?? 'Keep one worker running.' },
+    cadence: { parallel: pick.suggestedParallel ?? 1, note: pick.note ?? 'Keep one worker running.' },
   }
 }
 

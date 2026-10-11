@@ -261,20 +261,21 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
     const host = await hostFor(lang)
     if (!host.sessions) return { sessions: [], rows: [], attention: 0, tasks: [], finishedTasks: [] }
     const fleet = await timeFleetPhase('readFleet: host.sessions()', () => host.sessions!())
-    // The context gauge in this snapshot is the composer/ring's server-side reading. The hint is
-    // fire-and-forget so a slow terminal send never holds the fleet response open.
+    // Leaders get one low-noise handoff hint. It reads the RAW context numbers off the hub's
+    // snapshot (the formatted `context` on a ControlSession is a label, not a count) and never holds
+    // the fleet response open.
     void (async () => {
-      const registry = await readRegistry().catch(() => [])
+      const [registry, raw] = await Promise.all([readRegistry().catch(() => []), fleetSessionHub().then(h => h.read())])
+      const titles = new Map(fleet.sessions.map(row => [row.id, fleetRow(row, s).title]))
       const byId = new Map(registry.map(row => [row.id, row]))
-      const rows: HandoffHintRow[] = fleet.sessions.map(row => {
-        const managed = byId.get(row.id)
+      const rows: HandoffHintRow[] = raw.sessions.map(view => {
+        const managed = byId.get(view.id)
         return {
-          id: row.id,
-          title: fleetRow(row, s).title,
+          id: view.id,
+          title: titles.get(view.id) ?? '',
           ...(managed?.leader ? { leader: true } : {}),
-          ...(row.contextTokens !== undefined ? { contextTokens: row.contextTokens } : {}),
-          ...(row.contextWindow !== undefined ? { contextWindow: row.contextWindow } : {}),
-          ...(managed?.handoffHintLevel !== undefined ? { hintedLevel: managed.handoffHintLevel } : {}),
+          ...(view.contextTokens !== undefined ? { contextTokens: view.contextTokens } : {}),
+          ...(view.contextWindow !== undefined ? { contextWindow: view.contextWindow } : {}),
         }
       })
       await sendHandoffHints({
@@ -283,8 +284,11 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
           const out = await runFleetAction(lang, { action: 'prompt', id, text })
           return { ok: out.ok }
         },
-        hintedLevel: async id => byId.get(id)?.handoffHintLevel ?? 0,
-        markHinted: (id, level) => patchSession(id, { handoffHintLevel: level }),
+        hinted: async id => {
+          const m = (await readRegistry().catch(() => [])).find(r => r.id === id)
+          return { level: m?.handoffHintLevel ?? 0, ...(m?.handoffHintTokens !== undefined ? { tokens: m.handoffHintTokens } : {}) }
+        },
+        markHinted: (id, level, tokens) => patchSession(id, { handoffHintLevel: level, ...(tokens !== undefined ? { handoffHintTokens: tokens } : {}) }),
       })
     })().catch(() => {})
     // Nay conversations are filed into "Nay › Ativas" / "Nay › Inativas" by whether they run. It

@@ -1,7 +1,6 @@
 import { test, expect } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { HARNESS_ORDER, SURFACE_HARNESS_ORDER, type HarnessId } from "@agentistics/core";
+import { planLimitsTool } from "./plan-limits-tool.js";
 import { harnessIds, harnessParam } from "./session-tokens.js";
 
 /**
@@ -46,9 +45,23 @@ test("harnessParam() includes all harnesses and 'all'", () => {
   }
 });
 
-test("plan limits MCP tool is registered as a read-only preflight", () => {
-  const source = readFileSync(join(import.meta.dir, "agentistics-mcp.ts"), "utf8");
-  expect(source).toContain('name: "agentistics_plan_limits"');
-  expect(source).toContain('Read this BEFORE opening sessions');
-  expect(source).toContain('apiGet("/api/plan-limits")');
+test("plan limits MCP tool answers with a recommendation from the real payload shape", async () => {
+  const { planBudget, planPace } = await import("@agentistics/core");
+  const now = Date.parse("2026-10-10T00:00:00Z");
+  const H = 3_600_000;
+  const limits = {
+    harness: "codex" as const, account: "default", plan: "Plus", updatedAt: now, source: "codex-rollout" as const,
+    windows: [
+      { kind: "5h" as const, usedPct: 11, resetsAt: now + 3 * H },
+      { kind: "week" as const, usedPct: 35, resetsAt: now + 3 * 24 * H },
+    ],
+  };
+  // The flat `{ ...budget, ...pace }` row, exactly as /api/plan-limits builds it.
+  const budgets = [{ ...planBudget(limits as any, now), ...planPace(limits as any, now, []) }];
+  const out = planLimitsTool({ kind: "spec-impl" }, { budgets, now });
+  expect(out.budgets).toHaveLength(1);
+  expect(out.recommendation?.harness).toBe("codex");
+  expect(out.recommendation?.cadence.parallel).toBeGreaterThanOrEqual(1);
+  expect(out.readAt).toBe(now);
+  expect(planLimitsTool(undefined, { budgets, now }).recommendation).toBeUndefined();
 });
