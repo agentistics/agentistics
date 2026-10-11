@@ -707,7 +707,7 @@ export function consumeFreshPresence(proof: { session: string; token?: string | 
   return true
 }
 /** Mint the proof for the gesture that just happened, for this session and this action — or none. */
-function mintFresh(fresh: { session: string; binding: string } | undefined): string | undefined {
+export function mintFresh(fresh: { session: string; binding: string } | undefined): string | undefined {
   _fresh = null
   if (!fresh || !FRESH_BINDING.test(fresh.binding)) return undefined
   const token = randomBytes(32).toString('base64url')

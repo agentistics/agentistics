@@ -20,12 +20,12 @@ describe('confirm each use — web', () => {
   test('texts exist in both languages', () => {
     for (const k of ['cfu_title', 'cfu_d'] as const) { expect(vt(k, 'pt').length).toBeGreaterThan(5); expect(vt(k, 'en')).not.toBe(vt(k, 'pt')) }
   })
-  test('deny posts at once with no gesture; approve here posts too (the service raises the gesture)', async () => {
+  test('deny posts at once with no gesture; approve here first asks the service to prove the gesture, bound to the request', async () => {
     mockFetch()
     ;(globalThis as Record<string, unknown>).window = { location: { hostname: 'localhost' } }
     await decideVaultUse('use-1', false)
     await decideVaultUse('use-1', true)
-    expect(calls.map(c => c.url)).toEqual(['/api/vault/personal/use/use-1/deny', '/api/vault/personal/use/use-1/approve'])
+    expect(calls.map(c => c.url)).toEqual(['/api/vault/personal/use/use-1/deny', '/api/vault/personal/use/use-1/prove', '/api/vault/personal/use/use-1/approve'])
   })
   test('from a phone, approve asks the passkey first and carries its token; deny still asks nothing', async () => {
     mockFetch()
