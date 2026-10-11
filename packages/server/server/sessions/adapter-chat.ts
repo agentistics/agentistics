@@ -112,8 +112,31 @@ export interface AdapterChatDeps {
    * the current value, then every change. Absent = this source cannot say (the event is never sent).
    */
   composing?: { now(): 'question' | null; on(cb: (c: 'question' | null) => void): () => void }
+  /**
+   * Is this channel STILL the one the row would be served from? Asked on every fleet tick; `false`
+   * closes the stream (not as a failure) so the client reconnects to whatever the row reads from now.
+   * A structured session turned into a TUI (`attach` = open in terminal) keeps its row and its
+   * conversation, but its structured channel is dead: following it froze the chat on the person's own
+   * message while the TUI answered (AGY.CHAT.REPLIES, 2026-10-10). Absent = never re-asked.
+   */
+  current?: () => Promise<boolean>
   setTimer?: (f: () => void, ms: number) => unknown
   clearTimer?: (t: unknown) => void
+}
+
+/** Which channel a stream follows: a structured session's own, or the engine's file channel for a conversation. */
+export type AdapterSourceKind = { structured: true } | { structured: false; conversationId: string }
+
+/**
+ * PURE (AGY.CHAT.REPLIES). Is the channel a stream opened on still the one the row would be served
+ * from? `now === null` = the row would take the legacy path now. A structured channel stays current
+ * while the session is structured — its conversation id may move from the managed id to the one the
+ * harness states, which is the same channel; a file channel stays current for the same conversation.
+ */
+export function sameAdapterSource(opened: AdapterSourceKind, now: AdapterSourceKind | null): boolean {
+  if (!now) return false
+  if (opened.structured || now.structured) return opened.structured === now.structured
+  return opened.conversationId === now.conversationId
 }
 
 /** PURE. The payload's canonical facts, the way `readSessionChat` adds them on the legacy path. */
@@ -246,6 +269,8 @@ export function adapterChatResponse(
       const row = await deps.row()
       if (closed) return
       if (!row) { close(false); return } // gone: the legacy stream says so in its own words
+      if (deps.current && !(await deps.current())) { if (!closed) close(false); return }
+      if (closed) return
       cwd = row.cwd || cwd
       link = row.link
       const nowLive = rowLive(row)
