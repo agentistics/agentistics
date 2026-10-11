@@ -10,7 +10,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { b64url, base32Decode, hotp, type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
-import { __resetVaultForTests, __setVaultClockForTests, sealToFile } from './service'
+import { __resetVaultForTests, __setVaultClockForTests, acceptVaultHeartbeatToken, rotateVaultHeartbeatToken, sealToFile } from './service'
 import { __resetGateForTests } from './gate'
 import { __resetPersonalForTests } from './personal'
 import { __resetMobileForTests } from './mobile'
@@ -264,6 +264,18 @@ describe('opening with the code alone (opt-in, default off)', () => {
     // Owner 2026-10-03: the unlock's code is the step-up — the list opens with no second code.
     expect(typeof r.json.grant).toBe('string')
     expect((await http('GET', '/api/vault', undefined, PHONE_HTTP)).status).toBe(200) // carries the grant the unlock returned
+  })
+  test('a phone unlock while the vault is open leaves the tab\'s heartbeat token valid', async () => {
+    await http('POST', '/api/vault/personal/mobile/code-reveal', { enabled: true, code: codeAt() }); next()
+    const d = await enrolDevice()
+    await lock()
+    const body = () => ({ kind: 'device', deviceId: d.deviceId, deviceSecret: d.deviceSecret, code: codeAt() })
+    expect((await http('POST', '/api/vault/phone/unlock', body(), PHONE_HTTP)).json.ok).toBe(true)
+    const tabToken = rotateVaultHeartbeatToken() // what the computer's tab holds
+    next()
+    const again = await http('POST', '/api/vault/phone/unlock', body(), PHONE_HTTP)
+    expect(again.headers.get('set-cookie') ?? '').not.toContain('agentistics-vault-heartbeat')
+    expect(acceptVaultHeartbeatToken(tabToken)).toBe('ok')
   })
   test('the code with another device\'s secret opens nothing', async () => {
     await http('POST', '/api/vault/personal/mobile/code-reveal', { enabled: true, code: codeAt() }); next()

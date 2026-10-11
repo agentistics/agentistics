@@ -173,7 +173,10 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     if (!g.ok) return reply(g)
     const left = extendAutoLock()
     if (left === null) return reply({ ok: false, code: String('locked'), sentence: vaultLang() === 'pt' ? 'O cofre já está trancado.' : 'The vault is already locked.' })
-    return addHeartbeatCookie(reply({ ok: true, autoLockInMs: left }), rotateVaultHeartbeatToken())
+    // A token only for the page's own grant, and under the arm's 30 s throttle (null = too soon: no new cookie).
+    const token = gate.grantValid(grant, session, 'read') ? armVaultHeartbeatToken() : null
+    const res = reply({ ok: true, autoLockInMs: left })
+    return token === null ? res : addHeartbeatCookie(res, token)
   }
   if (path === '/api/vault/lock' && req.method === 'POST') {
     const b = await body()
