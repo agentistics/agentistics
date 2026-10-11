@@ -77,9 +77,14 @@ export function __setPlanLimitsForTest(limits: PlanLimits[] | null, now = Date.n
 
 type Lang = 'pt' | 'en'
 
-export function windowLabel(kind: PlanWindowKind, _lang: Lang): string {
-  // "7 d", paired with "5 h" — "sem" read as the word "sem" (without).
-  return kind === '5h' ? '5 h' : '7 d'
+export function windowLabel(kind: PlanWindowKind, lang: Lang): string {
+  return kind === '5h'
+    ? (lang === 'pt' ? 'Sessão 5 h' : '5-h session')
+    : (lang === 'pt' ? 'Semana' : 'Week')
+}
+
+export function windowShortLabel(kind: PlanWindowKind, lang: Lang): string {
+  return kind === '5h' ? '5 h' : (lang === 'pt' ? 'Semana' : 'Week')
 }
 
 export const SOURCE_LABEL: Record<PlanLimitSource, { pt: string; en: string }> = {
@@ -142,6 +147,32 @@ export function limitTone(pct: number): string {
   return pct >= 95 ? 'var(--accent-red)' : pct >= 75 ? 'var(--anthropic-orange)' : 'var(--accent-green)'
 }
 
+export type LimitLevel = 'ok' | 'attention' | 'critical'
+
+/** The level a percentage reads as — the same 75 / 95 thresholds `limitTone` colours by. */
+export function limitLevel(pct: number | null): LimitLevel {
+  if (pct === null) return 'ok'
+  return pct >= 95 ? 'critical' : pct >= 75 ? 'attention' : 'ok'
+}
+
+/** The level in WORDS, for aria-labels: the colour and the glyph never carry it alone. */
+export function limitLevelWord(level: LimitLevel, lang: Lang): string {
+  if (level === 'critical') return lang === 'pt' ? 'quase no fim' : 'almost exhausted'
+  if (level === 'attention') return lang === 'pt' ? 'atenção' : 'attention'
+  return lang === 'pt' ? 'com folga' : 'room to spare'
+}
+
+export interface SubscriptionRow { harness: PlanLimits['harness']; plan: string | undefined; limits: PlanLimits | null }
+
+/** "All subscriptions": every reading, plus every registered plan that has none yet (no ring, no zero). */
+export function subscriptionRows(limits: PlanLimits[] | null, registered: { harness: PlanLimits['harness']; plan: string }[]): SubscriptionRow[] {
+  const found = new Set((limits ?? []).map(l => l.harness))
+  return [
+    ...(limits ?? []).map(l => ({ harness: l.harness, plan: l.plan ?? l.sourcePlan, limits: l })),
+    ...registered.filter(r => !found.has(r.harness)).map(r => ({ harness: r.harness, plan: r.plan as string | undefined, limits: null })),
+  ]
+}
+
 export { currentUsedPct, forecastWindow }
 
 // ─── The threshold notice (bell, toast and the Nay card share these words) ──────────────────
@@ -195,7 +226,7 @@ export function warnForecast(w: PlanLimitWindow, now: number): PlanForecast | nu
 
 /** The short form for a one-line meter: the same "5 h" / "7 d". */
 export function windowShort(kind: PlanWindowKind, lang: Lang): string {
-  return windowLabel(kind, lang)
+  return windowShortLabel(kind, lang)
 }
 
 /** When it renews, as short as it can be said: the clock for the 5-hour window (it renews within
