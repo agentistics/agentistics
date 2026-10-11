@@ -528,3 +528,21 @@ describe('parseFleetPanes — one list-panes for the session list and the pane p
     expect(parseFleetPanes('')).toEqual({ sessions: [], panePids: new Map() })
   })
 })
+
+describe('fleetPanesWithCaptures — the poll in one tmux process (PERF.IDLE)', () => {
+  const { fleetPanesWithCapturesArgs, splitFleetPanesWithCaptures, FLEET_PANES_FORMAT, tmuxName } = require('./tmux-cli') as typeof import('./tmux-cli')
+  it('lists, marks the end of the listing, then captures each id with its separator', () => {
+    const args = fleetPanesWithCapturesArgs(['aaaa1111bb'], 60, 'L', 'S')
+    expect(args.slice(2)).toEqual(['list-panes', '-a', '-F', FLEET_PANES_FORMAT, ';', 'display-message', '-p', 'L',
+      ';', 'capture-pane', '-p', '-t', tmuxName('aaaa1111bb'), '-S', '-60', ';', 'display-message', '-p', 'S'])
+  })
+  it('cuts the listing from the frames; a sequence that stopped leaves the rest null', () => {
+    const out = ['row1', 'row2', 'L', 'a1', 'a2', '', 'S', 'b1'].join('\n')
+    const cut = splitFleetPanesWithCaptures(out, 2, 'L', 'S')
+    expect(cut).toEqual({ listOut: 'row1\nrow2', listOk: true, frames: [['a1', 'a2'], null] })
+  })
+  it('no listing separator: the listing did not complete, and no frame is trusted', () => {
+    expect(splitFleetPanesWithCaptures('no server running on /tmp/x', 1, 'L', 'S'))
+      .toEqual({ listOut: 'no server running on /tmp/x', listOk: false, frames: [null] })
+  })
+})

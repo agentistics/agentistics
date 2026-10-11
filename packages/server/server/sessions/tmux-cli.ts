@@ -372,6 +372,30 @@ export function fleetPanesArgs(socket?: string): string[] {
   return sock(['list-panes', '-a', '-F', FLEET_PANES_FORMAT], socket)
 }
 
+/**
+ * PERF.IDLE: the poll's screen captures ride the SAME tmux process as its listing — `list-panes -a`,
+ * a separator, then `captureManyArgs`' capture/separator pairs for the sessions the previous poll
+ * captured. tmux stops a sequence at the first command that fails (a session gone since), so the
+ * captures answered are exactly the ones whose separator arrived (`splitFleetPanesWithCaptures`).
+ */
+export function fleetPanesWithCapturesArgs(ids: string[], lines: number, listSep: string, sep: string, socket?: string): string[] {
+  const rest: string[] = ['list-panes', '-a', '-F', FLEET_PANES_FORMAT, ';', 'display-message', '-p', listSep]
+  for (const id of ids) rest.push(';', 'capture-pane', '-p', '-t', tmuxName(id), '-S', `-${lines}`, ';', 'display-message', '-p', sep)
+  return sock(rest, socket)
+}
+
+/**
+ * PURE. Cut `fleetPanesWithCapturesArgs`' output back apart: the listing (and whether it COMPLETED —
+ * its separator arrived, so a later failing capture says nothing about it) and one frame per id, `null`
+ * where the sequence stopped before it.
+ */
+export function splitFleetPanesWithCaptures(out: string, count: number, listSep: string, sep: string): { listOut: string; listOk: boolean; frames: (string[] | null)[] } {
+  const lines = out.split('\n')
+  const at = lines.indexOf(listSep)
+  if (at < 0) return { listOut: out, listOk: false, frames: Array.from({ length: count }, () => null) }
+  return { listOut: lines.slice(0, at).join('\n'), listOk: true, frames: splitCaptureMany(lines.slice(at + 1).join('\n'), count, sep) }
+}
+
 /** PURE. `fleetPanesArgs`' output -> the `parseTmuxList` rows and the `parsePanePids` map, as the two reads gave them. */
 export function parseFleetPanes(out: string): { sessions: BackendSession[]; panePids: Map<string, number> } {
   const listLines = new Map<string, string>()
