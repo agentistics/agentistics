@@ -37,6 +37,13 @@ describe('SessionLinkInfo', () => {
     expect(html).toContain('Started')
     expect(html).toContain('<button')
   })
+  it('keeps the type control inside the panel without a portalled role menu', () => {
+    const html = renderToStaticMarkup(<SessionLinkPanel links={links} sessionId="session-1" pt={false} onGo={() => {}} />)
+    expect(html).toContain('data-testid="session-link-panel"')
+    expect(html).toContain('Change type')
+    expect(html).not.toContain('role="menu"')
+    expect(html).not.toContain('session-role:leader')
+  })
 })
 
 import { STATE_COLOR } from '../../lib/sessionCardStyle'
