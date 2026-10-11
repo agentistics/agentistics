@@ -35,7 +35,7 @@ import {
 import { useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
 import {
   ChevronLeft, Eye, FileText, FolderTree, MessagesSquare, Plus, TerminalSquare,
-  X as XIcon, ArrowRight, MessageCircle, PanelLeft, PanelLeftClose, SquareTerminal,
+  X as XIcon, ArrowRight, MessageCircle, PanelLeft, PanelLeftClose, SquareTerminal, ChevronDown,
 } from 'lucide-react'
 import { setNayFabShownInSession, useNayFabShownInSession } from '../lib/nayFabVisibility'
 import { StudioHost, type StudioHostProps } from '../components/sessions/StudioHost'
@@ -2136,6 +2136,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    * closes the panel the instant it opened.
    */
   const [sessionDrawer, setSessionDrawer] = useState(false)
+  /** The panel's "Context and cost" card is long; it opens on a tap, its glance figure always shown. */
+  const [drawerCtxOpen, setDrawerCtxOpen] = useState(false)
   const openSessionDrawer = useCallback(() => {
     window.history.pushState({ ...(window.history.state ?? {}), [SESSION_DRAWER_STATE]: true }, '')
     setSessionDrawer(true)
@@ -2736,22 +2738,37 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       : null
     const contentsOn = rightActivePanel !== null && isTabPanelId(rightActivePanel)
     /** A row of the panel's own sections: label on the left, its glance figure on the right. */
-    const drawerSection = (key: string, label: string, summary: ReactNode, body: ReactNode) => (
-      <section key={key} data-drawer-section={key} className="ag-drawer-fit" style={{
-        border: '1px solid var(--border)', background: 'var(--bg-card)', borderRadius: 12, flexShrink: 0,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 40, padding: '0 12px' }}>
+    const drawerSection = (
+      key: string, label: string, summary: ReactNode, body: ReactNode,
+      fold?: { open: boolean; toggle: () => void },
+    ) => {
+      const head = (
+        <>
           <span style={{
             fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700,
             color: 'var(--text-tertiary)',
           }}>{label}</span>
           <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--text-secondary)' }}>
             {summary}
+            {fold && <ChevronDown size={16} style={{ transform: fold.open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />}
           </span>
-        </div>
-        <div style={{ padding: '0 12px 10px' }}>{body}</div>
-      </section>
-    )
+        </>
+      )
+      const headStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, minHeight: fold ? 44 : 40, padding: '0 12px' }
+      return (
+        <section key={key} data-drawer-section={key} className="ag-drawer-fit" style={{
+          border: '1px solid var(--border)', background: 'var(--bg-card)', borderRadius: 12, flexShrink: 0,
+        }}>
+          {fold ? (
+            <button type="button" onClick={fold.toggle} aria-expanded={fold.open} style={{
+              ...headStyle, width: '100%', border: 'none', background: 'transparent', cursor: 'pointer',
+              fontFamily: 'inherit', color: 'inherit', textAlign: 'left',
+            }}>{head}</button>
+          ) : <div style={headStyle}>{head}</div>}
+          {(!fold || fold.open) && <div style={{ padding: '0 12px 10px' }}>{body}</div>}
+        </section>
+      )
+    }
     /** The VIEW, as the segmented control it was in the ⋯ menu — now four alternatives, with the
      *  bottom bar's two terminals folded in (the bar is gone on a phone). */
     const viewTabs: { id: string; label: string; icon: ReactNode; on: boolean; go: () => void }[] = [
@@ -2901,6 +2918,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             {...(selected.model ? { startedModel: selected.model } : {})}
             {...(selected.effort ? { startedEffort: selected.effort } : {})}
           />,
+          { open: drawerCtxOpen, toggle: () => setDrawerCtxOpen(v => !v) },
         )}
 
         {drawerSection('limits', pt ? 'Limites de uso' : 'Usage limits', null, (
