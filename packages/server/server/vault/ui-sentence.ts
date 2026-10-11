@@ -78,6 +78,11 @@ export function uiSentence(sentence: string, lang: UiLang, code?: string): { sen
     })
   }
   // Terminal words left orphaned by the swap ("type them in a terminal (…)") never reach the page.
+  // The vault page creates the vault itself ("Create the vault"): no command, no action to draw.
+  out = out.replace(/(\b[Rr]ode |\b[Rr]un )?`agentop vault init( --protector[^`]*)?`/g, (_m, verb: string | undefined) => {
+    const ctl = lang === 'pt' ? '“Criar o cofre”, na página do Cofre' : '"Create the vault", on the Vault page'
+    return verb ? `${verb[0] === verb[0]!.toUpperCase() ? 'Use' : 'use'} ${ctl}` : ctl
+  })
   out = out.replace(/ (num|em um) terminal( desta máquina| nesta máquina)?/g, '').replace(/ (in|on) a terminal( on this machine)?/g, '')
   return { sentence: out, ...(action ? { action } : {}) }
 }

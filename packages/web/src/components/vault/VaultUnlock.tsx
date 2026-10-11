@@ -19,7 +19,7 @@ import type React from 'react'
 import { Fingerprint, Lock, Smartphone } from 'lucide-react'
 import { Err, input, primaryBtn } from '../MfaSetup'
 import { CodeBoxes } from '../CodeBoxes'
-import { cleanCode, codeComplete, loadVault, unlockCode, unlockGesture, type UiAction, type VaultView } from '../../lib/vaultApi'
+import { cleanCode, codeComplete, createVault, loadVault, unlockCode, unlockGesture, type UiAction, type VaultView } from '../../lib/vaultApi'
 import { vt, type VaultKey } from '../../lib/vaultText'
 import { PHONE_APPROVE_POLL_MS, PHONE_APPROVE_WAIT_MS, helloFallback } from '../../lib/helloFallback'
 import {
@@ -146,6 +146,10 @@ export function UnlockControl({ view, lang, onOpened, btn, isMobile, center, onA
   }, [phase, lang, onOpened])
 
   const align = isMobile ? 'left' : center ? 'center' : 'right'
+  // No vault on this computer yet: nothing to unlock — offer to create it, here, instead of a command.
+  if (view.state === 'uninitialized') {
+    return <CreateVaultControl lang={lang} isMobile={isMobile} center={center} btn={btn} onCreated={onOpened} onBusy={onBusy} />
+  }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: isMobile ? 'stretch' : center ? 'center' : 'flex-end', gap: 8, width: isMobile ? '100%' : undefined }}>
       {phase === 'phone' && (
@@ -175,6 +179,44 @@ export function UnlockControl({ view, lang, onOpened, btn, isMobile, center, onA
         <button type="button" style={{ ...btn, background: 'transparent' }} onClick={() => onAction(errAction)}>{vt(errAction === 'enroll' ? 'act_enroll' : errAction === 'unlock' ? 'act_unlock' : 'act_disable', lang)}</button>
       )}
     </div>
+  )
+}
+
+/**
+ * The vault does not exist yet: one button creates it (`POST /api/vault/init`, the code path
+ * `agentop vault init` runs). When the service finds no system keychain it answers `no-protector`;
+ * the same control then asks for a passphrase instead of sending the person to a terminal.
+ */
+function CreateVaultControl({ lang, isMobile, center, btn, onCreated, onBusy }: { lang: Lang; isMobile: boolean; center?: boolean; btn: React.CSSProperties; onCreated: () => void; onBusy?: (busy: boolean) => void }) {
+  const [busy, setBusy] = useState(false)
+  const [needsPass, setNeedsPass] = useState(false)
+  const [pass, setPass] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => { onBusy?.(busy) }, [busy, onBusy])
+  const create = async () => {
+    if (busy || (needsPass && pass.length < 8)) return
+    setBusy(true); setError(null)
+    const r = await createVault(needsPass ? pass : undefined)
+    setBusy(false)
+    if (r.ok) { setPass(''); onCreated(); return }
+    if (r.code === 'no-protector') { setNeedsPass(true); return }
+    setError(r.sentence || vt('network', lang))
+  }
+  return (
+    <form onSubmit={e => { e.preventDefault(); void create() }} data-vault-create
+      style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: isMobile ? 'stretch' : center ? 'center' : 'flex-end', width: isMobile ? '100%' : undefined, maxWidth: 360 }}>
+      <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.55, textAlign: isMobile ? 'left' : center ? 'center' : 'right' }}>
+        {vt(needsPass ? 'createVaultPassHint' : 'createVaultHint', lang)}
+      </div>
+      {needsPass && (
+        <input type="password" autoComplete="new-password" value={pass} onChange={e => setPass(e.target.value)} aria-label={vt('createVaultPassLabel', lang)}
+          placeholder={vt('createVaultPassLabel', lang)} style={{ ...input, width: '100%', boxSizing: 'border-box' }} />
+      )}
+      <button type="submit" style={{ ...btn, ...(isMobile ? { justifyContent: 'center', minHeight: 44 } : {}) }} disabled={busy || (needsPass && pass.length < 8)}>
+        {busy && <AgentisticsLoader size={14} />} {busy ? vt('createVaultCreating', lang) : vt('createVault', lang)}
+      </button>
+      {error && <div role="alert" style={{ fontSize: 12, color: 'var(--accent-red, #ef4444)' }}>{error}</div>}
+    </form>
   )
 }
 

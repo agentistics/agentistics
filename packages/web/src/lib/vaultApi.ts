@@ -156,6 +156,8 @@ export const stepUp = (code: string) => call('POST', '/api/vault/stepup', { code
 export const lockNow = (code?: string) => call('POST', '/api/vault/lock', code ? { code } : {}).then(r => reply(r))
 /** Phase 1: raises the gesture IN THE SERVICE. `pending-stepup` = a code is owed (§2.2). */
 export const unlockGesture = () => call('POST', '/api/vault/unlock', _unlockFor ? { for: _unlockFor } : {}).then(r => reply<{ state: string }>(r))
+/** Create the vault from the page (the same code path as `agentop vault init`). `passphrase` only when no keychain answered. */
+export const createVault = (passphrase?: string) => call('POST', '/api/vault/init', passphrase ? { passphrase } : {}).then(r => reply<{ existed?: boolean; said?: string }>(r))
 export const unlockCode = (code: string) => call('POST', '/api/vault/unlock/code', { code }).then(r => reply(r))
 /** Which proof each kind of action asks: gated by the CURRENT 'settings' choice (the server's `set-auth-policy` row). */
 export const setAuthPolicy = (policy: Partial<Record<ActionKind, ProofChoice>>, code?: string) => call('POST', '/api/vault/auth-policy', { policy, ...(code ? { code } : {}) }).then(r => reply(r))

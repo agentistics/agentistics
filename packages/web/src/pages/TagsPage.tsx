@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate, useOutletContext } from 'react-router-dom'
 import { Plus, Trash2, X, CalendarRange } from 'lucide-react'
-import { fmt, fmtCost, formatProjectName, canonicalProjectPath, planAllocation, totalTokens, totalTokensExplained } from '@agentistics/core'
+import { tagPlanFactor } from '../lib/costBasis'
+import { fmt, fmtCost, formatProjectName, canonicalProjectPath, totalTokens, totalTokensExplained } from '@agentistics/core'
 import type { AppContext } from '../lib/app-context'
 import type { TokenBreakdown } from '@agentistics/core'
 import { HARNESS_LABELS } from '../lib/harness'
@@ -26,6 +27,8 @@ interface TagSource { type: TagSourceType; value: string }
 interface TagAggregate {
   sessions: number
   costUSD: number
+  /** Absent on a server that predates the split. */
+  costByHarness?: Record<string, number>
   /** The two conversational counters. NOT the total — read `tokens`. */
   inputTokens: number
   outputTokens: number
@@ -182,9 +185,8 @@ export default function TagsPage() {
   // the right one here, the same one CostsPage/HomePage/TopUsagePage apply to a cross-harness
   // total. Toggling the header's API/Plan switch used to change nothing on this page at all: every
   // card kept reading `fmtCost(costUSD, …)` straight off the API figure regardless of the basis.
-  const planFactor = (costBasis === 'plan' && planBasis.basis
-    ? planAllocation(planBasis.basis).aggregateFactor
-    : null) ?? 1
+  const planFactorOf = (a: TagAggregate): number =>
+    costBasis === 'plan' ? tagPlanFactor(planBasis.basis, a.costByHarness) : 1
 
   const [tags, setTags] = useState<Tag[]>([])
   const [err, setErr] = useState<string | null>(null)
@@ -605,7 +607,7 @@ export default function TagsPage() {
                 </span>
               )}
               <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--anthropic-orange)', wordBreak: 'break-word' }}>
-                {fmtCost(t.aggregate.costUSD * planFactor, currency, brlRate)}
+                {fmtCost(t.aggregate.costUSD * planFactorOf(t.aggregate), currency, brlRate)}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 10px' }}>
                 <MiniStat label={pt ? 'Sessões' : 'Sessions'} value={t.aggregate.sessions.toLocaleString()} />
@@ -657,7 +659,7 @@ export default function TagsPage() {
                   </span>
                 )}
               </span>
-              <Cell label={pt ? 'Custo' : 'Cost'} value={fmtCost(t.aggregate.costUSD * planFactor, currency, brlRate)} accent />
+              <Cell label={pt ? 'Custo' : 'Cost'} value={fmtCost(t.aggregate.costUSD * planFactorOf(t.aggregate), currency, brlRate)} accent />
               <Cell label={pt ? 'Sessões' : 'Sessions'} value={t.aggregate.sessions.toLocaleString()} />
               <Cell label={pt ? 'Entrada' : 'Input'} value={fmt(t.aggregate.inputTokens)} />
               <Cell label={pt ? 'Saída' : 'Output'} value={fmt(t.aggregate.outputTokens)} />

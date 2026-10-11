@@ -6,11 +6,12 @@ import {
 import { format, parseISO } from 'date-fns'
 import { ArrowLeft, Pencil, Trash2, CalendarRange } from 'lucide-react'
 import {
-  fmt, fmtCost, formatModel, formatProjectName, planAllocation, repoShortName,
+  fmt, fmtCost, formatModel, formatProjectName, repoShortName,
   totalTokens as totalTokensOf, totalTokensExplained,
 } from '@agentistics/core'
 import { TokenBreakdownLine } from '../components/TokenBreakdownLine'
 import type { AppContext } from '../lib/app-context'
+import { tagPlanFactor } from '../lib/costBasis'
 import type { TokenBreakdown } from '@agentistics/core'
 import { MetricNote } from '../components/MetricNote'
 import { HARNESS_LABELS } from '../lib/harness'
@@ -26,6 +27,8 @@ interface TagSource { type: TagSourceType; value: string }
 interface TagAggregate {
   sessions: number
   costUSD: number
+  /** Absent on a server that predates the split. */
+  costByHarness?: Record<string, number>
   /** The two conversational counters. NOT the total — read `tokens`. */
   inputTokens: number
   outputTokens: number
@@ -137,13 +140,9 @@ export default function TagDetailPage() {
   const pt = lang === 'pt'
   const isMobile = useIsMobile()
 
-  // Same fix as TagsPage: a tag's sources are not per-harness, so the AGGREGATE factor applies —
-  // toggling the header's API/Plan switch used to change nothing here at all.
-  const planFactor = (costBasis === 'plan' && planBasis.basis
-    ? planAllocation(planBasis.basis).aggregateFactor
-    : null) ?? 1
-
   const [detail, setDetail] = useState<TagDetail | null>(null)
+  // Each harness slice at its OWN plan (see `tagPlanFactor`); toggling the API/Plan switch moves it.
+  const planFactor = costBasis === 'plan' && detail ? tagPlanFactor(planBasis.basis, detail.tag.aggregate.costByHarness) : 1
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [confirmDelete, setConfirmDelete] = useState(false)

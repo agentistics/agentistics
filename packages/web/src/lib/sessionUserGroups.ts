@@ -27,7 +27,8 @@
 
 import { reorderByDrag, stepOrder } from './dragReorder'
 import { unpinSession } from './pinnedSessions'
-import { createSharedPref } from './sharedPref'
+import { subscribeEvent } from './eventStream'
+import { createSharedPref, loadSharedPrefs } from './sharedPref'
 
 const KEY = 'agentistics-session-groups'
 
@@ -225,8 +226,8 @@ export function setSessionGroupHidden(id: string, hidden: boolean): void {
   if (next !== cur) store.set(next)
 }
 
-export function deleteSessionGroup(id: string): void {
-  store.set(planDeleteGroup(store.get(), id))
+export function deleteSessionGroup(id: string, cascade = false): void {
+  store.set(planDeleteGroup(store.get(), id, cascade))
 }
 
 export function addSessionToGroup(id: string, key: string): void {
@@ -319,4 +320,10 @@ export function folderCountLabel(shown: number, total: number, narrowing: boolea
  */
 export function listNarrowed(o: { activeOnly: boolean; query: string; valueFiltered: number; total: number }): boolean {
   return o.activeOnly || o.query.trim() !== '' || o.valueFiltered < o.total
+}
+
+// A folder created/renamed/moved/deleted through the API or the MCP reaches the open tabs here: the
+// server sends an empty `session-groups` signal and the store re-reads its own scoped document.
+if (typeof window !== 'undefined' && typeof EventSource !== 'undefined') {
+  subscribeEvent('session-groups', () => { void loadSharedPrefs() })
 }

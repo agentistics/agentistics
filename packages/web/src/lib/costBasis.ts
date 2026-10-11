@@ -247,3 +247,17 @@ export function modelCostByHarness(
   }
   return out
 }
+
+/**
+ * The factor a TAG's cost is rescaled by under the plan basis: each harness slice at that
+ * harness's OWN factor (`splitPlanFactor`), never the cross-harness aggregate — a tag spanning
+ * Claude and Codex was priced entirely at the Claude subscription's C/A. A harness no plan covers
+ * stays at its API figure. Falls back to 1 (the API figure) when no plan covers the tag, or when the
+ * server predates `costByHarness` and cannot say what each harness spent.
+ */
+export function tagPlanFactor(
+  basis: AggregatePlanBasis | null,
+  costByHarness: Readonly<Record<string, number>> | undefined,
+): number {
+  return splitPlanFactor(basis, costByHarness) ?? 1
+}

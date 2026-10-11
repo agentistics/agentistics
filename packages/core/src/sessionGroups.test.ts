@@ -234,3 +234,15 @@ describe('hiding a folder', () => {
     expect(planDeleteGroupH(hidden, 'nay').groups.find(g => g.id === 'x')!.hidden).toBe(true)
   })
 })
+
+describe('planDeleteGroup — cascade', () => {
+  const v = { groups: [
+    { id: 'p', name: 'P', keys: ['k1'] }, { id: 'c', name: 'C', keys: ['k2'], parentId: 'p' }, { id: 'o', name: 'O', keys: [] },
+  ] } as never
+  test('without cascade the child is promoted', () => {
+    expect(planDeleteGroup(v, 'p').groups.map(g => g.id)).toEqual(['c', 'o'])
+  })
+  test('with cascade the sub-folders go too, the rest stays', () => {
+    expect(planDeleteGroup(v, 'p', true).groups.map(g => g.id)).toEqual(['o'])
+  })
+})

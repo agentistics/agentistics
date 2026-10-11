@@ -13,6 +13,9 @@ export interface CleanIoOpts {
   lowPriority?: boolean
 }
 
+/** Ceiling for one git/du call. */
+export const RUN_TIMEOUT_MS = 60_000
+
 let prio: string[] | null = null
 function priority(): string[] {
   if (prio) return prio
@@ -23,8 +26,12 @@ function priority(): string[] {
 
 async function run(argv: string[], o: CleanIoOpts & { cwd?: string } = {}): Promise<{ code: number; out: string }> {
   const p = Bun.spawn(o.lowPriority ? [...priority(), ...argv] : argv, { cwd: o.cwd, env: (o.env ?? process.env) as Record<string, string>, stdout: 'pipe', stderr: 'ignore' })
-  const out = await new Response(p.stdout).text()
-  return { code: await p.exited, out }
+  // A wedged git/du (huge tree, dead network mount) must cost one item, never the whole command.
+  const timer = setTimeout(() => { try { p.kill('SIGKILL') } catch { /* gone */ } }, RUN_TIMEOUT_MS)
+  try {
+    const out = await new Response(p.stdout).text()
+    return { code: await p.exited, out }
+  } finally { clearTimeout(timer) }
 }
 const git = (args: string[], o: CleanIoOpts) => run(['git', ...args], o)
 

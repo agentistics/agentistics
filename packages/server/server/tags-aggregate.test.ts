@@ -13,6 +13,7 @@ function s(over: Partial<SessionMeta>): SessionMeta {
 
 test('empty input yields zeroes and null tops', () => {
   expect(aggregateSessions([])).toEqual({
+    costByHarness: {},
     sessions: 0, costUSD: 0, inputTokens: 0, outputTokens: 0, tokens: EMPTY_TOKENS, unpricedTokens: 0,
     topProject: null, topModel: null, topHarness: null,
   })
@@ -69,4 +70,14 @@ test('PRICE.UNKNOWN: a session of an unknown model (or none) is counted in token
   const priced = aggregateSessions([s({ input_tokens: 1000, output_tokens: 100, model: 'claude-opus-4-6' })])
   expect(out.costUSD).toBeCloseTo(priced.costUSD)
   expect(priced.unpricedTokens).toBe(0)
+})
+
+test('costByHarness splits costUSD per harness and sums back to it', () => {
+  const mk = (harness: string, model: string): SessionMeta => ({
+    session_id: harness, project_path: '/p', start_time: '2026-01-01T00:00:00Z', harness, model,
+    input_tokens: 1000, output_tokens: 1000,
+  } as unknown as SessionMeta)
+  const agg = aggregateSessions([mk('claude', 'claude-sonnet-4-6'), mk('codex', 'gpt-5'), mk('claude', 'claude-sonnet-4-6')])
+  expect(Object.keys(agg.costByHarness).sort()).toEqual(['claude', 'codex'])
+  expect(Object.values(agg.costByHarness).reduce((a, b) => a + b, 0)).toBeCloseTo(agg.costUSD)
 })

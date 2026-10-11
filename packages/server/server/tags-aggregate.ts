@@ -14,6 +14,8 @@ import {
 export interface TagAggregate {
   sessions: number
   costUSD: number
+  /** `costUSD` split by harness — so a plan basis prices each slice at ITS harness's own plan. */
+  costByHarness: Record<string, number>
   /** The two conversational counters. NOT the total — read `tokens` for that. */
   inputTokens: number
   outputTokens: number
@@ -53,6 +55,7 @@ export function aggregateSessions(sessions: SessionMeta[]): TagAggregate {
   let outputTokens = 0
   let tokens: TokenBreakdown = EMPTY_TOKENS
   let unpriced = 0
+  const costByHarness: Record<string, number> = {}
   for (const s of sessions) {
     const input = s.input_tokens ?? 0
     const output = s.output_tokens ?? 0
@@ -62,7 +65,7 @@ export function aggregateSessions(sessions: SessionMeta[]): TagAggregate {
     unpriced += unpricedTokens(s)
     // Priced per model (multi-model sessions carry a `model_usage` breakdown).
     // No model at all → calcCost falls back to the default price, same as everywhere else.
-    costUSD += sessionCostUSD(s) ?? calcCost({
+    const sessionCost = sessionCostUSD(s) ?? calcCost({
       inputTokens: input,
       outputTokens: output,
       cacheReadInputTokens: s.cache_read_input_tokens ?? 0,
@@ -70,10 +73,14 @@ export function aggregateSessions(sessions: SessionMeta[]): TagAggregate {
       webSearchRequests: 0,
       costUSD: 0,
     }, '')
+    costUSD += sessionCost
+    const harness = s.harness ?? 'claude'
+    costByHarness[harness] = (costByHarness[harness] ?? 0) + sessionCost
   }
   return {
     sessions: sessions.length,
     costUSD,
+    costByHarness,
     inputTokens,
     outputTokens,
     tokens,
