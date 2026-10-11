@@ -24,6 +24,7 @@ import { SessionRowMenu } from './SessionRowMenu'
 import { setSessionRole, useSessionRole, type SessionRole } from '../../lib/sessionRoles'
 import { sessionIdentityKey } from '../../lib/sessionIdentity'
 import { isInsidePortalledMenu } from '../../lib/rowMenu'
+import { RoleChip } from './RoleChip'
 
 export interface LinkTarget { kind: 'parent' | 'child' | 'task'; key: string; label: string; harness?: string; state?: string; stateLabel?: string; startedAt?: number; path: string | null }
 
@@ -106,7 +107,7 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
       {sessionId && <div>
         <div style={SECTION}>{pt ? 'Tipo' : 'Type'}</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 6px', fontSize: 12 }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: role === 'leader' ? 'var(--accent-purple)' : role === 'worker' ? 'var(--accent-cyan)' : 'var(--text-tertiary)', border: '1px solid currentColor', borderRadius: 5, padding: '2px 6px', fontSize: 11 }}><span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />{role === 'leader' ? (pt ? 'Líder' : 'Leader') : role === 'worker' ? 'Worker' : (pt ? 'Automático' : 'Automatic')}</span>
+          <RoleChip role={role} pt={pt} />
           <span style={{ color: 'var(--text-tertiary)', fontSize: 10.5 }}>{role ? (pt ? 'definido por você' : 'set by you') : (pt ? 'deduzido pelo sistema' : 'inferred by system')}</span>
           <button type="button" aria-label={pt ? 'Trocar tipo' : 'Change type'} onClick={e => {
             const r = e.currentTarget.getBoundingClientRect()
