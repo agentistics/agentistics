@@ -26,9 +26,16 @@ export interface RowVerb {
   label: string
   enabled: boolean
   reason?: string
+  checked?: boolean
+  color?: string
 }
 
 export type MenuEntry = RowVerb
+
+/** True when an event target belongs to any menu rendered through a body portal. */
+export function isInsidePortalledMenu(target: EventTarget | null): boolean {
+  return typeof Element !== 'undefined' && target instanceof Element && target.closest('[data-portalled-menu]') !== null
+}
 
 /** States where the session is mid-turn, so "stop" means the TURN and not the session. */
 const MID_TURN = new Set(['working'])

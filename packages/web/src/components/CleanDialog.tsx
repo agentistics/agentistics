@@ -140,7 +140,7 @@ export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: 
         {confirm && <button type="button" onClick={() => void run()} disabled={busy || picked.size === 0} style={dialogButtonStyle('danger', isMobile, busy || picked.size === 0)}>{pt ? 'Confirmar' : 'Confirm'}</button>}
       </DialogActions>}
     >
-      <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+      <div style={{ maxHeight: 'calc(60vh / var(--ui-zoom, 1))', overflowY: 'auto' }}>
         {busy && job && <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)', fontSize: 12 }}><StatusDot state={job.state === 'done' ? 'ok' : 'warn'} /><span>{stage(job.state, pt)} ({job.progress}%)</span></div>}
       {error && <div role="alert" style={{ color: 'var(--text-secondary)', fontSize: 13 }}><p>{pt ? 'Não foi possível carregar a limpeza.' : 'Could not load cleanup options.'}</p><button type="button" onClick={() => setRetry(value => value + 1)} style={dialogButtonStyle('secondary', isMobile)}>{pt ? 'Tentar novamente' : 'Retry'}</button></div>}
       {!error && !plan && <p>{pt ? `Conferindo… ${Math.round(scanProgress * 100)}%` : `Checking… ${Math.round(scanProgress * 100)}%`}</p>}

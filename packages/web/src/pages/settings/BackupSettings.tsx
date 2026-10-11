@@ -2063,7 +2063,7 @@ function GithubDisconnectModal({ repo, url, pt, busy, error, onCancel, onConfirm
         style={{
           width: '100%', maxWidth: isMobile ? '100%' : 520,
           height: isMobile ? '100%' : undefined,
-          maxHeight: isMobile ? '100%' : '90vh',
+          maxHeight: isMobile ? '100%' : 'calc(90vh / var(--ui-zoom, 1))',
           overflowY: 'auto', boxSizing: 'border-box',
           background: 'var(--bg-card)', border: isMobile ? 'none' : '1px solid var(--border)',
           borderRadius: isMobile ? 0 : 12, padding: isMobile ? 16 : 22,
@@ -3004,7 +3004,7 @@ function RestoreConfirmModal({ release, machine, pt, starting, error, onCancel, 
         style={{
           width: '100%', maxWidth: isMobile ? '100%' : 560,
           height: isMobile ? '100%' : undefined,
-          maxHeight: isMobile ? '100%' : '90vh',
+          maxHeight: isMobile ? '100%' : 'calc(90vh / var(--ui-zoom, 1))',
           overflowY: 'auto', boxSizing: 'border-box',
           background: 'var(--bg-card)', border: isMobile ? 'none' : '1px solid var(--border)',
           borderRadius: isMobile ? 0 : 12, padding: isMobile ? 16 : 22,

@@ -289,7 +289,7 @@ function TaskList() {
         <>
           <div onClick={() => setSheet(false)} style={{ position: 'fixed', inset: 0, zIndex: 1100, background: 'rgba(0,0,0,0.45)' }} />
           <div role="dialog" aria-label={MB.adjustTitle} style={{
-            position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 1110, maxHeight: '80dvh', overflowY: 'auto',
+            position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 1110, maxHeight: 'calc(80dvh / var(--ui-zoom, 1))', overflowY: 'auto',
             background: 'var(--bg-surface)', borderTop: '1px solid var(--border)',
             borderRadius: '16px 16px 0 0', boxShadow: '0 -8px 30px rgba(0,0,0,0.35)',
             padding: '8px 12px calc(16px + env(safe-area-inset-bottom))', display: 'grid', gap: 14,

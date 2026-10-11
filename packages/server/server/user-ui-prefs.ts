@@ -88,6 +88,8 @@ export const USER_UI_PREF_REGISTRY = {
   studioSeen: { machine: 'ui', maxBytes: SMALL },
   projectDisk: { machine: 'ui', maxBytes: SMALL },
   centralMachine: { machine: 'ui', maxBytes: SMALL },
+  sessionRoles: { machine: 'ui', maxBytes: MEDIUM },
+  muteWorkers: { machine: 'ui', maxBytes: SMALL },
   updateSnooze: { machine: 'ui', maxBytes: SMALL },
   whatsNewSeen: { machine: 'ui', maxBytes: SMALL },
   whatsNewAutoOpen: { machine: 'ui', maxBytes: SMALL },

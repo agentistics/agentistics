@@ -484,7 +484,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
         // and the home indicator itself: nothing above it pads for the notch. Without this the header
         // (tabs, gear, close) sat under the iOS status bar, invisible and untappable.
         ? {
-            position: 'fixed', inset: 0, height: '100dvh', boxSizing: 'border-box', zIndex: 400, background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
+            position: 'fixed', inset: 0, height: 'calc(100dvh / var(--ui-zoom, 1))', boxSizing: 'border-box', zIndex: 400, background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
             paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)',
             paddingLeft: 'env(safe-area-inset-left, 0px)', paddingRight: 'env(safe-area-inset-right, 0px)',
           }

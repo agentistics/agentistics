@@ -74,7 +74,7 @@ export function WhatsNewModal({ entries, lang, isMobile, onClose, autoOpened, on
           boxShadow: '0 24px 64px rgba(0,0,0,0.4)',
           maxWidth: isMobile ? '100%' : 520,
           width: '100%',
-          maxHeight: isMobile ? '100%' : 'min(640px, calc(100vh - 32px))',
+          maxHeight: isMobile ? '100%' : 'min(640px, calc(100vh / var(--ui-zoom, 1) - 32px))',
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
         }}
       >

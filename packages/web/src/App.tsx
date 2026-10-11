@@ -22,7 +22,8 @@ import { planCostOf } from './lib/topUsage'
 import { bootLoading } from './lib/bootPhase'
 import { editorEnabledFor } from './lib/editorGate'
 import { useProjectedDerived } from './hooks/useProjectedDerived'
-import { journalBackfillText, type JournalBackfillSummary } from './lib/journalBackfill'
+import { ConfirmModal } from './pages/settings/primitives'
+import { type JournalBackfillSummary } from './lib/journalBackfill'
 import { DEFAULT_CARD_ORDER, migrateCardOrder, type CardId } from './lib/cardOrder'
 import { BillingIntroModal } from './components/BillingIntroModal'
 import type { LoadProgress } from './hooks/useData'
@@ -57,6 +58,7 @@ import { HardwareModal } from './components/HardwareModal'
 import { CleanDialog } from './components/CleanDialog'
 import { useNotificationStream } from './hooks/useNotificationStream'
 import { pushNotification } from './lib/notifications'
+import { startupLoadingNotification, journalLoadingNotification } from './lib/loadingNotifications'
 import { RecentSessions } from './components/RecentSessions'
 import { HighlightsBoard } from './components/HighlightsBoard'
 import { InfoModal } from './components/InfoModal'
@@ -95,7 +97,7 @@ import { SessionsRail } from './components/nav/SessionsRail'
 import { AsideHeader } from './components/nav/AsideHeader'
 import { getPinnedIds } from './lib/pinnedSessions'
 import { loadSharedPrefs, loadPersonalPrefs, putPersonal, migrateLocalOnce } from './lib/sharedPref'
-import { applyTextScale, clampTextScale } from './lib/textScale'
+import { applyTextScale, clampTextScale, readLocalTextScale, writeLocalTextScale } from './lib/textScale'
 import { initialLang } from './lib/lang'
 import { fleetOpenStore, sessionsFiltersOpenStore, studioSeenStore } from './lib/appFlags'
 import { pageMaxWidth } from './lib/pageWidth'
@@ -143,7 +145,7 @@ import { consumeRestore, snoozeUpdate, startUpgrade, upgradeInFlight, useUpdateS
 import { NayUpdateCard, type UpdateCardPlacement } from './components/nay/NayUpdateCard'
 import { UpgradeOverlay } from './components/UpgradeOverlay'
 import { HOST_SESSION_PATH, resolveHostSessionRefresh } from './lib/hostSession'
-import { bootWatchdog, fetchWithTimeout, loadErrorText, SMALL_TIMEOUT_MS, startupStripText, type BootVerdict, type LoadError } from './lib/startupLoad'
+import { bootWatchdog, fetchWithTimeout, loadErrorText, SMALL_TIMEOUT_MS, type BootVerdict, type LoadError } from './lib/startupLoad'
 import { bootReleased, scheduleBootRelease, setBootStatus, useBootHold } from './lib/bootSplash'
 
 /**
@@ -249,7 +251,7 @@ function useBootWatchdog(): BootVerdict {
 function ServerProblem({ lang, problem, onRetry, autoRetry }: { lang: string; problem: LoadError; onRetry: () => void; autoRetry: boolean }) {
   const { title, body } = loadErrorText(problem, lang === 'pt' ? 'pt' : 'en', typeof location !== 'undefined' ? location.host : '')
   return (
-    <div role="alert" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '40px 16px', textAlign: 'center', background: 'var(--bg-base)', boxSizing: 'border-box' }}>
+    <div role="alert" style={{ minHeight: 'calc(100vh / var(--ui-zoom, 1))', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '40px 16px', textAlign: 'center', background: 'var(--bg-base)', boxSizing: 'border-box' }}>
       <img src={brandAsset('/minimalistLogo.png')} alt="" aria-hidden="true" style={{ width: 40, height: 40, objectFit: 'contain', opacity: 0.8 }} />
       <div style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)', maxWidth: 460 }}>{title}</div>
       <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', maxWidth: 460, lineHeight: 1.5 }}>{body}</div>
@@ -292,7 +294,7 @@ function LoadingScreen({ lang }: { lang: string }) {
   if (unreachable) {
     return <ServerProblem lang={lang} problem={{ kind: 'unreachable', detail: '' }} onRetry={() => location.reload()} autoRetry />
   }
-  if (underSplash) return <div style={{ minHeight: '100vh', background: 'var(--bg-base)' }} />
+  if (underSplash) return <div style={{ minHeight: 'calc(100vh / var(--ui-zoom, 1))', background: 'var(--bg-base)' }} />
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'var(--bg-base)' }}>
       <AgentisticsLoader size={56} label={lang === 'pt' ? 'Carregando' : 'Loading'}
@@ -402,7 +404,7 @@ function ChartModal({ title, onClose, children }: {
           padding: '24px 28px',
           width: '100%',
           maxWidth: 1100,
-          maxHeight: '90vh',
+          maxHeight: 'calc(90vh / var(--ui-zoom, 1))',
           overflow: 'auto',
           boxShadow: 'var(--shadow-elevated)',
         }}
@@ -1491,6 +1493,15 @@ export default function AppLayout() {
       .catch(() => setTeamSession(prev => resolveHostSessionRefresh(prev, null, HOST_SESSION_BOOT)))
   }, [])
   useEffect(() => { void refreshTeamSession() }, [refreshTeamSession])
+  // Journal backfill progress is part of the team-session response rather than the data poll. Keep
+  // the bell current while the server is working (and after a failure, so a retry can resolve it),
+  // then stop polling once the backfill reaches its terminal state.
+  useEffect(() => {
+    const state = teamSession?.journalBackfill?.state
+    if (state !== 'running' && state !== 'failed') return
+    const timer = window.setInterval(() => { void refreshTeamSession() }, 10_000)
+    return () => window.clearInterval(timer)
+  }, [refreshTeamSession, teamSession?.journalBackfill?.state])
   /**
    * Whether to offer the chat at all.
    *
@@ -1518,14 +1529,23 @@ export default function AppLayout() {
     try { return localStorage.getItem('agentistics-theme') === 'light' ? 'light' : 'dark' } catch { return 'dark' }
   })
   const [currency, setCurrencyState] = useState<'USD' | 'BRL'>('USD')
-  const [textScale, setTextScaleState] = useState(1)
+  // The local mirror decides the first paint, like the theme; the personal preference corrects it.
+  const [textScale, setTextScaleState] = useState(readLocalTextScale)
   const setTextScale = useCallback((scale: number) => {
     const next = clampTextScale(scale)
     setTextScaleState(next)
     applyTextScale(document.documentElement, next)
     putPersonal({ textScale: next })
   }, [])
-  useEffect(() => { applyTextScale(document.documentElement, textScale) }, [textScale])
+  useEffect(() => {
+    applyTextScale(document.documentElement, textScale)
+    writeLocalTextScale(textScale)
+    // The narrow-screen ceiling (`effectiveTextScale`) depends on the width: a phone turned
+    // sideways may take more of the chosen size.
+    const onResize = () => applyTextScale(document.documentElement, textScale)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [textScale])
 
   // Surface server-pushed notifications (member connection/auth errors) as toasts + bell.
   useNotificationStream(lang)
@@ -2373,6 +2393,31 @@ export default function AppLayout() {
   const [showUpdateModal, setShowUpdateModal] = useState(false)
   // The popup left this page (closed, timed out, installed): it does not come back until a reload.
   const [promptGone, setPromptGone] = useState<string | null>(null)
+  const [retryImportOpen, setRetryImportOpen] = useState(false)
+  const loadingNoticeSeen = useRef({ startup: false, journal: false })
+  useEffect(() => {
+    const startupNotice = startupLoadingNotification(startup, lang === 'pt' ? 'pt' : 'en')
+    if (startupNotice) {
+      loadingNoticeSeen.current.startup = true
+      pushNotification(startupNotice)
+    } else if (loadingNoticeSeen.current.startup) {
+      pushNotification({ type: 'success', title: lang === 'pt' ? 'Carregamento concluído' : 'Loading complete', message: lang === 'pt' ? 'Os dados estão atualizados.' : 'The data is up to date.', meta: { notificationKey: 'loading.startup', loadingKind: 'startup', state: 'done' } })
+      loadingNoticeSeen.current.startup = false
+    }
+    const journalNotice = journalLoadingNotification(teamSession?.journalBackfill, lang === 'pt' ? 'pt' : 'en')
+    if (journalNotice) {
+      loadingNoticeSeen.current.journal = true
+      pushNotification(journalNotice)
+    } else if (loadingNoticeSeen.current.journal) {
+      pushNotification({ type: 'success', title: lang === 'pt' ? 'Importação concluída' : 'Import complete', message: lang === 'pt' ? 'O histórico foi importado.' : 'The history was imported.', meta: { notificationKey: 'loading.journal', loadingKind: 'journal', state: 'done' } })
+      loadingNoticeSeen.current.journal = false
+    }
+  }, [startup, teamSession?.journalBackfill, lang])
+  useEffect(() => {
+    const openRetry = () => setRetryImportOpen(true)
+    window.addEventListener('agentistics:retry-journal-import', openRetry)
+    return () => window.removeEventListener('agentistics:retry-journal-import', openRetry)
+  }, [])
   const updateSnooze = useUpdateSnooze()
   const upgradeFlow = useUpgradeFlow()
   // First-run archive consent gate: undefined = prefs not loaded, null = loaded but
@@ -3452,39 +3497,36 @@ export default function AppLayout() {
 
   // The journal's first import, one muted line above the page while it runs: the figures on the page
   // come from /api/data until it completes (the server refuses the projections until then).
-  const backfillText = journalBackfillText(teamSession?.journalBackfill, lang)
-  // Plus the data still arriving (fast startup): the page is already usable, this line says what is
-  // still on its way — or that the server stopped answering while the page kept what it had.
-  const startupText = startupStripText(startup, lang === 'pt' ? 'pt' : 'en')
+  // Offline is urgent and keeps its visible retry action; startup and journal progress live in the bell.
   const offlineText = offline
     ? (lang === 'pt'
       ? `O servidor não está respondendo (${offline.kind === 'unreachable' ? 'inacessível' : offline.detail}). Mostrando o que já estava carregado; volta sozinho quando ele responder.`
       : `The server is not answering (${offline.kind === 'unreachable' ? 'unreachable' : offline.detail}). Showing what was already loaded; it comes back by itself when the server answers.`)
     : null
-  const noteLines = [offlineText, startupText, backfillText].filter((t): t is string => !!t)
-  const backfillNote = noteLines.length > 0
-    ? (
-      <div role="status" aria-live="polite" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {noteLines.map(t => (
-          <div key={t} style={{ fontSize: '0.75rem', color: t === offlineText ? 'var(--text-secondary)' : 'var(--text-tertiary)', lineHeight: 1.4, display: 'flex', alignItems: 'center', gap: 8 }}>
-            {t === startupText && startup.partial && (
-              <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--anthropic-orange)', flexShrink: 0, animation: 'agStartupPulse 1.4s ease-in-out infinite' }} />
-            )}
-            <span>{t}</span>
-            {t === offlineText && (
-              <button onClick={refetch} style={{
+  const backfillNote = offlineText ? (
+    <div role="status" aria-live="polite" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.4, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span>{offlineText}</span>
+        <button onClick={refetch} style={{
                 minHeight: isMobile ? 44 : 28, padding: '2px 12px',
                 background: 'var(--anthropic-orange-dim)', border: '1px solid var(--anthropic-orange)60', borderRadius: 8,
                 color: 'var(--anthropic-orange)', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.75rem', fontWeight: 600,
-              }}>
-                {lang === 'pt' ? 'Tentar de novo' : 'Try again'}
-              </button>
-            )}
-          </div>
-        ))}
+        }}>
+          {lang === 'pt' ? 'Tentar de novo' : 'Try again'}
+        </button>
       </div>
-    )
-    : null
+    </div>
+  ) : null
+  const retryImportModal = <ConfirmModal
+    open={retryImportOpen}
+    tone="default"
+    title={lang === 'pt' ? 'Importar o histórico de novo?' : 'Retry the history import?'}
+    message={lang === 'pt' ? 'A importação roda em segundo plano, com prioridade baixa. Nada é apagado.' : 'The import runs in the background at low priority. Nothing is deleted.'}
+    confirmLabel={lang === 'pt' ? 'Importar' : 'Import'}
+    cancelLabel={lang === 'pt' ? 'Cancelar' : 'Cancel'}
+    onCancel={() => setRetryImportOpen(false)}
+    onConfirm={() => { setRetryImportOpen(false); void fetch('/api/journal/import', { method: 'POST' }).catch(() => {}) }}
+  />
 
   // Built once so the magnifier layer (Task 8) can be handed the exact same object the pages get
   // via <Outlet context>; two separately-built objects would drift out of sync.
@@ -3745,7 +3787,7 @@ export default function AppLayout() {
                 display: 'grid',
                 gridTemplateRows: sessionsFiltersOpen ? '1fr' : '0fr',
                 transition: 'grid-template-rows 0.3s cubic-bezier(0.22, 1, 0.36, 1)',
-                width: filtrosBounds.width, maxWidth: 'calc(100vw - 16px)',
+                width: filtrosBounds.width, maxWidth: 'calc(100vw / var(--ui-zoom, 1) - 16px)',
               }}
               onTransitionEnd={e => {
                 if (e.target !== e.currentTarget) return
@@ -4182,6 +4224,17 @@ export default function AppLayout() {
                 >
                   <Zap size={11} />
                   v{version}
+                  {updateInstallable && versionAnswer?.latest && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      title={lang === 'pt' ? `Nova versão ${versionAnswer.latest} disponível` : `New version ${versionAnswer.latest} available`}
+                      onClick={e => { e.preventDefault(); e.stopPropagation(); setShowUpdateModal(true) }}
+                      style={{ marginLeft: 4, padding: '1px 6px', borderRadius: 10, background: 'var(--anthropic-orange)', color: '#fff', fontSize: '0.625rem', fontWeight: 700 }}
+                    >
+                      {lang === 'pt' ? 'atualizar' : 'update'}
+                    </span>
+                  )}
                 </a>
               </div>
             </div>
@@ -4277,7 +4330,7 @@ export default function AppLayout() {
       // Everywhere else it stays, because a short page still has to fill the window.
       // The DESKTOP dashboard is on the board as well: its page scrolls inside its own panel, so
       // the root is a window-sized frame there too, never a document that grows.
-      ...(inSessionsWorkspace || !isMobile ? {} : { minHeight: '100vh' }),
+      ...(inSessionsWorkspace || !isMobile ? {} : { minHeight: 'calc(100vh / var(--ui-zoom, 1))' }),
       // The REAL cause of the session pane's header/composer "scrolling away" and landing at the
       // wrong spot: `<main>` below sets an explicit `height` for the sessions workspace, but a flex
       // item with `flex: 1 1 0%` computes its used size from the flex algorithm, not from its own
@@ -4360,7 +4413,7 @@ export default function AppLayout() {
       // A home-screen app on iOS can come back from the keyboard with `100dvh` short by about the
       // status bar, leaving a black band under the bottom bar (owner, 2026-10-04). Held at the
       // screen's height then — `useStandaloneHeight` / `lib/standaloneHeight.ts`.
-      height: inSessionsWorkspace || !isMobile ? (standaloneH !== null ? `${standaloneH}px` : '100dvh') : undefined,
+      height: inSessionsWorkspace || !isMobile ? (standaloneH !== null ? `${standaloneH}px` : 'calc(100dvh / var(--ui-zoom, 1))') : undefined,
       // Only on the LIST. With a session open the bar is not rendered at all (see its own note),
       // so reserving its band would leave a strip of nothing under the composer — the same
       // mismatch the old subtraction made, seen from the other side.
@@ -4668,7 +4721,7 @@ export default function AppLayout() {
               // On MOBILE this fills the parent, which already subtracts the fixed nav (see the
               // root's own note) — repeating the arithmetic here is what let the two disagree.
               // Desktop still subtracts its own fixed top strip, which the root does not know about.
-              height: isMobile ? undefined : 'calc(100vh - var(--ag-topbar-h))',
+              height: isMobile ? undefined : 'calc(100vh / var(--ui-zoom, 1) - var(--ag-topbar-h))',
               minHeight: 0,
               display: 'flex', flexDirection: 'column', overflow: 'hidden',
             }
@@ -4696,7 +4749,7 @@ export default function AppLayout() {
               flex: 1,
               // Fill at least the viewport so the footer always sits below the fold (a scroll away),
               // even on short pages — it never floats up into a half-empty screen.
-              minHeight: '100vh',
+              minHeight: 'calc(100vh / var(--ui-zoom, 1))',
               // The bottom padding clears the fixed nav, so it has to grow with it: installed as a
               // PWA the bar is 56px + the home-indicator inset, and a flat 80px hid the last card.
               padding: isMobile ? '16px 16px calc(24px + var(--mobile-nav-h))' : '24px 32px',
@@ -4904,6 +4957,7 @@ export default function AppLayout() {
           the page panel instead (see `<main>`), because the panel is what scrolls there. */}
       {!inSessionsWorkspace && isMobile && pageFooter}
 
+      {retryImportModal}
       {/* Global notification toasts (auto-dismiss with an exit animation; history in the bell) */}
       <NotificationToasts lang={lang} />
 

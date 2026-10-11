@@ -30,4 +30,17 @@ describe('the words', () => {
     expect(src).toContain('data-resolved-note')
     expect(src).toContain('data-resolved-badge')
   })
+  test('every failed topic verb is surfaced inline and can be retried', () => {
+    const src = readFileSync(join(import.meta.dir, 'ThreadsPanel.tsx'), 'utf8')
+    expect(src).toContain('data-verb-error')
+    expect(src).toContain("pushNotification({ type: 'error', title: t.verbFailed, message })")
+    expect(src).toContain('verbError.action, verbError.sessionId')
+    expect(src).toContain('{t.retry}')
+  })
+  test('the selected resolved topic keeps its section visible and the panel fits short viewports', () => {
+    const src = readFileSync(join(import.meta.dir, 'ThreadsPanel.tsx'), 'utf8')
+    expect(src).toContain("if (thread?.resolvedAt) setResolvedOpen(true)")
+    expect(src).toContain('100dvh')
+    expect(src).not.toContain('height: \'min(72vh, 820px)\'')
+  })
 })

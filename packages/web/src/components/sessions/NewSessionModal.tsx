@@ -32,6 +32,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, Check, ClipboardList, Lock, Pap
 import { attachmentRoom, MAX_ATTACHMENTS, planPaste } from '../../lib/pastePlan'
 import { Field, inputStyle } from './formBits'
 import { ModePicker, NoQuestionsWarning } from './ModePicker'
+import { PillPicker } from './PillPicker'
 import { CANONICAL_MODE_TEXT, type CanonicalMode } from '@agentistics/core'
 import { HarnessPicker } from './HarnessPicker'
 import { HarnessInstallDialog } from '../HarnessInstallDialog'
@@ -55,6 +56,7 @@ import { useFleetNewOptions, type FleetProjectOption } from '../../hooks/useFlee
 import { ConfirmModal } from '../../pages/settings/primitives'
 import { forcedNote, isAdmissionRefusal } from '../../lib/spawnAdmission'
 import { pushNotification } from '../../lib/notifications'
+import { setSessionRole, type SessionRole } from '../../lib/sessionRoles'
 import { usePlanLimits } from '../../lib/planLimits'
 import { PlanLimitBars } from '../PlanLimitMeter'
 import {
@@ -201,6 +203,7 @@ export function NewSessionModal({
   const [effort, setEffort] = useState(restored?.effort ?? initialPreset?.effort ?? '')
   /** MODE.EVERYWHERE — the permission mode to start in; `default` = the harness's own configuration. */
   const [mode, setMode] = useState<CanonicalMode>('default')
+  const [sessionRole, setSessionRoleChoice] = useState<SessionRole | ''>('')
   const [prompt, setPrompt] = useState(restored?.prompt ?? initialPreset?.prompt ?? '')
   const [label, setLabel] = useState(restored?.label ?? initialPreset?.label ?? '')
 
@@ -608,6 +611,7 @@ export function NewSessionModal({
       if (unfiled) pushNotification({ type: 'warning', code: 'sessions.native_unfiled', meta: { note: unfiled } })
       setBusy(false)
       onStarted(id, { harness: NATIVE_HARNESS_ID, ...(label ? { label } : {}) })
+      if (sessionRole && id) setSessionRole(id, sessionRole)
     } catch {
       setBusy(false)
       setNotice(pt ? 'Erro de rede ao falar com esta máquina.' : 'Network error talking to this machine.')
@@ -658,6 +662,7 @@ export function NewSessionModal({
 
         const finish = () => {
           setBusy(false)
+          if (sessionRole && json.id) setSessionRole(json.id, sessionRole)
           onStarted(json.id, {
             ...(harness ? { harness: harness.id } : {}),
             ...(label ? { label } : {}),
@@ -748,7 +753,7 @@ export function NewSessionModal({
     >
       <div style={{
         background: 'var(--bg-surface)', border: '1px solid var(--border)',
-        borderRadius: 16, width: '100%', maxWidth: 620, maxHeight: '86vh',
+        borderRadius: 16, width: '100%', maxWidth: 620, maxHeight: 'calc(86vh / var(--ui-zoom, 1))',
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}>
         <header style={{
@@ -929,6 +934,20 @@ export function NewSessionModal({
               <ModePicker modes={wizardHarness!.modes!} value={mode} lang={pt ? 'pt' : 'en'} onChange={v => { setMode(v); setDirty(true) }} />
             </Field>
           )}
+
+          <Field label={pt ? 'Tipo da sessão' : 'Session type'} hint={pt
+            ? 'Líder coordena e workers executam. Automático deixa o sistema decidir.'
+            : 'Leaders coordinate and workers execute. Automatic lets the system decide.'}>
+            <PillPicker
+              items={[
+                { key: '', label: pt ? 'Não sei (automático)' : 'Not sure (automatic)', color: 'var(--text-tertiary)' },
+                { key: 'leader', label: pt ? 'Líder' : 'Leader', color: '#a78bfa' },
+                { key: 'worker', label: 'Worker', color: '#22d3ee' },
+              ]}
+              value={sessionRole}
+              onPick={v => { setSessionRoleChoice(v as SessionRole | ''); setDirty(true) }}
+            />
+          </Field>
 
           {/* REQUIRED, and the gate is `stepReady('assistant')`'s — see `wizardSteps.ts`. It is
               asked here rather than at the end because a title is what this session IS, and that

@@ -33,6 +33,10 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
   'clean.failed': { pt: { title: 'Não foi possível iniciar a limpeza', message: 'Tente novamente.' }, en: { title: 'Cleanup could not start', message: 'Try again.' } },
   'clean.done': { pt: { title: 'Limpeza concluída', message: '{freed} liberados. {worktrees} worktree(s) e {nodeModules} pasta(s) de dependências removidos.' }, en: { title: 'Cleanup complete', message: '{freed} freed. Removed {worktrees} worktree(s) and {nodeModules} dependency folder(s).' } },
   'clean.partial': { pt: { title: 'Limpeza concluída com itens mantidos', message: '{freed} liberados. {skipped} item(ns) foram mantidos por segurança; {errors} erro(s).' }, en: { title: 'Cleanup finished with items kept', message: '{freed} freed. {skipped} item(s) were kept for safety; {errors} error(s).' } },
+  'tasks.thread_resolved': {
+    pt: { title: 'Tópico resolvido', message: 'O tópico foi movido para Resolvidos.' },
+    en: { title: 'Topic resolved', message: 'The topic was moved to Resolved.' },
+  },
   // PLAN.LIMITS — the generic copy; `resolveNotification` composes the real sentence from `meta`
   // (harness, window, percentage, renewal) through `limitNoticeText`.
   'limits.threshold': {

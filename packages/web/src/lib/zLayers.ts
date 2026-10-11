@@ -34,3 +34,6 @@ export const NAY_NOTIFY_CARD_Z = NAY_FAB_Z + 1
 
 /** The first ordinary dialog tier (`SessionDrilldownModal` and friends). Must stay above the button. */
 export const DIALOG_FLOOR_Z = 350
+
+/** Menus opened from portalled popovers must remain above the popover surface itself. */
+export const SESSION_ROW_MENU_Z = 1300

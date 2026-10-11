@@ -23,7 +23,7 @@ export function journalBackfillText(b: JournalBackfillSummary | null | undefined
       case 'pending': return `O histórico desta máquina ainda vai ser importado para o journal, em segundo plano${tail}`
       case 'paused': return `Importação do histórico pausada: a máquina está sem memória folgada${where} · ${n} eventos${tail}`
       case 'interrupted': return `Importação do histórico interrompida${where} · ${n} eventos; ela continua no próximo início do servidor${tail}`
-      case 'failed': return `A importação do histórico falhou; rode \`agentop journal import\` para ver o motivo${tail}`
+      case 'failed': return `A importação do histórico falhou; tente de novo pelo botão ao lado${tail}`
       default: return `Importando o histórico desta máquina para o journal${where} · ${n} eventos${tail}`
     }
   }
@@ -31,7 +31,7 @@ export function journalBackfillText(b: JournalBackfillSummary | null | undefined
     case 'pending': return `This machine's history is still to be imported into the journal, in the background${tail}`
     case 'paused': return `History import paused: the machine is short on memory${where} · ${n} events${tail}`
     case 'interrupted': return `History import interrupted${where} · ${n} events; it resumes on the next server start${tail}`
-    case 'failed': return `The history import failed; run \`agentop journal import\` to see why${tail}`
+    case 'failed': return `The history import failed; retry with the button beside it${tail}`
     default: return `Importing this machine's history into the journal${where} · ${n} events${tail}`
   }
 }

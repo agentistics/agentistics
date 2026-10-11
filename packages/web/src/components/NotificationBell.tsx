@@ -6,6 +6,8 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { openWhatsNew } from '../whatsNew/open'
 import { requestIdleReview } from '../lib/idleReviewRequest'
 import { muteSessionWithToast, SESSION_MUTED_CODE } from '../lib/notifyMenu'
+import { setMuteWorkers, useMuteWorkers } from '../lib/sessionRoles'
+import { ToggleSwitch } from './ToggleSwitch'
 
 const ICON: Record<NotificationType, { color: string; Icon: typeof AlertCircle }> = {
   error:   { color: '#ef4444', Icon: AlertCircle },
@@ -45,6 +47,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) 
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const unread = notes.filter(n => !n.read).length
+  const muteWorkers = useMuteWorkers()
 
   useEffect(() => {
     const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
@@ -91,7 +94,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) 
                 left: `max(8px, env(safe-area-inset-left))`,
                 right: `max(8px, env(safe-area-inset-right))`,
                 width: 'auto',
-                maxHeight: 'min(70vh, 520px)',
+                maxHeight: 'min(calc(70vh / var(--ui-zoom, 1)), 520px)',
               }
             : {
                 top: '100%',
@@ -128,6 +131,13 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) 
               </button>
             )}
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '9px 12px', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 11.5, color: 'var(--text-primary)' }}>{pt ? 'Silenciar workers ativos' : 'Mute active workers'}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>{pt ? 'Só líderes e sessões sem tipo avisam' : 'Only leaders and untyped sessions notify'}</div>
+            </div>
+            <ToggleSwitch on={muteWorkers} onToggle={() => setMuteWorkers(!muteWorkers)} label={pt ? 'Silenciar workers ativos' : 'Mute active workers'} />
+          </div>
 
           {notes.length === 0 ? (
             <div style={{ padding: '24px 12px', textAlign: 'center', fontSize: 12, color: 'var(--text-tertiary)' }}>
@@ -155,6 +165,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) 
               const isIdle = n.code === 'sessions.idle'
               const isWhatsNew = n.code === 'app.whats_new'
               const isClean = n.code === 'clean.suggestion'
+              const isJournalFailed = n.meta?.loadingKind === 'journal' && n.meta?.state === 'failed'
               const clickable = link !== null || isUpdate || isIdle || isWhatsNew
               const go = () => {
                 setOpen(false)
@@ -192,6 +203,11 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) 
                       </div>
                     )}
                   </div>
+                  {isJournalFailed && (
+                    <button onClick={e => { e.stopPropagation(); setOpen(false); window.dispatchEvent(new CustomEvent('agentistics:retry-journal-import')) }} style={{ flexShrink: 0, padding: '4px 7px', borderRadius: 6, border: '1px solid var(--anthropic-orange)60', background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)', cursor: 'pointer', font: 'inherit', fontSize: 11 }}>
+                      {pt ? 'Tentar importar de novo' : 'Retry the import'}
+                    </button>
+                  )}
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0,
                     alignSelf: 'flex-start',
