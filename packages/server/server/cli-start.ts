@@ -131,7 +131,7 @@ import { SPAWN_SPECS, planSpawn, tuiStartModes } from './sessions/spawn-spec'
 import { answerStructured, structuredIntentOf, structuredReopenOrigin } from './sessions/structured-route'
 import { agentisticsMcpLaunch } from './mcp-launch'
 import { prependContext } from './sessions/agentistics-context'
-import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextParent, resolveContextTask, writeContextFile } from './sessions/spawn-context'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextParent, resolveContextRole, resolveContextTask, writeContextFile } from './sessions/spawn-context'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
 import { bornConversationLink } from './sessions/born-link'
@@ -2062,6 +2062,7 @@ async function spawnManaged(req: {
       lang,
       ...(await resolveContextTask(req.contextTaskId ?? req.taskId, req.contextSubtaskId, req.task)),
       ...(await resolveContextParent(req.parentSessionId ?? req.inherit?.parentConversationId ?? req.inherit?.parentSessionId)),
+      ...(await resolveContextRole(id, req.resumeId)),
     })
   const logFile = managedProcessLogPath(req.harness, id, AGENTISTICS_DATA_DIR)
   const offeredConversationId = randomUUID()

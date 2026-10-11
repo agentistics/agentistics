@@ -31,7 +31,7 @@ import { toControlSession } from './control-session'
 import { recordedRepo, repoFacts } from './repo-facts'
 import { emptyReason, renderSessionTable, resolveWidth } from './session-table'
 import { SPAWN_SPECS, planSpawn } from './spawn-spec'
-import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextParent, resolveContextTask, resolveContextTaskByRef, writeContextFile } from './spawn-context'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextParent, resolveContextRole, resolveContextTask, resolveContextTaskByRef, writeContextFile } from './spawn-context'
 import { rulesFor } from './attention-rules'
 // The harness half of a rename. Shared with the cockpit's Rename verb — see `rename.ts`.
 import { renameInHarness, renameMessage } from './rename'
@@ -325,7 +325,7 @@ async function start(
   const logFile = managedProcessLogPath(cmd.harness, id, AGENTISTICS_DATA_DIR)
   const parentLink = await parentLinkOf(callerSessionId())
   const parentSessionId = parentLink.parentSessionId
-  const ctx = buildSpawnContext({ sessionId: id, cwd, harness: cmd.harness, lang, ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)), ...(await resolveContextParent(parentSessionId)) })
+  const ctx = buildSpawnContext({ sessionId: id, cwd, harness: cmd.harness, lang, ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)), ...(await resolveContextParent(parentSessionId)), ...(await resolveContextRole(id)) })
   const planned = planSpawn({
     harness: cmd.harness, cwd, prompt: cmd.prompt, model: cmd.model, effort: cmd.effort,
     ...(logFile ? { logFile } : {}),
@@ -536,7 +536,7 @@ async function batch(
     const cwd = spec.cwd ? resolve(spec.cwd) : process.cwd()
     const id = newSessionId()
     const logFile = managedProcessLogPath(spec.harness, id, AGENTISTICS_DATA_DIR)
-    const ctx = buildSpawnContext({ sessionId: id, cwd, harness: spec.harness, lang, ...(await resolveContextParent(parentSessionId)), ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
+    const ctx = buildSpawnContext({ sessionId: id, cwd, harness: spec.harness, lang, ...(await resolveContextParent(parentSessionId)), ...(await resolveContextRole(id)), ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
     const planned = planSpawn({
       harness: spec.harness,
       cwd,

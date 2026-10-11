@@ -242,3 +242,21 @@ describe('context for a child session', () => {
     expect(t).toContain('git worktree remove')
   })
 })
+
+describe('role line follows the stored role', () => {
+  const base = { sessionId: 's1', cwd: '/w' }
+  test('no stored role: decide from the request', () => {
+    expect(contextText(base)).toContain('Your role here: decide from the request')
+  })
+  test('leader and worker print their own line instead', () => {
+    const l = contextText({ ...base, role: 'leader' })
+    expect(l).toContain('Your role here: LEADER.')
+    expect(l).not.toContain('decide from the request')
+    const w = contextText({ ...base, role: 'worker' })
+    expect(w).toContain('Your role here: WORKER.')
+    expect(w).not.toContain('decide from the request')
+  })
+  test('the leader briefing points at agentistics_session_role', () => {
+    expect(contextText(base)).toContain('agentistics_session_role')
+  })
+})
