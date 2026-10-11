@@ -16,6 +16,7 @@ import { observeFleet, pushAlert, pushDemoAlert, requestShock, resetNayNotifySto
 import { isSessionMuted } from './mutedSessions'
 import { pushNotification, setMutedCategories, type NotificationType } from './notifications'
 import { isNotificationCategory } from './notificationCategories'
+import { isWorkerMuted } from './sessionRoles'
 
 export type SessionActivity = 'working' | 'waiting' | 'waiting-approval' | 'exited'
 /** The four original chimes, plus the thirteen synthesized in `notificationSounds.ts`. */
@@ -497,6 +498,7 @@ function deliver(d: Delivery, settings: NotificationSettings): void {
   // MUTE SUPPRESSES DELIVERY ONLY — bell, card, shock, sound. The session's state (`waiting`) is
   // computed upstream of here and never touched. The observer still sees it: it is the decision log.
   if (isMutedId(d.bell.id)) return
+  if (isWorkerMuted(d.bell.id)) return
   deliveryObserver?.({ event: d.event, title: d.title, body: d.body, nay: d.nay === true })
   if (typeof document !== 'undefined') {
     pushNotification({

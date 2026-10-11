@@ -20,6 +20,7 @@ import { messageTime } from '../../lib/messageTime'
 import { STATE_COLOR } from '../../lib/sessionCardStyle'
 import { inputStyle } from './formBits'
 import { HarnessMark } from './HarnessMark'
+import { getSessionRole, setSessionRole, type SessionRole } from '../../lib/sessionRoles'
 
 export interface LinkTarget { kind: 'parent' | 'child' | 'task'; key: string; label: string; harness?: string; state?: string; stateLabel?: string; startedAt?: number; path: string | null }
 
@@ -74,8 +75,8 @@ function Row({ t, pt, onGo, touch }: { t: LinkTarget; pt: boolean; onGo: (path: 
   )
 }
 
-export function SessionLinkPanel({ links, startedAt, pt, onGo, isMobile = false }: {
-  links: SessionLinks; startedAt?: number; pt: boolean; onGo: (path: string) => void; isMobile?: boolean
+export function SessionLinkPanel({ links, startedAt, sessionId, pt, onGo, isMobile = false }: {
+  links: SessionLinks; startedAt?: number; sessionId?: string; pt: boolean; onGo: (path: string) => void; isMobile?: boolean
 }) {
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
@@ -95,6 +96,16 @@ export function SessionLinkPanel({ links, startedAt, pt, onGo, isMobile = false 
   const close = () => { setSearching(false); setQuery('') }
   return (
     <div data-testid="session-link-panel">
+      {sessionId && <div>
+        <div style={SECTION}>{pt ? 'Tipo' : 'Type'}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 6px', fontSize: 12 }}>
+          <span style={{ color: getSessionRole(sessionId) === 'leader' ? '#c4b5fd' : getSessionRole(sessionId) === 'worker' ? '#67e8f9' : 'var(--text-tertiary)' }}>{getSessionRole(sessionId) === 'leader' ? (pt ? 'Líder' : 'Leader') : getSessionRole(sessionId) === 'worker' ? 'Worker' : (pt ? 'Automático' : 'Automatic')}</span>
+          <span style={{ color: 'var(--text-tertiary)', fontSize: 10.5 }}>{getSessionRole(sessionId) ? (pt ? 'definido por você' : 'set by you') : (pt ? 'deduzido pelo sistema' : 'inferred by system')}</span>
+          <select aria-label={pt ? 'Trocar tipo' : 'Change type'} value={getSessionRole(sessionId) ?? ''} onChange={e => setSessionRole(sessionId!, (e.target.value || null) as SessionRole | null)} style={{ marginLeft: 'auto', fontSize: 11 }}>
+            <option value="">{pt ? 'Automático' : 'Automatic'}</option><option value="leader">{pt ? 'Líder' : 'Leader'}</option><option value="worker">Worker</option>
+          </select>
+        </div>
+      </div>}
       {groups.map(([kind, title]) => {
         let rows = targets.filter(t => t.kind === kind)
         if (!rows.length) return null
@@ -143,7 +154,7 @@ export function SessionLinkPanel({ links, startedAt, pt, onGo, isMobile = false 
 }
 
 export function SessionLinkInfo({ session, links, lang, onGo, isMobile = false }: {
-  session: Pick<ControlSession, 'startedAt'>
+  session: Partial<Pick<ControlSession, 'id' | 'startedAt'>>
   links: SessionLinks | null
   lang: 'pt' | 'en'
   onGo: (path: string) => void
@@ -204,7 +215,7 @@ export function SessionLinkInfo({ session, links, lang, onGo, isMobile = false }
           maxHeight: '60vh', overflowY: 'auto', padding: '4px 10px 10px', borderRadius: 10,
           background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
         }}>
-          <SessionLinkPanel links={links} {...(session.startedAt ? { startedAt: session.startedAt } : {})} pt={pt} isMobile={isMobile}
+          <SessionLinkPanel links={links} {...(session.startedAt ? { startedAt: session.startedAt } : {})} sessionId={session.id} pt={pt} isMobile={isMobile}
             onGo={p => { setOpen(false); onGo(p) }} />
         </div>, document.body)}
     </>
