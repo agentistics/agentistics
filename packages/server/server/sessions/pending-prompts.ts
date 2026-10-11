@@ -30,7 +30,8 @@
 import { pendingEchoes } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { tmpdir } from 'node:os'
 
 export interface PendingPrompt {
   /** Exactly what was handed to the session. */
@@ -52,7 +53,11 @@ export const PENDING_TTL_MS = 20 * 60 * 1000
 /** The most entries kept per conversation — a runaway sender cannot grow this without bound. */
 const MAX_PER_SESSION = 50
 const MAX_TOTAL = 500
-let storeFile = join(AGENTISTICS_DATA_DIR, 'pending-prompts.json')
+// Under `bun test` (NODE_ENV=test) the default store is a per-process temp file, so no suite that
+// records or resets prompts can ever touch the user's real queue.
+let storeFile = process.env.NODE_ENV === 'test'
+  ? join(tmpdir(), `agentistics-pending-prompts-${process.pid}.json`)
+  : join(AGENTISTICS_DATA_DIR, 'pending-prompts.json')
 
 const byConversation = new Map<string, PendingPrompt[]>()
 let loaded = false
@@ -87,7 +92,7 @@ function load(): void {
 
 function persist(): void {
   try {
-    mkdirSync(AGENTISTICS_DATA_DIR, { recursive: true, mode: 0o700 })
+    mkdirSync(dirname(storeFile), { recursive: true, mode: 0o700 })
     const tmp = `${storeFile}.tmp-${process.pid}`
     writeFileSync(tmp, JSON.stringify(Object.fromEntries(byConversation)), { mode: 0o600 })
     renameSync(tmp, storeFile)
