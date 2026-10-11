@@ -187,7 +187,8 @@ afterEach(async () => {
     for (const id of [...r.store.alive(), ...r.store.dead()]) await r.store.terminate(id, 4000)
     rmSync(r.root, { recursive: true, force: true })
   }
-})
+  // One test spins a rig per structured harness; tearing each down may take up to 4 s.
+}, 30_000)
 
 const webSpawn = (cwd: string, prompt?: string, harness: HarnessId = 'gemini'): BackendSpawn => ({
   id: 'm-1', cwd, argv: ['/usr/bin/gemini'],
