@@ -22,6 +22,7 @@ import { planCostOf } from './lib/topUsage'
 import { bootLoading } from './lib/bootPhase'
 import { editorEnabledFor } from './lib/editorGate'
 import { useProjectedDerived } from './hooks/useProjectedDerived'
+import { ConfirmModal } from './pages/settings/primitives'
 import { journalBackfillText, type JournalBackfillSummary } from './lib/journalBackfill'
 import { DEFAULT_CARD_ORDER, migrateCardOrder, type CardId } from './lib/cardOrder'
 import { BillingIntroModal } from './components/BillingIntroModal'
@@ -2366,6 +2367,7 @@ export default function AppLayout() {
   const [showUpdateModal, setShowUpdateModal] = useState(false)
   // The popup left this page (closed, timed out, installed): it does not come back until a reload.
   const [promptGone, setPromptGone] = useState<string | null>(null)
+  const [retryImportOpen, setRetryImportOpen] = useState(false)
   const updateSnooze = useUpdateSnooze()
   const upgradeFlow = useUpgradeFlow()
   // First-run archive consent gate: undefined = prefs not loaded, null = loaded but
@@ -3473,8 +3475,27 @@ export default function AppLayout() {
                 {lang === 'pt' ? 'Tentar de novo' : 'Try again'}
               </button>
             )}
+            {t === backfillText && teamSession?.journalBackfill?.state === 'failed' && (
+              <button onClick={() => setRetryImportOpen(true)} style={{
+                minHeight: isMobile ? 44 : 28, padding: '2px 12px',
+                background: 'var(--anthropic-orange-dim)', border: '1px solid var(--anthropic-orange)60', borderRadius: 8,
+                color: 'var(--anthropic-orange)', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.75rem', fontWeight: 600,
+              }}>
+                {lang === 'pt' ? 'Tentar importar de novo' : 'Retry the import'}
+              </button>
+            )}
           </div>
         ))}
+        <ConfirmModal
+          open={retryImportOpen}
+          tone="default"
+          title={lang === 'pt' ? 'Importar o histórico de novo?' : 'Retry the history import?'}
+          message={lang === 'pt' ? 'A importação roda em segundo plano, com prioridade baixa. Nada é apagado.' : 'The import runs in the background at low priority. Nothing is deleted.'}
+          confirmLabel={lang === 'pt' ? 'Importar' : 'Import'}
+          cancelLabel={lang === 'pt' ? 'Cancelar' : 'Cancel'}
+          onCancel={() => setRetryImportOpen(false)}
+          onConfirm={() => { setRetryImportOpen(false); void fetch('/api/journal/import', { method: 'POST' }).catch(() => {}) }}
+        />
       </div>
     )
     : null

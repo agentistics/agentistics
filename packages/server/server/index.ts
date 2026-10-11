@@ -827,6 +827,18 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       if (res) return res
     }
 
+    // Retry the journal's history import from the page (the button on the "import failed" notice) —
+    // the same starter the boot check uses, so a running or completed import is left alone.
+    if (url.pathname === '/api/journal/import' && req.method === 'POST') {
+      const [{ JOURNAL_ENABLED, JOURNAL_PATH, JOURNAL_BACKFILL_PATH }, { maybeStartAutoBackfill }] = await Promise.all([
+        import('./config'), import('./journal/backfill'),
+      ])
+      const d = maybeStartAutoBackfill({ journalEnabled: JOURNAL_ENABLED, central: TEAM_CENTRAL, journalPath: JOURNAL_PATH, progressPath: JOURNAL_BACKFILL_PATH, env: process.env })
+      return new Response(JSON.stringify(d.start ? { started: true } : { started: false, reason: d.reason }), {
+        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      })
+    }
+
     if (url.pathname === '/api/version' && req.method === 'GET') {
       try {
         const info = versionWithRestart(await getVersionInfo())

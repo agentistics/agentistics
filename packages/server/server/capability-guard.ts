@@ -20,6 +20,7 @@ const EXACT: ReadonlyMap<string, keyof Capabilities> = new Map<string, keyof Cap
   // most powerful thing this product does from a browser, so it rides the gate the shell rides.
   // `upgrade-gate.ts` refuses a central on top of this, and says so in words.
   ['/api/upgrade', 'localShell'],
+  ['/api/journal/import', 'localShell'],
   // It SPAWNS `tailscale` to read what this machine is already serving — a process, so it is host
   // power and belongs here. It configures nothing; see `secure-origin.ts`.
   ['/api/secure-origin', 'localShell'],
