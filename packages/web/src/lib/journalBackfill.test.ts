@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { journalBackfillText } from './journalBackfill'
+import { journalBackfillPollMs, journalBackfillText } from './journalBackfill'
 
 describe('the journal first-import line', () => {
+  test('polls failed imports less often than running imports', () => {
+    expect(journalBackfillPollMs('running')).toBe(10_000)
+    expect(journalBackfillPollMs('failed')).toBe(60_000)
+  })
   test('nothing to say: no line', () => {
     expect(journalBackfillText(null, 'pt')).toBeNull()
     expect(journalBackfillText(undefined, 'en')).toBeNull()

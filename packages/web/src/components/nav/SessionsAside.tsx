@@ -63,6 +63,7 @@ import { SessionFiling } from '../tasks/SessionFiling'
 import { boardCopy } from '../tasks/copy'
 import { attachSession, detachSession } from '../../lib/tasks'
 import { SessionFacts } from '../sessions/SessionFacts'
+import { RoleChip } from '../sessions/RoleChip'
 import { reopenedSessionRoute, sessionPath } from '../../lib/sessionRoute'
 import {
   MAX_PINNED, getPinnedIds, movePinnedSession, pinnedServerSnapshot, resolvePinnedRows,
@@ -2568,7 +2569,7 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
         {...(lang ? { lang } : {})}
         {...(cardStyle.stateTextColor ? { metaColor: cardStyle.stateTextColor } : {})}
       />
-      {role && <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: role === 'leader' ? 'var(--accent-purple)' : 'var(--accent-cyan)', border: `1px solid ${role === 'leader' ? 'var(--accent-purple)' : 'var(--accent-cyan)'}`, borderRadius: 5, padding: '2px 5px' }}>{role === 'leader' ? (lang === 'pt' ? 'Líder' : 'Leader') : 'Worker'}</span>}
+      {role && <RoleChip role={role} pt={lang === 'pt'} />}
       {/* The assistant, NAMED. It was a 5px dot, which carries the fact in colour alone — and a
           colour is not a name. The model sits with it on the meta line below. */}
       {/* The pin lives on the row rather than in a menu: it is a one-click decision about the row

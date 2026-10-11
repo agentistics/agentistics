@@ -331,12 +331,13 @@ export function Divider() {
 }
 
 export function TabSelect<T extends string>({
-  options, value, onChange, accent = 'var(--anthropic-orange)',
+  options, value, onChange, accent = 'var(--anthropic-orange)', buttonMinHeight,
 }: {
   options: { value: T; label: string }[]
   value: T
   onChange: (v: T) => void
   accent?: string
+  buttonMinHeight?: number
 }) {
   return (
     <div style={{ display: 'inline-flex', width: 'fit-content', border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
@@ -357,6 +358,7 @@ export function TabSelect<T extends string>({
               fontFamily: 'inherit',
               transition: 'background 0.15s, color 0.15s',
               whiteSpace: 'nowrap',
+              ...(buttonMinHeight !== undefined ? { minHeight: buttonMinHeight } : {}),
             }}
           >
             {opt.label}

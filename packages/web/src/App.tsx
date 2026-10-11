@@ -98,6 +98,7 @@ import { AsideHeader } from './components/nav/AsideHeader'
 import { getPinnedIds } from './lib/pinnedSessions'
 import { loadSharedPrefs, loadPersonalPrefs, putPersonal, migrateLocalOnce } from './lib/sharedPref'
 import { applyTextScale, clampTextScale, readLocalTextScale, writeLocalTextScale } from './lib/textScale'
+import { journalBackfillPollMs } from './lib/journalBackfill'
 import { initialLang } from './lib/lang'
 import { fleetOpenStore, sessionsFiltersOpenStore, studioSeenStore } from './lib/appFlags'
 import { pageMaxWidth } from './lib/pageWidth'
@@ -1499,7 +1500,7 @@ export default function AppLayout() {
   useEffect(() => {
     const state = teamSession?.journalBackfill?.state
     if (state !== 'running' && state !== 'failed') return
-    const timer = window.setInterval(() => { void refreshTeamSession() }, 10_000)
+    const timer = window.setInterval(() => { void refreshTeamSession() }, journalBackfillPollMs(state))
     return () => window.clearInterval(timer)
   }, [refreshTeamSession, teamSession?.journalBackfill?.state])
   /**
