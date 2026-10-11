@@ -14,6 +14,7 @@ import { CenteredLoader } from '../components/CenteredLoader'
  * page only after a reveal, in one row's state, for 30 seconds; copying overwrites the clipboard after
  * 30 seconds too.
  */
+import { overlayPadding } from '../lib/mobileOverlay'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useOutletContext, useSearchParams } from 'react-router-dom'
 import { CheckSquare, ChevronDown, ChevronUp, Copy, Eye, EyeOff, FileUp, FolderInput, FolderPlus, History, Info, KeyRound, Pencil, Plus, Replace, RotateCcw, Search, ShieldCheck, Trash2, X } from 'lucide-react'
@@ -487,7 +488,7 @@ export function QuickVault({ lang, isMobile, onClose }: { lang: Lang; isMobile: 
   // The same frame as the app's ConfirmModal (scrim, card tokens, radius, shadow); full-screen on a phone.
   const o: React.CSSProperties = {
     position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent: 'center',
-    background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)', padding: isMobile ? 0 : 16,
+    background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)', padding: overlayPadding(isMobile, 16),
   }
   const c: React.CSSProperties = {
     width: '100%', maxWidth: isMobile ? 'none' : 560, maxHeight: isMobile ? '100dvh' : '86vh', height: isMobile ? '100dvh' : undefined,
