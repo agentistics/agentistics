@@ -5,7 +5,7 @@
 //
 // The test proves BOTH halves: the naive open really does create sidecars (so the guarantee is not
 // vacuous), and the adapter's read path creates none.
-import { test, expect, beforeAll } from 'bun:test'
+import { test, expect, beforeAll, afterAll } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import { mkdtempSync, mkdirSync, rmSync, readdirSync, readFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -36,6 +36,8 @@ beforeAll(() => {
   makeWalDb()
 })
 
+afterAll(() => rmSync(root, { recursive: true, force: true }))
+
 test('the NAIVE readonly open DOES create -shm/-wal sidecars (the bug being prevented)', () => {
   for (const f of sidecars()) rmSync(join(conversationsDir, f))
   expect(sidecars()).toEqual([])
@@ -61,7 +63,6 @@ test('the adapter read path creates NO sidecar and leaves the DB byte-identical'
   expect(sidecars()).toEqual([])
   expect(Buffer.compare(before, readFileSync(dbFile))).toBe(0)
 
-  rmSync(root, { recursive: true, force: true })
 })
 
 test('toSqliteUriPath escapes what would otherwise be URI syntax', async () => {

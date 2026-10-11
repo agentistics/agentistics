@@ -27,7 +27,12 @@ const read = () => {
   try { return parseAsideGroupPrefs(JSON.parse(seeded)) } catch { return parseAsideGroupPrefs(null) }
 }
 
-beforeEach(() => { installStorage(); seeded = null })
+beforeEach(() => {
+  installStorage(); seeded = null
+  // The preference document is a module-level store; reset the fields that a preceding test may
+  // have changed before each test gets its fresh browser-storage stub.
+  writeAsideGroupPrefs({ ...DEFAULT_ASIDE_GROUP_PREFS })
+})
 afterEach(() => { delete (globalThis as Record<string, unknown>).localStorage })
 
 describe('readAsideGroupPrefs', () => {

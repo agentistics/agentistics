@@ -11,6 +11,8 @@ export interface CleanIoOpts {
   env?: Record<string, string | undefined>
   /** Run git and du at the lowest CPU and I/O priority (the server's weekly look). */
   lowPriority?: boolean
+  /** Override the per-process ceiling in tests; production keeps the 60-second default. */
+  timeoutMs?: number
 }
 
 /** Ceiling for one git/du call. */
@@ -27,11 +29,27 @@ function priority(): string[] {
 async function run(argv: string[], o: CleanIoOpts & { cwd?: string } = {}): Promise<{ code: number; out: string }> {
   const p = Bun.spawn(o.lowPriority ? [...priority(), ...argv] : argv, { cwd: o.cwd, env: (o.env ?? process.env) as Record<string, string>, stdout: 'pipe', stderr: 'ignore' })
   // A wedged git/du (huge tree, dead network mount) must cost one item, never the whole command.
-  const timer = setTimeout(() => { try { p.kill('SIGKILL') } catch { /* gone */ } }, RUN_TIMEOUT_MS)
-  try {
+  let timedOut = false
+  let timeout!: ReturnType<typeof setTimeout>
+  const deadline = new Promise<{ code: number; out: string }>(resolve => {
+    timeout = setTimeout(() => {
+      timedOut = true
+      try { p.kill('SIGKILL') } catch { /* gone */ }
+      // Do not await the pipe after killing the process. A child such as a Git hook can inherit
+      // stdout and keep the pipe open even though the process we spawned is gone.
+      resolve({ code: 124, out: '' })
+    }, o.timeoutMs ?? RUN_TIMEOUT_MS)
+  })
+  const result = (async () => {
     const out = await new Response(p.stdout).text()
     return { code: await p.exited, out }
-  } finally { clearTimeout(timer) }
+  })()
+  try {
+    return await Promise.race([result, deadline])
+  } finally {
+    clearTimeout(timeout)
+    if (timedOut) void result.catch(() => {})
+  }
 }
 const git = (args: string[], o: CleanIoOpts) => run(['git', ...args], o)
 

@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.122.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O tempo ativo de uma sessão não passa mais da duração dela: intervalos sobrepostos contam uma vez só, e o tempo medido de cada resposta continua valendo.',
+        en: 'A session\'s active time no longer exceeds its duration: overlapping intervals count once, and each reply\'s measured time still wins.',
+      },
+    ],
+  },
   '2.121.0': {
     features: [
       {
