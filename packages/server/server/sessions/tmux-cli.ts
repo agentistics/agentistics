@@ -359,6 +359,40 @@ export function listPanePidsArgs(socket?: string): string[] {
   return sock(['list-panes', '-a', '-F', '#{session_name}\t#{pane_pid}'], socket)
 }
 
+/**
+ * PERF.IDLE: the fleet poll asked tmux TWO questions every tick — `list-sessions` (each session's
+ * created/attached/dead/activity) and `list-panes -a` (each pane's pid) — as two processes. One
+ * `list-panes -a` carrying the session fields as well answers both: the session fields are the same on
+ * every pane of a session, `pane_dead` is taken from the window's ACTIVE pane (exactly what
+ * `list-sessions` resolves `#{pane_dead}` against), and the pid keeps `parsePanePids`' last-pane-wins.
+ */
+export const FLEET_PANES_FORMAT = `${LIST_FORMAT}\t#{pane_pid}\t#{window_active}#{pane_active}`
+
+export function fleetPanesArgs(socket?: string): string[] {
+  return sock(['list-panes', '-a', '-F', FLEET_PANES_FORMAT], socket)
+}
+
+/** PURE. `fleetPanesArgs`' output -> the `parseTmuxList` rows and the `parsePanePids` map, as the two reads gave them. */
+export function parseFleetPanes(out: string): { sessions: BackendSession[]; panePids: Map<string, number> } {
+  const listLines = new Map<string, string>()
+  const firstLine = new Map<string, string>()
+  const pidLines: string[] = []
+  for (const raw of out.split('\n')) {
+    const line = raw.trimEnd()
+    if (!line) continue
+    const f = line.split('\t')
+    if (f.length < 7) continue
+    const [name, created, attached, dead, activity, pid, active] = f
+    const sessionLine = [name, created, attached, dead, activity].join('\t')
+    if (!firstLine.has(name!)) firstLine.set(name!, sessionLine)
+    if (active === '11') listLines.set(name!, sessionLine)
+    pidLines.push(`${name}\t${pid}`)
+  }
+  // Session order as tmux listed them; a session with no active pane reported falls back to its first.
+  const rows = [...firstLine.keys()].map(n => listLines.get(n) ?? firstLine.get(n)!)
+  return { sessions: parseTmuxList(rows.join('\n')), panePids: parsePanePids(pidLines.join('\n')) }
+}
+
 /** PURE. `listPanePidsArgs`' output -> managed id -> pane pid. Not-ours and malformed lines are dropped. */
 export function parsePanePids(out: string): Map<string, number> {
   const map = new Map<string, number>()

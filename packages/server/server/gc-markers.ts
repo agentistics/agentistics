@@ -1,5 +1,5 @@
 /**
- * gc-markers.ts — `agentop server` runs JavaScriptCore with ONE parallel GC marker (PERF.IDLE).
+ * gc-markers.ts — `agentop server` runs JavaScriptCore with TWO parallel GC markers (PERF.IDLE).
  *
  * WHAT WAS MEASURED (2026-10-11, bun 1.3.14, 8-core WSL2): a bare `Bun.serve` that allocates ANYTHING
  * once a second — one empty array — costs ~1.0 % of a core; the same process allocating nothing costs
@@ -8,7 +8,15 @@
  * starts on an 8-core machine, which wake for every cycle and spin on `sched_yield` waiting for
  * marking work a small idle heap does not have (a full strace of the idle server: ~250 `sched_yield`
  * a second outside any burst, all on those threads). With `BUN_JSC_numberOfGCMarkers=1` the same
- * process measures ~0.15 %, and the idle server at N=10 went from ~1.7 % to ~1.0 %.
+ * process measures ~0.15 %. On the engine-map fleet (N=10, five simulated web clients, 60 s):
+ *
+ *   markers   idle CPU   5 clients CPU   RSS
+ *   default    1.3 %        11.9 %       ~210 MB
+ *   1          0.6 %         4.2 %       ~340 MB   (collects later: +130 MB resident)
+ *   2          0.9 %         5.3 %       ~210 MB
+ *
+ * Two keeps the memory the server always had and most of the saving; one would buy another 0.3 %
+ * with a third more RSS, on machines where memory is what runs out first.
  *
  * A server that is idle is exactly the case where parallel marking buys nothing; one that is busy
  * still marks CONCURRENTLY with its own collector thread, it just does not fan the work out. The
@@ -24,7 +32,7 @@
  */
 
 export const GC_MARKERS_ENV = 'BUN_JSC_numberOfGCMarkers'
-export const DEFAULT_GC_MARKERS = 1
+export const DEFAULT_GC_MARKERS = 2
 
 /** PURE: the marker count to re-exec with, or `null` to start as we are. */
 export function gcMarkersPlan(env: Record<string, string | undefined>, platform: string): number | null {

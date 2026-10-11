@@ -723,7 +723,7 @@ if (command === 'start') {
 }
 
 if (command === 'server' || command === 'start' || !command) {
-  // FIRST, before anything is claimed: re-execute with one GC marker thread — see gc-markers.ts for
+  // FIRST, before anything is claimed: re-execute with two GC marker threads — see gc-markers.ts for
   // what an idle server paid without it. Same pid, same fds; returns only when it did not happen.
   if (command === 'server') {
     const { reexecWithGcMarkers } = await import('../server/gc-markers.ts')

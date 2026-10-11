@@ -10,11 +10,11 @@ import { highlightedRow, parseRewindMenu, REWIND_MAX_STEPS, rewindRowMatches } f
 import type { RewindOutcome } from './types'
 import {
   attachArgs, capturePaneArgs, captureManyArgs, captureTerminalArgs, splitCaptureMany, capturePaneAnsiArgs, idFromTmuxName, isSessionGoneError,
-  killSessionArgs, listSessionsArgs, paneInfoArgs, parsePaneInfo, parsePrefix, parseTmuxList,
+  killSessionArgs, listSessionsArgs, paneInfoArgs, parsePaneInfo, parsePrefix,
   tmuxListIsEmptyState,
   resolveDefaultTerminal, resolveTruecolorTerm, spawnArgs, sendKeysNamedArgs, sendKeysLiteralArgs, sendKeysNamedSequenceArgs,
   clearHistoryArgs, pasteBufferName, setBufferArgs, pasteBufferArgs,
-  showPrefixArgs, trimCapture, listPanePidsArgs, parsePanePids,
+  showPrefixArgs, trimCapture, fleetPanesArgs, parseFleetPanes,
   type TerminalProfile,
 } from './tmux-cli'
 import { collectOwnPids, escalateKill, procIO } from './kill-escalate'
@@ -115,6 +115,20 @@ async function tmux(args: string[]): Promise<{ code: number; out: string; err: s
     // callers are meant to consult — no throw, so a missing tmux never crashes a caller.
     return { code: 127, out: '', err: '' }
   }
+}
+
+/**
+ * ONE `list-panes -a` answers both `list()` and `listPanePids()` (`parseFleetPanes`). Callers asking at
+ * the same moment — the fleet poll asks both in one `Promise.all` — share the read IN FLIGHT; nothing
+ * is kept once it settles, so a caller arriving later (a spawn confirming its session) always reads
+ * tmux afresh.
+ */
+let fleetPanesInFlight: Promise<{ code: number; out: string; err: string }> | null = null
+function fleetPanes(): Promise<{ code: number; out: string; err: string }> {
+  if (fleetPanesInFlight) return fleetPanesInFlight
+  const p = tmux(fleetPanesArgs()).finally(() => { if (fleetPanesInFlight === p) fleetPanesInFlight = null })
+  fleetPanesInFlight = p
+  return p
 }
 
 /**
@@ -675,14 +689,14 @@ export const tmuxBackend: SessionBackend = {
     // a failure and THROWS — see `tmuxListIsEmptyState`. Swallowing them made a tmux that could not
     // be reached report every session as gone, which is the one answer a fleet monitor must never
     // give by accident.
-    const { code, out, err } = await tmux(listSessionsArgs())
+    const { code, out, err } = await fleetPanes()
     // BOTH streams: with no server tmux says nothing on stdout and puts its reason on stderr, so a
     // stdout-only test would call the ordinary first-run state a failure. See `tmuxListIsEmptyState`.
     if (!tmuxListIsEmptyState(code, out, err)) {
       const said = (err.trim() || out.trim()).split('\n')[0]
       throw new Error(said || `tmux list-sessions failed (code ${code})`)
     }
-    return parseTmuxList(out)
+    return parseFleetPanes(out).sessions
   },
 
   async capture(id: string, lines: number) {
@@ -758,7 +772,7 @@ export const tmuxBackend: SessionBackend = {
   },
 
   async listPanePids(): Promise<Map<string, number>> {
-    const { out } = await tmux(listPanePidsArgs())
-    return parsePanePids(out)
+    const { out } = await fleetPanes()
+    return parseFleetPanes(out).panePids
   },
 }

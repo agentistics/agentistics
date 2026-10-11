@@ -440,3 +440,26 @@ describe('the parent link survives the heartbeat rewrite (SESSION.LINK)', () => 
     } finally { await rm(dir, { recursive: true, force: true }) }
   })
 })
+
+describe('the kept parse (PERF.IDLE)', () => {
+  const rec = (id: string, label: string) => ({ id, harness: 'claude', cwd: '/w', createdAt: '2026-10-11T00:00:00.000Z', label })
+  it('hands out fresh objects every read, so an edit by one caller never reaches the next', async () => {
+    await writeFile(file, JSON.stringify([rec('aaaa1111bb', 'one')]))
+    const reg = createSessionRegistry(file)
+    const first = await reg.read()
+    first[0]!.label = 'edited in memory'
+    expect((await reg.read())[0]!.label).toBe('one')
+  })
+  it('a rewrite IN PLACE with the same size is still seen (mtime), and so is one through the registry', async () => {
+    await writeFile(file, JSON.stringify([rec('aaaa1111bb', 'one')]))
+    const reg = createSessionRegistry(file)
+    expect((await reg.read())[0]!.label).toBe('one')
+    // Past the kernel's timestamp granularity (a jiffy, ~4 ms): an in-place rewrite of the same size
+    // inside one jiffy is the one change the key cannot see — agentop itself only ever renames.
+    await Bun.sleep(30)
+    await writeFile(file, JSON.stringify([rec('aaaa1111bb', 'two')]))
+    expect((await reg.read())[0]!.label).toBe('two')
+    await reg.patch('aaaa1111bb', { label: 'three' })
+    expect((await reg.read())[0]!.label).toBe('three')
+  })
+})

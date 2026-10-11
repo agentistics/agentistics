@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { DEFAULT_GC_MARKERS, GC_MARKERS_ENV, gcMarkersPlan, selfArgv } from './gc-markers'
 
 describe('gcMarkersPlan', () => {
-  it('re-executes with one marker by default on Linux and macOS', () => {
+  it('re-executes with two markers by default on Linux and macOS', () => {
     expect(gcMarkersPlan({}, 'linux')).toBe(DEFAULT_GC_MARKERS)
     expect(gcMarkersPlan({}, 'darwin')).toBe(DEFAULT_GC_MARKERS)
   })

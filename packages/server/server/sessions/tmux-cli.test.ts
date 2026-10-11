@@ -502,3 +502,29 @@ describe('parsePanePids', () => {
     expect([...m]).toEqual([['a1', 123]])
   })
 })
+
+describe('parseFleetPanes — one list-panes for the session list and the pane pids (PERF.IDLE)', () => {
+  const { parseFleetPanes, fleetPanesArgs, FLEET_PANES_FORMAT, LIST_FORMAT, parseTmuxList, parsePanePids, tmuxName } = require('./tmux-cli') as typeof import('./tmux-cli')
+  const a = tmuxName('aaaa1111bb'), b = tmuxName('cccc2222dd')
+  it('asks list-panes -a on our socket, with the session fields first', () => {
+    const args = fleetPanesArgs()
+    expect(args.slice(2)).toEqual(['list-panes', '-a', '-F', FLEET_PANES_FORMAT])
+    expect(FLEET_PANES_FORMAT.startsWith(LIST_FORMAT)).toBe(true)
+  })
+  it('gives what list-sessions and list-panes gave: session fields from the ACTIVE pane, pid of the LAST pane', () => {
+    const out = [
+      `${a}\t100\t0\t0\t150\t11\t11`,
+      `${b}\t200\t1\t1\t250\t21\t10`, // first pane, inactive and dead
+      `${b}\t200\t1\t0\t250\t22\t11`, // the active pane is alive
+      'other\t300\t0\t0\t300\t31\t11', // not ours
+      '',
+    ].join('\n')
+    const { sessions, panePids } = parseFleetPanes(out)
+    expect(sessions).toEqual(parseTmuxList([`${a}\t100\t0\t0\t150`, `${b}\t200\t1\t0\t250`].join('\n')))
+    expect(panePids).toEqual(parsePanePids([`${a}\t11`, `${b}\t21`, `${b}\t22`].join('\n')))
+    expect(panePids.get('cccc2222dd')).toBe(22)
+  })
+  it('an empty answer (no server) is no sessions and no pids', () => {
+    expect(parseFleetPanes('')).toEqual({ sessions: [], panePids: new Map() })
+  })
+})
