@@ -9,6 +9,7 @@ import {
   armHeartbeat, askWords, credentials, gateFor, grantAlive, heartbeat, loadVault, lockNow, missingSteps, needsTypedCode, presenceDisable, primarySection,
   recoverySteps, setAutoLock, type Credential, type LoadResult, type UiAction, type UnlockMode, type VaultView, type WizardStep, type ActionKind, type ProofChoice,
 } from '../../lib/vaultApi'
+import { pageBeat } from '../../lib/vaultBeat'
 import { presenceKey, vt, vtf } from '../../lib/vaultText'
 import { EnrolWizard, GateDialog, RecoverDialog, gateActionOf, type GateKind } from '../../components/vault/VaultFlows'
 
@@ -57,15 +58,8 @@ export function useVaultControls(lang: Lang) {
     if (!open) return
     let last = 0
     const beat = (event: Event) => {
-      // A script can dispatch pointer/keyboard events too; only browser-originated input is a human gesture.
-      if (!event.isTrusted) return
-      const n = Date.now(); if (n - last >= BEAT_MS) {
-        last = n
-        void heartbeat().then(r => {
-          if (r?.json.code !== 'activity-token') return
-          return armHeartbeat().then(armed => armed?.json.ok ? heartbeat() : undefined)
-        })
-      }
+      const n = Date.now()
+      if (event.isTrusted && n - last >= BEAT_MS) { last = n; void pageBeat(event, { heartbeat, armHeartbeat }) }
     }
     window.addEventListener('pointerdown', beat); window.addEventListener('keydown', beat)
     return () => { window.removeEventListener('pointerdown', beat); window.removeEventListener('keydown', beat) }

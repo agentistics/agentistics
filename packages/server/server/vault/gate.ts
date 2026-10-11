@@ -405,8 +405,13 @@ export async function requireVaultStepUp(action: VaultAction, ctx: GateContext):
     if (action === 'reset') return resetUnopenable(ctx)
     return refused('locked', sentence('locked'))
   }
-  // VAULT.UI2: "keep it open" on THIS computer — the vault is already open and the click is the consent.
-  if (action === 'extend-open' && ctx.loopback) {
+  // VAULT.V2 (QA r3 C1): "keep it open" needs the page's own read grant (bound to the HTTP session) or the code.
+  // A bare loopback request is no longer enough: any local process could otherwise hold the vault open forever.
+  if (action === 'extend-open') {
+    if (grantValid(ctx.grant, ctx.session, 'read')) { noteVaultActivity(); return { ok: true } }
+    if (!ctx.code) return refused('stepup-required', sentence('stepup-required'))
+    const c = await checkCodeWith(o.dek, o.kid, ctx.code)
+    if (!c.ok) return c
     noteVaultActivity()
     return { ok: true }
   }

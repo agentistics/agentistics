@@ -456,6 +456,32 @@ describe('the routes that already existed keep their gate (stepup, lock, auto-lo
     expect((await beat(t2)).json.code).toBe('activity-token')
   })
 
+  test('extend: a bare local curl is refused (window unchanged, no token); with the page\'s grant it works, throttled', async () => {
+    lockVault('user')
+    await http('POST', '/api/vault/unlock', {})
+    T += 40 * 60_000 / 4
+    const before = autoLockRemainingMs()!
+    const bare = await http('POST', '/api/vault/extend', {})
+    expect(bare.json.code).toBe('stepup-required')
+    expect(tokenOf(bare)).toBeUndefined()
+    expect(autoLockRemainingMs()!).toBe(before)
+    const other = await http('POST', '/api/vault/extend', {}, mintGrant('http:session-B', 'read'))
+    expect(other.json.code).toBe('stepup-required')
+    expect(tokenOf(other)).toBeUndefined()
+    const grant = mintGrant('http:session-A', 'read')
+    const first = await http('POST', '/api/vault/extend', {}, grant)
+    expect(first.json.ok).toBe(true)
+    const t1 = tokenOf(first)
+    expect(t1).toBeDefined()
+    expect(autoLockRemainingMs()!).toBeGreaterThan(before)
+    T += 5_000
+    const second = await http('POST', '/api/vault/extend', {}, grant)
+    expect(second.json.ok).toBe(true)
+    expect(tokenOf(second)).toBeUndefined()                       // the arm throttle: no fresh token inside 30 s
+    expect(second.headers.get('set-cookie') ?? '').not.toContain('agentistics-vault-heartbeat') // and the page's cookie is not cleared
+    expect((await beat(t1)).json.ok).toBe(true)                   // the first token is still the live one
+  })
+
   test('activity without a token is refused; an unknown path is not ours', async () => {
     expect((await http('POST', '/api/vault/activity', {})).json.code).toBe('activity-token')
     expect((await http('GET', '/api/vault/nope')).status).toBe(404)
