@@ -40,7 +40,7 @@ import { markFleetPhase, timeFleetPhase } from './fleet-profile'
 import { processSessionHub, type SessionHub } from './session-hub'
 import { forceRowScreen } from './adapter-state-host'
 import {
-  buildFleetFrame, closedPage, compactFleetPayload, compactFleetSession, fleetEventsResponse, type FleetFrame,
+  buildFleetFrame, closedPage, compactFleetPayload, compactFleetRows, compactFleetSession, fleetEventsResponse, type FleetFrame,
 } from './fleet-events'
 import { cachedBaseline } from './fleet-baseline'
 import { loadConsolidated } from '../consolidate'
@@ -372,11 +372,12 @@ export async function openFleetEvents(
 /** `GET /api/fleet/closed` — one page of the closed rows the stream did not send, most recent first. */
 export async function readClosedFleet(lang: CliLang, offset: number, limit: number): Promise<ReturnType<typeof closedPage>> {
   const page = closedPage(await readFleet(lang), offset, limit)
-  const sessions = page.sessions.map((session, i) => {
+  const rawSessions = page.sessions.map((session, i) => {
     const row = page.rows[i]!
     return compactFleetSession(session, row)
   })
-  return { total: page.total, sessions, rows: undefined } as unknown as ReturnType<typeof closedPage>
+  const { sessions, verbCatalog } = compactFleetRows(rawSessions)
+  return { total: page.total, sessions, verbCatalog, rows: undefined } as unknown as ReturnType<typeof closedPage>
 }
 
 /**

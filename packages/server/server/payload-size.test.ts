@@ -33,7 +33,8 @@ function fleetFixture(liveCount = 12, closedCount = 400) {
     id: closed ? `closed:${id}` : id, title: `A long session title ${'x'.repeat(120)}`,
     harness: 'claude', cwd: '/workspace/repo', project: 'repo', state: closed ? 'closed' : 'working',
     stateLabel: closed ? 'Closed' : 'Working', actionable: !closed, attachCommand: `agentop session attach ${id}`,
-    verbs: [], searchFields: { name: 'long title', folder: '/workspace/repo', harness: 'claude', note: 'n'.repeat(40), task: 't'.repeat(40), prompt: 'p'.repeat(120) },
+    verbs: Array.from({ length: 8 }, (_, n) => ({ action: `action-${n}`, label: `Action ${n} ${'v'.repeat(35)}`, enabled: n % 2 === 0, reason: 'r'.repeat(20) })),
+    searchFields: { name: 'long title', folder: '/workspace/repo', harness: 'claude', note: 'n'.repeat(40), task: 't'.repeat(40), prompt: 'p'.repeat(120) },
     tokenParts: { input: 100, output: 200 }, context: { fraction: 0.5, used: 50_000, window: 100_000 },
     ...(closed ? { endedAt: 1 } : { cpuPercent: 1, rssBytes: 1024 }),
   })
@@ -63,12 +64,20 @@ describe('payload budgets on realistic fleet/data fixtures', () => {
   })
 
   test('the real-shaped 808-row stream has one canonical list and no derived search index', () => {
-    const source = fleetFixture(808, 300) as unknown as FleetFramePayload
+    const source = fleetFixture(508, 300) as unknown as FleetFramePayload
+    const states = [...Array(5).fill('waiting'), ...Array(4).fill('working'), ...Array(710).fill('exited'), ...Array(85).fill('lost'), ...Array(4).fill('closed')]
+    source.rows.forEach((row, i) => { row.state = states[i] as never; row.stateLabel = states[i] as never })
+    source.sessions.forEach((row, i) => { row.state = states[i] as never; row.stateLabel = states[i] as never })
     const body = snapshotBody(1, buildFleetFrame(source, 0))
     const json = JSON.stringify(body)
-    expect((body.sessions as unknown[]).length).toBe(808)
+    expect((body.sessions as unknown[]).length).toBe(9)
+    expect((body as { closed: { total: number; sent: number } }).closed).toEqual({ total: 799, sent: 0 })
     expect(json).not.toContain('"rows"')
     expect(json).not.toContain('"searchFields"')
+    expect(json).not.toContain('"attachCommand"')
+    expect(json).toContain('"verbCatalog"')
+    expect(json).toContain('"verbKey"')
+    expect(bytes(body)).toBeLessThanOrEqual(50 * 1024)
     expect(json.length).toBeLessThan(bytes({ ...source, rows: source.rows }))
   })
 })

@@ -154,12 +154,21 @@ const EMPTY: FleetPayload = { sessions: [], rows: [], attention: 0, tasks: [], f
  */
 export function normalizeFleetPayload(raw: FleetPayload): FleetPayload {
   const list = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : [])
-  const rawSessions = list<Record<string, unknown>>(raw.sessions)
-  const rawRows = list<Record<string, unknown>>(raw.rows)
+  const verbCatalog = list<Record<string, unknown>[]>( (raw as unknown as { verbCatalog?: unknown }).verbCatalog)
+  const expand = (row: Record<string, unknown>) => {
+    const key = row.verbKey
+    const verbs = typeof key === 'number' ? verbCatalog[key] : undefined
+    const { verbKey: _verbKey, ...withoutKey } = row
+    return { ...withoutKey, ...(verbs ? { verbs } : {}), ...('attachCommand' in withoutKey ? {} : {
+      attachCommand: withoutKey.harness === 'agentistics' ? '' : `agentop session attach ${String(withoutKey.id ?? '').slice(0, 12)}`,
+    }) }
+  }
+  const rawSessions = list<Record<string, unknown>>(raw.sessions).map(expand)
+  const rawRows = list<Record<string, unknown>>(raw.rows).map(expand)
   // New servers send one merged `sessions` list.  Recreate the old client-facing aliases locally,
   // and derive the search index from fields already displayed instead of shipping ~186 KB of
   // repeated `searchFields` for the owner's 808-row fleet.
-  const canonical = rawRows.length > 0 ? rawRows : rawSessions
+  const canonical = (rawRows.length > 0 ? rawRows : rawSessions) as Record<string, unknown>[]
   const compact = canonical.map(row => row.searchFields ? row : {
     ...row,
     searchFields: {
