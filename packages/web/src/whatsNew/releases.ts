@@ -14,6 +14,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     features: [],
     fixes: [
       {
+        pt: 'Trocar o tipo da sessão (Líder/Worker) no painel ⓘ agora abre as opções dentro do próprio painel, sem cobrir as outras informações.',
+        en: 'Changing the session type (Leader/Worker) in the ⓘ panel now opens the options inside the panel, without covering the other details.',
+      },
+      {
         pt: 'A limpeza pela interface agora mostra cada item mantido com o motivo, e os itens mantidos não voltam marcados.',
         en: 'Cleanup from the app now lists each kept item with its reason, and kept items no longer come back selected.',
       },
