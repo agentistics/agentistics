@@ -40,6 +40,23 @@ test('a working session is treated the same — it has simply not spoken yet', a
   expect(out.live).toBe(true)
 })
 
+test('an unlinked approval carries its question and options into the chat payload', async () => {
+  const host = {
+    sessions: async () => ({ sessions: [{
+      id: 'sess1', harness: 'antigravity', cwd: NO_PROJECT, state: 'waiting-approval',
+      approvalLines: ['Do you trust this folder?', '❯ 1. Yes, I trust this folder', '  2. No, exit'],
+      dialogOptions: [
+        { number: 1, label: 'Yes, I trust this folder', selected: true },
+        { number: 2, label: 'No, exit', selected: false },
+      ],
+    }] }),
+  } as never
+  const out = await readSessionChat(host, 'en', 'sess1')
+  expect(out.unavailable).toBeUndefined()
+  expect(out.approvalLines).toEqual(['Do you trust this folder?', '❯ 1. Yes, I trust this folder', '  2. No, exit'])
+  expect(out.dialogOptions?.map(o => o.label)).toEqual(['Yes, I trust this folder', 'No, exit'])
+})
+
 test('a session that is NOT running keeps the refusal — there the transcript is genuinely gone', async () => {
   const out = await readSessionChat(hostWith('exited'), 'en', 'sess1')
   expect(out.live).toBe(false)
@@ -162,11 +179,11 @@ test('an old conversation of a harness with no retention rule is never called ex
   expect(out.transcript?.state).toBe('deleted')
 })
 
-test('a session waiting on a dialog before it has a conversation says so, not "no linked conversation"', async () => {
+test('a session waiting on a dialog before it has a conversation keeps the chat actionable', async () => {
   const out = await readSessionChat(
     hostWithRow({ harness: 'antigravity', state: 'waiting-approval', conversationId: undefined }), 'en', 'sess1',
   )
-  expect(out.unavailable).toContain('waiting for your answer')
+  expect(out.unavailable).toBeUndefined()
   expect(out.live).toBe(true)
 })
 
