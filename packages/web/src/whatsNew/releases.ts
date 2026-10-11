@@ -11,7 +11,24 @@ export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
   '2.126.0': {
-    features: [],
+    features: [
+      {
+        pt: 'Novo botão "Uso" no rodapé da barra lateral: passe o mouse para ver os limites de todos os seus planos (sessão de 5 h e semana) e clique para abrir a aba Limites da Nay.',
+        en: 'New "Usage" button at the bottom of the sidebar: hover to see the limits of all your plans (5-hour session and week) and click to open Nay\'s Limits tab.',
+      },
+      {
+        pt: 'O bloco "Plano" do composer mostra anéis com o uso do plano da sessão, e a aba Limites da Nay mostra cada janela em uma linha, com quando renova.',
+        en: 'The composer\'s "Plan" block shows rings with the session plan\'s usage, and Nay\'s Limits tab shows each window on its own row with when it renews.',
+      },
+      {
+        pt: 'Assistentes que coordenam outras sessões leem os limites dos planos (agentistics_plan_limits) e recebem uma recomendação de qual assistente usar e quantas sessões manter rodando.',
+        en: 'Assistants that coordinate other sessions read the plan limits (agentistics_plan_limits) and get a recommendation of which assistant to use and how many sessions to keep running.',
+      },
+      {
+        pt: 'Sessões líderes recebem um aviso quando o contexto cresce, sugerindo passar o bastão para uma sessão nova.',
+        en: 'Leader sessions get a notice when their context grows, suggesting a hand-off to a fresh session.',
+      },
+    ],
     fixes: [
       {
         pt: 'Trocar o tipo da sessão (Líder/Worker) no painel ⓘ agora abre as opções dentro do próprio painel, sem cobrir as outras informações.',

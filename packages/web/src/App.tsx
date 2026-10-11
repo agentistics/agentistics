@@ -118,6 +118,7 @@ import { ChangePasswordSelf } from './components/ChangePasswordSelf'
 import { MfaSetup } from './components/MfaSetup'
 import { StepUpPrompt } from './components/StepUpPrompt'
 import { HARNESS_LABELS } from './lib/harness'
+import { PlanUsageFootButton } from './components/PlanUsageFootButton'
 import { format, parseISO, parse } from 'date-fns'
 import { ToggleSwitch } from './components/ToggleSwitch'
 import { fleetFilterOptions, filterFleet, SESSION_FILTER_DIMS } from './lib/fleetFilter'
@@ -1189,6 +1190,7 @@ function SideNav({
             <SlidersHorizontal size={15} />
           </NavLink>
         </CollapsedTip>
+        {!isCentral && <PlanUsageFootButton lang={pt ? 'pt' : 'en'} collapsed={collapsed} footBtn={footBtn} />}
       </div>
     </div>
   )

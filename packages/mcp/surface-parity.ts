@@ -74,6 +74,7 @@ export function compareObject(
 export const MCP_PARITY_FIELDS = {
   agentistics_summary: ['totalSessions', 'totalInputTokens', 'totalOutputTokens', 'totalCacheReadTokens', 'totalCacheWriteTokens', 'estimatedCostUSD', 'topModel', 'topProject', 'activeDays'],
   agentistics_harnesses: { key: 'harness', fields: ['sessions', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'totalTokens', 'estimatedCostUSD'] },
+  agentistics_plan_limits: { key: 'harness', fields: ['plan', 'fiveHourPct', 'weekPct', 'status', 'paceStatus', 'suggestedParallel'] },
   agentistics_projects: { key: 'path', fields: ['sessions', 'inputTokens', 'outputTokens', 'totalTokens', 'estimatedCostUSD'] },
   agentistics_costs: { key: 'model', fields: ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'totalTokens', 'estimatedCostUSD'] },
   agentistics_repos: { key: 'repo', fields: ['sessions', 'inputTokens', 'outputTokens', 'totalTokens', 'estimatedCostUSD'] },
