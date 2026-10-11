@@ -24,20 +24,25 @@
  *
  * JSC reads its options ONCE, when the VM starts, from `BUN_JSC_*` in the environment, and `bun:jsc`
  * has no setter — so the server re-executes ITSELF (execve: same pid, same fds, nothing claimed yet)
- * with the variable set, before it touches the data dir, a port or the vault. The variable in the new
- * environment is what stops it from doing so twice.
+ * with the variable set, before it touches the data dir, a port or the vault. `AGENTISTICS_GC_REEXEC=1`
+ * marks the new image as ours: it stops a second re-exec, and tells the new image to take BOTH variables
+ * back out of its environment at once (`forgetReexecEnv`) — the option is read already, and everything
+ * the server starts (tmux and every session in it, the harnesses, MCPs, a `bun test` run inside a
+ * session) inherits `process.env`, so leaving it there tuned every one of them too.
  *
  * Overrides: a `BUN_JSC_numberOfGCMarkers` the person set is left alone; `AGENTISTICS_GC_MARKERS=<n>`
  * picks another count, `AGENTISTICS_GC_MARKERS=0` leaves the runtime's default (and skips the re-exec).
  */
 
 export const GC_MARKERS_ENV = 'BUN_JSC_numberOfGCMarkers'
+/** Set only on the re-executed image: "the GC variable is ours, take it back out". */
+export const GC_REEXEC_ENV = 'AGENTISTICS_GC_REEXEC'
 export const DEFAULT_GC_MARKERS = 2
 
 /** PURE: the marker count to re-exec with, or `null` to start as we are. */
 export function gcMarkersPlan(env: Record<string, string | undefined>, platform: string): number | null {
   if (platform !== 'linux' && platform !== 'darwin') return null
-  if (env[GC_MARKERS_ENV] !== undefined) return null
+  if (env[GC_REEXEC_ENV] !== undefined || env[GC_MARKERS_ENV] !== undefined) return null
   const raw = env.AGENTISTICS_GC_MARKERS
   if (raw === undefined || raw === '') return DEFAULT_GC_MARKERS
   const n = Number(raw)
@@ -60,11 +65,24 @@ export function selfArgv(o: { execPath: string; argv: readonly string[]; execArg
 }
 
 /**
+ * On the re-executed image: delete the two variables the re-exec put there (the runtime has read its
+ * option already), so no child inherits them. A `BUN_JSC_numberOfGCMarkers` the person set themselves
+ * never carries the marker, and is left alone. Returns whether this was the re-executed image.
+ */
+export function forgetReexecEnv(env: Record<string, string | undefined>): boolean {
+  if (env[GC_REEXEC_ENV] !== '1') return false
+  delete env[GC_REEXEC_ENV]
+  delete env[GC_MARKERS_ENV]
+  return true
+}
+
+/**
  * Re-execute this process with the marker count set. Returns only when it could NOT (no C library,
  * execve refused): the server then simply starts with the runtime's default, which is what it always
  * did — never a reason not to serve.
  */
 export async function reexecWithGcMarkers(): Promise<void> {
+  if (forgetReexecEnv(process.env)) return
   const n = gcMarkersPlan(process.env, process.platform)
   if (n === null) return
   const argv = selfArgv({ execPath: process.execPath, argv: process.argv, execArgv: process.execArgv })
@@ -74,7 +92,7 @@ export async function reexecWithGcMarkers(): Promise<void> {
     const lib = dlopen(process.platform === 'linux' ? 'libc.so.6' : '/usr/lib/libSystem.B.dylib', {
       execve: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
     } as const)
-    const env = { ...process.env, [GC_MARKERS_ENV]: String(n) }
+    const env = { ...process.env, [GC_MARKERS_ENV]: String(n), [GC_REEXEC_ENV]: '1' }
     // NUL-terminated strings, then a NULL-terminated array of pointers to them. The buffers stay
     // referenced until execve either replaces the process or returns.
     const cstr = (s: string) => Buffer.from(`${s}\0`, 'utf8')

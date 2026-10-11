@@ -725,7 +725,8 @@ if (command === 'start') {
 if (command === 'server' || command === 'start' || !command) {
   // FIRST, before anything is claimed: re-execute with two GC marker threads — see gc-markers.ts for
   // what an idle server paid without it. Same pid, same fds; returns only when it did not happen.
-  if (command === 'server') {
+  // `--bg` only detaches a copy that does this itself: re-executing the parent first would be one exec wasted.
+  if (command === 'server' && !args.includes('--bg') && !args.includes('--background')) {
     const { reexecWithGcMarkers } = await import('../server/gc-markers.ts')
     await reexecWithGcMarkers()
   }

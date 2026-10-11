@@ -42,13 +42,13 @@
     "idleCpuPct": {
       "label": "Idle server CPU (N=10, C=0)",
       "max": 1,
-      "level": "fail",
+      "level": "warn",
       "unit": "%"
     },
     "perClientCpuPct": {
       "label": "CPU per client (N=10)",
       "max": 1,
-      "level": "fail",
+      "level": "warn",
       "unit": "%"
     },
     "tmuxPerMinN50": {

@@ -123,10 +123,11 @@ export function createTerminalHub(deps: TerminalHubDeps): TerminalHub {
     entries.delete(id)
   }
 
-  async function tick(id: string): Promise<void> {
+  async function tick(id: string, stamp?: string): Promise<void> {
     const entry = entries.get(id)
     if (!entry || entry.busy) return
     entry.busy = true
+    if (stamp !== undefined) entry.lastStamp = stamp
     entry.lastCaptureAt = now()
     try {
       let cap: TerminalCapture | null
@@ -205,11 +206,12 @@ export function createTerminalHub(deps: TerminalHubDeps): TerminalHub {
           // nothing to do; changed is a capture NOW, whatever the stride says.
           const stamp = e.lastFrame && deps.activity ? deps.activity(id) : null
           if (stamp !== null) {
-            const quiet = stamp === e.lastStamp && now() - e.lastCaptureAt < QUIET_FORCE_MS
-            e.lastStamp = stamp
-            if (quiet) return
+            if (stamp === e.lastStamp && now() - e.lastCaptureAt < QUIET_FORCE_MS) return
             e.skipped = 0
-            void tick(id)
+            // The stamp is recorded by the capture that STARTS with it: a tick turned away because one
+            // is still in flight leaves it unrecorded, so the next tick tries again instead of sitting
+            // on a write until QUIET_FORCE_MS (QA perf-idle-1 #3).
+            void tick(id, stamp)
             return
           }
           if (++e.skipped < stillStride(e.unchanged)) return

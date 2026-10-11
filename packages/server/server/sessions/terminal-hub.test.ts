@@ -249,4 +249,26 @@ describe('the write-stamp gate (PERF.IDLE)', () => {
     await g.tick()
     expect(g.calls()).toBe(base + 1)
   })
+  it('a write seen while a capture is still in flight is captured by the next tick, not 10 s later', async () => {
+    let stamp = 'a'
+    let release: (() => void) | null = null
+    let calls = 0
+    let intervalFn: (() => void) | null = null
+    const hub = createTerminalHub({
+      capture: async () => { calls++; if (calls === 2) await new Promise<void>(r => { release = r }); return cap(['same']) },
+      isManaged: async () => true,
+      historyLimit: 50_000, viewLines: 200, pollMs: 500,
+      setInterval: fn => { intervalFn = fn; return 1 as unknown as ReturnType<typeof setInterval> },
+      clearInterval: () => {}, setTimeout: () => {},
+      activity: () => stamp, now: () => 1_000,
+    })
+    await hub.subscribe('s1', sink().s)
+    await flush() // first capture (calls = 1)
+    intervalFn!(); await flush() // stamp 'a' starts capture #2, which hangs
+    stamp = 'b'
+    intervalFn!(); await flush() // turned away: busy — 'b' must stay unrecorded
+    release!(); await flush()
+    intervalFn!(); await flush() // 'b' is new: captured now
+    expect(calls).toBe(3)
+  })
 })

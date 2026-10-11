@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { DEFAULT_GC_MARKERS, GC_MARKERS_ENV, gcMarkersPlan, selfArgv } from './gc-markers'
+import { DEFAULT_GC_MARKERS, GC_MARKERS_ENV, GC_REEXEC_ENV, forgetReexecEnv, gcMarkersPlan, selfArgv } from './gc-markers'
 
 describe('gcMarkersPlan', () => {
   it('re-executes with two markers by default on Linux and macOS', () => {
@@ -34,5 +34,19 @@ describe('selfArgv', () => {
   })
   it('nothing to name, nothing to run', () => {
     expect(selfArgv({ execPath: '', argv: [], execArgv: [] })).toBeNull()
+  })
+})
+
+describe('forgetReexecEnv — nothing the server starts inherits the GC option (QA perf-idle-1 #1)', () => {
+  it('the re-executed image takes both variables back out, and is never re-executed again', () => {
+    const env: Record<string, string | undefined> = { [GC_MARKERS_ENV]: '2', [GC_REEXEC_ENV]: '1', HOME: '/h' }
+    expect(gcMarkersPlan(env, 'linux')).toBeNull()
+    expect(forgetReexecEnv(env)).toBe(true)
+    expect(env).toEqual({ HOME: '/h' })
+  })
+  it('a value the person set (no marker) is left exactly as it was', () => {
+    const env: Record<string, string | undefined> = { [GC_MARKERS_ENV]: '4' }
+    expect(forgetReexecEnv(env)).toBe(false)
+    expect(env).toEqual({ [GC_MARKERS_ENV]: '4' })
   })
 })
