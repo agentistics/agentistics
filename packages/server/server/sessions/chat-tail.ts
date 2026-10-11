@@ -494,8 +494,16 @@ function extractToolActivity(e: Record<string, unknown>): string[] | null {
   return names.length > 0 ? names : null
 }
 
+const TOOL_ACTIVITY_PREFIX = 'Running '
+
 function toolActivityLabel(tools: string[]): string {
-  return `Running ${tools.join(', ')}`
+  return `${TOOL_ACTIVITY_PREFIX}${tools.join(', ')}`
+}
+
+/** The tool names a `pending` turn's label names — the inverse of `toolActivityLabel` (tail-state.ts). */
+export function toolActivityNames(turn: ChatTurn): string[] {
+  if (!turn.pending || turn.task || !turn.text.startsWith(TOOL_ACTIVITY_PREFIX)) return []
+  return turn.text.slice(TOOL_ACTIVITY_PREFIX.length).split(', ')
 }
 
 // The tail window — its size, its growth and the byte read — is `transcript-window.ts`, shared

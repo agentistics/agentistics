@@ -46,6 +46,7 @@ import { readProcRss, readProcStat } from '../hardware-probe'
 import { procAvailable } from './proc-liveness'
 import { backgroundWork } from './attention'
 import { adapterActivity, planScreen, type AdapterStateFeed } from './adapter-state'
+import { tailActivity, tailSkipsScreen, tailStateOf, type TailReading, type TailStateMemo } from './tail-state'
 import { linkDecision, liveLinks, moveAllowed } from './relink-policy'
 
 /** How often the cockpit refreshes. Five seconds is the interval the feature was specified at. */
@@ -371,6 +372,13 @@ export function createSessionsPoller(o: {
    * this poller exactly as it was. Read on every poll: the flag and the engine are runtime facts.
    */
   adapterState?: () => AdapterStateFeed | null
+  /**
+   * ELSEWHERE: the memory for rows read off their own transcript tail (`tail-state.ts`) — only with the
+   * `adapter-chat` flag on, so `null` (the default) keeps this poller exactly as it was.
+   */
+  tailState?: () => TailStateMemo | null
+  /** The transcript reader per harness — the real one (`harness-transcript.ts`) unless a test injects one. */
+  transcriptReader?: typeof transcriptReaderFor
   now?: () => number
   captureLines?: number
   /** Overridable so a test can drive several heartbeats without waiting a minute for each. */
@@ -526,11 +534,11 @@ export function createSessionsPoller(o: {
       // we did not start; `ManagedSession.conversationId` is the id agentop handed the CLI
       // itself, which is the only one the other harnesses can ever have. Claude's own record is
       // preferred where both exist — it is the LIVE one, while the registry's was recorded once.
-      const readChatTail = async (r: (typeof reconciled)[number]): Promise<void> => {
+      const readChatTail = async (r: (typeof reconciled)[number]): Promise<ChatTurn[]> => {
         const cwd = r.managed?.cwd
         const conversationId = harnessSessions.byManagedId.get(r.id)?.sessionId
           ?? r.managed?.conversationId
-        const transcript = transcriptReaderFor(harnessOf.get(r.id))
+        const transcript = (o.transcriptReader ?? transcriptReaderFor)(harnessOf.get(r.id))
         if (transcript && conversationId) {
           const path = await transcript
             .resolve({ conversationId, ...(cwd ? { cwd } : {}) })
@@ -538,16 +546,21 @@ export function createSessionsPoller(o: {
           if (path) {
             const turns = await transcript.readRecent(path, TAIL_CHAT_TURNS).catch(() => [] as ChatTurn[])
             if (turns.length > 0) chatTails.set(r.id, anyGrant() ? await scrubDeep(r.id, turns) : turns)
+            return turns
           }
         }
+        return []
       }
+      // ELSEWHERE (flag on): a row no driver and no engine reading states is read off the tail the poll
+      // fetches anyway (`tail-state.ts`) — its screen is skipped while it is idle and agreed.
+      const tailFeed = o.tailState?.() ?? null
 
       const captureStart = performance.now()
       // PERF.SLOW: every live pane in ONE backend call where the backend can (tmux: one process for
       // the whole fleet instead of one per pane). Only with the adapter flag off — there the screen is
       // read for every live row; with it on most rows skip the screen and are read one by one below.
       // A failed batch is no batch: each row then captures on its own, as it always did.
-      const prefetched = !adapter && o.backend.captureMany
+      const prefetched = !adapter && !tailFeed && o.backend.captureMany
         ? await o.backend.captureMany(reconciled.filter(r => r.backend?.alive).map(r => r.id), lines).catch(() => null)
         : null
       await Promise.all(reconciled.map(r => limit(async () => {
@@ -575,6 +588,30 @@ export function createSessionsPoller(o: {
           nowMs,
           forced: adapter.takeForced(r.id),
         })
+        // The tail is read FIRST for a row only it can state, so the screen can be skipped when idle.
+        let tailReading: TailReading | undefined
+        let tailRead = false
+        if (tailFeed && !reading && !statedNow) {
+          tailReading = tailStateOf(harnessOf.get(r.id), await readChatTail(r))
+          tailRead = true
+          if (tailSkipsScreen({
+            reading: tailReading,
+            agreedSig: tailFeed.agreed(r.id),
+            lastScreenMs: tailFeed.lastScreen(r.id),
+            nowMs,
+            forced: tailFeed.takeForced(r.id),
+          })) {
+            const kept = lastFrameFacts.get(r.id)
+            if (kept?.mode && !statedMode) modes.set(r.id, kept.mode)
+            if (kept) tails.set(r.id, kept.tail)
+            const before = prevDigest.get(r.id)
+            if (before !== undefined) nextDigest.set(r.id, before)
+            activity.set(r.id, 'waiting')
+            exact.add(r.id)
+            corroborated.add(r.id)
+            return
+          }
+        }
         if (!readScreen && reading) {
           // The harness said what the row is doing, and nothing on the screen can add to it now.
           const kept = lastFrameFacts.get(r.id)
@@ -591,6 +628,7 @@ export function createSessionsPoller(o: {
 
         const frame = prefetched?.get(r.id) ?? await o.backend.capture(r.id, lines).catch(() => [] as string[])
         adapter?.screenRead(r.id, nowMs)
+        if (tailRead) tailFeed?.screenRead(r.id, nowMs)
         // WHICH MODE the harness is in, read off the same frame the state came from — see
         // `mode-spec.ts`. `null` for a harness nobody has probed and for a frame with no footer yet,
         // and the row then simply carries none.
@@ -603,13 +641,13 @@ export function createSessionsPoller(o: {
         const frameDigest = digestFrame(frame)
         nextDigest.set(r.id, frameDigest)
         tails.set(r.id, anyGrant() ? frameTail(frame, TAIL_LINES).map(l => scrubTerminalLine(r.id, l)) : frameTail(frame, TAIL_LINES))
-        if (adapter) {
+        if (adapter || tailFeed) {
           const mode = modes.get(r.id)
           lastFrameFacts.set(r.id, { ...(mode ? { mode } : {}), tail: tails.get(r.id) ?? [] })
         }
 
         const harness = harnessOf.get(r.id)
-        await readChatTail(r)
+        if (!tailRead) await readChatTail(r)
 
         const rules = harness ? rulesFor(harness) : undefined
         // CORROBORATED: the harness said so itself. A `working` read from MOVEMENT ALONE, on a
@@ -637,10 +675,21 @@ export function createSessionsPoller(o: {
         })
         // The harness's own statement, where there is one (flag on); a dialog only the screen can see
         // still wins over it, and is confirmed like any screen reading.
-        const state = reading && !stated ? adapterActivity(reading, screenState) : screenState
+        let state = reading && !stated ? adapterActivity(reading, screenState) : screenState
         if (reading && !stated && !(screenState === 'waiting-approval' && !reading.attention)) {
           exact.add(r.id)
           corroborated.add(r.id)
+        }
+        if (tailRead && tailFeed) {
+          if (tailReading) {
+            const told = tailActivity(tailReading, screenState)
+            state = told.state
+            if (told.exact) { exact.add(r.id); corroborated.add(r.id) }
+            // An idle tail the screen agreed with: the next polls may believe it without a capture.
+            tailFeed.setAgreed(r.id, told.exact && told.state === 'waiting' ? tailReading.sig : undefined)
+          } else {
+            tailFeed.setAgreed(r.id, undefined)
+          }
         }
         activity.set(r.id, state)
         // The dialog is kept from the frame that DECIDED the state, so the two can never describe
@@ -1026,6 +1075,7 @@ export function createSessionsPoller(o: {
       const rang = bellTransitions(prevActivity, sessions)
 
       prevDigest = nextDigest
+      tailFeed?.retain(new Set(nextDigest.keys()))
       for (const id of [...lastFrameFacts.keys()]) if (!nextDigest.has(id)) lastFrameFacts.delete(id)
       prevActivity = new Map(
         sessions
