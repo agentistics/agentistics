@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gitTestEnv } from '@agentistics/core/gitTestEnv'
@@ -48,5 +48,16 @@ describe('clean io (real git)', () => {
     expect(existsSync(join(root, 'wip', 'b'))).toBe(true)
     expect(existsSync(join(root, 'wip', 'node_modules'))).toBe(false)
     expect(g(r, 'branch', '--list', 'done').trim()).toContain('done')
+  })
+
+  test('a child that leaves stdout open cannot strand clean after the timeout', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'clean-timeout-'))); dirs.push(root)
+    const fakeBin = join(root, 'git')
+    writeFileSync(fakeBin, '#!/bin/sh\nsleep 10\n')
+    chmodSync(fakeBin, 0o755)
+    const target = join(root, 'repo'); mkdirSync(target)
+    const started = Date.now()
+    expect(await repoOf(target, { env: { ...env, PATH: root }, timeoutMs: 25 })).toBeNull()
+    expect(Date.now() - started).toBeLessThan(1000)
   })
 })
