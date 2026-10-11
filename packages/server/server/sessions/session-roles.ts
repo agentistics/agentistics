@@ -148,7 +148,9 @@ const serial = <T>(fn: () => Promise<T>): Promise<T> => {
  * allowed only for a session it started.
  */
 export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps): Promise<RoleReply> {
-  return serial(async () => {
+  // Fleet resolution and parent verification can join the in-flight poll. Keep them outside the
+  // role-store queue: a poll that discovers a conversation may itself be waiting for that queue.
+  return (async () => {
     const rows = await deps.rows().catch(() => [] as FleetRowForGroups[])
     const ref = req.ref?.trim() ?? ''
     let own = false
@@ -166,39 +168,41 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
       own = senderId !== null && (target.id === senderId || target.conversationId === senderId)
       if (senderId !== null && !own && (await deps.parentOf(target.id).catch(() => undefined)) !== senderId) return fail('not_your_child')
     }
-    const key = sessionIdentityKey(target)
-    const doc = await loadRoles(deps)
-    const current = roleOfRow(doc.roles, target)
-    const base = { key, id: target.id, title: target.title }
+    const resolved = target
+    const key = sessionIdentityKey(resolved)
+    const state = await serial(async () => {
+      const doc = await loadRoles(deps)
+      const current = roleOfRow(doc.roles, resolved)
+      const base = { key, id: resolved.id, title: resolved.title }
+      if (req.role === undefined) {
+        return { kind: 'read' as const, reply: { ok: true, ...base, role: current ?? 'auto', changed: false, renamed: false, notified: false, line: roleLine(current), message: `Role: ${current ?? 'auto'}.` } satisfies RoleReply }
+      }
+      if (!isSessionRoleRequest(req.role)) return { kind: 'fail' as const, reply: fail('bad_role') }
+      const next: SessionRole | null = req.role === 'auto' ? null : req.role
+      const changed = next !== (current ?? null)
+      const roles = { ...doc.roles }
+      delete roles[resolved.id]
+      if (next) roles[key] = next
+      else delete roles[key]
+      await writeRolesDoc(deps.dataDir, { ...doc, roles })
+      return { kind: 'change' as const, doc, roles, base, current, next, changed }
+    })
+    if (state.kind !== 'change') return state.reply
 
-    if (req.role === undefined) {
-      return { ok: true, ...base, role: current ?? 'auto', changed: false, renamed: false, notified: false, line: roleLine(current), message: `Role: ${current ?? 'auto'}.` }
-    }
-    if (!isSessionRoleRequest(req.role)) return fail('bad_role')
-    const next: SessionRole | null = req.role === 'auto' ? null : req.role
-    const changed = next !== (current ?? null)
-
-    const roles = { ...doc.roles }
-    delete roles[target.id]
-    if (next) roles[key] = next
-    else delete roles[key]
-    await writeRolesDoc(deps.dataDir, { ...doc, roles })
-
+    const { base, next, changed } = state
     const lang: RoleLang = req.lang === 'pt' || req.lang === 'en' ? req.lang : await deps.uiLang().catch(() => 'en' as RoleLang)
-    // The prefix is brought in line even when the stored role did not change: setting `leader` on a
-    // session whose title lost its prefix repairs it, and a second identical call changes nothing.
-    const wanted = titleForRole(target.title, next, lang)
-    const renamed = wanted !== target.title && wanted !== '' ? (await deps.rename(target.id, wanted).catch(() => ({ ok: false }))).ok : false
-    const notified = changed && !own ? (await deps.prompt(target.id, roleChangeNote(next)).catch(() => ({ ok: false }))).ok : false
+    // External title/note I/O stays outside `serial`; either can wait for the fleet poll.
+    const wanted = titleForRole(resolved.title, next, lang)
+    const renamed = wanted !== resolved.title && wanted !== '' ? (await deps.rename(resolved.id, wanted).catch(() => ({ ok: false }))).ok : false
+    const notified = changed && !own ? (await deps.prompt(resolved.id, roleChangeNote(next)).catch(() => ({ ok: false }))).ok : false
     if (notified || own) {
-      const delivered = { ...(doc.lastDeliveredRole ?? {}) }
-      if (next) delivered[key] = next
-      else delete delivered[key]
-      await writeRolesDoc(deps.dataDir, {
-        ...doc,
-        roles,
-        lastDeliveredRole: delivered,
-      }).catch(() => {})
+      await serial(async () => {
+        const latest = await loadRoles(deps)
+        const delivered = { ...(latest.lastDeliveredRole ?? {}) }
+        if (next) delivered[key] = next
+        else delete delivered[key]
+        await writeRolesDoc(deps.dataDir, { ...latest, lastDeliveredRole: delivered }).catch(() => {})
+      })
     }
     return {
       ok: true, ...base, role: next ?? 'auto', changed, renamed, notified, line: roleLine(next),
@@ -206,7 +210,7 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
         ? `Role set to ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}${notified ? '; the session was told' : ''}.`
         : `Role is already ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}.`,
     }
-  })
+  })()
 }
 
 export function roleStatus(out: RoleReply): number {
@@ -358,18 +362,30 @@ export async function deliverStoredRole(
   conversationId?: string,
   providedDeps?: RoleDeps,
 ): Promise<boolean> {
-  return serial(async () => {
+  const initial = await serial(async () => {
     const deps = providedDeps ?? await defaultRoleDeps()
     const doc = await loadRoles(deps)
     const key = conversationId ?? rowId
     const role = doc.roles[key] ?? doc.roles[rowId]
-    if (!role || doc.lastDeliveredRole?.[key] === role || doc.lastDeliveredRole?.[rowId] === role) return false
-    if (deps.waitForInput && !(await deps.waitForInput(rowId).catch(() => false))) return false
-    const sent = (await deps.prompt(rowId, roleChangeNote(role)).catch(() => ({ ok: false }))).ok
-    if (!sent) return false
-    await writeRolesDoc(deps.dataDir, {
-      ...doc,
-      lastDeliveredRole: { ...doc.lastDeliveredRole, [key]: role },
+    if (!role || doc.lastDeliveredRole?.[key] === role || doc.lastDeliveredRole?.[rowId] === role) return null
+    return { deps, key, role }
+  })
+  if (!initial) return false
+
+  // Input readiness and prompt delivery can join the fleet poll. Never hold the role-store queue
+  // across either await: that poll may be waiting to rekey this very session.
+  if (initial.deps.waitForInput && !(await initial.deps.waitForInput(rowId).catch(() => false))) return false
+  const sent = (await initial.deps.prompt(rowId, roleChangeNote(initial.role)).catch(() => ({ ok: false }))).ok
+  if (!sent) return false
+
+  return serial(async () => {
+    const latest = await loadRoles(initial.deps)
+    const current = latest.roles[initial.key] ?? latest.roles[rowId]
+    const delivered = latest.lastDeliveredRole?.[initial.key] ?? latest.lastDeliveredRole?.[rowId]
+    if (current !== initial.role || delivered === initial.role) return false
+    await writeRolesDoc(initial.deps.dataDir, {
+      ...latest,
+      lastDeliveredRole: { ...latest.lastDeliveredRole, [initial.key]: initial.role },
     }).catch(() => {})
     return true
   })

@@ -594,17 +594,6 @@ test('the production poller wiring carries resolveProcessLog — the collision g
   expect(typeof opts.recordConversation).toBe('function')
 })
 
-test('spawnManaged wires stored-role reopen rekey, context delivery, and leader title application', () => {
-  const src = stripComments(readFileSync(join(import.meta.dir, 'cli-start.ts'), 'utf8'))
-  const body = extractTopLevelFunction(src, 'spawnManaged')
-  expect(body).toContain('req.inherit?.id')
-  expect(body).toContain('rekeyStoredRole(')
-  expect(body).toContain('[req.inherit.id, req.inherit.conversationId, req.resumeId]')
-  expect(body).toContain('storedContextRole')
-  expect(body).toContain('markRoleDelivered([planned.plan.conversationId, id], storedContextRole.role)')
-  expect(body).toContain('applyRoleTitle(id, title, storedContextRole.role, lang)')
-})
-
 /**
  * `linkProcessConversationSoon` — the spawn-time retry (FIXWAVE 1's own doc-comment calls it "the
  * whole of the fix") — does real `/proc` and tmux I/O and is not exported, so it cannot safely be

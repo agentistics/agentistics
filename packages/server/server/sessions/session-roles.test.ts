@@ -119,6 +119,23 @@ describe('spawn role assignment and delivery', () => {
     })
   })
 
+  test('does not deadlock when input readiness rekeys the session', async () => {
+    const { deps } = fake([{ id: 'new-id', title: 'T' }])
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { 'new-id': 'leader' }, lastDeliveredRole: {} })
+    const gated = {
+      ...deps,
+      waitForInput: async () => {
+        await rekeyStoredRole(['new-id'], ['new-id', 'conversation-id'], deps)
+        return true
+      },
+    }
+    const result = await Promise.race([
+      deliverStoredRole('new-id', undefined, gated),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('role delivery deadlocked')), 250)),
+    ])
+    expect(result).toBe(true)
+  })
+
   test('waits for input before recording an acknowledged delivery', async () => {
     const rows = [{ id: 'm1', conversationId: 'c1', title: 'T' }]
     const { deps } = fake(rows)
