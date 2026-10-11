@@ -25,7 +25,7 @@ export function ScopeNote({ children }: { children: React.ReactNode }) {
 // ConfirmModal
 // Centered confirmation dialog for destructive actions (delete/revoke/remove). Renders nothing
 // when `open` is false. Backdrop click + Escape = cancel. The confirm button is red (danger).
-export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, children, tone = 'danger' }: {
+export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, children, footer, tone = 'danger' }: {
   open: boolean
   title: string
   message: string
@@ -40,6 +40,8 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
   requireTextHint?: string
   focusCancel?: boolean
   children?: React.ReactNode
+  /** Optional replacement for the standard two-button footer. */
+  footer?: React.ReactNode
   /** `danger` (default): red button + warning triangle, for delete/revoke. `default`: the app's
    *  accent button + a neutral icon, for a confirmation that destroys nothing (an install). */
   tone?: 'danger' | 'default'
@@ -96,13 +98,13 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
             />
           </div>
         )}
-        <div style={{
+        {footer ?? <div style={{
           display: 'flex', gap: 8, marginTop: 2, justifyContent: 'flex-end',
           flexDirection: isMobile ? 'column-reverse' : 'row',
         }}>
           <button type="button" autoFocus={focusCancel} onClick={onCancel} style={dialogButtonStyle('secondary', isMobile)}>{cancelLabel}</button>
           <button type="button" onClick={() => { if (armed) onConfirm() }} disabled={!armed} style={dialogButtonStyle(tone === 'danger' ? 'danger' : 'primary', isMobile, !armed)}>{confirmLabel}</button>
-        </div>
+        </div>}
       </div>
     </div>
   )

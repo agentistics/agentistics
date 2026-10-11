@@ -1,4 +1,6 @@
+import { readdirSync, readlinkSync } from 'node:fs'
 import { resolve, sep } from 'node:path'
+import { platform } from 'node:os'
 import { cleanRepos, collectCleanFacts } from '../cli-clean'
 import { applyClean } from './clean-io'
 import { fmtBytes, planClean, reclaimable, type CleanItem, type WorktreeFacts } from './clean-plan'
@@ -62,10 +64,28 @@ async function protectedPaths(): Promise<Map<string, string>> {
   }
   return out
 }
-function processIn(path: string): boolean {
+export async function processIn(path: string): Promise<boolean> {
+  if (platform() === 'linux') {
+    let pids: string[]
+    try { pids = readdirSync('/proc').filter(name => /^\d+$/.test(name)) } catch { return true }
+    let inspected = 0
+    for (const pid of pids) {
+      try {
+        const cwd = readlinkSync(`/proc/${pid}/cwd`)
+        inspected++
+        if (inside(cwd, path)) return true
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if (code !== 'EACCES' && code !== 'ENOENT') return true
+      }
+    }
+    return inspected === 0
+  }
+  const lsof = Bun.which('lsof')
+  if (!lsof) return true
   try {
-    const out = Bun.spawnSync(['ps', '-eo', 'pid=,cwd=']).stdout.toString()
-    return out.split('\n').some(line => { const cwd = line.trim().replace(/^\d+\s+/, ''); return cwd && inside(cwd, path) })
+    const out = Bun.spawnSync([lsof, '-a', '-d', 'cwd', '-Fn']).stdout.toString()
+    return out.split('\n').some(line => line.startsWith('n') && inside(line.slice(1), path))
   } catch { return true }
 }
 export async function applyCleanSelection(ids: readonly string[]): Promise<CleanJob> {
@@ -83,7 +103,7 @@ export async function applyCleanSelection(ids: readonly string[]): Promise<Clean
       const f = item.facts
       const session = [...protectedBySession].find(([p]) => inside(f.path, p) || inside(p, f.path))
       if (session) { skipped.push({ path: f.path, reason: session[1] }); continue }
-      if (processIn(f.path)) { skipped.push({ path: f.path, reason: 'a process is running inside it' }); continue }
+      if (await processIn(f.path)) { skipped.push({ path: f.path, reason: 'a process is running inside it (or its location is unknown)' }); continue }
       safe.push(item)
     }
     const errors: string[] = []
