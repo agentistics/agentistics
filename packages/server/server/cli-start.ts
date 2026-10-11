@@ -132,7 +132,7 @@ import { answerStructured, structuredIntentOf, structuredReopenOrigin } from './
 import { agentisticsMcpLaunch } from './mcp-launch'
 import { prependContext } from './sessions/agentistics-context'
 import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextParent, resolveContextRole, resolveContextTask, writeContextFile } from './sessions/spawn-context'
-import { applyRoleTitle, ensureSpawnRole, markRoleDelivered } from './sessions/session-roles'
+import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, rekeyStoredRole } from './sessions/session-roles'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
 import { bornConversationLink } from './sessions/born-link'
@@ -1572,7 +1572,11 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
     recordConversation: (id, conversationId, conversationLink, conversationLinkVia) =>
       patchSession(id, { conversationId, conversationLink, ...(conversationLinkVia ? { conversationLinkVia } : {}) })
         // A mute made at spawn is keyed by the managed id until the conversation is known.
-        .then(async r => { await rekeyMutedSession(id, conversationId).catch(() => {}); return r }),
+        .then(async r => {
+          await rekeyMutedSession(id, conversationId).catch(() => {})
+          await rekeyStoredRole([id], [id, conversationId]).catch(() => {})
+          return r
+        }),
     // The per-process log link — antigravity's only exact answer, and the reason its chat view was
     // permanently empty while its terminal worked. Wired HERE and deliberately not on
     // `cli-session.ts`'s poller: that one is a one-shot command and writes nothing, exactly as it
@@ -1752,7 +1756,11 @@ async function sampleLinksFor(harness: HarnessId, deadline: () => number, onlyId
 /** The one write a process-transcript link makes, wherever it was found. */
 function recordProcessLink(sid: string, conversationId: string, link: 'assigned', via?: ConversationLinkReason): Promise<unknown> {
   return patchSession(sid, { conversationId, conversationLink: link, ...(via ? { conversationLinkVia: via } : {}) })
-    .then(async r => { await rekeyMutedSession(sid, conversationId).catch(() => {}); return r })
+    .then(async r => {
+      await rekeyMutedSession(sid, conversationId).catch(() => {})
+      await rekeyStoredRole([sid], [sid, conversationId]).catch(() => {})
+      return r
+    })
 }
 
 /**

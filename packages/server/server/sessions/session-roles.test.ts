@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, migrateLegacyRoles, parseRoles, roleOfRow, roleOp, roleStatus, writeRolesDoc, type RoleDeps,
+  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, migrateLegacyRoles, parseRoles, rekeyStoredRole, roleOfRow, roleOp, roleStatus, writeRolesDoc, type RoleDeps,
 } from './session-roles'
 
 let dir = ''
@@ -86,6 +86,24 @@ describe('spawn role assignment and delivery', () => {
     const { deps } = fake([])
     await ensureSpawnRole(['offered-conversation', 'managed-id'], 'worker', deps)
     expect((await loadRoles(deps)).roles).toEqual({ 'offered-conversation': 'worker', 'managed-id': 'worker' })
+  })
+
+  test('rekeys role and delivery state from an old managed id to a reopened id', async () => {
+    const { deps, prompts } = fake([{ id: 'new-id', title: 'T' }])
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { 'old-id': 'leader' }, lastDeliveredRole: { 'old-id': 'leader' } })
+    await rekeyStoredRole(['old-id'], ['new-id'], deps)
+    expect((await loadRoles(deps)).roles).toEqual({ 'new-id': 'leader' })
+    expect((await loadRoles(deps)).lastDeliveredRole).toEqual({ 'new-id': 'leader' })
+    expect(await deliverStoredRole('new-id', undefined, deps)).toBe(false)
+    expect(prompts).toHaveLength(0)
+  })
+
+  test('rekeys to a newly discovered conversation while retaining the delivery watermark', async () => {
+    const { deps } = fake([{ id: 'managed', title: 'T' }])
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { managed: 'worker' }, lastDeliveredRole: { managed: 'worker' } })
+    await rekeyStoredRole(['managed'], ['managed', 'conversation'], deps)
+    expect((await loadRoles(deps)).roles).toEqual({ managed: 'worker', conversation: 'worker' })
+    expect((await loadRoles(deps)).lastDeliveredRole).toEqual({ managed: 'worker', conversation: 'worker' })
   })
 
   test('waits for input before recording an acknowledged delivery', async () => {

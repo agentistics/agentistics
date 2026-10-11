@@ -300,6 +300,37 @@ export async function markRoleDelivered(
   await writeRolesDoc(deps.dataDir, { ...doc, lastDeliveredRole: delivered }).catch(() => {})
 }
 
+/** Move role state when a managed row is replaced or its conversation is discovered. */
+export async function rekeyStoredRole(
+  fromKeys: readonly (string | undefined)[],
+  toKeys: readonly (string | undefined)[],
+  providedDeps?: Pick<RoleDeps, 'dataDir' | 'legacyPref'>,
+): Promise<void> {
+  const deps = providedDeps ?? await defaultRoleDeps()
+  const doc = await loadRoles(deps)
+  const from = [...new Set(fromKeys.filter((k): k is string => !!k))]
+  const to = [...new Set(toKeys.filter((k): k is string => !!k))]
+  if (from.length === 0 || to.length === 0) return
+
+  const role = from.map(k => doc.roles[k]).find((r): r is SessionRole => !!r)
+  const delivered = from.map(k => doc.lastDeliveredRole?.[k]).find((r): r is SessionRole => !!r)
+  if (!role && !delivered) return
+
+  const roles = { ...doc.roles }
+  const lastDeliveredRole = { ...(doc.lastDeliveredRole ?? {}) }
+  for (const key of to) {
+    if (role && !roles[key]) roles[key] = role
+    if (delivered && !lastDeliveredRole[key]) lastDeliveredRole[key] = delivered
+  }
+  for (const key of from) {
+    if (!to.includes(key)) {
+      delete roles[key]
+      delete lastDeliveredRole[key]
+    }
+  }
+  await writeRolesDoc(deps.dataDir, { ...doc, roles, lastDeliveredRole }).catch(() => {})
+}
+
 /** Apply the leader title convention through the same rename dependency used by role changes. */
 export async function applyRoleTitle(
   rowId: string,

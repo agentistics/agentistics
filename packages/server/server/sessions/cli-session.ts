@@ -57,7 +57,7 @@ import { execFailed } from './spawn-outcome'
 import { spawnDeath } from './spawn-check'
 import { parseHarnessAgents } from './harness-agents'
 import { planTakeover, type TakeoverRefusal } from './takeover'
-import { deliverStoredRole, ensureSpawnRole, markRoleDelivered } from './session-roles'
+import { applyRoleTitle, deliverStoredRole, ensureSpawnRole, markRoleDelivered, rekeyStoredRole } from './session-roles'
 import type { BackendInitialPrompt, ManagedSession, SessionBackend, SpawnPlan, SpawnPlanError } from './types'
 
 /**
@@ -398,6 +398,7 @@ async function start(
       : {}),
     ...(await recordedRepo(cwd)),
   })
+  if (role) await applyRoleTitle(id, cmd.label ?? id, role, lang).catch(() => false)
   // Muted at birth: keyed by the conversation we assigned, else by the managed id (re-keyed when the
   // poller links the conversation). Delivery only — the session still reads as waiting.
   if (cmd.notify === 'off') await muteAtSpawn(planned.plan.conversationId ?? id).catch(() => {})
@@ -728,6 +729,10 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
       // through every session ever reopened from it.
       ...(await recordedRepo(m.cwd)),
     })
+    await rekeyStoredRole(
+      [m.id, m.conversationId],
+      [id, planned.plan.conversationId],
+    )
     await deliverStoredRole(id, planned.plan.conversationId).catch(() => false)
     // The old row is RETIRED, not deleted: it is still a thing that happened, and it stops standing
     // beside its own continuation with the same name on it.
@@ -823,6 +828,7 @@ async function pollFleet(backend: SessionBackend): Promise<SessionSnapshot> {
   const poller = createSessionsPoller({
     backend, readRegistry, scanProcesses, loadConversations, loadHarnessSessions,
     findExactLinks: exactLinksOnDisk,
+    rekeyRole: async (managedId, conversationId) => rekeyStoredRole([managedId], [managedId, conversationId]),
   })
   // Poll TWICE, and return the second. The cockpit debounces the noisy per-frame reading by
   // confirming a `waiting` state across two polls (`attention-confirm.ts`), but a one-shot command
