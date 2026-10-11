@@ -35,6 +35,7 @@ import { participantState, replyReach } from './threadView'
 import { RESOLVED_FLASH_MS, resolveView } from './resolveFlow'
 import { focusComposer } from './focusComposer'
 import { commentAnchor, commentCandidates, commentIdFromHref, sessionCandidates } from './commentMention'
+import { commentNavigation, type CommentView } from './commentNavigation'
 
 /** Today: the time. Otherwise: day and month. An inbox row has room for one short stamp. */
 function shortWhen(iso: string, lang: Lang): string {
@@ -67,16 +68,12 @@ export const INBOX_CSS = `
 .ag-inbox-row:focus-visible{outline:2px solid var(--anthropic-orange);outline-offset:-2px}
 `
 
-/** A `#comment-ID` link written by the `^` picker scrolls to that comment instead of navigating. */
-function followCommentLink(e: React.MouseEvent): void {
-  const a = (e.target as HTMLElement).closest?.('a')
-  const cid = commentIdFromHref(a?.getAttribute('href'))
-  if (!cid) return
-  e.preventDefault()
-  const el = document.getElementById(commentAnchor(cid))
-  if (!el) return
+function focusComment(id: string): boolean {
+  const el = document.getElementById(commentAnchor(id))
+  if (!el) return false
   el.scrollIntoView({ block: 'center', behavior: 'smooth' })
   el.animate([{ background: 'var(--anthropic-orange-dim)' }, { background: 'transparent' }], { duration: 1600 })
+  return true
 }
 
 export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
@@ -100,10 +97,36 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
   const inbox = useMemo(() => threadInbox(threads, detail.comments), [threads, detail.comments])
   const looseCount = detail.comments.filter(c => !c.threadId).length
   const [picked, setPicked] = useState<string | 'loose' | null>(null)
+  const [pendingComment, setPendingComment] = useState<string | null>(null)
   const [resolvedOpen, setResolvedOpen] = useState(false)
   // On a phone nothing is open until the person picks; on a desktop the newest open thread is.
   const selected = picked ?? (isMobile ? null : inbox.open[0]?.thread.id ?? inbox.resolved[0]?.thread.id ?? (looseCount > 0 ? 'loose' : null))
   const thread = threads.find(x => x.id === selected) ?? null
+  const currentView: CommentView = selected === 'loose' ? 'loose' : thread ? { kind: 'thread', id: thread.id } : 'loose'
+  useEffect(() => {
+    if (!pendingComment) return
+    const id = pendingComment
+    const frame = requestAnimationFrame(() => {
+      if (!focusComment(id)) pushNotification({ type: 'error', title: 'Comentário não encontrado', message: 'O comentário foi removido ou não está mais disponível.' })
+      setPendingComment(null)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [pendingComment, selected])
+  const followCommentLink = (e: React.MouseEvent) => {
+    const a = (e.target as HTMLElement).closest?.('a')
+    const cid = commentIdFromHref(a?.getAttribute('href'))
+    if (!cid) return
+    e.preventDefault()
+    const decision = commentNavigation(detail.comments, cid, currentView)
+    if (decision.kind === 'missing') {
+      pushNotification({ type: 'error', title: 'Comentário não encontrado', message: 'O comentário foi removido ou não está mais disponível.' })
+    } else if (decision.kind === 'same') {
+      if (!focusComment(decision.id)) setPendingComment(decision.id)
+    } else {
+      setPendingComment(decision.id)
+      setPicked(decision.view === 'loose' ? 'loose' : decision.view.id)
+    }
+  }
   useEffect(() => {
     if (thread?.resolvedAt) setResolvedOpen(true)
   }, [thread?.id, thread?.resolvedAt])

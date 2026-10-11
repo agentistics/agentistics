@@ -10,7 +10,7 @@
  * Both triggers follow the word-boundary rule `hashQuery` states (the character must open the text or follow
  * whitespace, so `x^2` and `issue#12` never open a picker), and `# ` (a markdown heading) is not a search.
  */
-import { applySessionMention, filterMentionCandidates, hashQuery, type MentionCandidate, type MentionInsertion } from '../../lib/sessionMention'
+import { applySessionMention, filterMentionCandidates, hashQuery, shortSessionId, type MentionCandidate, type MentionInsertion } from '../../lib/sessionMention'
 import type { TaskComment, TaskSessionRow } from '../../lib/tasks'
 
 export type Trigger = { kind: 'session' | 'comment'; query: string }
@@ -83,6 +83,21 @@ export const commentAnchor = (id: string) => `comment-${id}`
 export function commentIdFromHref(href: string | null | undefined): string | null {
   const m = /^#comment-([A-Za-z0-9_-]+)$/.exec(href ?? '')
   return m ? m[1]! : null
+}
+
+/** The short id carried by a rendered `#«title · id»` session chip. */
+export function sessionIdFromMention(text: string): string | null {
+  const m = /^#«[^«»\n]+? · ([0-9a-f]{4,12})»$/i.exec(text.trim())
+  return m ? m[1]!.toLowerCase() : null
+}
+
+export function sessionCandidateForMention(
+  text: string,
+  sessions: readonly TaskSessionRow[],
+): MentionCandidate | null {
+  const id = sessionIdFromMention(text)
+  if (!id) return null
+  return sessionCandidates(sessions).find(row => shortSessionId(row) === id) ?? null
 }
 
 export { applySessionMention, filterMentionCandidates }

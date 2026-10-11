@@ -3,7 +3,9 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   applyCommentMention, caretQuery, commentCandidates, commentIdFromHref, commentSnippet, filterComments, sessionCandidates, triggerAt,
+  sessionCandidateForMention, sessionIdFromMention,
 } from './commentMention'
+import { commentNavigation } from './commentNavigation'
 import { applySessionMention, filterMentionCandidates } from '../../lib/sessionMention'
 
 const sessions = [
@@ -76,5 +78,23 @@ describe('wired where comments are written', () => {
     expect(src('ThreadsPanel.tsx')).toContain('id={commentAnchor(c.id)}')
     expect(src('ThreadsPanel.tsx')).toContain('onClickCapture={followCommentLink}')
     expect(src('DeliveryDetail.tsx')).toContain('id={commentAnchor(c.id)}')
+  })
+  test('session chips in both comment surfaces receive an open-session handler and cross-view links use the decision', () => {
+    expect(src('DeliveryDetail.tsx')).toContain('sessionCandidateForMention(raw, sessions)')
+    expect(src('DeliveryDetail.tsx')).toContain('onOpenSession={sid => navigate(sessionPath(sid))}')
+    expect(src('ThreadsPanel.tsx')).toContain('commentNavigation(detail.comments, cid, currentView)')
+    expect(src('ThreadsPanel.tsx')).toContain("title: 'Comentário não encontrado'")
+  })
+})
+
+describe('navigation decisions', () => {
+  test('recognizes session chips and resolves their candidate', () => {
+    expect(sessionIdFromMention('#«Fix the login · 3f5f21a8»')).toBe('3f5f21a8')
+    expect(sessionCandidateForMention('#«Fix the login · 3f5f21a8»', sessions)?.id).toBe('3f5f21a8b0c1')
+  })
+  test('switches between loose comments and topic threads, and reports deletion', () => {
+    expect(commentNavigation(comments, 'c-1', 'loose')).toEqual({ kind: 'same', id: 'c-1' })
+    expect(commentNavigation([{ id: 'c-1', author: 'you', body: 'First', createdAt: 't', threadId: 't-1' }] as never[], 'c-1', 'loose')).toEqual({ kind: 'switch', id: 'c-1', view: { kind: 'thread', id: 't-1' } })
+    expect(commentNavigation(comments, 'gone', 'loose')).toEqual({ kind: 'missing' })
   })
 })
