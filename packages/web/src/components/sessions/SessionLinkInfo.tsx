@@ -201,7 +201,7 @@ export function SessionLinkInfo({ session, links, lang, onGo, isMobile = false }
       {open && pos && createPortal(
         <div ref={panelRef} role="dialog" aria-label={label} style={{
           position: 'fixed', top: pos.top, left: pos.left, width: Math.min(320, window.innerWidth - 24), zIndex: 1200,
-          maxHeight: '60vh', overflowY: 'auto', padding: '4px 10px 10px', borderRadius: 10,
+          maxHeight: 'calc(60vh / var(--ui-zoom, 1))', overflowY: 'auto', padding: '4px 10px 10px', borderRadius: 10,
           background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
         }}>
           <SessionLinkPanel links={links} {...(session.startedAt ? { startedAt: session.startedAt } : {})} pt={pt} isMobile={isMobile}

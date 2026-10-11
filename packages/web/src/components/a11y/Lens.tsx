@@ -297,8 +297,8 @@ export function Lens({
           ref={stageRef}
           aria-hidden="true"
           style={{
-            width: '100vw',
-            height: '100vh',
+            width: 'calc(100vw / var(--ui-zoom, 1))',
+            height: 'calc(100vh / var(--ui-zoom, 1))',
             transformOrigin: '0 0',
             transform: `scale(${t.scale}) translate(${t.tx}px, ${t.ty}px)`,
             pointerEvents: 'none',

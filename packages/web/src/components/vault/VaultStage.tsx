@@ -104,7 +104,7 @@ function StageFrame({ isMobile, compact, phase, fromOpen, label, title, sub, chi
   return (
     <div data-vault-stage={compact ? 'panel' : 'page'} style={{
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', gap: compact ? 8 : 10,
-      minHeight: compact ? '100%' : isMobile ? 'calc(100dvh - 230px)' : 'calc(100dvh - 190px)',
+      minHeight: compact ? '100%' : isMobile ? 'calc(100dvh / var(--ui-zoom, 1) - 230px)' : 'calc(100dvh / var(--ui-zoom, 1) - 190px)',
       padding: compact ? '18px 6px' : '12px 8px', boxSizing: 'border-box',
     }}>
       {/* A composed block, nothing huge: ~140 px tall on a desktop page, ~100 px at 390 px, ~88 px in a panel. */}

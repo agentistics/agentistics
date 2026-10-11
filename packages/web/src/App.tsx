@@ -94,7 +94,7 @@ import { SessionsRail } from './components/nav/SessionsRail'
 import { AsideHeader } from './components/nav/AsideHeader'
 import { getPinnedIds } from './lib/pinnedSessions'
 import { loadSharedPrefs, loadPersonalPrefs, putPersonal, migrateLocalOnce } from './lib/sharedPref'
-import { applyTextScale, clampTextScale } from './lib/textScale'
+import { applyTextScale, clampTextScale, readLocalTextScale, writeLocalTextScale } from './lib/textScale'
 import { fleetOpenStore, sessionsFiltersOpenStore, studioSeenStore } from './lib/appFlags'
 import { pageMaxWidth } from './lib/pageWidth'
 import {
@@ -247,7 +247,7 @@ function useBootWatchdog(): BootVerdict {
 function ServerProblem({ lang, problem, onRetry, autoRetry }: { lang: string; problem: LoadError; onRetry: () => void; autoRetry: boolean }) {
   const { title, body } = loadErrorText(problem, lang === 'pt' ? 'pt' : 'en', typeof location !== 'undefined' ? location.host : '')
   return (
-    <div role="alert" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '40px 16px', textAlign: 'center', background: 'var(--bg-base)', boxSizing: 'border-box' }}>
+    <div role="alert" style={{ minHeight: 'calc(100vh / var(--ui-zoom, 1))', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '40px 16px', textAlign: 'center', background: 'var(--bg-base)', boxSizing: 'border-box' }}>
       <img src={brandAsset('/minimalistLogo.png')} alt="" aria-hidden="true" style={{ width: 40, height: 40, objectFit: 'contain', opacity: 0.8 }} />
       <div style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)', maxWidth: 460 }}>{title}</div>
       <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', maxWidth: 460, lineHeight: 1.5 }}>{body}</div>
@@ -290,7 +290,7 @@ function LoadingScreen({ lang }: { lang: string }) {
   if (unreachable) {
     return <ServerProblem lang={lang} problem={{ kind: 'unreachable', detail: '' }} onRetry={() => location.reload()} autoRetry />
   }
-  if (underSplash) return <div style={{ minHeight: '100vh', background: 'var(--bg-base)' }} />
+  if (underSplash) return <div style={{ minHeight: 'calc(100vh / var(--ui-zoom, 1))', background: 'var(--bg-base)' }} />
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'var(--bg-base)' }}>
       <AgentisticsLoader size={56} label={lang === 'pt' ? 'Carregando' : 'Loading'}
@@ -400,7 +400,7 @@ function ChartModal({ title, onClose, children }: {
           padding: '24px 28px',
           width: '100%',
           maxWidth: 1100,
-          maxHeight: '90vh',
+          maxHeight: 'calc(90vh / var(--ui-zoom, 1))',
           overflow: 'auto',
           boxShadow: 'var(--shadow-elevated)',
         }}
@@ -1511,14 +1511,18 @@ export default function AppLayout() {
     try { return localStorage.getItem('agentistics-theme') === 'light' ? 'light' : 'dark' } catch { return 'dark' }
   })
   const [currency, setCurrencyState] = useState<'USD' | 'BRL'>('USD')
-  const [textScale, setTextScaleState] = useState(1)
+  // The local mirror decides the first paint, like the theme; the personal preference corrects it.
+  const [textScale, setTextScaleState] = useState(readLocalTextScale)
   const setTextScale = useCallback((scale: number) => {
     const next = clampTextScale(scale)
     setTextScaleState(next)
     applyTextScale(document.documentElement, next)
     putPersonal({ textScale: next })
   }, [])
-  useEffect(() => { applyTextScale(document.documentElement, textScale) }, [textScale])
+  useEffect(() => {
+    applyTextScale(document.documentElement, textScale)
+    writeLocalTextScale(textScale)
+  }, [textScale])
 
   // Surface server-pushed notifications (member connection/auth errors) as toasts + bell.
   useNotificationStream(lang)
@@ -3738,7 +3742,7 @@ export default function AppLayout() {
                 display: 'grid',
                 gridTemplateRows: sessionsFiltersOpen ? '1fr' : '0fr',
                 transition: 'grid-template-rows 0.3s cubic-bezier(0.22, 1, 0.36, 1)',
-                width: filtrosBounds.width, maxWidth: 'calc(100vw - 16px)',
+                width: filtrosBounds.width, maxWidth: 'calc(100vw / var(--ui-zoom, 1) - 16px)',
               }}
               onTransitionEnd={e => {
                 if (e.target !== e.currentTarget) return
@@ -4270,7 +4274,7 @@ export default function AppLayout() {
       // Everywhere else it stays, because a short page still has to fill the window.
       // The DESKTOP dashboard is on the board as well: its page scrolls inside its own panel, so
       // the root is a window-sized frame there too, never a document that grows.
-      ...(inSessionsWorkspace || !isMobile ? {} : { minHeight: '100vh' }),
+      ...(inSessionsWorkspace || !isMobile ? {} : { minHeight: 'calc(100vh / var(--ui-zoom, 1))' }),
       // The REAL cause of the session pane's header/composer "scrolling away" and landing at the
       // wrong spot: `<main>` below sets an explicit `height` for the sessions workspace, but a flex
       // item with `flex: 1 1 0%` computes its used size from the flex algorithm, not from its own
@@ -4353,7 +4357,7 @@ export default function AppLayout() {
       // A home-screen app on iOS can come back from the keyboard with `100dvh` short by about the
       // status bar, leaving a black band under the bottom bar (owner, 2026-10-04). Held at the
       // screen's height then — `useStandaloneHeight` / `lib/standaloneHeight.ts`.
-      height: inSessionsWorkspace || !isMobile ? (standaloneH !== null ? `${standaloneH}px` : '100dvh') : undefined,
+      height: inSessionsWorkspace || !isMobile ? (standaloneH !== null ? `${standaloneH}px` : 'calc(100dvh / var(--ui-zoom, 1))') : undefined,
       // Only on the LIST. With a session open the bar is not rendered at all (see its own note),
       // so reserving its band would leave a strip of nothing under the composer — the same
       // mismatch the old subtraction made, seen from the other side.
@@ -4661,7 +4665,7 @@ export default function AppLayout() {
               // On MOBILE this fills the parent, which already subtracts the fixed nav (see the
               // root's own note) — repeating the arithmetic here is what let the two disagree.
               // Desktop still subtracts its own fixed top strip, which the root does not know about.
-              height: isMobile ? undefined : 'calc(100vh - var(--ag-topbar-h))',
+              height: isMobile ? undefined : 'calc(100vh / var(--ui-zoom, 1) - var(--ag-topbar-h))',
               minHeight: 0,
               display: 'flex', flexDirection: 'column', overflow: 'hidden',
             }
@@ -4689,7 +4693,7 @@ export default function AppLayout() {
               flex: 1,
               // Fill at least the viewport so the footer always sits below the fold (a scroll away),
               // even on short pages — it never floats up into a half-empty screen.
-              minHeight: '100vh',
+              minHeight: 'calc(100vh / var(--ui-zoom, 1))',
               // The bottom padding clears the fixed nav, so it has to grow with it: installed as a
               // PWA the bar is 56px + the home-indicator inset, and a flat 80px hid the last card.
               padding: isMobile ? '16px 16px calc(24px + var(--mobile-nav-h))' : '24px 32px',

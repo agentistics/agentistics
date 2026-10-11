@@ -4,8 +4,13 @@ import AppRouter from './AppRouter'
 import { FinaleHost } from './components/FinaleHost'
 import { RootErrorBoundary } from './components/RootErrorBoundary'
 import { installHistoryPopGuard } from './lib/historyPopGuard'
+import { applyTextScale, readLocalTextScale } from './lib/textScale'
 import './index.css'
 import './styles/cursors.css'
+
+// The text size zooms the whole UI; applied before the first render so a reload never paints at
+// 100% and then jumps. App re-applies it once the personal preference arrives.
+applyTextScale(document.documentElement, readLocalTextScale())
 
 /**
  * IN DEV, EVICT ANY SERVICE WORKER THAT IS STILL CONTROLLING THIS PAGE.

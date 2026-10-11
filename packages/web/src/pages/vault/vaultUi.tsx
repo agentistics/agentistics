@@ -133,8 +133,8 @@ export function Sheet({ closeLabel, isMobile, title, onClose, children, wide, fo
   const o: React.CSSProperties = isMobile ? { ...overlay, padding: 0, zIndex: 3000 } : { ...overlay, zIndex: 3000 }
   const frame: React.CSSProperties = { ...card, padding: 0, display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }
   const c: React.CSSProperties = isMobile
-    ? { ...frame, maxWidth: 'none', width: '100%', height: '100dvh', maxHeight: '100dvh', borderRadius: 0, border: 'none' }
-    : { ...frame, maxWidth: wide ? 640 : 500, maxHeight: '90vh', boxShadow: '0 20px 60px rgba(0,0,0,0.55)' }
+    ? { ...frame, maxWidth: 'none', width: '100%', height: 'calc(100dvh / var(--ui-zoom, 1))', maxHeight: 'calc(100dvh / var(--ui-zoom, 1))', borderRadius: 0, border: 'none' }
+    : { ...frame, maxWidth: wide ? 640 : 500, maxHeight: 'calc(90vh / var(--ui-zoom, 1))', boxShadow: '0 20px 60px rgba(0,0,0,0.55)' }
   return (
     <div style={o} role="dialog" aria-modal="true" aria-label={title} onClick={onClose}>
       <div style={c} onClick={e => e.stopPropagation()}>

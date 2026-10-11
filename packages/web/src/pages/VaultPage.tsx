@@ -486,8 +486,8 @@ export function QuickVault({ lang, isMobile, onClose }: { lang: Lang; isMobile: 
   }, [onClose, asking])
   const o: React.CSSProperties = isMobile ? { ...overlay, padding: 0, zIndex: 3000 } : { ...overlay, zIndex: 3000 }
   const c: React.CSSProperties = isMobile
-    ? { ...card, maxWidth: 'none', width: '100%', height: '100dvh', maxHeight: '100dvh', borderRadius: 0, border: 'none', overflowY: 'auto', boxSizing: 'border-box' }
-    : { ...card, maxWidth: 560, maxHeight: '86vh', overflowY: 'auto', boxSizing: 'border-box' }
+    ? { ...card, maxWidth: 'none', width: '100%', height: 'calc(100dvh / var(--ui-zoom, 1))', maxHeight: 'calc(100dvh / var(--ui-zoom, 1))', borderRadius: 0, border: 'none', overflowY: 'auto', boxSizing: 'border-box' }
+    : { ...card, maxWidth: 560, maxHeight: 'calc(86vh / var(--ui-zoom, 1))', overflowY: 'auto', boxSizing: 'border-box' }
   return (
     <div style={o} role="dialog" aria-modal="true" aria-label={t('quickTitle')} onClick={onClose} data-quick-vault>
       <div style={c} onClick={e => e.stopPropagation()}>

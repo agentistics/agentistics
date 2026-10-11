@@ -1399,8 +1399,8 @@ export function SessionsAside({
           aria-label={pt ? 'Sessões silenciadas' : 'Muted sessions'}
           style={{
             position: 'fixed', left: Math.max(10, Math.min(mutedPopover.x, window.innerWidth - 300)),
-            top: Math.min(mutedPopover.y, window.innerHeight - 260), width: 'min(290px, calc(100vw - 20px))',
-            maxHeight: 'min(250px, calc(100vh - 20px))', overflowY: 'auto', zIndex: 5000,
+            top: Math.min(mutedPopover.y, window.innerHeight - 260), width: 'min(290px, calc(100vw / var(--ui-zoom, 1) - 20px))',
+            maxHeight: 'min(250px, calc(100vh / var(--ui-zoom, 1) - 20px))', overflowY: 'auto', zIndex: 5000,
             padding: 8, borderRadius: 10, border: '1px solid var(--border)',
             background: 'var(--bg-card)', boxShadow: '0 12px 32px rgba(0,0,0,.35)',
           }}
