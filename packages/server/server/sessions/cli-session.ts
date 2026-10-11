@@ -57,6 +57,7 @@ import { execFailed } from './spawn-outcome'
 import { spawnDeath } from './spawn-check'
 import { parseHarnessAgents } from './harness-agents'
 import { planTakeover, type TakeoverRefusal } from './takeover'
+import { deliverStoredRole, ensureSpawnRole } from './session-roles'
 import type { BackendInitialPrompt, ManagedSession, SessionBackend, SpawnPlan, SpawnPlanError } from './types'
 
 /**
@@ -322,14 +323,16 @@ async function start(
   const cwd = cmd.cwd ? resolve(cmd.cwd) : process.cwd()
   const lang = await resolveLang()
   const id = newSessionId()
+  const offeredConversationId = randomUUID()
   const logFile = managedProcessLogPath(cmd.harness, id, AGENTISTICS_DATA_DIR)
   const parentLink = await parentLinkOf(callerSessionId())
   const parentSessionId = parentLink.parentSessionId
-  const ctx = buildSpawnContext({ sessionId: id, cwd, harness: cmd.harness, lang, ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)), ...(await resolveContextParent(parentSessionId)), ...(await resolveContextRole(id)) })
+  const role = parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker') : undefined
+  const ctx = buildSpawnContext({ sessionId: id, cwd, harness: cmd.harness, lang, ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
   const planned = planSpawn({
     harness: cmd.harness, cwd, prompt: cmd.prompt, model: cmd.model, effort: cmd.effort,
     ...(logFile ? { logFile } : {}),
-    conversationId: randomUUID(),
+    conversationId: offeredConversationId,
     context: ctx,
   })
   if (!planned.ok) { console.error(explainPlanError(planned.error)); return 1 }
@@ -535,8 +538,10 @@ async function batch(
   for (const spec of cmd.specs) {
     const cwd = spec.cwd ? resolve(spec.cwd) : process.cwd()
     const id = newSessionId()
+    const offeredConversationId = randomUUID()
     const logFile = managedProcessLogPath(spec.harness, id, AGENTISTICS_DATA_DIR)
-    const ctx = buildSpawnContext({ sessionId: id, cwd, harness: spec.harness, lang, ...(await resolveContextParent(parentSessionId)), ...(await resolveContextRole(id)), ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
+    const role = parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker') : undefined
+    const ctx = buildSpawnContext({ sessionId: id, cwd, harness: spec.harness, lang, ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)), ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
     const planned = planSpawn({
       harness: spec.harness,
       cwd,
@@ -545,7 +550,7 @@ async function batch(
       ...(spec.prompt ? { prompt: spec.prompt } : {}),
       ...(spec.model ? { model: spec.model } : {}),
       ...(spec.effort ? { effort: spec.effort } : {}),
-      conversationId: randomUUID(),
+      conversationId: offeredConversationId,
     })
     if (!planned.ok) { failed.push({ harness: spec.harness, reason: explainPlanError(planned.error) }); continue }
 
@@ -719,6 +724,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
       // through every session ever reopened from it.
       ...(await recordedRepo(m.cwd)),
     })
+    await deliverStoredRole(id, planned.plan.conversationId).catch(() => false)
     // The old row is RETIRED, not deleted: it is still a thing that happened, and it stops standing
     // beside its own continuation with the same name on it.
     await patchSession(m.id, { endedAt: new Date().toISOString() })
@@ -1089,6 +1095,7 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
       + `run \`agentop session attach ${id}\` again.`,
     )
   }
+  await deliverStoredRole(id, plan.conversationId).catch(() => false)
   return execAttach(id, backend)
 }
 

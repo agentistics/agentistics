@@ -33,9 +33,11 @@ export interface RolesDoc {
   /** The legacy web preference (`ui.sessionRoles`) was folded in. Done once, never again. */
   migrated: boolean
   roles: Record<string, SessionRole>
+  /** Last role note delivered to a session. Prevents reopen/takeover from typing it repeatedly. */
+  lastDeliveredRole?: Record<string, SessionRole>
 }
 
-const emptyDoc = (): RolesDoc => ({ version: 1, migrated: false, roles: {} })
+const emptyDoc = (): RolesDoc => ({ version: 1, migrated: false, roles: {}, lastDeliveredRole: {} })
 
 export function parseRoles(raw: unknown): Record<string, SessionRole> {
   const out: Record<string, SessionRole> = {}
@@ -47,7 +49,12 @@ export function parseRoles(raw: unknown): Record<string, SessionRole> {
 export async function readRolesDoc(dataDir: string): Promise<RolesDoc> {
   try {
     const p = JSON.parse(await readFile(join(dataDir, SESSION_ROLES_FILE), 'utf-8')) as Partial<RolesDoc>
-    return { version: 1, migrated: p.migrated === true, roles: parseRoles(p.roles) }
+    return {
+      version: 1,
+      migrated: p.migrated === true,
+      roles: parseRoles(p.roles),
+      lastDeliveredRole: parseRoles(p.lastDeliveredRole),
+    }
   } catch {
     return emptyDoc()
   }
@@ -67,7 +74,7 @@ export async function writeRolesDoc(dataDir: string, doc: RolesDoc): Promise<voi
  */
 export function migrateLegacyRoles(doc: RolesDoc, legacy: unknown): RolesDoc {
   if (doc.migrated) return doc
-  return { version: 1, migrated: true, roles: { ...parseRoles(legacy), ...doc.roles } }
+  return { ...doc, version: 1, migrated: true, roles: { ...parseRoles(legacy), ...doc.roles } }
 }
 
 /** The stored role of a row: by conversation key first, then by managed id. */
@@ -181,6 +188,16 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
     const wanted = titleForRole(target.title, next, lang)
     const renamed = wanted !== target.title && wanted !== '' ? (await deps.rename(target.id, wanted).catch(() => ({ ok: false }))).ok : false
     const notified = changed && !own ? (await deps.prompt(target.id, roleChangeNote(next)).catch(() => ({ ok: false }))).ok : false
+    if (notified || own) {
+      const delivered = { ...(doc.lastDeliveredRole ?? {}) }
+      if (next) delivered[key] = next
+      else delete delivered[key]
+      await writeRolesDoc(deps.dataDir, {
+        ...doc,
+        roles,
+        lastDeliveredRole: delivered,
+      }).catch(() => {})
+    }
     return {
       ok: true, ...base, role: next ?? 'auto', changed, renamed, notified, line: roleLine(next),
       message: changed
@@ -229,4 +246,59 @@ export async function storedRoleFor(keys: readonly (string | undefined)[]): Prom
   const roles = (await loadRoles(deps)).roles
   for (const k of keys) if (k && roles[k]) return roles[k]
   return undefined
+}
+
+/**
+ * Assign the role implied by the spawn relationship, but only when no explicit role exists yet.
+ * `leader` is reserved for a declared hand-off; every other child is a worker. Existing entries
+ * always win, including an explicit role that was set before the conversation was linked.
+ */
+export async function ensureSpawnRole(
+  keys: readonly (string | undefined)[],
+  desired: SessionRole,
+  providedDeps?: RoleDeps,
+): Promise<SessionRole> {
+  const deps = providedDeps ?? await defaultRoleDeps()
+  const doc = await loadRoles(deps)
+  const existing = keys.map(k => k ? doc.roles[k] : undefined).find((r): r is SessionRole => !!r)
+  if (existing) return existing
+  const key = keys.find((k): k is string => !!k)
+  if (!key) return desired
+  await writeRolesDoc(deps.dataDir, { ...doc, roles: { ...doc.roles, [key]: desired } })
+  return desired
+}
+
+/** Apply the leader title convention through the same rename dependency used by role changes. */
+export async function applyRoleTitle(
+  rowId: string,
+  title: string,
+  role: SessionRole,
+  lang: RoleLang,
+  providedDeps?: RoleDeps,
+): Promise<boolean> {
+  if (role !== 'leader') return false
+  const deps = providedDeps ?? await defaultRoleDeps()
+  const wanted = titleForRole(title, role, lang)
+  if (wanted === '' || wanted === title) return false
+  return (await deps.rename(rowId, wanted).catch(() => ({ ok: false }))).ok
+}
+
+/** Deliver a stored role to a reopened/taken-over session once per role value. */
+export async function deliverStoredRole(
+  rowId: string,
+  conversationId?: string,
+  providedDeps?: RoleDeps,
+): Promise<boolean> {
+  const deps = providedDeps ?? await defaultRoleDeps()
+  const doc = await loadRoles(deps)
+  const key = conversationId ?? rowId
+  const role = doc.roles[key] ?? doc.roles[rowId]
+  if (!role || doc.lastDeliveredRole?.[key] === role || doc.lastDeliveredRole?.[rowId] === role) return false
+  const sent = (await deps.prompt(rowId, roleChangeNote(role)).catch(() => ({ ok: false }))).ok
+  if (!sent) return false
+  await writeRolesDoc(deps.dataDir, {
+    ...doc,
+    lastDeliveredRole: { ...doc.lastDeliveredRole, [key]: role },
+  }).catch(() => {})
+  return true
 }

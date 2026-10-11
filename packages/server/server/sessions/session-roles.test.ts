@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  SESSION_ROLES_FILE, loadRoles, migrateLegacyRoles, parseRoles, roleOfRow, roleOp, roleStatus, type RoleDeps,
+  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, migrateLegacyRoles, parseRoles, roleOfRow, roleOp, roleStatus, writeRolesDoc, type RoleDeps,
 } from './session-roles'
 
 let dir = ''
@@ -38,6 +38,12 @@ describe('store + migration', () => {
     expect(m).toEqual({ version: 1, migrated: true, roles: { a: 'worker', b: 'leader' } })
     expect(migrateLegacyRoles(m, { z: 'leader' })).toBe(m)
   })
+  test('migration and read preserve lastDeliveredRole', async () => {
+    const doc = migrateLegacyRoles({ version: 1, migrated: false, roles: { a: 'worker' }, lastDeliveredRole: { a: 'worker' } }, { b: 'leader' })
+    expect(doc.lastDeliveredRole).toEqual({ a: 'worker' })
+    await writeRolesDoc(dir, doc)
+    expect((await loadRoles({ dataDir: dir, legacyPref: async () => undefined })).lastDeliveredRole).toEqual({ a: 'worker' })
+  })
   test('loadRoles persists the migration and never re-reads the legacy pref', async () => {
     let reads = 0
     const legacyPref = async () => { reads++; return { c1: 'leader' } }
@@ -54,6 +60,46 @@ describe('store + migration', () => {
     expect(roleOfRow({ conv: 'leader' }, { id: 'm1', conversationId: 'conv' })).toBe('leader')
     expect(roleOfRow({ m1: 'worker' }, { id: 'm1', conversationId: 'conv' })).toBe('worker')
     expect(roleOfRow({}, { id: 'm1' })).toBeUndefined()
+  })
+})
+
+describe('spawn role assignment and delivery', () => {
+  test('a leader spawn applies the localized title prefix through rename', async () => {
+    const rows = [{ id: 'm1', title: 'Child' }]
+    const { deps, renames } = fake(rows)
+    expect(await applyRoleTitle('m1', 'Child', 'leader', 'pt', deps)).toBe(true)
+    expect(renames).toEqual([['m1', '[ LÍDER ] - Child']])
+    expect(await applyRoleTitle('m1', '[ LÍDER ] - Child', 'leader', 'pt', deps)).toBe(false)
+  })
+
+  test('a child defaults to worker, a handoff can request leader, and an explicit role wins', async () => {
+    const { deps } = fake([])
+    expect(await ensureSpawnRole(['child'], 'worker', deps)).toBe('worker')
+    expect(await ensureSpawnRole(['handoff'], 'leader', deps)).toBe('leader')
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { child: 'worker', handoff: 'leader', explicit: 'leader' }, lastDeliveredRole: {} })
+    expect(await ensureSpawnRole(['explicit', 'new-id'], 'worker', deps)).toBe('leader')
+    expect(await ensureSpawnRole([], 'worker', deps)).toBe('worker')
+    expect((await loadRoles(deps)).roles).toEqual({ child: 'worker', handoff: 'leader', explicit: 'leader' })
+  })
+
+  test('delivers once per role value, redelivers after a change, and does not mark failed sends', async () => {
+    const rows = [{ id: 'm1', conversationId: 'c1', title: 'T' }]
+    const { deps, prompts } = fake(rows)
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { c1: 'worker' }, lastDeliveredRole: {} })
+    expect(await deliverStoredRole('m1', 'c1', deps)).toBe(true)
+    expect(await deliverStoredRole('m1', 'c1', deps)).toBe(false)
+    expect(prompts).toHaveLength(1)
+
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { c1: 'leader' }, lastDeliveredRole: { c1: 'worker' } })
+    expect(await deliverStoredRole('m1', 'c1', deps)).toBe(true)
+    expect(prompts).toHaveLength(2)
+
+    let fail = true
+    const failing = { ...deps, prompt: async () => { if (fail) { fail = false; return { ok: false } }; return { ok: true } } }
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { c1: 'worker' }, lastDeliveredRole: { c1: 'leader' } })
+    expect(await deliverStoredRole('m1', 'c1', failing)).toBe(false)
+    expect((await loadRoles(deps)).lastDeliveredRole).toEqual({ c1: 'leader' })
+    expect(await deliverStoredRole('m1', 'c1', failing)).toBe(true)
   })
 })
 

@@ -132,6 +132,7 @@ import { answerStructured, structuredIntentOf, structuredReopenOrigin } from './
 import { agentisticsMcpLaunch } from './mcp-launch'
 import { prependContext } from './sessions/agentistics-context'
 import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextParent, resolveContextRole, resolveContextTask, writeContextFile } from './sessions/spawn-context'
+import { applyRoleTitle, ensureSpawnRole } from './sessions/session-roles'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
 import { bornConversationLink } from './sessions/born-link'
@@ -1985,6 +1986,7 @@ async function spawnManaged(req: {
   /** The managed id of the session that is starting this one (`ManagedSession.parentSessionId`). */
   parentSessionId?: string
   parentConversationId?: string
+  handoff?: boolean
   attemptId?: string
   /** The row this spawn REPLACES: its identity (`inheritedIdentity`) is born into the new row. */
   inherit?: ManagedSession
@@ -2053,6 +2055,10 @@ async function spawnManaged(req: {
   const effort = req.effort ?? launch.effort
   // Minted BEFORE the plan: the agentistics context tells the harness its own session id.
   const id = newSessionId()
+  const offeredConversationId = randomUUID()
+  const role = req.parentSessionId
+    ? await ensureSpawnRole([req.resumeId, req.inherit?.conversationId, offeredConversationId, id], req.handoff ? 'leader' : 'worker')
+    : undefined
   // The parent's conversation id, read from the registry at spawn: stable across the parent's reopens.
   const parentLink = req.parentSessionId ? await parentLinkOf(req.parentSessionId) : {}
   const ctx = buildSpawnContext({
@@ -2062,10 +2068,9 @@ async function spawnManaged(req: {
       lang,
       ...(await resolveContextTask(req.contextTaskId ?? req.taskId, req.contextSubtaskId, req.task)),
       ...(await resolveContextParent(req.parentSessionId ?? req.inherit?.parentConversationId ?? req.inherit?.parentSessionId)),
-      ...(await resolveContextRole(id, req.resumeId)),
+      ...(role ? { role } : await resolveContextRole(id, req.resumeId, offeredConversationId)),
     })
   const logFile = managedProcessLogPath(req.harness, id, AGENTISTICS_DATA_DIR)
-  const offeredConversationId = randomUUID()
   const planned = planSpawn({
     harness: req.harness,
     cwd: req.cwd,
@@ -2104,6 +2109,10 @@ async function spawnManaged(req: {
   // agentop. Born linked — see `born-link.ts` for the window a patch-afterwards left open.
   const bornLink = bornConversationLink(planned.plan.conversationId, req.resumeId)
   await addSession(await spawnRow({ id, spawnedAt, req: { ...req, ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}) }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx) }))
+  if (role === 'leader') {
+    const title = req.label ?? req.inherit?.label ?? req.task ?? ''
+    await applyRoleTitle(id, title, role, lang)
+  }
   // A REOPEN keeps the replaced row's mute. A session linked to a conversation is muted under that
   // conversation, which the new row keeps; one with no link (codex, kimi, gemini…) was muted under its
   // managed id, which changes here, so the mute moves to the new id or it would silently come undone.
@@ -4485,6 +4494,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(taskId ? { contextTaskId: taskId } : {}),
         ...(taskId && subtaskId ? { contextSubtaskId: subtaskId } : {}),
         ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
+        ...(req.handoff ? { handoff: true } : {}),
         ...(req.force ? { force: true } : {}),
         ...(req.origin ? { origin: req.origin } : {}),
       }, S(), lang).then(async r => {
