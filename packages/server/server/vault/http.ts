@@ -16,7 +16,7 @@ import { readJsonLimited } from '../limits'
 import { originAllowed } from '../cors'
 import * as gate from './gate'
 import { readVaultView, lockVaultNow } from './inventory'
-import { FRESH_BINDING, acceptVaultHeartbeatToken, extendAutoLock, rotateVaultHeartbeatToken, unlockWithGesture, vaultIsOpen, vaultLang, vaultStatus } from './service'
+import { FRESH_BINDING, acceptVaultHeartbeatToken, armVaultHeartbeatToken, extendAutoLock, rotateVaultHeartbeatToken, unlockWithGesture, vaultIsOpen, vaultLang, vaultStatus } from './service'
 import { isLoopbackAddress } from '../native-bind'
 import { opInit } from './ops'
 import { uiReply } from './ui-sentence'
@@ -248,18 +248,26 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
         ? 'A atividade do cofre só pode vir do painel aberto no próprio computador.'
         : 'Vault activity can only come from the dashboard on this computer.' })
     }
-    if (!acceptVaultHeartbeatToken(cookieValue(req, HEARTBEAT_COOKIE))) {
+    const beat = acceptVaultHeartbeatToken(cookieValue(req, HEARTBEAT_COOKIE))
+    if (beat === 'too-soon') {
+      return reply({ ok: false, code: 'activity-too-soon', sentence: vaultLang() === 'pt'
+        ? 'A batida do cofre chegou cedo demais; a próxima conta em 30 segundos.'
+        : 'The vault heartbeat arrived too soon; the next one counts after 30 seconds.' })
+    }
+    if (beat !== 'ok') {
       return reply({ ok: false, code: 'activity-token', sentence: vaultLang() === 'pt'
-        ? 'Esta batida do cofre não tem um token válido ou chegou cedo demais.'
-        : 'This vault heartbeat has no valid token or arrived too soon.' })
+        ? 'Esta batida do cofre não tem um token válido.'
+        : 'This vault heartbeat has no valid token.' })
     }
     return send({ ok: true }, 200, noStore)
   }
   if (path === '/api/vault/activity/arm' && req.method === 'POST') {
-    // A page can recover its tab capability after a reload, CLI unlock, or phone unlock only from a
-    // real input handler. The HTTP session binds the capability to this page; loopback keeps phones
-    // and remote callers out, while `gesture` is supplied only by the isTrusted UI handler. This is
-    // intentionally usable after a reload, when the page's in-memory read grant is gone.
+    // A page recovers its tab capability only with PROOF it passed the vault's own gate: loopback, the
+    // real input gesture, AND a valid 'read' grant bound to this HTTP session (minted only by a step-up
+    // the person completed). A local process with curl has no such grant, so it cannot mint a token and
+    // keep the vault open. After a reload the page's in-memory grant is gone: it is refused here
+    // (`activity-grant`) until the person's next step-up/unlock hands the page a new one; the page then
+    // arms on the next trusted gesture. Until then the idle clock simply runs (fails safe: it locks).
     const b = await body()
     if (!loopback) {
       return reply({ ok: false, code: 'activity-not-here', sentence: vaultLang() === 'pt'
@@ -274,7 +282,18 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
         ? 'Armar a atividade do cofre exige uma interação real nesta página.'
         : 'Arming vault activity requires a real interaction on this page.' })
     }
-    return addHeartbeatCookie(send({ ok: true }, 200, noStore), rotateVaultHeartbeatToken())
+    if (!gate.grantValid(grant, session, 'read')) {
+      return reply({ ok: false, code: 'activity-grant', sentence: vaultLang() === 'pt'
+        ? 'Para manter o cofre aberto por atividade, confirme sua identidade nesta página.'
+        : 'To keep the vault open by activity, confirm your identity on this page.' })
+    }
+    const token = armVaultHeartbeatToken()
+    if (token === null) {
+      return reply({ ok: false, code: 'activity-too-soon', sentence: vaultLang() === 'pt'
+        ? 'O token de atividade foi armado há pouco; tente de novo em 30 segundos.'
+        : 'The activity token was armed a moment ago; try again in 30 seconds.' })
+    }
+    return addHeartbeatCookie(send({ ok: true }, 200, noStore), token)
   }
 
   // ── SECRETS.4 §7.1: the enrolment wizard and the sections' actions ────────────────────────────

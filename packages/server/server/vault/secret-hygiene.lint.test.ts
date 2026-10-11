@@ -49,7 +49,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
     _lockedBy: 'why it is locked (a word)', _onState: 'the state-change listener (engine-api 1.6 onStateChange; carries a reason word, never a key)', _recoveryTodo: 'the re-enrolment steps owed (words)', _now: 'a clock',
     _autoClock: 'the idle clock (times)', _autoTimer: 'a timer', _onAutoLock: 'a notifier',
     _pending: 'THE DEK between a gesture and its code (§2.2): service-only, at most 120 s, zeroed on a wrong code, on expiry and by lockVault',
-    _onInit: 'a reporter', _migrators: 'migrator objects (paths, no values)', _migratedThisOpen: 'a flag', _migrating: 'a pending report', _onUse: 'an activity hook', _heartbeat: 'the tab heartbeat capability stores only its sha256 hash and throttle timestamp, never the token',
+    _onInit: 'a reporter', _migrators: 'migrator objects (paths, no values)', _migratedThisOpen: 'a flag', _migrating: 'a pending report', _onUse: 'an activity hook', _beatAt: 'a throttle timestamp', _armAt: 'a throttle timestamp', _heartbeat: 'the tab heartbeat capability stores only its sha256 hash and throttle timestamp, never the token',
   },
   'server/server/vault/gate.ts': {
     RECOVERY_ALLOWED: 'action names', _mem: 'the step-up counters (integrity, not secret — §2.3)', _now: 'a clock',
