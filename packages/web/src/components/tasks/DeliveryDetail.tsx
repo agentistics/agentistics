@@ -19,7 +19,7 @@
  * aside is exactly the asymmetry this move exists to end.
  */
 
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
@@ -32,6 +32,7 @@ import {
 import { commentThread, type ChatAttachmentRef } from '@agentistics/core'
 import { CommentAttachments, CommentComposer } from './CommentComposer'
 import { commentAnchor, commentCandidates, sessionCandidates } from './commentMention'
+import { sessionMentionTokens } from '../../lib/sessionMention'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useFleet } from '../../lib/fleet'
 import { sessionPath } from '../../lib/sessionRoute'
@@ -324,7 +325,7 @@ function CommentBody({ body, files }: { body: string; files: TaskFile[] }) {
           if (part.kind === 'text') {
             return part.text.trim() === ''
               ? null
-              : <ReactMarkdown key={i} remarkPlugins={[remarkGfm, remarkBreaks]}>{part.text}</ReactMarkdown>
+              : <CommentMarkdown key={i} text={part.text} />
           }
           if (!known.has(part.id)) {
             return (
@@ -370,6 +371,23 @@ function CommentBody({ body, files }: { body: string; files: TaskFile[] }) {
       )}
     </div>
   )
+}
+
+/** Markdown normally leaves a session reference as prose. Keep the same reference/chip treatment
+ * used by the session composer, while still letting the surrounding text use Markdown. */
+function CommentMarkdown({ text }: { text: string }) {
+  const ranges = sessionMentionTokens(text)
+  if (ranges.length === 0) return <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{text}</ReactMarkdown>
+  const out: ReactNode[] = []
+  let last = 0
+  for (const range of ranges) {
+    if (range.start > last) out.push(<ReactMarkdown key={`md-${last}`} remarkPlugins={[remarkGfm, remarkBreaks]}>{text.slice(last, range.start)}</ReactMarkdown>)
+    const raw = text.slice(range.start, range.end)
+    out.push(<span key={`mention-${range.start}`} style={{ background: 'var(--accent-blue-dim)', color: 'var(--accent-blue)', borderRadius: 4, boxShadow: '0 0 0 2px var(--accent-blue-dim)', whiteSpace: 'nowrap' }}>{raw}</span>)
+    last = range.end
+  }
+  if (last < text.length) out.push(<ReactMarkdown key={`md-${last}`} remarkPlugins={[remarkGfm, remarkBreaks]}>{text.slice(last)}</ReactMarkdown>)
+  return <>{out}</>
 }
 
 /**
