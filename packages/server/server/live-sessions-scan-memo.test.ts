@@ -31,6 +31,7 @@ describe('scanLinuxProcesses — the not-a-harness memo (PERF.SLOW)', () => {
     expect((await scanLinuxProcesses(root)).procs.map(p => p.pid)).toEqual([200])
   })
   it('a process known not to be a harness is not re-read while its identity holds', async () => {
+    await scanLinuxProcesses(root)
     // argv/comm files change but /proc/<pid>/stat still says the same process: memo hit.
     writeFileSync(join(root, '100', 'comm'), 'claude\n')
     writeFileSync(join(root, '100', 'cmdline'), 'claude\0')
