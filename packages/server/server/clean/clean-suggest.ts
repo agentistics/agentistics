@@ -27,8 +27,8 @@ export function weekIsUp(lastAt: number | null, nowMs: number): boolean {
 
 export function suggestionText(bytes: number, count: number, lang: 'en' | 'pt'): { title: string; message: string } {
   return lang === 'pt'
-    ? { title: `agentop clean pode liberar ${fmtBytes(bytes)}`, message: `${count} worktree(s) merged ou node_modules parado(s). Rode \`agentop clean\` para ver a lista e confirmar.` }
-    : { title: `agentop clean can free ${fmtBytes(bytes)}`, message: `${count} merged worktree(s) or stale node_modules. Run \`agentop clean\` to see the list and confirm.` }
+    ? { title: `Há espaço para liberar ${fmtBytes(bytes)}`, message: `${count} item(ns) concluído(s) ou parado(s) podem ser removido(s). Veja a lista e confirme o que deseja limpar.` }
+    : { title: `You can free ${fmtBytes(bytes)}`, message: `${count} completed or idle item(s) can be removed. See the list and confirm what you want to clean.` }
 }
 
 export function startCleanSuggestions(dataDir: string, lang: 'en' | 'pt' = 'en'): void {
@@ -44,7 +44,7 @@ export function startCleanSuggestions(dataDir: string, lang: 'en' | 'pt' = 'en')
       await writeFile(file, JSON.stringify({ at: Date.now(), bytes: r.bytes, count: r.count }), { mode: 0o600 })
       if (!shouldSuggest({ lastAt: null, nowMs: Date.now(), bytes: r.bytes })) return
       const { broadcastNotification } = await import('../sse')
-      broadcastNotification({ type: 'info', ...suggestionText(r.bytes, r.count, lang) })
+      broadcastNotification({ type: 'info', code: 'clean.suggestion', meta: { bytes: r.bytes, count: r.count } })
     } catch { /* a suggestion is never worth an error */ }
   }
   setTimeout(() => { void check(); setInterval(() => void check(), 86_400_000).unref() }, 15 * 60_000).unref()

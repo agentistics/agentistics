@@ -55,6 +55,7 @@ import { NotificationBell } from './components/NotificationBell'
 import { AgentisticsLoader } from './components/AgentisticsLoader'
 import { VaultHeaderButton } from './components/vault/VaultHeaderButton'
 import { HardwareModal } from './components/HardwareModal'
+import { CleanDialog } from './components/CleanDialog'
 import { useNotificationStream } from './hooks/useNotificationStream'
 import { pushNotification } from './lib/notifications'
 import { startupLoadingNotification, journalLoadingNotification } from './lib/loadingNotifications'
@@ -1417,6 +1418,8 @@ export function writeStudioSeen(storage: Pick<StorageLike, 'setItem'>): void {
 }
 
 export default function AppLayout() {
+  const [cleanOpen, setCleanOpen] = useState(false)
+  useEffect(() => { const open = () => setCleanOpen(true); window.addEventListener('agentistics:open-clean', open); return () => window.removeEventListener('agentistics:open-clean', open) }, [])
   // The boot splash (`index.html` #ag-preboot) is the ONLY boot screen. Every commit asks for it to
   // leave; it does once the browser has painted a commit in which no loading state holds it
   // (`LoadingScreen`, the first route's `PageFallback`) — i.e. once the app, or a screen asking the
@@ -4903,6 +4906,7 @@ export default function AppLayout() {
       )}
 
       {hardwareOpen && <HardwareModal lang={lang} onClose={() => setHardwareOpen(false)} />}
+      <CleanDialog lang={lang === 'pt' ? 'pt' : 'en'} open={cleanOpen} onClose={() => setCleanOpen(false)} />
 
       {/* Mobile bottom navigation bar — HIDDEN while a session is open.
           A session's panel is a full-screen reading-and-typing surface: the conversation fills the
