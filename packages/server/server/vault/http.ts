@@ -255,6 +255,27 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     }
     return send({ ok: true }, 200, noStore)
   }
+  if (path === '/api/vault/activity/arm' && req.method === 'POST') {
+    // A page can recover its tab capability after a reload, CLI unlock, or phone unlock only from a
+    // real input handler. The HTTP session binds the capability to this page; loopback keeps phones
+    // and remote callers out, while `gesture` is supplied only by the isTrusted UI handler. This is
+    // intentionally usable after a reload, when the page's in-memory read grant is gone.
+    const b = await body()
+    if (!loopback) {
+      return reply({ ok: false, code: 'activity-not-here', sentence: vaultLang() === 'pt'
+        ? 'A atividade do cofre só pode vir do painel aberto no próprio computador.'
+        : 'Vault activity can only come from the dashboard on this computer.' })
+    }
+    if (!vaultIsOpen()) {
+      return reply({ ok: false, code: 'vault-locked', sentence: vaultLang() === 'pt' ? 'O cofre já está trancado.' : 'The vault is already locked.' })
+    }
+    if (b.gesture !== true) {
+      return reply({ ok: false, code: 'activity-gesture', sentence: vaultLang() === 'pt'
+        ? 'Armar a atividade do cofre exige uma interação real nesta página.'
+        : 'Arming vault activity requires a real interaction on this page.' })
+    }
+    return addHeartbeatCookie(send({ ok: true }, 200, noStore), rotateVaultHeartbeatToken())
+  }
 
   // ── SECRETS.4 §7.1: the enrolment wizard and the sections' actions ────────────────────────────
 
@@ -333,12 +354,8 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     return reply(r)
   }
   // VAULT.PERSONAL: answered through THIS module's `reply` (the one JSON exit, page filter included).
-  const wasOpen = vaultIsOpen()
   const phoneRoute = await handlePhoneHttp({ req, path, url, session, grant, loopback, reply })
-  if (phoneRoute) {
-    if (path === '/api/vault/phone/unlock' && phoneRoute.status === 200 && !wasOpen) return addHeartbeatCookie(phoneRoute, rotateVaultHeartbeatToken())
-    return phoneRoute
-  }
+  if (phoneRoute) return phoneRoute
   const personal = await handlePersonalHttp({ req, path, url, session, grant, fresh, loopback, reply })
   if (personal) return personal
   return null
