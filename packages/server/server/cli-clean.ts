@@ -30,7 +30,7 @@ async function knownProjectPaths(): Promise<string[]> {
   } catch { return [] }
 }
 
-export async function collectCleanFacts(repos: readonly string[], o: { lowPriority?: boolean } = {}): Promise<WorktreeFacts[]> {
+export async function collectCleanFacts(repos: readonly string[], o: { lowPriority?: boolean; onProgress?: (done: number, total: number) => void } = {}): Promise<WorktreeFacts[]> {
   const all: WorktreeFacts[] = []
   const pool = 2
   let next = 0
@@ -41,6 +41,7 @@ export async function collectCleanFacts(repos: readonly string[], o: { lowPriori
       process.stderr.write(`\rScanning clean candidates (${done}/${repos.length} repositories)`)
       all.push(...(await worktreeFacts(r, o)))
       done++
+      o.onProgress?.(done, repos.length)
     }
   }
   await Promise.all(Array.from({ length: Math.min(pool, repos.length) }, worker))

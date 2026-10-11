@@ -106,7 +106,7 @@ export function ResourcesSection({ lang, isMobile, onNavigate }: { lang: Lang; i
 
   return (
     <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }} aria-label={l === 'pt' ? 'Recursos' : 'Resources'}>
-      <h2 style={h2}><Activity size={17} />{l === 'pt' ? 'Recursos' : 'Resources'}</h2>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}><h2 style={h2}><Activity size={17} />{l === 'pt' ? 'Recursos' : 'Resources'}</h2><button onClick={() => window.dispatchEvent(new CustomEvent('agentistics:open-clean'))} style={{ ...btn, color: 'var(--text-secondary)', borderColor: 'var(--border)', background: 'transparent' }}>{l === 'pt' ? 'Ver o que dá para limpar' : 'See what can be cleaned'}</button></div>
 
       {error && <div style={{ ...box, color: 'var(--text-tertiary)' }}>{error}</div>}
       {!error && !snap && <div style={{ ...box, color: 'var(--text-tertiary)' }}>{l === 'pt' ? 'Lendo…' : 'Reading…'}</div>}

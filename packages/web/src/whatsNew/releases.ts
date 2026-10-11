@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.125.0': {
+    features: [
+      {
+        pt: 'Limpeza pela interface: o aviso de espaço para liberar ganhou o botão "Ver o que dá para limpar", que lista o que pode sair (worktrees concluídas e dependências paradas), pede confirmação, roda em segundo plano e mostra quanto foi liberado. Nada em andamento é tocado e as branches ficam.',
+        en: 'Cleanup from the app: the free-space notice now has a "See what can be cleaned" button that lists what can go (finished worktrees and idle dependencies), asks for confirmation, runs in the background and shows how much was freed. Nothing in progress is touched and branches stay.',
+      },
+    ],
+    fixes: [],
+  },
   '2.124.0': {
     features: [
       {
