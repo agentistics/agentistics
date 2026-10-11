@@ -94,7 +94,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) 
                 left: `max(8px, env(safe-area-inset-left))`,
                 right: `max(8px, env(safe-area-inset-right))`,
                 width: 'auto',
-                maxHeight: 'min(70vh, 520px)',
+                maxHeight: 'min(calc(70vh / var(--ui-zoom, 1)), 520px)',
               }
             : {
                 top: '100%',

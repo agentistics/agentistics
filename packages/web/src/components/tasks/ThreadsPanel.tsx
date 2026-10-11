@@ -269,7 +269,7 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
   }
   return (
     <div onClickCapture={followCommentLink} style={{
-      display: 'grid', gridTemplateColumns: '280px minmax(0, 1fr)', minHeight: 520, height: 'min(72vh, 820px)',
+      display: 'grid', gridTemplateColumns: '280px minmax(0, 1fr)', minHeight: 520, height: 'min(calc(72vh / var(--ui-zoom, 1)), 820px)',
       background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
     }}>
       <div style={{ borderRight: '1px solid var(--border)', minHeight: 0 }}>{inboxPane}</div>

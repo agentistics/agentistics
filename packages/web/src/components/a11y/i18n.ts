@@ -10,6 +10,8 @@ export interface A11yText {
   textSizeMedium: string
   textSizeLarge: string
   textSizeVeryLarge: string
+  /** Said when a narrow screen holds the zoom below the chosen size (`effectiveTextScale`). */
+  textSizeLimited(shownPct: number): string
   tab: string
   enable: string
   enableHelp: string
@@ -85,13 +87,16 @@ export function a11yText(lang: 'pt' | 'en'): A11yText {
   const pt = lang === 'pt'
   return {
     textSize: pt ? 'Tamanho do texto' : 'Text size',
-    textSizeHelp: pt ? 'Ajuste o tamanho de todo o texto do aplicativo.' : 'Adjust the size of all text in the app.',
+    textSizeHelp: pt ? 'Ajusta o tamanho de todo o aplicativo — texto, botões e painéis.' : 'Scales the whole app — text, buttons and panels.',
     textSizePreview: pt ? 'Aa — Assim fica o texto' : 'Aa — This is how text looks',
     textSizeDefault: pt ? 'Padrão 100%' : 'Default 100%',
     textSizeSmall: pt ? 'Pequeno 90%' : 'Small 90%',
     textSizeMedium: pt ? 'Médio 112%' : 'Medium 112%',
     textSizeLarge: pt ? 'Grande 125%' : 'Large 125%',
     textSizeVeryLarge: pt ? 'Muito grande 140%' : 'Very large 140%',
+    textSizeLimited: (shownPct: number) => pt
+      ? `Nesta tela estreita o tamanho fica em ${shownPct}% para que tudo caiba; em uma tela mais larga ele vai até o que você escolheu.`
+      : `On this narrow screen the size stops at ${shownPct}% so everything still fits; a wider screen shows the size you chose.`,
     tab: pt ? 'Acessibilidade' : 'Accessibility',
     enable: pt ? 'Ativar lupas' : 'Enable magnifiers',
     enableHelp: pt

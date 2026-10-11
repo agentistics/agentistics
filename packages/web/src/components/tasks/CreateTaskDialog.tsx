@@ -80,7 +80,7 @@ export function CreateTaskDialog(p: {
           ...surface, background: 'var(--bg-card)', boxShadow: '0 12px 48px rgba(0,0,0,0.5)', display: 'grid', gap: 12, padding: 20,
           ...(isMobile
             ? { width: '100%', height: '100%', borderRadius: 0, overflowY: 'auto', alignContent: 'start' }
-            : { width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto', borderRadius: 12 }),
+            : { width: '100%', maxWidth: 560, maxHeight: 'calc(90vh / var(--ui-zoom, 1))', overflowY: 'auto', borderRadius: 12 }),
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

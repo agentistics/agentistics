@@ -2696,7 +2696,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 marginBottom: 8, padding: 4, borderRadius: 12,
                 background: 'var(--bg-elevated)', border: '1px solid var(--border)',
                 boxShadow: '0 10px 30px rgba(0,0,0,0.38)',
-                maxHeight: isMobile ? '50vh' : 300, overflowY: 'auto', overscrollBehavior: 'contain',
+                maxHeight: isMobile ? 'calc(50vh / var(--ui-zoom, 1))' : 300, overflowY: 'auto', overscrollBehavior: 'contain',
               }}
             >
               {skills === null ? (
@@ -2790,7 +2790,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 marginBottom: 8, padding: 4, borderRadius: 12,
                 background: 'var(--bg-elevated)', border: '1px solid var(--border)',
                 boxShadow: '0 10px 30px rgba(0,0,0,0.38)',
-                maxHeight: isMobile ? '50vh' : 300, overflowY: 'auto', overscrollBehavior: 'contain',
+                maxHeight: isMobile ? 'calc(50vh / var(--ui-zoom, 1))' : 300, overflowY: 'auto', overscrollBehavior: 'contain',
               }}
             >
               {mcpServers === null ? (
@@ -2913,7 +2913,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 marginBottom: 8, padding: 4, borderRadius: 12,
                 background: 'var(--bg-elevated)', border: '1px solid var(--border)',
                 boxShadow: '0 10px 30px rgba(0,0,0,0.38)',
-                maxHeight: isMobile ? '50vh' : 300, overflowY: 'auto', overscrollBehavior: 'contain',
+                maxHeight: isMobile ? 'calc(50vh / var(--ui-zoom, 1))' : 300, overflowY: 'auto', overscrollBehavior: 'contain',
               }}
             >
               {hashRows.length === 0 ? (
@@ -3125,7 +3125,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 {replyTo.length > 0 && (
                   <div
                     aria-label={pt ? 'Citações e respostas desta mensagem' : 'Quotes and replies in this message'}
-                    style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '6px 4px 2px', maxHeight: '40vh', overflowY: 'auto' }}
+                    style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '6px 4px 2px', maxHeight: 'calc(40vh / var(--ui-zoom, 1))', overflowY: 'auto' }}
                   >
                     {replyTo.map((t, i) => {
                       const before = t.before ?? ''
