@@ -419,7 +419,7 @@ describe('§4.3 / §12.4 recovery', () => {
 })
 
 describe('§5.1 / §12.5 auto-lock', () => {
-  test('idle 30 min → locked, the DEK buffer zeroed, audited; activity and opens reset the clock', async () => {
+  test('idle 30 min → locked, the DEK buffer zeroed, audited; human activity resets the clock, a decrypt does not', async () => {
     dir = await mkdtemp(join(tmpdir(), 'agentistics-autolock-'))
     dpapi = fake('dpapi'); hello = fake('hello')
     restart()
@@ -432,9 +432,10 @@ describe('§5.1 / §12.5 auto-lock', () => {
     noteVaultActivity()
     expect(autoLockTick(t0 + 49 * 60_000)).toBe(false)
     T = t0 + 45 * 60_000
-    expect((await openFromFile(join(dir, 'x.sealed'), 'central-token', 'n')).ok).toBe(true) // an open is use
-    expect(autoLockTick(t0 + 74 * 60_000)).toBe(false)
-    expect(autoLockTick(t0 + 75 * 60_000)).toBe(true)
+    // A decrypt (a harness ref, a hook, a backup) is machine traffic: it never keeps the vault open.
+    expect((await openFromFile(join(dir, 'x.sealed'), 'central-token', 'n')).ok).toBe(true)
+    expect(autoLockTick(t0 + 49 * 60_000)).toBe(false)
+    expect(autoLockTick(t0 + 50 * 60_000)).toBe(true)
     expect(dekRef.every(b => b === 0)).toBe(true)
     expect((await vaultStatus()).lockedBy).toBe('auto-lock')
     expect(readFileSync(join(vaultDir(), 'audit.jsonl'), 'utf8')).toContain('vault.auto-locked')

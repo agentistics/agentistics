@@ -10,6 +10,24 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.127.0': {
+    features: [
+      {
+        pt: 'Ao abrir um tópico no Agentask você já pode escrever a primeira mensagem, mencionando sessões com # e comentários com ^.',
+        en: 'When you open a topic in Agentask you can now write its first message, mentioning sessions with # and comments with ^.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Cofre mais seguro: só um gesto seu mantém o cofre aberto. Agentes e serviços que usam segredos não adiam mais a tranca automática.',
+        en: 'Safer vault: only your own actions keep the vault open. Agents and services using secrets no longer postpone the auto-lock.',
+      },
+      {
+        pt: 'Abrir um tópico não cria mais tópicos repetidos, e os botões Abrir/Cancelar não ficam escondidos no celular.',
+        en: 'Opening a topic no longer creates duplicates, and the Open/Cancel buttons are no longer hidden on the phone.',
+      },
+    ],
+  },
   '2.126.0': {
     features: [
       {

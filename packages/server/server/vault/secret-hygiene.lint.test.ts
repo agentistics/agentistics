@@ -34,7 +34,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
   'vault/src/protectors/presence.ts': { _gestureListener: 'the service\'s progress callback; it receives no argument, so no key material can pass through it' },
   'server/server/vault/central-env.ts': { SECRET_SET: 'the NAMES of the secret keys, not values' },
   'server/server/vault/engine-secrets.ts': { ENGINE_CODES: 'refusal codes', VAULT_ACTIONS: 'audit action names' },
-  'server/server/vault/ops.ts': { _gate: 'the step-up gate function (S4.7)', GH_HEADERS_IN: 'header names', GH_METHODS: 'HTTP methods', _installed: 'a flag' },
+  'server/server/vault/ops.ts': { _gate: 'the step-up gate function (S4.7)', HUMAN_OPS: 'op names that count as human activity', GH_HEADERS_IN: 'header names', GH_METHODS: 'HTTP methods', _installed: 'a flag' },
   'server/server/vault/service.ts': {
     _lockHooks: 'callbacks run on lock (they DROP key material, they hold none)',
     _fresh: 'the SHA-256 of the single-use fresh-unlock proof + the session and action it is bound to + a timestamp (review H2); the token itself goes only to the page that unlocked; no key material',
