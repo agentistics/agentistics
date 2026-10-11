@@ -11,8 +11,8 @@ describe('text scale', () => {
   })
 
   test('applies the preference to the document root', () => {
-    const root = { style: { fontSize: '' } }
+    const root = { style: { zoom: '' } }
     expect(applyTextScale(root, 1.4)).toBe(1.4)
-    expect(root.style.fontSize).toBe('22.4px')
+    expect(root.style.zoom).toBe('1.4')
   })
 })

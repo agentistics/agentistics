@@ -7,8 +7,9 @@ export function clampTextScale(value: unknown): number {
   return Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, value))
 }
 
-export function applyTextScale(root: { style: { fontSize: string } }, value: unknown): number {
+export function applyTextScale(root: { style: { zoom: string } }, value: unknown): number {
   const scale = clampTextScale(value)
-  root.style.fontSize = `${16 * scale}px`
+  // Zoom (not root font-size): most of the UI is sized in px, so only a zoom scales ALL of it.
+  root.style.zoom = scale === 1 ? '' : String(scale)
   return scale
 }
