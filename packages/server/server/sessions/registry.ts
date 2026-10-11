@@ -418,6 +418,9 @@ export async function retireSession(
   if (!(await registry.patch(id, { endedAt: new Date().toISOString() }))) await registry.remove(id)
 }
 
+/** How long a row without a heartbeat is presumed to still be getting its pane. */
+const BORN_GRACE_MS = 30_000
+
 export async function retireFallenSessions(
   o: {
     newSessionId?: string
@@ -440,6 +443,9 @@ export async function retireFallenSessions(
     if (m.endedAt) continue
     if (o.newSessionId && m.id === o.newSessionId) continue
     if (backendIds.has(m.id)) continue
+    // A row written BEFORE its pane exists (`start` registers first) has no heartbeat and no pane yet; a
+    // concurrent start in the same directory must not read that as a fallen session.
+    if (m.lastSeenMs === undefined && Date.parse(m.createdAt) > Date.now() - BORN_GRACE_MS) continue
     const sameConv = Boolean(o.conversationId && m.conversationId === o.conversationId)
     const sameCwd = m.cwd === o.cwd && m.harness === o.harness
     if (sameConv || sameCwd) {

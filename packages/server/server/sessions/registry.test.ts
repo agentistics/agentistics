@@ -463,3 +463,21 @@ describe('adopt (never replaces a row it did not create)', () => {
     expect((await r.read())[0]).toMatchObject({ conversationId: 'own', conversationLinkVia: 'assigned-id' })
   })
 })
+
+describe('retireFallenSessions — a row being born', () => {
+  const fresh = (id: string, ageMs: number) => ({ ...session(id), createdAt: new Date(Date.now() - ageMs).toISOString() })
+  it('does not retire a row with no heartbeat created seconds ago (its pane is still being spawned)', async () => {
+    const r = createSessionRegistry(file)
+    await r.add(fresh('A', 2_000))
+    const n = await retireFallenSessions({ newSessionId: 'B', cwd: '/tmp', harness: 'claude', backendIds: new Set(['B']) }, r)
+    expect(n).toBe(0)
+    expect((await r.read())[0]!.endedAt).toBeUndefined()
+  })
+  it('still retires a paneless row that is old, or one that has been seen', async () => {
+    const r = createSessionRegistry(file)
+    await r.add(fresh('old', 120_000))
+    await r.add({ ...fresh('seen', 2_000), lastSeenMs: Date.now() })
+    const n = await retireFallenSessions({ newSessionId: 'B', cwd: '/tmp', harness: 'claude', backendIds: new Set(['B']) }, r)
+    expect(n).toBe(2)
+  })
+})
