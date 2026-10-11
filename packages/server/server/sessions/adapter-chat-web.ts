@@ -15,7 +15,8 @@ import type { SessionHub } from './session-hub'
 import type { SessionSnapshot } from './sessions-host'
 import { engine } from '../engine/load'
 import {
-  adapterChatResponse, pickAdapterChat, readAdapterChat, refuseAdapter, type AdapterChatRow,
+  adapterChatResponse, pickAdapterChat, readAdapterChat, refuseAdapter, sameAdapterSource,
+  type AdapterChatRow, type AdapterSourceKind,
 } from './adapter-chat'
 import { finishChatRead, MAX_TURNS } from './chat-web'
 import { acquireChatSlot, onChatWake, releaseChatSlot } from './chat-stream'
@@ -77,6 +78,7 @@ export async function openAdapterChatStream(
   if (!acquireChatSlot()) return null
   const { chat, conversationId } = picked
   const harness = row.harness ?? ''
+  const opened: AdapterSourceKind = structured ? { structured: true } : { structured: false, conversationId }
   return adapterChatResponse({
     id,
     conversationId,
@@ -87,6 +89,15 @@ export async function openAdapterChatStream(
     finish: (read, live) => finishChatRead(id, conversationId, read, live, lang, row.id),
     onFleetTick: cb => hub.subscribe(() => cb()),
     onWake: cb => onChatWake(id, cb),
+    // A structured session turned into a TUI (open in terminal) keeps its row: re-pick on every tick,
+    // and let the client reconnect when this channel is no longer the row's (AGY.CHAT.REPLIES).
+    current: async () => {
+      const r = await findRow(hub, lang, id).catch(() => null)
+      if (!r) return true // a row that left is the tick's own close, said in the legacy words
+      const s = await structuredChatOf(id)
+      const p = s ? null : pickAdapterChat(r, true, chatOf)
+      return sameAdapterSource(opened, s ? { structured: true } : p ? { structured: false, conversationId: p.conversationId } : null)
+    },
     // Only a structured session's raw stream can say it (the file channel learns a block when it is FINISHED).
     ...(structured ? { composing: { now: () => composingOf(id), on: (cb: (c: 'question' | null) => void) => onComposing(id, cb) } } : {}),
   }, signal, failed => {
