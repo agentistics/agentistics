@@ -183,7 +183,8 @@ export function howStep2(v: Pick<VaultView, 'authenticator' | 'presence' | 'unlo
   return { key: 'how2_daily', hours: p.hours }
 }
 export const setAutoLock = (minutes: number, code?: string) => call('POST', '/api/vault/auto-lock', { minutes, ...(code ? { code } : {}) }).then(r => reply(r))
-export const heartbeat = () => { void call('POST', '/api/vault/activity', {}) }
+export const armHeartbeat = () => call('POST', '/api/vault/activity/arm', { gesture: true })
+export const heartbeat = () => call('POST', '/api/vault/activity', {})
 
 /** The wizard's first step: spend the setup code BEFORE any gesture; the proof stands for the rest of this wizard. */
 export const setupCodeAccept = (setupCode: string) => call('POST', '/api/vault/setup-code', { setupCode }).then(r => reply(r))
