@@ -25,6 +25,7 @@
 
 let factor = 1
 let installed = false
+const originals = new Map<object, Map<string, PropertyDescriptor | null>>()
 
 /** The zoom currently applied to `<html>` — 1 when the text size is the default. */
 export function geometryZoom(): number { return factor }
@@ -39,6 +40,7 @@ export function setGeometryZoom(zoom: number): void {
   factor = Number.isFinite(zoom) && zoom > 0 ? zoom : 1
   // Only a real DOM is patched — tests run with a bare `window` stub and no Element/Range at all.
   if (factor !== 1 && typeof window !== 'undefined' && typeof Element !== 'undefined' && typeof Range !== 'undefined') installZoomGeometry()
+  else if (factor === 1 && installed) uninstallZoomGeometry()
 }
 
 const div = (v: number) => (factor === 1 ? v : v / factor)
@@ -50,8 +52,15 @@ function wrapGetter(target: object | undefined | null, key: string, map: (v: num
   if (!target) return
   const d = Object.getOwnPropertyDescriptor(target, key)
   if (!d?.get || !d.configurable) return
+  remember(target, key, d)
   const get = d.get as Getter
   Object.defineProperty(target, key, { ...d, get(this: unknown) { return map(get.call(this), this) } })
+}
+
+function remember(target: object, key: string, descriptor = Object.getOwnPropertyDescriptor(target, key)): void {
+  let saved = originals.get(target)
+  if (!saved) { saved = new Map(); originals.set(target, saved) }
+  if (!saved.has(key)) saved.set(key, descriptor ?? null)
 }
 
 function scaledRect(r: DOMRectReadOnly): DOMRect {
@@ -88,6 +97,8 @@ function installZoomGeometry(): void {
   for (const proto of [Element.prototype, Range.prototype]) {
     const rect = proto.getBoundingClientRect
     const rects = proto.getClientRects
+    remember(proto, 'getBoundingClientRect')
+    remember(proto, 'getClientRects')
     proto.getBoundingClientRect = function (this: Element & Range) { return scaledRect(rect.call(this)) }
     proto.getClientRects = function (this: Element & Range) { return scaledRectList(rects.call(this)) }
   }
@@ -118,6 +129,7 @@ function installZoomGeometry(): void {
   for (const key of ['scrollTop', 'scrollLeft']) {
     const d = Object.getOwnPropertyDescriptor(Element.prototype, key)
     if (!d?.get || !d.set) continue
+    remember(Element.prototype, key, d)
     const { get, set } = d
     Object.defineProperty(Element.prototype, key, {
       ...d,
@@ -126,6 +138,7 @@ function installZoomGeometry(): void {
     })
   }
   for (const key of ['scrollTo', 'scroll', 'scrollBy'] as const) {
+    remember(window, key, Object.getOwnPropertyDescriptor(window, key))
     const native = window[key].bind(window) as (...a: unknown[]) => void
     window[key] = ((a?: unknown, b?: unknown) => {
       if (typeof a === 'number') return native(mul(a), mul(Number(b ?? 0)))
@@ -144,8 +157,20 @@ function installZoomGeometry(): void {
   for (const key of ['elementFromPoint', 'elementsFromPoint', 'caretRangeFromPoint', 'caretPositionFromPoint']) {
     const native = doc[key]
     if (typeof native !== 'function') continue
+    remember(doc, key)
     doc[key] = function (this: Document, x: number, y: number, ...rest: unknown[]) {
       return (native as (...a: unknown[]) => unknown).call(this, mul(x), mul(y), ...rest)
     }
   }
+}
+
+function uninstallZoomGeometry(): void {
+  for (const [target, saved] of originals) {
+    for (const [key, descriptor] of saved) {
+      if (descriptor) Object.defineProperty(target, key, descriptor)
+      else delete (target as Record<string, unknown>)[key]
+    }
+  }
+  originals.clear()
+  installed = false
 }
