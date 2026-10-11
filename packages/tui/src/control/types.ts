@@ -1261,6 +1261,8 @@ export interface ActionResult {
   ok: boolean
   /** Already-localized one-line outcome, shown in the status line. */
   message: string
+  /** The action is a question and must be explicitly confirmed before it can proceed. */
+  confirm?: boolean
   /** A failed pane write classified from the post-write screen. */
   failure?: 'prompt' | 'ended' | 'unconfirmed'
 }
@@ -1684,7 +1686,7 @@ export interface ControlHost {
    * mid-dialog by the time its turn comes, one has just died — and "sent to 5 sessions" would hide
    * exactly the failures the re-read exists to produce.
    */
-  broadcastPrompt?(ids: readonly string[], text: string): Promise<ActionResult>
+  broadcastPrompt?(ids: readonly string[], text: string, confirm?: boolean): Promise<ActionResult>
 
   renameSession?(id: string, label: string): Promise<ActionResult>
   noteSession?(id: string, text: string): Promise<ActionResult>

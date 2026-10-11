@@ -266,6 +266,10 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
       + 'machine, named by ids the new machine will not have.',
   },
   {
+    pattern: '.agentistics/pending-prompts.json', match: 'prefix', reason: 'regenerable',
+    why: 'Pending prompt echoes are a bounded display queue. They expire or retire when the transcript accounts for them; prompt text may contain user content, so it is not carried in a machine backup.',
+  },
+  {
     pattern: '.agentistics/restore-state.json', match: 'prefix', reason: 'runtime',
     restoreWith: 'nothing — `agentop restore --repos` writes its own',
     why: 'The resumable plan of a restore in progress. Carrying one INTO an archive would have a '
