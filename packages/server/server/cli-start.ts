@@ -186,7 +186,7 @@ import { withResumeLock } from './sessions/resume-lock'
 import { liveConversationHolders } from './sessions/live-claims'
 import type { ManagedSession, SessionBackend, SpawnPlanError } from './sessions/types'
 import {
-  addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession, touchSessions,
+  addSession, adoptSessionRecords, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession, touchSessions,
 } from './sessions/registry'
 import {
   createSessionsPoller, linkProcessConversation, sampleProcessLinks, SESSION_POLL_MS, type SessionsPoller,
@@ -1600,7 +1600,7 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
       patchSession(id, { harnessName: name, ...(since !== undefined ? { harnessNameSince: since } : {}) }),
     // Take back a running session whose registry record was lost. Called only with a non-empty
     // list, so a healthy fleet never writes. See `session-adopt.ts` for what may be adopted.
-    adoptSessions: async records => { for (const r of records) await addSession(r) },
+    adoptSessions: async records => { await adoptSessionRecords(records) },
     // ENGINE.MAP F1.2: the harness's own statement of its state, with the `adapter-chat` flag on only.
     adapterState: hostAdapterState,
   }

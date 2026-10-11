@@ -37,7 +37,7 @@ import { rulesFor } from './attention-rules'
 import { renameInHarness, renameMessage } from './rename'
 import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefCandidate } from './session-ref'
 import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
-import { addSession, newSessionId, patchSession, readRegistry, retireFallenSessions, retireSession } from './registry'
+import { addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession } from './registry'
 import { loadConversations } from './conversations'
 import { exactLinksOnDisk } from './reopen-link'
 import { reopenTargetFor } from './reopen-target'
@@ -357,26 +357,10 @@ async function start(
   // for good. The moment we launched is the moment the claim means; the moment we finished
   // checking is not.
   const spawnedAt = new Date().toISOString()
-  await writeContextFile(planned.plan)
-  try {
-    if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-    await backend.spawn({ id, cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...spawnPromptArg(planned.plan, cmd.harness) })
-  } catch (e) {
-    console.error(`Could not start the session: ${e instanceof Error ? e.message : String(e)}`)
-    return 1
-  }
-
-  // `spawn` returning is not evidence anything is RUNNING — tmux's contract is "I made you a
-  // session". A harness that refuses its arguments has already exited by now, and registering a row
-  // for it is what produced three dead rows called MAIN. See `spawn-outcome.ts`.
-  const failed = await spawnFailure(backend, id, planned.plan.argv[0])
-  if (failed) {
-    console.error(failed)
-    await backend.kill(id).catch(() => {})
-    return 1
-  }
-  if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
-
+  // The row (with its label) is written BEFORE the pane exists. `spawnFailure` waits to see whether the
+  // child dies; a row written after that wait leaves a window in which the fleet poller sees an
+  // unregistered pane and adopts it WITHOUT the name (`session-adopt.ts` cannot know one), so the
+  // `--name` was lost. Removed again below if the spawn fails.
   await addSession({
     id,
     harness: cmd.harness,
@@ -398,6 +382,28 @@ async function start(
       : {}),
     ...(await recordedRepo(cwd)),
   })
+  await writeContextFile(planned.plan)
+  try {
+    if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
+    await backend.spawn({ id, cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...spawnPromptArg(planned.plan, cmd.harness) })
+  } catch (e) {
+    await removeSession(id).catch(() => {})
+    console.error(`Could not start the session: ${e instanceof Error ? e.message : String(e)}`)
+    return 1
+  }
+
+  // `spawn` returning is not evidence anything is RUNNING — tmux's contract is "I made you a
+  // session". A harness that refuses its arguments has already exited by now, and registering a row
+  // for it is what produced three dead rows called MAIN. See `spawn-outcome.ts`.
+  const failed = await spawnFailure(backend, id, planned.plan.argv[0])
+  if (failed) {
+    console.error(failed)
+    await backend.kill(id).catch(() => {})
+    await removeSession(id).catch(() => {})
+    return 1
+  }
+  if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
+
   if (role) await applyRoleTitle(id, cmd.label ?? id, role, lang).catch(() => false)
   // Muted at birth: keyed by the conversation we assigned, else by the managed id (re-keyed when the
   // poller links the conversation). Delivery only — the session still reads as waiting.

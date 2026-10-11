@@ -440,3 +440,26 @@ describe('the parent link survives the heartbeat rewrite (SESSION.LINK)', () => 
     } finally { await rm(dir, { recursive: true, force: true }) }
   })
 })
+
+describe('adopt (never replaces a row it did not create)', () => {
+  it('appends a record whose id is absent', async () => {
+    const r = createSessionRegistry(file)
+    await r.adopt([session('a1')])
+    expect(await r.read()).toEqual([session('a1')])
+  })
+
+  it('keeps label, task, createdAt and role of an existing row when the adoption is a stale snapshot', async () => {
+    const r = createSessionRegistry(file)
+    await r.add({ ...session('a1'), label: 'X', labelSince: 5, task: 't-1', taskId: 'id-1', createdAt: '2026-08-12T09:00:00.000Z' })
+    await r.adopt([{ ...session('a1'), createdAt: '2026-08-12T11:00:00.000Z', conversationId: 'c1', conversationLink: 'assigned', conversationLinkVia: 'harness-session-file' }])
+    const [row] = await r.read()
+    expect(row).toMatchObject({ id: 'a1', label: 'X', labelSince: 5, task: 't-1', taskId: 'id-1', createdAt: '2026-08-12T09:00:00.000Z', conversationId: 'c1' })
+  })
+
+  it('does not clobber a field the existing row already has', async () => {
+    const r = createSessionRegistry(file)
+    await r.add({ ...session('a1'), conversationId: 'own', conversationLink: 'assigned', conversationLinkVia: 'assigned-id' })
+    await r.adopt([{ ...session('a1'), conversationId: 'other', conversationLink: 'assigned', conversationLinkVia: 'harness-session-file' }])
+    expect((await r.read())[0]).toMatchObject({ conversationId: 'own', conversationLinkVia: 'assigned-id' })
+  })
+})
