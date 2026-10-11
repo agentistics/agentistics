@@ -100,4 +100,24 @@ describe('computeActiveTime', () => {
     const wall = 95
     expect(computeActiveTime(events).activeMinutes!).toBeLessThanOrEqual(wall)
   })
+
+  test('overlapping reconstructed turns are counted once', () => {
+    const r = computeActiveTime([
+      { ts: 0, userPrompt: true },
+      { ts: 10 * MIN },
+      { ts: 10 * MIN, userPrompt: true },
+      { ts: 15 * MIN, measuredMs: 10 * MIN },
+    ])
+    expect(r.activeMinutes).toBe(15)
+    expect(r.turns).toBe(2)
+  })
+
+  test('a measured close keeps its measured length even beyond timestamp span', () => {
+    const r = computeActiveTime([
+      { ts: 0, userPrompt: true },
+      { ts: 5 * MIN, measuredMs: 10 * MIN },
+    ])
+    expect(r.activeMinutes).toBe(10)
+    expect(r.measuredTurns).toBe(1)
+  })
 })
