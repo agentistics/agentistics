@@ -158,6 +158,13 @@ export function previewIdleReviewVisible(now: number): boolean {
   return computeSnapshot(state, now).visible
 }
 
+/** Test seam for the process-wide store; production callers should publish real poll state. */
+export function resetIdleReviewForTests(): void {
+  state = { count: 0, freedBytes: null, candidateKeys: [], modalOpen: false, snoozedUntil: null, dismissedKeys: new Set() }
+  cached = computeSnapshot(state, Date.now())
+  emit()
+}
+
 export function useIdleReviewCard(): IdleReviewSnapshot {
   return useSyncExternalStore(subscribe, getIdleReviewSnapshot, getIdleReviewSnapshot)
 }
