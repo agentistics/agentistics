@@ -20,6 +20,11 @@ export const SLIM_DROPPED_SESSION_FIELDS = [
   'tool_output_tokens',
   'user_response_times',
   'tool_error_categories',
+  // These are useful in the full session detail but are not needed to paint the first screen.
+  'daily',
+  'hours',
+  'model_usage',
+  'messages',
 ] as const
 
 /** How many sessions the slim answer carries (most recent first). */

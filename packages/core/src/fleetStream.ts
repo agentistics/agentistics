@@ -8,7 +8,7 @@ export interface FleetWire {
 }
 export interface FleetWireDelta {
   seq: number
-  upsert?: Pick<FleetWire, 'sessions' | 'rows'>
+  upsert?: { sessions?: FleetWire['sessions']; rows?: FleetWire['rows'] }
   remove?: string[]
   order?: string[]
   meta?: Record<string, unknown>
@@ -18,8 +18,14 @@ export function applyFleetWire(prev: FleetWire | null, event: string, body: unkn
   const next = body as FleetWire & FleetWireDelta
   if (!next || !Number.isSafeInteger(next.seq) || next.seq < 1) throw new Error('Invalid fleet sequence')
   if (event === 'snapshot') {
-    if (!Array.isArray(next.sessions) || !Array.isArray(next.rows)) throw new Error('Invalid fleet snapshot')
-    return next
+    if (!Array.isArray(next.sessions) && !Array.isArray(next.rows)) throw new Error('Invalid fleet snapshot')
+    const sessions = Array.isArray(next.sessions) ? next.sessions : next.rows!
+    const hasLegacyRows = Array.isArray(next.rows)
+    const { rows: _legacyRows, ...withoutRows } = next
+    const result = { ...withoutRows, sessions } as FleetWire
+    if (hasLegacyRows) result.rows = next.rows!
+    else Object.defineProperty(result, 'rows', { value: sessions, enumerable: false })
+    return result
   }
   if (event !== 'delta' || !prev || next.seq !== prev.seq + 1) throw new Error('Fleet snapshot required')
   const merge = (held: Array<{ id: string }>, added: Array<{ id: string }> = []) => {
@@ -29,7 +35,11 @@ export function applyFleetWire(prev: FleetWire | null, event: string, body: unkn
     const order = [...new Set([...(next.order ?? []), ...rows.keys()])]
     return order.flatMap(id => rows.has(id) ? [rows.get(id)!] : [])
   }
-  const result: FleetWire = { ...prev, seq: next.seq, sessions: merge(prev.sessions, next.upsert?.sessions), rows: merge(prev.rows, next.upsert?.rows) }
+  const { rows: _legacyRows, ...withoutRows } = prev
+  const result = { ...withoutRows, seq: next.seq, sessions: merge(prev.sessions, next.upsert?.sessions ?? next.upsert?.rows) } as FleetWire
+  if (Object.prototype.propertyIsEnumerable.call(prev, 'rows')) {
+    result.rows = merge(prev.rows, next.upsert?.rows)
+  } else Object.defineProperty(result, 'rows', { value: result.sessions, enumerable: false })
   for (const [key, value] of Object.entries(next.meta ?? {})) {
     if (['seq', 'sessions', 'rows', '__proto__', 'constructor', 'prototype'].includes(key)) continue
     if (value === null) delete result[key]
@@ -85,21 +95,21 @@ export function followFleet(url: string, onFrame: (wire: FleetWire) => void, opt
       const historyOrder = wire.rows.filter(r => r.id.startsWith('closed:')).slice(0, offset).map(r => r.id)
       const before = wire
       const sessions: FleetWire['sessions'] = []
-      const rows: FleetWire['rows'] = []
       while (offset < Math.min(total, end) && !closed) {
         const pageUrl = new URL(url, typeof location === 'undefined' ? 'http://localhost' : location.href)
         pageUrl.pathname = '/api/fleet/closed'; pageUrl.searchParams.set('offset', String(offset)); pageUrl.searchParams.set('limit', '100')
         const res = await fetch(pageUrl, { signal: controller.signal })
         if (!res.ok) throw new Error('Closed fleet unavailable')
-        const page = await res.json() as { sessions: FleetWire['sessions']; rows: FleetWire['rows']; total: number }
+        const page = await res.json() as { sessions?: FleetWire['sessions']; rows?: FleetWire['rows']; total: number }
         if (!wire || closed) return
         if (wire.closedVersion !== version || closedTotal() !== closedTotalAtStart) { refreshPending = true; return }
-        if (!Array.isArray(page.rows) || !Array.isArray(page.sessions)) throw new Error('Invalid closed fleet page')
+        const pageSessions = Array.isArray(page.sessions) ? page.sessions : page.rows
+        if (!Array.isArray(pageSessions)) throw new Error('Invalid closed fleet page')
         total = page.total
-        if (!page.rows.length) break
-        offset += page.rows.length
-        sessions.push(...page.sessions); rows.push(...page.rows)
-        historyOrder.push(...page.rows.map(r => r.id))
+        if (!pageSessions.length) break
+        offset += pageSessions.length
+        sessions.push(...pageSessions)
+        historyOrder.push(...pageSessions.map(r => r.id))
       }
       if (!wire || closed) return
       const merge = (held: FleetWire['rows'], added: FleetWire['rows'], prior: FleetWire['rows']) => {
@@ -112,8 +122,9 @@ export function followFleet(url: string, onFrame: (wire: FleetWire) => void, opt
           ...[...new Set(historyOrder)].flatMap(id => current.has(id) ? [current.get(id)!] : []),
         ]
       }
-      if (rows.length || invalidated || total === 0 && wire.rows.some(r => r.id.startsWith('closed:'))) {
-        wire = { ...wire, sessions: merge(wire.sessions, sessions, before.sessions), rows: merge(wire.rows, rows, before.rows), closed: { total, sent: offset } }
+      if (sessions.length || invalidated || total === 0 && wire.rows.some(r => r.id.startsWith('closed:'))) {
+        wire = { ...wire, sessions: merge(wire.sessions, sessions, before.sessions), closed: { total, sent: offset } }
+        Object.defineProperty(wire, 'rows', { value: wire.sessions, enumerable: false })
         onFrame(expandFleetView(wire))
       }
       pagedTotal = total

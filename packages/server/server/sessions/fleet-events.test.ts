@@ -224,7 +224,7 @@ describe('fleetEventsResponse', () => {
     tick!()
     const next = await readEvents(res, 1)
     expect(next[0]!.event).toBe('delta')
-    expect((next[0]!.data as { seq: number; upsert: { rows: ControlSession[] } }).upsert.rows[0]!.state).toBe('working')
+    expect((next[0]!.data as { seq: number; upsert: { sessions: ControlSession[] } }).upsert.sessions[0]!.state).toBe('working')
     expect((next[0]!.data as { seq: number }).seq).toBe(2)
     ctl.abort()
     expect(unsubscribed).toBe(true)

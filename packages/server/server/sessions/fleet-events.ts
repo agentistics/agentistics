@@ -7,18 +7,17 @@
  *
  * ```
  * retry: 2000
- * event: snapshot   {seq, sessions, rows, attention, tasks, finishedTasks, unavailable?, fell?, baseline?,
+ * event: snapshot   {seq, sessions, attention, tasks, finishedTasks, unavailable?, fell?, baseline?,
  *                    view?, closed: {total, sent}}
  * event: delta      {seq, upsert?: {sessions, rows}, remove?: [id], meta?: {<changed top-level field>: value | null},
  *                    order?: [id]}
  * event: ping       <ms>
  * ```
  *
- * - **The WINDOW.** `sessions`/`rows` hold every row that is not a `closed:` conversation, plus the
+ * - **The WINDOW.** `sessions` holds every row that is not a `closed:` conversation, plus the
  *   `closed` most recent closed ones (`closedLimit`, default `DEFAULT_CLOSED_LIMIT`). Older closed rows
  *   are PAGED on demand (`GET /api/fleet/closed`), never re-sent on a timer.
- * - **`upsert`** carries a window row whose content changed, both shapes (`FleetRow` + `ControlSession`)
- *   so a client keeps the pair the `/api/fleet` payload always gave it. **`remove`** names a row that
+ * - **`upsert`** carries one merged window row (the former `FleetRow` + `ControlSession` pair). **`remove`** names a row that
  *   was SENT and is no longer in the fleet at all — never a row that merely slid out of the closed window
  *   (it still exists; the client keeps it). **`order`** is the window's ids in the server's order, sent
  *   only when that order changed.
@@ -76,6 +75,30 @@ export interface FleetFramePayload {
   fell?: { count: number; atMs: number }
   view?: FleetArrangement
   baseline?: unknown
+}
+
+/** One canonical wire row: the old protocol sent these facts twice as `sessions` and `rows`. */
+export function compactFleetSession(session: FleetRow, row: ControlSession): Record<string, unknown> {
+  const { searchFields: _searchFields, ...withoutSearchFields } = row as ControlSession & { searchFields?: unknown }
+  return { ...session, ...withoutSearchFields }
+}
+
+/** Compact an internal payload into one row list and a real closed window. */
+export function compactFleetPayload(p: FleetFramePayload, closedLimit = DEFAULT_CLOSED_LIMIT): Record<string, unknown> {
+  const byId = new Map(p.sessions.map(s => [s.id, s]))
+  const { indexes, closedTotal } = windowOf(p.rows, closedLimit)
+  const sessions = indexes.flatMap(i => {
+    const row = p.rows[i]!
+    const shaped = byId.get(row.id)
+    return shaped ? [compactFleetSession(shaped, row)] : []
+  })
+  const { rows: _rows, view: _view, ...meta } = p
+  return {
+    ...meta,
+    ...(p.view ? { view: compactView(p.view) } : {}),
+    sessions,
+    closed: { total: closedTotal, sent: sessions.filter(s => String(s.id).startsWith('closed:')).length },
+  }
 }
 
 /** A view's groups by id: what a client needs to arrange rows it already holds. */
@@ -236,26 +259,31 @@ export const EMPTY_SENT: SentState = { rows: new Map(), gauges: new Map(), order
 /** PURE. The `snapshot` event body for a frame. */
 export function snapshotBody(seq: number, frame: FleetFrame): Record<string, unknown> {
   const { closedTotal, ...rest } = frame.metaValues
-  return {
+  const sessions = frame.window.map(w => compactFleetSession(w.session, w.row))
+  const result: Record<string, unknown> = {
     seq,
-    sessions: frame.window.map(w => w.session),
-    rows: frame.window.map(w => w.row),
+    sessions,
     ...rest,
     closed: { total: closedTotal, sent: frame.window.filter(w => isClosedRow(w.id)).length },
   }
+  Object.defineProperty(result, 'rows', { value: sessions, enumerable: false })
+  return result
 }
 
 /** PURE. The `delta` event body. */
 export function deltaBody(seq: number, frame: FleetFrame, d: FleetDelta): Record<string, unknown> {
   const pick = new Set(d.upsert)
   const up = frame.window.filter(w => pick.has(w.id))
-  return {
+  const sessions = up.map(w => compactFleetSession(w.session, w.row))
+  const result: Record<string, unknown> = {
     seq,
-    ...(up.length > 0 ? { upsert: { sessions: up.map(w => w.session), rows: up.map(w => w.row) } } : {}),
+    ...(up.length > 0 ? { upsert: { sessions } } : {}),
     ...(d.remove.length > 0 ? { remove: d.remove } : {}),
     ...(Object.keys(d.meta).length > 0 ? { meta: d.meta } : {}),
     ...(d.order ? { order: d.order } : {}),
   }
+  if (up.length > 0) Object.defineProperty(result.upsert as Record<string, unknown>, 'rows', { value: sessions, enumerable: false })
+  return result
 }
 
 /**
