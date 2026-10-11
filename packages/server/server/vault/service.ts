@@ -564,6 +564,34 @@ let _now: () => number = () => Date.now()
 let _autoClock: AutoLockClock | null = null
 let _autoTimer: ReturnType<typeof setInterval> | null = null
 let _onAutoLock: (minutes: number) => void = () => {}
+
+/** The dashboard heartbeat is a capability, not an identity signal.  Keep only its hash in memory. */
+export const VAULT_HEARTBEAT_MIN_INTERVAL_MS = 30_000
+let _heartbeat: { hash: string; lastAt: number | null } | null = null
+const heartbeatHash = (token: string): string => createHash('sha256').update(`agentistics-vault-heartbeat/v1.${token}`).digest('hex')
+
+/** Rotate the tab's heartbeat capability after a successful human gesture. */
+export function rotateVaultHeartbeatToken(): string {
+  const token = randomBytes(32).toString('base64url')
+  _heartbeat = { hash: heartbeatHash(token), lastAt: null }
+  return token
+}
+
+/** Invalidate the capability when the vault is locked (including an automatic lock). */
+export function invalidateVaultHeartbeatToken(): void { _heartbeat = null }
+
+/** Accept at most one heartbeat per interval and move the idle clock only when accepted. */
+export function acceptVaultHeartbeatToken(token: string | null | undefined): boolean {
+  const h = _heartbeat
+  if (!_opened || !h || !token || token.length > 128) return false
+  const got = Buffer.from(heartbeatHash(token)), want = Buffer.from(h.hash)
+  if (got.length !== want.length || !timingSafeEqual(got, want)) return false
+  const now = _now()
+  if (h.lastAt !== null && now - h.lastAt < VAULT_HEARTBEAT_MIN_INTERVAL_MS) return false
+  h.lastAt = now
+  noteVaultActivity()
+  return true
+}
 /** The service's toast/notification hook for an auto-lock (SSE + desktop notification). */
 export function setAutoLockNotifier(fn: (minutes: number) => void): void { _onAutoLock = fn }
 
@@ -882,6 +910,7 @@ export function lockVault(reason: LockedBy = 'user'): void {
   if (_opened) _opened.dek.fill(0)
   _opened = null
   _fresh = null
+  invalidateVaultHeartbeatToken()
   _last = null
   _autoClock = null
   _lockedBy = reason

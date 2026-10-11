@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { base32Decode, hotp, parseVaultJson, type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
 import {
-  __resetVaultForTests, __setVaultClockForTests, autoLockTick, ensureVaultOpen, lockVault, openFromFile, sealToFile, vaultDir, vaultStatus,
+  __resetVaultForTests, __setVaultClockForTests, autoLockRemainingMs, autoLockTick, ensureVaultOpen, lockVault, openFromFile, sealToFile, vaultDir, vaultStatus,
 } from './service'
 import { __resetGateForTests, mintSetupCode } from './gate'
 import { handleVaultHttp } from './http'
@@ -52,9 +52,9 @@ function restart(): void {
 }
 
 type J = Record<string, any>
-async function http(method: 'GET' | 'POST', path: string, body?: unknown, grant?: string): Promise<{ status: number; json: J; headers: Headers }> {
+async function http(method: 'GET' | 'POST', path: string, body?: unknown, grant?: string, cookie?: string): Promise<{ status: number; json: J; headers: Headers }> {
   // What the dashboard sends: same-origin, JSON (M1 refuses anything else on a POST).
-  const headers: Record<string, string> = { 'sec-fetch-site': 'same-origin', ...(method === 'POST' ? { 'content-type': 'application/json' } : {}), ...(grant ? { 'x-vault-grant': grant } : {}) }
+  const headers: Record<string, string> = { 'sec-fetch-site': 'same-origin', ...(method === 'POST' ? { 'content-type': 'application/json' } : {}), ...(grant ? { 'x-vault-grant': grant } : {}), ...(cookie ? { cookie } : {}) }
   // VAULT.PERSONAL §10: the gesture unlock answers ONLY the page on this computer, so it is sent as one —
   // and so are the reads (review M3: the no-proof list is the rule for a page on this computer).
   const local = path === '/api/vault/unlock' || path === '/api/vault/activity' || method === 'GET'
@@ -351,8 +351,29 @@ describe('the routes that already existed keep their gate (stepup, lock, auto-lo
     expect((await http('POST', '/api/vault/lock', {})).status).toBe(200)  // locking only reduces exposure: no code
   })
 
-  test('activity is a heartbeat; an unknown path is not ours', async () => {
-    expect((await http('POST', '/api/vault/activity', {})).json.ok).toBe(true)
+  test('activity needs the rotated tab token and is throttled', async () => {
+    lockVault('user')
+    const opened = await http('POST', '/api/vault/unlock', {})
+    const setCookie = opened.headers.get('set-cookie') ?? ''
+    const token = setCookie.match(/agentistics-vault-heartbeat=([^;]+)/)?.[1]
+    expect(token).toBeTruthy()
+    const cookie = `agentistics-vault-heartbeat=${token}`
+    const before = autoLockRemainingMs()!
+    expect((await http('POST', '/api/vault/activity', {}, undefined, cookie)).json.ok).toBe(true)
+    const after = autoLockRemainingMs()!
+    expect(after).toBeGreaterThanOrEqual(before)
+    expect((await http('POST', '/api/vault/activity', {}, undefined, cookie)).json.code).toBe('activity-token')
+    expect(autoLockRemainingMs()).toBe(after)
+    T += 30_000
+    expect((await http('POST', '/api/vault/activity', {}, undefined, cookie)).json.ok).toBe(true)
+    lockVault('user')
+    expect((await http('POST', '/api/vault/activity', {}, undefined, cookie)).json.code).toBe('activity-token')
+    expect((await http('GET', '/api/vault/nope')).status).toBe(404)
+    expect((await http('GET', '/api/vault/authenticator/begin')).status).toBe(404) // GET is not a begin
+  })
+
+  test('activity without a token is refused; an unknown path is not ours', async () => {
+    expect((await http('POST', '/api/vault/activity', {})).json.code).toBe('activity-token')
     expect((await http('GET', '/api/vault/nope')).status).toBe(404)
     expect((await http('GET', '/api/vault/authenticator/begin')).status).toBe(404) // GET is not a begin
   })
