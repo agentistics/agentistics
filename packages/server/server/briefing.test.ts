@@ -3,7 +3,7 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { BRIEFING_VERSION, briefingSkills, managedBlock, managedTargets, removeManagedBlocks, replaceManagedBlock, skillMarkdown } from './briefing'
-import { installBriefing, uninstallBriefing } from './briefing-installer'
+import { ensureBriefingInstalled, installBriefing, uninstallBriefing } from './briefing-installer'
 
 describe('managed briefing source', () => {
   test('all skills follow the Agent Skills frontmatter contract', () => {
@@ -47,6 +47,18 @@ describe('briefing installer', () => {
     await uninstallBriefing({ home, harnesses: ['claude'] })
     expect(await Bun.file(path).exists()).toBe(false)
   })
+
+  test('automatic install is versioned in agentop state and respects opt-outs', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'agentistics-briefing-auto-home-'))
+    const dataDir = await mkdtemp(join(tmpdir(), 'agentistics-briefing-auto-data-'))
+    const options = { home, dataDir, harnesses: ['codex'] as const, readSettings: async () => ({}) }
+    const first = await ensureBriefingInstalled(options)
+    expect(first?.some(x => x.changed)).toBe(true)
+    expect(await readFile(join(dataDir, 'briefing-state.json'), 'utf8')).toContain(`"version":${BRIEFING_VERSION}`)
+    expect(await ensureBriefingInstalled(options)).toEqual([])
+    expect(await ensureBriefingInstalled({ ...options, env: { AGENTISTICS_BRIEFING: '0' } })).toBeNull()
+    expect(await ensureBriefingInstalled({ ...options, readSettings: async () => ({ briefingAutoInstall: false }) })).toBeNull()
+  })
 })
 
 test('targets use the harness global instruction locations', () => {
@@ -55,4 +67,3 @@ test('targets use the harness global instruction locations', () => {
   expect(targets.find(x => x.harness === 'codex')?.path).toBe('/home/u/.codex/AGENTS.md')
   expect(targets.find(x => x.harness === 'gemini')?.path).toBe('/home/u/.gemini/GEMINI.md')
 })
-

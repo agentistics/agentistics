@@ -9,6 +9,8 @@
  * docs/superpowers/specs/2026-10-08-session-context-injection.md
  */
 
+import { briefingText } from '../briefing'
+
 export type ContextLang = 'en' | 'pt'
 
 export interface ContextInput {
@@ -81,6 +83,7 @@ export function contextText(i: ContextInput): string {
     `- Tasks (Agentask): ${TOOL_GROUPS.Tasks.join(', ')} — plan, claim, edit, link, comment, coordinate, and close work.`,
     `- Sessions: ${TOOL_GROUPS.Sessions.join(', ')} — list, message another session, notify the user, and organise sidebar folders.`,
     METRICS_DASHBOARDS_LINE,
+    briefingText('en'),
   ]
   lines.push(
     'Your role here: decide from the request. LEADER organises: break the request into Agentask tasks/subtasks, propose which sessions to open (harness + model each), follow them, have each delivery QA\'d by a different model, and report to the user; do not implement big pieces yourself. WORKER implements one defined piece, tests, commits, and reports to whoever started it. AUTO: one piece → worker; several fronts → leader; you may become leader if the work grows.',

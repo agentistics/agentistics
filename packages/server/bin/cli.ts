@@ -846,6 +846,12 @@ if (command === 'server' || command === 'start' || !command) {
     const { bootVault } = await import('../server/vault/boot.ts')
     await bootVault()
   }
+  // Managed onboarding is versioned in agentop's own data directory; harness instruction files
+  // receive only the agentistics-owned blocks/skills and are never used as state.
+  {
+    const { ensureBriefingInstalled } = await import('../server/briefing-installer.ts')
+    await ensureBriefingInstalled()
+  }
   // Server, daemon and version check run in parallel — the daemon and the banner only where they
   // belong (a central has no host sessions, a container is upgraded by its image): daemon-plan.ts.
   const { serverDaemonPlan } = await import('../server/daemon-plan.ts')

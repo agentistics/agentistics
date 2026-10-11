@@ -78,6 +78,8 @@ export interface CustomGridItem {
 }
 
 export interface Preferences {
+  /** Opt out of automatic managed briefing skill updates at server start. */
+  briefingAutoInstall?: boolean
   /** Additional filesystem roots offered by the session/project discovery wizard. */
   scanRoots?: string[]
   /** Anonymous daily usage signal. Absent means on by default. */

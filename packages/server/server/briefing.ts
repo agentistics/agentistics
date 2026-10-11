@@ -32,9 +32,6 @@ Use \`in_progress → in_review → done\`: a handback is ready for review, neve
 Create a missing status, type, folder, or subtask when the board needs one; do not silently downgrade
 the work to fit the current vocabulary. Never leave a running worker outside the board.
 
-Installed managed skills: agentistics-board-agentask, agentistics-sessions-hand-offs,
-agentistics-vault, agentistics-qa-releases.
-
 Keep secrets out of prompts and commits. Ask the person in the conversation when a decision is
 needed. At a hand-off, write state, running sessions, queue, and decisions to the durable hand-off
 file, then tell the successor to close the old leader after taking over.
@@ -53,9 +50,19 @@ Descreva cada tarefa e o critério de pronto. Separe trabalho independente em su
 vincule cada sessão à subtarefa que ela atende e mantenha os status vivos. Comente nos marcos.
 Use \`em_andamento → em_revisão → concluída\`: handback significa pronta para revisão, nunca aceite.
 Crie status, tipo, pasta ou subtarefa que falte; não rebaixe o trabalho para caber no vocabulário.
-Skills gerenciadas instaladas: agentistics-board-agentask, agentistics-sessions-hand-offs,
-agentistics-vault, agentistics-qa-releases.
 `
+
+export const BRIEFING_SKILL_NAMES = [
+  'agentistics-board-agentask',
+  'agentistics-sessions-hand-offs',
+  'agentistics-vault',
+  'agentistics-qa-releases',
+] as const
+
+export function briefingText(lang: 'en' | 'pt' = 'en'): string {
+  const text = lang === 'pt' ? BRIEFING_PT : common
+  return `${text.trim()}\n\nInstalled managed skills: ${BRIEFING_SKILL_NAMES.join(', ')}.`
+}
 
 const skills: readonly BriefingSkill[] = [
   {

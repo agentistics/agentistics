@@ -1,12 +1,17 @@
-import { existsSync } from 'node:fs'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
 import { availableHarnesses } from './sessions/harness-available'
-import { briefingSkills, managedBlock, managedTargets, removeManagedBlocks, replaceManagedBlock, skillMarkdown, type ManagedTarget } from './briefing'
+import { AGENTISTICS_DATA_DIR, HOME_DIR } from './config'
+import { readPreferences } from './preferences'
+import { BRIEFING_VERSION, briefingSkills, managedBlock, managedTargets, removeManagedBlocks, replaceManagedBlock, skillMarkdown, type ManagedTarget } from './briefing'
 
 export type InstallOptions = { home: string; harnesses?: readonly HarnessId[]; uninstall?: boolean; planLimitsAvailable?: boolean }
 export type InstallResult = { harness: HarnessId; path: string; changed: boolean; removed?: boolean }[]
+
+export const BRIEFING_STATE_FILE = join(AGENTISTICS_DATA_DIR, 'briefing-state.json')
+
+type BriefingState = { version: number }
 
 function selected(o: InstallOptions): ManagedTarget[] {
   const ids = o.harnesses ?? (() => {
@@ -62,4 +67,41 @@ export async function uninstallBriefing(o: InstallOptions): Promise<InstallResul
     out.push({ harness: target.harness, path: target.path, changed: true, removed: after.trim() === '' })
   }
   return out
+}
+
+export type AutoInstallOptions = {
+  home?: string
+  dataDir?: string
+  env?: NodeJS.ProcessEnv
+  harnesses?: readonly HarnessId[]
+  readSettings?: () => Promise<{ briefingAutoInstall?: boolean }>
+}
+
+async function readState(path: string): Promise<BriefingState | null> {
+  try {
+    const value = JSON.parse(await readFile(path, 'utf8')) as Partial<BriefingState>
+    return typeof value.version === 'number' ? { version: value.version } : null
+  } catch { return null }
+}
+
+/** Install managed briefing content once per product briefing version, without touching user text. */
+export async function ensureBriefingInstalled(o: AutoInstallOptions = {}): Promise<InstallResult | null> {
+  const env = o.env ?? process.env
+  if (env.AGENTISTICS_BRIEFING === '0' || env.AGENTISTICS_BRIEFING_AUTO_INSTALL === '0') return null
+  const settings = await (o.readSettings ?? readPreferences)()
+  if (settings.briefingAutoInstall === false) return null
+  const dataDir = o.dataDir ?? AGENTISTICS_DATA_DIR
+  const statePath = join(dataDir, 'briefing-state.json')
+  const state = await readState(statePath)
+  if (state?.version === BRIEFING_VERSION) return []
+  const result = await installBriefing({
+    home: o.home ?? HOME_DIR,
+    harnesses: o.harnesses ?? (() => {
+      const available = availableHarnesses()
+      return available.blind ? [] : available.ids
+    })(),
+  })
+  await mkdir(dataDir, { recursive: true, mode: 0o700 })
+  await writeFile(statePath, JSON.stringify({ version: BRIEFING_VERSION }) + '\n', { mode: 0o600 })
+  return result
 }
