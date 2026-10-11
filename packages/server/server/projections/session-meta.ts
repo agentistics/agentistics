@@ -665,7 +665,7 @@ function compareTurnItems(a: { key: OrderKey; end: boolean }, b: { key: OrderKey
  */
 export function turnTime(
   turns: readonly TurnStart[], ends: readonly TurnEnd[], sawTime: boolean,
-): { activeMinutes?: number; open: boolean; responseTimes: number[] } {
+): { activeMinutes?: number; open: boolean; responseTimes: number[]; span: boolean } {
   type Item = { key: OrderKey; end: true; e: TurnEnd } | { key: OrderKey; end: false; t: TurnStart }
   const items: Item[] = [
     ...turns.map(t => ({ key: t.key, end: false as const, t })),
@@ -704,9 +704,18 @@ export function turnTime(
   }
   flush()
 
-  if (open) return { open: true, responseTimes }
+  // Whether any turn spans an interval the transcript can observe: a close strictly after its prompt.
+  // (Antigravity stamps one-second `created_at` and gives a reply its prompt's stamp, so a short
+  // exchange has no measurable time — its legacy `hasObservableTurnSpan` makes that ABSENT, not 0.)
+  let span = false
+  let startedAt: number | null = null
+  for (const ev of events) {
+    if (ev.userPrompt) { startedAt = ev.ts; continue }
+    if (startedAt !== null && (ev.measuredMs !== undefined || ev.ts > startedAt)) { span = true; break }
+  }
+  if (open) return { open: true, responseTimes, span }
   const activeMinutes = events.length > 0 ? activeMinutesOf(events) : (sawTime ? 0 : undefined)
-  return { ...(activeMinutes !== undefined ? { activeMinutes } : {}), open: false, responseTimes }
+  return { ...(activeMinutes !== undefined ? { activeMinutes } : {}), open: false, responseTimes, span }
 }
 
 function finish(s: SessionMetaState): SessionMetaProjection {
@@ -898,6 +907,8 @@ function finish(s: SessionMetaState): SessionMetaProjection {
     meta.user_response_times = t.responseTimes
     if (t.open) {
       caveats.push({ field: 'active_minutes', reason: 'a turn has no usable turn.ended yet (the transcript is still open); absent, not a partial sum' })
+    } else if (s.run?.harness === 'antigravity' && !t.span) {
+      caveats.push({ field: 'active_minutes', reason: 'no turn spans an interval the transcript can observe (one-second timestamps, a reply stamped like its prompt); absent, not zero' })
     } else if (t.activeMinutes !== undefined) {
       meta.active_minutes = t.activeMinutes
     }

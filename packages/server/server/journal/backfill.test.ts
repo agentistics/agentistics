@@ -35,6 +35,25 @@ describe('planAutoBackfill: the first import starts by itself, once', () => {
   })
 })
 
+describe('planAutoBackfill: an adapter upgrade re-runs a completed import (METRICS.FIX)', () => {
+  const done = (adapterVersions?: Record<string, string>) =>
+    progress({ state: 'done', completedAt: '2026-10-03T11:30:00Z', ...(adapterVersions ? { adapterVersions } : {}) })
+  const now = { codex: '1.1.0', gemini: '1.1.0', kimi: '1.1.0', claude: '1.5.0' }
+  test('a completed import from before the field existed counts as the legacy 1.0.0 versions', () => {
+    expect(plan({ progress: done(), adapterVersions: now })).toEqual({ start: true })
+  })
+  test('same versions: complete; an older recorded version of one harness: start', () => {
+    expect(plan({ progress: done(now), adapterVersions: now })).toEqual({ start: false, reason: 'complete' })
+    expect(plan({ progress: done({ ...now, gemini: '1.0.0' }), adapterVersions: now })).toEqual({ start: true })
+  })
+  test('versions unknown (no engine): never re-run', () => {
+    expect(plan({ progress: done() })).toEqual({ start: false, reason: 'complete' })
+  })
+  test('an upgrade run already live is left alone', () => {
+    expect(plan({ progress: progress({ state: 'running', completedAt: '2026-10-03T11:30:00Z' }), adapterVersions: now })).toEqual({ start: false, reason: 'running-elsewhere' })
+  })
+})
+
 describe('backfillComplete / backfillPending', () => {
   test('pending until a completed record names this journal file', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'backfill-'))

@@ -105,7 +105,7 @@ function parseRichJson(content: string, fallbackId: string, projectPath: string)
         // Extract token data from the rich format
         const tokens = msg.tokens
         if (tokens && typeof tokens === 'object') {
-          inputTokens += (tokens.input as number | undefined) ?? 0
+          inputTokens += uncachedInput(tokens.input as number | undefined, tokens.cached as number | undefined)
           outputTokens += (tokens.output as number | undefined) ?? 0
           cacheRead += (tokens.cached as number | undefined) ?? 0
         }
@@ -349,6 +349,19 @@ interface JsonlParsedData {
   nativeId?: string | undefined
 }
 
+/**
+ * Gemini's `tokens.input` is the API's `promptTokenCount`, which INCLUDES `cachedContentTokenCount`
+ * (`tokens.cached`): gemini-cli itself reports `input = prompt - cached` (its stats code, v0.63), and
+ * records the two raw. Every other harness here stores `input` as the UNCACHED part and prices
+ * `cacheRead` separately, so summing both raw would price the cached tokens twice. Clamped at 0.
+ * The engine's replay applies the same subtraction (`gemini/replay.ts`, `uncachedInput`).
+ */
+export function uncachedInput(input: number | undefined, cached: number | undefined): number {
+  const i = typeof input === 'number' && Number.isFinite(input) ? input : 0
+  const c = typeof cached === 'number' && Number.isFinite(cached) ? cached : 0
+  return Math.max(0, i - c)
+}
+
 function buildJsonlSessionMeta(data: JsonlParsedData): SessionMeta | null {
   const { projectPath, startTime, endTime, messages } = data
 
@@ -381,7 +394,7 @@ function buildJsonlSessionMeta(data: JsonlParsedData): SessionMeta | null {
       if (msg.model) model = msg.model
       if (msg.tokens) {
         sawTokens = true
-        inputTokens += msg.tokens.input ?? 0
+        inputTokens += uncachedInput(msg.tokens.input, msg.tokens.cached)
         outputTokens += msg.tokens.output ?? 0
         cacheRead += msg.tokens.cached ?? 0
       }

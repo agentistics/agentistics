@@ -510,6 +510,18 @@ describe('turn time (D25) — active_minutes and user_response_times', () => {
     expect(p.caveats.some(c => c.field === 'active_minutes')).toBe(false)
   })
 
+  test('antigravity: turns that share their prompt\'s second span nothing observable, so active_minutes is ABSENT (legacy agrees), not 0', () => {
+    const agy = (): AnyAgentisticsEvent[] => syntheticSession().map(e => (e.type === 'run.started'
+      ? anyEv({ ...e, data: { ...(e.data as object), harness: 'antigravity' } })
+      : e))
+    const same = project(sessionMetaProjection, [...agy(), start(2, iso(0)), lastLine(2, iso(0)), start(5, iso(3)), lastLine(5, iso(3))])
+    expect('active_minutes' in same.meta).toBe(false)
+    expect(same.caveats.find(c => c.field === 'active_minutes')!.reason).toContain('absent, not zero')
+    // one observable span anywhere: legacy sums every turn, the same-second ones adding 0
+    const some = project(sessionMetaProjection, [...agy(), start(2, iso(0)), lastLine(2, iso(0)), start(5, iso(3)), lastLine(8, iso(5))])
+    expect(some.meta.active_minutes).toBe(2)
+  })
+
   test('a harness-opened turn (by: task) bounds active time but is never counted as a user message', () => {
     const base = project(sessionMetaProjection, syntheticSession())
     const task = anyEv(ev('turn.started', { by: 'task' }, { at: iso(0), ref: 'claude:c:2' }))

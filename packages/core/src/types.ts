@@ -1230,7 +1230,7 @@ export function emptyModelUsage(): ModelUsage {
 export function sessionModelUsage(
   s: Pick<SessionMeta, 'model' | 'model_usage' | 'input_tokens' | 'output_tokens'
     | 'cache_read_input_tokens' | 'cache_creation_input_tokens'
-    | 'cache_creation_1h_input_tokens' | 'cache_creation_5m_input_tokens'>,
+    | 'cache_creation_1h_input_tokens' | 'cache_creation_5m_input_tokens'> & Pick<Partial<SessionMeta>, 'tokens_unavailable'>,
   fallbackModel?: string,
 ): [string, ModelUsage][] {
   const breakdown = s.model_usage
@@ -1238,6 +1238,9 @@ export function sessionModelUsage(
     const entries = Object.entries(breakdown).filter(([m, u]) => m && u)
     if (entries.length > 0) return entries as [string, ModelUsage][]
   }
+  // The source stated NO usage (a Kimi run that failed before its first response): the zeros below
+  // would be stored as a measured $0 under that model. Absent is not zero — no row, no price.
+  if (s.tokens_unavailable) return []
   const model = s.model || fallbackModel || ''
   if (!model) return []
   return [[model, {

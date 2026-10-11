@@ -121,6 +121,13 @@ export function startsOnOrAfter(start: string | undefined, from: string | undefi
 // ─── The state file ─────────────────────────────────────────────────────────────────────────────
 
 export interface SourceRecord {
+  /**
+   * The integration's adapter version when this source was last replayed (METRICS.FIX, D8). A source
+   * recorded under another version than the one running is REPLACED: its cursor is dropped, it is
+   * re-read from the start, and its old events are deleted before the new ones go in — `UNIQUE(event_id)`
+   * would keep the old, wrong ones.
+   */
+  adapterVersion?: string
   cursor: ReplayCursor
   /** Absent when the harness has no stamp function. */
   stamp?: SourceStamp
@@ -143,6 +150,14 @@ export interface ImportState {
   store: Record<string, StoreRecord>
 }
 
+/**
+ * Records written before `adapterVersion` existed, per harness, were replayed at THIS version: those
+ * three harnesses are the ones whose 1.1.0 changed what their events say (METRICS.FIX). Any other
+ * harness's record without a version is stamped with the running version instead (`runImport`), so a
+ * bump of THEIRS later is still seen — and a first run does not re-read every Claude transcript.
+ */
+export const LEGACY_RECORD_VERSION: Partial<Record<HarnessId, string>> = { codex: '1.0.0', gemini: '1.0.0', kimi: '1.0.0' }
+
 export function emptyState(identity: string): ImportState {
   return { v: 1, identity, sources: {}, store: {} }
 }
@@ -162,6 +177,7 @@ export function parseImportState(text: string | null, identity: string): ImportS
   for (const [k, s] of Object.entries(r.sources)) {
     if (!s || typeof s.replayedAtMs !== 'number' || !(s.cursor === null || typeof s.cursor === 'string')) continue
     const rec: SourceRecord = { cursor: s.cursor, replayedAtMs: s.replayedAtMs }
+    if (typeof s.adapterVersion === 'string' && s.adapterVersion !== '') rec.adapterVersion = s.adapterVersion
     if (s.stamp && typeof s.stamp.key === 'string' && typeof s.stamp.mtimeMs === 'number') rec.stamp = { key: s.stamp.key, mtimeMs: s.stamp.mtimeMs }
     out.sources[k] = rec
   }
@@ -182,6 +198,8 @@ export interface PlannedSource {
   source: ReplaySource
   cursor: ReplayCursor
   stamp?: SourceStamp
+  /** The recorded adapter version is not the running one: re-read whole and REPLACE the old events. */
+  replace?: boolean
 }
 
 export interface ArtifactPlan {
@@ -201,6 +219,8 @@ export function planArtifacts(
   stamps: ReadonlyMap<string, SourceStamp> | null,
   storeStart: ReadonlyMap<string, string>,
   from: string | undefined,
+  /** The running integration's adapter version; `undefined` = unknown, nothing is ever replaced. */
+  currentVersion?: string,
 ): ArtifactPlan {
   const plan: ArtifactPlan = { replay: [], skipped: {} }
   for (const source of discovered) {
@@ -208,8 +228,11 @@ export function planArtifacts(
     if (!startsOnOrAfter(known, from)) { bump(plan.skipped, 'before-from'); continue }
     const rec = state.sources[sourceKey(harness, source.sessionId)]
     const stamp = stamps?.get(source.sessionId)
-    if (rec?.stamp && canSkip({ ...rec.stamp, replayedAtMs: rec.replayedAtMs }, stamp)) { bump(plan.skipped, 'unchanged'); continue }
-    const p: PlannedSource = { source, cursor: rec?.cursor ?? null }
+    const recorded = rec ? (rec.adapterVersion ?? LEGACY_RECORD_VERSION[harness]) : undefined
+    const replace = rec !== undefined && currentVersion !== undefined && recorded !== undefined && recorded !== currentVersion
+    if (!replace && rec?.stamp && canSkip({ ...rec.stamp, replayedAtMs: rec.replayedAtMs }, stamp)) { bump(plan.skipped, 'unchanged'); continue }
+    const p: PlannedSource = { source, cursor: replace ? null : rec?.cursor ?? null }
+    if (replace) p.replace = true
     if (stamp) p.stamp = stamp
     plan.replay.push(p)
   }
@@ -288,6 +311,8 @@ export interface HalfStat<Skip extends string, Fail extends string> {
   /** Rows inserted — or, on `--dry-run`, rows that WOULD be new. */
   written: number
   duplicates: number
+  /** Sources re-read because their adapter version changed; their old events were replaced. Absent = none. */
+  replaced?: number
   skipped: Partial<Record<Skip, number>>
   failed: Partial<Record<Fail, number>>
 }
@@ -379,6 +404,7 @@ export function renderImportReport(r: ImportReport): string {
       const a = h.artifacts
       const mb = h.bytes !== undefined ? ` · ${(h.bytes / 1e6).toFixed(1)} MB` : ''
       lines.push(`  artifacts: ${fmtN(a.considered)} found, ${fmtN(a.processed)} replayed${mb} · ${fmtN(a.events)} events · ${fmtN(a.written)} ${verb} · ${fmtN(a.duplicates)} already present`)
+      if (a.replaced) lines.push(`    ${fmtN(a.replaced)} re-read because the adapter version changed (their old events are ${r.dryRun ? 'replaced when not a dry run' : 'replaced'})`)
       lines.push(...reasons(a.skipped, k => `skipped: ${SKIP_TEXT[k as ArtifactSkipReason]}`, '    '))
       lines.push(...reasons(a.failed, k => `could not read: ${failText(k)}`, '    '))
     }

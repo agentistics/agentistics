@@ -138,6 +138,17 @@ export interface Journal {
    * head could not be read (closed, or the read failed — counted in `failedReads`): also "unknown".
    */
   head?(): Promise<number | null>
+  /**
+   * METRICS.FIX (D8): delete every event whose `sourceRef` names this source — the ref itself, or
+   * `<ref>:…` / `<ref>/…` (a conversation's events are `gemini:<id>:msg:3`, a Kimi agent's
+   * `kimi:<id>/agents/main:12`). The import REPLACES a source whose adapter version changed instead of
+   * deduplicating it: `UNIQUE(event_id)` would otherwise keep the old, wrong event. Bumps the journal
+   * EPOCH (`epoch()`), which makes every projection re-fold, because a cursor never sees a delete.
+   * Answers how many rows went; `0` also when the journal cannot write. Optional so an older fake fits.
+   */
+  deleteBySourcePrefix?(prefix: string): Promise<number>
+  /** How many times rows were deleted from this journal (0 = never). `null` = could not be read. */
+  epoch?(): Promise<number | null>
   status(): JournalStatus
   close(): void
 }

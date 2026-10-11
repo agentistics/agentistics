@@ -137,6 +137,8 @@ export const RARE_EVENT_TYPES: readonly string[] = [
 ]
 const RARE_DDL = 'CREATE TABLE IF NOT EXISTS rare_events (rowid INTEGER PRIMARY KEY, type TEXT NOT NULL)'
 
+const STATE_DDL = 'CREATE TABLE IF NOT EXISTS journal_state (k TEXT PRIMARY KEY, v TEXT NOT NULL)'
+
 const PAGE_SQL =
   `SELECT rowid AS cursor_rowid, ${STORED_COLUMNS.join(', ')} FROM events WHERE rowid > ? ORDER BY rowid LIMIT ?`
 
@@ -239,6 +241,8 @@ function disabledJournal(where: Where, reason: JournalDisabledReason): Journal {
     async head() {
       return 0
     },
+    async deleteBySourcePrefix() { return 0 },
+    async epoch() { return 0 },
     status() {
       return { state: 'disabled', reason, ...copyWhere(where), counters: { ...counters } }
     },
@@ -349,9 +353,12 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
     let statsStmt: ReturnType<Database['query']>
     let stringStmt: ReturnType<Database['query']>
     let headStmt: ReturnType<Database['query']>
+    let deleteTx: { immediate: (prefix: string) => number }
+    let epochStmt: ReturnType<Database['query']>
     try {
       const insert = db.prepare(INSERT_SQL) as unknown as InsertStmt
       db.exec(RARE_DDL)
+      db.exec(STATE_DDL)
       const addRare = db.prepare('INSERT OR IGNORE INTO rare_events (rowid, type) VALUES (last_insert_rowid(), ?)')
       const rare = new Set(RARE_EVENT_TYPES)
       const findString = db.prepare('SELECT id FROM event_strings WHERE s = ?')
@@ -378,6 +385,26 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
         }
         return { written, duplicates, fresh }
       }) as unknown as typeof insertTx
+      const refIds = db.prepare(
+        'SELECT id FROM event_strings WHERE s = ?1 OR (s >= ?1 || \':\' AND s < ?1 || \';\') OR (s >= ?1 || \'/\' AND s < ?1 || \'0\')',
+      )
+      const bumpEpoch = db.prepare(
+        "INSERT INTO journal_state (k, v) VALUES ('epoch', '1') ON CONFLICT(k) DO UPDATE SET v = CAST(v AS INTEGER) + 1",
+      )
+      deleteTx = db.transaction((prefix: string) => {
+        const ids = (refIds.all(prefix) as { id: number }[]).map(r => r.id)
+        let removed = 0
+        // Chunked: one bound parameter per interned base, and SQLite caps the count.
+        for (let i = 0; i < ids.length; i += 500) {
+          const marks = ids.slice(i, i + 500)
+          const q = marks.map(() => '?').join(',')
+          db.prepare(`DELETE FROM rare_events WHERE rowid IN (SELECT rowid FROM events WHERE source_ref IN (${q}))`).run(...marks)
+          removed += Number(db.prepare(`DELETE FROM events WHERE source_ref IN (${q})`).run(...marks).changes)
+        }
+        if (removed > 0) bumpEpoch.run()
+        return removed
+      }) as unknown as typeof deleteTx
+      epochStmt = db.query("SELECT v FROM journal_state WHERE k = 'epoch'")
       pageStmt = db.query(PAGE_SQL)
       statsStmt = db.query(
         'SELECT COUNT(*) AS n, MIN(occurred_at) AS first_at, MAX(occurred_at) AS last_at FROM events',
@@ -526,6 +553,30 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
         try {
           const r = headStmt.get() as { h: number } | null
           return Number(r?.h ?? 0)
+        } catch {
+          counters.failedReads++
+          return null
+        }
+      },
+
+      async deleteBySourcePrefix(prefix): Promise<number> {
+        if (state === 'closed' || prefix === '') return 0
+        try {
+          const n = await withRecoveryRetry(() => deleteTx.immediate(prefix), recoveryPending, sleep)
+          recoveryPending = false
+          return n
+        } catch {
+          recoveryPending = false
+          counters.failedAppends++
+          return 0
+        }
+      },
+
+      async epoch(): Promise<number | null> {
+        if (state === 'closed') return null
+        try {
+          const r = epochStmt.get() as { v: string } | null
+          return r ? Number(r.v) : 0
         } catch {
           counters.failedReads++
           return null

@@ -77,8 +77,9 @@ test('parses rich Gemini JSON format with tokens and model', () => {
   // 2 genuine user messages, 2 gemini responses, 1 info (skipped)
   expect(s!.user_message_count).toBe(2)
   expect(s!.assistant_message_count).toBe(2)
-  // Token sums across all gemini messages: input=9651+11058=20709, output=84+53=137, cached=3190+9495=12685
-  expect(s!.input_tokens).toBe(20709)
+  // Token sums across all gemini messages: the file's `input` is the API's promptTokenCount, which
+  // INCLUDES the cache, so the stored (uncached) input is (9651-3190)+(11058-9495)=8024; output=84+53=137, cached=12685
+  expect(s!.input_tokens).toBe(8024)
   expect(s!.output_tokens).toBe(137)
   expect(s!.cache_read_input_tokens).toBe(12685)
   // Model from gemini messages
@@ -535,13 +536,26 @@ describe('jsonl journal: lastUpdated patches, model and tools', () => {
 
   test('tokens are summed from gemini records (owner decision D8 approved); null counters add nothing', () => {
     const s = parseGeminiChat(journal, 'fb', '/p')!
-    expect(s.input_tokens).toBe(100)
+    // promptTokenCount (100) includes the 3 cached: stored input is the uncached part
+    expect(s.input_tokens).toBe(97)
     expect(s.output_tokens).toBe(7)
     expect(s.cache_read_input_tokens).toBe(3)
     expect(s.tokens_unavailable).toBeUndefined()
     const withNull = journal + '\n' + JSON.stringify({ id: 'g3', timestamp: '2026-10-11T21:09:00.000Z', type: 'gemini', content: 'x', tokens: { input: 5, output: null } })
     const t = parseGeminiChat(withNull, 'fb', '/p')!
-    expect([t.input_tokens, t.output_tokens]).toEqual([105, 7])
+    expect([t.input_tokens, t.output_tokens]).toEqual([102, 7])
+  })
+
+  test('cache is never double counted: input is prompt - cached, clamped at 0, and the cost does not price the cache twice', () => {
+    const one = (tokens: object) => parseGeminiChat([
+      JSON.stringify(header),
+      JSON.stringify({ id: 'g1', timestamp: '2026-10-11T20:25:30.000Z', type: 'gemini', content: 'ok', model: 'gemini-x-pro', tokens }),
+    ].join('\n'), 'fb', '/p')!
+    const a = one({ input: 1000, output: 10, cached: 900 })
+    expect([a.input_tokens, a.cache_read_input_tokens]).toEqual([100, 900])
+    expect(a.input_tokens + (a.cache_read_input_tokens ?? 0)).toBe(1000) // total prompt, once
+    const b = one({ input: 5, output: 1, cached: 9 })
+    expect([b.input_tokens, b.cache_read_input_tokens]).toEqual([0, 9])
   })
 
   test('a journal whose records carry no tokens object is flagged unavailable, not 0', () => {

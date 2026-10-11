@@ -81,7 +81,7 @@ export function sessionStats(
   }
   if (!meta) return base
 
-  const tokens = caps?.tokens ? sessionTokens(meta) : null
+  const tokens = caps?.tokens && !meta.tokens_unavailable ? sessionTokens(meta) : null
   const model = typeof meta.model === 'string' && meta.model !== '' ? meta.model : null
 
   // The window the HARNESS declared outranks the table — it knows the deployment and any per-session
@@ -122,7 +122,8 @@ export function sessionStats(
     sessionId,
     harness,
     tokens,
-    conversation: caps?.tokens ? { input: num(meta.input_tokens), output: num(meta.output_tokens) } : null,
+    // `tokens_unavailable`: the source stated no usage at all, so the pair is ABSENT ("—"), never 0.
+    conversation: caps?.tokens && !meta.tokens_unavailable ? { input: num(meta.input_tokens), output: num(meta.output_tokens) } : null,
     // Priced through `calcCost` with the REAL cache counters — pricing cache as fresh input is
     // roughly tenfold too high, and zeroing it prices the cheap 4% of the volume.
     costUSD: caps?.cost && tokens

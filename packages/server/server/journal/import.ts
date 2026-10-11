@@ -32,7 +32,7 @@ import { createLimiter } from '../utils'
 import { openJournal } from './journal'
 import { openJournalIndex, type JournalIndex } from './import-journal-index'
 import {
-  batches, bump, emptyHalf, parseImportState, planArtifacts, planStore, selectedHarnesses, sourceKey,
+  LEGACY_RECORD_VERSION, batches, bump, emptyHalf, parseImportState, planArtifacts, planStore, selectedHarnesses, sourceKey,
   stampBytes, startsOnOrAfter,
   type ArtifactFailReason, type HarnessReport, type ImportReport, type ImportState, type StoreEntry,
   type StoreFailReason,
@@ -237,16 +237,22 @@ export async function runImport(opts: ImportOptions = {}): Promise<ImportResult>
   const example = (reason: string, ref: string) => { if (!(reason in report.examples)) report.examples[reason] = ref }
 
   /** Appends one source's events; answers whether EVERY event was accepted (or, dry, would be offered). */
-  async function append(events: AgentisticsEvent[], half: HarnessReport['artifacts'] | HarnessReport['store'], ref: string): Promise<boolean> {
+  async function append(
+    events: AgentisticsEvent[], half: HarnessReport['artifacts'] | HarnessReport['store'], ref: string, replaceRef?: string,
+  ): Promise<boolean> {
     half.events += events.length
     if (dryRun) {
-      const present = index?.countPresent(events.map(e => e.eventId)) ?? 0
+      // A replaced source is written whole: none of its events counts as "already present".
+      const present = replaceRef !== undefined ? 0 : index?.countPresent(events.map(e => e.eventId)) ?? 0
       half.duplicates += present
       half.written += events.length - present
       return true
     }
     const j = journal!
     const droppedBefore = j.status().counters.dropped
+    // The old events of a re-read source go FIRST: the same event id would otherwise keep the old row.
+    // If the append is then dropped the source stays unrecorded under the old version and is redone.
+    if (replaceRef !== undefined && j.deleteBySourcePrefix) await j.deleteBySourcePrefix(replaceRef)
     for (let i = 0; i < events.length; i += flushEvents) {
       const res = await j.append(events.slice(i, i + flushEvents))
       half.written += res.written
@@ -300,7 +306,15 @@ export async function runImport(opts: ImportOptions = {}): Promise<ImportResult>
       if (stampFn) { try { stamps = await stampFn() } catch { stamps = null } }
       const storeStart = new Map<string, string>()
       for (const e of storeEntries) if (e.ok && e.harness === harness && e.start) storeStart.set(e.sessionId, e.start)
-      const plan = planArtifacts(harness, discovered, state, stamps, storeStart, opts.from)
+      const currentVersion = integration?.version
+      // A record from before `adapterVersion` existed: the three harnesses of METRICS.FIX were at 1.0.0;
+      // every other is taken as written by the running version (and stamped, so its next bump counts).
+      if (currentVersion !== undefined && LEGACY_RECORD_VERSION[harness] === undefined) {
+        for (const [k, rec] of Object.entries(state.sources)) {
+          if (k.startsWith(`${harness}:`) && rec.adapterVersion === undefined) rec.adapterVersion = currentVersion
+        }
+      }
+      const plan = planArtifacts(harness, discovered, state, stamps, storeStart, opts.from, currentVersion)
       for (const [k, n] of Object.entries(plan.skipped)) bump(h.artifacts.skipped, k as keyof typeof plan.skipped, n)
 
       const limit = createLimiter(concurrency)
@@ -330,9 +344,11 @@ export async function runImport(opts: ImportOptions = {}): Promise<ImportResult>
           h.artifacts.processed++
           const b = stampBytes(p.stamp)
           if (b !== undefined) h.bytes = (h.bytes ?? 0) + b
-          const accepted = await append(result.events, h.artifacts, p.source.sourceRef)
+          if (p.replace) h.artifacts.replaced = (h.artifacts.replaced ?? 0) + 1
+          const accepted = await append(result.events, h.artifacts, p.source.sourceRef, p.replace ? p.source.sourceRef : undefined)
           if (accepted && !dryRun) {
             const rec: ImportState['sources'][string] = { cursor: result.cursor, replayedAtMs: now() }
+            if (currentVersion !== undefined) rec.adapterVersion = currentVersion
             if (p.stamp) rec.stamp = p.stamp
             state.sources[key] = rec
           }
