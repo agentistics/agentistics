@@ -1158,6 +1158,8 @@ export function vaultStatusSync(): { state: 'open' | 'locked' | 'uninitialized' 
 
 /** Is the vault open in this process right now (without trying to open it)? */
 export function vaultIsOpen(): boolean { return _opened !== null }
+/** V4 product setting. Missing/locked values are deliberately OFF. */
+export function vaultConfirmEachUse(): boolean { return _opened?.vault.confirmEachUse === true }
 
 // ── the runner scope (SECRETS.4 §1.1, §6) ──────────────────────────────────────────────────────
 //

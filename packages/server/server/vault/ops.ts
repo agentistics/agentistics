@@ -504,8 +504,6 @@ async function opPersonalRef(h: Record<string, unknown>): Promise<OpResult> {
     const s = sentences[r.code] ?? sentences['use-pending']!
     return { reply: refused(r.code, vaultLang() === 'pt' ? s[0] : s[1]) }
   }
-  const ref = grantedRef(sid, h.ref)
-  vaultAudit({ type: 'vault.personal-use', name: ref?.itemId })
   return { reply: { ok: true, value: r.value } }
 }
 async function opPersonalScrub(h: Record<string, unknown>): Promise<OpResult> {
