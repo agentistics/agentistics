@@ -15,7 +15,7 @@ import { HARNESS_LABELS } from '../lib/harness'
 import { HarnessMark } from './sessions/HarnessMark'
 import {
   currentUsedPct, forecastPhrase, LIMIT_WARN, limitTone, resetPhrase, shortWhen, SOURCE_LABEL, stalePhrase,
-  updatedPhrase, warnForecast, windowLabel, windowShort, fmtWhen,
+  updatedPhrase, warnForecast, windowLabel, windowShort, fmtWhen, limitLevel, limitLevelWord, subscriptionRows,
 } from '../lib/planLimits'
 
 type Lang = 'pt' | 'en'
@@ -33,43 +33,75 @@ export function PlanUsageRing({ pct, size = 36, stroke = 3, children }: { pct: n
   </span>
 }
 
-export function LimitLevelIcon({ pct, size = 16 }: { pct: number | null; size?: number }) {
-  if (pct === null || pct < 75) return null
-  const critical = pct >= 95
-  return <svg aria-label={critical ? 'critical limit' : 'limit attention'} width={size} height={size} viewBox="0 0 20 20" role="img" style={{ color: critical ? 'var(--accent-red)' : 'var(--anthropic-orange)', flexShrink: 0 }}>
+export function LimitLevelIcon({ pct, size = 16, lang = 'pt' }: { pct: number | null; size?: number; lang?: Lang }) {
+  const level = limitLevel(pct)
+  if (level === 'ok') return null
+  const critical = level === 'critical'
+  return <svg aria-label={limitLevelWord(level, lang)} width={size} height={size} viewBox="0 0 20 20" role="img" style={{ color: critical ? 'var(--accent-red)' : 'var(--anthropic-orange)', flexShrink: 0 }}>
     {critical ? <polygon points="6,1 14,1 19,6 19,14 14,19 6,19 1,14 1,6" fill="currentColor" /> : <polygon points="10,1 19,18 1,18" fill="currentColor" />}
     <text x="10" y={critical ? 14 : 15} textAnchor="middle" fontSize="12" fontWeight="800" fill="var(--bg-base)">!</text>
   </svg>
-}
-
-function subscriptionRows(limits: PlanLimits[] | null, registered: { harness: PlanLimits['harness']; plan: string }[]) {
-  const found = new Set((limits ?? []).map(l => l.harness))
-  return [...(limits ?? []).map(l => ({ limits: l, harness: l.harness, plan: l.plan ?? l.sourcePlan })), ...registered.filter(r => !found.has(r.harness)).map(r => ({ limits: null, harness: r.harness, plan: r.plan }))]
 }
 
 export function PlanUsageSummary({ limits, registered = [], now, lang }: { limits: PlanLimits[] | null; registered?: { harness: PlanLimits['harness']; plan: string }[]; now: number; lang: Lang }) {
   const rows = subscriptionRows(limits, registered)
   return <div data-plan-usage-summary style={{ width: 344, padding: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '2px 4px 8px', fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-secondary)' }}>◉ <span id="plan-usage-summary-title">{lang === 'pt' ? 'Uso dos planos' : 'Plan usage'}</span><span style={{ marginLeft: 'auto', fontWeight: 500, letterSpacing: 0 }}>{lang === 'pt' ? '% usado' : '% used'}</span></div>
-    {rows.map(row => <div key={row.harness} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', alignItems: 'center', gap: 8, padding: '8px 4px', borderTop: '1px solid var(--border)' }}>
+    {rows.map(row => <div key={row.harness} data-plan-row={row.harness} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', alignItems: 'center', gap: 8, padding: '8px 4px', borderTop: '1px solid var(--border)' }}>
       <HarnessMark harness={row.harness} size={20} />
       <div style={{ minWidth: 0 }}><b style={{ display: 'block', fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{HARNESS_LABELS[row.harness]}</b><span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.plan ?? (lang === 'pt' ? 'plano não registrado' : 'plan not registered')}</span></div>
       {row.limits ? row.limits.windows.map(w => <div key={w.kind} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}><PlanUsageRing pct={currentUsedPct(w, now)} size={36}>{Math.round(currentUsedPct(w, now))}</PlanUsageRing><span style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{windowLabel(w.kind, lang)}</span></div>) : <span style={{ gridColumn: '3 / -1', fontSize: 11.5, color: 'var(--text-secondary)' }}>{lang === 'pt' ? 'aguardando leitura' : 'waiting for the first reading'}</span>}
     </div>)}
-    {rows.some(r => r.limits?.windows.some(w => currentUsedPct(w, now) >= 75)) && <div style={{ padding: '7px 4px', fontSize: 11.5, color: 'var(--text-secondary)' }}>{rows.flatMap(r => (r.limits?.windows ?? []).filter(w => currentUsedPct(w, now) >= 75).slice(0, 1).map(w => <span key={`${r.harness}:${w.kind}`} style={{ display: 'flex', alignItems: 'center', gap: 5 }}><LimitLevelIcon pct={currentUsedPct(w, now)} />{HARNESS_LABELS[r.harness]}: {windowLabel(w.kind, lang)} em {Math.round(currentUsedPct(w, now))}% · {lang === 'pt' ? 'renova' : 'resets'} {fmtWhen(w.resetsAt, now, lang)}</span>))}</div>}
+    {rows.some(r => r.limits?.windows.some(w => currentUsedPct(w, now) >= 75)) && <div style={{ padding: '7px 4px', fontSize: 11.5, color: 'var(--text-secondary)' }}>{rows.flatMap(r => (r.limits?.windows ?? []).filter(w => currentUsedPct(w, now) >= 75).slice(0, 1).map(w => <span key={`${r.harness}:${w.kind}`} style={{ display: 'flex', alignItems: 'center', gap: 5 }}><LimitLevelIcon pct={currentUsedPct(w, now)} lang={lang} />{HARNESS_LABELS[r.harness]}: {windowLabel(w.kind, lang)} {lang === 'pt' ? 'em' : 'at'} {Math.round(currentUsedPct(w, now))}% · {lang === 'pt' ? 'renova' : 'resets'} {fmtWhen(w.resetsAt, now, lang)}</span>))}</div>}
     <div style={{ borderTop: '1px solid var(--border)', padding: '8px 4px 4px', fontSize: 11.5, color: 'var(--text-tertiary)' }}>{lang === 'pt' ? 'Clique para ver tudo' : 'Click to see everything'} <b style={{ float: 'right', color: 'var(--anthropic-orange)' }}>{lang === 'pt' ? 'Abrir ›' : 'Open ›'}</b></div>
   </div>
 }
 
-export function PlanUsageCard({ limits, now, lang }: { limits: PlanLimits; now: number; lang: Lang }) {
+/** One window as a ring + words. Shared by the detailed card (48px) and the composer block (34px). */
+function WindowRow({ w, now, lang, ring, forecast = true }: { w: PlanLimitWindow; now: number; lang: Lang; ring: number; forecast?: boolean }) {
   const pt = lang === 'pt'
-  const values = limits.windows.map(w => currentUsedPct(w, now))
-  const worst = Math.max(...values, 0)
-  const state = worst >= 95 ? (pt ? 'quase no fim' : 'almost exhausted') : worst >= 75 ? (pt ? 'atenção' : 'attention') : (pt ? 'com folga' : 'room to spare')
-  return <div data-plan-usage-card={limits.harness} style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, borderRadius: 12, background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><HarnessMark harness={limits.harness} size={24} /><div style={{ minWidth: 0 }}><b style={{ display: 'block', fontSize: 14 }}>{HARNESS_LABELS[limits.harness]}</b><span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{limits.plan ?? limits.sourcePlan ?? (pt ? 'plano não registrado' : 'plan not registered')}</span></div><span style={{ marginLeft: 'auto', fontSize: 12, color: worst >= 95 ? 'var(--accent-red)' : worst >= 75 ? 'var(--anthropic-orange)' : 'var(--accent-green)' }}><LimitLevelIcon pct={worst} />{state}</span></div>
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>{limits.windows.map(w => { const pct = currentUsedPct(w, now); const f = warnForecast(w, now); return <div key={w.kind} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: 10, borderRadius: 10, background: 'var(--ag-tint-2)' }}><PlanUsageRing pct={pct} size={48}>{Math.round(pct)}%</PlanUsageRing><div style={{ minWidth: 0, fontSize: 12 }}><b style={{ display: 'block' }}>{windowLabel(w.kind, lang)}</b><span style={{ display: 'block', color: 'var(--text-secondary)' }}>{Math.round(pct)}% {pt ? 'usado' : 'used'} · {100 - Math.round(pct)}% {pt ? 'restam' : 'left'}</span><span style={{ display: 'block', color: 'var(--text-tertiary)' }}>{resetPhrase(w, now, lang)}</span>{f && <span style={{ display: 'block', color: LIMIT_WARN, fontWeight: 600 }}>{forecastPhrase(f, now, lang)}</span>}</div><LimitLevelIcon pct={pct} /></div> })}</div>
-    {stalePhrase(limits, now, lang) && <span style={{ fontSize: 11, color: 'var(--anthropic-orange)' }}>{stalePhrase(limits, now, lang)}</span>}
+  const pct = currentUsedPct(w, now)
+  const f = forecast ? warnForecast(w, now) : null
+  return <div data-plan-window={w.kind} style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>
+    <PlanUsageRing pct={pct} size={ring}>{ring >= 44 ? `${Math.round(pct)}%` : Math.round(pct)}</PlanUsageRing>
+    <div style={{ minWidth: 0, flex: 1, fontSize: 12 }}>
+      <b style={{ display: 'block', whiteSpace: 'nowrap' }}>{windowLabel(w.kind, lang)} · {Math.round(pct)}% {pt ? 'usado' : 'used'}</b>
+      <span style={{ display: 'block', color: 'var(--text-secondary)' }}>{pt ? `restam ${100 - Math.round(pct)}%` : `${100 - Math.round(pct)}% left`} · {resetPhrase(w, now, lang)}</span>
+      {f && <span style={{ display: 'block', color: LIMIT_WARN, fontWeight: 600 }}>{forecastPhrase(f, now, lang)}</span>}
+    </div>
+    <LimitLevelIcon pct={pct} lang={lang} />
+  </div>
+}
+
+/** The composer's "Plano" block body: THIS session's harness only — rings, never bars. */
+export function PlanSessionBlock({ limits, now, lang }: { limits: PlanLimits; now: number; lang: Lang }) {
+  const stale = stalePhrase(limits, now, lang)
+  return <div data-plan-limits={limits.harness} style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
+    {limits.windows.map(w => <WindowRow key={w.kind} w={w} now={now} lang={lang} ring={34} />)}
+    <div style={{ fontSize: 10.5, color: stale ? 'var(--anthropic-orange)' : 'var(--text-tertiary)' }}>{updatedPhrase(limits, now, lang)} · {lang === 'pt' ? 'fonte' : 'source'}: {SOURCE_LABEL[limits.source][lang]}</div>
+  </div>
+}
+
+/**
+ * The DETAILED card (Nay's Limits tab, mobile panel). `limits: null` is a registered plan that has
+ * reported nothing yet: named, state "waiting for the first reading", NO ring and no zero.
+ */
+export function PlanUsageCard({ limits, pending, now, lang }: { limits: PlanLimits | null; pending?: { harness: PlanLimits['harness']; plan: string }; now: number; lang: Lang }) {
+  const pt = lang === 'pt'
+  const harness = limits?.harness ?? pending!.harness
+  const plan = limits ? (limits.plan ?? limits.sourcePlan) : pending?.plan
+  const worst = limits ? Math.max(...limits.windows.map(w => currentUsedPct(w, now)), 0) : null
+  const level = limitLevel(worst)
+  const state = limits ? limitLevelWord(level, lang) : (pt ? 'aguardando leitura' : 'waiting for the first reading')
+  const stale = limits ? stalePhrase(limits, now, lang) : null
+  return <div data-plan-usage-card={harness} style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, borderRadius: 12, background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <HarnessMark harness={harness} size={24} />
+      <div style={{ minWidth: 0 }}><b style={{ display: 'block', fontSize: 14 }}>{HARNESS_LABELS[harness]}</b><span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{plan ?? (pt ? 'plano não registrado' : 'plan not registered')}</span></div>
+      <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, whiteSpace: 'nowrap', color: !limits ? 'var(--text-tertiary)' : level === 'critical' ? 'var(--accent-red)' : level === 'attention' ? 'var(--anthropic-orange)' : 'var(--accent-green)' }}><LimitLevelIcon pct={worst} size={14} lang={lang} />{state}</span>
+    </div>
+    {limits && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8 }}>{limits.windows.map(w => <div key={w.kind} style={{ padding: 10, borderRadius: 10, background: 'var(--ag-tint-2)' }}><WindowRow w={w} now={now} lang={lang} ring={48} /></div>)}</div>}
+    {stale && <span style={{ fontSize: 11, color: 'var(--anthropic-orange)' }}>{stale}</span>}
   </div>
 }
 

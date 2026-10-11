@@ -30,7 +30,8 @@ import { useArtifactLive } from '../../lib/artifactsStore'
 import { scrollIsOutside } from '../../lib/popoverScroll'
 import { modelDisplay } from '../../lib/modelDisplay'
 import { usePlanLimits } from '../../lib/planLimits'
-import { PlanLimitsBlock } from '../PlanLimitMeter'
+import { PlanSessionBlock } from '../PlanLimitMeter'
+import { HarnessMark } from './HarnessMark'
 
 /**
  * The trigger button's own percentage colour — a THREE-tier ramp, deliberately not the same as the
@@ -208,6 +209,7 @@ export function SessionStatsMenu({
   // PLAN.LIMITS: this harness's plan windows, when it reported any (none → nothing drawn).
   const planSnap = usePlanLimits()
   const plan = planSnap.limits?.find(l => l.harness === harness)
+  const planName = plan ? (plan.plan ?? plan.sourcePlan) : planSnap.registered.find(r => r.harness === harness)?.plan
   const [open, setOpen] = useState(false)
 
   /**
@@ -522,11 +524,11 @@ export function SessionStatsMenu({
             ) : <Absent text={na('contextWindow')} />}
           </Block>
 
-          <Block title={pt ? 'Plano' : 'Plan'}>
-            {plan ? <PlanLimitsBlock limits={plan} now={planSnap.now} lang={lang} header details forecast /> : (
-              <Absent text={pt
+          <Block title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><HarnessMark harness={harness} size={13} />{planName ? `${pt ? 'Plano' : 'Plan'} · ${planName}` : (pt ? 'Plano' : 'Plan')}</span>}>
+            {plan ? <PlanSessionBlock limits={plan} now={planSnap.now} lang={lang} /> : (
+              <div style={{ border: '1px dashed var(--border)', borderRadius: 8, padding: '8px 10px' }}><Absent text={pt
                 ? `${(HARNESS_LABELS as Record<string, string>)[harness] ?? harness} ainda não informou os limites do plano — eles aparecem aqui assim que informar.`
-                : `${(HARNESS_LABELS as Record<string, string>)[harness] ?? harness} has not reported plan limits yet — they will appear here when available.`} />
+                : `${(HARNESS_LABELS as Record<string, string>)[harness] ?? harness} has not reported plan limits yet — they will appear here when available.`} /></div>
             )}
           </Block>
 
@@ -775,7 +777,7 @@ export function SessionStatsMenu({
   )
 }
 
-function Block({ title, children, last }: { title: string; children: React.ReactNode; last?: boolean }) {
+function Block({ title, children, last }: { title: React.ReactNode; children: React.ReactNode; last?: boolean }) {
   return (
     <div style={{
       paddingBottom: last ? 0 : 8, marginBottom: last ? 0 : 8,

@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test'
-import { fmtSpan, forecastPhrase, limitNoticeMeta, limitNoticeText, limitTone, resetPhrase, windowLabel, windowShortLabel } from './planLimits'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { LimitLevelIcon } from '../components/PlanLimitMeter'
+import { limitLevel, limitLevelWord, subscriptionRows, fmtSpan, forecastPhrase, limitNoticeMeta, limitNoticeText, limitTone, resetPhrase, windowLabel, windowShortLabel } from './planLimits'
 
 const M = 60_000
 test('spans', () => {
@@ -36,4 +38,25 @@ test('notice meta round trip and text', () => {
   expect(t.message).toContain('Codex')
   expect(limitNoticeText({ ...m, threshold: 85, pct: 86 }, 'en', now).title).toBe('Claude Code: 85% of the 5-hour window')
   expect(limitNoticeMeta({ harness: 'claude' })).toBeNull()
+})
+
+test('level thresholds: nothing at 74, triangle at 75, octagon at 95', () => {
+  expect([74, 75, 94, 95].map(p => limitLevel(p))).toEqual(['ok', 'attention', 'attention', 'critical'])
+  expect(limitLevel(null)).toBe('ok')
+  const html = (p: number) => renderToStaticMarkup(<LimitLevelIcon pct={p} />)
+  expect(html(74)).toBe('')
+  expect(html(75)).toContain('<polygon points="10,1 19,18 1,18"')
+  expect(html(94)).toContain('<polygon points="10,1 19,18 1,18"')
+  expect(html(95)).toContain('points="6,1 14,1')
+})
+test('the level in words: critical is never said as attention', () => {
+  expect(limitLevelWord('critical', 'pt')).toBe('quase no fim')
+  expect(limitLevelWord('attention', 'pt')).toBe('atenção')
+  expect(limitLevelWord('critical', 'en')).toBe('almost exhausted')
+})
+test('a registered plan with no reading is a row with no limits (no ring, no zero)', () => {
+  const reading = { harness: 'claude', account: 'a', plan: 'Max 5x', source: 'stream', updatedAt: 1, windows: [{ kind: '5h', usedPct: 10, resetsAt: 9e12 }] } as never
+  const rows = subscriptionRows([reading], [{ harness: 'claude', plan: 'Max 5x' }, { harness: 'gemini', plan: 'Pro' }])
+  expect(rows.map(r => [r.harness, r.limits === null])).toEqual([['claude', false], ['gemini', true]])
+  expect(subscriptionRows(null, [{ harness: 'codex', plan: 'Plus' }])[0]!.limits).toBeNull()
 })
