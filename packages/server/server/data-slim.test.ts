@@ -8,6 +8,7 @@ const session = (i: number) => ({
   message_hours: Array.from({ length: 800 }, (_, k) => k % 24),
   user_message_timestamps: Array.from({ length: 200 }, () => '2026-01-01T00:00:00Z'),
   agentMetrics: { invocations: [] }, tool_output_tokens: { Bash: 1 }, user_response_times: [1, 2], tool_error_categories: { x: 1 },
+  daily: [{ input: 1 }], hours: { '10': 1 }, model_usage: { opus: { input: 1 } }, messages: ['detail'],
 })
 const data = (n: number) => ({
   statsCache: { dailyActivity: [] }, projects: [{ path: '/p', name: 'p', sessions: [] }], allSessions: [] as [],

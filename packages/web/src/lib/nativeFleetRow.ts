@@ -219,12 +219,13 @@ export function withNativeSessions<P extends { sessions: FleetRow[]; rows: Contr
   const have = new Set(payload.sessions.map(s => s.id))
   const rows = native.rows.filter(r => !have.has(r.id))
   const sessions = native.sessions.filter(s => !have.has(s.id))
+  const merged = rows.map((row, i) => ({ ...sessions[i], ...row }))
   // Only a MEASURED wait counts toward "N waiting on you" — an unmeasured open session is `unknown`.
   const attention = native.measuredWaiting.filter(id => !have.has(id)).length
   return {
     ...payload,
-    sessions: [...payload.sessions, ...rows],
-    rows: [...payload.rows, ...sessions],
+    sessions: [...payload.sessions, ...merged] as FleetRow[],
+    rows: [...payload.rows, ...merged] as ControlSession[],
     attention: payload.attention + attention,
   }
 }

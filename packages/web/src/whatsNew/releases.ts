@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.129.0': {
+    features: [
+      {
+        pt: 'A lista de sessões abre muito mais rápido: só as sessões ativas vêm na primeira carga, e as fechadas aparecem quando você abre a lista delas.',
+        en: 'The session list opens much faster: only active sessions come in the first load, and closed ones appear when you open their list.',
+      },
+      {
+        pt: 'Cada sessão lembra se é líder ou worker ao ser reaberta, em qualquer assistente, e recebe esse aviso só uma vez.',
+        en: 'Each session remembers whether it is a leader or a worker when reopened, in every assistant, and gets that note only once.',
+      },
+      {
+        pt: 'Uma sessão aberta como líder pelo terminal já ganha o prefixo de líder no título.',
+        en: 'A session opened as a leader from the terminal gets the leader prefix in its title right away.',
+      },
+    ],
+    fixes: [],
+  },
   '2.128.0': {
     features: [
       {

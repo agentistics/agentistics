@@ -40,7 +40,7 @@ import { markFleetPhase, timeFleetPhase } from './fleet-profile'
 import { processSessionHub, type SessionHub } from './session-hub'
 import { forceRowScreen } from './adapter-state-host'
 import {
-  buildFleetFrame, closedPage, fleetEventsResponse, type FleetFrame,
+  buildFleetFrame, closedPage, compactFleetRows, compactFleetSession, fleetEventsResponse, type FleetFrame,
 } from './fleet-events'
 import { cachedBaseline } from './fleet-baseline'
 import { loadConsolidated } from '../consolidate'
@@ -352,6 +352,8 @@ export async function readFleetBody(lang: CliLang, view?: FleetViewRequest): Pro
     void fleetSessionHub().then(h => h.read()).catch(() => {})
     return hit.body
   }
+  // Polling is an established public contract for VS Code, MCP, scripts, and older web clients:
+  // keep the full `sessions` + `rows` answer here. The compact catalogue is stream-only.
   const entry = { snap, atMs: Date.now(), body: readFleet(lang, view).then(p => JSON.stringify(p)) }
   if (!BODIES.has(key) && BODIES.size >= MAX_FRAME_KEYS) BODIES.delete(BODIES.keys().next().value as string)
   BODIES.set(key, entry)
@@ -403,7 +405,13 @@ export async function openFleetEvents(
 
 /** `GET /api/fleet/closed` — one page of the closed rows the stream did not send, most recent first. */
 export async function readClosedFleet(lang: CliLang, offset: number, limit: number): Promise<ReturnType<typeof closedPage>> {
-  return closedPage(await readFleet(lang), offset, limit)
+  const page = closedPage(await readFleet(lang), offset, limit)
+  const rawSessions = page.sessions.map((session, i) => {
+    const row = page.rows[i]!
+    return compactFleetSession(session, row)
+  })
+  const { sessions, verbCatalog } = compactFleetRows(rawSessions)
+  return { total: page.total, sessions, verbCatalog, rows: undefined } as unknown as ReturnType<typeof closedPage>
 }
 
 /**

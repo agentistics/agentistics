@@ -7,18 +7,17 @@
  *
  * ```
  * retry: 2000
- * event: snapshot   {seq, sessions, rows, attention, tasks, finishedTasks, unavailable?, fell?, baseline?,
+ * event: snapshot   {seq, sessions, attention, tasks, finishedTasks, unavailable?, fell?, baseline?,
  *                    view?, closed: {total, sent}}
  * event: delta      {seq, upsert?: {sessions, rows}, remove?: [id], meta?: {<changed top-level field>: value | null},
  *                    order?: [id]}
  * event: ping       <ms>
  * ```
  *
- * - **The WINDOW.** `sessions`/`rows` hold every row that is not a `closed:` conversation, plus the
- *   `closed` most recent closed ones (`closedLimit`, default `DEFAULT_CLOSED_LIMIT`). Older closed rows
- *   are PAGED on demand (`GET /api/fleet/closed`), never re-sent on a timer.
- * - **`upsert`** carries a window row whose content changed, both shapes (`FleetRow` + `ControlSession`)
- *   so a client keeps the pair the `/api/fleet` payload always gave it. **`remove`** names a row that
+ * - **The WINDOW.** `sessions` holds every live row, plus the `closed` most recent historical rows
+ *   (`closed`, `exited`, and `lost`; `closedLimit`, default `DEFAULT_CLOSED_LIMIT`). Older history is
+ *   PAGED on demand (`GET /api/fleet/closed`), never re-sent on a timer.
+ * - **`upsert`** carries one merged window row (the former `FleetRow` + `ControlSession` pair). **`remove`** names a row that
  *   was SENT and is no longer in the fleet at all — never a row that merely slid out of the closed window
  *   (it still exists; the client keeps it). **`order`** is the window's ids in the server's order, sent
  *   only when that order changed.
@@ -78,6 +77,55 @@ export interface FleetFramePayload {
   baseline?: unknown
 }
 
+/** One canonical wire row: the old protocol sent these facts twice as `sessions` and `rows`. */
+export function compactFleetSession(session: FleetRow, row: ControlSession): Record<string, unknown> {
+  // Keep verbs and attachCommand long enough for compactFleetRows to catalogue them. They are
+  // removed from the serialized row there, after the catalogue key has been assigned.
+  const { searchFields: _searchFields, ...withoutSearchFields } = row as ControlSession & { searchFields?: unknown }
+  return { ...session, ...withoutSearchFields }
+}
+
+type WireVerb = Record<string, unknown>
+
+/** Replace repeated localized action arrays with one catalogue and a per-row integer key. */
+export function compactFleetRows(rows: Array<Record<string, unknown>>): { sessions: Array<Record<string, unknown>>; verbCatalog: WireVerb[][] } {
+  const catalog: WireVerb[][] = []
+  const keys = new Map<string, number>()
+  const sessions = rows.map(row => {
+    const verbs = Array.isArray(row.verbs) ? row.verbs as WireVerb[] : []
+    const signature = JSON.stringify(verbs)
+    let verbKey = keys.get(signature)
+    if (verbKey === undefined) {
+      verbKey = catalog.length
+      keys.set(signature, verbKey)
+      catalog.push(verbs)
+    }
+    const { verbs: _verbs, attachCommand: _attachCommand, ...compact } = row
+    return { ...compact, verbKey }
+  })
+  return { sessions, verbCatalog: catalog }
+}
+
+/** Compact an internal payload into one row list and a real closed window. */
+export function compactFleetPayload(p: FleetFramePayload, closedLimit = DEFAULT_CLOSED_LIMIT): Record<string, unknown> {
+  const byId = new Map(p.sessions.map(s => [s.id, s]))
+  const { indexes, closedTotal } = windowOf(p.rows, closedLimit)
+  const rawSessions = indexes.flatMap(i => {
+    const row = p.rows[i]!
+    const shaped = byId.get(row.id)
+    return shaped ? [compactFleetSession(shaped, row)] : []
+  })
+  const { sessions, verbCatalog } = compactFleetRows(rawSessions)
+  const { rows: _rows, view: _view, ...meta } = p
+  return {
+    ...meta,
+    ...(p.view ? { view: compactView(p.view) } : {}),
+    sessions,
+    verbCatalog,
+    closed: { total: closedTotal, sent: sessions.filter(s => String(s.id).startsWith('closed:')).length },
+  }
+}
+
 /** A view's groups by id: what a client needs to arrange rows it already holds. */
 export interface CompactArrangement extends Omit<FleetArrangement, 'groups'> {
   groups: Array<{ key: string; label: string; done?: boolean; ids: string[] }>
@@ -105,7 +153,10 @@ export interface FleetFrame {
   metaValues: Record<string, unknown>
 }
 
-export const isClosedRow = (id: string): boolean => id.startsWith(CLOSED_ROW_PREFIX)
+export const isClosedRow = (id: string, state?: string): boolean =>
+  id.startsWith(CLOSED_ROW_PREFIX) || state === 'closed' || state === 'exited' || state === 'lost'
+
+export const isHistoricalRow = (row: Pick<ControlSession, 'id' | 'state'>): boolean => isClosedRow(row.id, row.state)
 
 /** A closed row's recency: when it ended, else when the person last wrote, else when it began. */
 function recency(r: ControlSession): number {
@@ -113,15 +164,15 @@ function recency(r: ControlSession): number {
 }
 
 /**
- * PURE. Which rows a stream carries: every non-closed row in server order, then the `closedLimit` most
- * recent closed ones in server order. Returns the indexes into `rows`.
+ * PURE. Which rows a stream carries: every live row in server order, then the `closedLimit` most
+ * recent historical (`closed`, `exited`, or `lost`) rows in server order. Returns indexes into `rows`.
  */
 export function windowOf(rows: readonly ControlSession[], closedLimit: number): { indexes: number[]; closedTotal: number } {
-  const closed = rows.map((r, i) => ({ r, i })).filter(x => isClosedRow(x.r.id))
+  const closed = rows.map((r, i) => ({ r, i })).filter(x => isHistoricalRow(x.r))
   const keep = new Set(
     [...closed].sort((a, b) => recency(b.r) - recency(a.r) || a.i - b.i).slice(0, Math.max(0, closedLimit)).map(x => x.i),
   )
-  const indexes = rows.map((_, i) => i).filter(i => !isClosedRow(rows[i]!.id) || keep.has(i))
+  const indexes = rows.map((_, i) => i).filter(i => !isHistoricalRow(rows[i]!) || keep.has(i))
   return { indexes, closedTotal: closed.length }
 }
 
@@ -146,7 +197,7 @@ export function gaugesMoved(sent: RowGauges | undefined, now: RowGauges): boolea
  */
 export function closedVersionOf(p: Pick<FleetFramePayload, 'sessions' | 'rows'>, windowed: ReadonlySet<number>): string {
   const byId = new Map(p.sessions.map(s => [s.id, s]))
-  const paged = p.rows.map((r, i) => ({ r, i })).filter(x => isClosedRow(x.r.id) && !windowed.has(x.i))
+  const paged = p.rows.map((r, i) => ({ r, i })).filter(x => isHistoricalRow(x.r) && !windowed.has(x.i))
     .sort((a, b) => recency(b.r) - recency(a.r) || a.i - b.i)
   const h = createHash('sha1')
   for (const x of paged) h.update(JSON.stringify([byId.get(x.r.id) ?? null, x.r])).update('\n')
@@ -236,26 +287,35 @@ export const EMPTY_SENT: SentState = { rows: new Map(), gauges: new Map(), order
 /** PURE. The `snapshot` event body for a frame. */
 export function snapshotBody(seq: number, frame: FleetFrame): Record<string, unknown> {
   const { closedTotal, ...rest } = frame.metaValues
-  return {
+  const rawSessions = frame.window.map(w => compactFleetSession(w.session, w.row))
+  const { sessions, verbCatalog } = compactFleetRows(rawSessions)
+  const result: Record<string, unknown> = {
     seq,
-    sessions: frame.window.map(w => w.session),
-    rows: frame.window.map(w => w.row),
+    sessions,
+    verbCatalog,
     ...rest,
-    closed: { total: closedTotal, sent: frame.window.filter(w => isClosedRow(w.id)).length },
+    closed: { total: closedTotal, sent: frame.window.filter(w => isHistoricalRow(w.row)).length },
   }
+  Object.defineProperty(result, 'rows', { value: sessions, enumerable: false })
+  return result
 }
 
 /** PURE. The `delta` event body. */
 export function deltaBody(seq: number, frame: FleetFrame, d: FleetDelta): Record<string, unknown> {
   const pick = new Set(d.upsert)
-  const up = frame.window.filter(w => pick.has(w.id))
-  return {
+  const allRawSessions = frame.window.map(w => compactFleetSession(w.session, w.row))
+  const all = compactFleetRows(allRawSessions)
+  const sessions = all.sessions.filter(row => pick.has(String(row.id)))
+  const verbCatalog = all.verbCatalog
+  const result: Record<string, unknown> = {
     seq,
-    ...(up.length > 0 ? { upsert: { sessions: up.map(w => w.session), rows: up.map(w => w.row) } } : {}),
+    ...(sessions.length > 0 ? { upsert: { sessions, verbCatalog } } : {}),
     ...(d.remove.length > 0 ? { remove: d.remove } : {}),
     ...(Object.keys(d.meta).length > 0 ? { meta: d.meta } : {}),
     ...(d.order ? { order: d.order } : {}),
   }
+  if (sessions.length > 0) Object.defineProperty(result.upsert as Record<string, unknown>, 'rows', { value: sessions, enumerable: false })
+  return result
 }
 
 /**
@@ -268,7 +328,7 @@ export function closedPage(
   limit: number,
 ): { sessions: FleetRow[]; rows: ControlSession[]; total: number } {
   const byId = new Map(p.sessions.map(s => [s.id, s]))
-  const closed = p.rows.map((r, i) => ({ r, i })).filter(x => isClosedRow(x.r.id))
+  const closed = p.rows.map((r, i) => ({ r, i })).filter(x => isHistoricalRow(x.r))
     .sort((a, b) => recency(b.r) - recency(a.r) || a.i - b.i)
   const page = closed.slice(Math.max(0, offset), Math.max(0, offset) + Math.max(0, limit))
     .filter(x => byId.has(x.r.id))
