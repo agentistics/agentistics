@@ -4175,6 +4175,17 @@ export default function AppLayout() {
                 >
                   <Zap size={11} />
                   v{version}
+                  {updateInstallable && versionAnswer?.latest && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      title={lang === 'pt' ? `Nova versão ${versionAnswer.latest} disponível` : `New version ${versionAnswer.latest} available`}
+                      onClick={e => { e.preventDefault(); e.stopPropagation(); setShowUpdateModal(true) }}
+                      style={{ marginLeft: 4, padding: '1px 6px', borderRadius: 10, background: 'var(--anthropic-orange)', color: '#fff', fontSize: '0.625rem', fontWeight: 700 }}
+                    >
+                      {lang === 'pt' ? 'atualizar' : 'update'}
+                    </span>
+                  )}
                 </a>
               </div>
             </div>
