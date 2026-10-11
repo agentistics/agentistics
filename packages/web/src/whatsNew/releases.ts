@@ -10,6 +10,28 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.128.0': {
+    features: [
+      {
+        pt: 'Mensagens enviadas a uma sessão e pedidos de aprovação ou perguntas pendentes continuam lá depois que o servidor reinicia, e podem ser respondidos normalmente.',
+        en: 'Messages sent to a session and pending approval requests or questions are still there after the server restarts, and can be answered as usual.',
+      },
+      {
+        pt: 'Enviar uma mensagem para várias sessões não reabre mais uma sessão fechada sem perguntar antes.',
+        en: 'Sending a message to several sessions no longer reopens a closed session without asking first.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Quando um assistente troca de conta, o chat avisa se aquele assistente ainda não acompanha a troca, em vez de parecer travado.',
+        en: 'When an assistant switches accounts, the chat says so if that assistant does not follow the switch yet, instead of looking frozen.',
+      },
+      {
+        pt: 'Sessões nativas: se não for possível conferir a saída de uma ferramenta em busca de segredos, ela fica retida em vez de aparecer.',
+        en: 'Native sessions: if a tool\'s output cannot be checked for secrets, it is withheld instead of shown.',
+      },
+    ],
+  },
   '2.127.0': {
     features: [
       {

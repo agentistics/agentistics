@@ -3,7 +3,8 @@
  * on stdin/stdout, like every structured protocol. `init` answers a session id; `prompt` streams its
  * reply as `{chunk}` lines and then answers the request. A prompt starting with `slow` streams ten
  * chunks 80 ms apart (a turn long enough to restart the server in the middle of). Every prompt it
- * RECEIVES is appended to `$AGENT_LOG`, so a test can count deliveries.
+ * RECEIVES is appended to `$AGENT_LOG`, so a test can count deliveries. A prompt beginning with
+ * `approval` leaves a structured permission request open until an `answer` arrives.
  */
 import { appendFileSync } from 'node:fs'
 
@@ -27,10 +28,18 @@ process.stdin.on('data', (chunk: string) => {
       if (m.method === 'prompt') {
         const text = m.text ?? ''
         if (log) appendFileSync(log, `${text}\n`)
+        if (text.startsWith('approval')) {
+          out({ id: m.id, result: { attention: { requestId: 'request-1', kind: 'permission', prompt: 'Allow the change?', options: [{ id: 'allow', label: 'Allow once' }, { id: 'reject', label: 'Reject' }] } } })
+          return
+        }
         if (text.startsWith('slow')) {
           for (let i = 0; i < 10; i++) { out({ chunk: `c${i} ` }); await sleep(80) }
         } else out({ chunk: `echo:${text}` })
         out({ id: m.id, result: 'end_turn' })
+      }
+      if (m.method === 'answer') {
+        out({ chunk: 'approved' })
+        out({ id: m.id, result: 'answered' })
       }
     })
   }

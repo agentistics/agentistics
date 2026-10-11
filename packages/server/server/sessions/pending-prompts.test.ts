@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
-import { PENDING_TTL_MS, clearPrompts, migratePrompts, pendingFor, recordPrompt, resetPrompts } from './pending-prompts'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { PENDING_TTL_MS, clearPrompts, migratePrompts, pendingFor, recordPrompt, reloadPrompts, resetPrompts, usePromptStoreForTests } from './pending-prompts'
 
 const CONV = 'conv-1'
 
-beforeEach(() => resetPrompts())
+beforeEach(() => {
+  usePromptStoreForTests(join(mkdtempSync(join(tmpdir(), 'pending-prompts-')), 'pending-prompts.json'))
+  resetPrompts()
+})
 
 describe('pendingFor', () => {
   it('THE REPORTED CASE: a message is held for EVERY device, not just the tab that sent it', () => {
@@ -61,6 +67,15 @@ describe('pendingFor', () => {
     recordPrompt(CONV, 'a')
     clearPrompts(CONV)
     expect(pendingFor(CONV, [])).toEqual([])
+  })
+
+  it('survives a server restart and remains answerable afterwards', () => {
+    recordPrompt(CONV, 'approve this change', 1_000)
+    reloadPrompts()
+    expect(pendingFor(CONV, [], 2_000).map(p => p.text)).toEqual(['approve this change'])
+    expect(pendingFor(CONV, ['approve this change'], 2_000)).toEqual([])
+    reloadPrompts()
+    expect(pendingFor(CONV, [], 2_000)).toEqual([])
   })
 })
 
