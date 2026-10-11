@@ -29,6 +29,12 @@ let installed = false
 /** The zoom currently applied to `<html>` — 1 when the text size is the default. */
 export function geometryZoom(): number { return factor }
 
+/** The viewport's width in DEVICE-independent screen px — what the browser would report with no
+ *  zoom applied — whatever the current zoom is. */
+export function nativeViewportWidth(): number {
+  return typeof window === 'undefined' ? 0 : (installed ? window.innerWidth * factor : window.innerWidth)
+}
+
 export function setGeometryZoom(zoom: number): void {
   factor = Number.isFinite(zoom) && zoom > 0 ? zoom : 1
   // Only a real DOM is patched — tests run with a bare `window` stub and no Element/Range at all.

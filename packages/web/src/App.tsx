@@ -1522,6 +1522,11 @@ export default function AppLayout() {
   useEffect(() => {
     applyTextScale(document.documentElement, textScale)
     writeLocalTextScale(textScale)
+    // The narrow-screen ceiling (`effectiveTextScale`) depends on the width: a phone turned
+    // sideways may take more of the chosen size.
+    const onResize = () => applyTextScale(document.documentElement, textScale)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
   }, [textScale])
 
   // Surface server-pushed notifications (member connection/auth errors) as toasts + bell.

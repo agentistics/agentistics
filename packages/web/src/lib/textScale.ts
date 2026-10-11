@@ -1,10 +1,25 @@
-import { setGeometryZoom } from './zoomGeometry'
+import { nativeViewportWidth, setGeometryZoom } from './zoomGeometry'
 
 export const TEXT_SCALE_MIN = 0.85
 export const TEXT_SCALE_MAX = 1.5
 export const TEXT_SCALE_DEFAULT = 1
 /** First-paint mirror of the personal preference, so a reload does not paint at 100% and then jump. */
 export const TEXT_SCALE_LOCAL_KEY = 'agentistics-text-scale'
+
+/**
+ * The narrowest layout the app is designed for. Zooming a 390px phone by 1.5 leaves 260 CSS px,
+ * and components built for a 320px minimum then overlap (the New session stepper's labels ran into
+ * each other). So on a narrow screen the zoom stops where the layout would drop below this width —
+ * a 390px phone reaches ~122% — and Settings says so rather than silently showing less than chosen.
+ * A wide screen never hits it, and sizes below the default are never limited.
+ */
+export const MIN_LAYOUT_WIDTH = 320
+
+export function effectiveTextScale(scale: number, viewportWidth: number): number {
+  if (scale <= 1 || !(viewportWidth > 0)) return scale
+  const ceiling = Math.floor((viewportWidth / MIN_LAYOUT_WIDTH) * 100) / 100
+  return Math.min(scale, Math.max(1, ceiling))
+}
 
 export function clampTextScale(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return TEXT_SCALE_DEFAULT
@@ -27,11 +42,12 @@ interface ZoomRoot { style: { zoom: string; setProperty(name: string, value: str
  * The root font-size stays the browser's own: zoom already scales rem, and changing both would
  * apply the scale twice.
  */
-export function applyTextScale(root: ZoomRoot, value: unknown): number {
+export function applyTextScale(root: ZoomRoot, value: unknown, viewportWidth = nativeViewportWidth()): number {
   const scale = clampTextScale(value)
-  setGeometryZoom(scale)
-  root.style.zoom = scale === 1 ? '' : String(scale)
-  root.style.setProperty('--ui-zoom', String(scale))
+  const zoom = effectiveTextScale(scale, viewportWidth)
+  setGeometryZoom(zoom)
+  root.style.zoom = zoom === 1 ? '' : String(zoom)
+  root.style.setProperty('--ui-zoom', String(zoom))
   return scale
 }
 
