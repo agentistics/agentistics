@@ -57,7 +57,7 @@ async function http(method: 'GET' | 'POST', path: string, body?: unknown, grant?
   const headers: Record<string, string> = { 'sec-fetch-site': 'same-origin', ...(method === 'POST' ? { 'content-type': 'application/json' } : {}), ...(grant ? { 'x-vault-grant': grant } : {}) }
   // VAULT.PERSONAL §10: the gesture unlock answers ONLY the page on this computer, so it is sent as one —
   // and so are the reads (review M3: the no-proof list is the rule for a page on this computer).
-  const local = path === '/api/vault/unlock' || method === 'GET'
+  const local = path === '/api/vault/unlock' || path === '/api/vault/activity' || method === 'GET'
   if (local) Object.assign(headers, { host: 'localhost:47292', origin: 'http://localhost:47292' })
   const req = new Request(`${local ? 'http://localhost:47292' : 'http://local'}${path}`, { method, headers, ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}) })
   const res = await handleVaultHttp(req, new URL(req.url), { cors: {}, session: 'session-A', ...(local ? { peer: '127.0.0.1' } : {}) })
@@ -355,6 +355,17 @@ describe('the routes that already existed keep their gate (stepup, lock, auto-lo
     expect((await http('POST', '/api/vault/activity', {})).json.ok).toBe(true)
     expect((await http('GET', '/api/vault/nope')).status).toBe(404)
     expect((await http('GET', '/api/vault/authenticator/begin')).status).toBe(404) // GET is not a begin
+  })
+
+  test('activity from a non-loopback peer is refused', async () => {
+    const req = new Request('http://localhost:47292/api/vault/activity', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin', origin: 'http://localhost:47292' },
+      body: '{}',
+    })
+    const res = await handleVaultHttp(req, new URL(req.url), { cors: {}, session: 'session-A', peer: '192.0.2.10' })
+    expect(res?.status).toBe(403)
+    expect((await res!.json()).code).toBe('activity-not-here')
   })
 })
 

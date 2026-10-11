@@ -217,6 +217,12 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   }
   if (path === '/api/vault/activity' && req.method === 'POST') {
     // The dashboard's input heartbeat (§5.1): human interaction resets the idle clock.
+    if (!loopback) {
+      await req.body?.cancel().catch(() => {})
+      return reply({ ok: false, code: 'activity-not-here', sentence: vaultLang() === 'pt'
+        ? 'A atividade do cofre só pode vir do painel aberto no próprio computador.'
+        : 'Vault activity can only come from the dashboard on this computer.' })
+    }
     noteVaultActivity()
     return send({ ok: true }, 200, noStore)
   }
