@@ -27,6 +27,23 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     ],
     fixes: [],
   },
+  '2.129.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'No Agentask, clicar numa sessão mencionada com # abre a sessão.',
+        en: 'In Agentask, clicking a session mentioned with # opens that session.',
+      },
+      {
+        pt: 'Um comentário mencionado com ^ abre mesmo quando está em outra vista da tarefa.',
+        en: 'A comment mentioned with ^ opens even when it is in another view of the task.',
+      },
+      {
+        pt: 'O aviso de comentário não encontrado aparece no idioma da interface.',
+        en: 'The "comment not found" notice shows in the interface language.',
+      },
+    ],
+  },
   '2.129.0': {
     features: [
       {
