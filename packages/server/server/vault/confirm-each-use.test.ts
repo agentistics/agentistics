@@ -42,6 +42,7 @@ const next = () => { T += 30_000 }
 let dir = ''
 let dpapi = fake('dpapi'), hello = fake('hello')
 let grant: string | undefined
+let freshTok: string | undefined
 const BODIES: { path: string; text: string }[] = []
 
 type J = Record<string, any>
@@ -49,7 +50,7 @@ const RP = 'box.tail1234.ts.net'
 const PHONE = { host: `${RP}:47292`, origin: `http://${RP}:47292`, peer: '100.64.0.7' }
 const LOCAL = { host: 'localhost:47292', origin: 'http://localhost:47292', peer: '127.0.0.1' }
 async function http(method: 'GET' | 'POST', path: string, body?: unknown, where = LOCAL, withGrant = true): Promise<{ status: number; json: J }> {
-  const headers: Record<string, string> = { host: where.host, 'sec-fetch-site': 'same-origin', ...(grant && withGrant ? { 'x-vault-grant': grant } : {}), ...(method === 'POST' ? { 'content-type': 'application/json', origin: where.origin } : {}) }
+  const headers: Record<string, string> = { host: where.host, 'sec-fetch-site': 'same-origin', ...(grant && withGrant ? { 'x-vault-grant': grant } : {}), ...(freshTok ? { 'x-vault-fresh': freshTok } : {}), ...(method === 'POST' ? { 'content-type': 'application/json', origin: where.origin } : {}) }
   const req = new Request(`${where.origin}${path}`, { method, headers, ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}) })
   const res = await handleVaultHttp(req, new URL(req.url), { cors: {}, session: 'local', peer: where.peer })
   if (!res) return { status: 404, json: {} }
@@ -57,12 +58,13 @@ async function http(method: 'GET' | 'POST', path: string, body?: unknown, where 
   BODIES.push({ path, text })
   const json = text.startsWith('{') ? JSON.parse(text) : {}
   if (typeof json.grant === 'string') grant = json.grant
+  if (typeof json.fresh === 'string') freshTok = json.fresh
   return { status: res.status, json }
 }
 
 async function fresh(withPresence = true): Promise<void> {
   dir = await mkdtemp(join(tmpdir(), 'agentistics-personal-'))
-  STORE.clear(); BODIES.length = 0; grant = undefined
+  STORE.clear(); BODIES.length = 0; grant = undefined; freshTok = undefined
   dpapi = fake('dpapi'); hello = fake('hello')
   T = 1_800_000_000_000
   __resetVaultForTests({ dir: join(dir, 'vault'), lang: 'en', protectors: withPresence ? [dpapi, hello] : [dpapi], autoInit: { candidates: [dpapi] } })
@@ -129,18 +131,45 @@ describe('use requests over HTTP (VAULT.V4 §3.4–3.5)', () => {
     expect(list.json.requests).toHaveLength(1)
     expect(JSON.stringify(list.json)).not.toContain('MARKER')
     expect(list.json.requests[0]).toMatchObject({ id, name: 'OpenAI', harness: 'codex', command: 'echo hi' })
-    // the vault is already open, so no unlock minted a token: the gesture is raised in the service, and a refused one leaves it pending
+    // the card's Approve click raises the gesture through /prove; a refused one leaves the request pending
     hello.deny = true
-    const refused = await http('POST', `/api/vault/personal/use/${id}/approve`, {})
-    expect(refused.json.ok).toBe(false)
-    expect(pendingUseRequests()).toHaveLength(1)
+    expect((await http('POST', `/api/vault/personal/use/${id}/prove`, {})).json.ok).toBe(false)
     hello.deny = false
+    expect((await http('POST', `/api/vault/personal/use/${id}/approve`, {})).json.ok).toBe(false)
+    expect(pendingUseRequests()).toHaveLength(1)
     const g0 = hello.gestures
+    expect((await http('POST', `/api/vault/personal/use/${id}/prove`, {})).json.ok).toBe(true)
+    expect(hello.gestures).toBeGreaterThan(g0)
     const ok = await http('POST', `/api/vault/personal/use/${id}/approve`, {})
     expect(ok.json).toEqual({ ok: true })
-    expect(hello.gestures).toBeGreaterThan(g0)
     expect(JSON.stringify(ok.json)).not.toContain('MARKER')
     expect(await waiting).toEqual({ ok: true, value: 'MARKER-http-cfu' })
+  })
+
+  test('a curl-style approve (no proof from the card) is refused WITHOUT raising a gesture', async () => {
+    await presenceOn()
+    const { waiting, id } = await ask()
+    const g0 = hello.gestures
+    const r = await http('POST', `/api/vault/personal/use/${id}/approve`, { code: codeAt() })
+    expect(r.json).toMatchObject({ ok: false, code: 'presence-required' })
+    expect(hello.gestures).toBe(g0)
+    expect(pendingUseRequests()).toHaveLength(1)
+    await http('POST', `/api/vault/personal/use/${id}/deny`, {})
+    expect(await waiting).toEqual({ ok: false, code: 'use-denied' })
+  })
+
+  test('a vault with NO presence device refuses approval: no code, no read grant, no value (§3.5)', async () => {
+    await fresh(false); __resetGrantsForTests(clock)
+    const { waiting, id } = await ask()
+    const r = await http('POST', `/api/vault/personal/use/${id}/approve`, { code: codeAt() })
+    expect(r.json).toMatchObject({ ok: false, code: 'no-presence' })
+    expect(r.json.sentence).toContain('Always confirm')
+    expect((await http('POST', `/api/vault/personal/use/${id}/prove`, {})).json).toMatchObject({ ok: false, code: 'no-presence' })
+    expect(pendingUseRequests()).toHaveLength(1)
+    expect(BODIES.some(b => b.text.includes('MARKER'))).toBe(false)
+    // denying still works without any device
+    expect((await http('POST', `/api/vault/personal/use/${id}/deny`, {})).json).toEqual({ ok: true })
+    expect(await waiting).toEqual({ ok: false, code: 'use-denied' })
   })
 
   test('DENY never asks for the presence gesture — on this computer or from a phone — only an authenticated session', async () => {

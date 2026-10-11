@@ -1335,3 +1335,12 @@ would price months the user was on something else.
 **The timeline never travels.** `Preferences.billing` is local: it is not in `IngestBody`, not in
 a team document, not in an audit event. What someone pays is theirs, and a central cannot price a
 fleet from one operator's timeline anyway.
+
+### Confirm each use: approving a request (VAULT.V4)
+
+Approving one use request has its own gate, `requireUseApproval` — never the step-up gate, never a code or a read grant. On this computer the
+proof is a single-use presence token bound to `use-approve:<id>`, minted by `POST …/use/<id>/prove` (the card's own Approve click raises
+Windows Hello there); a phone sends a single-use passkey token. A vault with no presence device refuses (`no-presence`): turn "Always confirm"
+off for that secret or enrol a device. A bare `approve` raises no gesture. **Stated limit:** a local process of the same user can still call
+`prove` and so make Hello appear; the person sees only the system prompt, not the card — the value is delivered only if they confirm it.
+`personal-scrub` is limited to 60 calls/min per session. Only `personal.ts`, `personal-http.ts` and `grants.ts` may use `revealField` (lint).

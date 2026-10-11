@@ -167,7 +167,13 @@ const onThisComputer = (): boolean => { try { return ['localhost', '127.0.0.1', 
  */
 export async function decideVaultUse(id: string, approve: boolean, phone: (action: string, target: string) => Promise<Reply<{ gestureToken: string }>> = async () => ({ ok: false, code: 'passkey-cancelled', sentence: '', status: 0 })): Promise<Reply<Record<string, unknown>>> {
   const path = `/api/vault/personal/use/${encodeURIComponent(id)}/${approve ? 'approve' : 'deny'}`
-  if (!approve || onThisComputer()) return vaultPost(path, {})
+  if (!approve) return vaultPost(path, {})
+  // On this computer the card's own Approve click raises the gesture, bound to THIS request; the proof rides x-vault-fresh.
+  if (onThisComputer()) {
+    const p = await vaultPost(`/api/vault/personal/use/${encodeURIComponent(id)}/prove`, {})
+    if (!p.ok) return p as Reply<Record<string, unknown>>
+    return vaultPost(path, {})
+  }
   const g = await phone('use-approve', id)
   if (!g.ok) return g as Reply<Record<string, unknown>>
   return vaultPost(path, { gestureToken: g.gestureToken })

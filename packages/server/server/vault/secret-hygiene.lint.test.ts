@@ -69,6 +69,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
   'server/server/vault/grants.ts': {
     _grants: 'per-session grants (VAULT.PERSONAL §8): item ids and reference names, NEVER a value; memory only, dropped on lock',
     _now: 'a clock',
+    _scrubCalls: 'call times per session for the scrub rate limit (60/min); no text, no value',
     _scrubbers: 'a compiled scrubber per granted session: holds the granted values\' FORMS so served copies can be scrubbed; dropped with the grant and on lock (the service holds the DEK anyway)',
     _confirmEachUseOverride: 'test-only feature flag override; production reads the persisted vault setting',
     _epoch: 'the in-memory lock generation; never secret material',
@@ -139,6 +140,22 @@ describe('secret hygiene in the vault and its consumers', () => {
     }
     expect(offenders).toEqual([])
     expect(readFileSync(pkg('server/server/vault/grants.ts'), 'utf8')).not.toMatch(/export\s+(?:async\s+)?function\s+(?:grantEnv|resolveGrant)\b/)
+  })
+
+  // §3.6 by import: only these modules may call `revealField` (the human reveal route, the agent gate, the scrubber,
+  // and the filtered legacy env). Anything else importing it is a new door around the confirmation.
+  test('only the allow-listed modules import revealField', () => {
+    const ALLOWED_IMPORTERS = new Set(['personal.ts', 'personal-http.ts', 'grants.ts'])
+    const dir = pkg('server/server/vault')
+    const offenders: string[] = []
+    const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)])
+    for (const f of walk(pkg('server/server')).filter(x => /\.tsx?$/.test(x) && !/\.test\.tsx?$/.test(x))) {
+      const text = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+      if (!/\brevealField\b/.test(text)) continue
+      const rel = relative(dir, f)
+      if (!ALLOWED_IMPORTERS.has(rel)) offenders.push(relative(ROOT, f))
+    }
+    expect(offenders).toEqual([])
   })
 
   test('the private envelope key is no longer cached', () => {

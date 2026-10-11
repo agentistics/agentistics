@@ -12,7 +12,7 @@ import * as store from './personal'
 import * as mobile from './mobile'
 import * as phone from './phone'
 import * as grants from './grants'
-import { consumeFreshPresence, vaultAudit, vaultLang } from './service'
+import { vaultAudit, vaultLang } from './service'
 import { informationalSecure } from './request-origin'
 
 type Reply = (r: { ok: boolean } & Record<string, unknown>, extra?: Record<string, unknown>) => Response
@@ -101,17 +101,21 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
   const b = await body()
 
   // One request, one reference, one human gesture. Approval never accepts an authenticator code.
+  // The card's Approve click: the computer's gesture is raised here and answered with a proof bound to THIS request.
+  const useProve = path.match(/^\/api\/vault\/personal\/use\/([^/]+)\/prove$/)
+  if (useProve) {
+    if (!grants.pendingUseRequests().some(x => x.id === useProve[1])) return reply(fail('not-found', 'That use request no longer exists.', 'Esse pedido de uso não existe mais.'))
+    const p = await gate.proveUseApproval({ session, loopback, id: useProve[1]! })
+    return reply(p)
+  }
   const useDecision = path.match(/^\/api\/vault\/personal\/use\/([^/]+)\/(approve|deny)$/)
   if (useDecision) {
     // Approving is the one act that opens a value: it needs the presence gesture. DENYING only closes
     // (spec §3.5) — an authenticated session is enough, so the owner can always say no without the device.
     if (useDecision[2] === 'approve') {
-      if (!loopback && !mobile.consumeGestureToken(session, tokenOf(b), `use-approve:${useDecision[1]}`)) return reply(fail('mobile-gesture-required', 'Confirm this use with your phone biometrics.', 'Confirme este uso com a digital do celular.'))
-      if (loopback && !consumeFreshPresence({ session, token: fresh, binding: `use-approve:${useDecision[1]}` })) {
-        // An open vault minted no token at unlock: raise the gesture here, in the service (never a code).
-        const g = await step('personal-use-approve', b, useDecision[1])
-        if (!g.ok) return reply(g)
-      }
+      // Its own gate (spec §3.3): a presence proof born from the card, or a phone's single-use token — never a code or a read grant.
+      const g = await gate.requireUseApproval({ session, loopback, id: useDecision[1]!, fresh, gestureToken: tokenOf(b) })
+      if (!g.ok) return reply(g)
     } else {
       const g = await step('personal-list', b)
       if (!g.ok) return reply(g)

@@ -27,7 +27,7 @@
  * Every op validates its own inputs; an unknown op is `bad-request`. `ops.test.ts` runs each op with
  * a marker secret in the vault and asserts the marker appears in no reply and no reply body.
  */
-import { grantOf, grantedRef, scrubFor, useRef } from './grants'
+import { grantOf, grantedRef, scrubFor, scrubWithinLimit, useRef } from './grants'
 import { buildVaultBundle, stageBundleRestore } from './bundle-io'
 import { existsSync } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
@@ -509,6 +509,7 @@ async function opPersonalRef(h: Record<string, unknown>): Promise<OpResult> {
 async function opPersonalScrub(h: Record<string, unknown>): Promise<OpResult> {
   const sid = sessionIdOf(h)
   if (!sid || typeof h.text !== 'string' || h.text.length > 4 * 1024 * 1024) return bad()
+  if (!scrubWithinLimit(sid)) return { reply: refused('scrub-limit', vaultLang() === 'pt' ? 'saída retida pelo cofre: limite de verificações por minuto.' : 'output held back by the vault: too many checks per minute.') }
   const text = await scrubFor(sid, h.text)
   return { reply: { ok: true, changed: text !== h.text, text } }
 }

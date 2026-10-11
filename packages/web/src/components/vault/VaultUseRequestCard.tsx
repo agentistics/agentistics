@@ -16,9 +16,16 @@ export function useRequestWords(request: VaultUseRequest, lang: 'pt' | 'en', bus
 }
 
 /** Uses the app's shared confirmation card. Deny never asks a gesture; Approve does (the server raises it). */
-export function UseRequestDialog({ request, lang, busy, onDecide }: { request: VaultUseRequest; lang: 'pt' | 'en'; busy: boolean; onDecide: (approve: boolean) => void }) {
+export function UseRequestDialog({ request, lang, busy, onDecide, onClose }: { request: VaultUseRequest; lang: 'pt' | 'en'; busy: boolean; onDecide: (approve: boolean) => void; onClose: () => void }) {
   const w = useRequestWords(request, lang, busy)
-  return <ConfirmModal open title={w.title} message={w.message} confirmLabel={w.confirm} cancelLabel={w.cancel} onConfirm={() => onDecide(true)} onCancel={() => onDecide(false)} />
+  // Esc / backdrop only CLOSE the card (the request stays pending); only the explicit Deny button revokes.
+  const footer = (
+    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+      <button type="button" disabled={busy} onClick={() => onDecide(false)} style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer' }}>{w.cancel}</button>
+      <button type="button" disabled={busy} onClick={() => onDecide(true)} style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: 'var(--anthropic-orange)', color: '#fff', cursor: 'pointer' }}>{w.confirm}</button>
+    </div>
+  )
+  return <ConfirmModal open title={w.title} message={w.message} confirmLabel={w.confirm} cancelLabel={w.cancel} onConfirm={() => onDecide(true)} onCancel={onClose} footer={footer} tone="default" />
 }
 
 /** One card at a time. */
@@ -31,8 +38,10 @@ export function VaultUseRequestCard({ lang }: { lang: 'pt' | 'en' }) {
     load(); const timer = window.setInterval(load, 2_000)
     return () => { alive = false; window.clearInterval(timer) }
   }, [])
-  const request = requests[0]
+  const [hidden, setHidden] = useState<Record<string, number>>({})
+  const request = requests.find(r => !((hidden[r.id] ?? 0) > Date.now()))
   if (!request) return null
+  const rid = request.id
   const decide = async (approve: boolean) => {
     setBusy(true)
     const r = await decideVaultUse(request.id, approve, phoneGesture)
@@ -40,5 +49,5 @@ export function VaultUseRequestCard({ lang }: { lang: 'pt' | 'en' }) {
     // A refused gesture leaves the request standing (it is still pending on the server); the poll redraws it.
     if (r.ok) setRequests(current => current.filter(x => x.id !== request.id))
   }
-  return <UseRequestDialog request={request} lang={lang} busy={busy} onDecide={a => { void decide(a) }} />
+  return <UseRequestDialog request={request} lang={lang} busy={busy} onDecide={a => { void decide(a) }} onClose={() => setHidden(h => ({ ...h, [rid]: Date.now() + 30_000 }))} />
 }

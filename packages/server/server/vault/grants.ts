@@ -146,6 +146,15 @@ export function decideUse(id: string, approve: boolean, windowMin = 10): { ok: t
 }
 function revokeRef(sessionId: string, itemId: string, field: string): void { const g = _grants.get(sessionId); if (g) g.refs = g.refs.filter(r => !(r.itemId === itemId && r.field === field)) }
 
+/** §3.6: at most 60 scrub calls a minute per session — a scrub answers whether a guess matches a secret, so it is not free to ask. */
+const SCRUB_LIMIT = 60
+const _scrubCalls = new Map<string, number[]>() // session -> call times in the last minute (no text, no value)
+export function scrubWithinLimit(sessionId: string): boolean {
+  const now = _now(), recent = (_scrubCalls.get(sessionId) ?? []).filter(t => now - t < 60_000)
+  if (recent.length >= SCRUB_LIMIT) { _scrubCalls.set(sessionId, recent); return false }
+  recent.push(now); _scrubCalls.set(sessionId, recent); return true
+}
+
 /** Is any session granted? (the served-copy scrubbers skip all work when none is) */
 export function anyGrant(): boolean { return _grants.size > 0 }
 
@@ -214,7 +223,7 @@ export function grantBriefing(g: Grant, lang: 'en' | 'pt' = 'en'): string {
     : `Vault secrets granted to this session (you do NOT see the values):\n${lines.join('\n')}\n${VAULT_REF_INSTRUCTION}\nAny value that shows up in an output is replaced by «vault:NAME». Never ask for a secret to be pasted.`
 }
 
-export function __resetGrantsForTests(now?: () => number): void { _grants = new Map(); _scrubbers = new Map(); _requests = new Map(); _approvals = new Map(); _epoch = 0; _requestSeq = 0; _useTtlMs = 90_000; _confirmEachUseOverride = undefined; _now = now ?? (() => Date.now()) }
+export function __resetGrantsForTests(now?: () => number): void { _grants = new Map(); _scrubbers = new Map(); _requests = new Map(); _approvals = new Map(); _epoch = 0; _requestSeq = 0; _useTtlMs = 90_000; _confirmEachUseOverride = undefined; _scrubCalls.clear(); _now = now ?? (() => Date.now()) }
 
 /** A reference as typed (`vault://key` or `vault://key/field`) → the granted ref it names, or null. */
 export function grantedRef(sessionId: string, ref: string): GrantRef | null {

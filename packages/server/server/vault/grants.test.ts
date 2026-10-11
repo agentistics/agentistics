@@ -106,6 +106,22 @@ describe('the vault.sock ops a hook calls (§8.3)', () => {
     expect(audit).not.toContain('MARKER')
   })
 
+  test('personal-scrub is limited to 60 calls a minute per session and then holds the output back', async () => {
+    const { handleVaultOp } = await import('./ops')
+    const { becomeVaultHolder } = await import('./service')
+    becomeVaultHolder()
+    const op = (header: Record<string, unknown>) => handleVaultOp({ header: header as never, body: null, emit() {}, closed: new Promise(() => {}) })
+    let last: unknown
+    for (let i = 0; i < 60; i++) last = (await op({ op: 'personal-scrub', managedId: 'lim', text: 'plain' })).reply
+    expect(last).toMatchObject({ ok: true })
+    const over = (await op({ op: 'personal-scrub', managedId: 'lim', text: 'plain' })).reply as Record<string, unknown>
+    expect(over).toMatchObject({ ok: false, code: 'scrub-limit' })
+    expect(JSON.stringify(over)).not.toContain('plain')
+    expect(String(over.sentence)).toContain('held back by the vault')
+    // another session is not affected
+    expect((await op({ op: 'personal-scrub', managedId: 'other', text: 'plain' })).reply).toMatchObject({ ok: true })
+  })
+
   test('agent ref resolutions do not renew auto-lock, while human activity does', async () => {
     const { handleVaultOp } = await import('./ops')
     const b = (await createItem({ kind: 'api-key', name: 'OpenAI', fields: { value: 'sk-MARKER-clock' } })).meta

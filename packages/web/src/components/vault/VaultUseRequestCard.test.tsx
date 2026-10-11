@@ -20,7 +20,7 @@ describe('VaultUseRequestCard', () => {
     if (!had) g.window = { innerWidth: 1280, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), addEventListener() {}, removeEventListener() {} }
     try {
     for (const lang of ['pt', 'en'] as const) {
-      const html = renderToStaticMarkup(<UseRequestDialog request={req} lang={lang} busy={false} onDecide={() => {}} />)
+      const html = renderToStaticMarkup(<UseRequestDialog request={req} lang={lang} busy={false} onDecide={() => {}} onClose={() => {}} />)
       const w = useRequestWords(req, lang)
       expect(html).toContain(w.cancel); expect(html).toContain(w.confirm)
     }
