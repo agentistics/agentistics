@@ -108,8 +108,22 @@ describe('spawn role assignment and delivery', () => {
 
   test('a rekey never leaves two contradictory entries for one session', async () => {
     const { deps } = fake([])
-    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { offered: 'worker', conversation: 'leader' } })
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { offered: 'worker', conversation: 'leader' }, at: { offered: 10, conversation: 20 } })
     await rekeyStoredRole(['offered'], ['conversation', 'managed'], deps)
+    expect((await loadRoles(deps)).roles).toEqual({ conversation: 'leader', managed: 'leader' })
+  })
+
+  test('rekey chooses a newer target assignment over the source', async () => {
+    const { deps } = fake([])
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { old: 'worker', conversation: 'leader' }, at: { old: 10, conversation: 20 } })
+    await rekeyStoredRole(['old'], ['conversation', 'managed'], deps)
+    expect((await loadRoles(deps)).roles).toEqual({ conversation: 'leader', managed: 'leader' })
+  })
+
+  test('rekey chooses a newer source assignment over the target', async () => {
+    const { deps } = fake([])
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { old: 'leader', conversation: 'worker' }, at: { old: 20, conversation: 10 } })
+    await rekeyStoredRole(['old'], ['conversation', 'managed'], deps)
     expect((await loadRoles(deps)).roles).toEqual({ conversation: 'leader', managed: 'leader' })
   })
 

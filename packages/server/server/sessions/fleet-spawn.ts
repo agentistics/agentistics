@@ -37,7 +37,7 @@
  * fleet routes load their implementation by dynamic import precisely so a machine that never opens
  * the Sessions page never pays for that graph.
  */
-import { isCanonicalMode, type CanonicalMode } from '@agentistics/core'
+import { hasRolePrefix, isCanonicalMode, type CanonicalMode } from '@agentistics/core'
 
 export interface SpawnHarness {
   id: string
@@ -97,6 +97,8 @@ export interface FleetSpawnPlan {
   effort?: string
   mode?: CanonicalMode
   label?: string
+  /** A leader title prefix is an explicit leader-role request, shared with the CLI path. */
+  role?: 'leader'
   /** Always false — see the header. */
   attach: false
   /** See `FleetSpawnBody.force`. Always a genuine boolean, never merely truthy. */
@@ -194,6 +196,7 @@ export function planFleetSpawn(
   const parentSessionId = text(body.parent)
   const prompt = text(body.prompt)
   const label = text(body.label)
+  const role = label && hasRolePrefix(label) ? 'leader' as const : undefined
   const force = readForce(body.force)
   const handoff = parentSessionId && body.handoff === true
   const parentVerified = parentSessionId && body.parentVerified === true
@@ -214,6 +217,7 @@ export function planFleetSpawn(
       ...(effort ? { effort } : {}),
       ...(mode ? { mode } : {}),
       ...(label ? { label } : {}),
+      ...(role ? { role } : {}),
       ...(force ? { force: true } : {}),
       attach: false,
     },

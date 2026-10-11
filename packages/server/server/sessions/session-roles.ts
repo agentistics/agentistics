@@ -33,6 +33,8 @@ export interface RolesDoc {
   /** The legacy web preference (`ui.sessionRoles`) was folded in. Done once, never again. */
   migrated: boolean
   roles: Record<string, SessionRole>
+  /** Assignment time in milliseconds, keyed like `roles`; absent on legacy entries. */
+  at?: Record<string, number>
   /** Who set each role (same keys as `roles`). Absent = set by the person (back-compat). */
   origins?: Record<string, RoleOrigin>
   /** Last role note delivered to a session. Prevents reopen/takeover from typing it repeatedly. */
@@ -55,6 +57,15 @@ export function parseOrigins(raw: unknown): Record<string, RoleOrigin> {
   return out
 }
 
+export function parseRoleTimes(raw: unknown): Record<string, number> {
+  const out: Record<string, number> = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === 'number' && Number.isFinite(v)) out[k] = v
+  }
+  return out
+}
+
 export async function readRolesDoc(dataDir: string): Promise<RolesDoc> {
   try {
     const p = JSON.parse(await readFile(join(dataDir, SESSION_ROLES_FILE), 'utf-8')) as Partial<RolesDoc>
@@ -62,6 +73,7 @@ export async function readRolesDoc(dataDir: string): Promise<RolesDoc> {
       version: 1,
       migrated: p.migrated === true,
       roles: parseRoles(p.roles),
+      at: parseRoleTimes(p.at),
       origins: parseOrigins(p.origins),
       lastDeliveredRole: parseRoles(p.lastDeliveredRole),
     }
@@ -203,11 +215,12 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
       const changed = next !== (current ?? null)
       const roles = { ...doc.roles }
       const origins = { ...(doc.origins ?? {}) }
+      const at = { ...(doc.at ?? {}) }
       delete roles[resolved.id]
       delete origins[resolved.id]
-      if (next) { roles[key] = next; origins[key] = origin }
-      else { delete roles[key]; delete origins[key] }
-      await writeRolesDoc(deps.dataDir, { ...doc, roles, origins })
+      if (next) { roles[key] = next; origins[key] = origin; at[key] = Date.now() }
+      else { delete roles[key]; delete origins[key]; delete at[key] }
+      await writeRolesDoc(deps.dataDir, { ...doc, roles, origins, at })
       return { kind: 'change' as const, doc, roles, base, current, next, changed }
     })
     if (state.kind !== 'change') return state.reply
@@ -370,8 +383,10 @@ export async function ensureSpawnRole(
     // which is the stable key until the poller can discover the real conversation id.
     const roles = { ...doc.roles }
     const origins = { ...(doc.origins ?? {}) }
-    for (const key of nonEmpty) { roles[key] = desired; origins[key] = origin }
-    await writeRolesDoc(deps.dataDir, { ...doc, roles, origins })
+    const at = { ...(doc.at ?? {}) }
+    const assignedAt = Date.now()
+    for (const key of nonEmpty) { roles[key] = desired; origins[key] = origin; at[key] = assignedAt }
+    await writeRolesDoc(deps.dataDir, { ...doc, roles, origins, at })
     return desired
   })
 }
@@ -410,22 +425,35 @@ export async function rekeyStoredRole(
 
     const roles = { ...doc.roles }
     const origins = { ...(doc.origins ?? {}) }
+    const at = { ...(doc.at ?? {}) }
     const fromOrigin = from.map(k => doc.origins?.[k]).find(o => !!o)
     const lastDeliveredRole = { ...(doc.lastDeliveredRole ?? {}) }
-    // A role already stored under ANY target key is the newer statement (e.g. the conversation key set to
-    // leader while the old managed-id key still said worker): every target key takes it, so one session
-    // never ends with two contradictory entries.
-    const heldKey = to.find(k => doc.roles[k])
+    // Rekeying can see assignments made independently under the managed and conversation keys. Recency,
+    // rather than which side happens to be the target, determines the winner. Legacy entries have no `at`
+    // and therefore lose to any timestamped entry; equal timestamps deliberately prefer the source key.
+    const sourceKey = from.find(k => doc.roles[k])
+    const sourceAt = sourceKey ? doc.at?.[sourceKey] : undefined
+    const targetKey = to.find(k => doc.roles[k])
+    const targetAt = targetKey ? doc.at?.[targetKey] : undefined
+    const targetWins = targetKey && targetAt !== undefined && (sourceAt === undefined || targetAt > sourceAt)
+    const heldKey = targetWins ? targetKey : sourceKey ?? targetKey
     const effective = heldKey ? doc.roles[heldKey] : role
     const effectiveOrigin = heldKey ? doc.origins?.[heldKey] : fromOrigin
+    const effectiveAt = heldKey ? doc.at?.[heldKey] : undefined
     for (const key of to) {
-      if (effective) { roles[key] = effective; if (effectiveOrigin) origins[key] = effectiveOrigin }
+      if (effective) {
+        roles[key] = effective
+        if (effectiveOrigin) origins[key] = effectiveOrigin
+        if (effectiveAt !== undefined) at[key] = effectiveAt
+        else delete at[key]
+      }
       if (delivered && !lastDeliveredRole[key]) lastDeliveredRole[key] = delivered
     }
     for (const key of from) {
       if (!to.includes(key)) {
         delete roles[key]
         delete origins[key]
+        delete at[key]
         delete lastDeliveredRole[key]
       }
     }
