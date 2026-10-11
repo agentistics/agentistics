@@ -25,7 +25,9 @@ import { ContextRing } from '../components/sessions/SessionStatsMenu'
 import { HarnessMark } from '../components/sessions/HarnessMark'
 import { HARNESS_LABELS } from '../lib/harness'
 import { sessionStats } from '../lib/sessionStats'
-import { usePlanLimits } from '../lib/planLimits'
+import { usePlanLimits, worstUsedPct } from '../lib/planLimits'
+import { PlanUsageRing } from '../components/PlanLimitMeter'
+import { TaskProgressChip } from '../components/tasks/TaskProgressChip'
 import { requestNayTab } from '../lib/nayDockRequests'
 import { drawerEntryOnTop, sessionDrawerDot, SESSION_DRAWER_STATE } from '../lib/sessionDrawer'
 import {
@@ -2138,6 +2140,9 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const [sessionDrawer, setSessionDrawer] = useState(false)
   /** The panel's "Context and cost" card is long; it opens on a tap, its glance figure always shown. */
   const [drawerCtxOpen, setDrawerCtxOpen] = useState(false)
+  const [drawerLimitsOpen, setDrawerLimitsOpen] = useState(false)
+  const [drawerSessionOpen, setDrawerSessionOpen] = useState(false)
+  const [drawerActionsOpen, setDrawerActionsOpen] = useState(false)
   const openSessionDrawer = useCallback(() => {
     window.history.pushState({ ...(window.history.state ?? {}), [SESSION_DRAWER_STATE]: true }, '')
     setSessionDrawer(true)
@@ -2921,7 +2926,15 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           { open: drawerCtxOpen, toggle: () => setDrawerCtxOpen(v => !v) },
         )}
 
-        {drawerSection('limits', pt ? 'Limites de uso' : 'Usage limits', null, (
+        {drawerSection('limits', pt ? 'Limites de uso' : 'Usage limits', (() => {
+          const worst = worstUsedPct(planLimits.limits, planLimits.now)
+          return worst === null ? null : (
+            <>
+              <PlanUsageRing pct={worst} size={22} stroke={3} />
+              <span style={{ fontWeight: 650 }}>{Math.round(worst)}%</span>
+            </>
+          )
+        })(), (
           <button
             type="button"
             onClick={() => { closeSessionDrawer(); requestNayTab('limits') }}
@@ -2932,9 +2945,12 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           >
             <PlanUsageSummary limits={planLimits.limits} registered={planLimits.registered} now={planLimits.now} lang={tPt} />
           </button>
-        ))}
+        ), { open: drawerLimitsOpen, toggle: () => setDrawerLimitsOpen(v => !v) })}
 
-        {drawerSection('session', pt ? 'Sessão' : 'Session', null, (
+        {drawerSection('session', pt ? 'Sessão' : 'Session', (() => {
+          const taskRef = sessionLinks(selected, fleet.rows)?.task?.id
+          return taskRef ? <TaskProgressChip taskRef={taskRef} lang={tPt} /> : null
+        })(), (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', alignItems: 'center', minHeight: 44 }}>
               <SessionTitleFlag
@@ -2957,9 +2973,11 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               onGo={p => leaveDrawerTo(p)}
             />
           </div>
-        ))}
+        ), { open: drawerSessionOpen, toggle: () => setDrawerSessionOpen(v => !v) })}
 
-        {rowIndex.get(selected.id) && drawerSection('actions', pt ? 'Ferramentas e ações' : 'Tools and actions', null, (
+        {rowIndex.get(selected.id) && drawerSection('actions', pt ? 'Ferramentas e ações' : 'Tools and actions', filterCount > 0 ? (
+          <span data-drawer-filter-count style={{ minWidth: 20, height: 20, padding: '0 6px', borderRadius: 10, display: 'inline-grid', placeItems: 'center', fontSize: 11.5, fontWeight: 700, background: 'var(--anthropic-orange)', color: 'var(--bg-base)' }}>{filterCount}</span>
+        ) : null, (
           <>
             {/* The magnifier and its pair render NOTHING unless the lenses are on, so a phone
                 that never enabled them gives up no row here. */}
@@ -3001,7 +3019,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               ]}
             />
           </>
-        ))}
+        ), { open: drawerActionsOpen, toggle: () => setDrawerActionsOpen(v => !v) })}
       </Drawer>
       </>
     )
