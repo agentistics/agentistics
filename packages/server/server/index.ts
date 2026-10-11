@@ -2015,10 +2015,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json({ roles: await listRoles(deps), origins: await listRoleOrigins(deps) })
     }
     if (url.pathname === '/api/session-roles' && req.method === 'POST') {
-      const body = await req.json().catch(() => ({})) as { ref?: unknown; role?: unknown; lang?: unknown; session?: { id?: unknown; token?: unknown } }
+      const body = await req.json().catch(() => ({})) as { ref?: unknown; role?: unknown; lang?: unknown; session?: unknown }
       const { verifySessionIdentity } = await import('./sessions/session-identity')
-      const sender = body.session ? await verifySessionIdentity(body.session.id, body.session.token) : null
-      const { roleOp, roleStatus, defaultRoleDeps } = await import('./sessions/session-roles')
+      const { roleOp, roleStatus, roleSenderFromBody, defaultRoleDeps } = await import('./sessions/session-roles')
+      const who = await roleSenderFromBody(body, verifySessionIdentity)
+      if (!who.ok) return json(who, 403)
+      const sender = who.sender
       const out = await roleOp(sender, {
         ...(body.ref !== undefined ? { ref: String(body.ref) } : {}),
         ...(body.role !== undefined && body.role !== null ? { role: String(body.role) } : {}),

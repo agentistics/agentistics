@@ -1108,7 +1108,9 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const body = await apiSend("POST", "/api/session-roles", {
           ...(a?.ref ? { ref: a.ref } : {}),
           ...(a?.role !== undefined ? { role: a.role } : {}),
-          session: sessionProof(process.env),
+          // Always present (null without proof): the server refuses an unproven MCP instead of
+          // mistaking it for the person at the browser.
+          session: sessionProof(process.env) ?? null,
         });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }

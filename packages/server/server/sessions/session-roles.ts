@@ -235,7 +235,41 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
   })()
 }
 
+/**
+ * The origin to record for a role assigned at spawn: a leader only when the parent id was PROVEN by the
+ * request (`verified`) and is a row in the registry; anything else is the person's (`manual`).
+ */
+export function spawnRoleOrigin(parentId: string | undefined, verified: boolean, registryIds: Iterable<string>): RoleOrigin {
+  if (!parentId || !verified) return 'manual'
+  for (const id of registryIds) if (id === parentId) return { leader: parentId }
+  return 'manual'
+}
+
+/** `spawnRoleOrigin` against the live registry. */
+export async function spawnRoleOriginFor(parentId: string | undefined, verified: boolean): Promise<RoleOrigin> {
+  if (!parentId || !verified) return 'manual'
+  const { readRegistry } = await import('./registry')
+  return spawnRoleOrigin(parentId, verified, (await readRegistry().catch(() => [])).map(m => m.id))
+}
+
+/**
+ * Who is asking `/api/session-roles`. A body with NO `session` key is the browser/CLI (the person). A body
+ * that carries the key must prove it: null, missing or invalid is `unverified_sender` — an MCP outside an
+ * agentop pane must never be taken for the person.
+ */
+export async function roleSenderFromBody(
+  body: { session?: unknown },
+  verify: (id: unknown, token: unknown) => Promise<string | null>,
+): Promise<{ ok: true; sender: string | null } | { ok: false; code: string; message: string }> {
+  if (!('session' in body)) return { ok: true, sender: null }
+  const s = body.session as { id?: unknown; token?: unknown } | null
+  const sender = s && typeof s === 'object' ? await verify(s.id, s.token) : null
+  if (!sender) return { ok: false, code: 'unverified_sender', message: MESSAGES.unverified_sender! }
+  return { ok: true, sender }
+}
+
 export function roleStatus(out: RoleReply): number {
+  if (!out.ok && out.code === 'unverified_sender') return 403
   if (out.ok) return 200
   if (out.code === 'no_such_session') return 404
   if (out.code === 'ambiguous_session') return 409

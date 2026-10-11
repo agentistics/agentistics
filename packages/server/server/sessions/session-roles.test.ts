@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, markRoleDelivered, migrateLegacyRoles, parseRoles, rekeyStoredRole, roleOfRow, originOfRow, listRoleOrigins, roleOp, roleStatus, writeRolesDoc, type RoleDeps,
+  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, markRoleDelivered, migrateLegacyRoles, parseRoles, rekeyStoredRole, roleOfRow, originOfRow, listRoleOrigins, spawnRoleOrigin, roleSenderFromBody, roleOp, roleStatus, writeRolesDoc, type RoleDeps,
 } from './session-roles'
 
 let dir = ''
@@ -283,5 +283,31 @@ describe('ensureSpawnRole origin', () => {
     const { deps } = fake([])
     await ensureSpawnRole(['c1', 'm1'], 'worker', deps, { leader: 'p' })
     expect(await listRoleOrigins(deps)).toEqual({ c1: { leader: 'p' }, m1: { leader: 'p' } })
+  })
+})
+
+describe('spawnRoleOrigin (only a proven live parent is a leader origin)', () => {
+  test('verified parent present in the registry -> leader', () => {
+    expect(spawnRoleOrigin('p', true, ['p', 'q'])).toEqual({ leader: 'p' })
+  })
+  test('unverified, unknown or absent parent -> manual', () => {
+    expect(spawnRoleOrigin('p', false, ['p'])).toBe('manual')
+    expect(spawnRoleOrigin('ghost', true, ['p'])).toBe('manual')
+    expect(spawnRoleOrigin(undefined, true, ['p'])).toBe('manual')
+  })
+})
+
+describe('roleSenderFromBody (who is asking)', () => {
+  const verify = async (id: unknown, token: unknown) => (id === 'm1' && token === 'ok' ? 'm1' : null)
+  test('no session field at all = the browser/CLI (manual power)', async () => {
+    expect(await roleSenderFromBody({ ref: 'x' }, verify)).toEqual({ ok: true, sender: null })
+  })
+  test('a valid proof is the sender', async () => {
+    expect(await roleSenderFromBody({ session: { id: 'm1', token: 'ok' } }, verify)).toEqual({ ok: true, sender: 'm1' })
+  })
+  test('a session field that is null, missing or invalid is unverified_sender', async () => {
+    expect(await roleSenderFromBody({ session: null }, verify)).toMatchObject({ ok: false, code: 'unverified_sender' })
+    expect(await roleSenderFromBody({ session: { id: 'm1', token: 'bad' } }, verify)).toMatchObject({ ok: false, code: 'unverified_sender' })
+    expect(roleStatus({ ok: false, code: 'unverified_sender', message: '' })).toBe(403)
   })
 })
