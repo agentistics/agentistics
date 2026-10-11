@@ -173,7 +173,8 @@ export function normalizeFleetPayload(raw: FleetPayload): FleetPayload {
     ...row,
     searchFields: {
       name: String(row.title ?? ''), folder: String(row.cwd ?? ''), harness: String(row.harness ?? ''),
-      note: String(row.note ?? ''), task: String(row.task ?? ''), prompt: String(row.title ?? ''),
+      note: String(row.note ?? ''), task: String(row.task ?? ''),
+      prompt: String(row.firstPrompt ?? row.first_prompt ?? row.prompt ?? ''),
     },
   })
   return {

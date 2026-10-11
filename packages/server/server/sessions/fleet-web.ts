@@ -40,7 +40,7 @@ import { markFleetPhase, timeFleetPhase } from './fleet-profile'
 import { processSessionHub, type SessionHub } from './session-hub'
 import { forceRowScreen } from './adapter-state-host'
 import {
-  buildFleetFrame, closedPage, compactFleetPayload, compactFleetRows, compactFleetSession, fleetEventsResponse, type FleetFrame,
+  buildFleetFrame, closedPage, compactFleetRows, compactFleetSession, fleetEventsResponse, type FleetFrame,
 } from './fleet-events'
 import { cachedBaseline } from './fleet-baseline'
 import { loadConsolidated } from '../consolidate'
@@ -320,7 +320,9 @@ export async function readFleetBody(lang: CliLang, view?: FleetViewRequest): Pro
     void fleetSessionHub().then(h => h.read()).catch(() => {})
     return hit.body
   }
-  const entry = { snap, atMs: Date.now(), body: readFleet(lang, view).then(p => JSON.stringify(compactFleetPayload(p))) }
+  // Polling is an established public contract for VS Code, MCP, scripts, and older web clients:
+  // keep the full `sessions` + `rows` answer here. The compact catalogue is stream-only.
+  const entry = { snap, atMs: Date.now(), body: readFleet(lang, view).then(p => JSON.stringify(p)) }
   if (!BODIES.has(key) && BODIES.size >= MAX_FRAME_KEYS) BODIES.delete(BODIES.keys().next().value as string)
   BODIES.set(key, entry)
   // Keyed on the snapshot the body maps: read AFTER `readFleet`, which may itself have polled. A body

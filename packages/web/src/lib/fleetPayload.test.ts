@@ -46,7 +46,7 @@ describe('the fleet answer the page reads', () => {
     } as unknown as FleetPayload)
     expect(out.rows as unknown).toBe(out.sessions as unknown)
     expect((out.rows[0] as unknown as { searchFields: Record<string, string> }).searchFields).toEqual({
-      name: 'Fix parser', folder: '/w/repo', harness: 'claude', note: '', task: 'parser', prompt: 'Fix parser',
+      name: 'Fix parser', folder: '/w/repo', harness: 'claude', note: '', task: 'parser', prompt: '',
     })
   })
 })

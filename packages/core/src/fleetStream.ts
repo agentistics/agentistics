@@ -15,17 +15,38 @@ export interface FleetWireDelta {
   meta?: Record<string, unknown>
 }
 
+function attachCommand(row: Record<string, unknown>): string {
+  return row.harness === 'agentistics' ? '' : `agentop session attach ${String(row.id ?? '').slice(0, 12)}`
+}
+
+/** Materialize compact stream rows before storing them, so keys never survive into a later delta. */
+function expandRows(rows: FleetWire['sessions'], catalog?: FleetWire['verbCatalog']): FleetWire['sessions'] {
+  return rows.map(row => {
+    const source = row as Record<string, unknown>
+    const key = source.verbKey
+    const verbs = typeof key === 'number' ? catalog?.[key] : undefined
+    const compact = typeof key === 'number' || Array.isArray(catalog)
+    if (!compact) return row
+    const { verbKey: _verbKey, ...withoutKey } = source
+    return {
+      ...withoutKey,
+      ...(verbs ? { verbs } : {}),
+      ...(compact && !('attachCommand' in withoutKey) ? { attachCommand: attachCommand(withoutKey) } : {}),
+    }
+  }) as FleetWire['sessions']
+}
+
 export function applyFleetWire(prev: FleetWire | null, event: string, body: unknown): FleetWire {
   const next = body as FleetWire & FleetWireDelta
   if (!next || !Number.isSafeInteger(next.seq) || next.seq < 1) throw new Error('Invalid fleet sequence')
   if (event === 'snapshot') {
     if (!Array.isArray(next.sessions) && !Array.isArray(next.rows)) throw new Error('Invalid fleet snapshot')
-    const sessions = Array.isArray(next.sessions) ? next.sessions : next.rows!
+    const compactSessions = Array.isArray(next.sessions) ? next.sessions : next.rows!
+    const sessions = expandRows(compactSessions, next.verbCatalog)
     const hasLegacyRows = Array.isArray(next.rows)
     const { rows: _legacyRows, ...withoutRows } = next
     const result = { ...withoutRows, sessions } as FleetWire
-    if (hasLegacyRows) result.rows = next.rows!
-    else Object.defineProperty(result, 'rows', { value: sessions, enumerable: false })
+    result.rows = hasLegacyRows && !Array.isArray(next.verbCatalog) ? next.rows! : sessions
     return result
   }
   if (event !== 'delta' || !prev || next.seq !== prev.seq + 1) throw new Error('Fleet snapshot required')
@@ -37,11 +58,9 @@ export function applyFleetWire(prev: FleetWire | null, event: string, body: unkn
     return order.flatMap(id => rows.has(id) ? [rows.get(id)!] : [])
   }
   const { rows: _legacyRows, ...withoutRows } = prev
-  const result = { ...withoutRows, seq: next.seq, sessions: merge(prev.sessions, next.upsert?.sessions ?? next.upsert?.rows) } as FleetWire
-  if (next.upsert?.verbCatalog) result.verbCatalog = next.upsert.verbCatalog
-  if (Object.prototype.propertyIsEnumerable.call(prev, 'rows')) {
-    result.rows = merge(prev.rows, next.upsert?.rows)
-  } else Object.defineProperty(result, 'rows', { value: result.sessions, enumerable: false })
+  const added = expandRows(next.upsert?.sessions ?? next.upsert?.rows ?? [], next.upsert?.verbCatalog ?? prev.verbCatalog)
+  const result = { ...withoutRows, seq: next.seq, sessions: merge(prev.sessions, added) } as FleetWire
+  result.rows = merge(prev.rows, added)
   for (const [key, value] of Object.entries(next.meta ?? {})) {
     if (['seq', 'sessions', 'rows', '__proto__', 'constructor', 'prototype'].includes(key)) continue
     if (value === null) delete result[key]
@@ -52,18 +71,9 @@ export function applyFleetWire(prev: FleetWire | null, event: string, body: unkn
 
 /** Expand the compact verb catalogue before any host-specific consumer sees the rows. */
 export function expandFleetVerbs(wire: FleetWire): FleetWire {
-  const catalog = wire.verbCatalog
-  if (!Array.isArray(catalog)) return wire
-  const expand = (row: FleetWire['sessions'][number]) => {
-    const key = (row as Record<string, unknown>).verbKey
-    const verbs = typeof key === 'number' ? catalog[key] : undefined
-    if (!verbs) return row
-    const { verbKey: _verbKey, ...withoutKey } = row as Record<string, unknown>
-    return { ...withoutKey, verbs }
-  }
-  const sessions = wire.sessions.map(expand)
+  const sessions = expandRows(wire.sessions, wire.verbCatalog)
   const result = { ...wire, sessions }
-  Object.defineProperty(result, 'rows', { value: sessions, enumerable: false })
+  result.rows = sessions
   return result as unknown as FleetWire
 }
 
@@ -128,13 +138,7 @@ export function followFleet(url: string, onFrame: (wire: FleetWire) => void, opt
         if (wire.closedVersion !== version || closedTotal() !== closedTotalAtStart) { refreshPending = true; return }
         const pageSessionsRaw = Array.isArray(page.sessions) ? page.sessions : page.rows
         if (!Array.isArray(pageSessionsRaw)) throw new Error('Invalid closed fleet page')
-        const pageSessions = pageSessionsRaw.map(row => {
-          const key = (row as Record<string, unknown>).verbKey
-          const verbs = typeof key === 'number' ? page.verbCatalog?.[key] : undefined
-          if (!verbs) return row
-          const { verbKey: _verbKey, ...withoutKey } = row as Record<string, unknown>
-          return { ...withoutKey, verbs }
-        }) as FleetWire['sessions']
+        const pageSessions = expandRows(pageSessionsRaw, page.verbCatalog)
         total = page.total
         if (!pageSessions.length) break
         offset += pageSessions.length
@@ -154,7 +158,7 @@ export function followFleet(url: string, onFrame: (wire: FleetWire) => void, opt
       }
       if (sessions.length || invalidated || total === 0 && wire.rows.some(historicalWireRow)) {
         wire = { ...wire, sessions: merge(wire.sessions, sessions, before.sessions), closed: { total, sent: offset } }
-        Object.defineProperty(wire, 'rows', { value: wire.sessions, enumerable: false })
+        wire.rows = wire.sessions
           onFrame(expandFleetView(expandFleetVerbs(wire)))
       }
       pagedTotal = total
