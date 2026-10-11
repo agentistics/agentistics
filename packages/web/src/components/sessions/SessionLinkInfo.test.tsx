@@ -14,6 +14,10 @@ describe('SessionLinkInfo', () => {
   it('is absent when the session has no link', () => {
     expect(renderToStaticMarkup(<SessionLinkInfo session={{}} links={null} lang="en" onGo={() => {}} />)).toBe('')
   })
+  it('keeps the type info control available without links', () => {
+    const html = renderToStaticMarkup(<SessionLinkInfo session={{ id: 'unfiled' }} links={null} lang="en" onGo={() => {}} />)
+    expect(html).toContain('data-testid="session-link-info"')
+  })
   it('is present, closed, with an aria-label when linked', () => {
     const html = renderToStaticMarkup(<SessionLinkInfo session={{}} links={links} lang="pt" onGo={() => {}} />)
     expect(html).toContain('data-testid="session-link-info"')

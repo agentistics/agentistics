@@ -99,6 +99,13 @@ describe('adding', () => {
     expect(after).toHaveLength(2)
   })
 
+  test('a stable notification key updates progress in place', async () => {
+    await addNotificationTo(file, { type: 'info', title: 'Loading', message: '42%', meta: { notificationKey: 'loading.startup', state: 'running' } })
+    const after = await addNotificationTo(file, { type: 'success', title: 'Complete', message: 'Done', meta: { notificationKey: 'loading.startup', state: 'done' } })
+    expect(after).toHaveLength(1)
+    expect(after[0]).toMatchObject({ type: 'success', title: 'Complete', message: 'Done', meta: { state: 'done' } })
+  })
+
   test('same code+meta but a different subject is a different notification, not a dupe update', async () => {
     // iam.reset_requested carries no meta at all, so two DIFFERENT accounts requesting a reset
     // must not collapse into one row that then only shows the SECOND requester's subject —

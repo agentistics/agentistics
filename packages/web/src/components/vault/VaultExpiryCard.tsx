@@ -53,7 +53,7 @@ export function VaultExpiryCard({ lang, isMobile, zIndex, enabled = true }: { la
   const btn: React.CSSProperties = { minHeight: isMobile ? 44 : 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }
   return (
     <div role="alertdialog" aria-label={pt ? 'Cofre vai se trancar' : 'Vault is about to lock'} data-vault-expiry
-      style={{ position: 'fixed', right: isMobile ? 12 : 24, bottom: isMobile ? 84 : 96, width: isMobile ? 'calc(100vw - 24px)' : 340, boxSizing: 'border-box', zIndex, padding: 14, borderRadius: 14, border: '1px solid var(--anthropic-orange)', background: 'var(--bg-secondary)', boxShadow: '0 10px 30px rgba(0,0,0,.35)' }}>
+      style={{ position: 'fixed', right: isMobile ? 12 : 24, bottom: isMobile ? 84 : 96, width: isMobile ? 'calc(100vw / var(--ui-zoom, 1) - 24px)' : 340, boxSizing: 'border-box', zIndex, padding: 14, borderRadius: 14, border: '1px solid var(--anthropic-orange)', background: 'var(--bg-secondary)', boxShadow: '0 10px 30px rgba(0,0,0,.35)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
         <span aria-hidden style={{ color: 'var(--anthropic-orange)', display: 'inline-flex' }}><VaultGlyph size={16} /></span>
         <strong style={{ flex: 1, fontSize: 13.5 }}>{pt ? 'Seu cofre vai se trancar em 5 min. Manter aberto?' : 'Your vault locks in 5 min. Keep it open?'}</strong>

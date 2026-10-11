@@ -99,7 +99,7 @@ export function UpdateFinale({ lang, version, from = '', onDone, isMobile = fals
       <StageText lang={lang} isMobile={isMobile} refs={refs} from={from} to={version} title="loader.title" allDone
         phrase={<span>{ut(lang, 'phrase.power.4')}…</span>} />
       <div ref={result} style={{
-        position: 'fixed', left: 0, right: 0, top: 'calc(47% + 20vmin)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+        position: 'fixed', left: 0, right: 0, top: 'calc(47% + calc(20vmin / var(--ui-zoom, 1)))', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
         textAlign: 'center', padding: '0 16px', opacity: 0, transition: 'opacity .6s ease', pointerEvents: 'none',
         textShadow: TEXT_SHADOW,
       }}>
