@@ -154,6 +154,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) 
               // the race.
               const isIdle = n.code === 'sessions.idle'
               const isWhatsNew = n.code === 'app.whats_new'
+              const isJournalFailed = n.meta?.loadingKind === 'journal' && n.meta?.state === 'failed'
               const clickable = link !== null || isUpdate || isIdle || isWhatsNew
               const go = () => {
                 setOpen(false)
@@ -190,6 +191,11 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) 
                       </div>
                     )}
                   </div>
+                  {isJournalFailed && (
+                    <button onClick={e => { e.stopPropagation(); setOpen(false); window.dispatchEvent(new CustomEvent('agentistics:retry-journal-import')) }} style={{ flexShrink: 0, padding: '4px 7px', borderRadius: 6, border: '1px solid var(--anthropic-orange)60', background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)', cursor: 'pointer', font: 'inherit', fontSize: 11 }}>
+                      {pt ? 'Tentar importar de novo' : 'Retry the import'}
+                    </button>
+                  )}
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0,
                     alignSelf: 'flex-start',

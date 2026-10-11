@@ -109,6 +109,7 @@ export function NotificationToasts({ lang }: Props) {
         const isWhatsNew = n.code === 'app.whats_new'
         const isMuted = n.code === SESSION_MUTED_CODE
         const isTelemetry = n.code === 'telemetry.first_use'
+        const isJournalFailed = n.meta?.loadingKind === 'journal' && n.meta?.state === 'failed'
         return (
           <div
             key={n.id}
@@ -159,6 +160,7 @@ export function NotificationToasts({ lang }: Props) {
               </button>
             )}
             {isTelemetry && <button onClick={e => { e.stopPropagation(); void fetch('/api/preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telemetryEnabled: false, telemetryNoticeDismissed: true }) }); startLeave(n.id) }} style={{ flexShrink: 0, padding: '4px 7px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', font: 'inherit', fontSize: 11 }}>{lang === 'pt' ? 'Desligar' : 'Turn off'}</button>}
+            {isJournalFailed && <button onClick={e => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('agentistics:retry-journal-import')); startLeave(n.id) }} style={{ flexShrink: 0, padding: '4px 7px', borderRadius: 6, border: '1px solid var(--anthropic-orange)60', background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)', cursor: 'pointer', font: 'inherit', fontSize: 11 }}>{lang === 'pt' ? 'Tentar importar de novo' : 'Retry the import'}</button>}
             <button
               onClick={e => { e.stopPropagation(); startLeave(n.id) }}
               aria-label="dismiss"
