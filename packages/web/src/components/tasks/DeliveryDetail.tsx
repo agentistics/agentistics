@@ -31,7 +31,7 @@ import {
 } from 'lucide-react'
 import { commentThread, type ChatAttachmentRef } from '@agentistics/core'
 import { CommentAttachments, CommentComposer } from './CommentComposer'
-import { commentAnchor, commentCandidates, sessionCandidates } from './commentMention'
+import { commentAnchor, commentCandidates, sessionCandidateForMention, sessionCandidates } from './commentMention'
 import { sessionMentionTokens } from '../../lib/sessionMention'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useFleet } from '../../lib/fleet'
@@ -61,7 +61,7 @@ import {
   detachSession, editComment, editTask, fileUrl, fmtDuration,
   patchSubtask, removeComment, removeSubtask, saveStagedSession,
   uploadFile, useTaskActivity, useTaskStatuses,
-  type AttemptRollup, type AttemptView, type Subtask, type TaskDetail,
+  type AttemptRollup, type AttemptView, type Subtask, type TaskDetail, type TaskSessionRow,
   type TaskFile, type TaskListRow,
 } from '../../lib/tasks'
 
@@ -306,7 +306,7 @@ function SessionsTab({ detail }: { detail: TaskDetail }) {
  * reads as a failed load) and never silence (which would erase the fact that something was
  * attached). The same N/A-versus-a-confident-blank rule the dashboard applies to metrics.
  */
-function CommentBody({ body, files }: { body: string; files: TaskFile[] }) {
+function CommentBody({ body, files, sessions = [], onOpenSession }: { body: string; files: TaskFile[]; sessions?: TaskSessionRow[]; onOpenSession?: (id: string) => void }) {
   const parts = parseCommentBody(body)
   const known = new Set(files.map(f => f.id))
   const images = parts
@@ -325,7 +325,7 @@ function CommentBody({ body, files }: { body: string; files: TaskFile[] }) {
           if (part.kind === 'text') {
             return part.text.trim() === ''
               ? null
-              : <CommentMarkdown key={i} text={part.text} />
+              : <CommentMarkdown key={i} text={part.text} sessions={sessions} onOpenSession={onOpenSession} />
           }
           if (!known.has(part.id)) {
             return (
@@ -375,7 +375,7 @@ function CommentBody({ body, files }: { body: string; files: TaskFile[] }) {
 
 /** Markdown normally leaves a session reference as prose. Keep the same reference/chip treatment
  * used by the session composer, while still letting the surrounding text use Markdown. */
-function CommentMarkdown({ text }: { text: string }) {
+function CommentMarkdown({ text, sessions, onOpenSession }: { text: string; sessions: TaskSessionRow[]; onOpenSession?: (id: string) => void }) {
   const ranges = sessionMentionTokens(text)
   if (ranges.length === 0) return <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{text}</ReactMarkdown>
   const out: ReactNode[] = []
@@ -383,7 +383,10 @@ function CommentMarkdown({ text }: { text: string }) {
   for (const range of ranges) {
     if (range.start > last) out.push(<ReactMarkdown key={`md-${last}`} remarkPlugins={[remarkGfm, remarkBreaks]}>{text.slice(last, range.start)}</ReactMarkdown>)
     const raw = text.slice(range.start, range.end)
-    out.push(<span key={`mention-${range.start}`} style={{ background: 'var(--accent-blue-dim)', color: 'var(--accent-blue)', borderRadius: 4, boxShadow: '0 0 0 2px var(--accent-blue-dim)', whiteSpace: 'nowrap' }}>{raw}</span>)
+    const row = sessionCandidateForMention(raw, sessions)
+    out.push(row && onOpenSession
+      ? <button key={`mention-${range.start}`} type="button" onClick={() => onOpenSession(row.id)} title={row.id} style={{ background: 'var(--accent-blue-dim)', color: 'var(--accent-blue)', border: 0, borderRadius: 4, boxShadow: '0 0 0 2px var(--accent-blue-dim)', whiteSpace: 'nowrap', cursor: 'pointer', font: 'inherit' }}>{raw}</button>
+      : <span key={`mention-${range.start}`} style={{ background: 'var(--accent-blue-dim)', color: 'var(--accent-blue)', borderRadius: 4, boxShadow: '0 0 0 2px var(--accent-blue-dim)', whiteSpace: 'nowrap' }}>{raw}</span>)
     last = range.end
   }
   if (last < text.length) out.push(<ReactMarkdown key={`md-${last}`} remarkPlugins={[remarkGfm, remarkBreaks]}>{text.slice(last)}</ReactMarkdown>)
@@ -708,6 +711,7 @@ export function CommentsTab({ id, detail, onChanged, target, lang = 'en', looseO
   looseOnly?: boolean
 }) {
   const isMobile = useIsMobile()
+  const navigate = useNavigate()
   const pt = lang === 'pt'
   const threadId = target ?? null
   const entries = commentThread(looseOnly ? detail.comments.filter(c => !c.threadId) : detail.comments, detail.subtasks, threadId)
@@ -835,7 +839,7 @@ export function CommentsTab({ id, detail, onChanged, target, lang = 'en', looseO
               )
               : (
                 <>
-                  {c.body && <CommentBody body={c.body} files={detail.files} />}
+                  {c.body && <CommentBody body={c.body} files={detail.files} sessions={detail.sessions} onOpenSession={sid => navigate(sessionPath(sid))} />}
                   <CommentAttachments attachments={c.attachments ?? []} lang={lang} />
                 </>
               ))}
@@ -1105,7 +1109,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted, tab
                 detail={detail}
                 lang={lang}
                 reload={reload}
-                renderBody={c => <CommentBody body={c.body} files={detail.files} />}
+                renderBody={c => <CommentBody body={c.body} files={detail.files} sessions={detail.sessions} onOpenSession={sid => navigate(sessionPath(sid))} />}
                 loose={<CommentsTab id={id} detail={detail} onChanged={reload} lang={lang} looseOnly />}
               />
             </div>
