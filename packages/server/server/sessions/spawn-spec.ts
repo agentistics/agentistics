@@ -60,7 +60,7 @@
  * these CLIs prints its default, add it HERE with the command in a comment — never anywhere else.
  */
 
-import type { HarnessId } from '@agentistics/core'
+import { isCanonicalMode, type CanonicalMode, type HarnessId } from '@agentistics/core'
 import { HARNESS_PROCESS_TRANSCRIPTS, HARNESS_SESSION_SOURCES } from './harness-session-file'
 import { prependContext } from './agentistics-context'
 import type { InitialPrompt, SpawnRequest, SpawnPlanResult, SpawnSpec } from './types'
@@ -90,6 +90,15 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     effortFlag: '--effort',
     // "Effort level for the current session (low, medium, high, xhigh, max)"
     efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    // MODE.EVERYWHERE — `claude --help` 2.1.296: `--permission-mode <mode>  (choices: "acceptEdits", "auto",
+    // "bypassPermissions", "manual", "dontAsk", "plan")` and `--dangerously-skip-permissions  Bypass all
+    // permission checks`. The ALLOW flag is deliberately not added to a TUI: it inserts bypass into the
+    // shift+tab cycle that `mode-spec.ts` measured, and the chip would then cycle to a mode it cannot name.
+    modeArgs: {
+      'accept-edits': ['--permission-mode', 'acceptEdits'],
+      plan: ['--permission-mode', 'plan'],
+      'no-questions': ['--dangerously-skip-permissions'],
+    },
     // `-r, --resume [value]  Resume a conversation by session ID`
     resume: id => ['--resume', id],
     // `--session-id <uuid>  Use a specific session ID for the conversation (must be a valid UUID)`.
@@ -122,6 +131,14 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     modelSuggestions: [],
     effortArgs: effort => ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`],
     efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    // MODE.EVERYWHERE — `codex --help` 0.161.0: `-s, --sandbox <read-only|workspace-write|danger-full-access>`,
+    // `-a, --ask-for-approval <untrusted|on-request|never>`, `--dangerously-bypass-approvals-and-sandbox  Skip all
+    // confirmation prompts and execute commands without sandboxing`. NO plan: the TUI has no flag for its
+    // collaboration mode — only the app-server protocol sets it (`thread/settings/update`), so plan runs structured.
+    modeArgs: {
+      'accept-edits': ['--sandbox', 'workspace-write', '--ask-for-approval', 'on-request'],
+      'no-questions': ['--dangerously-bypass-approvals-and-sandbox'],
+    },
     // A SUBCOMMAND, not a flag: `codex resume [OPTIONS] [SESSION_ID] [PROMPT]`, whose argument is
     // documented as "Conversation/session id (UUID) or thread name".
     resume: id => ['resume', id],
@@ -139,6 +156,15 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     bin: 'kimi',
     prompt: { kind: 'send-keys' },
     modelFlag: '--model', // `-m, --model <model>`
+    // MODE.EVERYWHERE — `kimi --help` 2.1.1: `-y, --yolo  Start in Ask When Needed mode: routine edits and commands
+    // run automatically; risky actions, questions, and plans still ask`, `--auto  Start in Never Ask mode`,
+    // `--plan  Start in plan mode`. kimi's own names cross over: its ACP `auto` is this `--yolo`, its ACP `yolo`
+    // this `--auto` (the descriptions are what match, see acp-structured.ts in the engine).
+    modeArgs: {
+      'accept-edits': ['--yolo'],
+      plan: ['--plan'],
+      'no-questions': ['--auto'],
+    },
     // EMPTY, and this one could not be otherwise. kimi 0.38.0's `--help` says "LLM model ALIAS to
     // use for this invocation. Defaults to default_model in config.toml" — the accepted values are
     // aliases the USER defined, in their own provider registry, so they are a property of the
@@ -175,6 +201,13 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     // `loadMemoryFromIncludeDirectories` (default false) is on, and the only places that setting can live are the
     // user's ~/.gemini or the project. So the fenced block rides the first message.
     modelFlag: '--model', // `-m, --model  Model  [string]`
+    // MODE.EVERYWHERE — `gemini --help` 0.63.0: `--approval-mode  default (prompt for approval), auto_edit
+    // (auto-approve edit tools), yolo (auto-approve all tools), plan (read-only mode)`.
+    modeArgs: {
+      'accept-edits': ['--approval-mode', 'auto_edit'],
+      plan: ['--approval-mode', 'plan'],
+      'no-questions': ['--approval-mode', 'yolo'],
+    },
     // EMPTY as of 2026-09-02, checked against gemini 0.55.1. `--help` prints "Model  [string]" and
     // no values; the CLI has `--list-extensions` and `--list-sessions` but nothing that lists
     // models, and no `models` subcommand. The string is forwarded VERBATIM to the Google API, which
@@ -219,6 +252,16 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     bin: 'copilot',
     prompt: { kind: 'send-keys' },
     modelFlag: '--model', // `--model <model>  Set the AI model to use (use 'auto' to let Copilot pick)`
+    // MODE.EVERYWHERE — `copilot --help` 1.0.95: `--allow-tool [<tools>...]  will not prompt for permission` with
+    // the example "Allow all file editing: --allow-tool='write'", `--plan  Start in plan mode`, `--autopilot  Start
+    // in autopilot mode` (its ACP mode "Autonomous … without user interaction" — the same one structured uses).
+    // Autopilot alone is a MODE, not a permission grant (its help says nothing of prompts), so "no questions" also
+    // carries `--allow-all` ("Enable all permissions", = --allow-all-tools --allow-all-paths --allow-all-urls).
+    modeArgs: {
+      'accept-edits': ['--allow-tool=write'],
+      plan: ['--plan'],
+      'no-questions': ['--autopilot', '--allow-all'],
+    },
     // `auto` and nothing else, and copilot 1.0.80 is the case that proves the rule. It is the one
     // value its own `--model` help NAMES, and running it works: `copilot --model auto -p … ` ran
     // the turn. Every other id was REFUSED on this account, instantly and locally, by the CLI's own
@@ -253,6 +296,13 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     logFileFlag: '--log-file', // agy 1.3.2 --help, probed 2026-10-09
     prompt: { kind: 'flag', flag: '--prompt-interactive' },
     modelFlag: '--model', // `--model  Model for the current CLI session`
+    // MODE.EVERYWHERE — `agy --help` 1.3.3: `--mode  Set the agent execution mode for this session (accept-edits,
+    // plan)` and `--dangerously-skip-permissions  Auto-approve all tool permission requests without prompting`.
+    modeArgs: {
+      'accept-edits': ['--mode', 'accept-edits'],
+      plan: ['--mode', 'plan'],
+      'no-questions': ['--dangerously-skip-permissions'],
+    },
     // The only harness here with a real listing command: `agy models` ("List available models",
     // its own `--help`). Printed verbatim by agy 1.1.22 on 2026-09-02, in the order it gave them.
     //
@@ -353,6 +403,10 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
     }
   }
 
+  if (req.mode !== undefined && !isCanonicalMode(req.mode)) {
+    return { ok: false, error: { code: 'unknown-mode', harness: req.harness, value: String(req.mode) } }
+  }
+
   if (req.resumeId && !spec.resume) {
     return { ok: false, error: { code: 'resume-unsupported', harness: req.harness } }
   }
@@ -373,6 +427,12 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
   if (req.model && spec.modelFlag) argv.push(spec.modelFlag, req.model)
   if (req.effort && spec.effortArgs) argv.push(...spec.effortArgs(req.effort))
   else if (req.effort && spec.effortFlag) argv.push(spec.effortFlag, req.effort)
+  // MODE.EVERYWHERE — the TUI's own flag where its CLI has one. A mode it has none for is NOT dropped: the
+  // plan says so (`modeNeedsProtocol`), and only a structured start may then run it.
+  const wantMode = req.mode && req.mode !== 'default' ? req.mode : undefined
+  const modeArgs = wantMode ? spec.modeArgs?.[wantMode] : undefined
+  if (modeArgs) argv.push(...modeArgs)
+  const modeNeedsProtocol = wantMode && !modeArgs ? wantMode : undefined
 
   // THE AGENTISTICS CONTEXT — fresh sessions only (a reopened conversation already has its history).
   // Official channel first; a harness with none gets the fenced block ahead of its first message.
@@ -432,6 +492,17 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
       ...(req.context && !req.resumeId ? { contextVia } : {}),
       ...(initialPrompt ? { initialPrompt } : {}),
       ...(conversationId ? { conversationId } : {}),
+      ...(modeNeedsProtocol ? { modeNeedsProtocol } : {}),
     },
   }
+}
+
+/**
+ * PURE (MODE.EVERYWHERE). The canonical modes a harness can START in as a TUI — `default` always, the rest
+ * where its CLI has a flag. The New session field offers these plus what a structured start can take.
+ */
+export function tuiStartModes(harness: HarnessId): CanonicalMode[] {
+  const spec = SPAWN_SPECS[harness]
+  if (!spec) return []
+  return ['default', ...(['accept-edits', 'plan', 'no-questions'] as const).filter(m => !!spec.modeArgs?.[m])]
 }

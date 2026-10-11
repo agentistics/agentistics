@@ -68,7 +68,18 @@ describe('visibleQuestions', () => {
     expect(visibleQuestions(codex).effort).toBe(false)
   })
   it('asks nothing extra when there is no harness yet', () => {
-    expect(visibleQuestions(null)).toEqual({ model: false, effort: false })
+    expect(visibleQuestions(null)).toEqual({ model: false, effort: false, mode: false })
+  })
+  it('MODE.EVERYWHERE — asks for a mode only when the harness can start in more than its default', () => {
+    expect(visibleQuestions({ ...claude, modes: ['default', 'plan'] }).mode).toBe(true)
+    expect(visibleQuestions({ ...claude, modes: ['default'] }).mode).toBe(false)
+    expect(visibleQuestions(claude).mode).toBe(false)
+  })
+  it('MODE.EVERYWHERE — toWizardHarness keeps only canonical modes, and only when there is a choice', () => {
+    const base = { id: 'x', label: 'X', modelSuggestions: [], supportsModel: false, efforts: [] }
+    expect(toWizardHarness({ ...base, modes: ['default', 'plan', 'yolo'] }).modes).toEqual(['default', 'plan'])
+    expect(toWizardHarness({ ...base, modes: ['default'] }).modes).toBeUndefined()
+    expect(toWizardHarness(base).modes).toBeUndefined()
   })
 })
 

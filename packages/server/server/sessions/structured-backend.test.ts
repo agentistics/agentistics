@@ -10,7 +10,8 @@ import type {
   StructuredDeclaration, StructuredExit, StructuredSession, StructuredSpawn,
 } from '@agentistics/engine-api'
 import { answerFits, structuredRegistry, stubDriver } from '@agentistics/engine-api'
-import { acpAsStructured, structuredSpawnOf, withStructured, type StructuredProvider } from './structured-backend'
+import { acpAsStructured, recordingSession, structuredSpawnOf, withStructured, type StructuredProvider } from './structured-backend'
+import { isReplayCall } from './structured-replay'
 import { STRUCTURED_ROUTE_OFF, answerStructured, routableDriver, routeSpawn, structuredIntentOf, structuredReopenOrigin } from './structured-route'
 import type { BackendSpawn, SessionBackend } from './types'
 
@@ -56,6 +57,10 @@ function fakeSession(req: StructuredSpawn) {
     prompt(t: string) { if (state === 'exited') return false; s.prompts.push(t); state = 'working'; for (const f of subs) f({ kind: 'live', text: 'thin' }); return true },
     answer(a: StructuredAnswer) { const fit = answerFits(open, a); if (!fit.ok) return false; s.answers.push(a); open = null; state = 'working'; return true },
     cancel() { s.cancelled++; open = null; state = 'waiting' },
+    modeNow: 'default',
+    modes: () => [{ id: 'default', label: 'Default' }, { id: 'plan', label: 'Plan' }],
+    mode() { return s.modes().find(m => m.id === s.modeNow) ?? null },
+    setMode(id: string) { if (!s.modes().some(m => m.id === id)) return false; s.modeNow = id; return true },
     follow(_max: number, on: (d: HarnessChatDelta) => void) {
       on({ kind: 'window', turns: [{ role: 'user', text: req.initialPrompt ?? '' }], older: false })
       on({ kind: 'state', working: state === 'working' })
@@ -303,6 +308,28 @@ describe('withStructured — answering through the driver', () => {
   })
 })
 
+describe('withStructured — the permission mode (F4.D)', () => {
+  test('a structured session states its mode and its choices, and is set directly through the driver', async () => {
+    const base = fakeBase()
+    const eng = fakeEngine()
+    const b = withStructured(base, provider(eng.reg))
+    await b.spawn(web('gemini'))
+    expect(b.modeOf!('m-1')).toEqual({ id: 'default', label: 'Default' })
+    expect(b.modesOf!('m-1')).toEqual([{ id: 'default', label: 'Default' }, { id: 'plan', label: 'Plan' }])
+    expect(await b.setMode!('m-1', 'plan')).toBe(true)
+    expect(b.modeOf!('m-1')).toEqual({ id: 'plan', label: 'Plan' })
+    expect(await b.setMode!('m-1', 'yolo')).toBe(false) // an id the protocol did not list is refused
+    expect(b.modeOf!('m-1')).toEqual({ id: 'plan', label: 'Plan' })
+    expect(base.calls).toEqual([]) // no keystroke reached tmux
+  })
+  test('a session that is not structured answers undefined (its mode is read off the footer)', async () => {
+    const b = withStructured(fakeBase(), provider(fakeEngine().reg))
+    expect(b.modeOf!('t-1')).toBeUndefined()
+    expect(b.modesOf!('t-1')).toBeUndefined()
+    expect(await b.setMode!('t-1', 'plan')).toBe(false)
+  })
+})
+
 describe('withStructured — the session is its own chat source', () => {
   test('chatOf follows the protocol: window, state, live', async () => {
     const base = fakeBase()
@@ -339,22 +366,52 @@ describe('structuredSpawnOf (pure)', () => {
   })
 })
 
-describe('the one-line route switch (STRUCTURED_ROUTE_OFF)', () => {
-  test('agy: a READY driver exists, but a web-born agy session is a TUI + adapter, with the reason cited', async () => {
-    expect(STRUCTURED_ROUTE_OFF.antigravity).toMatch(/permission/)
-    expect(routableDriver('antigravity', 'agy-stream-json')).toBeNull()
-    expect(routableDriver('gemini', 'acp')).toBe('acp')
-    const base = fakeBase()
+describe('MODE.EVERYWHERE — a structured start only in a mode its driver declares', () => {
+  const agyReg = (started: StructuredSpawn[]) => structuredRegistry([{
+    id: 'agy-stream-json', status: 'ready', harnesses: ['antigravity'], note: 'fake',
+    declares: () => ({ ...DECL, startModes: ['no-questions'] }),
+    async start(req) { started.push(req); return { ok: true, session: fakeSession(req) as unknown as StructuredSession } },
+  }])
+
+  test('the route switch is empty: agy is routed by its startModes now, not switched off whole', () => {
+    expect(STRUCTURED_ROUTE_OFF.antigravity).toBeUndefined()
+    expect(routableDriver('antigravity', 'agy-stream-json')).toBe('agy-stream-json')
+  })
+
+  test('agy in an asking mode (or the default) is a TUI + adapter; in "no questions" it runs structured', async () => {
     const started: StructuredSpawn[] = []
-    const reg = structuredRegistry([{
-      id: 'agy-stream-json', status: 'ready', harnesses: ['antigravity'], note: 'fake', declares: () => DECL,
-      async start(req) { started.push(req); return { ok: true, session: fakeSession(req) as unknown as StructuredSession } },
-    }])
-    const b = withStructured(base, provider(reg))
-    const req = web('antigravity')
-    await b.spawn(req)
-    expect(base.calls).toEqual([['spawn', req]])
+    const base = fakeBase()
+    const b = withStructured(base, provider(agyReg(started)))
+    const asking = web('antigravity')
+    await b.spawn(asking)
+    expect(base.calls).toEqual([['spawn', asking]])
     expect(started).toEqual([])
+    const yes = web('antigravity', { id: 'm-2', structured: { harness: 'antigravity', origin: 'web', mode: 'no-questions' } })
+    await b.spawn(yes)
+    expect(started.map(s => s.mode)).toEqual(['no-questions'])
+    expect(base.calls).toHaveLength(1)
+  })
+
+  test('a mode only the protocol can set is REFUSED when the spawn runs as a TUI, never started in another mode', async () => {
+    const base = fakeBase()
+    const b = withStructured(base, provider(null))
+    const req = web('codex', { structured: { harness: 'codex', origin: 'web', mode: 'plan' }, modeNeedsProtocol: 'plan' })
+    await expect(b.spawn(req)).rejects.toThrow(/plan/)
+    expect(base.calls).toEqual([])
+  })
+
+  test('routeSpawn: a mode outside startModes goes to the TUI; no startModes = default only', () => {
+    const r = { flagOn: true, origin: 'web' as const, harness: 'gemini' as HarnessId, driver: 'acp' as const, acpDriven: false, acpOptIn: [] }
+    expect(routeSpawn({ ...r, mode: 'plan', startModes: ['default', 'plan'] })).toBe('structured')
+    expect(routeSpawn({ ...r, mode: 'accept-edits', startModes: ['default', 'plan'] })).toBe('tmux')
+    expect(routeSpawn({ ...r })).toBe('structured')
+    expect(routeSpawn({ ...r, mode: 'plan' })).toBe('tmux')
+  })
+
+  test('the intent carries the mode, never "default" (which means: pass nothing)', () => {
+    expect(structuredIntentOf({ harness: 'claude', mode: 'plan' }, {}).mode).toBe('plan')
+    expect(structuredIntentOf({ harness: 'claude', mode: 'default' }, {}).mode).toBeUndefined()
+    expect(structuredSpawnOf(web('claude', { structured: { harness: 'claude', origin: 'web', mode: 'accept-edits' } }), 'claude').mode).toBe('accept-edits')
   })
 })
 
@@ -381,4 +438,27 @@ test('structured free text preserves whitespace while refusing an empty answer',
   expect(answerStructured(open, 1, text)).toEqual({ ok: true, answer: { requestId: 'q1', choice: 1, text }, said: text })
   expect(answerStructured(open, undefined, text)).toEqual({ ok: true, answer: { requestId: 'q1', text }, said: text })
   expect(answerStructured(open, 1, ' \n ')).toEqual({ ok: false, why: 'needs-text' })
+})
+
+
+describe('MODE.EVERYWHERE — the durable relay\'s session forwards the mode and RECORDS a set', () => {
+  test('mode/modes/setMode reach the driver; setMode is recorded before it writes, so a re-attach makes it again', async () => {
+    const s = fakeSession({ id: 'm', harness: 'gemini', cwd: '/w' }) as unknown as StructuredSession
+    const recorded: unknown[] = []
+    const r = recordingSession(s, { record: c => { recorded.push(c) } })
+    expect(r.modes!().map(m => m.id)).toEqual(['default', 'plan'])
+    expect(r.mode!()?.id).toBe('default')
+    expect(await r.setMode!('plan')).toBe(true)
+    expect(r.mode!()?.id).toBe('plan')
+    expect(recorded).toEqual([{ op: 'setMode', id: 'plan' }])
+    expect(isReplayCall({ op: 'setMode', id: 'plan', at: 3, t: 1 })).toBe(true)
+    expect(isReplayCall({ op: 'setMode', at: 3, t: 1 })).toBe(false)
+  })
+  test('a driver with no modes keeps none through the relay (absent stays absent)', () => {
+    const s = fakeSession({ id: 'm', harness: 'gemini', cwd: '/w' }) as unknown as Record<string, unknown>
+    const bare = { ...s, modes: undefined, mode: undefined, setMode: undefined } as unknown as StructuredSession
+    const r = recordingSession(bare, { record: () => {} })
+    expect(r.modes).toBeUndefined()
+    expect(r.setMode).toBeUndefined()
+  })
 })

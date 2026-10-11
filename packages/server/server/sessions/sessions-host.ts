@@ -12,7 +12,7 @@
  */
 
 import { anyGrant, scrubDeep, scrubTerminalLine } from '../vault/grants'
-import type { ConversationLinkReason, HarnessId } from '@agentistics/core'
+import { canonicalOfTuiMode, type ConversationLinkReason, type HarnessId, type SessionMode } from '@agentistics/core'
 import { createLimiter } from '../utils'
 import { retainKeys } from '../prune-keys'
 import type { HarnessProcess } from '../live-sessions'
@@ -381,7 +381,7 @@ export function createSessionsPoller(o: {
   let prevActivity = new Map<string, SessionActivity>()
   // What only a SCREEN read carries, kept for the polls that skip the screen of an adapter-stated row
   // (`adapter-state.ts`): the mode chip and the raw tail stay what the last read said.
-  const lastFrameFacts = new Map<string, { mode?: { id: string; label: string }; tail: string[] }>()
+  const lastFrameFacts = new Map<string, { mode?: SessionMode; tail: string[] }>()
   // The raw per-poll reading is noisy: a session that just finished, or a pane a plugin repainted,
   // reads `working` then `waiting` across two polls with nothing changed. `confirmActivities` turns
   // that into a CONFIRMED reading — a needs-you state must be seen twice before the counter believes
@@ -482,7 +482,8 @@ export function createSessionsPoller(o: {
       const tails = new Map<string, string[]>()
       const approvals = new Map<string, string[]>()
       /** The harness mode each running session is in — see `mode-spec.ts`. */
-      const modes = new Map<string, { id: string; label: string }>()
+      const modes = new Map<string, SessionMode>()
+      const modeChoices = new Map<string, SessionMode[]>()
       const dialogOptions = new Map<string, DialogOption[]>()
       const dialogSelect = new Map<string, 'numbered' | 'marker'>()
       const dialogStated = new Set<string>()
@@ -548,6 +549,15 @@ export function createSessionsPoller(o: {
         if (!b) return // `lost`: the backend has nothing to capture and nothing to report.
         if (!b.alive) { activity.set(r.id, 'exited'); return }
 
+        // F4.D — a STRUCTURED session states its mode (and the ones it can be set to) itself: it has no
+        // footer to read, and what the protocol said outranks anything a screen could.
+        const statedMode = o.backend.modeOf?.(r.id)
+        {
+          const choices = o.backend.modesOf?.(r.id)
+          if (statedMode) modes.set(r.id, statedMode)
+          if (choices && choices.length > 0) modeChoices.set(r.id, choices)
+        }
+
         const reading = adapter?.reading(r.id)
         // A backend that KNOWS the state (a structured session: the protocol's open turn) outranks the
         // transcript file's reading — the file only learns a turn's progress when a message is FINISHED,
@@ -562,7 +572,7 @@ export function createSessionsPoller(o: {
         if (!readScreen && reading) {
           // The harness said what the row is doing, and nothing on the screen can add to it now.
           const kept = lastFrameFacts.get(r.id)
-          if (kept?.mode) modes.set(r.id, kept.mode)
+          if (kept?.mode && !statedMode) modes.set(r.id, kept.mode)
           if (kept) tails.set(r.id, kept.tail)
           const before = prevDigest.get(r.id)
           if (before !== undefined) nextDigest.set(r.id, before)
@@ -578,9 +588,11 @@ export function createSessionsPoller(o: {
         // WHICH MODE the harness is in, read off the same frame the state came from — see
         // `mode-spec.ts`. `null` for a harness nobody has probed and for a frame with no footer yet,
         // and the row then simply carries none.
-        {
+        // A structured session's rendered screen has no footer; what its protocol stated stands.
+        if (statedMode === undefined) {
           const m = modeOf(frame, modeSpecFor(r.managed?.harness))
-          if (m) modes.set(r.id, { id: m.id, label: m.label })
+          const canonical = m ? canonicalOfTuiMode(m.id) : undefined
+          if (m) modes.set(r.id, { id: m.id, label: m.label, ...(canonical ? { canonical } : {}) })
         }
         const frameDigest = digestFrame(frame)
         nextDigest.set(r.id, frameDigest)
@@ -991,6 +1003,7 @@ export function createSessionsPoller(o: {
         chatTails,
         approvals,
         modes,
+        modeChoices,
         ...(structured.size > 0 ? { structured } : {}),
         dialogOptions,
         dialogSelect,

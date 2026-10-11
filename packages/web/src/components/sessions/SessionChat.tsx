@@ -43,6 +43,8 @@ import { AttentionMarkLine, RecordedBlock } from './AttentionMarks'
 import { placeAttention, type ChatAttentionMark, type ChatRecorded } from '../../lib/sessionRecorded'
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
 import { modeStyle } from '../../lib/modeStyle'
+import { NoQuestionsWarning } from './ModePicker'
+import { modeLabel, modeTitle, onlyModeNote } from '../../lib/modeLabel'
 import { modeCycles, modeMenuFor, modeMenuPlacement, type MenuPlacement } from '../../lib/modeMenu'
 import { ApprovalCard } from './ApprovalCard'
 import { TypedModel } from './ModelSelect'
@@ -1845,9 +1847,19 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   // verb is ENABLED when a write can continue it here — the server decides, the row says so.
   const promptOffered = session.actionable || row?.verbs.some(v => v.action === 'prompt' && v.enabled) === true
   const canPrompt = !loading && promptOffered && (!blocked || answeringNow) && payload.live !== false
-  const modeOptions = useMemo(() => modeMenuFor(row?.harness), [row?.harness])
+  // F4.D — a STRUCTURED row lists the modes its protocol can set; those are chosen directly. A terminal
+  // row has only the harness's cycle key, so its menu is the measured table and a choice is N cycles.
+  const directModes = row?.modes && row.modes.length > 0 ? row.modes : null
+  const modeOptions = useMemo(() => directModes ?? modeMenuFor(row?.harness), [directModes, row?.harness])
   const chooseMode = useCallback(async (target: string) => {
     if (!row?.mode || !canPrompt) return
+    if (directModes) {
+      setModeMenuOpen(false)
+      const out = await act({ id: session.id, action: 'setMode', text: target })
+      setNotice(out.ok ? (modeOptions.find(mode => mode.id === target)?.label ?? target) : out.message)
+      if (out.ok) nudgeFleet()
+      return
+    }
     const cycles = modeCycles(row.mode.id, target, modeOptions)
     setModeMenuOpen(false)
     for (let i = 0; i < cycles; i += 1) {
@@ -1861,7 +1873,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       setNotice(modeOptions.find(mode => mode.id === target)?.label ?? target)
       nudgeFleet()
     }
-  }, [act, canPrompt, modeOptions, row?.mode, session.id])
+  }, [act, canPrompt, directModes, modeOptions, row?.mode, session.id])
   /** EXT.OPEN: the one question before a write continues an external session here. */
   const [continueAsk, setContinueAsk] = useState<{ message: string; text: string } | null>(null)
   const [continuing, setContinuing] = useState(false)
@@ -3573,14 +3585,16 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     className="ag-tap-icon"
                     onClick={() => {
                       const rect = modeButtonRef.current?.getBoundingClientRect()
-                      if (rect) setModeMenuPos(modeMenuPlacement(rect, window.innerWidth, window.innerHeight))
+                      // Wider and taller when a menu carries the "no questions" warning.
+                      const warns = modeOptions.some(m => 'canonical' in m && m.canonical === 'no-questions')
+                      if (rect) setModeMenuPos(modeMenuPlacement(rect, window.innerWidth, window.innerHeight, warns ? 270 : 190, warns ? 320 : 220))
                       setModeMenuOpen(value => !value)
                     }}
                     disabled={!canPrompt}
                     aria-haspopup="menu"
                     aria-expanded={modeMenuOpen}
-                    aria-label={pt ? `Modo: ${row.mode.label}` : `Mode: ${row.mode.label}`}
-                    title={row.mode.label}
+                    aria-label={pt ? `Modo: ${modeLabel(row.mode, 'pt')}` : `Mode: ${modeLabel(row.mode, 'en')}`}
+                    title={modeTitle(row.mode, pt ? 'pt' : 'en')}
                     style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
                       height: 30, padding: '0 9px',
@@ -3589,9 +3603,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                       // session proceeds without asking, and never the fault colour: `auto` is how
                       // this product is normally used, and a red ordinary state is the cry-wolf
                       // this codebase avoids everywhere else.
-                      border: `1px solid ${modeStyle(row.mode.id).border}`,
-                      background: modeStyle(row.mode.id).bg,
-                      color: modeStyle(row.mode.id).fg,
+                      border: `1px solid ${modeStyle(row.mode).border}`,
+                      background: modeStyle(row.mode).bg,
+                      color: modeStyle(row.mode).fg,
                       fontFamily: 'inherit', fontSize: 11.5,
                       cursor: canPrompt ? 'pointer' : 'default',
                       opacity: canPrompt ? 1 : 0.55,
@@ -3600,7 +3614,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     <SlidersHorizontal size={13} style={{ flexShrink: 0 }} />
                     {!isMobile && <span style={{
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>{row.mode.label}</span>}
+                    }}>{modeLabel(row.mode, pt ? 'pt' : 'en')}</span>}
                   </button>
                 )}
                 {modeMenuOpen && row?.mode && modeOptions.length > 0 && modeMenuPos && createPortal(
@@ -3617,7 +3631,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                   >
                     {modeOptions.map(option => {
                       const current = option.id === row.mode?.id
-                      const style = modeStyle(option.id)
+                      const style = modeStyle(option)
+                      const unattended = 'canonical' in option && option.canonical === 'no-questions'
                       return (
                         <button
                           key={option.id}
@@ -3625,7 +3640,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                           aria-checked={current}
                           onClick={() => void chooseMode(option.id)}
                           style={{
-                            display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                            display: 'flex', alignItems: unattended && !current ? 'flex-start' : 'center', gap: 8, width: '100%',
                             minHeight: 36, padding: '7px 9px', border: 'none', borderRadius: 7,
                             background: current ? style.bg : 'transparent',
                             color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 12,
@@ -3634,13 +3649,22 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         >
                           <span style={{
                             width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                            background: style.fg,
+                            background: style.fg, ...(unattended && !current ? { marginTop: 4 } : {}),
                           }} />
-                          <span style={{ flex: 1 }}>{option.label}</span>
+                          <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                            {modeLabel(option, pt ? 'pt' : 'en')}
+                            {/* MODE.EVERYWHERE — "no questions" says what it means before it is picked. */}
+                            {unattended && !current && <NoQuestionsWarning lang={pt ? 'pt' : 'en'} compact />}
+                          </span>
                           {current && <span aria-hidden style={{ color: style.fg }}>✓</span>}
                         </button>
                       )
                     })}
+                    {onlyModeNote(modeOptions, pt ? 'pt' : 'en') && (
+                      <div role="note" data-mode-only-note style={{ padding: '6px 9px', fontSize: 11, lineHeight: 1.45, color: 'var(--text-tertiary)' }}>
+                        {onlyModeNote(modeOptions, pt ? 'pt' : 'en')}
+                      </div>
+                    )}
                   </div>,
                   document.body,
                 )}

@@ -44,6 +44,7 @@ import { accountHome } from './account-home'
 import {
   followFleet, HARNESS_ORDER, repoShortName, sendNowDelivered,
   type ConversationLinkReason, type HarnessId,
+  CANONICAL_MODES, type CanonicalMode,
 } from '@agentistics/core'
 import type {
   ActionResult,
@@ -126,7 +127,7 @@ import { resolveLang } from './cli-lang'
 import { scanProcesses, type HarnessProcess } from './live-sessions'
 import { resolveBackend } from './sessions'
 import { inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
-import { SPAWN_SPECS, planSpawn } from './sessions/spawn-spec'
+import { SPAWN_SPECS, planSpawn, tuiStartModes } from './sessions/spawn-spec'
 import { answerStructured, structuredIntentOf, structuredReopenOrigin } from './sessions/structured-route'
 import { agentisticsMcpLaunch } from './mcp-launch'
 import { prependContext } from './sessions/agentistics-context'
@@ -1677,6 +1678,7 @@ function explainSpawnError(e: SpawnPlanError, s: CliStrings): string {
     case 'model-unsupported': return s.sessSpawnNoModel(e.harness)
     case 'effort-unsupported': return s.sessSpawnNoEffort(e.harness)
     case 'unknown-effort': return s.sessSpawnBadEffort(e.harness, e.value, e.accepted)
+    case 'unknown-mode': return s.sessSpawnBadMode(e.harness, e.value)
   }
 }
 
@@ -1966,6 +1968,8 @@ async function spawnManaged(req: {
   prompt?: string
   model?: string
   effort?: string
+  /** MODE.EVERYWHERE — the permission mode to start in (see `SpawnRequest.mode`). */
+  mode?: CanonicalMode
   label?: string
   task?: string
   /** See `ManagedSession.taskId`: recorded at spawn, the one moment it is a fact. */
@@ -2069,6 +2073,7 @@ async function spawnManaged(req: {
     ...(req.prompt ? { prompt: req.prompt } : {}),
     ...(model ? { model } : {}),
     ...(effort ? { effort } : {}),
+    ...(req.mode ? { mode: req.mode } : {}),
     // Offered for a FRESH session; `planSpawn` applies it only where the CLI accepts one and reports
     // back what it actually did. A resume ignores it — that conversation already has an id.
     conversationId: offeredConversationId,
@@ -2125,6 +2130,7 @@ async function spawnManaged(req: {
         // linked by what the protocol then STATES (`onConversation`), never by this offer.
         conversationId: offeredConversationId,
       }),
+      ...(planned.plan.modeNeedsProtocol ? { modeNeedsProtocol: planned.plan.modeNeedsProtocol } : {}),
     })
   } catch (e) {
     await abandon()
@@ -3618,6 +3624,15 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
 
       const managed = (await readRegistry()).find(m => m.id === id)
       if (!managed) return { ok: false, message: s.sessNoRegistryEntry }
+      // F4.D — a structured session has no footer and no cycle key: "next" is the next entry of the
+      // modes its protocol lists, set directly.
+      const choices = backend.modesOf?.(id)
+      if (choices && choices.length > 0 && backend.setMode) {
+        const now = backend.modeOf?.(id)?.id
+        const at = choices.findIndex(m => m.id === now)
+        const next = choices[(at + 1) % choices.length]!
+        return (await backend.setMode(id, next.id)) ? { ok: true, message: s.sessModeCycled } : { ok: false, message: s.sessSendFailed(id) }
+      }
       const spec = modeSpecFor(managed.harness)
       if (!spec) return { ok: false, message: s.sessModeUnknown(managed.harness) }
 
@@ -3629,6 +3644,25 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       return (await backend.sendKey(id, spec.cycleKey))
         ? { ok: true, message: s.sessModeCycled }
         : { ok: false, message: s.sessSendFailed(id) }
+    },
+
+    /**
+     * F4.D — set a structured session's mode through its driver. The id must be one the protocol listed
+     * for THIS session: an id the driver does not know is refused by the driver, never guessed at here.
+     */
+    async setSessionMode(id: string, modeId: string): Promise<ActionResult> {
+      const s = S()
+      const backend = await resolveBackend()
+      const blocked = await backend.unavailable()
+      if (blocked) return { ok: false, message: blocked }
+      const managed = (await readRegistry()).find(m => m.id === id)
+      if (!managed) return { ok: false, message: s.sessNoRegistryEntry }
+      const live = (await backend.list().catch(() => [])).find(b => b.id === id)
+      if (!live?.alive) return { ok: false, message: s.sessNotRunning }
+      const choices = backend.modesOf?.(id)
+      if (!choices || !backend.setMode) return { ok: false, message: s.sessModeUnknown(managed.harness) }
+      if (!choices.some(m => m.id === modeId)) return { ok: false, message: s.sessModeUnknown(managed.harness) }
+      return (await backend.setMode(id, modeId)) ? { ok: true, message: choices.find(m => m.id === modeId)!.label } : { ok: false, message: s.sessSendFailed(id) }
     },
 
     async rewindSession(id: string, prompt: string, occurrence: number): Promise<ActionResult> {
@@ -4366,10 +4400,21 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // nothing to offer and `harnessNotice` says why.
       const { ids, blind } = availableHarnesses()
       if (blind) return []
+      // MODE.EVERYWHERE — what a WEB session can start in: the TUI's own flags, plus — with the adapter on —
+      // the canonical modes the harness's structured driver declares (codex's plan exists only there).
+      const { featureOn } = await import('@agentistics/core')
+      const structured = featureOn('adapter-chat') ? (await import('./engine/load')).engine()?.structured ?? null : null
+      const { routableDriver } = await import('./sessions/structured-route')
+      const modesOf = (id: HarnessId): CanonicalMode[] => {
+        const viaProtocol = structured && routableDriver(id, structured.driverFor(id)) ? structured.declares(id)?.startModes ?? [] : []
+        return CANONICAL_MODES.filter(m => tuiStartModes(id).includes(m) || viaProtocol.includes(m))
+      }
       return ids.flatMap(id => {
         const spec = SPAWN_SPECS[id]
         if (!spec) return []
+        const modes = modesOf(id)
         return [{
+          ...(modes.length > 1 ? { modes } : {}),
           id,
           label: id,
           modelSuggestions: spec.modelSuggestions,
@@ -4432,6 +4477,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.prompt ? { prompt: req.prompt } : {}),
         ...(req.model ? { model: req.model } : {}),
         ...(req.effort ? { effort: req.effort } : {}),
+        ...(req.mode ? { mode: req.mode } : {}),
         ...(req.label ? { label: req.label } : {}),
         ...(req.task ? { task: req.task } : {}),
         ...(taskId ? { contextTaskId: taskId } : {}),

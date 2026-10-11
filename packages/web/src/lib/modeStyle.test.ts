@@ -37,4 +37,20 @@ describe('modeStyle', () => {
       for (const v of [s.fg, s.bg, s.border]) expect(v.length).toBeGreaterThan(0)
     }
   })
+
+  it('MODE.EVERYWHERE — a harness\'s own mode wears the colour of the CANONICAL one it means', () => {
+    // gemini "YOLO", codex "Full Access", claude "bypass permissions": one meaning, one colour.
+    expect(modeStyle({ id: 'yolo', canonical: 'no-questions' })).toEqual(modeStyle('auto'))
+    expect(modeStyle({ id: 'full-access', canonical: 'no-questions' })).toEqual(modeStyle('auto'))
+    expect(modeStyle({ id: 'autoEdit', canonical: 'accept-edits' })).toEqual(modeStyle('accept-edits'))
+    expect(modeStyle({ id: 'agent', canonical: 'default' })).toEqual(modeStyle('manual'))
+    expect(modeStyle({ id: 'read-only', canonical: 'default' })).toEqual(modeStyle('manual'))
+    expect(modeStyle({ id: 'plan', canonical: 'plan' })).toEqual(modeStyle('plan'))
+    // no canonical: the terminal id decides, and an unknown one stays neutral
+    expect(modeStyle({ id: 'auto' })).toEqual(modeStyle('auto'))
+    expect(modeStyle({ id: 'custom' })).toEqual(modeStyle('manual'))
+    for (const c of ['default', 'accept-edits', 'plan', 'no-questions'] as const) {
+      expect(JSON.stringify(modeStyle({ id: 'x', canonical: c }))).not.toContain('accent-red')
+    }
+  })
 })

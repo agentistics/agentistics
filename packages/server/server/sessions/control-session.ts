@@ -161,6 +161,7 @@ export function toControlSession(
     ...(v.model ? { model: v.model } : {}),
     ...(v.effort ? { effort: v.effort } : {}),
     ...(v.mode ? { mode: v.mode } : {}),
+    ...(v.modeChoices ? { modeChoices: v.modeChoices } : {}),
     ...(v.structured ? { structured: true as const } : {}),
     ...(v.note ? { note: v.note } : {}),
     state,
