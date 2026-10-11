@@ -137,7 +137,7 @@ test('a lock naming a pid that was REUSED after it was written is debris', async
 
   const claim = await claimInstanceLock(file, 7777)
   expect(claim.ok).toBe(true)
-  expect((await readFile(file, 'utf-8')).trim()).toBe('7777')
+  expect((await readFile(file, 'utf-8')).trim().split(' ')[0]).toBe('7777') // the start ticks may follow when pid 7777 happens to be live on the runner
 })
 
 test('a container restart does not refuse ITSELF — same pid, lock from the previous run', async () => {
