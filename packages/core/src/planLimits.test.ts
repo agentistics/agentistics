@@ -132,6 +132,12 @@ describe('budgets, pacing, and routing', () => {
     expect(planBudget(withPlan('codex', 11, 95, 'Plus'), now).status).toBe('hold')
   })
 
+  test('days to the weekly reset are days, and the daily budget spreads what is left over them', () => {
+    const b = planBudget(withPlan('claude', 34, 70, 'Max'), now)
+    expect(b.daysToWeekReset).toBeCloseTo(3)
+    expect(b.dailyBudgetPct).toBeCloseTo(10)
+  })
+
   test('routes spec implementation to codex and QA away from its author', () => {
     const claude = planBudget(withPlan('claude', 20, 55, 'Max'), now)
     const codex = planBudget(withPlan('codex', 11, 35, 'Plus'), now)
