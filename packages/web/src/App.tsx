@@ -23,7 +23,7 @@ import { bootLoading } from './lib/bootPhase'
 import { editorEnabledFor } from './lib/editorGate'
 import { useProjectedDerived } from './hooks/useProjectedDerived'
 import { ConfirmModal } from './pages/settings/primitives'
-import { journalBackfillText, type JournalBackfillSummary } from './lib/journalBackfill'
+import { type JournalBackfillSummary } from './lib/journalBackfill'
 import { DEFAULT_CARD_ORDER, migrateCardOrder, type CardId } from './lib/cardOrder'
 import { BillingIntroModal } from './components/BillingIntroModal'
 import type { LoadProgress } from './hooks/useData'
@@ -57,6 +57,7 @@ import { VaultHeaderButton } from './components/vault/VaultHeaderButton'
 import { HardwareModal } from './components/HardwareModal'
 import { useNotificationStream } from './hooks/useNotificationStream'
 import { pushNotification } from './lib/notifications'
+import { startupLoadingNotification, journalLoadingNotification } from './lib/loadingNotifications'
 import { RecentSessions } from './components/RecentSessions'
 import { HighlightsBoard } from './components/HighlightsBoard'
 import { InfoModal } from './components/InfoModal'
@@ -143,7 +144,7 @@ import { consumeRestore, snoozeUpdate, startUpgrade, upgradeInFlight, useUpdateS
 import { NayUpdateCard, type UpdateCardPlacement } from './components/nay/NayUpdateCard'
 import { UpgradeOverlay } from './components/UpgradeOverlay'
 import { HOST_SESSION_PATH, resolveHostSessionRefresh } from './lib/hostSession'
-import { bootWatchdog, fetchWithTimeout, loadErrorText, SMALL_TIMEOUT_MS, startupStripText, type BootVerdict, type LoadError } from './lib/startupLoad'
+import { bootWatchdog, fetchWithTimeout, loadErrorText, SMALL_TIMEOUT_MS, type BootVerdict, type LoadError } from './lib/startupLoad'
 import { bootReleased, scheduleBootRelease, setBootStatus, useBootHold } from './lib/bootSplash'
 
 /**
@@ -1489,6 +1490,15 @@ export default function AppLayout() {
       .catch(() => setTeamSession(prev => resolveHostSessionRefresh(prev, null, HOST_SESSION_BOOT)))
   }, [])
   useEffect(() => { void refreshTeamSession() }, [refreshTeamSession])
+  // Journal backfill progress is part of the team-session response rather than the data poll. Keep
+  // the bell current while the server is working (and after a failure, so a retry can resolve it),
+  // then stop polling once the backfill reaches its terminal state.
+  useEffect(() => {
+    const state = teamSession?.journalBackfill?.state
+    if (state !== 'running' && state !== 'failed') return
+    const timer = window.setInterval(() => { void refreshTeamSession() }, 10_000)
+    return () => window.clearInterval(timer)
+  }, [refreshTeamSession, teamSession?.journalBackfill?.state])
   /**
    * Whether to offer the chat at all.
    *
@@ -2381,6 +2391,30 @@ export default function AppLayout() {
   // The popup left this page (closed, timed out, installed): it does not come back until a reload.
   const [promptGone, setPromptGone] = useState<string | null>(null)
   const [retryImportOpen, setRetryImportOpen] = useState(false)
+  const loadingNoticeSeen = useRef({ startup: false, journal: false })
+  useEffect(() => {
+    const startupNotice = startupLoadingNotification(startup, lang === 'pt' ? 'pt' : 'en')
+    if (startupNotice) {
+      loadingNoticeSeen.current.startup = true
+      pushNotification(startupNotice)
+    } else if (loadingNoticeSeen.current.startup) {
+      pushNotification({ type: 'success', title: lang === 'pt' ? 'Carregamento concluído' : 'Loading complete', message: lang === 'pt' ? 'Os dados estão atualizados.' : 'The data is up to date.', meta: { notificationKey: 'loading.startup', loadingKind: 'startup', state: 'done' } })
+      loadingNoticeSeen.current.startup = false
+    }
+    const journalNotice = journalLoadingNotification(teamSession?.journalBackfill, lang === 'pt' ? 'pt' : 'en')
+    if (journalNotice) {
+      loadingNoticeSeen.current.journal = true
+      pushNotification(journalNotice)
+    } else if (loadingNoticeSeen.current.journal) {
+      pushNotification({ type: 'success', title: lang === 'pt' ? 'Importação concluída' : 'Import complete', message: lang === 'pt' ? 'O histórico foi importado.' : 'The history was imported.', meta: { notificationKey: 'loading.journal', loadingKind: 'journal', state: 'done' } })
+      loadingNoticeSeen.current.journal = false
+    }
+  }, [startup, teamSession?.journalBackfill, lang])
+  useEffect(() => {
+    const openRetry = () => setRetryImportOpen(true)
+    window.addEventListener('agentistics:retry-journal-import', openRetry)
+    return () => window.removeEventListener('agentistics:retry-journal-import', openRetry)
+  }, [])
   const updateSnooze = useUpdateSnooze()
   const upgradeFlow = useUpgradeFlow()
   // First-run archive consent gate: undefined = prefs not loaded, null = loaded but
@@ -3460,58 +3494,36 @@ export default function AppLayout() {
 
   // The journal's first import, one muted line above the page while it runs: the figures on the page
   // come from /api/data until it completes (the server refuses the projections until then).
-  const backfillText = journalBackfillText(teamSession?.journalBackfill, lang)
-  // Plus the data still arriving (fast startup): the page is already usable, this line says what is
-  // still on its way — or that the server stopped answering while the page kept what it had.
-  const startupText = startupStripText(startup, lang === 'pt' ? 'pt' : 'en')
+  // Offline is urgent and keeps its visible retry action; startup and journal progress live in the bell.
   const offlineText = offline
     ? (lang === 'pt'
       ? `O servidor não está respondendo (${offline.kind === 'unreachable' ? 'inacessível' : offline.detail}). Mostrando o que já estava carregado; volta sozinho quando ele responder.`
       : `The server is not answering (${offline.kind === 'unreachable' ? 'unreachable' : offline.detail}). Showing what was already loaded; it comes back by itself when the server answers.`)
     : null
-  const noteLines = [offlineText, startupText, backfillText].filter((t): t is string => !!t)
-  const backfillNote = noteLines.length > 0
-    ? (
-      <div role="status" aria-live="polite" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {noteLines.map(t => (
-          <div key={t} style={{ fontSize: '0.75rem', color: t === offlineText ? 'var(--text-secondary)' : 'var(--text-tertiary)', lineHeight: 1.4, display: 'flex', alignItems: 'center', gap: 8 }}>
-            {t === startupText && startup.partial && (
-              <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--anthropic-orange)', flexShrink: 0, animation: 'agStartupPulse 1.4s ease-in-out infinite' }} />
-            )}
-            <span>{t}</span>
-            {t === offlineText && (
-              <button onClick={refetch} style={{
+  const backfillNote = offlineText ? (
+    <div role="status" aria-live="polite" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.4, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span>{offlineText}</span>
+        <button onClick={refetch} style={{
                 minHeight: isMobile ? 44 : 28, padding: '2px 12px',
                 background: 'var(--anthropic-orange-dim)', border: '1px solid var(--anthropic-orange)60', borderRadius: 8,
                 color: 'var(--anthropic-orange)', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.75rem', fontWeight: 600,
-              }}>
-                {lang === 'pt' ? 'Tentar de novo' : 'Try again'}
-              </button>
-            )}
-            {t === backfillText && teamSession?.journalBackfill?.state === 'failed' && (
-              <button onClick={() => setRetryImportOpen(true)} style={{
-                minHeight: isMobile ? 44 : 28, padding: '2px 12px',
-                background: 'var(--anthropic-orange-dim)', border: '1px solid var(--anthropic-orange)60', borderRadius: 8,
-                color: 'var(--anthropic-orange)', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.75rem', fontWeight: 600,
-              }}>
-                {lang === 'pt' ? 'Tentar importar de novo' : 'Retry the import'}
-              </button>
-            )}
-          </div>
-        ))}
-        <ConfirmModal
-          open={retryImportOpen}
-          tone="default"
-          title={lang === 'pt' ? 'Importar o histórico de novo?' : 'Retry the history import?'}
-          message={lang === 'pt' ? 'A importação roda em segundo plano, com prioridade baixa. Nada é apagado.' : 'The import runs in the background at low priority. Nothing is deleted.'}
-          confirmLabel={lang === 'pt' ? 'Importar' : 'Import'}
-          cancelLabel={lang === 'pt' ? 'Cancelar' : 'Cancel'}
-          onCancel={() => setRetryImportOpen(false)}
-          onConfirm={() => { setRetryImportOpen(false); void fetch('/api/journal/import', { method: 'POST' }).catch(() => {}) }}
-        />
+        }}>
+          {lang === 'pt' ? 'Tentar de novo' : 'Try again'}
+        </button>
       </div>
-    )
-    : null
+    </div>
+  ) : null
+  const retryImportModal = <ConfirmModal
+    open={retryImportOpen}
+    tone="default"
+    title={lang === 'pt' ? 'Importar o histórico de novo?' : 'Retry the history import?'}
+    message={lang === 'pt' ? 'A importação roda em segundo plano, com prioridade baixa. Nada é apagado.' : 'The import runs in the background at low priority. Nothing is deleted.'}
+    confirmLabel={lang === 'pt' ? 'Importar' : 'Import'}
+    cancelLabel={lang === 'pt' ? 'Cancelar' : 'Cancel'}
+    onCancel={() => setRetryImportOpen(false)}
+    onConfirm={() => { setRetryImportOpen(false); void fetch('/api/journal/import', { method: 'POST' }).catch(() => {}) }}
+  />
 
   // Built once so the magnifier layer (Task 8) can be handed the exact same object the pages get
   // via <Outlet context>; two separately-built objects would drift out of sync.
@@ -4941,6 +4953,7 @@ export default function AppLayout() {
           the page panel instead (see `<main>`), because the panel is what scrolls there. */}
       {!inSessionsWorkspace && isMobile && pageFooter}
 
+      {retryImportModal}
       {/* Global notification toasts (auto-dismiss with an exit animation; history in the bell) */}
       <NotificationToasts lang={lang} />
 
