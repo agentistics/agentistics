@@ -2018,7 +2018,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const body = await req.json().catch(() => ({})) as { ref?: unknown; role?: unknown; lang?: unknown; session?: unknown }
       const { verifySessionIdentity } = await import('./sessions/session-identity')
       const { roleOp, roleStatus, roleSenderFromBody, defaultRoleDeps } = await import('./sessions/session-roles')
-      const who = await roleSenderFromBody(body, verifySessionIdentity)
+      const who = await roleSenderFromBody(body, verifySessionIdentity, body.lang === 'pt' ? 'pt' : 'en')
       if (!who.ok) return json(who, 403)
       const sender = who.sender
       const out = await roleOp(sender, {
@@ -2837,10 +2837,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // `parentVerified` is the SERVER's statement, never the wire's: overwrite whatever arrived, then set
         // it only when the body's `session` proof is valid and names the `parent` it claims.
         const spawnBody = body.value as FleetSpawnBody & { session?: { id?: unknown; token?: unknown } }
-        const proof = spawnBody.session
+        const { markParentVerified } = await import('./sessions/session-roles')
         const { verifySessionIdentity } = await import('./sessions/session-identity')
-        const proven = proof && typeof proof === 'object' ? await verifySessionIdentity(proof.id, proof.token) : null
-        spawnBody.parentVerified = proven !== null && typeof spawnBody.parent === 'string' && spawnBody.parent.trim() === proven
+        await markParentVerified(spawnBody, verifySessionIdentity)
         const out = await runFleetSpawn(fleetLang(url.searchParams.get('lang')), spawnBody)
         // A memory-budget refusal is a DISTINCT status, not the plain `ok: false` every other
         // `planFleetSpawn` refusal answers with (an unknown harness, a relative path, …) — 409

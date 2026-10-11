@@ -37,4 +37,9 @@ describe('callerHoldsIdentity', () => {
     expect(await callerHoldsIdentity('a', {})).toBe(false)
     expect(await callerHoldsIdentity('a', { AGENTOP_MANAGED_ID: 'b' })).toBe(false)
   })
+  test('true when the key exists and the id is the pane\'s own AGENTOP_MANAGED_ID', async () => {
+    const { callerHoldsIdentity } = await import('./session-identity')
+    await ensureSessionIdentityKey()
+    expect(await callerHoldsIdentity('a', { AGENTOP_MANAGED_ID: 'a' })).toBe(true)
+  })
 })

@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { mkdir } from 'node:fs/promises'
 import { managedProcessLogPath } from './process-conversation'
-import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
+import { HARNESS_ORDER, hasRolePrefix, type HarnessId } from '@agentistics/core'
 // `GROUPINGS` and never a list typed into the usage text: the help is the only place a person can
 // read what `--group` accepts, and a second copy of that list drifts silently — the CLI would go on
 // accepting an arrangement its own help says nothing about. Same rule `cli-parse.ts` already applies
@@ -313,7 +313,7 @@ export function callerSessionId(env: Record<string, string | undefined> = proces
   return id ? id : undefined
 }
 
-async function start(
+export async function start(
   cmd: Extract<SessionCommand, { kind: 'start' }>,
   backend: SessionBackend,
 ): Promise<number> {
@@ -329,8 +329,10 @@ async function start(
   const parentLink = await parentLinkOf(callerSessionId())
   const parentSessionId = parentLink.parentSessionId
   const parentVerified = await callerHoldsIdentity(parentSessionId)
-  const role = cmd.role
-    ? await ensureSpawnRole([offeredConversationId, id], cmd.role, undefined, await spawnRoleOriginFor(parentSessionId, parentVerified))
+  // A name that already wears the leader prefix is a statement of intent: never let it silently become a worker.
+  const wantedRole = cmd.role ?? (cmd.label && hasRolePrefix(cmd.label) ? 'leader' as const : undefined)
+  const role = wantedRole
+    ? await ensureSpawnRole([offeredConversationId, id], wantedRole, undefined, await spawnRoleOriginFor(parentSessionId, parentVerified))
     : parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker', undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) : undefined
   const ctx = buildSpawnContext({ sessionId: id, cwd, harness: cmd.harness, lang, ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
   const planned = planSpawn({
@@ -522,7 +524,7 @@ async function resolveTaskAndAttempts(
  * A failure does not abort the rest: with five sessions requested, four that started are four that
  * are running, and pretending otherwise would leave them orphaned. Every outcome is reported.
  */
-async function batch(
+export async function batch(
   cmd: Extract<SessionCommand, { kind: 'batch' }>,
   backend: SessionBackend,
 ): Promise<number> {
@@ -553,7 +555,8 @@ async function batch(
     const id = newSessionId()
     const offeredConversationId = randomUUID()
     const logFile = managedProcessLogPath(spec.harness, id, AGENTISTICS_DATA_DIR)
-    const role = parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker', undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) : undefined
+    const batchRole = spec.name && hasRolePrefix(spec.name) ? 'leader' as const : parentSessionId ? 'worker' as const : undefined
+    const role = batchRole ? await ensureSpawnRole([offeredConversationId, id], batchRole, undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) : undefined
     const ctx = buildSpawnContext({ sessionId: id, cwd, harness: spec.harness, lang, ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)), ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
     const planned = planSpawn({
       harness: spec.harness,

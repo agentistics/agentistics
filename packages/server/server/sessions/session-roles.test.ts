@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, markRoleDelivered, migrateLegacyRoles, parseRoles, rekeyStoredRole, roleOfRow, originOfRow, listRoleOrigins, spawnRoleOrigin, roleSenderFromBody, roleOp, roleStatus, writeRolesDoc, type RoleDeps,
+  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, markRoleDelivered, migrateLegacyRoles, parseRoles, rekeyStoredRole, roleOfRow, originOfRow, listRoleOrigins, spawnRoleOrigin, roleSenderFromBody, markParentVerified, roleOp, roleStatus, writeRolesDoc, type RoleDeps,
 } from './session-roles'
 
 let dir = ''
@@ -309,5 +309,36 @@ describe('roleSenderFromBody (who is asking)', () => {
     expect(await roleSenderFromBody({ session: null }, verify)).toMatchObject({ ok: false, code: 'unverified_sender' })
     expect(await roleSenderFromBody({ session: { id: 'm1', token: 'bad' } }, verify)).toMatchObject({ ok: false, code: 'unverified_sender' })
     expect(roleStatus({ ok: false, code: 'unverified_sender', message: '' })).toBe(403)
+  })
+})
+
+describe('unverified_sender language', () => {
+  const verify = async () => null
+  test('PT when asked in PT, EN otherwise', async () => {
+    const pt = await roleSenderFromBody({ session: null }, verify, 'pt')
+    const en = await roleSenderFromBody({ session: null }, verify, 'en')
+    expect(pt).toMatchObject({ ok: false, code: 'unverified_sender' })
+    expect((pt as { message: string }).message).toContain('Só uma sessão')
+    expect((en as { message: string }).message).toContain('Only a session')
+    expect((en as { message: string }).message).not.toContain('without naming')
+  })
+})
+
+describe('markParentVerified (the wire never states it)', () => {
+  const verify = async (id: unknown, token: unknown) => (id === 'p1' && token === 'ok' ? 'p1' : null)
+  test('overwrites a forged parentVerified: true when there is no proof', async () => {
+    const body = { parent: 'p1', parentVerified: true } as { parent?: unknown; parentVerified?: unknown; session?: unknown }
+    expect(await markParentVerified(body, verify)).toBe(false)
+    expect(body.parentVerified).toBe(false)
+  })
+  test('overwrites it when the proof names a different parent', async () => {
+    const body = { parent: 'p2', parentVerified: true, session: { id: 'p1', token: 'ok' } }
+    await markParentVerified(body, verify)
+    expect(body.parentVerified).toBe(false)
+  })
+  test('true only for a valid proof naming the parent it claims', async () => {
+    const body = { parent: ' p1 ', parentVerified: false, session: { id: 'p1', token: 'ok' } }
+    await markParentVerified(body, verify)
+    expect(body.parentVerified).toBe(true)
   })
 })

@@ -130,7 +130,7 @@ export type RoleReply =
   | { ok: false; code: string; message: string; matches?: string[] }
 
 const MESSAGES: Record<string, string> = {
-  unverified_sender: 'Only a session started by agentistics can use this without naming a session reference.',
+  unverified_sender: 'Only a session started by agentistics can set session roles; this request could not prove which session it comes from.',
   missing_argument: 'A session reference is required.',
   bad_role: 'role must be leader, worker or auto.',
   no_such_session: 'No session on this machine matches that reference.',
@@ -138,7 +138,7 @@ const MESSAGES: Record<string, string> = {
   not_your_child: 'A session may set another session\'s role only for sessions it started itself.',
 }
 
-const UNVERIFIED = 'unverified_sender'
+const UNVERIFIED_PT = 'Só uma sessão iniciada pelo agentistics pode definir papéis de sessão; esta chamada não conseguiu provar de qual sessão vem.'
 const fail = (code: string, matches?: string[]): RoleReply => ({
   ok: false, code, message: MESSAGES[code] ?? code, ...(matches && matches.length > 0 ? { matches } : {}),
 })
@@ -261,12 +261,28 @@ export async function spawnRoleOriginFor(parentId: string | undefined, verified:
 export async function roleSenderFromBody(
   body: { session?: unknown },
   verify: (id: unknown, token: unknown) => Promise<string | null>,
+  lang?: string,
 ): Promise<{ ok: true; sender: string | null } | { ok: false; code: string; message: string }> {
   if (!('session' in body)) return { ok: true, sender: null }
   const s = body.session as { id?: unknown; token?: unknown } | null
   const sender = s && typeof s === 'object' ? await verify(s.id, s.token) : null
   if (sender) return { ok: true, sender }
-  return { ok: false, code: UNVERIFIED, message: MESSAGES[UNVERIFIED]! }
+  return { ok: false, code: 'unverified_sender', message: lang === 'pt' ? UNVERIFIED_PT : MESSAGES.unverified_sender! }
+}
+
+/**
+ * `parentVerified` for `/api/fleet/new` is the SERVER's statement, never the wire's: whatever arrived in the
+ * body is overwritten, and it is true only when the body's `session` proof is valid and names the `parent`.
+ */
+export async function markParentVerified(
+  body: { parent?: unknown; parentVerified?: unknown; session?: unknown },
+  verify: (id: unknown, token: unknown) => Promise<string | null>,
+): Promise<boolean> {
+  const proof = body.session as { id?: unknown; token?: unknown } | null | undefined
+  const proven = proof && typeof proof === 'object' ? await verify(proof.id, proof.token) : null
+  const ok = proven !== null && typeof body.parent === 'string' && body.parent.trim() === proven
+  body.parentVerified = ok
+  return ok
 }
 
 export function roleStatus(out: RoleReply): number {
