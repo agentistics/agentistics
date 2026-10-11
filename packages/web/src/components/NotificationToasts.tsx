@@ -40,9 +40,10 @@ export function NotificationToasts({ lang }: Props) {
   const notes = useNotifications()
   const [toasts, setToasts] = useState<AppNotification[]>([])
   const [leaving, setLeaving] = useState<Set<string>>(new Set())
-  const seen = useRef<Set<string>>(new Set())
+  const seen = useRef<Map<string, NotificationType>>(new Map())
   const initialized = useRef(false)
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const autoTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
   // Play the exit animation, then remove the toast from the DOM.
   const startLeave = useCallback((id: string) => {
@@ -70,12 +71,15 @@ export function NotificationToasts({ lang }: Props) {
     // replay historical notifications as toasts on mount.
     if (!initialized.current) {
       initialized.current = true
-      for (const n of notes) seen.current.add(n.id)
+      for (const n of notes) seen.current.set(n.id, n.type)
       return
     }
     for (const n of notes) {
-      if (seen.current.has(n.id)) continue
-      seen.current.add(n.id)
+      const previousType = seen.current.get(n.id)
+      seen.current.set(n.id, n.type)
+      const isNew = previousType === undefined
+      const severityChanged = previousType !== undefined && previousType !== n.type
+      if (!isNew && !severityChanged) continue
       // A session card is the Nay button's to show, and do-not-disturb keeps every session event
       // quiet. Both stay in the bell; only the popup is skipped.
       // The update's bell entry is the RECORD of the popup the Nay window already showed — never a toast too.
@@ -83,13 +87,25 @@ export function NotificationToasts({ lang }: Props) {
       // A plan-limit notice is Nay's card when the card can take it; otherwise it is a toast.
       if (pushLimitAlert(n)) continue
       if (n.code && (NAY_CARD_CODES.has(n.code) || (n.code.startsWith('session.') && n.code !== SESSION_MUTED_CODE && getNotificationSettings().doNotDisturb))) continue
-      setToasts(t => [n, ...t])
-      setTimeout(() => startLeave(n.id), AUTO_MS[n.type])
+      if (severityChanged) {
+        if (timers.current[n.id]) clearTimeout(timers.current[n.id])
+        if (autoTimers.current[n.id]) clearTimeout(autoTimers.current[n.id])
+        delete timers.current[n.id]
+        delete autoTimers.current[n.id]
+      }
+      setToasts(t => [n, ...t.filter(existing => existing.id !== n.id)])
+      autoTimers.current[n.id] = setTimeout(() => {
+        delete autoTimers.current[n.id]
+        startLeave(n.id)
+      }, AUTO_MS[n.type])
     }
   }, [notes, startLeave])
 
   // Clear any pending timers on unmount.
-  useEffect(() => () => { for (const id of Object.keys(timers.current)) clearTimeout(timers.current[id]) }, [])
+  useEffect(() => () => {
+    for (const id of Object.keys(timers.current)) clearTimeout(timers.current[id])
+    for (const id of Object.keys(autoTimers.current)) clearTimeout(autoTimers.current[id])
+  }, [])
 
   if (toasts.length === 0) return null
 

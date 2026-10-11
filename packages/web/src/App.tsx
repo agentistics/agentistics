@@ -1486,6 +1486,15 @@ export default function AppLayout() {
       .catch(() => setTeamSession(prev => resolveHostSessionRefresh(prev, null, HOST_SESSION_BOOT)))
   }, [])
   useEffect(() => { void refreshTeamSession() }, [refreshTeamSession])
+  // Journal backfill progress is part of the team-session response rather than the data poll. Keep
+  // the bell current while the server is working (and after a failure, so a retry can resolve it),
+  // then stop polling once the backfill reaches its terminal state.
+  useEffect(() => {
+    const state = teamSession?.journalBackfill?.state
+    if (state !== 'running' && state !== 'failed') return
+    const timer = window.setInterval(() => { void refreshTeamSession() }, 10_000)
+    return () => window.clearInterval(timer)
+  }, [refreshTeamSession, teamSession?.journalBackfill?.state])
   /**
    * Whether to offer the chat at all.
    *
