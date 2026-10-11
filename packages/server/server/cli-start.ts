@@ -164,7 +164,7 @@ import { classifyCodexSendFailure, codexIsBlockingFrame } from './sessions/codex
 import { planCrashGroup, planFellOffer } from './sessions/crash-group'
 import { selectFell } from './sessions/fell-selection'
 import {
-  broadcastReport, planBroadcast, type BroadcastOutcome,
+  broadcastReport, needsReopenConfirmation, planBroadcast, type BroadcastOutcome,
 } from './sessions/broadcast-plan'
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import { controlStrings } from '@agentistics/tui/control/i18n'
@@ -3979,7 +3979,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * a load spike on the machine the user is sitting at. One at a time is also what makes the
      * report readable in the order the list was shown.
      */
-    async broadcastPrompt(ids: readonly string[], text: string): Promise<ActionResult> {
+    async broadcastPrompt(ids: readonly string[], text: string, confirmed = false): Promise<ActionResult> {
       const s = S()
       const backend = await resolveBackend()
       const blocked = await backend.unavailable()
@@ -4004,6 +4004,21 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         })),
       })
       if (!plan.ok) return { ok: false, message: s.sessBroadcastRefused(plan.reason, plan.skipped.length) }
+
+      // Reopening is a consequential action, not an implementation detail of delivery. The
+      // broadcast may queue/send to live rows immediately, but a closed row is held until the
+      // person explicitly confirms the reopen in the same ConfirmModal used by other actions.
+      const reopen = plan.targets.filter(t => t.needsReopen)
+      if (needsReopenConfirmation(plan, confirmed)) {
+        const names = reopen.map(t => t.title).join(', ')
+        return {
+          ok: false,
+          confirm: true,
+          message: lang === 'pt'
+            ? `A mensagem também alcançará ${reopen.length} sessão(ões) fechada(s) (${names}) se você autorizar a reabertura.`
+            : `This message will also reach ${reopen.length} closed session(s) (${names}) if you allow reopening them.`,
+        }
+      }
 
       const outcomes: BroadcastOutcome[] = []
       let reopened = 0

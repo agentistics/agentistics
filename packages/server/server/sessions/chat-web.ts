@@ -46,6 +46,7 @@ import type { SessionSurfaceDeps } from './session-surface-deps'
 import { CLAUDE_DIR } from '../config'
 import { safeReadJson } from '../utils'
 import { isComposerMessage } from './composer-message'
+import { forkCapabilitySentence } from './fork-capability'
 
 /** What the journal remembers of a conversation whose transcript is gone — numbers only (D5, Q3). */
 export interface ChatRecorded {
@@ -216,6 +217,10 @@ async function readSessionChatCore(
   // every finished conversation with "no linked conversation yet", which is the one row people open
   // precisely to read one. `conversationOfRow` is the single place both shapes are known.
   const conversationId = conversationOfRow(row)
+  const forkNote = row.harness && (row as { conversationLinkVia?: string }).conversationLinkVia
+    && ['assigned-id', 'resumed-id'].includes((row as { conversationLinkVia?: string }).conversationLinkVia!)
+    ? forkCapabilitySentence(row.harness, lang)
+    : undefined
   // An echo recorded before the link existed is held under the ROW id; once the link is there it
   // moves to the conversation (never duplicated, never lost).
   if (conversationId) migratePrompts(row.id, conversationId)
@@ -365,7 +370,8 @@ async function readSessionChatCore(
       live,
     }
   }
-  return finishChatRead(id, conversationId, read, live, lang, row.id)
+  const finished = await finishChatRead(id, conversationId, read, live, lang, row.id)
+  return forkNote ? { ...finished, linkNote: forkNote } : finished
 }
 
 /**

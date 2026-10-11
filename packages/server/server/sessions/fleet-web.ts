@@ -509,7 +509,7 @@ async function runFleetActionOnce(
      */
     case 'broadcast':
       if (!host.broadcastPrompt) return { ok: false, message: s.sessionsNoHost }
-      return await host.broadcastPrompt(ids ?? [], text)
+      return await host.broadcastPrompt(ids ?? [], text, req.confirm === true)
     // The one action whose subject is a NAME rather than a row: a task is not a session.
     case 'deleteTask':
       if (!host.deleteTask) return { ok: false, message: s.sessionsNoHost }
