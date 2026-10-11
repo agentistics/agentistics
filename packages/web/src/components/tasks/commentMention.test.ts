@@ -69,6 +69,8 @@ describe('wired where comments are written', () => {
   test('the thread composer and the loose/overview composer both get the task\'s sessions and comments', () => {
     expect(src('ThreadsPanel.tsx')).toContain('mentions={{ sessions: sessionCandidates(detail.sessions)')
     expect(src('DeliveryDetail.tsx')).toContain('mentions={{ sessions: sessionCandidates(detail.sessions)')
+    expect(src('ThreadsPanel.tsx')).toContain('First message (optional) — # session, ^ comment')
+    expect(src('ThreadsPanel.tsx')).toContain('await addComment(id, \'you\', newBody.trim(), null, [], { threadId: r.thread.id })')
   })
   test('a comment link has somewhere to land and is followed in place', () => {
     expect(src('ThreadsPanel.tsx')).toContain('id={commentAnchor(c.id)}')

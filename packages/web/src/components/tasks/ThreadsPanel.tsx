@@ -129,13 +129,19 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
   }, [])
   const [creating, setCreating] = useState(false)
   const [newTitle, setNewTitle] = useState('')
+  const [newBody, setNewBody] = useState('')
   const create = async () => {
     const title = newTitle.trim()
     if (!title) return
     const r = await openThread(id, title)
-    setCreating(false); setNewTitle('')
+    if (!r.ok) return
+    // Opening a topic and writing its first record are separate server operations. Keeping the
+    // first message in this form means the topic field has the same #/^ picker as every later
+    // comment, while the thread API remains backward-compatible with title-only callers.
+    if (newBody.trim()) await addComment(id, 'you', newBody.trim(), null, [], { threadId: r.thread.id })
+    setCreating(false); setNewTitle(''); setNewBody('')
     await reload()
-    if (r.ok) setPicked(r.thread.id)
+    setPicked(r.thread.id)
   }
 
   const item = (s: ThreadSummary<TaskComment>) => {
@@ -233,9 +239,22 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
               autoFocus value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder={t.newThreadTitle}
               aria-label={t.newThreadTitle} style={{ ...field(isMobile), width: '100%' }}
             />
+            <CommentComposer
+              lang={lang}
+              value={newBody}
+              onChange={setNewBody}
+              attachments={[]}
+              onAttachments={() => {}}
+              mentions={{ sessions: sessionCandidates(detail.sessions), comments: commentCandidates(detail.comments) }}
+              ariaLabel={lang === 'pt' ? 'Primeira mensagem do tópico' : 'First message of the topic'}
+              placeholder={lang === 'pt' ? 'Primeira mensagem (opcional) — # sessão, ^ comentário' : 'First message (optional) — # session, ^ comment'}
+              submitLabel={t.create}
+              busy={false}
+              onSubmit={() => void create()}
+            />
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="submit" style={{ ...button(isMobile, 'primary'), flex: 1 }} disabled={!newTitle.trim()}>{t.create}</button>
-              <button type="button" style={{ ...button(isMobile), flex: 1 }} onClick={() => { setCreating(false); setNewTitle('') }}>{t.cancel}</button>
+              <button type="button" style={{ ...button(isMobile), flex: 1 }} onClick={() => { setCreating(false); setNewTitle(''); setNewBody('') }}>{t.cancel}</button>
             </div>
           </form>
         ) : (
