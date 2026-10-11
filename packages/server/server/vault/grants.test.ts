@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { memoryProtector } from '@agentistics/vault'
 import { __resetVaultForTests, __setVaultClockForTests, autoLockRemainingMs, ensureVaultOpen, lockVault, noteVaultActivity, sealToFile } from './service'
 import { __resetPersonalForTests, createGroup, createItem } from './personal'
-import { __resetGrantsForTests, grantBriefing, grantEnv, grantOf, grantSession, refKey, revokeGrant, scrubDeep, scrubTerminalLine, VAULT_REF_INSTRUCTION } from './grants'
+import { __setConfirmEachUseForTests, __resetGrantsForTests, authorizeUse, decideUse, grantBriefing, grantEnv, grantOf, grantSession, pendingUseRequests, refKey, revokeGrant, scrubDeep, scrubTerminalLine, VAULT_REF_INSTRUCTION } from './grants'
 
 let testNow = 1_800_000_000_000
 
@@ -128,5 +128,33 @@ describe('engine-api 1.7 vaultRefs (native sessions)', () => {
     expect(await nativeVaultRefs.env('rt1')).toEqual({ VAULT_OPENAI: 'sk-MARKER-888888' })
     expect(await nativeVaultRefs.scrub('rt1', 'k=sk-MARKER-888888')).toBe('k=«vault:OpenAI»')
     expect(await nativeVaultRefs.scrub('other', 'k=sk-MARKER-888888')).toBe('k=sk-MARKER-888888')
+  })
+})
+
+describe('VAULT.V4 confirm each use', () => {
+  test('creates one request per reference and approval opens a short window', async () => {
+    const b = (await createItem({ kind: 'login', name: 'Panel', fields: { login: 'user', password: 'MARKER-v4' } })).meta
+    await grantSession('v4', [b.id], [])
+    __setConfirmEachUseForTests(true)
+    const waiting = authorizeUse('v4', 'vault://panel/login', { command: 'echo $VAULT_PANEL_LOGIN', harness: 'codex' })
+    await new Promise(r => setTimeout(r, 0))
+    const [req] = pendingUseRequests()
+    expect(req?.field).toBe('login')
+    expect(req?.flags).toEqual([])
+    expect(decideUse(req!.id, true).ok).toBe(true)
+    expect(await waiting).toEqual({ ok: true, value: 'user' })
+    expect(await authorizeUse('v4', 'vault://panel/login', { command: null, harness: 'codex' })).toEqual({ ok: true, value: 'user' })
+  })
+
+  test('denial revokes only the requested field; legacy flag remains unchanged', async () => {
+    const b = (await createItem({ kind: 'login', name: 'Panel', fields: { login: 'user', password: 'MARKER-v4' } })).meta
+    await grantSession('v4', [b.id], [])
+    __setConfirmEachUseForTests(true)
+    const denied = authorizeUse('v4', 'vault://panel/password', { command: 'curl https://example.invalid', harness: 'claude' })
+    await new Promise(r => setTimeout(r, 0)); const req = pendingUseRequests()[0]!
+    decideUse(req.id, false)
+    const denial = await denied
+    expect(denial.ok ? 'ok' : denial.code).toBe('use-denied')
+    expect(grantOf('v4')?.refs.map(r => r.field)).toEqual(['login'])
   })
 })

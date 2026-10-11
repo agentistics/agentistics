@@ -8,8 +8,9 @@
  * values are opened at the moment of use (`resolveGrant`) and handed to exactly two consumers — the env
  * of a process being spawned, and the scrubber that watches that session's output.
  */
-import { envNameFor, KIND_FIELDS, makeScrubber, type PersonalMeta } from '@agentistics/vault'
-import { onVaultLock } from './service'
+import { envNameFor, KIND_FIELDS, makeScrubber, needsConfirm, type PersonalMeta } from '@agentistics/vault'
+import { broadcastNotification } from '../sse'
+import { onVaultLock, vaultAudit } from './service'
 import { listItems, revealField } from './personal'
 
 export interface GrantRef { itemId: string; field: string; ref: string; env: string; name: string }
@@ -19,7 +20,35 @@ let _grants = new Map<string, Grant>()
 let _now: () => number = () => Date.now()
 /** A compiled scrubber per granted session — holds the value FORMS while the grant lives; dropped with it. */
 let _scrubbers = new Map<string, ReturnType<typeof makeScrubber>>()
-onVaultLock(() => { _grants = new Map(); _scrubbers = new Map() })
+let _confirmEachUse = false
+let _epoch = 0
+let _requests = new Map<string, UseRequest>()
+let _approvals = new Map<string, number>()
+let _requestSeq = 0
+export type UseCode = 'not-granted' | 'secret-gone' | 'use-denied' | 'use-pending' | 'use-busy' | 'vault-locked' | 'use-unsupported'
+export interface UseContext { command: string | null; harness: string; callId?: string }
+export interface UseRequest {
+  id: string; epoch: number; sessionId: string; itemId: string; field: string; ref: string; name: string
+  sessionTitle: string; harness: string; command: string | null; flags: ('persists' | 'background' | 'network')[]
+  count: number; createdAt: number; expiresAt: number; state: 'pending' | 'approved' | 'denied' | 'expired' | 'cancelled'
+  waiters: Set<(ok: boolean) => void>
+}
+const requestKey = (sid: string, itemId: string, field: string, epoch = _epoch) => `${sid}\0${itemId}\0${field}\0${epoch}`
+const cleanCommand = (command: string | null): string | null => command === null ? null : command
+  .replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, '').slice(0, 200)
+const commandFlags = (command: string | null): UseRequest['flags'] => {
+  if (!command) return []
+  const f: UseRequest['flags'] = []
+  if (/(?:^|\s)(?:>>?|tee|export|set\s+-a|(?:cp|mv)\s+.*\S)/i.test(command)) f.push('persists')
+  if (/(?:&\s*$|\b(?:nohup|setsid|disown|screen|tmux)\b)/i.test(command)) f.push('background')
+  if (/\b(?:curl|wget|nc|ssh|scp|https?)\b/i.test(command)) f.push('network')
+  return f
+}
+function cancelAll(code: UseCode): void {
+  for (const r of _requests.values()) if (r.state === 'pending') { r.state = 'cancelled'; for (const w of r.waiters) w(false); r.waiters.clear(); vaultAudit({ type: 'vault.personal-use-cancelled', name: r.itemId, purpose: code }) }
+  _requests = new Map(); _approvals = new Map(); _epoch++
+}
+onVaultLock(() => { _grants = new Map(); _scrubbers = new Map(); cancelAll('vault-locked') })
 
 /** A reference key from a name: `Banco Itaú` → `banco-itau` (what `vault://` carries; unique per grant). */
 export function refKey(name: string): string {
@@ -55,7 +84,56 @@ export async function grantSession(sessionId: string, itemIds: readonly string[]
 
 export function grantOf(sessionId: string): Grant | null { return _grants.get(sessionId) ?? null }
 export function listGrants(): Grant[] { return [..._grants.values()] }
-export function revokeGrant(sessionId: string): boolean { _scrubbers.delete(sessionId); return _grants.delete(sessionId) }
+export function revokeGrant(sessionId: string): boolean {
+  for (const r of _requests.values()) if (r.sessionId === sessionId && r.state === 'pending') { r.state = 'cancelled'; for (const w of r.waiters) w(false); r.waiters.clear() }
+  for (const k of _approvals.keys()) if (k.startsWith(`${sessionId}\0`)) _approvals.delete(k)
+  _scrubbers.delete(sessionId); return _grants.delete(sessionId)
+}
+
+export function confirmEachUseEnabled(): boolean { return _confirmEachUse }
+export function __setConfirmEachUseForTests(enabled: boolean): void { _confirmEachUse = enabled }
+export function pendingUseRequests(): UseRequest[] { return [..._requests.values()].filter(r => r.state === 'pending').map(r => ({ ...r, waiters: new Set() })) }
+export function useRequest(id: string): UseRequest | null { const r = _requests.get(id); return r ? { ...r, waiters: new Set() } : null }
+function failUse(code: UseCode): { ok: false; code: UseCode } { return { ok: false, code } }
+async function openAuthorized(r: GrantRef): Promise<{ ok: true; value: string } | { ok: false; code: UseCode }> {
+  const v = await revealField(r.itemId, r.field)
+  if (!v.ok || v.meta.deletedAt) return failUse('secret-gone')
+  vaultAudit({ type: 'vault.personal-use', name: r.itemId }); return { ok: true, value: v.value }
+}
+function waitFor(r: UseRequest): Promise<boolean> { return new Promise(resolve => { r.waiters.add(resolve); setTimeout(() => { if (r.state !== 'pending') return; r.state = 'expired'; for (const w of r.waiters) w(false); r.waiters.clear(); vaultAudit({ type: 'vault.personal-use-expired', name: r.itemId }) }, Math.max(0, r.expiresAt - _now())) }) }
+
+/** The sole gate through which a personal value is returned to an agent process. */
+export async function authorizeUse(sessionId: string, ref: string, ctx: UseContext): Promise<{ ok: true; value: string } | { ok: false; code: UseCode }> {
+  const g = _grants.get(sessionId), r = g?.refs.find(x => x.ref === ref)
+  if (!r) return failUse('not-granted')
+  if (!_confirmEachUse) return openAuthorized(r)
+  const meta = (await listItems()).find(x => x.id === r.itemId)
+  if (!meta || meta.deletedAt) return failUse('secret-gone')
+  if (!needsConfirm(meta)) return openAuthorized(r)
+  const key = requestKey(sessionId, r.itemId, r.field)
+  const until = _approvals.get(key)
+  if (until !== undefined && until > _now()) return openAuthorized(r)
+  _approvals.delete(key)
+  let pending = [..._requests.values()].find(x => x.state === 'pending' && requestKey(x.sessionId, x.itemId, x.field, x.epoch) === key)
+  if (!pending && ([..._requests.values()].filter(x => x.state === 'pending' && x.sessionId === sessionId).length >= 3 || [..._requests.values()].filter(x => x.state === 'pending').length >= 10)) return failUse('use-busy')
+  if (!pending) {
+    const command = cleanCommand(ctx.command)
+    pending = { id: `use-${++_requestSeq}`, epoch: _epoch, sessionId, itemId: r.itemId, field: r.field, ref: r.ref, name: r.name, sessionTitle: sessionId, harness: ctx.harness, command, flags: commandFlags(command), count: 1, createdAt: _now(), expiresAt: _now() + 90_000, state: 'pending', waiters: new Set() }
+    _requests.set(pending.id, pending); vaultAudit({ type: 'vault.personal-use-asked', name: r.itemId, purpose: ctx.harness }); broadcastNotification({ type: 'warning', code: 'vault.use-request', meta: { requestId: pending.id, name: r.name } })
+  } else pending.count++
+  const approved = await waitFor(pending)
+  if (!approved || pending.state !== 'approved' || pending.epoch !== _epoch || !_grants.has(sessionId)) return failUse(pending.state === 'denied' ? 'use-denied' : 'use-pending')
+  return openAuthorized(r)
+}
+export function decideUse(id: string, approve: boolean, windowMin = 10): { ok: true } | { ok: false; code: 'use-not-pending' | 'not-found' } {
+  const r = _requests.get(id)
+  if (!r) return { ok: false, code: 'not-found' }
+  if (r.state !== 'pending' || r.expiresAt <= _now() || r.epoch !== _epoch) return { ok: false, code: 'use-not-pending' }
+  r.state = approve ? 'approved' : 'denied'
+  if (approve) { _approvals.set(requestKey(r.sessionId, r.itemId, r.field), _now() + Math.max(0, Math.min(60, windowMin)) * 60_000); vaultAudit({ type: 'vault.personal-use-approved', name: r.itemId }) } else { revokeRef(r.sessionId, r.itemId, r.field); vaultAudit({ type: 'vault.personal-use-denied', name: r.itemId }) }
+  for (const w of r.waiters) w(approve); r.waiters.clear(); return { ok: true }
+}
+function revokeRef(sessionId: string, itemId: string, field: string): void { const g = _grants.get(sessionId); if (g) g.refs = g.refs.filter(r => !(r.itemId === itemId && r.field === field)) }
 
 /** Is any session granted? (the served-copy scrubbers skip all work when none is) */
 export function anyGrant(): boolean { return _grants.size > 0 }
@@ -96,6 +174,14 @@ export async function grantEnv(sessionId: string): Promise<Record<string, string
   for (const { ref, value } of await resolveGrant(sessionId)) env[ref.env] = value
   return env
 }
+async function legacyNativeEnv(sessionId: string): Promise<Record<string, string>> {
+  const env: Record<string, string> = {}
+  for (const { ref, value } of await resolveGrant(sessionId)) {
+    if (!_confirmEachUse) { env[ref.env] = value; continue }
+    const meta = (await listItems()).find(x => x.id === ref.itemId); if (meta && !needsConfirm(meta)) env[ref.env] = value
+  }
+  return env
+}
 
 /** The one execution instruction shared by non-hook harnesses. It contains no value or phantom env var. */
 export const VAULT_REF_INSTRUCTION = "Use this secret inside a shell command as $(agentop vault ref 'vault://<key>') — the value is fetched at run time for this session only; never print it, never write it to a file or the conversation."
@@ -108,7 +194,7 @@ export function grantBriefing(g: Grant, lang: 'en' | 'pt' = 'en'): string {
     : `Vault secrets granted to this session (you do NOT see the values):\n${lines.join('\n')}\n${VAULT_REF_INSTRUCTION}\nAny value that shows up in an output is replaced by «vault:NAME». Never ask for a secret to be pasted.`
 }
 
-export function __resetGrantsForTests(now?: () => number): void { _grants = new Map(); _scrubbers = new Map(); _now = now ?? (() => Date.now()) }
+export function __resetGrantsForTests(now?: () => number): void { _grants = new Map(); _scrubbers = new Map(); _requests = new Map(); _approvals = new Map(); _epoch = 0; _requestSeq = 0; _confirmEachUse = false; _now = now ?? (() => Date.now()) }
 
 /** A reference as typed (`vault://key` or `vault://key/field`) → the granted ref it names, or null. */
 export function grantedRef(sessionId: string, ref: string): GrantRef | null {
@@ -122,13 +208,7 @@ export function grantedRef(sessionId: string, ref: string): GrantRef | null {
  * page: `agentop vault ref`, run INSIDE a granted session's command at the moment it executes. Only a ref
  * the session was granted; every use audited as the act (never the value).
  */
-export async function useRef(sessionId: string, ref: string): Promise<{ ok: true; value: string } | { ok: false; code: 'not-granted' | 'secret-gone' }> {
-  const r = grantedRef(sessionId, ref)
-  if (!r) return { ok: false, code: 'not-granted' }
-  const v = await revealField(r.itemId, r.field)
-  if (!v.ok || v.meta.deletedAt) return { ok: false, code: 'secret-gone' }
-  return { ok: true, value: v.value }
-}
+export async function useRef(sessionId: string, ref: string, ctx: UseContext = { command: null, harness: 'legacy' }): Promise<{ ok: true; value: string } | { ok: false; code: UseCode }> { return authorizeUse(sessionId, ref, ctx) }
 
 /** The cached scrubber for a session, if it is granted and warm — the synchronous paths (a terminal frame) use this. */
 export function scrubSync(sessionId: string, text: string): string {
@@ -176,6 +256,6 @@ export function scrubTerminalLine(sessionId: string, line: string): string {
  * sessions. Grant keys are namespaced `native:<id>`; the engine passes its own session id.
  */
 export const nativeVaultRefs = {
-  env: (sessionId: string) => grantEnv(`native:${sessionId}`),
+  env: (sessionId: string) => legacyNativeEnv(`native:${sessionId}`),
   scrub: (sessionId: string, text: string) => scrubFor(`native:${sessionId}`, text),
 }

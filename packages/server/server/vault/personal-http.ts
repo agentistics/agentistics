@@ -12,7 +12,7 @@ import * as store from './personal'
 import * as mobile from './mobile'
 import * as phone from './phone'
 import * as grants from './grants'
-import { vaultAudit, vaultLang } from './service'
+import { consumeFreshPresence, vaultAudit, vaultLang } from './service'
 import { informationalSecure } from './request-origin'
 
 type Reply = (r: { ok: boolean } & Record<string, unknown>, extra?: Record<string, unknown>) => Response
@@ -94,6 +94,15 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
   }
   if (req.method !== 'POST') return null
   const b = await body()
+
+  // One request, one reference, one human gesture. Approval never accepts an authenticator code.
+  const useDecision = path.match(/^\/api\/vault\/personal\/use\/([^/]+)\/(approve|deny)$/)
+  if (useDecision) {
+    if (!loopback && !mobile.consumeGestureToken(session, tokenOf(b), `use-approve:${useDecision[1]}`)) return reply(fail('mobile-gesture-required', 'Confirm this use with your phone biometrics.', 'Confirme este uso com a digital do celular.'))
+    if (loopback && !consumeFreshPresence({ session, token: fresh, binding: `use-approve:${useDecision[1]}` })) return reply(fail('presence-required', 'Confirm this use with Windows Hello.', 'Confirme este uso com o Windows Hello.'))
+    const r = grants.decideUse(useDecision[1]!, useDecision[2] === 'approve')
+    return reply(r.ok ? { ok: true } : fail(r.code, r.code === 'not-found' ? 'That use request no longer exists.' : 'That use request is no longer pending.', r.code === 'not-found' ? 'Esse pedido de uso não existe mais.' : 'Esse pedido de uso não está mais pendente.'))
+  }
 
   if (path === '/api/vault/personal') {
     const v = validateInput(b.item, { requireFields: true })
