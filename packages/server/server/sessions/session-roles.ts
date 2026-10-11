@@ -273,18 +273,20 @@ export async function ensureSpawnRole(
   desired: SessionRole,
   providedDeps?: RoleDeps,
 ): Promise<SessionRole> {
-  const deps = providedDeps ?? await defaultRoleDeps()
-  const doc = await loadRoles(deps)
-  const existing = keys.map(k => k ? doc.roles[k] : undefined).find((r): r is SessionRole => !!r)
-  if (existing) return existing
-  const nonEmpty = keys.filter((k): k is string => !!k)
-  if (nonEmpty.length === 0) return desired
-  // Some harnesses reject the offered conversation id. Keep the role under the managed id too,
-  // which is the stable key until the poller can discover the real conversation id.
-  const roles = { ...doc.roles }
-  for (const key of nonEmpty) roles[key] = desired
-  await writeRolesDoc(deps.dataDir, { ...doc, roles })
-  return desired
+  return serial(async () => {
+    const deps = providedDeps ?? await defaultRoleDeps()
+    const doc = await loadRoles(deps)
+    const existing = keys.map(k => k ? doc.roles[k] : undefined).find((r): r is SessionRole => !!r)
+    if (existing) return existing
+    const nonEmpty = keys.filter((k): k is string => !!k)
+    if (nonEmpty.length === 0) return desired
+    // Some harnesses reject the offered conversation id. Keep the role under the managed id too,
+    // which is the stable key until the poller can discover the real conversation id.
+    const roles = { ...doc.roles }
+    for (const key of nonEmpty) roles[key] = desired
+    await writeRolesDoc(deps.dataDir, { ...doc, roles })
+    return desired
+  })
 }
 
 /** The spawn context already carried this role, so a later reopen must not type it again. */
@@ -293,11 +295,13 @@ export async function markRoleDelivered(
   role: SessionRole,
   providedDeps?: Pick<RoleDeps, 'dataDir' | 'legacyPref'>,
 ): Promise<void> {
-  const deps = providedDeps ?? await defaultRoleDeps()
-  const doc = await loadRoles(deps)
-  const delivered = { ...(doc.lastDeliveredRole ?? {}) }
-  for (const key of keys) if (key) delivered[key] = role
-  await writeRolesDoc(deps.dataDir, { ...doc, lastDeliveredRole: delivered }).catch(() => {})
+  return serial(async () => {
+    const deps = providedDeps ?? await defaultRoleDeps()
+    const doc = await loadRoles(deps)
+    const delivered = { ...(doc.lastDeliveredRole ?? {}) }
+    for (const key of keys) if (key) delivered[key] = role
+    await writeRolesDoc(deps.dataDir, { ...doc, lastDeliveredRole: delivered }).catch(() => {})
+  })
 }
 
 /** Move role state when a managed row is replaced or its conversation is discovered. */
@@ -306,29 +310,31 @@ export async function rekeyStoredRole(
   toKeys: readonly (string | undefined)[],
   providedDeps?: Pick<RoleDeps, 'dataDir' | 'legacyPref'>,
 ): Promise<void> {
-  const deps = providedDeps ?? await defaultRoleDeps()
-  const doc = await loadRoles(deps)
-  const from = [...new Set(fromKeys.filter((k): k is string => !!k))]
-  const to = [...new Set(toKeys.filter((k): k is string => !!k))]
-  if (from.length === 0 || to.length === 0) return
+  return serial(async () => {
+    const deps = providedDeps ?? await defaultRoleDeps()
+    const doc = await loadRoles(deps)
+    const from = [...new Set(fromKeys.filter((k): k is string => !!k))]
+    const to = [...new Set(toKeys.filter((k): k is string => !!k))]
+    if (from.length === 0 || to.length === 0) return
 
-  const role = from.map(k => doc.roles[k]).find((r): r is SessionRole => !!r)
-  const delivered = from.map(k => doc.lastDeliveredRole?.[k]).find((r): r is SessionRole => !!r)
-  if (!role && !delivered) return
+    const role = from.map(k => doc.roles[k]).find((r): r is SessionRole => !!r)
+    const delivered = from.map(k => doc.lastDeliveredRole?.[k]).find((r): r is SessionRole => !!r)
+    if (!role && !delivered) return
 
-  const roles = { ...doc.roles }
-  const lastDeliveredRole = { ...(doc.lastDeliveredRole ?? {}) }
-  for (const key of to) {
-    if (role && !roles[key]) roles[key] = role
-    if (delivered && !lastDeliveredRole[key]) lastDeliveredRole[key] = delivered
-  }
-  for (const key of from) {
-    if (!to.includes(key)) {
-      delete roles[key]
-      delete lastDeliveredRole[key]
+    const roles = { ...doc.roles }
+    const lastDeliveredRole = { ...(doc.lastDeliveredRole ?? {}) }
+    for (const key of to) {
+      if (role && !roles[key]) roles[key] = role
+      if (delivered && !lastDeliveredRole[key]) lastDeliveredRole[key] = delivered
     }
-  }
-  await writeRolesDoc(deps.dataDir, { ...doc, roles, lastDeliveredRole }).catch(() => {})
+    for (const key of from) {
+      if (!to.includes(key)) {
+        delete roles[key]
+        delete lastDeliveredRole[key]
+      }
+    }
+    await writeRolesDoc(deps.dataDir, { ...doc, roles, lastDeliveredRole }).catch(() => {})
+  })
 }
 
 /** Apply the leader title convention through the same rename dependency used by role changes. */
@@ -352,17 +358,19 @@ export async function deliverStoredRole(
   conversationId?: string,
   providedDeps?: RoleDeps,
 ): Promise<boolean> {
-  const deps = providedDeps ?? await defaultRoleDeps()
-  const doc = await loadRoles(deps)
-  const key = conversationId ?? rowId
-  const role = doc.roles[key] ?? doc.roles[rowId]
-  if (!role || doc.lastDeliveredRole?.[key] === role || doc.lastDeliveredRole?.[rowId] === role) return false
-  if (deps.waitForInput && !(await deps.waitForInput(rowId).catch(() => false))) return false
-  const sent = (await deps.prompt(rowId, roleChangeNote(role)).catch(() => ({ ok: false }))).ok
-  if (!sent) return false
-  await writeRolesDoc(deps.dataDir, {
-    ...doc,
-    lastDeliveredRole: { ...doc.lastDeliveredRole, [key]: role },
-  }).catch(() => {})
-  return true
+  return serial(async () => {
+    const deps = providedDeps ?? await defaultRoleDeps()
+    const doc = await loadRoles(deps)
+    const key = conversationId ?? rowId
+    const role = doc.roles[key] ?? doc.roles[rowId]
+    if (!role || doc.lastDeliveredRole?.[key] === role || doc.lastDeliveredRole?.[rowId] === role) return false
+    if (deps.waitForInput && !(await deps.waitForInput(rowId).catch(() => false))) return false
+    const sent = (await deps.prompt(rowId, roleChangeNote(role)).catch(() => ({ ok: false }))).ok
+    if (!sent) return false
+    await writeRolesDoc(deps.dataDir, {
+      ...doc,
+      lastDeliveredRole: { ...doc.lastDeliveredRole, [key]: role },
+    }).catch(() => {})
+    return true
+  })
 }

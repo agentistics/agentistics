@@ -2068,12 +2068,15 @@ async function spawnManaged(req: {
   // A web spawn without a parent is intentionally unassigned; only an explicit role or a
   // verified parent-child relationship may create a stored role.
   const role = req.role
-    ? await ensureSpawnRole([req.resumeId, req.inherit?.conversationId, offeredConversationId, id], req.role)
+    ? await ensureSpawnRole([req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId, id], req.role)
     : req.parentSessionId
-      ? await ensureSpawnRole([req.resumeId, req.inherit?.conversationId, offeredConversationId, id], req.handoff ? 'leader' : 'worker')
+      ? await ensureSpawnRole([req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId, id], req.handoff ? 'leader' : 'worker')
       : undefined
   // The parent's conversation id, read from the registry at spawn: stable across the parent's reopens.
   const parentLink = req.parentSessionId ? await parentLinkOf(req.parentSessionId) : {}
+  const storedContextRole = role
+    ? { role }
+    : await resolveContextRole(id, req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId)
   const ctx = buildSpawnContext({
       sessionId: id,
       cwd: req.cwd,
@@ -2081,7 +2084,7 @@ async function spawnManaged(req: {
       lang,
       ...(await resolveContextTask(req.contextTaskId ?? req.taskId, req.contextSubtaskId, req.task)),
       ...(await resolveContextParent(req.parentSessionId ?? req.inherit?.parentConversationId ?? req.inherit?.parentSessionId)),
-      ...(role ? { role } : await resolveContextRole(id, req.resumeId, offeredConversationId)),
+      ...storedContextRole,
     })
   const logFile = managedProcessLogPath(req.harness, id, AGENTISTICS_DATA_DIR)
   const planned = planSpawn({
@@ -2122,9 +2125,15 @@ async function spawnManaged(req: {
   // agentop. Born linked — see `born-link.ts` for the window a patch-afterwards left open.
   const bornLink = bornConversationLink(planned.plan.conversationId, req.resumeId)
   await addSession(await spawnRow({ id, spawnedAt, req: { ...req, ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}) }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx) }))
-  if (role === 'leader') {
+  if (req.inherit) {
+    await rekeyStoredRole(
+      [req.inherit.id, req.inherit.conversationId, req.resumeId],
+      [id, planned.plan.conversationId],
+    )
+  }
+  if (storedContextRole.role === 'leader') {
     const title = req.label ?? req.inherit?.label ?? req.task ?? `${req.harness}/${basename(req.cwd)}`
-    await applyRoleTitle(id, title, role, lang)
+    await applyRoleTitle(id, title, storedContextRole.role, lang)
   }
   // A REOPEN keeps the replaced row's mute. A session linked to a conversation is muted under that
   // conversation, which the new row keeps; one with no link (codex, kimi, gemini…) was muted under its
@@ -2174,7 +2183,7 @@ async function spawnManaged(req: {
       : died.message ? s.sessDiedAtSpawn(died.message) : s.sessDiedAtSpawnStatus(died.status)
     return { ok: false, message }
   }
-  if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
+  if (storedContextRole.role) await markRoleDelivered([planned.plan.conversationId, id], storedContextRole.role)
 
   // F2.0 — a STRUCTURED session got the opening context from its driver (its declared channel), so a
   // first-message context left pending for the TUI must not be prepended to its first prompt again.

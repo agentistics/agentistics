@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, migrateLegacyRoles, parseRoles, rekeyStoredRole, roleOfRow, roleOp, roleStatus, writeRolesDoc, type RoleDeps,
+  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, markRoleDelivered, migrateLegacyRoles, parseRoles, rekeyStoredRole, roleOfRow, roleOp, roleStatus, writeRolesDoc, type RoleDeps,
 } from './session-roles'
 
 let dir = ''
@@ -104,6 +104,19 @@ describe('spawn role assignment and delivery', () => {
     await rekeyStoredRole(['managed'], ['managed', 'conversation'], deps)
     expect((await loadRoles(deps)).roles).toEqual({ managed: 'worker', conversation: 'worker' })
     expect((await loadRoles(deps)).lastDeliveredRole).toEqual({ managed: 'worker', conversation: 'worker' })
+  })
+
+  test('serializes rekey and delivery writes without losing either field', async () => {
+    const { deps } = fake([])
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { old: 'leader' }, lastDeliveredRole: {} })
+    await Promise.all([
+      rekeyStoredRole(['old'], ['new'], deps),
+      markRoleDelivered(['new'], 'leader', deps),
+    ])
+    expect(await loadRoles(deps)).toMatchObject({
+      roles: { new: 'leader' },
+      lastDeliveredRole: { new: 'leader' },
+    })
   })
 
   test('waits for input before recording an acknowledged delivery', async () => {
