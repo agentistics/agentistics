@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { getSessionRole, isWorkerMuted, setMuteWorkers, setSessionRole } from './sessionRoles'
+import { getSessionRole, isWorkerMuted, roleOriginLabel, setMuteWorkers, setSessionRole } from './sessionRoles'
 
 const ids = ['role-test-worker', 'role-test-leader', 'role-test-unknown']
 
@@ -25,5 +25,22 @@ describe('session roles', () => {
     expect(isWorkerMuted(ids[0]!, 'exited')).toBe(false)
     expect(isWorkerMuted(ids[1]!, 'working')).toBe(false)
     expect(isWorkerMuted(ids[2]!, 'working')).toBe(false)
+  })
+})
+
+describe('roleOriginLabel (the ⓘ wording)', () => {
+  it('says the person set it for manual and for an entry with no origin', () => {
+    expect(roleOriginLabel('manual', true)).toBe('definido por você')
+    expect(roleOriginLabel(undefined, true)).toBe('definido por você')
+    expect(roleOriginLabel('manual', false)).toBe('set by you')
+  })
+  it('names the leader session by title when known', () => {
+    expect(roleOriginLabel({ leader: 'p' }, true, 'Líder X')).toBe('definido pelo líder Líder X')
+    expect(roleOriginLabel({ leader: 'p' }, false, 'Lead X')).toBe('set by leader Lead X')
+    expect(roleOriginLabel({ leader: 'p' }, true)).toBe('definido por um líder')
+  })
+  it('says the session set it itself for auto', () => {
+    expect(roleOriginLabel('auto', true)).toBe('definido pela própria sessão')
+    expect(roleOriginLabel('auto', false)).toBe('set by the session itself')
   })
 })

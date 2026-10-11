@@ -2068,9 +2068,9 @@ async function spawnManaged(req: {
   // A web spawn without a parent is intentionally unassigned; only an explicit role or a
   // verified parent-child relationship may create a stored role.
   const role = req.role
-    ? await ensureSpawnRole([req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId, id], req.role)
+    ? await ensureSpawnRole([req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId, id], req.role, undefined, req.parentSessionId ? { leader: req.parentSessionId } : 'manual')
     : req.parentSessionId
-      ? await ensureSpawnRole([req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId, id], req.handoff ? 'leader' : 'worker')
+      ? await ensureSpawnRole([req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId, id], req.handoff ? 'leader' : 'worker', undefined, { leader: req.parentSessionId })
       : undefined
   // The parent's conversation id, read from the registry at spawn: stable across the parent's reopens.
   const parentLink = req.parentSessionId ? await parentLinkOf(req.parentSessionId) : {}

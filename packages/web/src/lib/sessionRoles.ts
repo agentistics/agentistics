@@ -3,6 +3,19 @@ import { createSharedPref } from './sharedPref'
 
 export type SessionRole = 'leader' | 'worker'
 export type SessionRoles = Record<string, SessionRole>
+/** Who set a role — mirrors the core `RoleOrigin`; an entry with none was the person's. */
+export type RoleOrigin = 'manual' | 'auto' | { leader: string }
+export type RoleOrigins = Record<string, RoleOrigin>
+
+/** The ⓘ's wording for who set the role. */
+export function roleOriginLabel(origin: RoleOrigin | undefined, pt: boolean, leaderTitle?: string): string {
+  if (origin === 'auto') return pt ? 'definido pela própria sessão' : 'set by the session itself'
+  if (origin && typeof origin === 'object') {
+    if (leaderTitle) return pt ? `definido pelo líder ${leaderTitle}` : `set by leader ${leaderTitle}`
+    return pt ? 'definido por um líder' : 'set by a leader'
+  }
+  return pt ? 'definido por você' : 'set by you'
+}
 const roleAliases = new Map<string, string>()
 
 // The roles live on the SERVER (`/api/session-roles`): it renames the session, tells it and stores the
@@ -16,6 +29,16 @@ const parseRoles = (raw: unknown): SessionRoles => {
 }
 
 let cache: SessionRoles = {}
+let originCache: RoleOrigins = {}
+const parseOrigins = (raw: unknown): RoleOrigins => {
+  const out: RoleOrigins = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+  for (const [id, o] of Object.entries(raw as Record<string, unknown>)) {
+    if (o === 'manual' || o === 'auto') out[id] = o
+    else if (o && typeof o === 'object' && typeof (o as { leader?: unknown }).leader === 'string') out[id] = { leader: (o as { leader: string }).leader }
+  }
+  return out
+}
 let pendingWrites = 0
 const listeners = new Set<() => void>()
 const emit = () => { for (const l of listeners) l() }
@@ -25,9 +48,11 @@ async function refreshRoles(): Promise<void> {
   try {
     const res = await fetch('/api/session-roles')
     if (!res.ok) return
-    const next = parseRoles(((await res.json()) as { roles?: unknown }).roles)
+    const body = (await res.json()) as { roles?: unknown; origins?: unknown }
+    const next = parseRoles(body.roles)
+    const nextOrigins = parseOrigins(body.origins)
     if (pendingWrites > 0) return
-    if (JSON.stringify(next) !== JSON.stringify(cache)) { cache = next; emit() }
+    if (JSON.stringify(next) !== JSON.stringify(cache) || JSON.stringify(nextOrigins) !== JSON.stringify(originCache)) { cache = next; originCache = nextOrigins; emit() }
   } catch { /* offline or no host power: keep what we have */ }
 }
 
@@ -53,11 +78,18 @@ const muted = createSharedPref<boolean>({
 export function getSessionRole(id: string): SessionRole | undefined {
   return roles.get()[id] ?? (roleAliases.get(id) ? roles.get()[roleAliases.get(id)!] : undefined)
 }
+export function getSessionRoleOrigin(id: string): RoleOrigin | undefined {
+  const key = originCache[id] !== undefined || cache[id] ? id : roleAliases.get(id)
+  return key ? originCache[key] : undefined
+}
 export function setSessionRole(id: string, role: SessionRole | null): void {
   const next = { ...cache }
-  if (role) next[id] = role
-  else delete next[id]
+  const nextOrigins = { ...originCache }
+  // A choice made in the UI is the person's.
+  if (role) { next[id] = role; nextOrigins[id] = 'manual' }
+  else { delete next[id]; delete nextOrigins[id] }
   cache = next
+  originCache = nextOrigins
   emit()
   pendingWrites++
   void (async () => {
@@ -83,6 +115,9 @@ export function registerSessionRoleAlias(id: string, stableKey: string): void {
 }
 export function useSessionRole(id: string): SessionRole | undefined {
   return useSyncExternalStore(roles.subscribe, () => getSessionRole(id), () => undefined)
+}
+export function useSessionRoleOrigin(id: string): RoleOrigin | undefined {
+  return useSyncExternalStore(roles.subscribe, () => getSessionRoleOrigin(id), () => undefined)
 }
 export function useSessionRoles(): SessionRoles { return useSyncExternalStore(roles.subscribe, roles.get, roles.serverSnapshot) }
 export function useMuteWorkers(): boolean { return useSyncExternalStore(muted.subscribe, muted.get, muted.serverSnapshot) }

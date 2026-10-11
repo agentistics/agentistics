@@ -328,8 +328,8 @@ async function start(
   const parentLink = await parentLinkOf(callerSessionId())
   const parentSessionId = parentLink.parentSessionId
   const role = cmd.role
-    ? await ensureSpawnRole([offeredConversationId, id], cmd.role)
-    : parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker') : undefined
+    ? await ensureSpawnRole([offeredConversationId, id], cmd.role, undefined, parentSessionId ? { leader: parentSessionId } : 'manual')
+    : parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker', undefined, { leader: parentSessionId }) : undefined
   const ctx = buildSpawnContext({ sessionId: id, cwd, harness: cmd.harness, lang, ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
   const planned = planSpawn({
     harness: cmd.harness, cwd, prompt: cmd.prompt, model: cmd.model, effort: cmd.effort,
@@ -550,7 +550,7 @@ async function batch(
     const id = newSessionId()
     const offeredConversationId = randomUUID()
     const logFile = managedProcessLogPath(spec.harness, id, AGENTISTICS_DATA_DIR)
-    const role = parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker') : undefined
+    const role = parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker', undefined, { leader: parentSessionId }) : undefined
     const ctx = buildSpawnContext({ sessionId: id, cwd, harness: spec.harness, lang, ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)), ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
     const planned = planSpawn({
       harness: spec.harness,

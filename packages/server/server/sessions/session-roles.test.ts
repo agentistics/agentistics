@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, markRoleDelivered, migrateLegacyRoles, parseRoles, rekeyStoredRole, roleOfRow, roleOp, roleStatus, writeRolesDoc, type RoleDeps,
+  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, markRoleDelivered, migrateLegacyRoles, parseRoles, rekeyStoredRole, roleOfRow, originOfRow, listRoleOrigins, roleOp, roleStatus, writeRolesDoc, type RoleDeps,
 } from './session-roles'
 
 let dir = ''
@@ -233,5 +233,55 @@ describe('roleOp (the agentistics_session_role handler)', () => {
     const { deps, renames } = fake([{ id: 'm1', title: 'T' }], { uiLang: async () => 'pt' })
     await roleOp(null, { ref: 'm1', role: 'leader' }, deps)
     expect(renames[0]![1]).toBe('[ LÍDER ] - T')
+  })
+})
+
+describe('role origin (who set it)', () => {
+  test('the browser / CLI (no verified sender) is manual', async () => {
+    const { deps } = fake([{ id: 'm1', conversationId: 'c1', title: 'T' }])
+    const out = await roleOp(null, { ref: 'm1', role: 'worker' }, deps)
+    expect(out).toMatchObject({ ok: true, origin: 'manual' })
+    expect(await listRoleOrigins(deps)).toEqual({ c1: 'manual' })
+  })
+  test('a session setting its own role is auto', async () => {
+    const { deps } = fake([{ id: 'm1', title: 'T' }])
+    expect(await roleOp('m1', { role: 'leader' }, deps)).toMatchObject({ ok: true, origin: 'auto' })
+    expect(await listRoleOrigins(deps)).toEqual({ m1: 'auto' })
+  })
+  test('a leader setting a child records itself as the origin', async () => {
+    const { deps } = fake([{ id: 'p', title: 'P' }, { id: 'kid', title: 'Kid' }], { parentOf: async id => (id === 'kid' ? 'p' : undefined) })
+    expect(await roleOp('p', { ref: 'kid', role: 'worker' }, deps)).toMatchObject({ ok: true, origin: { leader: 'p' } })
+    expect(await listRoleOrigins(deps)).toEqual({ kid: { leader: 'p' } })
+  })
+  test('the owner choosing the same role afterwards takes the origin back (manual)', async () => {
+    const { deps } = fake([{ id: 'm1', title: 'T' }])
+    await roleOp('m1', { role: 'worker' }, deps)
+    const out = await roleOp(null, { ref: 'm1', role: 'worker' }, deps)
+    expect(out).toMatchObject({ ok: true, changed: false, origin: 'manual' })
+    expect(await listRoleOrigins(deps)).toEqual({ m1: 'manual' })
+  })
+  test('clearing the role clears the origin', async () => {
+    const { deps } = fake([{ id: 'm1', title: 'T' }])
+    await roleOp('m1', { role: 'worker' }, deps)
+    await roleOp(null, { ref: 'm1', role: 'auto' }, deps)
+    expect(await listRoleOrigins(deps)).toEqual({})
+  })
+  test('an entry stored without an origin reads as manual', async () => {
+    await writeFile(join(dir, SESSION_ROLES_FILE), JSON.stringify({ version: 1, migrated: true, roles: { c1: 'leader' } }))
+    expect(originOfRow((await loadRoles({ dataDir: dir, legacyPref: async () => undefined })), { id: 'm1', conversationId: 'c1' })).toBe('manual')
+  })
+  test('rekey moves the origin with the role', async () => {
+    const { deps } = fake([{ id: 'm1', title: 'T' }])
+    await roleOp('m1', { role: 'leader' }, deps)
+    await rekeyStoredRole(['m1'], ['c9'], deps)
+    expect(await listRoleOrigins(deps)).toEqual({ c9: 'auto' })
+  })
+})
+
+describe('ensureSpawnRole origin', () => {
+  test('records the spawning leader as the origin', async () => {
+    const { deps } = fake([])
+    await ensureSpawnRole(['c1', 'm1'], 'worker', deps, { leader: 'p' })
+    expect(await listRoleOrigins(deps)).toEqual({ c1: { leader: 'p' }, m1: { leader: 'p' } })
   })
 })

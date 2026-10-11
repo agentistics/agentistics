@@ -21,8 +21,8 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
-  isSessionRole, isSessionRoleRequest, resolveSessionForGroup, roleChangeNote, roleLine, sessionIdentityKey, titleForRole,
-  type HarnessId, type RoleLang, type SessionRole,
+  isSessionRole, isSessionRoleRequest, parseRoleOrigin, resolveSessionForGroup, roleChangeNote, roleLine, sessionIdentityKey, titleForRole,
+  type HarnessId, type RoleLang, type RoleOrigin, type SessionRole,
 } from '@agentistics/core'
 import type { FleetRowForGroups } from './session-groups-web'
 
@@ -33,6 +33,8 @@ export interface RolesDoc {
   /** The legacy web preference (`ui.sessionRoles`) was folded in. Done once, never again. */
   migrated: boolean
   roles: Record<string, SessionRole>
+  /** Who set each role (same keys as `roles`). Absent = set by the person (back-compat). */
+  origins?: Record<string, RoleOrigin>
   /** Last role note delivered to a session. Prevents reopen/takeover from typing it repeatedly. */
   lastDeliveredRole?: Record<string, SessionRole>
 }
@@ -46,6 +48,13 @@ export function parseRoles(raw: unknown): Record<string, SessionRole> {
   return out
 }
 
+export function parseOrigins(raw: unknown): Record<string, RoleOrigin> {
+  const out: Record<string, RoleOrigin> = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) { const o = parseRoleOrigin(v); if (o) out[k] = o }
+  return out
+}
+
 export async function readRolesDoc(dataDir: string): Promise<RolesDoc> {
   try {
     const p = JSON.parse(await readFile(join(dataDir, SESSION_ROLES_FILE), 'utf-8')) as Partial<RolesDoc>
@@ -53,6 +62,7 @@ export async function readRolesDoc(dataDir: string): Promise<RolesDoc> {
       version: 1,
       migrated: p.migrated === true,
       roles: parseRoles(p.roles),
+      origins: parseOrigins(p.origins),
       lastDeliveredRole: parseRoles(p.lastDeliveredRole),
     }
   } catch {
@@ -82,6 +92,13 @@ export function roleOfRow(roles: Record<string, SessionRole>, row: { id: string;
   return roles[sessionIdentityKey(row)] ?? roles[row.id]
 }
 
+/** Who set the stored role of a row; an entry written before origins existed was the person's. */
+export function originOfRow(doc: Pick<RolesDoc, 'roles' | 'origins'>, row: { id: string; conversationId?: string | undefined }): RoleOrigin {
+  const key = sessionIdentityKey(row)
+  const k = doc.roles[key] ? key : row.id
+  return doc.origins?.[k] ?? 'manual'
+}
+
 // ---------------------------------------------------------------------------------------------
 
 export interface RoleDeps {
@@ -109,7 +126,7 @@ export interface RoleRequest {
 }
 
 export type RoleReply =
-  | { ok: true; key: string; id?: string; title?: string; role: SessionRole | 'auto'; changed: boolean; renamed: boolean; notified: boolean; line: string; message: string }
+  | { ok: true; key: string; id?: string; title?: string; role: SessionRole | 'auto'; changed: boolean; renamed: boolean; notified: boolean; origin?: RoleOrigin; line: string; message: string }
   | { ok: false; code: string; message: string; matches?: string[] }
 
 const MESSAGES: Record<string, string> = {
@@ -170,6 +187,9 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
     }
     const resolved = target
     const key = sessionIdentityKey(resolved)
+    // Who is asking decides the origin: no verified sender = the person (browser/CLI), the session
+    // itself = auto, a verified other session = that leader.
+    const origin: RoleOrigin = senderId === null ? 'manual' : own ? 'auto' : { leader: senderId }
     const state = await serial(async () => {
       const doc = await loadRoles(deps)
       const current = roleOfRow(doc.roles, resolved)
@@ -181,10 +201,12 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
       const next: SessionRole | null = req.role === 'auto' ? null : req.role
       const changed = next !== (current ?? null)
       const roles = { ...doc.roles }
+      const origins = { ...(doc.origins ?? {}) }
       delete roles[resolved.id]
-      if (next) roles[key] = next
-      else delete roles[key]
-      await writeRolesDoc(deps.dataDir, { ...doc, roles })
+      delete origins[resolved.id]
+      if (next) { roles[key] = next; origins[key] = origin }
+      else { delete roles[key]; delete origins[key] }
+      await writeRolesDoc(deps.dataDir, { ...doc, roles, origins })
       return { kind: 'change' as const, doc, roles, base, current, next, changed }
     })
     if (state.kind !== 'change') return state.reply
@@ -205,7 +227,7 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
       })
     }
     return {
-      ok: true, ...base, role: next ?? 'auto', changed, renamed, notified, line: roleLine(next),
+      ok: true, ...base, role: next ?? 'auto', changed, renamed, notified, ...(next ? { origin } : {}), line: roleLine(next),
       message: changed
         ? `Role set to ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}${notified ? '; the session was told' : ''}.`
         : `Role is already ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}.`,
@@ -219,6 +241,14 @@ export function roleStatus(out: RoleReply): number {
   if (out.code === 'ambiguous_session') return 409
   if (out.code === 'not_your_child') return 403
   return 400
+}
+
+/** Who set each stored role, for the browser (`GET /api/session-roles` → `origins`). */
+export async function listRoleOrigins(deps: Pick<RoleDeps, 'dataDir' | 'legacyPref'>): Promise<Record<string, RoleOrigin>> {
+  const doc = await loadRoles(deps)
+  const out: Record<string, RoleOrigin> = {}
+  for (const k of Object.keys(doc.roles)) out[k] = doc.origins?.[k] ?? 'manual'
+  return out
 }
 
 /** The stored roles, for the browser (`GET /api/session-roles`). */
@@ -276,6 +306,7 @@ export async function ensureSpawnRole(
   keys: readonly (string | undefined)[],
   desired: SessionRole,
   providedDeps?: RoleDeps,
+  origin: RoleOrigin = 'manual',
 ): Promise<SessionRole> {
   return serial(async () => {
     const deps = providedDeps ?? await defaultRoleDeps()
@@ -287,8 +318,9 @@ export async function ensureSpawnRole(
     // Some harnesses reject the offered conversation id. Keep the role under the managed id too,
     // which is the stable key until the poller can discover the real conversation id.
     const roles = { ...doc.roles }
-    for (const key of nonEmpty) roles[key] = desired
-    await writeRolesDoc(deps.dataDir, { ...doc, roles })
+    const origins = { ...(doc.origins ?? {}) }
+    for (const key of nonEmpty) { roles[key] = desired; origins[key] = origin }
+    await writeRolesDoc(deps.dataDir, { ...doc, roles, origins })
     return desired
   })
 }
@@ -326,18 +358,21 @@ export async function rekeyStoredRole(
     if (!role && !delivered) return
 
     const roles = { ...doc.roles }
+    const origins = { ...(doc.origins ?? {}) }
+    const fromOrigin = from.map(k => doc.origins?.[k]).find(o => !!o)
     const lastDeliveredRole = { ...(doc.lastDeliveredRole ?? {}) }
     for (const key of to) {
-      if (role && !roles[key]) roles[key] = role
+      if (role && !roles[key]) { roles[key] = role; if (fromOrigin) origins[key] = fromOrigin }
       if (delivered && !lastDeliveredRole[key]) lastDeliveredRole[key] = delivered
     }
     for (const key of from) {
       if (!to.includes(key)) {
         delete roles[key]
+        delete origins[key]
         delete lastDeliveredRole[key]
       }
     }
-    await writeRolesDoc(deps.dataDir, { ...doc, roles, lastDeliveredRole }).catch(() => {})
+    await writeRolesDoc(deps.dataDir, { ...doc, roles, origins, lastDeliveredRole }).catch(() => {})
   })
 }
 

@@ -2010,8 +2010,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // map and sets any session's role; a session calling through the MCP proves who it is (HMAC, as for
     // messages) and may set its own role, or its children's.
     if (url.pathname === '/api/session-roles' && req.method === 'GET') {
-      const { listRoles, defaultRoleDeps } = await import('./sessions/session-roles')
-      return json({ roles: await listRoles(await defaultRoleDeps()) })
+      const { listRoles, listRoleOrigins, defaultRoleDeps } = await import('./sessions/session-roles')
+      const deps = await defaultRoleDeps()
+      return json({ roles: await listRoles(deps), origins: await listRoleOrigins(deps) })
     }
     if (url.pathname === '/api/session-roles' && req.method === 'POST') {
       const body = await req.json().catch(() => ({})) as { ref?: unknown; role?: unknown; lang?: unknown; session?: { id?: unknown; token?: unknown } }
