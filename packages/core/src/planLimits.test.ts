@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   alternativeWithRoom, currentUsedPct, forecastWindow, mostRoom, parseClaudeRateLimitEvent,
-  parseCodexRateLimits, planThresholdNotices, registeredPlanLabel, PLAN_WINDOW_MS,
+  parseCodexRateLimits, planBudget, planPace, planThresholdNotices, registeredPlanLabel,
+  routeRecommendation, PLAN_WINDOW_MS,
   type PlanLimits, type PlanNoticeState,
 } from './planLimits'
 
@@ -114,4 +115,37 @@ test('registered plan label: current subscription period only', () => {
   expect(registeredPlanLabel(billing, 'claude', Date.parse('2026-10-09T12:00:00Z'))).toBe('Max 20x')
   expect(registeredPlanLabel(billing, 'claude', Date.parse('2026-03-01T12:00:00Z'))).toBe('Max antigo')
   expect(registeredPlanLabel(billing, 'codex', Date.parse('2026-10-09T12:00:00Z'))).toBeUndefined()
+})
+
+describe('budgets, pacing, and routing', () => {
+  const now = Date.parse('2026-10-10T00:00:00Z')
+  const reset5 = now + 5 * H
+  const resetWeek = now + 3 * 24 * H
+  const withPlan = (harness: 'claude' | 'codex', five: number, week: number, plan: string): PlanLimits => ({
+    ...lim(harness, [win('5h', five, reset5), win('week', week, resetWeek)]), plan,
+  })
+
+  test('hold is driven by the five-hour or 95% weekly threshold', () => {
+    expect(planBudget(withPlan('claude', 90, 55, 'Max'), now).status).toBe('hold')
+    expect(planBudget(withPlan('codex', 11, 35, 'Plus'), now).status).toBe('ok')
+    expect(planBudget(withPlan('codex', 11, 80, 'Plus'), now).status).toBe('tight')
+    expect(planBudget(withPlan('codex', 11, 95, 'Plus'), now).status).toBe('hold')
+  })
+
+  test('routes spec implementation to codex and QA away from its author', () => {
+    const claude = planBudget(withPlan('claude', 20, 55, 'Max'), now)
+    const codex = planBudget(withPlan('codex', 11, 35, 'Plus'), now)
+    const gemini = { ...planBudget({ ...withPlan('gemini' as any, 10, 20, 'Pro'), harness: 'gemini' as any }, now), ...planPace(withPlan('gemini' as any, 10, 20, 'Pro'), now) }
+    const budgets = [claude, codex, gemini]
+    expect(routeRecommendation(budgets, 'spec-impl').harness).toBe('codex')
+    expect(routeRecommendation(budgets, 'qa', 'codex').harness).toBe('gemini')
+  })
+
+  test('under pace increases cadence and is stated in the recommendation', () => {
+    const l = { ...withPlan('codex', 11, 35, 'Plus'), updatedAt: now }
+    const pace = planPace(l, now, [{ ...l, updatedAt: now - 6 * H, windows: [win('5h', 10, reset5), win('week', 34, resetWeek)] }])
+    expect(pace.paceStatus).toBe('under')
+    expect(pace.suggestedParallel).toBeGreaterThanOrEqual(2)
+    expect(routeRecommendation([{ ...planBudget(l, now), ...pace }], 'mechanical').reason).toContain('Under pace')
+  })
 })

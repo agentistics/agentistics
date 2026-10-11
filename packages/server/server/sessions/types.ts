@@ -310,6 +310,12 @@ export interface ManagedSession {
   createdAt: string
   model?: string
   effort?: string
+  /** Explicit leader role, used by the context handoff hint. */
+  leader?: boolean
+  /** Highest LEADER.HANDOFF.HINT level already delivered. */
+  handoffHintLevel?: number
+  /** Context size when the last hint went out; reminders come every +50k after it. */
+  handoffHintTokens?: number
   label?: string
   /**
    * When the label was written, epoch ms — so a name typed HERE can be compared with one typed
