@@ -18,11 +18,9 @@
  *  - **it carries `at`**, so any of them can say how long it has been waiting instead of showing a
  *    bubble with no age.
  *
- * IT IS IN MEMORY, DELIBERATELY. This is state about a message in flight, and the durable record of
- * whether it arrived is the transcript itself. A server restart drops the queue, which is honest:
- * afterwards the transcript either carries the message or it does not, and nothing here is claiming
- * otherwise. Persisting it would create the one thing this file exists to remove — an entry that
- * outlives the truth and cannot be told apart from it.
+ * It is persisted under the server data directory. A restart must not turn a delivered-but-not-yet-
+ * echoed message into a ghost, and the queue is bounded and retired as soon as the transcript accounts
+ * for it. The file is deliberately a small implementation detail rather than part of the task book.
  *
  * RETIRING IS `pendingEchoes`, from `@agentistics/core`, which is where that rule now lives BECAUSE
  * of this file. The browser has always had it; a second implementation here would be a second
@@ -30,6 +28,9 @@
  */
 
 import { pendingEchoes } from '@agentistics/core'
+import { AGENTISTICS_DATA_DIR } from '../config'
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 export interface PendingPrompt {
   /** Exactly what was handed to the session. */
@@ -50,15 +51,58 @@ export const PENDING_TTL_MS = 20 * 60 * 1000
 
 /** The most entries kept per conversation — a runaway sender cannot grow this without bound. */
 const MAX_PER_SESSION = 50
+const MAX_TOTAL = 500
+const STORE_FILE = join(AGENTISTICS_DATA_DIR, 'pending-prompts.json')
 
 const byConversation = new Map<string, PendingPrompt[]>()
+let loaded = false
+
+function trimTotal(): void {
+  const all = [...byConversation.entries()].flatMap(([conversationId, prompts]) => prompts.map(prompt => ({ conversationId, prompt })))
+  if (all.length <= MAX_TOTAL) return
+  const keep = new Set(all.sort((a, b) => a.prompt.at - b.prompt.at).slice(-MAX_TOTAL).map(x => x.prompt))
+  for (const [id, prompts] of byConversation) {
+    const left = prompts.filter(prompt => keep.has(prompt))
+    if (left.length) byConversation.set(id, left)
+    else byConversation.delete(id)
+  }
+}
+
+function load(): void {
+  if (loaded) return
+  loaded = true
+  try {
+    const raw = JSON.parse(readFileSync(STORE_FILE, 'utf8')) as unknown
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return
+    for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (!id || !Array.isArray(value)) continue
+      const prompts = value.filter((p): p is PendingPrompt => Boolean(p) && typeof p === 'object'
+        && typeof (p as PendingPrompt).text === 'string' && (p as PendingPrompt).text.trim() !== ''
+        && Number.isFinite((p as PendingPrompt).at))
+      if (prompts.length) byConversation.set(id, prompts.slice(-MAX_PER_SESSION))
+    }
+    trimTotal()
+  } catch { /* missing/corrupt state is an empty queue */ }
+}
+
+function persist(): void {
+  try {
+    mkdirSync(AGENTISTICS_DATA_DIR, { recursive: true, mode: 0o700 })
+    const tmp = `${STORE_FILE}.tmp-${process.pid}`
+    writeFileSync(tmp, JSON.stringify(Object.fromEntries(byConversation)), { mode: 0o600 })
+    renameSync(tmp, STORE_FILE)
+  } catch { /* a display queue must never make a successful prompt fail */ }
+}
 
 /** Record a message just handed to a session. Called only on a delivery the backend confirmed. */
 export function recordPrompt(conversationId: string, text: string, now = Date.now()): void {
+  load()
   if (conversationId === '' || text.trim() === '') return
   const list = byConversation.get(conversationId) ?? []
   list.push({ text, at: now })
   byConversation.set(conversationId, list.slice(-MAX_PER_SESSION))
+  trimTotal()
+  persist()
 }
 
 /**
@@ -72,6 +116,7 @@ export function pendingFor(
   userTurns: readonly string[],
   now = Date.now(),
 ): PendingPrompt[] {
+  load()
   const list = byConversation.get(conversationId)
   if (list === undefined || list.length === 0) return []
   const fresh = list.filter(p => now - p.at < PENDING_TTL_MS)
@@ -79,6 +124,7 @@ export function pendingFor(
   const kept = fresh.filter(p => stillWaiting.has(p.text))
   if (kept.length === 0) byConversation.delete(conversationId)
   else byConversation.set(conversationId, kept)
+  if (fresh.length !== list.length || kept.length !== fresh.length) persist()
   return kept
 }
 
@@ -92,6 +138,7 @@ export function pendingFor(
  * read, and idempotent: with nothing under `fromKey` it does nothing.
  */
 export function migratePrompts(fromKey: string, toKey: string): void {
+  load()
   if (fromKey === '' || toKey === '' || fromKey === toKey) return
   const moved = byConversation.get(fromKey)
   if (moved === undefined) return
@@ -100,14 +147,27 @@ export function migratePrompts(fromKey: string, toKey: string): void {
   for (const p of moved) if (!into.some(q => q.text === p.text && q.at === p.at)) into.push(p)
   into.sort((a, b) => a.at - b.at)
   byConversation.set(toKey, into.slice(-MAX_PER_SESSION))
+  trimTotal()
+  persist()
 }
 
 /** Drop everything for a conversation — used when a session is killed. */
 export function clearPrompts(conversationId: string): void {
+  load()
   byConversation.delete(conversationId)
+  persist()
 }
 
 /** Test seam only: the store is process-wide, so a test that writes must be able to reset it. */
 export function resetPrompts(): void {
   byConversation.clear()
+  loaded = true
+  try { unlinkSync(STORE_FILE) } catch { /* already absent */ }
+}
+
+/** Test seam for a server restart: forget the process cache, then read the durable queue again. */
+export function reloadPrompts(): void {
+  byConversation.clear()
+  loaded = false
+  load()
 }

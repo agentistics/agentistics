@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
-import { PENDING_TTL_MS, clearPrompts, migratePrompts, pendingFor, recordPrompt, resetPrompts } from './pending-prompts'
+import { PENDING_TTL_MS, clearPrompts, migratePrompts, pendingFor, recordPrompt, reloadPrompts, resetPrompts } from './pending-prompts'
 
 const CONV = 'conv-1'
 
@@ -61,6 +61,15 @@ describe('pendingFor', () => {
     recordPrompt(CONV, 'a')
     clearPrompts(CONV)
     expect(pendingFor(CONV, [])).toEqual([])
+  })
+
+  it('survives a server restart and remains answerable afterwards', () => {
+    recordPrompt(CONV, 'approve this change', 1_000)
+    reloadPrompts()
+    expect(pendingFor(CONV, [], 2_000).map(p => p.text)).toEqual(['approve this change'])
+    expect(pendingFor(CONV, ['approve this change'], 2_000)).toEqual([])
+    reloadPrompts()
+    expect(pendingFor(CONV, [], 2_000)).toEqual([])
   })
 })
 
