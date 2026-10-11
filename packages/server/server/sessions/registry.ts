@@ -51,6 +51,8 @@ export function newSessionId(): string {
  * as a type error at best and a silently dropped write at worst.
  */
 export interface SessionPatch {
+  leader?: boolean
+  handoffHintLevel?: number
   label?: string
   /** Written alongside `label`, never on its own — see `ManagedSession.labelSince`. */
   labelSince?: number
@@ -123,6 +125,9 @@ function sanitize(raw: unknown): ManagedSession | null {
     createdAt: typeof s.createdAt === 'string' ? s.createdAt : new Date().toISOString(),
     ...(typeof s.model === 'string' ? { model: s.model } : {}),
     ...(typeof s.effort === 'string' ? { effort: s.effort } : {}),
+    ...(s.leader === true ? { leader: true } : {}),
+    ...(typeof s.handoffHintLevel === 'number' && Number.isInteger(s.handoffHintLevel) && s.handoffHintLevel >= 0
+      ? { handoffHintLevel: s.handoffHintLevel } : {}),
     ...(typeof s.label === 'string' ? { label: s.label } : {}),
     ...(typeof s.labelSince === 'number' && Number.isFinite(s.labelSince)
       ? { labelSince: s.labelSince }

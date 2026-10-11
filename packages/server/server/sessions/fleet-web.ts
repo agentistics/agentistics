@@ -49,6 +49,8 @@ import { type ModelOption, type Baseline } from '@agentistics/core'
 import { catalogFields } from '../model-catalog-fields'
 import { artifactPathsFromTurns, type AllowedArtifact } from './artifact-file'
 import type { ArtifactResponse } from './artifact-web'
+import { readRegistry, patchSession } from './registry'
+import { sendHandoffHints, type HandoffHintRow } from './handoff-hint'
 
 // The REQUEST shape lives in the leaf `fleet-row.ts` so `index.ts` can name it without naming
 // this module — see the note there.
@@ -259,6 +261,32 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
     const host = await hostFor(lang)
     if (!host.sessions) return { sessions: [], rows: [], attention: 0, tasks: [], finishedTasks: [] }
     const fleet = await timeFleetPhase('readFleet: host.sessions()', () => host.sessions!())
+    // The context gauge in this snapshot is the composer/ring's server-side reading. The hint is
+    // fire-and-forget so a slow terminal send never holds the fleet response open.
+    void (async () => {
+      const registry = await readRegistry().catch(() => [])
+      const byId = new Map(registry.map(row => [row.id, row]))
+      const rows: HandoffHintRow[] = fleet.sessions.map(row => {
+        const managed = byId.get(row.id)
+        return {
+          id: row.id,
+          title: fleetRow(row, s).title,
+          ...(managed?.leader ? { leader: true } : {}),
+          ...(row.contextTokens !== undefined ? { contextTokens: row.contextTokens } : {}),
+          ...(row.contextWindow !== undefined ? { contextWindow: row.contextWindow } : {}),
+          ...(managed?.handoffHintLevel !== undefined ? { hintedLevel: managed.handoffHintLevel } : {}),
+        }
+      })
+      await sendHandoffHints({
+        rows: async () => rows,
+        prompt: async (id, text) => {
+          const out = await runFleetAction(lang, { action: 'prompt', id, text })
+          return { ok: out.ok }
+        },
+        hintedLevel: async id => byId.get(id)?.handoffHintLevel ?? 0,
+        markHinted: (id, level) => patchSession(id, { handoffHintLevel: level }),
+      })
+    })().catch(() => {})
     // Nay conversations are filed into "Nay › Ativas" / "Nay › Inativas" by whether they run. It
     // rides the fleet read because that is the one moment every state change is seen, and it never
     // holds the reply: a filing is a convenience, the fleet is what this route is for.
