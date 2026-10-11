@@ -107,7 +107,7 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
     if (!pendingComment) return
     const id = pendingComment
     const frame = requestAnimationFrame(() => {
-      if (!focusComment(id)) pushNotification({ type: 'error', title: 'Comentário não encontrado', message: 'O comentário foi removido ou não está mais disponível.' })
+      if (!focusComment(id)) pushNotification(lang === 'pt' ? { type: 'error', title: 'Comentário não encontrado', message: 'O comentário foi removido ou não está mais disponível.' } : { type: 'error', title: 'Comment not found', message: 'The comment was removed or is no longer available.' })
       setPendingComment(null)
     })
     return () => cancelAnimationFrame(frame)
@@ -119,7 +119,7 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
     e.preventDefault()
     const decision = commentNavigation(detail.comments, cid, currentView)
     if (decision.kind === 'missing') {
-      pushNotification({ type: 'error', title: 'Comentário não encontrado', message: 'O comentário foi removido ou não está mais disponível.' })
+      pushNotification(lang === 'pt' ? { type: 'error', title: 'Comentário não encontrado', message: 'O comentário foi removido ou não está mais disponível.' } : { type: 'error', title: 'Comment not found', message: 'The comment was removed or is no longer available.' })
     } else if (decision.kind === 'same') {
       if (!focusComment(decision.id)) setPendingComment(decision.id)
     } else {

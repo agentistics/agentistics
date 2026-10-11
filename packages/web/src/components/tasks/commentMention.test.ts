@@ -84,6 +84,7 @@ describe('wired where comments are written', () => {
     expect(src('DeliveryDetail.tsx')).toContain('onOpenSession={sid => navigate(sessionPath(sid))}')
     expect(src('ThreadsPanel.tsx')).toContain('commentNavigation(detail.comments, cid, currentView)')
     expect(src('ThreadsPanel.tsx')).toContain("title: 'Comentário não encontrado'")
+    expect(src('ThreadsPanel.tsx')).toContain("title: 'Comment not found'")
   })
 })
 
