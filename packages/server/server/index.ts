@@ -774,7 +774,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // plan registered in Settings → Billing. Reads only what the host already stored.
     if (url.pathname === '/api/plan-limits' && req.method === 'GET') {
       const [{ planLimitsPayload }, prefs] = await Promise.all([import('./plan-limits'), readPreferences()])
-      const body = TEAM_CENTRAL ? { limits: [], now: Date.now() } : await planLimitsPayload(prefs.billing)
+      const body = TEAM_CENTRAL ? { limits: [], registered: [], budgets: [], now: Date.now() } : await planLimitsPayload(prefs.billing)
       return new Response(JSON.stringify(body), { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
     }
     if (url.pathname === '/api/events' && req.method === 'GET') {

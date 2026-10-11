@@ -49,6 +49,8 @@ import { type ModelOption, type Baseline } from '@agentistics/core'
 import { catalogFields } from '../model-catalog-fields'
 import { artifactPathsFromTurns, type AllowedArtifact } from './artifact-file'
 import type { ArtifactResponse } from './artifact-web'
+import { readRegistry, patchSession } from './registry'
+import { sendHandoffHints, type HandoffHintRow } from './handoff-hint'
 
 // The REQUEST shape lives in the leaf `fleet-row.ts` so `index.ts` can name it without naming
 // this module — see the note there.
@@ -259,6 +261,36 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
     const host = await hostFor(lang)
     if (!host.sessions) return { sessions: [], rows: [], attention: 0, tasks: [], finishedTasks: [] }
     const fleet = await timeFleetPhase('readFleet: host.sessions()', () => host.sessions!())
+    // Leaders get one low-noise handoff hint. It reads the RAW context numbers off the hub's
+    // snapshot (the formatted `context` on a ControlSession is a label, not a count) and never holds
+    // the fleet response open.
+    void (async () => {
+      const [registry, raw] = await Promise.all([readRegistry().catch(() => []), fleetSessionHub().then(h => h.read())])
+      const titles = new Map(fleet.sessions.map(row => [row.id, fleetRow(row, s).title]))
+      const byId = new Map(registry.map(row => [row.id, row]))
+      const rows: HandoffHintRow[] = raw.sessions.map(view => {
+        const managed = byId.get(view.id)
+        return {
+          id: view.id,
+          title: titles.get(view.id) ?? '',
+          ...(managed?.leader ? { leader: true } : {}),
+          ...(view.contextTokens !== undefined ? { contextTokens: view.contextTokens } : {}),
+          ...(view.contextWindow !== undefined ? { contextWindow: view.contextWindow } : {}),
+        }
+      })
+      await sendHandoffHints({
+        rows: async () => rows,
+        prompt: async (id, text) => {
+          const out = await runFleetAction(lang, { action: 'prompt', id, text })
+          return { ok: out.ok }
+        },
+        hinted: async id => {
+          const m = (await readRegistry().catch(() => [])).find(r => r.id === id)
+          return { level: m?.handoffHintLevel ?? 0, ...(m?.handoffHintTokens !== undefined ? { tokens: m.handoffHintTokens } : {}) }
+        },
+        markHinted: (id, level, tokens) => patchSession(id, { handoffHintLevel: level, ...(tokens !== undefined ? { handoffHintTokens: tokens } : {}) }),
+      })
+    })().catch(() => {})
     // Nay conversations are filed into "Nay › Ativas" / "Nay › Inativas" by whether they run. It
     // rides the fleet read because that is the one moment every state change is seen, and it never
     // holds the reply: a filing is a convenience, the fleet is what this route is for.

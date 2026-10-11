@@ -34,6 +34,7 @@ const EXACT: ReadonlyMap<string, keyof Capabilities> = new Map<string, keyof Cap
   ['/api/chat-tty', 'localChat'],
   ['/api/chat-harnesses', 'localChat'],
   ['/api/projects-list', 'localTranscripts'],
+  ['/api/plan-limits', 'localTranscripts'],
   // Returns this machine's decrypted sibling messages — a peer's FULL source list, plus its own
   // key fingerprints. Strictly more sensitive than /api/team/status, which deliberately exposes
   // only counts, so it is host-local data and must be unreachable on an exposed instance.

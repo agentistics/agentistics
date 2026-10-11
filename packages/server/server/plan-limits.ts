@@ -15,7 +15,7 @@ import { basename, dirname, join } from 'node:path'
 import { watch as fsWatch } from 'node:fs'
 import {
   alternativeWithRoom, newerLimits, parseClaudeRateLimitEvent, parseCodexRateLimits,
-  planThresholdNotices, registeredPlanLabel, withPlanLabel,
+  planBudget, planPace, planThresholdNotices, registeredPlanLabel, withPlanLabel,
   type HarnessId,
   type PlanLimits, type PlanNoticeState, type PlanThresholdNotice,
 } from '@agentistics/core'
@@ -28,6 +28,7 @@ const FILE = (): string => filePath ?? join(AGENTISTICS_DATA_DIR, 'plan-limits.j
 interface Persisted { limits: Record<string, PlanLimits>; notices: PlanNoticeState }
 
 let state: Persisted = { limits: {}, notices: {} }
+const history = new Map<string, PlanLimits[]>()
 let loaded: Promise<void> | null = null
 
 const keyOf = (l: Pick<PlanLimits, 'harness' | 'account'>): string => `${l.harness}:${l.account}`
@@ -98,6 +99,10 @@ export async function ingestPlanLimits(l: PlanLimits): Promise<boolean> {
   const held = state.limits[key]
   if (held && newerLimits(held, l) === held) return false
   state.limits[key] = l
+  const readings = history.get(key) ?? []
+  readings.push(l)
+  const cutoff = l.updatedAt - 7 * 24 * 3_600_000
+  history.set(key, readings.filter(x => x.updatedAt >= cutoff).slice(-32))
   // Only the owner judges thresholds: a notice decided by a process that cannot raise it would be
   // recorded as told and never reach anyone.
   const notices: PlanThresholdNotice[] = []
@@ -246,7 +251,7 @@ export async function seedPlanLimits(structuredDir: string): Promise<void> {
 export async function planLimitsPayload(
   billing: Parameters<typeof withPlanLabel>[1],
   nowMs = Date.now(),
-): Promise<{ limits: PlanLimits[]; registered: { harness: HarnessId; plan: string }[]; now: number }> {
+): Promise<{ limits: PlanLimits[]; registered: { harness: HarnessId; plan: string }[]; budgets: Array<ReturnType<typeof planBudget> & ReturnType<typeof planPace>>; now: number }> {
   await syncPlanLimitsFromFile()
   const limits = Object.values(state.limits)
     .map(l => withPlanLabel(l, billing, nowMs))
@@ -258,12 +263,17 @@ export async function planLimitsPayload(
     const plan = registeredPlanLabel(billing, h, nowMs)
     if (plan && !limits.some(l => l.harness === h)) registered.push({ harness: h, plan })
   }
-  return { limits, registered, now: nowMs }
+  const budgets = limits.map(l => {
+    const budget = planBudget(l, nowMs)
+    return { ...budget, ...planPace(l, nowMs, history.get(keyOf(l)) ?? []) }
+  })
+  return { limits, registered, budgets, now: nowMs }
 }
 
 /** Tests only. */
 export function __resetPlanLimitsForTest(file: string | null = null): void {
   state = { limits: {}, notices: {} }
+  history.clear()
   filePath = file
   fileMtime = 0
   loaded = file ? null : Promise.resolve()
