@@ -87,3 +87,11 @@ describe('attachmentRoom', () => {
     expect(attachmentRoom(MAX_ATTACHMENTS + 5)).toBe(0)
   })
 })
+
+describe('planPaste — a 7.000-character paste', () => {
+  test('becomes an attachment chip in every composer that shares the plan', () => {
+    const text = 'lorem ipsum '.repeat(584).slice(0, 7000)
+    expect(text.length).toBe(7000)
+    expect(planPaste({ files: [], text, existing: 0 }).kind).toBe('textFile')
+  })
+})

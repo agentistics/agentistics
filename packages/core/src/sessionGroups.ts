@@ -133,7 +133,10 @@ export function planRenameGroup(
  * deletes a group as a side effect of another write, and a child silently disappearing with its
  * parent would be exactly that.
  */
-export function planDeleteGroup(current: SessionUserGroupsValue, id: string): SessionUserGroupsValue {
+export function planDeleteGroup(current: SessionUserGroupsValue, id: string, cascade = false): SessionUserGroupsValue {
+  // `cascade` deletes the sub-folders together. Their sessions are still untouched: a group only
+  // holds keys, so removing the group is what sends them back to "no folder".
+  if (cascade) return { groups: current.groups.filter(g => g.id !== id && g.parentId !== id) }
   return {
     groups: current.groups
       .filter(g => g.id !== id)
@@ -345,7 +348,7 @@ export function resolveSessionForGroup<T extends GroupableSession>(rows: readonl
 export type GroupOp =
   | { type: 'create'; name: string; keys?: readonly string[] }
   | { type: 'rename'; group: string; name: string }
-  | { type: 'delete'; group: string }
+  | { type: 'delete'; group: string; cascade?: boolean }
   | { type: 'add'; group: string; key: string }
   | { type: 'remove'; key: string }
   /** `parent: null` moves `group` back to the top level ("Tirar da pasta"); a ref nests it under
@@ -393,7 +396,7 @@ export function planGroupOp(
     case 'delete': {
       const g = resolveGroupRef(groups, op.group)
       if (!g.ok) return { ok: false, code: g.code, matches: g.matches }
-      return same(planDeleteGroup(groups, g.group.id), [...pins], { id: g.group.id })
+      return same(planDeleteGroup(groups, g.group.id, op.cascade === true), [...pins], { id: g.group.id })
     }
     case 'add': {
       const g = resolveGroupRef(groups, op.group)

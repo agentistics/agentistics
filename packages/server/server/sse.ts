@@ -363,3 +363,13 @@ export function broadcastPlanLimitsChanged(): void {
     try { ctrl.enqueue(payload) } catch { sseClients.delete(ctrl) }
   }
 }
+
+/** The user's session folders changed through the API/MCP: an EMPTY signal on the shared stream —
+ *  the browser re-reads its own scoped `/api/user-prefs`, so no folder name travels to every listener. */
+export function broadcastSessionGroupsChanged(): void {
+  if (sseClients.size === 0) return
+  const payload = sseEncoder.encode('event: session-groups\ndata: {}\n\n')
+  for (const ctrl of [...sseClients]) {
+    try { ctrl.enqueue(payload) } catch { sseClients.delete(ctrl) }
+  }
+}

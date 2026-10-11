@@ -107,7 +107,11 @@ export async function readProcEntries(alwaysPids: ReadonlySet<number> = new Set(
       const prev = previous.get(pid)
       const cpuPercent = prev && nowMs > prev.atMs
         ? Math.round(((ticks - prev.ticks) / CLK_TCK) / ((nowMs - prev.atMs) / 1000) * 100)
-        : null
+        // First sight of a pid: no earlier sample, so report its lifetime average (measured, and
+        // labelled by the column as CPU) instead of N/A on every row of a fresh snapshot.
+        : up !== null && up - stat.starttime / CLK_TCK > 0.5
+          ? Math.round(ticks / CLK_TCK / (up - stat.starttime / CLK_TCK) * 100)
+          : null
       out.push({
         pid, ppid: stat.ppid, argv, exe,
         rssBytes: kb('VmRSS'), swapBytes: kb('VmSwap'),

@@ -847,6 +847,8 @@ if (command === 'server' || command === 'start' || !command) {
 } else if (command === 'clean') {
   const { runClean } = await import('../server/cli-clean.ts')
   await runClean(args)
+  // Leave explicitly: a stdin listener or a leftover handle must not keep the command alive.
+  process.exit(0)
 } else if (command === 'doctor') {
   const { runDoctor } = await import('../server/cli-doctor.ts')
   await runDoctor(args)

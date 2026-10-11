@@ -4,7 +4,7 @@
  * the inventory does not hold is refused 403.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { copyFileSync, mkdtempSync, chmodSync, rmSync } from 'node:fs'
+import { copyFileSync, readFileSync, mkdtempSync, chmodSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { handleResources } from './routes'
@@ -24,7 +24,12 @@ beforeAll(async () => {
   const fake = join(dir, 'agentop')
   copyFileSync('/bin/sh', fake); chmodSync(fake, 0o755)
   child = Bun.spawn([fake, '-c', 'trap "" TERM; while :; do sleep 0.2; done'], { stdout: 'ignore', stderr: 'ignore' })
-  await new Promise(r => setTimeout(r, 400))
+  // Wait on the condition (the exec happened, so /proc names it `agentop`), not on a fixed sleep.
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    try { if (readFileSync(`/proc/${child.pid}/comm`, 'utf8').trim() === 'agentop') break } catch { /* not yet */ }
+    await new Promise(r => setTimeout(r, 20))
+  }
 })
 afterAll(() => {
   try { child?.kill('SIGKILL') } catch { /* gone */ }

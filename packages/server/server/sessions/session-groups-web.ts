@@ -91,6 +91,8 @@ export interface GroupOpRequest {
   op: 'create' | 'rename' | 'delete' | 'add' | 'remove' | 'nest'
   /** A group id, or its name. */
   group?: string
+  /** `delete` only: also delete the folder's sub-folders (their sessions go back to no folder). */
+  cascade?: boolean
   /** The new name (create, rename). */
   name?: string
   /** A session: managed id, conversation id, exact title or a unique id prefix. */
@@ -148,7 +150,7 @@ export async function groupOp(req: GroupOpRequest, deps: GroupsDeps = defaultDep
       break
     case 'delete':
       if (!req.group) return fail('missing_argument')
-      op = { type: 'delete', group: req.group }
+      op = { type: 'delete', group: req.group, ...(req.cascade ? { cascade: true } : {}) }
       break
     case 'add': {
       if (!req.group || !req.session) return fail('missing_argument')
@@ -183,6 +185,7 @@ export async function groupOp(req: GroupOpRequest, deps: GroupsDeps = defaultDep
     return { sessionGroups: { groups: plan.groups.groups }, pinnedSessions: plan.pins }
   })
   if (refused) return refused
+  void import('../sse').then(m => m.broadcastSessionGroupsChanged()).catch(() => {})
 
   const groups = groupsOf(next).groups
   const group = touched.id ? groups.find(g => g.id === touched.id) : undefined
