@@ -510,6 +510,15 @@ describe('turn time (D25) — active_minutes and user_response_times', () => {
     expect(p.caveats.some(c => c.field === 'active_minutes')).toBe(false)
   })
 
+  test('a harness-opened turn (by: task) bounds active time but is never counted as a user message', () => {
+    const base = project(sessionMetaProjection, syntheticSession())
+    const task = anyEv(ev('turn.started', { by: 'task' }, { at: iso(0), ref: 'claude:c:2' }))
+    const p = project(sessionMetaProjection, [...syntheticSession(), task, measured(5, iso(3), 3 * 60_000)])
+    expect(p.meta.active_minutes).toBe(3)
+    expect(p.meta.user_message_count).toBe(base.meta.user_message_count)
+    expect(p.meta.user_message_timestamps).toEqual(base.meta.user_message_timestamps)
+  })
+
   test('no prompt: 0 when the walk saw a timed line (legacy sawTime), absent when it saw none', () => {
     const timed = project(sessionMetaProjection, syntheticSession())
     expect(timed.meta.active_minutes).toBe(0)

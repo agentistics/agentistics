@@ -299,7 +299,7 @@ function materialize(u: ModelUsageCounters): Tokens {
   return { input: u.input ?? 0, output: u.output ?? 0, cacheRead: u.cacheRead ?? 0, cacheWrite: u.cacheWrite ?? 0 }
 }
 
-export interface TurnStart { key: OrderKey; at: string; stamped: boolean; previousAssistantAt?: string }
+export interface TurnStart { key: OrderKey; at: string; stamped: boolean; previousAssistantAt?: string; /** a harness-opened turn (no person's prompt): bounds active time, never counted as a message */ task?: true }
 export interface TurnEnd { key: OrderKey; at: string; close: 'measured' | 'last-line'; durationMs?: number }
 
 /** A time usable as a clock — legacy's `Date.parse` filter on a line's timestamp. */
@@ -588,6 +588,7 @@ function foldOne(s: SessionMetaState, e: AnyAgentisticsEvent): void {
       // legacy leaves such a line out of `user_message_timestamps`, and so does this projection.
       acc.turns.push({
         key: keyOf(e), at: e.occurredAt, stamped: e.provenance.confidence !== 'estimated',
+        ...(e.data.by === 'task' ? { task: true as const } : {}),
         ...(e.data.previousAssistantAt !== undefined ? { previousAssistantAt: e.data.previousAssistantAt } : {}),
       })
       return
@@ -881,7 +882,7 @@ function finish(s: SessionMetaState): SessionMetaProjection {
   // Same shape as the compactions above: a walk of events that predate `turn.started` says nothing,
   // and a walk of nothing says nothing; only a walk that could have seen a turn reports a count.
   if (turnsRecorded && s.agents.size > 0) {
-    const turns = [...main.turns, ...sessionTurns].sort((a, b) => compareKey(a.key, b.key))
+    const turns = [...main.turns, ...sessionTurns].filter(t => !t.task).sort((a, b) => compareKey(a.key, b.key))
     meta.user_message_count = turns.length
     meta.rounds = turns.length
     meta.user_interruptions = Math.max(0, turns.length - 1)
