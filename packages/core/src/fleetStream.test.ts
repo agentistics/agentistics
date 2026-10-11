@@ -19,6 +19,22 @@ describe('fleet push reducer', () => {
     const expanded = expandFleetView({ ...snapshot, view: { groups: [{ key: 'g', ids: ['a', 'missing'] }] } })
     expect(expanded.view).toEqual({ groups: [{ key: 'g', rows: [{ id: 'a', state: 'working' }] }] })
   })
+  it('materializes compact verbs before a delta can replace its local catalogue', () => {
+    const held = applyFleetWire(null, 'snapshot', {
+      seq: 1,
+      sessions: [
+        { id: 'x', verbKey: 0, harness: 'claude' },
+        { id: 'y', verbKey: 1, harness: 'claude' },
+      ],
+      verbCatalog: [[{ action: 'kill' }], [{ action: 'resume' }]],
+    })
+    const next = applyFleetWire(held, 'delta', {
+      seq: 2,
+      upsert: { sessions: [{ id: 'x', verbKey: 0, harness: 'claude' }], verbCatalog: [[{ action: 'resume' }]] },
+    })
+    expect(next.rows.find(r => r.id === 'x')).toMatchObject({ verbs: [{ action: 'resume' }], attachCommand: 'agentop session attach x' })
+    expect(next.rows.find(r => r.id === 'y')).toMatchObject({ verbs: [{ action: 'resume' }] })
+  })
   for (const harness of ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi', 'opencode', 'agentistics']) {
     it(`preserves ${harness} row facts without interpreting them`, () => {
       const row = { id: harness, harness, state: 'waiting-approval', actionable: false, reason: 'harness says so' }

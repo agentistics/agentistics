@@ -142,3 +142,14 @@ export async function writeContextFile(plan: SpawnPlan): Promise<boolean> {
     return false
   }
 }
+
+/** The stored role of a session being (re)started, if any — keyed by its managed id or conversation id. */
+export async function resolveContextRole(...keys: (string | undefined)[]): Promise<Pick<ContextInput, 'role'>> {
+  try {
+    const { storedRoleFor } = await import('./session-roles')
+    const role = await storedRoleFor(keys)
+    return role ? { role } : {}
+  } catch {
+    return {}
+  }
+}

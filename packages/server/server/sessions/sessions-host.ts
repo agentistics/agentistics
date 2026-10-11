@@ -131,12 +131,14 @@ export async function linkProcessConversation(o: {
   knownLog?: ProcessTranscriptFile | null
   readProcessConversation: (harness: HarnessId, pid: number, knownLog?: ProcessTranscriptFile | null) => Promise<string | null>
   recordConversation: (id: string, conversationId: string, link: 'assigned', via?: ConversationLinkReason) => Promise<unknown>
+  rekeyRole?: (managedId: string, conversationId: string) => Promise<unknown>
 }): Promise<boolean> {
   if (!HARNESS_PROCESS_TRANSCRIPTS[o.harness]) return false
   const found = await o.readProcessConversation(o.harness, o.pid, o.knownLog).catch(() => null)
   if (!found) return false
   try {
     await o.recordConversation(o.id, found, 'assigned', 'process-log')
+    await o.rekeyRole?.(o.id, found)
     return true
   } catch {
     return false
@@ -171,6 +173,7 @@ export async function sampleProcessLinks(o: {
   resolveProcessLog: (harness: HarnessId, pid: number) => Promise<ProcessTranscriptFile | null>
   readProcessConversation: (harness: HarnessId, pid: number, knownLog?: ProcessTranscriptFile | null) => Promise<string | null>
   recordConversation: (id: string, conversationId: string, link: 'assigned', via?: ConversationLinkReason) => Promise<unknown>
+  rekeyRole?: (managedId: string, conversationId: string) => Promise<unknown>
   deadline: () => number
   intervalMs: number
   refreshMs?: number
@@ -240,6 +243,7 @@ export async function sampleProcessLinks(o: {
             return f && f !== row.current && moveAllowed(row.id, f, live) ? f : null
           },
         recordConversation: o.recordConversation,
+        rekeyRole: o.rekeyRole,
       })
       if (linked) { writes++; linkedAny = true }
     }
@@ -311,6 +315,8 @@ export function createSessionsPoller(o: {
     /** WHERE the link came from (LIVE.1) — one of the three recording sites says so. */
     via?: ConversationLinkReason,
   ) => Promise<unknown>
+  /** Carry role state from a managed-id key to the conversation key after linking. */
+  rekeyRole?: (managedId: string, conversationId: string) => Promise<unknown>
   /**
    * The conversation the process behind one of our panes is writing, from the log that process
    * holds open. `null` whenever nothing can say — see `process-conversation.ts`.
@@ -734,6 +740,7 @@ export function createSessionsPoller(o: {
           if (m.conversationId && !moveAllowed(m.id, found, live, movesTo.get(found))) continue
           try {
             await o.recordConversation(m.id, found, 'assigned', 'process-log')
+            await o.rekeyRole?.(m.id, found)
             // The fallback below must not overwrite the newer managed log with an old open DB.
             m.conversationId = found
             m.conversationLinkVia = 'process-log'
@@ -853,6 +860,7 @@ export function createSessionsPoller(o: {
           if (!found) continue
           try {
             await o.recordConversation(m.id, found, 'assigned', 'first-sighting')
+            await o.rekeyRole?.(m.id, found)
             taken.add(found)
             afterWrites++
           } catch {

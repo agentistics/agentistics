@@ -1921,6 +1921,8 @@ export interface SpawnSessionRequest {
   parentSessionId?: string
   /** Leader hand-off: inherit the parent's task/subtask filing when none is given. */
   handoff?: boolean
+  /** Explicit briefing role for CLI/web callers. */
+  role?: 'leader' | 'worker'
   prompt?: string
   model?: string
   effort?: string

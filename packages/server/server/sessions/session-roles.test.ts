@@ -1,0 +1,237 @@
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import {
+  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, markRoleDelivered, migrateLegacyRoles, parseRoles, rekeyStoredRole, roleOfRow, roleOp, roleStatus, writeRolesDoc, type RoleDeps,
+} from './session-roles'
+
+let dir = ''
+beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'roles-')) })
+afterEach(async () => { await rm(dir, { recursive: true, force: true }) })
+
+interface Row { id: string; conversationId?: string; title: string }
+function fake(rows: Row[], extra: Partial<RoleDeps> = {}) {
+  const renames: Array<[string, string]> = []
+  const prompts: Array<[string, string]> = []
+  const deps: RoleDeps = {
+    dataDir: dir,
+    rows: async () => rows,
+    legacyPref: async () => undefined,
+    uiLang: async () => 'en',
+    rename: async (id, title) => { renames.push([id, title]); const r = rows.find(x => x.id === id); if (r) r.title = title; return { ok: true } },
+    prompt: async (id, text) => { prompts.push([id, text]); return { ok: true } },
+    parentOf: async () => undefined,
+    ...extra,
+  }
+  return { deps, renames, prompts }
+}
+
+describe('store + migration', () => {
+  test('parseRoles keeps only valid roles', () => {
+    expect(parseRoles({ a: 'leader', b: 'worker', c: 'boss', d: 1 })).toEqual({ a: 'leader', b: 'worker' })
+    expect(parseRoles(null)).toEqual({})
+    expect(parseRoles([])).toEqual({})
+  })
+  test('migrates the legacy preference once; the store wins on conflict', async () => {
+    const m = migrateLegacyRoles({ version: 1, migrated: false, roles: { a: 'worker' } }, { a: 'leader', b: 'leader' })
+    expect(m).toEqual({ version: 1, migrated: true, roles: { a: 'worker', b: 'leader' } })
+    expect(migrateLegacyRoles(m, { z: 'leader' })).toBe(m)
+  })
+  test('migration and read preserve lastDeliveredRole', async () => {
+    const doc = migrateLegacyRoles({ version: 1, migrated: false, roles: { a: 'worker' }, lastDeliveredRole: { a: 'worker' } }, { b: 'leader' })
+    expect(doc.lastDeliveredRole).toEqual({ a: 'worker' })
+    await writeRolesDoc(dir, doc)
+    expect((await loadRoles({ dataDir: dir, legacyPref: async () => undefined })).lastDeliveredRole).toEqual({ a: 'worker' })
+  })
+  test('loadRoles persists the migration and never re-reads the legacy pref', async () => {
+    let reads = 0
+    const legacyPref = async () => { reads++; return { c1: 'leader' } }
+    expect((await loadRoles({ dataDir: dir, legacyPref })).roles).toEqual({ c1: 'leader' })
+    expect((await loadRoles({ dataDir: dir, legacyPref })).roles).toEqual({ c1: 'leader' })
+    expect(reads).toBe(1)
+    expect(JSON.parse(await readFile(join(dir, SESSION_ROLES_FILE), 'utf-8')).migrated).toBe(true)
+  })
+  test('a corrupt file reads as empty', async () => {
+    await writeFile(join(dir, SESSION_ROLES_FILE), '{nope')
+    expect((await loadRoles({ dataDir: dir, legacyPref: async () => undefined })).roles).toEqual({})
+  })
+  test('roleOfRow finds a role by conversation key or managed id', () => {
+    expect(roleOfRow({ conv: 'leader' }, { id: 'm1', conversationId: 'conv' })).toBe('leader')
+    expect(roleOfRow({ m1: 'worker' }, { id: 'm1', conversationId: 'conv' })).toBe('worker')
+    expect(roleOfRow({}, { id: 'm1' })).toBeUndefined()
+  })
+})
+
+describe('spawn role assignment and delivery', () => {
+  test('a leader spawn applies the localized title prefix through rename', async () => {
+    const rows = [{ id: 'm1', title: 'Child' }]
+    const { deps, renames } = fake(rows)
+    expect(await applyRoleTitle('m1', 'Child', 'leader', 'pt', deps)).toBe(true)
+    expect(renames).toEqual([['m1', '[ LÍDER ] - Child']])
+    expect(await applyRoleTitle('m1', '[ LÍDER ] - Child', 'leader', 'pt', deps)).toBe(false)
+  })
+
+  test('a child defaults to worker, a handoff can request leader, and an explicit role wins', async () => {
+    const { deps } = fake([])
+    expect(await ensureSpawnRole(['child'], 'worker', deps)).toBe('worker')
+    expect(await ensureSpawnRole(['handoff'], 'leader', deps)).toBe('leader')
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { child: 'worker', handoff: 'leader', explicit: 'leader' }, lastDeliveredRole: {} })
+    expect(await ensureSpawnRole(['explicit', 'new-id'], 'worker', deps)).toBe('leader')
+    expect(await ensureSpawnRole([], 'worker', deps)).toBe('worker')
+    expect((await loadRoles(deps)).roles).toEqual({ child: 'worker', handoff: 'leader', explicit: 'leader' })
+  })
+
+  test('stores the managed id when the offered conversation id is not accepted', async () => {
+    const { deps } = fake([])
+    await ensureSpawnRole(['offered-conversation', 'managed-id'], 'worker', deps)
+    expect((await loadRoles(deps)).roles).toEqual({ 'offered-conversation': 'worker', 'managed-id': 'worker' })
+  })
+
+  test('rekeys role and delivery state from an old managed id to a reopened id', async () => {
+    const { deps, prompts } = fake([{ id: 'new-id', title: 'T' }])
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { 'old-id': 'leader' }, lastDeliveredRole: { 'old-id': 'leader' } })
+    await rekeyStoredRole(['old-id'], ['new-id'], deps)
+    expect((await loadRoles(deps)).roles).toEqual({ 'new-id': 'leader' })
+    expect((await loadRoles(deps)).lastDeliveredRole).toEqual({ 'new-id': 'leader' })
+    expect(await deliverStoredRole('new-id', undefined, deps)).toBe(false)
+    expect(prompts).toHaveLength(0)
+  })
+
+  test('rekeys to a newly discovered conversation while retaining the delivery watermark', async () => {
+    const { deps } = fake([{ id: 'managed', title: 'T' }])
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { managed: 'worker' }, lastDeliveredRole: { managed: 'worker' } })
+    await rekeyStoredRole(['managed'], ['managed', 'conversation'], deps)
+    expect((await loadRoles(deps)).roles).toEqual({ managed: 'worker', conversation: 'worker' })
+    expect((await loadRoles(deps)).lastDeliveredRole).toEqual({ managed: 'worker', conversation: 'worker' })
+  })
+
+  test('serializes rekey and delivery writes without losing either field', async () => {
+    const { deps } = fake([])
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { old: 'leader' }, lastDeliveredRole: {} })
+    await Promise.all([
+      rekeyStoredRole(['old'], ['new'], deps),
+      markRoleDelivered(['new'], 'leader', deps),
+    ])
+    expect(await loadRoles(deps)).toMatchObject({
+      roles: { new: 'leader' },
+      lastDeliveredRole: { new: 'leader' },
+    })
+  })
+
+  test('does not deadlock when input readiness rekeys the session', async () => {
+    const { deps } = fake([{ id: 'new-id', title: 'T' }])
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { 'new-id': 'leader' }, lastDeliveredRole: {} })
+    const gated = {
+      ...deps,
+      waitForInput: async () => {
+        await rekeyStoredRole(['new-id'], ['new-id', 'conversation-id'], deps)
+        return true
+      },
+    }
+    const result = await Promise.race([
+      deliverStoredRole('new-id', undefined, gated),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('role delivery deadlocked')), 250)),
+    ])
+    expect(result).toBe(true)
+  })
+
+  test('waits for input before recording an acknowledged delivery', async () => {
+    const rows = [{ id: 'm1', conversationId: 'c1', title: 'T' }]
+    const { deps } = fake(rows)
+    const events: string[] = []
+    const gated = { ...deps, waitForInput: async () => { events.push('ready'); return true }, prompt: async () => { events.push('prompt'); return { ok: true } } }
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { c1: 'worker' }, lastDeliveredRole: {} })
+    expect(await deliverStoredRole('m1', 'c1', gated)).toBe(true)
+    expect(events).toEqual(['ready', 'prompt'])
+    expect((await loadRoles(deps)).lastDeliveredRole).toEqual({ c1: 'worker' })
+  })
+
+  test('delivers once per role value, redelivers after a change, and does not mark failed sends', async () => {
+    const rows = [{ id: 'm1', conversationId: 'c1', title: 'T' }]
+    const { deps, prompts } = fake(rows)
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { c1: 'worker' }, lastDeliveredRole: {} })
+    expect(await deliverStoredRole('m1', 'c1', deps)).toBe(true)
+    expect(await deliverStoredRole('m1', 'c1', deps)).toBe(false)
+    expect(prompts).toHaveLength(1)
+
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { c1: 'leader' }, lastDeliveredRole: { c1: 'worker' } })
+    expect(await deliverStoredRole('m1', 'c1', deps)).toBe(true)
+    expect(prompts).toHaveLength(2)
+
+    let fail = true
+    const failing = { ...deps, prompt: async () => { if (fail) { fail = false; return { ok: false } }; return { ok: true } } }
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { c1: 'worker' }, lastDeliveredRole: { c1: 'leader' } })
+    expect(await deliverStoredRole('m1', 'c1', failing)).toBe(false)
+    expect((await loadRoles(deps)).lastDeliveredRole).toEqual({ c1: 'leader' })
+    expect(await deliverStoredRole('m1', 'c1', failing)).toBe(true)
+  })
+})
+
+describe('roleOp (the agentistics_session_role handler)', () => {
+  test('a browser sets leader: stored under the conversation key, renamed, and the session is told', async () => {
+    const rows = [{ id: 'm1', conversationId: 'c1', title: 'Fix login' }]
+    const { deps, renames, prompts } = fake(rows)
+    const out = await roleOp(null, { ref: 'm1', role: 'leader', lang: 'pt' }, deps)
+    expect(out).toMatchObject({ ok: true, role: 'leader', changed: true, renamed: true, notified: true })
+    expect(renames).toEqual([['m1', '[ LÍDER ] - Fix login']])
+    expect(prompts[0]![1]).toContain('your role is now LEADER')
+    expect((await loadRoles(deps)).roles).toEqual({ c1: 'leader' })
+  })
+  test('setting the same role twice is idempotent: no second rename, no second note', async () => {
+    const rows = [{ id: 'm1', title: 'T' }]
+    const { deps, renames, prompts } = fake(rows)
+    await roleOp(null, { ref: 'm1', role: 'leader' }, deps)
+    const again = await roleOp(null, { ref: 'm1', role: 'leader' }, deps)
+    expect(again).toMatchObject({ ok: true, changed: false, renamed: false, notified: false })
+    expect(renames).toHaveLength(1)
+    expect(prompts).toHaveLength(1)
+    expect(rows[0]!.title).toBe('[ LEADER ] - T')
+  })
+  test('worker / auto strip the prefix and clear the entry', async () => {
+    const rows = [{ id: 'm1', title: 'T' }]
+    const { deps, renames } = fake(rows)
+    await roleOp(null, { ref: 'm1', role: 'leader' }, deps)
+    const out = await roleOp(null, { ref: 'm1', role: 'auto' }, deps)
+    expect(out).toMatchObject({ ok: true, role: 'auto', changed: true, renamed: true })
+    expect(renames.at(-1)).toEqual(['m1', 'T'])
+    expect((await loadRoles(deps)).roles).toEqual({})
+    await roleOp(null, { ref: 'm1', role: 'worker' }, deps)
+    expect((await loadRoles(deps)).roles).toEqual({ m1: 'worker' })
+  })
+  test('a session sets its OWN role without ref and is not typed into', async () => {
+    const rows = [{ id: 'm1', title: 'Me' }]
+    const { deps, prompts, renames } = fake(rows)
+    const out = await roleOp('m1', { role: 'leader' }, deps)
+    expect(out).toMatchObject({ ok: true, role: 'leader', notified: false, renamed: true })
+    expect(prompts).toHaveLength(0)
+    expect(renames).toEqual([['m1', '[ LEADER ] - Me']])
+    expect(out.ok && out.line).toContain('LEADER')
+  })
+  test('reading reports the role and changes nothing', async () => {
+    const { deps, renames } = fake([{ id: 'm1', title: 'T' }])
+    await roleOp(null, { ref: 'm1', role: 'worker' }, deps)
+    const out = await roleOp('m1', {}, deps)
+    expect(out).toMatchObject({ ok: true, role: 'worker', changed: false })
+    expect(renames).toHaveLength(0)
+  })
+  test('another session only for its own children', async () => {
+    const rows = [{ id: 'p', title: 'P' }, { id: 'kid', title: 'Kid' }, { id: 'other', title: 'Other' }]
+    const { deps } = fake(rows, { parentOf: async id => (id === 'kid' ? 'p' : undefined) })
+    expect(await roleOp('p', { ref: 'kid', role: 'worker' }, deps)).toMatchObject({ ok: true })
+    const denied = await roleOp('p', { ref: 'other', role: 'leader' }, deps)
+    expect(denied).toMatchObject({ ok: false, code: 'not_your_child' })
+    expect(roleStatus(denied)).toBe(403)
+  })
+  test('refusals: no ref and no sender, bad role, unknown session', async () => {
+    const { deps } = fake([{ id: 'm1', title: 'T' }])
+    expect(await roleOp(null, { role: 'leader' }, deps)).toMatchObject({ ok: false, code: 'missing_argument' })
+    expect(await roleOp(null, { ref: 'm1', role: 'boss' }, deps)).toMatchObject({ ok: false, code: 'bad_role' })
+    expect(await roleOp(null, { ref: 'zzz', role: 'leader' }, deps)).toMatchObject({ ok: false, code: 'no_such_session' })
+  })
+  test('the UI language defaults from preferences when the request names none', async () => {
+    const { deps, renames } = fake([{ id: 'm1', title: 'T' }], { uiLang: async () => 'pt' })
+    await roleOp(null, { ref: 'm1', role: 'leader' }, deps)
+    expect(renames[0]![1]).toBe('[ LÍDER ] - T')
+  })
+})

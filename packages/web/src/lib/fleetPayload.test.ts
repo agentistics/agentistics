@@ -38,4 +38,15 @@ describe('the fleet answer the page reads', () => {
     expect(src).toMatch(/^\s*finishedTasks: string\[\]$/m)
     expect(src).toContain('finishedTasks: [...finishedTasks],')
   })
+
+  test('the compact one-list wire answer supplies local rows and derives search fields', () => {
+    const out = normalizeFleetPayload({
+      sessions: [{ id: 'a', title: 'Fix parser', cwd: '/w/repo', harness: 'claude', task: 'parser' }],
+      attention: 0, tasks: [], finishedTasks: [],
+    } as unknown as FleetPayload)
+    expect(out.rows as unknown).toBe(out.sessions as unknown)
+    expect((out.rows[0] as unknown as { searchFields: Record<string, string> }).searchFields).toEqual({
+      name: 'Fix parser', folder: '/w/repo', harness: 'claude', note: '', task: 'parser', prompt: '',
+    })
+  })
 })

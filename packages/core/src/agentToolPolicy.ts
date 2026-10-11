@@ -76,6 +76,7 @@ export const AGENT_TOOL_NAMES = [
   // Session notifications (1)
   'agentistics_session_notify',
   'agentistics_session_message',
+  'agentistics_session_role',
   // Metrics (6)
   'agentistics_summary',
   'agentistics_harnesses',
@@ -162,6 +163,10 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_session_message: {
     ...GROUPS, risk: 'W', routes: ['POST /api/session-message'],
     reason: 'types a message into another session through the composer path; additive, rate-limited, sender verified',
+  },
+  agentistics_session_role: {
+    ...GROUPS, risk: 'W', routes: ['POST /api/session-roles'],
+    reason: 'sets a session label (role + title prefix) and types a one-line note; reversible by setting auto; a session may only touch itself or the sessions it started',
   },
   // ------------------------------------------------------------------ Metrics
   agentistics_summary: { ...DATA, capability: 'localTranscripts', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/runtime/metrics'], reason: 'reads computed metrics' },

@@ -66,6 +66,7 @@ export * from './stagedSession'
 export * from './pasteSanitize'
 export * from './sessionShape'
 export * from './sessionGroups'
+export * from './sessionRole'
 export * from './mutedSessions'
 export * from './idleSessions'
 // The canonical runtime model (A1.1): entities, the event envelope and the projection contract.

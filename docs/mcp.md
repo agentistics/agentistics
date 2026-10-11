@@ -70,6 +70,7 @@ There are **38 tools** (`packages/mcp/agentistics-mcp.ts`, the `TOOLS` array). B
 |------|-------|
 | **Task board (ALM)** — 18, *beta* | `agentistics_tasks`, `agentistics_task`, `agentistics_task_create`, `agentistics_task_edit`, `agentistics_task_status`, `agentistics_task_statuses`, `agentistics_task_status_edit`, `agentistics_task_types`, `agentistics_task_type_edit`, `agentistics_task_comment`, `agentistics_task_subtask`, `agentistics_task_link`, `agentistics_task_blocked_by`, `agentistics_task_next`, `agentistics_task_claim`, `agentistics_task_activity`, `agentistics_task_session`, `agentistics_task_delete` |
 | **Session groups** — 3 | `agentistics_session_groups`, `agentistics_session_group_create`, `agentistics_session_group_edit` |
+| **Session role** — 1 | `agentistics_session_role` — get/set a session's role (leader \| worker \| auto); a leader gets the `[ LEADER ] - ` title prefix and the briefing's leader line. A session sets its own role, or its children's. |
 | **Metrics** — 6 | `agentistics_summary`, `agentistics_harnesses`, `agentistics_projects`, `agentistics_sessions`, `agentistics_costs`, `agentistics_repos` |
 | **Custom layouts** — 8 | `agentistics_component_catalog`, `agentistics_get_layouts`, `agentistics_build_layout`, `agentistics_add_component`, `agentistics_remove_component`, `agentistics_create_layout`, `agentistics_set_active_layout`, `agentistics_delete_layout` |
 | **PDF export** — 1 | `agentistics_export_pdf` |
