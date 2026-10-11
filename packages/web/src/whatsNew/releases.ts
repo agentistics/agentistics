@@ -10,6 +10,27 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.126.0': {
+    features: [],
+    fixes: [
+      {
+        pt: 'A limpeza pela interface agora mostra cada item mantido com o motivo, e os itens mantidos não voltam marcados.',
+        en: 'Cleanup from the app now lists each kept item with its reason, and kept items no longer come back selected.',
+      },
+      {
+        pt: 'O selo de Líder/Worker é o mesmo na lista e no painel ⓘ, e a linha da sessão continua legível com o sino silenciado.',
+        en: 'The Leader/Worker badge is the same in the list and in the ⓘ panel, and the session row stays readable with a muted bell.',
+      },
+      {
+        pt: 'Voltar o tamanho do texto para 100% devolve o comportamento normal da página.',
+        en: 'Setting the text size back to 100% restores the page\'s normal behaviour.',
+      },
+      {
+        pt: 'Quando a importação do histórico falha, o app consulta o estado com menos frequência.',
+        en: 'When the history import fails, the app checks its state less often.',
+      },
+    ],
+  },
   '2.125.0': {
     features: [
       {
