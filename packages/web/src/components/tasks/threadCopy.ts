@@ -104,5 +104,7 @@ export function threadCopy(lang: Lang) {
     } satisfies Record<DeliveryReason, string>,
     loading: pt ? 'Carregando…' : 'Loading…',
     failed: pt ? 'Não foi possível salvar.' : 'Could not save.',
+    verbFailed: pt ? 'Não foi possível atualizar este tópico.' : 'Could not update this topic.',
+    retry: pt ? 'Tentar de novo' : 'Try again',
   }
 }

@@ -104,6 +104,9 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
   // On a phone nothing is open until the person picks; on a desktop the newest open thread is.
   const selected = picked ?? (isMobile ? null : inbox.open[0]?.thread.id ?? inbox.resolved[0]?.thread.id ?? (looseCount > 0 ? 'loose' : null))
   const thread = threads.find(x => x.id === selected) ?? null
+  useEffect(() => {
+    if (thread?.resolvedAt) setResolvedOpen(true)
+  }, [thread?.id, thread?.resolvedAt])
 
   const where = (th: TaskThread) => {
     const title = th.subtaskId ? detail.subtasks.find(s => s.id === th.subtaskId)?.title : undefined
@@ -299,7 +302,7 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
   }
   return (
     <div ref={panelRef} onClickCapture={followCommentLink} style={{
-      display: 'grid', gridTemplateColumns: '280px minmax(0, 1fr)', minHeight: 520, height: 'min(72vh, 820px)',
+      display: 'grid', gridTemplateColumns: '280px minmax(0, 1fr)', minHeight: 'min(520px, calc(100dvh - 440px))', height: 'min(72dvh, calc(100dvh - 440px))',
       background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
     }}>
       <div style={{ borderRight: '1px solid var(--border)', minHeight: 0 }}>{inboxPane}</div>
@@ -343,6 +346,7 @@ function ThreadRecord({ id, thread, detail, rows, lang, reload, renderBody, wher
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
   const [verbPending, setVerbPending] = useState(false)
+  const [verbError, setVerbError] = useState<{ message: string; action: 'resolve' | 'reopen' | 'mute' | 'unmute'; sessionId?: string } | null>(null)
   const [flashing, setFlashing] = useState(false)
   useEffect(() => {
     if (!flashing) return
@@ -387,9 +391,13 @@ function ThreadRecord({ id, thread, detail, rows, lang, reload, renderBody, wher
   }
   const verb = async (action: 'resolve' | 'reopen' | 'mute' | 'unmute', sessionId?: string) => {
     if (action === 'resolve') setVerbPending(true)
+    setVerbError(null)
     const result = await threadVerb(id, thread.id, action, sessionId ? { sessionId } : {})
     if (!result.ok) {
       if (action === 'resolve') setVerbPending(false)
+      const message = result.message ?? t.verbFailed
+      setVerbError({ message, action, ...(sessionId ? { sessionId } : {}) })
+      pushNotification({ type: 'error', title: t.verbFailed, message })
       return
     }
     await reload()
@@ -435,6 +443,12 @@ function ThreadRecord({ id, thread, detail, rows, lang, reload, renderBody, wher
 
       {rv === 'done' && (
         <div role="status" data-resolved-note style={{ padding: '6px 16px', fontSize: 12, color: 'var(--accent-green)', background: 'var(--accent-green-dim)' }}>{t.movedToResolved}</div>
+      )}
+      {verbError && (
+        <div role="alert" data-verb-error style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '6px 16px', fontSize: 12, color: 'var(--accent-red)', background: 'var(--accent-red-dim)' }}>
+          <span>{verbError.message}</span>
+          <button type="button" onClick={() => void verb(verbError.action, verbError.sessionId)} style={{ ...button(isMobile), minHeight: isMobile ? 36 : undefined, color: 'inherit', borderColor: 'currentColor' }}>{t.retry}</button>
+        </div>
       )}
       <div ref={scroller} style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', padding: isMobile ? '6px 12px' : '6px 16px' }}>
         {comments.map(c => {
