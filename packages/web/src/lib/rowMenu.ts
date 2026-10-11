@@ -26,6 +26,7 @@ export interface RowVerb {
   label: string
   enabled: boolean
   reason?: string
+  checked?: boolean
 }
 
 export type MenuEntry = RowVerb

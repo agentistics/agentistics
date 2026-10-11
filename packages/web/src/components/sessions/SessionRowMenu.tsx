@@ -84,6 +84,7 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMen
           onMouseEnter={ev => { if (e.enabled) ev.currentTarget.style.background = 'var(--bg-elevated)' }}
           onMouseLeave={ev => { ev.currentTarget.style.background = 'transparent' }}
         >
+          {e.checked && <span aria-hidden style={{ flexShrink: 0, width: 12, color: 'var(--text-primary)', fontWeight: 700 }}>✓</span>}
           <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.label}</span>
           {/* Same rule as the three-dot menu: where the delivery board reaches into a session
               surface, it says it is in beta. `link-task` is the entry that opens the picker. */}

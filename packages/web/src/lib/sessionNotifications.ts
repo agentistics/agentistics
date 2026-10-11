@@ -498,7 +498,7 @@ function deliver(d: Delivery, settings: NotificationSettings): void {
   // MUTE SUPPRESSES DELIVERY ONLY — bell, card, shock, sound. The session's state (`waiting`) is
   // computed upstream of here and never touched. The observer still sees it: it is the decision log.
   if (isMutedId(d.bell.id)) return
-  if (isWorkerMuted(d.bell.id)) return
+  if (isWorkerMuted(d.bell.id, d.event)) return
   deliveryObserver?.({ event: d.event, title: d.title, body: d.body, nay: d.nay === true })
   if (typeof document !== 'undefined') {
     pushNotification({

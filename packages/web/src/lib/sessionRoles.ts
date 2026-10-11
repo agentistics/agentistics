@@ -3,6 +3,7 @@ import { createSharedPref } from './sharedPref'
 
 export type SessionRole = 'leader' | 'worker'
 export type SessionRoles = Record<string, SessionRole>
+const roleAliases = new Map<string, string>()
 
 const parseRoles = (raw: unknown): SessionRoles | null => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
@@ -21,7 +22,9 @@ const muted = createSharedPref<boolean>({
   parse: raw => typeof raw === 'boolean' ? raw : null,
 })
 
-export function getSessionRole(id: string): SessionRole | undefined { return roles.get()[id] }
+export function getSessionRole(id: string): SessionRole | undefined {
+  return roles.get()[id] ?? (roleAliases.get(id) ? roles.get()[roleAliases.get(id)!] : undefined)
+}
 export function setSessionRole(id: string, role: SessionRole | null): void {
   const next = { ...roles.get() }
   if (role) next[id] = role
@@ -30,10 +33,23 @@ export function setSessionRole(id: string, role: SessionRole | null): void {
 }
 export function getMuteWorkers(): boolean { return muted.get() }
 export function setMuteWorkers(value: boolean): void { muted.set(value) }
-export function isWorkerMuted(id: string): boolean { return muted.get() && roles.get()[id] === 'worker' }
+export function isWorkerMuted(id: string, state?: string): boolean {
+  const active = state === undefined || ['working', 'waiting', 'waiting-approval', 'unknown'].includes(state)
+  return active && muted.get() && getSessionRole(id) === 'worker'
+}
+/** Associate a managed id with the stable conversation key, migrating an older id entry. */
+export function registerSessionRoleAlias(id: string, stableKey: string): void {
+  if (!id || !stableKey || id === stableKey) return
+  roleAliases.set(id, stableKey)
+  const current = roles.get()
+  if (current[id] && !current[stableKey]) {
+    const next = { ...current, [stableKey]: current[id] }
+    delete next[id]
+    roles.set(next)
+  }
+}
 export function useSessionRole(id: string): SessionRole | undefined {
   return useSyncExternalStore(roles.subscribe, () => getSessionRole(id), () => undefined)
 }
 export function useSessionRoles(): SessionRoles { return useSyncExternalStore(roles.subscribe, roles.get, roles.serverSnapshot) }
 export function useMuteWorkers(): boolean { return useSyncExternalStore(muted.subscribe, muted.get, muted.serverSnapshot) }
-

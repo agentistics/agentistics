@@ -28,7 +28,7 @@ import {
 } from 'lucide-react'
 import type { Filters } from '@agentistics/core'
 import {
-  ACTIVE_STATES, filterSessions, sessionNotify,
+  ACTIVE_STATES, filterSessions, sessionNotify, sessionRunning,
   type ControlSession, type SessionGroup, type SessionState,
 } from '@agentistics/tui/control/session-fleet'
 import { asideGroups, showsGroupHeadings } from '../../lib/fleetGroups'
@@ -90,7 +90,7 @@ import { ConfirmModal } from '../../pages/settings/primitives'
 import { CLUSTER_ACCENT, CLUSTER_TINT } from '../tasks/subtaskGroups'
 import { NAY_UNDOCK_SESSION, requestUndockSession, withUndockEntry } from '../../lib/nayDockBridge'
 import { AgentisticsLoader } from '../AgentisticsLoader'
-import { getSessionRole, setSessionRole, useMuteWorkers, useSessionRole, type SessionRole } from '../../lib/sessionRoles'
+import { getSessionRole, registerSessionRoleAlias, setSessionRole, useMuteWorkers, useSessionRole, type SessionRole } from '../../lib/sessionRoles'
 
 /** The row menu's client-side "open beside" entry — see `openSessionBeside`. */
 const OPEN_BESIDE = '__open_beside__'
@@ -246,12 +246,13 @@ const notifyExtras = notifyMenuExtras
 
 function roleExtras(row: ControlSession | undefined, pt: boolean): MenuEntry[] {
   if (!row) return []
-  const current = getSessionRole(row.id)
+  const key = sessionIdentityKey(row)
+  const current = getSessionRole(key)
   return [
     { action: 'session-role-label', label: pt ? 'Tipo' : 'Type', enabled: false },
-    { action: 'session-role:', label: pt ? 'Tipo: Automático' : 'Type: Automatic', enabled: true, ...(current === undefined ? { reason: '✓' } : {}) },
-    { action: 'session-role:leader', label: pt ? 'Líder' : 'Leader', enabled: true, ...(current === 'leader' ? { reason: '✓' } : {}) },
-    { action: 'session-role:worker', label: 'Worker', enabled: true, ...(current === 'worker' ? { reason: '✓' } : {}) },
+    { action: 'session-role:', label: pt ? 'Não sei' : "Don't know", enabled: true, checked: current === undefined },
+    { action: 'session-role:leader', label: pt ? 'Líder' : 'Leader', enabled: true, checked: current === 'leader' },
+    { action: 'session-role:worker', label: 'Worker', enabled: true, checked: current === 'worker' },
   ]
 }
 
@@ -670,7 +671,8 @@ export function SessionsAside({
       return
     }
     if (action.startsWith('session-role:')) {
-      setSessionRole(id, action.slice('session-role:'.length) as SessionRole | null)
+      const target = rows.find(r => r.id === id)
+      setSessionRole(target ? sessionIdentityKey(target) : id, action.slice('session-role:'.length) as SessionRole | null)
       setMenu(null)
       return
     }
@@ -2482,8 +2484,10 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
   cardColor: AsideCardColor
 }) {
   const mutedKeys = useMutedKeys()
-  const role = useSessionRole(session.id)
+  const roleKey = sessionIdentityKey(session)
+  const role = useSessionRole(roleKey)
   const muteWorkers = useMuteWorkers()
+  useEffect(() => { registerSessionRoleAlias(session.id, roleKey) }, [session.id, roleKey])
   const wants = sessionNotify(session)
   const reopening = useReopening().has(session.id)
   const goTo = useContext(GoToSessionContext)
@@ -2564,7 +2568,7 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
         {...(lang ? { lang } : {})}
         {...(cardStyle.stateTextColor ? { metaColor: cardStyle.stateTextColor } : {})}
       />
-      {role && <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: role === 'leader' ? '#c4b5fd' : '#67e8f9', border: `1px solid ${role === 'leader' ? '#8b5cf6' : '#06b6d4'}`, borderRadius: 5, padding: '2px 5px' }}>{role === 'leader' ? (lang === 'pt' ? 'Líder' : 'Leader') : 'Worker'}</span>}
+      {role && <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: role === 'leader' ? 'var(--accent-purple)' : 'var(--accent-cyan)', border: `1px solid ${role === 'leader' ? 'var(--accent-purple)' : 'var(--accent-cyan)'}`, borderRadius: 5, padding: '2px 5px' }}>{role === 'leader' ? (lang === 'pt' ? 'Líder' : 'Leader') : 'Worker'}</span>}
       {/* The assistant, NAMED. It was a 5px dot, which carries the fact in colour alone — and a
           colour is not a name. The model sits with it on the meta line below. */}
       {/* The pin lives on the row rather than in a menu: it is a one-click decision about the row
@@ -2610,7 +2614,7 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
           <BellOff size={12} />
         </span>
       )}
-      {muteWorkers && role === 'worker' && !mutedKeys.includes(pinKeyOf(session)) && (
+      {muteWorkers && role === 'worker' && sessionRunning(session) && !mutedKeys.includes(pinKeyOf(session)) && (
         <span role="img" aria-label={lang === 'en' ? 'Workers muted' : 'Workers silenciados'} title={lang === 'en' ? 'Workers muted' : 'Workers silenciados'} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: 18, height: 20, color: 'var(--text-tertiary)' }}><BellOff size={12} /></span>
       )}
       {onPin && (
