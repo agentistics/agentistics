@@ -509,7 +509,8 @@ async function opPersonalRef(h: Record<string, unknown>): Promise<OpResult> {
 async function opPersonalScrub(h: Record<string, unknown>): Promise<OpResult> {
   const sid = sessionIdOf(h)
   if (!sid || typeof h.text !== 'string' || h.text.length > 4 * 1024 * 1024) return bad()
-  if (!scrubWithinLimit(sid)) {
+  // Only a session with a grant is counted or limited: one that never had a secret has nothing to hold back (§3.11-B exception).
+  if (grantOf(sid) && !scrubWithinLimit(sid)) {
     // §3.6: over the limit the WHOLE output is replaced by the sentence — an answer that is ok, never an error (a hook treats an error as "pass the output through").
     vaultAudit({ type: 'vault.personal-reveal-refused', purpose: 'scrub-limit' })
     return { reply: { ok: true, changed: true, text: JSON.stringify(vaultLang() === 'pt' ? '«saída retida pelo cofre: limite»' : '«output held back by the vault: limit»') } }

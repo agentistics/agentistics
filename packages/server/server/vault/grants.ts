@@ -11,7 +11,10 @@
 import { envNameFor, KIND_FIELDS, makeScrubber, needsConfirm, type PersonalMeta } from '@agentistics/vault'
 import { broadcastNotification } from '../sse'
 import { readRegistry } from '../sessions/registry'
-import { onVaultLock, vaultAudit, vaultConfirmEachUse } from './service'
+import { onVaultLock, runDir, vaultAudit, vaultConfirmEachUse } from './service'
+import { grantMarkerName } from './hook-rewrite'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { listItems, revealField } from './personal'
 
 export interface GrantRef { itemId: string; field: string; ref: string; env: string; name: string }
@@ -24,6 +27,9 @@ let _scrubbers = new Map<string, ReturnType<typeof makeScrubber>>()
 // Test seam only; production reads the persisted vault.json setting through vaultConfirmEachUse().
 let _confirmEachUseOverride: boolean | undefined
 let _epoch = 0
+// Test seam only: where grant markers go (production: the run dir, which the hook reads).
+let _markerDir: string | null = null
+export function __setGrantMarkerDirForTests(dir: string | null): void { _markerDir = dir }
 let _requests = new Map<string, UseRequest>()
 let _approvals = new Map<string, number>()
 let _requestSeq = 0
@@ -80,6 +86,9 @@ export async function grantSession(sessionId: string, itemIds: readonly string[]
   const refs = chosen.sort((a, b) => a.name.localeCompare(b.name)).flatMap(m => refsFor(m, taken))
   const g: Grant = { sessionId, refs, groups: [...groupIds], createdAt: new Date(_now()).toISOString() }
   _grants.set(sessionId, g)
+  // A hook cannot ask the server whether this session ever had a grant when the server is down, so the grant leaves an empty 0600 marker in the run dir (§3.11-B exception). Never removed on revoke: output seen under a grant stays fail-closed.
+  const dir = _markerDir ?? runDir()
+  try { mkdirSync(dir, { recursive: true, mode: 0o700 }); writeFileSync(join(dir, grantMarkerName(sessionId)), '', { mode: 0o600 }) } catch { /* best effort: without a marker the hook passes output through, as before the grant existed */ }
   _scrubbers.delete(sessionId)
   await warmScrubber(sessionId)
   return { ok: true, grant: g }

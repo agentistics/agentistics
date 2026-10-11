@@ -583,12 +583,18 @@ async function cmdPostTool(): Promise<number> {
   try { input = JSON.parse(raw) } catch { return 0 }
   if (input.tool_response === undefined) return 0
   const { askVault } = await import('./vault/socket')
+  const { postToolDecision, grantMarkerName, HOOK_ASK_TIMEOUT_MS } = await import('./vault/hook-rewrite')
   const text = JSON.stringify(input.tool_response)
   let r: { ok?: boolean; changed?: boolean; text?: string } | undefined
-  try { r = (await askVault({ op: 'personal-scrub', managedId: managedId(), text }))?.reply as typeof r } catch { r = undefined }
-  const { postToolAnswer, withheldAnswer } = await import('./vault/hook-rewrite')
-  // Fail closed (§3.11-B): the vault could not answer, so the output is withheld, never passed raw.
-  const ans = r?.ok && typeof r.text === 'string' ? (postToolAnswer(input.tool_response, r.text, r.changed === true) ?? (r.changed === true ? withheldAnswer() : null)) : withheldAnswer()
+  try { r = (await askVault({ op: 'personal-scrub', managedId: managedId(), text }, { timeoutMs: HOOK_ASK_TIMEOUT_MS }))?.reply as typeof r } catch { r = undefined }
+  let hadGrant = true // unknown reads as "had one": fail closed
+  if (!r?.ok) {
+    const { existsSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const { runDir } = await import('./vault/service')
+    try { hadGrant = existsSync(join(runDir(), grantMarkerName(managedId()!))) } catch { hadGrant = true }
+  }
+  const ans = postToolDecision(input.tool_response, r, hadGrant)
   if (ans) process.stdout.write(ans)
   return 0
 }
