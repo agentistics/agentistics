@@ -3,14 +3,18 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { memoryProtector } from '@agentistics/vault'
-import { __resetVaultForTests, ensureVaultOpen, lockVault, sealToFile } from './service'
+import { __resetVaultForTests, __setVaultClockForTests, autoLockRemainingMs, ensureVaultOpen, lockVault, noteVaultActivity, sealToFile } from './service'
 import { __resetPersonalForTests, createGroup, createItem } from './personal'
 import { __resetGrantsForTests, grantBriefing, grantEnv, grantOf, grantSession, refKey, revokeGrant, scrubDeep, scrubTerminalLine, VAULT_REF_INSTRUCTION } from './grants'
 
+let testNow = 1_800_000_000_000
+
 beforeEach(async () => {
+  testNow = 1_800_000_000_000
   const dir = await mkdtemp(join(tmpdir(), 'agentistics-grants-'))
   const mem = memoryProtector()
   __resetVaultForTests({ dir: join(dir, 'vault'), lang: 'en', protectors: [mem], autoInit: { candidates: [mem] } })
+  __setVaultClockForTests(() => testNow)
   __resetPersonalForTests(); __resetGrantsForTests()
   await sealToFile(join(dir, 'x.sealed'), 'github-backup', 'github-backup', new TextEncoder().encode('x'))
   expect(await ensureVaultOpen()).not.toBeNull()
@@ -91,6 +95,26 @@ describe('the vault.sock ops a hook calls (§8.3)', () => {
     const audit = readFileSync(`${vaultDir()}/audit.jsonl`, 'utf8')
     expect(audit).toContain('vault.personal-use')
     expect(audit).not.toContain('MARKER')
+  })
+
+  test('agent ref resolutions do not renew auto-lock, while human activity does', async () => {
+    const { handleVaultOp } = await import('./ops')
+    const b = (await createItem({ kind: 'api-key', name: 'OpenAI', fields: { value: 'sk-MARKER-clock' } })).meta
+    await grantSession('clock-session', [b.id], [])
+    const initial = autoLockRemainingMs()!
+    for (let i = 0; i < 3; i++) {
+      testNow += 60_000
+      const r = await handleVaultOp({ header: { op: 'personal-ref', managedId: 'clock-session', ref: 'vault://openai' }, body: null, emit() {}, closed: new Promise(() => {}) })
+      expect(r.reply.ok).toBe(true)
+    }
+    expect(autoLockRemainingMs()).toBe(initial - 3 * 60_000)
+    for (const op of ['personal-refs', 'personal-scrub', 'github-config', 'prefs-tokens', 'vault-bundle']) {
+      testNow += 1_000
+      await handleVaultOp({ header: { op, managedId: 'clock-session', ref: 'vault://openai' }, body: null, emit() {}, closed: new Promise(() => {}) })
+    }
+    expect(autoLockRemainingMs()).toBe(initial - 3 * 60_000 - 5_000)
+    noteVaultActivity()
+    expect(autoLockRemainingMs()).toBe(30 * 60_000)
   })
 })
 

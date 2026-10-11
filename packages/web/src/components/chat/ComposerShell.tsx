@@ -85,6 +85,7 @@ export function ComposerAttachments({ items, pt, isImage, imageSrc, onOpenImage,
             <img src={imageSrc(a.path)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
           </button>
           <button
+            type="button"
             onClick={() => onRemove(a.path)}
             aria-label={pt ? `Remover ${a.name}` : `Remove ${a.name}`}
             title={pt ? 'Remover' : 'Remove'}
@@ -110,6 +111,7 @@ export function ComposerAttachments({ items, pt, isImage, imageSrc, onOpenImage,
           <Paperclip size={11} style={{ flexShrink: 0 }} />
           <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
           <button
+            type="button"
             onClick={() => onRemove(a.path)}
             aria-label={pt ? `Remover ${a.name}` : `Remove ${a.name}`}
             className="ag-tap-icon"
@@ -131,6 +133,7 @@ export function ComposerAttachButton({ onClick, disabled, uploading, label }: {
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       disabled={disabled || uploading}
       aria-label={label}
@@ -152,6 +155,7 @@ export function ComposerMicButton({ onClick, disabled, listening, label }: {
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       disabled={disabled}
       aria-pressed={listening}
@@ -194,6 +198,7 @@ export function ComposerSendButton({ onClick, disabled, sending, active, label }
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
