@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -30,6 +30,17 @@ beforeAll(() => {
 })
 
 afterAll(() => { rmSync(root, { recursive: true, force: true }) })
+
+beforeEach(() => {
+  rmSync(repo, { recursive: true, force: true })
+  mkdirSync(repo)
+  git(repo, 'init', '-q', '-b', 'main')
+  git(repo, 'config', 'user.email', 't@t')
+  git(repo, 'config', 'user.name', 't')
+  writeFileSync(join(repo, 'a.ts'), 'export const a = 1\n')
+  git(repo, 'add', 'a.ts')
+  git(repo, 'commit', '-q', '-m', 'init')
+})
 
 // `StartHost` (via `ControlHost`) carries many members no route here calls — the same posture
 // `editor-fs.test.ts` and `shell-web.test.ts` already take for a host that is never driven beyond
@@ -91,12 +102,9 @@ describe('handleEditorTreeRoute', () => {
   test('GET /api/fleet/tree lists the root', async () => {
     const req = new Request('http://x/api/fleet/tree?id=s1&path=')
     const { body } = await call(req, hostWith('s1', repo))
-    // `movedir` is the empty directory the earlier "into-itself" test created and then failed to
-    // move — it is still sitting on disk, untracked and empty, and correctly appears as a `dir`
-    // row here: an empty, non-ignored directory is exactly what this route must list.
     expect(body).toEqual({
       ok: true,
-      children: [{ name: 'movedir', kind: 'dir' }, { name: 'a.ts', kind: 'file' }],
+      children: [{ name: 'a.ts', kind: 'file' }],
     })
   })
 
@@ -156,6 +164,7 @@ describe('handleEditorTreeRoute', () => {
   })
 
   test('PATCH /api/fleet/tree/entry renames', async () => {
+    writeFileSync(join(repo, 'brand-new.md'), 'new\n')
     const patch = await call(new Request('http://x/api/fleet/tree/entry', {
       method: 'PATCH', body: JSON.stringify({ id: 's1', from: 'brand-new.md', to: 'renamed.md' }),
     }), hostWith('s1', repo))
@@ -163,6 +172,7 @@ describe('handleEditorTreeRoute', () => {
   })
 
   test('DELETE /api/fleet/tree/entry deletes', async () => {
+    writeFileSync(join(repo, 'renamed.md'), 'new\n')
     const del = await call(new Request('http://x/api/fleet/tree/entry?id=s1&path=renamed.md', {
       method: 'DELETE',
     }), hostWith('s1', repo))

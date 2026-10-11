@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -47,6 +47,10 @@ describe('the antigravity reader', () => {
     brain = await mkdtemp(join(tmpdir(), 'agy-brain-'))
     logs = join(brain, CONV, '.system_generated', 'logs')
     await mkdir(logs, { recursive: true })
+  })
+  beforeEach(async () => {
+    await rm(join(logs, 'transcript.jsonl'), { force: true })
+    await rm(join(logs, 'transcript_full.jsonl'), { force: true })
   })
   afterAll(async () => { await rm(brain, { recursive: true, force: true }) })
 
