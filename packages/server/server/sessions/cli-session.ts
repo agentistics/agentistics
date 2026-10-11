@@ -577,28 +577,7 @@ async function batch(
     // for good. The moment we launched is the moment the claim means; the moment we finished
     // checking is not.
     const spawnedAt = new Date().toISOString()
-    await writeContextFile(planned.plan)
-    try {
-      if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-      await backend.spawn({
-        id, cwd, argv: planned.plan.argv,
-        ...(planned.plan.env ? { env: planned.plan.env } : {}),
-        ...spawnPromptArg(planned.plan, spec.harness),
-      })
-    } catch (e) {
-      failed.push({ harness: spec.harness, reason: e instanceof Error ? e.message : String(e) })
-      continue
-    }
-    // Same check as `start`: a harness that refused its arguments is already gone, and a batch that
-    // reports N started when N exited is worse than one that reports the refusal — the whole point
-    // of a batch is that nobody is watching each one come up.
-    const died = await spawnFailure(backend, id, planned.plan.argv[0])
-    if (died) {
-      failed.push({ harness: spec.harness, reason: died })
-      await backend.kill(id).catch(() => {})
-      continue
-    }
-    if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
+    // Row first, pane second (same reason as `start`); removed again if the spawn fails.
     await addSession({
       id,
       harness: spec.harness,
@@ -621,6 +600,30 @@ async function batch(
         : {}),
       ...(await recordedRepo(cwd)),
     })
+    await writeContextFile(planned.plan)
+    try {
+      if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
+      await backend.spawn({
+        id, cwd, argv: planned.plan.argv,
+        ...(planned.plan.env ? { env: planned.plan.env } : {}),
+        ...spawnPromptArg(planned.plan, spec.harness),
+      })
+    } catch (e) {
+      await removeSession(id).catch(() => {})
+      failed.push({ harness: spec.harness, reason: e instanceof Error ? e.message : String(e) })
+      continue
+    }
+    // Same check as `start`: a harness that refused its arguments is already gone, and a batch that
+    // reports N started when N exited is worse than one that reports the refusal — the whole point
+    // of a batch is that nobody is watching each one come up.
+    const died = await spawnFailure(backend, id, planned.plan.argv[0])
+    if (died) {
+      failed.push({ harness: spec.harness, reason: died })
+      await backend.kill(id).catch(() => {})
+      await removeSession(id).catch(() => {})
+      continue
+    }
+    if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
     if (spec.notify === 'off') await muteAtSpawn(planned.plan.conversationId ?? id).catch(() => {})
     const liveBackend = await backend.list().catch(() => null)
     const backendIds = liveBackend ? new Set(liveBackend.map(b => b.id)) : null
