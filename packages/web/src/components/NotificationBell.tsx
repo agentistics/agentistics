@@ -6,6 +6,8 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { openWhatsNew } from '../whatsNew/open'
 import { requestIdleReview } from '../lib/idleReviewRequest'
 import { muteSessionWithToast, SESSION_MUTED_CODE } from '../lib/notifyMenu'
+import { setMuteWorkers, useMuteWorkers } from '../lib/sessionRoles'
+import { ToggleSwitch } from './ToggleSwitch'
 
 const ICON: Record<NotificationType, { color: string; Icon: typeof AlertCircle }> = {
   error:   { color: '#ef4444', Icon: AlertCircle },
@@ -45,6 +47,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) 
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const unread = notes.filter(n => !n.read).length
+  const muteWorkers = useMuteWorkers()
 
   useEffect(() => {
     const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
@@ -127,6 +130,13 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) 
                 <Trash2 size={11} />{pt ? 'Limpar tudo' : 'Clear all'}
               </button>
             )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '9px 12px', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 11.5, color: 'var(--text-primary)' }}>{pt ? 'Silenciar workers ativos' : 'Mute active workers'}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>{pt ? 'Só líderes e sessões sem tipo avisam' : 'Only leaders and untyped sessions notify'}</div>
+            </div>
+            <ToggleSwitch on={muteWorkers} onToggle={() => setMuteWorkers(!muteWorkers)} label={pt ? 'Silenciar workers ativos' : 'Mute active workers'} />
           </div>
 
           {notes.length === 0 ? (
