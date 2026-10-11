@@ -116,6 +116,14 @@ export interface ChatPayload {
   /** True while the session is running, so the view knows whether to expect more. */
   live: boolean
   /**
+   * A dialog shown before the harness creates its conversation (for example, trusting the folder).
+   * The fleet row normally carries these fields, but an unlinked first-run session must carry them
+   * through the chat response too so the chat can render the same answerable approval card.
+   */
+  approvalLines?: string[]
+  dialogOptions?: { number: number; label: string; selected: boolean; freeText?: boolean }[]
+  chooseBlind?: string
+  /**
    * ENGINE.MAP F1.2: `'adapter'` when these turns came from the engine's chat channel (`HarnessChat`,
    * the `adapter-chat` experimental flag) rather than from the host's own transcript readers. Absent on
    * the legacy path, which stays byte for byte what it was. A client seeing it may take `working` from
@@ -226,10 +234,10 @@ async function readSessionChatCore(
     if (row.state === 'waiting-approval') {
       return {
         turns: [],
-        unavailable: lang === 'pt'
-          ? 'Esta sessão está esperando uma resposta sua antes de criar a conversa (por exemplo, confiar na pasta). Responda no cartão da sessão e a transcrição aparece em seguida.'
-          : 'This session is waiting for your answer before it creates the conversation (for example, trusting the folder). Answer it on the session card and the transcript follows.',
         live,
+        ...(row.approvalLines?.length ? { approvalLines: row.approvalLines } : {}),
+        ...(row.dialogOptions?.length ? { dialogOptions: row.dialogOptions } : {}),
+        ...(row.chooseBlind ? { chooseBlind: row.chooseBlind } : {}),
       }
     }
     // A RUNNING session of a harness that creates its conversation on the FIRST MESSAGE (agy: its

@@ -157,6 +157,10 @@ interface ChatPayload {
   /** LIVE.2: numbers only, for a conversation whose transcript is gone (accompanies `unavailable`). */
   recorded?: ChatRecorded
   live: boolean
+  /** A pre-conversation dialog carried by the chat response when the fleet row has no link yet. */
+  approvalLines?: string[]
+  dialogOptions?: { number: number; label: string; selected: boolean; freeText?: boolean }[]
+  chooseBlind?: string
   /** Already-localized: these turns are the END of a longer conversation. See `chat-web.ts`. */
   older?: string
   /** Messages the SERVER is holding for this conversation — see `pending-prompts.ts`. */
@@ -1758,8 +1762,19 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    */
   const [typing, setTyping] = useState(false)
 
-  // A source's questions are its own slot (`approvals`), never the fleet row's dialog.
-  const blocked = !source && (session.approvalLines?.length ?? 0) > 0
+  // A source's questions are its own slot (`approvals`), never the fleet row's dialog. An
+  // unlinked first-run session has no useful fleet row dialog in older polls, so the chat payload
+  // is allowed to fill the same row shape from the server's captured dialog.
+  const approvalRow = useMemo(() => {
+    if (!row || !payload?.approvalLines?.length) return row
+    return {
+      ...row,
+      approvalLines: payload.approvalLines,
+      ...(payload.dialogOptions?.length ? { dialogOptions: payload.dialogOptions } : {}),
+      ...(payload.chooseBlind ? { chooseBlind: payload.chooseBlind } : {}),
+    }
+  }, [row, payload?.approvalLines, payload?.dialogOptions, payload?.chooseBlind])
+  const blocked = !source && (approvalRow?.approvalLines?.length ?? 0) > 0
   const loading = payload === null
 
   /**
@@ -1783,8 +1798,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * permission prompt is a fixed template across every command it asks about.
    */
   const dialogShape = useMemo(
-    () => approvalIdentity(row?.approvalLines ?? [], row?.dialogOptions ?? []),
-    [row?.approvalLines, row?.dialogOptions],
+    () => approvalIdentity(approvalRow?.approvalLines ?? [], approvalRow?.dialogOptions ?? []),
+    [approvalRow?.approvalLines, approvalRow?.dialogOptions],
   )
   useEffect(() => {
     // The question went away, or became a different question. Either way this is no longer an
@@ -2573,9 +2588,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
           {/* The question, at the BOTTOM of the conversation, where the next thing to happen goes.
               It is not in the transcript — a dialog lives on the screen and is never written to the
               JSONL — so it arrives on the fleet row instead. */}
-          {blocked && row && (
+          {blocked && approvalRow && (
             <ApprovalCard
-              row={row}
+              row={approvalRow}
               lang={lang}
               act={act}
               answering={answering?.number ?? null}
