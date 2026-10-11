@@ -87,7 +87,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
     _imports: 'a parsed .env import between its preview and its commit (VAULT.PERSONAL): <= 10 min, bound to one session, single use, every value blanked on commit/expiry',
   },
   'server/server/vault/rekey.ts': { SKIP_DIRS: 'directory names the rotation scan skips', _crashAt: 'a test seam: the name of a point to inject a crash at' },
-  'server/server/vault/sleep-watch.ts': { _proc: 'the gdbus monitor child process handle', _winProc: 'the powershell.exe session-event child process handle (WSL)' },
+  'server/server/vault/sleep-watch.ts': { _proc: 'the gdbus monitor child process handle', _winProc: 'the powershell.exe session-event child process handle (WSL)', _exitHooked: 'a flag: the exit hook that stops both is registered' },
   'server/server/vault/socket.ts': { _handler: 'the op dispatcher', _server: 'the listening socket' },
   'server/server/envelope-keys.ts': { _cachedPublic: 'the PUBLIC half only — the private key is opened per use' },
   'server/server/preferences.ts': {

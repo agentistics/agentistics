@@ -49,9 +49,14 @@ export type SleepWatch = { state: 'watching' } | { state: 'unavailable'; reason:
 
 let _proc: { kill(): void } | null = null
 let _winProc: { kill(): void } | null = null
+let _exitHooked = false
 
 /** Start once; never throws. `onLock` is called for each sleep / screen-lock signal. */
 export function startSleepWatch(onLock: (why: 'sleep' | 'screen-lock') => void): SleepWatch {
+  // The two monitors are long-lived children, and nothing else stops them: a server that exits (a
+  // SIGTERM is `process.exit(143)`) left both running — under `KillMode=process` one pair per restart,
+  // and 104 of them were found after a day of throwaway bench servers (PERF.IDLE).
+  if (!_exitHooked) { _exitHooked = true; process.once('exit', stopSleepWatch) }
   const win = startWindowsWatch(onLock)
   const lin = startLinuxWatch(onLock)
   return lin.state === 'watching' ? lin : win.state === 'watching' ? win : lin

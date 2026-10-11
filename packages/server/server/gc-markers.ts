@@ -26,13 +26,15 @@
  * has no setter — so the server re-executes ITSELF (execve: same pid, same fds, nothing claimed yet)
  * with the variable set, before it touches the data dir, a port or the vault. `AGENTISTICS_GC_REEXEC=1`
  * marks the new image as ours: it stops a second re-exec, and tells the new image to take BOTH variables
- * back out of its environment at once (`forgetReexecEnv`) — the option is read already, and everything
- * the server starts (tmux and every session in it, the harnesses, MCPs, a `bun test` run inside a
- * session) inherits `process.env`, so leaving it there tuned every one of them too.
+ * back out of its environment at once (`forgetReexecEnv`) and installs the spawn guard
+ * (`spawn-env.ts`) — the option is read already, and everything the server starts (tmux and every
+ * session in it, the harnesses, MCPs, a `bun test` run inside a session) would otherwise inherit it.
  *
  * Overrides: a `BUN_JSC_numberOfGCMarkers` the person set is left alone; `AGENTISTICS_GC_MARKERS=<n>`
  * picks another count, `AGENTISTICS_GC_MARKERS=0` leaves the runtime's default (and skips the re-exec).
  */
+
+import { installSpawnEnvGuard } from './spawn-env'
 
 export const GC_MARKERS_ENV = 'BUN_JSC_numberOfGCMarkers'
 /** Set only on the re-executed image: "the GC variable is ours, take it back out". */
@@ -82,7 +84,11 @@ export function forgetReexecEnv(env: Record<string, string | undefined>): boolea
  * did — never a reason not to serve.
  */
 export async function reexecWithGcMarkers(): Promise<void> {
-  if (forgetReexecEnv(process.env)) return
+  if (forgetReexecEnv(process.env)) {
+    // `process.env` is not what a child inherits — see spawn-env.ts.
+    installSpawnEnvGuard([GC_MARKERS_ENV, GC_REEXEC_ENV])
+    return
+  }
   const n = gcMarkersPlan(process.env, process.platform)
   if (n === null) return
   const argv = selfArgv({ execPath: process.execPath, argv: process.argv, execArgv: process.execArgv })
