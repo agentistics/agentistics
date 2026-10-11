@@ -8,7 +8,7 @@
 import { HARNESS_LABELS } from '../../lib/harness'
 import { usePlanLimits } from '../../lib/planLimits'
 import { AgentisticsLoader } from '../AgentisticsLoader'
-import { PlanLimitsBlock } from '../PlanLimitMeter'
+import { PlanUsageCard } from '../PlanLimitMeter'
 import { HarnessMark } from '../sessions/HarnessMark'
 
 export function NayLimitsTab({ lang, isMobile }: { lang: 'pt' | 'en'; isMobile: boolean }) {
@@ -32,9 +32,7 @@ export function NayLimitsTab({ lang, isMobile }: { lang: 'pt' | 'en'; isMobile: 
         {limits.map(l => (
           <div key={`${l.harness}:${l.account}`} style={card}>
             <HarnessMark harness={l.harness} size={18} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <PlanLimitsBlock limits={l} now={now} lang={lang} header details forecast />
-            </div>
+            <div style={{ flex: 1, minWidth: 0 }}><PlanUsageCard limits={l} now={now} lang={lang} /></div>
           </div>
         ))}
         {registered.map(r => (

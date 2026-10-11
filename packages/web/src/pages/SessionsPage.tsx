@@ -66,6 +66,7 @@ import { PresetLaunchConfirm } from '../components/sessions/PresetLaunchConfirm'
 // while creating was the only thing that could announce a session; a reopen announces one too, and
 // two constants for one budget is two answers.
 import { SessionStatsMenu } from '../components/sessions/SessionStatsMenu'
+import { PlanUsageHeaderRings } from '../components/sessions/PlanUsageHeaderRings'
 import type { SessionComposerMetrics } from '../components/sessions/SessionChat'
 import { SessionTitleFlag } from '../components/sessions/SessionTitleFlag'
 import { ChatSelectionOverlay } from '../components/sessions/ChatSelectionBar'
@@ -2721,6 +2722,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             than extend, and a figure you have to open a menu for is a figure nobody watches.
             The view toggle went in with the rest: asked for directly, after it had been left
             out here on the argument that two taps per switch was too many. */}
+        <PlanUsageHeaderRings lang={pt ? 'pt' : 'en'} />
         {magnifierButton}
         {/* THE ONE CONTROL THAT STAYS BESIDE THE TITLE. Its own button, its own percentage —
             the figure is the reason it is out here rather than in the menu. */}

@@ -77,9 +77,14 @@ export function __setPlanLimitsForTest(limits: PlanLimits[] | null, now = Date.n
 
 type Lang = 'pt' | 'en'
 
-export function windowLabel(kind: PlanWindowKind, _lang: Lang): string {
-  // "7 d", paired with "5 h" — "sem" read as the word "sem" (without).
-  return kind === '5h' ? '5 h' : '7 d'
+export function windowLabel(kind: PlanWindowKind, lang: Lang): string {
+  return kind === '5h'
+    ? (lang === 'pt' ? 'Sessão 5 h' : '5-h session')
+    : (lang === 'pt' ? 'Semana' : 'Week')
+}
+
+export function windowShortLabel(kind: PlanWindowKind, lang: Lang): string {
+  return kind === '5h' ? '5 h' : (lang === 'pt' ? 'Semana' : 'Week')
 }
 
 export const SOURCE_LABEL: Record<PlanLimitSource, { pt: string; en: string }> = {
@@ -195,7 +200,7 @@ export function warnForecast(w: PlanLimitWindow, now: number): PlanForecast | nu
 
 /** The short form for a one-line meter: the same "5 h" / "7 d". */
 export function windowShort(kind: PlanWindowKind, lang: Lang): string {
-  return windowLabel(kind, lang)
+  return windowShortLabel(kind, lang)
 }
 
 /** When it renews, as short as it can be said: the clock for the 5-hour window (it renews within

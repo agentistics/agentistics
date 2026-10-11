@@ -3,7 +3,7 @@ import { Outlet, NavLink, useLocation, useNavigate, useParams, useSearchParams }
 import { createPortal } from 'react-dom'
 import { version } from '../../../package.json'
 import {
-  Activity, AlertTriangle, ArrowLeft, ArrowRight, BarChart2, Bot,
+  Activity, AlertTriangle, ArrowLeft, ArrowRight, BarChart2, Bot, Gauge,
   Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp,
   Clock, Code2, Cpu, DollarSign, Download,
   FileCode, FileDown, Flame, FolderOpen, FolderTree, GitBranch,
@@ -113,6 +113,9 @@ import { ChangePasswordSelf } from './components/ChangePasswordSelf'
 import { MfaSetup } from './components/MfaSetup'
 import { StepUpPrompt } from './components/StepUpPrompt'
 import { HARNESS_LABELS } from './lib/harness'
+import { usePlanLimits, currentUsedPct, windowLabel } from './lib/planLimits'
+import { LimitLevelIcon, PlanUsageSummary } from './components/PlanLimitMeter'
+import { requestNayTab } from './lib/nayDockRequests'
 import { format, parseISO, parse } from 'date-fns'
 import { ToggleSwitch } from './components/ToggleSwitch'
 import { fleetFilterOptions, filterFleet, SESSION_FILTER_DIMS } from './lib/fleetFilter'
@@ -990,6 +993,12 @@ function SideNav({
   // Which session is open, for the collapsed rail's selected highlight.
   const { sessionId } = useParams()
   const pt = lang === 'pt'
+  const planSnap = usePlanLimits()
+  const [usageHover, setUsageHover] = useState(false)
+  const worst = useMemo(() => (planSnap.limits ?? []).flatMap(l => l.windows.map(w => ({ l, w, pct: currentUsedPct(w, planSnap.now) }))).sort((a, b) => b.pct - a.pct)[0], [planSnap.limits, planSnap.now])
+  const usageLabel = worst
+    ? `${pt ? 'Uso dos planos' : 'Plan usage'} — ${pt ? 'atenção' : 'attention'}: ${HARNESS_LABELS[worst.l.harness]}, ${windowLabel(worst.w.kind, lang === 'pt' ? 'pt' : 'en')} em ${Math.round(worst.pct)}%`
+    : (pt ? 'Uso dos planos' : 'Plan usage')
   // History, for the icon row. This ships as an installed PWA, where there is no browser chrome to
   // fall back on — in a plain tab they duplicate the browser's own, which is a cost worth paying
   // for the standalone case.
@@ -1184,6 +1193,17 @@ function SideNav({
             <SlidersHorizontal size={15} />
           </NavLink>
         </CollapsedTip>
+        {!isCentral && <div style={{ flex: collapsed ? undefined : 1, width: collapsed ? 34 : 'auto', position: 'relative' }} onMouseEnter={() => setUsageHover(true)} onMouseLeave={() => setUsageHover(false)}>
+          <button
+            aria-label={usageLabel}
+            aria-haspopup="dialog"
+            onFocus={() => setUsageHover(true)} onBlur={() => setUsageHover(false)}
+            onKeyDown={e => { if (e.key === 'Escape') setUsageHover(false); if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); requestNayTab('limits'); setUsageHover(false) } }}
+            onClick={() => { requestNayTab('limits'); setUsageHover(false) }}
+            style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: 1, position: 'relative' }}
+          ><Gauge size={15} />{!collapsed && (pt ? 'Uso' : 'Usage')}{worst && worst.pct >= 75 && <span style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: '50%', background: 'var(--bg-base)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LimitLevelIcon pct={worst.pct} size={14} /></span>}</button>
+          {usageHover && createPortal(<div role="dialog" aria-labelledby="plan-usage-summary-title" onMouseEnter={() => setUsageHover(true)} onMouseLeave={() => setUsageHover(false)} style={{ position: 'fixed', left: collapsed ? 48 : width + 8, bottom: 52, zIndex: 600, background: 'var(--bg-card)', border: '1px solid var(--ag-tint-4)', borderRadius: 12, boxShadow: 'var(--ag-shadow-menu)' }}><PlanUsageSummary limits={planSnap.limits} registered={planSnap.registered} now={planSnap.now} lang={pt ? 'pt' : 'en'} /></div>, document.body)}
+        </div>}
       </div>
     </div>
   )

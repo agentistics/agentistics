@@ -18,6 +18,7 @@
  */
 
 import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { subscribeNayRequests } from '../../lib/nayDockRequests'
 import { ArrowDownToLine, ArrowLeft, Loader2, Minus, MoreVertical, PictureInPicture2, Plus, Power, SquareArrowOutUpRight, X } from 'lucide-react'
 import { isNayCwd, nayPlacementRows, planNayPlacement, sessionIdentityKey, type Filters, type SessionMeta } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
@@ -135,6 +136,9 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
     open: false, panelSession: null, ...parseDockState(windowsStore.get()),
   }))
   const [tab, setTab] = useState<Tab>(() => tabStore.get())
+  useEffect(() => subscribeNayRequests(requested => {
+    if (requested === 'limits') { setTab('limits'); setDock(d => ({ ...d, open: true, panelSession: null })) }
+  }), [])
   // Follow the server's copy when it lands after mount, or arrives from another device.
   useEffect(() => windowsStore.subscribe(() => {
     const { windows } = parseDockState(windowsStore.get())

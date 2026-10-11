@@ -30,7 +30,7 @@ import { useArtifactLive } from '../../lib/artifactsStore'
 import { scrollIsOutside } from '../../lib/popoverScroll'
 import { modelDisplay } from '../../lib/modelDisplay'
 import { usePlanLimits } from '../../lib/planLimits'
-import { PlanLimitArcs, PlanLimitsBlock } from '../PlanLimitMeter'
+import { PlanLimitsBlock } from '../PlanLimitMeter'
 
 /**
  * The trigger button's own percentage colour — a THREE-tier ramp, deliberately not the same as the
@@ -496,12 +496,6 @@ export function SessionStatsMenu({
 
           {/* CONTEXT — a bar, and the bar SATURATES while the label keeps counting. A session can
               genuinely exceed the documented window, and a clamped label would hide exactly that. */}
-          {plan && (
-            <Block title={pt ? 'Plano' : 'Plan'}>
-              <PlanLimitsBlock limits={plan} now={planSnap.now} lang={lang} header details forecast />
-            </Block>
-          )}
-
           <Block title={pt ? 'Contexto' : 'Context'}>
             {s.context ? (
               <>
@@ -526,6 +520,14 @@ export function SessionStatsMenu({
                 />
               </>
             ) : <Absent text={na('contextWindow')} />}
+          </Block>
+
+          <Block title={pt ? 'Plano' : 'Plan'}>
+            {plan ? <PlanLimitsBlock limits={plan} now={planSnap.now} lang={lang} header details forecast /> : (
+              <Absent text={pt
+                ? `${(HARNESS_LABELS as Record<string, string>)[harness] ?? harness} ainda não informou os limites do plano — eles aparecem aqui assim que informar.`
+                : `${(HARNESS_LABELS as Record<string, string>)[harness] ?? harness} has not reported plan limits yet — they will appear here when available.`} />
+            )}
           </Block>
 
           {/* COST PER REPLY — every reply resends the whole conversation, so the context of the last
@@ -709,7 +711,6 @@ export function SessionStatsMenu({
           }}
         >
           <ContextRing fraction={s.context.fraction} size={GAUGE_SIZE} stroke={3} />
-          {plan && <PlanLimitArcs limits={plan} now={planSnap.now} size={GAUGE_SIZE} />}
           <span style={{
             position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: 11, fontWeight: 700, color: 'var(--text-primary)',

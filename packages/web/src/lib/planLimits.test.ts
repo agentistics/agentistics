@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { fmtSpan, forecastPhrase, limitNoticeMeta, limitNoticeText, limitTone, resetPhrase } from './planLimits'
+import { fmtSpan, forecastPhrase, limitNoticeMeta, limitNoticeText, limitTone, resetPhrase, windowLabel, windowShortLabel } from './planLimits'
 
 const M = 60_000
 test('spans', () => {
@@ -18,6 +18,12 @@ test('tone follows the notice thresholds', () => {
   expect(limitTone(10)).toBe('var(--accent-green)')
   expect(limitTone(80)).toBe('var(--anthropic-orange)')
   expect(limitTone(96)).toBe('var(--accent-red)')
+})
+test('window labels are explicit and short labels are mobile-only', () => {
+  expect(windowLabel('5h', 'pt')).toBe('Sessão 5 h')
+  expect(windowLabel('week', 'pt')).toBe('Semana')
+  expect(windowLabel('5h', 'en')).toBe('5-h session')
+  expect(windowShortLabel('5h', 'pt')).toBe('5 h')
 })
 test('notice meta round trip and text', () => {
   const now = Date.parse('2026-10-09T12:00:00')
