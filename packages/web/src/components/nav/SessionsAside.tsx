@@ -250,9 +250,9 @@ function roleExtras(row: ControlSession | undefined, pt: boolean): MenuEntry[] {
   const current = getSessionRole(key)
   return [
     { action: 'session-role-label', label: pt ? 'Tipo' : 'Type', enabled: false },
-    { action: 'session-role:', label: pt ? 'Não sei' : "Don't know", enabled: true, checked: current === undefined },
-    { action: 'session-role:leader', label: pt ? 'Líder' : 'Leader', enabled: true, checked: current === 'leader' },
-    { action: 'session-role:worker', label: 'Worker', enabled: true, checked: current === 'worker' },
+    { action: 'session-role:', label: pt ? 'Automático' : 'Automatic', enabled: true, checked: current === undefined, color: 'var(--text-tertiary)' },
+    { action: 'session-role:leader', label: pt ? 'Líder' : 'Leader', enabled: true, checked: current === 'leader', color: 'var(--accent-purple)' },
+    { action: 'session-role:worker', label: 'Worker', enabled: true, checked: current === 'worker', color: 'var(--accent-cyan)' },
   ]
 }
 
