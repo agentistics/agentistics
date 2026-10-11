@@ -56,7 +56,11 @@ export function useVaultControls(lang: Lang) {
   useEffect(() => {
     if (!open) return
     let last = 0
-    const beat = () => { const n = Date.now(); if (n - last >= BEAT_MS) { last = n; heartbeat() } }
+    const beat = (event: Event) => {
+      // A script can dispatch pointer/keyboard events too; only browser-originated input is a human gesture.
+      if (!event.isTrusted) return
+      const n = Date.now(); if (n - last >= BEAT_MS) { last = n; heartbeat() }
+    }
     window.addEventListener('pointerdown', beat); window.addEventListener('keydown', beat)
     return () => { window.removeEventListener('pointerdown', beat); window.removeEventListener('keydown', beat) }
   }, [open])

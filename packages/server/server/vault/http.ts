@@ -16,7 +16,7 @@ import { readJsonLimited } from '../limits'
 import { originAllowed } from '../cors'
 import * as gate from './gate'
 import { readVaultView, lockVaultNow } from './inventory'
-import { FRESH_BINDING, extendAutoLock, noteVaultActivity, unlockWithGesture, vaultLang, vaultStatus } from './service'
+import { FRESH_BINDING, acceptVaultHeartbeatToken, extendAutoLock, rotateVaultHeartbeatToken, unlockWithGesture, vaultIsOpen, vaultLang, vaultStatus } from './service'
 import { isLoopbackAddress } from '../native-bind'
 import { opInit } from './ops'
 import { uiReply } from './ui-sentence'
@@ -96,6 +96,26 @@ function send(body: Record<string, unknown>, status: number, headers: Record<str
   return new Response(JSON.stringify(uiReply(body, vaultLang() === 'pt' ? 'pt' : 'en')), { status, headers })
 }
 
+const HEARTBEAT_COOKIE = 'agentistics-vault-heartbeat'
+function cookieValue(req: Request, name: string): string | null {
+  const raw = req.headers.get('cookie') ?? ''
+  for (const part of raw.split(';')) {
+    const i = part.indexOf('=')
+    if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim() || null
+  }
+  return null
+}
+function heartbeatCookie(token: string): string {
+  return `${HEARTBEAT_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict`
+}
+function expiredHeartbeatCookie(): string {
+  return `${HEARTBEAT_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`
+}
+function addHeartbeatCookie(response: Response, token: string | null): Response {
+  response.headers.append('Set-Cookie', token === null ? expiredHeartbeatCookie() : heartbeatCookie(token))
+  return response
+}
+
 /** Answers a `/api/vault*` request, or `null` for a path that is not one of ours. */
 export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv): Promise<Response | null> {
   const json = { ...env.cors, 'Content-Type': 'application/json' }
@@ -153,12 +173,14 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     if (!g.ok) return reply(g)
     const left = extendAutoLock()
     if (left === null) return reply({ ok: false, code: String('locked'), sentence: vaultLang() === 'pt' ? 'O cofre já está trancado.' : 'The vault is already locked.' })
-    return reply({ ok: true, autoLockInMs: left })
+    return addHeartbeatCookie(reply({ ok: true, autoLockInMs: left }), rotateVaultHeartbeatToken())
   }
   if (path === '/api/vault/lock' && req.method === 'POST') {
     const b = await body()
     const r = await lockVaultNow({ grant, session, code: codeOf(b) })
-    return send(r.ok ? { ok: true, vault: await readVaultView([], async () => [], session, loopback) } : { error: r.error, code: r.code, sentence: r.error }, r.ok ? 200 : statusOf(r.code), noStore)
+    return r.ok
+      ? addHeartbeatCookie(send({ ok: true, vault: await readVaultView([], async () => [], session, loopback) }, 200, noStore), null)
+      : send({ error: r.error, code: r.code, sentence: r.error }, statusOf(r.code), noStore)
   }
   if (path === '/api/vault/init' && req.method === 'POST') {
     // Create the vault from the page: the very code path `agentop vault init` takes (`opInit`), with
@@ -189,8 +211,10 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     // then carries a single-use proof for exactly that action, this session — and nobody else's request.
     const b = await body()
     const binding = typeof b.for === 'string' && FRESH_BINDING.test(b.for) ? b.for : null
+    const wasOpen = vaultIsOpen()
     const u = await unlockWithGesture(undefined, binding ? { session, binding } : undefined)
-    return reply(u.ok ? { ok: true, state: u.state, ...(u.fresh ? { fresh: u.fresh } : {}) } : u)
+    const response = reply(u.ok ? { ok: true, state: u.state, ...(u.fresh ? { fresh: u.fresh } : {}) } : u)
+    return u.ok && u.state === 'open' && !wasOpen ? addHeartbeatCookie(response, rotateVaultHeartbeatToken()) : response
   }
   if (path === '/api/vault/unlock/code' && req.method === 'POST') {
     const b = await body()
@@ -198,7 +222,8 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     // Owner 2026-10-03: the code that completes the unlock IS the step-up — it hands back the
     // 5-minute 'read' grant, so the list right behind the unlock never asks for a second code.
     const r = await gate.completeUnlock(b.code)
-    return reply(r.ok ? { ok: true, grant: gate.mintGrant(session, 'read') } : r)
+    const response = reply(r.ok ? { ok: true, grant: gate.mintGrant(session, 'read') } : r)
+    return r.ok ? addHeartbeatCookie(response, rotateVaultHeartbeatToken()) : response
   }
   if (path === '/api/vault/auto-lock' && req.method === 'POST') {
     const b = await body()
@@ -223,7 +248,11 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
         ? 'A atividade do cofre só pode vir do painel aberto no próprio computador.'
         : 'Vault activity can only come from the dashboard on this computer.' })
     }
-    noteVaultActivity()
+    if (!acceptVaultHeartbeatToken(cookieValue(req, HEARTBEAT_COOKIE))) {
+      return reply({ ok: false, code: 'activity-token', sentence: vaultLang() === 'pt'
+        ? 'Esta batida do cofre não tem um token válido ou chegou cedo demais.'
+        : 'This vault heartbeat has no valid token or arrived too soon.' })
+    }
     return send({ ok: true }, 200, noStore)
   }
 
@@ -304,8 +333,12 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     return reply(r)
   }
   // VAULT.PERSONAL: answered through THIS module's `reply` (the one JSON exit, page filter included).
+  const wasOpen = vaultIsOpen()
   const phoneRoute = await handlePhoneHttp({ req, path, url, session, grant, loopback, reply })
-  if (phoneRoute) return phoneRoute
+  if (phoneRoute) {
+    if (path === '/api/vault/phone/unlock' && phoneRoute.status === 200 && !wasOpen) return addHeartbeatCookie(phoneRoute, rotateVaultHeartbeatToken())
+    return phoneRoute
+  }
   const personal = await handlePersonalHttp({ req, path, url, session, grant, fresh, loopback, reply })
   if (personal) return personal
   return null
