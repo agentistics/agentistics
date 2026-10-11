@@ -32,7 +32,19 @@ async function knownProjectPaths(): Promise<string[]> {
 
 export async function collectCleanFacts(repos: readonly string[], o: { lowPriority?: boolean } = {}): Promise<WorktreeFacts[]> {
   const all: WorktreeFacts[] = []
-  for (const r of repos) all.push(...(await worktreeFacts(r, o)))
+  const pool = 2
+  let next = 0
+  let done = 0
+  const worker = async () => {
+    while (next < repos.length) {
+      const r = repos[next++]!
+      process.stderr.write(`\rScanning clean candidates (${done}/${repos.length} repositories)`)
+      all.push(...(await worktreeFacts(r, o)))
+      done++
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(pool, repos.length) }, worker))
+  if (repos.length) process.stderr.write(`\rScanning clean candidates (${repos.length}/${repos.length} repositories)\n`)
   return all
 }
 
