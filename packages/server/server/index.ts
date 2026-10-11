@@ -3960,8 +3960,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // such when the first build is still running. Without it — the MCP, the VS Code extension,
         // anything older — the answer is the full build, exactly as before.
         const wantPartial = url.searchParams.get('partial') === '1'
-        // `slim=1` (only ever with `partial=1`): the first screen's payload, a fraction of the full one.
-        const wantSlim = wantPartial && url.searchParams.get('slim') === '1'
+        // `slim=1`: the first screen's payload, a fraction of the full one. Keep this independent
+        // from `partial=1` so the web probe and older clients asking explicitly for slim cannot
+        // accidentally receive the full 6+ MB response.
+        const wantSlim = url.searchParams.get('slim') === '1'
         let data = wantPartial ? await buildApiResponseForClient() : await buildApiResponse()
         const unscoped = data
         // Presence is live (in-memory sockets + heartbeat) — merge it in AFTER the cached

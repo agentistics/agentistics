@@ -4,22 +4,50 @@ export interface FleetWire {
   closedVersion?: string
   sessions: Array<{ id: string }>
   rows: Array<{ id: string }>
+  verbCatalog?: Array<Array<Record<string, unknown>>>
   [key: string]: unknown
 }
 export interface FleetWireDelta {
   seq: number
-  upsert?: Pick<FleetWire, 'sessions' | 'rows'>
+  upsert?: { sessions?: FleetWire['sessions']; rows?: FleetWire['rows']; verbCatalog?: FleetWire['verbCatalog'] }
   remove?: string[]
   order?: string[]
   meta?: Record<string, unknown>
+}
+
+function attachCommand(row: Record<string, unknown>): string {
+  return row.harness === 'agentistics' ? '' : `agentop session attach ${String(row.id ?? '').slice(0, 12)}`
+}
+
+/** Materialize compact stream rows before storing them, so keys never survive into a later delta. */
+function expandRows(rows: FleetWire['sessions'], catalog?: FleetWire['verbCatalog']): FleetWire['sessions'] {
+  return rows.map(row => {
+    const source = row as Record<string, unknown>
+    const key = source.verbKey
+    const verbs = typeof key === 'number' ? catalog?.[key] : undefined
+    const compact = typeof key === 'number' || Array.isArray(catalog)
+    if (!compact) return row
+    const { verbKey: _verbKey, ...withoutKey } = source
+    return {
+      ...withoutKey,
+      ...(verbs ? { verbs } : {}),
+      ...(compact && !('attachCommand' in withoutKey) ? { attachCommand: attachCommand(withoutKey) } : {}),
+    }
+  }) as FleetWire['sessions']
 }
 
 export function applyFleetWire(prev: FleetWire | null, event: string, body: unknown): FleetWire {
   const next = body as FleetWire & FleetWireDelta
   if (!next || !Number.isSafeInteger(next.seq) || next.seq < 1) throw new Error('Invalid fleet sequence')
   if (event === 'snapshot') {
-    if (!Array.isArray(next.sessions) || !Array.isArray(next.rows)) throw new Error('Invalid fleet snapshot')
-    return next
+    if (!Array.isArray(next.sessions) && !Array.isArray(next.rows)) throw new Error('Invalid fleet snapshot')
+    const compactSessions = Array.isArray(next.sessions) ? next.sessions : next.rows!
+    const sessions = expandRows(compactSessions, next.verbCatalog)
+    const hasLegacyRows = Array.isArray(next.rows)
+    const { rows: _legacyRows, ...withoutRows } = next
+    const result = { ...withoutRows, sessions } as FleetWire
+    result.rows = hasLegacyRows && !Array.isArray(next.verbCatalog) ? next.rows! : sessions
+    return result
   }
   if (event !== 'delta' || !prev || next.seq !== prev.seq + 1) throw new Error('Fleet snapshot required')
   const merge = (held: Array<{ id: string }>, added: Array<{ id: string }> = []) => {
@@ -29,13 +57,28 @@ export function applyFleetWire(prev: FleetWire | null, event: string, body: unkn
     const order = [...new Set([...(next.order ?? []), ...rows.keys()])]
     return order.flatMap(id => rows.has(id) ? [rows.get(id)!] : [])
   }
-  const result: FleetWire = { ...prev, seq: next.seq, sessions: merge(prev.sessions, next.upsert?.sessions), rows: merge(prev.rows, next.upsert?.rows) }
+  const { rows: _legacyRows, ...withoutRows } = prev
+  const added = expandRows(next.upsert?.sessions ?? next.upsert?.rows ?? [], next.upsert?.verbCatalog ?? prev.verbCatalog)
+  const result = { ...withoutRows, seq: next.seq, sessions: merge(prev.sessions, added) } as FleetWire
+  result.rows = merge(prev.rows, added)
   for (const [key, value] of Object.entries(next.meta ?? {})) {
     if (['seq', 'sessions', 'rows', '__proto__', 'constructor', 'prototype'].includes(key)) continue
     if (value === null) delete result[key]
     else result[key] = value
   }
-  return result
+  return result as unknown as FleetWire
+}
+
+/** Expand the compact verb catalogue before any host-specific consumer sees the rows. */
+export function expandFleetVerbs(wire: FleetWire): FleetWire {
+  const sessions = expandRows(wire.sessions, wire.verbCatalog)
+  const result = { ...wire, sessions }
+  result.rows = sessions
+  return result as unknown as FleetWire
+}
+
+function historicalWireRow(row: { id: string; state?: unknown }): boolean {
+  return row.id.startsWith('closed:') || row.state === 'closed' || row.state === 'exited' || row.state === 'lost'
 }
 
 /** Expand the compact server view using the rows already received. */
@@ -82,24 +125,25 @@ export function followFleet(url: string, onFrame: (wire: FleetWire) => void, opt
       // page ordering. Refresh only pages already opened; a closed history makes no page GETs.
       let offset = Math.min(total, invalidated ? initialClosedSent : (wire.closed as { sent?: number } | undefined)?.sent ?? 0)
       const end = refreshOnly && pagedTotal !== null ? pagedEnd : Infinity
-      const historyOrder = wire.rows.filter(r => r.id.startsWith('closed:')).slice(0, offset).map(r => r.id)
+      const historyOrder = wire.rows.filter(historicalWireRow).slice(0, offset).map(r => r.id)
       const before = wire
       const sessions: FleetWire['sessions'] = []
-      const rows: FleetWire['rows'] = []
       while (offset < Math.min(total, end) && !closed) {
         const pageUrl = new URL(url, typeof location === 'undefined' ? 'http://localhost' : location.href)
         pageUrl.pathname = '/api/fleet/closed'; pageUrl.searchParams.set('offset', String(offset)); pageUrl.searchParams.set('limit', '100')
         const res = await fetch(pageUrl, { signal: controller.signal })
         if (!res.ok) throw new Error('Closed fleet unavailable')
-        const page = await res.json() as { sessions: FleetWire['sessions']; rows: FleetWire['rows']; total: number }
+        const page = await res.json() as { sessions?: FleetWire['sessions']; rows?: FleetWire['rows']; verbCatalog?: FleetWire['verbCatalog']; total: number }
         if (!wire || closed) return
         if (wire.closedVersion !== version || closedTotal() !== closedTotalAtStart) { refreshPending = true; return }
-        if (!Array.isArray(page.rows) || !Array.isArray(page.sessions)) throw new Error('Invalid closed fleet page')
+        const pageSessionsRaw = Array.isArray(page.sessions) ? page.sessions : page.rows
+        if (!Array.isArray(pageSessionsRaw)) throw new Error('Invalid closed fleet page')
+        const pageSessions = expandRows(pageSessionsRaw, page.verbCatalog)
         total = page.total
-        if (!page.rows.length) break
-        offset += page.rows.length
-        sessions.push(...page.sessions); rows.push(...page.rows)
-        historyOrder.push(...page.rows.map(r => r.id))
+        if (!pageSessions.length) break
+        offset += pageSessions.length
+        sessions.push(...pageSessions)
+        historyOrder.push(...pageSessions.map(r => r.id))
       }
       if (!wire || closed) return
       const merge = (held: FleetWire['rows'], added: FleetWire['rows'], prior: FleetWire['rows']) => {
@@ -108,13 +152,14 @@ export function followFleet(url: string, onFrame: (wire: FleetWire) => void, opt
         // Replace paged facts, but retain a newer SSE upsert received during this GET.
         for (const row of added) if (!current.has(row.id) || current.get(row.id) === original.get(row.id)) current.set(row.id, row)
         return [
-          ...[...current.values()].filter(r => !r.id.startsWith('closed:')),
+          ...[...current.values()].filter(r => !historicalWireRow(r)),
           ...[...new Set(historyOrder)].flatMap(id => current.has(id) ? [current.get(id)!] : []),
         ]
       }
-      if (rows.length || invalidated || total === 0 && wire.rows.some(r => r.id.startsWith('closed:'))) {
-        wire = { ...wire, sessions: merge(wire.sessions, sessions, before.sessions), rows: merge(wire.rows, rows, before.rows), closed: { total, sent: offset } }
-        onFrame(expandFleetView(wire))
+      if (sessions.length || invalidated || total === 0 && wire.rows.some(historicalWireRow)) {
+        wire = { ...wire, sessions: merge(wire.sessions, sessions, before.sessions), closed: { total, sent: offset } }
+        wire.rows = wire.sessions
+          onFrame(expandFleetView(expandFleetVerbs(wire)))
       }
       pagedTotal = total
       pagedVersion = version
@@ -152,7 +197,7 @@ export function followFleet(url: string, onFrame: (wire: FleetWire) => void, opt
           wire = applyFleetWire(wire, event, JSON.parse(data))
           if (event === 'snapshot') { initialClosedSent = (wire.closed as { sent?: number } | undefined)?.sent ?? 0; pagedTotal = null; pagedVersion = null; pagedEnd = initialClosedSent }
           at = Date.now()
-          if (!closed) { onFrame(expandFleetView(wire)); if (options.history || historyOpened) void loadClosed(true) }
+          if (!closed) { onFrame(expandFleetView(expandFleetVerbs(wire))); if (options.history || historyOpened) void loadClosed(true) }
         }
         if (buffer.length > 8 * 1024 * 1024) throw new Error('Fleet frame too large')
       }

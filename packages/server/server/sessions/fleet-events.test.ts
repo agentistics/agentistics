@@ -4,8 +4,10 @@ import {
   GAUGE_RSS_BYTES, gaugesMoved, planFleetDelta,
   readClosedLimit, snapshotBody, windowOf, type FleetFrame, type FleetFramePayload,
 } from './fleet-events'
+import { applyFleetWire } from '@agentistics/core'
+import { controlStrings } from '@agentistics/tui/control/i18n'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
-import type { FleetRow } from './fleet-row'
+import { fleetRow, type FleetRow } from './fleet-row'
 
 const row = (id: string, extra: Partial<ControlSession> = {}): ControlSession =>
   ({ id, title: id, harness: 'claude', cwd: '/w', state: 'waiting', ...extra }) as unknown as ControlSession
@@ -119,6 +121,14 @@ describe('planFleetDelta', () => {
     expect(Object.keys(d.delta.meta)).toEqual([])
   })
 
+  test('a verbs-only change is an upsert', () => {
+    const before = [{ action: 'kill', label: 'Kill', enabled: true }]
+    const after = [{ action: 'resume', label: 'Reopen', enabled: true }]
+    const s = planFleetDelta(EMPTY_SENT, buildFleetFrame(payload([row('a', { verbs: before } as never)]), 20)).next
+    const d = planFleetDelta(s, buildFleetFrame(payload([row('a', { verbs: after } as never)]), 20))
+    expect(d.delta.upsert).toEqual(['a'])
+  })
+
   test('a row that left the fleet is removed; one that slid out of the closed window is NOT', () => {
     const before = [row('a'), row('closed:1', { endedAt: 1 }), row('closed:2', { endedAt: 2 })]
     const s = planFleetDelta(EMPTY_SENT, buildFleetFrame(payload(before), 2)).next
@@ -140,6 +150,19 @@ describe('planFleetDelta', () => {
 })
 
 describe('bodies', () => {
+  test('real fleetRow verbs survive server compaction and core expansion', () => {
+    const control = row('a', {
+      state: 'working', stateLabel: 'working', actionable: true, attached: false, searchText: '', structured: false,
+    } as never)
+    const shaped = fleetRow(control, controlStrings('en'))
+    const f = buildFleetFrame({ sessions: [shaped], rows: [control], attention: 0, tasks: [], finishedTasks: [] }, 20)
+    const body = snapshotBody(1, f)
+    const wire = applyFleetWire(null, 'snapshot', JSON.parse(JSON.stringify(body)))
+    const received = wire.sessions[0] as unknown as { verbs: unknown; attachCommand: string }
+    expect(received.verbs).toEqual(shaped.verbs)
+    expect(received.attachCommand).toBe('agentop session attach a')
+  })
+
   test('snapshot carries the window, the meta and the closed counts', () => {
     const f = buildFleetFrame(payload([row('a'), row('closed:1', { endedAt: 1 }), row('closed:2', { endedAt: 2 })]), 1)
     const b = snapshotBody(1, f) as { sessions: FleetRow[]; rows: ControlSession[]; closed: { total: number; sent: number } }
@@ -224,7 +247,7 @@ describe('fleetEventsResponse', () => {
     tick!()
     const next = await readEvents(res, 1)
     expect(next[0]!.event).toBe('delta')
-    expect((next[0]!.data as { seq: number; upsert: { rows: ControlSession[] } }).upsert.rows[0]!.state).toBe('working')
+    expect((next[0]!.data as { seq: number; upsert: { sessions: ControlSession[] } }).upsert.sessions[0]!.state).toBe('working')
     expect((next[0]!.data as { seq: number }).seq).toBe(2)
     ctl.abort()
     expect(unsubscribed).toBe(true)
