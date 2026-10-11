@@ -254,6 +254,11 @@ function parseJsonl(content: string, fallbackId: string, projectPath: string): S
       timestamp: msg.timestamp as string | undefined,
       text: extractMessageText(msg),
       ...(typeof msg.model === 'string' && msg.model ? { model: msg.model } : {}),
+      ...(msg.tokens && typeof msg.tokens === 'object' ? { tokens: {
+        ...(typeof msg.tokens.input === 'number' ? { input: msg.tokens.input } : {}),
+        ...(typeof msg.tokens.output === 'number' ? { output: msg.tokens.output } : {}),
+        ...(typeof msg.tokens.cached === 'number' ? { cached: msg.tokens.cached } : {}),
+      } } : {}),
       ...(Array.isArray(msg.toolCalls)
         ? { toolNames: msg.toolCalls.map((tc: any) => tc?.name).filter((n: unknown): n is string => typeof n === 'string' && n !== '') }
         : {}),
@@ -331,6 +336,8 @@ interface JsonlMessage {
   model?: string
   /** `toolCalls[].name` of a `gemini` record. */
   toolNames?: string[]
+  /** `tokens` of a `gemini` record: input / output / cached, when numeric. */
+  tokens?: { input?: number; output?: number; cached?: number }
 }
 
 interface JsonlParsedData {
@@ -362,14 +369,22 @@ function buildJsonlSessionMeta(data: JsonlParsedData): SessionMeta | null {
   const toolCounts: Record<string, number> = {}
   let model: string | undefined
   let lastMessageMs = NaN
+  let sawTokens = false
+  let inputTokens = 0, outputTokens = 0, cacheRead = 0
 
   for (const msg of messages) {
     const isUser = msg.type === 'user'
     const isAssistant = msg.type === 'model' || msg.type === 'gemini'
     if (msg.type === 'gemini') {
-      // Last model named wins, as in parseRichJson. Tokens are deliberately NOT read here — owner
-      // decision D8 (they move money on every cost surface and need a bill reconciliation first).
+      // Last model named wins, as in parseRichJson. Tokens are summed as parseRichJson does (owner
+      // decision D8 approved 2026-10-11); a `tokens: null` stub or a null counter adds nothing.
       if (msg.model) model = msg.model
+      if (msg.tokens) {
+        sawTokens = true
+        inputTokens += msg.tokens.input ?? 0
+        outputTokens += msg.tokens.output ?? 0
+        cacheRead += msg.tokens.cached ?? 0
+      }
       for (const name of msg.toolNames ?? []) {
         const shared = canonicalTool('gemini', name)
         toolCounts[shared] = (toolCounts[shared] ?? 0) + 1
@@ -438,9 +453,10 @@ function buildJsonlSessionMeta(data: JsonlParsedData): SessionMeta | null {
     languages: [],
     git_commits: 0,
     git_pushes: 0,
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_read_input_tokens: 0,
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    ...(sawTokens ? {} : { tokens_unavailable: true as const }),
+    cache_read_input_tokens: cacheRead,
     cache_creation_input_tokens: 0,
     first_prompt: firstPrompt,
     user_interruptions: 0,

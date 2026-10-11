@@ -533,9 +533,20 @@ describe('jsonl journal: lastUpdated patches, model and tools', () => {
     expect(s.tool_counts).toEqual({ Bash: 1, Read: 1 })
   })
 
-  test('tokens are still NOT read from the journal (owner decision D8)', () => {
+  test('tokens are summed from gemini records (owner decision D8 approved); null counters add nothing', () => {
     const s = parseGeminiChat(journal, 'fb', '/p')!
-    expect(s.input_tokens).toBe(0)
-    expect(s.output_tokens).toBe(0)
+    expect(s.input_tokens).toBe(100)
+    expect(s.output_tokens).toBe(7)
+    expect(s.cache_read_input_tokens).toBe(3)
+    expect(s.tokens_unavailable).toBeUndefined()
+    const withNull = journal + '\n' + JSON.stringify({ id: 'g3', timestamp: '2026-10-11T21:09:00.000Z', type: 'gemini', content: 'x', tokens: { input: 5, output: null } })
+    const t = parseGeminiChat(withNull, 'fb', '/p')!
+    expect([t.input_tokens, t.output_tokens]).toEqual([105, 7])
+  })
+
+  test('a journal whose records carry no tokens object is flagged unavailable, not 0', () => {
+    const none = journal.replace(/"tokens":\{[^}]*\},/, '')
+    const s = parseGeminiChat(none, 'fb', '/p')!
+    expect(s.tokens_unavailable).toBe(true)
   })
 })
