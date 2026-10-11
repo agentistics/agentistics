@@ -3,7 +3,7 @@ import type { ChatSourceRef, HarnessChat, HarnessChatDelta } from '@agentistics/
 import type { ChatTurn } from '@agentistics/core'
 import {
   adapterChatResponse, adapterRefused, clearAdapterRefusals, pickAdapterChat, readAdapterChat, refuseAdapter,
-  rowLive, type AdapterChatDeps, type AdapterChatRow,
+  rowLive, sameAdapterSource, type AdapterChatDeps, type AdapterChatRow,
 } from './adapter-chat'
 import type { ChatPayload } from './chat-web'
 
@@ -92,7 +92,7 @@ describe('pickAdapterChat — who takes the engine path', () => {
 })
 
 describe('adapterChatResponse', () => {
-  function open(f: ReturnType<typeof fakeChat>, o: { rowAt?: () => AdapterChatRow | null; composing?: AdapterChatDeps['composing'] } = {}) {
+  function open(f: ReturnType<typeof fakeChat>, o: { rowAt?: () => AdapterChatRow | null; composing?: AdapterChatDeps['composing']; current?: AdapterChatDeps['current'] } = {}) {
     const ticks = new Set<() => void>()
     const wakes = new Set<() => void>()
     let closedWith: boolean | null = null
@@ -105,6 +105,7 @@ describe('adapterChatResponse', () => {
       onFleetTick: cb => { ticks.add(cb); return () => ticks.delete(cb) },
       onWake: cb => { wakes.add(cb); return () => wakes.delete(cb) },
       ...(o.composing ? { composing: o.composing } : {}),
+      ...(o.current ? { current: o.current } : {}),
     }, ctl.signal, failed => { closedWith = failed })
     return { res, ctl, tick: () => { for (const t of ticks) t() }, ticks, wakes, closedWith: () => closedWith }
   }
@@ -193,6 +194,27 @@ describe('adapterChatResponse', () => {
     expect(s.ticks.size).toBe(0)
   })
 
+  test('AGY.CHAT.REPLIES: a source the row no longer reads from (structured → TUI) closes the stream, not FAILED', async () => {
+    // Measured 2026-10-10 on a3e4c77936: a structured agy session was turned into a TUI (`attach` =
+    // open in terminal); the stream kept following the dead structured channel, so the chat froze on
+    // the person's own message while the TUI answered. Closing lets the client reconnect to the
+    // source the row reads from NOW.
+    const f = fakeChat()
+    let still = true
+    const s = open(f, { current: async () => still })
+    await Bun.sleep(20)
+    f.emit({ kind: 'window', turns: [{ role: 'user', text: 'salve' }], older: false })
+    await events(s.res, e => e.some(x => x.event === 'chat'))
+    s.tick()
+    await Bun.sleep(20)
+    expect(s.closedWith()).toBeNull()
+    still = false
+    s.tick()
+    await Bun.sleep(20)
+    expect(s.closedWith()).toBe(false)
+    expect(f.counts().unfollows).toBe(1)
+  })
+
   test('the row going idle re-emits `live: false`', async () => {
     const f = fakeChat()
     let state = 'working'
@@ -229,5 +251,20 @@ describe('readAdapterChat — the one-shot GET', () => {
   test('no window in time: null, so the caller serves the legacy read', async () => {
     const out = await readAdapterChat({ conversationId: 'c1', chat: fakeChat().chat, row: row(), pending: [], max: 400, finish, timeoutMs: 20 })
     expect(out).toBeNull()
+  })
+})
+
+describe('sameAdapterSource — is the opened channel still the row\'s (AGY.CHAT.REPLIES)', () => {
+  test('structured → TUI (file channel): no longer current', () => {
+    expect(sameAdapterSource({ structured: true }, { structured: false, conversationId: 'c1' })).toBe(false)
+  })
+  test('structured stays structured even when the harness states its own conversation id', () => {
+    expect(sameAdapterSource({ structured: true }, { structured: true })).toBe(true)
+  })
+  test('a file channel: current for the same conversation, not for another, not when the row went legacy', () => {
+    expect(sameAdapterSource({ structured: false, conversationId: 'c1' }, { structured: false, conversationId: 'c1' })).toBe(true)
+    expect(sameAdapterSource({ structured: false, conversationId: 'c1' }, { structured: false, conversationId: 'c2' })).toBe(false)
+    expect(sameAdapterSource({ structured: false, conversationId: 'c1' }, null)).toBe(false)
+    expect(sameAdapterSource({ structured: false, conversationId: 'c1' }, { structured: true })).toBe(false)
   })
 })
