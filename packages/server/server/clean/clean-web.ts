@@ -1,8 +1,9 @@
 import { resolve, sep } from 'node:path'
 import { cleanRepos, collectCleanFacts } from '../cli-clean'
 import { applyClean } from './clean-io'
-import { planClean, reclaimable, type CleanItem, type WorktreeFacts } from './clean-plan'
+import { fmtBytes, planClean, reclaimable, type CleanItem, type WorktreeFacts } from './clean-plan'
 import { loadConsolidated } from '../consolidate'
+import { broadcastNotification } from '../sse'
 
 export interface CleanWebItem {
   id: string
@@ -29,7 +30,10 @@ function reason(item: CleanItem): string {
 }
 function wire(items: readonly CleanItem[]): CleanWebPlan {
   const selected = items.filter(i => i.action.kind !== 'keep')
-  return { items: selected.map(i => ({ id: itemId(i.facts, i.action.kind), repo: i.facts.repo, path: i.facts.path, kind: i.action.kind, bytes: i.action.frees, reason: reason(i) })), reclaimable: reclaimable(items) }
+  return { items: selected.map(i => {
+    if (i.action.kind === 'keep') throw new Error('keep item selected')
+    return { id: itemId(i.facts, i.action.kind), repo: i.facts.repo, path: i.facts.path, kind: i.action.kind, bytes: i.action.frees, reason: reason(i) }
+  }), reclaimable: reclaimable(items) }
 }
 async function scanNow(): Promise<CleanWebPlan> {
   const facts = await collectCleanFacts(await cleanRepos([]), { lowPriority: true })
@@ -43,9 +47,8 @@ export function getCleanPlan(): { state: 'scanning' | 'ready'; progress: number;
 }
 export async function cleanPlanResponse(): Promise<CleanWebPlan | { state: 'scanning'; progress: number }> {
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.plan
-  if (scan && Date.now() - scan.at < CACHE_MS) return { state: 'scanning', progress: 0 }
-  const p = getCleanPlan().plan!
-  return p
+  if (!scan || Date.now() - scan.at >= CACHE_MS) getCleanPlan()
+  return { state: 'scanning', progress: 0 }
 }
 
 function inside(path: string, root: string): boolean { const p = resolve(path), r = resolve(root); return p === r || p.startsWith(r + sep) }
@@ -72,8 +75,8 @@ export async function applyCleanSelection(ids: readonly string[]): Promise<Clean
   void (async () => {
     const protectedBySession = await protectedPaths()
     const requested = new Set(ids)
-    const facts = (await collectCleanFacts(await cleanRepos([]), { lowPriority: true })).filter(f => requested.has(itemId(f, planClean([f], Date.now())[0]!.action.kind)))
-    const current = planClean(facts, Date.now()).filter(i => i.action.kind !== 'keep')
+    const current = planClean(await collectCleanFacts(await cleanRepos([]), { lowPriority: true }), Date.now())
+      .filter(i => i.action.kind !== 'keep' && requested.has(itemId(i.facts, i.action.kind)))
     const skipped: Array<{ path: string; reason: string }> = []
     const safe: CleanItem[] = []
     for (const item of current) {
@@ -90,9 +93,20 @@ export async function applyCleanSelection(ids: readonly string[]): Promise<Clean
     errors.push(...(await applyClean(safe.filter(i => i.action.kind === 'node-modules'))))
     created.state = 'pruning'; created.progress = 85
     errors.push(...(await applyClean(safe.filter(i => i.action.kind === 'prune'))))
-    created.result = { freedBytes: safe.reduce((n, i) => n + i.action.frees, 0), worktrees: safe.filter(i => i.action.kind === 'remove' || i.action.kind === 'prune').length, nodeModules: safe.filter(i => i.action.kind === 'node-modules').length, skipped, errors }
+    created.result = { freedBytes: safe.reduce((n, i) => n + (i.action.kind === 'keep' ? 0 : i.action.frees), 0), worktrees: safe.filter(i => i.action.kind === 'remove' || i.action.kind === 'prune').length, nodeModules: safe.filter(i => i.action.kind === 'node-modules').length, skipped, errors }
     created.state = 'done'; created.progress = 100
     console.info('[clean] apply', JSON.stringify({ jobId: created.id, ...created.result }))
+    broadcastNotification({
+      type: created.result.skipped.length || created.result.errors.length ? 'warning' : 'success',
+      code: created.result.skipped.length || created.result.errors.length ? 'clean.partial' : 'clean.done',
+      meta: {
+        freed: fmtBytes(created.result.freedBytes),
+        worktrees: created.result.worktrees,
+        nodeModules: created.result.nodeModules,
+        skipped: created.result.skipped.length,
+        errors: created.result.errors.length,
+      },
+    })
   })().catch(error => { created.state = 'done'; created.progress = 100; created.result = { freedBytes: 0, worktrees: 0, nodeModules: 0, skipped: [], errors: [String(error)] } })
   return created
 }
