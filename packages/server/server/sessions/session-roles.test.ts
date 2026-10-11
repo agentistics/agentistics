@@ -82,6 +82,23 @@ describe('spawn role assignment and delivery', () => {
     expect((await loadRoles(deps)).roles).toEqual({ child: 'worker', handoff: 'leader', explicit: 'leader' })
   })
 
+  test('stores the managed id when the offered conversation id is not accepted', async () => {
+    const { deps } = fake([])
+    await ensureSpawnRole(['offered-conversation', 'managed-id'], 'worker', deps)
+    expect((await loadRoles(deps)).roles).toEqual({ 'offered-conversation': 'worker', 'managed-id': 'worker' })
+  })
+
+  test('waits for input before recording an acknowledged delivery', async () => {
+    const rows = [{ id: 'm1', conversationId: 'c1', title: 'T' }]
+    const { deps } = fake(rows)
+    const events: string[] = []
+    const gated = { ...deps, waitForInput: async () => { events.push('ready'); return true }, prompt: async () => { events.push('prompt'); return { ok: true } } }
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { c1: 'worker' }, lastDeliveredRole: {} })
+    expect(await deliverStoredRole('m1', 'c1', gated)).toBe(true)
+    expect(events).toEqual(['ready', 'prompt'])
+    expect((await loadRoles(deps)).lastDeliveredRole).toEqual({ c1: 'worker' })
+  })
+
   test('delivers once per role value, redelivers after a change, and does not mark failed sends', async () => {
     const rows = [{ id: 'm1', conversationId: 'c1', title: 'T' }]
     const { deps, prompts } = fake(rows)

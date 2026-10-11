@@ -35,7 +35,7 @@ import { spawn } from 'node:child_process'
 import { rekeyMutedSession } from './sessions/session-notify-web'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, writeSync } from 'node:fs'
-import { dirname, join, resolve as resolvePath } from 'node:path'
+import { basename, dirname, join, resolve as resolvePath } from 'node:path'
 import type { CodeHostPort } from '@agentistics/engine-api'
 import type { CodeLaunch } from '@agentistics/tui/control/code-types'
 import type { CodeStartLaunch } from './code-launch'
@@ -132,7 +132,7 @@ import { answerStructured, structuredIntentOf, structuredReopenOrigin } from './
 import { agentisticsMcpLaunch } from './mcp-launch'
 import { prependContext } from './sessions/agentistics-context'
 import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextParent, resolveContextRole, resolveContextTask, writeContextFile } from './sessions/spawn-context'
-import { applyRoleTitle, ensureSpawnRole } from './sessions/session-roles'
+import { applyRoleTitle, ensureSpawnRole, markRoleDelivered } from './sessions/session-roles'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
 import { bornConversationLink } from './sessions/born-link'
@@ -1987,6 +1987,7 @@ async function spawnManaged(req: {
   parentSessionId?: string
   parentConversationId?: string
   handoff?: boolean
+  role?: 'leader' | 'worker'
   attemptId?: string
   /** The row this spawn REPLACES: its identity (`inheritedIdentity`) is born into the new row. */
   inherit?: ManagedSession
@@ -2056,9 +2057,13 @@ async function spawnManaged(req: {
   // Minted BEFORE the plan: the agentistics context tells the harness its own session id.
   const id = newSessionId()
   const offeredConversationId = randomUUID()
-  const role = req.parentSessionId
-    ? await ensureSpawnRole([req.resumeId, req.inherit?.conversationId, offeredConversationId, id], req.handoff ? 'leader' : 'worker')
-    : undefined
+  // A web spawn without a parent is intentionally unassigned; only an explicit role or a
+  // verified parent-child relationship may create a stored role.
+  const role = req.role
+    ? await ensureSpawnRole([req.resumeId, req.inherit?.conversationId, offeredConversationId, id], req.role)
+    : req.parentSessionId
+      ? await ensureSpawnRole([req.resumeId, req.inherit?.conversationId, offeredConversationId, id], req.handoff ? 'leader' : 'worker')
+      : undefined
   // The parent's conversation id, read from the registry at spawn: stable across the parent's reopens.
   const parentLink = req.parentSessionId ? await parentLinkOf(req.parentSessionId) : {}
   const ctx = buildSpawnContext({
@@ -2110,7 +2115,7 @@ async function spawnManaged(req: {
   const bornLink = bornConversationLink(planned.plan.conversationId, req.resumeId)
   await addSession(await spawnRow({ id, spawnedAt, req: { ...req, ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}) }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx) }))
   if (role === 'leader') {
-    const title = req.label ?? req.inherit?.label ?? req.task ?? ''
+    const title = req.label ?? req.inherit?.label ?? req.task ?? `${req.harness}/${basename(req.cwd)}`
     await applyRoleTitle(id, title, role, lang)
   }
   // A REOPEN keeps the replaced row's mute. A session linked to a conversation is muted under that
@@ -2161,6 +2166,7 @@ async function spawnManaged(req: {
       : died.message ? s.sessDiedAtSpawn(died.message) : s.sessDiedAtSpawnStatus(died.status)
     return { ok: false, message }
   }
+  if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
 
   // F2.0 — a STRUCTURED session got the opening context from its driver (its declared channel), so a
   // first-message context left pending for the TUI must not be prepended to its first prompt again.
@@ -4495,6 +4501,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(taskId && subtaskId ? { contextSubtaskId: subtaskId } : {}),
         ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
         ...(req.handoff ? { handoff: true } : {}),
+        ...(req.role ? { role: req.role } : {}),
         ...(req.force ? { force: true } : {}),
         ...(req.origin ? { origin: req.origin } : {}),
       }, S(), lang).then(async r => {

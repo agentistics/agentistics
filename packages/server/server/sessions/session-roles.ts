@@ -94,6 +94,8 @@ export interface RoleDeps {
   rename: (rowId: string, title: string) => Promise<{ ok: boolean }>
   /** Type a note into the session through the composer path. */
   prompt: (rowId: string, text: string) => Promise<{ ok: boolean }>
+  /** Wait until the harness has an input surface; spawn delivery must not race startup. */
+  waitForInput?: (rowId: string) => Promise<boolean>
   /** Who started this managed session (the registry's parentSessionId), if anyone. */
   parentOf: (rowId: string) => Promise<string | undefined>
 }
@@ -236,6 +238,19 @@ export async function defaultRoleDeps(): Promise<RoleDeps> {
       const out = await (await import('./fleet-web')).runFleetAction('en', { action: 'prompt', id: rowId, text })
       return { ok: out.ok }
     },
+    waitForInput: async rowId => {
+      const row = (await (await import('./fleet-web')).readFleet('en')).rows.find(r => r.id === rowId)
+      if (!row) return false
+      const backend = await (await import('./index')).resolveBackend()
+      const { rulesFor } = await import('./attention-rules')
+      const { promptSurfaceReady } = await import('./initial-prompt')
+      const rules = rulesFor(row.harness)
+      for (let i = 0; i < 40; i++) {
+        if (promptSurfaceReady(await backend.capture(rowId, 80), rules)) return true
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+      return false
+    },
     parentOf: async rowId => (await (await import('./registry')).readRegistry()).find(m => m.id === rowId)?.parentSessionId,
   }
 }
@@ -262,10 +277,27 @@ export async function ensureSpawnRole(
   const doc = await loadRoles(deps)
   const existing = keys.map(k => k ? doc.roles[k] : undefined).find((r): r is SessionRole => !!r)
   if (existing) return existing
-  const key = keys.find((k): k is string => !!k)
-  if (!key) return desired
-  await writeRolesDoc(deps.dataDir, { ...doc, roles: { ...doc.roles, [key]: desired } })
+  const nonEmpty = keys.filter((k): k is string => !!k)
+  if (nonEmpty.length === 0) return desired
+  // Some harnesses reject the offered conversation id. Keep the role under the managed id too,
+  // which is the stable key until the poller can discover the real conversation id.
+  const roles = { ...doc.roles }
+  for (const key of nonEmpty) roles[key] = desired
+  await writeRolesDoc(deps.dataDir, { ...doc, roles })
   return desired
+}
+
+/** The spawn context already carried this role, so a later reopen must not type it again. */
+export async function markRoleDelivered(
+  keys: readonly (string | undefined)[],
+  role: SessionRole,
+  providedDeps?: Pick<RoleDeps, 'dataDir' | 'legacyPref'>,
+): Promise<void> {
+  const deps = providedDeps ?? await defaultRoleDeps()
+  const doc = await loadRoles(deps)
+  const delivered = { ...(doc.lastDeliveredRole ?? {}) }
+  for (const key of keys) if (key) delivered[key] = role
+  await writeRolesDoc(deps.dataDir, { ...doc, lastDeliveredRole: delivered }).catch(() => {})
 }
 
 /** Apply the leader title convention through the same rename dependency used by role changes. */
@@ -294,6 +326,7 @@ export async function deliverStoredRole(
   const key = conversationId ?? rowId
   const role = doc.roles[key] ?? doc.roles[rowId]
   if (!role || doc.lastDeliveredRole?.[key] === role || doc.lastDeliveredRole?.[rowId] === role) return false
+  if (deps.waitForInput && !(await deps.waitForInput(rowId).catch(() => false))) return false
   const sent = (await deps.prompt(rowId, roleChangeNote(role)).catch(() => ({ ok: false }))).ok
   if (!sent) return false
   await writeRolesDoc(deps.dataDir, {

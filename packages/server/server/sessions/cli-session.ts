@@ -57,7 +57,7 @@ import { execFailed } from './spawn-outcome'
 import { spawnDeath } from './spawn-check'
 import { parseHarnessAgents } from './harness-agents'
 import { planTakeover, type TakeoverRefusal } from './takeover'
-import { deliverStoredRole, ensureSpawnRole } from './session-roles'
+import { deliverStoredRole, ensureSpawnRole, markRoleDelivered } from './session-roles'
 import type { BackendInitialPrompt, ManagedSession, SessionBackend, SpawnPlan, SpawnPlanError } from './types'
 
 /**
@@ -327,7 +327,9 @@ async function start(
   const logFile = managedProcessLogPath(cmd.harness, id, AGENTISTICS_DATA_DIR)
   const parentLink = await parentLinkOf(callerSessionId())
   const parentSessionId = parentLink.parentSessionId
-  const role = parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker') : undefined
+  const role = cmd.role
+    ? await ensureSpawnRole([offeredConversationId, id], cmd.role)
+    : parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker') : undefined
   const ctx = buildSpawnContext({ sessionId: id, cwd, harness: cmd.harness, lang, ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
   const planned = planSpawn({
     harness: cmd.harness, cwd, prompt: cmd.prompt, model: cmd.model, effort: cmd.effort,
@@ -373,6 +375,7 @@ async function start(
     await backend.kill(id).catch(() => {})
     return 1
   }
+  if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
 
   await addSession({
     id,
@@ -585,6 +588,7 @@ async function batch(
       await backend.kill(id).catch(() => {})
       continue
     }
+    if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
     await addSession({
       id,
       harness: spec.harness,

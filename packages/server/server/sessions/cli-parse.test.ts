@@ -2,6 +2,10 @@ import { describe, expect, it } from 'bun:test'
 import { LS_DEFAULT, parseSessionArgs } from './cli-parse'
 
 describe('parseSessionArgs', () => {
+  it('parses an explicit spawn role', () => {
+    expect(parseSessionArgs(['codex', '--role', 'leader'])).toMatchObject({ kind: 'start', harness: 'codex', role: 'leader' })
+    expect(parseSessionArgs(['codex', '--role', 'other'])).toMatchObject({ kind: 'error' })
+  })
   it('starts a background session on the given harness', () => {
     expect(parseSessionArgs(['claude', '--bg', '-p', 'fix the tests'])).toEqual({
       kind: 'start', harness: 'claude', background: true, prompt: 'fix the tests',
