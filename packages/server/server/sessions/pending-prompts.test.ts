@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
-import { PENDING_TTL_MS, clearPrompts, migratePrompts, pendingFor, recordPrompt, reloadPrompts, resetPrompts } from './pending-prompts'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { PENDING_TTL_MS, clearPrompts, migratePrompts, pendingFor, recordPrompt, reloadPrompts, resetPrompts, usePromptStoreForTests } from './pending-prompts'
 
 const CONV = 'conv-1'
 
-beforeEach(() => resetPrompts())
+beforeEach(() => {
+  usePromptStoreForTests(join(mkdtempSync(join(tmpdir(), 'pending-prompts-')), 'pending-prompts.json'))
+  resetPrompts()
+})
 
 describe('pendingFor', () => {
   it('THE REPORTED CASE: a message is held for EVERY device, not just the tab that sent it', () => {

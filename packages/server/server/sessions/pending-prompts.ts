@@ -52,7 +52,7 @@ export const PENDING_TTL_MS = 20 * 60 * 1000
 /** The most entries kept per conversation — a runaway sender cannot grow this without bound. */
 const MAX_PER_SESSION = 50
 const MAX_TOTAL = 500
-const STORE_FILE = join(AGENTISTICS_DATA_DIR, 'pending-prompts.json')
+let storeFile = join(AGENTISTICS_DATA_DIR, 'pending-prompts.json')
 
 const byConversation = new Map<string, PendingPrompt[]>()
 let loaded = false
@@ -72,7 +72,7 @@ function load(): void {
   if (loaded) return
   loaded = true
   try {
-    const raw = JSON.parse(readFileSync(STORE_FILE, 'utf8')) as unknown
+    const raw = JSON.parse(readFileSync(storeFile, 'utf8')) as unknown
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return
     for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
       if (!id || !Array.isArray(value)) continue
@@ -88,9 +88,9 @@ function load(): void {
 function persist(): void {
   try {
     mkdirSync(AGENTISTICS_DATA_DIR, { recursive: true, mode: 0o700 })
-    const tmp = `${STORE_FILE}.tmp-${process.pid}`
+    const tmp = `${storeFile}.tmp-${process.pid}`
     writeFileSync(tmp, JSON.stringify(Object.fromEntries(byConversation)), { mode: 0o600 })
-    renameSync(tmp, STORE_FILE)
+    renameSync(tmp, storeFile)
   } catch { /* a display queue must never make a successful prompt fail */ }
 }
 
@@ -162,7 +162,14 @@ export function clearPrompts(conversationId: string): void {
 export function resetPrompts(): void {
   byConversation.clear()
   loaded = true
-  try { unlinkSync(STORE_FILE) } catch { /* already absent */ }
+  try { unlinkSync(storeFile) } catch { /* already absent */ }
+}
+
+/** Test seam: point this process at a throwaway store without touching the user's data dir. */
+export function usePromptStoreForTests(file: string): void {
+  byConversation.clear()
+  loaded = false
+  storeFile = file
 }
 
 /** Test seam for a server restart: forget the process cache, then read the durable queue again. */
