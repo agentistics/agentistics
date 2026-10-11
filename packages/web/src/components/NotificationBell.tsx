@@ -164,12 +164,14 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) 
               // the race.
               const isIdle = n.code === 'sessions.idle'
               const isWhatsNew = n.code === 'app.whats_new'
+              const isClean = n.code === 'clean.suggestion'
               const isJournalFailed = n.meta?.loadingKind === 'journal' && n.meta?.state === 'failed'
               const clickable = link !== null || isUpdate || isIdle || isWhatsNew
               const go = () => {
                 setOpen(false)
                 if (isUpdate) { window.dispatchEvent(new CustomEvent('agentistics:open-update-modal')); return }
                 if (isWhatsNew) { openWhatsNew(n.meta); return }
+                if (isClean) { window.dispatchEvent(new CustomEvent('agentistics:open-clean')); return }
                 if (isIdle) { navigate('/sessions'); requestIdleReview(); return }
                 if (link) navigate(link)
               }
@@ -236,6 +238,11 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) 
                         <BellOff size={13} />
                       </button>
                     )}
+                    {isClean && <button
+                      className="ag-tap"
+                      onClick={e => { e.stopPropagation(); setOpen(false); window.dispatchEvent(new CustomEvent('agentistics:open-clean')) }}
+                      style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', font: 'inherit', fontSize: 11 }}
+                    >{pt ? 'Ver o que dá para limpar' : 'See what can be cleaned'}</button>}
                     {/* Per-item delete. Always visible, never hover-only: the bell is rendered on
                         mobile too, where hover does not exist, and the hit area is a full 44px
                         there (the icon stays small — only the touch target grows). */}
