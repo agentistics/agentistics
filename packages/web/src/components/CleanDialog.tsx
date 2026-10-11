@@ -44,7 +44,7 @@ export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: 
       try {
         const response = await fetch('/api/clean/plan')
         if (!response.ok) throw new Error('plan failed')
-        const value = await response.json() as Plan | { state: string }
+        const value = await response.json() as Plan | { state: string; progress?: number }
         if (stopped) return
         if ('items' in value) {
           setPlan(value)
@@ -91,7 +91,7 @@ export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: 
     try {
       const response = await fetch('/api/clean/plan')
       if (!response.ok) throw new Error('plan failed')
-      const value = await response.json() as Plan | { state: string }
+      const value = await response.json() as Plan | { state: string; progress?: number }
       if ('items' in value) {
         setPlan(value)
         setPicked(new Set(value.items.filter(i => i.kind !== 'node-modules').map(i => i.id)))
