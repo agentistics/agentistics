@@ -10,6 +10,28 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.123.0': {
+    features: [
+      {
+        pt: 'Quando sai uma versão nova, aparece um selo "atualizar" ao lado do número da versão; clicar abre a atualização.',
+        en: 'When a new version is out, an "update" badge shows next to the version number; clicking it opens the update.',
+      },
+      {
+        pt: 'Se a importação do histórico falhar, um botão "Tentar importar de novo" refaz a importação, sem precisar de comando.',
+        en: 'If the history import fails, a "Retry the import" button runs it again, no command needed.',
+      },
+      {
+        pt: 'As sessões conhecem melhor o agentistics: o briefing de início explica o quadro, as tarefas e as passagens de bastão, e cada harness recebe as instruções do agentistics, atualizadas a cada versão.',
+        en: 'Sessions know agentistics better: the start briefing explains the board, tasks and hand-offs, and each harness gets the agentistics instructions, refreshed on every version.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Cofre: o modal rápido usa a mesma moldura dos outros diálogos, alinhado no computador e em tela cheia no celular.',
+        en: 'Vault: the quick modal uses the same frame as the other dialogs, aligned on desktop and full-screen on the phone.',
+      },
+    ],
+  },
   '2.122.1': {
     features: [],
     fixes: [
