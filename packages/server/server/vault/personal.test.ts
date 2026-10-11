@@ -503,8 +503,8 @@ describe('"Só uso" — write-only secrets (VAULT.UX-R2 item 11, owner-approved 
     await presenceOn()
     const m = (await http('POST', '/api/vault/personal', { item: { ...key, useOnly: true }, code: codeAt() })).json.meta
     expect((await http('POST', '/api/vault/personal/grants', { sessionId: 'abc123', itemIds: [m.id] })).json.ok).toBe(true)
-    const { grantEnv, useRef } = await import('./grants')
-    expect(Object.values(await grantEnv('abc123'))).toContain('MARKER-sk-use-only')
+    const { grantOf, useRef } = await import('./grants')
+    expect(await Promise.all((grantOf('abc123')?.refs ?? []).map(async r => { const v = await useRef('abc123', r.ref); return v.ok ? v.value : '' }))).toContain('MARKER-sk-use-only')
     expect(await useRef('abc123', 'vault://openai')).toEqual({ ok: true, value: 'MARKER-sk-use-only' })
   })
 

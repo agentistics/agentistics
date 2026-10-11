@@ -75,6 +75,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
     _requests: 'pending use requests and their metadata; values never enter the request',
     _approvals: 'session/reference approval deadlines; no secret material',
     _requestSeq: 'monotonic request id counter',
+    _useTtlMs: 'how long a use request waits (a duration); a test seam',
   },
   'server/server/vault/mobile.ts': {
     _now: 'a clock',
@@ -122,6 +123,22 @@ describe('secret hygiene in the vault and its consumers', () => {
       }
     }
     expect(unexplained).toEqual([])
+  })
+
+  // VAULT.V4 §3.6: the only functions that hand a personal VALUE to a caller are the human reveal and the
+  // agent gate (and `useRef`, a one-line wrapper over it). Anything else that returns `value: string` from the
+  // personal/grant surface is a door around the confirmation, and fails here until it is removed or argued.
+  test('only authorizeUse / revealField (and useRef, its wrapper) return a personal value', () => {
+    const ALLOWED_VALUE_RETURNS = new Set(['authorizeUse', 'useRef', 'revealField'])
+    const offenders: string[] = []
+    for (const f of ['grants.ts', 'personal.ts', 'personal-http.ts', 'ops.ts'].map(n => pkg(`server/server/vault/${n}`))) {
+      for (const line of readFileSync(f, 'utf8').split('\n')) {
+        const m = /^export\s+(?:async\s+)?function\s+(\w+)\b.*(?:\bvalue\??:\s*string|Record<string,\s*string>)/.exec(line)
+        if (m && !ALLOWED_VALUE_RETURNS.has(m[1]!)) offenders.push(`${relative(ROOT, f)}: ${m[1]}`)
+      }
+    }
+    expect(offenders).toEqual([])
+    expect(readFileSync(pkg('server/server/vault/grants.ts'), 'utf8')).not.toMatch(/export\s+(?:async\s+)?function\s+(?:grantEnv|resolveGrant)\b/)
   })
 
   test('the private envelope key is no longer cached', () => {

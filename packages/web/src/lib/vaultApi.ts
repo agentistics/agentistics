@@ -35,6 +35,8 @@ export interface VaultView {
   recoveryCreatedAt: string | null
   requirePresence: boolean
   autoLockMinutes: number
+  /** VAULT.V4: confirm each use of a sensitive secret. Absent on an older server = off. */
+  confirmEachUse?: boolean
   autoLockInMs: number | null
   pendingStepup: boolean
   lockedBy: string | null
@@ -158,11 +160,17 @@ export const lockNow = (code?: string) => call('POST', '/api/vault/lock', code ?
 export const unlockGesture = () => call('POST', '/api/vault/unlock', _unlockFor ? { for: _unlockFor } : {}).then(r => reply<{ state: string }>(r))
 export interface VaultUseRequest { id: string; sessionTitle: string; harness: string; name: string; field: string; command: string | null; flags: string[]; count: number; expiresAt: number }
 export const pendingVaultUseRequests = () => vaultGet<{ requests: VaultUseRequest[] }>('/api/vault/personal/use-requests')
-export async function decideVaultUse(id: string, approve: boolean): Promise<Reply<Record<string, unknown>>> {
-  unlockFor(`use-approve:${id}`)
-  const gesture = await unlockGesture()
-  if (!gesture.ok) return gesture as Reply<Record<string, unknown>>
-  return vaultPost(`/api/vault/personal/use/${encodeURIComponent(id)}/${approve ? 'approve' : 'deny'}`, {})
+const onThisComputer = (): boolean => { try { return ['localhost', '127.0.0.1', '[::1]', '::1'].includes(window.location.hostname) } catch { return true } }
+/**
+ * Approve or deny ONE use request. Denying only closes, so it asks no gesture (spec §3.5); approving opens a
+ * value, so it carries the presence gesture — raised by the service on this computer, a passkey token off it.
+ */
+export async function decideVaultUse(id: string, approve: boolean, phone: (action: string, target: string) => Promise<Reply<{ gestureToken: string }>> = async () => ({ ok: false, code: 'passkey-cancelled', sentence: '', status: 0 })): Promise<Reply<Record<string, unknown>>> {
+  const path = `/api/vault/personal/use/${encodeURIComponent(id)}/${approve ? 'approve' : 'deny'}`
+  if (!approve || onThisComputer()) return vaultPost(path, {})
+  const g = await phone('use-approve', id)
+  if (!g.ok) return g as Reply<Record<string, unknown>>
+  return vaultPost(path, { gestureToken: g.gestureToken })
 }
 /** Create the vault from the page (the same code path as `agentop vault init`). `passphrase` only when no keychain answered. */
 export const createVault = (passphrase?: string) => call('POST', '/api/vault/init', passphrase ? { passphrase } : {}).then(r => reply<{ existed?: boolean; said?: string }>(r))
@@ -192,6 +200,7 @@ export function howStep2(v: Pick<VaultView, 'authenticator' | 'presence' | 'unlo
 }
 export const setAutoLock = (minutes: number, code?: string) => call('POST', '/api/vault/auto-lock', { minutes, ...(code ? { code } : {}) }).then(r => reply(r))
 export const armHeartbeat = () => call('POST', '/api/vault/activity/arm', { gesture: true })
+export const setConfirmEachUse = (enabled: boolean, code?: string) => call('POST', '/api/vault/confirm-each-use', { enabled, ...(code ? { code } : {}) }).then(r => reply(r))
 export const heartbeat = () => call('POST', '/api/vault/activity', {})
 
 /** The wizard's first step: spend the setup code BEFORE any gesture; the proof stands for the rest of this wizard. */
