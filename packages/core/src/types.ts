@@ -336,6 +336,11 @@ export interface SessionMeta {
   git_pushes: number
   input_tokens: number
   output_tokens: number
+  /** True when the harness's source carries NO usage figures at all (a run that failed before any
+   *  model answered, a shutdown with empty `modelMetrics`). The counters above are then 0 only
+   *  because the type requires a number: read them as "absent", not "zero". Never set when any
+   *  usage was reported, even if that usage sums to 0. */
+  tokens_unavailable?: true
   /** Only populated for `_source: 'jsonl' | 'subdir'` — parsed directly from JSONL usage. */
   cache_read_input_tokens?: number
   cache_creation_input_tokens?: number

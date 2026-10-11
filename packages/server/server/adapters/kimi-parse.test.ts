@@ -241,3 +241,32 @@ test('a Bash call with no command counts as a call and nothing more', () => {
   expect(s.git_commits).toBe(0)
   expect(s.tool_counts['Bash']).toBe(1)
 })
+
+// A run that failed before any model answered: the wire names the model it tried (`llm.request`,
+// `profile.bind`) but carries no `usage.record`.
+const llmRequest = (over: Record<string, unknown> = {}) => ({
+  type: 'llm.request', provider: 'ollama-local', model: 'qwen-x', modelAlias: 'ollama-local/qwen-x', time: T0 + 500, ...over,
+})
+
+test('with no usage.record the model comes from llm.request and tokens are flagged unavailable', () => {
+  const totals = accumulateKimiWire(wire([userPrompt('hi'), llmRequest(), llmRequest()]))
+  const s = buildKimiSession('k1', null, totals, '/w')!
+  expect(s.model).toBe('ollama-local/qwen-x')
+  expect(s.tokens_unavailable).toBe(true)
+})
+
+test('profile.bind.modelAlias is a fallback behind llm.request', () => {
+  const bind = { type: 'profile.bind', modelAlias: 'google/gemini-3.5-flash-lite', time: T0 + 100 }
+  const onlyBind = buildKimiSession('k', null, accumulateKimiWire(wire([bind, userPrompt('hi')])), '/w')!
+  expect(onlyBind.model).toBe('gemini-3.5-flash-lite')
+  const both = buildKimiSession('k', null, accumulateKimiWire(wire([bind, userPrompt('hi'), llmRequest()])), '/w')!
+  expect(both.model).toBe('ollama-local/qwen-x')
+})
+
+test('a usage.record model wins over llm.request, and tokens are not flagged', () => {
+  const totals = accumulateKimiWire(wire([userPrompt('hi'), llmRequest(), usageRecord()]))
+  const s = buildKimiSession('k', null, totals, '/w')!
+  expect(s.model).toBe('gemini-3.5-flash-lite')
+  expect(s.tokens_unavailable).toBeUndefined()
+  expect(s.input_tokens).toBe(100)
+})

@@ -110,6 +110,12 @@ export interface KimiWireTotals {
    *  same list and run DURING the parent's turn, so the list is sorted by time before it is
    *  consumed — appending one agent's stream after another's would otherwise invent turns. */
   turnEvents: TurnEvent[]
+  /** True once any `usage.record` was read. Without one the counters are absent, not zero. */
+  sawUsage?: boolean
+  /** The model the wire NAMED without a `usage.record` (`llm.request`, then `profile.bind`). Only a
+   *  fallback: a `usage.record` model always wins. */
+  requestedModel?: string
+  boundModel?: string
 }
 
 /** A factory, not a shared constant: spreading a constant copies its array REFERENCES, so every
@@ -147,9 +153,19 @@ export function accumulateKimiWire(
     }
 
     switch (d.type) {
+      case 'llm.request': {
+        const m = typeof d.modelAlias === 'string' && d.modelAlias ? d.modelAlias : d.model
+        if (typeof m === 'string' && m) acc.requestedModel = stripProvider(m)
+        break
+      }
+      case 'profile.bind': {
+        if (typeof d.modelAlias === 'string' && d.modelAlias) acc.boundModel = stripProvider(d.modelAlias)
+        break
+      }
       case 'usage.record': {
         const u = d.usage as Record<string, number> | undefined
         if (u) {
+          acc.sawUsage = true
           acc.inputTokens += num(u.inputOther)
           acc.outputTokens += num(u.output)
           acc.cacheRead += num(u.inputCacheRead)
@@ -262,6 +278,11 @@ export function isoFromKimiTime(v: string | number | undefined): string {
   return ''
 }
 
+/** usage.record's model, else the one the wire requested, else the one the profile bound. */
+function modelOf(t: KimiWireTotals): string | undefined {
+  return t.model || t.requestedModel || t.boundModel || undefined
+}
+
 export function buildKimiSession(
   sessionId: string,
   state: KimiState | null,
@@ -314,6 +335,7 @@ export function buildKimiSession(
     git_pushes: totals.gitPushes,
     input_tokens: totals.inputTokens,
     output_tokens: totals.outputTokens,
+    ...(totals.sawUsage ? {} : { tokens_unavailable: true as const }),
     cache_read_input_tokens: totals.cacheRead,
     cache_creation_input_tokens: totals.cacheCreation,
     ...(totals.contextTokens ? { context_tokens: totals.contextTokens } : {}),
@@ -332,7 +354,7 @@ export function buildKimiSession(
     files_modified: 0,
     message_hours: totals.hours,
     user_message_timestamps: totals.userTimestamps,
-    ...(totals.model ? { model: totals.model } : {}),
+    ...(modelOf(totals) ? { model: modelOf(totals) } : {}),
     harness: 'kimi',
     _source: 'jsonl',
     ...(toolCalls === 0 ? {} : {}),
