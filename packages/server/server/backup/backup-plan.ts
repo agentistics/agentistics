@@ -272,6 +272,12 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
       + 'restore resume a plan belonging to a different machine.',
   },
   {
+    pattern: '.agentistics/briefing-state.json', match: 'prefix', reason: 'regenerable',
+    restoreWith: 'nothing — the server reinstalls the managed briefing on its next start',
+    why: 'Which managed briefing version was installed into THIS machine\'s harness dirs. A restored '
+      + 'machine has none installed yet, so starting without the record is exactly right.',
+  },
+  {
     pattern: '.agentistics/upgrade.lock', match: 'prefix', reason: 'runtime',
     restoreWith: 'nothing',
     why: 'A lock held by a process on this machine.',
