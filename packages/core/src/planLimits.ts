@@ -19,6 +19,8 @@ import { findPlan } from './plan-catalog'
 
 export type PlanWindowKind = '5h' | 'week'
 
+const DAY_MS = 24 * 60 * 60_000
+
 export const PLAN_WINDOW_MS: Record<PlanWindowKind, number> = {
   '5h': 5 * 60 * 60_000,
   week: 7 * 24 * 60 * 60_000,
@@ -224,7 +226,7 @@ export function planBudget(l: PlanLimits, nowMs: number): PlanBudget {
   const fiveHourPct = five ? currentUsedPct(five, nowMs) : 0
   const weekPct = week ? currentUsedPct(week, nowMs) : 0
   const weekResetsAt = week?.resetsAt ?? nowMs
-  const daysToWeekReset = Math.max(0, (weekResetsAt - nowMs) / PLAN_WINDOW_MS.week)
+  const daysToWeekReset = Math.max(0, (weekResetsAt - nowMs) / DAY_MS)
   const dailyBudgetPct = (100 - weekPct) / Math.max(daysToWeekReset, 0.5)
   const forecast = week ? forecastWindow(week, nowMs) : { kind: 'lasts' as const }
   const status: PlanBudgetStatus = fiveHourPct >= PLAN_BUDGET_HOLD_5H_PCT || weekPct >= PLAN_BUDGET_HOLD_WEEK_PCT
