@@ -107,7 +107,6 @@ import { attachmentName, splitMessage } from '../../lib/messageAttachments'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useViewportWidth } from '../../hooks/useViewportWidth'
-import { modelChipLabel, modelChipShown } from '../../lib/composerModelChip'
 import { modelDisplay } from '../../lib/modelDisplay'
 import { handleComposerDrop } from '../../lib/mentionInsert'
 import { REPO_DRAG_MIME, readRepoDrag } from '../../lib/repoDrag'
@@ -3686,39 +3685,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     )}
                   </div>,
                   document.body,
-                )}
-
-                {/* THE MODEL, ON A PHONE, IN SIGHT — a shortcut to the model list "More" already
-                    holds, never a second list. Below 360px it does not fit and is not drawn; the
-                    list stays in "More" at every width. See `lib/composerModelChip.ts`. */}
-                {modelChipShown({
-                  isMobile, viewportWidth, answeringNow,
-                  canSwitch: !modelReason && (menuModels.length > 0 || menuFreeText),
-                }) && (
-                  <button
-                    type="button"
-                    data-model-chip
-                    // The menu's own outside-press closes it on `mousedown`; this press is not outside.
-                    onMouseDown={e => e.stopPropagation()}
-                    onClick={() => setMoreOpen(v => !v)}
-                    disabled={!canPrompt || sending}
-                    aria-haspopup="menu"
-                    aria-expanded={moreOpen}
-                    aria-label={pt ? 'Modelo' : 'Model'}
-                    title={modelDisplay(session.harness, sourceControls?.model?.current ?? metrics?.meta?.model, session.model) ?? (pt ? 'Modelo' : 'Model')}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 3, flexShrink: 1, minWidth: 0,
-                      height: 34, maxWidth: 84, padding: '0 6px 0 9px', borderRadius: 9,
-                      border: '1px solid var(--ag-tint-4)', background: 'transparent',
-                      color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600,
-                      cursor: canPrompt ? 'pointer' : 'default', opacity: canPrompt ? 1 : 0.55,
-                    }}
-                  >
-                    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {modelChipLabel(modelDisplay(session.harness, sourceControls?.model?.current ?? metrics?.meta?.model, session.model), pt)}
-                    </span>
-                    <ChevronDown size={14} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />
-                  </button>
                 )}
 
                 {/* THE PANEL OF EVERYTHING YOU SENT, its first row being the last message. ABSENT until
