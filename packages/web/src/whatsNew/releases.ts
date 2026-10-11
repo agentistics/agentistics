@@ -17,10 +17,6 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'O tempo ativo de uma sessão não passa mais da duração dela: intervalos sobrepostos contam uma vez só, e o tempo medido de cada resposta continua valendo.',
         en: 'A session\'s active time no longer exceeds its duration: overlapping intervals count once, and each reply\'s measured time still wins.',
       },
-      {
-        pt: '"agentop clean" não fica mais pendurado quando um comando do git demora.',
-        en: '"agentop clean" no longer hangs when a git command is slow.',
-      },
     ],
   },
   '2.121.0': {
