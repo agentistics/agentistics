@@ -25,6 +25,10 @@ type Localized = { title: string; message?: string }
 /** Localized copy for server- and client-emitted notification codes. Resolved at
  *  render time by resolveNotification so switching the language re-translates. */
 export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }> = {
+  'tasks.thread_resolved': {
+    pt: { title: 'Tópico resolvido', message: 'O tópico foi movido para Resolvidos.' },
+    en: { title: 'Topic resolved', message: 'The topic was moved to Resolved.' },
+  },
   // PLAN.LIMITS — the generic copy; `resolveNotification` composes the real sentence from `meta`
   // (harness, window, percentage, renewal) through `limitNoticeText`.
   'limits.threshold': {

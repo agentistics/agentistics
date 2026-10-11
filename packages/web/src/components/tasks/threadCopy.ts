@@ -33,6 +33,7 @@ export function threadCopy(lang: Lang) {
     // inbox
     open: pt ? 'Abertos' : 'Open',
     resolved: pt ? 'Resolvidos' : 'Resolved',
+    resolvedSection: (n: number) => pt ? `Resolvidos · ${n}` : `Resolved · ${n}`,
     loose: pt ? 'Comentários avulsos' : 'Loose comments',
     looseHint: pt ? 'Comentários sem tópico' : 'Comments with no topic',
     newThread: pt ? 'Abrir tópico' : 'Open a topic',

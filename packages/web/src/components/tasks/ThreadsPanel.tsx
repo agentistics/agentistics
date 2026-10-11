@@ -24,6 +24,7 @@ import {
 } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useFleet } from '../../lib/fleet'
+import { pushNotification } from '../../lib/notifications'
 import { sessionPath } from '../../lib/sessionRoute'
 import { addComment, openThread, sendThread, threadVerb, type TaskComment, type TaskDetail, type TaskThread } from '../../lib/tasks'
 import { HarnessMark } from '../sessions/HarnessMark'
@@ -99,6 +100,7 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
   const inbox = useMemo(() => threadInbox(threads, detail.comments), [threads, detail.comments])
   const looseCount = detail.comments.filter(c => !c.threadId).length
   const [picked, setPicked] = useState<string | 'loose' | null>(null)
+  const [resolvedOpen, setResolvedOpen] = useState(false)
   // On a phone nothing is open until the person picks; on a desktop the newest open thread is.
   const selected = picked ?? (isMobile ? null : inbox.open[0]?.thread.id ?? inbox.resolved[0]?.thread.id ?? (looseCount > 0 ? 'loose' : null))
   const thread = threads.find(x => x.id === selected) ?? null
@@ -109,6 +111,19 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
   }
 
   const looseRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return
+      const target = e.target as HTMLElement | null
+      if (target?.matches('input, textarea, select, [contenteditable="true"]')) return
+      if (e.key.toLowerCase() !== 'c' && e.key !== '/') return
+      e.preventDefault()
+      focusComposer(panelRef.current)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
   const [creating, setCreating] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const create = async () => {
@@ -154,6 +169,7 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
             {t.sessionsCount(s.thread.participants.length)} · {where(s.thread)}
           </span>
+          <span aria-label={lang === 'pt' ? `${s.count} comentários` : `${s.count} comments`} style={{ marginLeft: 4, flex: '0 0 auto', minWidth: 18, padding: '1px 5px', borderRadius: 999, background: 'var(--ag-tint-3)', color: 'var(--text-secondary)', textAlign: 'center' }}>{s.count}</span>
           <span style={{ marginLeft: 'auto', flex: '0 0 auto', whiteSpace: 'nowrap' }}>{shortWhen(s.last?.createdAt ?? s.thread.createdAt, lang)}</span>
         </span>
         <ChevronRight className="ag-inbox-chev" size={15} aria-hidden style={{ position: 'absolute', right: 10, top: '50%', marginTop: -7 }} />
@@ -175,7 +191,21 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
           <div style={{ padding: 14, fontSize: 12.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>{t.noThreads}</div>
         )}
         {inbox.open.length > 0 && <div>{heading(t.open, inbox.open.length)}{inbox.open.map(item)}</div>}
-        {inbox.resolved.length > 0 && <div>{heading(t.resolved, inbox.resolved.length)}{inbox.resolved.map(item)}</div>}
+        {inbox.resolved.length > 0 && (
+          <section data-resolved-section>
+            <button
+              type="button"
+              aria-expanded={resolvedOpen}
+              aria-controls="resolved-thread-list"
+              onClick={() => setResolvedOpen(open => !open)}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '12px 14px 6px', border: 0, background: 'transparent', color: 'var(--text-tertiary)', font: '600 11px inherit', letterSpacing: '0.06em', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'left' }}
+            >
+              <span>{t.resolvedSection(inbox.resolved.length)}</span>
+              <ChevronRight size={14} aria-hidden style={{ transform: resolvedOpen ? 'rotate(90deg)' : undefined, transition: 'transform .15s' }} />
+            </button>
+            {resolvedOpen && <div id="resolved-thread-list">{inbox.resolved.map(item)}</div>}
+          </section>
+        )}
         {looseCount > 0 && (
           <div>
             {heading(t.loose, looseCount)}
@@ -243,7 +273,7 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
 
   if (isMobile) {
     return (
-      <div onClickCapture={followCommentLink}>
+      <div ref={panelRef} onClickCapture={followCommentLink}>
         <div style={{ background: 'var(--bg-card)', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
           {inboxPane}
         </div>
@@ -268,7 +298,7 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
     )
   }
   return (
-    <div onClickCapture={followCommentLink} style={{
+    <div ref={panelRef} onClickCapture={followCommentLink} style={{
       display: 'grid', gridTemplateColumns: '280px minmax(0, 1fr)', minHeight: 520, height: 'min(72vh, 820px)',
       background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
     }}>
@@ -357,9 +387,17 @@ function ThreadRecord({ id, thread, detail, rows, lang, reload, renderBody, wher
   }
   const verb = async (action: 'resolve' | 'reopen' | 'mute' | 'unmute', sessionId?: string) => {
     if (action === 'resolve') setVerbPending(true)
-    await threadVerb(id, thread.id, action, sessionId ? { sessionId } : {})
+    const result = await threadVerb(id, thread.id, action, sessionId ? { sessionId } : {})
+    if (!result.ok) {
+      if (action === 'resolve') setVerbPending(false)
+      return
+    }
     await reload()
-    if (action === 'resolve') { setVerbPending(false); setFlashing(true) }
+    if (action === 'resolve') {
+      setVerbPending(false)
+      setFlashing(true)
+      pushNotification({ type: 'success', code: 'tasks.thread_resolved' })
+    }
   }
   const rv = resolveView({ resolvedAt: thread.resolvedAt, pending: verbPending, flashing })
   const cantSend = busy || !draft.trim() || reach.total === 0
@@ -475,6 +513,7 @@ function ThreadRecord({ id, thread, detail, rows, lang, reload, renderBody, wher
           busy={busy}
           refusal={refusal}
           onSubmit={() => { void comment() }}
+          sticky
         />
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)', minHeight: isMobile ? 44 : undefined, cursor: 'pointer' }}>

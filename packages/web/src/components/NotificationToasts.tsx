@@ -112,7 +112,8 @@ export function NotificationToasts({ lang }: Props) {
         return (
           <div
             key={n.id}
-            role={isUpdate || isWhatsNew ? 'button' : undefined}
+            role={isUpdate || isWhatsNew ? 'button' : 'status'}
+            aria-live="polite"
             tabIndex={isUpdate || isWhatsNew ? 0 : undefined}
             onClick={isUpdate ? () => { window.dispatchEvent(new CustomEvent('agentistics:open-update-modal')); startLeave(n.id) }
               : isWhatsNew ? () => { openWhatsNew(n.meta); startLeave(n.id) } : undefined}
