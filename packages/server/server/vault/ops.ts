@@ -534,12 +534,20 @@ async function opVaultStageBundle(ctx: OpContext): Promise<OpResult> {
 
 // ── dispatch ────────────────────────────────────────────────────────────────────────────────
 
+/** The socket verbs a person runs (`agentop vault …`); every other op is machine traffic. */
+const HUMAN_OPS: ReadonlySet<string> = new Set([
+  'unlock-code', 'recover', 'authenticator-begin', 'authenticator-confirm', 'recovery-begin', 'setup-code',
+  'recovery-confirm', 'presence-enroll', 'presence-disable', 'view', 'set-auto-lock', 'activity', 'unlock',
+  'vault-init', 'vault-rekey', 'vault-add-passphrase', 'vault-reset',
+])
+
 export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch } = {}): Promise<OpResult> {
   // Only the holder answers; a client process that somehow listened would have no key to use.
   if (vaultRole() !== 'holder') return { reply: refused('service-only', sentence('service-only')) }
   const h = ctx.header
-  // §5.1: any `agentop` verb is human interaction (a status poll is not).
-  if (h.op !== 'status') noteVaultActivity()
+  // §5.1: only a HUMAN verb renews the idle clock. Refs, scrubs, service fetches and bundles are
+  // called by harnesses, hooks and services — an agent loop must never keep the vault open.
+  if (typeof h.op === 'string' && HUMAN_OPS.has(h.op)) noteVaultActivity()
   switch (h.op) {
     case 'status': return opStatus()
     case 'unlock-code': return opUnlockCode(h)
@@ -605,4 +613,3 @@ export function installVaultOps(): void {
   _installed = true
 }
 export function opsInstalled(): boolean { installVaultOps(); return _installed }
-

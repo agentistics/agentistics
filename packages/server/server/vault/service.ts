@@ -1035,10 +1035,14 @@ export async function withSecret<T>(
   }
 }
 
-/** Activity hook for auto-lock (S4.7): every human-scope open counts as use. */
+/**
+ * Use hook (S4.7). A decrypt is NOT human activity: harness refs, hooks, backups and service fetches
+ * all decrypt, and an agent loop must never keep the vault open. Only a human gesture renews the idle
+ * clock (`noteVaultActivity`, called by the gate and the human socket verbs).
+ */
 let _onUse: () => void = () => {}
 export function setVaultUseListener(fn: () => void): void { _onUse = fn }
-function noteVaultUse(): void { _autoClock?.use(_now()); try { _onUse() } catch { /* never breaks an open */ } }
+function noteVaultUse(): void { try { _onUse() } catch { /* never breaks an open */ } }
 
 /**
  * Seal `plaintext` into `path` (tmp + fsync + rename + chmod 0600 + fsync dir). THROWS a
