@@ -111,7 +111,9 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
           <RoleChip role={role} pt={pt} />
           <span style={{ color: 'var(--text-tertiary)', fontSize: 10.5 }}>{role ? (pt ? 'definido por você' : 'set by you') : (pt ? 'deduzido pelo sistema' : 'inferred by system')}</span>
           <button type="button" aria-label={pt ? 'Trocar tipo' : 'Change type'} onClick={e => {
-            const r = e.currentTarget.getBoundingClientRect()
+            // Anchor to the whole Tipo row, not the tiny trigger: the menu must start after the
+            // row's bottom edge so it cannot sit on top of the panel's information rows.
+            const r = e.currentTarget.parentElement?.getBoundingClientRect() ?? e.currentTarget.getBoundingClientRect()
             const pos = popoverPosition(r, 160, window.innerHeight)
             setRoleMenu({ x: pos.left, y: pos.top ?? window.innerHeight - (pos.bottom ?? 0) - 160 })
           }} style={{ all: 'unset', marginLeft: 'auto', color: 'var(--anthropic-orange)', cursor: 'pointer', fontSize: 11, padding: '3px 5px', borderRadius: 5 }}>{pt ? 'Trocar' : 'Change'}</button>

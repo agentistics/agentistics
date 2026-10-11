@@ -34,7 +34,7 @@ export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: 
   const [error, setError] = useState(false)
   const [retry, setRetry] = useState(0)
   const [scanProgress, setScanProgress] = useState(0)
-  const resultRef = useRef<HTMLElement>(null)
+  const resultRef = useRef<HTMLDivElement>(null)
   const keptPaths = useRef(new Set<string>())
   const selectFreshItems = (items: Item[]) => new Set(items.filter(i => i.kind !== 'node-modules' && !keptPaths.current.has(i.path)).map(i => i.id))
 
