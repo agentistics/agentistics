@@ -20,11 +20,10 @@ import { messageTime } from '../../lib/messageTime'
 import { STATE_COLOR } from '../../lib/sessionCardStyle'
 import { inputStyle } from './formBits'
 import { HarnessMark } from './HarnessMark'
-import { SessionRowMenu } from './SessionRowMenu'
 import { setSessionRole, useSessionRole, type SessionRole } from '../../lib/sessionRoles'
 import { sessionIdentityKey } from '../../lib/sessionIdentity'
 import { isInsidePortalledMenu } from '../../lib/rowMenu'
-import { popoverPosition } from '../../pages/settings/primitives'
+import { TabSelect } from '../../pages/settings/primitives'
 import { RoleChip } from './RoleChip'
 
 export interface LinkTarget { kind: 'parent' | 'child' | 'task'; key: string; label: string; harness?: string; state?: string; stateLabel?: string; startedAt?: number; path: string | null }
@@ -86,7 +85,7 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
   const [endedOpen, setEndedOpen] = useState(false)
-  const [roleMenu, setRoleMenu] = useState<{ x: number; y: number } | null>(null)
+  const [rolePickerOpen, setRolePickerOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const primaryRole = useSessionRole(sessionId ?? '')
   const fallbackRole = useSessionRole(roleFallbackId ?? '')
@@ -110,14 +109,18 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 6px', fontSize: 12 }}>
           <RoleChip role={role} pt={pt} />
           <span style={{ color: 'var(--text-tertiary)', fontSize: 10.5 }}>{role ? (pt ? 'definido por você' : 'set by you') : (pt ? 'deduzido pelo sistema' : 'inferred by system')}</span>
-          <button type="button" aria-label={pt ? 'Trocar tipo' : 'Change type'} onClick={e => {
-            // Anchor to the whole Tipo row, not the tiny trigger: the menu must start after the
-            // row's bottom edge so it cannot sit on top of the panel's information rows.
-            const r = e.currentTarget.parentElement?.getBoundingClientRect() ?? e.currentTarget.getBoundingClientRect()
-            const pos = popoverPosition(r, 160, window.innerHeight)
-            setRoleMenu({ x: pos.left, y: pos.top ?? window.innerHeight - (pos.bottom ?? 0) - 160 })
-          }} style={{ all: 'unset', marginLeft: 'auto', color: 'var(--anthropic-orange)', cursor: 'pointer', fontSize: 11, padding: '3px 5px', borderRadius: 5 }}>{pt ? 'Trocar' : 'Change'}</button>
+          <button type="button" aria-label={pt ? 'Trocar tipo' : 'Change type'} aria-expanded={rolePickerOpen} onClick={() => setRolePickerOpen(open => !open)} style={{ all: 'unset', marginLeft: 'auto', color: 'var(--anthropic-orange)', cursor: 'pointer', fontSize: 11, padding: '3px 5px', borderRadius: 5, ...(isMobile ? { boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', minHeight: 44, minWidth: 44, justifyContent: 'center' } : {}) }}>{pt ? 'Trocar' : 'Change'}</button>
         </div>
+        {rolePickerOpen && (
+          <div data-testid="session-role-picker" onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setRolePickerOpen(false) } }} style={{ padding: '2px 6px 8px', overflowX: 'auto' }}>
+            <TabSelect
+              options={[{ value: 'automatic', label: pt ? 'Automático' : 'Automatic' }, { value: 'leader', label: pt ? 'Líder' : 'Leader' }, { value: 'worker', label: 'Worker' }]}
+              value={role ?? 'automatic'}
+              onChange={value => { setSessionRole(sessionId, value === 'automatic' ? null : value as SessionRole); setRolePickerOpen(false) }}
+              {...(isMobile ? { buttonMinHeight: 44 } : {})}
+            />
+          </div>
+        )}
       </div>}
       {groups.map(([kind, title]) => {
         let rows = targets.filter(t => t.kind === kind)
@@ -162,14 +165,6 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
         )
       })}
       {started && <div style={{ ...SECTION, textTransform: 'none', letterSpacing: 0, fontWeight: 400, marginTop: 10 }}>{started}</div>}
-      {roleMenu && sessionId && <SessionRowMenu x={roleMenu.x} y={roleMenu.y} onClose={() => setRoleMenu(null)} onPick={action => {
-        setSessionRole(sessionId, action.slice('session-role:'.length) as SessionRole | null)
-        setRoleMenu(null)
-      }} entries={[
-        { action: 'session-role:', label: pt ? 'Automático' : 'Automatic', enabled: true, checked: role === undefined, color: 'var(--text-tertiary)' },
-        { action: 'session-role:leader', label: pt ? 'Líder' : 'Leader', enabled: true, checked: role === 'leader', color: 'var(--accent-purple)' },
-        { action: 'session-role:worker', label: 'Worker', enabled: true, checked: role === 'worker', color: 'var(--accent-cyan)' },
-      ]} />}
     </div>
   )
 }
