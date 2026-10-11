@@ -26,6 +26,7 @@ export function parseCopilotEvents(content: string, fallbackId: string): Session
 
   // Enriched fields from session.shutdown (clean-exit only)
   let inputTokens = 0
+  let sawUsage = false
   let outputTokens = 0
   let cacheReadTokens = 0
   let cacheWriteTokens = 0
@@ -140,6 +141,7 @@ export function parseCopilotEvents(content: string, fallbackId: string): Session
         for (const [, metrics] of Object.entries(modelMetrics) as [string, any][]) {
           const usage = metrics?.usage
           if (usage && typeof usage === 'object') {
+            sawUsage = true
             inputTokens += (usage.inputTokens as number | undefined) ?? 0
             outputTokens += (usage.outputTokens as number | undefined) ?? 0
             cacheReadTokens += (usage.cacheReadTokens as number | undefined) ?? 0
@@ -202,6 +204,8 @@ export function parseCopilotEvents(content: string, fallbackId: string): Session
     git_pushes: gitPushes,
     input_tokens: inputTokens,
     output_tokens: outputTokens,
+    // No `modelMetrics.*.usage` anywhere (failed run, crashed session): the 0s above are absence.
+    ...(sawUsage ? {} : { tokens_unavailable: true as const }),
     cache_read_input_tokens: cacheReadTokens,
     cache_creation_input_tokens: cacheWriteTokens,
     first_prompt: firstPrompt,
