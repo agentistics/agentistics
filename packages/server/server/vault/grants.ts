@@ -33,7 +33,7 @@ export interface UseContext { command: string | null; harness: string; callId?: 
 export interface UseRequest {
   id: string; epoch: number; sessionId: string; itemId: string; field: string; ref: string; name: string
   sessionTitle: string; harness: string; command: string | null; flags: ('persists' | 'background' | 'network')[]
-  count: number; createdAt: number; expiresAt: number; state: 'pending' | 'approved' | 'denied' | 'expired' | 'cancelled'
+  proves?: number; count: number; createdAt: number; expiresAt: number; state: 'pending' | 'approved' | 'denied' | 'expired' | 'cancelled'
   waiters: Set<(ok: boolean) => void>
 }
 const requestKey = (sid: string, itemId: string, field: string, epoch = _epoch) => `${sid}\0${itemId}\0${field}\0${epoch}`
@@ -97,6 +97,11 @@ export function confirmEachUseEnabled(): boolean { return _confirmEachUseOverrid
 export function __setConfirmEachUseForTests(enabled: boolean): void { _confirmEachUseOverride = enabled }
 export function __setUseTtlForTests(ms: number): void { _useTtlMs = ms }
 export function pendingUseRequests(): UseRequest[] { return [..._requests.values()].filter(r => r.state === 'pending').map(r => ({ ...r, waiters: new Set() })) }
+/** Counts one Hello prompt against a pending request; false once it has had `max`. */
+export function noteProveAttempt(id: string, max: number): boolean {
+  const r = _requests.get(id); if (!r || r.state !== 'pending') return false
+  r.proves = (r.proves ?? 0) + 1; return r.proves <= max
+}
 export function useRequest(id: string): UseRequest | null { const r = _requests.get(id); return r ? { ...r, waiters: new Set() } : null }
 function failUse(code: UseCode): { ok: false; code: UseCode } { return { ok: false, code } }
 async function openAuthorized(r: GrantRef): Promise<{ ok: true; value: string } | { ok: false; code: UseCode }> {
@@ -151,6 +156,7 @@ const SCRUB_LIMIT = 60
 const _scrubCalls = new Map<string, number[]>() // session -> call times in the last minute (no text, no value)
 export function scrubWithinLimit(sessionId: string): boolean {
   const now = _now(), recent = (_scrubCalls.get(sessionId) ?? []).filter(t => now - t < 60_000)
+  for (const [k, ts] of _scrubCalls) if (k !== sessionId && !ts.some(t => now - t < 60_000)) _scrubCalls.delete(k)
   if (recent.length >= SCRUB_LIMIT) { _scrubCalls.set(sessionId, recent); return false }
   recent.push(now); _scrubCalls.set(sessionId, recent); return true
 }

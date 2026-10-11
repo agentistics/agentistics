@@ -16,6 +16,8 @@ import { vaultAudit, vaultLang } from './service'
 import { informationalSecure } from './request-origin'
 
 type Reply = (r: { ok: boolean } & Record<string, unknown>, extra?: Record<string, unknown>) => Response
+const PROVE_PER_REQUEST = 3
+
 export interface PersonalHttpCtx { req: Request; path: string; url: URL; session: string; grant: string | null; loopback: boolean; reply: Reply; /** Review H2: the single-use proof from this page's own unlock reply. */ fresh?: string | null }
 
 /** Large enough for a 64 KiB value or a `.env` file; still bounded and read as a stream. */
@@ -105,6 +107,8 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
   const useProve = path.match(/^\/api\/vault\/personal\/use\/([^/]+)\/prove$/)
   if (useProve) {
     if (!grants.pendingUseRequests().some(x => x.id === useProve[1])) return reply(fail('not-found', 'That use request no longer exists.', 'Esse pedido de uso não existe mais.'))
+    // At most 3 Hello prompts per request: a looping caller must not wear the person down into approving.
+    if (!grants.noteProveAttempt(useProve[1]!, PROVE_PER_REQUEST)) return reply(fail('prove-limit', 'Too many confirmation prompts for this request. Deny it or wait for it to expire.', 'Pedidos de confirmação demais para este uso. Negue-o ou espere expirar.'))
     const p = await gate.proveUseApproval({ session, loopback, id: useProve[1]! })
     return reply(p)
   }

@@ -584,10 +584,11 @@ async function cmdPostTool(): Promise<number> {
   if (input.tool_response === undefined) return 0
   const { askVault } = await import('./vault/socket')
   const text = JSON.stringify(input.tool_response)
-  const r = (await askVault({ op: 'personal-scrub', managedId: managedId(), text }))?.reply as { ok?: boolean; changed?: boolean; text?: string } | undefined
-  if (!r?.ok || typeof r.text !== 'string') return 0
-  const { postToolAnswer } = await import('./vault/hook-rewrite')
-  const ans = postToolAnswer(input.tool_response, r.text, r.changed === true)
+  let r: { ok?: boolean; changed?: boolean; text?: string } | undefined
+  try { r = (await askVault({ op: 'personal-scrub', managedId: managedId(), text }))?.reply as typeof r } catch { r = undefined }
+  const { postToolAnswer, withheldAnswer } = await import('./vault/hook-rewrite')
+  // Fail closed (§3.11-B): the vault could not answer, so the output is withheld, never passed raw.
+  const ans = r?.ok && typeof r.text === 'string' ? (postToolAnswer(input.tool_response, r.text, r.changed === true) ?? (r.changed === true ? withheldAnswer() : null)) : withheldAnswer()
   if (ans) process.stdout.write(ans)
   return 0
 }

@@ -61,6 +61,11 @@ export function postToolAnswer(original: unknown, scrubbedJson: string, changed:
   return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', updatedToolOutput: updated } })
 }
 
+/** The PostToolUse answer that withholds the whole output (the vault refused or could not be asked). */
+export function withheldAnswer(): string {
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', updatedToolOutput: '«output held back by the vault»' } })
+}
+
 /** The PreToolUse answer for a rewritten Bash command (the rest of the input untouched). */
 export function preToolAnswer(toolInput: Record<string, unknown>, command: string): string {
   return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: { ...toolInput, command } } })

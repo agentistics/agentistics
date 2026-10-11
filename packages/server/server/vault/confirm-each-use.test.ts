@@ -158,6 +158,14 @@ describe('use requests over HTTP (VAULT.V4 §3.4–3.5)', () => {
     expect(await waiting).toEqual({ ok: false, code: 'use-denied' })
   })
 
+  test('/prove is limited to 3 prompts per request', async () => {
+    await fresh(false); __resetGrantsForTests(clock)
+    const { waiting, id } = await ask()
+    for (let i = 0; i < 3; i++) expect((await http('POST', `/api/vault/personal/use/${id}/prove`, {})).json).toMatchObject({ code: 'no-presence' })
+    expect((await http('POST', `/api/vault/personal/use/${id}/prove`, {})).json).toMatchObject({ ok: false, code: 'prove-limit' })
+    await http('POST', `/api/vault/personal/use/${id}/deny`, {}); await waiting
+  })
+
   test('a vault with NO presence device refuses approval: no code, no read grant, no value (§3.5)', async () => {
     await fresh(false); __resetGrantsForTests(clock)
     const { waiting, id } = await ask()
