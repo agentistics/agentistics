@@ -109,7 +109,7 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 6px', fontSize: 12 }}>
           <RoleChip role={role} pt={pt} />
           <span style={{ color: 'var(--text-tertiary)', fontSize: 10.5 }}>{role ? (pt ? 'definido por você' : 'set by you') : (pt ? 'deduzido pelo sistema' : 'inferred by system')}</span>
-          <button type="button" aria-label={pt ? 'Trocar tipo' : 'Change type'} aria-expanded={rolePickerOpen} onClick={() => setRolePickerOpen(open => !open)} style={{ all: 'unset', marginLeft: 'auto', color: 'var(--anthropic-orange)', cursor: 'pointer', fontSize: 11, padding: isMobile ? '9px 5px' : '3px 5px', borderRadius: 5 }}>{pt ? 'Trocar' : 'Change'}</button>
+          <button type="button" aria-label={pt ? 'Trocar tipo' : 'Change type'} aria-expanded={rolePickerOpen} onClick={() => setRolePickerOpen(open => !open)} style={{ all: 'unset', marginLeft: 'auto', color: 'var(--anthropic-orange)', cursor: 'pointer', fontSize: 11, padding: '3px 5px', borderRadius: 5, ...(isMobile ? { boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', minHeight: 44, minWidth: 44, justifyContent: 'center' } : {}) }}>{pt ? 'Trocar' : 'Change'}</button>
         </div>
         {rolePickerOpen && (
           <div data-testid="session-role-picker" onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setRolePickerOpen(false) } }} style={{ padding: '2px 6px 8px', overflowX: 'auto' }}>

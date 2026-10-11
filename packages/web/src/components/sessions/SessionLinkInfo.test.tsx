@@ -44,6 +44,11 @@ describe('SessionLinkInfo', () => {
     expect(html).not.toContain('role="menu"')
     expect(html).not.toContain('session-role:leader')
   })
+  it('gives the type control a 44 px touch target on mobile', () => {
+    const html = renderToStaticMarkup(<SessionLinkPanel links={links} sessionId="session-1" pt={false} onGo={() => {}} isMobile />)
+    const button = html.match(/<button[^>]*aria-label="Change type"[^>]*>/)?.[0] ?? ''
+    expect(button).toContain('min-height:44px')
+  })
 })
 
 import { STATE_COLOR } from '../../lib/sessionCardStyle'
