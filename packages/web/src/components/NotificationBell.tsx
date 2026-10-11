@@ -154,11 +154,13 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) 
               // the race.
               const isIdle = n.code === 'sessions.idle'
               const isWhatsNew = n.code === 'app.whats_new'
-              const clickable = link !== null || isUpdate || isIdle || isWhatsNew
+              const isClean = n.code === 'clean.suggestion'
+              const clickable = link !== null || isUpdate || isIdle || isWhatsNew || isClean
               const go = () => {
                 setOpen(false)
                 if (isUpdate) { window.dispatchEvent(new CustomEvent('agentistics:open-update-modal')); return }
                 if (isWhatsNew) { openWhatsNew(n.meta); return }
+                if (isClean) { window.dispatchEvent(new CustomEvent('agentistics:open-clean')); return }
                 if (isIdle) { navigate('/sessions'); requestIdleReview(); return }
                 if (link) navigate(link)
               }

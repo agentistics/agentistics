@@ -25,6 +25,12 @@ type Localized = { title: string; message?: string }
 /** Localized copy for server- and client-emitted notification codes. Resolved at
  *  render time by resolveNotification so switching the language re-translates. */
 export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }> = {
+  'clean.suggestion': {
+    pt: { title: 'Há espaço para liberar', message: '{count} item(ns) concluído(s) ou parado(s) podem ser removido(s). Veja o que dá para limpar.' },
+    en: { title: 'You can free some space', message: '{count} completed or idle item(s) can be removed. See what can be cleaned.' },
+  },
+  'clean.started': { pt: { title: 'Limpeza em andamento', message: 'Verificando novamente antes de remover. Nada em andamento será tocado.' }, en: { title: 'Cleanup started', message: 'Checking again before removal. Nothing in progress will be touched.' } },
+  'clean.failed': { pt: { title: 'Não foi possível iniciar a limpeza', message: 'Tente novamente.' }, en: { title: 'Cleanup could not start', message: 'Try again.' } },
   // PLAN.LIMITS — the generic copy; `resolveNotification` composes the real sentence from `meta`
   // (harness, window, percentage, renewal) through `limitNoticeText`.
   'limits.threshold': {

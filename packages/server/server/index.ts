@@ -86,6 +86,7 @@ import { validateSecret, ensureSessionSecret } from './secret-store'
 import { requiresStepUp, verifyStepUp, STEPUP_HEADER } from './stepup'
 import { writeAudit, ensureAuditIndexes, listAudit } from './audit'
 import { safeError } from './errors'
+import { cleanPlanResponse, applyCleanSelection, cleanJob } from './clean/clean-web'
 import { LIMITS, readJsonLimited } from './limits'
 // Type only, and from the LEAF: `sessions/fleet-web.ts` reaches `cli-start.ts` and through it Ink
 // and React, so this server names only `fleet-row.ts` — the two handlers load the implementation by
@@ -1004,6 +1005,23 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         return json(safe.body, 500)
       }
     }
+
+    // Cleanup is deliberately a plan/apply pair. The scan is low priority and the apply path
+    // performs a fresh scan, so a changed worktree can never be removed from an old browser list.
+    if (url.pathname === '/api/clean/plan' && req.method === 'GET') {
+      try {
+        const result = await cleanPlanResponse()
+        return json(result)
+      } catch (err) { return json({ error: String(err) }, 500) }
+    }
+    if (url.pathname === '/api/clean/apply' && req.method === 'POST') {
+      try {
+        const body = await req.json() as { ids?: unknown }
+        if (!Array.isArray(body.ids) || body.ids.some(id => typeof id !== 'string')) return json({ error: 'ids must be an array' }, 400)
+        return json(await applyCleanSelection(body.ids as string[]), 202)
+      } catch (err) { return json({ error: String(err) }, 409) }
+    }
+    if (url.pathname === '/api/clean/job' && req.method === 'GET') return json(cleanJob() ?? { state: 'idle', progress: 0 })
 
     /**
      * WHERE THIS DASHBOARD IS ALREADY REACHABLE OVER HTTPS, if anywhere.

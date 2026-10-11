@@ -9,8 +9,8 @@ describe('clean suggestion', () => {
     expect(weekIsUp(0, WEEK_MS)).toBe(true)
     expect(weekIsUp(0, WEEK_MS - 1)).toBe(false)
   })
-  test('the notification names the size and the command', () => {
-    expect(suggestionText(2.7 * MIN_BYTES, 5, 'en')).toEqual({ title: 'agentop clean can free 2.7 GB', message: '5 merged worktree(s) or stale node_modules. Run `agentop clean` to see the list and confirm.' })
-    expect(suggestionText(2 * MIN_BYTES, 1, 'pt').title).toBe('agentop clean pode liberar 2.0 GB')
+  test('the notification names the size and invites the interface flow', () => {
+    expect(suggestionText(2.7 * MIN_BYTES, 5, 'en')).toEqual({ title: 'You can free 2.7 GB', message: '5 completed or idle item(s) can be removed. See the list and confirm what you want to clean.' })
+    expect(suggestionText(2 * MIN_BYTES, 1, 'pt').title).toBe('Há espaço para liberar 2.0 GB')
   })
 })
