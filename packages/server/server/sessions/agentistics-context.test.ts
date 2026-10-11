@@ -62,6 +62,12 @@ describe('context text', () => {
     expect(t).toContain('Specification skills installed for this harness: superpowers')
     expect(contextText(base)).not.toContain('Specification skills installed')
   })
+  test('briefing follows the UI language and only emits plan limits when the tool is present', () => {
+    expect(contextText({ ...base, lang: 'pt' })).toContain('Ambiente operacional')
+    expect(contextText({ ...base, lang: 'pt' })).toContain('segredos')
+    expect(contextText(base)).not.toContain('agentistics_plan_limits')
+    expect(contextText({ ...base, toolNames: ['agentistics_plan_limits'] })).toContain('agentistics_plan_limits')
+  })
   test('no task: says so and offers to file it; with task: names it, never done before validation', () => {
     expect(contextText(base)).toContain('not linked to a task')
     expect(contextText(base)).not.toContain('belongs to Agentask task')

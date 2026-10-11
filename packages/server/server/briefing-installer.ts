@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
 import { availableHarnesses } from './sessions/harness-available'
@@ -6,7 +6,7 @@ import { AGENTISTICS_DATA_DIR, HOME_DIR } from './config'
 import { readPreferences } from './preferences'
 import { BRIEFING_VERSION, briefingSkills, managedBlock, managedTargets, removeManagedBlocks, replaceManagedBlock, skillMarkdown, type ManagedTarget } from './briefing'
 
-export type InstallOptions = { home: string; harnesses?: readonly HarnessId[]; uninstall?: boolean; planLimitsAvailable?: boolean }
+export type InstallOptions = { home: string; harnesses?: readonly HarnessId[]; uninstall?: boolean; planLimitsAvailable?: boolean; toolNames?: readonly string[] }
 export type InstallResult = { harness: HarnessId; path: string; changed: boolean; removed?: boolean }[]
 
 export const BRIEFING_STATE_FILE = join(AGENTISTICS_DATA_DIR, 'briefing-state.json')
@@ -25,13 +25,19 @@ async function read(path: string): Promise<string | null> {
   try { return await readFile(path, 'utf8') } catch { return null }
 }
 
+async function pruneEmpty(path: string): Promise<void> {
+  try {
+    if ((await readdir(path)).length === 0) { await rm(path); await pruneEmpty(dirname(path)) }
+  } catch { /* absent or non-empty */ }
+}
+
 export async function installBriefing(o: InstallOptions): Promise<InstallResult> {
   const out: InstallResult = []
   for (const target of selected(o)) {
     const before = await read(target.path)
     if (target.skills) {
       const root = join(dirname(target.path), 'skills')
-      for (const skill of briefingSkills({ planLimitsAvailable: o.planLimitsAvailable })) {
+      for (const skill of briefingSkills({ planLimitsAvailable: o.planLimitsAvailable ?? o.toolNames?.includes('agentistics_plan_limits') })) {
         const path = join(root, skill.name, 'SKILL.md')
         const desired = skillMarkdown(skill)
         const prior = await read(path)
@@ -41,7 +47,7 @@ export async function installBriefing(o: InstallOptions): Promise<InstallResult>
       continue
     }
     let content = before ?? ''
-    for (const skill of briefingSkills({ planLimitsAvailable: o.planLimitsAvailable })) content = replaceManagedBlock(content, managedBlock(skill))
+    for (const skill of briefingSkills({ planLimitsAvailable: o.planLimitsAvailable ?? o.toolNames?.includes('agentistics_plan_limits') })) content = replaceManagedBlock(content, managedBlock(skill))
     if (content !== before) { await mkdir(dirname(target.path), { recursive: true, mode: 0o700 }); await writeFile(target.path, content, { mode: 0o600 }) }
     out.push({ harness: target.harness, path: target.path, changed: content !== before })
   }
@@ -56,6 +62,7 @@ export async function uninstallBriefing(o: InstallOptions): Promise<InstallResul
         const path = join(dirname(target.path), 'skills', skill.name, 'SKILL.md')
         const content = await read(path)
         if (content?.includes('agentistics-managed-briefing:')) { await rm(path); out.push({ harness: target.harness, path, changed: true, removed: true }) }
+        await pruneEmpty(dirname(path))
       }
       continue
     }
@@ -74,6 +81,7 @@ export type AutoInstallOptions = {
   dataDir?: string
   env?: NodeJS.ProcessEnv
   harnesses?: readonly HarnessId[]
+  toolNames?: readonly string[]
   readSettings?: () => Promise<{ briefingAutoInstall?: boolean }>
 }
 
@@ -100,6 +108,7 @@ export async function ensureBriefingInstalled(o: AutoInstallOptions = {}): Promi
       const available = availableHarnesses()
       return available.blind ? [] : available.ids
     })(),
+    toolNames: o.toolNames,
   })
   await mkdir(dataDir, { recursive: true, mode: 0o700 })
   await writeFile(statePath, JSON.stringify({ version: BRIEFING_VERSION }) + '\n', { mode: 0o600 })

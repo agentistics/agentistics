@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { BRIEFING_VERSION, briefingSkills, managedBlock, managedTargets, removeManagedBlocks, replaceManagedBlock, skillMarkdown } from './briefing'
+import { BRIEFING_VERSION, PLAN_LIMITS_TOOL, briefingSkills, briefingText, managedBlock, managedTargets, removeManagedBlocks, replaceManagedBlock, skillMarkdown } from './briefing'
 import { ensureBriefingInstalled, installBriefing, uninstallBriefing } from './briefing-installer'
 
 describe('managed briefing source', () => {
@@ -21,6 +21,32 @@ describe('managed briefing source', () => {
     expect(next).toContain('# Mine')
     expect(next).toContain(`v${BRIEFING_VERSION}`)
     expect(removeManagedBlocks(next)).toBe('# Mine\n')
+  })
+
+  test('keeps all four managed topics and is idempotent for instruction-only harnesses', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'agentistics-briefing-topics-'))
+    const path = join(home, '.codex', 'AGENTS.md')
+    await Bun.write(path, '# User rules\n')
+    await installBriefing({ home, harnesses: ['codex'] })
+    const first = await readFile(path, 'utf8')
+    for (const skill of briefingSkills()) expect(first).toContain(skill.name)
+    await installBriefing({ home, harnesses: ['codex'] })
+    expect(await readFile(path, 'utf8')).toBe(first)
+    await uninstallBriefing({ home, harnesses: ['codex'] })
+    expect(await readFile(path, 'utf8')).toBe('# User rules\n')
+  })
+
+  test('plan limits and Portuguese briefing are guarded and complete', () => {
+    expect(briefingText('en')).not.toContain(PLAN_LIMITS_TOOL)
+    expect(briefingText('en', { planLimitsAvailable: true })).toContain(PLAN_LIMITS_TOOL)
+    expect(briefingText('pt')).toContain('segredos')
+    expect(briefingText('pt')).toContain('hand-off')
+  })
+
+  test('installer detects plan limits from the actual tool list', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'agentistics-briefing-limits-'))
+    await installBriefing({ home, harnesses: ['codex'], toolNames: [PLAN_LIMITS_TOOL] })
+    expect(await readFile(join(home, '.codex', 'AGENTS.md'), 'utf8')).toContain(PLAN_LIMITS_TOOL)
   })
 })
 
@@ -46,6 +72,7 @@ describe('briefing installer', () => {
     expect(await readFile(path, 'utf8')).toContain(briefingSkills()[0]!.name)
     await uninstallBriefing({ home, harnesses: ['claude'] })
     expect(await Bun.file(path).exists()).toBe(false)
+    expect(await Bun.file(join(home, '.claude', 'skills')).exists()).toBe(false)
   })
 
   test('automatic install is versioned in agentop state and respects opt-outs', async () => {
@@ -66,4 +93,6 @@ test('targets use the harness global instruction locations', () => {
   expect(targets.find(x => x.harness === 'claude')?.path).toBe('/home/u/.claude/CLAUDE.md')
   expect(targets.find(x => x.harness === 'codex')?.path).toBe('/home/u/.codex/AGENTS.md')
   expect(targets.find(x => x.harness === 'gemini')?.path).toBe('/home/u/.gemini/GEMINI.md')
+  expect(targets.find(x => x.harness === 'antigravity')?.path).toBe('/home/u/.gemini/antigravity-cli/AGENTS.md')
+  expect(targets.find(x => x.harness === 'antigravity')?.skills).toBe(false)
 })

@@ -10,6 +10,7 @@ import type { HarnessId } from '@agentistics/core'
 export const BRIEFING_VERSION = 1
 export const MANAGED_OPEN = '<!-- agentistics-managed-briefing: v'
 export const MANAGED_CLOSE = '<!-- /agentistics-managed-briefing -->'
+export const PLAN_LIMITS_TOOL = 'agentistics_plan_limits'
 
 export type BriefingSkill = {
   name: string
@@ -34,7 +35,8 @@ the work to fit the current vocabulary. Never leave a running worker outside the
 
 Keep secrets out of prompts and commits. Ask the person in the conversation when a decision is
 needed. At a hand-off, write state, running sessions, queue, and decisions to the durable hand-off
-file, then tell the successor to close the old leader after taking over.
+file, then tell the successor to close the old leader after taking over. When a leader receives a
+hand-off hint after 150k tokens or 35% of its window, do that immediately; then once per +50k.
 `
 
 export const BRIEFING_PT = `
@@ -50,6 +52,10 @@ Descreva cada tarefa e o critério de pronto. Separe trabalho independente em su
 vincule cada sessão à subtarefa que ela atende e mantenha os status vivos. Comente nos marcos.
 Use \`em_andamento → em_revisão → concluída\`: handback significa pronta para revisão, nunca aceite.
 Crie status, tipo, pasta ou subtarefa que falte; não rebaixe o trabalho para caber no vocabulário.
+Mantenha segredos fora dos prompts e commits; use referências \`vault://nome\` e nunca peça, imprima
+ou confirme o valor de um segredo. No hand-off, escreva estado, sessões ativas, fila e decisões no
+arquivo durável e diga ao sucessor para fechar o líder antigo depois de assumir. Ao receber uma dica
+de hand-off após 150 mil tokens ou 35% da janela, faça isso imediatamente; depois, a cada 50 mil.
 `
 
 export const BRIEFING_SKILL_NAMES = [
@@ -59,31 +65,34 @@ export const BRIEFING_SKILL_NAMES = [
   'agentistics-qa-releases',
 ] as const
 
-export function briefingText(lang: 'en' | 'pt' = 'en'): string {
+export function briefingText(lang: 'en' | 'pt' = 'en', o: { planLimitsAvailable?: boolean } = {}): string {
   const text = lang === 'pt' ? BRIEFING_PT : common
-  return `${text.trim()}\n\nInstalled managed skills: ${BRIEFING_SKILL_NAMES.join(', ')}.`
+  const limits = o.planLimitsAvailable
+    ? '\nBefore opening sessions, read agentistics_plan_limits and follow its recommendation: keep cadence.parallel workers running; if paceStatus is under, pull work from the queue. Hold only when the 5-hour window is at least 85% (short pause until renewal); weekly quota is not a brake unless it is at least 95%.\n'
+    : ''
+  return `${text.trim()}${limits}\nInstalled managed skills: ${BRIEFING_SKILL_NAMES.join(', ')}.`
 }
 
 const skills: readonly BriefingSkill[] = [
   {
     name: 'agentistics-board-agentask',
     description: 'Use when planning, filing, updating, or delivering work on the Agentask board.',
-    body: `# Agentask board\n${common}\nCall the task and status/type listing tools before making assumptions. Claim work, file the current session, and put comments on the subtask where the work happens. A task is not done because a command passed: leave it in review until the owner validates it.`,
+    body: '# Agentask board\nCall the task and status/type listing tools before making assumptions. Claim work, file the current session, and put comments on the subtask where the work happens. A task is not done because a command passed: leave it in review until the owner validates it.',
   },
   {
     name: 'agentistics-sessions-hand-offs',
     description: 'Use when starting workers, coordinating parent and child sessions, or handing work over.',
-    body: `# Sessions and hand-offs\n${common}\nOpen other sessions only after explicit approval. Give each worker a complete prompt, task, subtask, done criteria, and files it must not touch. A worker reports with agentistics_session_message(kind=handback|block|question); the product moves a filed subtask to review on handback.`,
+    body: '# Sessions and hand-offs\nOpen other sessions only after explicit approval. Give each worker a complete prompt, task, subtask, done criteria, and files it must not touch. A worker reports with agentistics_session_message(kind=handback|block|question); the product moves a filed subtask to review on handback.',
   },
   {
     name: 'agentistics-vault',
     description: 'Use when a task needs credentials, provider keys, or other protected values.',
-    body: `# Vault\n${common}\nUse vault://name references and the vault tools. Never ask a person to paste a secret into chat, print a secret, put one in a prompt, or commit one. Request only the minimum secret and report the reference, not its value.`,
+    body: '# Vault\nUse vault://name references and the vault tools. Never ask a person to paste a secret into chat, print a secret, put one in a prompt, or commit one. Request only the minimum secret and report the reference, not its value.',
   },
   {
     name: 'agentistics-qa-releases',
     description: 'Use when validating a delivery, preparing a release, or reviewing another harness output.',
-    body: `# QA and releases\n${common}\nQA is independent: use a different harness/model than the author. Test in agentop run --rm with throwaway HOME and ports, inspect desktop and 390px mobile when UI changes, and attach evidence to the task. A release is published only after QA and owner validation; do not mark work done automatically.`,
+    body: '# QA and releases\nQA is independent: use a different harness/model than the author. Test in agentop run --rm with throwaway HOME and ports, inspect desktop and 390px mobile when UI changes, and attach evidence to the task. A release is published only after QA and owner validation; do not mark work done automatically.',
   },
 ]
 
@@ -104,7 +113,10 @@ export function managedBlock(skill: BriefingSkill, version = BRIEFING_VERSION): 
 
 export function replaceManagedBlock(file: string, block: string): string {
   const escaped = MANAGED_OPEN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const re = new RegExp(`${escaped}[^\\n]*[\\s\\S]*?${MANAGED_CLOSE}`, 'g')
+  const name = block.match(new RegExp(`${escaped}[^\\n]*?\\s([^ ]+)\\s*-->`))?.[1]
+  const re = name
+    ? new RegExp(`${escaped}[^\\n]*?\\s${name.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\s*-->[\\s\\S]*?${MANAGED_CLOSE}\\n?`, 'g')
+    : new RegExp(`${escaped}[^\\n]*[\\s\\S]*?${MANAGED_CLOSE}\\n?`, 'g')
   const without = file.replace(re, '').replace(/\n{3,}/g, '\n\n').trimEnd()
   return without ? `${without}\n\n${block}\n` : `${block}\n`
 }
@@ -122,7 +134,7 @@ export function managedTargets(home: string): ManagedTarget[] {
     { harness: 'codex', path: join(home, '.codex', 'AGENTS.md'), skills: false },
     { harness: 'gemini', path: join(home, '.gemini', 'GEMINI.md'), skills: false },
     { harness: 'copilot', path: join(home, '.copilot', 'copilot-instructions.md'), skills: false },
-    { harness: 'antigravity', path: join(home, '.gemini', 'AGENTS.md'), skills: true },
+    { harness: 'antigravity', path: join(home, '.gemini', 'antigravity-cli', 'AGENTS.md'), skills: false },
     { harness: 'kimi', path: join(home, '.kimi-code', 'AGENTS.md'), skills: false },
   ]
 }

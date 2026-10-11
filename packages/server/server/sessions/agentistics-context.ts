@@ -9,7 +9,7 @@
  * docs/superpowers/specs/2026-10-08-session-context-injection.md
  */
 
-import { briefingText } from '../briefing'
+import { briefingText, PLAN_LIMITS_TOOL } from '../briefing'
 
 export type ContextLang = 'en' | 'pt'
 
@@ -33,6 +33,8 @@ export interface ContextInput {
   specSkills?: readonly string[]
   /** TODO(phase 2): stored role and `agentistics_session_role` will choose the role line. */
   role?: 'leader' | 'worker'
+  lang?: ContextLang
+  toolNames?: readonly string[]
 }
 
 /** The block is fenced so the chat UI can recognise it and render it collapsed. */
@@ -83,7 +85,7 @@ export function contextText(i: ContextInput): string {
     `- Tasks (Agentask): ${TOOL_GROUPS.Tasks.join(', ')} — plan, claim, edit, link, comment, coordinate, and close work.`,
     `- Sessions: ${TOOL_GROUPS.Sessions.join(', ')} — list, message another session, notify the user, and organise sidebar folders.`,
     METRICS_DASHBOARDS_LINE,
-    briefingText('en'),
+    briefingText(i.lang ?? 'en', { planLimitsAvailable: i.toolNames?.includes(PLAN_LIMITS_TOOL) }),
   ]
   lines.push(
     'Your role here: decide from the request. LEADER organises: break the request into Agentask tasks/subtasks, propose which sessions to open (harness + model each), follow them, have each delivery QA\'d by a different model, and report to the user; do not implement big pieces yourself. WORKER implements one defined piece, tests, commits, and reports to whoever started it. AUTO: one piece → worker; several fronts → leader; you may become leader if the work grows.',

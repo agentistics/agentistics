@@ -850,7 +850,8 @@ if (command === 'server' || command === 'start' || !command) {
   // receive only the agentistics-owned blocks/skills and are never used as state.
   {
     const { ensureBriefingInstalled } = await import('../server/briefing-installer.ts')
-    await ensureBriefingInstalled()
+    const { CONTEXT_TOOL_NAMES } = await import('../server/sessions/agentistics-context.ts')
+    await ensureBriefingInstalled({ toolNames: CONTEXT_TOOL_NAMES })
   }
   // Server, daemon and version check run in parallel — the daemon and the banner only where they
   // belong (a central has no host sessions, a container is upgraded by its image): daemon-plan.ts.
