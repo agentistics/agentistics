@@ -79,9 +79,10 @@ export interface FleetFramePayload {
 
 /** One canonical wire row: the old protocol sent these facts twice as `sessions` and `rows`. */
 export function compactFleetSession(session: FleetRow, row: ControlSession): Record<string, unknown> {
-  const { searchFields: _searchFields, verbs: _verbs, attachCommand: _attachCommand, ...withoutSearchFields } = row as ControlSession & { searchFields?: unknown; verbs?: unknown; attachCommand?: unknown }
-  const { verbs: _sessionVerbs, attachCommand: _sessionAttach, ...withoutSessionDerivations } = session as FleetRow & { verbs?: unknown; attachCommand?: unknown }
-  return { ...withoutSessionDerivations, ...withoutSearchFields }
+  // Keep verbs and attachCommand long enough for compactFleetRows to catalogue them. They are
+  // removed from the serialized row there, after the catalogue key has been assigned.
+  const { searchFields: _searchFields, ...withoutSearchFields } = row as ControlSession & { searchFields?: unknown }
+  return { ...session, ...withoutSearchFields }
 }
 
 type WireVerb = Record<string, unknown>
