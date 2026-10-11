@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.130.0': {
+    features: [
+      {
+        pt: 'Sessões abertas fora do agentistics agora mostram o estado certo, lido do histórico da própria conversa.',
+        en: 'Sessions opened elsewhere (outside agentistics) now show the right state, read from the conversation transcript.',
+      },
+      {
+        pt: 'Novas sessões com o papel "Automático" já começam como workers.',
+        en: 'New sessions whose role is "Automatic" now start as workers.',
+      },
+      {
+        pt: 'O histórico das sessões do Gemini e do Kimi é lido de forma incremental: mais rápido e com menos uso de CPU.',
+        en: 'Gemini and Kimi session history is now read incrementally: faster and lighter on CPU.',
+      },
+    ],
+    fixes: [],
+  },
   '2.129.1': {
     features: [],
     fixes: [

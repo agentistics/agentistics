@@ -193,7 +193,7 @@ import {
   type SessionSnapshot,
 } from './sessions/sessions-host'
 import { createSessionHub, setProcessSessionHub, type SessionHub } from './sessions/session-hub'
-import { hostAdapterState, onAdapterStateChange } from './sessions/adapter-state-host'
+import { hostAdapterState, hostTailState, onAdapterStateChange } from './sessions/adapter-state-host'
 import { HARNESS_PROCESS_TRANSCRIPTS } from './sessions/harness-session-file'
 import { modeSpecFor } from './sessions/mode-spec'
 import { isServerProcess, readServerSnapshot } from './sessions/shared-snapshot'
@@ -1603,6 +1603,7 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
     adoptSessions: async records => { for (const r of records) await addSession(r) },
     // ENGINE.MAP F1.2: the harness's own statement of its state, with the `adapter-chat` flag on only.
     adapterState: hostAdapterState,
+    tailState: hostTailState,
   }
 }
 
