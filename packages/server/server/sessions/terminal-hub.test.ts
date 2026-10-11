@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { FOLLOW_MS, createTerminalHub, type TerminalSink } from './terminal-hub'
+import { FOLLOW_MS, QUIET_FORCE_MS, createTerminalHub, type TerminalSink } from './terminal-hub'
 import type { TerminalFrame } from './terminal-stream'
 import type { PaneInfo, TerminalCapture } from './types'
 
@@ -192,5 +192,61 @@ describe('createTerminalHub', () => {
     expect(h.follows.length).toBe(1) // still changing: keeps following
     h.follows.shift()!.fn(); await flush() // unchanged now
     expect(h.follows.length).toBe(0) // settled: back to the interval alone
+  })
+})
+
+describe('the write-stamp gate (PERF.IDLE)', () => {
+  function gated() {
+    let stamp: string | null = 'a'
+    let clock = 1_000
+    let intervalFn: (() => void) | null = null
+    let calls = 0
+    const hub = createTerminalHub({
+      capture: async () => { calls++; return cap(['same']) },
+      isManaged: async () => true,
+      historyLimit: 50_000, viewLines: 200, pollMs: 500,
+      setInterval: fn => { intervalFn = fn; return 1 as unknown as ReturnType<typeof setInterval> },
+      clearInterval: () => {},
+      setTimeout: () => {},
+      activity: () => stamp,
+      now: () => clock,
+    })
+    return {
+      hub, calls: () => calls,
+      setStamp: (s: string | null) => { stamp = s },
+      advance: (ms: number) => { clock += ms },
+      tick: async () => { intervalFn?.(); await flush() },
+    }
+  }
+  it('an unchanged stamp captures nothing; a changed one captures at once', async () => {
+    const g = gated()
+    await g.hub.subscribe('s1', sink().s)
+    await flush()
+    const first = g.calls()
+    await g.tick() // first decision records the stamp
+    const afterFirst = g.calls()
+    for (let i = 0; i < 6; i++) { g.advance(500); await g.tick() }
+    expect(g.calls()).toBe(afterFirst)
+    g.setStamp('b'); g.advance(500); await g.tick()
+    expect(g.calls()).toBe(afterFirst + 1)
+    expect(first).toBe(1)
+  })
+  it('a quiet screen is still captured every QUIET_FORCE_MS', async () => {
+    const g = gated()
+    await g.hub.subscribe('s1', sink().s)
+    await flush()
+    await g.tick()
+    const base = g.calls()
+    g.advance(QUIET_FORCE_MS + 1); await g.tick()
+    expect(g.calls()).toBe(base + 1)
+  })
+  it('no stamp: the still-screen stride as before', async () => {
+    const g = gated()
+    g.setStamp(null)
+    await g.hub.subscribe('s1', sink().s)
+    await flush()
+    const base = g.calls()
+    await g.tick()
+    expect(g.calls()).toBe(base + 1)
   })
 })

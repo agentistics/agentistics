@@ -43,6 +43,13 @@ export interface TerminalHubDeps {
   /** Injectable so a test drives the loop by hand instead of by wall-clock. */
   setInterval?: (fn: () => void, ms: number) => TimerHandle
   clearInterval?: (h: TimerHandle) => void
+  /**
+   * PERF.IDLE: a cheap stamp of the session's writes since the last look (`pane-activity.ts`), `null`
+   * when unknown. With a known stamp a still screen is captured only when it moved — checked on every
+   * tick, so a change is SEEN sooner than the still-screen stride saw it — or every `QUIET_FORCE_MS`.
+   */
+  activity?: (id: string) => string | null
+  now?: () => number
   /** Injectable for the quick follow-up capture (`FOLLOW_MS`). */
   setTimeout?: (fn: () => void, ms: number) => void
 }
@@ -55,6 +62,9 @@ export interface TerminalHubDeps {
  * capture this soon; an unchanged one arms nothing, so a still screen costs exactly what it did.
  */
 export const FOLLOW_MS = 150
+/** With a write stamp, the longest a still screen goes uncaptured — for what no stamp can see (a
+ *  resize from another client, tmux's own redraw, a writer outside the tree). */
+export const QUIET_FORCE_MS = 10_000
 
 interface Entry {
   sinks: Set<TerminalSink>
@@ -70,6 +80,9 @@ interface Entry {
   unchanged: number
   /** Interval ticks passed over since the last capture. */
   skipped: number
+  /** The write stamp the last capture decision saw, and when the last capture STARTED. */
+  lastStamp: string | null
+  lastCaptureAt: number
 }
 
 /**
@@ -103,6 +116,7 @@ export function createTerminalHub(deps: TerminalHubDeps): TerminalHub {
   const clearIv: (h: TimerHandle) => void = deps.clearInterval ?? clearInterval
   const entries = new Map<string, Entry>()
   const setTo: (fn: () => void, ms: number) => void = deps.setTimeout ?? ((fn, ms) => { setTimeout(fn, ms) })
+  const now = deps.now ?? (() => Date.now())
 
   function stop(id: string, entry: Entry): void {
     if (entry.handle !== null) { clearIv(entry.handle); entry.handle = null }
@@ -113,6 +127,7 @@ export function createTerminalHub(deps: TerminalHubDeps): TerminalHub {
     const entry = entries.get(id)
     if (!entry || entry.busy) return
     entry.busy = true
+    entry.lastCaptureAt = now()
     try {
       let cap: TerminalCapture | null
       try {
@@ -179,13 +194,24 @@ export function createTerminalHub(deps: TerminalHubDeps): TerminalHub {
       }
       let entry = entries.get(id)
       if (!entry) {
-        entry = { sinks: new Set(), handle: null, busy: false, lastDigest: null, lastFrame: null, seq: 0, following: false, unchanged: 0, skipped: 0 }
+        entry = { sinks: new Set(), handle: null, busy: false, lastDigest: null, lastFrame: null, seq: 0, following: false, unchanged: 0, skipped: 0, lastStamp: null, lastCaptureAt: 0 }
         entries.set(id, entry)
         // First tick immediately so the first reader is not waiting a whole interval for a screen
         // that already exists, then on the cadence (slower while the screen stays still).
         entry.handle = setIv(() => {
           const e = entries.get(id)
           if (!e) return
+          // Once there is a screen, a known write stamp decides: unchanged and recently captured is
+          // nothing to do; changed is a capture NOW, whatever the stride says.
+          const stamp = e.lastFrame && deps.activity ? deps.activity(id) : null
+          if (stamp !== null) {
+            const quiet = stamp === e.lastStamp && now() - e.lastCaptureAt < QUIET_FORCE_MS
+            e.lastStamp = stamp
+            if (quiet) return
+            e.skipped = 0
+            void tick(id)
+            return
+          }
           if (++e.skipped < stillStride(e.unchanged)) return
           e.skipped = 0
           void tick(id)
