@@ -96,6 +96,7 @@ import { AsideHeader } from './components/nav/AsideHeader'
 import { getPinnedIds } from './lib/pinnedSessions'
 import { loadSharedPrefs, loadPersonalPrefs, putPersonal, migrateLocalOnce } from './lib/sharedPref'
 import { applyTextScale, clampTextScale } from './lib/textScale'
+import { initialLang } from './lib/lang'
 import { fleetOpenStore, sessionsFiltersOpenStore, studioSeenStore } from './lib/appFlags'
 import { pageMaxWidth } from './lib/pageWidth'
 import {
@@ -742,7 +743,7 @@ function MobileBottomNav({
     // Theme and language live here because the sidebar that hosts them on desktop is not
     // rendered on mobile. Neither closes the sheet — you toggle and immediately re-judge.
     { key: 'theme', label: pt ? 'Tema' : 'Theme', icon: theme === 'dark' ? Sun : Moon, onClick: () => onToggleTheme() },
-    { key: 'lang', label: pt ? 'Idioma' : 'Language', icon: Globe, onClick: () => onToggleLang(), badge: pt ? 'EN' : 'PT' },
+    { key: 'lang', label: pt ? 'Idioma' : 'Language', icon: Globe, onClick: () => onToggleLang(), badge: pt ? 'PT' : 'EN' },
     // Health warnings moved next to the notification bell in the mobile top bar (its own popover).
   ]
   const allTiles = [...navTiles, ...actionTiles]
@@ -1169,7 +1170,7 @@ function SideNav({
           <button onClick={onToggleLang} aria-label={pt ? 'Idioma' : 'Language'} title={collapsed ? undefined : (pt ? 'Switch to English' : 'Mudar para Português')} style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1, gap: 5, fontSize: '0.75rem', fontWeight: 600, fontFamily: 'inherit' }}
             onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-primary)' }}
             onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-secondary)' }}>
-            <Globe size={14} />{!collapsed && (pt ? 'EN' : 'PT')}
+            <Globe size={14} />{!collapsed && (pt ? 'PT' : 'EN')}
           </button>
         </CollapsedTip>
         <CollapsedTip label={pt ? 'Exportar' : 'Export'} show={collapsed}>
@@ -1459,7 +1460,10 @@ export default function AppLayout() {
   }, [])
   const { data, loading, error, loadError, offline, startup, refetch, liveUpdates, setLiveUpdates, updateInterval, setUpdateInterval } = useData()
   const [riskyMode, setRiskyMode] = useState(false)
-  const [lang, setLangState] = useState<Lang>('en')
+  const [lang, setLangState] = useState<Lang>(() => initialLang(
+    typeof window === 'undefined' ? null : window.localStorage,
+    typeof navigator === 'undefined' ? undefined : navigator.language,
+  ))
   // A local mirror of the language, for the one sentence the boot splash may say before the bundle
   // (and the preferences) arrive — the same reason the theme is mirrored. The first render's 'en' is a
   // placeholder, not a choice, so only a CHANGE is written.

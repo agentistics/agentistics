@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, wr
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gitTestEnv } from '@agentistics/core/gitTestEnv'
-import { applyClean, repoOf, worktreeFacts } from './clean-io'
+import { applyClean, repoOf, worktreeFacts, WORKTREE_POOL_SIZE } from './clean-io'
 import { planClean } from './clean-plan'
 
 const dirs: string[] = []
@@ -30,6 +30,11 @@ function repo() {
 }
 
 describe('clean io (real git)', () => {
+  test('uses a bounded worktree inspection pool', () => {
+    expect(WORKTREE_POOL_SIZE).toBeGreaterThan(1)
+    expect(WORKTREE_POOL_SIZE).toBeLessThanOrEqual(8)
+  })
+
   test('facts, plan and apply: merged+clean removed, dirty kept, stale node_modules removed, branches kept', async () => {
     const { root, r } = repo()
     expect(await repoOf(join(root, 'wip'), { env })).toBe(r)

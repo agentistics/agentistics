@@ -35,7 +35,15 @@ describe('findGitDirs', () => {
     expect(d?.commonDir).toBe(join(repo, '.git'))
   })
   test('outside any repository: null', async () => {
-    expect(await findGitDirs(tmpdir())).toBeNull()
+    const empty = join(root, 'empty-git')
+    mkdirSync(join(empty, '.git'), { recursive: true })
+    expect(await findGitDirs(empty)).toBeNull()
+  })
+
+  test('a git directory without HEAD is not a repository', async () => {
+    const empty = join(root, 'empty-git-subdir')
+    mkdirSync(join(empty, '.git', 'objects'), { recursive: true })
+    expect(await findGitDirs(join(empty, 'nested'))).toBeNull()
   })
 })
 
