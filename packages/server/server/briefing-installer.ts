@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, rmdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
 import { availableHarnesses } from './sessions/harness-available'
@@ -27,7 +27,7 @@ async function read(path: string): Promise<string | null> {
 
 async function pruneEmpty(path: string): Promise<void> {
   try {
-    if ((await readdir(path)).length === 0) { await rm(path); await pruneEmpty(dirname(path)) }
+    if ((await readdir(path)).length === 0) { await rmdir(path); await pruneEmpty(dirname(path)) }
   } catch { /* absent or non-empty */ }
 }
 

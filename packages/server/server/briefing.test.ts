@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { BRIEFING_VERSION, PLAN_LIMITS_TOOL, briefingSkills, briefingText, managedBlock, managedTargets, removeManagedBlocks, replaceManagedBlock, skillMarkdown } from './briefing'
@@ -41,6 +41,12 @@ describe('managed briefing source', () => {
     expect(briefingText('en', { planLimitsAvailable: true })).toContain(PLAN_LIMITS_TOOL)
     expect(briefingText('pt')).toContain('segredos')
     expect(briefingText('pt')).toContain('hand-off')
+    expect(briefingText('en')).toContain('Ask the person in the conversation')
+    expect(briefingText('pt')).toContain('Pergunte à pessoa na conversa')
+    expect(briefingText('en')).toContain('in_progress → in_review → done')
+    expect(briefingText('pt')).toContain('in_progress → in_review → done')
+    expect(briefingText('pt')).toContain('Habilidades gerenciadas instaladas:')
+    expect(briefingText('pt', { planLimitsAvailable: true })).toContain('Antes de abrir sessões')
   })
 
   test('installer detects plan limits from the actual tool list', async () => {
@@ -71,8 +77,8 @@ describe('briefing installer', () => {
     const path = join(home, '.claude', 'skills', briefingSkills()[0]!.name, 'SKILL.md')
     expect(await readFile(path, 'utf8')).toContain(briefingSkills()[0]!.name)
     await uninstallBriefing({ home, harnesses: ['claude'] })
-    expect(await Bun.file(path).exists()).toBe(false)
-    expect(await Bun.file(join(home, '.claude', 'skills')).exists()).toBe(false)
+    await expect(stat(path)).rejects.toThrow()
+    await expect(readdir(join(home, '.claude', 'skills'))).rejects.toThrow()
   })
 
   test('automatic install is versioned in agentop state and respects opt-outs', async () => {

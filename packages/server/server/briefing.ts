@@ -33,10 +33,11 @@ Use \`in_progress → in_review → done\`: a handback is ready for review, neve
 Create a missing status, type, folder, or subtask when the board needs one; do not silently downgrade
 the work to fit the current vocabulary. Never leave a running worker outside the board.
 
-Keep secrets out of prompts and commits. Ask the person in the conversation when a decision is
-needed. At a hand-off, write state, running sessions, queue, and decisions to the durable hand-off
-file, then tell the successor to close the old leader after taking over. When a leader receives a
-hand-off hint after 150k tokens or 35% of its window, do that immediately; then once per +50k.
+Keep secrets out of prompts and commits; never ask for, print, or confirm a secret value.
+Ask the person in the conversation when a decision is needed. At a hand-off, write state, running sessions,
+queue, and decisions to the durable hand-off file, then tell the successor to close the old leader
+after taking over. When a leader receives a hand-off hint after 150k tokens or 35% of its window, do
+that immediately; then once per +50k.
 `
 
 export const BRIEFING_PT = `
@@ -50,12 +51,14 @@ trabalho; sessões são trabalhadoras, não substitutas do quadro.
 
 Descreva cada tarefa e o critério de pronto. Separe trabalho independente em subtarefas/grupos,
 vincule cada sessão à subtarefa que ela atende e mantenha os status vivos. Comente nos marcos.
-Use \`em_andamento → em_revisão → concluída\`: handback significa pronta para revisão, nunca aceite.
+Use \`in_progress → in_review → done\` (em andamento → em revisão → concluído): handback significa
+pronta para revisão, nunca aceite.
 Crie status, tipo, pasta ou subtarefa que falte; não rebaixe o trabalho para caber no vocabulário.
 Mantenha segredos fora dos prompts e commits; use referências \`vault://nome\` e nunca peça, imprima
-ou confirme o valor de um segredo. No hand-off, escreva estado, sessões ativas, fila e decisões no
-arquivo durável e diga ao sucessor para fechar o líder antigo depois de assumir. Ao receber uma dica
-de hand-off após 150 mil tokens ou 35% da janela, faça isso imediatamente; depois, a cada 50 mil.
+ou confirme o valor de um segredo. Pergunte à pessoa na conversa quando uma decisão for necessária.
+No hand-off, escreva estado, sessões ativas, fila e decisões no arquivo durável e diga ao sucessor
+para fechar o líder antigo depois de assumir. Ao receber uma dica de hand-off após 150 mil tokens ou
+35% da janela, faça isso imediatamente; depois, a cada 50 mil.
 `
 
 export const BRIEFING_SKILL_NAMES = [
@@ -68,9 +71,12 @@ export const BRIEFING_SKILL_NAMES = [
 export function briefingText(lang: 'en' | 'pt' = 'en', o: { planLimitsAvailable?: boolean } = {}): string {
   const text = lang === 'pt' ? BRIEFING_PT : common
   const limits = o.planLimitsAvailable
-    ? '\nBefore opening sessions, read agentistics_plan_limits and follow its recommendation: keep cadence.parallel workers running; if paceStatus is under, pull work from the queue. Hold only when the 5-hour window is at least 85% (short pause until renewal); weekly quota is not a brake unless it is at least 95%.\n'
+    ? lang === 'pt'
+      ? '\nAntes de abrir sessões, leia agentistics_plan_limits e siga sua recomendação: mantenha em execução a quantidade de workers indicada por cadence.parallel; se paceStatus estiver under, puxe trabalho da fila. Só faça uma pausa quando a janela de 5 horas estiver em pelo menos 85% (pausa curta até a renovação); a cota semanal não é um freio, a menos que esteja em pelo menos 95%.\n'
+      : '\nBefore opening sessions, read agentistics_plan_limits and follow its recommendation: keep cadence.parallel workers running; if paceStatus is under, pull work from the queue. Hold only when the 5-hour window is at least 85% (short pause until renewal); weekly quota is not a brake unless it is at least 95%.\n'
     : ''
-  return `${text.trim()}${limits}\nInstalled managed skills: ${BRIEFING_SKILL_NAMES.join(', ')}.`
+  const installed = lang === 'pt' ? 'Habilidades gerenciadas instaladas' : 'Installed managed skills'
+  return `${text.trim()}${limits}\n${installed}: ${BRIEFING_SKILL_NAMES.join(', ')}.`
 }
 
 const skills: readonly BriefingSkill[] = [
