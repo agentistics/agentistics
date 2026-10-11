@@ -36,10 +36,15 @@ interface Props {
    * itself. Existing call sites that only pass `buttonStyle` are unaffected.
    */
   buttonClassName?: string
+  /**
+   * A word beside the bell, with the count drawn in line instead of as a corner badge — for the
+   * phone's session panel, where this is a labelled button ("Inbox") rather than a toolbar icon.
+   */
+  label?: string
 }
 
 /** Bell icon with an unread badge and a dropdown of the notification history. */
-export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) {
+export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: Props) {
   const pt = lang === 'pt'
   const notes = useNotifications()
   const isMobile = useIsMobile()
@@ -75,7 +80,15 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName }: Props) 
         }}
       >
         <Bell size={16} />
-        {unread > 0 && (
+        {label && <span>{label}</span>}
+        {label && unread > 0 && (
+          <span style={{
+            minWidth: 20, height: 20, padding: '0 5px', borderRadius: 10,
+            background: 'var(--anthropic-orange)', color: '#fff', fontSize: 11.5, fontWeight: 700,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
+          }}>{unread > 9 ? '9+' : unread}</span>
+        )}
+        {!label && unread > 0 && (
           <span style={{
             position: 'absolute', top: -5, right: -5, minWidth: 16, height: 16, padding: '0 4px',
             borderRadius: 8, background: '#ef4444', color: '#fff',

@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.131.0': {
+    features: [
+      {
+        pt: 'Nova tela de sessão no celular: o título aparece inteiro, um ícone abre o painel lateral, que desliza da esquerda e fecha com um gesto para o lado.',
+        en: 'New session screen on phones: the full title shows, one icon opens the side panel, which slides in from the left and closes with a swipe.',
+      },
+    ],
+    fixes: [],
+  },
   '2.130.0': {
     features: [
       {

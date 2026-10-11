@@ -6,7 +6,7 @@ import { fmt, fmtCost, formatProjectName, canonicalProjectPath, totalTokens, tot
 import type { AppContext } from '../lib/app-context'
 import type { TokenBreakdown } from '@agentistics/core'
 import { HARNESS_LABELS } from '../lib/harness'
-import { Drawer } from './settings/Drawer'
+import { Drawer } from '../components/Drawer'
 import { Section, Select, TabSelect, MultiPicker } from './settings/primitives'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { DatePicker } from '../components/DatePicker'

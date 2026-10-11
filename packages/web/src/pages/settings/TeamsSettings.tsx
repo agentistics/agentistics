@@ -3,7 +3,7 @@ import { useOutletContext } from 'react-router-dom'
 import { Plus, Trash2, Settings } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
 import { SectionHeader, Section, Select, Checkbox, ConfirmModal, RecordCard, RecordCardAction } from './primitives'
-import { Drawer } from './Drawer'
+import { Drawer } from '../../components/Drawer'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { stepUpFetch } from '../../lib/stepup'
 
