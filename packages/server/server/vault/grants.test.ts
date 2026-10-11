@@ -5,9 +5,10 @@ import { join } from 'node:path'
 import { memoryProtector } from '@agentistics/vault'
 import { __resetVaultForTests, __setVaultClockForTests, autoLockRemainingMs, ensureVaultOpen, lockVault, noteVaultActivity, sealToFile } from './service'
 import { __resetPersonalForTests, createGroup, createItem } from './personal'
-import { __setConfirmEachUseForTests, __setUseTtlForTests, __resetGrantsForTests, authorizeUse, decideUse, grantBriefing, grantOf, grantSession, nativeVaultRefs, pendingUseRequests, refKey, revokeGrant, scrubDeep, scrubTerminalLine, VAULT_REF_INSTRUCTION } from './grants'
+import { __setGrantMarkerDirForTests, __setConfirmEachUseForTests, __setUseTtlForTests, __resetGrantsForTests, authorizeUse, decideUse, grantBriefing, grantOf, grantSession, nativeVaultRefs, pendingUseRequests, refKey, revokeGrant, scrubDeep, scrubTerminalLine, VAULT_REF_INSTRUCTION } from './grants'
 
 let testNow = 1_800_000_000_000
+let markerDir = ''
 
 afterEach(() => { __setConfirmEachUseForTests(false) })
 
@@ -18,6 +19,8 @@ beforeEach(async () => {
   __resetVaultForTests({ dir: join(dir, 'vault'), lang: 'en', protectors: [mem], autoInit: { candidates: [mem] } })
   __setVaultClockForTests(() => testNow)
   __resetPersonalForTests(); __resetGrantsForTests()
+  __setGrantMarkerDirForTests(join(dir, 'run'))
+  markerDir = join(dir, 'run')
   await sealToFile(join(dir, 'x.sealed'), 'github-backup', 'github-backup', new TextEncoder().encode('x'))
   expect(await ensureVaultOpen()).not.toBeNull()
 })
@@ -111,6 +114,8 @@ describe('the vault.sock ops a hook calls (§8.3)', () => {
     const { becomeVaultHolder } = await import('./service')
     becomeVaultHolder()
     const op = (header: Record<string, unknown>) => handleVaultOp({ header: header as never, body: null, emit() {}, closed: new Promise(() => {}) })
+    const it = (await createItem({ kind: 'api-key', name: 'Lim', fields: { value: 'sk-LIM-MARKER' } })).meta
+    await grantSession('lim', [it.id], [])
     let last: unknown
     for (let i = 0; i < 60; i++) last = (await op({ op: 'personal-scrub', managedId: 'lim', text: 'plain' })).reply
     expect(last).toMatchObject({ ok: true })
@@ -126,6 +131,26 @@ describe('the vault.sock ops a hook calls (§8.3)', () => {
     expect(ans).toContain('held back by the vault')
     // another session is not affected
     expect((await op({ op: 'personal-scrub', managedId: 'other', text: 'plain' })).reply).toMatchObject({ ok: true })
+  })
+
+  test('a session that never had a grant is neither counted nor limited by the scrub rate limit', async () => {
+    const { handleVaultOp } = await import('./ops')
+    const { becomeVaultHolder } = await import('./service')
+    becomeVaultHolder()
+    let last: Record<string, unknown> = {}
+    for (let i = 0; i < 100; i++) last = (await handleVaultOp({ header: { op: 'personal-scrub', managedId: 'nogrant', text: 'plain' } as never, body: null, emit() {}, closed: new Promise(() => {}) })).reply as Record<string, unknown>
+    expect(last).toMatchObject({ ok: true, changed: false })
+  })
+
+  test('granting leaves a value-free marker the hook can read with the server down', async () => {
+    const { existsSync, readFileSync } = await import('node:fs')
+    const { grantMarkerName } = await import('./hook-rewrite')
+    const b = (await createItem({ kind: 'api-key', name: 'M', fields: { value: 'sk-M-MARKER' } })).meta
+    expect(existsSync(join(markerDir, grantMarkerName('mk')))).toBe(false)
+    await grantSession('mk', [b.id], [])
+    expect(existsSync(join(markerDir, grantMarkerName('mk')))).toBe(true)
+    expect(readFileSync(join(markerDir, grantMarkerName('mk')), 'utf8')).toBe('')
+    expect(existsSync(join(markerDir, grantMarkerName('other')))).toBe(false)
   })
 
   test('agent ref resolutions do not renew auto-lock, while human activity does', async () => {
