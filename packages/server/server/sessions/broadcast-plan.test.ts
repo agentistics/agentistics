@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test'
-import { MAX_BROADCAST, broadcastReport, planBroadcast , reopenCount } from './broadcast-plan'
+import { MAX_BROADCAST, broadcastReport, needsReopenConfirmation, planBroadcast , reopenCount } from './broadcast-plan'
 import type { BroadcastCandidate } from './broadcast-plan'
 
 const row = (id: string, o: Partial<BroadcastCandidate> = {}): BroadcastCandidate => ({
@@ -130,6 +130,12 @@ test('a closed session that can be reopened becomes a target, marked as needing 
   ])
   expect(p.skipped).toEqual([])
   expect(reopenCount(p.targets)).toBe(1)
+})
+
+test('reopening a closed broadcast target always requires an explicit confirmation', () => {
+  const plan = planBroadcast({ text: 'go', ids: ['closed'], rows: [row('closed', { running: false, reopenable: true })] })
+  expect(plan.ok && needsReopenConfirmation(plan, false)).toBe(true)
+  expect(plan.ok && needsReopenConfirmation(plan, true)).toBe(false)
 })
 
 test('a closed session nothing can reopen is still named, with its own reason', () => {

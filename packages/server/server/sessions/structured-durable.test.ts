@@ -12,7 +12,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type {
-  EngineChatTurn, HarnessChatDelta, StructuredDeclaration, StructuredDriver, StructuredExit,
+  EngineChatTurn, HarnessChatDelta, HarnessId, StructuredAttention, StructuredDeclaration, StructuredDriver, StructuredExit,
   StructuredSession, StructuredSpawn,
 } from '@agentistics/engine-api'
 import { structuredRegistry } from '@agentistics/engine-api'
@@ -32,13 +32,13 @@ async function until(cond: () => boolean, ms = 5000, what = 'condition'): Promis
 const DECL: StructuredDeclaration = {
   assignId: { absent: 'fake' }, resume: { via: 'fake' }, model: { absent: 'fake' }, effort: { absent: 'fake' },
   mcp: { absent: 'fake' }, instructions: { channel: 'first-message', reason: 'fake' }, live: { via: 'chunks' },
-  permissions: { absent: 'fake' }, questions: { absent: 'fake' }, cancel: { absent: 'fake' },
+  permissions: { via: 'fake permission request' }, questions: { via: 'fake question request' }, cancel: { absent: 'fake' },
 }
 
 /** A deterministic driver over `req.transport`: ids in order, no timers, turns stamped by the pipe's clock. */
-function fakeDriver(log: string, started: StructuredSpawn[]): StructuredDriver {
+function fakeDriver(log: string, started: StructuredSpawn[], harness: HarnessId): StructuredDriver {
   return {
-    id: 'acp', status: 'ready', harnesses: ['gemini'], note: 'fake', declares: () => DECL,
+    id: 'acp', status: 'ready', harnesses: [harness], note: 'fake', declares: () => DECL,
     async start(req) {
       started.push(req)
       const pipe = req.transport!.launch('bun', ['run', AGENT], req.cwd, { AGENT_LOG: log })
@@ -50,6 +50,7 @@ function fakeDriver(log: string, started: StructuredSpawn[]): StructuredDriver {
       let state: ReturnType<StructuredSession['activity']> = 'starting'
       let sid: string | null = null
       let disposed = false
+      let open: StructuredAttention | null = null
       const subs = new Set<(d: HarnessChatDelta) => void>()
       const exits = new Set<(e: StructuredExit) => void>()
       const emit = (d: HarnessChatDelta) => { for (const f of subs) f(d) }
@@ -67,7 +68,17 @@ function fakeDriver(log: string, started: StructuredSpawn[]): StructuredDriver {
             const m = JSON.parse(buf.slice(0, nl)) as { id?: number; result?: unknown; chunk?: string }
             buf = buf.slice(nl + 1)
             if (typeof m.chunk === 'string') { draft += m.chunk; emit({ kind: 'live', text: draft }) }
-            else if (typeof m.id === 'number') { pending.get(m.id)?.(m.result); pending.delete(m.id) }
+            else if (typeof m.id === 'number') {
+              const result = m.result as { attention?: StructuredAttention } | string | undefined
+              if (result && typeof result === 'object' && result.attention) {
+                open = result.attention; state = 'waiting-approval'
+              } else if (open && result === 'answered') {
+                open = null; state = 'waiting'
+                const a: EngineChatTurn = { role: 'assistant', text: draft, at: new Date(now()).toISOString() }
+                turns.push(a); emit({ kind: 'append', turns: [a] }); draft = ''
+              }
+              pending.get(m.id)?.(m.result); pending.delete(m.id)
+            }
           }
         }
         state = 'exited'
@@ -85,6 +96,7 @@ function fakeDriver(log: string, started: StructuredSpawn[]): StructuredDriver {
           turns.push(u); emit({ kind: 'append', turns: [u] })
           draft = ''
           await request('prompt', { text })
+          if (open) { running = false; return }
           const a: EngineChatTurn = { role: 'assistant', text: draft, at: new Date(now()).toISOString() }
           turns.push(a); emit({ kind: 'append', turns: [a] })
           draft = ''
@@ -100,11 +112,14 @@ function fakeDriver(log: string, started: StructuredSpawn[]): StructuredDriver {
         id: req.id, driver: 'acp', harness: req.harness,
         conversationId: () => sid,
         activity: () => state,
-        attention: () => null,
+        attention: () => open,
         screen: n => turns.map(t => `${t.role}: ${t.text}`).slice(-n),
         lastActivityMs: () => now(),
         prompt(t) { if (state === 'exited') return false; queue.push(t); void drain(); return true },
-        answer: () => false,
+        answer(a) {
+          if (!open || a.requestId !== open.requestId || a.choice !== 1) return false
+          state = 'working'; void request('answer', { ...a }).catch(() => {}); return true
+        },
         cancel() {},
         follow(max, on) {
           on({ kind: 'window', turns: turns.slice(-max), older: turns.length > max })
@@ -138,7 +153,7 @@ interface Rig {
   log: string
   store: DurableStore
   started: StructuredSpawn[]
-  server(o?: { flagOn?: boolean }): { b: ReturnType<typeof withStructured>; base: ReturnType<typeof fakeBase> }
+  server(o?: { flagOn?: boolean; harness?: HarnessId }): { b: ReturnType<typeof withStructured>; base: ReturnType<typeof fakeBase> }
 }
 
 const rigs: Rig[] = []
@@ -152,7 +167,7 @@ function rig(): Rig {
     root, log, store, started,
     server(o = {}) {
       const base = fakeBase()
-      const reg = structuredRegistry([fakeDriver(log, started)])
+      const reg = structuredRegistry([fakeDriver(log, started, o.harness ?? 'gemini')])
       const provider: StructuredProvider = {
         structured: async () => reg, acp: async () => null, allowed: async () => [],
         flagOn: () => o.flagOn ?? true,
@@ -172,11 +187,12 @@ afterEach(async () => {
     for (const id of [...r.store.alive(), ...r.store.dead()]) await r.store.terminate(id, 4000)
     rmSync(r.root, { recursive: true, force: true })
   }
-})
+  // One test spins a rig per structured harness; tearing each down may take up to 4 s.
+}, 30_000)
 
-const webSpawn = (cwd: string, prompt?: string): BackendSpawn => ({
+const webSpawn = (cwd: string, prompt?: string, harness: HarnessId = 'gemini'): BackendSpawn => ({
   id: 'm-1', cwd, argv: ['/usr/bin/gemini'],
-  structured: structuredIntentOf({ harness: 'gemini', origin: 'web', ...(prompt ? { prompt } : {}) }, { conversationId: 'offered' }),
+  structured: structuredIntentOf({ harness, origin: 'web', ...(prompt ? { prompt } : {}) }, { conversationId: 'offered' }),
 })
 
 /** Follow the session's chat; collect every delta. */
@@ -211,6 +227,28 @@ describe('structured-replay (pure)', () => {
 })
 
 describe('a structured session survives a server restart', () => {
+  test('pending permission cards survive restart and remain answerable for every structured harness', async () => {
+    for (const harness of ['claude', 'codex', 'gemini', 'kimi'] as HarnessId[]) {
+      const r = rig()
+      const A = r.server({ harness })
+      await A.b.spawn(webSpawn(r.root, undefined, harness))
+      expect(await A.b.sendText('m-1', 'approval')).toBe(true)
+      await until(() => A.b.activityOf!('m-1') === 'waiting-approval', 5000, `${harness} approval`)
+      expect(A.b.attentionOf!('m-1')).toMatchObject({ kind: 'permission', requestId: 'request-1' })
+
+      ;(r.started[0]!.transport as DurableTransport).detach()
+      await sleep(100)
+      const B = r.server({ harness })
+      await B.b.reattach()
+      await until(() => B.b.activityOf!('m-1') === 'waiting-approval', 5000, `${harness} replayed approval`)
+      expect(B.b.attentionOf!('m-1')).toMatchObject({ kind: 'permission', requestId: 'request-1' })
+      expect(await B.b.answer!('m-1', { requestId: 'request-1', choice: 1 })).toBe(true)
+      const b = follow(B.b)
+      await until(() => b.appended().some(t => t.text === 'approved'), 5000, `${harness} answer`)
+      expect(prompts(r)).toEqual(['approval'])
+    }
+  }, 60000)
+
   test('restart while IDLE: the row stays live, the chat continues, nothing is lost or repeated', async () => {
     const r = rig()
     const A = r.server()

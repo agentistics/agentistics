@@ -168,7 +168,9 @@ export interface SessionsAsideProps {
     text?: string
     /** Narrows a GROUP verb (`reopenFell`, `broadcast`). Absent = the whole group. */
     ids?: readonly string[]
-  }) => Promise<{ ok: boolean; message: string; id?: string }>
+    /** Explicit confirmation for a broadcast that would reopen closed sessions. */
+    confirm?: boolean
+  }) => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean }>
   /**
    * THE FILTROS TRIGGER (design item 4) — "Filtros na linha de botões da lista, visível também
    * com ela minimizada". `App.tsx` owns the open/close state and the panel itself; this aside only
@@ -358,6 +360,7 @@ export function SessionsAside({
   /** Which GROUP modal is open, if any. Both are the one picker — see `SessionPickModal`. */
   const [picking, setPicking] = useState<'reopen' | 'send' | null>(null)
   const [groupBusy, setGroupBusy] = useState(false)
+  const [broadcastReopenAsk, setBroadcastReopenAsk] = useState<{ ids: string[]; text: string; message: string } | null>(null)
   /*
    * A SECOND, SYNCHRONOUS guard against the group verb firing twice.
    *
@@ -1540,7 +1543,10 @@ export function SessionsAside({
              */
             const call = () => act({ id: ids[0] ?? '', action: picking === 'reopen' ? 'reopenFell' : 'broadcast', ids, ...(text ? { text } : {}) })
             void (picking === 'reopen' ? withReopening(ids, call) : call())
-              .then(out => { setNotice(out.message); setPicking(null) })
+              .then(out => {
+                if (picking === 'send' && out.confirm) setBroadcastReopenAsk({ ids: [...ids], text, message: out.message })
+                else { setNotice(out.message); setPicking(null) }
+              })
               .finally(() => { endDispatch(groupActingRef); setGroupBusy(false) })
           }}
         />
@@ -2265,6 +2271,23 @@ export function SessionsAside({
 
       {/* Deleting a group is ALWAYS behind a confirmation — it never deletes a session, only the
           grouping, and the message says so explicitly. */}
+      <ConfirmModal
+        open={broadcastReopenAsk !== null}
+        title={pt ? 'Reabrir sessões fechadas?' : 'Reopen closed sessions?'}
+        message={broadcastReopenAsk?.message ?? ''}
+        confirmLabel={pt ? 'Reabrir e enviar' : 'Reopen and send'}
+        cancelLabel={pt ? 'Cancelar' : 'Cancel'}
+        onConfirm={() => {
+          const ask = broadcastReopenAsk
+          if (!ask || !act) return
+          setBroadcastReopenAsk(null)
+          setGroupBusy(true)
+          void act({ id: ask.ids[0] ?? '', action: 'broadcast', ids: ask.ids, text: ask.text, confirm: true })
+            .then(out => setNotice(out.message))
+            .finally(() => setGroupBusy(false))
+        }}
+        onCancel={() => setBroadcastReopenAsk(null)}
+      />
       <ConfirmModal
         open={deletingGroup !== null}
         title={pt ? 'Excluir grupo' : 'Delete group'}

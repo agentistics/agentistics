@@ -97,6 +97,13 @@ export function reopenCount(targets: readonly BroadcastTarget[]): number {
   return targets.filter(t => t.needsReopen).length
 }
 
+/** PURE. A broadcast may not reopen a closed session until the person confirms that consequence. */
+export function needsReopenConfirmation(
+  plan: Extract<BroadcastPlan, { ok: true }>, confirmed: boolean,
+): boolean {
+  return !confirmed && reopenCount(plan.targets) > 0
+}
+
 export function planBroadcast(o: {
   text: string
   /** The ids the user ticked. NEVER null: there is no "all" for this — see the header. */
