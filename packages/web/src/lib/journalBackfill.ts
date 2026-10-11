@@ -11,6 +11,10 @@ export interface JournalBackfillSummary {
   total: number | null
 }
 
+export function journalBackfillPollMs(state: JournalBackfillSummary['state']): number {
+  return state === 'failed' ? 60_000 : 10_000
+}
+
 export function journalBackfillText(b: JournalBackfillSummary | null | undefined, lang: 'pt' | 'en'): string | null {
   if (!b) return null
   const n = b.written.toLocaleString(lang === 'pt' ? 'pt-BR' : 'en-US')

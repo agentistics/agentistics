@@ -170,4 +170,12 @@ describe('popoverPosition', () => {
   test('carries the trigger width, so the panel lines up with the field', () => {
     expect(popoverPosition(rect(100, 40, 12, 333), 280, 900).width).toBe(333)
   })
+
+  test('anchors below the measured row, then flips above near the viewport bottom', () => {
+    const row = rect(80, 36, 20, 200)
+    expect(popoverPosition(row, 160, 900)).toEqual({ left: 20, top: 120, width: 200 })
+    const nearBottom = popoverPosition(rect(705, 36, 20, 200), 160, 900)
+    expect(nearBottom.bottom).toBe(199)
+    expect(nearBottom.top).toBeUndefined()
+  })
 })
