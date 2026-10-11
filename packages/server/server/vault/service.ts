@@ -568,29 +568,40 @@ let _onAutoLock: (minutes: number) => void = () => {}
 /** The dashboard heartbeat is a capability, not an identity signal.  Keep only its hash in memory. */
 export const VAULT_HEARTBEAT_MIN_INTERVAL_MS = 30_000
 let _heartbeat: { hash: string; lastAt: number | null } | null = null
+/** When the idle clock was last moved by a heartbeat, and when a token was last ARMED: both survive a rotation (only a lock clears them). */
+let _beatAt: number | null = null
+let _armAt: number | null = null
 const heartbeatHash = (token: string): string => createHash('sha256').update(`agentistics-vault-heartbeat/v1.${token}`).digest('hex')
 
-/** Rotate the tab's heartbeat capability after a successful human gesture. */
+/** Rotate the tab's heartbeat capability after a successful unlock. The throttle clock is NOT reset: rotating never buys a faster idle clock. */
 export function rotateVaultHeartbeatToken(): string {
   const token = randomBytes(32).toString('base64url')
-  _heartbeat = { hash: heartbeatHash(token), lastAt: null }
+  _heartbeat = { hash: heartbeatHash(token), lastAt: _beatAt }
   return token
 }
 
+/** Re-arm a tab token for a page that lost it. At most one per interval; `null` = too soon. */
+export function armVaultHeartbeatToken(): string | null {
+  const now = _now()
+  if (_armAt !== null && now - _armAt < VAULT_HEARTBEAT_MIN_INTERVAL_MS) return null
+  _armAt = now
+  return rotateVaultHeartbeatToken()
+}
+
 /** Invalidate the capability when the vault is locked (including an automatic lock). */
-export function invalidateVaultHeartbeatToken(): void { _heartbeat = null }
+export function invalidateVaultHeartbeatToken(): void { _heartbeat = null; _beatAt = null; _armAt = null }
 
 /** Accept at most one heartbeat per interval and move the idle clock only when accepted. */
-export function acceptVaultHeartbeatToken(token: string | null | undefined): boolean {
+export function acceptVaultHeartbeatToken(token: string | null | undefined): 'ok' | 'invalid' | 'too-soon' {
   const h = _heartbeat
-  if (!_opened || !h || !token || token.length > 128) return false
+  if (!_opened || !h || !token || token.length > 128) return 'invalid'
   const got = Buffer.from(heartbeatHash(token)), want = Buffer.from(h.hash)
-  if (got.length !== want.length || !timingSafeEqual(got, want)) return false
+  if (got.length !== want.length || !timingSafeEqual(got, want)) return 'invalid'
   const now = _now()
-  if (h.lastAt !== null && now - h.lastAt < VAULT_HEARTBEAT_MIN_INTERVAL_MS) return false
-  h.lastAt = now
+  if (_beatAt !== null && now - _beatAt < VAULT_HEARTBEAT_MIN_INTERVAL_MS) return 'too-soon'
+  _beatAt = now; h.lastAt = now
   noteVaultActivity()
-  return true
+  return 'ok'
 }
 /** The service's toast/notification hook for an auto-lock (SSE + desktop notification). */
 export function setAutoLockNotifier(fn: (minutes: number) => void): void { _onAutoLock = fn }
