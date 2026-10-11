@@ -66,7 +66,7 @@ function contextRingTone(fraction: number): string {
  * conic-gradient so the same markup renders identically in every browser this app already supports
  * without a vendor-prefixed fallback.
  */
-function ContextRing({ fraction, size = 26, stroke = 3 }: { fraction: number; size?: number; stroke?: number }) {
+export function ContextRing({ fraction, size = 26, stroke = 3 }: { fraction: number; size?: number; stroke?: number }) {
   const radius = (size - stroke) / 2
   const circumference = 2 * Math.PI * radius
   const filled = Math.min(1, Math.max(0, fraction))
@@ -199,18 +199,25 @@ export interface SessionStatsMenuProps {
    * plain link to the feed.
    */
   rowId?: string
+  /**
+   * THE CARD, DRAWN IN PLACE — no trigger, no popover, no close button, always open. The phone's
+   * session panel shows this card as one of its own groups; a button there that opened a second
+   * floating card over the panel would be a menu inside a menu. The content is the same code.
+   */
+  inline?: boolean
 }
 
 export function SessionStatsMenu({
   harness, sessionId, meta, stats, lang, currency, brlRate, startedModel, startedEffort, touch = false,
   variant = 'button', panelMaxWidth, costBasis = 'api', planFactor = null, onOpenFull, task, onOpenTask, onOpenLive, rowId,
+  inline = false,
 }: SessionStatsMenuProps) {
   const pt = lang === 'pt'
   // PLAN.LIMITS: this harness's plan windows, when it reported any (none → nothing drawn).
   const planSnap = usePlanLimits()
   const plan = planSnap.limits?.find(l => l.harness === harness)
   const planName = plan ? (plan.plan ?? plan.sourcePlan) : planSnap.registered.find(r => r.harness === harness)?.plan
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(inline)
 
   /**
    * How many times this conversation has been COMPACTED — read only when the card is opened, and
@@ -258,7 +265,7 @@ export function SessionStatsMenu({
   const panelRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
-    if (!open) return
+    if (!open || inline) return
     const away = (e: MouseEvent) => {
       const t = e.target as Node
       if (boxRef.current?.contains(t) || panelRef.current?.contains(t)) return
@@ -289,7 +296,7 @@ export function SessionStatsMenu({
    */
   const [maxPanelHeight, setMaxPanelHeight] = useState<number | null>(null)
   useEffect(() => {
-    if (!open || variant === 'gauge') return
+    if (!open || variant === 'gauge' || inline) return
     const measure = () => {
       const triggerTop = boxRef.current?.getBoundingClientRect().top ?? 0
       const panelTop = triggerTop + (touch ? 48 : 36)
@@ -426,7 +433,9 @@ export function SessionStatsMenu({
    * component's own box. The CARD's own visual chrome (padding, radius, border, shadow) is shared
    * across all three — only the anchor and the ceiling differ.
    */
-  const panelStyle: React.CSSProperties = variant === 'gauge'
+  const panelStyle: React.CSSProperties = inline
+    ? { display: 'flex', flexDirection: 'column' }
+    : variant === 'gauge'
     ? {
         position: 'fixed', zIndex: 1200,
         left: gaugeAnchor?.left ?? -9999, bottom: gaugeAnchor?.bottom ?? -9999,
@@ -453,7 +462,7 @@ export function SessionStatsMenu({
       }
   const panelCard = open && (
       <div ref={panelRef} style={panelStyle}>
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
+          {!inline && <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
             <span style={{
               fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
               color: 'var(--text-tertiary)',
@@ -467,7 +476,7 @@ export function SessionStatsMenu({
                 background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer',
               }}
             ><X size={13} /></button>
-          </div>
+          </div>}
 
           {/* HOW THIS SESSION IS RUNNING — before the numbers, because it is what the numbers are
               OF. `model` has two sources and they are not the same claim: what agentop was asked to
@@ -680,6 +689,8 @@ export function SessionStatsMenu({
   // clip, which an absolutely-positioned descendant never could. Every other variant stays exactly
   // where it always rendered, as a child of this component's own box.
   const panel = variant === 'gauge' ? (panelCard && createPortal(panelCard, document.body)) : panelCard
+
+  if (inline) return <div ref={boxRef}>{panelCard}</div>
 
   if (variant === 'gauge') {
     // THE COMPOSER'S CONTEXT GAUGE (design item 3) — a ring, not a pill, because this trigger sits
