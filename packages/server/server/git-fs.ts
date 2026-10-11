@@ -26,7 +26,11 @@ export async function findGitDirs(path: string): Promise<GitDirs | null> {
   for (let i = 0; i < 64; i++) {
     const dotGit = join(dir, '.git')
     const st = await stat(dotGit).catch(() => null)
-    if (st?.isDirectory()) return withCommon(dotGit)
+    if (st?.isDirectory()) {
+      // Git only treats a directory as repository metadata when it has a HEAD.
+      // In particular, an empty `.git` folder is often just a scan/test artifact.
+      if (await stat(join(dotGit, 'HEAD')).catch(() => null)) return withCommon(dotGit)
+    }
     if (st?.isFile()) {
       // A linked worktree (or a submodule): `.git` is a file naming the real git dir.
       const m = /^gitdir:\s*(.+?)\s*$/m.exec(await readFile(dotGit, 'utf8').catch(() => ''))
