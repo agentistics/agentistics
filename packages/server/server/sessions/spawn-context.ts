@@ -7,7 +7,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
-import { contextBlock, contextText, type ContextInput } from './agentistics-context'
+import { CONTEXT_TOOL_NAMES, contextBlock, contextText, type ContextInput } from './agentistics-context'
 import { availableHarnesses } from './harness-available'
 import { specificationSkillsFor } from './specification-skills'
 import type { SpawnPlan, SpawnRequest } from './types'
@@ -125,6 +125,7 @@ export function buildSpawnContext(i: Omit<ContextInput, 'harnesses' | 'specSkill
     ...i,
     ...(i.harness ? { specSkills: i.specSkills ?? specificationSkillsFor(i.harness) } : {}),
     harnesses: i.harnesses ?? installedHarnessNames(),
+    toolNames: i.toolNames ?? CONTEXT_TOOL_NAMES,
   }
   return { text: contextText(full), block: contextBlock(full), dir: join(AGENTISTICS_DATA_DIR, 'session-context', i.sessionId) }
 }

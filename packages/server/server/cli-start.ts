@@ -2059,6 +2059,7 @@ async function spawnManaged(req: {
       sessionId: id,
       cwd: req.cwd,
       harness: req.harness,
+      lang,
       ...(await resolveContextTask(req.contextTaskId ?? req.taskId, req.contextSubtaskId, req.task)),
       ...(await resolveContextParent(req.parentSessionId ?? req.inherit?.parentConversationId ?? req.inherit?.parentSessionId)),
     })
