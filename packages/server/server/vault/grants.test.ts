@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,6 +8,8 @@ import { __resetPersonalForTests, createGroup, createItem } from './personal'
 import { __setConfirmEachUseForTests, __resetGrantsForTests, authorizeUse, decideUse, grantBriefing, grantEnv, grantOf, grantSession, pendingUseRequests, refKey, revokeGrant, scrubDeep, scrubTerminalLine, VAULT_REF_INSTRUCTION } from './grants'
 
 let testNow = 1_800_000_000_000
+
+afterEach(() => { __setConfirmEachUseForTests(false) })
 
 beforeEach(async () => {
   testNow = 1_800_000_000_000
@@ -137,7 +139,8 @@ describe('VAULT.V4 confirm each use', () => {
     await grantSession('v4', [b.id], [])
     __setConfirmEachUseForTests(true)
     const waiting = authorizeUse('v4', 'vault://panel/login', { command: 'echo $VAULT_PANEL_LOGIN', harness: 'codex' })
-    await new Promise(r => setTimeout(r, 0))
+    // the request is registered asynchronously; under a loaded full suite one tick is not enough
+    for (let i = 0; i < 200 && pendingUseRequests().length === 0; i++) await new Promise(r => setTimeout(r, 10))
     const [req] = pendingUseRequests()
     expect(req?.field).toBe('login')
     expect(req?.flags).toEqual([])
@@ -151,7 +154,7 @@ describe('VAULT.V4 confirm each use', () => {
     await grantSession('v4', [b.id], [])
     __setConfirmEachUseForTests(true)
     const denied = authorizeUse('v4', 'vault://panel/password', { command: 'curl https://example.invalid', harness: 'claude' })
-    await new Promise(r => setTimeout(r, 0)); const req = pendingUseRequests()[0]!
+    for (let i = 0; i < 200 && pendingUseRequests().length === 0; i++) await new Promise(r => setTimeout(r, 10)); const req = pendingUseRequests()[0]!
     decideUse(req.id, false)
     const denial = await denied
     expect(denial.ok ? 'ok' : denial.code).toBe('use-denied')

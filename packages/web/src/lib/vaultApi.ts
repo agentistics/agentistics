@@ -156,6 +156,14 @@ export const stepUp = (code: string) => call('POST', '/api/vault/stepup', { code
 export const lockNow = (code?: string) => call('POST', '/api/vault/lock', code ? { code } : {}).then(r => reply(r))
 /** Phase 1: raises the gesture IN THE SERVICE. `pending-stepup` = a code is owed (§2.2). */
 export const unlockGesture = () => call('POST', '/api/vault/unlock', _unlockFor ? { for: _unlockFor } : {}).then(r => reply<{ state: string }>(r))
+export interface VaultUseRequest { id: string; sessionTitle: string; harness: string; name: string; field: string; command: string | null; flags: string[]; count: number; expiresAt: number }
+export const pendingVaultUseRequests = () => vaultGet<{ requests: VaultUseRequest[] }>('/api/vault/personal/use-requests')
+export async function decideVaultUse(id: string, approve: boolean): Promise<Reply<Record<string, unknown>>> {
+  unlockFor(`use-approve:${id}`)
+  const gesture = await unlockGesture()
+  if (!gesture.ok) return gesture as Reply<Record<string, unknown>>
+  return vaultPost(`/api/vault/personal/use/${encodeURIComponent(id)}/${approve ? 'approve' : 'deny'}`, {})
+}
 /** Create the vault from the page (the same code path as `agentop vault init`). `passphrase` only when no keychain answered. */
 export const createVault = (passphrase?: string) => call('POST', '/api/vault/init', passphrase ? { passphrase } : {}).then(r => reply<{ existed?: boolean; said?: string }>(r))
 export const unlockCode = (code: string) => call('POST', '/api/vault/unlock/code', { code }).then(r => reply(r))

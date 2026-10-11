@@ -70,6 +70,11 @@ const ALLOWED: Record<string, Record<string, string>> = {
     _grants: 'per-session grants (VAULT.PERSONAL §8): item ids and reference names, NEVER a value; memory only, dropped on lock',
     _now: 'a clock',
     _scrubbers: 'a compiled scrubber per granted session: holds the granted values\' FORMS so served copies can be scrubbed; dropped with the grant and on lock (the service holds the DEK anyway)',
+    _confirmEachUseOverride: 'test-only feature flag override; production reads the persisted vault setting',
+    _epoch: 'the in-memory lock generation; never secret material',
+    _requests: 'pending use requests and their metadata; values never enter the request',
+    _approvals: 'session/reference approval deadlines; no secret material',
+    _requestSeq: 'monotonic request id counter',
   },
   'server/server/vault/mobile.ts': {
     _now: 'a clock',

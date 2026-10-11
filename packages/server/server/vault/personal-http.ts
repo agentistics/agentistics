@@ -92,6 +92,11 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     if (!g.ok) return reply(g)
     return reply({ ok: true, grants: grants.listGrants().map(x => ({ sessionId: x.sessionId, createdAt: x.createdAt, refs: x.refs.map(r => ({ ref: r.ref, env: r.env, name: r.name, field: r.field })) })), ...withGrant(g) })
   }
+  if (path === '/api/vault/personal/use-requests' && req.method === 'GET') {
+    const g = await step('personal-list', {})
+    if (!g.ok) return reply(g)
+    return reply({ ok: true, requests: grants.pendingUseRequests().map(r => ({ ...r, waiters: undefined })) })
+  }
   if (req.method !== 'POST') return null
   const b = await body()
 
