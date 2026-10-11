@@ -132,7 +132,7 @@ import { answerStructured, structuredIntentOf, structuredReopenOrigin } from './
 import { agentisticsMcpLaunch } from './mcp-launch'
 import { prependContext } from './sessions/agentistics-context'
 import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextParent, resolveContextRole, resolveContextTask, writeContextFile } from './sessions/spawn-context'
-import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, rekeyStoredRole } from './sessions/session-roles'
+import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor } from './sessions/session-roles'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
 import { bornConversationLink } from './sessions/born-link'
@@ -1993,6 +1993,8 @@ async function spawnManaged(req: {
   contextSubtaskId?: string
   /** The managed id of the session that is starting this one (`ManagedSession.parentSessionId`). */
   parentSessionId?: string
+  /** The caller proved it is `parentSessionId`; only then is a leader origin recorded. */
+  parentVerified?: boolean
   parentConversationId?: string
   handoff?: boolean
   role?: 'leader' | 'worker'
@@ -2068,9 +2070,9 @@ async function spawnManaged(req: {
   // A web spawn without a parent is intentionally unassigned; only an explicit role or a
   // verified parent-child relationship may create a stored role.
   const role = req.role
-    ? await ensureSpawnRole([req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId, id], req.role, undefined, req.parentSessionId ? { leader: req.parentSessionId } : 'manual')
+    ? await ensureSpawnRole([req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId, id], req.role, undefined, await spawnRoleOriginFor(req.parentSessionId, req.parentVerified === true))
     : req.parentSessionId
-      ? await ensureSpawnRole([req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId, id], req.handoff ? 'leader' : 'worker', undefined, { leader: req.parentSessionId })
+      ? await ensureSpawnRole([req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId, id], req.handoff ? 'leader' : 'worker', undefined, await spawnRoleOriginFor(req.parentSessionId, req.parentVerified === true))
       : undefined
   // The parent's conversation id, read from the registry at spawn: stable across the parent's reopens.
   const parentLink = req.parentSessionId ? await parentLinkOf(req.parentSessionId) : {}
@@ -4532,6 +4534,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(taskId ? { contextTaskId: taskId } : {}),
         ...(taskId && subtaskId ? { contextSubtaskId: subtaskId } : {}),
         ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
+        ...(req.parentSessionId && req.parentVerified ? { parentVerified: true } : {}),
         ...(req.handoff ? { handoff: true } : {}),
         ...(req.role ? { role: req.role } : {}),
         ...(req.force ? { force: true } : {}),

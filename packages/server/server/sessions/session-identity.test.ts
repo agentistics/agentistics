@@ -29,3 +29,12 @@ describe('session identity', () => {
     expect(await verifySessionIdentity(undefined, undefined)).toBeNull()
   })
 })
+
+describe('callerHoldsIdentity', () => {
+  test('false without a matching AGENTOP_MANAGED_ID, whatever the key', async () => {
+    const { callerHoldsIdentity } = await import('./session-identity')
+    expect(await callerHoldsIdentity(undefined, { AGENTOP_MANAGED_ID: 'a' })).toBe(false)
+    expect(await callerHoldsIdentity('a', {})).toBe(false)
+    expect(await callerHoldsIdentity('a', { AGENTOP_MANAGED_ID: 'b' })).toBe(false)
+  })
+})

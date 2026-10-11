@@ -2834,7 +2834,14 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
           })
         }
-        const out = await runFleetSpawn(fleetLang(url.searchParams.get('lang')), body.value)
+        // `parentVerified` is the SERVER's statement, never the wire's: overwrite whatever arrived, then set
+        // it only when the body's `session` proof is valid and names the `parent` it claims.
+        const spawnBody = body.value as FleetSpawnBody & { session?: { id?: unknown; token?: unknown } }
+        const proof = spawnBody.session
+        const { verifySessionIdentity } = await import('./sessions/session-identity')
+        const proven = proof && typeof proof === 'object' ? await verifySessionIdentity(proof.id, proof.token) : null
+        spawnBody.parentVerified = proven !== null && typeof spawnBody.parent === 'string' && spawnBody.parent.trim() === proven
+        const out = await runFleetSpawn(fleetLang(url.searchParams.get('lang')), spawnBody)
         // A memory-budget refusal is a DISTINCT status, not the plain `ok: false` every other
         // `planFleetSpawn` refusal answers with (an unknown harness, a relative path, …) — 409
         // Conflict, because the request is well-formed and refused only by the state of the machine

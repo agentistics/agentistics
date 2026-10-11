@@ -63,6 +63,8 @@ export interface FleetSpawnBody {
   subtaskId?: unknown
   /** The managed id of the session that is starting this one (a verified-by-lookup session id, see `planFleetSpawn`). */
   parent?: unknown
+  /** SET BY THE SERVER ONLY (the route overwrites it): the caller proved it is `parent`. */
+  parentVerified?: unknown
   /** A leader hand-off: the child inherits the parent's task/subtask filing. Strict boolean. */
   handoff?: unknown
   prompt?: unknown
@@ -87,6 +89,8 @@ export interface FleetSpawnPlan {
   taskId?: string
   subtaskId?: string
   parentSessionId?: string
+  /** The caller proved it is `parentSessionId` (server-set). */
+  parentVerified?: true
   handoff?: true
   prompt?: string
   model?: string
@@ -192,6 +196,7 @@ export function planFleetSpawn(
   const label = text(body.label)
   const force = readForce(body.force)
   const handoff = parentSessionId && body.handoff === true
+  const parentVerified = parentSessionId && body.parentVerified === true
 
   return {
     ok: true,
@@ -202,6 +207,7 @@ export function planFleetSpawn(
       ...(taskId ? { taskId } : {}),
       ...(subtaskId ? { subtaskId } : {}),
       ...(parentSessionId ? { parentSessionId } : {}),
+      ...(parentVerified ? { parentVerified: true as const } : {}),
       ...(handoff ? { handoff: true as const } : {}),
       ...(prompt ? { prompt } : {}),
       ...(model ? { model } : {}),

@@ -38,6 +38,7 @@ import { renameInHarness, renameMessage } from './rename'
 import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefCandidate } from './session-ref'
 import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
 import { addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession } from './registry'
+import { callerHoldsIdentity } from './session-identity'
 import { loadConversations } from './conversations'
 import { exactLinksOnDisk } from './reopen-link'
 import { reopenTargetFor } from './reopen-target'
@@ -57,7 +58,7 @@ import { execFailed } from './spawn-outcome'
 import { spawnDeath } from './spawn-check'
 import { parseHarnessAgents } from './harness-agents'
 import { planTakeover, type TakeoverRefusal } from './takeover'
-import { applyRoleTitle, deliverStoredRole, ensureSpawnRole, markRoleDelivered, rekeyStoredRole } from './session-roles'
+import { applyRoleTitle, deliverStoredRole, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor } from './session-roles'
 import type { BackendInitialPrompt, ManagedSession, SessionBackend, SpawnPlan, SpawnPlanError } from './types'
 
 /**
@@ -327,9 +328,10 @@ async function start(
   const logFile = managedProcessLogPath(cmd.harness, id, AGENTISTICS_DATA_DIR)
   const parentLink = await parentLinkOf(callerSessionId())
   const parentSessionId = parentLink.parentSessionId
+  const parentVerified = await callerHoldsIdentity(parentSessionId)
   const role = cmd.role
-    ? await ensureSpawnRole([offeredConversationId, id], cmd.role, undefined, parentSessionId ? { leader: parentSessionId } : 'manual')
-    : parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker', undefined, { leader: parentSessionId }) : undefined
+    ? await ensureSpawnRole([offeredConversationId, id], cmd.role, undefined, await spawnRoleOriginFor(parentSessionId, parentVerified))
+    : parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker', undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) : undefined
   const ctx = buildSpawnContext({ sessionId: id, cwd, harness: cmd.harness, lang, ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
   const planned = planSpawn({
     harness: cmd.harness, cwd, prompt: cmd.prompt, model: cmd.model, effort: cmd.effort,
@@ -544,13 +546,14 @@ async function batch(
   const resolved = await resolveTaskAndAttempts(cmd).catch(() => null)
   const parentLink = await parentLinkOf(callerSessionId())
   const parentSessionId = parentLink.parentSessionId
+  const parentVerified = await callerHoldsIdentity(parentSessionId)
 
   for (const spec of cmd.specs) {
     const cwd = spec.cwd ? resolve(spec.cwd) : process.cwd()
     const id = newSessionId()
     const offeredConversationId = randomUUID()
     const logFile = managedProcessLogPath(spec.harness, id, AGENTISTICS_DATA_DIR)
-    const role = parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker', undefined, { leader: parentSessionId }) : undefined
+    const role = parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker', undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) : undefined
     const ctx = buildSpawnContext({ sessionId: id, cwd, harness: spec.harness, lang, ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)), ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
     const planned = planSpawn({
       harness: spec.harness,

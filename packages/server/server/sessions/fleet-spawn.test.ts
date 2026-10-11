@@ -168,6 +168,17 @@ describe('planFleetSpawn — parent', () => {
   })
 })
 
+describe('planFleetSpawn — parentVerified', () => {
+  it('is carried only with a parent and a strict true', () => {
+    const yes = planFleetSpawn({ harness: 'claude', cwd: '/r', parent: 'p', parentVerified: true }, HARNESSES)
+    expect(yes.ok && yes.plan.parentVerified).toBe(true)
+    const str = planFleetSpawn({ harness: 'claude', cwd: '/r', parent: 'p', parentVerified: 'true' }, HARNESSES)
+    expect(str.ok && 'parentVerified' in str.plan).toBe(false)
+    const orphan = planFleetSpawn({ harness: 'claude', cwd: '/r', parentVerified: true }, HARNESSES)
+    expect(orphan.ok && 'parentVerified' in orphan.plan).toBe(false)
+  })
+})
+
 it('handoff is read only with a parent and a strict true', () => {
   const h = [{ id: 'claude', supportsModel: true, efforts: [] }]
   const base = { harness: 'claude', cwd: '/tmp/x' }
