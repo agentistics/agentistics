@@ -31,7 +31,7 @@ import { toControlSession } from './control-session'
 import { recordedRepo, repoFacts } from './repo-facts'
 import { emptyReason, renderSessionTable, resolveWidth } from './session-table'
 import { SPAWN_SPECS, planSpawn } from './spawn-spec'
-import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextParent, resolveContextTask, resolveContextTaskByRef, writeContextFile } from './spawn-context'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextParent, resolveContextRole, resolveContextTask, resolveContextTaskByRef, writeContextFile } from './spawn-context'
 import { rulesFor } from './attention-rules'
 // The harness half of a rename. Shared with the cockpit's Rename verb — see `rename.ts`.
 import { renameInHarness, renameMessage } from './rename'
@@ -57,6 +57,7 @@ import { execFailed } from './spawn-outcome'
 import { spawnDeath } from './spawn-check'
 import { parseHarnessAgents } from './harness-agents'
 import { planTakeover, type TakeoverRefusal } from './takeover'
+import { applyRoleTitle, deliverStoredRole, ensureSpawnRole, markRoleDelivered, rekeyStoredRole } from './session-roles'
 import type { BackendInitialPrompt, ManagedSession, SessionBackend, SpawnPlan, SpawnPlanError } from './types'
 
 /**
@@ -322,14 +323,18 @@ async function start(
   const cwd = cmd.cwd ? resolve(cmd.cwd) : process.cwd()
   const lang = await resolveLang()
   const id = newSessionId()
+  const offeredConversationId = randomUUID()
   const logFile = managedProcessLogPath(cmd.harness, id, AGENTISTICS_DATA_DIR)
   const parentLink = await parentLinkOf(callerSessionId())
   const parentSessionId = parentLink.parentSessionId
-  const ctx = buildSpawnContext({ sessionId: id, cwd, harness: cmd.harness, lang, ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)), ...(await resolveContextParent(parentSessionId)) })
+  const role = cmd.role
+    ? await ensureSpawnRole([offeredConversationId, id], cmd.role)
+    : parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker') : undefined
+  const ctx = buildSpawnContext({ sessionId: id, cwd, harness: cmd.harness, lang, ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
   const planned = planSpawn({
     harness: cmd.harness, cwd, prompt: cmd.prompt, model: cmd.model, effort: cmd.effort,
     ...(logFile ? { logFile } : {}),
-    conversationId: randomUUID(),
+    conversationId: offeredConversationId,
     context: ctx,
   })
   if (!planned.ok) { console.error(explainPlanError(planned.error)); return 1 }
@@ -370,6 +375,7 @@ async function start(
     await backend.kill(id).catch(() => {})
     return 1
   }
+  if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
 
   await addSession({
     id,
@@ -392,6 +398,7 @@ async function start(
       : {}),
     ...(await recordedRepo(cwd)),
   })
+  if (role) await applyRoleTitle(id, cmd.label ?? id, role, lang).catch(() => false)
   // Muted at birth: keyed by the conversation we assigned, else by the managed id (re-keyed when the
   // poller links the conversation). Delivery only — the session still reads as waiting.
   if (cmd.notify === 'off') await muteAtSpawn(planned.plan.conversationId ?? id).catch(() => {})
@@ -535,8 +542,10 @@ async function batch(
   for (const spec of cmd.specs) {
     const cwd = spec.cwd ? resolve(spec.cwd) : process.cwd()
     const id = newSessionId()
+    const offeredConversationId = randomUUID()
     const logFile = managedProcessLogPath(spec.harness, id, AGENTISTICS_DATA_DIR)
-    const ctx = buildSpawnContext({ sessionId: id, cwd, harness: spec.harness, lang, ...(await resolveContextParent(parentSessionId)), ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
+    const role = parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker') : undefined
+    const ctx = buildSpawnContext({ sessionId: id, cwd, harness: spec.harness, lang, ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)), ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
     const planned = planSpawn({
       harness: spec.harness,
       cwd,
@@ -545,7 +554,7 @@ async function batch(
       ...(spec.prompt ? { prompt: spec.prompt } : {}),
       ...(spec.model ? { model: spec.model } : {}),
       ...(spec.effort ? { effort: spec.effort } : {}),
-      conversationId: randomUUID(),
+      conversationId: offeredConversationId,
     })
     if (!planned.ok) { failed.push({ harness: spec.harness, reason: explainPlanError(planned.error) }); continue }
 
@@ -580,6 +589,7 @@ async function batch(
       await backend.kill(id).catch(() => {})
       continue
     }
+    if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
     await addSession({
       id,
       harness: spec.harness,
@@ -719,6 +729,11 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
       // through every session ever reopened from it.
       ...(await recordedRepo(m.cwd)),
     })
+    await rekeyStoredRole(
+      [m.id, m.conversationId],
+      [id, planned.plan.conversationId],
+    )
+    await deliverStoredRole(id, planned.plan.conversationId).catch(() => false)
     // The old row is RETIRED, not deleted: it is still a thing that happened, and it stops standing
     // beside its own continuation with the same name on it.
     await patchSession(m.id, { endedAt: new Date().toISOString() })
@@ -813,6 +828,7 @@ async function pollFleet(backend: SessionBackend): Promise<SessionSnapshot> {
   const poller = createSessionsPoller({
     backend, readRegistry, scanProcesses, loadConversations, loadHarnessSessions,
     findExactLinks: exactLinksOnDisk,
+    rekeyRole: async (managedId, conversationId) => rekeyStoredRole([managedId], [managedId, conversationId]),
   })
   // Poll TWICE, and return the second. The cockpit debounces the noisy per-frame reading by
   // confirming a `waiting` state across two polls (`attention-confirm.ts`), but a one-shot command
@@ -1089,6 +1105,7 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
       + `run \`agentop session attach ${id}\` again.`,
     )
   }
+  await deliverStoredRole(id, plan.conversationId).catch(() => false)
   return execAttach(id, backend)
 }
 

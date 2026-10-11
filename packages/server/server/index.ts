@@ -2006,6 +2006,25 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }, await defaultMessageDeps())
       return json(out, messageStatus(out))
     }
+    // SESSION ROLES — leader | worker, owned by the server (`sessions/session-roles.ts`). The browser reads the
+    // map and sets any session's role; a session calling through the MCP proves who it is (HMAC, as for
+    // messages) and may set its own role, or its children's.
+    if (url.pathname === '/api/session-roles' && req.method === 'GET') {
+      const { listRoles, defaultRoleDeps } = await import('./sessions/session-roles')
+      return json({ roles: await listRoles(await defaultRoleDeps()) })
+    }
+    if (url.pathname === '/api/session-roles' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({})) as { ref?: unknown; role?: unknown; lang?: unknown; session?: { id?: unknown; token?: unknown } }
+      const { verifySessionIdentity } = await import('./sessions/session-identity')
+      const sender = body.session ? await verifySessionIdentity(body.session.id, body.session.token) : null
+      const { roleOp, roleStatus, defaultRoleDeps } = await import('./sessions/session-roles')
+      const out = await roleOp(sender, {
+        ...(body.ref !== undefined ? { ref: String(body.ref) } : {}),
+        ...(body.role !== undefined && body.role !== null ? { role: String(body.role) } : {}),
+        ...(body.lang !== undefined ? { lang: String(body.lang) } : {}),
+      }, await defaultRoleDeps())
+      return json(out, roleStatus(out))
+    }
     // USER SESSION GROUPS — the door the MCP tools use to organise sessions (see
     // `sessions/session-groups-web.ts`). Matched before `/api/tasks`; it shares no path with it.
     if (url.pathname === '/api/session-groups' && req.method === 'GET') {

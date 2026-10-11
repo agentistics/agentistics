@@ -598,6 +598,19 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "agentistics_session_role",
+    description:
+      "Get or set a session's ROLE (leader | worker | auto). With no `ref` it is YOUR OWN session. Setting `leader` stores the role, renames the session to \"[ LEADER ] - <title>\" (\"[ LÍDER ] - …\" in a Portuguese UI) keeping the user's title, and the briefing then tells the model it is a leader; `worker`/`auto` strip the prefix. Use it to declare yourself leader when the work grows to several fronts — do not rename the session by hand. Setting ANOTHER session's role works only for sessions you started yourself. Idempotent. With no `role` it just reports the current one and the role line.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ref: { type: "string", description: "A session reference (managed id, conversation id, exact title or unique id prefix). Omit for your own session." },
+        role: { type: "string", enum: ["leader", "worker", "auto"], description: "The role to set. Omit to read it." },
+      },
+      required: [],
+    },
+  },
+  {
     name: "agentistics_summary",
     description:
       "Get an overview of AI coding usage metrics (across all tracked harnesses — Claude Code, Codex, Gemini, Copilot, Antigravity — or scoped to one): total tokens, estimated cost, sessions, streak, most used model, and top project. Good starting point for any metrics question.",
@@ -1087,6 +1100,15 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const body = await apiSend("POST", "/api/session-notify", {
           ref: a?.ref,
           ...(a?.notify !== undefined ? { notify: a.notify } : {}),
+        });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_session_role": {
+        const a = args as any;
+        const body = await apiSend("POST", "/api/session-roles", {
+          ...(a?.ref ? { ref: a.ref } : {}),
+          ...(a?.role !== undefined ? { role: a.role } : {}),
+          session: sessionProof(process.env),
         });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }

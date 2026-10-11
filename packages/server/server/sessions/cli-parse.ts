@@ -9,7 +9,7 @@
  * `cli.ts`'s `readFlag` comment already warns about for `agentop member`.
  */
 
-import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
+import { HARNESS_ORDER, type HarnessId, type SessionRole } from '@agentistics/core'
 // `GROUPINGS` is the ONE list of the dimensions a fleet can be grouped along — the same rule
 // `HARNESS_SORT` follows: a second hand-written list here would accept a value the table cannot
 // draw, or refuse one it can, and TypeScript would accept both.
@@ -36,6 +36,8 @@ export type SessionCommand =
       notify?: NotifySwitch
       /** Start anyway when the memory gate would refuse — see `spawn-admission.ts`. */
       force?: boolean
+      /** Explicitly declare the spawned session's briefing role. */
+      role?: SessionRole
       /** A refusal is machine-readable too — see `admissionRefusalBody`. */
       json?: boolean
     }
@@ -119,7 +121,7 @@ function notifyValue(v: string): NotifySwitch | null {
 }
 
 const VALUE_FLAGS = new Set([
-  '-p', '--prompt', '--model', '--effort', '--cwd', '--name', '--task', '--subtask', '--session', '--attempt', '--notify',
+  '-p', '--prompt', '--model', '--effort', '--cwd', '--name', '--task', '--subtask', '--session', '--attempt', '--notify', '--role',
 ])
 
 function isHarness(v: string): v is HarnessId {
@@ -212,6 +214,11 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
       const n = notifyValue(value)
       if (n === null) return { kind: 'error', message: `--notify takes "on" or "off", not "${value}".` }
       cmd.notify = n
+      continue
+    }
+    if (arg === '--role') {
+      if (value !== 'leader' && value !== 'worker') return { kind: 'error', message: '--role takes "leader" or "worker".' }
+      cmd.role = value
       continue
     }
     if (arg === '-p' || arg === '--prompt') cmd.prompt = value
