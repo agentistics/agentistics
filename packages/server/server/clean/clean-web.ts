@@ -4,7 +4,6 @@ import { platform } from 'node:os'
 import { cleanRepos, collectCleanFacts } from '../cli-clean'
 import { applyClean } from './clean-io'
 import { fmtBytes, planClean, reclaimable, type CleanItem, type WorktreeFacts } from './clean-plan'
-import { loadConsolidated } from '../consolidate'
 import { broadcastNotification } from '../sse'
 
 export interface CleanWebItem {
@@ -21,6 +20,7 @@ export interface CleanJob { id: string; state: 'verifying' | 'removing worktrees
 let scan: { promise: Promise<CleanWebPlan>; at: number } | null = null
 let cached: { plan: CleanWebPlan; at: number } | null = null
 let job: CleanJob | null = null
+let scanProgress = 0
 const CACHE_MS = 5 * 60_000
 
 function itemId(f: WorktreeFacts, kind: CleanItem['action']['kind']): string { return `${f.repo}:${f.path}:${kind}` }
@@ -38,30 +38,40 @@ function wire(items: readonly CleanItem[]): CleanWebPlan {
   }), reclaimable: reclaimable(items) }
 }
 async function scanNow(): Promise<CleanWebPlan> {
-  const facts = await collectCleanFacts(await cleanRepos([]), { lowPriority: true })
+  const repos = await cleanRepos([])
+  scanProgress = repos.length ? 0 : 1
+  const facts = await collectCleanFacts(repos, { lowPriority: true, onProgress: (done, total) => { scanProgress = total ? done / total : 1 } })
   return wire(planClean(facts, Date.now()))
 }
 export function getCleanPlan(): { state: 'scanning' | 'ready'; progress: number; plan?: Promise<CleanWebPlan> } {
-  if (scan && Date.now() - scan.at < CACHE_MS) return { state: 'scanning', progress: 0, plan: scan.promise }
+  if (scan && Date.now() - scan.at < CACHE_MS) return { state: 'scanning', progress: scanProgress, plan: scan.promise }
   const promise = scanNow().then(plan => { cached = { plan, at: Date.now() }; return plan }).finally(() => { if (scan?.promise === promise) scan = null })
   scan = { promise, at: Date.now() }
-  return { state: 'scanning', progress: 0, plan: promise }
+  return { state: 'scanning', progress: scanProgress, plan: promise }
 }
 export async function cleanPlanResponse(): Promise<CleanWebPlan | { state: 'scanning'; progress: number }> {
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.plan
   if (!scan || Date.now() - scan.at >= CACHE_MS) getCleanPlan()
-  return { state: 'scanning', progress: 0 }
+  return { state: 'scanning', progress: scanProgress }
 }
 
 function inside(path: string, root: string): boolean { const p = resolve(path), r = resolve(root); return p === r || p.startsWith(r + sep) }
-async function protectedPaths(): Promise<Map<string, string>> {
+export async function protectedPaths(): Promise<Map<string, string>> {
   const out = new Map<string, string>()
   const cwd = process.cwd()
-  for (const s of (await loadConsolidated()).values()) {
-    const p = s.current_cwd ?? s.project_path
-    if (p && inside(cwd, p)) out.set(p, 'the server working directory')
-    else if (p) out.set(p, 'an active session')
+  try {
+    // The consolidated store is historical. The fleet is the server's live source of truth;
+    // importing it lazily also keeps the cleanup scanner independent of CLI startup wiring.
+    const { readFleet } = await import('../sessions/fleet-web')
+    const fleet = await readFleet('en')
+    for (const row of fleet.rows) {
+      if (['working', 'waiting', 'waiting-approval', 'unknown'].includes(row.state) && row.cwd) out.set(row.cwd, 'an active session')
+    }
+  } catch {
+    // A failed fleet read must not turn historical sessions into permanent locks. processIn below
+    // remains the independent last safety check.
   }
+  if (cwd) out.set(cwd, 'the server working directory')
   return out
 }
 export async function processIn(path: string): Promise<boolean> {
@@ -95,9 +105,16 @@ export async function applyCleanSelection(ids: readonly string[]): Promise<Clean
   void (async () => {
     const protectedBySession = await protectedPaths()
     const requested = new Set(ids)
-    const current = planClean(await collectCleanFacts(await cleanRepos([]), { lowPriority: true }), Date.now())
-      .filter(i => i.action.kind !== 'keep' && requested.has(itemId(i.facts, i.action.kind)))
+    const repos = await cleanRepos([])
+    const currentPlan = planClean(await collectCleanFacts(repos, { lowPriority: true }), Date.now())
+    const planned = new Map((cached?.plan.items ?? []).map(item => [item.id, item]))
+    const current = currentPlan.filter(i => i.action.kind !== 'keep' && requested.has(itemId(i.facts, i.action.kind)))
     const skipped: Array<{ path: string; reason: string }> = []
+    const currentIds = new Set(current.map(i => itemId(i.facts, i.action.kind)))
+    for (const id of requested) {
+      if (currentIds.has(id)) continue
+      skipped.push({ path: planned.get(id)?.path ?? id, reason: 'changed since the plan' })
+    }
     const safe: CleanItem[] = []
     for (const item of current) {
       const f = item.facts
@@ -115,6 +132,8 @@ export async function applyCleanSelection(ids: readonly string[]): Promise<Clean
     errors.push(...(await applyClean(safe.filter(i => i.action.kind === 'prune'))))
     created.result = { freedBytes: safe.reduce((n, i) => n + (i.action.kind === 'keep' ? 0 : i.action.frees), 0), worktrees: safe.filter(i => i.action.kind === 'remove' || i.action.kind === 'prune').length, nodeModules: safe.filter(i => i.action.kind === 'node-modules').length, skipped, errors }
     created.state = 'done'; created.progress = 100
+    cached = null
+    scan = null
     console.info('[clean] apply', JSON.stringify({ jobId: created.id, ...created.result }))
     broadcastNotification({
       type: created.result.skipped.length || created.result.errors.length ? 'warning' : 'success',

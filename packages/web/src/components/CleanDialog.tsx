@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Checkbox, ConfirmModal, DialogActions, dialogButtonStyle, RecordCard, SectionHeader, StatusDot } from '../pages/settings/primitives'
 import { pushNotification } from '../lib/notifications'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -7,9 +7,21 @@ type Item = { id: string; repo: string; path: string; kind: string; bytes: numbe
 type Plan = { items: Item[]; reclaimable: { bytes: number; count: number } }
 type Job = { id?: string; state: string; progress: number; result?: { freedBytes: number; worktrees: number; nodeModules: number; skipped: Array<{ path: string; reason: string }>; errors: string[] } }
 
-const size = (n: number) => n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : `${Math.round(n / 1024 ** 2)} MB`
+const size = (n: number) => n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : n >= 1024 ** 2 ? `${Math.round(n / 1024 ** 2)} MB` : `${Math.round(n / 1024)} KB`
 const stage = (state: string, pt: boolean) => ({ verifying: pt ? 'Conferindo…' : 'Checking…', 'removing worktrees': pt ? 'Removendo worktrees…' : 'Removing worktrees…', 'removing node_modules': pt ? 'Removendo node_modules…' : 'Removing node_modules…', pruning: pt ? 'Limpando registros do git…' : 'Cleaning git records…', done: pt ? 'Concluído' : 'Done' }[state] ?? (pt ? 'Limpando…' : 'Cleaning…'))
 const kindLabel = (kind: string, pt: boolean) => ({ remove: pt ? 'worktree merged e limpo' : 'merged, clean worktree', prune: pt ? 'registro de worktree ausente' : 'missing worktree record', 'node-modules': 'node_modules' }[kind] ?? kind)
+const reasonLabel = (reason: string, pt: boolean) => {
+  const labels: Record<string, [string, string]> = {
+    'merged and clean': ['merged e limpo', 'merged and clean'],
+    'directory is gone': ['a pasta não existe mais', 'directory is gone'],
+    'no commit in 30+ days': ['sem commit há 30+ dias', 'no commit in 30+ days'],
+    'changed since the plan': ['mudou desde o plano', 'changed since the plan'],
+    'the server working directory': ['diretório do servidor', 'server working directory'],
+    'an active session': ['sessão ativa', 'active session'],
+    'a process is running inside it (or its location is unknown)': ['há um processo dentro (ou localização desconhecida)', 'a process is running inside it (or its location is unknown)'],
+  }
+  return labels[reason]?.[pt ? 0 : 1] ?? reason
+}
 
 export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: boolean; onClose: () => void }) {
   const pt = lang === 'pt'
@@ -21,6 +33,8 @@ export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: 
   const [job, setJob] = useState<Job | null>(null)
   const [error, setError] = useState(false)
   const [retry, setRetry] = useState(0)
+  const [scanProgress, setScanProgress] = useState(0)
+  const resultRef = useRef<HTMLParagraphElement>(null)
 
   useEffect(() => {
     if (!open) return
@@ -37,6 +51,7 @@ export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: 
           setPicked(new Set(value.items.filter(i => i.kind !== 'node-modules').map(i => i.id)))
           return
         }
+        if (typeof value.progress === 'number') setScanProgress(value.progress)
         window.setTimeout(pollPlan, 300)
       } catch {
         if (!stopped) { setError(true); setPlan(null) }
@@ -57,7 +72,13 @@ export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: 
         if (stopped) return
         setJob(value)
         if (value.state !== 'done') window.setTimeout(poll, 350)
-        else setBusy(false)
+        else {
+          setBusy(false)
+          window.setTimeout(() => {
+            resultRef.current?.scrollIntoView({ block: 'nearest' })
+            void refreshPlan()
+          }, 0)
+        }
       } catch {
         if (!stopped) window.setTimeout(poll, 1000)
       }
@@ -65,6 +86,18 @@ export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: 
     void poll()
     return () => { stopped = true }
   }, [busy])
+
+  const refreshPlan = async () => {
+    try {
+      const response = await fetch('/api/clean/plan')
+      if (!response.ok) throw new Error('plan failed')
+      const value = await response.json() as Plan | { state: string }
+      if ('items' in value) {
+        setPlan(value)
+        setPicked(new Set(value.items.filter(i => i.kind !== 'node-modules').map(i => i.id)))
+      } else window.setTimeout(() => void refreshPlan(), 300)
+    } catch { /* the completed result remains visible if the refresh fails */ }
+  }
 
   const grouped = useMemo(() => {
     const groups = new Map<string, Item[]>()
@@ -110,11 +143,11 @@ export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: 
       <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
         {busy && job && <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)', fontSize: 12 }}><StatusDot state={job.state === 'done' ? 'ok' : 'warn'} /><span>{stage(job.state, pt)} ({job.progress}%)</span></div>}
       {error && <div role="alert" style={{ color: 'var(--text-secondary)', fontSize: 13 }}><p>{pt ? 'Não foi possível carregar a limpeza.' : 'Could not load cleanup options.'}</p><button type="button" onClick={() => setRetry(value => value + 1)} style={dialogButtonStyle('secondary', isMobile)}>{pt ? 'Tentar novamente' : 'Retry'}</button></div>}
-      {!error && !plan && <p>{pt ? 'Conferindo…' : 'Checking…'}</p>}
+      {!error && !plan && <p>{pt ? `Conferindo… ${Math.round(scanProgress * 100)}%` : `Checking… ${Math.round(scanProgress * 100)}%`}</p>}
       {!error && plan && plan.items.length === 0 && <p>{pt ? 'Nada para limpar.' : 'Nothing to clean.'}</p>}
-      {!error && plan && grouped.map(([repo, items]) => <section key={repo}><SectionHeader label={repo} /><div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{items.map(item => <RecordCard key={item.id} title={item.path} subtitle={item.reason} leading={<Checkbox checked={picked.has(item.id)} onChange={() => toggle(item.id)} label="" ariaLabel={item.path} disabled={busy} />} fields={[{ label: pt ? 'Tipo' : 'Kind', value: kindLabel(item.kind, pt) }, { label: pt ? 'Tamanho' : 'Size', value: size(item.bytes) }]} />)}</div></section>)}
+      {!error && plan && grouped.map(([repo, items]) => <section key={repo}><SectionHeader label={repo} /><div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{items.map(item => <RecordCard key={item.id} title={item.path} subtitle={reasonLabel(item.reason, pt)} leading={<Checkbox checked={picked.has(item.id)} onChange={() => toggle(item.id)} label="" ariaLabel={item.path} disabled={busy} />} fields={[{ label: pt ? 'Tipo' : 'Kind', value: kindLabel(item.kind, pt) }, { label: pt ? 'Tamanho' : 'Size', value: size(item.bytes) }]} />)}</div></section>)}
       {plan && plan.items.length > 0 && <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 0 }}>{size(selectedBytes)}</p>}
-        {job?.state === 'done' && job.result && <p role="status">{pt ? `${size(job.result.freedBytes)} liberados; ${job.result.skipped.length} mantidos por segurança.` : `${size(job.result.freedBytes)} freed; ${job.result.skipped.length} kept for safety.`}</p>}
+        {job?.state === 'done' && job.result && <p ref={resultRef} role="status">{pt ? `${size(job.result.freedBytes)} liberados; ${job.result.skipped.length} mantidos por segurança.` : `${size(job.result.freedBytes)} freed; ${job.result.skipped.length} kept for safety.`}</p>}
       </div>
     </ConfirmModal>
   )
