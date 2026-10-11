@@ -237,7 +237,7 @@ function parseJsonl(content: string, fallbackId: string, projectPath: string): S
 
   // Accumulate unique messages by id across all $set snapshots
   const seenIds = new Set<string>()
-  const allMessages: Array<{ type: string; timestamp?: string; text?: string }> = []
+  const allMessages: JsonlMessage[] = []
 
   // One message, from either source, counted once. `seenIds` spans BOTH: a resumed session's
   // opening snapshot repeats turns that then arrive again as their own lines, and counting those
@@ -253,6 +253,10 @@ function parseJsonl(content: string, fallbackId: string, projectPath: string): S
       type: msg.type as string,
       timestamp: msg.timestamp as string | undefined,
       text: extractMessageText(msg),
+      ...(typeof msg.model === 'string' && msg.model ? { model: msg.model } : {}),
+      ...(Array.isArray(msg.toolCalls)
+        ? { toolNames: msg.toolCalls.map((tc: any) => tc?.name).filter((n: unknown): n is string => typeof n === 'string' && n !== '') }
+        : {}),
     })
   }
 
@@ -281,7 +285,15 @@ function parseJsonl(content: string, fallbackId: string, projectPath: string): S
 
     // A `$set` that carries anything else is a PATCH of the session's own fields — the journal
     // writes `{"$set":{"lastUpdated":…}}` after every turn — and a patch is not a message.
-    if (parsed['$set'] !== undefined) continue
+    // …but its `lastUpdated` is the only place the journal says WHEN the session last moved: the
+    // header's own `lastUpdated` is written once, equal to `startTime`, and never rewritten.
+    const patched = parsed['$set']
+    if (patched !== undefined) {
+      if (patched && typeof patched.lastUpdated === 'string' && patched.lastUpdated) {
+        if (!lastUpdated || patched.lastUpdated > lastUpdated) lastUpdated = patched.lastUpdated
+      }
+      continue
+    }
 
     // AN APPENDED MESSAGE RECORD, which is how the journal writes a turn today.
     //
@@ -311,11 +323,21 @@ function parseJsonl(content: string, fallbackId: string, projectPath: string): S
 // Shared builder for JSONL streaming format
 // ---------------------------------------------------------------------------
 
+interface JsonlMessage {
+  type: string
+  timestamp?: string
+  text?: string
+  /** `model` of a `gemini` record. */
+  model?: string
+  /** `toolCalls[].name` of a `gemini` record. */
+  toolNames?: string[]
+}
+
 interface JsonlParsedData {
   projectPath: string
   startTime: string
   endTime: string
-  messages: Array<{ type: string; timestamp?: string; text?: string }>
+  messages: JsonlMessage[]
   fallbackId: string
   nativeId?: string | undefined
 }
@@ -337,16 +359,29 @@ function buildJsonlSessionMeta(data: JsonlParsedData): SessionMeta | null {
   // session a blank name in every list it appears in. Taken from the FIRST message that already
   // passed `isGenuineUserMessage`, so an injected context block never becomes the title.
   let firstPrompt = ''
+  const toolCounts: Record<string, number> = {}
+  let model: string | undefined
+  let lastMessageMs = NaN
 
   for (const msg of messages) {
     const isUser = msg.type === 'user'
     const isAssistant = msg.type === 'model' || msg.type === 'gemini'
+    if (msg.type === 'gemini') {
+      // Last model named wins, as in parseRichJson. Tokens are deliberately NOT read here — owner
+      // decision D8 (they move money on every cost surface and need a bill reconciliation first).
+      if (msg.model) model = msg.model
+      for (const name of msg.toolNames ?? []) {
+        const shared = canonicalTool('gemini', name)
+        toolCounts[shared] = (toolCounts[shared] ?? 0) + 1
+      }
+    }
 
     const tsMs = msg.timestamp ? Date.parse(msg.timestamp) : NaN
     let turnEvent: TurnEvent | null = null
     if (!Number.isNaN(tsMs)) {
       turnEvent = { ts: tsMs }
       turnEvents.push(turnEvent)
+      if (Number.isNaN(lastMessageMs) || tsMs > lastMessageMs) lastMessageMs = tsMs
     }
 
     let counted = false
@@ -373,8 +408,14 @@ function buildJsonlSessionMeta(data: JsonlParsedData): SessionMeta | null {
 
   if (!hasGenuineContent) return null
 
-  const durationMinutes = startTime && endTime
-    ? Math.max(0, (new Date(endTime).getTime() - new Date(startTime).getTime()) / 60000)
+  // The session ended at the later of what the journal stated (`lastUpdated`) and its last message.
+  const statedEndMs = endTime ? Date.parse(endTime) : NaN
+  const closeMs = Math.max(Number.isNaN(statedEndMs) ? -Infinity : statedEndMs, Number.isNaN(lastMessageMs) ? -Infinity : lastMessageMs)
+  const closeAt = Number.isFinite(closeMs)
+    ? (closeMs === statedEndMs ? endTime : new Date(closeMs).toISOString())
+    : endTime
+  const durationMinutes = startTime && closeAt
+    ? Math.max(0, (new Date(closeAt).getTime() - new Date(startTime).getTime()) / 60000)
     : 0
 
   return {
@@ -382,7 +423,7 @@ function buildJsonlSessionMeta(data: JsonlParsedData): SessionMeta | null {
     ...(data.nativeId ? { native_session_id: data.nativeId } : {}),
     project_path: projectPath,
     start_time: startTime || endTime || '',
-    end_time: endTime || undefined,
+    end_time: closeAt || undefined,
     duration_minutes: durationMinutes,
     active_minutes: activeMinutesOf(turnEvents),
     user_message_count: userMessages,
@@ -391,7 +432,7 @@ function buildJsonlSessionMeta(data: JsonlParsedData): SessionMeta | null {
     assistant_message_count: assistantMessages,
     assistant_chars: assistantChars,
     assistant_char_messages: assistantCharMsgs,
-    tool_counts: {},
+    tool_counts: toolCounts,
     tool_output_tokens: {},
     agent_file_reads: {},
     languages: [],
@@ -415,7 +456,7 @@ function buildJsonlSessionMeta(data: JsonlParsedData): SessionMeta | null {
     files_modified: 0,
     message_hours: messageHours,
     user_message_timestamps: userMessageTimestamps,
-    model: undefined,
+    model,
     harness: 'gemini',
     _source: 'jsonl',
   }

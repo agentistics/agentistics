@@ -494,3 +494,48 @@ describe('a reopened conversation read as ONE family (F0.2)', () => {
     expect(s?.user_message_timestamps).toEqual(['2026-10-09T11:02:07.000Z', '2026-10-09T11:03:20.000Z'])
   })
 })
+
+// ── jsonl journal: duration, model and tool counts (A-PARTIAL). Tokens are NOT read (owner D8). ──
+describe('jsonl journal: lastUpdated patches, model and tools', () => {
+  const header = { sessionId: 'aaaaaaaa-0000-4000-8000-000000000001', projectHash: 'h', startTime: '2026-10-11T20:25:00.000Z', lastUpdated: '2026-10-11T20:25:00.000Z', kind: 'main' }
+  const L = (o: unknown) => JSON.stringify(o)
+  const journal = [
+    L(header),
+    L({ id: 'u1', timestamp: '2026-10-11T20:25:01.000Z', type: 'user', content: [{ text: 'build the thing' }] }),
+    L({ $set: { lastUpdated: '2026-10-11T20:25:02.000Z' } }),
+    L({
+      id: 'g1', timestamp: '2026-10-11T20:25:30.000Z', type: 'gemini', content: 'ok', model: 'gemini-x-pro',
+      tokens: { input: 100, output: 7, cached: 3, total: 110 },
+      toolCalls: [{ id: 't1', name: 'run_shell_command', args: { command: 'ls' }, status: 'success' }, { id: 't2', name: 'read_file', args: {}, status: 'success' }, { name: '' }],
+    }),
+    L({ $set: { lastUpdated: '2026-10-11T21:08:00.000Z' } }),
+  ].join('\n')
+
+  test('duration follows the latest $set.lastUpdated, not the header', () => {
+    const s = parseGeminiChat(journal, 'fb', '/p')!
+    expect(s.end_time).toBe('2026-10-11T21:08:00.000Z')
+    expect(s.duration_minutes).toBeCloseTo(43, 5)
+  })
+
+  test('end is the later of lastUpdated and the last message timestamp', () => {
+    const late = journal + '\n' + L({ id: 'g2', timestamp: '2026-10-11T22:00:00.000Z', type: 'gemini', content: 'more' })
+    expect(parseGeminiChat(late, 'fb', '/p')!.end_time).toBe('2026-10-11T22:00:00.000Z')
+  })
+
+  test('model is the last one named by a gemini record; absent when none names one', () => {
+    expect(parseGeminiChat(journal, 'fb', '/p')!.model).toBe('gemini-x-pro')
+    const none = journal.replace('"model":"gemini-x-pro",', '')
+    expect(parseGeminiChat(none, 'fb', '/p')!.model).toBeUndefined()
+  })
+
+  test('tool_counts count toolCalls[].name under the shared vocabulary', () => {
+    const s = parseGeminiChat(journal, 'fb', '/p')!
+    expect(s.tool_counts).toEqual({ Bash: 1, Read: 1 })
+  })
+
+  test('tokens are still NOT read from the journal (owner decision D8)', () => {
+    const s = parseGeminiChat(journal, 'fb', '/p')!
+    expect(s.input_tokens).toBe(0)
+    expect(s.output_tokens).toBe(0)
+  })
+})
