@@ -17,7 +17,7 @@
  *     the router's listener) so the browser's own Back/Forward — the back gesture on a phone — is
  *     held the same way.
  *  4. Registers `beforeunload` for a reload, a closed tab or an external link — the pattern
- *     `pages/settings/Drawer.tsx` already uses.
+ *     `components/Drawer.tsx` already uses.
  *
  * It never keeps a closed panel mounted: the answer "discard" drops the pane exactly as before.
  */

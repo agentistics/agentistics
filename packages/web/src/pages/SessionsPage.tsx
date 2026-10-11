@@ -18,7 +18,16 @@
  */
 
 import { sessionLinks } from '../lib/sessionParent'
-import { SessionLinkInfo } from '../components/sessions/SessionLinkInfo'
+import { SessionLinkInfo, SessionLinkPanel } from '../components/sessions/SessionLinkInfo'
+import { Drawer } from '../components/Drawer'
+import { PlanUsageSummary } from '../components/PlanLimitMeter'
+import { ContextRing } from '../components/sessions/SessionStatsMenu'
+import { HarnessMark } from '../components/sessions/HarnessMark'
+import { HARNESS_LABELS } from '../lib/harness'
+import { sessionStats } from '../lib/sessionStats'
+import { usePlanLimits } from '../lib/planLimits'
+import { requestNayTab } from '../lib/nayDockRequests'
+import { drawerEntryOnTop, sessionDrawerDot, SESSION_DRAWER_STATE } from '../lib/sessionDrawer'
 import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
   type CSSProperties, type ReactElement, type ReactNode,
@@ -26,7 +35,7 @@ import {
 import { useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
 import {
   ChevronLeft, Eye, FileText, FolderTree, MessagesSquare, Plus, TerminalSquare,
-  X as XIcon, ArrowRight, MessageCircle,
+  X as XIcon, ArrowRight, MessageCircle, PanelLeft, PanelLeftClose, SquareTerminal,
 } from 'lucide-react'
 import { setNayFabShownInSession, useNayFabShownInSession } from '../lib/nayFabVisibility'
 import { StudioHost, type StudioHostProps } from '../components/sessions/StudioHost'
@@ -98,7 +107,7 @@ import { railActivityFromHint } from '../lib/railActivity'
 import { useHardwarePressureWatch } from '../hooks/useHardwarePressureWatch'
 import { useIdleSessions } from '../hooks/useIdleSessions'
 import { forcedNote, isAdmissionRefusal } from '../lib/spawnAdmission'
-import { pushNotification } from '../lib/notifications'
+import { pushNotification, useNotifications } from '../lib/notifications'
 import { takeIdleReviewRequest } from '../lib/idleReviewRequest'
 import { publishIdleReview } from '../lib/idleReviewStore'
 import { IdleSessionsModal } from '../components/sessions/IdleSessionsModal'
@@ -254,6 +263,48 @@ function PaneFrame({ pane, style, children }: { pane: PaneId; style: CSSProperti
  * between them is a resize handle, as every other seam in the floating-panels design is. Never more
  * than two. A phone never splits: there the route's session is the only one, exactly as before.
  */
+/**
+ * THE PHONE'S SESSION-PANEL ICON — `PanelLeft` closed, `PanelLeftClose` open, cross-faded rather than
+ * swapped (the panel slides, and an icon that jumps while it does reads as a different control),
+ * with the dot that says something behind it wants you (`lib/sessionDrawer.ts`). A function rather
+ * than inline JSX so its two states are asserted directly — see `sessionDrawerToggle.test.tsx`.
+ */
+export function sessionDrawerToggle({ open, dot, pt, onClick }: {
+  open: boolean; dot: boolean; pt: boolean; onClick: () => void
+}): ReactElement {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={open
+        ? (pt ? 'Fechar o painel da sessão' : 'Close the session panel')
+        : (pt ? 'Abrir o painel da sessão' : 'Open the session panel')}
+      aria-expanded={open}
+      aria-haspopup="dialog"
+      data-session-drawer-toggle={open ? 'open' : 'closed'}
+      style={{
+        position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: 44, height: 44, flexShrink: 0, borderRadius: 12,
+        border: 'none', color: 'var(--text-primary)', cursor: 'pointer',
+        background: open ? 'var(--ag-tint-4)' : 'transparent',
+        transition: 'background 200ms ease',
+      }}
+    >
+      <span aria-hidden data-icon="panel-left" style={{ position: 'absolute', display: 'flex', opacity: open ? 0 : 1, transition: 'opacity 200ms ease' }}>
+        <PanelLeft size={24} />
+      </span>
+      <span aria-hidden data-icon="panel-left-close" style={{ position: 'absolute', display: 'flex', opacity: open ? 1 : 0, transition: 'opacity 200ms ease' }}>
+        <PanelLeftClose size={24} />
+      </span>
+      {dot && (
+        <span data-session-drawer-dot className="ag-hint-pulse" style={{
+          position: 'absolute', top: 7, right: 7, width: 11, height: 11, borderRadius: '50%',
+          background: 'var(--anthropic-orange)', border: '2px solid var(--bg-surface)',
+        }} />
+      )}
+    </button>
+  )
+}
+
 export default function SessionsPage() {
   const { lang } = useOutletContext<AppContext>()
   const { sessionId } = useParams()
@@ -2075,6 +2126,39 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    * nothing when it is not wanted: `MagnifierButton` returns null unless the magnifiers have been
    * turned on, so a phone that never enabled them never gives up the width.
    */
+  /**
+   * THE PHONE'S SESSION PANEL (`Drawer side="left"`) — open/closed, and the history entry it rides.
+   *
+   * Opening PUSHES an entry, so the system Back closes the panel before it leaves the session; any
+   * other close (the backdrop, Esc, a swipe, the icon) goes BACK over that entry rather than
+   * leaving it behind for the next Back to land on. Done in the event handlers, never in an effect:
+   * StrictMode runs effects twice, and a push/back pair from a double-run arrives as a popstate that
+   * closes the panel the instant it opened.
+   */
+  const [sessionDrawer, setSessionDrawer] = useState(false)
+  const openSessionDrawer = useCallback(() => {
+    window.history.pushState({ ...(window.history.state ?? {}), [SESSION_DRAWER_STATE]: true }, '')
+    setSessionDrawer(true)
+  }, [])
+  const closeSessionDrawer = useCallback(() => {
+    if (drawerEntryOnTop(window.history.state)) window.history.back() // its popstate closes it
+    else setSessionDrawer(false)
+  }, [])
+  /** Leave the session FROM the panel: the panel's own history entry is replaced, not stacked. */
+  const leaveDrawerTo = useCallback((path: string) => {
+    const replace = drawerEntryOnTop(window.history.state)
+    setSessionDrawer(false)
+    navigate(path, replace ? { replace: true } : undefined)
+  }, [navigate])
+  useEffect(() => {
+    const onPop = () => { if (!drawerEntryOnTop(window.history.state)) setSessionDrawer(false) }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+  useEffect(() => { setSessionDrawer(false) }, [selected?.id])
+  const unreadInbox = useNotifications().filter(n => !n.read).length
+  const planLimits = usePlanLimits()
+
   const magnifierButton = isMobile
     ? (
       <>
@@ -2645,223 +2729,97 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       </div>
     )
   } else if (isMobile && panel && selected) {
+    const tPt = pt ? 'pt' : 'en'
+    const drawerDot = sessionDrawerDot({ state: selected.state, unread: unreadInbox })
+    const ctxStats = selected.conversationId !== undefined
+      ? sessionStats(selected.harness as HarnessId, selected.conversationId, selectedMeta)
+      : null
+    const contentsOn = rightActivePanel !== null && isTabPanelId(rightActivePanel)
+    /** A row of the panel's own sections: label on the left, its glance figure on the right. */
+    const drawerSection = (key: string, label: string, summary: ReactNode, body: ReactNode) => (
+      <section key={key} data-drawer-section={key} className="ag-drawer-fit" style={{
+        border: '1px solid var(--border)', background: 'var(--bg-card)', borderRadius: 12, flexShrink: 0,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 40, padding: '0 12px' }}>
+          <span style={{
+            fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700,
+            color: 'var(--text-tertiary)',
+          }}>{label}</span>
+          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--text-secondary)' }}>
+            {summary}
+          </span>
+        </div>
+        <div style={{ padding: '0 12px 10px' }}>{body}</div>
+      </section>
+    )
+    /** The VIEW, as the segmented control it was in the ⋯ menu — now four alternatives, with the
+     *  bottom bar's two terminals folded in (the bar is gone on a phone). */
+    const viewTabs: { id: string; label: string; icon: ReactNode; on: boolean; go: () => void }[] = [
+      ...(!isCentral ? [
+        { id: 'chat', label: pt ? 'Conversa' : 'Chat', icon: <MessagesSquare size={18} />, on: sessionView === 'chat' && !contentsOn, go: () => { if (contentsOn) closeSlotPanel(rightActivePanel!); setSessionView('chat') } },
+        { id: 'terminal', label: 'Terminal', icon: <TerminalSquare size={18} />, on: sessionView === 'terminal' && !contentsOn, go: () => { if (contentsOn) closeSlotPanel(rightActivePanel!); setSessionView('terminal') } },
+      ] : []),
+      ...(shellEnabled && !isCentral ? [
+        { id: 'shell', label: 'Shell', icon: <SquareTerminal size={18} />, on: false, go: () => leaveDrawerTo(dedicatedTerminalPath(selected.id, 'shell')) },
+      ] : []),
+      { id: 'contents', label: pt ? 'Conteúdos' : 'Contents', icon: <FileText size={18} />, on: contentsOn, go: () => { if (!contentsOn) openSlotPanel('live') } },
+    ]
+    const drawerHeader = (
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px 6px 4px',
+        borderBottom: '1px solid var(--border)',
+      }}>
+        <button
+          onClick={() => leaveDrawerTo('/sessions')}
+          aria-label={pt ? 'Voltar para as sessões' : 'Back to sessions'}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4, minHeight: 44, padding: '0 10px 0 4px',
+            border: 'none', background: 'transparent', color: 'var(--text-secondary)',
+            fontFamily: 'inherit', fontSize: 14, borderRadius: 10, cursor: 'pointer',
+          }}
+        >
+          <ChevronLeft size={20} />{pt ? 'Sessões' : 'Sessions'}
+        </button>
+        <span style={{ marginLeft: 'auto' }}>
+          <NotificationBell lang={tPt} label={pt ? 'Caixa de entrada' : 'Inbox'} buttonStyle={{
+            display: 'flex', alignItems: 'center', gap: 6, minHeight: 44, padding: '0 12px',
+            borderRadius: 12, border: '1px solid var(--ag-tint-4)', background: 'var(--bg-card)',
+            color: 'var(--text-secondary)', fontFamily: 'inherit', fontSize: 13, cursor: 'pointer',
+          }} />
+        </span>
+      </div>
+    )
     centre = (
       <>
-      {/* ONE bar. It used to be two: this back row, and SessionPanel's own header directly
-          under it carrying the title, the tabs and the verbs. On a 390px screen that spent
-          ~100px of a 664px viewport on chrome before a single message — and the back arrow
-          already says where you are, so the word beside it was the least useful thing there.
-          The arrow keeps its own 44px target; the title takes the room the label gave up. */}
+      {/* ONE ICON AND THE TITLE (MOBILE.SESSION, owner-approved prototype v3, 2026-10-11).
+          This bar carried seven things — back, links, title, task chip, bell, metrics, verbs — and
+          the title, the one thing saying WHICH session this is, was squeezed to "[ LÍDER ] - M…".
+          Everything but the title moved into the panel the icon opens; the title gets the whole
+          width, on up to two lines. The dot on the icon is the glance the bar used to give: the
+          session is waiting on you, or the inbox has news (`lib/sessionDrawer.ts`). */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        minHeight: 44, padding: '0 10px', flexShrink: 0,
+        display: 'flex', alignItems: 'center', gap: 4,
+        minHeight: 56, padding: '4px 14px 4px 4px', flexShrink: 0,
         // Installed as a PWA this is the topmost thing on the screen, so it carries the
-        // status-bar band itself — without it the arrow and the tabs sat under the clock and
-        // the taps went to the status bar. See `--safe-top`.
-        paddingTop: 'var(--safe-top)',
+        // status-bar band itself — see `--safe-top`.
+        paddingTop: 'calc(var(--safe-top) + 4px)',
         borderBottom: '1px solid var(--border)', background: 'var(--bg-surface)',
         position: 'relative',
       }}>
         {/* Selection mode's face for this bar — see `ChatSelectionOverlay`. */}
-        <ChatSelectionOverlay lang={pt ? 'pt' : 'en'} padX={10} />
-        <button
-          onClick={() => navigate('/sessions')}
-          aria-label={pt ? 'Voltar para as sessões' : 'Back to sessions'}
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            // 44px is the mobile figure, and this is the only way back from this screen.
-            width: 44, height: 44, flexShrink: 0, marginLeft: -6,
-            border: 'none', background: 'transparent', color: 'var(--text-secondary)',
-            cursor: 'pointer',
-          }}
-        >
-          <ChevronLeft size={20} />
-        </button>
-
-        <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-            <SessionLinkInfo session={selected} links={sessionLinks(selected, fleet.rows)} lang={pt ? 'pt' : 'en'} isMobile onGo={p => navigate(p)} />
-            <span style={{
-              fontSize: 13, fontWeight: 650, color: 'var(--text-primary)', minWidth: 0,
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>
-              {selected.title}
-            </span>
-            <SessionTitleFlag
-              session={{
-                id: selected.id, title: selected.title,
-                ...(selected.harness ? { harness: selected.harness } : {}),
-                ...(selected.task ? { task: selected.task } : {}),
-              }}
-              lang={pt ? 'pt' : 'en'}
-              onLinked={refresh}
-            />
-          </span>
-          {/* The state stays, on its own line: it is the one fact that changes while you read,
-              and the row below is a conversation that does not repeat it. */}
-          <span style={{
-            fontSize: 10.5, color: 'var(--text-tertiary)',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            {selected.stateLabel}
-            {selected.project ? ` · ${selected.project}` : ''}
-          </span>
+        <ChatSelectionOverlay lang={tPt} padX={10} />
+        {sessionDrawerToggle({
+          open: sessionDrawer, dot: drawerDot, pt,
+          onClick: () => (sessionDrawer ? closeSessionDrawer() : openSessionDrawer()),
+        })}
+        <div data-session-title style={{
+          flex: 1, minWidth: 0, fontSize: 15, fontWeight: 650, lineHeight: 1.3,
+          color: 'var(--text-primary)',
+          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+          overflowWrap: 'anywhere',
+        }}>
+          {selected.title}
         </div>
-
-        {/* ONLY THE TITLE AND THE METRICS, and that is the whole of this bar's rule.
-            It carried the back arrow, `+ Filtro` with its word and badge, the view toggle, the
-            metrics with their percentage, the panel button and the verbs — about 382px of a
-            390px screen. The title block is `flex: 1, minWidth: 0`, so it was squeezed to
-            nothing and the one thing saying WHICH session you are looking at was not on screen.
-
-            Everything that is not the title or the metrics moved into the verbs' OWN menu —
-            not a second popover beside it, which would be the same accumulation rearranged.
-            The METRICS stay out here because the context percentage is read at a GLANCE and
-            changes what you do next: a conversation near its window is one to finish rather
-            than extend, and a figure you have to open a menu for is a figure nobody watches.
-            The view toggle went in with the rest: asked for directly, after it had been left
-            out here on the argument that two taps per switch was too many. */}
-        {magnifierButton}
-        {/* THE ONE CONTROL THAT STAYS BESIDE THE TITLE. Its own button, its own percentage —
-            the figure is the reason it is out here rather than in the menu. */}
-        {selected.conversationId !== undefined && (
-          <SessionStatsMenu
-            harness={selected.harness}
-            sessionId={selected.conversationId}
-            meta={selectedMeta}
-            lang={pt ? 'pt' : 'en'}
-            currency={currency}
-            brlRate={brlRate}
-            costBasis={ctx.costBasis}
-            planFactor={sessionPlanFactor(ctx.planBasis.basis, selected.harness)}
-            touch
-            // THE DELIVERY, one tap away. The name IS the ref the board resolves, so this
-            // costs no id lookup — see `lib/sessionTaskLink.ts`.
-            {...(selected.task ? { task: selected.task } : {})}
-            onOpenTask={ref => navigate(`/tasks/${encodeURIComponent(ref)}`)}
-            // The Live tab, on the running step when there is one — read from the artifacts store
-            // under this row's id, published by `onArtifacts` below.
-            rowId={selected.id}
-            onOpenLive={ref => openArtifacts('live', ref)}
-            // The full reading is a TAB in the aside, not a second dialog over the session —
-            // withheld when there is no record, exactly as the tab is.
-            {...(sessionMetrics ? { onOpenFull: () => openArtifacts('metrics') } : {})}
-            {...(selected.model ? { startedModel: selected.model } : {})}
-            {...(selected.effort ? { startedEffort: selected.effort } : {})}
-          />
-        )}
-
-        {rowIndex.get(selected.id) && (
-          <SessionActions
-            row={rowIndex.get(selected.id)!}
-            lang={pt ? 'pt' : 'en'}
-            act={act}
-            onGone={() => navigate('/sessions')}
-            onOpened={goToReopened}
-            /* THE VIEW SWITCH, AS THE SWITCH IT IS. It came off the bar and was briefly two
-               rows in this list, which is a different statement: two rows read as two things
-               you could pick, while a segmented control says they are ALTERNATIVES and which
-               one you are in. It is the same control the bar carried, with its labels back —
-               there is room for words in a 240px menu and there was none in a 390px bar.
-               Absent for a harness that can never name its conversation, exactly as before. */
-            /* `!isCentral` is dev's gate, kept: on a central the conversation is not relayed, so a
-               Chat tab there cannot do what it says. It moves with the control. */
-            {...(!isCentral ? {
-              extraTop: (close: () => void) => (
-                <div role="tablist" style={{
-                  display: 'flex', gap: 3, padding: 3, borderRadius: 10,
-                  background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-                }}>
-                  {([
-                    ['chat', pt ? 'Conversa' : 'Chat', <MessagesSquare key="c" size={15} />],
-                    ['terminal', 'Terminal', <TerminalSquare key="t" size={15} />],
-                  ] as const).map(([id, label, icon]) => (
-                    <button
-                      key={id}
-                      role="tab"
-                      aria-selected={sessionView === id}
-                      onClick={() => { setSessionView(id); close() }}
-                      style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                        // 44px, the figure this repo holds every mobile target to — and this
-                        // menu is opened with a thumb.
-                        flex: 1, minHeight: 44, borderRadius: 8, border: 'none',
-                        cursor: 'pointer', minWidth: 0,
-                        background: sessionView === id ? 'var(--bg-surface)' : 'transparent',
-                        color: sessionView === id ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
-                        fontFamily: 'inherit', fontSize: 12.5,
-                        fontWeight: sessionView === id ? 650 : 400,
-                      }}
-                    >
-                      {icon}
-                      <span style={{
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      }}>{label}</span>
-                    </button>
-                  ))}
-                </div>
-              ),
-            } : {})}
-            extra={[
-              /* THE FLOATING NAY BUTTON, on a phone. Inside a session it is hidden by default — it
-                 sat on the composer's send button — and this row brings it back (per viewer,
-                 `lib/nayFabVisibility.ts`). Desktop never hides it, so the row is phone-only. */
-              ...(isMobile ? [{
-                id: 'nay-fab',
-                label: pt ? 'Exibir chat flutuante' : 'Show floating chat',
-                icon: <MessageCircle size={15} />,
-                on: nayFabShown,
-                onSelect: () => setNayFabShownInSession(!nayFabShown),
-              }] : []),
-              {
-                id: 'filters',
-                label: pt ? 'Filtros' : 'Filters',
-                icon: <Plus size={15} />,
-                ...(filterCount > 0 ? { badge: String(filterCount) } : {}),
-                on: filterCount > 0,
-                onSelect: () => setSheetOpen(true),
-              },
-              {
-                id: 'artifacts',
-                label: pt ? 'Conteúdos da sessão' : 'Session contents',
-                icon: <FileText size={15} />,
-                // Reflects whether one of the ten former Contents tabs is the right slot's own
-                // active occupant right now — `panelSlots.isTabPanelId` names that domain, the
-                // in-panel switcher (`rightSwitcherMobile`) below already lets the reader pick a
-                // SPECIFIC one; this row is the quick "some content is showing" shortcut.
-                on: rightActivePanel !== null && isTabPanelId(rightActivePanel),
-                onSelect: () => {
-                  if (rightActivePanel !== null && isTabPanelId(rightActivePanel)) {
-                    closeSlotPanel(rightActivePanel)
-                  } else openSlotPanel('live')
-                },
-              },
-              /* AGENTISTICS STUDIO, on a phone. The desktop entry is a button on the sessions
-                 strip (`App.tsx`), which this layout does not render — the actions live in this
-                 menu instead, which is where the panel's own entry already is. A tile in the
-                 bottom nav's "More" sheet was the other candidate and is wrong: that sheet is
-                 machine-wide chrome and the Studio is about the SESSION you have open, which
-                 only this menu has.
-                 ABSENT when the gate is closed, never greyed — the same `editorEnabled` the
-                 aside reads, the server's own already-resolved answer with a CENTRAL already
-                 subtracted where the app publishes it (`lib/editorGate.ts`): the `/api/fleet`
-                 prefix is refused on a central, and this row used to be the one entry that
-                 offered the Studio there.
-                 NO `badge` ANY MORE (see §2 of the slots/references design): the desktop button
-                 dropped its `NewTag` for a dot that clears after the first open, and a row with
-                 no icon corner to put a dot on just drops the mark rather than keeping a word the
-                 other nav lost. The beta caveat stays on the Studio's own top bar, one tap away.
-                 `on: isPanelShown(slotLayout, 'studio')` mirrors the desktop button's pressed
-                 state — the same `panelSlots.ts` layout, so a reader who opened the Studio from
-                 THIS row and then came back to the menu finds it marked current. Built by
-                 `studioMenuRow` (above `SessionsPage`) rather than as a literal here, so its `on`
-                 wiring is asserted directly — see `SessionsPage.test.tsx`. */
-              ...(editorEnabled
-                ? [studioMenuRow(isPanelShown(slotLayout, 'studio'), <FolderTree size={15} />, () => openArtifacts('studio'))]
-                : []),
-            ]}
-          />
-        )}
       </div>
       {/* `display: flex` is the load-bearing part, not `flex: 1`.
           This div had `flex: 1, minHeight: 0` and no display, so it was a BLOCK. Its child —
@@ -2873,6 +2831,160 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           because the box that was supposed to scroll had no bounded height to scroll within.
           `flex: 1` on a child means nothing until its PARENT is a flex container. */}
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{panel}</div>
+
+      <Drawer open={sessionDrawer} side="left" title={drawerHeader} onClose={closeSessionDrawer} lang={tPt}>
+        <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.3, padding: '8px 2px 0', color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>
+          {selected.title}
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: 12.5, color: 'var(--text-secondary)', padding: '0 2px' }}>
+          <span>{selected.stateLabel}</span>
+          {selected.project && <><span aria-hidden>·</span><span>{selected.project}</span></>}
+          {selected.harness && (
+            <><span aria-hidden>·</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <HarnessMark harness={selected.harness} size={13} />
+                {(HARNESS_LABELS as Record<string, string>)[selected.harness] ?? selected.harness}
+              </span></>
+          )}
+        </div>
+
+        {drawerSection('view', pt ? 'Vista' : 'View', null, (
+          <div role="tablist" style={{
+            display: 'grid', gridTemplateColumns: `repeat(${viewTabs.length}, 1fr)`, gap: 3, padding: 3,
+            borderRadius: 10, background: 'var(--bg-elevated)',
+          }}>
+            {viewTabs.map(v => (
+              <button
+                key={v.id}
+                role="tab"
+                aria-selected={v.on}
+                onClick={() => { v.go(); if (v.id !== 'shell') closeSessionDrawer() }}
+                style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
+                  minHeight: 48, minWidth: 0, borderRadius: 8, border: 'none', cursor: 'pointer',
+                  background: v.on ? 'var(--bg-surface)' : 'transparent',
+                  color: v.on ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
+                  fontFamily: 'inherit', fontSize: 12, fontWeight: v.on ? 650 : 400,
+                }}
+              >
+                {v.icon}
+                <span style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.label}</span>
+              </button>
+            ))}
+          </div>
+        ))}
+
+        {selected.conversationId !== undefined && drawerSection(
+          'context', pt ? 'Contexto e custo' : 'Context and cost',
+          ctxStats?.context ? (
+            <>
+              <ContextRing fraction={ctxStats.context.fraction} size={22} />
+              <span style={{ fontWeight: 650 }}>{Math.floor(ctxStats.context.fraction * 100)}%</span>
+            </>
+          ) : null,
+          <SessionStatsMenu
+            inline
+            harness={selected.harness}
+            sessionId={selected.conversationId}
+            meta={selectedMeta}
+            lang={tPt}
+            currency={currency}
+            brlRate={brlRate}
+            costBasis={ctx.costBasis}
+            planFactor={sessionPlanFactor(ctx.planBasis.basis, selected.harness)}
+            touch
+            {...(selected.task ? { task: selected.task } : {})}
+            onOpenTask={ref => leaveDrawerTo(`/tasks/${encodeURIComponent(ref)}`)}
+            rowId={selected.id}
+            onOpenLive={ref => { closeSessionDrawer(); openArtifacts('live', ref) }}
+            {...(sessionMetrics ? { onOpenFull: () => { closeSessionDrawer(); openArtifacts('metrics') } } : {})}
+            {...(selected.model ? { startedModel: selected.model } : {})}
+            {...(selected.effort ? { startedEffort: selected.effort } : {})}
+          />,
+        )}
+
+        {drawerSection('limits', pt ? 'Limites de uso' : 'Usage limits', null, (
+          <button
+            type="button"
+            onClick={() => { closeSessionDrawer(); requestNayTab('limits') }}
+            aria-label={pt ? 'Ver todos os limites' : 'See every limit'}
+            style={{
+              all: 'unset', boxSizing: 'border-box', display: 'block', width: '100%', cursor: 'pointer',
+            }}
+          >
+            <PlanUsageSummary limits={planLimits.limits} registered={planLimits.registered} now={planLimits.now} lang={tPt} />
+          </button>
+        ))}
+
+        {drawerSection('session', pt ? 'Sessão' : 'Session', null, (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', minHeight: 44 }}>
+              <SessionTitleFlag
+                session={{
+                  id: selected.id, title: selected.title,
+                  ...(selected.harness ? { harness: selected.harness } : {}),
+                  ...(selected.task ? { task: selected.task } : {}),
+                }}
+                lang={tPt}
+                onLinked={refresh}
+              />
+            </div>
+            <SessionLinkPanel
+              links={sessionLinks(selected, fleet.rows) ?? { parent: null, children: [], task: null }}
+              {...(selected.startedAt ? { startedAt: selected.startedAt } : {})}
+              sessionId={sessionIdentityKey(selected)}
+              roleFallbackId={selected.id}
+              pt={pt}
+              isMobile
+              onGo={p => leaveDrawerTo(p)}
+            />
+          </div>
+        ))}
+
+        {rowIndex.get(selected.id) && drawerSection('actions', pt ? 'Ferramentas e ações' : 'Tools and actions', null, (
+          <>
+            {/* The magnifier and its pair render NOTHING unless the lenses are on, so a phone
+                that never enabled them gives up no row here. */}
+            <div style={{ display: 'flex', gap: 6 }}>
+              <MagnifierButton ctx={ctx} />
+              <HideLensesButton ctx={ctx} />
+            </div>
+            <SessionActions
+              inline
+              row={rowIndex.get(selected.id)!}
+              lang={tPt}
+              act={act}
+              onGone={() => leaveDrawerTo('/sessions')}
+              onOpened={id => { setSessionDrawer(false); goToReopened(id) }}
+              extra={[
+                /* THE FLOATING NAY BUTTON, on a phone. Inside a session it is hidden by default — it
+                   sat on the composer's send button — and this row brings it back (per viewer,
+                   `lib/nayFabVisibility.ts`). */
+                {
+                  id: 'nay-fab',
+                  label: pt ? 'Exibir chat flutuante' : 'Show floating chat',
+                  icon: <MessageCircle size={18} />,
+                  on: nayFabShown,
+                  onSelect: () => setNayFabShownInSession(!nayFabShown),
+                },
+                {
+                  id: 'filters',
+                  label: pt ? 'Filtros' : 'Filters',
+                  icon: <Plus size={18} />,
+                  ...(filterCount > 0 ? { badge: String(filterCount) } : {}),
+                  on: filterCount > 0,
+                  onSelect: () => { closeSessionDrawer(); setSheetOpen(true) },
+                },
+                /* AGENTISTICS STUDIO — ABSENT when the gate is closed, never greyed; see
+                   `studioMenuRow`. */
+                ...(editorEnabled
+                  ? [studioMenuRow(isPanelShown(slotLayout, 'studio'), <FolderTree size={18} />, () => { closeSessionDrawer(); openArtifacts('studio') })]
+                  : []),
+              ]}
+            />
+          </>
+        ))}
+      </Drawer>
       </>
     )
   } else if (isMobile) {

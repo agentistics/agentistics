@@ -20,7 +20,7 @@ import {
 import type { AppContext } from '../../lib/app-context'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { Drawer } from './Drawer'
+import { Drawer } from '../../components/Drawer'
 import {
   Checkbox,
   ConfirmModal,
