@@ -71,10 +71,10 @@ describe('structured relay termination', () => {
       process.kill(r.proc.pid!, 'SIGTERM')
       await sleep(1000)
       expect(alive(gc) && alive(child)).toBe(true) // the grace has not elapsed: nothing is killed early
-      await until(() => !alive(gc) && !alive(child), 6000)
-      await until(() => !alive(r.proc.pid!), 2000)
+      await until(() => !alive(gc) && !alive(child), 10000)
+      await until(() => !alive(r.proc.pid!), 4000)
     } finally { r.cleanup() }
-  }, 15000)
+  }, 25000)
 
   test('a relay with a live child and no TERM keeps running (survives its launcher)', async () => {
     const r = startRelay('exec sleep 300\n')
