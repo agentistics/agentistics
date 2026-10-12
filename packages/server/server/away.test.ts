@@ -129,13 +129,15 @@ describe('away live fan-out', () => {
       },
     }
   }
+  async function flushLive() { await new Promise<void>(resolve => setTimeout(resolve, 0)) }
 
   it('on: every live leader and worker hears it, exited sessions do not', async () => {
     resetAwayLiveDedupe()
     const l = live()
     const { d } = deps({ live: l.live })
     const r = await setAway({ on: true, authorised: ['releases'] }, d)
-    expect(r).toMatchObject({ ok: true, notified: 2 })
+    await flushLive()
+    expect(r).toMatchObject({ ok: true })
     expect(l.typed.map(t => t.id).sort()).toEqual(['L', 'W'])
     expect(l.typed.find(t => t.id === 'L')!.text).toContain('releases')
   })
@@ -145,12 +147,15 @@ describe('away live fan-out', () => {
     const l = live()
     const { d } = deps({ live: l.live })
     await setAway({ on: true }, d)
+    await flushLive()
     l.typed.length = 0
     await setAway({ on: true, authorised: ['merges'] }, d)
+    await flushLive()
     expect(l.typed.map(t => t.id)).toEqual(['L'])
     expect(l.typed[0]!.text).toContain('UPDATED')
     l.typed.length = 0
     await setAway({ on: true, authorised: ['merges'] }, d)
+    await flushLive()
     expect(l.typed).toEqual([])
   })
 
@@ -159,8 +164,10 @@ describe('away live fan-out', () => {
     const l = live()
     const { d } = deps({ live: l.live })
     await setAway({ on: true }, d)
+    await flushLive()
     l.typed.length = 0
     await setAway({ on: false }, d)
+    await flushLive()
     expect(l.typed.map(t => t.id).sort()).toEqual(['L', 'W'])
     expect(l.typed[0]!.text).toContain('OFF')
   })
@@ -171,8 +178,41 @@ describe('away live fan-out', () => {
     l.live.rows = async () => [{ id: 'L', running: true, away: true }]
     const { d } = deps({ live: l.live })
     await setAway({ on: true }, d)
+    await flushLive()
     l.typed.length = 0
     await setAway({ on: false }, d)
+    await flushLive()
     expect(l.typed.every(t => !t.text.includes('now OFF'))).toBe(true)
+  })
+
+  it('does not notify the verified leader that made the change', async () => {
+    resetAwayLiveDedupe()
+    const typed: string[] = []
+    const { d } = deps({
+      live: {
+        rows: async () => [{ id: 'lead', conversationId: 'c-lead', running: true }, { id: 'W', running: true }],
+        roleOf: async id => id === 'lead' ? 'leader' : 'worker',
+        prompt: async id => { typed.push(id); return { ok: true } },
+      },
+    })
+    await setAway({ on: true, session: { id: 'lead', token: 'good' } }, d)
+    await flushLive()
+    expect(typed).toEqual(['W'])
+  })
+
+  it('redacts a secret-looking note before typing a live notice', async () => {
+    resetAwayLiveDedupe()
+    const typed: string[] = []
+    const { d } = deps({
+      live: {
+        rows: async () => [{ id: 'L', running: true }],
+        roleOf: async () => 'leader',
+        prompt: async (_id, text) => { typed.push(text); return { ok: true } },
+      },
+    })
+    await setAway({ on: true, note: 'api_key=sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' }, d)
+    await flushLive()
+    expect(typed[0]).toContain('api_key=[REDACTED]')
+    expect(typed[0]).not.toContain('sk-ant-api03-AAAAAAAA')
   })
 })

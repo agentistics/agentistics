@@ -9,6 +9,7 @@
  */
 
 import { HARNESS_ORDER, type HarnessId } from './types'
+import { redactSecrets } from './redact'
 
 /** The closed list of things the owner can pre-authorise while away. */
 export const AWAY_AUTH_IDS = ['releases', 'workers', 'merges'] as const
@@ -188,7 +189,7 @@ function untilText(s: AwayState): string {
 function authText(s: AwayState): string {
   const list = s.authorised.map(a => AWAY_AUTH_TEXT[a])
   const base = list.length > 0 ? list.join('; ') : 'nothing beyond the rules below'
-  return s.note ? `${base}; owner's note: ${s.note}` : base
+  return s.note ? `${base}; owner's note: ${redactSecrets(s.note)}` : base
 }
 
 export interface AwayBriefingOptions {
@@ -334,7 +335,7 @@ export function awayStateSignature(s: AwayState | null): string {
 
 /**
  * The line typed into a RUNNING session when the GLOBAL switch (or what it authorises) changes, or
- * null when this session has nothing new to hear. A leader (or a session of unknown role) hears
+ * null when this session has nothing new to hear. A leader hears
  * every change of its effective state: on, off, or a different authorisation/until/ceiling. A
  * worker's briefing carries only "do not ask the owner", so it hears the on/off flips and nothing
  * else — an edit to what the leaders may do does not touch it. Pure: both states are passed in.

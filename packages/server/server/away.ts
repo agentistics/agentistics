@@ -50,9 +50,10 @@ export function resetAwayLiveDedupe(): void { lastTold.clear() }
  * state is not told again. Returns how many were reached. Delivery is the composer path, never an MCP
  * tool, so a session on an old MCP gets it too.
  */
-export async function notifyLiveSessions(before: AwayState, after: AwayState, deps: LiveAwayDeps, now: number): Promise<number> {
+export async function notifyLiveSessions(before: AwayState, after: AwayState, deps: LiveAwayDeps, now: number, exclude?: string): Promise<number> {
   const rows = (await deps.rows().catch(() => [])).filter(r => r.running)
   const results = await Promise.all(rows.map(async r => {
+    if (exclude !== undefined && (r.id === exclude || r.conversationId === exclude)) return 0
     const role = await deps.roleOf(r.id, r.conversationId).catch(() => undefined)
     const text = awayLiveNotice(before, after, r.away, role, now, { planLimitsInBriefing: deps.planLimitsInBriefing === true })
     if (text === null) return 0
@@ -76,8 +77,9 @@ export async function readAwayView(deps: Pick<AwayDeps, 'read' | 'now'>): Promis
 
 export async function setAway(body: unknown, deps: AwayDeps): Promise<AwayReply> {
   const o = (body && typeof body === 'object' ? body : {}) as { session?: { id?: unknown; token?: unknown } }
+  let sender: string | undefined
   if (o.session !== undefined) {
-    const sender = await deps.verify(o.session?.id, o.session?.token)
+    sender = await deps.verify(o.session?.id, o.session?.token) ?? undefined
     if (!sender) return { ok: false, error: 'unverified_sender' }
     if ((await deps.roleOf(sender)) !== 'leader') return { ok: false, error: 'leader_only' }
   }
@@ -86,8 +88,8 @@ export async function setAway(body: unknown, deps: AwayDeps): Promise<AwayReply>
   if (!n.ok) return { ok: false, error: n.error, ...(n.detail !== undefined ? { detail: n.detail } : {}) }
   const before = parseAwayState(await deps.read().catch(() => AWAY_OFF))
   await deps.write(n.state)
-  const notified = deps.live ? await notifyLiveSessions(before, n.state, deps.live, now).catch(() => 0) : undefined
-  return { ok: true, ...awayView(n.state, now), ...(notified !== undefined ? { notified } : {}) }
+  if (deps.live) void notifyLiveSessions(before, n.state, deps.live, now, sender).catch(() => {})
+  return { ok: true, ...awayView(n.state, now) }
 }
 
 /**
