@@ -50,7 +50,7 @@ import { catalogFields } from '../model-catalog-fields'
 import { artifactPathsFromTurns, type AllowedArtifact } from './artifact-file'
 import type { ArtifactResponse } from './artifact-web'
 import { readRegistry, patchSession } from './registry'
-import { sendHandoffHints, type HandoffHintRow } from './handoff-hint'
+import { computeHandoffWhy, sendHandoffHints, type HandoffHintRow } from './handoff-hint'
 
 // The REQUEST shape lives in the leaf `fleet-row.ts` so `index.ts` can name it without naming
 // this module — see the note there.
@@ -278,6 +278,16 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
           ...(managed?.handoffHintTokens !== undefined ? { hintedTokens: managed.handoffHintTokens } : {}),
           ...(view.contextTokens !== undefined ? { contextTokens: view.contextTokens } : {}),
           ...(view.contextWindow !== undefined ? { contextWindow: view.contextWindow } : {}),
+          ...(view.model !== undefined ? { model: view.model } : {}),
+          ...(view.turns !== undefined ? { turns: view.turns } : {}),
+          ...(view.costUSD !== undefined ? { costUSD: view.costUSD } : {}),
+          ...(view.activity !== undefined ? { activity: view.activity, state: view.activity } : {}),
+          ...((view.activity === 'working' || view.background) ? {
+            workInFlight: [
+              ...(view.activity === 'working' ? ['resposta principal'] : []),
+              ...(view.background ? ['trabalho em segundo plano'] : []),
+            ],
+          } : {}),
         }
       })
       await sendHandoffHints({
@@ -337,6 +347,33 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
   } finally {
     markFleetPhase('readFleet: total', totalStart)
   }
+}
+
+/** The numbers behind the leader's handoff hint, for the future modal and API clients. */
+export async function readHandoffWhy(lang: CliLang, id: string): Promise<ReturnType<typeof computeHandoffWhy> | null> {
+  await hostFor(lang)
+  const [raw, registry] = await Promise.all([fleetSessionHub().then(h => h.read()), readRegistry().catch(() => [])])
+  const view = raw.sessions.find(row => row.id === id)
+  if (!view) return null
+  const managed = registry.find(row => row.id === id)
+  const row: HandoffHintRow = {
+    id,
+    title: managed?.label ?? '',
+    ...(managed?.leader ? { leader: true } : {}),
+    ...(view.contextTokens !== undefined ? { contextTokens: view.contextTokens } : {}),
+    ...(view.contextWindow !== undefined ? { contextWindow: view.contextWindow } : {}),
+    ...(view.model !== undefined ? { model: view.model } : {}),
+    ...(view.turns !== undefined ? { turns: view.turns } : {}),
+    ...(view.costUSD !== undefined ? { costUSD: view.costUSD } : {}),
+    ...(view.activity !== undefined ? { activity: view.activity, state: view.activity } : {}),
+    ...((view.activity === 'working' || view.background) ? {
+      workInFlight: [
+        ...(view.activity === 'working' ? ['resposta principal'] : []),
+        ...(view.background ? ['trabalho em segundo plano'] : []),
+      ],
+    } : {}),
+  }
+  return computeHandoffWhy(row, { model: view.model ?? managed?.model })
 }
 
 /**

@@ -78,6 +78,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
     _approvals: 'session/reference approval deadlines; no secret material',
     _requestSeq: 'monotonic request id counter',
     _useTtlMs: 'how long a use request waits (a duration); a test seam',
+    _revokeListeners: 'engine lifecycle callbacks; session ids only, never secret material',
   },
   'server/server/vault/mobile.ts': {
     _now: 'a clock',

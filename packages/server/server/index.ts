@@ -2668,6 +2668,19 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       })
     }
 
+    // Explain the handoff recommendation for one leader. This is intentionally a read-only,
+    // session-specific route; the eventual modal can use it without rebuilding the whole fleet.
+    const handoffWhy = url.pathname.match(/^\/api\/sessions\/([^/]+)\/handoff-why$/)
+    if (handoffWhy && req.method === 'GET') {
+      const id = decodeURIComponent(handoffWhy[1]!)
+      const { readHandoffWhy, fleetLang } = await import('./sessions/fleet-web')
+      const out = await readHandoffWhy(fleetLang(url.searchParams.get('lang')), id)
+      return new Response(JSON.stringify(out ?? { error: 'not_found' }), {
+        status: out ? 200 : 404,
+        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      })
+    }
+
     // The same list PUSHED (ENGINE.MAP 09 §6): a `snapshot` of the requested view (every live row and
     // the `closed` most recent closed ones), then `delta` events — row upserts/removes and changed
     // fields — on every tick of the server's ONE poller (`session-hub.ts`). Protocol: `fleet-events.ts`.
