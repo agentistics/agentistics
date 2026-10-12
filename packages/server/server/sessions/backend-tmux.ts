@@ -10,11 +10,11 @@ import { highlightedRow, parseRewindMenu, REWIND_MAX_STEPS, rewindRowMatches } f
 import type { RewindOutcome } from './types'
 import {
   attachArgs, capturePaneArgs, captureManyArgs, captureTerminalArgs, splitCaptureMany, capturePaneAnsiArgs, idFromTmuxName, isSessionGoneError,
-  killSessionArgs, listSessionsArgs, paneInfoArgs, parsePaneInfo, parsePrefix, parseTmuxList,
+  killSessionArgs, listSessionsArgs, paneInfoArgs, parsePaneInfo, parsePrefix,
   tmuxListIsEmptyState,
   resolveDefaultTerminal, resolveTruecolorTerm, spawnArgs, sendKeysNamedArgs, sendKeysLiteralArgs, sendKeysNamedSequenceArgs,
   clearHistoryArgs, pasteBufferName, setBufferArgs, pasteBufferArgs,
-  showPrefixArgs, trimCapture, listPanePidsArgs, parsePanePids,
+  showPrefixArgs, trimCapture, fleetPanesArgs, parseFleetPanes, fleetPanesWithCapturesArgs, splitFleetPanesWithCaptures,
   type TerminalProfile,
 } from './tmux-cli'
 import { collectOwnPids, escalateKill, procIO } from './kill-escalate'
@@ -115,6 +115,51 @@ async function tmux(args: string[]): Promise<{ code: number; out: string; err: s
     // callers are meant to consult — no throw, so a missing tmux never crashes a caller.
     return { code: 127, out: '', err: '' }
   }
+}
+
+/**
+ * ONE `list-panes -a` answers both `list()` and `listPanePids()` (`parseFleetPanes`). Callers asking at
+ * the same moment — the fleet poll asks both in one `Promise.all` — share the read IN FLIGHT; nothing
+ * is kept once it settles, so a caller arriving later (a spawn confirming its session) always reads
+ * tmux afresh.
+ *
+ * PERF.IDLE: it also carries the screen captures the poll is about to ask for — the ids `captureMany`
+ * was last given — so a poll is one tmux process, not two. They are handed to the very next
+ * `captureMany` (`takePrefetched`) only if it asks within `PREFETCH_TTL_MS` for the same depth; any id
+ * not answered that way is captured exactly as before.
+ */
+let fleetPanesInFlight: Promise<{ code: number; out: string; err: string }> | null = null
+let captureHint: { ids: string[]; lines: number } | null = null
+let prefetched: { atMs: number; lines: number; frames: Map<string, string[]> } | null = null
+const PREFETCH_TTL_MS = 2_000
+
+function fleetPanes(): Promise<{ code: number; out: string; err: string }> {
+  if (fleetPanesInFlight) return fleetPanesInFlight
+  const hint = captureHint
+  const ids = hint ? hint.ids.slice(0, CAPTURE_MANY_CHUNK) : []
+  const p = (async () => {
+    if (!hint || ids.length === 0) return tmux(fleetPanesArgs())
+    const listSep = `agentop-list-${randomUUID()}`
+    const sep = `agentop-capture-${randomUUID()}`
+    const r = await tmux(fleetPanesWithCapturesArgs(ids, hint.lines, listSep, sep))
+    const cut = splitFleetPanesWithCaptures(r.out, ids.length, listSep, sep)
+    // A capture that failed stops the sequence and sets the exit code; the LISTING is judged on its own.
+    if (!cut.listOk) return r
+    const frames = new Map<string, string[]>()
+    cut.frames.forEach((f, i) => { if (f) frames.set(ids[i]!, f) })
+    prefetched = { atMs: Date.now(), lines: hint.lines, frames }
+    return { code: 0, out: cut.listOut, err: '' }
+  })().finally(() => { if (fleetPanesInFlight === p) fleetPanesInFlight = null })
+  fleetPanesInFlight = p
+  return p
+}
+
+/** The frames the last listing captured for `ids`, once — see `fleetPanes`. */
+function takePrefetched(ids: string[], lines: number): Map<string, string[]> {
+  const got = prefetched
+  prefetched = null
+  if (!got || got.lines !== lines || Date.now() - got.atMs > PREFETCH_TTL_MS) return new Map()
+  return new Map(ids.flatMap(id => { const f = got.frames.get(id); return f ? [[id, f] as const] : [] }))
 }
 
 /**
@@ -675,14 +720,14 @@ export const tmuxBackend: SessionBackend = {
     // a failure and THROWS — see `tmuxListIsEmptyState`. Swallowing them made a tmux that could not
     // be reached report every session as gone, which is the one answer a fleet monitor must never
     // give by accident.
-    const { code, out, err } = await tmux(listSessionsArgs())
+    const { code, out, err } = await fleetPanes()
     // BOTH streams: with no server tmux says nothing on stdout and puts its reason on stderr, so a
     // stdout-only test would call the ordinary first-run state a failure. See `tmuxListIsEmptyState`.
     if (!tmuxListIsEmptyState(code, out, err)) {
       const said = (err.trim() || out.trim()).split('\n')[0]
       throw new Error(said || `tmux list-sessions failed (code ${code})`)
     }
-    return parseTmuxList(out)
+    return parseFleetPanes(out).sessions
   },
 
   async capture(id: string, lines: number) {
@@ -692,9 +737,11 @@ export const tmuxBackend: SessionBackend = {
   },
 
   async captureMany(ids: string[], lines: number) {
-    const frames = new Map<string, string[]>()
-    for (let at = 0; at < ids.length; at += CAPTURE_MANY_CHUNK) {
-      const chunk = ids.slice(at, at + CAPTURE_MANY_CHUNK)
+    captureHint = { ids: [...ids], lines }
+    const frames = takePrefetched(ids, lines)
+    const missing = ids.filter(id => !frames.has(id))
+    for (let at = 0; at < missing.length; at += CAPTURE_MANY_CHUNK) {
+      const chunk = missing.slice(at, at + CAPTURE_MANY_CHUNK)
       const sep = `agentop-capture-${randomUUID()}`
       const { out } = await tmux(captureManyArgs(chunk, lines, sep))
       const got = splitCaptureMany(out, chunk.length, sep)
@@ -758,7 +805,7 @@ export const tmuxBackend: SessionBackend = {
   },
 
   async listPanePids(): Promise<Map<string, number>> {
-    const { out } = await tmux(listPanePidsArgs())
-    return parsePanePids(out)
+    const { out } = await fleetPanes()
+    return parseFleetPanes(out).panePids
   },
 }

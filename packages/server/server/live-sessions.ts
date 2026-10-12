@@ -1,4 +1,6 @@
 import { readdir, readlink, readFile } from 'fs/promises'
+import { readFileSync } from 'node:fs'
+import { readProcTable } from './resources/proc-read'
 import type { HarnessId, LiveUnavailableReason, SessionMeta } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, HOME_DIR } from './config'
 
@@ -567,7 +569,24 @@ export async function scanProcesses(): Promise<{
   if (process.platform !== 'linux') {
     return { procs: [], unavailable: detectionUnavailable({ platform: process.platform, procReadable: false, foreignPids: 0, cwdDenied: false }) }
   }
-  return scanLinuxProcesses()
+  return sharedLinuxScan()
+}
+
+/**
+ * PERF.IDLE: the fleet poll and every `/api/data` request (its live-session fields) each swept every
+ * process on the machine — and a `change` event sends every open dashboard to `/api/data` at the same
+ * moment. One sweep is shared by every caller inside `SCAN_SHARE_MS` (and by every caller while it is
+ * in flight), which keeps the answer as live as a person can tell.
+ */
+const SCAN_SHARE_MS = 1_000
+let sharedScan: { atMs: number; p: ReturnType<typeof scanLinuxProcesses> } | null = null
+function sharedLinuxScan(): ReturnType<typeof scanLinuxProcesses> {
+  const nowMs = Date.now()
+  if (sharedScan && nowMs - sharedScan.atMs < SCAN_SHARE_MS && nowMs >= sharedScan.atMs) return sharedScan.p
+  const p = scanLinuxProcesses()
+  sharedScan = { atMs: nowMs, p }
+  void p.catch(() => { if (sharedScan?.p === p) sharedScan = null })
+  return p
 }
 
 /** Linux reader with an injectable procfs root so every process rule can be tested with fixtures. */
@@ -589,6 +608,10 @@ export async function scanLinuxProcesses(procRoot = '/proc'): Promise<{
   const hz = 100 // USER_HZ is 100 on every Linux this runs on; only used to scale start ticks.
   const procs: HarnessProcess[] = []
   const numeric = pids.filter(p => /^\d+$/.test(p))
+  // On the real /proc the identities come from the process table the governor's sweep shares
+  // (`readProcTable`, one in-line read of every `stat` per second) instead of a second read of each.
+  const table = procRoot === '/proc' ? readProcTable() : null
+  const tableIdentity = table ? new Map(table.map(r => [String(r.pid), `${r.pid}:${r.starttime}:${r.comm}`])) : null
   const own = String(process.pid)
   // A container without `pid: host` sees only its own process tree, so this is what separates
   // "nothing is running" from "this configuration cannot see the host at all".
@@ -602,7 +625,8 @@ export async function scanLinuxProcesses(procRoot = '/proc'): Promise<{
       // of them is a harness. A process already found not to be one is skipped on one small read: its
       // identity is the pid + the kernel's start time + its comm (an exec changes the comm), all in
       // /proc/<pid>/stat. No stat (a fixture, a vanished process) is simply no memo.
-      const identity = await processIdentity(pid, procRoot)
+      const identity = tableIdentity ? (tableIdentity.get(pid) ?? null) : processIdentity(pid, procRoot)
+      if (tableIdentity && identity === null) return // no stat on the real /proc: the process is gone
       if (identity) {
         seen.add(identity)
         if (notHarness.has(identity)) return
@@ -618,8 +642,16 @@ export async function scanLinuxProcesses(procRoot = '/proc'): Promise<{
       const harness = harnessOfProcess(comm, exePath, argv)
       if (!harness) { if (identity) notHarness.add(identity); return }
       const envRaw = await readFile(`${procRoot}/${pid}/environ`, 'utf-8').catch(() => '')
-      if (!envRaw || !belongsToServerEnvironment(parseProcEnviron(envRaw))) return
-      if (isNonInteractiveInvocation(harness, argv)) return
+      // Both refusals below rest on what an exec fixes for good — the initial environment and argv —
+      // so they are remembered under the same identity as "not a harness": every assistant of ANOTHER
+      // home or data dir on this machine (the user's own fleet, beside a second server) was otherwise
+      // re-read, environment and all, on every poll (PERF.IDLE). An unreadable environment is not
+      // remembered: that may be a race with the exec, and the next poll asks again.
+      if (!envRaw) return
+      if (!belongsToServerEnvironment(parseProcEnviron(envRaw)) || isNonInteractiveInvocation(harness, argv)) {
+        if (identity) notHarness.add(identity)
+        return
+      }
       // A harness we could identify but whose cwd we may not read is the signature of a container
       // running under a uid that cannot ptrace the host user — record it rather than skipping in
       // silence, or the panel reports an empty, confident zero.
@@ -654,8 +686,11 @@ function notHarnessMemo(procRoot: string): Set<string> {
 }
 
 /** `pid:starttime:comm` from /proc/<pid>/stat, or `null` when it cannot be read whole. */
-async function processIdentity(pid: string, procRoot: string): Promise<string | null> {
-  const raw = await readFile(`${procRoot}/${pid}/stat`, 'utf-8').catch(() => '')
+function processIdentity(pid: string, procRoot: string): string | null {
+  // In line, not through the thread pool: one small procfs read per process on the machine, every
+  // fleet poll — several hundred async reads at once cost ~3x the CPU of reading them here (PERF.IDLE).
+  let raw = ''
+  try { raw = readFileSync(`${procRoot}/${pid}/stat`, 'utf-8') } catch { /* gone, or a fixture without stat */ }
   const open = raw.indexOf('('), close = raw.lastIndexOf(')')
   if (open < 0 || close < open) return null
   const ticks = raw.slice(close + 2).split(' ')[19]

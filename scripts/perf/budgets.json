@@ -54,7 +54,7 @@
     "tmuxPerMinN50": {
       "label": "tmux invocations per minute (N=50, C=1)",
       "max": 60,
-      "level": "warn",
+      "level": "fail",
       "unit": "/min"
     },
     "fleetFirstFrameKB": {

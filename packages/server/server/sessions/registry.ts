@@ -22,7 +22,7 @@
  *  - a mutation that changes nothing (`remove` of an id that was never there) does not write at all.
  */
 
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { MANAGED_SESSIONS_FILE } from '../config'
@@ -224,7 +224,25 @@ export function createSessionRegistry(file: string): SessionRegistry {
   // moves them aside instead of walking straight over them — see `quarantineCorrupt`.
   let corrupt = false
 
+  // PERF.IDLE: the registry is read by every fleet poll, many routes and the hint pass, and the file
+  // changes only when somebody writes it — so the PARSE is kept per file version (inode + size + mtime
+  // in ns: every write here is a rename, i.e. a new inode; a hand edit moves the mtime — the one
+  // change it cannot see is an in-place rewrite of the same size within one kernel tick). `sanitize`
+  // still runs on every read and builds fresh objects, so a caller that edits what it was given (the
+  // poller does) can never reach the kept copy.
+  let parsedMemo: { key: string; parsed: unknown[] } | null = null
+
   async function read(): Promise<ManagedSession[]> {
+    let key: string | null = null
+    try {
+      const st = await stat(file, { bigint: true })
+      key = `${st.ino}:${st.size}:${st.mtimeNs}`
+    } catch { /* absent, or unreadable: the read below says which */ }
+    if (key !== null && parsedMemo?.key === key) {
+      corrupt = false
+      return parsedMemo.parsed.map(sanitize).filter((s): s is ManagedSession => s !== null)
+    }
+    parsedMemo = null
     let text: string
     try {
       text = await readFile(file, 'utf-8')
@@ -237,6 +255,12 @@ export function createSessionRegistry(file: string): SessionRegistry {
       const parsed = JSON.parse(text)
       if (!Array.isArray(parsed)) throw new Error('managed-sessions.json is not an array')
       corrupt = false
+      // Kept only when the version read is the one stat saw — a write landing between the two leaves
+      // nothing behind to be served stale.
+      if (key !== null) {
+        const after = await stat(file, { bigint: true }).catch(() => null)
+        if (after && `${after.ino}:${after.size}:${after.mtimeNs}` === key) parsedMemo = { key, parsed }
+      }
       return parsed.map(sanitize).filter((s): s is ManagedSession => s !== null)
     } catch {
       // Corrupt or hand-mangled JSON. Reading it empty keeps every caller working; the flag makes

@@ -8,12 +8,12 @@ import { scanLinuxProcesses } from './live-sessions'
 const root = mkdtempSync(join(tmpdir(), 'proc-memo-'))
 afterAll(() => rmSync(root, { recursive: true, force: true }))
 
-function proc(pid: string, o: { comm: string; statComm?: string; argv: string[]; start?: number }) {
+function proc(pid: string, o: { comm: string; statComm?: string; argv: string[]; start?: number; home?: string }) {
   const d = join(root, pid)
   mkdirSync(join(d, 'fd'), { recursive: true })
   writeFileSync(join(d, 'comm'), `${o.comm}\n`)
   writeFileSync(join(d, 'cmdline'), o.argv.join('\0') + '\0')
-  writeFileSync(join(d, 'environ'), `HOME=${HOME_DIR}\0`)
+  writeFileSync(join(d, 'environ'), `HOME=${o.home ?? HOME_DIR}\0`)
   // 52 fields; field 22 (index 19 after the comm) is the start time.
   const after = Array.from({ length: 50 }, (_, i) => (i === 19 ? String(o.start ?? 5) : '0'))
   writeFileSync(join(d, 'stat'), `${pid} (${o.statComm ?? o.comm}) S ${after.slice(1).join(' ')}`)
@@ -40,5 +40,21 @@ describe('scanLinuxProcesses — the not-a-harness memo (PERF.SLOW)', () => {
   it('an exec (new comm in stat) or a new process on the pid is read again', async () => {
     proc('100', { comm: 'claude', statComm: 'claude', argv: ['claude'] })
     expect((await scanLinuxProcesses(root)).procs.map(p => p.pid).sort()).toEqual([100, 200])
+  })
+  it('a harness of ANOTHER home is remembered as not ours, and re-read only on a new identity (PERF.IDLE)', async () => {
+    proc('300', { comm: 'claude', argv: ['claude'], home: '/home/someone-else' })
+    expect((await scanLinuxProcesses(root)).procs.map(p => p.pid)).not.toContain(300)
+    // Its environment cannot change after exec; a memo hit must not read it again.
+    writeFileSync(join(root, '300', 'environ'), `HOME=${HOME_DIR}\0`)
+    expect((await scanLinuxProcesses(root)).procs.map(p => p.pid)).not.toContain(300)
+    // A new process on the pid (new start time) is judged afresh.
+    proc('300', { comm: 'claude', argv: ['claude'], start: 9 })
+    expect((await scanLinuxProcesses(root)).procs.map(p => p.pid)).toContain(300)
+  })
+  it('a one-shot invocation (`-p`) is remembered too', async () => {
+    proc('400', { comm: 'claude', argv: ['claude', '-p', 'hi'] })
+    expect((await scanLinuxProcesses(root)).procs.map(p => p.pid)).not.toContain(400)
+    writeFileSync(join(root, '400', 'cmdline'), 'claude\0')
+    expect((await scanLinuxProcesses(root)).procs.map(p => p.pid)).not.toContain(400)
   })
 })

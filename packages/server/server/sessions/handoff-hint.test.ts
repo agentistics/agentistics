@@ -64,4 +64,20 @@ describe('LEADER.HANDOFF.HINT', () => {
     expect(f.st.level).toBe(0)
     expect(await sendHandoffHints(f.deps(true))).toBe(1)
   })
+
+  it('a row the caller already knows needs no hint is not read fresh (PERF.IDLE)', async () => {
+    let reads = 0
+    const deps = {
+      rows: async () => [
+        { id: 'worker', title: 'worker', contextTokens: 900_000, contextWindow: 1_000_000 },
+        { id: 'lead', title: '[ LEADER ] x', contextTokens: 10_000, contextWindow: 1_000_000 },
+        { id: 'done', title: '[ LEADER ] y', contextTokens: 160_000, contextWindow: 1_000_000, hintedLevel: 1, hintedTokens: 150_000 },
+      ],
+      prompt: async () => ({ ok: true }),
+      hinted: async () => { reads++; return { level: 0 } },
+      markHinted: async () => true,
+    }
+    expect(await sendHandoffHints(deps)).toBe(0)
+    expect(reads).toBe(0)
+  })
 })

@@ -786,7 +786,7 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          poll at a time), TIMER-DRIVEN ON DEMAND (ticks every `SESSION_POLL_MS`
   │                          while something subscribes — the in-server event producer, an
   │                          `/api/fleet/events` stream, a chat waiting for its link — or a reader asked
-  │                          within the 30 s lease; with no demand it polls NOTHING), and `refresh()`
+  │                          within the 15 s lease; with no demand it polls NOTHING), and `refresh()`
   │                          after an act (`kickFleet`, a poll that STARTS after the act). `/api/fleet`,
   │                          `/api/fleet/snapshot`, the chat streams, a send's `record()` and the event
   │                          producer all READ it — the producer no longer runs a poller of its own in
