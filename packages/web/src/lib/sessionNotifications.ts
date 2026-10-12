@@ -498,12 +498,17 @@ const muteKeyById = new Map<string, string>()
 function isMutedId(id: string): boolean {
   return isSessionMuted(muteKeyById.get(id) ?? id)
 }
+function isWorkerMutedId(id: string, event: NotifyEvent): boolean {
+  // Match server roleOfRow: the conversation role wins; its registered alias falls back to the
+  // managed id when only that identity has a role. Checking the managed id first reverses this.
+  return isWorkerMuted(muteKeyById.get(id) ?? id, event)
+}
 
 function deliver(d: Delivery, settings: NotificationSettings): void {
   // MUTE SUPPRESSES DELIVERY ONLY — bell, card, shock, sound. The session's state (`waiting`) is
   // computed upstream of here and never touched. The observer still sees it: it is the decision log.
   if (isMutedId(d.bell.id)) return
-  if (isWorkerMuted(d.bell.id, d.event)) return
+  if (isWorkerMutedId(d.bell.id, d.event)) return
   deliveryObserver?.({ event: d.event, title: d.title, body: d.body, nay: d.nay === true })
   if (typeof document !== 'undefined') {
     pushNotification({
@@ -530,7 +535,7 @@ setSnoozeReleaseHandler(alert => {
   if (!settings.enabled || settings.doNotDisturb) return
   if (isMutedId(alert.sessionId)) return
   const event: NotifyEvent = alert.kind === 'turn' ? 'waiting' : alert.kind === 'approval' ? 'waiting-approval' : 'stale'
-  if (isWorkerMuted(alert.sessionId, event)) return
+  if (isWorkerMutedId(alert.sessionId, event)) return
   if (!pushAlert(alert)) return
   if (settings.soundEnabled) playNotificationSound(resolveSound(event, alert.nay === true, settings), settings.soundVolume)
 })

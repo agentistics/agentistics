@@ -316,6 +316,46 @@ describe('muted workers', () => {
     expect(sounds).toBe(0)
   })
 
+  for (const conversationRole of ['leader', 'worker'] as const) {
+    const managedRole = conversationRole === 'leader' ? 'worker' : 'leader'
+    const muted = conversationRole === 'worker'
+
+    it(`uses conversation ${conversationRole} over managed ${managedRole} for every delivery channel`, () => {
+      setSessionRole('mute-worker-managed', managedRole)
+      setSessionRole('mute-worker-conversation', conversationRole)
+      setMuteWorkers(true)
+      const row = { id: 'mute-worker-managed', conversationId: 'mute-worker-conversation' }
+      let prev = notifyFleetTransitions(null, [{ ...row, state: 'working' }], 'en')
+      for (const state of ['waiting', 'waiting-approval', 'working']) {
+        prev = notifyFleetTransitions(prev, [{ ...row, state }], 'en')
+        prev = notifyFleetTransitions(prev, [{ ...row, state }], 'en')
+        expect(readNayAlerts()).toHaveLength(muted || state === 'working' ? 0 : 1)
+      }
+      expect(captured).toHaveLength(muted ? 0 : 3)
+      expect(bells).toHaveLength(muted ? 0 : 3)
+      expect(sounds).toBe(muted ? 0 : 9)
+    })
+
+    it(`uses conversation ${conversationRole} over managed ${managedRole} when a snoozed alert returns`, async () => {
+      setSessionRole('mute-worker-managed', managedRole)
+      setSessionRole('mute-worker-conversation', conversationRole)
+      setMuteWorkers(false)
+      const row = { id: 'mute-worker-managed', conversationId: 'mute-worker-conversation' }
+      let prev = notifyFleetTransitions(null, [{ ...row, state: 'working' }], 'en')
+      prev = notifyFleetTransitions(prev, [{ ...row, state: 'waiting-approval' }], 'en')
+      notifyFleetTransitions(prev, [{ ...row, state: 'waiting-approval' }], 'en')
+      expect(readNayAlerts()).toHaveLength(1)
+      expect(sounds).toBe(3)
+      snoozeAlert(readNayAlerts()[0]!.key, 60_000, 0)
+      setMuteWorkers(true)
+      releaseDue(60_000)
+      await Promise.resolve()
+      expect(readNayAlerts()).toHaveLength(muted ? 0 : 1)
+      expect(sounds).toBe(muted ? 3 : 6)
+      expect(bells).toHaveLength(1)
+    })
+  }
+
   for (const muteOnReturn of [false, true]) {
     it(`a snoozed worker approval ${muteOnReturn ? 'stays silent when muted' : 'returns with sound when unmuted'}`, async () => {
       setSessionRole('mute-worker-conversation', 'worker')
