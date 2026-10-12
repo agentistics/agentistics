@@ -78,6 +78,8 @@ export interface CustomGridItem {
 }
 
 export interface Preferences {
+  /** Server-owned leadership check-in agendas, keyed by conversation id. */
+  checkin?: Record<string, unknown>
   /** Opt out of automatic managed briefing skill updates at server start. */
   briefingAutoInstall?: boolean
   /** Additional filesystem roots offered by the session/project discovery wizard. */
