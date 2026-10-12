@@ -117,6 +117,7 @@ export interface SessionPanelProps {
    * then the enlarge control is ABSENT too rather than inert.
    */
   onOpenTerminal?: () => void
+  onOpenCheckin?: () => void
   /**
    * Take WHICHEVER PANE the docked band is showing — `cli` or `shell` — to its own screen. Absent
    * where there is no route to take it to. The band tells this callback which one it is on
@@ -188,7 +189,7 @@ export interface SessionPanelProps {
 
 export function SessionPanel({
   session, row, lang, theme, act, authorName, onGone, onOpened, view: viewProp, onViewChange,
-  onArtifacts, metrics, shellEnabled, shellCapable, onShellEnabledChange, editorEnabled, onOpenTerminal,
+  onArtifacts, metrics, shellEnabled, shellCapable, onShellEnabledChange, editorEnabled, onOpenTerminal, onOpenCheckin,
   onOpenShellFullscreen, onStudioBandRef, hardwareOffered, studioSeen = true,
   studioFullscreen, onStudioFullscreenChange,
   bottomTabPane, bottomTabFullscreen, onBottomTabFullscreenChange,
@@ -477,6 +478,7 @@ export function SessionPanel({
             {...(onArtifacts ? { onArtifacts } : {})}
             {...(metrics ? { metrics } : {})}
             {...(onOpened ? { onReopened: onOpened } : {})}
+            {...(onOpenCheckin ? { onOpenCheckin } : {})}
           />
         ) : active === 'chat' ? (
           <SessionChat
@@ -487,6 +489,7 @@ export function SessionPanel({
             /* THE SAME callback the row's menu gets. There are two Reopen buttons on this
                screen — the menu's verb and the composer's — and they must land in one place. */
             {...(onOpened ? { onReopened: onOpened } : {})}
+            {...(onOpenCheckin ? { onOpenCheckin } : {})}
             {...(onOpenTerminal ? { onOpenTerminal } : {})}
           />
         ) : (

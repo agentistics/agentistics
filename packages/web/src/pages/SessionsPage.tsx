@@ -2078,6 +2078,9 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       onBottomTabFullscreenChange={setTabFullscreen}
       // The terminal's own screen. A route, so it survives a reload and can be sent to somebody.
       onOpenTerminal={() => navigate(dedicatedTerminalPath(selected.id))}
+      onOpenCheckin={() => {
+        if (isMobile) { openSessionDrawer(); setDrawerCheckinOpen(true) }
+      }}
       // WHICHEVER PANE the band is showing right now (`target`) — never a fixed `'shell'`. See
       // `paneForTarget`'s own header for the defect this closes.
       onOpenShellFullscreen={target => navigate(dedicatedTerminalPath(selected.id, paneForTarget(target)))}

@@ -237,6 +237,7 @@ export interface SessionChatProps {
     => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' | 'unconfirmed' }>
   /** Switch to the live terminal when a failed write found a blocking prompt. */
   onOpenTerminal?: () => void
+  onOpenCheckin?: () => void
   /**
    * The files this session has touched, reported up as the conversation is read.
    *
@@ -325,7 +326,7 @@ const menuItemStyle = (mobile: boolean) => ({
 
 interface Attachment { name: string; path: string }
 
-export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onReopened, onOpenTerminal, metrics, source, focusComposerOnMount }: SessionChatProps) {
+export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onReopened, onOpenTerminal, onOpenCheckin, metrics, source, focusComposerOnMount }: SessionChatProps) {
   // Every verb goes through the source when there is one (the native runtime's send/stop/answer).
   const act = source?.act ?? actProp
   const pt = lang === 'pt'
@@ -2562,6 +2563,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               {...(turnAnchors[i] ? { anchorId: turnAnchors[i]! } : {})}
               {...(t.role === 'user' ? (() => { const grant = vaultGrantMessage(t.text, sessionGrants, pt); return grant ? { vaultGrant: grant } : {} })() : {})}
               {...(t.role === 'user' ? { onQuoteClick: onSentQuote } : {})}
+              {...(onOpenCheckin ? { onOpenCheckin } : {})}
               {...(canPrompt && selecting === null ? { onReply: onReplyToTurn } : {})}
               {
                 // Forwarding and selecting READ this conversation, so they need nothing from the

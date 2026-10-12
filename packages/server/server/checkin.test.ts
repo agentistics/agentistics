@@ -43,6 +43,10 @@ function reset() {
 }
 
 describe('check-in agenda', () => {
+  test('scheduled prompts carry the stable system marker', () => {
+    expect(promptFor(defaultConfig())).toStartWith('[agentistics · check-in]\nFaça o check-in da liderança agora.')
+  })
+
   test('defaults are complete and scheduled', async () => {
     reset()
     const state = await stateFor('conversation-leader', 1_000)

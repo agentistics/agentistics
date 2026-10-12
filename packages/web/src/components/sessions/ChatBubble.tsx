@@ -49,6 +49,7 @@ import { dialogButtonStyle } from '../../pages/settings/primitives'
 import { sentSegments } from '../../lib/replyQuote'
 import { QuoteBlock } from '../chat/QuoteBlock'
 import { shellRunViewModel } from '../../lib/shellRun'
+import { checkinPromptBody, isCheckinPrompt } from '../../lib/checkinPrompt'
 
 export interface ChatTurn {
   role: 'user' | 'assistant'
@@ -196,6 +197,7 @@ export interface ChatBubbleProps {
   onToggleSelect?: (turn: ChatTurn) => void
   /** Metadata for a user message that granted vault credentials. Values are never carried here. */
   vaultGrant?: VaultGrantMessage
+  onOpenCheckin?: () => void
 }
 
 /** How long a finger must rest on a bubble before its menu opens, ms — the platform's own feel. */
@@ -351,7 +353,24 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
   )
 }
 
-export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessionId, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, onQuoteClick, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect, vaultGrant }: ChatBubbleProps) {
+function CheckinNotice({ text, pt, onOpen }: { text: string; pt: boolean; onOpen?: () => void }) {
+  const [open, setOpen] = useState(false)
+  return <div style={{ display: 'flex', justifyContent: 'center', padding: '2px 0' }}>
+    <div style={{ width: 'min(100%, 560px)', border: '1px solid var(--border-subtle)', borderRadius: 10, background: 'var(--bg-elevated)', overflow: 'hidden' }}>
+      <button type="button" aria-expanded={open} onClick={() => setOpen(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 7, width: '100%', minHeight: 36, padding: '6px 10px', border: 0, background: 'transparent', color: 'var(--text-secondary)', font: 'inherit', fontSize: 11.5, textAlign: 'left', cursor: 'pointer' }}>
+        <ListChecks size={14} style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
+        <span style={{ fontWeight: 650 }}>{pt ? 'Check-in da liderança · sistema' : 'Leadership check-in · system'}</span>
+        <ChevronDown size={14} style={{ marginLeft: 'auto', transform: open ? 'rotate(180deg)' : 'none' }} />
+      </button>
+      {open && <div style={{ padding: '0 10px 8px', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{checkinPromptBody(text)}</div>}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0 10px 8px' }}>
+        <button type="button" onClick={onOpen} disabled={!onOpen} style={{ minHeight: 44, padding: '6px 12px', border: '1px solid var(--border)', borderRadius: 7, background: 'var(--bg-surface)', color: 'var(--text-primary)', font: 'inherit', fontSize: 12, cursor: onOpen ? 'pointer' : 'default' }}>{pt ? 'Abrir check-in' : 'Open check-in'}</button>
+      </div>
+    </div>
+  </div>
+}
+
+export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessionId, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, onQuoteClick, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect, vaultGrant, onOpenCheckin }: ChatBubbleProps) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const mine = turn.role === 'user'
@@ -554,6 +573,10 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessio
         </span>
       </div>
     )
+  }
+
+  if (isCheckinPrompt(turn.text)) {
+    return <CheckinNotice text={turn.text} pt={pt} onOpen={onOpenCheckin} />
   }
 
   if (turn.system) {
