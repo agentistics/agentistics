@@ -39,6 +39,7 @@ import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefC
 import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
 import { addSession, newSessionId, patchSession, readRegistry, retireFallenSessions, retireSession } from './registry'
 import { loadConversations } from './conversations'
+import { callerIsLeader, fileInFolder, folderLineText, folderTree, NO_FOLDER_WARNING, resolveFolders } from './cli-folder'
 import { exactLinksOnDisk } from './reopen-link'
 import { reopenTargetFor } from './reopen-target'
 import { resolveBackend } from './index'
@@ -76,11 +77,12 @@ function spawnPromptArg(plan: SpawnPlan, harness: HarnessId): { initialPrompt?: 
 const STARTABLE: HarnessId[] = HARNESS_ORDER.filter(h => SPAWN_SPECS[h] !== null)
 
 const USAGE = `Usage:
-  agentop session <harness> [-p "prompt"] [--bg] [--model <id>] [--effort <level>] [--cwd <path>] [--name "label"] [--notify on|off] [--force]
+  agentop session <harness> [-p "prompt"] [--bg] [--model <id>] [--effort <level>] [--cwd <path>] [--name "label"] [--notify on|off] [--folder <folder>] [--force]
   agentop session ls     [--all] [--group ${GROUPINGS.join('|')}] [--json]
   agentop session list
   agentop session attach <id|name>
-  agentop session kill   <id|name>
+  agentop session kill   <id|name> [--folder <folder>]
+  agentop session folders [--json]
   agentop session rename <id|name> "label"
   agentop session note   <id|name> "text"
   agentop session archive|unarchive|delete <ses_…>
@@ -102,11 +104,17 @@ const USAGE = `Usage:
   toast for it, while it still shows as waiting and its events are still recorded. Absent = on. On
   \`batch\` it is a default for the \`--session\`s that follow it, like \`--model\`.
 
+  \`--folder <ref>\` files the session into a sidebar folder AT SPAWN (also on \`batch\`, as a default for
+  the \`--session\`s that follow, and on \`open\`). <ref> is a folder id, its exact name, or a
+  "Parent/Child" path (case-insensitive). An unknown or ambiguous ref is refused before anything
+  starts and lists the candidates — a folder is never created for you. \`kill --folder\` ends the
+  session and moves it (e.g. to "…/Finalizadas") in one step. \`folders\` prints the tree to pick from.
+
 Orchestrating several at once — the form an assistant should use:
 
-  agentop session batch --task "<name>" [--cwd <path>] [--model <id>] [--effort <level>] \\
+  agentop session batch --task "<name>" [--cwd <path>] [--model <id>] [--effort <level>] [--folder <folder>] \\
                        --session "<harness>[@<cwd>]: <prompt>" [--session "..."] [--json] [--force]
-  agentop session open  "<task>" [--json] [--force]
+  agentop session open  "<task>" [--folder <folder>] [--json] [--force]
   agentop session list  [--json]
 
   \`batch\` starts every session detached and files them all under one task, so \`open\` brings the
@@ -182,6 +190,21 @@ let waitForRoom = false
  * Ask the gate; with `--wait`, keep asking every `WAIT_TICK_MS` until it admits — saying why it is
  * waiting once, then only when the number that would fit changes. Ctrl-C leaves, nothing started.
  */
+/** `--folder` refs resolved for THIS command (ref -> folder id). Set once in `runSession`. */
+let folderByRef = new Map<string, { id: string; path: string; siblings: string[] }>()
+const folderCtx = (ref?: string) => { const f = ref ? folderByRef.get(ref) : undefined; return f ? { folder: { path: f.path, siblings: f.siblings } } : {} }
+
+/** File a just-spawned session into its folder; with none asked, a LEADER caller is told on stderr. */
+async function fileAtSpawn(ref: string | undefined, row: { id: string; conversationId?: string | undefined }): Promise<void> {
+  const f = ref ? folderByRef.get(ref) : undefined
+  if (f) { await fileInFolder(f.id, row).catch(() => false); return }
+  if (ref) return
+  const { storedRoleFor } = await import('./session-roles')
+  const leader = await callerIsLeader(callerSessionId(), storedRoleFor,
+    async id => (await readRegistry()).find(m => m.id === id)?.conversationId).catch(() => false)
+  if (leader) console.error(NO_FOLDER_WARNING)
+}
+
 const WAIT_TICK_MS = 10_000
 async function admitOrWait(requested: number, force: boolean, lang: CliLang, json: boolean): Promise<Admission> {
   let a = admitSpawn(await readSpawnBudget(), requested, { force })
@@ -222,6 +245,19 @@ export async function runSession(argv: string[]): Promise<number> {
     return nativeCliVerb(cmd.kind, cmd.ref)
   }
 
+  // Folders are resolved BEFORE anything starts: a bad ref refuses the whole command.
+  const folderRefs = cmd.kind === 'batch' ? cmd.specs.map(sp => sp.folder) : cmd.kind === 'start' || cmd.kind === 'open' || cmd.kind === 'kill' ? [cmd.folder] : []
+  if (cmd.kind === 'folders') {
+    const tree = await folderTree()
+    if (cmd.json) console.log(JSON.stringify({ folders: tree }, null, 2))
+    else if (tree.length === 0) console.log('No folders yet.')
+    else for (const l of tree) console.log(folderLineText(l))
+    return 0
+  }
+  const resolvedFolders = await resolveFolders(folderRefs)
+  if (!resolvedFolders.ok) { console.error(resolvedFolders.message); return 1 }
+  folderByRef = resolvedFolders.byRef
+
   const backend = await resolveBackend()
   const blocked = await backend.unavailable()
   if (blocked) { console.error(blocked); return 1 }
@@ -229,11 +265,11 @@ export async function runSession(argv: string[]): Promise<number> {
   switch (cmd.kind) {
     case 'start': return start(cmd, backend)
     case 'batch': return batch(cmd, backend)
-    case 'open': return openTask(cmd.task, cmd.json ?? false, cmd.force ?? false, backend)
+    case 'open': return openTask(cmd.task, cmd.json ?? false, cmd.force ?? false, backend, cmd.folder)
     case 'list': return list(backend, cmd.json ?? false)
     case 'ls': return ls(cmd, backend)
     case 'attach': return attach(cmd.ref, backend)
-    case 'kill': return kill(cmd.ref, backend)
+    case 'kill': return kill(cmd.ref, backend, cmd.folder)
     // `labelSince` travels WITH the label, always. `pickTitle` settles a disagreement between the
     // name typed here and the one the harness holds by RECENCY, and it can only do that when both
     // sides say when — so a rename written without a timestamp can never win, whatever the user
@@ -330,7 +366,7 @@ async function start(
   const role = cmd.role
     ? await ensureSpawnRole([offeredConversationId, id], cmd.role)
     : parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker') : undefined
-  const ctx = buildSpawnContext({ sessionId: id, cwd, harness: cmd.harness, lang, ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
+  const ctx = buildSpawnContext({ sessionId: id, cwd, harness: cmd.harness, lang, ...folderCtx(cmd.folder), ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
   const planned = planSpawn({
     harness: cmd.harness, cwd, prompt: cmd.prompt, model: cmd.model, effort: cmd.effort,
     ...(logFile ? { logFile } : {}),
@@ -399,6 +435,7 @@ async function start(
     ...(await recordedRepo(cwd)),
   })
   if (role) await applyRoleTitle(id, cmd.label ?? id, role, lang).catch(() => false)
+  await fileAtSpawn(cmd.folder, { id, conversationId: planned.plan.conversationId })
   // Muted at birth: keyed by the conversation we assigned, else by the managed id (re-keyed when the
   // poller links the conversation). Delivery only — the session still reads as waiting.
   if (cmd.notify === 'off') await muteAtSpawn(planned.plan.conversationId ?? id).catch(() => {})
@@ -545,7 +582,7 @@ async function batch(
     const offeredConversationId = randomUUID()
     const logFile = managedProcessLogPath(spec.harness, id, AGENTISTICS_DATA_DIR)
     const role = parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker') : undefined
-    const ctx = buildSpawnContext({ sessionId: id, cwd, harness: spec.harness, lang, ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)), ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
+    const ctx = buildSpawnContext({ sessionId: id, cwd, harness: spec.harness, lang, ...folderCtx(spec.folder), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)), ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
     const planned = planSpawn({
       harness: spec.harness,
       cwd,
@@ -613,6 +650,7 @@ async function batch(
       ...(await recordedRepo(cwd)),
     })
     if (spec.notify === 'off') await muteAtSpawn(planned.plan.conversationId ?? id).catch(() => {})
+    await fileAtSpawn(spec.folder, { id, conversationId: planned.plan.conversationId })
     const liveBackend = await backend.list().catch(() => null)
     const backendIds = liveBackend ? new Set(liveBackend.map(b => b.id)) : null
     await retireFallenSessions({
@@ -637,7 +675,7 @@ async function batch(
 }
 
 /** `agentop session open "<task>"` — reopen every session of a task, detached. */
-async function openTask(task: string, json: boolean, force: boolean, backend: SessionBackend): Promise<number> {
+async function openTask(task: string, json: boolean, force: boolean, backend: SessionBackend, folder?: string): Promise<number> {
   const wanted = (await readRegistry()).filter(m => m.task === task)
   if (wanted.length === 0) {
     console.error(`No sessions are filed under "${task}".`)
@@ -737,6 +775,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
     // The old row is RETIRED, not deleted: it is still a thing that happened, and it stops standing
     // beside its own continuation with the same name on it.
     await patchSession(m.id, { endedAt: new Date().toISOString() })
+    await fileAtSpawn(folder, { id, conversationId: planned.plan.conversationId })
     started.push(id)
   }
 
@@ -1168,7 +1207,7 @@ async function liveAgentFor(ref: string): Promise<
   }
 }
 
-async function kill(ref: string, backend: SessionBackend): Promise<number> {
+async function kill(ref: string, backend: SessionBackend, folder?: string): Promise<number> {
   const registry = await readRegistry()
   const reconciled = reconcileSessions(registry, await backend.list())
   const found = resolveSessionRef(reconciled.map(toRefCandidate), ref)
@@ -1191,6 +1230,12 @@ async function kill(ref: string, backend: SessionBackend): Promise<number> {
   // already does behind the web/cockpit kill verb.
   await retireSession(id)
   console.log(`Killed ${id}.`)
+  const f = folder ? folderByRef.get(folder) : undefined
+  if (f) {
+    const conv = registry.find(m => m.id === id)?.conversationId
+    const moved = await fileInFolder(f.id, { id, conversationId: conv }).catch(() => false)
+    console.log(moved ? `Moved ${id} to ${f.path}.` : `Could not move ${id} to ${f.path}.`)
+  }
   return 0
 }
 
