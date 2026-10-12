@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { Gauge } from 'lucide-react'
 import { HARNESS_LABELS } from '../lib/harness'
 import { currentUsedPct, limitLevel, limitLevelWord, usePlanLimits, windowLabel } from '../lib/planLimits'
-import { requestNayTab } from '../lib/nayDockRequests'
+import { requestPlanUsageModal } from '../lib/planUsageModalRequests'
 import { scrollIsOutside } from '../lib/popoverScroll'
 import { LimitLevelIcon, PlanUsageSummary } from './PlanLimitMeter'
 
@@ -13,7 +13,7 @@ const GRACE_MS = 100
 
 /**
  * The sidebar footer's "Uso" button: hover or keyboard focus opens the plan-usage summary in a
- * portaled popover with a caret on the button; click opens Nay's Limits tab. Icon only (so the five
+ * portaled popover with a caret on the button; click opens the plan-usage modal. Icon only (so the five
  * footer buttons share one width); the level badge appears when a window is at 75% or more.
  */
 export function PlanUsageFootButton({ lang, collapsed, footBtn }: { lang: 'pt' | 'en'; collapsed: boolean; footBtn: CSSProperties }) {
@@ -55,7 +55,7 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn }: { lang: 'pt' |
     const caretLeft = rect.left + rect.width / 2 - (collapsed ? 0 : 8) - CARET / 2
     pop = createPortal(
       <div ref={popRef} role="dialog" aria-labelledby="plan-usage-summary-title" data-plan-usage-popover style={{ ...style, maxWidth: POP_W + 20 }} onMouseEnter={open} onMouseLeave={closeSoon}>
-        <PlanUsageSummary limits={snap.limits} registered={snap.registered} now={snap.now} lang={lang} />
+        <PlanUsageSummary onOpen={() => { requestPlanUsageModal(); close() }} limits={snap.limits} registered={snap.registered} now={snap.now} lang={lang} />
         {collapsed
           ? <span aria-hidden style={{ ...caret, left: -CARET / 2 - 1, bottom: Math.max(4, rect.height / 2 + 8 - CARET / 2 - 8), borderLeft: '1px solid var(--ag-tint-4)', borderBottom: '1px solid var(--ag-tint-4)' }} />
           : <span aria-hidden style={{ ...caret, bottom: -CARET / 2 - 1, left: Math.min(POP_W - 20, Math.max(8, caretLeft)), borderRight: '1px solid var(--ag-tint-4)', borderBottom: '1px solid var(--ag-tint-4)' }} />}
@@ -72,7 +72,7 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn }: { lang: 'pt' |
         aria-haspopup="dialog"
         aria-expanded={rect !== null}
         onFocus={open} onBlur={closeSoon}
-        onClick={() => { requestNayTab('limits'); close() }}
+        onClick={() => { requestPlanUsageModal(); close() }}
         style={{ ...footBtn, width: collapsed ? 34 : '100%', flex: 1, minWidth: 0, position: 'relative' }}
       >
         <Gauge size={15} />
