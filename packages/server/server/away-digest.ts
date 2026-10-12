@@ -1,5 +1,6 @@
 /** Server-owned away-mode summary offers and the bounded digest sent to Nay. */
 import { AWAY_OFF, awayActive, parseAwayState, redactSecrets, type AwayState } from '@agentistics/core'
+import type { PreferencesMutator } from './preferences'
 
 export const AWAY_DIGEST_AFTER = 5 * 60 * 60 * 1000
 export const AWAY_DIGEST_BUCKET = 15 * 60 * 1000
@@ -133,7 +134,7 @@ export type AwayDigestAnswer = { ok: true; conversationId: string; bucket: numbe
 
 export interface AwayDigestAnswerDeps {
   read: () => Promise<{ away?: AwayState; awayDigest?: AwayDigestState }>
-  write: (state: AwayDigestState) => Promise<void>
+  update: (mutate: PreferencesMutator) => Promise<unknown>
   build: (away: AwayState, now: number) => Promise<Record<string, unknown>>
   startNay: (lang: 'pt' | 'en') => Promise<{ ok: boolean; id?: string; launch?: { harness: string; model?: string; effort?: string } }>
   prompt: (lang: 'pt' | 'en', id: string, text: string) => Promise<{ ok: boolean }>
@@ -171,15 +172,25 @@ async function answerAwayDigestWithDepsUnlocked(answer: unknown, bucket: unknown
   const due = awayDigestOfferDue(away, prefs.awayDigest, now)
   if (prefs.awayDigest?.conversationId && prefs.awayDigest.lastBucket === key) return { ok: true, conversationId: prefs.awayDigest.conversationId, bucket: key }
   if (due !== key && prefs.awayDigest?.lastBucket !== key) return { ok: false, error: awayActive(away, now) ? 'stale' : 'not_away' }
+  const persist = async (state: AwayDigestState): Promise<boolean> => {
+    let saved = false
+    await deps.update(cur => {
+      const currentAway = parseAwayState(cur.away ?? AWAY_OFF)
+      if (currentAway.since !== away.since || !awayActive(currentAway, now)) return undefined
+      saved = true
+      return { awayDigest: state }
+    })
+    return saved
+  }
   if (answer === 'no') {
-    await deps.write({ ...awayDigestOfferState(away.since, key, prefs.awayDigest), snoozedUntil: now + 60 * 60 * 1000 })
+    if (!(await persist({ ...awayDigestOfferState(away.since, key, prefs.awayDigest), snoozedUntil: now + 60 * 60 * 1000 }))) return { ok: false, error: 'stale' }
     return { ok: true, conversationId: '', bucket: key }
   }
   const digest = await deps.build(away, now)
   const out = await deps.startNay(lang)
   if (!out.ok || !out.id) return { ok: false, error: 'failed' }
   if (!(await deps.prompt(lang, out.id, awayDigestPrompt(lang, away, now, digest, prefs.awayDigest?.lastDeliveredAt))).ok) return { ok: false, error: 'failed' }
-  await deps.write({ since: away.since, lastBucket: key, lastDeliveredAt: now, conversationId: out.id })
+  if (!(await persist({ since: away.since, lastBucket: key, lastDeliveredAt: now, conversationId: out.id }))) return { ok: false, error: 'stale' }
   return { ok: true, conversationId: out.id, bucket: key }
 }
 
@@ -205,7 +216,7 @@ export async function answerAwayDigest(answer: unknown, bucket: unknown, lang: '
   const { PORT } = await import('./config')
   return answerAwayDigestWithDeps(answer, bucket, lang, {
     read: async () => readPreferences(),
-    write: async state => { await updatePreferences(() => ({ awayDigest: state })) },
+    update: updatePreferences,
     build: buildAwayDigest,
     startNay: async selectedLang => { const out = await startNaySession(selectedLang, defaultNayDeps(PORT)); return { ok: out.ok, id: out.id } },
     prompt: async (selectedLang, id, text) => ({ ok: (await runFleetAction(selectedLang, { action: 'prompt', id, text })).ok }),

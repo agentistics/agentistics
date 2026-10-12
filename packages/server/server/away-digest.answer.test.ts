@@ -11,7 +11,7 @@ function fixture(overrides: Partial<{ state: AwayDigestState; start: AwayDigestA
   let prompts = 0
   const deps: AwayDigestAnswerDeps = {
     read: async () => ({ away, awayDigest: state }),
-    write: async next => { state = next },
+    update: async mutate => { const patch = mutate({ away, awayDigest: state }); if (patch?.awayDigest) state = patch.awayDigest },
     build: async () => ({ window: { since: away.since }, releases: 'unavailable' }),
     startNay: async lang => { starts++; return overrides.start?.(lang) ?? { ok: true, id: 'nay-1', launch: { harness: 'codex', model: 'o3', effort: 'high' } } },
     prompt: async (lang, id, text) => { prompts++; return overrides.prompt?.(lang, id, text) ?? { ok: true } },
@@ -73,13 +73,50 @@ describe('away digest answers', () => {
       expect(await answerAwayDigestWithDeps('invalid', bucket, 'en', f.deps, now, away.since)).toEqual({ ok: false, error: 'bad_answer' })
       const next = fixture()
       const nextAway = { ...away, since: new Date(start + 1000).toISOString() }
-      const nextDeps = { ...next.deps, read: async () => ({ away: nextAway, awayDigest: { since: nextAway.since, lastBucket: bucket } }) }
+      const nextDeps = {
+        ...next.deps,
+        read: async () => ({ away: nextAway, awayDigest: { since: nextAway.since, lastBucket: bucket } }),
+        update: async mutate => { mutate({ away: nextAway, awayDigest: next.state }) },
+      }
       expect(await answerAwayDigestWithDeps('yes', bucket, 'en', nextDeps, now, away.since)).toEqual({ ok: false, error: 'stale' })
       expect(await answerAwayDigestWithDeps('yes', bucket, 'en', nextDeps, now, nextAway.since)).toEqual({ ok: true, conversationId: 'nay-1', bucket })
       const expiredDeps = { ...f.deps, read: async () => ({ away: { ...away, until: new Date(now).toISOString() }, awayDigest: f.state }) }
       expect(await answerAwayDigestWithDeps('yes', bucket, 'en', expiredDeps, now, away.since)).toEqual({ ok: false, error: 'not_away' })
     } finally { release(); await first }
     expect(f.counts()).toEqual({ starts: 1, prompts: 1 })
+  })
+
+  test('a stalled answer from an obsolete window cannot overwrite a newer delivery', async () => {
+    const now = start + 5 * 60 * 60 * 1000
+    let currentAway = away
+    let state: AwayDigestState = { since: away.since, lastBucket: bucket }
+    let release!: () => void
+    let entered!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const started = new Promise<void>(resolve => { entered = resolve })
+    let launches = 0
+    const deps: AwayDigestAnswerDeps = {
+      read: async () => ({ away: currentAway, awayDigest: state }),
+      update: async mutate => {
+        const patch = mutate({ away: currentAway, awayDigest: state })
+        if (patch?.awayDigest) state = patch.awayDigest
+      },
+      build: async () => ({}),
+      startNay: async () => {
+        if (++launches === 1) { entered(); await gate; return { ok: true, id: 'nay-A' } }
+        return { ok: true, id: 'nay-B' }
+      },
+      prompt: async () => ({ ok: true }),
+    }
+    const first = answerAwayDigestWithDeps('yes', bucket, 'en', deps, now, away.since)
+    await started
+    try {
+      currentAway = { ...away, since: new Date(start + 1000).toISOString() }
+      state = { since: currentAway.since, lastBucket: bucket }
+      expect(await answerAwayDigestWithDeps('yes', bucket, 'en', deps, now + 1000, currentAway.since)).toEqual({ ok: true, conversationId: 'nay-B', bucket })
+    } finally { release() }
+    expect(await first).toEqual({ ok: false, error: 'stale' })
+    expect(state).toEqual({ since: currentAway.since, lastBucket: bucket, lastDeliveredAt: now + 1000, conversationId: 'nay-B' })
   })
 
   test('stale bucket is refused and failures remain retryable', async () => {
