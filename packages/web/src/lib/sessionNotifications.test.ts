@@ -5,6 +5,7 @@ import {
   fleetActivityStates, resetNotificationMemory, type SessionActivity,
 } from './sessionNotifications'
 import { setSessionMuted } from './mutedSessions'
+import { setMuteWorkers, setSessionRole } from './sessionRoles'
 
 /**
  * These tests exist because this module interrupts the user: a card, a sound and the bell (in-app
@@ -52,6 +53,9 @@ afterEach(() => {
   const g = globalThis as Record<string, unknown>
   observeDeliveries(null)
   delete g.localStorage
+  setSessionRole('mute-worker-managed', null)
+  setSessionRole('mute-leader', null)
+  setMuteWorkers(false)
 })
 
 const map = new Map([['a', session('a')], ['b', session('b')]])
@@ -250,5 +254,38 @@ describe('a muted session', () => {
     prev = notifyFleetTransitions(prev, rows('waiting'), 'en')
     prev = notifyFleetTransitions(prev, rows('waiting'), 'en')
     expect(captured.length).toBeGreaterThan(0)
+  })
+})
+
+describe('muted workers', () => {
+  it('suppresses turn, approval and responded events before any sidebar row renders', () => {
+    setSessionRole('mute-worker-conversation', 'worker')
+    setMuteWorkers(true)
+    const rows = [{ id: 'mute-worker-managed', conversationId: 'mute-worker-conversation', state: 'working' }]
+    let prev = notifyFleetTransitions(null, rows, 'en')
+    prev = notifyFleetTransitions(prev, [{ ...rows[0]!, state: 'waiting' }], 'en')
+    prev = notifyFleetTransitions(prev, [{ ...rows[0]!, state: 'waiting' }], 'en')
+    expect(captured).toHaveLength(0)
+    prev = notifyFleetTransitions(prev, [{ ...rows[0]!, state: 'working' }], 'en')
+    notifyFleetTransitions(prev, [{ ...rows[0]!, state: 'working' }], 'en')
+    expect(captured).toHaveLength(0)
+  })
+
+  it('still notifies leaders and untyped sessions', () => {
+    setSessionRole('mute-leader', 'leader')
+    setMuteWorkers(true)
+    let prev = notifyFleetTransitions(null, [
+      { id: 'mute-leader', state: 'working' },
+      { id: 'mute-untyped', state: 'working' },
+    ], 'en')
+    prev = notifyFleetTransitions(prev, [
+      { id: 'mute-leader', state: 'waiting' },
+      { id: 'mute-untyped', state: 'waiting' },
+    ], 'en')
+    notifyFleetTransitions(prev, [
+      { id: 'mute-leader', state: 'waiting' },
+      { id: 'mute-untyped', state: 'waiting' },
+    ], 'en')
+    expect(captured).toHaveLength(2)
   })
 })

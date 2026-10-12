@@ -110,13 +110,19 @@ export function setSessionRole(id: string, role: SessionRole | null): void {
 export function getMuteWorkers(): boolean { return muted.get() }
 export function setMuteWorkers(value: boolean): void { muted.set(value) }
 export function isWorkerMuted(id: string, state?: string): boolean {
-  const active = state === undefined || ['working', 'waiting', 'waiting-approval', 'unknown'].includes(state)
+  // Notification callers use both fleet state names and event names. Keep the ended-session
+  // exception explicit: an exited worker may still announce that it closed, while turn completion,
+  // approval and stale/working events all belong to an active worker.
+  const active = state === undefined || ['working', 'waiting', 'waiting-approval', 'stale', 'unknown', 'turn-done', 'responded', 'needs-approval'].includes(state)
   return active && muted.get() && getSessionRole(id) === 'worker'
 }
 /** Associate a managed id with the stable conversation key, so a role stored under either is found. */
 export function registerSessionRoleAlias(id: string, stableKey: string): void {
   if (!id || !stableKey || id === stableKey) return
   roleAliases.set(id, stableKey)
+  // Notifications may be called with either identity, before the sidebar has rendered. Register
+  // the reverse lookup too so a role stored under the managed id is found from the conversation key.
+  roleAliases.set(stableKey, id)
 }
 export function useSessionRole(id: string): SessionRole | undefined {
   return useSyncExternalStore(roles.subscribe, () => getSessionRole(id), () => undefined)

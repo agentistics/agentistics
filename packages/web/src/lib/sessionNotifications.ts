@@ -16,7 +16,7 @@ import { observeFleet, pushAlert, pushDemoAlert, requestShock, resetNayNotifySto
 import { isSessionMuted } from './mutedSessions'
 import { pushNotification, setMutedCategories, type NotificationType } from './notifications'
 import { isNotificationCategory } from './notificationCategories'
-import { isWorkerMuted } from './sessionRoles'
+import { isWorkerMuted, registerSessionRoleAlias } from './sessionRoles'
 import { DEFAULT_QUIET_HOURS, readQuietHours, type QuietHours } from './checkinNotify'
 
 export type SessionActivity = 'working' | 'waiting' | 'waiting-approval' | 'exited'
@@ -618,7 +618,13 @@ export function notifyFleetTransitions(
   lang: 'pt' | 'en',
 ): Record<string, SessionActivity> {
   const seen = fleetActivityStates(rows)
-  for (const r of rows) muteKeyById.set(r.id, r.conversationId ?? r.id)
+  for (const r of rows) {
+    const stableKey = r.conversationId ?? r.id
+    muteKeyById.set(r.id, stableKey)
+    // Role assignment is server-owned and can be keyed by either identity. The notification path
+    // must not depend on the sidebar having rendered this row first.
+    if (r.conversationId) registerSessionRoleAlias(r.id, r.conversationId)
+  }
   raiseStale(rows, lang)
   // `null` is the first snapshot — see the rule above. It is deliberately distinct from `{}`, which
   // is a machine that genuinely had no sessions a moment ago and now has one.

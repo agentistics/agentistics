@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { getSessionRole, isWorkerMuted, leaderTitleFor, roleOriginLabel, setMuteWorkers, setSessionRole } from './sessionRoles'
+import { getSessionRole, isWorkerMuted, leaderTitleFor, registerSessionRoleAlias, roleOriginLabel, setMuteWorkers, setSessionRole } from './sessionRoles'
 
 const ids = ['role-test-worker', 'role-test-leader', 'role-test-unknown']
 
@@ -25,6 +25,17 @@ describe('session roles', () => {
     expect(isWorkerMuted(ids[0]!, 'exited')).toBe(false)
     expect(isWorkerMuted(ids[1]!, 'working')).toBe(false)
     expect(isWorkerMuted(ids[2]!, 'working')).toBe(false)
+  })
+
+  it('recognizes notification event names and both role identities', () => {
+    setSessionRole('role-test-managed', 'worker')
+    registerSessionRoleAlias('role-test-managed', 'role-test-conversation')
+    setMuteWorkers(true)
+    expect(isWorkerMuted('role-test-conversation', 'turn-done')).toBe(true)
+    expect(isWorkerMuted('role-test-managed', 'responded')).toBe(true)
+    expect(isWorkerMuted('role-test-conversation', 'needs-approval')).toBe(true)
+    expect(isWorkerMuted('role-test-managed', 'exited')).toBe(false)
+    setSessionRole('role-test-managed', null)
   })
 })
 

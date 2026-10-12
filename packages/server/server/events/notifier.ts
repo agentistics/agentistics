@@ -21,6 +21,8 @@ import { sendToPeer } from './peer-client'
 import { subscribersOf, type Subscription } from './subscriptions'
 import type { SessionEvent } from './event-types'
 import { readPreferences } from '../preferences'
+import { AGENTISTICS_DATA_DIR } from '../config'
+import { readRolesDoc, type RolesDoc } from '../sessions/session-roles'
 import { readMobileSubscriptions, sendMobilePush, webPushTransport } from './mobile-push'
 
 /** The key a session's mute is stored under — the web's `sessionIdentityKey`, so one mute holds
@@ -51,6 +53,14 @@ export const EMPTY_REPORT: DeliveryReport = {
   lines: [], peersReached: 0, peersFailed: 0, toastsShown: 0, toastsFailed: 0,
 }
 
+/** The worker toggle silences active-worker interruptions on every server delivery channel. */
+export function isWorkerMutedEvent(e: Pick<SessionEvent, 'id' | 'conversationId' | 'kind'>, roles: RolesDoc['roles'], muteWorkers: boolean): boolean {
+  if (!muteWorkers || e.kind === 'exited') return false
+  // Events carry the same two identities as fleet rows. Resolve both directly here: this helper is
+  // also used before a fleet row is materialized, so it must not depend on a row adapter or UI alias.
+  return roles[e.conversationId ?? e.id] === 'worker' || roles[e.id] === 'worker'
+}
+
 /**
  * Deliver a batch.
  *
@@ -68,11 +78,22 @@ export async function deliver(o: {
   const report: DeliveryReport = { ...EMPTY_REPORT, lines: [] }
   if (o.events.length === 0 || o.subscriptions.length === 0) return report
 
+  // `muteWorkers` is a shared UI preference stored under preferences.ui. Read it here rather than
+  // asking the web client to pre-filter events: desktop and mobile producers have no browser.
+  let workerRoles: RolesDoc['roles'] = {}
+  let muteWorkers = false
+  try {
+    const prefs = await readPreferences() as { ui?: Record<string, unknown> }
+    muteWorkers = prefs.ui?.muteWorkers === true
+    workerRoles = (await readRolesDoc(AGENTISTICS_DATA_DIR)).roles
+  } catch { /* fail open: a preference/role read must not hide an urgent notification */ }
+  const workerMuted = (e: SessionEvent) => isWorkerMutedEvent(e, workerRoles, muteWorkers)
+
   // Which events each subscription wants, resolved once for the whole batch.
   const wanted = new Map<string, SessionEvent[]>()
   for (const sub of o.subscriptions) wanted.set(sub.id, [])
   for (const e of o.events) {
-    if (o.muted?.has(eventMuteKey(e))) continue
+    if (o.muted?.has(eventMuteKey(e)) || workerMuted(e)) continue
     for (const sub of subscribersOf(o.subscriptions, e)) wanted.get(sub.id)!.push(e)
   }
 
@@ -122,7 +143,9 @@ export async function deliver(o: {
   }
 
   // Mobile is deliberately a separate channel: desktop subscriptions never reach this sender.
-  const mobile = await sendMobilePush(o.events, await readMobileSubscriptions(), o.muted ?? new Set(), webPushTransport)
+  const mobileMuted = new Set(o.muted ?? [])
+  for (const e of o.events) if (workerMuted(e)) mobileMuted.add(eventMuteKey(e))
+  const mobile = await sendMobilePush(o.events, await readMobileSubscriptions(), mobileMuted, webPushTransport)
   if (mobile.sent > 0) report.lines.push(`mobile: ${mobile.sent} notification${mobile.sent > 1 ? 's' : ''}`)
   if (mobile.failed > 0) report.lines.push(`mobile push failed for ${mobile.failed} notification${mobile.failed > 1 ? 's' : ''}`)
 
