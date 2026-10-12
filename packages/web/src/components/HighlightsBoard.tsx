@@ -186,8 +186,8 @@ export function HighlightsBoard({ sessions, projects, lang, harness }: Highlight
           accent="#3b82f6"
           value={mostInputTokens.tokens_unavailable || mostInputTokens.input_tokens === undefined ? '—' : fmt(mostInputTokens.input_tokens)}
           comparison={mostInputTokens.tokens_unavailable || mostInputTokens.input_tokens === undefined ? null : multiplier(mostInputTokens.input_tokens, avgInput)}
-          prompt={truncate(sessionLabel(mostInputTokens), 90)}
-          project={formatProjectName(mostInputTokens.project_path ?? '')}
+          prompt={mostInputTokens.tokens_unavailable || mostInputTokens.input_tokens === undefined ? '' : truncate(sessionLabel(mostInputTokens), 90)}
+          project={mostInputTokens.tokens_unavailable || mostInputTokens.input_tokens === undefined ? '' : formatProjectName(mostInputTokens.project_path ?? '')}
         />
 
         <HighlightCard
@@ -196,8 +196,8 @@ export function HighlightsBoard({ sessions, projects, lang, harness }: Highlight
           accent="#8b5cf6"
           value={mostOutputTokens.tokens_unavailable || mostOutputTokens.output_tokens === undefined ? '—' : fmt(mostOutputTokens.output_tokens)}
           comparison={mostOutputTokens.tokens_unavailable || mostOutputTokens.output_tokens === undefined ? null : multiplier(mostOutputTokens.output_tokens, avgOutput)}
-          prompt={truncate(sessionLabel(mostOutputTokens), 90)}
-          project={formatProjectName(mostOutputTokens.project_path ?? '')}
+          prompt={mostOutputTokens.tokens_unavailable || mostOutputTokens.output_tokens === undefined ? '' : truncate(sessionLabel(mostOutputTokens), 90)}
+          project={mostOutputTokens.tokens_unavailable || mostOutputTokens.output_tokens === undefined ? '' : formatProjectName(mostOutputTokens.project_path ?? '')}
         />
 
         <HighlightCard

@@ -21,6 +21,14 @@ function render(sessions: SessionMeta[]): string {
   return renderToStaticMarkup(<HighlightsBoard sessions={sessions} projects={[]} lang="en" />)
 }
 
+function cardBetween(html: string, label: string, nextLabel: string): string {
+  const start = html.indexOf(`>${label}</span>`)
+  const end = html.indexOf(`>${nextLabel}</span>`, start + 1)
+  expect(start).toBeGreaterThanOrEqual(0)
+  expect(end).toBeGreaterThan(start)
+  return html.slice(start, end)
+}
+
 describe('token highlight cards', () => {
   test('show the shared unavailable dash when every session lacks measured tokens', () => {
     const html = render([
@@ -28,11 +36,14 @@ describe('token highlight cards', () => {
       session({ session_id: 'missing-2', input_tokens: 0, output_tokens: 0, tokens_unavailable: true }),
     ])
 
-    expect(html).toContain('Most input tokens')
-    expect(html).toContain('Most output tokens')
-    expect((html.match(/—/g) ?? []).length).toBe(2)
-    expect(html).toMatch(/Most input tokens[\s\S]*?—/)
-    expect(html).toMatch(/Most output tokens[\s\S]*?—/)
+    const inputCard = cardBetween(html, 'Most input tokens', 'Most output tokens')
+    const outputCard = cardBetween(html, 'Most output tokens', 'Most messages')
+    expect(inputCard).toMatch(/class="hl-value"[^>]*>—<\/div>/)
+    expect(outputCard).toMatch(/class="hl-value"[^>]*>—<\/div>/)
+    expect(inputCard).not.toContain('prompt')
+    expect(inputCard).not.toContain('/repo')
+    expect(outputCard).not.toContain('prompt')
+    expect(outputCard).not.toContain('/repo')
   })
 
   test('ranks measured sessions and ignores unavailable sessions in a mixed scope', () => {
@@ -41,7 +52,7 @@ describe('token highlight cards', () => {
       session({ session_id: 'measured', input_tokens: 1234, output_tokens: 5678 }),
     ])
 
-    expect(html).toMatch(/Most input tokens[\s\S]*?1\.2K/)
-    expect(html).toMatch(/Most output tokens[\s\S]*?5\.7K/)
+    expect(cardBetween(html, 'Most input tokens', 'Most output tokens')).toMatch(/class="hl-value"[^>]*>1\.2K<\/div>/)
+    expect(cardBetween(html, 'Most output tokens', 'Most messages')).toMatch(/class="hl-value"[^>]*>5\.7K<\/div>/)
   })
 })

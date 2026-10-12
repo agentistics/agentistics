@@ -581,16 +581,16 @@ function MiniHighlightsSection({ sessions, c, lang }: {
       label: pt ? 'Mais tokens de entrada' : 'Most input tokens',
       value: mostInputTokens.tokens_unavailable || mostInputTokens.input_tokens === undefined ? '—' : fmt(mostInputTokens.input_tokens),
       badge: mostInputTokens.tokens_unavailable || mostInputTokens.input_tokens === undefined ? null : multiplier(mostInputTokens.input_tokens, avgInput),
-      prompt: truncate(sessionLabel(mostInputTokens), 80),
-      project: formatProjectName(mostInputTokens.project_path ?? ''),
+      prompt: mostInputTokens.tokens_unavailable || mostInputTokens.input_tokens === undefined ? '' : truncate(sessionLabel(mostInputTokens), 80),
+      project: mostInputTokens.tokens_unavailable || mostInputTokens.input_tokens === undefined ? '' : formatProjectName(mostInputTokens.project_path ?? ''),
       accent: '#3b82f6',
     },
     {
       label: pt ? 'Mais tokens de saída' : 'Most output tokens',
       value: mostOutputTokens.tokens_unavailable || mostOutputTokens.output_tokens === undefined ? '—' : fmt(mostOutputTokens.output_tokens),
       badge: mostOutputTokens.tokens_unavailable || mostOutputTokens.output_tokens === undefined ? null : multiplier(mostOutputTokens.output_tokens, avgOutput),
-      prompt: truncate(sessionLabel(mostOutputTokens), 80),
-      project: formatProjectName(mostOutputTokens.project_path ?? ''),
+      prompt: mostOutputTokens.tokens_unavailable || mostOutputTokens.output_tokens === undefined ? '' : truncate(sessionLabel(mostOutputTokens), 80),
+      project: mostOutputTokens.tokens_unavailable || mostOutputTokens.output_tokens === undefined ? '' : formatProjectName(mostOutputTokens.project_path ?? ''),
       accent: '#8b5cf6',
     },
     {
@@ -649,12 +649,16 @@ function MiniHighlightsSection({ sessions, c, lang }: {
           )}
           {!r.badge && <div style={{ marginBottom: 8 }} />}
           <div style={{ height: 1, background: c.border, marginBottom: 8 }} />
-          <div style={{ fontSize: 9, color: c.textSec, fontStyle: 'italic', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' } as React.CSSProperties}>
-            "{r.prompt}"
-          </div>
-          <div style={{ fontSize: 9, color: c.textTer, marginTop: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {r.project}
-          </div>
+          {r.prompt && (
+            <div style={{ fontSize: 9, color: c.textSec, fontStyle: 'italic', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' } as React.CSSProperties}>
+              "{r.prompt}"
+            </div>
+          )}
+          {r.project && (
+            <div style={{ fontSize: 9, color: c.textTer, marginTop: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {r.project}
+            </div>
+          )}
         </div>
       ))}
     </div>
