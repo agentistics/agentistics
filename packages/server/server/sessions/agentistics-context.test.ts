@@ -50,7 +50,7 @@ describe('context text', () => {
     const t = contextText(base)
     for (const n of CONTEXT_TOOL_NAMES) {
       const listed = t.includes(n)
-      const sessionsOrTasks = /^agentistics_(task|session)/.test(n)
+      const sessionsOrTasks = /^agentistics_(task|session|checkin)/.test(n)
       if (sessionsOrTasks) expect(listed).toBe(true)
       else expect(listed).toBe(false)
     }

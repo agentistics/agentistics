@@ -18,7 +18,7 @@
  */
 
 import { sessionLinks } from '../lib/sessionParent'
-import { SessionLinkInfo, SessionLinkPanel } from '../components/sessions/SessionLinkInfo'
+import { SessionCheckinCard, SessionLinkInfo, SessionLinkPanel } from '../components/sessions/SessionLinkInfo'
 import { Drawer } from '../components/Drawer'
 import { PlanUsageSummary } from '../components/PlanLimitMeter'
 import { ContextRing } from '../components/sessions/SessionStatsMenu'
@@ -2951,6 +2951,17 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           </button>
         ), { open: drawerLimitsOpen, toggle: () => setDrawerLimitsOpen(v => !v) })}
 
+        {/* A leader's check-in is a card of its own and open, as in the prototype — folded inside
+            "Sessão" it was the one control a leader reaches for most, and the hardest to find. */}
+        <SessionCheckinCard
+          sessionId={sessionIdentityKey(selected)}
+          links={sessionLinks(selected, fleet.rows) ?? { parent: null, children: [], task: null }}
+          pt={pt}
+          isMobile
+          onGo={p => leaveDrawerTo(p)}
+          frame={(summary, body) => drawerSection('checkin', 'Check-in', summary, body)}
+        />
+
         {drawerSection('session', pt ? 'Sessão' : 'Session', (() => {
           const taskRef = sessionLinks(selected, fleet.rows)?.task?.id
           return taskRef ? <TaskProgressChip taskRef={taskRef} lang={tPt} /> : null
@@ -2974,6 +2985,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               roleFallbackId={selected.id}
               pt={pt}
               isMobile
+              hideCheckin
               onGo={p => leaveDrawerTo(p)}
             />
           </div>

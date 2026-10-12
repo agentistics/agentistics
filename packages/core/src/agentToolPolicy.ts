@@ -76,6 +76,7 @@ export const AGENT_TOOL_NAMES = [
   // Session notifications (1)
   'agentistics_session_notify',
   'agentistics_session_message',
+  'agentistics_checkin_report',
   'agentistics_session_role',
   'agentistics_session_away',
   // Metrics (6)
@@ -164,6 +165,10 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_session_message: {
     ...GROUPS, risk: 'W', routes: ['POST /api/session-message'],
     reason: 'types a message into another session through the composer path; additive, rate-limited, sender verified',
+  },
+  agentistics_checkin_report: {
+    ...GROUPS, risk: 'W', routes: ['POST /api/checkin/report'],
+    reason: 'records the calling leader\'s own check-in round; additive, sender verified',
   },
   agentistics_session_role: {
     ...GROUPS, risk: 'W', routes: ['POST /api/session-roles'],

@@ -126,6 +126,59 @@ export interface TaskEvent {
   detail?: string
   from?: string
   to?: string
+  state?: 'ok' | 'resolved' | 'needs_you'
+  summary?: string
+  sessionId?: string
+  actions?: CheckinAction[]
+  needs?: CheckinNeed[]
+}
+
+export interface CheckinLink { kind: 'session' | 'subtask' | 'task'; id: string; taskId?: string }
+export interface CheckinAction { text: string; link?: CheckinLink }
+export interface CheckinNeed { subject: string; text: string; critical?: boolean; link?: CheckinLink }
+
+export type ActivityFilter = 'all' | 'without-checkins' | 'only-checkins'
+export interface CheckinRun extends TaskEvent {
+  kind: 'checkin'
+  grouped: true
+  events: TaskEvent[]
+}
+export type GroupedActivity = TaskEvent | CheckinRun
+
+/**
+ * The server stores a check-in round's fields as JSON in `detail` (the task log's `TaskEvent` has no
+ * typed slot for them); lift them onto the event so the Activity tab can group and colour it. A
+ * detail that is not that JSON leaves the event as it was.
+ */
+export function expandCheckinEvent(e: TaskEvent): TaskEvent {
+  if (e.kind !== 'checkin' || e.state !== undefined || !e.detail?.startsWith('{')) return e
+  try {
+    const d = JSON.parse(e.detail) as Partial<Pick<TaskEvent, 'state' | 'summary' | 'sessionId' | 'actions' | 'needs'>>
+    const state = d.state === 'ok' || d.state === 'resolved' || d.state === 'needs_you' ? d.state : undefined
+    return {
+      ...e,
+      ...(state ? { state } : {}),
+      ...(typeof d.summary === 'string' ? { summary: d.summary } : {}),
+      ...(typeof d.sessionId === 'string' ? { sessionId: d.sessionId } : {}),
+      ...(Array.isArray(d.actions) ? { actions: d.actions } : {}),
+      ...(Array.isArray(d.needs) ? { needs: d.needs } : {}),
+    }
+  } catch { return e }
+}
+
+/** Filter and collapse adjacent successful check-ins, preserving the API's event order. */
+export function groupActivity(events: readonly TaskEvent[], filter: ActivityFilter = 'all'): GroupedActivity[] {
+  const visible = events.filter(e => filter === 'all' || (filter === 'only-checkins' ? e.kind === 'checkin' : e.kind !== 'checkin'))
+  const out: GroupedActivity[] = []
+  for (let i = 0; i < visible.length; i += 1) {
+    const event = visible[i]!
+    if (event.kind !== 'checkin' || event.state !== 'ok') { out.push(event); continue }
+    const run = [event]
+    while (i + 1 < visible.length && visible[i + 1]!.kind === 'checkin' && visible[i + 1]!.state === 'ok') run.push(visible[++i]!)
+    if (run.length === 1) out.push(event)
+    else out.push({ ...event, kind: 'checkin', grouped: true, events: run, summary: `${run.length} check-ins sem novidade` } satisfies CheckinRun)
+  }
+  return out
 }
 
 export interface TaskLink { id: string; url: string; label?: string; kind?: string }
@@ -1038,7 +1091,7 @@ export function useTaskActivity(ref?: string, limit = 60) {
     try {
       const r = await fetch(`/api/tasks/activity?${q}`)
       const body = await r.json() as { events?: TaskEvent[] }
-      setEvents(body.events ?? [])
+      setEvents((body.events ?? []).map(expandCheckinEvent))
     } catch {
       // An unreachable server keeps the last log rather than reporting an empty one — the same
       // rule the fleet poller follows. "Nothing happened" and "nobody answered" are different.
@@ -1047,6 +1100,9 @@ export function useTaskActivity(ref?: string, limit = 60) {
     }
   }, [ref, limit])
   useEffect(() => { void reload() }, [reload])
+  // A check-in round lands in this log while it is on screen; the server announces every round on
+  // the shared `checkin` event, so the log follows it instead of waiting for a remount.
+  useEffect(() => subscribeEvent('checkin', () => { void reload() }), [reload])
   return { events, loading, reload }
 }
 
