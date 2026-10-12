@@ -54,6 +54,7 @@ import { MagnifierButton } from './components/a11y/MagnifierButton'
 import { NotificationBell } from './components/NotificationBell'
 import { AgentisticsLoader } from './components/AgentisticsLoader'
 import { VaultHeaderButton } from './components/vault/VaultHeaderButton'
+import AwayPill from './components/AwayPill'
 import { HardwareModal } from './components/HardwareModal'
 import { CleanDialog } from './components/CleanDialog'
 import { useNotificationStream } from './hooks/useNotificationStream'
@@ -3666,6 +3667,7 @@ export default function AppLayout() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         <MagnifierButton ctx={appCtx} />
         <HideLensesButton ctx={appCtx} />
+        <AwayPill lang={lang} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} />
         <VaultHeaderButton lang={lang} enabled={!isCentral} buttonStyle={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }} />
         <NotificationBell lang={lang} buttonStyle={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -4060,6 +4062,7 @@ export default function AppLayout() {
         >
           <Cpu size={14} />
         </button>
+        <AwayPill lang={lang} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} />
         <VaultHeaderButton lang={lang} enabled={!isCentral} buttonStyle={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }} />
         <NotificationBell lang={lang} buttonStyle={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -4533,7 +4536,8 @@ export default function AppLayout() {
               {data?.healthIssues && data.healthIssues.length > 0 && (
                 <HealthWarnings issues={data.healthIssues} lang={lang} />
               )}
-              <VaultHeaderButton lang={lang} enabled={!isCentral} buttonStyle={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }} />
+              <AwayPill lang={lang} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} />
+        <VaultHeaderButton lang={lang} enabled={!isCentral} buttonStyle={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }} />
               <NotificationBell lang={lang} buttonStyle={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 width: 32, height: 32, borderRadius: 8,
