@@ -10,6 +10,32 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.133.0': {
+    features: [
+      {
+        pt: 'O painel de informações da sessão mostra quem definiu o papel dela (líder ou worker).',
+        en: 'The session info panel shows who set its role (leader or worker).',
+      },
+      {
+        pt: 'Os limites de plano mostram as vagas livres por assistente; um plano em pausa não oferece vagas até o reset.',
+        en: 'Plan limits show free slots per assistant; a plan on hold offers none until its reset.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Menos uso de CPU com o app parado e listas de sessões mais leves.',
+        en: 'Less CPU use while idle and lighter session lists.',
+      },
+      {
+        pt: 'Uma mensagem enviada no meio de uma resposta não fica mais presa como pendente.',
+        en: 'A message sent in the middle of a reply no longer stays stuck as pending.',
+      },
+      {
+        pt: 'O nome e o papel de uma sessão se mantêm ao abrir, reabrir ou criar em lote.',
+        en: 'A session keeps its name and role when opened, reopened or created in a batch.',
+      },
+    ],
+  },
   '2.131.0': {
     features: [
       {
