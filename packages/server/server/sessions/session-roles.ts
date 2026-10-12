@@ -21,7 +21,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
-  isSessionRole, isSessionRoleRequest, parseRoleOrigin, resolveSessionForGroup, roleChangeNote, roleLine, sessionIdentityKey, titleForRole,
+  isSessionRole, isSessionRoleRequest, parseRoleOrigin, resolveSessionForGroup, roleChangeNote, roleLine, sessionIdentityKey, stripRolePrefix, titleForRole,
   type HarnessId, type RoleLang, type RoleOrigin, type SessionRole,
 } from '@agentistics/core'
 import type { FleetRowForGroups } from './session-groups-web'
@@ -228,7 +228,7 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
     const { base, next, changed } = state
     const lang: RoleLang = req.lang === 'pt' || req.lang === 'en' ? req.lang : await deps.uiLang().catch(() => 'en' as RoleLang)
     // External title/note I/O stays outside `serial`; either can wait for the fleet poll.
-    const wanted = titleForRole(resolved.title, next, lang)
+    const wanted = isPlaceholderTitle(resolved.title) ? resolved.title : titleForRole(resolved.title, next, lang)
     const renamed = wanted !== resolved.title && wanted !== '' ? (await deps.rename(resolved.id, wanted).catch(() => ({ ok: false }))).ok : false
     const notified = changed && !own ? (await deps.prompt(resolved.id, roleChangeNote(next)).catch(() => ({ ok: false }))).ok : false
     if (notified || own) {
@@ -462,6 +462,12 @@ export async function rekeyStoredRole(
 }
 
 /** Apply the leader title convention through the same rename dependency used by role changes. */
+/** The placeholder a row shows before its harness reports a title (`sessUnregistered`, en + pt): never
+ *  mint a leader title out of it — leave it alone until the real title arrives. */
+export function isPlaceholderTitle(title: string): boolean {
+  return /^(?:unregistered session|sessão sem registro) [0-9a-z-]{6,}$/i.test(stripRolePrefix(title).trim())
+}
+
 export async function applyRoleTitle(
   rowId: string,
   title: string,
@@ -471,6 +477,7 @@ export async function applyRoleTitle(
 ): Promise<boolean> {
   if (role !== 'leader') return false
   const deps = providedDeps ?? await defaultRoleDeps()
+  if (isPlaceholderTitle(title)) return false
   const wanted = titleForRole(title, role, lang)
   if (wanted === '' || wanted === title) return false
   return (await deps.rename(rowId, wanted).catch(() => ({ ok: false }))).ok

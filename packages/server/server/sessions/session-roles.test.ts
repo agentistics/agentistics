@@ -190,6 +190,16 @@ describe('spawn role assignment and delivery', () => {
 })
 
 describe('roleOp (the agentistics_session_role handler)', () => {
+  test('a session still titled with the unregistered placeholder is not renamed into a leader title', async () => {
+    const rows = [{ id: 'm9', conversationId: 'c9', title: 'unregistered session 8c8c707d07' }]
+    const { deps, renames } = fake(rows)
+    const out = await roleOp('m9', { role: 'leader', lang: 'pt' }, deps)
+    expect(out).toMatchObject({ ok: true, role: 'leader', renamed: false })
+    expect(renames).toEqual([])
+    expect(await applyRoleTitle('m9', 'sessão sem registro 8c8c707d07', 'leader', 'pt', deps)).toBe(false)
+    expect(renames).toEqual([])
+  })
+
   test('a browser sets leader: stored under the conversation key, renamed, and the session is told', async () => {
     const rows = [{ id: 'm1', conversationId: 'c1', title: 'Fix login' }]
     const { deps, renames, prompts } = fake(rows)
