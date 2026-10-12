@@ -2142,10 +2142,12 @@ async function spawnManaged(req: {
   // A REOPEN keeps the replaced row's mute. A session linked to a conversation is muted under that
   // conversation, which the new row keeps; one with no link (codex, kimi, gemini…) was muted under its
   // managed id, which changes here, so the mute moves to the new id or it would silently come undone.
-  if (req.inherit && !req.inherit.conversationId && !bornLink?.conversationId) {
-    await rekeyMutedSession(req.inherit.id, id).catch(() => {})
+  // A reopen is usually born linked (it resumes a conversation), so the new key is that conversation.
+  const reopenKey = reopenRekeyTarget(req.inherit, bornLink?.conversationId, id)
+  if (req.inherit && reopenKey) {
+    await rekeyMutedSession(req.inherit.id, reopenKey).catch(() => {})
     // Same for its folder: filed under the old managed id, which this reopen retires.
-    await rekeyFolderMember(req.inherit.id, id).catch(() => {})
+    await rekeyFolderMember(req.inherit.id, reopenKey).catch(() => {})
   }
   // A launch that fails takes its row with it: no row is ever left for a pane that is not there.
   const abandon = () => removeSession(id).catch(() => {})
@@ -5100,4 +5102,11 @@ async function runControlLoop(
   if (!(await clearPortOrAbort(s, await isServerRunning()))) return 0
   await ensureArchiveModeChosen()
   return 'foreground'
+}
+
+/** The key a reopened UNLINKED row's mute and folder move to: the conversation the new row was born
+ *  linked to, else its new managed id. `null` when the old row was linked (its keys already hold). */
+export function reopenRekeyTarget(inherit: { id: string; conversationId?: string } | undefined, bornConversationId: string | undefined, newId: string): string | null {
+  if (!inherit || inherit.conversationId) return null
+  return bornConversationId ?? newId
 }

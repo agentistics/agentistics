@@ -26,7 +26,7 @@ export interface FolderDeps {
  *  the server's fleet snapshot yet, so re-filing it resolved to `no_such_session` and signalled nothing.
  *  Best effort: no server = nothing to refresh. */
 const pingServer = async (): Promise<void> => {
-  await fetch(`http://127.0.0.1:${PORT}/api/session-groups/broadcast`, {
+  await fetch(`http://127.0.0.1:${PORT}/api/session-groups-broadcast`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
     signal: AbortSignal.timeout(1500),
   }).catch(() => {})
