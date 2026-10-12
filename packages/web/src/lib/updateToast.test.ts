@@ -4,6 +4,7 @@ import {
   safeAppUrl, shouldShowToast, snapshotRestore, snoozeActive, snoozeFor, type VersionAnswer,
   UPDATE_NOTICE_CODE, promptExit, promptTimeoutMs,
   VERSION_POLL_MS, VERSION_FOCUS_MIN_MS, versionRefetchDue, promptDismissedFor,
+  pinnedUpdate,
 } from './updateToast'
 
 const info = (o: Partial<VersionAnswer> = {}): VersionAnswer =>
@@ -137,5 +138,21 @@ describe('UPD.NOTIFY: the page keeps asking, and a snooze is bounded', () => {
     expect(promptDismissedFor('2.101.1', '2.101.1')).toBe(true)
     expect(promptDismissedFor('2.101.1', '2.102.0')).toBe(false)
     expect(promptDismissedFor(null, '2.102.0')).toBe(false)
+  })
+})
+
+describe('UPD.PINNED: the bell keeps the update pinned', () => {
+  const info = { current: '1.0.0', latest: '1.1.0', hasUpdate: true, upgradable: null as string | null }
+  test('present while an installable update exists, whatever the snooze', () => {
+    expect(pinnedUpdate(info, false)).toEqual({ current: '1.0.0', latest: '1.1.0', critical: false })
+  })
+  test('gone once the installed version reaches latest', () => {
+    expect(pinnedUpdate({ ...info, current: '1.1.0', hasUpdate: false }, false)).toBeNull()
+    expect(pinnedUpdate({ ...info, current: '1.1.0' }, false)).toBeNull()
+  })
+  test('never on a central, when not installable, or with no answer', () => {
+    expect(pinnedUpdate(info, true)).toBeNull()
+    expect(pinnedUpdate({ ...info, upgradable: 'container' }, false)).toBeNull()
+    expect(pinnedUpdate(null, false)).toBeNull()
   })
 })
