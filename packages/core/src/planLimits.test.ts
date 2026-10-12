@@ -163,6 +163,34 @@ describe('budgets, pacing, and routing', () => {
     expect(pace.freeSlotsMeasured).toBe(false)
     expect(routeRecommendation([{ ...planBudget(l, now), ...pace }], 'mechanical').cadence.parallel).toBeGreaterThanOrEqual(2)
   })
+
+  test('a held five-hour budget has no slots even with zero burn', () => {
+    const l = { ...withPlan('codex', 92, 35, 'Plus'), updatedAt: now }
+    const pace = planPace(l, now, [{ ...l, updatedAt: now - H, windows: [win('5h', 92, reset5), win('week', 35, resetWeek)] }])
+    expect(pace.paceStatus).toBe('under')
+    expect(pace.burnPctPerHour).toBe(0)
+    expect(pace.suggestedParallel).toBe(0)
+    expect(pace.freeSlots).toBe(0)
+    expect(pace.pauseUntil).toBe(reset5)
+  })
+
+  test('a held weekly budget has no slots even with zero burn', () => {
+    const l = { ...withPlan('codex', 72, 96, 'Plus'), updatedAt: now }
+    const pace = planPace(l, now, [{ ...l, updatedAt: now - H, windows: [win('5h', 72, reset5), win('week', 96, resetWeek)] }])
+    expect(pace.paceStatus).toBe('under')
+    expect(pace.burnPctPerHour).toBe(0)
+    expect(pace.suggestedParallel).toBe(0)
+    expect(pace.freeSlots).toBe(0)
+    expect(pace.pauseUntil).toBe(resetWeek)
+  })
+
+  test('a below-threshold zero-burn budget still offers two sessions', () => {
+    const l = { ...withPlan('codex', 72, 35, 'Plus'), updatedAt: now }
+    const pace = planPace(l, now, [{ ...l, updatedAt: now - H, windows: [win('5h', 72, reset5), win('week', 35, resetWeek)] }])
+    expect(pace.burnPctPerHour).toBe(0)
+    expect(pace.suggestedParallel).toBeGreaterThanOrEqual(2)
+    expect(pace.freeSlots).toBeGreaterThanOrEqual(2)
+  })
 })
 
 test('plan slots use the mean burn of the live sessions', () => {

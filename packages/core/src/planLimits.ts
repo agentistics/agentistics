@@ -321,14 +321,17 @@ export function planPace(
     : week && weekPct >= PLAN_BUDGET_HOLD_WEEK_PCT
       ? week.resetsAt
       : undefined
+  const budgetHold = pauseReset !== undefined
   const projectedPauseHours = week && burnPctPerHour > 0
     ? Math.max(0, hoursToReset - (100 - weekPct) / burnPctPerHour)
     : 0
   const nextFiveHourReset = five?.resetsAt ?? week?.resetsAt ?? nowMs
-  const pauseUntil = paceStatus === 'over'
+  const pauseUntil = budgetHold
+    ? pauseReset
+    : paceStatus === 'over'
     ? (pauseReset ?? Math.min(nextFiveHourReset, nowMs + projectedPauseHours * 3_600_000))
     : undefined
-  const suggestedParallel = paceStatus === 'over' ? 0 : Math.max(1, Math.min(8, paceStatus === 'under'
+  const suggestedParallel = budgetHold || paceStatus === 'over' ? 0 : Math.max(1, Math.min(8, paceStatus === 'under'
     ? Math.max(2, Math.ceil(sustainablePctPerHour / Math.max(burnPctPerHour, sustainablePctPerHour / 2)))
     : Math.ceil(Math.max(burnPctPerHour, sustainablePctPerHour) / Math.max(sustainablePctPerHour, 0.01))))
   const slots = planSlots({
@@ -347,7 +350,11 @@ export function planPace(
     : paceStatus === 'over'
       ? `Over pace: pause until ${pauseUntil ? new Date(pauseUntil).toISOString() : 'the next reset'}; reduce concurrency until burn is sustainable.`
       : 'On pace: keep the current cadence through the weekly reset.'
-  return { paceStatus, burnPctPerHour, sustainablePctPerHour, suggestedParallel, note, ...slots }
+  return {
+    paceStatus, burnPctPerHour, sustainablePctPerHour, suggestedParallel, note,
+    ...slots,
+    ...(budgetHold ? { freeSlots: 0, pauseUntil } : {}),
+  }
 }
 
 const ROUTE_PREFERENCES: Record<RouteKind, readonly [HarnessId, string?][]> = {

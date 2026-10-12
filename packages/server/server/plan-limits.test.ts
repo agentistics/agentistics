@@ -90,6 +90,24 @@ test('pacing pools are per harness: Claude over does not remove Codex slots', as
   expect(rec.cadence.parallel).toBe(1)
 })
 
+test('aggregate free slots ignore held plans', async () => {
+  const now = Date.parse('2026-11-10T20:00:00Z')
+  const hour = 3_600_000
+  const weekReset = now + 20 * hour
+  const record = (harness: 'claude' | 'codex', five: number, week: number) => ingestPlanLimits({
+    harness, account: 'default', plan: harness === 'claude' ? 'Max' : 'Plus',
+    windows: [
+      { kind: '5h', usedPct: five, resetsAt: now + 4 * hour },
+      { kind: 'week', usedPct: week, resetsAt: weekReset },
+    ], updatedAt: now, source: harness === 'claude' ? 'claude-stream' : 'codex-rollout',
+  })
+  await record('claude', 92, 35)
+  await record('codex', 10, 35)
+  const body = await planLimitsPayload(undefined, now)
+  expect(body.freeSlotsByHarness.claude).toBe(0)
+  expect(body.freeSlots).toBe(body.freeSlotsByHarness.codex ?? 0)
+})
+
 test('notices fire once per threshold, the 100% one names an alternative with room', async () => {
   const told: [number, string | null][] = []
   setPlanLimitsSink({ changed: () => {}, notify: (n, alt) => told.push([n.threshold, alt]) })

@@ -304,7 +304,8 @@ export async function planLimitsPayload(
   })
   const freeSlotsByHarness = Object.fromEntries(budgets.map(b => [b.harness, b.freeSlots])) as Partial<Record<HarnessId, number>>
   // A caller choosing a harness must not be blocked by another harness's exhausted plan.
-  const freeSlots = budgets.length ? Math.max(...budgets.map(b => b.freeSlots)) : 0
+  const availableBudgets = budgets.filter(b => b.status !== 'hold')
+  const freeSlots = availableBudgets.length ? Math.max(...availableBudgets.map(b => b.freeSlots)) : 0
   const pauseUntil = budgets.map(b => b.pauseUntil).filter((v): v is number => v !== undefined).sort((a, b) => a - b)[0]
   const publicLiveSessions = liveSessions.map(({ harness: _harness, ...s }) => s)
   return { limits, registered, budgets, freeSlots, freeSlotsByHarness, liveSessions: publicLiveSessions, ...(pauseUntil !== undefined ? { pauseUntil } : {}), now: nowMs }
