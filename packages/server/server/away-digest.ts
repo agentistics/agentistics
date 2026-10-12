@@ -140,14 +140,23 @@ export interface AwayDigestAnswerDeps {
   prompt: (lang: 'pt' | 'en', id: string, text: string) => Promise<{ ok: boolean }>
 }
 
-export function awayDigestPrompt(lang: 'pt' | 'en', away: AwayState, now: number, digest: Record<string, unknown>): string {
-  const window = `${away.since} ${lang === 'pt' ? 'até' : 'to'} ${new Date(now).toISOString()}`
+export function awayDigestPrompt(
+  lang: 'pt' | 'en',
+  away: AwayState,
+  now: number,
+  digest: Record<string, unknown>,
+  lastDeliveredAt?: number,
+): string {
+  const windowStart = Math.max(Date.parse(away.since), lastDeliveredAt ?? -Infinity)
+  const window = `${Number.isFinite(windowStart) ? new Date(windowStart).toISOString() : away.since} ${lang === 'pt' ? 'até' : 'to'} ${new Date(now).toISOString()}`
   return lang === 'pt'
     ? `Você recebeu o JSON abaixo. Produza um relatório visual em Markdown com as seções Resumo, Releases, Tarefas, Sessões, Check-ins, Avisos e Esperando por você. Use somente o JSON, não invente fatos; marque dados unavailable como indisponíveis. Janela: ${window}.\n\n${JSON.stringify(digest)}`
     : `You received the JSON below. Produce a visual Markdown status report with sections Summary, Releases, Tasks, Sessions, Check-ins, Notices, and Waiting for you. Use only the JSON; do not invent facts, and mark unavailable data as unavailable. Window: ${window}.\n\n${JSON.stringify(digest)}`
 }
 
-export async function answerAwayDigestWithDeps(answer: unknown, bucket: unknown, lang: 'pt' | 'en', deps: AwayDigestAnswerDeps, now = Date.now(), since?: unknown): Promise<AwayDigestAnswer> {
+const answerDepsLocks = new Map<number, Promise<AwayDigestAnswer>>()
+
+async function answerAwayDigestWithDepsUnlocked(answer: unknown, bucket: unknown, lang: 'pt' | 'en', deps: AwayDigestAnswerDeps, now: number, since?: unknown): Promise<AwayDigestAnswer> {
   if (answer !== 'yes' && answer !== 'no') return { ok: false, error: 'bad_answer' }
   if (!Number.isInteger(bucket)) return { ok: false, error: 'stale' }
   const key = Number(bucket)
@@ -164,9 +173,18 @@ export async function answerAwayDigestWithDeps(answer: unknown, bucket: unknown,
   const digest = await deps.build(away, now)
   const out = await deps.startNay(lang)
   if (!out.ok || !out.id) return { ok: false, error: 'failed' }
-  if (!(await deps.prompt(lang, out.id, awayDigestPrompt(lang, away, now, digest))).ok) return { ok: false, error: 'failed' }
+  if (!(await deps.prompt(lang, out.id, awayDigestPrompt(lang, away, now, digest, prefs.awayDigest?.lastDeliveredAt))).ok) return { ok: false, error: 'failed' }
   await deps.write({ since: away.since, lastBucket: key, lastDeliveredAt: now, conversationId: out.id })
   return { ok: true, conversationId: out.id, bucket: key }
+}
+
+export async function answerAwayDigestWithDeps(answer: unknown, bucket: unknown, lang: 'pt' | 'en', deps: AwayDigestAnswerDeps, now = Date.now(), since?: unknown): Promise<AwayDigestAnswer> {
+  if (typeof bucket !== 'number' || !Number.isInteger(bucket)) return answerAwayDigestWithDepsUnlocked(answer, bucket, lang, deps, now, since)
+  const prior = answerDepsLocks.get(bucket)
+  if (prior) return prior
+  const run = answerAwayDigestWithDepsUnlocked(answer, bucket, lang, deps, now, since)
+  answerDepsLocks.set(bucket, run)
+  try { return await run } finally { answerDepsLocks.delete(bucket) }
 }
 
 export async function answerAwayDigest(answer: unknown, bucket: unknown, lang: 'pt' | 'en', now = Date.now(), since?: unknown): Promise<AwayDigestAnswer> {

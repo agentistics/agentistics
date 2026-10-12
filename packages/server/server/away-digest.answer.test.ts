@@ -64,4 +64,29 @@ describe('away digest answers', () => {
     const english = awayDigestPrompt('en', away, start, {})
     for (const section of ['Summary', 'Releases', 'Tasks', 'Sessions', 'Check-ins', 'Notices', 'Waiting for you']) expect(english).toContain(section)
   })
+
+  test('prompt starts at the last delivered digest, not the original away time', () => {
+    const delivered = start + 6 * 60 * 60 * 1000
+    const prompt = awayDigestPrompt('en', away, delivered + 1_000, {}, delivered)
+    expect(prompt).toContain(`Window: ${new Date(delivered).toISOString()} to ${new Date(delivered + 1_000).toISOString()}`)
+    expect(prompt).not.toContain(`Window: ${away.since} to`)
+  })
+
+  test('overlapping offers for one bucket spawn and prompt only once', async () => {
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    let starts = 0
+    let prompts = 0
+    const f = fixture({
+      start: async () => { starts++; await gate; return { ok: true, id: 'nay-overlap' } },
+      prompt: async () => { prompts++; return { ok: true } },
+    })
+    const first = answerAwayDigestWithDeps('yes', bucket, 'en', f.deps, start + 5 * 60 * 60 * 1000, away.since)
+    await Promise.resolve()
+    const second = answerAwayDigestWithDeps('yes', bucket, 'en', f.deps, start + 5 * 60 * 60 * 1000, away.since)
+    release()
+    const results = await Promise.all([first, second])
+    expect(results[1]).toEqual(results[0])
+    expect({ starts, prompts }).toEqual({ starts: 1, prompts: 1 })
+  })
 })

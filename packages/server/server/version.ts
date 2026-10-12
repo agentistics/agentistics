@@ -310,12 +310,7 @@ export async function getVersionInfo(opts: { force?: boolean } = {}): Promise<Ve
   const now = Date.now()
   if (!opts.force) {
     if (isInProcessFresh(_cache, now, CURRENT_VERSION)) {
-      return {
-        current: CURRENT_VERSION,
-        latest: _cache!.latest,
-        hasUpdate: _cache!.hasUpdate,
-        critical: _cache!.critical,
-      }
+      return cachedVersionInfo(_cache, CURRENT_VERSION)!
     }
     const disk = readVersionCache()
     if (isVersionCacheFresh(disk, now, CURRENT_VERSION)) {
