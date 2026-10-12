@@ -3,6 +3,11 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PENDING_TTL_MS, clearPrompts, migratePrompts, pendingFor, recordPrompt, reloadPrompts, resetPrompts, usePromptStoreForTests } from './pending-prompts'
+import { parseAntigravityChat } from './antigravity-chat'
+import { parseCodexChat } from './codex-chat'
+import { parseCopilotChat } from './copilot-chat'
+import { parseGeminiChatTurns } from './gemini-chat'
+import { parseKimiChat } from './kimi-chat'
 
 const CONV = 'conv-1'
 
@@ -40,6 +45,33 @@ describe('pendingFor', () => {
     // JOINED to another. `pendingEchoes` is shared with the web for exactly this.
     recordPrompt(CONV, 'e depois roda o lint por favor')
     expect(pendingFor(CONV, ['> algo antes\n> e depois roda o lint por favor\r\n'])).toEqual([])
+  })
+
+  it('retires a short Claude mid-turn message at its exact queued line', () => {
+    recordPrompt(CONV, 'ok')
+    // Claude's queued-command transcript joins the mid-turn message to the preceding input and
+    // prefixes both lines with `> `. The exact-line rule handles the short `ok` without fuzzy
+    // containment.
+    expect(pendingFor(CONV, ['> previous work\n> ok\r\n'])).toEqual([])
+  })
+
+  const harnessFixtures: Array<[string, string[]]> = [
+    ['codex', [JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'before\nok' }] } })]],
+    ['gemini', [JSON.stringify({ type: 'user', content: 'before\nok' })]],
+    ['copilot', [JSON.stringify({ type: 'user.message', data: { content: 'before\nok' } })]],
+    ['kimi', [JSON.stringify({ type: 'context.append_message', message: { role: 'user', content: [{ type: 'text', text: 'before\nok' }], origin: { kind: 'user' } } })]],
+    ['antigravity', [JSON.stringify({ type: 'USER_INPUT', source: 'USER_EXPLICIT', content: '<USER_REQUEST>before\nok</USER_REQUEST>' })]],
+  ]
+
+  for (const [harness, lines] of harnessFixtures) it(`retires a short mid-turn message for ${harness}`, () => {
+      const turns = harness === 'codex' ? parseCodexChat(lines, 'codex')
+        : harness === 'gemini' ? parseGeminiChatTurns(lines, 10)
+          : harness === 'copilot' ? parseCopilotChat(lines, 'copilot')
+            : harness === 'kimi' ? parseKimiChat(lines, 'kimi')
+              : parseAntigravityChat(lines, 'antigravity')
+      const conversation = `mid-turn-${harness}`
+      recordPrompt(conversation, 'ok')
+      expect(pendingFor(conversation, turns.filter(t => t.role === 'user').map(t => t.text))).toEqual([])
   })
 
   it('EXPIRES, so a message the harness dropped does not wait forever on every device', () => {
