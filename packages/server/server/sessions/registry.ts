@@ -88,6 +88,13 @@ export interface SessionPatch {
 export interface SessionRegistry {
   read(): Promise<ManagedSession[]>
   add(session: ManagedSession): Promise<void>
+  /**
+   * Take back records the caller found unregistered. Unlike `add` it RE-READS inside the lock and
+   * never replaces: an id already present keeps every field it has (label, task, createdAt, …) and
+   * only gains fields it lacks. The caller's snapshot may be seconds stale — a row registered since
+   * must not be overwritten by an unlabelled reconstruction of itself.
+   */
+  adopt(records: readonly ManagedSession[]): Promise<void>
   remove(id: string): Promise<void>
   /** False when no session carries that id — never a silent success. */
   patch(id: string, patch: SessionPatch): Promise<boolean>
@@ -314,6 +321,23 @@ export function createSessionRegistry(file: string): SessionRegistry {
         await write([...list.filter(s => s.id !== session.id), session])
       })
     },
+    adopt(records) {
+      return enqueue(async () => {
+        const list = await read()
+        let changed = false
+        for (const rec of records) {
+          const idx = list.findIndex(s => s.id === rec.id)
+          if (idx === -1) { list.push(rec); changed = true; continue }
+          const have = list[idx]! as unknown as Record<string, unknown>
+          const fill: Record<string, unknown> = {}
+          for (const [k, v] of Object.entries(rec)) if (have[k] === undefined && v !== undefined) fill[k] = v
+          if (Object.keys(fill).length === 0) continue
+          list[idx] = { ...list[idx]!, ...fill } as ManagedSession
+          changed = true
+        }
+        if (changed) await write(list)
+      })
+    },
     remove(id) {
       return enqueue(async () => {
         const list = await read()
@@ -363,6 +387,7 @@ export function createSessionRegistry(file: string): SessionRegistry {
 const defaultRegistry = createSessionRegistry(MANAGED_SESSIONS_FILE)
 
 export const readRegistry = (): Promise<ManagedSession[]> => defaultRegistry.read()
+export const adoptSessionRecords = (rs: readonly ManagedSession[]): Promise<void> => defaultRegistry.adopt(rs)
 export const addSession = (s: ManagedSession): Promise<void> => defaultRegistry.add(s)
 export const removeSession = (id: string): Promise<void> => defaultRegistry.remove(id)
 export const patchSession = (
@@ -393,6 +418,9 @@ export async function retireSession(
   if (!(await registry.patch(id, { endedAt: new Date().toISOString() }))) await registry.remove(id)
 }
 
+/** How long a row without a heartbeat is presumed to still be getting its pane. */
+const BORN_GRACE_MS = 30_000
+
 export async function retireFallenSessions(
   o: {
     newSessionId?: string
@@ -415,6 +443,9 @@ export async function retireFallenSessions(
     if (m.endedAt) continue
     if (o.newSessionId && m.id === o.newSessionId) continue
     if (backendIds.has(m.id)) continue
+    // A row written BEFORE its pane exists (`start` registers first) has no heartbeat and no pane yet; a
+    // concurrent start in the same directory must not read that as a fallen session.
+    if (m.lastSeenMs === undefined && Date.parse(m.createdAt) > Date.now() - BORN_GRACE_MS) continue
     const sameConv = Boolean(o.conversationId && m.conversationId === o.conversationId)
     const sameCwd = m.cwd === o.cwd && m.harness === o.harness
     if (sameConv || sameCwd) {

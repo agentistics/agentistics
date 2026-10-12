@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, markRoleDelivered, migrateLegacyRoles, parseRoles, rekeyStoredRole, roleOfRow, roleOp, roleStatus, writeRolesDoc, type RoleDeps,
+  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, markRoleDelivered, migrateLegacyRoles, parseRoles, rekeyStoredRole, roleOfRow, originOfRow, listRoleOrigins, spawnRoleOrigin, roleSenderFromBody, markParentVerified, roleOp, roleStatus, writeRolesDoc, type RoleDeps,
 } from './session-roles'
 
 let dir = ''
@@ -104,6 +104,27 @@ describe('spawn role assignment and delivery', () => {
     await rekeyStoredRole(['managed'], ['managed', 'conversation'], deps)
     expect((await loadRoles(deps)).roles).toEqual({ managed: 'worker', conversation: 'worker' })
     expect((await loadRoles(deps)).lastDeliveredRole).toEqual({ managed: 'worker', conversation: 'worker' })
+  })
+
+  test('a rekey never leaves two contradictory entries for one session', async () => {
+    const { deps } = fake([])
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { offered: 'worker', conversation: 'leader' }, at: { offered: 10, conversation: 20 } })
+    await rekeyStoredRole(['offered'], ['conversation', 'managed'], deps)
+    expect((await loadRoles(deps)).roles).toEqual({ conversation: 'leader', managed: 'leader' })
+  })
+
+  test('rekey chooses a newer target assignment over the source', async () => {
+    const { deps } = fake([])
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { old: 'worker', conversation: 'leader' }, at: { old: 10, conversation: 20 } })
+    await rekeyStoredRole(['old'], ['conversation', 'managed'], deps)
+    expect((await loadRoles(deps)).roles).toEqual({ conversation: 'leader', managed: 'leader' })
+  })
+
+  test('rekey chooses a newer source assignment over the target', async () => {
+    const { deps } = fake([])
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { old: 'leader', conversation: 'worker' }, at: { old: 20, conversation: 10 } })
+    await rekeyStoredRole(['old'], ['conversation', 'managed'], deps)
+    expect((await loadRoles(deps)).roles).toEqual({ conversation: 'leader', managed: 'leader' })
   })
 
   test('serializes rekey and delivery writes without losing either field', async () => {
@@ -233,5 +254,112 @@ describe('roleOp (the agentistics_session_role handler)', () => {
     const { deps, renames } = fake([{ id: 'm1', title: 'T' }], { uiLang: async () => 'pt' })
     await roleOp(null, { ref: 'm1', role: 'leader' }, deps)
     expect(renames[0]![1]).toBe('[ LÍDER ] - T')
+  })
+})
+
+describe('role origin (who set it)', () => {
+  test('the browser / CLI (no verified sender) is manual', async () => {
+    const { deps } = fake([{ id: 'm1', conversationId: 'c1', title: 'T' }])
+    const out = await roleOp(null, { ref: 'm1', role: 'worker' }, deps)
+    expect(out).toMatchObject({ ok: true, origin: 'manual' })
+    expect(await listRoleOrigins(deps)).toEqual({ c1: 'manual' })
+  })
+  test('a session setting its own role is auto', async () => {
+    const { deps } = fake([{ id: 'm1', title: 'T' }])
+    expect(await roleOp('m1', { role: 'leader' }, deps)).toMatchObject({ ok: true, origin: 'auto' })
+    expect(await listRoleOrigins(deps)).toEqual({ m1: 'auto' })
+  })
+  test('a leader setting a child records itself as the origin', async () => {
+    const { deps } = fake([{ id: 'p', title: 'P' }, { id: 'kid', title: 'Kid' }], { parentOf: async id => (id === 'kid' ? 'p' : undefined) })
+    expect(await roleOp('p', { ref: 'kid', role: 'worker' }, deps)).toMatchObject({ ok: true, origin: { leader: 'p' } })
+    expect(await listRoleOrigins(deps)).toEqual({ kid: { leader: 'p' } })
+  })
+  test('the owner choosing the same role afterwards takes the origin back (manual)', async () => {
+    const { deps } = fake([{ id: 'm1', title: 'T' }])
+    await roleOp('m1', { role: 'worker' }, deps)
+    const out = await roleOp(null, { ref: 'm1', role: 'worker' }, deps)
+    expect(out).toMatchObject({ ok: true, changed: false, origin: 'manual' })
+    expect(await listRoleOrigins(deps)).toEqual({ m1: 'manual' })
+  })
+  test('clearing the role clears the origin', async () => {
+    const { deps } = fake([{ id: 'm1', title: 'T' }])
+    await roleOp('m1', { role: 'worker' }, deps)
+    await roleOp(null, { ref: 'm1', role: 'auto' }, deps)
+    expect(await listRoleOrigins(deps)).toEqual({})
+  })
+  test('an entry stored without an origin reads as manual', async () => {
+    await writeFile(join(dir, SESSION_ROLES_FILE), JSON.stringify({ version: 1, migrated: true, roles: { c1: 'leader' } }))
+    expect(originOfRow((await loadRoles({ dataDir: dir, legacyPref: async () => undefined })), { id: 'm1', conversationId: 'c1' })).toBe('manual')
+  })
+  test('rekey moves the origin with the role', async () => {
+    const { deps } = fake([{ id: 'm1', title: 'T' }])
+    await roleOp('m1', { role: 'leader' }, deps)
+    await rekeyStoredRole(['m1'], ['c9'], deps)
+    expect(await listRoleOrigins(deps)).toEqual({ c9: 'auto' })
+  })
+})
+
+describe('ensureSpawnRole origin', () => {
+  test('records the spawning leader as the origin', async () => {
+    const { deps } = fake([])
+    await ensureSpawnRole(['c1', 'm1'], 'worker', deps, { leader: 'p' })
+    expect(await listRoleOrigins(deps)).toEqual({ c1: { leader: 'p' }, m1: { leader: 'p' } })
+  })
+})
+
+describe('spawnRoleOrigin (only a proven live parent is a leader origin)', () => {
+  test('verified parent present in the registry -> leader', () => {
+    expect(spawnRoleOrigin('p', true, ['p', 'q'])).toEqual({ leader: 'p' })
+  })
+  test('unverified, unknown or absent parent -> manual', () => {
+    expect(spawnRoleOrigin('p', false, ['p'])).toBe('manual')
+    expect(spawnRoleOrigin('ghost', true, ['p'])).toBe('manual')
+    expect(spawnRoleOrigin(undefined, true, ['p'])).toBe('manual')
+  })
+})
+
+describe('roleSenderFromBody (who is asking)', () => {
+  const verify = async (id: unknown, token: unknown) => (id === 'm1' && token === 'ok' ? 'm1' : null)
+  test('no session field at all = the browser/CLI (manual power)', async () => {
+    expect(await roleSenderFromBody({} , verify)).toEqual({ ok: true, sender: null })
+  })
+  test('a valid proof is the sender', async () => {
+    expect(await roleSenderFromBody({ session: { id: 'm1', token: 'ok' } }, verify)).toEqual({ ok: true, sender: 'm1' })
+  })
+  test('a session field that is null, missing or invalid is unverified_sender', async () => {
+    expect(await roleSenderFromBody({ session: null }, verify)).toMatchObject({ ok: false, code: 'unverified_sender' })
+    expect(await roleSenderFromBody({ session: { id: 'm1', token: 'bad' } }, verify)).toMatchObject({ ok: false, code: 'unverified_sender' })
+    expect(roleStatus({ ok: false, code: 'unverified_sender', message: '' })).toBe(403)
+  })
+})
+
+describe('unverified_sender language', () => {
+  const verify = async () => null
+  test('PT when asked in PT, EN otherwise', async () => {
+    const pt = await roleSenderFromBody({ session: null }, verify, 'pt')
+    const en = await roleSenderFromBody({ session: null }, verify, 'en')
+    expect(pt).toMatchObject({ ok: false, code: 'unverified_sender' })
+    expect((pt as { message: string }).message).toContain('Só uma sessão')
+    expect((en as { message: string }).message).toContain('Only a session')
+    expect((en as { message: string }).message).not.toContain('without naming')
+  })
+})
+
+describe('markParentVerified (the wire never states it)', () => {
+  const verify = async (id: unknown, token: unknown) => (id === 'p1' && token === 'ok' ? 'p1' : null)
+  test('overwrites a forged parentVerified: true when there is no proof', async () => {
+    const body = { parent: 'p1', parentVerified: true } as { parent?: unknown; parentVerified?: unknown; session?: unknown }
+    expect(await markParentVerified(body, verify)).toBe(false)
+    expect(body.parentVerified).toBe(false)
+  })
+  test('overwrites it when the proof names a different parent', async () => {
+    const body = { parent: 'p2', parentVerified: true, session: { id: 'p1', token: 'ok' } }
+    await markParentVerified(body, verify)
+    expect(body.parentVerified).toBe(false)
+  })
+  test('true only for a valid proof naming the parent it claims', async () => {
+    const body = { parent: ' p1 ', parentVerified: false, session: { id: 'p1', token: 'ok' } }
+    await markParentVerified(body, verify)
+    expect(body.parentVerified).toBe(true)
   })
 })

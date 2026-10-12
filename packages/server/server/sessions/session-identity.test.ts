@@ -29,3 +29,17 @@ describe('session identity', () => {
     expect(await verifySessionIdentity(undefined, undefined)).toBeNull()
   })
 })
+
+describe('callerHoldsIdentity', () => {
+  test('false without a matching AGENTOP_MANAGED_ID, whatever the key', async () => {
+    const { callerHoldsIdentity } = await import('./session-identity')
+    expect(await callerHoldsIdentity(undefined, { AGENTOP_MANAGED_ID: 'a' })).toBe(false)
+    expect(await callerHoldsIdentity('a', {})).toBe(false)
+    expect(await callerHoldsIdentity('a', { AGENTOP_MANAGED_ID: 'b' })).toBe(false)
+  })
+  test('true when the key exists and the id is the pane\'s own AGENTOP_MANAGED_ID', async () => {
+    const { callerHoldsIdentity } = await import('./session-identity')
+    await ensureSessionIdentityKey()
+    expect(await callerHoldsIdentity('a', { AGENTOP_MANAGED_ID: 'a' })).toBe(true)
+  })
+})

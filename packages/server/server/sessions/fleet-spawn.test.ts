@@ -45,6 +45,15 @@ describe('planFleetSpawn', () => {
     })
   })
 
+  it('derives the leader role from either localized leader title prefix', () => {
+    for (const label of ['[ LEADER ] - English', '[ LÍDER ] - Português']) {
+      const out = planFleetSpawn({ harness: 'claude', cwd: '/srv/work', label }, HARNESSES)
+      expect(out.ok && out.plan.role).toBe('leader')
+    }
+    const worker = planFleetSpawn({ harness: 'claude', cwd: '/srv/work', label: 'ordinary' }, HARNESSES)
+    expect(worker.ok && 'role' in worker.plan).toBe(false)
+  })
+
   it('treats a blank optional field as absent, never as an empty value', () => {
     // A label of '' would name a row with nothing, and the row would then have no name at all
     // rather than the derived one.
@@ -165,6 +174,17 @@ describe('planFleetSpawn — parent', () => {
     expect(ok.ok && ok.plan.parentSessionId).toBe('abc123')
     const none = planFleetSpawn({ harness: 'claude', cwd: '/r', parent: '  ' }, HARNESSES)
     expect(none.ok && 'parentSessionId' in none.plan).toBe(false)
+  })
+})
+
+describe('planFleetSpawn — parentVerified', () => {
+  it('is carried only with a parent and a strict true', () => {
+    const yes = planFleetSpawn({ harness: 'claude', cwd: '/r', parent: 'p', parentVerified: true }, HARNESSES)
+    expect(yes.ok && yes.plan.parentVerified).toBe(true)
+    const str = planFleetSpawn({ harness: 'claude', cwd: '/r', parent: 'p', parentVerified: 'true' }, HARNESSES)
+    expect(str.ok && 'parentVerified' in str.plan).toBe(false)
+    const orphan = planFleetSpawn({ harness: 'claude', cwd: '/r', parentVerified: true }, HARNESSES)
+    expect(orphan.ok && 'parentVerified' in orphan.plan).toBe(false)
   })
 })
 
