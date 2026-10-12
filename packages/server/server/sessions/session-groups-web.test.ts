@@ -179,3 +179,13 @@ test('delete with cascade removes the sub-folders too', async () => {
   const r = planGroupOp(g, [], { type: 'delete', group: 'P', cascade: true })
   expect(r.ok && r.groups.groups).toEqual([])
 })
+
+describe('groupOp broadcast', () => {
+  test('signals without resolving a session or writing', async () => {
+    let n = 0
+    const deps = { rows: async () => { throw new Error('rows must not be read') }, read: async () => ({}), update: async () => { throw new Error('no write') }, broadcast: () => { n++ } } as never
+    const out = await groupOp({ op: 'broadcast' }, deps)
+    expect(out.ok).toBe(true)
+    expect(n).toBe(1)
+  })
+})

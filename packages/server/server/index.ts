@@ -2058,6 +2058,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const out = await groupOp({ op: 'remove', session: String(body.session ?? '') })
       return json(out, groupStatus(out))
     }
+    if (url.pathname === '/api/session-groups-broadcast' && req.method === 'POST') {
+      const { groupOp, groupStatus } = await import('./sessions/session-groups-web')
+      const out = await groupOp({ op: 'broadcast' })
+      return json(out, groupStatus(out))
+    }
     if (url.pathname.startsWith('/api/session-groups/') && req.method === 'POST') {
       const rest = url.pathname.slice('/api/session-groups/'.length).split('/')
       const group = decodeURIComponent(rest[0] ?? '')

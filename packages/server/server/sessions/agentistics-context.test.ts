@@ -238,7 +238,7 @@ describe('context for a child session', () => {
   test('the cleanup rule is ONE bullet and still covers closing children and removing worktrees', () => {
     const t = contextText({ sessionId: 'c1', cwd: '/w' })
     expect(t.match(/Clean up after yourself/g)?.length).toBe(1)
-    expect(t).toContain('close it (agentop session kill) and file it in the task\'s finished folder')
+    expect(t).toContain('so it is filed in the task\'s finished folder')
     expect(t).toContain('git worktree remove')
   })
 })
@@ -265,5 +265,17 @@ describe('role line follows the stored role', () => {
   })
   test('the leader briefing points at agentistics_session_role', () => {
     expect(contextText(base)).toContain('agentistics_session_role')
+  })
+})
+
+describe('folders in the briefing', () => {
+  test('the open and clean-up lines name --folder', () => {
+    const t = contextText(base)
+    expect(t).toContain('--folder "<folder>"')
+    expect(t).toContain('agentop session kill <id> --folder "<finished folder>"')
+  })
+  test('a briefed session in a folder gets its path and siblings; otherwise no line', () => {
+    expect(contextText({ ...base, folder: { path: 'Eng/Leaders', siblings: ['Eng/Workers'] } })).toContain('Your sidebar folder: Eng/Leaders. Sibling folders: Eng/Workers.')
+    expect(contextText(base)).not.toContain('Your sidebar folder')
   })
 })

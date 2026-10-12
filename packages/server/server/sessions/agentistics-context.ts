@@ -34,6 +34,8 @@ export interface ContextInput {
   specSkills?: readonly string[]
   /** The stored role (`session-roles.ts`); absent = the session decides from the request. */
   role?: 'leader' | 'worker'
+  /** The sidebar folder this session sits in (path) and its sibling folders, when it was filed at spawn. */
+  folder?: { path: string; siblings: readonly string[]; /** A top-level folder: its `siblings` are its sub-folders. */ top?: boolean }
   lang?: ContextLang
   toolNames?: readonly string[]
 }
@@ -92,7 +94,7 @@ export function contextText(i: ContextInput): string {
     roleLine(i.role),
     'Becoming leader: call agentistics_session_role with role "leader" — it stores the role and renames this session to "[ LEADER ] - <title>" (or "[ LÍDER ] - <title>" in a Portuguese UI) for you, keeping the user\'s title. Do not rename it by hand. If you started the session, pick the title.' +
       (i.role ? '' : ' If you have no stored role (AUTO): as soon as it is clear the request is a single piece, call agentistics_session_role with role "worker" to record it.'),
-    'Open other sessions only after the user explicitly approves: `agentop session <harness> --bg --cwd <dir> --name "<title>" -p "<request>"` or `agentop session batch --task "<task>" …`. Every opened session is a WORKER; for a leader hand-off, tell the user it is a leader hand-off so the new session is marked as leader. File each opened session on its subtask and in the task\'s folder.',
+    'Open other sessions only after the user explicitly approves: `agentop session <harness> --bg --cwd <dir> --name "<title>" --folder "<folder>" -p "<request>"` or `agentop session batch --task "<task>" --folder "<folder>" …` (`agentop session folders` lists them; no --folder leaves the session loose in the sidebar). Every opened session is a WORKER; for a leader hand-off, tell the user it is a leader hand-off so the new session is marked as leader. File each opened session on its subtask and in the task\'s folder.',
     'Model/harness balance: use the strongest model for design, coordination, and hard bugs; a mid model for clearly scoped implementation; a light model for probes/screenshots; QA must use a different model from the author. Respect the user\'s usage rules. No usage rules are saved yet: before proposing sessions, ask the user once what plans, quotas, and preferences they allow.',
     'Specification skill rule: if you are a leader, or a worker facing a complex implementation, ASK the user in this session whether to use a specification skill (SDD, such as superpowers). Use it only after a yes; never make it automatic. If none is installed for this harness, you may suggest installing one, but install only after the user\'s OK. Never start every session with it.',
     'Do NOT suggest or ask about a specification skill when a brief, specification, or plan already exists — for example, a worker started by a leader with one, or when the user already gave one. A leader starting a worker must pass the specification path or text in the worker prompt; that worker never asks about specification skills in that case.',
@@ -109,6 +111,7 @@ export function contextText(i: ContextInput): string {
   } else {
     lines.push('This session is not linked to a task. If the work grows beyond a quick question, offer to file it in Agentask — ask first.')
   }
+  if (i.folder) lines.push(`Your sidebar folder: ${i.folder.path}${i.folder.siblings.length > 0 ? `. ${i.folder.top ? 'Sub-folders' : 'Sibling folders'}: ${i.folder.siblings.join(', ')}` : ''}. Workers you open go in the matching folder.`)
   if (i.parentId) {
     lines.push(
       `You were started by session ${i.parentId}${i.parentTitle ? ` ("${i.parentTitle}")` : ''}. When you finish, get blocked or need a decision, report to it with agentistics_session_message (kind: handback | block | question) — not to the user — and keep working only on what it asked.`,
@@ -123,7 +126,7 @@ export function contextText(i: ContextInput): string {
     '- Ports 47291 and 47292 belong to agentistics: never start, stop or bind anything there; never run `agentop upgrade`; never restart the agentistics service.',
     '- Never open public tunnels (ngrok, cloudflared, etc.) to this machine.',
     `- Do not delete, move or rewrite files outside ${i.cwd} without asking.`,
-    "- Clean up after yourself: when a session you started has finished and its work is committed/pushed, close it (agentop session kill) and file it in the task's finished folder; when a git worktree you created has been merged or published, remove it (git worktree remove) — never leave finished sessions, worktrees, temp servers or temp files accumulating on the user's machine. Ask before removing anything you did not create.",
+    "- Clean up after yourself: when a session you started has finished and its work is committed/pushed, close it (`agentop session kill <id> --folder \"<finished folder>\"`) so it is filed in the task's finished folder; when a git worktree you created has been merged or published, remove it (git worktree remove) — never leave finished sessions, worktrees, temp servers or temp files accumulating on the user's machine. Ask before removing anything you did not create.",
     "- Keep the user's sidebar organised: sessions you create with approval go into their task's folder.",
     '- To ask the user something, write the question in the conversation and wait; they answer from the agentistics app or their phone.',
   )
