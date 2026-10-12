@@ -78,6 +78,7 @@ import type { PrefsDraft, AppContext } from './lib/app-context'
 import { NayDock } from './components/nay/NayDock'
 import { dockActiveOnly } from './lib/nayDock'
 import { UpdateModal } from './components/UpdateModal'
+import { setPendingUpdate } from './lib/pendingUpdate'
 import { WhatsNewModal } from './components/WhatsNewModal'
 import { OPEN_WHATS_NEW_EVENT, openWhatsNew, type WhatsNewRequest } from './whatsNew/open'
 import { releasesBetween, MANUAL_OPEN_COUNT } from './whatsNew/select'
@@ -146,7 +147,7 @@ import { sessionLinks } from './lib/sessionParent'
 import { ChatSelectionOverlay } from './components/sessions/ChatSelectionBar'
 import { brandAsset } from './lib/brand'
 import { BUNDLE_VERSION, healStaleBundle, takeUpdatedToast } from './lib/bundleVersion'
-import { promptDismissedFor, promptExit, shouldShowToast, versionRefetchDue, type PromptExit, type VersionAnswer } from './lib/updateToast'
+import { pinnedUpdate, promptDismissedFor, promptExit, shouldShowToast, versionRefetchDue, type PromptExit, type VersionAnswer } from './lib/updateToast'
 import { consumeRestore, snoozeUpdate, startUpgrade, upgradeInFlight, useUpdateSnooze, useUpgradeFlow } from './lib/upgradeFlow'
 import { NayUpdateCard, type UpdateCardPlacement } from './components/nay/NayUpdateCard'
 import { UpgradeOverlay } from './components/UpgradeOverlay'
@@ -2710,6 +2711,8 @@ export default function AppLayout() {
 
   // May this machine be offered the update at all, and is it snoozed? (`shouldShowToast`)
   const updateVerdict = shouldShowToast({ info: versionAnswer, snooze: updateSnooze, now: Date.now(), central: isCentral })
+  const pinned = pinnedUpdate(versionAnswer, isCentral)
+  useEffect(() => { setPendingUpdate(pinned) }, [pinned?.latest, pinned?.current, pinned?.critical]) // eslint-disable-line react-hooks/exhaustive-deps
   const updateInstallable = updateVerdict.show || (updateVerdict.show === false && updateVerdict.why === 'snoozed')
   const promptVisible = updateVerdict.show && !promptDismissedFor(promptGone, versionAnswer?.latest ?? '') && !showUpdateModal && upgradeFlow.phase === 'idle'
   const onPromptExit = useCallback((exit: PromptExit) => {
@@ -4244,7 +4247,7 @@ export default function AppLayout() {
                       onClick={e => { e.preventDefault(); e.stopPropagation(); setShowUpdateModal(true) }}
                       style={{ marginLeft: 4, padding: '1px 6px', borderRadius: 10, background: 'var(--anthropic-orange)', color: '#fff', fontSize: '0.625rem', fontWeight: 700 }}
                     >
-                      {lang === 'pt' ? 'atualizar' : 'update'}
+                      {lang === 'pt' ? `Atualizar para v${versionAnswer.latest.replace(/^v/, '')}` : `Update to v${versionAnswer.latest.replace(/^v/, '')}`}
                     </span>
                   )}
                 </a>
