@@ -1,4 +1,5 @@
-/** LEADER.HANDOFF.HINT — one low-noise suggestion as a leader approaches context limits. */
+/** LEADER.HANDOFF.HINT / WHY — low-noise handoff timing and its explainable numbers. */
+import { getModelPrice } from '@agentistics/core'
 
 export const HANDOFF_HINT_DEFAULT_TOKENS = 150_000
 export const HANDOFF_HINT_DEFAULT_FRACTION = 0.35
@@ -13,6 +14,14 @@ export interface HandoffHintRow {
   hintedLevel?: number
   /** Context size when the last hint was sent; the next reminder is +50k after it. */
   hintedTokens?: number
+  model?: string
+  turns?: number
+  costUSD?: number
+  activity?: 'working' | 'waiting' | 'waiting-approval' | 'exited'
+  state?: 'working' | 'waiting' | 'waiting-approval' | 'exited' | 'closed'
+  workInFlight?: string[]
+  handoffPath?: string
+  handoffBytes?: number
 }
 
 export interface HandoffHint {
@@ -20,6 +29,75 @@ export interface HandoffHint {
   level: number
   tokens: number
   fraction: number
+  why?: HandoffWhy
+}
+
+export interface HandoffWhy {
+  contextTokens?: number
+  turnsDone?: number
+  avgCostPerTurnUSD?: number
+  projectedTurns?: number
+  estimated?: boolean
+  costContinueUSD?: number
+  costSuccessorUSD?: number
+  breakEvenTurns?: number
+  savingsUSD?: number
+  workInFlight: string[]
+  successor?: { handoffPath?: string; handoffTokens?: number }
+}
+
+export interface HandoffWhyDeps {
+  /** The model used for the session; absent means the price is unknown. */
+  model?: string
+  /** Average completed turns of prior leader sessions, when available. */
+  pastLeaderTurns?: readonly number[]
+  /** A known handoff file and its byte size. */
+  handoffPath?: string
+  handoffBytes?: number
+  /** Fixed briefing overhead in tokens; defaults to the installed briefing's estimate. */
+  briefingTokens?: number
+  workInFlight?: readonly string[]
+}
+
+/** Pure, deliberately omission-preserving explanation of why a leader handoff helps. */
+export function computeHandoffWhy(row: HandoffHintRow, deps: HandoffWhyDeps = {}): HandoffWhy {
+  const out: HandoffWhy = { workInFlight: [...(deps.workInFlight ?? row.workInFlight ?? [])] }
+  if (Number.isFinite(row.contextTokens)) out.contextTokens = row.contextTokens
+  if (Number.isFinite(row.turns)) out.turnsDone = row.turns
+  const price = (deps.model ?? row.model) ? getModelPrice(deps.model ?? row.model!).cacheRead : undefined
+  if (price !== undefined && Number.isFinite(row.contextTokens)) {
+    const perTurn = row.contextTokens! / 1_000_000 * price
+    const measured = Number.isFinite(row.turns) && row.turns! > 0 && Number.isFinite(row.costUSD)
+      ? row.costUSD! / row.turns! : undefined
+    out.avgCostPerTurnUSD = measured ?? perTurn
+  }
+  const samples = (deps.pastLeaderTurns ?? []).filter(n => Number.isFinite(n) && n > 0)
+  const projected = samples.length ? samples.reduce((a, n) => a + n, 0) / samples.length : 40
+  out.projectedTurns = Math.round(projected)
+  if (!samples.length) out.estimated = true
+  const handoffTokens = Number.isFinite(deps.handoffBytes)
+    ? Math.ceil(deps.handoffBytes! / 4) + (deps.briefingTokens ?? 2_000) : undefined
+  if (deps.handoffPath !== undefined || handoffTokens !== undefined) {
+    out.successor = {
+      ...(deps.handoffPath !== undefined ? { handoffPath: deps.handoffPath } : {}),
+      ...(handoffTokens !== undefined ? { handoffTokens } : {}),
+    }
+  }
+  if (price !== undefined && Number.isFinite(row.contextTokens)) {
+    const turns = out.projectedTurns!
+    const continueOne = row.contextTokens! / 1_000_000 * price
+    const successorOne = handoffTokens !== undefined ? handoffTokens / 1_000_000 * price : undefined
+    if (successorOne !== undefined) {
+      out.costContinueUSD = turns * continueOne
+      out.costSuccessorUSD = turns * successorOne
+      const delta = continueOne - successorOne
+      if (delta > 0) {
+        out.breakEvenTurns = Math.ceil(successorOne / delta)
+        out.savingsUSD = Math.max(0, out.costContinueUSD - out.costSuccessorUSD)
+      }
+    }
+  }
+  return out
 }
 
 /** Leader means the explicit registry role OR the user-visible title convention. */
@@ -35,6 +113,9 @@ export function planHandoffHints(rows: readonly HandoffHintRow[]): HandoffHint[]
     const fraction = row.contextWindow && row.contextWindow > 0 ? tokens / row.contextWindow : 0
     const crossed = tokens >= HANDOFF_HINT_DEFAULT_TOKENS || fraction >= HANDOFF_HINT_DEFAULT_FRACTION
     if (!crossed) return []
+    const hardCap = fraction >= HANDOFF_HINT_DEFAULT_FRACTION
+    const inFlight = row.workInFlight?.length || row.activity === 'working' || row.state === 'working'
+    if (inFlight && !hardCap) return []
     const previous = row.hintedLevel ?? 0
     if (previous >= 1) {
       const since = row.hintedTokens ?? HANDOFF_HINT_DEFAULT_TOKENS
@@ -47,7 +128,10 @@ export function planHandoffHints(rows: readonly HandoffHintRow[]): HandoffHint[]
 export function handoffHintText(hint: HandoffHint): string {
   const n = Math.round(hint.tokens / 1_000)
   const pct = Math.round(hint.fraction * 100)
-  return `Seu contexto passou de ${n}k tokens (${pct}% da janela). Para economizar, prepare a passagem: escreva o handoff e abra a sessão sucessora (handoff:true).`
+  const why = hint.why
+  const cost = why?.avgCostPerTurnUSD !== undefined ? ` Custo médio: ~US$ ${why.avgCostPerTurnUSD.toFixed(2)} por resposta.` : ''
+  const breakEven = why?.breakEvenTurns !== undefined ? ` Ponto de equilíbrio: ${why.breakEvenTurns} respostas.` : ''
+  return `Trocar agora pode economizar e deixar as respostas mais rápidas. Contexto: ${n}k tokens (${pct}% do limite).${cost}${breakEven} Prepare a passagem e abra a sessão sucessora (handoff:true).`
 }
 
 export interface HandoffHintDeps {
@@ -80,7 +164,8 @@ export async function sendHandoffHints(deps: HandoffHintDeps): Promise<number> {
       const [hint] = planHandoffHints([{ ...row, hintedLevel: prev.level, hintedTokens: prev.tokens }])
       if (!hint) continue
       if (!(await deps.markHinted(row.id, hint.level, hint.tokens).catch(() => false))) continue
-      const result = await deps.prompt(row.id, `[from agentistics · question]\n${handoffHintText(hint)}`).catch(() => ({ ok: false }))
+      const detailed = { ...hint, why: computeHandoffWhy(row, { model: row.model }) }
+      const result = await deps.prompt(row.id, `[from agentistics · question]\n${handoffHintText(detailed)}`).catch(() => ({ ok: false }))
       if (result.ok) sent++
       else await deps.markHinted(row.id, prev.level, prev.tokens).catch(() => false)
     } finally {
