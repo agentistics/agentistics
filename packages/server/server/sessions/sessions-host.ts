@@ -21,6 +21,7 @@ import { approvalTail, attentionOf, digestFrame, frameTail } from './attention'
 import { modeOf, modeSpecFor } from './mode-spec'
 import { EMPTY_CONFIRM_MEMORY, confirmActivities, type ConfirmMemory } from './attention-confirm'
 import type { ChatTurn } from '@agentistics/core'
+import { statSync } from 'node:fs'
 import { transcriptReaderFor } from './harness-transcript'
 import { markFleetPhase } from './fleet-profile'
 import { readDialog, type DialogOption, type DialogUnreadable } from './dialog-choice'
@@ -64,6 +65,13 @@ const CAPTURE_CONCURRENCY = 4
 /** How much of what a session is saying to carry. Enough that a tall pane has something to fill it
  *  with; the pane cuts from the bottom to whatever it can actually draw. */
 const TAIL_LINES = 8
+
+/** How many role-tagged chat turns to carry for a readable session — see `harness-transcript.ts`. */
+const TAIL_CHAT_TURNS = 6
+
+function statQuiet(path: string): { size: number; mtimeMs: number } | null {
+  try { const st = statSync(path); return { size: st.size, mtimeMs: st.mtimeMs } } catch { return null }
+}
 
 /**
  * How much of a blocked session's screen to carry as the dialog.
@@ -400,6 +408,8 @@ export function createSessionsPoller(o: {
   let confirmMemory: ConfirmMemory = EMPTY_CONFIRM_MEMORY
   const prevProcStats = new Map<number, ProcStatSample>()
   /** The last chat tail read per row, with the transcript stamp it was read at — see `readChatTail`. */
+  const chatTailMemo = new Map<string, { path: string; size: number; mtimeMs: number; turns: ChatTurn[] }>()
+  /** The last chat tail read per row, with the transcript stamp it was read at — see `readChatTail`. */
   // When the after-the-fact read last ran for a row. A DEAD row's answer cannot change (its log is
   // final), so it runs once; a LIVE row the live read has not linked gets another go every minute.
   const afterTheFactTried = new Map<string, number>()
@@ -527,9 +537,40 @@ export function createSessionsPoller(o: {
       // the poll no longer reads the transcript itself; the row's tail and its state come from the
       // one cursor the feed holds. No feed (flag off, no engine) and the raw screen tail stays the
       // row's only detail content — never a conversation guessed from harness-and-directory.
-      const readChatTail = async (r: (typeof reconciled)[number]): Promise<void> => {
-        const turns = adapter?.tail(r.id)
-        if (turns && turns.length > 0) chatTails.set(r.id, anyGrant() ? await scrubDeep(r.id, turns) : turns)
+      //
+      // A row the channel does not serve (no exact link yet, an integration without a chat feed, a
+      // no-driver row read ELSEWHERE) falls back to its own transcript, found by its EXACT
+      // conversation id — never by harness-and-directory.
+      const readChatTail = async (r: (typeof reconciled)[number]): Promise<readonly ChatTurn[]> => {
+        const fed = adapter?.tail(r.id)
+        if (fed && fed.length > 0) {
+          chatTails.set(r.id, anyGrant() ? await scrubDeep(r.id, fed) : fed)
+          return fed
+        }
+        const cwd = r.managed?.cwd
+        const conversationId = harnessSessions.byManagedId.get(r.id)?.sessionId
+          ?? r.managed?.conversationId
+        const transcript = (o.transcriptReader ?? transcriptReaderFor)(harnessOf.get(r.id))
+        if (transcript && conversationId) {
+          const path = await transcript
+            .resolve({ conversationId, ...(cwd ? { cwd } : {}) })
+            .catch(() => null)
+          if (path) {
+            // PERF.IDLE: an unchanged transcript yields the same six turns, so a poll does not re-read
+            // and re-parse its tail every five seconds — only a size or mtime that moved does. Gemini
+            // is read on every poll as before: its reader concatenates a FAMILY of files, and the
+            // newest member alone does not say whether an older one changed.
+            const st = harnessOf.get(r.id) === 'gemini' ? null : statQuiet(path)
+            const kept = chatTailMemo.get(r.id)
+            const turns = st && kept && kept.path === path && kept.size === st.size && kept.mtimeMs === st.mtimeMs
+              ? kept.turns
+              : await transcript.readRecent(path, TAIL_CHAT_TURNS).catch(() => [] as ChatTurn[])
+            if (st && turns !== kept?.turns) chatTailMemo.set(r.id, { path, size: st.size, mtimeMs: st.mtimeMs, turns })
+            if (turns.length > 0) chatTails.set(r.id, anyGrant() ? await scrubDeep(r.id, turns) : turns)
+            return turns
+          }
+        }
+        return []
       }
       // ELSEWHERE (flag on): a row no driver and no engine reading states is read off the tail the poll
       // fetches anyway (`tail-state.ts`) — its screen is skipped while it is idle and agreed.
@@ -697,6 +738,7 @@ export function createSessionsPoller(o: {
         }
       })))
       markFleetPhase(`poll: capture+chatTail x${reconciled.length} (concurrency ${CAPTURE_CONCURRENCY})`, captureStart)
+      retainKeys(chatTailMemo, new Set(reconciled.filter(r => r.backend?.alive).map(r => r.id)))
 
       // The heartbeat: one write, one timestamp, every session the backend reports as ALIVE. See
       // `crash-group.ts` for why one shared timestamp is what makes the grouping exact.
