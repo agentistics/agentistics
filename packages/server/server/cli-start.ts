@@ -33,6 +33,7 @@ import { adoptUserBinOnPath } from './sessions/user-path'
 import { loadNativeFleet, runNativeVerb, isNativeSessionId } from './sessions/native-fleet'
 import { spawn } from 'node:child_process'
 import { rekeyMutedSession } from './sessions/session-notify-web'
+import { rekeyFolderMember } from './sessions/cli-folder'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, writeSync } from 'node:fs'
 import { basename, dirname, join, resolve as resolvePath } from 'node:path'
@@ -1574,6 +1575,7 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
         // A mute made at spawn is keyed by the managed id until the conversation is known.
         .then(async r => {
           await rekeyMutedSession(id, conversationId).catch(() => {})
+          await rekeyFolderMember(id, conversationId).catch(() => {})
           await rekeyStoredRole([id], [id, conversationId]).catch(() => {})
           return r
         }),
@@ -1759,6 +1761,7 @@ function recordProcessLink(sid: string, conversationId: string, link: 'assigned'
   return patchSession(sid, { conversationId, conversationLink: link, ...(via ? { conversationLinkVia: via } : {}) })
     .then(async r => {
       await rekeyMutedSession(sid, conversationId).catch(() => {})
+      await rekeyFolderMember(sid, conversationId).catch(() => {})
       await rekeyStoredRole([sid], [sid, conversationId]).catch(() => {})
       return r
     })

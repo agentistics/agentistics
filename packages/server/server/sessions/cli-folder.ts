@@ -12,13 +12,24 @@ import {
   folderLabel, folderPath, planGroupOp, resolveFolderRef, sessionIdentityKey,
   type SessionUserGroupsValue,
 } from '@agentistics/core'
+import { PORT } from '../config'
 import { readPreferences, updatePreferences, type Preferences } from '../preferences'
 
 export interface FolderDeps {
   read: () => Promise<Preferences>
   update: typeof updatePreferences
+  /** Tell a running server the folders changed (its SSE signal is what refreshes open browsers). */
+  notify?: (folderId: string, key: string) => Promise<void>
 }
-const defaultDeps: FolderDeps = { read: readPreferences, update: updatePreferences }
+/** The write above is direct (the server may be stopped); re-filing the same key through the server's
+ *  own route is idempotent and makes IT broadcast. Best effort: no server = nothing to refresh. */
+const pingServer = async (folderId: string, key: string): Promise<void> => {
+  await fetch(`http://127.0.0.1:${PORT}/api/session-groups/${encodeURIComponent(folderId)}/sessions`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session: key }),
+    signal: AbortSignal.timeout(1500),
+  }).catch(() => {})
+}
+const defaultDeps: FolderDeps = { read: readPreferences, update: updatePreferences, notify: pingServer }
 
 const groupsOf = (p: Preferences): SessionUserGroupsValue => ({ groups: (p.sessionGroups?.groups ?? []).map(g => ({ ...g, sessionKeys: [...g.sessionKeys] })) })
 
@@ -33,7 +44,10 @@ export async function resolveFolders(refs: readonly (string | undefined)[], deps
   for (const ref of wanted) {
     const r = resolveFolderRef(groups, ref)
     if (r.ok) {
-      const siblings = groups.groups.filter(g => g.id !== r.group.id && g.parentId === r.group.parentId && !!r.group.parentId).map(g => folderPath(groups, g))
+      // A sub-folder lists its siblings; a TOP-LEVEL folder lists its sub-folders instead (where the workers go).
+      const siblings = (r.group.parentId
+        ? groups.groups.filter(g => g.id !== r.group.id && g.parentId === r.group.parentId)
+        : groups.groups.filter(g => g.parentId === r.group.id)).map(g => folderPath(groups, g))
       byRef.set(ref, { id: r.group.id, path: r.path, siblings })
       continue
     }
@@ -58,7 +72,31 @@ export async function fileInFolder(
     ok = true
     return { sessionGroups: { groups: plan.groups.groups }, pinnedSessions: plan.pins }
   })
+  if (ok) await deps.notify?.(folderId, key)
   return ok
+}
+
+/**
+ * A managed id was just linked to its conversation: `sessionIdentityKey` switches from the id to the
+ * conversation id at that moment, so a folder member (or pin) stored under the id would be orphaned.
+ * Same moment and same reason as `rekeyStoredRole`. Codex/kimi/agy always hit this: they have no
+ * conversation at spawn, so `--folder` files them under the managed id.
+ */
+export async function rekeyFolderMember(managedId: string, conversationId: string, deps: FolderDeps = defaultDeps): Promise<void> {
+  if (!managedId || !conversationId || managedId === conversationId) return
+  let folder: string | undefined
+  await deps.update(cur => {
+    const groups = cur.sessionGroups?.groups ?? []
+    const pins = cur.pinnedSessions ?? []
+    if (!groups.some(g => g.sessionKeys.includes(managedId)) && !pins.includes(managedId)) return undefined
+    const swap = (keys: readonly string[]): string[] => [...new Set(keys.map(k => (k === managedId ? conversationId : k)))]
+    folder = groups.find(g => g.sessionKeys.includes(managedId))?.id
+    return {
+      sessionGroups: { groups: groups.map(g => (g.sessionKeys.includes(managedId) ? { ...g, sessionKeys: swap(g.sessionKeys) } : g)) },
+      pinnedSessions: swap(pins),
+    }
+  })
+  if (folder) await deps.notify?.(folder, conversationId)
 }
 
 export interface FolderLine { id: string; path: string; sessions: number }

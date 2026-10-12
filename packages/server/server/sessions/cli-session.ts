@@ -39,7 +39,7 @@ import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefC
 import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
 import { addSession, newSessionId, patchSession, readRegistry, retireFallenSessions, retireSession } from './registry'
 import { loadConversations } from './conversations'
-import { callerIsLeader, fileInFolder, folderLineText, folderTree, NO_FOLDER_WARNING, resolveFolders } from './cli-folder'
+import { callerIsLeader, fileInFolder, rekeyFolderMember, folderLineText, folderTree, NO_FOLDER_WARNING, resolveFolders } from './cli-folder'
 import { exactLinksOnDisk } from './reopen-link'
 import { reopenTargetFor } from './reopen-target'
 import { resolveBackend } from './index'
@@ -194,15 +194,16 @@ let waitForRoom = false
 let folderByRef = new Map<string, { id: string; path: string; siblings: string[] }>()
 const folderCtx = (ref?: string) => { const f = ref ? folderByRef.get(ref) : undefined; return f ? { folder: { path: f.path, siblings: f.siblings } } : {} }
 
+let warnedNoFolder = false
 /** File a just-spawned session into its folder; with none asked, a LEADER caller is told on stderr. */
 async function fileAtSpawn(ref: string | undefined, row: { id: string; conversationId?: string | undefined }): Promise<void> {
   const f = ref ? folderByRef.get(ref) : undefined
   if (f) { await fileInFolder(f.id, row).catch(() => false); return }
-  if (ref) return
+  if (ref || warnedNoFolder) return
   const { storedRoleFor } = await import('./session-roles')
   const leader = await callerIsLeader(callerSessionId(), storedRoleFor,
     async id => (await readRegistry()).find(m => m.id === id)?.conversationId).catch(() => false)
-  if (leader) console.error(NO_FOLDER_WARNING)
+  if (leader) { warnedNoFolder = true; console.error(NO_FOLDER_WARNING) }
 }
 
 const WAIT_TICK_MS = 10_000
@@ -867,7 +868,7 @@ async function pollFleet(backend: SessionBackend): Promise<SessionSnapshot> {
   const poller = createSessionsPoller({
     backend, readRegistry, scanProcesses, loadConversations, loadHarnessSessions,
     findExactLinks: exactLinksOnDisk,
-    rekeyRole: async (managedId, conversationId) => rekeyStoredRole([managedId], [managedId, conversationId]),
+    rekeyRole: async (managedId, conversationId) => { await rekeyFolderMember(managedId, conversationId).catch(() => {}); return rekeyStoredRole([managedId], [managedId, conversationId]) },
   })
   // Poll TWICE, and return the second. The cockpit debounces the noisy per-frame reading by
   // confirming a `waiting` state across two polls (`attention-confirm.ts`), but a one-shot command

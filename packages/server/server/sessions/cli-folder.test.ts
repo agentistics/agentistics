@@ -71,3 +71,30 @@ describe('leader warning', () => {
     expect(await callerIsLeader(undefined, async () => 'leader', conv)).toBe(false)
   })
 })
+
+describe('rekeyFolderMember', () => {
+  test('moves a managed-id member and pin to the conversation id, once', async () => {
+    const { deps, prefs } = mk()
+    prefs.sessionGroups!.groups[1]!.sessionKeys = ['mid', 'other']
+    prefs.pinnedSessions = ['mid']
+    const { rekeyFolderMember } = await import('./cli-folder')
+    await rekeyFolderMember('mid', 'conv', deps)
+    expect(prefs.sessionGroups!.groups[1]!.sessionKeys).toEqual(['conv', 'other'])
+    expect(prefs.pinnedSessions).toEqual(['conv'])
+    await rekeyFolderMember('mid', 'conv', deps)
+    expect(prefs.sessionGroups!.groups[1]!.sessionKeys).toEqual(['conv', 'other'])
+  })
+  test('notifies after filing and after rekey', async () => {
+    const { deps } = mk()
+    const seen: string[] = []
+    const d = { ...deps, notify: async (f: string, k: string) => { seen.push(`${f}:${k}`) } }
+    await fileInFolder('g2', { id: 'a' }, d)
+    const { rekeyFolderMember } = await import('./cli-folder')
+    await rekeyFolderMember('a', 'c', d)
+    expect(seen).toEqual(['g2:a', 'g2:c'])
+  })
+  test('top-level folder lists its sub-folders as siblings', async () => {
+    const r = await resolveFolders(['Eng'], mk().deps)
+    expect(r.ok && r.byRef.get('Eng')!.siblings).toEqual(['Eng/Workers', 'Eng/Finalizadas'])
+  })
+})
