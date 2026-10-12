@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import {
-  defaultConfig, due, fireDue, mergeConfig, nextRun, promptFor, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
-  type CheckinAction, type CheckinDeps, type CheckinNeed,
+  checkinActivity, defaultConfig, due, fireDue, mergeConfig, nextRun, promptFor, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
+  runNow, type CheckinAction, type CheckinDeps, type CheckinNeed,
 } from './checkin'
 
 let preferences: Record<string, unknown> = {}
@@ -10,28 +10,41 @@ let roles: Record<string, string> = {}
 let prompts: any[] = []
 let activity: any[] = []
 let frames: string[] = []
+let limits: unknown = null
+let release: unknown = null
+let mcp: unknown = null
+let mcpCwds: string[] = []
+let delivery: 'ok' | 'false' | 'throw' = 'ok'
+
 
 const fakeSseClients = new Set<{ enqueue(data: Uint8Array): void }>()
-setCheckinDeps({
+const testDeps: Partial<CheckinDeps> = {
   readPreferences: (async () => preferences) as CheckinDeps['readPreferences'],
   updatePreferences: (async (mutate: (p: any) => any) => { const patch = mutate(preferences); if (patch) preferences = { ...preferences, ...patch }; return preferences }) as CheckinDeps['updatePreferences'],
   readRegistry: (async () => rows) as CheckinDeps['readRegistry'],
   readRolesDoc: (async () => ({ roles })) as unknown as CheckinDeps['readRolesDoc'],
   roleOfRow: ((r: Record<string, string>, row: { id: string; conversationId?: string }) => r[row.conversationId ?? row.id] ?? r[row.id]) as CheckinDeps['roleOfRow'],
   readFleet: (async () => ({ rows })) as unknown as CheckinDeps['readFleet'],
-  runFleetAction: (async (_lang: string, request: unknown) => { prompts.push(request); return { ok: true, message: 'sent' } }) as CheckinDeps['runFleetAction'],
+  runFleetAction: (async (_lang: string, request: unknown) => { prompts.push(request); if (delivery === 'throw') throw new Error('delivery failed'); return { ok: delivery === 'ok', message: 'sent' } }) as CheckinDeps['runFleetAction'],
   loadTaskWorld: (async () => ({ store: { logEvents: async (events: unknown[]) => { activity.push(...events) } } })) as CheckinDeps['loadTaskWorld'],
+  readCheckinActivity: async (_since, id) => checkinActivity(activity, id),
+  readCheckinLimits: async () => limits,
+  readCheckinRelease: async () => release,
+  readCheckinMcpConfigs: async cwd => { mcpCwds.push(cwd); return mcp },
   newEventId: (() => 'event-1') as CheckinDeps['newEventId'],
   dataDir: '/tmp/checkin-test',
   sseClients: fakeSseClients as CheckinDeps['sseClients'],
-})
+}
+setCheckinDeps(testDeps)
 
 afterAll(() => setCheckinDeps())
 
-const leader = { id: 'managed-leader', conversationId: 'conversation-leader', label: 'Leader', taskId: 'task-1' }
-const worker = { id: 'managed-worker', conversationId: 'conversation-worker', label: 'Worker' }
+const leader = { id: 'managed-leader', conversationId: 'conversation-leader', label: 'Leader', cwd: '/test/project', state: 'idle', taskId: 'task-1' }
+const worker = { id: 'managed-worker', conversationId: 'conversation-worker', label: 'Worker', cwd: '/test/project', state: 'idle' }
 
 function reset() {
+  setCheckinDeps(testDeps)
+  limits = null; release = null; mcp = null; mcpCwds = []; delivery = 'ok'
   preferences = {}
   rows = []
   roles = {}
@@ -171,5 +184,143 @@ describe('check-in agenda', () => {
     reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
     await recordReport(leader.conversationId, { state: 'ok', summary: 'Done', actions: [{ text: 'Closed it' }] }, 42)
     expect(JSON.parse(activity[0].detail).actions).toEqual([{ text: 'Closed it' }])
+  })
+})
+
+const MINUTE = 60_000
+const first = 15 * MINUTE
+const stored = () => (preferences.checkin as Record<string, any>)[leader.conversationId]!
+async function begin(withWorker = false) {
+  reset(); rows = withWorker ? [leader, worker] : [leader]
+  roles = { [leader.conversationId]: 'leader', [worker.conversationId]: 'worker' }
+  await putState(leader.conversationId, { intervalMin: 15 }, 0)
+  await fireDue(first)
+  await recordReport(leader.conversationId, { state: 'ok', summary: 'Done' }, first)
+}
+
+describe('idle check-ins', () => {
+  test('unchanged idle inputs skip and emit a public skip count', async () => {
+    await begin()
+    expect(await fireDue(first + 15 * MINUTE)).toEqual([])
+    expect(prompts).toHaveLength(1)
+    expect(stored().skipped).toEqual({ count: 1, lastAt: first + 15 * MINUTE })
+    const emitted = JSON.parse(frames.at(-1)!.split('data: ')[1]!.trim())
+    expect(emitted.fingerprint).toBeUndefined()
+    expect(emitted.lastFiredAt).toBeUndefined()
+  })
+  test('heartbeat fires at two hours and late reports cannot delay it', async () => {
+    await begin(true)
+    await putState(leader.conversationId, { intervalMin: 120 }, first)
+    await recordReport(leader.conversationId, { state: 'ok', summary: 'Late' }, first + 119 * MINUTE)
+    expect(stored().nextRunAt).toBe(first + 120 * MINUTE)
+    expect(await fireDue(first + 120 * MINUTE - 1)).toEqual([])
+    expect(await fireDue(first + 120 * MINUTE)).toEqual([leader.id])
+  })
+  test('skips are also bounded by the heartbeat deadline', async () => {
+    await begin(true)
+    await fireDue(first + 119 * MINUTE)
+    expect(stored().nextRunAt).toBe(first + 120 * MINUTE)
+    expect(await fireDue(first + 120 * MINUTE)).toEqual([leader.id])
+  })
+  for (const failure of ['false', 'throw'] as const) {
+    test(`${failure} delivery preserves the baseline and retries changed inputs`, async () => {
+      await begin(); limits = { windows: [{ usedPct: 90, resetsAt: 123 }] }
+      const baseline = { fingerprint: stored().fingerprint, lastFiredAt: stored().lastFiredAt }
+      delivery = failure
+      expect(await fireDue(first + 15 * MINUTE)).toEqual([])
+      expect(stored()).toMatchObject(baseline)
+      expect(stored().pending).toBeUndefined()
+      delivery = 'ok'
+      expect(await fireDue(first + 30 * MINUTE)).toEqual([leader.id])
+    })
+    test(`${failure} first delivery does not establish an idle baseline`, async () => {
+      reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+      await putState(leader.conversationId, { intervalMin: 15 }, 0)
+      delivery = failure; await fireDue(first)
+      expect(stored().fingerprint).toBeUndefined(); expect(stored().lastFiredAt).toBeUndefined()
+      delivery = 'ok'; expect(await fireDue(first + 15 * MINUTE)).toEqual([leader.id])
+    })
+  }
+  for (const kind of ['handback', 'block', 'question']) {
+    test(`real comment event for ${kind} matches only the exact recipient`, async () => {
+      await begin()
+      activity.push({ id: 'foreign', taskId: 'task-1', kind: 'comment', at: new Date(first + 1).toISOString(), actor: leader.id,
+        detail: JSON.stringify({ message: { from: worker.id, to: leader.id + '-other', kind } }) })
+      expect(await fireDue(first + 15 * MINUTE)).toEqual([])
+      activity.push({ id: 'mine', taskId: 'task-1', kind: 'comment', at: new Date(first + 2).toISOString(), actor: 'session:managed-',
+        detail: JSON.stringify({ message: { from: worker.id, to: leader.id, kind } }) })
+      expect(await fireDue(first + 30 * MINUTE)).toEqual([leader.id])
+      await recordReport(leader.conversationId, { state: 'ok', summary: 'Read' }, first + 31 * MINUTE)
+      expect(await fireDue(first + 46 * MINUTE)).toEqual([])
+    })
+  }
+  test('plain and malformed comment events are ignored', () => {
+    expect(checkinActivity([{ kind: 'comment', detail: 'on task' }, { kind: 'comment', detail: '{' },
+      { kind: 'checkin', detail: JSON.stringify({ message: { to: leader.id, kind: 'question' } }) }] as any, leader.id)).toEqual([])
+  })
+  for (const state of ['lost', 'closed', 'exited']) {
+    test(`${state} workers cannot keep heartbeats alive`, async () => {
+      await begin(); rows.push({ ...worker, state })
+      expect(await fireDue(first + 120 * MINUTE)).toEqual([])
+    })
+  }
+  test('unassigned and historical-id sessions are not live workers', async () => {
+    await begin(); rows.push({ ...worker, id: 'unassigned', conversationId: 'unassigned' }, { ...worker, id: 'closed:worker' })
+    await fireDue(first + 15 * MINUTE) // the newly added fleet rows are a real change
+    await recordReport(leader.conversationId, { state: 'ok', summary: 'Read' }, first + 15 * MINUTE)
+    expect(await fireDue(first + 135 * MINUTE)).toEqual([])
+  })
+  test('a failed heartbeat stays due for retry without advancing delivery history', async () => {
+    await begin(true); delivery = 'false'
+    expect(await fireDue(first + 120 * MINUTE)).toEqual([])
+    expect(stored().lastFiredAt).toBe(first)
+    expect(stored().nextRunAt).toBe(first + 120 * MINUTE)
+    delivery = 'ok'
+    expect(await fireDue(first + 120 * MINUTE + 1)).toEqual([leader.id])
+  })
+  test('manual runs preserve internal state and only commit successful delivery', async () => {
+    await begin(); const baseline = stored().fingerprint
+    stored().skipped = { count: 2, lastAt: first }
+    limits = { changed: true }; delivery = 'false'
+    expect(await runNow(leader.conversationId, first + MINUTE)).toBe(false)
+    expect(stored().fingerprint).toBe(baseline)
+    delivery = 'ok'
+    expect(await runNow(leader.conversationId, first + MINUTE)).toBe(true)
+    expect(stored().lastFiredAt).toBe(first + MINUTE)
+    expect(stored().skipped.count).toBe(2)
+  })
+  test('restart uses persisted idle and heartbeat history', async () => {
+    await begin(true)
+    preferences = JSON.parse(JSON.stringify(preferences)); setCheckinDeps(testDeps)
+    expect(await fireDue(first + 15 * MINUTE)).toEqual([])
+    expect(await fireDue(first + 120 * MINUTE)).toEqual([leader.id])
+  })
+  test('config updates and pause expiry preserve private state; checklist changes invalidate inputs', async () => {
+    await begin(true)
+    const baseline = { fingerprint: stored().fingerprint, lastFiredAt: stored().lastFiredAt }
+    stored().pending = true
+    const updated = await putState(leader.conversationId, { intervalMin: 120 }, first + MINUTE)
+    expect(stored()).toMatchObject({ ...baseline, pending: true })
+    expect(updated).not.toHaveProperty('pending')
+    expect(updated.nextRunAt).toBe(first + 120 * MINUTE)
+    await putState(leader.conversationId, { paused: { until: first + 2 * MINUTE } }, first + MINUTE)
+    await stateFor(leader.conversationId, first + 2 * MINUTE)
+    expect(stored()).toMatchObject({ ...baseline, pending: true })
+    await recordReport(leader.conversationId, { state: 'ok', summary: 'Read' }, first + 2 * MINUTE)
+    await putState(leader.conversationId, { intervalMin: 15, checklist: [{ id: 'limits', enabled: false }] }, first + 2 * MINUTE)
+    expect(stored().fingerprint).toBeUndefined()
+    expect(stored().lastFiredAt).toBe(baseline.lastFiredAt)
+    expect(await fireDue(first + 17 * MINUTE)).toEqual([leader.id])
+  })
+  test('limit/reset, release and project MCP changes trigger delivery', async () => {
+    await begin()
+    for (const [i, change] of [() => { limits = { windows: [{ usedPct: 85, resetsAt: 100 }] } },
+      () => { limits = { windows: [{ usedPct: 85, resetsAt: 200 }] } },
+      () => { release = { current: '1', latest: '2' } }, () => { mcp = { project: 'changed' } }].entries()) {
+      change(); const now = first + (i + 1) * 15 * MINUTE
+      expect(await fireDue(now)).toEqual([leader.id])
+      await recordReport(leader.conversationId, { state: 'ok', summary: 'Read' }, now)
+    }
+    expect(mcpCwds.every(cwd => cwd === leader.cwd)).toBe(true)
   })
 })
