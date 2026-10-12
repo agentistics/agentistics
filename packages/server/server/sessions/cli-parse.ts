@@ -38,6 +38,8 @@ export type SessionCommand =
       force?: boolean
       /** Explicitly declare the spawned session's briefing role. */
       role?: SessionRole
+      /** `--away` / `--no-away`: per-session away mode (absent = inherit a verified away parent's). */
+      away?: boolean
       /** `--folder <ref>`: the sidebar folder (id, name or "Parent/Child") the session is filed into at spawn. */
       folder?: string
       /** A refusal is machine-readable too — see `admissionRefusalBody`. */
@@ -83,6 +85,8 @@ export type SessionCommand =
       json?: boolean
       /** Start the whole batch anyway when the memory gate would refuse it. */
       force?: boolean
+      /** `--away` / `--no-away` for every session of the batch (absent = inherit). */
+      away?: boolean
     }
   | { kind: 'open'; task: string; json?: boolean; force?: boolean; folder?: string }
   | { kind: 'attach'; ref: string }
@@ -224,6 +228,8 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
     if (arg === '--bg' || arg === '--background') { cmd.background = true; continue }
     if (arg === '--json') { cmd.json = true; continue }
     if (arg === '--force') { cmd.force = true; continue }
+    if (arg === '--away') { cmd.away = true; continue }
+    if (arg === '--no-away') { cmd.away = false; continue }
     if (arg === '--task') {
       const value = argv[i + 1]
       if (value === undefined || VALUE_FLAGS.has(value) || value === '--force') {
@@ -344,10 +350,14 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
   const shared: { cwd?: string; model?: string; effort?: string; attempt?: string; notify?: NotifySwitch; folder?: string } = {}
 
   let force = false
+  let away: boolean | undefined
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!
     if (arg === '--json') continue
+    // Like `--force`, for the whole batch: per-session away is a statement about who is watching.
+    if (arg === '--away') { away = true; continue }
+    if (arg === '--no-away') { away = false; continue }
     // Gates the WHOLE batch, not a per-session flag — `--session` already has its own grammar and
     // a per-session force would mean "start this one anyway, refuse the rest", which is not what
     // the memory gate decides (see `spawn-admission.ts`: a batch is admitted or refused as a unit).
@@ -392,7 +402,7 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
 
   if (!task) return { kind: 'error', message: 'batch needs --task "<name>" so the sessions belong together.' }
   if (specs.length === 0) return { kind: 'error', message: 'batch needs at least one --session "<harness>: <prompt>".' }
-  return { kind: 'batch', task, ...(subtask ? { subtask } : {}), specs, ...(json ? { json: true } : {}), ...(force ? { force: true } : {}) }
+  return { kind: 'batch', task, ...(subtask ? { subtask } : {}), specs, ...(json ? { json: true } : {}), ...(force ? { force: true } : {}), ...(away !== undefined ? { away } : {}) }
 }
 
 /** `<harness>[@<cwd>]: <prompt>` — the one string that describes a session in a batch. */

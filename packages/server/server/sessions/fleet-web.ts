@@ -304,10 +304,11 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
           return { level: m?.handoffHintLevel ?? 0, ...(m?.handoffHintTokens !== undefined ? { tokens: m.handoffHintTokens } : {}) }
         },
         markHinted: (id, level, tokens) => patchSession(id, { handoffHintLevel: level, ...(tokens !== undefined ? { handoffHintTokens: tokens } : {}) }),
-        awayNote: async () => {
+        awayNote: async id => {
           const { readPreferences } = await import('../preferences')
-          const { awayHandoffNote, parseAwayState } = await import('@agentistics/core')
-          return awayHandoffNote(parseAwayState((await readPreferences()).away), Date.now())
+          const { awayHandoffNote, parseAwayState, sessionAwayState } = await import('@agentistics/core')
+          const own = (await readRegistry().catch(() => [])).find(r => r.id === id)?.away
+          return awayHandoffNote(sessionAwayState(parseAwayState((await readPreferences()).away), own, Date.now()), Date.now())
         },
       })
     })().catch(() => {})
@@ -1167,6 +1168,7 @@ export async function runFleetSpawn(
       : decision.reason === 'cwd_relative' ? s.spawnCwdRelative(detail)
       : decision.reason === 'unknown_effort' ? s.spawnUnknownEffort(detail)
       : decision.reason === 'unknown_mode' ? s.spawnUnknownMode(detail)
+      : decision.reason === 'bad_away' ? (lang === 'pt' ? `"away" aceita true, false ou "inherit", não "${detail}".` : `"away" takes true, false or "inherit", not "${detail}".`)
       : s.spawnModelUnsupported(detail)
     return { ok: false, message }
   }

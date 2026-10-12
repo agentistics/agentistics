@@ -218,3 +218,17 @@ describe('planFleetSpawn — MODE.EVERYWHERE', () => {
     expect(planFleetSpawn({ harness: 'claude', cwd: '/r', mode: 7 }, H).ok).toBe(true) // not text: not a mode at all
   })
 })
+
+describe('planFleetSpawn — per-session away', () => {
+  it('true/false/inherit ride the plan; absent stays absent (inherit)', () => {
+    for (const v of [true, false, 'inherit'] as const) {
+      const out = planFleetSpawn({ harness: 'claude', cwd: '/r', away: v }, HARNESSES)
+      expect(out.ok && out.plan.away).toBe(v)
+    }
+    const none = planFleetSpawn({ harness: 'claude', cwd: '/r' }, HARNESSES)
+    expect(none.ok && 'away' in none.plan).toBe(false)
+  })
+  it('a truthy string is refused, never read as consent', () => {
+    expect(planFleetSpawn({ harness: 'claude', cwd: '/r', away: 'true' }, HARNESSES)).toEqual({ ok: false, reason: 'bad_away', detail: 'true' })
+  })
+})

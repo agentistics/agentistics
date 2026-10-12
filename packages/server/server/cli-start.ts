@@ -132,7 +132,7 @@ import { SPAWN_SPECS, planSpawn, tuiStartModes } from './sessions/spawn-spec'
 import { answerStructured, structuredIntentOf, structuredReopenOrigin } from './sessions/structured-route'
 import { agentisticsMcpLaunch } from './mcp-launch'
 import { prependContext } from './sessions/agentistics-context'
-import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, writeContextFile } from './sessions/spawn-context'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveSpawnAwayFor, writeContextFile } from './sessions/spawn-context'
 import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor } from './sessions/session-roles'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
@@ -1912,11 +1912,13 @@ async function spawnRow(a: {
   spawnedAt: string
   req: { harness: HarnessId; cwd: string; label?: string; task?: string; taskId?: string; attemptId?: string; parentSessionId?: string; parentConversationId?: string; inherit?: ManagedSession }
   pendingContext?: string
+  /** Per-session away mode, already resolved (explicit request, else inherited / the replaced row's). */
+  away?: boolean
   model?: string
   effort?: string
   bornLink: Partial<ManagedSession> | null | undefined
 }): Promise<ManagedSession> {
-  const { id, spawnedAt, req, model, effort, bornLink, pendingContext } = a
+  const { id, spawnedAt, req, model, effort, bornLink, pendingContext, away } = a
   return {
     id,
     harness: req.harness,
@@ -1938,6 +1940,9 @@ async function spawnRow(a: {
     ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
     ...(req.parentConversationId ? { parentConversationId: req.parentConversationId } : {}),
     ...(pendingContext ? { pendingContext } : {}),
+    // Resolved by the caller; `false` drops an `away` the replaced row carried (an explicit off).
+    ...(away === true ? { away: true } : {}),
+    ...(away === false ? { away: undefined } : {}),
     // Recorded at the one moment it is certain — the harness was just handed this id, or we asked
     // it to reopen this conversation.
     ...(bornLink ?? {}),
@@ -2002,6 +2007,8 @@ async function spawnManaged(req: {
   parentConversationId?: string
   handoff?: boolean
   role?: 'leader' | 'worker'
+  /** Per-session away mode: on, off, or inherit a verified away parent's (absent = inherit). */
+  away?: boolean | 'inherit'
   attemptId?: string
   /** The row this spawn REPLACES: its identity (`inheritedIdentity`) is born into the new row. */
   inherit?: ManagedSession
@@ -2083,8 +2090,12 @@ async function spawnManaged(req: {
   const storedContextRole = role
     ? { role }
     : await resolveContextRole(id, req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId)
+  // A reopen keeps the replaced row's own away flag unless the request states one.
+  const away = req.away === undefined && req.inherit
+    ? req.inherit.away === true
+    : await resolveSpawnAwayFor(req.away, req.parentSessionId, req.parentVerified === true)
   const ctx = buildSpawnContext({
-      ...(await resolveContextAway()),
+      ...(await resolveContextAway(away)),
       sessionId: id,
       cwd: req.cwd,
       harness: req.harness,
@@ -2131,7 +2142,7 @@ async function spawnManaged(req: {
   // <id>" for seconds — the placeholder `control-session.ts` keeps for sessions started OUTSIDE
   // agentop. Born linked — see `born-link.ts` for the window a patch-afterwards left open.
   const bornLink = bornConversationLink(planned.plan.conversationId, req.resumeId)
-  await addSession(await spawnRow({ id, spawnedAt, req: { ...req, ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}) }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx) }))
+  await addSession(await spawnRow({ id, spawnedAt, req: { ...req, ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}) }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx), away }))
   if (req.inherit) {
     await rekeyStoredRole(
       [req.inherit.id, req.inherit.conversationId, req.resumeId],
@@ -4546,6 +4557,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.parentSessionId && req.parentVerified ? { parentVerified: true } : {}),
         ...(req.handoff ? { handoff: true } : {}),
         ...(req.role ? { role: req.role } : {}),
+        ...(req.away !== undefined ? { away: req.away } : {}),
         ...(req.force ? { force: true } : {}),
         ...(req.origin ? { origin: req.origin } : {}),
       }, S(), lang).then(async r => {

@@ -83,6 +83,8 @@ export interface SessionPatch {
   harnessNameSince?: number
   /** See `ManagedSession.structuredDriver`. */
   structuredDriver?: string
+  /** See `ManagedSession.away`. `null` clears it (a session switched back off). */
+  away?: true | null
 }
 
 export interface SessionRegistry {

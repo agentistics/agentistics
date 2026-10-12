@@ -31,7 +31,7 @@ import { toControlSession } from './control-session'
 import { recordedRepo, repoFacts } from './repo-facts'
 import { emptyReason, renderSessionTable, resolveWidth } from './session-table'
 import { SPAWN_SPECS, planSpawn } from './spawn-spec'
-import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveContextTaskByRef, writeContextFile } from './spawn-context'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveContextTaskByRef, resolveSpawnAwayFor, writeContextFile } from './spawn-context'
 import { rulesFor } from './attention-rules'
 // The harness half of a rename. Shared with the cockpit's Rename verb — see `rename.ts`.
 import { renameInHarness, renameMessage } from './rename'
@@ -78,7 +78,7 @@ function spawnPromptArg(plan: SpawnPlan, harness: HarnessId): { initialPrompt?: 
 const STARTABLE: HarnessId[] = HARNESS_ORDER.filter(h => SPAWN_SPECS[h] !== null)
 
 const USAGE = `Usage:
-  agentop session <harness> [-p "prompt"] [--bg] [--model <id>] [--effort <level>] [--cwd <path>] [--name "label"] [--notify on|off] [--folder <folder>] [--force]
+  agentop session <harness> [-p "prompt"] [--bg] [--model <id>] [--effort <level>] [--cwd <path>] [--name "label"] [--notify on|off] [--folder <folder>] [--away|--no-away] [--force]
   agentop session ls     [--all] [--group ${GROUPINGS.join('|')}] [--json]
   agentop session list
   agentop session attach <id|name>
@@ -105,6 +105,11 @@ const USAGE = `Usage:
   toast for it, while it still shows as waiting and its events are still recorded. Absent = on. On
   \`batch\` it is a default for the \`--session\`s that follow it, like \`--model\`.
 
+  \`--away\` starts the session in AWAY MODE on its own (it is told the owner is out and asks them
+  nothing, even while the global switch is off); \`--no-away\` refuses to inherit it. Absent: a
+  session started from inside a session that is itself in away mode inherits it. On \`batch\` it
+  applies to every session.
+
   \`--folder <ref>\` files the session into a sidebar folder AT SPAWN (also on \`batch\`, as a default for
   the \`--session\`s that follow, and on \`open\`). <ref> is a folder id, its exact name, or a
   "Parent/Child" path (case-insensitive). An unknown or ambiguous ref is refused before anything
@@ -114,7 +119,7 @@ const USAGE = `Usage:
 Orchestrating several at once — the form an assistant should use:
 
   agentop session batch --task "<name>" [--cwd <path>] [--model <id>] [--effort <level>] [--folder <folder>] \\
-                       --session "<harness>[@<cwd>]: <prompt>" [--session "..."] [--json] [--force]
+                       --session "<harness>[@<cwd>]: <prompt>" [--session "..."] [--away|--no-away] [--json] [--force]
   agentop session open  "<task>" [--folder <folder>] [--json] [--force]
   agentop session list  [--json]
 
@@ -371,7 +376,8 @@ export async function start(
   const role = wantedRole
     ? await ensureSpawnRole([offeredConversationId, id], wantedRole, undefined, await spawnRoleOriginFor(parentSessionId, parentVerified))
     : parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker', undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) : undefined
-  const ctx = buildSpawnContext({ ...(await resolveContextAway()), sessionId: id, cwd, harness: cmd.harness, lang, ...folderCtx(cmd.folder), ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
+  const away = await resolveSpawnAwayFor(cmd.away, parentSessionId, parentVerified)
+  const ctx = buildSpawnContext({ ...(await resolveContextAway(away)), sessionId: id, cwd, harness: cmd.harness, lang, ...folderCtx(cmd.folder), ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
   const planned = planSpawn({
     harness: cmd.harness, cwd, prompt: cmd.prompt, model: cmd.model, effort: cmd.effort,
     ...(logFile ? { logFile } : {}),
@@ -416,6 +422,7 @@ export async function start(
     ...(cmd.attemptId ? { attemptId: cmd.attemptId } : {}),
     ...(parentSessionId ? { parentSessionId } : {}),
     ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}),
+    ...(away ? { away: true } : {}),
     ...(pendingContextFor(planned.plan, ctx) ? { pendingContext: pendingContextFor(planned.plan, ctx)! } : {}),
     // The link is EXACT here: the CLI was handed this id (`SpawnSpec.assignId`).
     ...(planned.plan.conversationId
@@ -587,6 +594,7 @@ export async function batch(
   const parentLink = await parentLinkOf(callerSessionId())
   const parentSessionId = parentLink.parentSessionId
   const parentVerified = await callerHoldsIdentity(parentSessionId)
+  const away = await resolveSpawnAwayFor(cmd.away, parentSessionId, parentVerified)
 
   for (const spec of cmd.specs) {
     const cwd = spec.cwd ? resolve(spec.cwd) : process.cwd()
@@ -595,7 +603,7 @@ export async function batch(
     const logFile = managedProcessLogPath(spec.harness, id, AGENTISTICS_DATA_DIR)
     const batchRole = spec.name && hasRolePrefix(spec.name) ? 'leader' as const : parentSessionId ? 'worker' as const : undefined
     const role = batchRole ? await ensureSpawnRole([offeredConversationId, id], batchRole, undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) : undefined
-    const ctx = buildSpawnContext({ ...(await resolveContextAway()), sessionId: id, cwd, harness: spec.harness, lang, ...folderCtx(spec.folder), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)), ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
+    const ctx = buildSpawnContext({ ...(await resolveContextAway(away)), sessionId: id, cwd, harness: spec.harness, lang, ...folderCtx(spec.folder), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)), ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
     const planned = planSpawn({
       harness: spec.harness,
       cwd,
@@ -629,6 +637,7 @@ export async function batch(
       ...(resolved?.taskId ? { taskId: resolved.taskId } : {}),
       ...(parentSessionId ? { parentSessionId } : {}),
       ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}),
+      ...(away ? { away: true } : {}),
       ...(pendingContextFor(planned.plan, ctx) ? { pendingContext: pendingContextFor(planned.plan, ctx)! } : {}),
       ...(spec.attempt && resolved?.attempts.get(spec.attempt)
         ? { attemptId: resolved.attempts.get(spec.attempt)! }

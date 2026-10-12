@@ -291,3 +291,15 @@ describe('--folder', () => {
     expect(parseSessionArgs(['folders', '--json'])).toEqual({ kind: 'folders', json: true })
   })
 })
+
+describe('per-session away flags', () => {
+  it('start takes --away / --no-away', () => {
+    expect(parseSessionArgs(['claude', '--away'])).toMatchObject({ kind: 'start', away: true })
+    expect(parseSessionArgs(['codex', '--no-away', '--bg'])).toMatchObject({ kind: 'start', away: false, background: true })
+    expect(parseSessionArgs(['claude'])).not.toHaveProperty('away')
+  })
+  it('batch takes them for every session', () => {
+    expect(parseSessionArgs(['batch', '--task', 't', '--away', '--session', 'codex: x'])).toMatchObject({ kind: 'batch', away: true })
+    expect(parseSessionArgs(['batch', '--task', 't', '--session', 'codex: x', '--no-away'])).toMatchObject({ kind: 'batch', away: false })
+  })
+})

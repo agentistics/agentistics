@@ -37,7 +37,7 @@
  * fleet routes load their implementation by dynamic import precisely so a machine that never opens
  * the Sessions page never pays for that graph.
  */
-import { hasRolePrefix, isCanonicalMode, type CanonicalMode } from '@agentistics/core'
+import { hasRolePrefix, isCanonicalMode, readAwaySpawn, type AwaySpawnRequest, type CanonicalMode } from '@agentistics/core'
 
 export interface SpawnHarness {
   id: string
@@ -74,6 +74,11 @@ export interface FleetSpawnBody {
   mode?: unknown
   label?: unknown
   /**
+   * PER-SESSION AWAY MODE: `true`, `false` or `'inherit'` (absent = inherit a VERIFIED away parent's
+   * own flag). Read strictly — a truthy string must not switch it on, nor a falsy one off.
+   */
+  away?: unknown
+  /**
    * Start even if this machine's memory budget refuses. Read with a STRICT `typeof` check — see
    * `readForce` below — because JSON carries no guarantee this is a boolean, and a truthy string
    * must never read as consent nobody gave.
@@ -99,6 +104,8 @@ export interface FleetSpawnPlan {
   label?: string
   /** A leader title prefix is an explicit leader-role request, shared with the CLI path. */
   role?: 'leader'
+  /** Per-session away mode as requested (absent = inherit). */
+  away?: AwaySpawnRequest
   /** Always false — see the header. */
   attach: false
   /** See `FleetSpawnBody.force`. Always a genuine boolean, never merely truthy. */
@@ -113,6 +120,7 @@ export type FleetSpawnRefusal =
   | 'unknown_effort'
   | 'model_unsupported'
   | 'unknown_mode'
+  | 'bad_away'
 
 export type FleetSpawnDecision =
   | { ok: true; plan: FleetSpawnPlan }
@@ -190,6 +198,9 @@ export function planFleetSpawn(
     return { ok: false, reason: 'model_unsupported', detail: harness }
   }
 
+  const away = readAwaySpawn(body.away)
+  if (away === null) return { ok: false, reason: 'bad_away', detail: String(body.away) }
+
   const task = text(body.task)
   const taskId = text(body.taskId)
   const subtaskId = taskId ? text(body.subtaskId) : undefined
@@ -218,6 +229,7 @@ export function planFleetSpawn(
       ...(mode ? { mode } : {}),
       ...(label ? { label } : {}),
       ...(role ? { role } : {}),
+      ...(away !== undefined ? { away } : {}),
       ...(force ? { force: true } : {}),
       attach: false,
     },
