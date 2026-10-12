@@ -59,12 +59,13 @@ describe('agentistics_session_message', () => {
     const f = fake({ senderTask: async () => ({ taskId: 't1', subtaskId: 's1' }) })
     const out = await sendSessionMessage('child-1', { to: 'parent-1', kind: 'block', body: 'stuck on X' }, f.deps)
     expect(out).toMatchObject({ ok: true, mirrored: true })
-    expect(f.comments).toEqual([{ taskId: 't1', c: { author: 'session:child-1', body: 'stuck on X', subtaskId: 's1', kind: 'block', session: 'child-1' } }])
+    expect(f.comments).toEqual([{ taskId: 't1', c: { author: 'session:child-1', body: 'stuck on X', subtaskId: 's1', kind: 'block', session: 'child-1', message: { to: 'parent-1', kind: 'block' } } }])
   })
   test('a question is mirrored as a plain note, not a handback/block record', async () => {
     const f = fake({ senderTask: async () => ({ taskId: 't1' }) })
     await sendSessionMessage('child-1', { to: 'parent-1', kind: 'question', body: 'which?' }, f.deps)
     expect('kind' in f.comments[0]!.c).toBe(false)
+    expect(f.comments[0]!.c.message).toEqual({ to: 'parent-1', kind: 'question' })
   })
   test('a failing mirror never undoes the delivery', async () => {
     const f = fake({ senderTask: async () => ({ taskId: 't1' }), comment: async () => { throw new Error('boom') } })

@@ -42,7 +42,7 @@ export interface MessageDeps {
   /** The task/subtask the sender is filed on, from the registry. */
   senderTask: (senderId: string) => Promise<SenderTask>
   /** Record the mirror comment on the board. */
-  comment: (taskId: string, c: { author: string; body: string; subtaskId?: string; kind?: 'handback' | 'block'; session: string }) => Promise<{ ok: boolean }>
+  comment: (taskId: string, c: { author: string; body: string; subtaskId?: string; kind?: 'handback' | 'block'; session: string; message?: { to: string; kind: MessageKind } }) => Promise<{ ok: boolean }>
   /** `handback` from a session filed on a subtask: move that subtask in_progress → in_review. */
   handbackSubtask?: (subtaskId: string) => Promise<void>
   now: () => number
@@ -122,6 +122,7 @@ export async function sendSessionMessage(
       ...(filed.subtaskId ? { subtaskId: filed.subtaskId } : {}),
       ...(kind !== 'question' ? { kind } : {}),
       session: senderId,
+      message: { to: target.id, kind },
     }).catch(() => ({ ok: false }))
     mirrored = res.ok
     if (kind === 'handback' && filed.subtaskId && deps.handbackSubtask) await deps.handbackSubtask(filed.subtaskId).catch(() => {})

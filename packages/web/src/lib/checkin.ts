@@ -25,6 +25,14 @@ export interface CheckinState extends CheckinConfig {
   nextRunAt: number | null
   /** `at` and `needs` ride the SSE event of a round (CONTRACT §3 data); optional so older servers still parse. */
   last: CheckinRound | null
+  skipped?: { count: number; lastAt: number }
+}
+
+export function formatSkipped(skipped: CheckinState['skipped'], pt = true): string | null {
+  if (!skipped || skipped.count < 1) return null
+  return pt
+    ? `${skipped.count} rodada${skipped.count === 1 ? '' : 's'} pulada${skipped.count === 1 ? '' : 's'} (nada mudou) · última às ${clockLabel(skipped.lastAt, true)}`
+    : `${skipped.count} skipped round${skipped.count === 1 ? '' : 's'} (nothing changed) · last at ${clockLabel(skipped.lastAt, false)}`
 }
 
 export const CHECKIN_ITEMS: readonly { id: CheckinItemId; pt: string; en: string }[] = [
