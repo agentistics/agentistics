@@ -108,7 +108,12 @@
  * `StructuredSpawn.transport` lets the host own WHERE the child runs (a relay that survives a restart);
  * a driver that ignores it still works, its child simply dies with the server.
  */
-export const ENGINE_API_VERSION = '1.10.0'
+/**
+ * 1.11.0 — VAULT.PERSONAL E1: native vault references gain optional `use` (per-command, per-reference
+ * authorization) and `onRevoke` (grant/vault-lock notifications). The legacy `env` member remains for
+ * older engines but hosts must return only non-confirmable secrets from it.
+ */
+export const ENGINE_API_VERSION = '1.11.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

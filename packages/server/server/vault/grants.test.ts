@@ -181,7 +181,7 @@ describe('engine-api 1.7 vaultRefs (native sessions)', () => {
     await grantSession('rt1', [b.id], [])            // a CLI (managed) session named rt1
     expect(await nativeVaultRefs.env('rt1')).toEqual({})
     await grantSession('native:rt1', [b.id], [])
-    expect(await nativeVaultRefs.env('rt1')).toEqual({ VAULT_OPENAI: 'sk-MARKER-888888' })
+    expect(await nativeVaultRefs.env('rt1')).toEqual({})
     expect(await nativeVaultRefs.scrub('rt1', 'k=sk-MARKER-888888')).toBe('k=«vault:OpenAI»')
     expect(await nativeVaultRefs.scrub('other', 'k=sk-MARKER-888888')).toBe('k=sk-MARKER-888888')
   })
@@ -236,9 +236,36 @@ describe('VAULT.V4 confirm each use — behaviour (fake clock, fixture vault)', 
     const a = (await createItem({ kind: 'api-key', name: 'Sensitive', fields: { value: 'MARKER-sens' } })).meta
     const f = (await createItem({ kind: 'api-key', name: 'Free', confirmEach: false, fields: { value: 'MARKER-free' } })).meta
     await grantSession('native:n1', [a.id, f.id], [])
-    expect(await nativeVaultRefs.env('n1')).toEqual({ VAULT_SENSITIVE: 'MARKER-sens', VAULT_FREE: 'MARKER-free' })
+    expect(await nativeVaultRefs.env('n1')).toEqual({ VAULT_FREE: 'MARKER-free' })
     __setConfirmEachUseForTests(true)
     expect(await nativeVaultRefs.env('n1')).toEqual({ VAULT_FREE: 'MARKER-free' })
+  })
+
+  test('native use decides only cited refs and reports unknown refs without opening them', async () => {
+    const a = (await createItem({ kind: 'api-key', name: 'Sensitive', fields: { value: 'MARKER-use' } })).meta
+    const b = (await createItem({ kind: 'api-key', name: 'Free', confirmEach: false, fields: { value: 'MARKER-free-use' } })).meta
+    await grantSession('native:n1', [a.id, b.id], [])
+    __setConfirmEachUseForTests(true)
+    const free = await nativeVaultRefs.use('n1', ['vault://free', 'vault://missing'], { command: 'echo $VAULT_FREE', callId: 'call-2' })
+    expect(free.env).toEqual({ VAULT_FREE: 'MARKER-free-use' })
+    expect(free.refused.map(r => r.ref)).toEqual(['vault://missing'])
+  })
+
+  test('native use opens an approved confirmable ref and revoke notifications cover revoke and lock', async () => {
+    const a = (await createItem({ kind: 'api-key', name: 'Sensitive', fields: { value: 'MARKER-approved-use' } })).meta
+    await grantSession('native:n1', [a.id], [])
+    __setConfirmEachUseForTests(true)
+    const waiting = nativeVaultRefs.use('n1', ['vault://sensitive'], { command: 'echo $VAULT_SENSITIVE', callId: 'call-3' })
+    await pendingCount(1)
+    expect(decideUse(pendingUseRequests()[0]!.id, true).ok).toBe(true)
+    expect(await waiting).toEqual({ env: { VAULT_SENSITIVE: 'MARKER-approved-use' }, refused: [] })
+    const seen: (string | '*')[] = []
+    const off = nativeVaultRefs.onRevoke!(sessionId => seen.push(sessionId))
+    expect(revokeGrant('native:n1')).toBe(true)
+    await grantSession('native:n1', [a.id], [])
+    lockVault('user')
+    off()
+    expect(seen).toEqual(['n1', '*'])
   })
 
   test('a "no confirm" item skips the request even with the flag ON', async () => {
