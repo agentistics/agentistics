@@ -38,8 +38,9 @@ export function PlanUsageModal({ lang, onClose }: { lang: 'pt' | 'en'; onClose: 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 650 }}>
             <Gauge size={17} style={{ color: 'var(--anthropic-orange)' }} />{pt ? 'Uso dos planos' : 'Plan usage'}
           </div>
-          <button type="button" onClick={onClose} aria-label={pt ? 'Fechar' : 'Close'}
-            style={{ border: 0, background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', minWidth: isMobile ? 44 : 32, height: isMobile ? 44 : 32, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={16} /></button>
+          {/* `.ag-tap-icon` grows the 30px painted box to a 44px target on a phone (touchTarget.lint). */}
+          <button type="button" className="ag-tap-icon" onClick={onClose} aria-label={pt ? 'Fechar' : 'Close'}
+            style={{ border: 0, background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', minWidth: isMobile ? 30 : 32, height: isMobile ? 30 : 32, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={16} /></button>
         </div>
         <NayLimitsTab lang={lang} isMobile={isMobile} onNavigate={onClose} />
       </div>
