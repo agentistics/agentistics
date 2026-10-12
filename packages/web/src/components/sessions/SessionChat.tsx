@@ -85,6 +85,7 @@ import {
 } from '../../lib/quoteCards'
 import { ROW_FLASH } from '../../lib/noteFocus'
 import { pendingEchoes, sessionIdentityKey } from '@agentistics/core'
+import { shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { CenteredLoader } from '../CenteredLoader'
@@ -349,6 +350,10 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       : { turns: sourceTurns, live: true }
   ), [sourceTurns, sourceUnavailable])
   const payload = hasSource ? sourcePayload : feedPayload
+  const pendingRef = useRef(payload?.pending)
+  pendingRef.current = payload?.pending
+  /** The session whose transcript has loaded at least once from the feed (reset by the id changing). */
+  const [loadedId, setLoadedId] = useState<string | null>(null)
   /**
    * The frame on screen is one this session cached a while ago, and a fresh read is on its way.
    *
@@ -937,6 +942,12 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const holdTailUntil = useRef(0)
   /** Messages sent from here and not yet seen in the transcript. See the header. */
   const [echo, setEcho] = useState<string[]>(() => sessionScratch.readEchoes(scratchId))
+  /**
+   * Texts sent from THIS mount, for THIS session. Only these may draw a "not read yet" card before
+   * the first transcript read: an echo RESTORED from storage was sent on an earlier visit and the
+   * session may have consumed it meanwhile, so it waits for the read like the server's copies.
+   */
+  const sentHere = useRef<{ id: string; texts: Set<string> }>({ id: session.id, texts: new Set() })
 
   /**
    * Every change to the echo list, persisted against the session it belongs to.
@@ -1257,6 +1268,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     const stop = subscribeChat({ id: session.id, key: scratchId, lang }, next => {
       setPayload(next as unknown as ChatPayload)
       setRefreshing(false)
+      setLoadedId(session.id)
     })
     nudgeChat.current = () => { refreshChat(session.id) }
     const onVisible = () => { if (document.visibilityState === 'visible') refreshChat(session.id) }
@@ -1412,10 +1424,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // so a message the session had already taken in stayed "delivered — not read yet" and kept
     // "Send now (N)" on offer. The same containment rule decides for both (`pendingEchoes`).
     const userTurns = turns.filter(t => t.role === 'user').map(t => t.text)
-    const still = new Set(pendingEchoes(out.map(q => q.text), userTurns))
-    return out.filter(q => still.has(q.text) && !deliveredRef.current.has(q.text))
+    const transcriptLoaded = hasSource ? sourceTurns != null || !!sourceUnavailable : loadedId === session.id
+    const local = sentHere.current.id === session.id ? sentHere.current.texts : new Set<string>()
+    return visibleQueued(out, userTurns, transcriptLoaded, deliveredRef.current, local)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [echo, payload?.pending, turns, deliveredTick])
+  }, [echo, payload?.pending, turns, deliveredTick, loadedId, session.id])
 
   /** A clock, so an ageing echo ages on screen instead of freezing at its first render. */
   const [now, setNow] = useState(() => Date.now())
@@ -2331,6 +2344,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     setSending(true)
     setDeliveryFailure(null)
     // A SOURCE draws its own optimistic turn (the native runtime's `sent`); an echo would be a second copy.
+    if (sentHere.current.id !== session.id) sentHere.current = { id: session.id, texts: new Set() }
+    sentHere.current.texts.add(full)
     if (!source) editEcho(list => [...list, full])
     setDraft('')
     sessionScratch.clearDraft(scratchId)
@@ -2387,6 +2402,10 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     }
     // It did not go. Take the echo back out — leaving it would show a message that is waiting for
     // a session that never received it — and give the person their words back untouched.
+    // The server may already hold the message (it is drawn as delivered): then keep the echo and
+    // leave the composer empty instead of duplicating it.
+    if (out.failure === 'prompt' || out.failure === 'ended') setDeliveryFailure(out.failure)
+    if (!out.confirm && !shouldRestoreDraft(pendingRef.current, full)) { setNotice(out.message); return }
     editEcho(list => list.filter(t => t !== full))
     // EXT.OPEN: not a failure — a QUESTION. The words stay in the field, and the one confirmation
     // sends exactly them (`continueHere`).
@@ -2398,7 +2417,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     editReply(restore.replyTo)
     // A question is asked in its dialog, once — not again as a line under the field.
     if (!out.confirm) setNotice(out.message)
-    if (out.failure === 'prompt' || out.failure === 'ended') setDeliveryFailure(out.failure)
   }
 
   if (payload?.unavailable) {
