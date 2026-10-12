@@ -62,8 +62,10 @@ import {
   patchSubtask, removeComment, removeSubtask, saveStagedSession,
   uploadFile, useTaskActivity, useTaskStatuses,
   type AttemptRollup, type AttemptView, type Subtask, type TaskDetail, type TaskSessionRow,
-  type TaskFile, type TaskListRow,
+  type TaskFile, type TaskListRow, groupActivity, type ActivityFilter, type GroupedActivity,
 } from '../../lib/tasks'
+import { ChipSelect } from './ChipSelect'
+import { taskPath } from '../../lib/sessionTaskLink'
 
 /**
  * The PLAN half of a task: how urgent it is, and where it stands.
@@ -83,12 +85,49 @@ import {
  * the answer cannot come from the task record, which only ever holds the latest value of each
  * field. A kind nobody has words for prints itself rather than vanishing.
  */
-function ActivityTab({ id }: { id: string }) {
+function ActivityTab({ id, lang }: { id: string; lang: Lang }) {
   const { events, loading } = useTaskActivity(id, 100)
+  const [filter, setFilter] = useState<ActivityFilter>('all')
+  const [openRuns, setOpenRuns] = useState<Set<string>>(() => new Set())
+  const grouped = useMemo(() => groupActivity(events, filter), [events, filter])
+  const pt = lang === 'pt'
+  const filterOptions = [
+    { value: 'all', label: pt ? 'Tudo' : 'All', color: 'var(--text-secondary)', dim: 'var(--ag-tint-2)' },
+    { value: 'without-checkins', label: pt ? 'Ocultar check-ins' : 'Hide check-ins', color: 'var(--text-secondary)', dim: 'var(--ag-tint-2)' },
+    { value: 'only-checkins', label: pt ? 'Só check-ins' : 'Check-ins only', color: 'var(--accent-green)', dim: 'var(--accent-green-dim)' },
+  ] as const
+  const time = (at: string) => new Date(at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  const link = (kind: 'session' | 'subtask' | 'task', target: string, text: string, taskId?: string) => {
+    const href = kind === 'session' ? sessionPath(target) : taskPath(taskId ?? target)
+    return <a key={`${kind}-${target}-${text}`} href={href} onClick={e => { e.preventDefault(); navigate(href) }} style={{ color: 'var(--anthropic-orange)', textDecoration: 'none' }}>{text}</a>
+  }
+  const navigate = useNavigate()
+  const checkin = (e: GroupedActivity) => e.kind === 'checkin'
+  const groupedCheckin = (e: GroupedActivity): e is Extract<GroupedActivity, { grouped: true }> => e.kind === 'checkin' && 'grouped' in e
+  const row = (e: GroupedActivity) => {
+    if (checkin(e)) {
+      const run = groupedCheckin(e)
+      const children = run ? e.events : [e]
+      const expanded = run && openRuns.has(e.id)
+      const first = children[0]!
+      const last = children[children.length - 1]!
+      const label = run
+        ? `${children.length} ${pt ? 'check-ins sem novidade' : 'check-ins with no news'}, ${time(last.at)}–${time(first.at)}`
+        : (e.summary ?? (pt ? 'check-in sem novidade' : 'check-in with no news'))
+      if (run && !expanded) return <button key={e.id} onClick={() => setOpenRuns(prev => new Set(prev).add(e.id))} style={{ display: 'flex', width: '100%', gap: 9, alignItems: 'baseline', textAlign: 'left', border: 0, background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', font: 'inherit', padding: 0 }}><span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>{time(e.at)}</span><span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{label}</span><span aria-hidden="true">›</span></button>
+      return <div key={e.id} style={{ display: 'grid', gap: 6, padding: '7px 9px', borderRadius: 6, background: e.state === 'resolved' ? 'var(--anthropic-orange-dim)' : e.state === 'needs_you' ? 'var(--accent-red-dim)' : 'transparent' }}>
+        <div style={{ display: 'flex', gap: 9, alignItems: 'baseline', fontSize: 12 }}><span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>{time(e.at)}</span><span style={{ color: 'var(--text-secondary)' }}><strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{e.actor}</strong>{' '}{label}</span>{run && <button onClick={() => setOpenRuns(prev => { const next = new Set(prev); next.delete(e.id); return next })} style={{ border: 0, background: 'none', color: 'var(--text-tertiary)', cursor: 'pointer' }}>⌃</button>}</div>
+        {e.actions?.map(a => <div key={a.text} style={{ fontSize: 12 }}>{a.link ? link(a.link.kind, a.link.id, a.text, a.link.taskId) : a.text}</div>)}
+        {e.needs?.map(n => <div key={n.subject} style={{ fontSize: 12, color: n.critical ? 'var(--accent-red)' : 'var(--text-secondary)' }}>{n.link ? link(n.link.kind, n.link.id, n.text, n.link.taskId) : n.text}</div>)}
+        {run && children.slice(0, -1).map(child => <div key={child.id} style={{ ...microLabel, paddingLeft: 35 }}>{time(child.at)} · {child.summary ?? (pt ? 'sem novidade' : 'no news')}</div>)}
+      </div>
+    }
+    return <div key={e.id} style={{ display: 'flex', gap: 9, alignItems: 'baseline', fontSize: 12 }}><span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>{time(e.at)}</span><span style={{ color: 'var(--text-secondary)' }}><strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{e.actor}</strong>{' '}{e.kind === 'status' ? `moved ${e.from ?? '?'} → ${e.to ?? '?'}` : e.kind === 'claim' ? (e.detail === 'takeover' ? 'took over' : 'claimed it') : e.kind === 'release' ? 'released it' : e.kind === 'priority' ? `set priority ${e.from ?? '?'} → ${e.to ?? '?'}` : e.kind === 'assign' ? `set the owner to ${e.to || 'nobody'}` : e.kind === 'session' ? `filed a ${e.detail ?? ''} session`.trim() : e.kind === 'move' ? 'reordered it' : e.kind}</span></div>
+  }
   if (loading) {
     return <div style={{ ...surface, padding: 14, fontSize: 12.5, color: 'var(--text-tertiary)' }}>Loading…</div>
   }
-  if (events.length === 0) {
+  if (grouped.length === 0) {
     return (
       <div style={{ ...surface, padding: 14, fontSize: 12.5, color: 'var(--text-tertiary)' }}>
         Nothing recorded yet. Status moves, claims, priority changes and sessions filed under this
@@ -98,24 +137,8 @@ function ActivityTab({ id }: { id: string }) {
   }
   return (
     <div style={{ ...surface, padding: 14, display: 'grid', gap: 9 }}>
-      {events.map(e => (
-        <div key={e.id} style={{ display: 'flex', gap: 9, alignItems: 'baseline', fontSize: 12 }}>
-          <span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>
-            {new Date(e.at).toLocaleString()}
-          </span>
-          <span style={{ color: 'var(--text-secondary)' }}>
-            <strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{e.actor}</strong>
-            {' '}{e.kind === 'status' ? `moved ${e.from ?? '?'} → ${e.to ?? '?'}`
-              : e.kind === 'claim' ? (e.detail === 'takeover' ? 'took over' : 'claimed it')
-              : e.kind === 'release' ? 'released it'
-              : e.kind === 'priority' ? `set priority ${e.from ?? '?'} → ${e.to ?? '?'}`
-              : e.kind === 'assign' ? `set the owner to ${e.to || 'nobody'}`
-              : e.kind === 'session' ? `filed a ${e.detail ?? ''} session`.trim()
-              : e.kind === 'move' ? 'reordered it'
-              : e.kind}
-          </span>
-        </div>
-      ))}
+      <div style={{ maxWidth: 220 }}><ChipSelect value={filter} options={filterOptions} onPick={v => setFilter(v as ActivityFilter)} compact /></div>
+      {grouped.map(row)}
     </div>
   )
 }
@@ -1178,7 +1201,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted, tab
             />
           )}
 
-          {tab === 'activity' && <ActivityTab id={id} />}
+          {tab === 'activity' && <ActivityTab id={id} lang={lang} />}
 
           {tab === 'files' && (
             <TaskFiles

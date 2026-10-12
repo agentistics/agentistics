@@ -126,6 +126,38 @@ export interface TaskEvent {
   detail?: string
   from?: string
   to?: string
+  state?: 'ok' | 'resolved' | 'needs_you'
+  summary?: string
+  sessionId?: string
+  actions?: CheckinAction[]
+  needs?: CheckinNeed[]
+}
+
+export interface CheckinLink { kind: 'session' | 'subtask' | 'task'; id: string; taskId?: string }
+export interface CheckinAction { text: string; link?: CheckinLink }
+export interface CheckinNeed { subject: string; text: string; critical?: boolean; link?: CheckinLink }
+
+export type ActivityFilter = 'all' | 'without-checkins' | 'only-checkins'
+export interface CheckinRun extends TaskEvent {
+  kind: 'checkin'
+  grouped: true
+  events: TaskEvent[]
+}
+export type GroupedActivity = TaskEvent | CheckinRun
+
+/** Filter and collapse adjacent successful check-ins, preserving the API's event order. */
+export function groupActivity(events: readonly TaskEvent[], filter: ActivityFilter = 'all'): GroupedActivity[] {
+  const visible = events.filter(e => filter === 'all' || (filter === 'only-checkins' ? e.kind === 'checkin' : e.kind !== 'checkin'))
+  const out: GroupedActivity[] = []
+  for (let i = 0; i < visible.length; i += 1) {
+    const event = visible[i]!
+    if (event.kind !== 'checkin' || event.state !== 'ok') { out.push(event); continue }
+    const run = [event]
+    while (i + 1 < visible.length && visible[i + 1]!.kind === 'checkin' && visible[i + 1]!.state === 'ok') run.push(visible[++i]!)
+    if (run.length === 1) out.push(event)
+    else out.push({ ...event, kind: 'checkin', grouped: true, events: run, summary: `${run.length} check-ins sem novidade` } satisfies CheckinRun)
+  }
+  return out
 }
 
 export interface TaskLink { id: string; url: string; label?: string; kind?: string }
