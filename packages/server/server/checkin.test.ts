@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import {
-  defaultConfig, due, fireDue, mergeConfig, nextRun, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
+  defaultConfig, due, fireDue, mergeConfig, nextRun, promptFor, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
   type CheckinAction, type CheckinDeps, type CheckinNeed,
 } from './checkin'
 
@@ -114,11 +114,40 @@ describe('check-in agenda', () => {
     reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
     const needs: CheckinNeed[] = [{ subject: 'disk', text: 'Disk is nearly full', critical: true, link: { kind: 'session', id: 's1' } }]
     const actions: CheckinAction[] = [{ text: 'Paused worker', link: { kind: 'subtask', id: 'sub1', taskId: 'task1' } }]
-    const state = await reportFromIdentity(leader.id, { state: 'resolved', summary: 'Handled', needs, actions })
+    const reported = await reportFromIdentity(leader.id, { state: 'resolved', summary: 'Handled', needs, actions })
+    const state = reported && 'session' in reported ? reported : null
     expect(state?.session).toBe(leader.conversationId)
     expect(state?.last).toEqual({ state: 'resolved', summary: 'Handled', needs, actions })
     expect(JSON.parse(frames.at(-1)!.split('data: ')[1]!.trim()).last.needs).toEqual(needs)
     expect(activity.at(-1).detail).toContain('"needs"')
+  })
+
+  test('away mode adds a no-owner line to the leader prompt', async () => {
+    reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+    preferences = { away: { on: true, until: null, authorised: [], maxWorkers: 6, topCaps: {} } }
+    await putState(leader.conversationId, { intervalMin: 15 }, 1_000)
+    await fireDue(1_000 + 15 * 60_000)
+    expect(prompts[0].text).toContain('decide within the authorisations, record the decision, and never ask the owner')
+    expect(promptFor(defaultConfig())).not.toContain('AWAY MODE')
+  })
+
+  test('away mode refuses non-empty needs, but allows a needs-free report', async () => {
+    reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+    preferences = { away: { on: true, until: null, authorised: [], maxWorkers: 6, topCaps: {} } }
+    const needs: CheckinNeed[] = [{ subject: 'disk', text: 'Disk is nearly full' }]
+    const refused = await reportFromIdentity(leader.id, { state: 'needs_you', summary: 'Blocked', needs })
+    expect(refused).toEqual({ error: 'Away mode is on: decide within the authorisations, record the decision, and use an away notice for anything urgent instead of asking the owner.' })
+    expect(preferences.checkin).toBeUndefined()
+    const accepted = await reportFromIdentity(leader.id, { state: 'resolved', summary: 'Handled' })
+    expect(accepted && 'last' in accepted ? accepted.last?.summary : '').toBe('Handled')
+  })
+
+  test('away mode off keeps needs allowed', async () => {
+    reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+    preferences = { away: { on: false, until: null, authorised: [], maxWorkers: 6, topCaps: {} } }
+    const needs: CheckinNeed[] = [{ subject: 'disk', text: 'Disk is nearly full' }]
+    const accepted = await reportFromIdentity(leader.id, { state: 'needs_you', summary: 'Needs attention', needs })
+    expect(accepted && 'last' in accepted ? accepted.last?.needs : undefined).toEqual(needs)
   })
 
   test('report is refused without verified identity and for workers', async () => {

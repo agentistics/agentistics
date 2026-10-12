@@ -6,6 +6,7 @@ import { readFleet as realReadFleet, runFleetAction as realRunFleetAction } from
 import { loadTaskWorld as realLoadTaskWorld } from './sessions/task-source'
 import { newEventId as realNewEventId, type TaskEvent } from './sessions/task-model'
 import { sseEncoder, sseClients as realSseClients } from './sse'
+import { awayActive, parseAwayState } from '@agentistics/core'
 
 export interface CheckinDeps {
   readPreferences: typeof realReadPreferences
@@ -44,6 +45,7 @@ export interface CheckinLink { kind: 'session' | 'subtask' | 'task'; id: string;
 export interface CheckinAction { text: string; link?: CheckinLink }
 export interface CheckinNeed { subject: string; text: string; critical?: boolean; link?: CheckinLink }
 export interface CheckinRound { state: CheckinRoundState; summary: string; actions?: CheckinAction[]; needs?: CheckinNeed[] }
+export interface CheckinReportRefusal { error: string }
 export interface CheckinConfig {
   intervalMin: 15 | 30 | 60 | 120
   paused: null | { until: number | null }
@@ -72,6 +74,11 @@ export function mergeConfig(base: CheckinConfig, patch: Partial<CheckinConfig>):
 export function promptFor(c: CheckinConfig): string {
   const items = c.checklist.filter(x => x.enabled).map(x => `- ${labels[x.id]}`).join('\n')
   return `Faça o check-in da liderança agora.\n${items}\n\nQuando terminar, chame agentistics_checkin_report.`
+}
+async function promptForLeader(c: CheckinConfig): Promise<string> {
+  const prompt = promptFor(c)
+  const away = awayActive(parseAwayState((await deps.readPreferences()).away), Date.now())
+  return away ? `${prompt}\nAWAY MODE — decide within the authorisations, record the decision, and never ask the owner; anything urgent goes as an away notice.` : prompt
 }
 export function due(s: CheckinState, now: number): boolean { return s.nextRunAt !== null && s.nextRunAt <= now && !pausedNow(s, now) }
 
@@ -132,13 +139,16 @@ export async function recordReport(session: string, round: CheckinRound, now = D
 }
 export async function report(session: string, round: CheckinRound): Promise<CheckinState> { return recordReport(session, round) }
 /** MCP-facing guard: only a session identity verified by the HTTP boundary may report. */
-export async function reportFromIdentity(session: string | null, round: CheckinRound): Promise<CheckinState | null> {
+export async function reportFromIdentity(session: string | null, round: CheckinRound): Promise<CheckinState | CheckinReportRefusal | null> {
   if (!session) return null
   const rows = (await deps.readFleet('pt')).rows
   const row = rows.find(r => r.id === session)
   if (!row) return null
   const roles = (await deps.readRolesDoc(deps.dataDir)).roles
   if (deps.roleOfRow(roles, row) !== 'leader') return null
+  if (round.needs?.length && awayActive(parseAwayState((await deps.readPreferences()).away), Date.now())) {
+    return { error: 'Away mode is on: decide within the authorisations, record the decision, and use an away notice for anything urgent instead of asking the owner.' }
+  }
   return report(row.conversationId ?? row.id, round)
 }
 
@@ -163,7 +173,7 @@ export async function fireDue(now = Date.now()): Promise<string[]> {
     const existing = (await allStored())[state.session]
     if (existing?.pending) await recordReport(state.session, { state: 'needs_you', summary: 'check-in sem resposta' }, now)
     firing.add(row.id); fired.push(row.id)
-    const next = await deps.runFleetAction('pt', { action: 'prompt', id: row.id, text: promptFor(state) }).catch(() => ({ ok: false }))
+    const next = await deps.runFleetAction('pt', { action: 'prompt', id: row.id, text: await promptForLeader(state) }).catch(() => ({ ok: false }))
     await updateStored(all => {
       const latest = all[state.session] ?? state
       all[state.session] = { ...latest, nextRunAt: nextRun(now, latest), ...(next.ok ? { pending: true } : {}) }
@@ -179,7 +189,7 @@ export async function runNow(session: string, now = Date.now()): Promise<boolean
   const roles = (await deps.readRolesDoc(deps.dataDir)).roles
   if (deps.roleOfRow(roles, row) !== 'leader') return false
   const state = await stateFor(row.conversationId ?? row.id, now)
-  const result = await deps.runFleetAction('pt', { action: 'prompt', id: row.id, text: promptFor(state) })
+  const result = await deps.runFleetAction('pt', { action: 'prompt', id: row.id, text: await promptForLeader(state) })
   if (!result.ok) return false
   await updateStored(all => { all[state.session] = { ...state, nextRunAt: nextRun(now, state), pending: true } })
   emit(publicState((await allStored())[state.session]!))
