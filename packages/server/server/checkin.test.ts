@@ -68,7 +68,9 @@ describe('check-in agenda', () => {
     expect(due(paused, 9_999)).toBe(false)
     const resumed = await stateFor('conversation-leader', 10_001)
     expect(resumed.paused).toBeNull()
-    expect(resumed.nextRunAt).toBe(1_810_001)
+    // The held round is due at the deadline itself, not one interval after somebody looked.
+    expect(resumed.nextRunAt).toBe(10_000)
+    expect(due(resumed, 10_001)).toBe(true)
     const forever = await putState('conversation-leader', { paused: { until: null } }, 20_000)
     expect(nextRun(20_000, forever)).toBeNull()
   })
@@ -80,6 +82,14 @@ describe('check-in agenda', () => {
     expect(await fireDue(1_000 + 15 * 60_000)).toEqual([leader.id])
     expect(prompts).toHaveLength(1)
     expect(prompts[0].id).toBe(leader.id)
+  })
+
+  test('a timed pause that ran out fires the held round on the next tick', async () => {
+    reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+    await putState(leader.conversationId, { paused: { until: 5_000 } }, 1_000)
+    expect(await fireDue(4_000)).toEqual([])
+    expect(await fireDue(6_000)).toEqual([leader.id])
+    expect(prompts).toHaveLength(1)
   })
 
   test('does not stack while a prompt is pending', async () => {

@@ -96,8 +96,12 @@ function publicState(stored: Stored): CheckinState {
 export async function stateFor(session: string, now = Date.now()): Promise<CheckinState> {
   const all = await allStored(); const old = all[session]
   const config = old ? mergeConfig(defaultConfig(), old) : defaultConfig()
-  const resumed = config.paused && config.paused.until !== null && config.paused.until <= now ? { ...config, paused: null } : config
-  const state: CheckinState = { ...resumed, session, lastRunAt: old?.lastRunAt ?? null, nextRunAt: old?.nextRunAt ?? nextRun(now, resumed), last: old?.last ?? null }
+  const expired = config.paused !== null && config.paused.until !== null && config.paused.until <= now
+  const resumed = expired ? { ...config, paused: null } : config
+  // A timed pause that ran out resumes AT its deadline: the round it held back is due now, not one
+  // whole interval after somebody happened to look at the panel.
+  const nextRunAt = expired ? config.paused!.until : (old?.nextRunAt ?? nextRun(now, resumed))
+  const state: CheckinState = { ...resumed, session, lastRunAt: old?.lastRunAt ?? null, nextRunAt, last: old?.last ?? null }
   if (!old || state.paused !== config.paused) await updateStored(current => { current[session] = state; return state })
   return state
 }
@@ -145,7 +149,8 @@ export function startCheckinTimer(): void {
   const tick = async () => {
     const now = Date.now()
     const stored = await allStored()
-    if (!Object.values(stored).some(s => s.nextRunAt !== null && s.nextRunAt <= now)) return
+    // Due, or held by a timed pause that has run out (nothing else would ever resume it).
+    if (!Object.values(stored).some(s => (s.nextRunAt !== null && s.nextRunAt <= now) || (s.paused?.until != null && s.paused.until <= now))) return
     await fireDue(now)
   }
   timer = setInterval(() => { void tick() }, 15_000); timer.unref?.(); void tick()

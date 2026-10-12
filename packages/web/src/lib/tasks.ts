@@ -1100,6 +1100,9 @@ export function useTaskActivity(ref?: string, limit = 60) {
     }
   }, [ref, limit])
   useEffect(() => { void reload() }, [reload])
+  // A check-in round lands in this log while it is on screen; the server announces every round on
+  // the shared `checkin` event, so the log follows it instead of waiting for a remount.
+  useEffect(() => subscribeEvent('checkin', () => { void reload() }), [reload])
   return { events, loading, reload }
 }
 

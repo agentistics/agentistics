@@ -2023,7 +2023,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const { verifySessionIdentity } = await import('./sessions/session-identity')
         const sender = body.session ? await verifySessionIdentity(body.session.id, body.session.token) : null
         if (!sender) return json({ error: 'unverified_sender' }, 403)
-        return json(await reportCheckin(sender, { state: String(body.state) as any, summary: String(body.summary), ...(Array.isArray(body.actions) ? { actions: body.actions as any } : {}), ...(Array.isArray(body.needs) ? { needs: body.needs as any } : {}) }))
+        const reported = await reportCheckin(sender, { state: String(body.state) as any, summary: String(body.summary), ...(Array.isArray(body.actions) ? { actions: body.actions as any } : {}), ...(Array.isArray(body.needs) ? { needs: body.needs as any } : {}) })
+        // A verified session that is not a leader is refused in words, never answered `200 null`.
+        return reported ? json(reported) : json({ error: 'not_a_leader' }, 403)
       }
       const { readFleet } = await import('./sessions/fleet-web')
       const { readRolesDoc, roleOfRow } = await import('./sessions/session-roles')

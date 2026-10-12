@@ -14,7 +14,7 @@ import {
   type CheckinNeed, type SubjectMemory, type SummaryState,
 } from './checkinNotify'
 import { alertKey, type NayAlert } from './nayNotify'
-import { pushAlert } from './nayNotifyStore'
+import { pushAlert, readNayAlerts } from './nayNotifyStore'
 import { getNotificationSettings, playNotificationSound } from './sessionNotifications'
 
 const MEMORY_KEY = 'agentistics-checkin-subjects'
@@ -39,12 +39,22 @@ function lang(): 'pt' | 'en' {
 function raise(leader: string, items: CheckinNeed[], now: number, summary?: 'away' | 'morning'): void {
   if (items.length === 0) return
   const settings = getNotificationSettings()
+  const sessionId = `checkin:${leader}`
+  // One card per leader replaces the previous one, so whatever that card still shows unread rides
+  // along — a newer round (or the summary) must never wipe an unread critical item off the screen.
+  const queued = readNayAlerts().find(a => a.sessionId === sessionId && a.checkin)
+  const shown = queued?.checkin ? mergeHeld(queued.checkin.items, items) : items
   const alert: NayAlert = {
-    key: alertKey('checkin', `${leader}:${summary ?? 'round'}`, now), kind: 'checkin', sessionId: `checkin:${leader}`,
+    key: alertKey('checkin', `${leader}:${summary ?? 'round'}`, now), kind: 'checkin', sessionId,
     name: leader, sinceMs: now, sinceKnown: true,
-    checkin: { leader, ...(summary ? { summary } : {}), items },
+    checkin: { leader, ...(summary ? { summary } : {}), items: shown },
   }
-  if (!pushAlert(alert, now)) return
+  if (!pushAlert(alert, now)) {
+    // Refused (the card is snoozed, or this leader is open on screen): keep the items for the
+    // next summary instead of letting them vanish — planRound has already marked them as said.
+    if (!readNayAlerts().some(a => a.key === alert.key)) hold(leader, items)
+    return
+  }
   if (settings.soundEnabled) {
     const loud = items.some(i => i.critical)
     playNotificationSound(settings.eventSounds[loud ? 'waiting-approval' : 'waiting'], settings.soundVolume)

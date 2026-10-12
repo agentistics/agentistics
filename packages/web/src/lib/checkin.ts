@@ -53,7 +53,7 @@ async function request(sessionId: string, method: string, suffix = '', body?: un
 }
 
 export function useCheckin(sessionId: string | undefined): {
-  state: CheckinState | null; update: (partial: Partial<CheckinConfig>) => Promise<void>; runNow: () => Promise<void>
+  state: CheckinState | null; update: (partial: Partial<CheckinConfig>) => Promise<void>; runNow: () => Promise<boolean>
 } {
   const [state, setState] = useState<CheckinState | null>(null)
   const load = useCallback(async () => {
@@ -78,8 +78,13 @@ export function useCheckin(sessionId: string | undefined): {
     if (response.ok) setState(await response.json() as CheckinState)
   }, [sessionId])
   const runNow = useCallback(async () => {
-    if (!sessionId) return
-    await request(sessionId, 'POST', '/run')
+    if (!sessionId) return false
+    // The server says whether the prompt was actually typed into the leader; the panel says so too.
+    try {
+      const response = await request(sessionId, 'POST', '/run')
+      const body = await response.json().catch(() => ({})) as { ok?: boolean }
+      return response.ok && body.ok === true
+    } catch { return false }
   }, [sessionId])
   return { state, update, runNow }
 }

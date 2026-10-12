@@ -7,7 +7,7 @@
  * `scrollIsOutside` for scroll) whose rows navigate. The links themselves are decided by the pure
  * `sessionLinks`; where each row leads is `linkTargets`, so the click handlers hold no routing.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, ChevronRight, Clock3, Info, List, Pause, Play, RefreshCw, Search } from 'lucide-react'
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
@@ -59,17 +59,19 @@ const ROW_STYLE = {
 
 const CHECKIN_ROW = { display: 'flex', alignItems: 'center', gap: 7, minHeight: 28, fontSize: 12, color: 'var(--text-secondary)' } as const
 
-function CheckinPanel({ state, pt, isMobile, onGo, update, runNow, taskPath }: {
-  state: NonNullable<ReturnType<typeof useCheckin>['state']>; pt: boolean; isMobile: boolean
-  onGo: (path: string) => void; update: (partial: Partial<CheckinConfig>) => Promise<void>; runNow: () => Promise<void>; taskPath: string | null
+function CheckinPanel({ state, pt, isMobile, onGo, update, runNow, taskPath, bare = false }: {
+  state: NonNullable<ReturnType<typeof useCheckin>['state']>; pt: boolean; isMobile: boolean; bare?: boolean
+  onGo: (path: string) => void; update: (partial: Partial<CheckinConfig>) => Promise<void>; runNow: () => Promise<boolean>; taskPath: string | null
 }) {
   const paused = state.paused !== null
+  const [ran, setRan] = useState<null | 'busy' | 'ok' | 'refused'>(null)
+  const run = async () => { setRan('busy'); setRan(await runNow() ? 'ok' : 'refused') }
   const setInterval = (intervalMin: CheckinConfig['intervalMin']) => void update({ intervalMin })
   const togglePause = () => void update({ paused: paused ? null : { until: null } })
   const checklist = state.checklist.length ? state.checklist : CHECKIN_ITEMS.map(item => ({ id: item.id, enabled: true }))
   const last = state.last ? `${state.last.state === 'needs_you' ? (pt ? 'precisa de você' : 'needs you') : state.last.summary}` : (pt ? 'ainda não rodou' : 'not run yet')
-  return <div data-testid="checkin-panel" style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 7 }}>
-    <div style={{ ...SECTION, display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 0 }}>
+  return <div data-testid="checkin-panel" style={bare ? {} : { borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 7 }}>
+    <div style={{ ...SECTION, display: bare ? 'none' : 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 0 }}>
       <span>{pt ? 'Check-in' : 'Check-in'}</span>
       <span style={{ color: paused ? 'var(--text-tertiary)' : 'var(--accent-green)' }}>{paused ? (pt ? 'pausado' : 'paused') : (pt ? `ligado · a cada ${state.intervalMin} min` : `on · every ${state.intervalMin} min`)}</span>
     </div>
@@ -84,7 +86,8 @@ function CheckinPanel({ state, pt, isMobile, onGo, update, runNow, taskPath }: {
       <div style={{ fontSize: 12, color: 'var(--text-tertiary)', padding: '2px 0' }}>{pt ? 'Roteiro: o que o líder confere' : 'Checklist: what the leader checks'}</div>
       {CHECKIN_ITEMS.map(item => { const current = checklist.find(x => x.id === item.id); const enabled = current?.enabled ?? true; return <div key={item.id} style={{ ...CHECKIN_ROW, minHeight: isMobile ? 40 : 28 }}><span style={{ color: enabled ? 'var(--text-secondary)' : 'var(--text-tertiary)' }}>{item[pt ? 'pt' : 'en']}</span><span style={{ marginLeft: 'auto', display: 'inline-flex' }}><ToggleSwitch on={enabled} onToggle={() => void update({ checklist: checklist.map(x => x.id === item.id ? { ...x, enabled: !enabled } : x) })} label={item[pt ? 'pt' : 'en']} tap={isMobile ? 44 : undefined} /></span></div> })}
     </div>
-    <div style={{ display: 'flex', gap: 6, marginTop: 7, flexWrap: 'wrap' }}><button type="button" onClick={() => void runNow()} style={{ ...ROW_STYLE, width: 'auto', cursor: 'pointer', border: '1px solid var(--border)', ...(isMobile ? { minHeight: 44 } : {}) }}><Play size={14} />{pt ? 'Rodar agora' : 'Run now'}</button>{taskPath && <button type="button" onClick={() => onGo(taskPath)} style={{ ...ROW_STYLE, width: 'auto', cursor: 'pointer', border: '1px solid var(--border)', color: 'var(--text-secondary)', ...(isMobile ? { minHeight: 44 } : {}) }}><List size={14} />{pt ? 'Ver registro' : 'View log'}</button>}</div>
+    <div style={{ display: 'flex', gap: 6, marginTop: 7, flexWrap: 'wrap' }}><button type="button" disabled={ran === 'busy'} onClick={() => void run()} style={{ ...ROW_STYLE, width: 'auto', cursor: 'pointer', border: '1px solid var(--border)', ...(isMobile ? { minHeight: 44 } : {}) }}><Play size={14} />{pt ? 'Rodar agora' : 'Run now'}</button>{taskPath && <button type="button" onClick={() => onGo(taskPath)} style={{ ...ROW_STYLE, width: 'auto', cursor: 'pointer', border: '1px solid var(--border)', color: 'var(--text-secondary)', ...(isMobile ? { minHeight: 44 } : {}) }}><List size={14} />{pt ? 'Ver registro' : 'View log'}</button>}</div>
+    {ran && ran !== 'busy' && <div role="status" style={{ fontSize: 11.5, marginTop: 5, color: ran === 'ok' ? 'var(--accent-green)' : 'var(--accent-red)' }}>{ran === 'ok' ? (pt ? 'Check-in enviado ao líder.' : 'Check-in sent to the leader.') : (pt ? 'O líder não aceitou o check-in agora (ocupado, num diálogo ou parado). Tente de novo em instantes.' : 'The leader did not take the check-in now (busy, on a dialog or stopped). Try again shortly.')}</div>}
   </div>
 }
 
@@ -113,8 +116,25 @@ function Row({ t, pt, onGo, touch }: { t: LinkTarget; pt: boolean; onGo: (path: 
   )
 }
 
-export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, pt, onGo, isMobile = false }: {
+/** The check-in block on its own, for a surface that shows it as a card of its own (the phone's
+ *  session drawer). The server answers 404 for a session that is not a leader, so this renders
+ *  nothing there — the same rule the ⓘ panel follows. */
+export function SessionCheckinCard({ sessionId, links, pt, isMobile = false, onGo, frame }: {
+  sessionId?: string; links: SessionLinks; pt: boolean; isMobile?: boolean; onGo: (path: string) => void
+  /** The host's own section chrome: given the card's status line and its body. */
+  frame: (summary: ReactNode, body: ReactNode) => ReactNode
+}) {
+  const checkin = useCheckin(sessionId)
+  if (!checkin.state) return null
+  const paused = checkin.state.paused !== null
+  const summary = <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: paused ? 'var(--text-tertiary)' : 'var(--accent-green)' }} />{paused ? (pt ? 'pausado' : 'paused') : (pt ? `ligado · a cada ${checkin.state.intervalMin} min` : `on · every ${checkin.state.intervalMin} min`)}</span>
+  return <>{frame(summary, <CheckinPanel bare state={checkin.state} pt={pt} isMobile={isMobile} onGo={onGo} update={checkin.update} runNow={checkin.runNow} taskPath={links.task ? `/tasks/${encodeURIComponent(links.task.id)}?tab=activity&filter=checkins` : null} />)}</>
+}
+
+export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, pt, onGo, isMobile = false, hideCheckin = false }: {
   links: SessionLinks; startedAt?: number; sessionId?: string; roleFallbackId?: string; pt: boolean; onGo: (path: string) => void; isMobile?: boolean
+  /** The phone drawer draws the check-in as a card of its own (`SessionCheckinCard`). */
+  hideCheckin?: boolean
 }) {
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
@@ -127,7 +147,7 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
   const primaryOrigin = useSessionRoleOrigin(sessionId ?? '')
   const fallbackOrigin = useSessionRoleOrigin(roleFallbackId ?? '')
   const roleOrigin = primaryRole ? primaryOrigin : fallbackOrigin
-  const checkin = useCheckin(role === 'leader' ? sessionId : undefined)
+  const checkin = useCheckin(role === 'leader' && !hideCheckin ? sessionId : undefined)
   useEffect(() => { if (searching) inputRef.current?.focus() }, [searching])
 
   const targets = linkTargets(links)
@@ -203,7 +223,7 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
         )
       })}
       {started && <div style={{ ...SECTION, textTransform: 'none', letterSpacing: 0, fontWeight: 400, marginTop: 10 }}>{started}</div>}
-      {role === 'leader' && checkin.state && <CheckinPanel state={checkin.state} pt={pt} isMobile={isMobile} onGo={onGo} update={checkin.update} runNow={checkin.runNow} taskPath={links.task ? `/tasks/${encodeURIComponent(links.task.id)}?tab=activity&filter=checkins` : null} />}
+      {role === 'leader' && !hideCheckin && checkin.state && <CheckinPanel state={checkin.state} pt={pt} isMobile={isMobile} onGo={onGo} update={checkin.update} runNow={checkin.runNow} taskPath={links.task ? `/tasks/${encodeURIComponent(links.task.id)}?tab=activity&filter=checkins` : null} />}
     </div>
   )
 }

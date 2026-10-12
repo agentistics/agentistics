@@ -199,6 +199,8 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
   const kickRef = useRef<() => void>(() => {})
 
   const row = alert ? rows.find(r => r.id === alert.sessionId) : undefined
+  // A check-in alert names its leader by conversation id (the agenda's key); the fleet row gives the title.
+  const ckLeaderRow = alert?.checkin ? rows.find(r => r.conversationId === alert.checkin!.leader || r.id === alert.checkin!.leader) : undefined
   const reduced = prefersReducedMotion()
 
   // "A session replied": the button shocks — but NOT on the Sessions page, where the reply is
@@ -541,20 +543,34 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
         {/* The only part that scrolls: the sentence, the session card and the message preview. */}
         <div data-nay-body style={{ display: 'grid', gap: 10, flex: '0 1 auto', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', alignContent: 'start' }}>
         <div data-rise data-say style={{ fontSize: 13.5, fontWeight: 500 }}>{say}</div>
+        {ck && (
+          // Whose round this is, by the name the fleet gives it — never the bare conversation id.
+          <div data-rise style={{ ...hint, marginTop: -6 }}>
+            {pt ? 'Check-in do líder' : 'Check-in by leader'} <b style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{ckLeaderRow?.title ?? ck.leader.slice(0, 8)}</b> · {hhmm(alert.sinceMs)}
+          </div>
+        )}
 
         {ck && ck.items.map(item => (
-          <div key={item.subject} data-rise style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '9px 10px', display: 'grid', gap: 6, background: 'var(--bg-surface)' }}>
+          <div key={item.subject} data-rise style={{ border: `1px solid ${item.critical ? 'color-mix(in srgb, var(--accent-red) 50%, transparent)' : 'var(--border)'}`, borderRadius: 10, padding: '9px 10px', display: 'grid', gap: 8, background: 'var(--bg-surface)' }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, lineHeight: 1.4 }}>
-              <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', marginTop: 5, flexShrink: 0, background: 'var(--accent-red)' }} />
+              <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', marginTop: 5, flexShrink: 0, background: item.critical ? 'var(--accent-red)' : 'var(--anthropic-orange)' }} />
               <span style={{ overflowWrap: 'anywhere' }}>{item.text}{item.critical && <b style={{ marginLeft: 6, color: 'var(--accent-red)', fontSize: 11 }}>{pt ? 'crítico' : 'critical'}</b>}</span>
             </div>
-            {item.link && (
-              <div><button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); navigate(checkinLinkPath(item.link!)) })}>
-                {pt ? 'Abrir' : 'Open'}
-              </button></div>
-            )}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {item.link && (
+                <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); navigate(checkinLinkPath(item.link!)) })}>
+                  {item.link.kind === 'session' ? (pt ? 'Abrir a sessão' : 'Open the session') : (pt ? 'Abrir a tarefa' : 'Open the task')}
+                </button>
+              )}
+              {ckLeaderRow && (
+                <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); onReply(ckLeaderRow.id) })}>
+                  {pt ? 'Responder ao líder' : 'Reply to the leader'}
+                </button>
+              )}
+            </div>
           </div>
         ))}
+        {ck && <span data-rise style={hint}>{pt ? 'Não aviso de novo sobre isso, a não ser que piore.' : 'I will not bring this up again unless it gets worse.'}</span>}
         {!ck && <div data-rise style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '9px 10px', display: 'grid', gap: 6, background: 'var(--bg-surface)' }}>
           <div title={alert.name} style={{ fontWeight: 650, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{alert.limit ? (harnessLabel ?? alert.name) : alert.name}</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>

@@ -64,6 +64,7 @@ import {
   type AttemptRollup, type AttemptView, type Subtask, type TaskDetail, type TaskSessionRow,
   type TaskFile, type TaskListRow, groupActivity, type ActivityFilter, type GroupedActivity,
 } from '../../lib/tasks'
+import { Link2 } from 'lucide-react'
 import { ChipSelect } from './ChipSelect'
 import { taskPath } from '../../lib/sessionTaskLink'
 
@@ -100,10 +101,13 @@ function ActivityTab({ id, lang }: { id: string; lang: Lang }) {
   ] as const
   // The prototype's clock: `21h10` in Portuguese, `21:10` in English — never the browser's AM/PM.
   const time = (at: string) => { const d = new Date(at); const hh = String(d.getHours()).padStart(2, '0'); const mm = String(d.getMinutes()).padStart(2, '0'); return pt ? `${hh}h${mm}` : `${hh}:${mm}` }
-  const link = (kind: 'session' | 'subtask' | 'task', target: string, text: string, taskId?: string) => {
+  const link = (kind: 'session' | 'subtask' | 'task', target: string, text: string, taskId?: string, critical = false) => {
     const href = kind === 'session' ? sessionPath(target) : taskPath(taskId ?? target)
-    return <a key={`${kind}-${target}-${text}`} href={href} onClick={e => { e.preventDefault(); navigate(href) }} style={{ color: 'var(--anthropic-orange)', textDecoration: 'none' }}>{text}</a>
+    // A chip, as in the prototype: a link is a thing you can open, not a sentence in another colour.
+    return <a key={`${kind}-${target}-${text}`} href={href} onClick={e => { e.preventDefault(); navigate(href) }} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, maxWidth: '100%', padding: '2px 8px', borderRadius: 999, border: '1px solid var(--border-subtle)', background: 'var(--ag-tint-2)', color: critical ? 'var(--accent-red)' : 'var(--anthropic-orange)', textDecoration: 'none', fontSize: 11.5, overflowWrap: 'anywhere' }}><Link2 size={11} style={{ flexShrink: 0 }} />{critical && <b style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{pt ? 'crítico:' : 'critical:'}</b>}<span style={{ minWidth: 0 }}>{text}</span></a>
   }
+  const STATE_DOT = { ok: 'var(--accent-green)', resolved: 'var(--anthropic-orange)', needs_you: 'var(--accent-red)' } as const
+  const dot = (state: keyof typeof STATE_DOT | undefined) => <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, alignSelf: 'center', background: STATE_DOT[state ?? 'ok'] }} />
   const navigate = useNavigate()
   const checkin = (e: GroupedActivity) => e.kind === 'checkin'
   const groupedCheckin = (e: GroupedActivity): e is Extract<GroupedActivity, { grouped: true }> => e.kind === 'checkin' && 'grouped' in e
@@ -117,12 +121,17 @@ function ActivityTab({ id, lang }: { id: string; lang: Lang }) {
       const label = run
         ? `${children.length} ${pt ? 'check-ins sem novidade' : 'check-ins with no news'}, ${time(last.at)}–${time(first.at)}`
         : (e.summary ?? (pt ? 'check-in sem novidade' : 'check-in with no news'))
-      if (run && !expanded) return <button key={e.id} onClick={() => setOpenRuns(prev => new Set(prev).add(e.id))} style={{ display: 'flex', width: '100%', gap: 9, alignItems: 'baseline', textAlign: 'left', border: 0, background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', font: 'inherit', padding: 0 }}><span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>{time(e.at)}</span><span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600 }}>{label}</span><span aria-hidden="true">›</span></button>
-      return <div key={e.id} style={{ display: 'grid', gap: 6, padding: '7px 9px', borderRadius: 6, background: e.state === 'resolved' ? 'var(--anthropic-orange-dim)' : e.state === 'needs_you' ? 'var(--accent-red-dim)' : 'transparent' }}>
-        <div style={{ display: 'flex', gap: 9, alignItems: 'baseline', fontSize: 12 }}><span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>{time(e.at)}</span><span style={{ color: 'var(--text-secondary)' }}><strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{e.actor}</strong>{' '}{label}</span>{run && <button onClick={() => setOpenRuns(prev => { const next = new Set(prev); next.delete(e.id); return next })} style={{ border: 0, background: 'none', color: 'var(--text-tertiary)', cursor: 'pointer' }}>⌃</button>}</div>
-        {e.actions?.map(a => <div key={a.text} style={{ fontSize: 12 }}>{a.link ? link(a.link.kind, a.link.id, a.text, a.link.taskId) : a.text}</div>)}
-        {e.needs?.map(n => <div key={n.subject} style={{ fontSize: 12, color: n.critical ? 'var(--accent-red)' : 'var(--text-secondary)' }}>{n.link ? link(n.link.kind, n.link.id, n.text, n.link.taskId) : n.text}</div>)}
-        {run && children.map(child => <div key={child.id} style={{ ...microLabel, paddingLeft: 35 }}>{time(child.at)} · {child.summary ?? (pt ? 'sem novidade' : 'no news')}</div>)}
+      if (run && !expanded) return <button key={e.id} onClick={() => setOpenRuns(prev => new Set(prev).add(e.id))} style={{ display: 'flex', width: '100%', gap: 9, alignItems: 'center', textAlign: 'left', border: '1px dashed var(--border-subtle)', borderRadius: 8, background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', font: 'inherit', padding: '7px 9px', minHeight: 36 }}><span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>{time(e.at)}</span>{dot('ok')}<span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, flex: 1, minWidth: 0 }}>{label}</span><span aria-hidden="true">›</span></button>
+      const tone = e.state === 'resolved' ? { bg: 'var(--anthropic-orange-dim)', border: 'color-mix(in srgb, var(--anthropic-orange) 45%, transparent)' }
+        : e.state === 'needs_you' ? { bg: 'var(--accent-red-dim)', border: 'color-mix(in srgb, var(--accent-red) 45%, transparent)' }
+        : { bg: 'transparent', border: 'transparent' }
+      const links = [...(e.actions ?? []).filter(a => a.link).map(a => link(a.link!.kind, a.link!.id, a.text, a.link!.taskId)), ...(e.needs ?? []).filter(n => n.link).map(n => link(n.link!.kind, n.link!.id, n.text, n.link!.taskId, n.critical === true))]
+      const body = [...(e.actions ?? []).filter(a => !a.link).map(a => ({ text: a.text, critical: false })), ...(e.needs ?? []).filter(n => !n.link).map(n => ({ text: n.text, critical: n.critical === true }))]
+      return <div key={e.id} style={{ display: 'grid', gap: 6, padding: '8px 10px', borderRadius: 8, background: tone.bg, border: `1px solid ${tone.border}` }}>
+        <div style={{ display: 'flex', gap: 9, alignItems: 'baseline', fontSize: 12 }}><span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>{time(e.at)}</span>{dot(run ? 'ok' : e.state)}<span style={{ color: 'var(--text-secondary)', flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}><strong style={{ color: 'var(--text-primary)', fontWeight: 650 }}>{label}</strong>{!run && <span style={{ color: 'var(--text-tertiary)' }}>{' · '}{e.actor}</span>}</span>{run && <button aria-label={pt ? 'Recolher' : 'Collapse'} onClick={() => setOpenRuns(prev => { const next = new Set(prev); next.delete(e.id); return next })} style={{ border: 0, background: 'none', color: 'var(--text-tertiary)', cursor: 'pointer' }}>⌃</button>}</div>
+        {body.map(b => <div key={b.text} style={{ fontSize: 12, color: b.critical ? 'var(--accent-red)' : 'var(--text-secondary)', paddingLeft: 52, overflowWrap: 'anywhere' }}>{b.critical && <b>{pt ? 'crítico: ' : 'critical: '}</b>}{b.text}</div>)}
+        {links.length > 0 && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, paddingLeft: 52 }}>{links}</div>}
+        {run && children.map(child => <div key={child.id} style={{ ...microLabel, paddingLeft: 52 }}>{time(child.at)} · {child.summary ?? (pt ? 'sem novidade' : 'no news')}</div>)}
       </div>
     }
     return <div key={e.id} style={{ display: 'flex', gap: 9, alignItems: 'baseline', fontSize: 12 }}><span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>{time(e.at)}</span><span style={{ color: 'var(--text-secondary)' }}><strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{e.actor}</strong>{' '}{e.kind === 'status' ? `moved ${e.from ?? '?'} → ${e.to ?? '?'}` : e.kind === 'claim' ? (e.detail === 'takeover' ? 'took over' : 'claimed it') : e.kind === 'release' ? 'released it' : e.kind === 'priority' ? `set priority ${e.from ?? '?'} → ${e.to ?? '?'}` : e.kind === 'assign' ? `set the owner to ${e.to || 'nobody'}` : e.kind === 'session' ? `filed a ${e.detail ?? ''} session`.trim() : e.kind === 'move' ? 'reordered it' : e.kind}</span></div>
