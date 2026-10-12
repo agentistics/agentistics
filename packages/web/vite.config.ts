@@ -210,7 +210,7 @@ export default defineConfig({
         navigateFallback: null,
         skipWaiting: true,
         // The page owns the visible update swap; the worker only claims its new assets.
-        importScripts: ['sw-reload-on-update.js'],
+        importScripts: ['sw-reload-on-update.js', 'sw-push.js'],
         clientsClaim: true,
         runtimeCaching: [
           {

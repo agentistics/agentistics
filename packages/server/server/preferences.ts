@@ -1,7 +1,7 @@
 import { join, dirname } from 'path'
 import { mkdir, rename, writeFile, open, unlink, stat, readFile, utimes, chmod } from 'node:fs/promises'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR, CLAUDE_DIR } from './config'
-import type { AccessibilityPrefs, BillingSettings, SavedComparison, SessionPreset, TeamConfig } from '@agentistics/core'
+import type { AccessibilityPrefs, AwayState, BillingSettings, SavedComparison, SessionPreset, TeamConfig } from '@agentistics/core'
 import { migrateTeamConfig } from '@agentistics/core'
 import { injectSealedTokens, plaintextTokenCount, stripAndSealTokens, withoutTokenFields } from './vault/prefs-tokens'
 import { registerVaultMigrator, sentence as vaultSentence, type MigrationReport } from './vault/service'
@@ -78,6 +78,8 @@ export interface CustomGridItem {
 }
 
 export interface Preferences {
+  /** Server-owned leadership check-in agendas, keyed by conversation id. */
+  checkin?: Record<string, unknown>
   /** Opt out of automatic managed briefing skill updates at server start. */
   briefingAutoInstall?: boolean
   /** Additional filesystem roots offered by the session/project discovery wizard. */
@@ -122,6 +124,9 @@ export interface Preferences {
    *  only ever narrow `CAPS.localShell`; see sessions/shell-gate.ts. Separate from `chatEnabled`
    *  because they are different powers: the chat runs a named assistant CLI, this runs anything. */
   shellEnabled?: boolean
+  /** AWAY MODE — the owner is out and sessions must not ask them (`server/away.ts`). Read through
+   *  `parseAwayState`/`awayActive` (@agentistics/core); written only by `setAway`. */
+  away?: AwayState
   /** Turns on every experimental feature (`EXPERIMENTAL_FEATURES`, @agentistics/core) at server
    *  start. Absent reads as OFF. An explicit `AGENTISTICS_*` variable still wins either way. Read
    *  by `experimental-boot.ts` BEFORE config.ts loads, so it must stay a plain boolean key. */

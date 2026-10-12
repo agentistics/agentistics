@@ -50,7 +50,7 @@ describe('context text', () => {
     const t = contextText(base)
     for (const n of CONTEXT_TOOL_NAMES) {
       const listed = t.includes(n)
-      const sessionsOrTasks = /^agentistics_(task|session)/.test(n)
+      const sessionsOrTasks = /^agentistics_(task|session|checkin)/.test(n)
       if (sessionsOrTasks) expect(listed).toBe(true)
       else expect(listed).toBe(false)
     }
@@ -238,7 +238,7 @@ describe('context for a child session', () => {
   test('the cleanup rule is ONE bullet and still covers closing children and removing worktrees', () => {
     const t = contextText({ sessionId: 'c1', cwd: '/w' })
     expect(t.match(/Clean up after yourself/g)?.length).toBe(1)
-    expect(t).toContain('close it (agentop session kill) and file it in the task\'s finished folder')
+    expect(t).toContain('so it is filed in the task\'s finished folder')
     expect(t).toContain('git worktree remove')
   })
 })
@@ -265,5 +265,50 @@ describe('role line follows the stored role', () => {
   })
   test('the leader briefing points at agentistics_session_role', () => {
     expect(contextText(base)).toContain('agentistics_session_role')
+  })
+})
+
+describe('folders in the briefing', () => {
+  test('the open and clean-up lines name --folder', () => {
+    const t = contextText(base)
+    expect(t).toContain('--folder "<folder>"')
+    expect(t).toContain('agentop session kill <id> --folder "<finished folder>"')
+  })
+  test('a briefed session in a folder gets its path and siblings; otherwise no line', () => {
+    expect(contextText({ ...base, folder: { path: 'Eng/Leaders', siblings: ['Eng/Workers'] } })).toContain('Your sidebar folder: Eng/Leaders. Sibling folders: Eng/Workers.')
+    expect(contextText(base)).not.toContain('Your sidebar folder')
+  })
+})
+
+describe('away mode in the briefing', () => {
+  const NOW = Date.parse('2026-10-12T03:00:00.000Z')
+  const away = { on: true, since: '2026-10-12T02:00:00.000Z', until: '2026-10-12T12:00:00.000Z', authorised: ['releases' as const], maxWorkers: 6, maxOpus: 2 }
+  test('absent, off or expired: no line', () => {
+    expect(contextText({ ...base, now: NOW })).not.toContain('AWAY MODE')
+    expect(contextText({ ...base, now: NOW, away: { ...away, on: false } })).not.toContain('AWAY MODE')
+    expect(contextText({ ...base, now: Date.parse('2026-10-12T13:00:00Z'), away })).not.toContain('AWAY MODE')
+  })
+  test('leader gets the decide-and-record line right after the role line', () => {
+    const lines = contextText({ ...base, now: NOW, away, role: 'leader' }).split('\n')
+    const i = lines.findIndex(l => l.startsWith('AWAY MODE'))
+    expect(i).toBeGreaterThan(0)
+    expect(lines[i - 1]).toContain('LEADER')
+    expect(lines[i]).toContain('until 2026-10-12T12:00:00.000Z')
+    expect(lines[i]).toContain('publish releases the leader has approved')
+    expect(lines.slice(i, i + 4).join('\n')).toContain('never end a turn on a question to the owner')
+  })
+  test('on: pacing points at the plan-limits line already in the briefing (said once); off: every away line is gone', () => {
+    const tools = [...CONTEXT_TOOL_NAMES]
+    const onText = contextText({ ...base, now: NOW, away, role: 'leader', toolNames: tools })
+    expect(onText).toContain('Away pacing')
+    expect(onText).toContain('apply the agentistics_plan_limits rule above')
+    expect(onText.match(/5-hour window is at least 85%/g)).toHaveLength(1)
+    const offText = contextText({ ...base, now: NOW, away: { ...away, on: false }, role: 'leader', toolNames: tools })
+    for (const w of ['AWAY MODE', 'Away pacing', 'Away quality', 'Away communication']) expect(offText).not.toContain(w)
+    expect(offText.match(/5-hour window is at least 85%/g)).toHaveLength(1)
+  })
+  test('worker is told to report to its leader, not the owner', () => {
+    const t = contextText({ ...base, now: NOW, away, role: 'worker', parentId: 'p1' })
+    expect(t).toContain('Do not ask the owner anything')
   })
 })

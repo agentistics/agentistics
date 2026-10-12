@@ -8,7 +8,8 @@ const config = readFileSync(join(WEB, 'vite.config.ts'), 'utf8')
 
 describe('the service worker reloads open windows when it replaces an older worker', () => {
   test('the worker pulls the script in, and still skips waiting and claims clients', () => {
-    expect(config).toContain("importScripts: ['sw-reload-on-update.js']")
+    expect(config).toContain("importScripts: ['sw-reload-on-update.js', 'sw-push.js']")
+    expect(config).toContain("'sw-push.js'")
     expect(config).toContain('skipWaiting: true')
     expect(config).toContain('clientsClaim: true')
   })

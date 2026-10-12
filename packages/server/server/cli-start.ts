@@ -33,6 +33,7 @@ import { adoptUserBinOnPath } from './sessions/user-path'
 import { loadNativeFleet, runNativeVerb, isNativeSessionId } from './sessions/native-fleet'
 import { spawn } from 'node:child_process'
 import { rekeyMutedSession } from './sessions/session-notify-web'
+import { rekeyFolderMember } from './sessions/cli-folder'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, writeSync } from 'node:fs'
 import { basename, dirname, join, resolve as resolvePath } from 'node:path'
@@ -131,7 +132,7 @@ import { SPAWN_SPECS, planSpawn, tuiStartModes } from './sessions/spawn-spec'
 import { answerStructured, structuredIntentOf, structuredReopenOrigin } from './sessions/structured-route'
 import { agentisticsMcpLaunch } from './mcp-launch'
 import { prependContext } from './sessions/agentistics-context'
-import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextParent, resolveContextRole, resolveContextTask, writeContextFile } from './sessions/spawn-context'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, writeContextFile } from './sessions/spawn-context'
 import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor } from './sessions/session-roles'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
@@ -1574,6 +1575,7 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
         // A mute made at spawn is keyed by the managed id until the conversation is known.
         .then(async r => {
           await rekeyMutedSession(id, conversationId).catch(() => {})
+          await rekeyFolderMember(id, conversationId).catch(() => {})
           await rekeyStoredRole([id], [id, conversationId]).catch(() => {})
           return r
         }),
@@ -1759,6 +1761,7 @@ function recordProcessLink(sid: string, conversationId: string, link: 'assigned'
   return patchSession(sid, { conversationId, conversationLink: link, ...(via ? { conversationLinkVia: via } : {}) })
     .then(async r => {
       await rekeyMutedSession(sid, conversationId).catch(() => {})
+      await rekeyFolderMember(sid, conversationId).catch(() => {})
       await rekeyStoredRole([sid], [sid, conversationId]).catch(() => {})
       return r
     })
@@ -2081,6 +2084,7 @@ async function spawnManaged(req: {
     ? { role }
     : await resolveContextRole(id, req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId)
   const ctx = buildSpawnContext({
+      ...(await resolveContextAway()),
       sessionId: id,
       cwd: req.cwd,
       harness: req.harness,
@@ -2141,8 +2145,12 @@ async function spawnManaged(req: {
   // A REOPEN keeps the replaced row's mute. A session linked to a conversation is muted under that
   // conversation, which the new row keeps; one with no link (codex, kimi, gemini…) was muted under its
   // managed id, which changes here, so the mute moves to the new id or it would silently come undone.
-  if (req.inherit && !req.inherit.conversationId && !bornLink?.conversationId) {
-    await rekeyMutedSession(req.inherit.id, id).catch(() => {})
+  // A reopen is usually born linked (it resumes a conversation), so the new key is that conversation.
+  const reopenKey = reopenRekeyTarget(req.inherit, bornLink?.conversationId, id)
+  if (req.inherit && reopenKey) {
+    await rekeyMutedSession(req.inherit.id, reopenKey).catch(() => {})
+    // Same for its folder: filed under the old managed id, which this reopen retires.
+    await rekeyFolderMember(req.inherit.id, reopenKey).catch(() => {})
   }
   // A launch that fails takes its row with it: no row is ever left for a pane that is not there.
   const abandon = () => removeSession(id).catch(() => {})
@@ -5098,4 +5106,11 @@ async function runControlLoop(
   if (!(await clearPortOrAbort(s, await isServerRunning()))) return 0
   await ensureArchiveModeChosen()
   return 'foreground'
+}
+
+/** The key a reopened UNLINKED row's mute and folder move to: the conversation the new row was born
+ *  linked to, else its new managed id. `null` when the old row was linked (its keys already hold). */
+export function reopenRekeyTarget(inherit: { id: string; conversationId?: string } | undefined, bornConversationId: string | undefined, newId: string): string | null {
+  if (!inherit || inherit.conversationId) return null
+  return bornConversationId ?? newId
 }

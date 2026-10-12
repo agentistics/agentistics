@@ -373,3 +373,12 @@ export function broadcastSessionGroupsChanged(): void {
     try { ctrl.enqueue(payload) } catch { sseClients.delete(ctrl) }
   }
 }
+
+/** Away mode changed (`server/away.ts`): an EMPTY signal — the browser re-reads `GET /api/away`. */
+export function broadcastAwayChanged(): void {
+  if (sseClients.size === 0) return
+  const payload = sseEncoder.encode('event: away\ndata: {}\n\n')
+  for (const ctrl of [...sseClients]) {
+    try { ctrl.enqueue(payload) } catch { sseClients.delete(ctrl) }
+  }
+}

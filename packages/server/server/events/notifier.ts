@@ -21,6 +21,7 @@ import { sendToPeer } from './peer-client'
 import { subscribersOf, type Subscription } from './subscriptions'
 import type { SessionEvent } from './event-types'
 import { readPreferences } from '../preferences'
+import { readMobileSubscriptions, sendMobilePush, webPushTransport } from './mobile-push'
 
 /** The key a session's mute is stored under — the web's `sessionIdentityKey`, so one mute holds
  *  across the dashboard, the CLI and this producer (and survives a reopen). */
@@ -119,6 +120,11 @@ export async function deliver(o: {
   if (report.toastsShown > 0) {
     report.lines.push(`desktop: ${report.toastsShown} notification${report.toastsShown > 1 ? 's' : ''}${folded > 0 ? ` (${folded} folded in)` : ''}`)
   }
+
+  // Mobile is deliberately a separate channel: desktop subscriptions never reach this sender.
+  const mobile = await sendMobilePush(o.events, await readMobileSubscriptions(), o.muted ?? new Set(), webPushTransport)
+  if (mobile.sent > 0) report.lines.push(`mobile: ${mobile.sent} notification${mobile.sent > 1 ? 's' : ''}`)
+  if (mobile.failed > 0) report.lines.push(`mobile push failed for ${mobile.failed} notification${mobile.failed > 1 ? 's' : ''}`)
 
   return report
 }

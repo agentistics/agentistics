@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { Gauge } from 'lucide-react'
 import { HARNESS_LABELS } from '../lib/harness'
 import { currentUsedPct, limitLevel, limitLevelWord, usePlanLimits, windowLabel } from '../lib/planLimits'
-import { requestNayTab } from '../lib/nayDockRequests'
+import { requestPlanUsageModal } from '../lib/planUsageModalRequests'
 import { scrollIsOutside } from '../lib/popoverScroll'
 import { LimitLevelIcon, PlanUsageSummary } from './PlanLimitMeter'
 
@@ -13,7 +13,7 @@ const GRACE_MS = 100
 
 /**
  * The sidebar footer's "Uso" button: hover or keyboard focus opens the plan-usage summary in a
- * portaled popover with a caret on the button; click opens Nay's Limits tab. Icon only (so the five
+ * portaled popover with a caret on the button; click opens the plan-usage modal. Icon only (so the five
  * footer buttons share one width); the level badge appears when a window is at 75% or more.
  */
 export function PlanUsageFootButton({ lang, collapsed, footBtn }: { lang: 'pt' | 'en'; collapsed: boolean; footBtn: CSSProperties }) {
@@ -43,6 +43,33 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn }: { lang: 'pt' |
     return () => { window.removeEventListener('scroll', onScroll, true); window.removeEventListener('keydown', onKey) }
   }, [rect, close])
 
+  // The popover is portaled to <body>, so the browser's tab order never reaches it from the button.
+  // Tab from the button steps INTO it ("Open ›"); Tab out of it resumes after the button and
+  // shift+Tab returns to it. Opening the modal focuses the button first, so the modal hands focus
+  // back to the button — not to <body> — when it closes.
+  const openModal = useCallback(() => { btnRef.current?.focus(); requestPlanUsageModal(); close() }, [close])
+  // Keyboard focus opens the summary; focus handed back by a modal closed with the pointer does not.
+  const onBtnFocus = (e: React.FocusEvent<HTMLButtonElement>) => {
+    let visible = true
+    try { visible = e.currentTarget.matches(':focus-visible') } catch { /* older engines: keep opening */ }
+    if (visible) open()
+  }
+  const onBtnKey = (e: React.KeyboardEvent) => {
+    if (e.key !== 'Tab' || e.shiftKey || !rect) return
+    const target = popRef.current?.querySelector<HTMLElement>('[data-plan-usage-open]')
+    if (target) { e.preventDefault(); target.focus() }
+  }
+  const onPopKey = (e: React.KeyboardEvent) => {
+    if (e.key !== 'Tab' || !btnRef.current) return
+    e.preventDefault()
+    if (e.shiftKey) { btnRef.current.focus(); return }
+    const all = Array.from(document.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'))
+      .filter(el => !popRef.current?.contains(el) && el.offsetParent !== null)
+    const next = all[all.indexOf(btnRef.current) + 1]
+    close()
+    ;(next ?? btnRef.current).focus()
+  }
+
   let pop: React.ReactNode = null
   if (rect) {
     const common: CSSProperties = { position: 'fixed', zIndex: 600, background: 'var(--bg-card)', border: '1px solid var(--ag-tint-4)', borderRadius: 12, boxShadow: 'var(--ag-shadow-menu)' }
@@ -54,8 +81,8 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn }: { lang: 'pt' |
       : { ...common, left: 8, bottom: window.innerHeight - rect.top + CARET + 2 }
     const caretLeft = rect.left + rect.width / 2 - (collapsed ? 0 : 8) - CARET / 2
     pop = createPortal(
-      <div ref={popRef} role="dialog" aria-labelledby="plan-usage-summary-title" data-plan-usage-popover style={{ ...style, maxWidth: POP_W + 20 }} onMouseEnter={open} onMouseLeave={closeSoon}>
-        <PlanUsageSummary limits={snap.limits} registered={snap.registered} now={snap.now} lang={lang} />
+      <div ref={popRef} role="dialog" aria-labelledby="plan-usage-summary-title" data-plan-usage-popover style={{ ...style, maxWidth: POP_W + 20 }} onMouseEnter={open} onMouseLeave={closeSoon} onFocus={open} onBlur={closeSoon} onKeyDown={onPopKey}>
+        <PlanUsageSummary onOpen={openModal} limits={snap.limits} registered={snap.registered} now={snap.now} lang={lang} />
         {collapsed
           ? <span aria-hidden style={{ ...caret, left: -CARET / 2 - 1, bottom: Math.max(4, rect.height / 2 + 8 - CARET / 2 - 8), borderLeft: '1px solid var(--ag-tint-4)', borderBottom: '1px solid var(--ag-tint-4)' }} />
           : <span aria-hidden style={{ ...caret, bottom: -CARET / 2 - 1, left: Math.min(POP_W - 20, Math.max(8, caretLeft)), borderRight: '1px solid var(--ag-tint-4)', borderBottom: '1px solid var(--ag-tint-4)' }} />}
@@ -71,8 +98,8 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn }: { lang: 'pt' |
         aria-label={label}
         aria-haspopup="dialog"
         aria-expanded={rect !== null}
-        onFocus={open} onBlur={closeSoon}
-        onClick={() => { requestNayTab('limits'); close() }}
+        onFocus={onBtnFocus} onBlur={closeSoon} onKeyDown={onBtnKey}
+        onClick={openModal}
         style={{ ...footBtn, width: collapsed ? 34 : '100%', flex: 1, minWidth: 0, position: 'relative' }}
       >
         <Gauge size={15} />

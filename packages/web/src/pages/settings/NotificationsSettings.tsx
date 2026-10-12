@@ -30,13 +30,19 @@ import { NOTIFICATION_CATEGORIES } from '../../lib/notificationCategories'
 import { formatSpan, STALE_OPTIONS_MIN } from '../../lib/nayNotify'
 import { SectionHeader, Divider, PrefRow, Toggle, Select } from './primitives'
 import { ArrowUpRight, Volume2, VolumeX, Sparkles, AlertCircle, Clock, Activity, XCircle, Hourglass } from 'lucide-react'
+import { getMobilePushState, setMobilePushEnabled } from '../../lib/mobilePush'
+
+const HOUR_OPTIONS = Array.from({ length: 24 }, (_, h) => ({ value: String(h), label: `${String(h).padStart(2, '0')}h` }))
 
 export default function NotificationsSettings() {
   const ctx = useOutletContext<AppContext>()
   const pt = ctx.lang === 'pt'
 
   const [settings, setSettings] = useState<NotificationSettings>(getNotificationSettings)
+  const [mobilePush, setMobilePush] = useState({ enabled: false, supported: false })
+  const [mobilePushError, setMobilePushError] = useState<string | null>(null)
   useEffect(() => subscribeNotificationSettings(() => setSettings(getNotificationSettings())), [])
+  useEffect(() => { getMobilePushState().then(setMobilePush).catch(() => {}) }, [])
 
   function update(partial: Partial<NotificationSettings>) {
     const next = { ...settings, ...partial }
@@ -201,6 +207,45 @@ export default function NotificationsSettings() {
       >
         <Toggle on={settings.doNotDisturb} onToggle={() => update({ doNotDisturb: !settings.doNotDisturb })} />
       </PrefRow>
+
+      <PrefRow
+        label={pt ? 'Horário de silêncio' : 'Quiet hours'}
+        sub={pt
+          ? 'Os avisos dos check-ins se acumulam num resumo; só o crítico toca na hora. O resumo vem ao fim do silêncio e quando você volta após 2 h fora.'
+          : 'Check-in alerts pile up into a summary; only critical ones ring at once. The summary comes when the silence ends and when you return after 2 h away.'}
+      >
+        <Toggle on={settings.quietHours.enabled} onToggle={() => update({ quietHours: { ...settings.quietHours, enabled: !settings.quietHours.enabled } })} />
+      </PrefRow>
+      {settings.quietHours.enabled && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{pt ? 'das' : 'from'}</span>
+          <div style={{ minWidth: 90 }}>
+            <Select value={String(settings.quietHours.fromHour)} onChange={v => update({ quietHours: { ...settings.quietHours, fromHour: Number(v) } })}
+              options={HOUR_OPTIONS} />
+          </div>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{pt ? 'às' : 'to'}</span>
+          <div style={{ minWidth: 90 }}>
+            <Select value={String(settings.quietHours.toHour)} onChange={v => update({ quietHours: { ...settings.quietHours, toHour: Number(v) } })}
+              options={HOUR_OPTIONS} />
+          </div>
+        </div>
+      )}
+
+      <Divider />
+
+      <SectionHeader label={pt ? 'Neste aparelho' : 'On this device'} />
+      <PrefRow
+        label={pt ? 'Receber notificações neste aparelho' : 'Receive notifications on this device'}
+        sub={pt
+          ? 'Somente telefones recebem alerta do sistema. No iPhone, é preciso instalar o PWA (iOS 16.4+); vibrar no silencioso segue o ajuste de hápticos do iOS.'
+          : 'Only phones receive operating-system alerts. On iPhone, install the PWA (iOS 16.4+); vibration in silent mode follows the iOS haptics setting.'}
+      >
+        <Toggle on={mobilePush.enabled} onToggle={() => {
+          setMobilePushError(null)
+          void setMobilePushEnabled(!mobilePush.enabled).then(setMobilePush).catch(e => setMobilePushError(e instanceof Error ? e.message : (pt ? 'Não foi possível atualizar as notificações' : 'Could not update notifications')))
+        }} disabled={!mobilePush.supported} />
+      </PrefRow>
+      {mobilePushError && <div style={{ color: '#ef4444', fontSize: 12, marginTop: 8 }}>{mobilePushError}</div>}
 
       <Divider />
 

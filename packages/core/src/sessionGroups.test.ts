@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  resolveFolderRef,
   canNestGroup, planDeleteGroup, planGroupOp, planNestGroup, resolveGroupRef, resolveSessionForGroup,
   sessionIdentityKey, type SessionUserGroupsValue,
 } from './sessionGroups'
@@ -244,5 +245,24 @@ describe('planDeleteGroup — cascade', () => {
   })
   test('with cascade the sub-folders go too, the rest stays', () => {
     expect(planDeleteGroup(v, 'p', true).groups.map(g => g.id)).toEqual(['o'])
+  })
+})
+
+describe('resolveFolderRef', () => {
+  const g = { groups: [
+    { id: 'a', name: 'Eng', sessionKeys: [] },
+    { id: 'b', name: 'Done', parentId: 'a', sessionKeys: [] },
+    { id: 'c', name: 'Ops', sessionKeys: [] },
+    { id: 'd', name: 'Done', parentId: 'c', sessionKeys: [] },
+  ] }
+  test('id, name, path', () => {
+    expect(resolveFolderRef(g, 'a')).toMatchObject({ ok: true, path: 'Eng' })
+    expect(resolveFolderRef(g, ' eng ')).toMatchObject({ ok: true, path: 'Eng' })
+    expect(resolveFolderRef(g, 'ops / done')).toMatchObject({ ok: true, path: 'Ops/Done' })
+  })
+  test('ambiguous and unknown', () => {
+    const amb = resolveFolderRef(g, 'Done')
+    expect(amb).toEqual({ ok: false, code: 'ambiguous_group', matches: ['Eng/Done (b)', 'Ops/Done (d)'] })
+    expect(resolveFolderRef(g, 'x/y')).toMatchObject({ ok: false, code: 'no_such_group' })
   })
 })

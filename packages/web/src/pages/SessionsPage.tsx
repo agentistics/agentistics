@@ -18,7 +18,7 @@
  */
 
 import { sessionLinks } from '../lib/sessionParent'
-import { SessionLinkInfo, SessionLinkPanel } from '../components/sessions/SessionLinkInfo'
+import { SessionCheckinCard, SessionLinkInfo, SessionLinkPanel } from '../components/sessions/SessionLinkInfo'
 import { Drawer } from '../components/Drawer'
 import { PlanUsageSummary } from '../components/PlanLimitMeter'
 import { ContextRing } from '../components/sessions/SessionStatsMenu'
@@ -28,7 +28,7 @@ import { sessionStats } from '../lib/sessionStats'
 import { usePlanLimits, worstUsedPct } from '../lib/planLimits'
 import { PlanUsageRing } from '../components/PlanLimitMeter'
 import { TaskProgressChip } from '../components/tasks/TaskProgressChip'
-import { requestNayTab } from '../lib/nayDockRequests'
+import { requestPlanUsageModal } from '../lib/planUsageModalRequests'
 import { drawerEntryOnTop, sessionDrawerDot, SESSION_DRAWER_STATE } from '../lib/sessionDrawer'
 import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
@@ -83,6 +83,7 @@ import { ChatSelectionOverlay } from '../components/sessions/ChatSelectionBar'
 import { MagnifierButton } from '../components/a11y/MagnifierButton'
 import { HideLensesButton } from '../components/a11y/HideLensesButton'
 import { NotificationBell } from '../components/NotificationBell'
+import AwayPill from '../components/AwayPill'
 import { ArtifactsAside } from '../components/sessions/ArtifactsAside'
 import { HardwarePanel } from '../components/sessions/HardwarePanel'
 import { UnsavedChangesGuard } from '../components/sessions/UnsavedChangesGuard'
@@ -2180,6 +2181,9 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             44px mobile touch target coming from the invisible `.ag-tap-icon` hit zone (index.css)
             rather than a grown painted control — `NotificationBell.buttonClassName` exists for
             exactly this. */}
+        {/* Away mode, same reasoning as the bell: the phone's only header here is this slot, and the
+            owner switches away on from the phone — without it the state is invisible on this screen. */}
+        <AwayPill lang={pt ? 'pt' : 'en'} enabled={!ctx.isCentral && ctx.capabilities?.localShell !== false} />
         <NotificationBell lang={pt ? 'pt' : 'en'} buttonClassName="ag-tap-icon" buttonStyle={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           width: 32, height: 32, borderRadius: 8,
@@ -2937,7 +2941,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         })(), (
           <button
             type="button"
-            onClick={() => { closeSessionDrawer(); requestNayTab('limits') }}
+            onClick={() => { closeSessionDrawer(); requestPlanUsageModal() }}
             aria-label={pt ? 'Ver todos os limites' : 'See every limit'}
             style={{
               all: 'unset', boxSizing: 'border-box', display: 'block', width: '100%', cursor: 'pointer',
@@ -2946,6 +2950,17 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             <PlanUsageSummary limits={planLimits.limits} registered={planLimits.registered} now={planLimits.now} lang={tPt} />
           </button>
         ), { open: drawerLimitsOpen, toggle: () => setDrawerLimitsOpen(v => !v) })}
+
+        {/* A leader's check-in is a card of its own and open, as in the prototype — folded inside
+            "Sessão" it was the one control a leader reaches for most, and the hardest to find. */}
+        <SessionCheckinCard
+          sessionId={sessionIdentityKey(selected)}
+          links={sessionLinks(selected, fleet.rows) ?? { parent: null, children: [], task: null }}
+          pt={pt}
+          isMobile
+          onGo={p => leaveDrawerTo(p)}
+          frame={(summary, body) => drawerSection('checkin', 'Check-in', summary, body)}
+        />
 
         {drawerSection('session', pt ? 'Sessão' : 'Session', (() => {
           const taskRef = sessionLinks(selected, fleet.rows)?.task?.id
@@ -2970,6 +2985,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               roleFallbackId={selected.id}
               pt={pt}
               isMobile
+              hideCheckin
               onGo={p => leaveDrawerTo(p)}
             />
           </div>

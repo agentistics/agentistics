@@ -60,6 +60,9 @@ const EXACT: ReadonlyMap<string, keyof Capabilities> = new Map<string, keyof Cap
 
 /** Prefix (no trailing slash) → capability. Matches `<prefix>` and `<prefix>/…` only. */
 const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
+  // Registration writes device credentials and reads the sealed VAPID key, so every mobile-push
+  // route is host-local power and must be refused when this machine's local capability is off.
+  ['/api/mobile-push', 'localShell'],
   ['/api/harnesses', 'localChat'],
   // RES.1 — the process governor: reads every agentop process on the host, kills on request, and
   // registers helper processes. Host power, so the strictest capability.
@@ -100,6 +103,10 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   ['/api/session-notify', 'localShell'],
   ['/api/session-message', 'localShell'],
   ['/api/session-roles', 'localShell'],
+  ['/api/away', 'localShell'],
+  // The leaders' check-in agenda: resolves sessions against THIS machine's fleet and types the
+  // check-in prompt into them, so it rides the same capability as the session routes above.
+  ['/api/checkin', 'localShell'],
   // The file store is addressed by file id rather than under `/api/tasks/`, so it needs its own
   // entry: a route that is not registered here is assumed harmless.
   ['/api/task-files', 'localShell'],

@@ -125,3 +125,21 @@ describe('LEADER.HANDOFF.HINT', () => {
     expect(await findHandoffFile(undefined)).toBeUndefined()
   })
 })
+
+describe("hand-off hint while away", () => {
+  it('appends the away sentence when given', () => {
+    const t = handoffHintText({ id: 'x', level: 1, tokens: 150_000, fraction: 0.375 }, ' O dono está fora (modo ausente) até avisar que voltou: registre isso no handoff para o sucessor.')
+    expect(t).toContain('handoff:true). O dono está fora')
+  })
+  it('sendHandoffHints passes the away note through', async () => {
+    const sent: string[] = []
+    await sendHandoffHints({
+      rows: async () => [{ id: 'L', title: '[ LEADER ] - x', contextTokens: 160_000 }],
+      prompt: async (_id, text) => { sent.push(text); return { ok: true } },
+      hinted: async () => ({ level: 0 }),
+      markHinted: async () => true,
+      awayNote: async () => ' AWAY-NOTE',
+    })
+    expect(sent[0]).toEndWith(' AWAY-NOTE')
+  })
+})

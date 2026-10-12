@@ -261,6 +261,13 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
   // placeholders: the singular/plural noun, "and N more" and an optional "Frees ~X. " sentence are
   // WORDING, not a bare value, so `resolveNotification` fills them through
   // `idleSessionNoun`/`idleMoreSuffix`/`idleFreedSentence` before the generic pass ever sees them.
+  // AWAY MODE: a leader's notice to the owner while they are out (`POST /api/away/notice`) — the
+  // warning or decision that cannot wait, sent instead of a question that would block the turn.
+  // `{text}` is the leader's own sentence (secrets redacted by the server).
+  'away.notice': {
+    pt: { title: 'Aviso do líder (modo ausente)', message: '{text}' },
+    en: { title: 'Leader notice (away mode)', message: '{text}' },
+  },
   'sessions.idle': {
     pt: { title: 'Sessões ociosas', message: '{count} {sessionsNoun} sem mensagem sua há um tempo: {names}{more}. {freed}Clique para revisar.' },
     en: { title: 'Idle sessions', message: '{count} {sessionsNoun} you have not messaged in a while: {names}{more}. {freed}Click to review.' },
