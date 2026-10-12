@@ -1,4 +1,5 @@
-import { afterAll, describe, expect, test } from 'bun:test'
+import { afterAll, describe, expect, spyOn, test } from 'bun:test'
+import { planBudget, planPace, type PlanLimits } from '@agentistics/core'
 import {
   checkinActivity, checkinLimitInputs, defaultConfig, due, fireDue, mergeConfig, nextRun, promptFor, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
   runNow, type CheckinAction, type CheckinDeps, type CheckinNeed,
@@ -208,6 +209,82 @@ describe('idle check-ins', () => {
     expect(emitted.fingerprint).toBeUndefined()
     expect(emitted.lastFiredAt).toBeUndefined()
   })
+  for (const kind of ['status', 'assign', 'block', 'claim', 'release', 'session', 'move']) {
+    test(`board ${kind} event triggers one round without live workers`, async () => {
+      await begin()
+      activity.push({ id: 'board-event', taskId: 'task-1', kind, actor: 'owner',
+        at: new Date(first + MINUTE).toISOString(), from: 'in_progress', to: 'blocked', detail: 'waiting' })
+      expect(await fireDue(first + 15 * MINUTE)).toEqual([leader.id])
+      await recordReport(leader.conversationId, { state: 'ok', summary: 'Read' }, first + 15 * MINUTE)
+      expect(await fireDue(first + 30 * MINUTE)).toEqual([])
+    })
+  }
+  test('20% to 21% in the same decision bands skips; crossing hold fires', async () => {
+    await begin()
+    const records: PlanLimits[] = [{ harness: 'codex', account: 'default', source: 'codex-rollout',
+      updatedAt: first, windows: [{ kind: '5h', usedPct: 20, resetsAt: first + 300 * MINUTE }] }]
+    setCheckinDeps({ ...testDeps, readCheckinLimits: async now => checkinLimitInputs(records, now) })
+    await runNow(leader.conversationId, first)
+    await recordReport(leader.conversationId, { state: 'ok', summary: 'Read' }, first)
+    records[0]!.windows[0]!.usedPct = 21
+    expect(await fireDue(first + 15 * MINUTE)).toEqual([])
+    records[0]!.windows[0]!.usedPct = 85
+    expect(await fireDue(first + 30 * MINUTE)).toEqual([leader.id])
+  })
+  test('default limits reader retains time-driven pace bands from payload budgets', async () => {
+    await begin()
+    const records: PlanLimits[] = [{ harness: 'codex', account: 'default', source: 'codex-rollout',
+      updatedAt: first, windows: [{ kind: 'week', usedPct: 20, resetsAt: first + 120 * MINUTE }] }]
+    const history: PlanLimits[] = [{ ...records[0]!, updatedAt: first - 24 * MINUTE,
+      windows: [{ ...records[0]!.windows[0]!, usedPct: 0 }] }]
+    const module = await import('./plan-limits')
+    const seen: number[] = []
+    const reader = spyOn(module, 'planLimitsPayload').mockImplementation(async (_billing, now = Date.now()) => {
+      seen.push(now)
+      return { limits: records, registered: [], budgets: records.map(l => ({ ...planBudget(l, now), ...planPace(l, now, history) })),
+        freeSlots: 0, freeSlotsByHarness: {}, liveSessions: [], now }
+    })
+    const { readCheckinLimits: _reader, ...otherDeps } = testDeps
+    setCheckinDeps(otherDeps)
+    try {
+      expect(planPace(records[0]!, first, history).paceStatus).toBe('over')
+      expect(planPace(records[0]!, first + 30 * MINUTE, history).paceStatus).toBe('on')
+      await runNow(leader.conversationId, first)
+      await recordReport(leader.conversationId, { state: 'ok', summary: 'Read' }, first)
+      expect(await fireDue(first + 15 * MINUTE)).toEqual([leader.id]) // over -> on
+      await recordReport(leader.conversationId, { state: 'ok', summary: 'Read' }, first + 15 * MINUTE)
+      expect(await fireDue(first + 30 * MINUTE)).toEqual([])
+      expect(seen).toEqual([first, first + 15 * MINUTE, first + 30 * MINUTE])
+    } finally { reader.mockRestore(); setCheckinDeps(testDeps) }
+  })
+  for (const manualFirst of [false, true]) {
+    test(`${manualFirst ? 'manual' : 'scheduled'} round guards concurrent manual/scheduled readers`, async () => {
+      await begin(); limits = { changed: true }
+      let entered!: () => void
+      let releaseReader!: () => void
+      const reading = new Promise<void>(resolve => { entered = resolve })
+      const blocked = new Promise<void>(resolve => { releaseReader = resolve })
+      let reads = 0
+      setCheckinDeps({ ...testDeps, readCheckinLimits: async () => {
+        if (++reads === 1) { entered(); await blocked }
+        return limits
+      } })
+      const firstRound = manualFirst ? runNow(leader.conversationId, first + 15 * MINUTE) : fireDue(first + 15 * MINUTE)
+      await reading
+      const secondRound = manualFirst ? fireDue(first + 15 * MINUTE) : runNow(leader.conversationId, first + 15 * MINUTE)
+      try {
+        if (manualFirst) expect(await secondRound).toEqual([])
+        // Flush the second caller's fleet/roles awaits, without releasing the reader.
+        for (let i = 0; i < 10; i++) await Promise.resolve()
+        expect(reads).toBe(1)
+        expect(prompts).toHaveLength(1)
+      } finally { releaseReader(); await firstRound; await secondRound }
+      expect(prompts).toHaveLength(manualFirst ? 2 : 3)
+      expect(stored().lastFiredAt).toBe(first + 15 * MINUTE)
+      await recordReport(leader.conversationId, { state: 'ok', summary: 'Read' }, first + 15 * MINUTE)
+      expect(await fireDue(first + 30 * MINUTE)).toEqual([])
+    })
+  }
   for (const usedPct of [0, 85]) {
     test(`stored ${usedPct}% usage triggers one delivery when its window renews`, async () => {
       await begin()

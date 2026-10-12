@@ -310,8 +310,12 @@ web holds no rule of its own about what a session may take.
 Scheduled rounds skip unchanged enabled inputs and retain their delivery fingerprint across
 restarts and configuration edits. Session messages record their resolved recipient and
 handback/block/question kind in the mirrored `comment` event; ordinary comments are ignored.
-Usage windows and reset times come from the plan-limits store, and MCP configuration includes the
-leader's project directory and enabled harnesses. Only successful prompt delivery advances the
+Board activity (including status, assignment and blocking events) also changes the fingerprint;
+check-in reports are ignored to prevent feedback. Limits use budget and pace decision bands from
+the reader, together with window reset and renewal identity, so usage changes within a band skip
+while time-driven band changes remain visible. Manual and scheduled rounds share a per-leader
+guard; manual requests wait for an active round before reading state and always run.
+MCP configuration includes the leader's project directory and enabled harnesses. Only successful prompt delivery advances the
 fingerprint and delivery time. While explicitly assigned workers remain live, the next round is
 bounded by two hours after delivery, including after late reports; closed, exited and lost workers
 do not sustain heartbeats.

@@ -8,7 +8,7 @@ import { readFleet as realReadFleet, runFleetAction as realRunFleetAction } from
 import { loadTaskWorld as realLoadTaskWorld } from './sessions/task-source'
 import { newEventId as realNewEventId, type TaskEvent } from './sessions/task-model'
 import { sseEncoder, sseClients as realSseClients } from './sse'
-import { awayActive, currentUsedPct, parseAwayState, windowRenewed, type HarnessId, type PlanLimits } from '@agentistics/core'
+import { awayActive, planBudget, planPace, parseAwayState, windowRenewed, type HarnessId, type PlanLimits, type PlanBudget, type PlanPace } from '@agentistics/core'
 import { harnessEnabled } from './adapters/types'
 import { createHash } from 'node:crypto'
 import { isClosedRow } from './sessions/fleet-events'
@@ -34,10 +34,13 @@ export interface CheckinDeps {
   readCheckinMcpConfigs: (cwd: string) => Promise<unknown>
 }
 
-// Session-message mirrors are comment events, with the resolved recipient recorded in detail.
+// Board kinds are open-ended. Ignore check-in reports (our own feedback) and filter
+// session-message comment mirrors by their resolved recipient.
 export function checkinActivity(events: readonly TaskEvent[], leader: string): unknown {
   return events.flatMap(e => {
-    if (e.kind !== 'comment' || !e.detail) return []
+    if (e.kind === 'checkin') return []
+    if (e.kind !== 'comment') return [{ ...e }]
+    if (!e.detail) return []
     try {
       const { message } = JSON.parse(e.detail)
       return message?.to === leader && ['handback', 'block', 'question'].includes(message.kind)
@@ -46,11 +49,18 @@ export function checkinActivity(events: readonly TaskEvent[], leader: string): u
   })
 }
 
-export function checkinLimitInputs(limits: readonly PlanLimits[], now: number): unknown {
-  return limits.map(({ harness, account, plan, sourcePlan, windows }) => ({
-    harness, account, plan, sourcePlan,
-    windows: windows.map(w => ({ ...w, usedPct: currentUsedPct(w, now), renewed: windowRenewed(w, now) })),
-  }))
+export function checkinLimitInputs(limits: readonly PlanLimits[], now: number, budgets?: readonly (PlanBudget & PlanPace)[]): unknown {
+  return limits.map((l, index) => {
+    // Payload budgets follow the limits order, including separate accounts of one harness.
+    const budget = budgets?.[index] ?? { ...planBudget(l, now), ...planPace(l, now) }
+    return {
+      harness: l.harness, account: l.account, plan: l.plan, sourcePlan: l.sourcePlan,
+      status: budget.status, paceStatus: budget.paceStatus, hold: budget.status === 'hold',
+      pause: budget.pauseUntil !== undefined && budget.pauseUntil > now,
+      // Retain renewal identity, including a zero-usage renewal, without raw usage.
+      windows: l.windows.map(w => ({ kind: w.kind, resetsAt: w.resetsAt, renewed: windowRenewed(w, now) })),
+    }
+  })
 }
 
 const defaultCheckinActivity: CheckinDeps['readCheckinActivity'] = async (_since, leader) => checkinActivity((await deps.loadTaskWorld()).book.events, leader)
@@ -70,8 +80,8 @@ const defaultDeps: CheckinDeps = {
   readCheckinActivity: defaultCheckinActivity,
   readCheckinLimits: async now => {
     const { planLimitsPayload } = await import('./plan-limits')
-    const { limits, registered } = await planLimitsPayload((await deps.readPreferences()).billing)
-    return { registered, limits: checkinLimitInputs(limits, now) }
+    const { limits, registered, budgets } = await planLimitsPayload((await deps.readPreferences()).billing, now)
+    return { registered, limits: checkinLimitInputs(limits, now, budgets) }
   },
   readCheckinRelease: async () => {
     try {
@@ -252,7 +262,12 @@ export async function reportFromIdentity(session: string | null, round: CheckinR
 }
 
 let timer: ReturnType<typeof setInterval> | undefined
-let firing = new Set<string>()
+const firing = new Map<string, Promise<void>>()
+function guard(session: string): () => void {
+  let release!: () => void
+  firing.set(session, new Promise<void>(resolve => { release = resolve }))
+  return () => { firing.delete(session); release() }
+}
 export function startCheckinTimer(): void {
   if (timer) return
   const tick = async () => {
@@ -268,7 +283,7 @@ export async function fireDue(now = Date.now()): Promise<string[]> {
   const rows = (await deps.readFleet('pt')).rows; const roles = (await deps.readRolesDoc(deps.dataDir)).roles; const fired: string[] = []
   for (const row of rows) {
     if (deps.roleOfRow(roles, row) !== 'leader' || firing.has(row.id)) continue
-    firing.add(row.id)
+    const releaseGuard = guard(row.id)
     try {
       const state = await stateFor(row.conversationId ?? row.id, now); if (!due(state, now)) continue
       const existing = (await allStored())[state.session]
@@ -293,7 +308,7 @@ export async function fireDue(now = Date.now()): Promise<string[]> {
       if (next.ok) fired.push(row.id)
       if (next.ok) emit(publicState((await allStored())[state.session]!))
     } finally {
-      firing.delete(row.id)
+      releaseGuard()
     }
   }
   return fired
@@ -303,11 +318,18 @@ export async function runNow(session: string, now = Date.now()): Promise<boolean
   if (!row) return false
   const roles = (await deps.readRolesDoc(deps.dataDir)).roles
   if (deps.roleOfRow(roles, row) !== 'leader') return false
-  const state = await stateFor(row.conversationId ?? row.id, now)
-  const currentFingerprint = await fingerprint(row, state, rows, now)
-  const result = await deps.runFleetAction('pt', { action: 'prompt', id: row.id, text: await promptForLeader(state) })
-  if (!result.ok) return false
-  await updateStored(all => { all[state.session] = { ...all[state.session], ...state, fingerprint: currentFingerprint, lastFiredAt: now, nextRunAt: nextRun(now, state), pending: true } })
-  emit(publicState((await allStored())[state.session]!))
-  return result.ok
+  // Manual requests still always run, but wait for an in-flight round before reading state.
+  while (firing.has(row.id)) await firing.get(row.id)
+  const releaseGuard = guard(row.id)
+  try {
+    const state = await stateFor(row.conversationId ?? row.id, now)
+    const currentFingerprint = await fingerprint(row, state, rows, now)
+    const result = await deps.runFleetAction('pt', { action: 'prompt', id: row.id, text: await promptForLeader(state) })
+    if (!result.ok) return false
+    await updateStored(all => { all[state.session] = { ...all[state.session], ...state, fingerprint: currentFingerprint, lastFiredAt: now, nextRunAt: nextRun(now, state), pending: true } })
+    emit(publicState((await allStored())[state.session]!))
+    return result.ok
+  } finally {
+    releaseGuard()
+  }
 }
