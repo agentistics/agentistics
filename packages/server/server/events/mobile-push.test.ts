@@ -3,6 +3,7 @@ import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, test } from 'bun:test'
 import { AGENTISTICS_DATA_DIR } from '../config'
+import { destroyRunnerVault, ensureVaultOpen, lockVault, sealToFile } from '../vault/service'
 import { deriveWebPushKeys, encryptWebPushPayload, ensureVapidPublicKey, isMobileUserAgent, mobileEvents, parseMobileStore, sendMobileNotice, sendMobilePush, vapidJwt, webPushTransport, MOBILE_SUBSCRIPTIONS_FILE, type MobileSubscription } from './mobile-push'
 import type { SessionEvent } from './event-types'
 
@@ -88,6 +89,33 @@ describe('mobile push', () => {
     expect(first).not.toContain('.')
     const sealed = await readFile(join(AGENTISTICS_DATA_DIR, 'mobile-push-vapid.sealed'))
     expect(sealed?.toString()).not.toContain('privateKey')
+  })
+
+  test('VAPID remains available while the human vault is locked, including send signing', async () => {
+    const publicKey = await ensureVapidPublicKey()
+    lockVault()
+    expect(await ensureVapidPublicKey()).toBe(publicKey)
+    let authorization = ''
+    await webPushTransport(pushSub('locked'), { title: 'Waiting', body: 'Approve', sessionId: 's1' }, async (_url, init) => {
+      authorization = new Headers(init?.headers).get('Authorization') ?? ''
+      return new Response(null, { status: 201 })
+    })
+    expect(authorization).toMatch(/^vapid t=[^.]+\.[^.]+\.[^.]+, k=/)
+    await ensureVaultOpen()
+  })
+
+  test('migrates a legacy vault-sealed key without changing its public key', async () => {
+    const key = createECDH('prime256v1')
+    key.setPrivateKey(Buffer.alloc(32, 2))
+    const publicKey = key.getPublicKey().toString('base64url')
+    await destroyRunnerVault()
+    await ensureVaultOpen()
+    const body = new TextEncoder().encode(JSON.stringify({ publicKey, privateKey: Buffer.alloc(32, 2).toString('base64url'), curve: 'P-256' }))
+    await sealToFile(join(AGENTISTICS_DATA_DIR, 'mobile-push-vapid.sealed'), 'mobile-push-vapid', 'default', body)
+    expect(await ensureVapidPublicKey()).toBe(publicKey)
+    lockVault()
+    expect(await ensureVapidPublicKey()).toBe(publicKey)
+    await ensureVaultOpen()
   })
 
   test('web push request uses VAPID, TTL, and an aes128gcm record', async () => {
