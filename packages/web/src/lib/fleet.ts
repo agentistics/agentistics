@@ -19,7 +19,7 @@ import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { fleetSeedNotice, fleetStaleNotice } from './fleetStale'
 import { cacheIsUsable, stripVolatile } from './fleetCache'
 import { notifyFleetTransitions, type SessionActivity } from './sessionNotifications'
-import { confirmSendLanded, parseActResult, sendUnconfirmedMessage, textInUserTurns } from './fleetAct'
+import { confirmSendLanded, parseActResult, sendUnconfirmedMessage, textInPending, textInUserTurns } from './fleetAct'
 import { nativeAct, readNativeFleet } from './nativeFleet'
 import { withNativeSessions } from './nativeFleetRow'
 import { isNativeSessionId } from './sessionRoute'
@@ -647,18 +647,21 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
       // A poll settles what actually happened — see the note above. It runs even here.
       void pollOnce()
       const timedOut = err instanceof Error && err.name === 'AbortError'
-      // A timed-out SEND is checked against the session's own conversation before it is called a
-      // failure: the keys usually landed and only the answer was slow.
-      if (timedOut && req.action === 'prompt' && req.text && !machineIdAtCall) {
+      // A SEND that timed out or hit a network error is checked against the session's own
+      // conversation before it is called a failure: the keys usually landed and only the answer was
+      // lost. A mid-turn delivery sits in `pending`, not yet in `turns`.
+      if (req.action === 'prompt' && req.text && !machineIdAtCall) {
         const landed = await confirmSendLanded(async () => {
           const r = await fetch(`/api/fleet/chat?id=${encodeURIComponent(req.id)}&lang=${lang}`)
           if (!r.ok) return false
-          const b = await r.json() as { turns?: { role?: string; text?: string }[] }
-          return textInUserTurns(b.turns ?? [], req.text ?? '')
+          const b = await r.json() as { turns?: { role?: string; text?: string }[]; pending?: { text?: string }[] }
+          return textInUserTurns(b.turns ?? [], req.text ?? '') || textInPending(b.pending, req.text ?? '')
         })
         return landed
           ? { ok: true, message: lang === 'pt' ? 'Mensagem enviada.' : 'Message sent.' }
-          : { ok: false, message: sendUnconfirmedMessage(lang) }
+          : timedOut
+            ? { ok: false, message: sendUnconfirmedMessage(lang) }
+            : { ok: false, message: lang === 'pt' ? 'Erro de rede ao falar com esta máquina.' : 'Network error talking to this machine.' }
       }
       return {
         ok: false,

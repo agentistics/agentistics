@@ -14,8 +14,11 @@ export function visibleQueued(
   userTurns: string[],
   transcriptLoaded: boolean,
   delivered: ReadonlySet<string> = new Set(),
+  local: ReadonlySet<string> = new Set(),
 ): QueuedCard[] {
-  if (!transcriptLoaded) return []
+  // A message sent in THIS mount cannot have been consumed before it existed, so its card never
+  // waits for the first transcript read; only the server's older copies do.
+  if (!transcriptLoaded) return queued.filter(q => local.has(q.text) && !delivered.has(q.text))
   const still = new Set(pendingEchoes(queued.map(q => q.text), userTurns))
   return queued.filter(q => still.has(q.text) && !delivered.has(q.text))
 }

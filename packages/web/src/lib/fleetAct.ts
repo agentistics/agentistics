@@ -70,6 +70,14 @@ export function textInUserTurns(
   return turns.some(t => t.role === 'user' && typeof t.text === 'string' && norm(t.text).includes(want))
 }
 
+/** Is `text` among the server-held pending messages (delivered mid-turn, not yet in the transcript)? */
+export function textInPending(pending: readonly { text?: string }[] | undefined, text: string): boolean {
+  const norm = (v: string) => v.replace(/\s+/g, ' ').trim()
+  const want = norm(text)
+  if (!want) return false
+  return (pending ?? []).some(p => typeof p.text === 'string' && norm(p.text) === want)
+}
+
 /**
  * Ask `check` up to `attempts` times, `intervalMs` apart; `true` as soon as the message is seen.
  * A throwing check counts as "not seen yet" — it must never turn into the answer.

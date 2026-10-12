@@ -352,6 +352,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const payload = hasSource ? sourcePayload : feedPayload
   const pendingRef = useRef(payload?.pending)
   pendingRef.current = payload?.pending
+  /** The session whose transcript has loaded at least once from the feed (reset by the id changing). */
+  const [loadedId, setLoadedId] = useState<string | null>(null)
   /**
    * The frame on screen is one this session cached a while ago, and a fresh read is on its way.
    *
@@ -361,8 +363,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * flashes for 150 ms and means nothing, which is why the marker itself also waits (see
    * `showRefreshing`).
    */
-  /** The session whose transcript has loaded at least once from the feed (reset by the id changing). */
-  const [loadedId, setLoadedId] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(() => firstFrameStale(chatReadAt(scratchId), Date.now()))
   /**
    * The draft and its quote stack, READ TOGETHER and normalised: quotes live in the list drawn above
@@ -1419,7 +1419,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // "Send now (N)" on offer. The same containment rule decides for both (`pendingEchoes`).
     const userTurns = turns.filter(t => t.role === 'user').map(t => t.text)
     const transcriptLoaded = hasSource ? sourceTurns != null || !!sourceUnavailable : loadedId === session.id
-    return visibleQueued(out, userTurns, transcriptLoaded, deliveredRef.current)
+    return visibleQueued(out, userTurns, transcriptLoaded, deliveredRef.current, new Set(echo))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [echo, payload?.pending, turns, deliveredTick, loadedId, session.id])
 
@@ -2395,6 +2395,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // a session that never received it — and give the person their words back untouched.
     // The server may already hold the message (it is drawn as delivered): then keep the echo and
     // leave the composer empty instead of duplicating it.
+    if (out.failure === 'prompt' || out.failure === 'ended') setDeliveryFailure(out.failure)
     if (!out.confirm && !shouldRestoreDraft(pendingRef.current, full)) { setNotice(out.message); return }
     editEcho(list => list.filter(t => t !== full))
     // EXT.OPEN: not a failure — a QUESTION. The words stay in the field, and the one confirmation
@@ -2407,7 +2408,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     editReply(restore.replyTo)
     // A question is asked in its dialog, once — not again as a line under the field.
     if (!out.confirm) setNotice(out.message)
-    if (out.failure === 'prompt' || out.failure === 'ended') setDeliveryFailure(out.failure)
   }
 
   if (payload?.unavailable) {

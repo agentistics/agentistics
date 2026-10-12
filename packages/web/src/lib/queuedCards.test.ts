@@ -31,3 +31,10 @@ describe('shouldRestoreDraft', () => {
     expect(shouldRestoreDraft([{ text: 'x' }], 'x')).toBe(false)
   })
 })
+
+describe('visibleQueued local echoes', () => {
+  test('a local echo shows before the transcript loads; a server copy does not', () => {
+    const q = [{ text: 'mine' }, { text: 'old' }]
+    expect(visibleQueued(q, [], false, new Set(), new Set(['mine']))).toEqual([{ text: 'mine' }])
+  })
+})
