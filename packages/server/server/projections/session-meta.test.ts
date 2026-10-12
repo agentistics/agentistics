@@ -96,6 +96,36 @@ describe('session-meta over a synthetic multi-model, multi-tool, subagent sessio
   })
 })
 
+describe('model labels and pricing from invocation/replay events', () => {
+  test('model.invoked supplies a model when no completion or usage event exists', () => {
+    const onlyInvoked = EVENTS.filter(e => e.type !== 'model.completed' && e.type !== 'model.failed')
+    const projection = project(sessionMetaProjection, onlyInvoked)
+    expect(projection.meta.model).toBe('claude-opus-4-7')
+  })
+
+  test('a mixed priced/unpriced model session keeps the dominant model and prices the known model', () => {
+    let replaced = false
+    const mixed = EVENTS.map(e => {
+      if (!replaced && e.type === 'model.completed') {
+        replaced = true
+        return {
+          ...e,
+          data: {
+            ...e.data,
+            model: 'future-unpriced-model',
+            usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+          },
+        }
+      }
+      return e
+    })
+    const projection = project(sessionMetaProjection, mixed)
+    expect(projection.meta.model).toBe('claude-haiku-4-5')
+    expect(projection.meta.model_usage?.['future-unpriced-model']).toBeDefined()
+    expect(projection.costUSD).toBeGreaterThan(0)
+  })
+})
+
 describe('P1 §8 properties', () => {
   const whole = (p: SessionMetaProjection): unknown => ({ ...p })
 
@@ -508,6 +538,27 @@ describe('turn time (D25) — active_minutes and user_response_times', () => {
     ])
     expect(p.meta.active_minutes).toBe(0)
     expect(p.caveats.some(c => c.field === 'active_minutes')).toBe(false)
+  })
+
+  test('antigravity: turns that share their prompt\'s second span nothing observable, so active_minutes is ABSENT (legacy agrees), not 0', () => {
+    const agy = (): AnyAgentisticsEvent[] => syntheticSession().map(e => (e.type === 'run.started'
+      ? anyEv({ ...e, data: { ...(e.data as object), harness: 'antigravity' } })
+      : e))
+    const same = project(sessionMetaProjection, [...agy(), start(2, iso(0)), lastLine(2, iso(0)), start(5, iso(3)), lastLine(5, iso(3))])
+    expect('active_minutes' in same.meta).toBe(false)
+    expect(same.caveats.find(c => c.field === 'active_minutes')!.reason).toContain('absent, not zero')
+    // one observable span anywhere: legacy sums every turn, the same-second ones adding 0
+    const some = project(sessionMetaProjection, [...agy(), start(2, iso(0)), lastLine(2, iso(0)), start(5, iso(3)), lastLine(8, iso(5))])
+    expect(some.meta.active_minutes).toBe(2)
+  })
+
+  test('a harness-opened turn (by: task) bounds active time but is never counted as a user message', () => {
+    const base = project(sessionMetaProjection, syntheticSession())
+    const task = anyEv(ev('turn.started', { by: 'task' }, { at: iso(0), ref: 'claude:c:2' }))
+    const p = project(sessionMetaProjection, [...syntheticSession(), task, measured(5, iso(3), 3 * 60_000)])
+    expect(p.meta.active_minutes).toBe(3)
+    expect(p.meta.user_message_count).toBe(base.meta.user_message_count)
+    expect(p.meta.user_message_timestamps).toEqual(base.meta.user_message_timestamps)
   })
 
   test('no prompt: 0 when the walk saw a timed line (legacy sawTime), absent when it saw none', () => {

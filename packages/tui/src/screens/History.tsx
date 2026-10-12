@@ -50,8 +50,8 @@ export function History({ data, s, width, height, page }: {
     },
     { key: 'harness', header: s.harness, width: 13, render: r => harnessLabel(r.harness), color: r => harnessColor(r.harness) },
     { key: 'project', header: s.project, width: 16, render: r => r.project },
-    { key: 'cost', header: s.cost, width: 13, align: 'right', render: r => fmtCost(r.costUSD), color: () => COLORS.accent },
-    { key: 'tokens', header: s.tokens, width: 9, align: 'right', render: r => fmt(r.tokens) },
+    { key: 'cost', header: s.cost, width: 13, align: 'right', render: r => r.costUSD === undefined ? '—' : fmtCost(r.costUSD), color: () => COLORS.accent },
+    { key: 'tokens', header: s.tokens, width: 9, align: 'right', render: r => r.tokens === undefined ? '—' : fmt(r.tokens) },
     { key: 'started', header: s.started, width: 12, align: 'right', render: r => r.startTime.slice(0, 10) },
   ]
 

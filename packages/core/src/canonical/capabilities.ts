@@ -258,10 +258,10 @@ export const CAPABILITY_REFINEMENTS: CapabilityRefinements = {
     cost: { source: REPLAY('codex'), state: { state: 'partial', exactness: 'estimated', limit: 'priced from the table over three of four counters; the unread cache-write counter is not priced.' } },
   },
   gemini: {
-    tokens: { source: `${P2}; ${REPLAY('gemini')}`, state: { state: 'partial', exactness: 'exact', limit: 'rich-JSON chat shape only; the append-journal shape carries per-record tokens that are deliberately not read until the owner decides (it changes money on every cost surface).' } },
-    cost: { source: `${P2}; ${REPLAY('gemini')}`, state: { state: 'partial', exactness: 'estimated', limit: 'rich-JSON chat shape only, priced from the table; see tokens.' } },
-    model: { source: `${P2}; ${REPLAY('gemini')}`, state: { state: 'partial', exactness: 'exact', limit: 'rich-JSON chat shape only; the append-journal shape is not read for its model.' } },
-    tools: { source: `${P2}; ${REPLAY('gemini')}`, state: { state: 'partial', exactness: 'exact', limit: 'rich-JSON chat shape only; the append-journal shape is not read for tool calls.' } },
+    tokens: { source: `${P2}; ${REPLAY('gemini')}`, state: { state: 'partial', exactness: 'exact', limit: 'both chat shapes (rich-JSON and the append-journal) are summed per response since 1.1.0 (owner D8); `input` is the uncached part (the API\'s prompt count includes the cache); thoughts, tool and total are not read; a record with no `tokens`, or with null counters, adds nothing (absent, never 0).' } },
+    cost: { source: `${P2}; ${REPLAY('gemini')}`, state: { state: 'partial', exactness: 'estimated', limit: 'priced from the table over the summed tokens of both chat shapes; see tokens.' } },
+    model: { source: `${P2}; ${REPLAY('gemini')}`, state: { state: 'partial', exactness: 'exact', limit: 'the last model named by a response record wins, in both chat shapes; a session whose records name none has no model.' } },
+    tools: { source: `${P2}; ${REPLAY('gemini')}`, state: { state: 'partial', exactness: 'exact', limit: 'counted from the `toolCalls` of response records in both chat shapes.' } },
   },
   copilot: {
     tokens: { source: `${P2}; ${REPLAY('copilot')}`, state: { state: 'partial', exactness: 'exact', limit: 'only at session.shutdown, one cumulative report per model; a crashed session has none (absent, never zero).' } },

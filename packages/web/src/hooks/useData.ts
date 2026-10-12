@@ -879,7 +879,8 @@ export function summarizeSessions(list: SessionMeta[], hasCost: boolean, hasToke
       dailyMap[day] = (dailyMap[day] ?? 0) + 1
 
       if (hasTokens) {
-        tokensByDay[day] = (tokensByDay[day] ?? 0) + sessionTokenTotal(s)
+        const sessionTokens = sessionTokenTotal(s)
+        if (sessionTokens !== undefined) tokensByDay[day] = (tokensByDay[day] ?? 0) + sessionTokens
       }
     }
 

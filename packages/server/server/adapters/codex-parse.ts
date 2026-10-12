@@ -92,6 +92,12 @@ export function parseCodexRollout(content: string, fallbackId: string): SessionM
         userMessageTimestamps.push(lineTs)
         messageHours.push(new Date(lineTs).getHours())
       }
+    } else if (type === 'task_started') {
+      // `exec` / subagent rollouts never write a human `user_message`; Codex opens their turn with
+      // `task_started` instead. Treat it as the turn opening so `task_complete.duration_ms` has a
+      // turn to close. It is NOT a user message (the count is untouched), and when a `user_message`
+      // follows it the two open the same turn: the zero-length gap between them adds no time.
+      if (turnEvent) turnEvent.userPrompt = true
     } else if (type === 'task_complete') {
       // Codex's own measurement of the turn that just ended — authoritative over reconstruction.
       // `completed_at` - `task_started.started_at` (epoch SECONDS) is the same value; duration_ms

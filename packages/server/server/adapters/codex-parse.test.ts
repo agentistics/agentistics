@@ -76,3 +76,30 @@ test('malformed arguments never throw and never count', () => {
   expect(s.git_commits).toBe(0)
   expect(s.tool_counts['Bash']).toBe(1)
 })
+
+// An `exec` / subagent rollout: Codex opens a turn with `task_started` and closes it with
+// `task_complete`, but no human `user_message` ever appears.
+const EXEC = [
+  JSON.stringify({ timestamp: '2026-05-25T18:00:00.000Z', type: 'session_meta', payload: { id: 'x1', timestamp: '2026-05-25T18:00:00.000Z', cwd: '/repo' } }),
+  JSON.stringify({ timestamp: '2026-05-25T18:00:01.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 't1', started_at: 1779732001 } }),
+  JSON.stringify({ timestamp: '2026-05-25T18:00:05.000Z', type: 'event_msg', payload: { type: 'agent_message', message: 'ok' } }),
+  JSON.stringify({ timestamp: '2026-05-25T18:03:00.000Z', type: 'event_msg', payload: { type: 'task_complete', turn_id: 't1', duration_ms: 172709 } }),
+].join('\n')
+
+test('task_started opens a turn when no user_message did (exec rollouts)', () => {
+  const s = parseCodexRollout(EXEC, 'f')!
+  expect(s.active_minutes).toBe(Math.round(172709 / 60000))
+  expect(s.user_message_count).toBe(0)
+})
+
+test('task_started followed by user_message does not change active time', () => {
+  const withUser = [
+    EXEC.split('\n')[0],
+    JSON.stringify({ timestamp: '2026-05-25T18:00:01.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 't1' } }),
+    JSON.stringify({ timestamp: '2026-05-25T18:00:02.000Z', type: 'event_msg', payload: { type: 'user_message', message: 'hi' } }),
+    JSON.stringify({ timestamp: '2026-05-25T18:03:00.000Z', type: 'event_msg', payload: { type: 'task_complete', turn_id: 't1', duration_ms: 120000 } }),
+  ].join('\n')
+  const s = parseCodexRollout(withUser, 'f')!
+  expect(s.active_minutes).toBe(2)
+  expect(s.user_message_count).toBe(1)
+})

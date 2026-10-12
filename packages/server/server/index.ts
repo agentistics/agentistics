@@ -846,7 +846,14 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const [{ JOURNAL_ENABLED, JOURNAL_PATH, JOURNAL_BACKFILL_PATH }, { maybeStartAutoBackfill }] = await Promise.all([
         import('./config'), import('./journal/backfill'),
       ])
-      const d = maybeStartAutoBackfill({ journalEnabled: JOURNAL_ENABLED, central: TEAM_CENTRAL, journalPath: JOURNAL_PATH, progressPath: JOURNAL_BACKFILL_PATH, env: process.env })
+      const adapterVersions = await (async () => {
+        try {
+          const { loadEngine, engineIntegrations } = await import('./engine/load')
+          await loadEngine()
+          return Object.fromEntries(Object.entries(engineIntegrations()).flatMap(([h, i]) => i?.version ? [[h, i.version] as const] : []))
+        } catch { return undefined }
+      })()
+      const d = maybeStartAutoBackfill({ journalEnabled: JOURNAL_ENABLED, central: TEAM_CENTRAL, journalPath: JOURNAL_PATH, progressPath: JOURNAL_BACKFILL_PATH, env: process.env, ...(adapterVersions ? { adapterVersions } : {}) })
       return new Response(JSON.stringify(d.start ? { started: true } : { started: false, reason: d.reason }), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -5092,7 +5099,14 @@ const scheduleBackfillCheck = () => {
     const [{ JOURNAL_ENABLED, JOURNAL_PATH, JOURNAL_BACKFILL_PATH }, { maybeStartAutoBackfill }] = await Promise.all([
       import('./config'), import('./journal/backfill'),
     ])
-    const d = maybeStartAutoBackfill({ journalEnabled: JOURNAL_ENABLED, central: TEAM_CENTRAL, journalPath: JOURNAL_PATH, progressPath: JOURNAL_BACKFILL_PATH, env: process.env })
+    const adapterVersions = await (async () => {
+        try {
+          const { loadEngine, engineIntegrations } = await import('./engine/load')
+          await loadEngine()
+          return Object.fromEntries(Object.entries(engineIntegrations()).flatMap(([h, i]) => i?.version ? [[h, i.version] as const] : []))
+        } catch { return undefined }
+      })()
+      const d = maybeStartAutoBackfill({ journalEnabled: JOURNAL_ENABLED, central: TEAM_CENTRAL, journalPath: JOURNAL_PATH, progressPath: JOURNAL_BACKFILL_PATH, env: process.env, ...(adapterVersions ? { adapterVersions } : {}) })
     if (d.start) console.log('[journal] first import started in the background at low priority — `agentop journal status` shows its progress')
   })().catch(err => console.error('[journal] first import check failed:', err instanceof Error ? err.message : String(err)))
 }

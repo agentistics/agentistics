@@ -22,11 +22,13 @@ export function legacySummary(data: any, harness?: string): unknown {
   const projectSessions: Record<string, number> = {};
   const activeDates = new Set<string>();
   for (const s of allSessions) {
-    const { input, output, cacheRead, cacheWrite, cost, unpriced } = sessionTokens(s);
+    const { input, output, cacheRead, cacheWrite, cost, unpriced, tokensUnavailable } = sessionTokens(s);
     totalUnpriced += unpriced;
-    totalInput += input; totalOutput += output; totalCacheRead += cacheRead; totalCacheWrite += cacheWrite;
-    totalCostUSD += cost;
-    if (s.model) modelTokens[s.model] = (modelTokens[s.model] ?? 0) + input + output;
+    if (!tokensUnavailable) {
+      totalInput += input; totalOutput += output; totalCacheRead += cacheRead; totalCacheWrite += cacheWrite;
+      totalCostUSD += cost;
+      if (s.model) modelTokens[s.model] = (modelTokens[s.model] ?? 0) + input + output;
+    }
     if (s.project_path) {
       const root = canonicalProjectPath(s.project_path);
       projectSessions[root] = (projectSessions[root] ?? 0) + 1;
@@ -65,7 +67,9 @@ export function legacyHarnesses(data: any): unknown {
     let input = 0, output = 0, cacheRead = 0, cacheWrite = 0, cost = 0, messages = 0, lastActive = "";
     for (const s of hs) {
       const t = sessionTokens(s);
-      input += t.input; output += t.output; cacheRead += t.cacheRead; cacheWrite += t.cacheWrite; cost += t.cost;
+      if (!t.tokensUnavailable) {
+        input += t.input; output += t.output; cacheRead += t.cacheRead; cacheWrite += t.cacheWrite; cost += t.cost;
+      }
       messages += sessionMessages(s);
       if (s.start_time && String(s.start_time) > lastActive) lastActive = String(s.start_time);
     }
@@ -95,13 +99,15 @@ export function legacyProjects(data: any, harness?: string): unknown {
     if (!key) continue;
     if (!byPath[key]) byPath[key] = { sessions: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, costUSD: 0, messages: 0, lastActive: "", languages: [] };
     const agg = byPath[key]!;
-    const { input, output, cacheRead, cacheWrite, cost } = sessionTokens(s);
+    const { input, output, cacheRead, cacheWrite, cost, tokensUnavailable } = sessionTokens(s);
     agg.sessions     += 1;
-    agg.inputTokens  += input;
-    agg.outputTokens += output;
-    agg.cacheRead    += cacheRead;
-    agg.cacheWrite   += cacheWrite;
-    agg.costUSD      += cost;
+    if (!tokensUnavailable) {
+      agg.inputTokens  += input;
+      agg.outputTokens += output;
+      agg.cacheRead    += cacheRead;
+      agg.cacheWrite   += cacheWrite;
+      agg.costUSD      += cost;
+    }
     agg.messages     += sessionMessages(s);
     if (!agg.lastActive || (s.start_time ?? "") > agg.lastActive) agg.lastActive = s.start_time ?? "";
     for (const lang of s.languages ?? []) if (!agg.languages.includes(lang)) agg.languages.push(lang);
@@ -164,9 +170,11 @@ export function legacyCosts(data: any, harness?: string): unknown {
     const model = (s.model as string) || "unknown";
     if (!byModel[model]) byModel[model] = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, estimatedCostUSD: 0 };
     const agg = byModel[model]!;
-    const { input, output, cacheRead, cacheWrite, cost } = sessionTokens(s);
-    agg.inputTokens += input; agg.outputTokens += output; agg.cacheReadTokens += cacheRead; agg.cacheWriteTokens += cacheWrite;
-    agg.estimatedCostUSD += cost;
+    const { input, output, cacheRead, cacheWrite, cost, tokensUnavailable } = sessionTokens(s);
+    if (!tokensUnavailable) {
+      agg.inputTokens += input; agg.outputTokens += output; agg.cacheReadTokens += cacheRead; agg.cacheWriteTokens += cacheWrite;
+      agg.estimatedCostUSD += cost;
+    }
   }
   const breakdown = Object.entries(byModel)
     .map(([model, u]) => ({
@@ -189,11 +197,13 @@ export function legacyRepos(data: any, harness?: string): unknown {
     const key = (s.git_remote as string) || "";
     if (!byRemote[key]) byRemote[key] = { sessions: 0, messages: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, costUSD: 0, lastActive: "" };
     const agg = byRemote[key]!;
-    const { input, output, cacheRead, cacheWrite, cost } = sessionTokens(s);
+    const { input, output, cacheRead, cacheWrite, cost, tokensUnavailable } = sessionTokens(s);
     agg.sessions += 1;
     agg.messages += sessionMessages(s);
-    agg.inputTokens += input; agg.outputTokens += output; agg.cacheRead += cacheRead; agg.cacheWrite += cacheWrite;
-    agg.costUSD += cost;
+    if (!tokensUnavailable) {
+      agg.inputTokens += input; agg.outputTokens += output; agg.cacheRead += cacheRead; agg.cacheWrite += cacheWrite;
+      agg.costUSD += cost;
+    }
     if (s.start_time && String(s.start_time) > agg.lastActive) agg.lastActive = String(s.start_time);
   }
   const rows = Object.entries(byRemote)

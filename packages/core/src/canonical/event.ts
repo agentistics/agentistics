@@ -672,12 +672,14 @@ export interface ProcessEndedData {
  * projection counting these events agrees with `user_message_count` by construction.
  *
  * It carries WHO and nothing else: WHEN is the envelope's timestamp and WHICH LINE is its
- * `sourceRef`. There is no text and no text size (D5). `by` is a closed union of one member today;
- * it is a field rather than implied so a later turn opened by something other than a person is an
- * additive widening, not a new event type.
+ * `sourceRef`. There is no text and no text size (D5). `by` is `'user'` for a person's turn and
+ * `'task'` for a turn the harness opened by itself with no person's prompt (Codex `exec` /
+ * subagent rollouts open theirs with `task_started`). A `'task'` turn bounds active time like any
+ * other but is NOT a person's message: counts of user messages, rounds and interruptions read
+ * `'user'` turns only.
  */
 export interface TurnStartedData {
-  by: 'user'
+  by: 'user' | 'task'
   /**
    * The `timestamp` of the LAST assistant-role transcript line written before this prompt, verbatim
    * (decision D25, 2026-09-26) — the instant legacy's `user_response_times` measures FROM. Not the
