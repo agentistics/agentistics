@@ -7,6 +7,7 @@ import { loadTaskWorld as realLoadTaskWorld } from './sessions/task-source'
 import { newEventId as realNewEventId, type TaskEvent } from './sessions/task-model'
 import { sseEncoder, sseClients as realSseClients } from './sse'
 import { awayActive, parseAwayState } from '@agentistics/core'
+import { createHash } from 'node:crypto'
 
 export interface CheckinDeps {
   readPreferences: typeof realReadPreferences
@@ -20,6 +21,21 @@ export interface CheckinDeps {
   newEventId: typeof realNewEventId
   dataDir: string
   sseClients: typeof realSseClients
+  /** Cheap, server-side inputs for idle-skip. Each is replaceable in tests. */
+  readCheckinActivity: (since: number, leader: string) => Promise<unknown>
+  readCheckinLimits: () => Promise<unknown>
+  readCheckinRelease: () => Promise<unknown>
+  readCheckinMcpConfigs: () => Promise<unknown>
+}
+
+const defaultCheckinActivity = async (since: number, leader: string): Promise<unknown> => {
+  try {
+    const world = await realLoadTaskWorld()
+    return world.book.events
+      .filter(e => Date.parse(e.at) > since && ['handback', 'block', 'question'].includes(e.kind))
+      .filter(e => !leader || JSON.stringify(e).includes(leader))
+      .map(e => ({ id: e.id, kind: e.kind, at: e.at, taskId: e.taskId, actor: e.actor }))
+  } catch { return [] }
 }
 
 const defaultDeps: CheckinDeps = {
@@ -34,6 +50,22 @@ const defaultDeps: CheckinDeps = {
   newEventId: realNewEventId,
   dataDir: realDataDir,
   sseClients: realSseClients,
+  readCheckinActivity: defaultCheckinActivity,
+  readCheckinLimits: async () => null,
+  readCheckinRelease: async () => {
+    try {
+      const { getVersionInfo } = await import('./version')
+      const v = await getVersionInfo()
+      return { current: v.current, latest: v.latest }
+    } catch { return null }
+  },
+  readCheckinMcpConfigs: async () => {
+    try {
+      const { listMcp } = await import('./mcp-admin')
+      const listed = await listMcp()
+      return listed.servers.map(s => ({ name: s.name, scope: s.scope, transport: s.transport, url: s.url ?? null, config: s.config }))
+    } catch { return null }
+  },
 }
 let deps: CheckinDeps = defaultDeps
 export function setCheckinDeps(partial: Partial<CheckinDeps> = {}): void { deps = { ...defaultDeps, ...partial } }
@@ -56,8 +88,9 @@ export interface CheckinState extends CheckinConfig {
   lastRunAt: number | null
   nextRunAt: number | null
   last: CheckinRound | null
+  skipped?: { count: number; lastAt: number }
 }
-type Stored = CheckinState & { pending?: boolean }
+type Stored = CheckinState & { pending?: boolean; fingerprint?: string; lastFiredAt?: number | null }
 
 const labels: Record<CheckinItemId, string> = {
   fleet: 'Sessões e memória', handbacks: 'Entregas dos workers', limits: 'Limites de uso',
@@ -97,8 +130,29 @@ async function updateStored<T>(mutate: (all: Record<string, Stored>) => T): Prom
   return result
 }
 function publicState(stored: Stored): CheckinState {
-  const { pending: _pending, ...state } = stored
+  const { pending: _pending, fingerprint: _fingerprint, lastFiredAt: _lastFiredAt, ...state } = stored
   return state
+}
+
+const endedRow = (row: { status?: string; state?: string; activity?: string }): boolean =>
+  [row.status, row.state, row.activity].some(x => ['ended', 'closed', 'exited'].includes(String(x).toLowerCase()))
+
+function stable(value: unknown): string {
+  if (value === undefined) return 'undefined'
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stable).sort().join(',')}]`
+  return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${JSON.stringify(k)}:${stable(v)}`).join(',')}}`
+}
+
+async function fingerprint(row: { id: string }, state: CheckinState, rows: readonly any[]): Promise<string> {
+  const enabled = new Set(state.checklist.filter(x => x.enabled).map(x => x.id))
+  const inputs: Record<string, unknown> = {}
+  if (enabled.has('fleet')) inputs.fleet = rows.filter(r => !endedRow(r)).map(r => ({ id: r.id, status: r.status ?? r.state ?? r.activity ?? null })).sort((a, b) => a.id.localeCompare(b.id))
+  if (enabled.has('handbacks') || enabled.has('handoff')) inputs.activity = await deps.readCheckinActivity(state.lastRunAt ?? 0, row.id)
+  if (enabled.has('limits')) inputs.limits = await deps.readCheckinLimits()
+  if (enabled.has('releases')) inputs.release = await deps.readCheckinRelease()
+  if (enabled.has('mcp-configs')) inputs.mcp = await deps.readCheckinMcpConfigs()
+  return createHash('sha256').update(stable(inputs)).digest('hex')
 }
 export async function stateFor(session: string, now = Date.now()): Promise<CheckinState> {
   const all = await allStored(); const old = all[session]
@@ -108,7 +162,7 @@ export async function stateFor(session: string, now = Date.now()): Promise<Check
   // A timed pause that ran out resumes AT its deadline: the round it held back is due now, not one
   // whole interval after somebody happened to look at the panel.
   const nextRunAt = expired ? config.paused!.until : (old?.nextRunAt ?? nextRun(now, resumed))
-  const state: CheckinState = { ...resumed, session, lastRunAt: old?.lastRunAt ?? null, nextRunAt, last: old?.last ?? null }
+  const state: CheckinState = { ...resumed, session, lastRunAt: old?.lastRunAt ?? null, nextRunAt, last: old?.last ?? null, ...(old?.skipped ? { skipped: old.skipped } : {}) }
   if (!old || state.paused !== config.paused) await updateStored(current => { current[session] = state; return state })
   return state
 }
@@ -116,7 +170,7 @@ export async function putState(session: string, patch: Partial<CheckinConfig>, n
   const state = await updateStored(all => {
     const old = all[session] ?? { ...defaultConfig(), session, lastRunAt: null, nextRunAt: null, last: null }
     const config = mergeConfig(old, patch)
-    const state: CheckinState = { ...config, session, lastRunAt: old.lastRunAt, nextRunAt: config.paused ? null : (old.nextRunAt ?? nextRun(now, config)), last: old.last }
+    const state: CheckinState = { ...config, session, lastRunAt: old.lastRunAt, nextRunAt: config.paused ? null : (old.nextRunAt ?? nextRun(now, config)), last: old.last, ...(old.skipped ? { skipped: old.skipped } : {}) }
     if (patch.intervalMin !== undefined || patch.paused !== undefined) state.nextRunAt = nextRun(now, config)
     all[session] = state
     return state
@@ -172,11 +226,22 @@ export async function fireDue(now = Date.now()): Promise<string[]> {
     const state = await stateFor(row.conversationId ?? row.id, now); if (!due(state, now)) continue
     const existing = (await allStored())[state.session]
     if (existing?.pending) await recordReport(state.session, { state: 'needs_you', summary: 'check-in sem resposta' }, now)
+    const currentFingerprint = await fingerprint(row, state, rows)
+    const liveWorker = rows.some(r => deps.roleOfRow(roles, r) !== 'leader' && !endedRow(r))
+    const heartbeat = liveWorker && (existing?.lastFiredAt == null || now - existing.lastFiredAt >= 2 * 60 * 60_000)
+    if (existing?.fingerprint === currentFingerprint && !heartbeat) {
+      await updateStored(all => {
+        const latest = all[state.session] ?? state
+        all[state.session] = { ...latest, skipped: { count: (latest.skipped?.count ?? 0) + 1, lastAt: now }, nextRunAt: nextRun(now, latest) }
+      })
+      emit(publicState((await allStored())[state.session]!))
+      continue
+    }
     firing.add(row.id); fired.push(row.id)
     const next = await deps.runFleetAction('pt', { action: 'prompt', id: row.id, text: await promptForLeader(state) }).catch(() => ({ ok: false }))
     await updateStored(all => {
       const latest = all[state.session] ?? state
-      all[state.session] = { ...latest, nextRunAt: nextRun(now, latest), ...(next.ok ? { pending: true } : {}) }
+      all[state.session] = { ...latest, fingerprint: currentFingerprint, lastFiredAt: now, nextRunAt: nextRun(now, latest), ...(next.ok ? { pending: true } : {}) }
     })
     if (next.ok) emit(publicState((await allStored())[state.session]!))
     firing.delete(row.id)
@@ -191,7 +256,8 @@ export async function runNow(session: string, now = Date.now()): Promise<boolean
   const state = await stateFor(row.conversationId ?? row.id, now)
   const result = await deps.runFleetAction('pt', { action: 'prompt', id: row.id, text: await promptForLeader(state) })
   if (!result.ok) return false
-  await updateStored(all => { all[state.session] = { ...state, nextRunAt: nextRun(now, state), pending: true } })
+  const currentFingerprint = await fingerprint(row, state, rows)
+  await updateStored(all => { all[state.session] = { ...state, fingerprint: currentFingerprint, lastFiredAt: now, nextRunAt: nextRun(now, state), pending: true } })
   emit(publicState((await allStored())[state.session]!))
   return result.ok
 }

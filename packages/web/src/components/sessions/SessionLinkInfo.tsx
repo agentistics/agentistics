@@ -26,7 +26,7 @@ import { isInsidePortalledMenu } from '../../lib/rowMenu'
 import { TabSelect } from '../../pages/settings/primitives'
 import { RoleChip } from './RoleChip'
 import { ToggleSwitch } from '../ToggleSwitch'
-import { CHECKIN_ITEMS, clockLabel, formatNextRun, useCheckin, type CheckinConfig } from '../../lib/checkin'
+import { CHECKIN_ITEMS, clockLabel, formatNextRun, formatSkipped, useCheckin, type CheckinConfig } from '../../lib/checkin'
 import { parseSnooze, SNOOZE_PRESETS } from '../../lib/nayNotify'
 import { setSessionAway, useAway } from '../../lib/awayMode'
 
@@ -79,6 +79,7 @@ function CheckinPanel({ state, pt, isMobile, onGo, update, runNow, taskPath, bar
     <div style={{ display: 'grid', gap: 2 }}>
       <div style={CHECKIN_ROW}><Clock3 size={15} /><span>{pt ? 'Próxima rodada' : 'Next round'}</span><span style={{ marginLeft: 'auto', color: 'var(--text-primary)' }}>{formatNextRun(state.nextRunAt, Date.now(), pt)}</span></div>
       <div style={CHECKIN_ROW}><Check size={15} /><span>{pt ? 'Última' : 'Last'}</span><span style={{ marginLeft: 'auto', color: 'var(--text-primary)', textAlign: 'right' }}>{state.lastRunAt ? `${clockLabel(state.lastRunAt, pt)} · ${last}` : last}</span></div>
+      {formatSkipped(state.skipped, pt) && <div role="status" style={{ ...CHECKIN_ROW, fontSize: 11, color: 'var(--text-tertiary)' }}>{formatSkipped(state.skipped, pt)}</div>}
       <div style={CHECKIN_ROW}><RefreshCw size={15} /><span>{pt ? 'Intervalo' : 'Interval'}</span><select aria-label={pt ? 'Intervalo do check-in' : 'Check-in interval'} value={state.intervalMin} onChange={e => setInterval(Number(e.target.value) as CheckinConfig['intervalMin'])} style={{ marginLeft: 'auto', background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 5, padding: '4px 6px', font: 'inherit' }}><option value={15}>15 min</option><option value={30}>30 min</option><option value={60}>1 h</option><option value={120}>2 h</option></select></div>
       <div style={CHECKIN_ROW}><Pause size={15} /><span>{pt ? 'Pausar check-in' : 'Pause check-in'}</span><span style={{ marginLeft: 'auto', display: 'inline-flex' }}><ToggleSwitch on={paused} onToggle={togglePause} label={pt ? 'Pausar check-in' : 'Pause check-in'} tap={isMobile ? 44 : undefined} /></span></div>
       {paused && <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', padding: '0 0 3px 22px', fontSize: 11 }}><span style={{ color: 'var(--text-tertiary)' }}>{pt ? 'Pausar até:' : 'Pause until:'}</span>{SNOOZE_PRESETS.map(p => <button key={p.ms} type="button" onClick={() => { const parsed = parseSnooze(`${p.ms / 60_000}m`); if (parsed.ok) void update({ paused: { until: Date.now() + parsed.ms } }) }} style={{ all: 'unset', cursor: 'pointer', color: 'var(--anthropic-orange)' }}>{p.label[pt ? 'pt' : 'en']}</button>)}<button type="button" onClick={() => void update({ paused: { until: null } })} style={{ all: 'unset', cursor: 'pointer', color: 'var(--anthropic-orange)' }}>{pt ? 'até religar' : 'until resumed'}</button></div>}
