@@ -31,6 +31,7 @@ import { listGeminiSessions, getGeminiSessionMessages, type GeminiSessionSummary
 import { listCopilotSessions, getCopilotSessionMessages, type CopilotSessionSummary, type CopilotSessionMessage } from './copilot-sessions'
 import { PROJECTS_DIR, AGENTISTICS_DATA_DIR } from './config'
 import { safeReadDir } from './utils'
+import { ensureVapidPublicKey, parseMobileStore, readMobileSubscriptions, removeMobileSubscription, upsertMobileSubscription, writeMobileSubscriptions } from './events/mobile-push'
 import { decodeProjectDir } from './git'
 import { getEnabledAdapters } from './adapters/types'
 import { handleLogout, handleSession, getPrincipal, getPrincipalSession, makePrincipalSessionCookieHeader, SESSION_REFRESH_MS, isAuthed } from './auth'
@@ -1082,6 +1083,33 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
+    }
+
+    if (url.pathname === '/api/mobile-push/vapid' && req.method === 'GET') {
+      try { return json({ publicKey: await ensureVapidPublicKey() }) }
+      catch { return json({ error: 'mobile push is unavailable until the vault is unlocked' }, 503) }
+    }
+
+    if (url.pathname === '/api/mobile-push/subscription' && req.method === 'PUT') {
+      try {
+        const body = await req.json() as Record<string, unknown>
+        const keys = body.keys as Record<string, unknown> | undefined
+        const sub = parseMobileStore({ subscriptions: [{ ...body, id: typeof body.endpoint === 'string' ? body.endpoint.slice(-64) : '', createdAt: new Date().toISOString(), keys }] }).subscriptions[0]
+        if (!sub) return json({ error: 'invalid push subscription' }, 400)
+        const current = { subscriptions: await readMobileSubscriptions() }
+        await writeMobileSubscriptions(upsertMobileSubscription(current, sub).subscriptions)
+        return json({ ok: true })
+      } catch { return json({ error: 'invalid push subscription' }, 400) }
+    }
+
+    if (url.pathname === '/api/mobile-push/subscription' && req.method === 'DELETE') {
+      try {
+        const body = await req.json() as { endpoint?: unknown }
+        const current = { subscriptions: await readMobileSubscriptions() }
+        const hit = current.subscriptions.find(s => s.endpoint === body.endpoint)
+        if (hit) await writeMobileSubscriptions(removeMobileSubscription(current, hit.id).subscriptions)
+        return json({ ok: true })
+      } catch { return json({ error: 'invalid push subscription' }, 400) }
     }
 
     if (url.pathname === '/api/fs/folders' && req.method === 'GET') {

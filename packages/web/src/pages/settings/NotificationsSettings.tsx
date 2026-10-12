@@ -30,13 +30,17 @@ import { NOTIFICATION_CATEGORIES } from '../../lib/notificationCategories'
 import { formatSpan, STALE_OPTIONS_MIN } from '../../lib/nayNotify'
 import { SectionHeader, Divider, PrefRow, Toggle, Select } from './primitives'
 import { ArrowUpRight, Volume2, VolumeX, Sparkles, AlertCircle, Clock, Activity, XCircle, Hourglass } from 'lucide-react'
+import { getMobilePushState, setMobilePushEnabled } from '../../lib/mobilePush'
 
 export default function NotificationsSettings() {
   const ctx = useOutletContext<AppContext>()
   const pt = ctx.lang === 'pt'
 
   const [settings, setSettings] = useState<NotificationSettings>(getNotificationSettings)
+  const [mobilePush, setMobilePush] = useState({ enabled: false, supported: false })
+  const [mobilePushError, setMobilePushError] = useState<string | null>(null)
   useEffect(() => subscribeNotificationSettings(() => setSettings(getNotificationSettings())), [])
+  useEffect(() => { getMobilePushState().then(setMobilePush).catch(() => {}) }, [])
 
   function update(partial: Partial<NotificationSettings>) {
     const next = { ...settings, ...partial }
@@ -201,6 +205,22 @@ export default function NotificationsSettings() {
       >
         <Toggle on={settings.doNotDisturb} onToggle={() => update({ doNotDisturb: !settings.doNotDisturb })} />
       </PrefRow>
+
+      <Divider />
+
+      <SectionHeader label={pt ? 'Neste aparelho' : 'On this device'} />
+      <PrefRow
+        label={pt ? 'Receber notificações neste aparelho' : 'Receive notifications on this device'}
+        sub={pt
+          ? 'Somente telefones recebem alerta do sistema. No iPhone, é preciso instalar o PWA (iOS 16.4+); vibrar no silencioso segue o ajuste de hápticos do iOS.'
+          : 'Only phones receive operating-system alerts. On iPhone, install the PWA (iOS 16.4+); vibration in silent mode follows the iOS haptics setting.'}
+      >
+        <Toggle on={mobilePush.enabled} onToggle={() => {
+          setMobilePushError(null)
+          void setMobilePushEnabled(!mobilePush.enabled).then(setMobilePush).catch(e => setMobilePushError(e instanceof Error ? e.message : 'Could not update notifications'))
+        }} disabled={!mobilePush.supported} />
+      </PrefRow>
+      {mobilePushError && <div style={{ color: '#ef4444', fontSize: 12, marginTop: 8 }}>{mobilePushError}</div>}
 
       <Divider />
 
