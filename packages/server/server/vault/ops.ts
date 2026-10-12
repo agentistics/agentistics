@@ -27,7 +27,7 @@
  * Every op validates its own inputs; an unknown op is `bad-request`. `ops.test.ts` runs each op with
  * a marker secret in the vault and asserts the marker appears in no reply and no reply body.
  */
-import { grantOf, grantedRef, scrubFor, useRef } from './grants'
+import { grantOf, grantedRef, scrubFor, scrubWithinLimit, useRef } from './grants'
 import { buildVaultBundle, stageBundleRestore } from './bundle-io'
 import { existsSync } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
@@ -498,19 +498,23 @@ async function opPersonalRefs(h: Record<string, unknown>): Promise<OpResult> {
 async function opPersonalRef(h: Record<string, unknown>): Promise<OpResult> {
   const sid = sessionIdOf(h)
   if (!sid || typeof h.ref !== 'string') return bad()
-  const r = await useRef(sid, h.ref)
+  const r = await useRef(sid, h.ref, { command: typeof h.command === 'string' ? h.command : null, harness: typeof h.harness === 'string' ? h.harness : 'unknown', callId: typeof h.callId === 'string' ? h.callId : undefined })
   if (!r.ok) {
-    return { reply: refused(r.code === 'not-granted' ? 'not-granted' : 'secret-gone', vaultLang() === 'pt'
-      ? (r.code === 'not-granted' ? 'Este segredo não foi liberado para esta sessão.' : 'Este segredo não existe mais no cofre.')
-      : (r.code === 'not-granted' ? 'This secret was not granted to this session.' : 'This secret no longer exists in the vault.')) }
+    const sentences: Record<string, [string, string]> = { 'not-granted': ['Este segredo não foi liberado para esta sessão.', 'This secret was not granted to this session.'], 'secret-gone': ['Este segredo não existe mais no cofre.', 'This secret no longer exists in the vault.'], 'use-pending': ['A confirmação do uso ainda está pendente.', 'Use confirmation is still pending.'], 'use-busy': ['Há confirmações demais pendentes.', 'Too many use confirmations are pending.'], 'use-denied': ['O uso foi negado.', 'Use was denied.'], 'vault-locked': ['O cofre está trancado.', 'The vault is locked.'] }
+    const s = sentences[r.code] ?? sentences['use-pending']!
+    return { reply: refused(r.code, vaultLang() === 'pt' ? s[0] : s[1]) }
   }
-  const ref = grantedRef(sid, h.ref)
-  vaultAudit({ type: 'vault.personal-use', name: ref?.itemId })
   return { reply: { ok: true, value: r.value } }
 }
 async function opPersonalScrub(h: Record<string, unknown>): Promise<OpResult> {
   const sid = sessionIdOf(h)
   if (!sid || typeof h.text !== 'string' || h.text.length > 4 * 1024 * 1024) return bad()
+  // Only a session with a grant is counted or limited: one that never had a secret has nothing to hold back (§3.11-B exception).
+  if (grantOf(sid) && !scrubWithinLimit(sid)) {
+    // §3.6: over the limit the WHOLE output is replaced by the sentence — an answer that is ok, never an error (a hook treats an error as "pass the output through").
+    vaultAudit({ type: 'vault.personal-reveal-refused', purpose: 'scrub-limit' })
+    return { reply: { ok: true, changed: true, text: JSON.stringify(vaultLang() === 'pt' ? '«saída retida pelo cofre: limite»' : '«output held back by the vault: limit»') } }
+  }
   const text = await scrubFor(sid, h.text)
   return { reply: { ok: true, changed: text !== h.text, text } }
 }

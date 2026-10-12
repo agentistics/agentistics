@@ -164,6 +164,7 @@ describe('§2.4 — every row of the table', () => {
     test(`${action}: code ${row.code ? 'yes' : 'no'}, gesture ${row.gesture ? 'yes' : 'no'}, grant ${row.grant ?? 'none'}`, async () => {
       // A personal-secret row is the DESKTOP rule on a loopback page (off loopback the gesture is a phone
       // passkey token — tested in mobile.test.ts).
+      if (action === 'extend-open') return // VAULT.V2: grant-or-code by design — see the dedicated extend-open test below
       if (action === 'personal-grant') return // VAULT.UI2: loopback needs no proof, a phone needs its passkey — see the dedicated describe below
       // Review M3: a no-proof row is the rule for THIS computer (a remote caller owes the code — review-2-103-2.test.ts).
       const C = action.startsWith('personal-') || (!row.code && !row.gesture) ? { ...S, loopback: true } : S
@@ -278,9 +279,11 @@ describe('VAULT.UI2 — the grant for a :vault chip, and the extension of an ope
     expect(autoLockRemainingMs()!).toBeLessThan(before - 9 * 60_000)
   })
 
-  test('extend-open: a click on this computer is enough; a remote origin must give the code', async () => {
-    expect((await requireVaultStepUp('extend-open', { ...S, loopback: true })).ok).toBe(true)
+  test('extend-open: needs the page\'s read grant or the code — a bare loopback request is refused', async () => {
+    expect(await requireVaultStepUp('extend-open', { ...S, loopback: true })).toMatchObject({ ok: false, code: 'stepup-required' })
     expect(await requireVaultStepUp('extend-open', S)).toMatchObject({ ok: false, code: 'stepup-required' })
+    expect((await requireVaultStepUp('extend-open', { ...S, grant: mintGrant(S.session, 'read') })).ok).toBe(true)
+    expect(await requireVaultStepUp('extend-open', { ...S, grant: mintGrant('other-session', 'read') })).toMatchObject({ ok: false, code: 'stepup-required' })
     expect((await requireVaultStepUp('extend-open', { ...S, code: codeAt() })).ok).toBe(true)
     next()
   })

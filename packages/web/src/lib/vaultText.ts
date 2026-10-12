@@ -356,6 +356,8 @@ export const VAULT_TEXT = {
   },
   sec_recovery_d: { en: 'Your way back in if you lose your phone and Windows Hello: 24 words, shown once.', pt: 'Seu caminho de volta se você perder o celular e o Windows Hello: 24 palavras, mostradas uma vez.' },
   rec_offline: { en: 'Keep it offline — on paper, never in a file or a photo.', pt: 'Guarde offline — no papel, nunca em arquivo ou foto.' },
+  cfu_title: { en: 'Confirm each use', pt: 'Confirmar cada uso' },
+  cfu_d: { en: 'When an agent wants to use a sensitive secret, you approve that use first. Off: granted secrets are used without asking.', pt: 'Quando um agente quer usar um segredo sensível, você aprova esse uso antes. Desligado: os segredos liberados são usados sem perguntar.' },
   sec_autolock_d: { en: 'The vault locks itself when you are away, so it is never left open.', pt: 'O cofre tranca sozinho quando você se afasta, para nunca ficar aberto.' },
   sec_memory_d: { en: 'How Agentistics keeps the key out of reach of other programs while the vault is open.', pt: 'Como o Agentistics mantém a chave fora do alcance de outros programas enquanto o cofre está aberto.' },
   sec_secrets_d: { en: 'What is stored in the vault. You see names and dates — never the values.', pt: 'O que está guardado no cofre. Você vê nomes e datas — nunca os valores.' },

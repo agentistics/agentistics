@@ -564,6 +564,45 @@ let _now: () => number = () => Date.now()
 let _autoClock: AutoLockClock | null = null
 let _autoTimer: ReturnType<typeof setInterval> | null = null
 let _onAutoLock: (minutes: number) => void = () => {}
+
+/** The dashboard heartbeat is a capability, not an identity signal.  Keep only its hash in memory. */
+export const VAULT_HEARTBEAT_MIN_INTERVAL_MS = 30_000
+let _heartbeat: { hash: string; lastAt: number | null } | null = null
+/** When the idle clock was last moved by a heartbeat, and when a token was last ARMED: both survive a rotation (only a lock clears them). */
+let _beatAt: number | null = null
+let _armAt: number | null = null
+const heartbeatHash = (token: string): string => createHash('sha256').update(`agentistics-vault-heartbeat/v1.${token}`).digest('hex')
+
+/** Rotate the tab's heartbeat capability after a successful unlock. The throttle clock is NOT reset: rotating never buys a faster idle clock. */
+export function rotateVaultHeartbeatToken(): string {
+  const token = randomBytes(32).toString('base64url')
+  _heartbeat = { hash: heartbeatHash(token), lastAt: _beatAt }
+  return token
+}
+
+/** Re-arm a tab token for a page that lost it. At most one per interval; `null` = too soon. */
+export function armVaultHeartbeatToken(): string | null {
+  const now = _now()
+  if (_armAt !== null && now - _armAt < VAULT_HEARTBEAT_MIN_INTERVAL_MS) return null
+  _armAt = now
+  return rotateVaultHeartbeatToken()
+}
+
+/** Invalidate the capability when the vault is locked (including an automatic lock). */
+export function invalidateVaultHeartbeatToken(): void { _heartbeat = null; _beatAt = null; _armAt = null }
+
+/** Accept at most one heartbeat per interval and move the idle clock only when accepted. */
+export function acceptVaultHeartbeatToken(token: string | null | undefined): 'ok' | 'invalid' | 'too-soon' {
+  const h = _heartbeat
+  if (!_opened || !h || !token || token.length > 128) return 'invalid'
+  const got = Buffer.from(heartbeatHash(token)), want = Buffer.from(h.hash)
+  if (got.length !== want.length || !timingSafeEqual(got, want)) return 'invalid'
+  const now = _now()
+  if (_beatAt !== null && now - _beatAt < VAULT_HEARTBEAT_MIN_INTERVAL_MS) return 'too-soon'
+  _beatAt = now; h.lastAt = now
+  noteVaultActivity()
+  return 'ok'
+}
 /** The service's toast/notification hook for an auto-lock (SSE + desktop notification). */
 export function setAutoLockNotifier(fn: (minutes: number) => void): void { _onAutoLock = fn }
 
@@ -655,7 +694,7 @@ export type GestureUnlock =
  */
 export const FRESH_PRESENCE_MS = 90_000
 /** What a fresh-unlock proof may be declared for: one send to one session, or one reveal of one field. */
-export const FRESH_BINDING = /^personal-(grant|reveal):[A-Za-z0-9_:.-]{1,200}$/
+export const FRESH_BINDING = /^personal-(grant|reveal):[A-Za-z0-9_:.-]{1,200}$|^use-approve:[A-Za-z0-9_-]{1,120}$/
 let _fresh: { hash: string; session: string; binding: string; atMs: number } | null = null
 const freshHash = (token: string): string => createHash('sha256').update(`agentistics-vault-fresh/v1.${token}`).digest('hex')
 export function consumeFreshPresence(proof: { session: string; token?: string | null; binding: string }): boolean {
@@ -668,7 +707,7 @@ export function consumeFreshPresence(proof: { session: string; token?: string | 
   return true
 }
 /** Mint the proof for the gesture that just happened, for this session and this action — or none. */
-function mintFresh(fresh: { session: string; binding: string } | undefined): string | undefined {
+export function mintFresh(fresh: { session: string; binding: string } | undefined): string | undefined {
   _fresh = null
   if (!fresh || !FRESH_BINDING.test(fresh.binding)) return undefined
   const token = randomBytes(32).toString('base64url')
@@ -882,6 +921,7 @@ export function lockVault(reason: LockedBy = 'user'): void {
   if (_opened) _opened.dek.fill(0)
   _opened = null
   _fresh = null
+  invalidateVaultHeartbeatToken()
   _last = null
   _autoClock = null
   _lockedBy = reason
@@ -1092,7 +1132,7 @@ export type VaultAuditType =
   | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
   | 'vault.init' | 'vault.rekey' | 'vault.reset' | 'vault.add-passphrase'
   | 'vault.stepup-failed' | 'vault.stepup-frozen' | 'vault.auto-locked' | 'vault.auto-lock-extended' | 'vault.recovered' | 'vault.recover-failed'
-  | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.presence-held' | 'vault.local-proof' | 'vault.recover-page' | 'vault.set-auto-lock' | 'vault.set-unlock-policy' | 'vault.set-auth-policy' | 'vault.unlock' | 'vault.personal-create' | 'vault.personal-edit' | 'vault.personal-reveal' | 'vault.personal-reveal-refused' | 'vault.personal-trash' | 'vault.personal-restore' | 'vault.personal-restore-version' | 'vault.personal-purge' | 'vault.personal-group' | 'vault.personal-import' | 'vault.personal-passkey-add' | 'vault.personal-passkey-remove' | 'vault.personal-code-reveal' | 'vault.personal-grant' | 'vault.personal-use' | 'vault.bundle-staged' | 'vault.bundle-restored' | 'vault.bundle-built' | 'vault.bundle-wiped'
+  | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.presence-held' | 'vault.local-proof' | 'vault.recover-page' | 'vault.set-auto-lock' | 'vault.set-confirm-each-use' | 'vault.set-unlock-policy' | 'vault.set-auth-policy' | 'vault.unlock' | 'vault.personal-create' | 'vault.personal-edit' | 'vault.personal-reveal' | 'vault.personal-reveal-refused' | 'vault.personal-trash' | 'vault.personal-restore' | 'vault.personal-restore-version' | 'vault.personal-purge' | 'vault.personal-group' | 'vault.personal-import' | 'vault.personal-passkey-add' | 'vault.personal-passkey-remove' | 'vault.personal-code-reveal' | 'vault.personal-grant' | 'vault.personal-use' | 'vault.personal-use-asked' | 'vault.personal-use-approved' | 'vault.personal-use-denied' | 'vault.personal-use-expired' | 'vault.personal-use-cancelled' | 'vault.bundle-staged' | 'vault.bundle-restored' | 'vault.bundle-built' | 'vault.bundle-wiped'
   | 'vault.phone-enrol-request' | 'vault.phone-enrol-approve' | 'vault.phone-enrol-deny' | 'vault.phone-key-add' | 'vault.phone-key-remove' | 'vault.phone-unlock-failed'
 
 /** `device` is the label the owner gave a phone ('opened from Pixel') — never a key, an id or a secret. */
@@ -1118,6 +1158,8 @@ export function vaultStatusSync(): { state: 'open' | 'locked' | 'uninitialized' 
 
 /** Is the vault open in this process right now (without trying to open it)? */
 export function vaultIsOpen(): boolean { return _opened !== null }
+/** V4 product setting. Missing/locked values are deliberately OFF. */
+export function vaultConfirmEachUse(): boolean { return _opened?.vault.confirmEachUse === true }
 
 // ── the runner scope (SECRETS.4 §1.1, §6) ──────────────────────────────────────────────────────
 //

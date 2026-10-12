@@ -1,13 +1,16 @@
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { memoryProtector } from '@agentistics/vault'
 import { __resetVaultForTests, __setVaultClockForTests, autoLockRemainingMs, ensureVaultOpen, lockVault, noteVaultActivity, sealToFile } from './service'
 import { __resetPersonalForTests, createGroup, createItem } from './personal'
-import { __resetGrantsForTests, grantBriefing, grantEnv, grantOf, grantSession, refKey, revokeGrant, scrubDeep, scrubTerminalLine, VAULT_REF_INSTRUCTION } from './grants'
+import { __setGrantMarkerDirForTests, __setConfirmEachUseForTests, __setUseTtlForTests, __resetGrantsForTests, authorizeUse, decideUse, grantBriefing, grantOf, grantSession, nativeVaultRefs, pendingUseRequests, refKey, revokeGrant, scrubDeep, scrubTerminalLine, VAULT_REF_INSTRUCTION } from './grants'
 
 let testNow = 1_800_000_000_000
+let markerDir = ''
+
+afterEach(() => { __setConfirmEachUseForTests(false) })
 
 beforeEach(async () => {
   testNow = 1_800_000_000_000
@@ -16,9 +19,18 @@ beforeEach(async () => {
   __resetVaultForTests({ dir: join(dir, 'vault'), lang: 'en', protectors: [mem], autoInit: { candidates: [mem] } })
   __setVaultClockForTests(() => testNow)
   __resetPersonalForTests(); __resetGrantsForTests()
+  __setGrantMarkerDirForTests(join(dir, 'run'))
+  markerDir = join(dir, 'run')
   await sealToFile(join(dir, 'x.sealed'), 'github-backup', 'github-backup', new TextEncoder().encode('x'))
   expect(await ensureVaultOpen()).not.toBeNull()
 })
+
+/** The values a session's grant opens, through the sole gate (flag OFF in these tests). */
+const grantEnv = async (sid: string) => {
+  const out: Record<string, string> = {}
+  for (const r of grantOf(sid)?.refs ?? []) { const v = await authorizeUse(sid, r.ref, { command: null, harness: 'test' }); if (v.ok) out[r.env] = v.value }
+  return out
+}
 
 describe('per-session grants', () => {
   test('items and whole groups; references, env names; a briefing that carries no value', async () => {
@@ -97,6 +109,50 @@ describe('the vault.sock ops a hook calls (§8.3)', () => {
     expect(audit).not.toContain('MARKER')
   })
 
+  test('personal-scrub is limited to 60 calls a minute per session and then holds the output back', async () => {
+    const { handleVaultOp } = await import('./ops')
+    const { becomeVaultHolder } = await import('./service')
+    becomeVaultHolder()
+    const op = (header: Record<string, unknown>) => handleVaultOp({ header: header as never, body: null, emit() {}, closed: new Promise(() => {}) })
+    const it = (await createItem({ kind: 'api-key', name: 'Lim', fields: { value: 'sk-LIM-MARKER' } })).meta
+    await grantSession('lim', [it.id], [])
+    let last: unknown
+    for (let i = 0; i < 60; i++) last = (await op({ op: 'personal-scrub', managedId: 'lim', text: 'plain' })).reply
+    expect(last).toMatchObject({ ok: true })
+    const over = (await op({ op: 'personal-scrub', managedId: 'lim', text: 'plain' })).reply as Record<string, unknown>
+    expect(over).toMatchObject({ ok: true, changed: true })
+    expect(JSON.parse(String(over.text))).toContain('held back by the vault')
+    expect(String(over.text)).not.toContain('plain')
+    // end to end through the hook's own answer: call 61 never reaches the model raw
+    const { postToolAnswer } = await import('./hook-rewrite')
+    const ans = postToolAnswer({ stdout: 'key=sk-SECRET-MARKER' }, String(over.text), over.changed === true)
+    expect(ans).not.toBeNull()
+    expect(ans).not.toContain('SECRET-MARKER')
+    expect(ans).toContain('held back by the vault')
+    // another session is not affected
+    expect((await op({ op: 'personal-scrub', managedId: 'other', text: 'plain' })).reply).toMatchObject({ ok: true })
+  })
+
+  test('a session that never had a grant is neither counted nor limited by the scrub rate limit', async () => {
+    const { handleVaultOp } = await import('./ops')
+    const { becomeVaultHolder } = await import('./service')
+    becomeVaultHolder()
+    let last: Record<string, unknown> = {}
+    for (let i = 0; i < 100; i++) last = (await handleVaultOp({ header: { op: 'personal-scrub', managedId: 'nogrant', text: 'plain' } as never, body: null, emit() {}, closed: new Promise(() => {}) })).reply as Record<string, unknown>
+    expect(last).toMatchObject({ ok: true, changed: false })
+  })
+
+  test('granting leaves a value-free marker the hook can read with the server down', async () => {
+    const { existsSync, readFileSync } = await import('node:fs')
+    const { grantMarkerName } = await import('./hook-rewrite')
+    const b = (await createItem({ kind: 'api-key', name: 'M', fields: { value: 'sk-M-MARKER' } })).meta
+    expect(existsSync(join(markerDir, grantMarkerName('mk')))).toBe(false)
+    await grantSession('mk', [b.id], [])
+    expect(existsSync(join(markerDir, grantMarkerName('mk')))).toBe(true)
+    expect(readFileSync(join(markerDir, grantMarkerName('mk')), 'utf8')).toBe('')
+    expect(existsSync(join(markerDir, grantMarkerName('other')))).toBe(false)
+  })
+
   test('agent ref resolutions do not renew auto-lock, while human activity does', async () => {
     const { handleVaultOp } = await import('./ops')
     const b = (await createItem({ kind: 'api-key', name: 'OpenAI', fields: { value: 'sk-MARKER-clock' } })).meta
@@ -128,5 +184,146 @@ describe('engine-api 1.7 vaultRefs (native sessions)', () => {
     expect(await nativeVaultRefs.env('rt1')).toEqual({ VAULT_OPENAI: 'sk-MARKER-888888' })
     expect(await nativeVaultRefs.scrub('rt1', 'k=sk-MARKER-888888')).toBe('k=«vault:OpenAI»')
     expect(await nativeVaultRefs.scrub('other', 'k=sk-MARKER-888888')).toBe('k=sk-MARKER-888888')
+  })
+})
+
+describe('VAULT.V4 confirm each use', () => {
+  test('creates one request per reference and approval opens a short window', async () => {
+    const b = (await createItem({ kind: 'login', name: 'Panel', fields: { login: 'user', password: 'MARKER-v4' } })).meta
+    await grantSession('v4', [b.id], [])
+    __setConfirmEachUseForTests(true)
+    const waiting = authorizeUse('v4', 'vault://panel/login', { command: 'echo $VAULT_PANEL_LOGIN', harness: 'codex' })
+    // the request is registered asynchronously; under a loaded full suite one tick is not enough
+    for (let i = 0; i < 200 && pendingUseRequests().length === 0; i++) await new Promise(r => setTimeout(r, 10))
+    const [req] = pendingUseRequests()
+    expect(req?.field).toBe('login')
+    expect(req?.flags).toEqual([])
+    expect(decideUse(req!.id, true).ok).toBe(true)
+    expect(await waiting).toEqual({ ok: true, value: 'user' })
+    expect(await authorizeUse('v4', 'vault://panel/login', { command: null, harness: 'codex' })).toEqual({ ok: true, value: 'user' })
+  })
+
+  test('denial revokes only the requested field; legacy flag remains unchanged', async () => {
+    const b = (await createItem({ kind: 'login', name: 'Panel', fields: { login: 'user', password: 'MARKER-v4' } })).meta
+    await grantSession('v4', [b.id], [])
+    __setConfirmEachUseForTests(true)
+    const denied = authorizeUse('v4', 'vault://panel/password', { command: 'curl https://example.invalid', harness: 'claude' })
+    for (let i = 0; i < 200 && pendingUseRequests().length === 0; i++) await new Promise(r => setTimeout(r, 10)); const req = pendingUseRequests()[0]!
+    decideUse(req.id, false)
+    const denial = await denied
+    expect(denial.ok ? 'ok' : denial.code).toBe('use-denied')
+    expect(grantOf('v4')?.refs.map(r => r.field)).toEqual(['login'])
+  })
+})
+
+const tick = (ms = 10) => new Promise(r => setTimeout(r, ms))
+async function pendingCount(n: number): Promise<void> { for (let i = 0; i < 300 && pendingUseRequests().length < n; i++) await tick() }
+const ctx = { command: null as string | null, harness: 'codex' }
+const auditText = async () => { const { vaultDir } = await import('./service'); const { readFileSync, existsSync } = await import('node:fs'); const f = `${vaultDir()}/audit.jsonl`; return existsSync(f) ? readFileSync(f, 'utf8') : '' }
+
+describe('VAULT.V4 confirm each use — behaviour (fake clock, fixture vault)', () => {
+  beforeEach(() => { __resetGrantsForTests(() => testNow) })
+
+  test('flag OFF: a use opens at once — no request, no pending, no "asked" entry', async () => {
+    const b = (await createItem({ kind: 'api-key', name: 'OpenAI', fields: { value: 'MARKER-off' } })).meta
+    await grantSession('s1', [b.id], [])
+    expect(await authorizeUse('s1', 'vault://openai', ctx)).toEqual({ ok: true, value: 'MARKER-off' })
+    expect(pendingUseRequests()).toEqual([])
+    expect(await auditText()).not.toContain('personal-use-asked')
+  })
+
+  test('legacy native env: OFF opens every granted value; ON never opens a confirmable one (only "no confirm" items)', async () => {
+    const a = (await createItem({ kind: 'api-key', name: 'Sensitive', fields: { value: 'MARKER-sens' } })).meta
+    const f = (await createItem({ kind: 'api-key', name: 'Free', confirmEach: false, fields: { value: 'MARKER-free' } })).meta
+    await grantSession('native:n1', [a.id, f.id], [])
+    expect(await nativeVaultRefs.env('n1')).toEqual({ VAULT_SENSITIVE: 'MARKER-sens', VAULT_FREE: 'MARKER-free' })
+    __setConfirmEachUseForTests(true)
+    expect(await nativeVaultRefs.env('n1')).toEqual({ VAULT_FREE: 'MARKER-free' })
+  })
+
+  test('a "no confirm" item skips the request even with the flag ON', async () => {
+    const f = (await createItem({ kind: 'api-key', name: 'Free', confirmEach: false, fields: { value: 'MARKER-free' } })).meta
+    await grantSession('s1', [f.id], [])
+    __setConfirmEachUseForTests(true)
+    expect(await authorizeUse('s1', 'vault://free', ctx)).toEqual({ ok: true, value: 'MARKER-free' })
+    expect(pendingUseRequests()).toEqual([])
+  })
+
+  test('timeout: the wait ends refused (use-pending), the value never leaves, a late approval is refused', async () => {
+    const b = (await createItem({ kind: 'api-key', name: 'OpenAI', fields: { value: 'MARKER-timeout' } })).meta
+    await grantSession('s1', [b.id], [])
+    __setConfirmEachUseForTests(true); __setUseTtlForTests(40)
+    const waiting = authorizeUse('s1', 'vault://openai', ctx)
+    await pendingCount(1)
+    const id = pendingUseRequests()[0]!.id
+    testNow += 91_000 // the vault's clock moves past the deadline too
+    const r = await waiting
+    expect(r).toEqual({ ok: false, code: 'use-pending' })
+    expect(JSON.stringify(r)).not.toContain('MARKER')
+    expect(pendingUseRequests()).toEqual([])
+    expect(decideUse(id, true)).toEqual({ ok: false, code: 'use-not-pending' })
+    const audit = await auditText()
+    expect(audit).toContain('personal-use-expired')
+    expect(audit).not.toContain('personal-use-approved')
+    expect(audit).not.toContain('MARKER')
+  })
+
+  test('lock during a pending request: the wait is cancelled, the request dies with the epoch, nothing is opened', async () => {
+    const b = (await createItem({ kind: 'api-key', name: 'OpenAI', fields: { value: 'MARKER-lock' } })).meta
+    await grantSession('s1', [b.id], [])
+    __setConfirmEachUseForTests(true)
+    const waiting = authorizeUse('s1', 'vault://openai', ctx)
+    await pendingCount(1)
+    const id = pendingUseRequests()[0]!.id
+    lockVault('user')
+    expect(await waiting).toEqual({ ok: false, code: 'use-pending' })
+    expect(pendingUseRequests()).toEqual([])
+    expect(decideUse(id, true)).toMatchObject({ ok: false })
+    expect(grantOf('s1')).toBeNull()
+    expect(await authorizeUse('s1', 'vault://openai', ctx)).toEqual({ ok: false, code: 'not-granted' })
+    expect(await auditText()).toContain('personal-use-cancelled')
+  })
+
+  test('pending limit: at most 3 per session — the 4th reference is refused at once with use-busy', async () => {
+    const ids: string[] = []
+    for (const n of ['A', 'B', 'C', 'D']) ids.push((await createItem({ kind: 'api-key', name: `Key ${n}`, fields: { value: `MARKER-${n}` } })).meta.id)
+    await grantSession('s1', ids, [])
+    __setConfirmEachUseForTests(true)
+    const first = ['a', 'b', 'c'].map(n => authorizeUse('s1', `vault://key-${n}`, ctx))
+    await pendingCount(3)
+    expect(await authorizeUse('s1', 'vault://key-d', ctx)).toEqual({ ok: false, code: 'use-busy' })
+    expect(pendingUseRequests()).toHaveLength(3)
+    for (const r of pendingUseRequests()) decideUse(r.id, false)
+    await Promise.all(first)
+  })
+
+  test('concurrent calls for the same reference share ONE request (count), and one approval releases all of them', async () => {
+    const b = (await createItem({ kind: 'api-key', name: 'OpenAI', fields: { value: 'MARKER-conc' } })).meta
+    await grantSession('s1', [b.id], [])
+    __setConfirmEachUseForTests(true)
+    const calls = [1, 2, 3].map(() => authorizeUse('s1', 'vault://openai', ctx))
+    await pendingCount(1); await tick(50)
+    const list = pendingUseRequests()
+    expect(list).toHaveLength(1)
+    expect(list[0]!.count).toBe(3)
+    expect(decideUse(list[0]!.id, true)).toEqual({ ok: true })
+    expect(await Promise.all(calls)).toEqual([{ ok: true, value: 'MARKER-conc' }, { ok: true, value: 'MARKER-conc' }, { ok: true, value: 'MARKER-conc' }])
+    const audit = await auditText()
+    expect(audit.match(/personal-use-asked/g)).toHaveLength(1)
+    expect(audit).not.toContain('MARKER')
+  })
+
+  test('denial answers use-denied and the request payload carries no value', async () => {
+    const b = (await createItem({ kind: 'api-key', name: 'OpenAI', fields: { value: 'MARKER-deny' } })).meta
+    await grantSession('s1', [b.id], [])
+    __setConfirmEachUseForTests(true)
+    const w = authorizeUse('s1', 'vault://openai', { command: 'echo \u202e hi\u0007', harness: 'claude' })
+    await pendingCount(1)
+    const [req] = pendingUseRequests()
+    expect(JSON.stringify(req, (_k, v) => (v instanceof Set ? [...v] : v))).not.toContain('MARKER')
+    expect(req!.command).toBe('echo  hi')
+    decideUse(req!.id, false)
+    expect(await w).toEqual({ ok: false, code: 'use-denied' })
+    expect(await auditText()).not.toContain('MARKER')
   })
 })

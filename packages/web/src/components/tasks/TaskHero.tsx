@@ -39,7 +39,9 @@ export function ringLabelFontSize(size: number): number {
   return Math.max(9, Math.min(16, (size - 12) * 0.24))
 }
 
-function Ring({ done, inProgress, blocked, total, size, statuses, counts, titles, lang }: {
+export function Ring({ done, inProgress, blocked, total, size, statuses, counts, titles, lang, bare = false }: {
+  /** Draw the ring alone (no % inside, no hover card) — for a header too small to hold either. */
+  bare?: boolean
   done: number
   inProgress: number
   blocked: number
@@ -61,7 +63,7 @@ function Ring({ done, inProgress, blocked, total, size, statuses, counts, titles
   let offset = 0
   const labelSize = ringLabelFontSize(size)
   return (
-    <div style={{ position: 'relative', width: size, height: size, flex: '0 0 auto' }} aria-label={`${pct}%`} onMouseEnter={e => { const r = e.currentTarget.getBoundingClientRect(); setTip({ x: r.left, y: r.top - 7 }) }} onMouseLeave={() => setTip(null)}>
+    <div style={{ position: 'relative', width: size, height: size, flex: '0 0 auto' }} aria-label={`${pct}%`} onMouseEnter={e => { if (bare) return; const r = e.currentTarget.getBoundingClientRect(); setTip({ x: r.left, y: r.top - 7 }) }} onMouseLeave={() => setTip(null)}>
       <svg width={size} height={size} viewBox="0 0 84 84" style={{ transform: 'rotate(-90deg)' }}>
         <circle cx="42" cy="42" r={r} fill="none" stroke="var(--ag-tint-3)" strokeWidth="8" />
         {segments.map(segment => {
@@ -78,11 +80,11 @@ function Ring({ done, inProgress, blocked, total, size, statuses, counts, titles
           ) : null
         })}
       </svg>
-      <b style={{
+      {!bare && <b style={{
         position: 'absolute', inset: 0, display: 'grid', placeItems: 'center',
         fontSize: labelSize, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
         whiteSpace: 'nowrap', lineHeight: 1,
-      }}>{pct}%</b>
+      }}>{pct}%</b>}
       {tip && typeof document !== 'undefined' && <ProgressTooltip model={model} x={tip.x} y={tip.y} />}
     </div>
   )

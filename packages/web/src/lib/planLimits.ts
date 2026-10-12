@@ -238,3 +238,13 @@ export function shortWhen(ms: number, now: number, lang: Lang, kind?: PlanWindow
   }
   return d.toLocaleDateString(lang === 'pt' ? 'pt-BR' : 'en-US', { weekday: 'short' }).replace('.', '')
 }
+
+/** The single most-pressing figure across every registered plan window (% used), or `null` when none reads. */
+export function worstUsedPct(limits: readonly PlanLimits[] | null | undefined, now: number): number | null {
+  let worst: number | null = null
+  for (const l of limits ?? []) for (const w of l.windows) {
+    const p = currentUsedPct(w, now)
+    if (Number.isFinite(p) && (worst === null || p > worst)) worst = p
+  }
+  return worst
+}
