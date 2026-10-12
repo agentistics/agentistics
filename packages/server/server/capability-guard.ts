@@ -100,6 +100,9 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   ['/api/session-notify', 'localShell'],
   ['/api/session-message', 'localShell'],
   ['/api/session-roles', 'localShell'],
+  // The leaders' check-in agenda: resolves sessions against THIS machine's fleet and types the
+  // check-in prompt into them, so it rides the same capability as the session routes above.
+  ['/api/checkin', 'localShell'],
   // The file store is addressed by file id rather than under `/api/tasks/`, so it needs its own
   // entry: a route that is not registered here is assumed harmless.
   ['/api/task-files', 'localShell'],

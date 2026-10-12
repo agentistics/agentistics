@@ -611,6 +611,20 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "agentistics_checkin_report",
+    description: "Report the leadership check-in round. The server records the round, updates the agenda, and adds a checkin activity event to the filed task.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        state: { type: "string", enum: ["ok", "resolved", "needs_you"] },
+        summary: { type: "string" },
+        actions: { type: "array", items: { type: "object", properties: { text: { type: "string" }, link: { type: "object" } }, required: ["text"] } },
+        needs: { type: "array", items: { type: "object", properties: { subject: { type: "string" }, text: { type: "string" }, critical: { type: "boolean" }, link: { type: "object" } }, required: ["subject", "text"] } },
+      },
+      required: ["state", "summary"],
+    },
+  },
+  {
     name: "agentistics_summary",
     description:
       "Get an overview of AI coding usage metrics (across all tracked harnesses — Claude Code, Codex, Gemini, Copilot, Antigravity — or scoped to one): total tokens, estimated cost, sessions, streak, most used model, and top project. Good starting point for any metrics question.",
@@ -1120,6 +1134,14 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
           to: a?.to,
           kind: a?.kind,
           body: a?.body,
+          session: sessionProof(process.env),
+        });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_checkin_report": {
+        const a = args as any;
+        const body = await apiSend("POST", "/api/checkin/report", {
+          state: a?.state, summary: a?.summary, actions: a?.actions, needs: a?.needs,
           session: sessionProof(process.env),
         });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };

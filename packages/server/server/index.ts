@@ -142,6 +142,7 @@ import { startAgentClient, reconcileNow } from './team-agent-client'
 import { validateIngestToken } from './team-tokens'
 import { getAccount } from './accounts'
 import { getTeam } from './teams'
+import { stateFor as checkinState, putState as putCheckin, report as reportCheckin, runNow as runCheckin, startCheckinTimer } from './checkin'
 import { discoverProjectDisks } from './disk-picker'
 import { allowedRoots, listFolders, rootListing } from './fs-folders'
 import { forgetProjects } from './sessions/project-source'
@@ -2014,6 +2015,29 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         to: String(body.to ?? ''), kind: String(body.kind ?? ''), body: String(body.body ?? ''),
       }, await defaultMessageDeps())
       return json(out, messageStatus(out))
+    }
+    // LEADER CHECK-INS — agenda state, immediate run, and the MCP report share this server store.
+    if (url.pathname === '/api/checkin' || url.pathname.startsWith('/api/checkin/')) {
+      if (url.pathname === '/api/checkin/report' && req.method === 'POST') {
+        const body = await req.json().catch(() => ({})) as { state?: unknown; summary?: unknown; actions?: unknown; needs?: unknown; session?: { id?: unknown; token?: unknown } }
+        const { verifySessionIdentity } = await import('./sessions/session-identity')
+        const sender = body.session ? await verifySessionIdentity(body.session.id, body.session.token) : null
+        if (!sender) return json({ error: 'unverified_sender' }, 403)
+        return json(await reportCheckin(sender, { state: String(body.state) as any, summary: String(body.summary), ...(Array.isArray(body.actions) ? { actions: body.actions as any } : {}), ...(Array.isArray(body.needs) ? { needs: body.needs as any } : {}) }))
+      }
+      const { readFleet } = await import('./sessions/fleet-web')
+      const { readRolesDoc, roleOfRow } = await import('./sessions/session-roles')
+      const { AGENTISTICS_DATA_DIR } = await import('./config')
+      const rows = (await readFleet('pt')).rows
+      const roles = (await readRolesDoc(AGENTISTICS_DATA_DIR)).roles
+      const leaders = rows.filter(r => roleOfRow(roles, r) === 'leader')
+      const key = url.pathname === '/api/checkin' ? undefined : decodeURIComponent(url.pathname.slice('/api/checkin/'.length).replace(/\/run$/, ''))
+      const row = key ? leaders.find(r => r.id === key || r.conversationId === key) : undefined
+      if (key && !row) return json({ error: 'not_found' }, 404)
+      if (req.method === 'GET') return json(key ? await checkinState(key) : await Promise.all(leaders.map(r => checkinState(r.conversationId ?? r.id))))
+      if (req.method === 'PUT' && row) return json(await putCheckin(row.conversationId ?? row.id, await req.json().catch(() => ({}))))
+      if (req.method === 'POST' && url.pathname.endsWith('/run') && row) return json({ ok: await runCheckin(row.conversationId ?? row.id) })
+      return json({ error: 'method_not_allowed' }, 405)
     }
     // SESSION ROLES — leader | worker, owned by the server (`sessions/session-roles.ts`). The browser reads the
     // map and sets any session's role; a session calling through the MCP proves who it is (HMAC, as for
@@ -4941,6 +4965,7 @@ try {
 startHostAllowlistRefresh()
 // PORT (47291) is always the api + mcp endpoint.
 Bun.serve<WSData>({ hostname: '0.0.0.0', port: PORT, idleTimeout: 60, maxRequestBodySize: LIMITS.ingestBodyBytes, websocket: _wsHandlers, fetch: handleCompressed })
+startCheckinTimer()
 // Binary mode also serves the web dashboard on WEB_PORT (47292) — that's the URL you open.
 // Same handler → the SPA's same-origin `/api/*` calls resolve against 47292 and just work,
 // while 47291 stays the dedicated api + mcp port.
