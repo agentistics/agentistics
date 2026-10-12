@@ -323,3 +323,35 @@ export function sessionAwayNotice(
   if (next) return ['[agentistics · away mode is now ON for this session]', ...awayBriefingLines(next, role, now, o)].join('\n')
   return '[agentistics · away mode is now OFF for this session] The owner is back for this session: the away-mode instructions no longer apply — ask the owner as usual when a decision is theirs.'
 }
+
+// ─── Live notice: telling sessions ALREADY running ────────────────────────────────────────────
+
+/** A stable fingerprint of what a session is told while away; `'off'` when it is not away. */
+export function awayStateSignature(s: AwayState | null): string {
+  if (!s) return 'off'
+  return JSON.stringify([s.until, [...s.authorised].sort(), s.maxWorkers, HARNESS_ORDER.map(h => s.topCaps[h] ?? null)])
+}
+
+/**
+ * The line typed into a RUNNING session when the GLOBAL switch (or what it authorises) changes, or
+ * null when this session has nothing new to hear. A leader (or a session of unknown role) hears
+ * every change of its effective state: on, off, or a different authorisation/until/ceiling. A
+ * worker's briefing carries only "do not ask the owner", so it hears the on/off flips and nothing
+ * else — an edit to what the leaders may do does not touch it. Pure: both states are passed in.
+ */
+export function awayLiveNotice(
+  before: AwayState | null | undefined,
+  after: AwayState | null | undefined,
+  sessionAway: boolean | undefined,
+  role: 'leader' | 'worker' | undefined,
+  now: number,
+  o: AwayBriefingOptions = {},
+): string | null {
+  const was = sessionAwayState(before, sessionAway, now)
+  const next = sessionAwayState(after, sessionAway, now)
+  if (!was && !next) return null
+  if (!next) return '[agentistics · away mode is now OFF] The owner is back: the away-mode instructions no longer apply — ask the owner as usual when a decision is theirs.'
+  if (!was) return ['[agentistics · away mode is now ON]', ...awayBriefingLines(next, role, now, o)].join('\n')
+  if (role !== 'leader' || awayStateSignature(was) === awayStateSignature(next)) return null
+  return ['[agentistics · away mode UPDATED]', ...awayBriefingLines(next, role, now, o)].join('\n')
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { awayStatus, readAwayView, sendAwayNotice, sessionAwayStatus, setAway, setSessionAway, type AwayDeps, type SessionAwayDeps } from './away'
+import { awayStatus, readAwayView, resetAwayLiveDedupe, sendAwayNotice, sessionAwayStatus, setAway, setSessionAway, type AwayDeps, type SessionAwayDeps } from './away'
 import { routeCapability } from './capability-guard'
 
 const NOW = Date.parse('2026-10-12T03:00:00.000Z')
@@ -108,5 +108,71 @@ describe('per-session away route', () => {
     const nf = await setSessionAway({ target: 'nope', on: true }, d)
     expect(sessionAwayStatus(nf)).toBe(404)
     expect(sessionAwayStatus(await setSessionAway({ target: 's1' }, d))).toBe(400)
+  })
+})
+
+describe('away live fan-out', () => {
+  const rowsList = [
+    { id: 'L', conversationId: 'cL', running: true },
+    { id: 'W', conversationId: 'cW', running: true },
+    { id: 'X', running: false },
+  ]
+  const roles: Record<string, 'leader' | 'worker'> = { L: 'leader', W: 'worker' }
+  function live() {
+    const typed: { id: string; text: string }[] = []
+    return {
+      typed,
+      live: {
+        rows: async () => rowsList,
+        roleOf: async (id: string) => roles[id],
+        prompt: async (id: string, text: string) => { typed.push({ id, text }); return { ok: true } },
+      },
+    }
+  }
+
+  it('on: every live leader and worker hears it, exited sessions do not', async () => {
+    resetAwayLiveDedupe()
+    const l = live()
+    const { d } = deps({ live: l.live })
+    const r = await setAway({ on: true, authorised: ['releases'] }, d)
+    expect(r).toMatchObject({ ok: true, notified: 2 })
+    expect(l.typed.map(t => t.id).sort()).toEqual(['L', 'W'])
+    expect(l.typed.find(t => t.id === 'L')!.text).toContain('releases')
+  })
+
+  it('an authorisation change reaches the leader only; the same state again is not repeated', async () => {
+    resetAwayLiveDedupe()
+    const l = live()
+    const { d } = deps({ live: l.live })
+    await setAway({ on: true }, d)
+    l.typed.length = 0
+    await setAway({ on: true, authorised: ['merges'] }, d)
+    expect(l.typed.map(t => t.id)).toEqual(['L'])
+    expect(l.typed[0]!.text).toContain('UPDATED')
+    l.typed.length = 0
+    await setAway({ on: true, authorised: ['merges'] }, d)
+    expect(l.typed).toEqual([])
+  })
+
+  it('off tells the running sessions the owner is back', async () => {
+    resetAwayLiveDedupe()
+    const l = live()
+    const { d } = deps({ live: l.live })
+    await setAway({ on: true }, d)
+    l.typed.length = 0
+    await setAway({ on: false }, d)
+    expect(l.typed.map(t => t.id).sort()).toEqual(['L', 'W'])
+    expect(l.typed[0]!.text).toContain('OFF')
+  })
+
+  it('a session in its own away mode is not told the global OFF', async () => {
+    resetAwayLiveDedupe()
+    const l = live()
+    l.live.rows = async () => [{ id: 'L', running: true, away: true }]
+    const { d } = deps({ live: l.live })
+    await setAway({ on: true }, d)
+    l.typed.length = 0
+    await setAway({ on: false }, d)
+    expect(l.typed.every(t => !t.text.includes('now OFF'))).toBe(true)
   })
 })
