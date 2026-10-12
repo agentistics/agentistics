@@ -105,6 +105,19 @@ export function shouldShowToast(o: {
 
 // ---- the page state carried across the upgrade ---------------------------------------------
 
+export interface PinnedUpdate { current: string; latest: string; critical: boolean }
+
+/**
+ * PURE. The suggestion the bell keeps PINNED for as long as an installable update exists. It is derived
+ * from the live `/api/version` answer — never stored — so clearing notifications cannot remove it and the
+ * upgrade itself (installed version reaches latest) makes it vanish. A snooze silences the POPUP only.
+ */
+export function pinnedUpdate(info: VersionAnswer | null, central: boolean): PinnedUpdate | null {
+  if (central || !info || !info.hasUpdate || !isNewer(info.latest, info.current)) return null
+  if (info.upgradable !== null) return null
+  return { current: info.current, latest: info.latest, critical: info.critical === true }
+}
+
 export const RESTORE_KEY = 'agentistics-upgrade-restore'
 /** A saved state older than this is not "where I was" any more. */
 export const RESTORE_TTL_MS = 15 * 60_000

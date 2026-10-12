@@ -282,7 +282,7 @@ describe('folders in the briefing', () => {
 
 describe('away mode in the briefing', () => {
   const NOW = Date.parse('2026-10-12T03:00:00.000Z')
-  const away = { on: true, since: '2026-10-12T02:00:00.000Z', until: '2026-10-12T12:00:00.000Z', authorised: ['releases' as const], maxWorkers: 6, maxOpus: 2 }
+  const away = { on: true, since: '2026-10-12T02:00:00.000Z', until: '2026-10-12T12:00:00.000Z', authorised: ['releases' as const], maxWorkers: 6, topCaps: {} }
   test('absent, off or expired: no line', () => {
     expect(contextText({ ...base, now: NOW })).not.toContain('AWAY MODE')
     expect(contextText({ ...base, now: NOW, away: { ...away, on: false } })).not.toContain('AWAY MODE')

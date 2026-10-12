@@ -5,7 +5,7 @@ import { worstUsedPct } from '../lib/planLimits'
 const src = readFileSync(new URL('./SessionsPage.tsx', import.meta.url), 'utf8')
 
 test('every foldable drawer section starts closed and is wired to a fold', () => {
-  for (const name of ['drawerLimitsOpen', 'drawerSessionOpen', 'drawerActionsOpen', 'drawerCtxOpen']) {
+  for (const name of ['drawerLimitsOpen', 'drawerSessionOpen', 'drawerActionsOpen', 'drawerCtxOpen', 'drawerCheckinOpen']) {
     expect(src).toContain(`const [${name}, set${name[0]!.toUpperCase()}${name.slice(1)}] = useState(false)`)
     expect(src).toContain(`open: ${name}, toggle:`)
   }

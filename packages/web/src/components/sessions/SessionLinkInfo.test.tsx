@@ -100,3 +100,17 @@ describe('link row meta', () => {
     expect(html).not.toContain('>Claude Code<')
   })
 })
+
+describe('per-session away switch', () => {
+  const none: SessionLinks = { parent: null, children: [], task: null }
+  it('appears only for a managed row, as the one ToggleSwitch, reflecting the flag', () => {
+    const off = renderToStaticMarkup(<SessionLinkPanel links={none} sessionId="s1" pt={false} onGo={() => {}} awayId="s1" />)
+    expect(off).toContain('data-testid="session-away-row"')
+    expect(off).toContain('role="switch"')
+    expect(off).toContain('aria-checked="false"')
+    const on = renderToStaticMarkup(<SessionLinkPanel links={none} sessionId="s1" pt onGo={() => {}} awayId="s1" away />)
+    expect(on).toContain('aria-checked="true"')
+    expect(on).toContain('Modo ausente nesta sessão')
+    expect(renderToStaticMarkup(<SessionLinkPanel links={none} sessionId="s1" pt={false} onGo={() => {}} />)).not.toContain('session-away-row')
+  })
+})

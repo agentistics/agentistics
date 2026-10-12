@@ -144,17 +144,38 @@ export async function writeContextFile(plan: SpawnPlan): Promise<boolean> {
 }
 
 /**
- * AWAY MODE as stored, for the briefing. Best effort: an unreadable preferences file costs the line,
- * never the spawn. Returned even when expired — `contextText` judges it against the clock.
+ * AWAY MODE for the briefing of one session: the global state while it is active, else the
+ * session's own flag (`sessionAwayState`). Best effort: an unreadable preferences file costs the
+ * global half, never the spawn — a session-only away still briefs.
  */
-export async function resolveContextAway(): Promise<Pick<ContextInput, 'away'>> {
+export async function resolveContextAway(sessionAway?: boolean): Promise<Pick<ContextInput, 'away'>> {
+  const { parseAwayState, sessionAwayState } = await import('@agentistics/core')
+  let global = null
   try {
     const { readPreferences } = await import('../preferences')
-    const { parseAwayState, awayActive } = await import('@agentistics/core')
-    const away = parseAwayState((await readPreferences()).away)
-    return awayActive(away, Date.now()) ? { away } : {}
+    global = parseAwayState((await readPreferences()).away)
+  } catch { /* the session flag alone */ }
+  const away = sessionAwayState(global, sessionAway, Date.now())
+  return away ? { away } : {}
+}
+
+/**
+ * Whether a session being spawned is recorded as away (`resolveSpawnAway`): an explicit request
+ * wins, else a VERIFIED parent's own per-session flag is inherited. Unreadable registry = no parent.
+ */
+export async function resolveSpawnAwayFor(
+  requested: boolean | 'inherit' | undefined,
+  parentSessionId: string | undefined,
+  parentVerified: boolean,
+): Promise<boolean> {
+  const { resolveSpawnAway } = await import('@agentistics/core')
+  if (requested === true || requested === false || !parentSessionId || !parentVerified) return resolveSpawnAway(requested, undefined)
+  try {
+    const { readRegistry } = await import('./registry')
+    const parent = (await readRegistry()).find(m => m.id === parentSessionId || m.conversationId === parentSessionId)
+    return resolveSpawnAway(requested, { away: parent?.away, verified: true })
   } catch {
-    return {}
+    return false
   }
 }
 

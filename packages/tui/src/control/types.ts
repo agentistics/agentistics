@@ -920,6 +920,8 @@ export interface ControlSession {
   parentSessionId?: string
   /** The parent's conversation id — the link that survives the parent being reopened. */
   parentConversationId?: string
+  /** Per-session AWAY MODE (`ManagedSession.away`): on for this session alone. Absent = not on its own. */
+  away?: boolean
 }
 
 /**
@@ -1925,6 +1927,8 @@ export interface SpawnSessionRequest {
   handoff?: boolean
   /** Explicit briefing role for CLI/web callers. */
   role?: 'leader' | 'worker'
+  /** Per-session away mode: on, off, or inherit a verified away parent's (absent = inherit). */
+  away?: boolean | 'inherit'
   prompt?: string
   model?: string
   effort?: string

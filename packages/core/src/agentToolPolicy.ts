@@ -175,7 +175,7 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
     reason: 'sets a session label (role + title prefix) and types a one-line note; reversible by setting auto; a session may only touch itself or the sessions it started',
   },
   agentistics_session_away: {
-    ...GROUPS, risk: 'W', routes: ['GET /api/away', 'PUT /api/away', 'POST /api/away/notice'],
+    ...GROUPS, risk: 'W', routes: ['GET /api/away', 'PUT /api/away', 'PUT /api/away/session', 'POST /api/away/notice'],
     reason: 'reads or switches away mode (what newly started sessions are told about the owner being out) and lets a leader raise a notice in the owner\'s bell; reversible by switching it off; the server accepts writes only from a verified LEADER session',
   },
   // ------------------------------------------------------------------ Metrics
