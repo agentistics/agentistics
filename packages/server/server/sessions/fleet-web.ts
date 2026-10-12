@@ -50,7 +50,7 @@ import { catalogFields } from '../model-catalog-fields'
 import { artifactPathsFromTurns, type AllowedArtifact } from './artifact-file'
 import type { ArtifactResponse } from './artifact-web'
 import { readRegistry, patchSession } from './registry'
-import { computeHandoffWhy, sendHandoffHints, type HandoffHintRow } from './handoff-hint'
+import { computeHandoffWhy, findHandoffFile, sendHandoffHints, type HandoffHintRow } from './handoff-hint'
 
 // The REQUEST shape lives in the leaf `fleet-row.ts` so `index.ts` can name it without naming
 // this module — see the note there.
@@ -268,8 +268,9 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
       const [registry, raw] = await Promise.all([readRegistry().catch(() => []), fleetSessionHub().then(h => h.read())])
       const titles = new Map(fleet.sessions.map(row => [row.id, fleetRow(row, s).title]))
       const byId = new Map(registry.map(row => [row.id, row]))
-      const rows: HandoffHintRow[] = raw.sessions.map(view => {
+      const rows: HandoffHintRow[] = await Promise.all(raw.sessions.map(async view => {
         const managed = byId.get(view.id)
+        const handoff = await findHandoffFile(view.cwd)
         return {
           id: view.id,
           title: titles.get(view.id) ?? '',
@@ -281,6 +282,8 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
           ...(view.model !== undefined ? { model: view.model } : {}),
           ...(view.turns !== undefined ? { turns: view.turns } : {}),
           ...(view.costUSD !== undefined ? { costUSD: view.costUSD } : {}),
+          ...(handoff ? { handoffPath: handoff.path, handoffBytes: handoff.bytes } : {}),
+          ...(view.cwd ? { cwd: view.cwd } : {}),
           ...(view.activity !== undefined ? { activity: view.activity, state: view.activity } : {}),
           ...((view.activity === 'working' || view.background) ? {
             workInFlight: [
@@ -289,7 +292,7 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
             ],
           } : {}),
         }
-      })
+      }))
       await sendHandoffHints({
         rows: async () => rows,
         prompt: async (id, text) => {
@@ -368,7 +371,11 @@ export async function readHandoffWhy(lang: CliLang, id: string): Promise<ReturnT
       ],
     } : {}),
   }
-  return computeHandoffWhy(row, { model: view.model ?? managed?.model })
+  const handoff = await findHandoffFile(view.cwd)
+  return computeHandoffWhy(row, {
+    model: view.model ?? managed?.model,
+    ...(handoff ? { handoffPath: handoff.path, handoffBytes: handoff.bytes } : {}),
+  })
 }
 
 /**

@@ -228,7 +228,7 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
     const { base, next, changed } = state
     const lang: RoleLang = req.lang === 'pt' || req.lang === 'en' ? req.lang : await deps.uiLang().catch(() => 'en' as RoleLang)
     // External title/note I/O stays outside `serial`; either can wait for the fleet poll.
-    const wanted = isPlaceholderTitle(resolved.title) ? resolved.title : titleForRole(resolved.title, next, lang)
+    const wanted = next === 'leader' && isPlaceholderTitle(resolved.title) ? resolved.title : titleForRole(resolved.title, next, lang)
     const renamed = wanted !== resolved.title && wanted !== '' ? (await deps.rename(resolved.id, wanted).catch(() => ({ ok: false }))).ok : false
     const notified = changed && !own ? (await deps.prompt(resolved.id, roleChangeNote(next)).catch(() => ({ ok: false }))).ok : false
     if (notified || own) {
@@ -475,11 +475,10 @@ export async function applyRoleTitle(
   lang: RoleLang,
   providedDeps?: RoleDeps,
 ): Promise<boolean> {
-  if (role !== 'leader') return false
-  const deps = providedDeps ?? await defaultRoleDeps()
-  if (isPlaceholderTitle(title)) return false
+  if (role === 'leader' && isPlaceholderTitle(title)) return false
   const wanted = titleForRole(title, role, lang)
   if (wanted === '' || wanted === title) return false
+  const deps = providedDeps ?? await defaultRoleDeps()
   return (await deps.rename(rowId, wanted).catch(() => ({ ok: false }))).ok
 }
 
