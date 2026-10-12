@@ -9,7 +9,7 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown, ChevronRight, Clock3, Info, List, Pause, Play, RefreshCw, Search } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Clock3, Info, List, Moon, Pause, Play, RefreshCw, Search } from 'lucide-react'
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { HARNESS_LABELS } from '../../lib/harness'
@@ -28,6 +28,7 @@ import { RoleChip } from './RoleChip'
 import { ToggleSwitch } from '../ToggleSwitch'
 import { CHECKIN_ITEMS, clockLabel, formatNextRun, useCheckin, type CheckinConfig } from '../../lib/checkin'
 import { parseSnooze, SNOOZE_PRESETS } from '../../lib/nayNotify'
+import { setSessionAway, useAway } from '../../lib/awayMode'
 
 export interface LinkTarget { kind: 'parent' | 'child' | 'task'; key: string; label: string; harness?: string; state?: string; stateLabel?: string; startedAt?: number; path: string | null }
 
@@ -131,10 +132,55 @@ export function SessionCheckinCard({ sessionId, links, pt, isMobile = false, onG
   return <>{frame(summary, <CheckinPanel bare state={checkin.state} pt={pt} isMobile={isMobile} onGo={onGo} update={checkin.update} runNow={checkin.runNow} taskPath={links.task ? `/tasks/${encodeURIComponent(links.task.id)}?tab=activity&filter=checkins` : null} />)}</>
 }
 
-export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, pt, onGo, isMobile = false, hideCheckin = false }: {
+/**
+ * PER-SESSION AWAY MODE — the session's own switch (`PUT /api/away/session`), the product's one
+ * `ToggleSwitch`. The flag shown is the fleet row's; a click is optimistic until the next fleet push
+ * carries it. With the global switch on, the session is away either way and the line says so.
+ */
+export function SessionAwayRow({ managedId, away, pt, isMobile = false }: { managedId: string; away: boolean; pt: boolean; isMobile?: boolean }) {
+  const global = useAway()
+  const [pending, setPending] = useState<boolean | null>(null)
+  const [note, setNote] = useState<string | null>(null)
+  useEffect(() => { setPending(null) }, [away, managedId])
+  const on = pending ?? away
+  const label = pt ? 'Modo ausente nesta sessão' : 'Away mode on this session'
+  const toggle = async () => {
+    const next = !on
+    setPending(next)
+    setNote(null)
+    const r = await setSessionAway(managedId, next, pt ? 'pt' : 'en')
+    if (!r.ok) { setPending(null); setNote(pt ? `Não foi possível mudar (${r.error}).` : `Could not change it (${r.error}).`); return }
+    setNote(r.notified ? (pt ? 'A sessão foi avisada.' : 'The session was told.') : null)
+  }
+  const sub = global.active
+    ? (pt ? 'O modo ausente global está ligado: esta sessão já sabe que você está fora.' : 'Global away mode is on: this session already knows you are out.')
+    : on
+      ? (pt ? 'Ela não pergunta nada a você; as sessões que ela abrir herdam.' : 'It asks you nothing; sessions it starts inherit it.')
+      : (pt ? 'Ligue para esta sessão decidir sozinha enquanto você está fora.' : 'Turn on to let this session decide on its own while you are out.')
+  return (
+    <div data-testid="session-away-row">
+      <div style={SECTION}>{pt ? 'Modo ausente' : 'Away mode'}</div>
+      <div style={{ ...CHECKIN_ROW, padding: '0 6px', minHeight: isMobile ? 44 : 28 }}>
+        <Moon size={15} style={{ color: on || global.active ? 'var(--anthropic-orange)' : 'var(--text-tertiary)' }} />
+        <span>{pt ? 'Estou fora para esta sessão' : "I'm away for this session"}</span>
+        <span style={{ marginLeft: 'auto', display: 'inline-flex' }}>
+          <ToggleSwitch on={on} onToggle={() => { void toggle() }} label={label} tap={isMobile ? 44 : undefined} />
+        </span>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-tertiary)', padding: '0 6px 4px', lineHeight: 1.4 }}>{sub}</div>
+      {note && <div role="status" style={{ fontSize: 11, color: 'var(--text-secondary)', padding: '0 6px 4px' }}>{note}</div>}
+    </div>
+  )
+}
+
+export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, pt, onGo, isMobile = false, hideCheckin = false, awayId, away = false }: {
   links: SessionLinks; startedAt?: number; sessionId?: string; roleFallbackId?: string; pt: boolean; onGo: (path: string) => void; isMobile?: boolean
   /** The phone drawer draws the check-in as a card of its own (`SessionCheckinCard`). */
   hideCheckin?: boolean
+  /** The MANAGED id the per-session away switch acts on; absent = no switch (not a managed row). */
+  awayId?: string
+  /** The row's own `away` flag. */
+  away?: boolean
 }) {
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
@@ -180,6 +226,7 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
           </div>
         )}
       </div>}
+      {awayId && <SessionAwayRow managedId={awayId} away={away} pt={pt} isMobile={isMobile} />}
       {groups.map(([kind, title]) => {
         let rows = targets.filter(t => t.kind === kind)
         if (!rows.length) return null
@@ -229,7 +276,7 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
 }
 
 export function SessionLinkInfo({ session, links, lang, onGo, isMobile = false }: {
-  session: Partial<Pick<ControlSession, 'id' | 'startedAt' | 'conversationId'>>
+  session: Partial<Pick<ControlSession, 'id' | 'startedAt' | 'conversationId' | 'away' | 'actionable' | 'state'>>
   links: SessionLinks | null
   lang: 'pt' | 'en'
   onGo: (path: string) => void
@@ -291,6 +338,7 @@ export function SessionLinkInfo({ session, links, lang, onGo, isMobile = false }
           background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
         }}>
           <SessionLinkPanel links={links ?? { parent: null, children: [], task: null }} {...(session.startedAt ? { startedAt: session.startedAt } : {})} sessionId={session.id ? sessionIdentityKey(session as { id: string; conversationId?: string }) : undefined} roleFallbackId={session.id} pt={pt} isMobile={isMobile}
+            {...(session.id && session.actionable && session.state !== 'closed' ? { awayId: session.id, away: session.away === true } : {})}
             onGo={p => { setOpen(false); onGo(p) }} />
         </div>, document.body)}
     </>

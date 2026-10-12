@@ -17,6 +17,7 @@
  * a session's state by one poll interval — which is a bug people report as flicker.
  */
 
+import { AwayChip } from '../components/sessions/AwayChip'
 import { sessionLinks } from '../lib/sessionParent'
 import { SessionCheckinCard, SessionLinkInfo, SessionLinkPanel } from '../components/sessions/SessionLinkInfo'
 import { Drawer } from '../components/Drawer'
@@ -2651,6 +2652,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
                 fontSize: 13, fontWeight: 650, color: 'var(--text-primary)', minWidth: 0,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               }}>{selected.title}</div>
+              {selected.away === true && <AwayChip pt={pt} compact />}
               <SessionTitleFlag
                 session={{
                   id: selected.id, title: selected.title,
@@ -2986,6 +2988,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               pt={pt}
               isMobile
               hideCheckin
+              {...(selected.actionable && selected.state !== 'closed' ? { awayId: selected.id, away: selected.away === true } : {})}
               onGo={p => leaveDrawerTo(p)}
             />
           </div>

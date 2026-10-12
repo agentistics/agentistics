@@ -54,6 +54,7 @@ import { MagnifierButton } from './components/a11y/MagnifierButton'
 import { NotificationBell } from './components/NotificationBell'
 import { AgentisticsLoader } from './components/AgentisticsLoader'
 import { VaultHeaderButton } from './components/vault/VaultHeaderButton'
+import { AwayChip } from './components/sessions/AwayChip'
 import AwayPill from './components/AwayPill'
 import { HardwareModal } from './components/HardwareModal'
 import { PlanUsageModal } from './components/PlanUsageModal'
@@ -3629,6 +3630,7 @@ export default function AppLayout() {
           }}>
             {headerSession.title}
           </span>
+          {headerSession.away === true && <AwayChip pt={lang === 'pt'} />}
           {headerMuted && (
             <span role="img" aria-label={mutedTooltip(lang === 'pt')} title={mutedTooltip(lang === 'pt')}
               style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0, color: 'var(--text-tertiary)' }}>

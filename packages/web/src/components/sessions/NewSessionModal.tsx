@@ -58,6 +58,7 @@ import { forcedNote, isAdmissionRefusal } from '../../lib/spawnAdmission'
 import { pushNotification } from '../../lib/notifications'
 import { setSessionRole, type SessionRole } from '../../lib/sessionRoles'
 import { usePlanLimits } from '../../lib/planLimits'
+import { useAway } from '../../lib/awayMode'
 import { PlanLimitBars } from '../PlanLimitMeter'
 import {
   STEP_ORDER, modelDisplay, nextStep, prevStep, stepReady, toWizardHarness, unsetText,
@@ -204,6 +205,9 @@ export function NewSessionModal({
   /** MODE.EVERYWHERE — the permission mode to start in; `default` = the harness's own configuration. */
   const [mode, setMode] = useState<CanonicalMode>('default')
   const [sessionRole, setSessionRoleChoice] = useState<SessionRole | ''>('')
+  /** PER-SESSION AWAY MODE — this session alone is told the owner is out (`away: true` on the spawn). */
+  const [awayOn, setAwayOn] = useState(false)
+  const awayGlobal = useAway()
   const [prompt, setPrompt] = useState(restored?.prompt ?? initialPreset?.prompt ?? '')
   const [label, setLabel] = useState(restored?.label ?? initialPreset?.label ?? '')
 
@@ -522,6 +526,9 @@ export function NewSessionModal({
         const l = harness ? planSnap.limits?.find(x => x.harness === harness.id) : undefined
         return l ? <ReviewRow label={pt ? 'Limites' : 'Limits'} value={<span style={{ display: 'block', maxWidth: 260 }}><PlanLimitBars limits={l} now={planSnap.now} lang={lang} /></span>} /> : null
       })()}
+      {harness && harness.id !== NATIVE_HARNESS_ID && (awayOn || awayGlobal.active) && (
+        <ReviewRow label={pt ? 'Modo ausente' : 'Away mode'} value={awayOn ? (pt ? 'Ligado nesta sessão' : 'On for this session') : (pt ? 'Ligado (global)' : 'On (global)')} />
+      )}
       <ReviewRow label={pt ? 'Título' : 'Title'} value={label || null} />
       <ReviewRow label={pt ? 'Onde' : 'Where'} value={cwd || null} mono />
       <ReviewRow label={pt ? 'Tarefa' : 'Task'} value={task || null}
@@ -642,6 +649,8 @@ export function NewSessionModal({
           ...(effort ? { effort } : {}),
           // `default` is the absence of a mode: the harness's own configuration decides.
           ...(mode !== 'default' && wizardHarness?.modes?.includes(mode) ? { mode } : {}),
+          // Off is left absent (= inherit): a browser spawn has no parent, so it reads as off.
+          ...(awayOn ? { away: true as const } : {}),
           // The paths go FIRST, each on its own line, then what was typed — the same order the
           // composer uses. An assistant reads the files it is pointed at, and a path buried inside
           // a sentence is one it can miss.
@@ -948,6 +957,25 @@ export function NewSessionModal({
               onPick={v => { setSessionRoleChoice(v as SessionRole | ''); setDirty(true) }}
             />
           </Field>
+
+          {/* PER-SESSION AWAY MODE — the same PillPicker row as the session type. A native session is
+              the engine's, not a managed row, so it has no flag to carry it. */}
+          {wizardHarness && wizardHarness.id !== NATIVE_HARNESS_ID && (
+            <Field label={pt ? 'Modo ausente' : 'Away mode'} hint={awayGlobal.active
+              ? (pt ? 'O modo ausente global já está ligado: esta sessão já vai saber que você está fora.' : 'Global away mode is already on: this session will know you are out either way.')
+              : (pt ? 'Ligado, só esta sessão sabe que você está fora: não pergunta nada, decide e registra (ou reporta a quem a abriu). As sessões que ela abrir herdam.'
+                : 'On, only this session knows you are out: it asks you nothing, decides and records (or reports to whoever started it). Sessions it starts inherit it.')}>
+              <PillPicker
+                radioLabel={pt ? 'Modo ausente' : 'Away mode'}
+                items={[
+                  { key: 'off', label: pt ? 'Desligado' : 'Off', color: 'var(--text-tertiary)' },
+                  { key: 'on', label: pt ? 'Ligado — não me pergunte' : "On — don't ask me", color: '#a78bfa', data: { away: 'on' } },
+                ]}
+                value={awayOn ? 'on' : 'off'}
+                onPick={v => { setAwayOn(v === 'on'); setDirty(true) }}
+              />
+            </Field>
+          )}
 
           {/* REQUIRED, and the gate is `stepReady('assistant')`'s — see `wizardSteps.ts`. It is
               asked here rather than at the end because a title is what this session IS, and that

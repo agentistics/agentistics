@@ -5,7 +5,7 @@
  * The rules and words sessions are told live in core's `awayMode.ts`.
  */
 import { useSyncExternalStore } from 'react'
-import { AWAY_OFF, awayActive, parseAwayState, type AwayAuthId, type AwayState } from '@agentistics/core'
+import { AWAY_OFF, AWAY_TOP_MODEL, awayActive, parseAwayState, type AwayAuthId, type AwayState, type AwayTopCaps, type HarnessId } from '@agentistics/core'
 import { subscribeEvent } from './eventStream'
 
 export interface AwaySnapshot {
@@ -66,7 +66,8 @@ export interface AwayRequest {
   authorised?: AwayAuthId[]
   note?: string
   maxWorkers?: number
-  maxOpus?: number
+  /** Per provider: workers on its top model tier at once. */
+  topCaps?: AwayTopCaps
 }
 
 /** PUT, then adopt the server's answer. Resolves to the server's error code on refusal. */
@@ -77,6 +78,22 @@ export async function setAway(req: AwayRequest): Promise<{ ok: true } | { ok: fa
     if (!r.ok || body.ok !== true) return { ok: false, error: body.error ?? `http_${r.status}` }
     emit(parseAwayState(body.state))
     return { ok: true }
+  } catch {
+    return { ok: false, error: 'unreachable' }
+  }
+}
+
+/**
+ * Switch ONE session's own away mode (`PUT /api/away/session`). The server records it and, when
+ * the session is running and its effective state changed, tells it. Resolves to the server's
+ * error code on refusal; the fleet row follows on the next fleet push.
+ */
+export async function setSessionAway(id: string, on: boolean, lang: 'pt' | 'en'): Promise<{ ok: true; notified: boolean; effective: boolean } | { ok: false; error: string }> {
+  try {
+    const r = await fetch('/api/away/session', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target: id, on, lang }) })
+    const body = await r.json().catch(() => ({})) as { ok?: boolean; notified?: boolean; effective?: boolean; error?: string }
+    if (!r.ok || body.ok !== true) return { ok: false, error: body.error ?? `http_${r.status}` }
+    return { ok: true, notified: body.notified === true, effective: body.effective === true }
   } catch {
     return { ok: false, error: 'unreachable' }
   }
@@ -125,3 +142,20 @@ export function awayUntilLabel(s: AwayState | null, lang: 'pt' | 'en', now: numb
 /** Tests / fixtures. */
 export function __setAwayForTest(state: AwayState | null): void { emit(state) }
 export const AWAY_INITIAL: AwayState = AWAY_OFF
+
+/**
+ * The providers the away dialog lists a top-model ceiling for: every harness with an ACTIVE plan
+ * (a reported limit window or a plan registered in Settings → Billing — what
+ * `agentistics_plan_limits` reads), plus any harness that already carries a stored ceiling so it
+ * is never silently dropped. Display order is the shared harness order.
+ */
+export function activeCapProviders(
+  order: readonly string[],
+  limits: readonly { harness: string }[] | null,
+  registered: readonly { harness: string }[],
+  stored: AwayTopCaps,
+): HarnessId[] {
+  const on = new Set<string>([...(limits ?? []).map(l => l.harness), ...registered.map(r => r.harness), ...Object.keys(stored)])
+  // Only harnesses a ceiling can name (the native engine has no plan of its own here).
+  return order.filter((h): h is HarnessId => on.has(h) && h in AWAY_TOP_MODEL)
+}
