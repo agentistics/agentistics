@@ -574,6 +574,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const selected = sessionId === undefined
     ? undefined
     : fleet.rows.find(r => r.id === sessionId || r.conversationId === sessionId)
+  const sessionLinkInfoRef = useRef<HTMLButtonElement | null>(null)
   /** A STRUCTURED row's `cli` pane is the door to the same conversation as a TUI — every mount. */
   const selectedOpenInTerminal = openInTerminalFor(selected ? rowIndex.get(selected.id) : undefined, act)
 
@@ -2082,7 +2083,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         if (isMobile) { openSessionDrawer(); setDrawerCheckinOpen(true); return }
         // Desktop already has the shared header's ⓘ control. Click that existing control so its
         // portal renders the same check-in block as a user opening it manually.
-        document.querySelector<HTMLButtonElement>('[data-testid="session-link-info"]')?.click()
+        sessionLinkInfoRef.current?.click()
       }}
       // WHICHEVER PANE the band is showing right now (`target`) — never a fixed `'shell'`. See
       // `paneForTarget`'s own header for the defect this closes.
@@ -2654,7 +2655,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           </button>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-              <SessionLinkInfo session={selected} links={sessionLinks(selected, fleet.rows)} lang={pt ? 'pt' : 'en'} isMobile onGo={p => navigate(p)} />
+              <SessionLinkInfo session={selected} links={sessionLinks(selected, fleet.rows)} lang={pt ? 'pt' : 'en'} isMobile onButtonRef={button => { sessionLinkInfoRef.current = button }} onGo={p => navigate(p)} />
               <div style={{
                 fontSize: 13, fontWeight: 650, color: 'var(--text-primary)', minWidth: 0,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',

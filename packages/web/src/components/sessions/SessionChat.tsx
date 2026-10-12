@@ -3993,10 +3993,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                               aria-current={sourceControls?.model?.current === m.id ? 'true' : undefined}
                               onClick={() => { setMoreOpen(false); void switchModel(m.id) }}
                               style={{
-                                display: 'block', width: '100%', textAlign: 'left',
-                                minHeight: 36, padding: '6px 8px', borderRadius: 7, border: 'none',
-                                background: 'transparent', color: 'var(--text-primary)',
-                                fontFamily: 'inherit', fontSize: 12.5, cursor: 'pointer',
+                                ...menuItemStyle(isMobile), display: 'block',
                               }}
                             >
                               {m.label}{sourceControls?.model?.current === m.id ? ' ✓' : ''}
@@ -4035,10 +4032,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         onClick={() => { setMoreOpen(false); toggleSessionMuted(notifyKey) }}
                         title={notifyMuted ? mutedTooltip(pt) : undefined}
                         style={{
-                          display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
-                          minHeight: 36, padding: '6px 8px', borderRadius: 7, border: 'none',
-                          background: 'transparent', color: 'var(--text-primary)',
-                          fontFamily: 'inherit', fontSize: 12.5, cursor: 'pointer',
+                          ...menuItemStyle(isMobile),
                         }}
                       >
                         {notifyMuted ? <Bell size={14} /> : <BellOff size={14} />}

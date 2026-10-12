@@ -304,15 +304,40 @@ const SYSTEM_CHIP_STYLE: React.CSSProperties = {
   fontFamily: 'inherit',
 }
 
-function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt: boolean }) {
+function SystemNote({ note, noteRef, pt, checkin, onOpenCheckin }: {
+  note: string
+  noteRef?: string
+  pt: boolean
+  checkin?: boolean
+  onOpenCheckin?: () => void
+}) {
   const { label, help, tab } = chatNote(note, pt)
   const [shown, setShown] = useState(false)
   const isMobile = useIsMobile()
+  const bodyId = useId()
 
   const chip: React.CSSProperties = {
     ...SYSTEM_CHIP_STYLE,
     // Sleek chip dimensions on mobile and desktop
     ...(isMobile ? { padding: '4px 10px', margin: '2px 0' } : {}),
+  }
+
+  if (checkin) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', padding: '2px 0' }}>
+        <div style={{ width: 'min(100%, 560px)', overflow: 'hidden' }}>
+          <button type="button" aria-expanded={shown} aria-controls={bodyId} onClick={() => setShown(v => !v)} style={{ ...chip, display: 'flex', alignItems: 'center', gap: 7, width: '100%', minHeight: 36, textAlign: 'left', cursor: 'pointer' }}>
+            <ListChecks size={14} style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
+            <span style={{ fontWeight: 650 }}>{pt ? 'Check-in da liderança · sistema' : 'Leadership check-in · system'}</span>
+            <ChevronDown size={14} style={{ marginLeft: 'auto', transform: shown ? 'rotate(180deg)' : 'none' }} />
+          </button>
+          <div id={bodyId} hidden={!shown} style={{ marginTop: 3, padding: '7px 10px 8px', border: '1px solid var(--border-subtle)', borderRadius: 8, background: 'var(--bg-elevated)', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{checkinPromptBody(note)}</div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '3px 0 0' }}>
+            <button type="button" onClick={onOpenCheckin} disabled={!onOpenCheckin} style={{ ...chip, minHeight: 44, padding: '6px 12px', color: 'var(--text-primary)', cursor: onOpenCheckin ? 'pointer' : 'default' }}>{pt ? 'Abrir check-in' : 'Open check-in'}</button>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (tab !== null) {
@@ -355,28 +380,6 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
       )}
     </div>
   )
-}
-
-function CheckinNotice({ text, pt, onOpen }: { text: string; pt: boolean; onOpen?: () => void }) {
-  const [open, setOpen] = useState(false)
-  const bodyId = useId()
-  const chip: React.CSSProperties = {
-    ...SYSTEM_CHIP_STYLE,
-    overflow: 'visible', textOverflow: 'clip', whiteSpace: 'normal',
-  }
-  return <div style={{ display: 'flex', justifyContent: 'center', padding: '2px 0' }}>
-    <div style={{ width: 'min(100%, 560px)', overflow: 'hidden' }}>
-      <button type="button" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen(v => !v)} style={{ ...chip, display: 'flex', alignItems: 'center', gap: 7, width: '100%', minHeight: 36, textAlign: 'left', cursor: 'pointer' }}>
-        <ListChecks size={14} style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
-        <span style={{ fontWeight: 650 }}>{pt ? 'Check-in da liderança · sistema' : 'Leadership check-in · system'}</span>
-        <ChevronDown size={14} style={{ marginLeft: 'auto', transform: open ? 'rotate(180deg)' : 'none' }} />
-      </button>
-      <div id={bodyId} hidden={!open} style={{ marginTop: 3, padding: '7px 10px 8px', border: '1px solid var(--border-subtle)', borderRadius: 8, background: 'var(--bg-elevated)', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{checkinPromptBody(text)}</div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '3px 0 0' }}>
-        <button type="button" onClick={onOpen} disabled={!onOpen} style={{ ...chip, minHeight: 44, padding: '6px 12px', color: 'var(--text-primary)', cursor: onOpen ? 'pointer' : 'default' }}>{pt ? 'Abrir check-in' : 'Open check-in'}</button>
-      </div>
-    </div>
-  </div>
 }
 
 export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessionId, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, onQuoteClick, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect, vaultGrant, onOpenCheckin }: ChatBubbleProps) {
@@ -585,7 +588,7 @@ export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessio
   }
 
   if (isCheckinPrompt(turn.text)) {
-    return <CheckinNotice text={turn.text} pt={pt} onOpen={onOpenCheckin} />
+    return <SystemNote note={turn.text} pt={pt} checkin onOpenCheckin={onOpenCheckin} />
   }
 
   if (turn.system) {
