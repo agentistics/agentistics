@@ -38,6 +38,8 @@ export type SessionCommand =
       force?: boolean
       /** Explicitly declare the spawned session's briefing role. */
       role?: SessionRole
+      /** `--folder <ref>`: the sidebar folder (id, name or "Parent/Child") the session is filed into at spawn. */
+      folder?: string
       /** A refusal is machine-readable too — see `admissionRefusalBody`. */
       json?: boolean
     }
@@ -82,9 +84,12 @@ export type SessionCommand =
       /** Start the whole batch anyway when the memory gate would refuse it. */
       force?: boolean
     }
-  | { kind: 'open'; task: string; json?: boolean; force?: boolean }
+  | { kind: 'open'; task: string; json?: boolean; force?: boolean; folder?: string }
   | { kind: 'attach'; ref: string }
-  | { kind: 'kill'; ref: string }
+  /** `--folder <ref>`: after ending it, move it to that folder (e.g. "…/Finalizadas"). */
+  | { kind: 'kill'; ref: string; folder?: string }
+  /** The folder tree, so a caller can pick a `--folder` ref. */
+  | { kind: 'folders'; json?: boolean }
   /** NATIVE sessions only (`ses_…`): file an ended one away, bring it back, or delete it. */
   | { kind: 'archive' | 'unarchive' | 'delete'; ref: string }
   | { kind: 'rename'; ref: string; label: string }
@@ -111,6 +116,8 @@ export interface BatchSpec {
   name?: string
   /** See `start.notify`. */
   notify?: NotifySwitch
+  /** See `start.folder`. */
+  folder?: string
 }
 
 export type NotifySwitch = 'on' | 'off'
@@ -121,8 +128,23 @@ function notifyValue(v: string): NotifySwitch | null {
 }
 
 const VALUE_FLAGS = new Set([
-  '-p', '--prompt', '--model', '--effort', '--cwd', '--name', '--task', '--subtask', '--session', '--attempt', '--notify', '--role',
+  '-p', '--prompt', '--model', '--effort', '--cwd', '--name', '--task', '--subtask', '--session', '--attempt', '--notify', '--role', '--folder',
 ])
+
+/** Pull `--folder <ref>` out of an argument list (open / kill take it anywhere). */
+function takeFolder(args: string[]): { folder?: string; rest: string[] } | { error: string } {
+  const rest: string[] = []
+  let folder: string | undefined
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--folder') {
+      const v = args[i + 1]
+      if (v === undefined || v.startsWith('--')) return { error: 'Missing value for --folder' }
+      folder = v
+      i++
+    } else rest.push(args[i]!)
+  }
+  return { ...(folder ? { folder } : {}), rest }
+}
 
 function isHarness(v: string): v is HarnessId {
   return (HARNESS_ORDER as readonly string[]).includes(v)
@@ -140,18 +162,30 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
 
   if (head === 'batch') return parseBatch(argv.slice(1), jsonFlag)
 
+  if (head === 'folders') return { kind: 'folders', ...(jsonFlag ? { json: true } : {}) }
+
   if (head === 'open') {
     const rest = argv.slice(1)
     const forceFlag = rest.includes('--force')
-    const task = rest.filter(a => a !== '--json' && a !== '--force').join(' ').trim()
-    if (!task) return { kind: 'error', message: 'Usage: agentop session open "<task>" [--force]' }
-    return { kind: 'open', task, ...(jsonFlag ? { json: true } : {}), ...(forceFlag ? { force: true } : {}) }
+    const f = takeFolder(rest)
+    if ('error' in f) return { kind: 'error', message: f.error }
+    const task = f.rest.filter(a => a !== '--json' && a !== '--force').join(' ').trim()
+    if (!task) return { kind: 'error', message: 'Usage: agentop session open "<task>" [--folder <folder>] [--force]' }
+    return { kind: 'open', task, ...(jsonFlag ? { json: true } : {}), ...(forceFlag ? { force: true } : {}), ...(f.folder ? { folder: f.folder } : {}) }
   }
 
-  if (head === 'attach' || head === 'kill') {
+  if (head === 'attach') {
     const ref = argv[1]
-    if (!ref) return { kind: 'error', message: `Usage: agentop session ${head} <id|name>` }
-    return { kind: head, ref }
+    if (!ref) return { kind: 'error', message: 'Usage: agentop session attach <id|name>' }
+    return { kind: 'attach', ref }
+  }
+
+  if (head === 'kill') {
+    const f = takeFolder(argv.slice(1))
+    if ('error' in f) return { kind: 'error', message: f.error }
+    const ref = f.rest[0]
+    if (!ref) return { kind: 'error', message: 'Usage: agentop session kill <id|name> [--folder <folder>]' }
+    return { kind: 'kill', ref, ...(f.folder ? { folder: f.folder } : {}) }
   }
 
   if (head === 'archive' || head === 'unarchive' || head === 'delete') {
@@ -177,7 +211,7 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
   if (!isHarness(head)) {
     return {
       kind: 'error',
-      message: `Unknown harness or action: ${head}. Expected one of ${HARNESS_ORDER.join(', ')} — or ls, list, attach, kill, rename, note, archive, unarchive, delete.`,
+      message: `Unknown harness or action: ${head}. Expected one of ${HARNESS_ORDER.join(', ')} — or ls, list, folders, attach, kill, rename, note, archive, unarchive, delete.`,
     }
   }
 
@@ -216,6 +250,7 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
       cmd.notify = n
       continue
     }
+    if (arg === '--folder') { cmd.folder = value; continue }
     if (arg === '--role') {
       if (value !== 'leader' && value !== 'worker') return { kind: 'error', message: '--role takes "leader" or "worker".' }
       cmd.role = value
@@ -306,7 +341,7 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
   let task = ''
   let subtask: string | undefined
   const specs: BatchSpec[] = []
-  const shared: { cwd?: string; model?: string; effort?: string; attempt?: string; notify?: NotifySwitch } = {}
+  const shared: { cwd?: string; model?: string; effort?: string; attempt?: string; notify?: NotifySwitch; folder?: string } = {}
 
   let force = false
 
@@ -343,6 +378,9 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
       shared.notify = n
       continue
     }
+    // A positional default like `--notify`: it applies to the `--session`s that FOLLOW it, and a
+    // later `--folder` overrides it for the ones after that.
+    if (arg === '--folder') { shared.folder = value; continue }
     if (arg === '--session') {
       const spec = parseBatchSpec(value, shared)
       if ('error' in spec) return { kind: 'error', message: spec.error }
@@ -360,7 +398,7 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
 /** `<harness>[@<cwd>]: <prompt>` — the one string that describes a session in a batch. */
 export function parseBatchSpec(
   value: string,
-  shared: { cwd?: string; model?: string; effort?: string; attempt?: string; notify?: NotifySwitch } = {},
+  shared: { cwd?: string; model?: string; effort?: string; attempt?: string; notify?: NotifySwitch; folder?: string } = {},
 ): { spec: BatchSpec } | { error: string } {
   const colon = value.indexOf(':')
   const head = (colon === -1 ? value : value.slice(0, colon)).trim()
@@ -382,6 +420,7 @@ export function parseBatchSpec(
       ...(shared.effort ? { effort: shared.effort } : {}),
       ...(shared.attempt ? { attempt: shared.attempt } : {}),
       ...(shared.notify ? { notify: shared.notify } : {}),
+      ...(shared.folder ? { folder: shared.folder } : {}),
     },
   }
 }

@@ -1,0 +1,48 @@
+import { describe, expect, test } from 'bun:test'
+import { visibleQueued } from './queuedCards'
+
+const q = [{ text: 'hello there', at: 1 }]
+
+describe('visibleQueued', () => {
+  test('pending + transcript not loaded -> no cards', () => {
+    expect(visibleQueued(q, [], false)).toEqual([])
+  })
+  test('loaded and the turn is present -> no cards', () => {
+    expect(visibleQueued(q, ['hello there'], true)).toEqual([])
+  })
+  test('loaded without the turn -> card shows', () => {
+    expect(visibleQueued(q, ['other'], true)).toEqual(q)
+  })
+  test('fresh echo after load shows', () => {
+    expect(visibleQueued([{ text: 'new one' }], [], true)).toEqual([{ text: 'new one' }])
+  })
+  test('delivered ones are dropped', () => {
+    expect(visibleQueued(q, [], true, new Set(['hello there']))).toEqual([])
+  })
+})
+
+import { shouldRestoreDraft } from './queuedCards'
+describe('shouldRestoreDraft', () => {
+  test('send failure with no server copy -> text kept', () => {
+    expect(shouldRestoreDraft([], 'x')).toBe(true)
+    expect(shouldRestoreDraft(undefined, 'x')).toBe(true)
+  })
+  test('failure but the server already holds it -> composer stays empty', () => {
+    expect(shouldRestoreDraft([{ text: 'x' }], 'x')).toBe(false)
+  })
+})
+
+describe('visibleQueued local echoes', () => {
+  test('a local echo shows before the transcript loads; a server copy does not', () => {
+    const q = [{ text: 'mine' }, { text: 'old' }]
+    expect(visibleQueued(q, [], false, new Set(), new Set(['mine']))).toEqual([{ text: 'mine' }])
+  })
+})
+
+describe('visibleQueued restored echoes', () => {
+  test('an echo restored from storage (not sent in this mount) waits for the transcript like a server copy', () => {
+    const q = [{ text: 'sent earlier, maybe consumed' }, { text: 'sent now' }]
+    expect(visibleQueued(q, [], false, new Set(), new Set(['sent now']))).toEqual([{ text: 'sent now' }])
+    expect(visibleQueued(q, ['sent earlier, maybe consumed'], true, new Set(), new Set(['sent now']))).toEqual([{ text: 'sent now' }])
+  })
+})

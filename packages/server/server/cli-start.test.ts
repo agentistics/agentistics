@@ -9,6 +9,7 @@ import {
   logRuntime,
   needsProcessLinkRetry,
   parseBootState,
+  reopenRekeyTarget,
   parseContainerFacts,
   parseElapsedSeconds,
   pidsToKill,
@@ -647,4 +648,11 @@ test('spawnManaged still fires the process-link retry when needsProcessLinkRetry
 
 test('production poller wires the exclusive managed log reader', () => {
   expect(sessionsPollerOptions({} as SessionBackend).readManagedConversation).toBe(readManagedConversation)
+})
+
+test('reopenRekeyTarget: an unlinked row reopened born linked moves its mute/folder to the conversation', () => {
+  expect(reopenRekeyTarget({ id: 'old' }, 'conv-1', 'new')).toBe('conv-1')
+  expect(reopenRekeyTarget({ id: 'old' }, undefined, 'new')).toBe('new')
+  expect(reopenRekeyTarget({ id: 'old', conversationId: 'c0' }, 'c0', 'new')).toBeNull()
+  expect(reopenRekeyTarget(undefined, 'conv-1', 'new')).toBeNull()
 })

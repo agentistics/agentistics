@@ -307,6 +307,39 @@ export function resolveGroupRef(current: SessionUserGroupsValue, ref: string): G
   return { ok: false, code: 'no_such_group', matches: [] }
 }
 
+/** "Parent/Child" for a nested folder, the bare name for a top-level one. */
+export function folderPath(current: SessionUserGroupsValue, g: SessionUserGroup): string {
+  const parent = g.parentId ? current.groups.find(p => p.id === g.parentId) : undefined
+  return parent ? `${parent.name.trim()}/${g.name.trim()}` : g.name.trim()
+}
+
+/** How a candidate is listed in a refusal: "Parent/Child (id)". */
+export const folderLabel = (current: SessionUserGroupsValue, g: SessionUserGroup): string => `${folderPath(current, g)} (${g.id})`
+
+export type FolderRefResult =
+  | { ok: true; group: SessionUserGroup; path: string }
+  | { ok: false; code: 'no_such_group' | 'ambiguous_group'; matches: string[] }
+
+/**
+ * Resolve a folder named by id, exact name, or a "Parent/Child" path (case-insensitive, trimmed).
+ * An id wins; otherwise the full path is tried, then the bare name. Never guesses: zero matches or
+ * several are refusals whose `matches` are "Parent/Child (id)" labels (the candidates when ambiguous).
+ * Pure — never creates a folder.
+ */
+export function resolveFolderRef(current: SessionUserGroupsValue, ref: string): FolderRefResult {
+  const needle = ref.trim()
+  if (needle === '') return { ok: false, code: 'no_such_group', matches: [] }
+  const byId = current.groups.find(g => g.id === needle)
+  if (byId) return { ok: true, group: byId, path: folderPath(current, byId) }
+  const lower = needle.toLowerCase().split('/').map(x => x.trim()).join('/')
+  for (const key of [(g: SessionUserGroup) => folderPath(current, g), (g: SessionUserGroup) => g.name.trim()]) {
+    const hits = current.groups.filter(g => key(g).toLowerCase() === lower)
+    if (hits.length === 1) return { ok: true, group: hits[0]!, path: folderPath(current, hits[0]!) }
+    if (hits.length > 1) return { ok: false, code: 'ambiguous_group', matches: hits.map(g => folderLabel(current, g)) }
+  }
+  return { ok: false, code: 'no_such_group', matches: [] }
+}
+
 /** A row as far as session addressing goes. Structural, so this file imports nothing from the TUI. */
 export interface GroupableSession {
   id: string

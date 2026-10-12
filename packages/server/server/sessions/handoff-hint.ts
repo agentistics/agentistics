@@ -159,13 +159,15 @@ export function planHandoffHints(rows: readonly HandoffHintRow[]): HandoffHint[]
   })
 }
 
-export function handoffHintText(hint: HandoffHint): string {
+/** `awayNote` is `awayHandoffNote` (@agentistics/core): while the owner is away the hint says so, so the
+ *  predecessor writes it into the hand-off file — the successor's briefing carries it too. */
+export function handoffHintText(hint: HandoffHint, awayNote = ''): string {
   const n = Math.round(hint.tokens / 1_000)
   const pct = Math.round(hint.fraction * 100)
   const why = hint.why
   const cost = why?.avgCostPerTurnUSD !== undefined ? ` Custo médio: ~US$ ${why.avgCostPerTurnUSD.toFixed(2)} por resposta.` : ''
   const breakEven = why?.breakEvenTurns !== undefined ? ` Ponto de equilíbrio: ${why.breakEvenTurns} respostas.` : ''
-  return `Trocar agora pode economizar e deixar as respostas mais rápidas. Contexto: ${n}k tokens (${pct}% do limite).${cost}${breakEven} Prepare a passagem e abra a sessão sucessora (handoff:true).`
+  return `Trocar agora pode economizar e deixar as respostas mais rápidas. Contexto: ${n}k tokens (${pct}% do limite).${cost}${breakEven} Prepare a passagem e abra a sessão sucessora (handoff:true).${awayNote}`
 }
 
 export interface HandoffHintDeps {
@@ -175,6 +177,8 @@ export interface HandoffHintDeps {
   hinted: (id: string) => Promise<{ level: number; tokens?: number }>
   /** Persists the state; returns false when it could not be written. */
   markHinted: (id: string, level: number, tokens: number | undefined) => Promise<boolean>
+  /** The away-mode sentence to append (empty when the owner is not away). Optional: absent = none. */
+  awayNote?: () => Promise<string>
 }
 
 const inFlight = new Set<string>()
@@ -198,6 +202,7 @@ export async function sendHandoffHints(deps: HandoffHintDeps): Promise<number> {
       const [hint] = planHandoffHints([{ ...row, hintedLevel: prev.level, hintedTokens: prev.tokens }])
       if (!hint) continue
       if (!(await deps.markHinted(row.id, hint.level, hint.tokens).catch(() => false))) continue
+      const awayNote = await (deps.awayNote?.() ?? Promise.resolve('')).catch(() => '')
       const handoff = row.handoffPath !== undefined || row.handoffBytes !== undefined
         ? { path: row.handoffPath, bytes: row.handoffBytes }
         : await findHandoffFile(row.cwd)
@@ -205,7 +210,7 @@ export async function sendHandoffHints(deps: HandoffHintDeps): Promise<number> {
         model: row.model,
         ...(handoff ? { handoffPath: handoff.path, handoffBytes: handoff.bytes } : {}),
       }) }
-      const result = await deps.prompt(row.id, `[from agentistics · question]\n${handoffHintText(detailed)}`).catch(() => ({ ok: false }))
+      const result = await deps.prompt(row.id, `[from agentistics · question]\n${handoffHintText(detailed, awayNote)}`).catch(() => ({ ok: false }))
       if (result.ok) sent++
       else await deps.markHinted(row.id, prev.level, prev.tokens).catch(() => false)
     } finally {

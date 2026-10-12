@@ -266,3 +266,28 @@ describe('--notify', () => {
     expect(parseSessionArgs(['batch', '--task', 't', '--notify', 'x', '--session', 'claude: a']).kind).toBe('error')
   })
 })
+
+describe('--folder', () => {
+  it('start takes --folder', () => {
+    const c = parseSessionArgs(['claude', '--bg', '--folder', 'Work/Workers'])
+    expect(c.kind === 'start' && c.folder).toBe('Work/Workers')
+    expect(parseSessionArgs(['claude', '--folder']).kind).toBe('error')
+  })
+  it('batch --folder is a default for the following sessions, overridable', () => {
+    const c = parseSessionArgs(['batch', '--task', 't', '--folder', 'A', '--session', 'claude: x', '--folder', 'B', '--session', 'codex: y'])
+    expect(c.kind === 'batch' && c.specs.map(s => s.folder)).toEqual(['A', 'B'])
+    const d = parseSessionArgs(['batch', '--task', 't', '--session', 'claude: x'])
+    expect(d.kind === 'batch' && d.specs[0]!.folder).toBeUndefined()
+  })
+  it('open and kill take --folder anywhere', () => {
+    expect(parseSessionArgs(['open', 'my task', '--folder', 'A/B'])).toEqual({ kind: 'open', task: 'my task', folder: 'A/B' })
+    expect(parseSessionArgs(['kill', 'abc', '--folder', 'A/Finalizadas'])).toEqual({ kind: 'kill', ref: 'abc', folder: 'A/Finalizadas' })
+    expect(parseSessionArgs(['kill', '--folder', 'X', 'abc'])).toEqual({ kind: 'kill', ref: 'abc', folder: 'X' })
+    expect(parseSessionArgs(['kill', 'abc'])).toEqual({ kind: 'kill', ref: 'abc' })
+    expect(parseSessionArgs(['kill', 'abc', '--folder']).kind).toBe('error')
+  })
+  it('folders lists, with --json', () => {
+    expect(parseSessionArgs(['folders'])).toEqual({ kind: 'folders' })
+    expect(parseSessionArgs(['folders', '--json'])).toEqual({ kind: 'folders', json: true })
+  })
+})

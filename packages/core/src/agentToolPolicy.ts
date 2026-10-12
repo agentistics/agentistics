@@ -76,7 +76,9 @@ export const AGENT_TOOL_NAMES = [
   // Session notifications (1)
   'agentistics_session_notify',
   'agentistics_session_message',
+  'agentistics_checkin_report',
   'agentistics_session_role',
+  'agentistics_session_away',
   // Metrics (6)
   'agentistics_summary',
   'agentistics_harnesses',
@@ -164,9 +166,17 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
     ...GROUPS, risk: 'W', routes: ['POST /api/session-message'],
     reason: 'types a message into another session through the composer path; additive, rate-limited, sender verified',
   },
+  agentistics_checkin_report: {
+    ...GROUPS, risk: 'W', routes: ['POST /api/checkin/report'],
+    reason: 'records the calling leader\'s own check-in round; additive, sender verified',
+  },
   agentistics_session_role: {
     ...GROUPS, risk: 'W', routes: ['POST /api/session-roles'],
     reason: 'sets a session label (role + title prefix) and types a one-line note; reversible by setting auto; a session may only touch itself or the sessions it started',
+  },
+  agentistics_session_away: {
+    ...GROUPS, risk: 'W', routes: ['GET /api/away', 'PUT /api/away', 'POST /api/away/notice'],
+    reason: 'reads or switches away mode (what newly started sessions are told about the owner being out) and lets a leader raise a notice in the owner\'s bell; reversible by switching it off; the server accepts writes only from a verified LEADER session',
   },
   // ------------------------------------------------------------------ Metrics
   agentistics_summary: { ...DATA, capability: 'localTranscripts', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/runtime/metrics'], reason: 'reads computed metrics' },

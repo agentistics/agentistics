@@ -18,6 +18,7 @@
  */
 
 import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { requestPlanUsageModal } from '../../lib/planUsageModalRequests'
 import { subscribeNayRequests } from '../../lib/nayDockRequests'
 import { ArrowDownToLine, ArrowLeft, Loader2, Minus, MoreVertical, PictureInPicture2, Plus, Power, SquareArrowOutUpRight, X } from 'lucide-react'
 import { isNayCwd, nayPlacementRows, planNayPlacement, sessionIdentityKey, type Filters, type SessionMeta } from '@agentistics/core'
@@ -56,6 +57,7 @@ import { getFabLive, subscribeFabLive } from '../../lib/nayFabLive'
 import { followSettled, forceRest, shouldWake, frameStyle, initFollow, landImpulse, nextQuiet, renderDock, REST_AFTER_FRAMES, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
 import { DockSettings, DockSettingsScreen } from './DockSettings'
 import { NayNotifyCard } from './NayNotifyCard'
+import { startCheckinAlerts } from '../../lib/checkinAlerts'
 import type { UpdateCardPlacement } from './NayUpdateCard'
 import { setOpenSession, setVisibleSessions, useNayAlerts } from '../../lib/nayNotifyStore'
 import { nayFabVisible, useNayFabShownInSession } from '../../lib/nayFabVisibility'
@@ -128,6 +130,7 @@ export interface NayDockProps {
 }
 
 export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdatePrompt }: NayDockProps) {
+  useEffect(() => startCheckinAlerts(), [])
   const pt = lang === 'pt'
   const { fleet, loading, unsupported, stale, act } = useFleet(lang)
   const sessionAlerts = useNayAlerts()
@@ -644,7 +647,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
       <VaultExpiryCard lang={lang} isMobile={isMobile} zIndex={dockZ + 1} />
       <VaultUseRequestCard lang={lang} />
       <NayNotifyCard lang={lang} isMobile={isMobile} rows={fleet.rows} finishedTasks={fleet.finishedTasks} act={act} fabStyle={cardStyleOf(fabPrefs)} onReply={open} zIndex={dockZ + 1}
-        onOpenLimits={() => { setTab('limits'); setDock(d => ({ ...d, open: true, panelSession: null })) }} />
+        onOpenLimits={requestPlanUsageModal} />
       {!dock.open && sessionAlerts.length === 0 && renderUpdatePrompt?.('float')}
       {/* The trail/comet outline echoes behind the following dock — drawn by the follow loop. */}
       {echoStyle && [0, 1].map(i => (

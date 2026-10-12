@@ -16,7 +16,7 @@
 
 import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useNavigate, useOutletContext, useParams } from 'react-router-dom'
+import { useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft, BarChart3, ClipboardList, ExternalLink, FileText, Link2,
   Filter, LayoutGrid, MessageSquare, Pencil, Plus, Rows3, Search, Settings2, Trash2, X, XCircle,
@@ -41,7 +41,7 @@ import {
   useBoardPref,
 } from '../components/tasks/boardPrefs'
 import { BoardArrange } from '../components/tasks/BoardArrange'
-import { DeliveryDetail, type DeliveryTab } from '../components/tasks/DeliveryDetail'
+import { DELIVERY_TABS, DeliveryDetail, type DeliveryTab } from '../components/tasks/DeliveryDetail'
 import { TaskHero } from '../components/tasks/TaskHero'
 import { liveSessionsOf } from '../components/tasks/threadView'
 import { useMoney } from '../components/tasks/money'
@@ -560,7 +560,9 @@ function TaskDetailView({ id }: { id: string }) {
   const { statuses } = useTaskStatuses()
   const navigate = useNavigate()
   const isMobile = useIsMobile()
-  const [tab, setTab] = useState<DeliveryTab>('subtasks')
+  // `?tab=activity` (the ⓘ panel's "Ver registro") opens straight onto that tab.
+  const [params] = useSearchParams()
+  const [tab, setTab] = useState<DeliveryTab>(() => (DELIVERY_TABS as readonly string[]).includes(params.get('tab') ?? '') ? params.get('tab') as DeliveryTab : 'subtasks')
   // The fleet poll is module-level and shared — this subscribes to the same snapshot the sessions
   // workspace reads, so the hero's "N live" costs no request of its own.
   const { fleet, loading: fleetLoading } = useFleet(lang)

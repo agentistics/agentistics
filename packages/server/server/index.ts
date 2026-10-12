@@ -31,6 +31,8 @@ import { listGeminiSessions, getGeminiSessionMessages, type GeminiSessionSummary
 import { listCopilotSessions, getCopilotSessionMessages, type CopilotSessionSummary, type CopilotSessionMessage } from './copilot-sessions'
 import { PROJECTS_DIR, AGENTISTICS_DATA_DIR } from './config'
 import { safeReadDir } from './utils'
+import { createHash } from 'node:crypto'
+import { ensureVapidPublicKey, isMobileUserAgent, parseMobileStore, readMobileSubscriptions, removeMobileSubscription, upsertMobileSubscription, writeMobileSubscriptions } from './events/mobile-push'
 import { decodeProjectDir } from './git'
 import { getEnabledAdapters } from './adapters/types'
 import { handleLogout, handleSession, getPrincipal, getPrincipalSession, makePrincipalSessionCookieHeader, SESSION_REFRESH_MS, isAuthed } from './auth'
@@ -142,6 +144,7 @@ import { startAgentClient, reconcileNow } from './team-agent-client'
 import { validateIngestToken } from './team-tokens'
 import { getAccount } from './accounts'
 import { getTeam } from './teams'
+import { stateFor as checkinState, putState as putCheckin, reportFromIdentity as reportCheckin, runNow as runCheckin, startCheckinTimer } from './checkin'
 import { discoverProjectDisks } from './disk-picker'
 import { allowedRoots, listFolders, rootListing } from './fs-folders'
 import { forgetProjects } from './sessions/project-source'
@@ -1091,6 +1094,42 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
+    if (url.pathname === '/api/mobile-push/vapid' && req.method === 'GET') {
+      try { return json({ publicKey: await ensureVapidPublicKey() }) }
+      catch { return json({ error: 'mobile push is unavailable until the vault is unlocked' }, 503) }
+    }
+
+    if (url.pathname === '/api/mobile-push/subscriptions' && req.method === 'GET') {
+      const subscriptions = (await readMobileSubscriptions()).map(({ id, kind, createdAt }) => ({ id, kind, createdAt }))
+      return json({ subscriptions })
+    }
+
+    if (url.pathname === '/api/mobile-push/subscription' && req.method === 'PUT') {
+      try {
+        const read = await readJsonLimited<Record<string, unknown>>(req, LIMITS.bodyBytes)
+        if (!read.ok) return json({ error: read.error === 'too_large' ? 'request body too large' : 'invalid push subscription' }, 400)
+        const body = read.value
+        const keys = body.keys as Record<string, unknown> | undefined
+        const sub = parseMobileStore({ subscriptions: [{ ...body, id: typeof body.endpoint === 'string' ? createHash('sha256').update(body.endpoint).digest('hex').slice(0, 32) : '', createdAt: new Date().toISOString(), kind: isMobileUserAgent(req.headers.get('user-agent')) ? 'mobile' : 'desktop', keys }] }).subscriptions[0]
+        if (!sub) return json({ error: 'invalid push subscription' }, 400)
+        const current = { subscriptions: await readMobileSubscriptions() }
+        await writeMobileSubscriptions(upsertMobileSubscription(current, sub).subscriptions)
+        return json({ ok: true })
+      } catch { return json({ error: 'invalid push subscription' }, 400) }
+    }
+
+    if (url.pathname === '/api/mobile-push/subscription' && req.method === 'DELETE') {
+      try {
+        const read = await readJsonLimited<{ endpoint?: unknown }>(req, LIMITS.bodyBytes)
+        if (!read.ok) return json({ error: read.error === 'too_large' ? 'request body too large' : 'invalid push subscription' }, 400)
+        const body = read.value
+        const current = { subscriptions: await readMobileSubscriptions() }
+        const hit = current.subscriptions.find(s => s.endpoint === body.endpoint)
+        if (hit) await writeMobileSubscriptions(removeMobileSubscription(current, hit.id).subscriptions)
+        return json({ ok: true })
+      } catch { return json({ error: 'invalid push subscription' }, 400) }
+    }
+
     if (url.pathname === '/api/fs/folders' && req.method === 'GET') {
       try {
         const scanRoots = (await readPreferences()).scanRoots ?? []
@@ -2022,6 +2061,31 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }, await defaultMessageDeps())
       return json(out, messageStatus(out))
     }
+    // LEADER CHECK-INS — agenda state, immediate run, and the MCP report share this server store.
+    if (url.pathname === '/api/checkin' || url.pathname.startsWith('/api/checkin/')) {
+      if (url.pathname === '/api/checkin/report' && req.method === 'POST') {
+        const body = await req.json().catch(() => ({})) as { state?: unknown; summary?: unknown; actions?: unknown; needs?: unknown; session?: { id?: unknown; token?: unknown } }
+        const { verifySessionIdentity } = await import('./sessions/session-identity')
+        const sender = body.session ? await verifySessionIdentity(body.session.id, body.session.token) : null
+        if (!sender) return json({ error: 'unverified_sender' }, 403)
+        const reported = await reportCheckin(sender, { state: String(body.state) as any, summary: String(body.summary), ...(Array.isArray(body.actions) ? { actions: body.actions as any } : {}), ...(Array.isArray(body.needs) ? { needs: body.needs as any } : {}) })
+        // A verified session that is not a leader is refused in words, never answered `200 null`.
+        return reported ? json(reported) : json({ error: 'not_a_leader' }, 403)
+      }
+      const { readFleet } = await import('./sessions/fleet-web')
+      const { readRolesDoc, roleOfRow } = await import('./sessions/session-roles')
+      const { AGENTISTICS_DATA_DIR } = await import('./config')
+      const rows = (await readFleet('pt')).rows
+      const roles = (await readRolesDoc(AGENTISTICS_DATA_DIR)).roles
+      const leaders = rows.filter(r => roleOfRow(roles, r) === 'leader')
+      const key = url.pathname === '/api/checkin' ? undefined : decodeURIComponent(url.pathname.slice('/api/checkin/'.length).replace(/\/run$/, ''))
+      const row = key ? leaders.find(r => r.id === key || r.conversationId === key) : undefined
+      if (key && !row) return json({ error: 'not_found' }, 404)
+      if (req.method === 'GET') return json(key ? await checkinState(key) : await Promise.all(leaders.map(r => checkinState(r.conversationId ?? r.id))))
+      if (req.method === 'PUT' && row) return json(await putCheckin(row.conversationId ?? row.id, await req.json().catch(() => ({}))))
+      if (req.method === 'POST' && url.pathname.endsWith('/run') && row) return json({ ok: await runCheckin(row.conversationId ?? row.id) })
+      return json({ error: 'method_not_allowed' }, 405)
+    }
     // SESSION ROLES — leader | worker, owned by the server (`sessions/session-roles.ts`). The browser reads the
     // map and sets any session's role; a session calling through the MCP proves who it is (HMAC, as for
     // messages) and may set its own role, or its children's.
@@ -2044,6 +2108,25 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }, await defaultRoleDeps())
       return json(out, roleStatus(out))
     }
+    // AWAY MODE — the owner is out; sessions started meanwhile are told so (`away.ts`). The browser and
+    // the CLI write it as the person; a session (MCP) must prove itself and be a leader.
+    if (url.pathname === '/api/away' && req.method === 'GET') {
+      const { readAwayView, defaultAwayDeps } = await import('./away')
+      return json(await readAwayView(await defaultAwayDeps()))
+    }
+    if (url.pathname === '/api/away' && req.method === 'PUT') {
+      const body = await req.json().catch(() => ({}))
+      const { setAway, awayStatus, defaultAwayDeps } = await import('./away')
+      const out = await setAway(body, await defaultAwayDeps())
+      if (out.ok) (await import('./sse')).broadcastAwayChanged()
+      return json(out, awayStatus(out))
+    }
+    if (url.pathname === '/api/away/notice' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({}))
+      const { sendAwayNotice, awayStatus, defaultAwayDeps } = await import('./away')
+      const out = await sendAwayNotice(body, await defaultAwayDeps())
+      return json(out, awayStatus(out))
+    }
     // USER SESSION GROUPS — the door the MCP tools use to organise sessions (see
     // `sessions/session-groups-web.ts`). Matched before `/api/tasks`; it shares no path with it.
     if (url.pathname === '/api/session-groups' && req.method === 'GET') {
@@ -2063,6 +2146,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const body = await req.json().catch(() => ({})) as { session?: string }
       const { groupOp, groupStatus } = await import('./sessions/session-groups-web')
       const out = await groupOp({ op: 'remove', session: String(body.session ?? '') })
+      return json(out, groupStatus(out))
+    }
+    if (url.pathname === '/api/session-groups-broadcast' && req.method === 'POST') {
+      const { groupOp, groupStatus } = await import('./sessions/session-groups-web')
+      const out = await groupOp({ op: 'broadcast' })
       return json(out, groupStatus(out))
     }
     if (url.pathname.startsWith('/api/session-groups/') && req.method === 'POST') {
@@ -4961,6 +5049,7 @@ try {
 startHostAllowlistRefresh()
 // PORT (47291) is always the api + mcp endpoint.
 Bun.serve<WSData>({ hostname: '0.0.0.0', port: PORT, idleTimeout: 60, maxRequestBodySize: LIMITS.ingestBodyBytes, websocket: _wsHandlers, fetch: handleCompressed })
+startCheckinTimer()
 // Binary mode also serves the web dashboard on WEB_PORT (47292) — that's the URL you open.
 // Same handler → the SPA's same-origin `/api/*` calls resolve against 47292 and just work,
 // while 47291 stays the dedicated api + mcp port.

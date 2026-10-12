@@ -20,7 +20,7 @@
  */
 
 import { useMemo, useRef, useState, type ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -62,8 +62,11 @@ import {
   patchSubtask, removeComment, removeSubtask, saveStagedSession,
   uploadFile, useTaskActivity, useTaskStatuses,
   type AttemptRollup, type AttemptView, type Subtask, type TaskDetail, type TaskSessionRow,
-  type TaskFile, type TaskListRow,
+  type TaskFile, type TaskListRow, groupActivity, type ActivityFilter, type GroupedActivity,
 } from '../../lib/tasks'
+import { Link2 } from 'lucide-react'
+import { ChipSelect } from './ChipSelect'
+import { taskPath } from '../../lib/sessionTaskLink'
 
 /**
  * The PLAN half of a task: how urgent it is, and where it stands.
@@ -83,12 +86,60 @@ import {
  * the answer cannot come from the task record, which only ever holds the latest value of each
  * field. A kind nobody has words for prints itself rather than vanishing.
  */
-function ActivityTab({ id }: { id: string }) {
+function ActivityTab({ id, lang }: { id: string; lang: Lang }) {
   const { events, loading } = useTaskActivity(id, 100)
+  // `?filter=checkins` (the ⓘ panel's "Ver registro") opens the log already narrowed to check-ins.
+  const [params] = useSearchParams()
+  const [filter, setFilter] = useState<ActivityFilter>(() => params.get('filter') === 'checkins' ? 'only-checkins' : 'all')
+  const [openRuns, setOpenRuns] = useState<Set<string>>(() => new Set())
+  const grouped = useMemo(() => groupActivity(events, filter), [events, filter])
+  const pt = lang === 'pt'
+  const filterOptions = [
+    { value: 'all', label: pt ? 'Tudo' : 'All', color: 'var(--text-secondary)', dim: 'var(--ag-tint-2)' },
+    { value: 'without-checkins', label: pt ? 'Ocultar check-ins' : 'Hide check-ins', color: 'var(--text-secondary)', dim: 'var(--ag-tint-2)' },
+    { value: 'only-checkins', label: pt ? 'Só check-ins' : 'Check-ins only', color: 'var(--accent-green)', dim: 'var(--accent-green-dim)' },
+  ] as const
+  // The prototype's clock: `21h10` in Portuguese, `21:10` in English — never the browser's AM/PM.
+  const time = (at: string) => { const d = new Date(at); const hh = String(d.getHours()).padStart(2, '0'); const mm = String(d.getMinutes()).padStart(2, '0'); return pt ? `${hh}h${mm}` : `${hh}:${mm}` }
+  const link = (kind: 'session' | 'subtask' | 'task', target: string, text: string, taskId?: string, critical = false) => {
+    const href = kind === 'session' ? sessionPath(target) : taskPath(taskId ?? target)
+    // A chip, as in the prototype: a link is a thing you can open, not a sentence in another colour.
+    return <a key={`${kind}-${target}-${text}`} href={href} onClick={e => { e.preventDefault(); navigate(href) }} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, maxWidth: '100%', padding: '2px 8px', borderRadius: 999, border: '1px solid var(--border-subtle)', background: 'var(--ag-tint-2)', color: critical ? 'var(--accent-red)' : 'var(--anthropic-orange)', textDecoration: 'none', fontSize: 11.5, overflowWrap: 'anywhere' }}><Link2 size={11} style={{ flexShrink: 0 }} />{critical && <b style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{pt ? 'crítico:' : 'critical:'}</b>}<span style={{ minWidth: 0 }}>{text}</span></a>
+  }
+  const STATE_DOT = { ok: 'var(--accent-green)', resolved: 'var(--anthropic-orange)', needs_you: 'var(--accent-red)' } as const
+  const dot = (state: keyof typeof STATE_DOT | undefined) => <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, alignSelf: 'center', background: STATE_DOT[state ?? 'ok'] }} />
+  const navigate = useNavigate()
+  const checkin = (e: GroupedActivity) => e.kind === 'checkin'
+  const groupedCheckin = (e: GroupedActivity): e is Extract<GroupedActivity, { grouped: true }> => e.kind === 'checkin' && 'grouped' in e
+  const row = (e: GroupedActivity) => {
+    if (checkin(e)) {
+      const run = groupedCheckin(e)
+      const children = run ? e.events : [e]
+      const expanded = run && openRuns.has(e.id)
+      const first = children[0]!
+      const last = children[children.length - 1]!
+      const label = run
+        ? `${children.length} ${pt ? 'check-ins sem novidade' : 'check-ins with no news'}, ${time(last.at)}–${time(first.at)}`
+        : (e.summary ?? (pt ? 'check-in sem novidade' : 'check-in with no news'))
+      if (run && !expanded) return <button key={e.id} onClick={() => setOpenRuns(prev => new Set(prev).add(e.id))} style={{ display: 'flex', width: '100%', gap: 9, alignItems: 'center', textAlign: 'left', border: '1px dashed var(--border-subtle)', borderRadius: 8, background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', font: 'inherit', padding: '7px 9px', minHeight: 36 }}><span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>{time(e.at)}</span>{dot('ok')}<span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, flex: 1, minWidth: 0 }}>{label}</span><span aria-hidden="true">›</span></button>
+      const tone = e.state === 'resolved' ? { bg: 'var(--anthropic-orange-dim)', border: 'color-mix(in srgb, var(--anthropic-orange) 45%, transparent)' }
+        : e.state === 'needs_you' ? { bg: 'var(--accent-red-dim)', border: 'color-mix(in srgb, var(--accent-red) 45%, transparent)' }
+        : { bg: 'transparent', border: 'transparent' }
+      const links = [...(e.actions ?? []).filter(a => a.link).map(a => link(a.link!.kind, a.link!.id, a.text, a.link!.taskId)), ...(e.needs ?? []).filter(n => n.link).map(n => link(n.link!.kind, n.link!.id, n.text, n.link!.taskId, n.critical === true))]
+      const body = [...(e.actions ?? []).filter(a => !a.link).map(a => ({ text: a.text, critical: false })), ...(e.needs ?? []).filter(n => !n.link).map(n => ({ text: n.text, critical: n.critical === true }))]
+      return <div key={e.id} style={{ display: 'grid', gap: 6, padding: '8px 10px', borderRadius: 8, background: tone.bg, border: `1px solid ${tone.border}` }}>
+        <div style={{ display: 'flex', gap: 9, alignItems: 'baseline', fontSize: 12 }}><span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>{time(e.at)}</span>{dot(run ? 'ok' : e.state)}<span style={{ color: 'var(--text-secondary)', flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}><strong style={{ color: 'var(--text-primary)', fontWeight: 650 }}>{label}</strong>{!run && <span style={{ color: 'var(--text-tertiary)' }}>{' · '}{e.actor}</span>}</span>{run && <button aria-label={pt ? 'Recolher' : 'Collapse'} onClick={() => setOpenRuns(prev => { const next = new Set(prev); next.delete(e.id); return next })} style={{ border: 0, background: 'none', color: 'var(--text-tertiary)', cursor: 'pointer' }}>⌃</button>}</div>
+        {body.map(b => <div key={b.text} style={{ fontSize: 12, color: b.critical ? 'var(--accent-red)' : 'var(--text-secondary)', paddingLeft: 52, overflowWrap: 'anywhere' }}>{b.critical && <b>{pt ? 'crítico: ' : 'critical: '}</b>}{b.text}</div>)}
+        {links.length > 0 && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, paddingLeft: 52 }}>{links}</div>}
+        {run && children.map(child => <div key={child.id} style={{ ...microLabel, paddingLeft: 52 }}>{time(child.at)} · {child.summary ?? (pt ? 'sem novidade' : 'no news')}</div>)}
+      </div>
+    }
+    return <div key={e.id} style={{ display: 'flex', gap: 9, alignItems: 'baseline', fontSize: 12 }}><span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>{time(e.at)}</span><span style={{ color: 'var(--text-secondary)' }}><strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{e.actor}</strong>{' '}{e.kind === 'status' ? `moved ${e.from ?? '?'} → ${e.to ?? '?'}` : e.kind === 'claim' ? (e.detail === 'takeover' ? 'took over' : 'claimed it') : e.kind === 'release' ? 'released it' : e.kind === 'priority' ? `set priority ${e.from ?? '?'} → ${e.to ?? '?'}` : e.kind === 'assign' ? `set the owner to ${e.to || 'nobody'}` : e.kind === 'session' ? `filed a ${e.detail ?? ''} session`.trim() : e.kind === 'move' ? 'reordered it' : e.kind}</span></div>
+  }
   if (loading) {
     return <div style={{ ...surface, padding: 14, fontSize: 12.5, color: 'var(--text-tertiary)' }}>Loading…</div>
   }
-  if (events.length === 0) {
+  if (grouped.length === 0) {
     return (
       <div style={{ ...surface, padding: 14, fontSize: 12.5, color: 'var(--text-tertiary)' }}>
         Nothing recorded yet. Status moves, claims, priority changes and sessions filed under this
@@ -98,24 +149,8 @@ function ActivityTab({ id }: { id: string }) {
   }
   return (
     <div style={{ ...surface, padding: 14, display: 'grid', gap: 9 }}>
-      {events.map(e => (
-        <div key={e.id} style={{ display: 'flex', gap: 9, alignItems: 'baseline', fontSize: 12 }}>
-          <span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>
-            {new Date(e.at).toLocaleString()}
-          </span>
-          <span style={{ color: 'var(--text-secondary)' }}>
-            <strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{e.actor}</strong>
-            {' '}{e.kind === 'status' ? `moved ${e.from ?? '?'} → ${e.to ?? '?'}`
-              : e.kind === 'claim' ? (e.detail === 'takeover' ? 'took over' : 'claimed it')
-              : e.kind === 'release' ? 'released it'
-              : e.kind === 'priority' ? `set priority ${e.from ?? '?'} → ${e.to ?? '?'}`
-              : e.kind === 'assign' ? `set the owner to ${e.to || 'nobody'}`
-              : e.kind === 'session' ? `filed a ${e.detail ?? ''} session`.trim()
-              : e.kind === 'move' ? 'reordered it'
-              : e.kind}
-          </span>
-        </div>
-      ))}
+      <div style={{ maxWidth: 220 }}><ChipSelect value={filter} options={filterOptions} onPick={v => setFilter(v as ActivityFilter)} compact /></div>
+      {grouped.map(row)}
     </div>
   )
 }
@@ -887,7 +922,8 @@ export function CommentsTab({ id, detail, onChanged, target, lang = 'en', looseO
   )
 }
 
-export type DeliveryTab = 'threads' | 'overview' | 'sessions' | 'comments' | 'subtasks' | 'files' | 'activity' | 'about'
+export const DELIVERY_TABS = ['threads', 'overview', 'sessions', 'comments', 'subtasks', 'files', 'activity', 'about'] as const
+export type DeliveryTab = typeof DELIVERY_TABS[number]
 
 export interface DeliveryDetailProps {
   id: string
@@ -1178,7 +1214,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted, tab
             />
           )}
 
-          {tab === 'activity' && <ActivityTab id={id} />}
+          {tab === 'activity' && <ActivityTab id={id} lang={lang} />}
 
           {tab === 'files' && (
             <TaskFiles

@@ -30,3 +30,29 @@ describe('confirmSendLanded', () => {
     expect(await confirmSendLanded(async () => { if (++n < 2) throw new Error('net'); return true }, { sleep: nosleep })).toBe(true)
   })
 })
+
+import { chatHoldsText, textInPending } from './fleetAct'
+describe('textInPending', () => {
+  test('finds a mid-turn delivery held by the server, whitespace-normalised', () => {
+    expect(textInPending([{ text: 'fix  the\nbug' }], 'fix the bug')).toBe(true)
+  })
+  test('absent text, empty text or no pending is not landed', () => {
+    expect(textInPending([{ text: 'other' }], 'fix the bug')).toBe(false)
+    expect(textInPending(undefined, 'x')).toBe(false)
+    expect(textInPending([{ text: 'x' }], ' ')).toBe(false)
+  })
+  test('landed check accepts pending and refuses when nothing carries the text', async () => {
+    const mk = (b: { turns: { role: string; text: string }[]; pending: { text: string }[] }) => async () =>
+      chatHoldsText(b, 'hi')
+    expect(await confirmSendLanded(mk({ turns: [], pending: [{ text: 'hi' }] }), { attempts: 2, sleep: async () => {} })).toBe(true)
+    expect(await confirmSendLanded(mk({ turns: [], pending: [] }), { attempts: 2, sleep: async () => {} })).toBe(false)
+  })
+})
+
+describe('chatHoldsText', () => {
+  test('a turn or a pending entry counts; a different text does not', () => {
+    expect(chatHoldsText({ turns: [{ role: 'user', text: 'say hi there' }] }, 'hi there')).toBe(true)
+    expect(chatHoldsText({ turns: [{ role: 'assistant', text: 'hi there' }], pending: [{ text: 'hi there' }] }, 'hi there')).toBe(true)
+    expect(chatHoldsText({ turns: [{ role: 'assistant', text: 'hi there' }], pending: [] }, 'hi there')).toBe(false)
+  })
+})
