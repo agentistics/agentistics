@@ -119,6 +119,9 @@ function usageOf(
 
 /** The per-model usage the record states: `model_usage` when present, else one row for `model`. */
 function modelRows(meta: SessionMeta, tokens: CapabilityState): { model: string; usage: ModelUsageCounters }[] {
+  // The source stated no usage (`tokens_unavailable`): a stored 0 is the ABSENCE of a measurement, and a
+  // `model.completed` carrying it would be read as a measured $0 for that model.
+  if (meta.tokens_unavailable && !(meta.model_usage && Object.keys(meta.model_usage).length > 0)) return []
   const rows: { model: string; usage: ModelUsageCounters }[] = []
   const mu = meta.model_usage
   if (mu && typeof mu === 'object' && Object.keys(mu).length > 0) {

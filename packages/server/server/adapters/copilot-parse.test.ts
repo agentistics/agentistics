@@ -239,3 +239,17 @@ test('a tool with no name is not counted under an empty key', () => {
   const s = parseCopilotEvents(lines, 'f')!
   expect(Object.keys(s.tool_counts)).toEqual([])
 })
+
+test('a shutdown with empty modelMetrics flags tokens unavailable instead of reporting zeros', () => {
+  const failed = [
+    JSON.stringify({ type: 'session.start', data: { sessionId: 'f1', startTime: '2026-02-23T00:04:51.096Z', context: { cwd: '/p' } }, timestamp: '2026-02-23T00:04:51.119Z' }),
+    JSON.stringify({ type: 'user.message', data: { content: 'x' }, timestamp: '2026-02-23T00:06:00.000Z' }),
+    JSON.stringify({ type: 'session.shutdown', data: { shutdownType: 'error', totalApiDurationMs: 0, modelMetrics: {} }, timestamp: '2026-02-23T00:06:01.000Z' }),
+  ].join('\n')
+  const s = parseCopilotEvents(failed, 'fb')!
+  expect(s.tokens_unavailable).toBe(true)
+})
+
+test('reported usage is never flagged unavailable', () => {
+  expect(parseCopilotEvents(SAMPLE_WITH_SHUTDOWN, 'fb')!.tokens_unavailable).toBeUndefined()
+})

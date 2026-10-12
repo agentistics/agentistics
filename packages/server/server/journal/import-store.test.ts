@@ -93,6 +93,15 @@ describe('storeSessionEvents', () => {
     expect(r.events.some(e => e.type === 'model.completed')).toBe(false)
   })
 
+  test('tokens_unavailable: a SUPPORTED harness with no stated usage emits no model.completed (never a measured $0 per model)', () => {
+    const r = storeSessionEvents(
+      meta({ harness: 'kimi', model: 'kimi-k2', input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, tokens_unavailable: true }),
+      ctx({ harness: 'kimi', tokens: SUPPORTED }),
+    )
+    if (!r.ok) throw new Error(r.reason)
+    expect(r.events.some(e => e.type === 'model.completed')).toBe(false)
+  })
+
   test('model_usage → one model.completed per model, in model order, gauge only on the session model', () => {
     const r = storeSessionEvents(meta({
       model: 'claude-opus-5',

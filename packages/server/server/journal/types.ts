@@ -51,6 +51,11 @@ export interface AppendResult {
   rejected: Rejection[]
 }
 
+export interface ReplaceResult extends AppendResult {
+  /** False means the delete+insert transaction rolled back and the old source is intact. */
+  ok: boolean
+}
+
 export interface ReadPage {
   events: AgentisticsEvent[]
   /** The rowid of the last event returned — pass it back to continue. Unchanged when the page is
@@ -138,6 +143,19 @@ export interface Journal {
    * head could not be read (closed, or the read failed — counted in `failedReads`): also "unknown".
    */
   head?(): Promise<number | null>
+  /**
+   * METRICS.FIX (D8): delete every event whose `sourceRef` names this source — the ref itself, or
+   * `<ref>:…` / `<ref>/…` (a conversation's events are `gemini:<id>:msg:3`, a Kimi agent's
+   * `kimi:<id>/agents/main:12`). The import REPLACES a source whose adapter version changed instead of
+   * deduplicating it: `UNIQUE(event_id)` would otherwise keep the old, wrong event. Bumps the journal
+   * EPOCH (`epoch()`), which makes every projection re-fold, because a cursor never sees a delete.
+   * Answers how many rows went; `0` also when the journal cannot write. Optional so an older fake fits.
+   */
+  deleteBySourcePrefix?(prefix: string): Promise<number>
+  /** Replace one source and its events in one immediate transaction. */
+  replaceBySourcePrefix?(prefix: string, events: readonly AgentisticsEvent[]): Promise<ReplaceResult>
+  /** How many times rows were deleted from this journal (0 = never). `null` = could not be read. */
+  epoch?(): Promise<number | null>
   status(): JournalStatus
   close(): void
 }

@@ -432,7 +432,9 @@ export async function runJournalImport(
   const tty = process.stderr.isTTY === true
   // Every REAL import records its progress beside the journal (`backfill.ts`): its completion is what
   // the projections wait for, whether the server started it or a person did.
-  const progress = args.dryRun ? null : await importProgressRecorder(deps.progressPath)
+  const progress = args.dryRun ? null : await importProgressRecorder(deps.progressPath, Object.fromEntries(
+    Object.entries(integrations).flatMap(([h, i]) => i?.version && (args.harnesses.length === 0 || args.harnesses.includes(h as never)) ? [[h, i.version] as const] : []),
+  ))
   try {
     const result = await run({
       harnesses: args.harnesses,
@@ -472,14 +474,18 @@ export async function runJournalImport(
  * `paused` while the memory gate refuses, and the end state, `completedAt` only for an import that ran
  * to its end. Bound to the journal file's identity, read when written (the import creates the file).
  */
-async function importProgressRecorder(path?: string) {
+async function importProgressRecorder(path?: string, adapterVersions: Record<string, string> = {}) {
   const [{ JOURNAL_BACKFILL_PATH, JOURNAL_PATH: journalPath }, backfill, { fileIdentity }] = await Promise.all([
     import('./config'), import('./journal/backfill'), import('./journal/shadow'),
   ])
   const file = path ?? JOURNAL_BACKFILL_PATH
   const startedAt = new Date().toISOString()
+  // An UPGRADE re-import (adapter versions changed) starts from a completed record: keep its
+  // `completedAt` while it runs, or the projections would answer "backfilling" for the whole re-read.
+  const prior = backfill.readBackfillProgress(file)
+  const keep = prior && backfill.backfillComplete(prior, fileIdentity(journalPath)) ? { completedAt: prior.completedAt!, ...(prior.adapterVersions ? { adapterVersions: prior.adapterVersions } : {}) } : {}
   let rec: import('./journal/backfill').BackfillProgress = {
-    v: 1, identity: fileIdentity(journalPath), state: 'running', startedAt, updatedAt: startedAt, written: 0,
+    v: 1, identity: fileIdentity(journalPath), state: 'running', startedAt, updatedAt: startedAt, written: 0, ...keep,
   }
   let lastWrite = 0
   const save = async (force = false) => {
@@ -505,7 +511,7 @@ async function importProgressRecorder(path?: string) {
     },
     async finish(end: { state: 'done' | 'interrupted' | 'failed'; complete?: boolean; error?: string }) {
       const { pausedReason: _r, ...rest } = rec
-      rec = { ...rest, state: end.state, ...(end.complete ? { completedAt: new Date().toISOString() } : {}), ...(end.error ? { error: end.error } : {}) }
+      rec = { ...rest, state: end.state, ...(end.complete ? { completedAt: new Date().toISOString(), adapterVersions: { ...(prior?.adapterVersions ?? {}), ...adapterVersions } } : {}), ...(end.error ? { error: end.error } : {}) }
       await save(true)
     },
   }

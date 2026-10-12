@@ -1,4 +1,4 @@
-import { canonicalProjectPath, sessionCostUSD, sessionModelUsage, calcCost } from '@agentistics/core'
+import { canonicalProjectPath, sessionCostUSD, sessionModelUsage, sessionTokenTotal, calcCost } from '@agentistics/core'
 import type { SessionMeta, StatsCache, Filters } from '@agentistics/core'
 import { format, parseISO } from 'date-fns'
 
@@ -29,9 +29,7 @@ export interface TopResult {
   distinct: number
 }
 
-const tokensOf = (s: SessionMeta): number =>
-  (s.input_tokens ?? 0) + (s.output_tokens ?? 0)
-  + (s.cache_read_input_tokens ?? 0) + (s.cache_creation_input_tokens ?? 0)
+const tokensOf = (s: SessionMeta): number | undefined => sessionTokenTotal(s)
 
 /**
  * Split a session into the keys it contributes to.
@@ -42,6 +40,7 @@ const tokensOf = (s: SessionMeta): number =>
  * session under one label — otherwise the cheaper model inherits the expensive one's spend.
  */
 function contributions(s: SessionMeta, dim: TopDimension): Array<{ key: string; cost: number; tokens: number; harness: string }> {
+  if (s.tokens_unavailable) return []
   if (dim === 'model') {
     const entries = sessionModelUsage(s)
     if (entries.length === 0) return []
@@ -62,7 +61,9 @@ function contributions(s: SessionMeta, dim: TopDimension): Array<{ key: string; 
     : (s.memberId ?? '')
 
   if (!key) return []
-  return [{ key, cost: sessionCostUSD(s) ?? 0, tokens: tokensOf(s), harness: s.harness ?? 'claude' }]
+  const tokens = tokensOf(s)
+  if (tokens === undefined) return []
+  return [{ key, cost: sessionCostUSD(s) ?? 0, tokens, harness: s.harness ?? 'claude' }]
 }
 
 /**
@@ -174,6 +175,7 @@ export function rankTopFromCaches(
   const cachedDays = new Map<string, Set<string>>()
 
   for (const s of sessions) {
+    if (s.tokens_unavailable) continue
     const key = keyOf(s)
     if (!key) continue
     let e = acc.get(key)
@@ -191,7 +193,8 @@ export function rankTopFromCaches(
       const harness = s.harness ?? 'claude'
       const byHarness = (e.costByHarness ??= {})
       byHarness[harness] = (byHarness[harness] ?? 0) + cost
-      e.tokens += tokensOf(s)
+      const tokens = tokensOf(s)
+      if (tokens !== undefined) e.tokens += tokens
       e.sessions += 1
     } else if (s.start_time && !cachedDays.get(key)!.has(format(parseISO(s.start_time), 'yyyy-MM-dd'))) {
       e.sessions += 1

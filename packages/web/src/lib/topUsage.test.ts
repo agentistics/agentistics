@@ -68,6 +68,12 @@ test('sessions with nothing to attribute are skipped, not bucketed as empty', ()
   expect(r.total).toBe(0)
 })
 
+test('tokens_unavailable sessions are absent from token and cost leaderboards', () => {
+  const r = rankTop([s({ harness: 'codex', model: 'gpt-5', tokens_unavailable: true, input_tokens: 1000, output_tokens: 500 })], 'harness', 'tokens')
+  expect(r.entries).toEqual([])
+  expect(r.total).toBe(0)
+})
+
 test('only the top N are returned, but the total counts everything', () => {
   const sessions = Array.from({ length: 6 }, (_, i) =>
     s({ project_path: `/p${i}`, input_tokens: (i + 1) * 1000 }))

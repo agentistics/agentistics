@@ -37,7 +37,8 @@ const FIRST_PAGE = 20
 /** Cost of one session, priced per model; the blended-free fallback prices all four counters at
  *  the unknown-model rate rather than pricing cache as fresh input (~10x too high). Mirrors
  *  `sessCost` in RepoDetailPage — the same rule, not a second one. */
-function sessionCost(s: SessionMeta): number {
+export function sessionCost(s: SessionMeta): number | undefined {
+  if (s.tokens_unavailable) return undefined
   const byModel = sessionCostUSD(s)
   if (byModel !== null) return byModel
   return calcCost({
@@ -164,10 +165,10 @@ export function ScopedSessions({ sessions, lang, currency, brlRate }: Props) {
               display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
               gap: isMobile ? 14 : 18, flexWrap: 'wrap', flexShrink: 0,
             }}>
-              <Metric label={pt ? 'Custo' : 'Cost'} value={fmtCost(sessionCost(s), currency, brlRate)} accent />
+              <Metric label={pt ? 'Custo' : 'Cost'} value={sessionCost(s) === undefined ? '—' : fmtCost(sessionCost(s)!, currency, brlRate)} accent />
               <Metric
                 label="Tokens"
-                value={fmt(tokens)}
+                value={tokens === undefined ? '—' : fmt(tokens)}
                 title={totalTokensExplained(sessionTokens(s), lang)}
               />
               {!isMobile && <Metric label={pt ? 'Mensagens' : 'Messages'} value={fmt(messages)} />}

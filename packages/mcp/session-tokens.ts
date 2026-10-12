@@ -25,6 +25,7 @@ export function filterSessions(sessions: AnySession[], harness?: string): AnySes
  * is UNPRICED (PRICE.UNKNOWN): cost 0 here, its tokens reported as `unpriced`.
  */
 export function sessionTokens(s: AnySession) {
+  const tokensUnavailable = s.tokens_unavailable === true;
   const input = s.input_tokens ?? 0;
   const output = s.output_tokens ?? 0;
   const cacheRead = s.cache_read_input_tokens ?? 0;
@@ -46,7 +47,7 @@ export function sessionTokens(s: AnySession) {
   // a total can admit it is a floor.
   const cost = sessionCostUSD(priced) ?? 0;
   const unpriced = unpricedTokens(priced);
-  return { input, output, cacheRead, cacheWrite, cost, unpriced };
+  return { input, output, cacheRead, cacheWrite, cost, unpriced, tokensUnavailable };
 }
 
 export function sessionMessages(s: AnySession): number {

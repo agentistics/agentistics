@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import type { AppContext, } from '../lib/app-context'
 import type { SessionMeta, MemberPresence, SurfaceHarnessId, WorkflowRun, WorkflowAgent } from '@agentistics/core'
-import { repoShortName, fmt, fmtCost, fmtDuration, formatProjectName, formatModel, calcCost, sessionCostUSD, sessionLabel, workflowTokens, NO_REPO_KEY, sessionTokenTotal, totalTokens, totalTokensExplained } from '@agentistics/core'
+import { repoShortName, fmt, fmtCost, fmtDuration, formatProjectName, formatModel, sessionLabel, workflowTokens, NO_REPO_KEY, sessionTokenTotal, totalTokens, totalTokensExplained } from '@agentistics/core'
 import { TokenBreakdownLine } from '../components/TokenBreakdownLine'
 import { capable, HARNESS_LABELS, HARNESS_COLORS, DYNAMIC_WORKFLOWS_DOC } from '../lib/harness'
 import { DocLink } from '../components/DocLink'
@@ -20,6 +20,7 @@ import { ModelBreakdown } from '../components/ModelBreakdown'
 import { ActivityChart } from '../components/ActivityChart'
 import { RecentSessions } from '../components/RecentSessions'
 import { ScopedSessions } from '../components/ScopedSessions'
+import { sessionCost } from '../components/ScopedSessions'
 import { StatTile, STAT_TILE_GRID } from '../components/StatTile'
 import { MetricNote } from '../components/MetricNote'
 import { BetaTag } from '../components/BetaTag'
@@ -380,16 +381,7 @@ interface MemberAgg {
   byDay: Record<string, number>; byHour: Record<number, number>
 }
 
-/** Cost of a single session — calcCost with its model (Sonnet fallback via '' when unknown). */
-function sessCost(s: SessionMeta): number {
-  const byModel = sessionCostUSD(s)
-  if (byModel !== null) return byModel
-  return calcCost({
-    inputTokens: s.input_tokens ?? 0, outputTokens: s.output_tokens ?? 0,
-    cacheReadInputTokens: s.cache_read_input_tokens ?? 0, cacheCreationInputTokens: s.cache_creation_input_tokens ?? 0,
-    webSearchRequests: 0, costUSD: 0,
-  }, '')
-}
+const sessCost = sessionCost
 
 function MembersTable({ sessions, presence, lang, currency, brlRate }: {
   sessions: SessionMeta[]
@@ -417,11 +409,13 @@ function MembersTable({ sessions, presence, lang, currency, brlRate }: {
       m.sessions++
       m.messages += (s.user_message_count ?? 0) + (s.assistant_message_count ?? 0)
       m.toolCalls += Object.values(s.tool_counts ?? {}).reduce((a, b) => a + b, 0)
-      m.cost += sessCost(s)
-      m.inTok += s.input_tokens ?? 0
-      m.outTok += s.output_tokens ?? 0
-      m.cacheRead += s.cache_read_input_tokens ?? 0
-      m.cacheWrite += s.cache_creation_input_tokens ?? 0
+      if (!s.tokens_unavailable) {
+        m.cost += sessCost(s) ?? 0
+        m.inTok += s.input_tokens ?? 0
+        m.outTok += s.output_tokens ?? 0
+        m.cacheRead += s.cache_read_input_tokens ?? 0
+        m.cacheWrite += s.cache_creation_input_tokens ?? 0
+      }
       m.commits += s.git_commits ?? 0
       m.linesAdded += s.lines_added ?? 0
       m.linesRemoved += s.lines_removed ?? 0

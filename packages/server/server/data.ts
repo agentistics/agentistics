@@ -1463,7 +1463,10 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
       if (set && set.size > 0) p.users = Array.from(set)
     }
 
-    const totalTokens = dedupedSessions.reduce((sum, s) => sum + sessionTokenTotal(s), 0)
+    const totalTokens = dedupedSessions.reduce((sum, s) => {
+      const tokens = sessionTokenTotal(s)
+      return tokens === undefined ? sum : sum + tokens
+    }, 0)
     onProgress('finalizing', 1, String(totalTokens))
     timer.mark('finalize')
     console.log(`[data] ${timer.line()}`)
@@ -1543,4 +1546,3 @@ export async function buildApiResponseStream(onProgress: ProgressFn): Promise<Ap
   _progressListeners.add(onProgress)
   return startFirstBuild()
 }
-

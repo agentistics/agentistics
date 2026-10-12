@@ -101,7 +101,7 @@ function foldOne(s: SessionSurfaceState, e: AnyAgentisticsEvent): void {
       }
       return
     }
-    case 'turn.started': s.turns++; return
+    case 'turn.started': if (e.data.by !== 'task') s.turns++; return
     case 'tool.requested': s.toolCalls++; return
     case 'tool.failed': s.toolsFailed++; return
     case 'tool.denied': s.toolsDenied++; return

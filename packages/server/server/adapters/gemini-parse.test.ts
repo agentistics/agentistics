@@ -77,8 +77,9 @@ test('parses rich Gemini JSON format with tokens and model', () => {
   // 2 genuine user messages, 2 gemini responses, 1 info (skipped)
   expect(s!.user_message_count).toBe(2)
   expect(s!.assistant_message_count).toBe(2)
-  // Token sums across all gemini messages: input=9651+11058=20709, output=84+53=137, cached=3190+9495=12685
-  expect(s!.input_tokens).toBe(20709)
+  // Token sums across all gemini messages: the file's `input` is the API's promptTokenCount, which
+  // INCLUDES the cache, so the stored (uncached) input is (9651-3190)+(11058-9495)=8024; output=84+53=137, cached=12685
+  expect(s!.input_tokens).toBe(8024)
   expect(s!.output_tokens).toBe(137)
   expect(s!.cache_read_input_tokens).toBe(12685)
   // Model from gemini messages
@@ -492,5 +493,74 @@ describe('a reopened conversation read as ONE family (F0.2)', () => {
     expect(s?.user_message_count).toBe(2)
     expect(s?.assistant_message_count).toBe(2)
     expect(s?.user_message_timestamps).toEqual(['2026-10-09T11:02:07.000Z', '2026-10-09T11:03:20.000Z'])
+  })
+})
+
+// ── jsonl journal: duration, model and tool counts (A-PARTIAL). Tokens are NOT read (owner D8). ──
+describe('jsonl journal: lastUpdated patches, model and tools', () => {
+  const header = { sessionId: 'aaaaaaaa-0000-4000-8000-000000000001', projectHash: 'h', startTime: '2026-10-11T20:25:00.000Z', lastUpdated: '2026-10-11T20:25:00.000Z', kind: 'main' }
+  const L = (o: unknown) => JSON.stringify(o)
+  const journal = [
+    L(header),
+    L({ id: 'u1', timestamp: '2026-10-11T20:25:01.000Z', type: 'user', content: [{ text: 'build the thing' }] }),
+    L({ $set: { lastUpdated: '2026-10-11T20:25:02.000Z' } }),
+    L({
+      id: 'g1', timestamp: '2026-10-11T20:25:30.000Z', type: 'gemini', content: 'ok', model: 'gemini-x-pro',
+      tokens: { input: 100, output: 7, cached: 3, total: 110 },
+      toolCalls: [{ id: 't1', name: 'run_shell_command', args: { command: 'ls' }, status: 'success' }, { id: 't2', name: 'read_file', args: {}, status: 'success' }, { name: '' }],
+    }),
+    L({ $set: { lastUpdated: '2026-10-11T21:08:00.000Z' } }),
+  ].join('\n')
+
+  test('duration follows the latest $set.lastUpdated, not the header', () => {
+    const s = parseGeminiChat(journal, 'fb', '/p')!
+    expect(s.end_time).toBe('2026-10-11T21:08:00.000Z')
+    expect(s.duration_minutes).toBeCloseTo(43, 5)
+  })
+
+  test('end is the later of lastUpdated and the last message timestamp', () => {
+    const late = journal + '\n' + L({ id: 'g2', timestamp: '2026-10-11T22:00:00.000Z', type: 'gemini', content: 'more' })
+    expect(parseGeminiChat(late, 'fb', '/p')!.end_time).toBe('2026-10-11T22:00:00.000Z')
+  })
+
+  test('model is the last one named by a gemini record; absent when none names one', () => {
+    expect(parseGeminiChat(journal, 'fb', '/p')!.model).toBe('gemini-x-pro')
+    const none = journal.replace('"model":"gemini-x-pro",', '')
+    expect(parseGeminiChat(none, 'fb', '/p')!.model).toBeUndefined()
+  })
+
+  test('tool_counts count toolCalls[].name under the shared vocabulary', () => {
+    const s = parseGeminiChat(journal, 'fb', '/p')!
+    expect(s.tool_counts).toEqual({ Bash: 1, Read: 1 })
+  })
+
+  test('tokens are summed from gemini records (owner decision D8 approved); null counters add nothing', () => {
+    const s = parseGeminiChat(journal, 'fb', '/p')!
+    // promptTokenCount (100) includes the 3 cached: stored input is the uncached part
+    expect(s.input_tokens).toBe(97)
+    expect(s.output_tokens).toBe(7)
+    expect(s.cache_read_input_tokens).toBe(3)
+    expect(s.tokens_unavailable).toBeUndefined()
+    const withNull = journal + '\n' + JSON.stringify({ id: 'g3', timestamp: '2026-10-11T21:09:00.000Z', type: 'gemini', content: 'x', tokens: { input: 5, output: null } })
+    const t = parseGeminiChat(withNull, 'fb', '/p')!
+    expect([t.input_tokens, t.output_tokens]).toEqual([102, 7])
+  })
+
+  test('cache is never double counted: input is prompt - cached, clamped at 0, and the cost does not price the cache twice', () => {
+    const one = (tokens: object) => parseGeminiChat([
+      JSON.stringify(header),
+      JSON.stringify({ id: 'g1', timestamp: '2026-10-11T20:25:30.000Z', type: 'gemini', content: 'ok', model: 'gemini-x-pro', tokens }),
+    ].join('\n'), 'fb', '/p')!
+    const a = one({ input: 1000, output: 10, cached: 900 })
+    expect([a.input_tokens, a.cache_read_input_tokens]).toEqual([100, 900])
+    expect(a.input_tokens + (a.cache_read_input_tokens ?? 0)).toBe(1000) // total prompt, once
+    const b = one({ input: 5, output: 1, cached: 9 })
+    expect([b.input_tokens, b.cache_read_input_tokens]).toEqual([0, 9])
+  })
+
+  test('a journal whose records carry no tokens object is flagged unavailable, not 0', () => {
+    const none = journal.replace(/"tokens":\{[^}]*\},/, '')
+    const s = parseGeminiChat(none, 'fb', '/p')!
+    expect(s.tokens_unavailable).toBe(true)
   })
 })

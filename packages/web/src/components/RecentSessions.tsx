@@ -209,13 +209,14 @@ const T = {
 
 // Helpers
 
-function fmt(n: number): string {
+function fmt(n: number | undefined): string {
+  if (n === undefined) return '—'
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`
   return String(n)
 }
 
-function totalTokens(s: SessionMeta): number {
+function totalTokens(s: SessionMeta): number | undefined {
   // All four billed counters — `input + output` alone is a fraction of a percent of the volume.
   return sessionTokenTotal(s)
 }
@@ -596,7 +597,11 @@ export function RecentSessions({ sessions, lang, onSelect, pinnedIds, activities
           res = new Date(b.start_time).getTime() - new Date(a.start_time).getTime()
           break
         case 'tokens':
-          res = totalTokens(b) - totalTokens(a)
+          {
+            const bt = totalTokens(b)
+            const at = totalTokens(a)
+            res = bt === undefined ? (at === undefined ? 0 : 1) : at === undefined ? -1 : bt - at
+          }
           break
         case 'messages':
           res = totalMessages(b) - totalMessages(a)
@@ -1508,7 +1513,9 @@ function CardChips({ s, lang }: { s: SessionMeta; lang: 'pt' | 'en' }) {
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
       <Chip icon={<Clock size={11} />} label={sessionTime(s, lang).combined} title={sessionTime(s, lang).tooltip} />
       <Chip icon={null} label={`${msgs} msgs`} color="var(--accent-blue, #3b82f6)" />
-      {tokens > 0 && <Chip icon={null} label={`${fmt(tokens)} tkn`} color="var(--anthropic-orange, #e8690b)" />}
+      {tokens === undefined
+        ? <Chip icon={null} label="— tkn" color="var(--text-tertiary)" />
+        : tokens > 0 && <Chip icon={null} label={`${fmt(tokens)} tkn`} color="var(--anthropic-orange, #e8690b)" />}
       {tools > 0 && <Chip icon={<Wrench size={11} />} label={`${tools} tools`} color="var(--accent-green, #22c55e)" />}
       {s.git_commits > 0 && <Chip icon={<GitCommit size={11} />} label={`${s.git_commits} commits`} color="var(--accent-purple, #a855f7)" />}
       {s.files_modified > 0 && <Chip icon={<FileCode size={11} />} label={`${s.files_modified} files`} />}

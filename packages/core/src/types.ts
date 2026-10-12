@@ -336,6 +336,11 @@ export interface SessionMeta {
   git_pushes: number
   input_tokens: number
   output_tokens: number
+  /** True when the harness's source carries NO usage figures at all (a run that failed before any
+   *  model answered, a shutdown with empty `modelMetrics`). The counters above are then 0 only
+   *  because the type requires a number: read them as "absent", not "zero". Never set when any
+   *  usage was reported, even if that usage sums to 0. */
+  tokens_unavailable?: true
   /** Only populated for `_source: 'jsonl' | 'subdir'` — parsed directly from JSONL usage. */
   cache_read_input_tokens?: number
   cache_creation_input_tokens?: number
@@ -1225,14 +1230,19 @@ export function emptyModelUsage(): ModelUsage {
 export function sessionModelUsage(
   s: Pick<SessionMeta, 'model' | 'model_usage' | 'input_tokens' | 'output_tokens'
     | 'cache_read_input_tokens' | 'cache_creation_input_tokens'
-    | 'cache_creation_1h_input_tokens' | 'cache_creation_5m_input_tokens'>,
+    | 'cache_creation_1h_input_tokens' | 'cache_creation_5m_input_tokens'> & Pick<Partial<SessionMeta>, 'tokens_unavailable'>,
   fallbackModel?: string,
 ): [string, ModelUsage][] {
+  // A provider can leave a stale model_usage object alongside an explicit absence marker. The
+  // marker is authoritative: absent usage must never become a measured model or $0 cost.
+  if (s.tokens_unavailable) return []
   const breakdown = s.model_usage
   if (breakdown && typeof breakdown === 'object') {
     const entries = Object.entries(breakdown).filter(([m, u]) => m && u)
     if (entries.length > 0) return entries as [string, ModelUsage][]
   }
+  // The source stated NO usage (a Kimi run that failed before its first response): the zeros below
+  // would be stored as a measured $0 under that model. Absent is not zero — no row, no price.
   const model = s.model || fallbackModel || ''
   if (!model) return []
   return [[model, {

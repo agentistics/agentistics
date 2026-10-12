@@ -109,7 +109,10 @@ export function readTokens(b: TokenBreakdown): number {
 }
 
 /** Total of a session in one call — the shape most call sites want. */
-export function sessionTokenTotal(s: Parameters<typeof sessionTokens>[0]): number {
+export function sessionTokenTotal(
+  s: Parameters<typeof sessionTokens>[0] & Pick<Partial<SessionMeta>, 'tokens_unavailable'>,
+): number | undefined {
+  if (s.tokens_unavailable) return undefined
   return totalTokens(sessionTokens(s))
 }
 

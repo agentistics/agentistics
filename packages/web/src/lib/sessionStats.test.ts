@@ -75,3 +75,10 @@ test('subagents are counted and summed when the harness has them', () => {
   } as unknown as Partial<SessionMeta>))
   expect(s.subagents).toEqual({ count: 2, tokens: 15, costUSD: 1.5 })
 })
+
+test('tokens_unavailable: the source stated no usage, so tokens, pair and cost are absent, not 0', () => {
+  const s = sessionStats('kimi', 's1', meta({ harness: 'kimi', input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, tokens_unavailable: true }))
+  expect(s.tokens).toBeNull()
+  expect(s.conversation).toBeNull()
+  expect(s.costUSD).toBeNull()
+})
