@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test'
-import { computeHandoffWhy, handoffHintText, planHandoffHints, sendHandoffHints } from './handoff-hint'
+import { mkdtemp, mkdir, writeFile, utimes } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { computeHandoffWhy, findHandoffFile, handoffHintText, planHandoffHints, sendHandoffHints } from './handoff-hint'
 
 const row = (extra: Record<string, unknown> = {}) => ({
   id: 'leader-1', title: '[ LEADER ] - engine', contextTokens: 150_000, contextWindow: 400_000, ...extra,
@@ -104,5 +107,20 @@ describe('LEADER.HANDOFF.HINT', () => {
     expect(why).not.toHaveProperty('costContinueUSD')
     expect(why).not.toHaveProperty('costSuccessorUSD')
     expect(why).not.toHaveProperty('breakEvenTurns')
+  })
+
+  it('finds the newest fixed handoff candidate, without recursing', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'handoff-'))
+    await mkdir(join(cwd, 'leader'))
+    await mkdir(join(cwd, 'leader', 'deeper'))
+    await writeFile(join(cwd, 'leader', 'HANDOFF.md'), 'old')
+    await writeFile(join(cwd, 'leader', 'notes-HANDOFF.md'), 'newest')
+    await writeFile(join(cwd, 'leader', 'deeper', 'HANDOFF.md'), 'ignored')
+    const now = Date.now() / 1000
+    await utimes(join(cwd, 'leader', 'HANDOFF.md'), now - 2, now - 2)
+    await utimes(join(cwd, 'leader', 'notes-HANDOFF.md'), now, now)
+    expect(await findHandoffFile(cwd)).toEqual({ path: join(cwd, 'leader', 'notes-HANDOFF.md'), bytes: 6 })
+    expect(await findHandoffFile(await mkdtemp(join(tmpdir(), 'handoff-empty-')))).toBeUndefined()
+    expect(await findHandoffFile(undefined)).toBeUndefined()
   })
 })

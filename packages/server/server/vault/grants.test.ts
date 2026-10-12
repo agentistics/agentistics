@@ -264,6 +264,16 @@ describe('VAULT.V4 confirm each use — behaviour (fake clock, fixture vault)', 
     expect(wrongCase.refused[0]!.sentence).toContain('VAULT://FREE')
   })
 
+  test('native refusal bounds and cleans an unknown reference', async () => {
+    await grantSession('native:n1', [], [])
+    const raw = `vault://bad\u0000\u0007${'x'.repeat(100)}`
+    const result = await nativeVaultRefs.use('n1', [raw], { command: 'true', callId: 'bounded' })
+    expect(result.refused[0]!.sentence).not.toContain('\u0000')
+    expect(result.refused[0]!.sentence).not.toContain('\u0007')
+    expect(result.refused[0]!.sentence.length).toBeLessThan(110)
+    expect(result.refused[0]!.sentence).toEndWith('… foi recusado.')
+  })
+
   test('native use refuses the whole command when a grant is revoked while resolving', async () => {
     const a = (await createItem({ kind: 'api-key', name: 'Race', confirmEach: false, fields: { value: 'MARKER-race' } })).meta
     await grantSession('native:n1', [a.id], [])

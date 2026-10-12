@@ -1,5 +1,7 @@
 /** LEADER.HANDOFF.HINT / WHY — low-noise handoff timing and its explainable numbers. */
 import { getModelPrice, hasModelPrice } from '@agentistics/core'
+import { readdir, stat } from 'node:fs/promises'
+import { join } from 'node:path'
 
 export const HANDOFF_HINT_DEFAULT_TOKENS = 150_000
 export const HANDOFF_HINT_DEFAULT_FRACTION = 0.35
@@ -22,6 +24,35 @@ export interface HandoffHintRow {
   workInFlight?: string[]
   handoffPath?: string
   handoffBytes?: number
+  cwd?: string
+}
+
+export interface HandoffFile { path: string; bytes: number }
+type HandoffCacheEntry = { at: number; value?: HandoffFile }
+const handoffCache = new Map<string, HandoffCacheEntry>()
+const HANDOFF_CACHE_MS = 30_000
+
+/** Find the newest fixed-location handoff file without reading its contents. */
+export async function findHandoffFile(cwd?: string): Promise<HandoffFile | undefined> {
+  if (!cwd) return undefined
+  const cached = handoffCache.get(cwd)
+  if (cached && Date.now() - cached.at < HANDOFF_CACHE_MS) return cached.value
+  const candidates = [join(cwd, 'leader', 'HANDOFF.md'), join(cwd, 'HANDOFF.md'), join(cwd, 'docs', 'HANDOFF.md')]
+  try {
+    for (const name of await readdir(join(cwd, 'leader'))) {
+      if (/HANDOFF.*\.md$/i.test(name)) candidates.push(join(cwd, 'leader', name))
+    }
+  } catch { /* no leader directory */ }
+  let newest: { path: string; bytes: number; mtimeMs: number } | undefined
+  for (const path of new Set(candidates)) {
+    try {
+      const info = await stat(path)
+      if (info.isFile() && (!newest || info.mtimeMs > newest.mtimeMs)) newest = { path, bytes: info.size, mtimeMs: info.mtimeMs }
+    } catch { /* missing or inaccessible candidate */ }
+  }
+  const value = newest ? { path: newest.path, bytes: newest.bytes } : undefined
+  handoffCache.set(cwd, { at: Date.now(), value })
+  return value
 }
 
 export interface HandoffHint {
@@ -166,7 +197,13 @@ export async function sendHandoffHints(deps: HandoffHintDeps): Promise<number> {
       const [hint] = planHandoffHints([{ ...row, hintedLevel: prev.level, hintedTokens: prev.tokens }])
       if (!hint) continue
       if (!(await deps.markHinted(row.id, hint.level, hint.tokens).catch(() => false))) continue
-      const detailed = { ...hint, why: computeHandoffWhy(row, { model: row.model }) }
+      const handoff = row.handoffPath !== undefined || row.handoffBytes !== undefined
+        ? { path: row.handoffPath, bytes: row.handoffBytes }
+        : await findHandoffFile(row.cwd)
+      const detailed = { ...hint, why: computeHandoffWhy(row, {
+        model: row.model,
+        ...(handoff ? { handoffPath: handoff.path, handoffBytes: handoff.bytes } : {}),
+      }) }
       const result = await deps.prompt(row.id, `[from agentistics · question]\n${handoffHintText(detailed)}`).catch(() => ({ ok: false }))
       if (result.ok) sent++
       else await deps.markHinted(row.id, prev.level, prev.tokens).catch(() => false)

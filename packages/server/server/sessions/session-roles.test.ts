@@ -230,6 +230,15 @@ describe('roleOp (the agentistics_session_role handler)', () => {
     await roleOp(null, { ref: 'm1', role: 'worker' }, deps)
     expect((await loadRoles(deps)).roles).toEqual({ m1: 'worker' })
   })
+  test('worker and auto strip a leader prefix from a placeholder title', async () => {
+    for (const role of ['worker', 'auto'] as const) {
+      const rows = [{ id: 'm1', title: '[ LÍDER ] - sessão sem registro 8c8c707d07' }]
+      const { deps, renames } = fake(rows)
+      const out = await roleOp(null, { ref: 'm1', role }, deps)
+      expect(out).toMatchObject({ ok: true, renamed: true })
+      expect(renames).toEqual([['m1', 'sessão sem registro 8c8c707d07']])
+    }
+  })
   test('a session sets its OWN role without ref and is not typed into', async () => {
     const rows = [{ id: 'm1', title: 'Me' }]
     const { deps, prompts, renames } = fake(rows)
