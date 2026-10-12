@@ -30,6 +30,7 @@ import { versionedAsset } from '../../lib/brand'
 import { sessionCardStyle } from '../../lib/sessionCardStyle'
 import { readAsideGroupPrefs, subscribeAsideGroupPrefs } from '../../lib/sessionsAsidePrefs'
 import { VaultExpiryCard } from '../vault/VaultExpiryCard'
+import { VaultUseRequestCard } from '../vault/VaultUseRequestCard'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { NayLimitsTab } from './NayLimitsTab'
 import { VaultGlyph } from '../vault/VaultGlyph'
@@ -641,6 +642,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
           on screen: on a phone inside a session the button can be hidden, and the card then opens
           from the corner it would have occupied. */}
       <VaultExpiryCard lang={lang} isMobile={isMobile} zIndex={dockZ + 1} />
+      <VaultUseRequestCard lang={lang} />
       <NayNotifyCard lang={lang} isMobile={isMobile} rows={fleet.rows} finishedTasks={fleet.finishedTasks} act={act} fabStyle={cardStyleOf(fabPrefs)} onReply={open} zIndex={dockZ + 1}
         onOpenLimits={() => { setTab('limits'); setDock(d => ({ ...d, open: true, panelSession: null })) }} />
       {!dock.open && sessionAlerts.length === 0 && renderUpdatePrompt?.('float')}

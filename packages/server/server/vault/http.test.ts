@@ -11,9 +11,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { base32Decode, hotp, parseVaultJson, type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
 import {
-  __resetVaultForTests, __setVaultClockForTests, autoLockTick, ensureVaultOpen, lockVault, openFromFile, sealToFile, vaultDir, vaultStatus,
+  __resetVaultForTests, __setVaultClockForTests, autoLockRemainingMs, autoLockTick, ensureVaultOpen, lockVault, openFromFile, sealToFile, vaultDir, vaultStatus,
 } from './service'
-import { __resetGateForTests, mintSetupCode } from './gate'
+import { __resetGateForTests, mintGrant, mintSetupCode } from './gate'
 import { handleVaultHttp } from './http'
 
 const STORE = new Map<string, Uint8Array>()
@@ -52,12 +52,12 @@ function restart(): void {
 }
 
 type J = Record<string, any>
-async function http(method: 'GET' | 'POST', path: string, body?: unknown, grant?: string): Promise<{ status: number; json: J; headers: Headers }> {
+async function http(method: 'GET' | 'POST', path: string, body?: unknown, grant?: string, cookie?: string): Promise<{ status: number; json: J; headers: Headers }> {
   // What the dashboard sends: same-origin, JSON (M1 refuses anything else on a POST).
-  const headers: Record<string, string> = { 'sec-fetch-site': 'same-origin', ...(method === 'POST' ? { 'content-type': 'application/json' } : {}), ...(grant ? { 'x-vault-grant': grant } : {}) }
+  const headers: Record<string, string> = { 'sec-fetch-site': 'same-origin', ...(method === 'POST' ? { 'content-type': 'application/json' } : {}), ...(grant ? { 'x-vault-grant': grant } : {}), ...(cookie ? { cookie } : {}) }
   // VAULT.PERSONAL §10: the gesture unlock answers ONLY the page on this computer, so it is sent as one —
   // and so are the reads (review M3: the no-proof list is the rule for a page on this computer).
-  const local = path === '/api/vault/unlock' || path === '/api/vault/activity' || method === 'GET'
+  const local = path === '/api/vault/unlock' || path === '/api/vault/activity' || path === '/api/vault/activity/arm' || method === 'GET'
   if (local) Object.assign(headers, { host: 'localhost:47292', origin: 'http://localhost:47292' })
   const req = new Request(`${local ? 'http://localhost:47292' : 'http://local'}${path}`, { method, headers, ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}) })
   const res = await handleVaultHttp(req, new URL(req.url), { cors: {}, session: 'session-A', ...(local ? { peer: '127.0.0.1' } : {}) })
@@ -351,8 +351,139 @@ describe('the routes that already existed keep their gate (stepup, lock, auto-lo
     expect((await http('POST', '/api/vault/lock', {})).status).toBe(200)  // locking only reduces exposure: no code
   })
 
-  test('activity is a heartbeat; an unknown path is not ours', async () => {
-    expect((await http('POST', '/api/vault/activity', {})).json.ok).toBe(true)
+  test('activity needs the rotated tab token and is throttled', async () => {
+    lockVault('user')
+    const opened = await http('POST', '/api/vault/unlock', {})
+    const setCookie = opened.headers.get('set-cookie') ?? ''
+    const token = setCookie.match(/agentistics-vault-heartbeat=([^;]+)/)?.[1]
+    expect(token).toBeTruthy()
+    const cookie = `agentistics-vault-heartbeat=${token}`
+    T += 1_000
+    const before = autoLockRemainingMs()!
+    expect((await http('POST', '/api/vault/activity', {}, undefined, cookie)).json.ok).toBe(true)
+    const after = autoLockRemainingMs()!
+    expect(after).toBeGreaterThan(before)
+    expect((await http('POST', '/api/vault/activity', {}, undefined, cookie)).json.code).toBe('activity-too-soon')
+    expect(autoLockRemainingMs()).toBe(after)
+    T += 30_000
+    expect((await http('POST', '/api/vault/activity', {}, undefined, cookie)).json.ok).toBe(true)
+    lockVault('user')
+    expect((await http('POST', '/api/vault/activity', {}, undefined, cookie)).json.code).toBe('activity-token')
+    expect((await http('GET', '/api/vault/nope')).status).toBe(404)
+    expect((await http('GET', '/api/vault/authenticator/begin')).status).toBe(404) // GET is not a begin
+  })
+
+  test('an open vault without a cookie can arm only from a trusted local page gesture', async () => {
+    lockVault('user')
+    await http('POST', '/api/vault/unlock', {})
+    const grant = mintGrant('http:session-A', 'read')
+    const noGesture = await http('POST', '/api/vault/activity/arm', {}, grant)
+    expect(noGesture.json.code).toBe('activity-gesture')
+    const armed = await http('POST', '/api/vault/activity/arm', { gesture: true }, grant)
+    const token = armed.headers.get('set-cookie')?.match(/agentistics-vault-heartbeat=([^;]+)/)?.[1]
+    expect(armed.json.ok).toBe(true)
+    expect(token).toBeTruthy()
+    T += 1_000
+    const before = autoLockRemainingMs()!
+    expect((await http('POST', '/api/vault/activity', {}, undefined, `agentistics-vault-heartbeat=${token}`)).json.ok).toBe(true)
+    expect(autoLockRemainingMs()).toBeGreaterThan(before)
+    lockVault('user')
+    expect((await http('POST', '/api/vault/activity/arm', { gesture: true }, grant)).json.code).toBe('vault-locked')
+  })
+
+  const tokenOf = (r: { headers: Headers }) => r.headers.get('set-cookie')?.match(/agentistics-vault-heartbeat=([^;]+)/)?.[1]
+  const beat = (t: string | undefined) => http('POST', '/api/vault/activity', {}, undefined, `agentistics-vault-heartbeat=${t}`)
+
+  test('arm is refused without the page\'s grant (a bare local curl), with a grant for another session, and from a non-loopback peer', async () => {
+    lockVault('user')
+    await http('POST', '/api/vault/unlock', {})
+    const bare = await http('POST', '/api/vault/activity/arm', { gesture: true })
+    expect(bare.json.code).toBe('activity-grant')
+    expect(tokenOf(bare)).toBeUndefined()
+    const other = await http('POST', '/api/vault/activity/arm', { gesture: true }, mintGrant('http:session-B', 'read'))
+    expect(other.json.code).toBe('activity-grant')
+    expect((await http('POST', '/api/vault/activity/arm', { gesture: true }, 'garbage')).json.code).toBe('activity-grant')
+    const req = new Request('http://localhost:47292/api/vault/activity/arm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin', origin: 'http://localhost:47292', 'x-vault-grant': mintGrant('http:session-A', 'read') },
+      body: JSON.stringify({ gesture: true }),
+    })
+    const res = await handleVaultHttp(req, new URL(req.url), { cors: {}, session: 'session-A', peer: '192.0.2.10' })
+    expect((await res!.json()).code).toBe('activity-not-here')
+  })
+
+  test('arm cannot move the idle clock faster than one beat per 30 s, and re-arming is itself throttled', async () => {
+    lockVault('user')
+    await http('POST', '/api/vault/unlock', {})
+    const grant = mintGrant('http:session-A', 'read')
+    T += 1_000
+    const a1 = await http('POST', '/api/vault/activity/arm', { gesture: true }, grant)
+    expect(a1.json.ok).toBe(true)
+    expect((await beat(tokenOf(a1))).json.ok).toBe(true)
+    const left = autoLockRemainingMs()!
+    T += 5_000
+    const a2 = await http('POST', '/api/vault/activity/arm', { gesture: true }, grant)
+    expect(a2.json.code).toBe('activity-too-soon')
+    expect(tokenOf(a2)).toBeUndefined()
+    T += 25_000                                   // 30 s since the first arm
+    const a3 = await http('POST', '/api/vault/activity/arm', { gesture: true }, grant)
+    expect(a3.json.ok).toBe(true)
+    // the beat clock survived the rotation: this beat is only 30 s after the first one → fine, but a fast one is not
+    expect((await beat(tokenOf(a3))).json.ok).toBe(true)
+    expect(autoLockRemainingMs()!).toBeGreaterThan(left - 31_000)
+    T += 1_000
+    expect((await beat(tokenOf(a3))).json.code).toBe('activity-too-soon')
+  })
+
+  test('the old token dies after a re-arm; lock and auto-lock invalidate the token', async () => {
+    lockVault('user')
+    const opened = await http('POST', '/api/vault/unlock', {})
+    const t0 = tokenOf(opened)
+    const grant = mintGrant('http:session-A', 'read')
+    T += 31_000
+    const a = await http('POST', '/api/vault/activity/arm', { gesture: true }, grant)
+    const t1 = tokenOf(a)
+    expect(t1).not.toBe(t0)
+    expect((await beat(t0)).json.code).toBe('activity-token')
+    expect((await beat(t1)).json.ok).toBe(true)
+    // auto-lock invalidates
+    expect(autoLockTick(T + 31 * 60_000)).toBe(true)
+    expect((await beat(t1)).json.code).toBe('activity-token')
+    // a manual lock invalidates a freshly re-opened vault's token
+    const t2 = tokenOf(await http('POST', '/api/vault/unlock', {}))
+    lockVault('user')
+    await http('POST', '/api/vault/unlock', {})
+    expect((await beat(t2)).json.code).toBe('activity-token')
+  })
+
+  test('extend: a bare local curl is refused (window unchanged, no token); with the page\'s grant it works, throttled', async () => {
+    lockVault('user')
+    await http('POST', '/api/vault/unlock', {})
+    T += 40 * 60_000 / 4
+    const before = autoLockRemainingMs()!
+    const bare = await http('POST', '/api/vault/extend', {})
+    expect(bare.json.code).toBe('stepup-required')
+    expect(tokenOf(bare)).toBeUndefined()
+    expect(autoLockRemainingMs()!).toBe(before)
+    const other = await http('POST', '/api/vault/extend', {}, mintGrant('http:session-B', 'read'))
+    expect(other.json.code).toBe('stepup-required')
+    expect(tokenOf(other)).toBeUndefined()
+    const grant = mintGrant('http:session-A', 'read')
+    const first = await http('POST', '/api/vault/extend', {}, grant)
+    expect(first.json.ok).toBe(true)
+    const t1 = tokenOf(first)
+    expect(t1).toBeDefined()
+    expect(autoLockRemainingMs()!).toBeGreaterThan(before)
+    T += 5_000
+    const second = await http('POST', '/api/vault/extend', {}, grant)
+    expect(second.json.ok).toBe(true)
+    expect(tokenOf(second)).toBeUndefined()                       // the arm throttle: no fresh token inside 30 s
+    expect(second.headers.get('set-cookie') ?? '').not.toContain('agentistics-vault-heartbeat') // and the page's cookie is not cleared
+    expect((await beat(t1)).json.ok).toBe(true)                   // the first token is still the live one
+  })
+
+  test('activity without a token is refused; an unknown path is not ours', async () => {
+    expect((await http('POST', '/api/vault/activity', {})).json.code).toBe('activity-token')
     expect((await http('GET', '/api/vault/nope')).status).toBe(404)
     expect((await http('GET', '/api/vault/authenticator/begin')).status).toBe(404) // GET is not a begin
   })

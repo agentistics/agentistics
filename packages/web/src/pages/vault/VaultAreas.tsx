@@ -284,6 +284,9 @@ export function SettingsArea({ lang, isMobile, c, isPhone, gated, onFlash }: {
         <VaultRow data="autolock" isMobile={isMobile} title={vt('sec_autolock', lang)} desc={t('set_autolock_d', { n: view.autoLockMinutes })}>
           <button type="button" style={btn} onClick={() => setEdit('autolock')} title={c.tip('set-auto-lock')}>{t('change')}</button>
         </VaultRow>
+        <VaultRow data="confirm-each-use" isMobile={isMobile} title={vt('cfu_title', lang)} desc={vt('cfu_d', lang)}>
+          <Toggle on={view.confirmEachUse === true} label={vt('cfu_title', lang)} onToggle={() => c.ask('confirm-each-use', undefined, undefined, undefined, view.confirmEachUse !== true)} />
+        </VaultRow>
         {view.presence && view.authenticator && (
           <VaultRow data="policy" isMobile={isMobile} title={vt('sec_unlock', lang)}
             desc={[vt(unlockModeKey(policy.mode), lang).replace('{presence}', pres), policy.windowEndsAt && !policy.codeNextUnlock ? vtf('unlock_now_window', lang, { time: fmtTime(policy.windowEndsAt, lang), presence: pres }) : policy.codeNextUnlock && policy.mode !== 'hello-only' ? vt('unlock_now_code', lang) : ''].filter(Boolean).join(' · ')}>

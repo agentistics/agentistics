@@ -583,11 +583,18 @@ async function cmdPostTool(): Promise<number> {
   try { input = JSON.parse(raw) } catch { return 0 }
   if (input.tool_response === undefined) return 0
   const { askVault } = await import('./vault/socket')
+  const { postToolDecision, grantMarkerName, HOOK_ASK_TIMEOUT_MS } = await import('./vault/hook-rewrite')
   const text = JSON.stringify(input.tool_response)
-  const r = (await askVault({ op: 'personal-scrub', managedId: managedId(), text }))?.reply as { ok?: boolean; changed?: boolean; text?: string } | undefined
-  if (!r?.ok || typeof r.text !== 'string') return 0
-  const { postToolAnswer } = await import('./vault/hook-rewrite')
-  const ans = postToolAnswer(input.tool_response, r.text, r.changed === true)
+  let r: { ok?: boolean; changed?: boolean; text?: string } | undefined
+  try { r = (await askVault({ op: 'personal-scrub', managedId: managedId(), text }, { timeoutMs: HOOK_ASK_TIMEOUT_MS }))?.reply as typeof r } catch { r = undefined }
+  let hadGrant = true // unknown reads as "had one": fail closed
+  if (!r?.ok) {
+    const { existsSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const { runDir } = await import('./vault/service')
+    try { hadGrant = existsSync(join(runDir(), grantMarkerName(managedId()!))) } catch { hadGrant = true }
+  }
+  const ans = postToolDecision(input.tool_response, r, hadGrant)
   if (ans) process.stdout.write(ans)
   return 0
 }

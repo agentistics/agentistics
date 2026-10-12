@@ -49,7 +49,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
     _lockedBy: 'why it is locked (a word)', _onState: 'the state-change listener (engine-api 1.6 onStateChange; carries a reason word, never a key)', _recoveryTodo: 'the re-enrolment steps owed (words)', _now: 'a clock',
     _autoClock: 'the idle clock (times)', _autoTimer: 'a timer', _onAutoLock: 'a notifier',
     _pending: 'THE DEK between a gesture and its code (§2.2): service-only, at most 120 s, zeroed on a wrong code, on expiry and by lockVault',
-    _onInit: 'a reporter', _migrators: 'migrator objects (paths, no values)', _migratedThisOpen: 'a flag', _migrating: 'a pending report', _onUse: 'an activity hook',
+    _onInit: 'a reporter', _migrators: 'migrator objects (paths, no values)', _migratedThisOpen: 'a flag', _migrating: 'a pending report', _onUse: 'an activity hook', _beatAt: 'a throttle timestamp', _armAt: 'a throttle timestamp', _heartbeat: 'the tab heartbeat capability stores only its sha256 hash and throttle timestamp, never the token',
   },
   'server/server/vault/gate.ts': {
     RECOVERY_ALLOWED: 'action names', _mem: 'the step-up counters (integrity, not secret — §2.3)', _now: 'a clock',
@@ -69,21 +69,32 @@ const ALLOWED: Record<string, Record<string, string>> = {
   'server/server/vault/grants.ts': {
     _grants: 'per-session grants (VAULT.PERSONAL §8): item ids and reference names, NEVER a value; memory only, dropped on lock',
     _now: 'a clock',
+    _markerDir: 'test-only override of the directory for grant markers; a path, no value',
+    _scrubCalls: 'call times per session for the scrub rate limit (60/min); no text, no value',
     _scrubbers: 'a compiled scrubber per granted session: holds the granted values\' FORMS so served copies can be scrubbed; dropped with the grant and on lock (the service holds the DEK anyway)',
+    _confirmEachUseOverride: 'test-only feature flag override; production reads the persisted vault setting',
+    _epoch: 'the in-memory lock generation; never secret material',
+    _requests: 'pending use requests and their metadata; values never enter the request',
+    _approvals: 'session/reference approval deadlines; no secret material',
+    _requestSeq: 'monotonic request id counter',
+    _useTtlMs: 'how long a use request waits (a duration); a test seam',
   },
   'server/server/vault/mobile.ts': {
     _now: 'a clock',
+    _markerDir: 'test-only override of the directory for grant markers; a path, no value',
     _challenges: 'WebAuthn challenges (random bytes, public by nature): 60 s, single use, bound to one session',
     _tokens: 'single-use gesture tokens from a verified passkey assertion: 60 s, bound to session + action; authorise, decrypt nothing',
     _windows: 'per-session deadlines (ms) of the opt-in 30-second code reveal window; no key material',
   },
   'server/server/vault/phone.ts': {
     _now: 'a clock',
+    _markerDir: 'test-only override of the directory for grant markers; a path, no value',
     _challenges: 'WebAuthn challenges (random, public by nature) + the PRF salt (public input): 60 s, single use, bound to one session',
     _requests: 'phone enrol requests: label, match code, session, status; no key material',
   },
   'server/server/vault/personal.ts': {
     _now: 'a clock',
+    _markerDir: 'test-only override of the directory for grant markers; a path, no value',
     _imports: 'a parsed .env import between its preview and its commit (VAULT.PERSONAL): <= 10 min, bound to one session, single use, every value blanked on commit/expiry',
   },
   'server/server/vault/rekey.ts': { SKIP_DIRS: 'directory names the rotation scan skips', _crashAt: 'a test seam: the name of a point to inject a crash at' },
@@ -117,6 +128,38 @@ describe('secret hygiene in the vault and its consumers', () => {
       }
     }
     expect(unexplained).toEqual([])
+  })
+
+  // VAULT.V4 §3.6: the only functions that hand a personal VALUE to a caller are the human reveal and the
+  // agent gate (and `useRef`, a one-line wrapper over it). Anything else that returns `value: string` from the
+  // personal/grant surface is a door around the confirmation, and fails here until it is removed or argued.
+  test('only authorizeUse / revealField (and useRef, its wrapper) return a personal value', () => {
+    const ALLOWED_VALUE_RETURNS = new Set(['authorizeUse', 'useRef', 'revealField'])
+    const offenders: string[] = []
+    for (const f of ['grants.ts', 'personal.ts', 'personal-http.ts', 'ops.ts'].map(n => pkg(`server/server/vault/${n}`))) {
+      for (const line of readFileSync(f, 'utf8').split('\n')) {
+        const m = /^export\s+(?:async\s+)?function\s+(\w+)\b.*(?:\bvalue\??:\s*string|Record<string,\s*string>)/.exec(line)
+        if (m && !ALLOWED_VALUE_RETURNS.has(m[1]!)) offenders.push(`${relative(ROOT, f)}: ${m[1]}`)
+      }
+    }
+    expect(offenders).toEqual([])
+    expect(readFileSync(pkg('server/server/vault/grants.ts'), 'utf8')).not.toMatch(/export\s+(?:async\s+)?function\s+(?:grantEnv|resolveGrant)\b/)
+  })
+
+  // §3.6 by import: only these modules may call `revealField` (the human reveal route, the agent gate, the scrubber,
+  // and the filtered legacy env). Anything else importing it is a new door around the confirmation.
+  test('only the allow-listed modules import revealField', () => {
+    const ALLOWED_IMPORTERS = new Set(['personal.ts', 'personal-http.ts', 'grants.ts'])
+    const dir = pkg('server/server/vault')
+    const offenders: string[] = []
+    const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)])
+    for (const f of walk(pkg('server/server')).filter(x => /\.tsx?$/.test(x) && !/\.test\.tsx?$/.test(x))) {
+      const text = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+      if (!/\brevealField\b/.test(text)) continue
+      const rel = relative(dir, f)
+      if (!ALLOWED_IMPORTERS.has(rel)) offenders.push(relative(ROOT, f))
+    }
+    expect(offenders).toEqual([])
   })
 
   test('the private envelope key is no longer cached', () => {

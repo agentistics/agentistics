@@ -16,6 +16,8 @@ import { vaultAudit, vaultLang } from './service'
 import { informationalSecure } from './request-origin'
 
 type Reply = (r: { ok: boolean } & Record<string, unknown>, extra?: Record<string, unknown>) => Response
+const PROVE_PER_REQUEST = 3
+
 export interface PersonalHttpCtx { req: Request; path: string; url: URL; session: string; grant: string | null; loopback: boolean; reply: Reply; /** Review H2: the single-use proof from this page's own unlock reply. */ fresh?: string | null }
 
 /** Large enough for a 64 KiB value or a `.env` file; still bounded and read as a stream. */
@@ -92,8 +94,39 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     if (!g.ok) return reply(g)
     return reply({ ok: true, grants: grants.listGrants().map(x => ({ sessionId: x.sessionId, createdAt: x.createdAt, refs: x.refs.map(r => ({ ref: r.ref, env: r.env, name: r.name, field: r.field })) })), ...withGrant(g) })
   }
+  if (path === '/api/vault/personal/use-requests' && req.method === 'GET') {
+    const g = await step('personal-list', {})
+    if (!g.ok) return reply(g)
+    return reply({ ok: true, requests: grants.pendingUseRequests().map(r => ({ ...r, waiters: undefined })) })
+  }
   if (req.method !== 'POST') return null
   const b = await body()
+
+  // One request, one reference, one human gesture. Approval never accepts an authenticator code.
+  // The card's Approve click: the computer's gesture is raised here and answered with a proof bound to THIS request.
+  const useProve = path.match(/^\/api\/vault\/personal\/use\/([^/]+)\/prove$/)
+  if (useProve) {
+    if (!grants.pendingUseRequests().some(x => x.id === useProve[1])) return reply(fail('not-found', 'That use request no longer exists.', 'Esse pedido de uso não existe mais.'))
+    // At most 3 Hello prompts per request: a looping caller must not wear the person down into approving.
+    if (!grants.noteProveAttempt(useProve[1]!, PROVE_PER_REQUEST)) return reply(fail('prove-limit', 'Too many confirmation prompts for this request. Deny it or wait for it to expire.', 'Pedidos de confirmação demais para este uso. Negue-o ou espere expirar.'))
+    const p = await gate.proveUseApproval({ session, loopback, id: useProve[1]! })
+    return reply(p)
+  }
+  const useDecision = path.match(/^\/api\/vault\/personal\/use\/([^/]+)\/(approve|deny)$/)
+  if (useDecision) {
+    // Approving is the one act that opens a value: it needs the presence gesture. DENYING only closes
+    // (spec §3.5) — an authenticated session is enough, so the owner can always say no without the device.
+    if (useDecision[2] === 'approve') {
+      // Its own gate (spec §3.3): a presence proof born from the card, or a phone's single-use token — never a code or a read grant.
+      const g = await gate.requireUseApproval({ session, loopback, id: useDecision[1]!, fresh, gestureToken: tokenOf(b) })
+      if (!g.ok) return reply(g)
+    } else {
+      const g = await step('personal-list', b)
+      if (!g.ok) return reply(g)
+    }
+    const r = grants.decideUse(useDecision[1]!, useDecision[2] === 'approve')
+    return reply(r.ok ? { ok: true } : fail(r.code, r.code === 'not-found' ? 'That use request no longer exists.' : 'That use request is no longer pending.', r.code === 'not-found' ? 'Esse pedido de uso não existe mais.' : 'Esse pedido de uso não está mais pendente.'))
+  }
 
   if (path === '/api/vault/personal') {
     const v = validateInput(b.item, { requireFields: true })
@@ -349,7 +382,7 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     if (!secure) return reply(notSecure())
     const action = typeof b.action === 'string' ? b.action : ''
     const target = typeof b.target === 'string' ? b.target.slice(0, 200) : ''
-    if (!/^personal-(reveal|edit|trash|restore|restore-version|purge|group-delete|grant)$/.test(action)) return reply(bad())
+    if (!/^(?:personal-(?:reveal|edit|trash|restore|restore-version|purge|group-delete|grant)|use-approve)$/.test(action)) return reply(bad())
     const g = await step('personal-list', b)
     if (!g.ok) return reply(g)
     const r = await mobile.beginAssertion(session, `${action}:${target}`, rpId, origin)

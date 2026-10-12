@@ -61,7 +61,33 @@ export function postToolAnswer(original: unknown, scrubbedJson: string, changed:
   return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', updatedToolOutput: updated } })
 }
 
+/** The PostToolUse answer that withholds the whole output (the vault refused or could not be asked). */
+export function withheldAnswer(): string {
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', updatedToolOutput: '«output held back by the vault»' } })
+}
+
 /** The PreToolUse answer for a rewritten Bash command (the rest of the input untouched). */
 export function preToolAnswer(toolInput: Record<string, unknown>, command: string): string {
   return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: { ...toolInput, command } } })
 }
+
+/** The hook's own deadline for the vault's answer: under `timeoutSec` (5 s, claude-hooks.ts), so a slow server lands in the fail-closed branch instead of the hook being killed with the output raw. */
+export const HOOK_ASK_TIMEOUT_MS = 3_000
+
+export interface ScrubReply { ok?: boolean; changed?: boolean; text?: string }
+
+/**
+ * PostToolUse decision (§3.11-B). `reply` is the vault's answer (undefined = socket down, timeout, error);
+ * `hadGrant` = this session was EVER granted something (a marker written at grant time). The output is
+ * withheld whenever the vault cannot vouch for it — except for a session that never had a grant: there is
+ * nothing in its output to leak, and withholding would blind every managed session while the server is down.
+ */
+export function postToolDecision(original: unknown, reply: ScrubReply | undefined, hadGrant: boolean): string | null {
+  if (reply?.ok && typeof reply.text === 'string') {
+    return postToolAnswer(original, reply.text, reply.changed === true) ?? (reply.changed === true ? withheldAnswer() : null)
+  }
+  return hadGrant ? withheldAnswer() : null
+}
+
+/** Marker file name for a session's grant history (no value inside; the id is already `[A-Za-z0-9_:-]{1,80}`). */
+export const grantMarkerName = (sessionId: string): string => `grant-${sessionId.replace(/[^A-Za-z0-9_-]/g, '_')}`

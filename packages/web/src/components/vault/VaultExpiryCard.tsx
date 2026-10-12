@@ -11,7 +11,7 @@ import { X } from 'lucide-react'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { pushNotification } from '../../lib/notifications'
 import { WARN_INITIAL, nextWarn, type WarnState } from '../../lib/vaultExpiry'
-import { extendVaultOpen, lockVaultFromCard } from '../../lib/vaultApi'
+import { extendVaultOpen, lockVaultFromCard, stepUp } from '../../lib/vaultApi'
 import { refreshVaultWatch, useVaultWatch } from '../../lib/vaultWatch'
 import { VaultGlyph } from './VaultGlyph'
 import { CodeBoxes } from '../CodeBoxes'
@@ -43,7 +43,12 @@ export function VaultExpiryCard({ lang, isMobile, zIndex, enabled = true }: { la
 
   const run = async (what: 'extend' | 'lock', withCode?: string) => {
     setBusy(what); setError(null)
-    const r = await (what === 'extend' ? extendVaultOpen(withCode) : lockVaultFromCard(withCode))
+    // Keep-open needs the page's read grant: with a code, take the step-up first (it hands the grant back), then extend.
+    if (what === 'extend' && withCode) {
+      const g = await stepUp(withCode)
+      if (!g.ok) { setBusy(null); setError(g.sentence || (pt ? 'Não foi possível agora.' : 'Could not do that right now.')); if (g.code === 'stepup-wrong') setNeedCode('extend'); return }
+    }
+    const r = await (what === 'extend' ? extendVaultOpen() : lockVaultFromCard(withCode))
     setBusy(null)
     if (r.ok) { setNeedCode(null); setCode(''); setShown(false); await refreshVaultWatch(); return }
     if (r.code === 'stepup-required' || r.code === 'stepup-wrong') { setNeedCode(what); setError(r.code === 'stepup-wrong' ? r.sentence : null); return }

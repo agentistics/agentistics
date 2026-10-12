@@ -58,6 +58,8 @@ export interface VaultView {
   /** The owner's machine (§7.4): enrolment is the default path and presence cannot be turned off lightly. */
   requirePresence: boolean
   autoLockMinutes: number
+  /** VAULT.V4: confirm each use of a sensitive secret (absent on an older server = off). */
+  confirmEachUse?: boolean
   autoLockInMs: number | null
   pendingStepup: boolean
   lockedBy: LockedBy | null
@@ -153,6 +155,7 @@ export async function readVaultView(files: string[] = sealedFiles(), pendingFile
     recoveryCreatedAt: stored?.wrappers.find(w => w.type === 'recovery')?.createdAt ?? null,
     requirePresence: stored?.requirePresence === true,
     autoLockMinutes: stored?.autoLock?.minutes ?? 30,
+    confirmEachUse: stored?.confirmEachUse === true,
     autoLockInMs: s.autoLockInMs ?? null, pendingStepup: s.pendingStepup === true, lockedBy: s.lockedBy ?? null,
     recoveryTodo: s.recoveryTodo ?? null,
     // Owner decision 2026-10-06: the rows the person's per-action policy makes of the table, so the icons

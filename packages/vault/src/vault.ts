@@ -50,6 +50,8 @@ export interface VaultJson {
   stepup?: { enrolledAt: string; digits: 6; period: 30 }
   /** SECRETS.4 §5.1: the human scope's idle lock, in minutes (5–480). Absent = the default 30. v2 only. */
   autoLock?: { minutes: number }
+  /** V4: ask for a human approval on every agent use; absent is backwards-compatible OFF. */
+  confirmEachUse?: boolean
   /** Owner decision 2026-10-02: what an unlock asks besides the gesture (unlock-policy.ts). Absent = per day, 24 h. v2 only. */
   unlockPolicy?: UnlockPolicy
   /** SECRETS.4 §7.4: the owner's machine — presence cannot be turned off without the recovery key. */
@@ -115,6 +117,7 @@ export function parseVaultJson(raw: Uint8Array | string | null): VaultJson | nul
     if (r.v !== VAULT_VERSION_SCOPED || !p) return null
     unlockPolicy = p
   }
+  if (r.confirmEachUse !== undefined && (r.v !== VAULT_VERSION_SCOPED || typeof r.confirmEachUse !== 'boolean')) return null
   if (r.requirePresence !== undefined && (r.v !== VAULT_VERSION_SCOPED || r.requirePresence !== true)) return null
   let retired: WrapperRecord[] | undefined
   if (r.retired !== undefined) {
@@ -128,6 +131,7 @@ export function parseVaultJson(raw: Uint8Array | string | null): VaultJson | nul
     ...(retired && retired.length ? { retired } : {}),
     ...(stepup ? { stepup } : {}),
     ...(autoLock ? { autoLock } : {}),
+    ...(typeof r.confirmEachUse === 'boolean' ? { confirmEachUse: r.confirmEachUse } : {}),
     ...(unlockPolicy ? { unlockPolicy } : {}),
     ...(r.requirePresence === true ? { requirePresence: true as const } : {}),
   }
@@ -140,7 +144,7 @@ export function parseVaultJson(raw: Uint8Array | string | null): VaultJson | nul
  */
 export function serializeVaultJson(v: VaultJson): Uint8Array {
   const plainV1 = v.scope === 'human' && v.v === VAULT_VERSION && !v.machineId && !v.retired?.length
-    && !v.wrappers.some(w => isPresenceId(w.type) || w.type === 'recovery') && !v.stepup && !v.autoLock && !v.unlockPolicy && !v.requirePresence
+    && !v.wrappers.some(w => isPresenceId(w.type) || w.type === 'recovery') && !v.stepup && !v.autoLock && !v.confirmEachUse && !v.unlockPolicy && !v.requirePresence
   const out = plainV1
     ? { v: VAULT_VERSION, kid: v.kid, createdAt: v.createdAt, wrappers: v.wrappers }
     : {
@@ -149,6 +153,7 @@ export function serializeVaultJson(v: VaultJson): Uint8Array {
         ...(v.retired?.length ? { retired: v.retired } : {}),
         ...(v.stepup ? { stepup: v.stepup } : {}),
         ...(v.autoLock ? { autoLock: v.autoLock } : {}),
+        ...(v.confirmEachUse ? { confirmEachUse: true } : {}),
         ...(v.unlockPolicy ? { unlockPolicy: v.unlockPolicy } : {}),
         ...(v.requirePresence ? { requirePresence: true } : {}),
       }
