@@ -1919,6 +1919,8 @@ export interface SpawnSessionRequest {
   subtaskId?: string
   /** The managed id of the session starting this one — recorded as `ManagedSession.parentSessionId`. */
   parentSessionId?: string
+  /** The caller proved it is `parentSessionId` (set by the server route only). */
+  parentVerified?: boolean
   /** Leader hand-off: inherit the parent's task/subtask filing when none is given. */
   handoff?: boolean
   /** Explicit briefing role for CLI/web callers. */

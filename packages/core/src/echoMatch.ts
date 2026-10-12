@@ -124,7 +124,18 @@ export function pendingEchoes(
 ): string[] {
   const seen = userTurns.map(normalizeEcho).filter(t => t !== '')
   const stripped = userTurns.map(withoutLeadingMarkers).filter(t => t !== '')
-  const match = echoes.map(text => matchEcho(text, userTurns, seen, stripped))
+  // A harness may commit a mid-turn message into the same user entry as the text that was
+  // already being sent.  A short message cannot use containment safely ("ok" is everywhere), but
+  // an exact transcript line is still evidence: it is the wire-level boundary the harness kept.
+  // Claude prefixes queued lines with `> `, so match that measured decoration explicitly rather
+  // than falling back to a fuzzy search.
+  const segments = userTurns.flatMap(text => text.split(/\r?\n/).flatMap(line => {
+    const out = [normalizeEcho(line)]
+    const unquoted = line.replace(/^\s*>\s?/, '')
+    if (unquoted !== line) out.push(normalizeEcho(unquoted))
+    return out
+  })).filter(t => t !== '')
+  const match = echoes.map(text => matchEcho(text, userTurns, seen, stripped, segments))
   // The last echo matched by something a coincidence cannot fake. Delivery is FIFO, so everything
   // before it went into the same pane earlier and was read no later — the header's third shape.
   //
@@ -148,11 +159,15 @@ function matchEcho(
   userTurns: readonly string[],
   seen: readonly string[],
   stripped: readonly string[],
+  segments: readonly string[],
 ): EchoMatch {
   const c = normalizeEcho(text)
   // An empty echo is nothing to wait for. It anchors nothing — there is no evidence in it.
   if (c === '') return 'weak'
   if (seen.includes(c)) return c.length >= SAFE_CONTAINS_LEN ? 'anchor' : 'weak'
+  // Exact line equality is safe for short messages that were joined into a larger turn. It is
+  // deliberately checked before containment and never uses a substring/semantic comparison.
+  if (segments.includes(c)) return 'anchor'
   if (c.length >= SAFE_CONTAINS_LEN && seen.some(t => t.includes(c))) return 'anchor'
   const { prose, paths } = echoProse(text)
   if (paths === 0) return 'no'

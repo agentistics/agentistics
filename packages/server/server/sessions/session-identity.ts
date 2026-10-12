@@ -69,6 +69,21 @@ export async function ensureSessionIdentityKey(): Promise<void> {
   await loadKey(true).catch(() => null)
 }
 
+/**
+ * Does THIS process claim to run as session `id`? True when the identity key exists and `id` is the
+ * pane's own `AGENTOP_MANAGED_ID`. Used by the CLI spawn path, which has no HTTP body to carry a proof.
+ *
+ * ACCEPTED RISK, stated plainly: this is NOT a cryptographic proof. The token is derived from the key right
+ * here, so the HMAC check is always true once the key exists; the only real test is the environment variable.
+ * Any same-user process can forge it by exporting `AGENTOP_MANAGED_ID=<id of a registered leader>` — no key
+ * needed. We accept that: the origin it affects is a display attribution, not a security boundary.
+ */
+export async function callerHoldsIdentity(id: string | undefined, env: Record<string, string | undefined> = process.env): Promise<boolean> {
+  if (!id || env[SESSION_ID_ENV] !== id) return false
+  const key = await loadKey(false).catch(() => null)
+  return !!key && tokenProves(key, id, sessionToken(key, id))
+}
+
 /** Is this claimed identity real? Never creates a key: no key means no session could ever prove one. */
 export async function verifySessionIdentity(id: unknown, token: unknown): Promise<string | null> {
   if (typeof id !== 'string' || typeof token !== 'string') return null

@@ -7,8 +7,7 @@
  * made-up zero. Every read is guarded; a process that exits mid-read is simply skipped.
  */
 
-import { readdir, readFile, readlink } from 'node:fs/promises'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync, readlinkSync } from 'node:fs'
 import type { ProcEntry } from './inventory'
 import { readProcCards, sweepProcCards, type ProcCard } from './proc-card'
 
@@ -41,8 +40,8 @@ export function pickEnv(environ: string): ProcEntry['env'] {
 const CLK_TCK = 100
 let previous = new Map<number, { ticks: number; atMs: number }>()
 
-async function uptimeSec(): Promise<number | null> {
-  try { return Number((await readFile('/proc/uptime', 'utf8')).split(' ')[0]) } catch { return null }
+function uptimeSec(): number | null {
+  try { return Number(readFileSync('/proc/uptime', 'utf8').split(' ')[0]) } catch { return null }
 }
 
 /** The kernel start time of a pid, or null when it is gone — what makes a pid an identity. */
@@ -60,41 +59,123 @@ export function pidAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM' }
 }
 
+/** One row of the process table: what `/proc/<pid>/stat` says about a pid. */
+export interface ProcStatRow { pid: number; comm: string; ppid: number; utime: number; stime: number; starttime: number }
+
+/** `/proc/<pid>/stat` → a table row, `null` when it cannot be read whole — PURE. */
+export function parseStatRow(pid: number, text: string): ProcStatRow | null {
+  const open = text.indexOf('('), close = text.lastIndexOf(')')
+  if (open < 0 || close < open) return null
+  const st = parseStat(text)
+  return st ? { pid, comm: text.slice(open + 1, close), ...st } : null
+}
+
+/**
+ * How long one read of the process table is shared. The governor's tick asks for it twice (its own
+ * inventory and the bare-`flock` jobs, `heavy-io.ts`) within milliseconds; a second sweep of every
+ * process on the machine learns nothing the first did not.
+ */
+const TABLE_TTL_MS = 1_000
+let tableMemo: { atMs: number; rows: ProcStatRow[] } | null = null
+
+/**
+ * Every pid's `stat`, read SYNCHRONOUSLY. These are procfs reads — no disk, microseconds each — and
+ * issuing one async read per process sent several hundred tasks through the runtime's thread pool at
+ * once: measured (PERF.IDLE, 380 processes) ~5.3 ms of CPU per sweep against ~1.9 ms read in line,
+ * most of the difference being pool threads spinning on the burst. `null` when `/proc` is unreadable.
+ * `fresh` skips the memo (and refreshes it): a caller that must see a process born a moment ago — a
+ * kill of a just-spawned pid — cannot be answered from a table read before it existed.
+ */
+export function readProcTable(nowMs = Date.now(), fresh = false): ProcStatRow[] | null {
+  if (process.platform !== 'linux') return null
+  if (!fresh && tableMemo && nowMs - tableMemo.atMs < TABLE_TTL_MS && nowMs >= tableMemo.atMs) return tableMemo.rows
+  let names: string[]
+  try { names = readdirSync('/proc') } catch { return null }
+  const rows: ProcStatRow[] = []
+  for (const n of names) {
+    if (!/^\d+$/.test(n)) continue
+    let text: string
+    try { text = readFileSync(`/proc/${n}/stat`, 'utf8') } catch { continue }
+    const row = parseStatRow(Number(n), text)
+    if (row) rows.push(row)
+  }
+  tableMemo = { atMs: nowMs, rows }
+  return rows
+}
+
+/**
+ * What a process IS — owner, argv, exe, the environment entries of interest — decided once per
+ * process identity (pid + kernel start time + comm; an exec changes the comm) instead of once per
+ * tick: the governor used to read status, cmdline, exe and environ of EVERY process on the machine
+ * every 30 s to find the handful that are agentop's. Re-read after `IDENTITY_TTL_MS` regardless, so
+ * an exec that kept its comm, or an argv rewritten in place, is picked up within minutes.
+ */
+interface ProcIdentity { key: string; atMs: number; ours: boolean; intrinsic: boolean; argv: string[]; exe: string | null; env: ProcEntry['env'] }
+const IDENTITY_TTL_MS = 5 * 60_000
+const identities = new Map<number, ProcIdentity>()
+
+function readSync(path: string): string | null {
+  try { return readFileSync(path, 'utf8') } catch { return null }
+}
+function readlinkQuiet(path: string): string | null {
+  try { return readlinkSync(path) } catch { return null }
+}
+
+function identityOf(row: ProcStatRow, uid: number | undefined, nowMs: number): ProcIdentity | null {
+  const key = `${row.starttime}:${row.comm}`
+  const known = identities.get(row.pid)
+  if (known && known.key === key && nowMs - known.atMs < IDENTITY_TTL_MS && nowMs >= known.atMs) return known
+  const status = readSync(`/proc/${row.pid}/status`)
+  if (status === null) return null
+  const uidLine = /^Uid:\s+(\d+)/m.exec(status)
+  const ours = !(uid !== undefined && uidLine && Number(uidLine[1]) !== uid)
+  let argv: string[] = [], exe: string | null = null, env: ProcEntry['env'] = {}
+  if (ours) {
+    const cmd = readSync(`/proc/${row.pid}/cmdline`)
+    if (cmd === null) return null
+    argv = cmd.split('\0').filter(Boolean)
+    exe = readlinkQuiet(`/proc/${row.pid}/exe`)
+    env = pickEnv(readSync(`/proc/${row.pid}/environ`) ?? '')
+  }
+  const intrinsic = ours && (env.AGENTISTICS_HEAVY_JOB !== undefined || env.AGENTISTICS_HELPER_ID !== undefined
+    || argv.some(a => /(^|\/)agentop(\.[\w-]+)?$/.test(a) || a.endsWith('packages/server/bin/cli.ts'))
+    || /\/agentop[^/]*$/.test((exe ?? '').replace(/ \(deleted\)$/, '')))
+  const id: ProcIdentity = { key, atMs: nowMs, ours, intrinsic, argv, exe, env }
+  identities.set(row.pid, id)
+  return id
+}
+
 /**
  * Read every process of this uid whose argv could make it agentop's (cheap pre-filter on argv/exe),
  * plus any pid in `alwaysPids` (registered helpers, heavy jobs). `null` when `/proc` is unreadable.
  */
 export async function readProcEntries(alwaysPids: ReadonlySet<number> = new Set()): Promise<ProcEntry[] | null> {
-  if (process.platform !== 'linux') return null
-  let names: string[]
-  try { names = await readdir('/proc') } catch { return null }
-  const up = await uptimeSec()
-  const uid = process.getuid?.()
   const nowMs = Date.now()
+  // Always a fresh sweep: this is the read that decides (inventory, kill). The memo it leaves is
+  // what the tick's second reader (heavy-io.ts) shares.
+  const table = readProcTable(nowMs, true)
+  if (!table) return null
+  const up = uptimeSec()
+  const uid = process.getuid?.()
   const next = new Map<number, { ticks: number; atMs: number }>()
   const out: ProcEntry[] = []
   // What each agentop process declared about itself — its environment is unreadable (proc-card.ts).
   const cards = readProcCards()
-  await Promise.all(names.filter(n => /^\d+$/.test(n)).map(async n => {
-    const pid = Number(n)
+  const starttimes = new Map<number, number>()
+  for (const stat of table) {
+    starttimes.set(stat.pid, stat.starttime)
+    const pid = stat.pid
     try {
-      const status = await readFile(`/proc/${pid}/status`, 'utf8')
-      const uidLine = /^Uid:\s+(\d+)/m.exec(status)
-      if (uid !== undefined && uidLine && Number(uidLine[1]) !== uid) return
-      const cmd = await readFile(`/proc/${pid}/cmdline`, 'utf8')
-      const argv = cmd.split('\0').filter(Boolean)
-      const exe = await readlink(`/proc/${pid}/exe`).catch(() => null)
-      let env = pickEnv(await readFile(`/proc/${pid}/environ`, 'utf8').catch(() => ''))
+      const id = identityOf(stat, uid, nowMs)
+      if (!id || !id.ours) continue
       const card = cards.get(pid)
-      const candidate = card !== undefined || alwaysPids.has(pid)
-        || env.AGENTISTICS_HEAVY_JOB !== undefined || env.AGENTISTICS_HELPER_ID !== undefined
-        || argv.some(a => /(^|\/)agentop(\.[\w-]+)?$/.test(a) || a.endsWith('packages/server/bin/cli.ts'))
-        || /\/agentop[^/]*$/.test((exe ?? '').replace(/ \(deleted\)$/, ''))
-      if (!candidate) return
-      const stat = parseStat(await readFile(`/proc/${pid}/stat`, 'utf8'))
-      if (!stat) return
-      const cwdGone = ((await readlink(`/proc/${pid}/cwd`).catch(() => '')) as string).endsWith(' (deleted)')
-      const ancestorManagedId = env.AGENTOP_MANAGED_ID ? undefined : await ancestorManagedIdOf(stat.ppid)
+      const candidate = id.intrinsic || card !== undefined || alwaysPids.has(pid)
+      if (!candidate) continue
+      const status = readSync(`/proc/${pid}/status`)
+      if (status === null) continue
+      let env = id.env
+      const cwdGone = (readlinkQuiet(`/proc/${pid}/cwd`) ?? '').endsWith(' (deleted)')
+      const ancestorManagedId = env.AGENTOP_MANAGED_ID ? undefined : ancestorManagedIdOf(stat.ppid)
       // A card counts only for the process that wrote it — same pid AND same start time.
       const own = card && card.starttime === stat.starttime ? card : undefined
       if (own) env = { ...cardEnv(own), ...env }
@@ -113,7 +194,7 @@ export async function readProcEntries(alwaysPids: ReadonlySet<number> = new Set(
           ? Math.round(ticks / CLK_TCK / (up - stat.starttime / CLK_TCK) * 100)
           : null
       out.push({
-        pid, ppid: stat.ppid, argv, exe,
+        pid, ppid: stat.ppid, argv: id.argv, exe: id.exe,
         rssBytes: kb('VmRSS'), swapBytes: kb('VmSwap'),
         cpuPercent,
         ageSec: up !== null ? Math.max(0, Math.round(up - stat.starttime / CLK_TCK)) : 0,
@@ -123,14 +204,12 @@ export async function readProcEntries(alwaysPids: ReadonlySet<number> = new Set(
         ...(own?.owner ? { cardOwner: own.owner } : {}),
       })
     } catch { /* exited mid-read, or not ours */ }
-  }))
+  }
   previous = next
+  // Forget the identities of processes that are gone, so the memo is as large as the table.
+  for (const pid of identities.keys()) if (!starttimes.has(pid)) identities.delete(pid)
   // Cards whose process is gone, or whose pid now belongs to someone else.
-  const live = new Map(await Promise.all([...cards.keys()].map(async pid => {
-    const st = parseStat(await readFile(`/proc/${pid}/stat`, 'utf8').catch(() => ''))
-    return [pid, st?.starttime ?? null] as const
-  })))
-  sweepProcCards(c => live.get(c.pid) === c.starttime)
+  sweepProcCards(c => starttimes.get(c.pid) === c.starttime)
   return out
 }
 
@@ -143,12 +222,12 @@ function cardEnv(c: ProcCard): ProcEntry['env'] {
 }
 
 /** Walk up to 6 ancestors for the nearest AGENTOP_MANAGED_ID (the session an MCP was started under). */
-async function ancestorManagedIdOf(ppid: number): Promise<string | undefined> {
+function ancestorManagedIdOf(ppid: number): string | undefined {
   let pid = ppid
   for (let i = 0; i < 6 && pid > 1; i++) {
-    const env = pickEnv(await readFile(`/proc/${pid}/environ`, 'utf8').catch(() => ''))
+    const env = pickEnv(readSync(`/proc/${pid}/environ`) ?? '')
     if (env.AGENTOP_MANAGED_ID) return env.AGENTOP_MANAGED_ID
-    const st = parseStat(await readFile(`/proc/${pid}/stat`, 'utf8').catch(() => ''))
+    const st = parseStat(readSync(`/proc/${pid}/stat`) ?? '')
     if (!st) return undefined
     pid = st.ppid
   }

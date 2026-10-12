@@ -4,9 +4,17 @@ import { routeRecommendation, type RouteKind } from "@agentistics/core";
 export function planLimitsTool(
   args: { kind?: RouteKind; authorHarness?: string } | undefined,
   /** The `GET /api/plan-limits` body (fetched by the caller so the policy lint sees the route). */
-  body: { budgets?: any[]; now?: number },
+  body: { budgets?: any[]; freeSlots?: number; freeSlotsByHarness?: Record<string, number>; liveSessions?: any[]; pauseUntil?: number; now?: number },
 ) {
   const budgets = body.budgets ?? [];
   const recommendation = args?.kind ? routeRecommendation(budgets, args.kind, args.authorHarness) : undefined;
-  return { budgets, ...(recommendation ? { recommendation } : {}), readAt: body.now ?? Date.now() };
+  return {
+    budgets,
+    freeSlots: body.freeSlots ?? (budgets.length ? Math.max(...budgets.map(b => b.freeSlots ?? 0)) : 0),
+    freeSlotsByHarness: body.freeSlotsByHarness ?? Object.fromEntries(budgets.map(b => [b.harness, b.freeSlots ?? 0])),
+    liveSessions: body.liveSessions ?? budgets.flatMap(b => b.liveSessions ?? []).filter((s, i, all) => all.findIndex(x => x.id === s.id) === i),
+    ...(body.pauseUntil !== undefined ? { pauseUntil: body.pauseUntil } : {}),
+    ...(recommendation ? { recommendation } : {}),
+    readAt: body.now ?? Date.now(),
+  };
 }

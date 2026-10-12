@@ -359,6 +359,64 @@ export function listPanePidsArgs(socket?: string): string[] {
   return sock(['list-panes', '-a', '-F', '#{session_name}\t#{pane_pid}'], socket)
 }
 
+/**
+ * PERF.IDLE: the fleet poll asked tmux TWO questions every tick — `list-sessions` (each session's
+ * created/attached/dead/activity) and `list-panes -a` (each pane's pid) — as two processes. One
+ * `list-panes -a` carrying the session fields as well answers both: the session fields are the same on
+ * every pane of a session, `pane_dead` is taken from the window's ACTIVE pane (exactly what
+ * `list-sessions` resolves `#{pane_dead}` against), and the pid keeps `parsePanePids`' last-pane-wins.
+ */
+export const FLEET_PANES_FORMAT = `${LIST_FORMAT}\t#{pane_pid}\t#{window_active}#{pane_active}`
+
+export function fleetPanesArgs(socket?: string): string[] {
+  return sock(['list-panes', '-a', '-F', FLEET_PANES_FORMAT], socket)
+}
+
+/**
+ * PERF.IDLE: the poll's screen captures ride the SAME tmux process as its listing — `list-panes -a`,
+ * a separator, then `captureManyArgs`' capture/separator pairs for the sessions the previous poll
+ * captured. tmux stops a sequence at the first command that fails (a session gone since), so the
+ * captures answered are exactly the ones whose separator arrived (`splitFleetPanesWithCaptures`).
+ */
+export function fleetPanesWithCapturesArgs(ids: string[], lines: number, listSep: string, sep: string, socket?: string): string[] {
+  const rest: string[] = ['list-panes', '-a', '-F', FLEET_PANES_FORMAT, ';', 'display-message', '-p', listSep]
+  for (const id of ids) rest.push(';', 'capture-pane', '-p', '-t', tmuxName(id), '-S', `-${lines}`, ';', 'display-message', '-p', sep)
+  return sock(rest, socket)
+}
+
+/**
+ * PURE. Cut `fleetPanesWithCapturesArgs`' output back apart: the listing (and whether it COMPLETED —
+ * its separator arrived, so a later failing capture says nothing about it) and one frame per id, `null`
+ * where the sequence stopped before it.
+ */
+export function splitFleetPanesWithCaptures(out: string, count: number, listSep: string, sep: string): { listOut: string; listOk: boolean; frames: (string[] | null)[] } {
+  const lines = out.split('\n')
+  const at = lines.indexOf(listSep)
+  if (at < 0) return { listOut: out, listOk: false, frames: Array.from({ length: count }, () => null) }
+  return { listOut: lines.slice(0, at).join('\n'), listOk: true, frames: splitCaptureMany(lines.slice(at + 1).join('\n'), count, sep) }
+}
+
+/** PURE. `fleetPanesArgs`' output -> the `parseTmuxList` rows and the `parsePanePids` map, as the two reads gave them. */
+export function parseFleetPanes(out: string): { sessions: BackendSession[]; panePids: Map<string, number> } {
+  const listLines = new Map<string, string>()
+  const firstLine = new Map<string, string>()
+  const pidLines: string[] = []
+  for (const raw of out.split('\n')) {
+    const line = raw.trimEnd()
+    if (!line) continue
+    const f = line.split('\t')
+    if (f.length < 7) continue
+    const [name, created, attached, dead, activity, pid, active] = f
+    const sessionLine = [name, created, attached, dead, activity].join('\t')
+    if (!firstLine.has(name!)) firstLine.set(name!, sessionLine)
+    if (active === '11') listLines.set(name!, sessionLine)
+    pidLines.push(`${name}\t${pid}`)
+  }
+  // Session order as tmux listed them; a session with no active pane reported falls back to its first.
+  const rows = [...firstLine.keys()].map(n => listLines.get(n) ?? firstLine.get(n)!)
+  return { sessions: parseTmuxList(rows.join('\n')), panePids: parsePanePids(pidLines.join('\n')) }
+}
+
 /** PURE. `listPanePidsArgs`' output -> managed id -> pane pid. Not-ours and malformed lines are dropped. */
 export function parsePanePids(out: string): Map<string, number> {
   const map = new Map<string, number>()

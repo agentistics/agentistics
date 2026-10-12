@@ -35,6 +35,7 @@ import type { ChatTurn } from '@agentistics/core'
 import type { AttachmentMessage, AttachmentSend, HarnessId } from '@agentistics/core'
 import { ATTACHMENT_DIR, readAttachmentLog } from './attachment-web'
 import { transcriptReaderFor } from './harness-transcript'
+import { readChatMemo } from './chat-read-memo'
 import { conversationOfRow } from './row-conversation'
 import { migratePrompts, pendingFor, type PendingPrompt } from './pending-prompts'
 import { HARNESS_PROCESS_TRANSCRIPTS } from './harness-session-file'
@@ -366,7 +367,7 @@ async function readSessionChatCore(
   // stale memo in `transcript-path-memo.ts`; this is the symptom guard beside it, so the next cause
   // says something instead of drawing a blank pane.
   onPath(path)
-  const read = await reader.read(path, maxTurns).catch(() => null)
+  const read = await readChatMemo(path, maxTurns, row.harness, () => reader.read(path, maxTurns)).catch(() => null)
   if (read === null) {
     const availability = transcriptAvailability({
       harness: row.harness, resolved: true, readFailed: true, live, nowMs: Date.now(),

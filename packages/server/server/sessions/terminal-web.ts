@@ -23,6 +23,8 @@ import { readRegistry } from './registry'
 import { createTerminalHub, type TerminalHub } from './terminal-hub'
 import { encodeSse, TERMINAL_POLL_MS, TERMINAL_VIEW_LINES } from './terminal-stream'
 import { HISTORY_LIMIT } from './tmux-cli'
+import { processSessionHub } from './session-hub'
+import { processTreeActivity } from './pane-activity'
 
 /**
  * A ceiling on concurrent terminal streams for the whole process. Each holds a socket, a controller
@@ -56,6 +58,14 @@ async function getHub(): Promise<TerminalHub> {
       return cap && anyGrant() ? { ...cap, lines: cap.lines.map(l => scrubTerminalLine(id, l)) } : cap
     },
     isManaged: async id => (await readRegistry()).some(m => m.id === id),
+    // PERF.IDLE: a still screen is re-captured only once its process tree has written something. The
+    // pid is the one the fleet poll already measures for the row (`SessionView.pid`), read off the
+    // hub's last snapshot — a PEEK, which neither polls nor holds the hub. No pid, no stamp: the hub
+    // then captures on its usual cadence.
+    activity: id => {
+      const pid = processSessionHub()?.last()?.sessions.find(v => v.id === id)?.pid
+      return pid ? processTreeActivity(pid) : null
+    },
     historyLimit: HISTORY_LIMIT,
     viewLines: TERMINAL_VIEW_LINES,
     pollMs: POLL_MS,

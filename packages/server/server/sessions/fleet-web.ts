@@ -274,6 +274,8 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
           id: view.id,
           title: titles.get(view.id) ?? '',
           ...(managed?.leader ? { leader: true } : {}),
+          ...(managed?.handoffHintLevel !== undefined ? { hintedLevel: managed.handoffHintLevel } : {}),
+          ...(managed?.handoffHintTokens !== undefined ? { hintedTokens: managed.handoffHintTokens } : {}),
           ...(view.contextTokens !== undefined ? { contextTokens: view.contextTokens } : {}),
           ...(view.contextWindow !== undefined ? { contextWindow: view.contextWindow } : {}),
         }

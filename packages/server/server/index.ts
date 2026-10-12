@@ -773,8 +773,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // PLAN.LIMITS — the 5-hour and weekly windows each harness account last reported, with the
     // plan registered in Settings → Billing. Reads only what the host already stored.
     if (url.pathname === '/api/plan-limits' && req.method === 'GET') {
-      const [{ planLimitsPayload }, prefs] = await Promise.all([import('./plan-limits'), readPreferences()])
-      const body = TEAM_CENTRAL ? { limits: [], registered: [], budgets: [], now: Date.now() } : await planLimitsPayload(prefs.billing)
+      const [{ planLimitsPayload, sampleLivePlanSessions }, prefs] = await Promise.all([import('./plan-limits'), readPreferences()])
+      const now = Date.now()
+      let liveSessions: import('@agentistics/core').LivePlanSession[] = []
+      if (!TEAM_CENTRAL) {
+        const data = await buildApiResponse()
+        const live = await readLocalLiveSnapshot(data.sessions)
+        const latest = await planLimitsPayload(prefs.billing, now)
+        const burnByHarness = Object.fromEntries(latest.budgets.map(b => [b.harness, b.burnPctPerHour])) as Partial<Record<import('@agentistics/core').HarnessId, number>>
+        liveSessions = sampleLivePlanSessions(data.sessions, live.liveSessionIds, now, burnByHarness)
+      }
+      const body = TEAM_CENTRAL ? { limits: [], registered: [], budgets: [], freeSlots: 0, freeSlotsByHarness: {}, liveSessions: [], now } : await planLimitsPayload(prefs.billing, now, liveSessions)
       return new Response(JSON.stringify(body), { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
     }
     if (url.pathname === '/api/events' && req.method === 'GET') {
@@ -2010,14 +2019,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // map and sets any session's role; a session calling through the MCP proves who it is (HMAC, as for
     // messages) and may set its own role, or its children's.
     if (url.pathname === '/api/session-roles' && req.method === 'GET') {
-      const { listRoles, defaultRoleDeps } = await import('./sessions/session-roles')
-      return json({ roles: await listRoles(await defaultRoleDeps()) })
+      const { listRoles, listRoleOrigins, defaultRoleDeps } = await import('./sessions/session-roles')
+      const deps = await defaultRoleDeps()
+      return json({ roles: await listRoles(deps), origins: await listRoleOrigins(deps) })
     }
     if (url.pathname === '/api/session-roles' && req.method === 'POST') {
-      const body = await req.json().catch(() => ({})) as { ref?: unknown; role?: unknown; lang?: unknown; session?: { id?: unknown; token?: unknown } }
+      const body = await req.json().catch(() => ({})) as { ref?: unknown; role?: unknown; lang?: unknown; session?: unknown }
       const { verifySessionIdentity } = await import('./sessions/session-identity')
-      const sender = body.session ? await verifySessionIdentity(body.session.id, body.session.token) : null
-      const { roleOp, roleStatus, defaultRoleDeps } = await import('./sessions/session-roles')
+      const { roleOp, roleStatus, roleSenderFromBody, defaultRoleDeps } = await import('./sessions/session-roles')
+      const who = await roleSenderFromBody(body, verifySessionIdentity, body.lang === 'pt' ? 'pt' : 'en')
+      if (!who.ok) return json(who, 403)
+      const sender = who.sender
       const out = await roleOp(sender, {
         ...(body.ref !== undefined ? { ref: String(body.ref) } : {}),
         ...(body.role !== undefined && body.role !== null ? { role: String(body.role) } : {}),
@@ -2831,7 +2843,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
           })
         }
-        const out = await runFleetSpawn(fleetLang(url.searchParams.get('lang')), body.value)
+        // `parentVerified` is the SERVER's statement, never the wire's: overwrite whatever arrived, then set
+        // it only when the body's `session` proof is valid and names the `parent` it claims.
+        const spawnBody = body.value as FleetSpawnBody & { session?: { id?: unknown; token?: unknown } }
+        const { markParentVerified } = await import('./sessions/session-roles')
+        const { verifySessionIdentity } = await import('./sessions/session-identity')
+        await markParentVerified(spawnBody, verifySessionIdentity)
+        const out = await runFleetSpawn(fleetLang(url.searchParams.get('lang')), spawnBody)
         // A memory-budget refusal is a DISTINCT status, not the plain `ok: false` every other
         // `planFleetSpawn` refusal answers with (an unknown harness, a relative path, …) — 409
         // Conflict, because the request is well-formed and refused only by the state of the machine

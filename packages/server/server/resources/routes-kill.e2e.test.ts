@@ -8,6 +8,7 @@ import { copyFileSync, readFileSync, mkdtempSync, chmodSync, rmSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { handleResources } from './routes'
+import { readProcTable } from './proc-read'
 
 let dir = ''
 let child: ReturnType<typeof Bun.spawn> | null = null
@@ -23,6 +24,9 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'res-kill-'))
   const fake = join(dir, 'agentop')
   copyFileSync('/bin/sh', fake); chmodSync(fake, 0o755)
+  // Warm the shared process-table memo BEFORE the child exists, as an earlier test file in the same
+  // `bun test` process does in CI: the kill must still find a pid born after that read.
+  readProcTable()
   child = Bun.spawn([fake, '-c', 'trap "" TERM; while :; do sleep 0.2; done'], { stdout: 'ignore', stderr: 'ignore' })
   // Wait on the condition (the exec happened, so /proc names it `agentop`), not on a fixed sleep.
   const deadline = Date.now() + 10_000
