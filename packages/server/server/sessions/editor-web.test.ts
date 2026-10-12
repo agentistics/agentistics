@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gitTestEnv } from '@agentistics/core/gitTestEnv'
@@ -117,6 +117,10 @@ describe('handleEditorTreeRoute', () => {
   })
 
   test('PUT /api/fleet/tree/file writes, then a stale write is refused as a conflict', async () => {
+    // Back-date the file so the first PUT always moves its mtime: on a coarse-mtime filesystem a
+    // write in the same tick as the read keeps the old stamp and the stale write slips through.
+    const past = new Date(Date.now() - 60_000)
+    utimesSync(join(repo, 'a.ts'), past, past)
     const read = await call(new Request('http://x/api/fleet/tree/file?id=s1&path=a.ts'), hostWith('s1', repo))
     const put1 = await call(new Request('http://x/api/fleet/tree/file?id=s1&path=a.ts', {
       method: 'PUT', body: JSON.stringify({ content: 'export const a = 2\n', mtimeMs: read.body.mtimeMs }),
