@@ -37,6 +37,51 @@ describe('away digest answers', () => {
     expect(f.counts()).toEqual({ starts: 0, prompts: 0 })
   })
 
+  test('No preserves the last delivery timestamp while snoozing', async () => {
+    const delivered = start + 5 * 60 * 60 * 1000
+    const f = fixture({ state: { since: away.since, lastBucket: bucket, lastDeliveredAt: delivered } })
+    expect((await answerAwayDigestWithDeps('no', bucket, 'en', f.deps, delivered + 5 * 60 * 60 * 1000, away.since)).ok).toBe(true)
+    expect(f.state.lastDeliveredAt).toBe(delivered)
+    expect(f.state.snoozedUntil).toBe(delivered + 6 * 60 * 60 * 1000)
+  })
+
+  test('expired and disabled away windows reject persisted offers without writes or launches', async () => {
+    const now = start + 5 * 60 * 60 * 1000
+    for (const inactive of [{ ...away, until: new Date(now).toISOString() }, { ...away, on: false }]) {
+      for (const answer of ['yes', 'no']) {
+        const f = fixture()
+        const deps = { ...f.deps, read: async () => ({ away: inactive, awayDigest: f.state }) }
+        expect(await answerAwayDigestWithDeps(answer, bucket, 'en', deps, now, away.since)).toEqual({ ok: false, error: 'not_away' })
+        expect(f.state).toEqual({ since: away.since, lastBucket: bucket })
+        expect(f.counts()).toEqual({ starts: 0, prompts: 0 })
+      }
+    }
+  })
+
+  test('in-flight answers validate since, isolate windows, and reject conflicting Yes/No', async () => {
+    const now = start + 5 * 60 * 60 * 1000
+    let release!: () => void
+    let entered!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const f = fixture({ start: async () => { entered(); await gate; return { ok: true, id: 'nay-first' } } })
+    const first = answerAwayDigestWithDeps('yes', bucket, 'en', f.deps, now, away.since)
+    await started
+    try {
+      expect(await answerAwayDigestWithDeps('yes', bucket, 'en', f.deps, now, 'old-window')).toEqual({ ok: false, error: 'stale' })
+      expect(await answerAwayDigestWithDeps('no', bucket, 'en', f.deps, now, away.since)).toEqual({ ok: false, error: 'stale' })
+      expect(await answerAwayDigestWithDeps('invalid', bucket, 'en', f.deps, now, away.since)).toEqual({ ok: false, error: 'bad_answer' })
+      const next = fixture()
+      const nextAway = { ...away, since: new Date(start + 1000).toISOString() }
+      const nextDeps = { ...next.deps, read: async () => ({ away: nextAway, awayDigest: { since: nextAway.since, lastBucket: bucket } }) }
+      expect(await answerAwayDigestWithDeps('yes', bucket, 'en', nextDeps, now, away.since)).toEqual({ ok: false, error: 'stale' })
+      expect(await answerAwayDigestWithDeps('yes', bucket, 'en', nextDeps, now, nextAway.since)).toEqual({ ok: true, conversationId: 'nay-1', bucket })
+      const expiredDeps = { ...f.deps, read: async () => ({ away: { ...away, until: new Date(now).toISOString() }, awayDigest: f.state }) }
+      expect(await answerAwayDigestWithDeps('yes', bucket, 'en', expiredDeps, now, away.since)).toEqual({ ok: false, error: 'not_away' })
+    } finally { release(); await first }
+    expect(f.counts()).toEqual({ starts: 1, prompts: 1 })
+  })
+
   test('stale bucket is refused and failures remain retryable', async () => {
     const stale = fixture()
     expect(await answerAwayDigestWithDeps('yes', bucket - 1, 'en', stale.deps, start + 5 * 60 * 60 * 1000, away.since)).toEqual({ ok: false, error: 'stale' })

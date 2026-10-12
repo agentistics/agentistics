@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bell, BellOff, AlertCircle, AlertTriangle, Info, CheckCircle2, Trash2, X, Download } from 'lucide-react'
-import { useNotifications, markAllRead, clearNotifications, dismissNotification, resolveNotification, notificationLink, type NotificationType } from '../lib/notifications'
+import { useNotifications, markAllRead, clearNotifications, dismissNotification, pushLocalNotification, resolveNotification, notificationLink, type NotificationType } from '../lib/notifications'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { openWhatsNew } from '../whatsNew/open'
 import { requestIdleReview } from '../lib/idleReviewRequest'
@@ -213,7 +213,16 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
                 setDigestBusyId(n.id)
                 try {
                   const body = await answerAwayDigest(answer, n.meta?.bucket, n.meta?.since, lang)
-                  if (body.ok && answer === 'yes' && body.conversationId) { setOpen(false); navigate(`/sessions/${encodeURIComponent(body.conversationId)}`) }
+                  if (!body.ok) {
+                    const stale = body.status === 409
+                    if (stale) dismissNotification(n.id)
+                    pushLocalNotification({ type: 'error', code: stale ? 'away.digest_stale' : 'away.digest_failed' })
+                    return
+                  }
+                  dismissNotification(n.id)
+                  if (answer === 'yes' && body.conversationId) { setOpen(false); navigate(`/sessions/${encodeURIComponent(body.conversationId)}`) }
+                } catch {
+                  pushLocalNotification({ type: 'error', code: 'away.digest_failed' })
                 } finally { setDigestBusyId(null) }
               }
               const clickable = link !== null || isUpdate || isIdle || isWhatsNew

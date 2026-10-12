@@ -33,6 +33,16 @@ describe('away digest source projection', () => {
     expect(digest.pending).toBe('unavailable')
   })
 
+  test('redacts and bounds task titles before they reach the digest prompt', () => {
+    const digest = buildAwayDigestFromSources(away, now, {
+      tasks: [{ id: 'task-1', title: 'token=private-value ' + 'x'.repeat(2000), status: 'in_review' }],
+      events: [{ taskId: 'task-1', at: new Date(since + 1).toISOString(), kind: 'status' }],
+    }) as { tasks: { title: string }[] }
+    expect(digest.tasks[0]!.title).toStartWith('token=[redacted]')
+    expect(digest.tasks[0]!.title.length).toBe(500)
+    expect(JSON.stringify(digest)).not.toContain('private-value')
+  })
+
   test('keeps only cached releases published inside the digest window', () => {
     const digest = buildAwayDigestFromSources(away, now, {
       awayDigest: { since: away.since, lastBucket: 20 },

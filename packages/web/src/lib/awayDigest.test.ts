@@ -9,9 +9,14 @@ describe('away digest bell action', () => {
   test('posts the answer payload and returns the Nay conversation', async () => {
     let request: RequestInit | undefined
     globalThis.fetch = (async (_url, init) => { request = init; return new Response(JSON.stringify({ conversationId: 'nay-42' }), { status: 200 }) }) as typeof fetch
-    await expect(answerAwayDigest('yes', 20, '2026-01-01T00:00:00.000Z', 'pt')).resolves.toEqual({ ok: true, conversationId: 'nay-42' })
+    await expect(answerAwayDigest('yes', 20, '2026-01-01T00:00:00.000Z', 'pt')).resolves.toEqual({ ok: true, status: 200, conversationId: 'nay-42' })
     expect(request?.method).toBe('POST')
     expect(JSON.parse(String(request?.body))).toEqual({ answer: 'yes', bucket: 20, since: '2026-01-01T00:00:00.000Z', lang: 'pt' })
+  })
+
+  test('returns stale status and never lets the response body override HTTP failure', async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({ ok: true }), { status: 409 })) as typeof fetch
+    expect(await answerAwayDigest('yes', 20, 'old-window', 'en')).toMatchObject({ ok: false, status: 409 })
   })
 
   test('bell renders both buttons, disables them while pending, and opens the returned session', () => {

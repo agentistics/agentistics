@@ -400,3 +400,16 @@ describe('every {placeholder} is interpolated, not only the hand-listed ones', (
     expect(out.message).not.toContain('{skipped}')
   })
 })
+
+
+test('local digest failure reaches the toast store with localized copy without fetching', async () => {
+  const s = await freshStore()
+  s.pushLocalNotification({ type: 'error', code: 'away.digest_failed' })
+  const failure = s.readNotifications()[0]!
+  expect(failure.type).toBe('error')
+  expect(s.resolveNotification(failure, 'pt').title).toBe('Não foi possível abrir o resumo')
+  expect(s.resolveNotification(failure, 'en').title).toBe('Could not open the summary')
+  expect(calls).toHaveLength(0)
+  s.pushLocalNotification({ type: 'error', code: 'away.digest_stale' })
+  expect(s.resolveNotification(s.readNotifications()[0]!, 'en').message).toBe('This offer is no longer available.')
+})

@@ -62,7 +62,7 @@ export function buildAwayDigestFromSources(away: AwayState, now: number, sources
   return {
     window: { since: new Date(window.since).toISOString(), until: new Date(window.until).toISOString() },
     tasks: [...new Set(events.map(e => e.taskId))].slice(0, 30).map(id => ({
-      id, title: taskById.get(id)?.title ?? 'unavailable', status: taskById.get(id)?.status ?? 'unavailable',
+      id, title: safe(taskById.get(id)?.title ?? 'unavailable'), status: taskById.get(id)?.status ?? 'unavailable',
       events: events.filter(e => e.taskId === id).map(e => safe(e)),
     })),
     checkIns: events.filter(e => e.kind === 'checkin').slice(0, 30).map(e => safe(e)),
@@ -93,7 +93,7 @@ export async function buildAwayDigest(away: AwayState, now: number): Promise<Rec
     }).slice(-30)
     result.tasks = [...new Set(events.map(e => e.taskId))].slice(0, 30).map(id => {
       const task = taskById.get(id)
-      return { id, title: task?.title ?? 'unavailable', status: task?.status ?? 'unavailable', events: events.filter(e => e.taskId === id).map(e => safe({ at: e.at, kind: e.kind, detail: e.detail, from: e.from, to: e.to })) }
+      return { id, title: safe(task?.title ?? 'unavailable'), status: task?.status ?? 'unavailable', events: events.filter(e => e.taskId === id).map(e => safe({ at: e.at, kind: e.kind, detail: e.detail, from: e.from, to: e.to })) }
     })
     result.checkIns = events.filter(e => e.kind === 'checkin').map(e => safe({ taskId: e.taskId, at: e.at, detail: e.detail })).slice(0, 30)
     result.pending = [
@@ -129,7 +129,6 @@ export async function buildAwayDigest(away: AwayState, now: number): Promise<Rec
   return result
 }
 
-const answerLocks = new Map<number, Promise<unknown>>()
 export type AwayDigestAnswer = { ok: true; conversationId: string; bucket: number } | { ok: false; error: 'stale' | 'bad_answer' | 'not_away' | 'failed' }
 
 export interface AwayDigestAnswerDeps {
@@ -154,7 +153,12 @@ export function awayDigestPrompt(
     : `You received the JSON below. Produce a visual Markdown status report with sections Summary, Releases, Tasks, Sessions, Check-ins, Notices, and Waiting for you. Use only the JSON; do not invent facts, and mark unavailable data as unavailable. Window: ${window}.\n\n${JSON.stringify(digest)}`
 }
 
-const answerDepsLocks = new Map<number, Promise<AwayDigestAnswer>>()
+/** An offer resets its response state but keeps delivery history for this away window. */
+export function awayDigestOfferState(since: string, bucket: number, state?: AwayDigestState): AwayDigestState {
+  return { since, lastBucket: bucket, ...(state?.since === since && state.lastDeliveredAt !== undefined ? { lastDeliveredAt: state.lastDeliveredAt } : {}) }
+}
+
+const answerDepsLocks = new Map<string, { answer: 'yes' | 'no'; run: Promise<AwayDigestAnswer> }>()
 
 async function answerAwayDigestWithDepsUnlocked(answer: unknown, bucket: unknown, lang: 'pt' | 'en', deps: AwayDigestAnswerDeps, now: number, since?: unknown): Promise<AwayDigestAnswer> {
   if (answer !== 'yes' && answer !== 'no') return { ok: false, error: 'bad_answer' }
@@ -163,11 +167,12 @@ async function answerAwayDigestWithDepsUnlocked(answer: unknown, bucket: unknown
   const prefs = await deps.read()
   const away = parseAwayState(prefs.away ?? AWAY_OFF)
   if (since !== away.since) return { ok: false, error: 'stale' }
+  if (!awayActive(away, now)) return { ok: false, error: 'not_away' }
   const due = awayDigestOfferDue(away, prefs.awayDigest, now)
   if (prefs.awayDigest?.conversationId && prefs.awayDigest.lastBucket === key) return { ok: true, conversationId: prefs.awayDigest.conversationId, bucket: key }
   if (due !== key && prefs.awayDigest?.lastBucket !== key) return { ok: false, error: awayActive(away, now) ? 'stale' : 'not_away' }
   if (answer === 'no') {
-    await deps.write({ since: away.since, lastBucket: key, snoozedUntil: now + 60 * 60 * 1000 })
+    await deps.write({ ...awayDigestOfferState(away.since, key, prefs.awayDigest), snoozedUntil: now + 60 * 60 * 1000 })
     return { ok: true, conversationId: '', bucket: key }
   }
   const digest = await deps.build(away, now)
@@ -179,35 +184,32 @@ async function answerAwayDigestWithDepsUnlocked(answer: unknown, bucket: unknown
 }
 
 export async function answerAwayDigestWithDeps(answer: unknown, bucket: unknown, lang: 'pt' | 'en', deps: AwayDigestAnswerDeps, now = Date.now(), since?: unknown): Promise<AwayDigestAnswer> {
-  if (typeof bucket !== 'number' || !Number.isInteger(bucket)) return answerAwayDigestWithDepsUnlocked(answer, bucket, lang, deps, now, since)
-  const prior = answerDepsLocks.get(bucket)
-  if (prior) return prior
+  if (answer !== 'yes' && answer !== 'no') return { ok: false, error: 'bad_answer' }
+  if (typeof bucket !== 'number' || !Number.isInteger(bucket)) return { ok: false, error: 'stale' }
+  const prefs = await deps.read()
+  const away = parseAwayState(prefs.away ?? AWAY_OFF)
+  if (since !== away.since) return { ok: false, error: 'stale' }
+  if (!awayActive(away, now)) return { ok: false, error: 'not_away' }
+  const key = JSON.stringify([bucket, since])
+  const prior = answerDepsLocks.get(key)
+  if (prior) return prior.answer === answer ? prior.run : { ok: false, error: 'stale' }
   const run = answerAwayDigestWithDepsUnlocked(answer, bucket, lang, deps, now, since)
-  answerDepsLocks.set(bucket, run)
-  try { return await run } finally { answerDepsLocks.delete(bucket) }
+  answerDepsLocks.set(key, { answer, run })
+  try { return await run } finally { answerDepsLocks.delete(key) }
 }
 
 export async function answerAwayDigest(answer: unknown, bucket: unknown, lang: 'pt' | 'en', now = Date.now(), since?: unknown): Promise<AwayDigestAnswer> {
-  if (answer !== 'yes' && answer !== 'no') return { ok: false, error: 'bad_answer' }
-  if (!Number.isInteger(bucket)) return { ok: false, error: 'stale' }
-  const key = Number(bucket)
-  const prior = answerLocks.get(key)
-  if (prior) return prior as Promise<AwayDigestAnswer>
-  const run = (async (): Promise<AwayDigestAnswer> => {
-    const { readPreferences, updatePreferences } = await import('./preferences')
-    const { startNaySession, defaultNayDeps } = await import('./sessions/nay-web')
-    const { runFleetAction } = await import('./sessions/fleet-web')
-    const { PORT } = await import('./config')
-    return answerAwayDigestWithDeps(answer, bucket, lang, {
-      read: async () => readPreferences(),
-      write: async state => { await updatePreferences(() => ({ awayDigest: state })) },
-      build: buildAwayDigest,
-      startNay: async selectedLang => { const out = await startNaySession(selectedLang, defaultNayDeps(PORT)); return { ok: out.ok, id: out.id } },
-      prompt: async (selectedLang, id, text) => ({ ok: (await runFleetAction(selectedLang, { action: 'prompt', id, text })).ok }),
-    }, now, since)
-  })()
-  answerLocks.set(key, run)
-  try { return await run } finally { answerLocks.delete(key) }
+  const { readPreferences, updatePreferences } = await import('./preferences')
+  const { startNaySession, defaultNayDeps } = await import('./sessions/nay-web')
+  const { runFleetAction } = await import('./sessions/fleet-web')
+  const { PORT } = await import('./config')
+  return answerAwayDigestWithDeps(answer, bucket, lang, {
+    read: async () => readPreferences(),
+    write: async state => { await updatePreferences(() => ({ awayDigest: state })) },
+    build: buildAwayDigest,
+    startNay: async selectedLang => { const out = await startNaySession(selectedLang, defaultNayDeps(PORT)); return { ok: out.ok, id: out.id } },
+    prompt: async (selectedLang, id, text) => ({ ok: (await runFleetAction(selectedLang, { action: 'prompt', id, text })).ok }),
+  }, now, since)
 }
 
 export async function offerAwayDigest(now = Date.now()): Promise<void> {
@@ -228,7 +230,7 @@ async function offerAwayDigestLocked(now: number): Promise<void> {
     if (currentAway.since !== away.since) return undefined
     if (awayDigestOfferDue(currentAway, cur.awayDigest, now) !== bucket) return undefined
     claimed = true
-    return { awayDigest: { since: away.since, lastBucket: bucket } }
+    return { awayDigest: awayDigestOfferState(away.since, bucket, cur.awayDigest) }
   })
   if (!claimed) return
   const { broadcastNotification } = await import('./sse')
