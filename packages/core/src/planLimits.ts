@@ -73,6 +73,53 @@ export interface PlanPace {
   sustainablePctPerHour: number
   suggestedParallel: number
   note: string
+  /** Slots remaining after the currently live sessions' measured burn. */
+  freeSlots: number
+  /** Whether freeSlots is based on a positive measured per-session burn. */
+  freeSlotsMeasured: boolean
+  /** The live sessions used to calculate the shared pool. */
+  liveSessions: LivePlanSession[]
+  /** When an over-pace plan can be considered again. */
+  pauseUntil?: number
+}
+
+export interface LivePlanSession {
+  id: string
+  model: string
+  burnPctPerHour: number
+  /** Internal routing hint; API responses omit it. */
+  harness?: HarnessId
+}
+
+export interface PlanSlotInput {
+  sustainablePctPerHour: number
+  liveSessions: readonly LivePlanSession[]
+  /** Typical burn for one additional session, when no live session is available. */
+  typicalBurnPctPerHour?: number
+  /** Number of sessions represented by the plan burn reading, when no live session is present. */
+  measuredLiveCount?: number
+  /** Cadence fallback when no per-session burn has been measured yet. */
+  fallbackParallel?: number
+  pauseUntil?: number
+}
+
+/** Calculate the one shared pool used by all harnesses and all owners. */
+export function planSlots(input: PlanSlotInput): { freeSlots: number; freeSlotsMeasured: boolean; liveSessions: LivePlanSession[]; pauseUntil?: number } {
+  const sessions = input.liveSessions.filter(s => finite(s.burnPctPerHour) && s.burnPctPerHour >= 0)
+  const totalBurn = sessions.reduce((sum, s) => sum + s.burnPctPerHour, 0)
+  const perSession = sessions.length
+    ? sessions.reduce((sum, s) => sum + s.burnPctPerHour, 0) / sessions.length
+    : (input.typicalBurnPctPerHour ?? input.sustainablePctPerHour) / Math.max(1, input.measuredLiveCount ?? 1)
+  const freeSlotsMeasured = perSession > 0
+  const freeSlots = freeSlotsMeasured
+    ? Math.max(0, Math.floor((input.sustainablePctPerHour - totalBurn) / perSession))
+    : Math.max(0, (input.fallbackParallel ?? 1) - sessions.length)
+  return {
+    freeSlots,
+    freeSlotsMeasured,
+    liveSessions: sessions.map(({ harness: _harness, ...s }) => ({ ...s })),
+    ...(input.pauseUntil !== undefined ? { pauseUntil: input.pauseUntil } : {}),
+  }
 }
 
 export type RouteKind = 'lead' | 'hard-bug' | 'design' | 'spec-impl' | 'mechanical' | 'qa' | 'probe'
@@ -241,7 +288,12 @@ export function planBudget(l: PlanLimits, nowMs: number): PlanBudget {
   }
 }
 
-export function planPace(l: PlanLimits, nowMs: number, history: readonly PlanLimits[] = []): PlanPace {
+export function planPace(
+  l: PlanLimits,
+  nowMs: number,
+  history: readonly PlanLimits[] = [],
+  liveSessions: readonly LivePlanSession[] = [],
+): PlanPace {
   const week = windowOf(l, 'week')
   const weekPct = week ? currentUsedPct(week, nowMs) : 0
   const hoursToReset = week ? Math.max(0.5, (week.resetsAt - nowMs) / 3_600_000) : 0.5
@@ -262,15 +314,40 @@ export function planPace(l: PlanLimits, nowMs: number, history: readonly PlanLim
     : sustainablePctPerHour
   const ratio = sustainablePctPerHour > 0 ? burnPctPerHour / sustainablePctPerHour : 0
   const paceStatus: PlanPaceStatus = ratio > 1.2 ? 'over' : ratio < 0.8 ? 'under' : 'on'
-  const suggestedParallel = Math.max(1, Math.min(8, paceStatus === 'under'
+  const five = windowOf(l, '5h')
+  const fivePct = five ? currentUsedPct(five, nowMs) : 0
+  const pauseReset = fivePct >= PLAN_BUDGET_HOLD_5H_PCT
+    ? five?.resetsAt
+    : week && weekPct >= PLAN_BUDGET_HOLD_WEEK_PCT
+      ? week.resetsAt
+      : undefined
+  const projectedPauseHours = week && burnPctPerHour > 0
+    ? Math.max(0, hoursToReset - (100 - weekPct) / burnPctPerHour)
+    : 0
+  const nextFiveHourReset = five?.resetsAt ?? week?.resetsAt ?? nowMs
+  const pauseUntil = paceStatus === 'over'
+    ? (pauseReset ?? Math.min(nextFiveHourReset, nowMs + projectedPauseHours * 3_600_000))
+    : undefined
+  const suggestedParallel = paceStatus === 'over' ? 0 : Math.max(1, Math.min(8, paceStatus === 'under'
     ? Math.max(2, Math.ceil(sustainablePctPerHour / Math.max(burnPctPerHour, sustainablePctPerHour / 2)))
     : Math.ceil(Math.max(burnPctPerHour, sustainablePctPerHour) / Math.max(sustainablePctPerHour, 0.01))))
+  const slots = planSlots({
+    sustainablePctPerHour,
+    liveSessions,
+    // With no live measurements, the measured plan burn is the only honest estimate for one
+    // additional session. This keeps the old route recommendation useful while live sessions
+    // are being discovered.
+    typicalBurnPctPerHour: burnPctPerHour,
+    measuredLiveCount: liveSessions.length,
+    fallbackParallel: suggestedParallel,
+    ...(pauseUntil !== undefined ? { pauseUntil } : {}),
+  })
   const note = paceStatus === 'under'
     ? `Under pace: keep up to ${suggestedParallel} parallel worker${suggestedParallel === 1 ? '' : 's'} so quota is used before reset.`
     : paceStatus === 'over'
-      ? 'Over pace: reduce concurrency until burn is sustainable.'
+      ? `Over pace: pause until ${pauseUntil ? new Date(pauseUntil).toISOString() : 'the next reset'}; reduce concurrency until burn is sustainable.`
       : 'On pace: keep the current cadence through the weekly reset.'
-  return { paceStatus, burnPctPerHour, sustainablePctPerHour, suggestedParallel, note }
+  return { paceStatus, burnPctPerHour, sustainablePctPerHour, suggestedParallel, note, ...slots }
 }
 
 const ROUTE_PREFERENCES: Record<RouteKind, readonly [HarnessId, string?][]> = {
@@ -315,7 +392,7 @@ export function routeRecommendation(
     ...(selected?.[1] ? { model: selected[1] } : {}),
     reason: `${pick.harness} is the preferred eligible plan for ${kind}.${paceText}`,
     alternatives,
-    cadence: { parallel: pick.suggestedParallel ?? 1, note: pick.note ?? 'Keep one worker running.' },
+    cadence: { parallel: pick.freeSlotsMeasured ? (pick.freeSlots ?? 0) : (pick.suggestedParallel ?? 1), note: pick.note ?? 'Keep one worker running.' },
   }
 }
 

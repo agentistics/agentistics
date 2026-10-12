@@ -773,8 +773,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // PLAN.LIMITS — the 5-hour and weekly windows each harness account last reported, with the
     // plan registered in Settings → Billing. Reads only what the host already stored.
     if (url.pathname === '/api/plan-limits' && req.method === 'GET') {
-      const [{ planLimitsPayload }, prefs] = await Promise.all([import('./plan-limits'), readPreferences()])
-      const body = TEAM_CENTRAL ? { limits: [], registered: [], budgets: [], now: Date.now() } : await planLimitsPayload(prefs.billing)
+      const [{ planLimitsPayload, sampleLivePlanSessions }, prefs] = await Promise.all([import('./plan-limits'), readPreferences()])
+      const now = Date.now()
+      let liveSessions: import('@agentistics/core').LivePlanSession[] = []
+      if (!TEAM_CENTRAL) {
+        const data = await buildApiResponse()
+        const live = await readLocalLiveSnapshot(data.sessions)
+        const latest = await planLimitsPayload(prefs.billing, now)
+        const burnByHarness = Object.fromEntries(latest.budgets.map(b => [b.harness, b.burnPctPerHour])) as Partial<Record<import('@agentistics/core').HarnessId, number>>
+        liveSessions = sampleLivePlanSessions(data.sessions, live.liveSessionIds, now, burnByHarness)
+      }
+      const body = TEAM_CENTRAL ? { limits: [], registered: [], budgets: [], freeSlots: 0, freeSlotsByHarness: {}, liveSessions: [], now } : await planLimitsPayload(prefs.billing, now, liveSessions)
       return new Response(JSON.stringify(body), { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
     }
     if (url.pathname === '/api/events' && req.method === 'GET') {

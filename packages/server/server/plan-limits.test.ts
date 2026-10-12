@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { routeRecommendation } from '@agentistics/core'
 import {
   __resetPlanLimitsForTest, ingestPlanLimits, latestCodexLimits, noteStructuredLine, planLimitsPayload,
-  setPlanLimitsSink, syncPlanLimitsFromFile, watchPlanLimitsFile,
+  sampleLivePlanSessions, setPlanLimitsSink, syncPlanLimitsFromFile, watchPlanLimitsFile,
 } from './plan-limits'
 
 const fx = (n: string) => readFileSync(join(import.meta.dir, '../../core/src/__fixtures__', n), 'utf8').trim()
@@ -52,6 +52,42 @@ test('payload exposes pacing budgets alongside limits', async () => {
   expect(rec.harness).toBe('codex')
   expect(rec.cadence.parallel).toBe(body.budgets[0]!.suggestedParallel)
   expect(rec.reason).toContain(body.budgets[0]!.note)
+})
+
+test('live usage drops sessions that are no longer live', () => {
+  const session = (id: string, tokens: number) => ({ session_id: id, harness: 'codex' as const, model: 'sonnet', input_tokens: tokens })
+  sampleLivePlanSessions([session('a', 100), session('b', 0)], ['a', 'b'], 0, { codex: 5 })
+  sampleLivePlanSessions([session('a', 200), session('b', 0)], ['a', 'b'], 3_600_000, { codex: 5 })
+  sampleLivePlanSessions([session('b', 0)], ['b'], 7_200_000, { codex: 5 })
+  const rates = sampleLivePlanSessions([session('a', 300), session('b', 0)], ['a', 'b'], 10_800_000, { codex: 5 })
+  expect(rates.find(s => s.id === 'a')?.burnPctPerHour).toBe(2.5)
+})
+
+test('pacing pools are per harness: Claude over does not remove Codex slots', async () => {
+  const now = Date.parse('2026-11-10T20:00:00Z')
+  const hour = 3_600_000
+  const weekReset = now + 20 * hour
+  const record = (harness: 'claude' | 'codex', used: number, at: number) => ingestPlanLimits({
+    harness, account: 'default', plan: harness === 'claude' ? 'Max' : 'Plus',
+    windows: [
+      { kind: '5h', usedPct: used, resetsAt: now + 4 * hour },
+      { kind: 'week', usedPct: used, resetsAt: weekReset },
+    ], updatedAt: at, source: harness === 'claude' ? 'claude-stream' : 'codex-rollout',
+  })
+  await record('claude', 90, now - hour)
+  await record('claude', 95, now)
+  await record('codex', 10, now - hour)
+  await record('codex', 10.1, now)
+  const body = await planLimitsPayload(undefined, now, [
+    { id: 'c1', harness: 'claude', model: 'opus', burnPctPerHour: 1 },
+    { id: 'x1', harness: 'codex', model: 'sonnet', burnPctPerHour: 2 },
+  ])
+  expect(body.freeSlotsByHarness.claude).toBe(0)
+  expect(body.freeSlotsByHarness.codex).toBe(1)
+  expect(body.freeSlots).toBe(1)
+  const rec = routeRecommendation(body.budgets, 'spec-impl')
+  expect(rec.harness).toBe('codex')
+  expect(rec.cadence.parallel).toBe(1)
 })
 
 test('notices fire once per threshold, the 100% one names an alternative with room', async () => {
