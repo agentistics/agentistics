@@ -217,7 +217,7 @@ export default function NotificationsSettings() {
       >
         <Toggle on={mobilePush.enabled} onToggle={() => {
           setMobilePushError(null)
-          void setMobilePushEnabled(!mobilePush.enabled).then(setMobilePush).catch(e => setMobilePushError(e instanceof Error ? e.message : 'Could not update notifications'))
+          void setMobilePushEnabled(!mobilePush.enabled).then(setMobilePush).catch(e => setMobilePushError(e instanceof Error ? e.message : (pt ? 'Não foi possível atualizar as notificações' : 'Could not update notifications')))
         }} disabled={!mobilePush.supported} />
       </PrefRow>
       {mobilePushError && <div style={{ color: '#ef4444', fontSize: 12, marginTop: 8 }}>{mobilePushError}</div>}

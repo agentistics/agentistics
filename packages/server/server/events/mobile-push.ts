@@ -46,6 +46,11 @@ export function parseMobileStore(raw: unknown): MobileSubscriptionStore {
   }) }
 }
 
+/** Classifies the browser making the registration request; the request body is never trusted. */
+export function isMobileUserAgent(userAgent: string | null): boolean {
+  return /Android|iPhone|iPad|iPod|Windows Phone|Mobile/i.test(userAgent ?? '')
+}
+
 export async function readMobileSubscriptions(file = MOBILE_SUBSCRIPTIONS_FILE): Promise<MobileSubscription[]> {
   try {
     if (!existsSync(file)) return []

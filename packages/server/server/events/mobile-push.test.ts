@@ -1,6 +1,6 @@
 import { createECDH } from 'node:crypto'
 import { describe, expect, test } from 'bun:test'
-import { deriveWebPushKeys, encryptWebPushPayload, mobileEvents, parseMobileStore, sendMobilePush, vapidJwt, type MobileSubscription } from './mobile-push'
+import { deriveWebPushKeys, encryptWebPushPayload, isMobileUserAgent, mobileEvents, parseMobileStore, sendMobilePush, vapidJwt, type MobileSubscription } from './mobile-push'
 import type { SessionEvent } from './event-types'
 
 const event = (id: string, kind: SessionEvent['kind'] = 'waiting'): SessionEvent => ({
@@ -27,6 +27,13 @@ describe('mobile push', () => {
     const result = await sendMobilePush([event('one')], [sub('mobile'), sub('desktop', 'desktop')], new Set(), async s => { sent.push(s.id) })
     expect(sent).toEqual(['mobile'])
     expect(result).toEqual({ sent: 1, failed: 0 })
+  })
+
+  test('classifies phone and tablet user agents, but not desktop browsers', () => {
+    expect(isMobileUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile/15E148')).toBe(true)
+    expect(isMobileUserAgent('Mozilla/5.0 (Linux; Android 14; Pixel Tablet) AppleWebKit/537.36')).toBe(true)
+    expect(isMobileUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36')).toBe(false)
+    expect(isMobileUserAgent(null)).toBe(false)
   })
 
   test('aes128gcm matches RFC 8291 Appendix A, including intermediate values', () => {

@@ -31,7 +31,7 @@ import { listGeminiSessions, getGeminiSessionMessages, type GeminiSessionSummary
 import { listCopilotSessions, getCopilotSessionMessages, type CopilotSessionSummary, type CopilotSessionMessage } from './copilot-sessions'
 import { PROJECTS_DIR, AGENTISTICS_DATA_DIR } from './config'
 import { safeReadDir } from './utils'
-import { ensureVapidPublicKey, parseMobileStore, readMobileSubscriptions, removeMobileSubscription, upsertMobileSubscription, writeMobileSubscriptions } from './events/mobile-push'
+import { ensureVapidPublicKey, isMobileUserAgent, parseMobileStore, readMobileSubscriptions, removeMobileSubscription, upsertMobileSubscription, writeMobileSubscriptions } from './events/mobile-push'
 import { decodeProjectDir } from './git'
 import { getEnabledAdapters } from './adapters/types'
 import { handleLogout, handleSession, getPrincipal, getPrincipalSession, makePrincipalSessionCookieHeader, SESSION_REFRESH_MS, isAuthed } from './auth'
@@ -1090,11 +1090,18 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       catch { return json({ error: 'mobile push is unavailable until the vault is unlocked' }, 503) }
     }
 
+    if (url.pathname === '/api/mobile-push/subscriptions' && req.method === 'GET') {
+      const subscriptions = (await readMobileSubscriptions()).map(({ id, kind, createdAt }) => ({ id, kind, createdAt }))
+      return json({ subscriptions })
+    }
+
     if (url.pathname === '/api/mobile-push/subscription' && req.method === 'PUT') {
       try {
-        const body = await req.json() as Record<string, unknown>
+        const read = await readJsonLimited<Record<string, unknown>>(req, LIMITS.bodyBytes)
+        if (!read.ok) return json({ error: read.error === 'too_large' ? 'request body too large' : 'invalid push subscription' }, 400)
+        const body = read.value
         const keys = body.keys as Record<string, unknown> | undefined
-        const sub = parseMobileStore({ subscriptions: [{ ...body, id: typeof body.endpoint === 'string' ? body.endpoint.slice(-64) : '', createdAt: new Date().toISOString(), keys }] }).subscriptions[0]
+        const sub = parseMobileStore({ subscriptions: [{ ...body, id: typeof body.endpoint === 'string' ? body.endpoint.slice(-64) : '', createdAt: new Date().toISOString(), kind: isMobileUserAgent(req.headers.get('user-agent')) ? 'mobile' : 'desktop', keys }] }).subscriptions[0]
         if (!sub) return json({ error: 'invalid push subscription' }, 400)
         const current = { subscriptions: await readMobileSubscriptions() }
         await writeMobileSubscriptions(upsertMobileSubscription(current, sub).subscriptions)
@@ -1104,7 +1111,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 
     if (url.pathname === '/api/mobile-push/subscription' && req.method === 'DELETE') {
       try {
-        const body = await req.json() as { endpoint?: unknown }
+        const read = await readJsonLimited<{ endpoint?: unknown }>(req, LIMITS.bodyBytes)
+        if (!read.ok) return json({ error: read.error === 'too_large' ? 'request body too large' : 'invalid push subscription' }, 400)
+        const body = read.value
         const current = { subscriptions: await readMobileSubscriptions() }
         const hit = current.subscriptions.find(s => s.endpoint === body.endpoint)
         if (hit) await writeMobileSubscriptions(removeMobileSubscription(current, hit.id).subscriptions)

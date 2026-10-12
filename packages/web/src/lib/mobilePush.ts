@@ -1,13 +1,17 @@
 export type MobilePushState = { enabled: boolean; supported: boolean; error?: string }
 
+export function isMobileDevice(userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent): boolean {
+  return /Android|iPhone|iPad|iPod|Windows Phone|Mobile/i.test(userAgent)
+}
+
 export async function getMobilePushState(): Promise<MobilePushState> {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return { enabled: false, supported: false }
+  if (!isMobileDevice() || !('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return { enabled: false, supported: false }
   const registration = await navigator.serviceWorker.ready
   return { enabled: Boolean(await registration.pushManager.getSubscription()), supported: true }
 }
 
 export async function setMobilePushEnabled(enabled: boolean): Promise<MobilePushState> {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return { enabled: false, supported: false }
+  if (!isMobileDevice() || !('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return { enabled: false, supported: false }
   const registration = await navigator.serviceWorker.ready
   if (!enabled) {
     const current = await registration.pushManager.getSubscription()
