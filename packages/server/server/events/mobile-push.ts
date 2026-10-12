@@ -77,7 +77,8 @@ export function mobileEvents(events: readonly SessionEvent[], muted: ReadonlySet
   return events.filter(e => !muted.has(e.conversationId ?? e.id) && (e.kind === 'waiting' || e.kind === 'waiting-approval'))
 }
 
-export type PushTransport = (sub: MobileSubscription, payload: { title: string; body: string; sessionId: string }) => Promise<void>
+export type WebPushFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
+export type PushTransport = (sub: MobileSubscription, payload: { title: string; body: string; sessionId: string }, fetchImpl?: WebPushFetch) => Promise<void>
 
 const textEncoder = new TextEncoder()
 const VAPID_SUBJECT = process.env.AGENTISTICS_VAPID_SUBJECT ?? 'https://github.com/agentistics/agentistics'
@@ -146,10 +147,10 @@ async function loadVapid(): Promise<{ publicKey: string; privateD: string }> {
 }
 
 /** Sends an encrypted Web Push request and removes endpoints that the push service no longer knows. */
-export const webPushTransport: PushTransport = async (sub, payload) => {
+export const webPushTransport: PushTransport = async (sub, payload, fetchImpl: WebPushFetch = fetch) => {
   const vapid = await loadVapid()
   const body = encryptWebPushPayload(textEncoder.encode(JSON.stringify(payload)), sub.keys.p256dh, sub.keys.auth)
-  const response = await fetch(sub.endpoint, {
+  const response = await fetchImpl(sub.endpoint, {
     method: 'POST', body: body as unknown as BodyInit,
     headers: {
       Authorization: `vapid t=${vapidJwt(sub.endpoint, vapid.publicKey, vapid.privateD)}, k=${vapid.publicKey}`,

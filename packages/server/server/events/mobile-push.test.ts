@@ -1,6 +1,9 @@
 import { createECDH } from 'node:crypto'
+import { readFile, rm } from 'node:fs/promises'
+import { join } from 'node:path'
 import { describe, expect, test } from 'bun:test'
-import { deriveWebPushKeys, encryptWebPushPayload, isMobileUserAgent, mobileEvents, parseMobileStore, sendMobilePush, vapidJwt, type MobileSubscription } from './mobile-push'
+import { AGENTISTICS_DATA_DIR } from '../config'
+import { deriveWebPushKeys, encryptWebPushPayload, ensureVapidPublicKey, isMobileUserAgent, mobileEvents, parseMobileStore, sendMobilePush, vapidJwt, webPushTransport, MOBILE_SUBSCRIPTIONS_FILE, type MobileSubscription } from './mobile-push'
 import type { SessionEvent } from './event-types'
 
 const event = (id: string, kind: SessionEvent['kind'] = 'waiting'): SessionEvent => ({
@@ -9,6 +12,11 @@ const event = (id: string, kind: SessionEvent['kind'] = 'waiting'): SessionEvent
 const sub = (id: string, kind: MobileSubscription['kind'] = 'mobile'): MobileSubscription => ({
   id, endpoint: `https://push.example/${id}`, keys: { p256dh: 'key', auth: 'auth' }, kind, enabled: true, createdAt: '',
 })
+const validKeys = {
+  p256dh: 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4',
+  auth: 'BTBZMqHH6r4Tts7J_aSIgg',
+}
+const pushSub = (id: string): MobileSubscription => ({ ...sub(id), keys: validKeys })
 
 describe('mobile push', () => {
   test('subscription store drops malformed rows and defaults kind to mobile', () => {
@@ -63,5 +71,48 @@ describe('mobile push', () => {
     expect(JSON.parse(Buffer.from(encodedHeader!, 'base64url').toString())).toEqual({ typ: 'JWT', alg: 'ES256' })
     expect(JSON.parse(Buffer.from(encodedClaims!, 'base64url').toString()).sub).not.toContain('localhost')
     expect(Buffer.from(encodedSignature!, 'base64url')).toHaveLength(64)
+  })
+
+  test('creates a VAPID key once and returns the same public key when reopened', async () => {
+    const first = await ensureVapidPublicKey()
+    const second = await ensureVapidPublicKey()
+    expect(first).toBe(second)
+    expect(first).not.toContain('.')
+    const sealed = await readFile(join(AGENTISTICS_DATA_DIR, 'mobile-push-vapid.sealed'))
+    expect(sealed?.toString()).not.toContain('privateKey')
+  })
+
+  test('web push request uses VAPID, TTL, and an aes128gcm record', async () => {
+    await ensureVapidPublicKey()
+    let request: { url: string; init?: RequestInit } | undefined
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      request = { url: String(url), init }
+      return new Response(null, { status: 201 })
+    }
+    await webPushTransport(pushSub('request'), { title: 'Waiting', body: 'Approve', sessionId: 's1' }, fetchImpl)
+    expect(request?.url).toBe('https://push.example/request')
+    expect(request?.init?.method).toBe('POST')
+    const headers = new Headers(request?.init?.headers)
+    expect(headers.get('TTL')).toBe('86400')
+    expect(headers.get('Content-Encoding')).toBe('aes128gcm')
+    expect(headers.get('Authorization')).toMatch(/^vapid t=[^.]+\.[^.]+\.[^.]+, k=[A-Za-z0-9_-]+$/)
+    const body = Buffer.from(await new Response(request?.init?.body).arrayBuffer())
+    expect(body.length).toBeGreaterThan(16 + 4 + 1 + 65 + 16)
+    expect(body.subarray(16, 20).readUInt32BE()).toBe(4096)
+    expect(body[20]).toBe(65)
+  })
+
+  test('removes subscriptions for 404 and 410, but keeps them for 500', async () => {
+    for (const status of [404, 410, 500]) {
+      const target = pushSub(`status-${status}`)
+      const other = pushSub(`other-${status}`)
+      await Bun.write(MOBILE_SUBSCRIPTIONS_FILE, JSON.stringify({ subscriptions: [target, other] }))
+      const call = webPushTransport(target, { title: 'Waiting', body: 'Approve', sessionId: 's1' }, async () => new Response(null, { status }))
+      if (status === 500) await expect(call).rejects.toThrow('HTTP 500')
+      else await expect(call).rejects.toThrow(`HTTP ${status}`)
+      const remaining = await readFile(MOBILE_SUBSCRIPTIONS_FILE, 'utf8').then(raw => parseMobileStore(JSON.parse(raw)).subscriptions)
+      expect(remaining.map(item => item.id)).toEqual(status === 500 ? [target.id, other.id] : [other.id])
+    }
+    await rm(MOBILE_SUBSCRIPTIONS_FILE, { force: true })
   })
 })
