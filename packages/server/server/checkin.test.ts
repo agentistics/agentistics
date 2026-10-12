@@ -172,4 +172,18 @@ describe('check-in agenda', () => {
     await recordReport(leader.conversationId, { state: 'ok', summary: 'Done', actions: [{ text: 'Closed it' }] }, 42)
     expect(JSON.parse(activity[0].detail).actions).toEqual([{ text: 'Closed it' }])
   })
+
+  test('recordReport persists structured round fields in state and activity', async () => {
+    reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+    const round = {
+      state: 'ok' as const, summary: 'fallback', headline: 'Shipped the check-in view',
+      delivered: [{ text: 'Structured reports', ref: 'abc' }],
+      inProgress: [{ item: 'QA', stage: 'review', release: 'today', session: 'sess-1' }],
+      next: [{ text: 'Run mobile QA', when: 'tomorrow' }],
+      health: [{ label: 'MCP', value: 'connected', state: 'ok' as const }],
+    }
+    const state = await recordReport(leader.conversationId, round, 42)
+    expect(state.last).toMatchObject(round)
+    expect(JSON.parse(activity[0].detail)).toMatchObject(round)
+  })
 })

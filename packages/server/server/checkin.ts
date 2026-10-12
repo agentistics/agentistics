@@ -44,7 +44,22 @@ export type CheckinRoundState = 'ok' | 'resolved' | 'needs_you'
 export interface CheckinLink { kind: 'session' | 'subtask' | 'task'; id: string; taskId?: string }
 export interface CheckinAction { text: string; link?: CheckinLink }
 export interface CheckinNeed { subject: string; text: string; critical?: boolean; link?: CheckinLink }
-export interface CheckinRound { state: CheckinRoundState; summary: string; actions?: CheckinAction[]; needs?: CheckinNeed[] }
+export interface CheckinDelivered { text: string; ref?: string }
+export interface CheckinInProgress { item: string; stage: string; release?: string; session?: string }
+export interface CheckinNext { text: string; when?: string }
+export type CheckinHealthState = 'ok' | 'warn' | 'bad'
+export interface CheckinHealth { label: string; value: string; state: CheckinHealthState }
+export interface CheckinRound {
+  state: CheckinRoundState
+  summary: string
+  headline?: string
+  delivered?: CheckinDelivered[]
+  inProgress?: CheckinInProgress[]
+  next?: CheckinNext[]
+  health?: CheckinHealth[]
+  actions?: CheckinAction[]
+  needs?: CheckinNeed[]
+}
 export interface CheckinReportRefusal { error: string }
 export interface CheckinConfig {
   intervalMin: 15 | 30 | 60 | 120
@@ -134,7 +149,18 @@ export async function recordReport(session: string, round: CheckinRound, now = D
   })
   emit(publicState(state))
   const reg = (await deps.readRegistry()).find(x => x.id === session || x.conversationId === session)
-  if (reg?.taskId) { const w = await deps.loadTaskWorld(); const event: TaskEvent = { id: deps.newEventId(), taskId: reg.taskId, actor: reg.label || reg.id, kind: 'checkin', at: new Date(now).toISOString(), detail: JSON.stringify({ sessionId: session, state: round.state, summary: round.summary, ...(round.actions ? { actions: round.actions } : {}), ...(round.needs ? { needs: round.needs } : {}) }) }; await w.store.logEvents([event]) }
+  if (reg?.taskId) {
+    const w = await deps.loadTaskWorld()
+    const event: TaskEvent = {
+      id: deps.newEventId(), taskId: reg.taskId, actor: reg.label || reg.id, kind: 'checkin', at: new Date(now).toISOString(),
+      detail: JSON.stringify({ sessionId: session, state: round.state, summary: round.summary,
+        ...(round.headline ? { headline: round.headline } : {}), ...(round.delivered ? { delivered: round.delivered } : {}),
+        ...(round.inProgress ? { inProgress: round.inProgress } : {}), ...(round.next ? { next: round.next } : {}),
+        ...(round.health ? { health: round.health } : {}), ...(round.actions ? { actions: round.actions } : {}),
+        ...(round.needs ? { needs: round.needs } : {}) }),
+    }
+    await w.store.logEvents([event])
+  }
   return state
 }
 export async function report(session: string, round: CheckinRound): Promise<CheckinState> { return recordReport(session, round) }

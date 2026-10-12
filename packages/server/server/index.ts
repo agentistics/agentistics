@@ -2064,11 +2064,15 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // LEADER CHECK-INS — agenda state, immediate run, and the MCP report share this server store.
     if (url.pathname === '/api/checkin' || url.pathname.startsWith('/api/checkin/')) {
       if (url.pathname === '/api/checkin/report' && req.method === 'POST') {
-        const body = await req.json().catch(() => ({})) as { state?: unknown; summary?: unknown; actions?: unknown; needs?: unknown; session?: { id?: unknown; token?: unknown } }
+        const body = await req.json().catch(() => ({})) as { state?: unknown; summary?: unknown; headline?: unknown; delivered?: unknown; inProgress?: unknown; next?: unknown; health?: unknown; actions?: unknown; needs?: unknown; session?: { id?: unknown; token?: unknown } }
         const { verifySessionIdentity } = await import('./sessions/session-identity')
         const sender = body.session ? await verifySessionIdentity(body.session.id, body.session.token) : null
         if (!sender) return json({ error: 'unverified_sender' }, 403)
-        const reported = await reportCheckin(sender, { state: String(body.state) as any, summary: String(body.summary), ...(Array.isArray(body.actions) ? { actions: body.actions as any } : {}), ...(Array.isArray(body.needs) ? { needs: body.needs as any } : {}) })
+        const reported = await reportCheckin(sender, { state: String(body.state) as any, summary: String(body.summary),
+          ...(typeof body.headline === 'string' ? { headline: body.headline } : {}), ...(Array.isArray(body.delivered) ? { delivered: body.delivered as any } : {}),
+          ...(Array.isArray(body.inProgress) ? { inProgress: body.inProgress as any } : {}), ...(Array.isArray(body.next) ? { next: body.next as any } : {}),
+          ...(Array.isArray(body.health) ? { health: body.health as any } : {}), ...(Array.isArray(body.actions) ? { actions: body.actions as any } : {}),
+          ...(Array.isArray(body.needs) ? { needs: body.needs as any } : {}) })
         // A verified session that is not a leader is refused in words, never answered `200 null`.
         if (reported && 'error' in reported) return json(reported, 409)
         return reported ? json(reported) : json({ error: 'not_a_leader' }, 403)

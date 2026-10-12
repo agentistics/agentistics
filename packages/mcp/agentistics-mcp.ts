@@ -631,12 +631,17 @@ const TOOLS: Tool[] = [
   },
   {
     name: "agentistics_checkin_report",
-    description: "Report the leadership check-in round. The server records the round, updates the agenda, and adds a checkin activity event to the filed task.",
+    description: "Report the leadership check-in round. Include a concise headline (<=140 chars), delivered items, in-progress items with stage and expected release, next steps, and health rows (sessions/memory, limits, releases, MCP, handoff). Keep summary as the fallback for older/short rounds. The server records the round, updates the agenda, and adds a checkin activity event to the filed task.",
     inputSchema: {
       type: "object",
       properties: {
         state: { type: "string", enum: ["ok", "resolved", "needs_you"] },
         summary: { type: "string" },
+        headline: { type: "string", maxLength: 140, description: "One-line headline, at most 140 characters." },
+        delivered: { type: "array", items: { type: "object", properties: { text: { type: "string" }, ref: { type: "string" } }, required: ["text"] } },
+        inProgress: { type: "array", items: { type: "object", properties: { item: { type: "string" }, stage: { type: "string" }, release: { type: "string" }, session: { type: "string" } }, required: ["item", "stage"] } },
+        next: { type: "array", items: { type: "object", properties: { text: { type: "string" }, when: { type: "string" } }, required: ["text"] } },
+        health: { type: "array", items: { type: "object", properties: { label: { type: "string" }, value: { type: "string" }, state: { type: "string", enum: ["ok", "warn", "bad"] } }, required: ["label", "value", "state"] } },
         actions: { type: "array", items: { type: "object", properties: { text: { type: "string" }, link: { type: "object" } }, required: ["text"] } },
         needs: { type: "array", items: { type: "object", properties: { subject: { type: "string" }, text: { type: "string" }, critical: { type: "boolean" }, link: { type: "object" } }, required: ["subject", "text"] } },
       },
@@ -1185,7 +1190,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
       case "agentistics_checkin_report": {
         const a = args as any;
         const body = await apiSend("POST", "/api/checkin/report", {
-          state: a?.state, summary: a?.summary, actions: a?.actions, needs: a?.needs,
+          state: a?.state, summary: a?.summary, headline: a?.headline, delivered: a?.delivered, inProgress: a?.inProgress, next: a?.next, health: a?.health, actions: a?.actions, needs: a?.needs,
           session: sessionProof(process.env),
         });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
