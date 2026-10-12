@@ -1961,8 +1961,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       hasPrompts: promptList.length > 0,
       dictationReady: dictation.state === 'ready',
       hasModel: Boolean(sourceControls?.model || modelReason || menuModels.length > 0 || menuFreeText),
+      hasNotifications: notifyKey.length > 0,
     }),
-    [answeringNow, dictation.state, isMobile, menuFreeText, menuModels.length, modelReason, promptList.length, sourceControls?.model],
+    [answeringNow, dictation.state, isMobile, menuFreeText, menuModels.length, modelReason, notifyKey, promptList.length, sourceControls?.model],
   )
 
   const closePrompts = useCallback(() => {
@@ -3850,7 +3851,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     }}>
                       {menuGroups.includes('message') && (
                         <>
-                          <button type="button" aria-expanded={!foldedMenuGroups.has('message')} onClick={() => toggleMenuGroup('message')} style={menuGroupHeaderStyle(isMobile)}>
+                          <button type="button" aria-expanded={!foldedMenuGroups.has('message')} aria-controls="composer-menu-message-region" onClick={() => toggleMenuGroup('message')} style={menuGroupHeaderStyle(isMobile)}>
                             {foldedMenuGroups.has('message') ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
                             {pt ? 'Mensagem' : 'Message'}
                           </button>
@@ -3865,7 +3866,18 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                               {pt ? 'Suas mensagens' : 'Your messages'}
                             </button>
                           )}
-                          <div style={{ display: foldedMenuGroups.has('message') ? 'none' : 'block' }}>
+                          <div id="composer-menu-message-region" style={{ display: foldedMenuGroups.has('message') ? 'none' : 'block' }}>
+                      {dictation.state === 'ready' && (
+                        <button
+                          type="button"
+                          onClick={toggleDictation}
+                          disabled={!canPrompt}
+                          style={{ ...menuItemStyle(isMobile), opacity: canPrompt ? 1 : 0.55, cursor: canPrompt ? 'pointer' : 'default' }}
+                        >
+                          <Mic size={14} />
+                          {listening ? (pt ? 'Parar de ouvir' : 'Stop listening') : (pt ? 'Ditar' : 'Dictate')}
+                        </button>
+                      )}
                       {/* DICTATION. Its refusal is a LINE, not a `title`: a phone has no hover, and
                           this is exactly where it is refused most — the Web Speech API needs a
                           secure context, so a dashboard reached over plain HTTP on a LAN never has
@@ -3957,11 +3969,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                           button: choosing a model is a decision about the next turn, and this is an
                           answer to a dialog that is already open. */}
                       {menuGroups.includes('model') && <>
-                      <button type="button" aria-expanded={!foldedMenuGroups.has('model')} onClick={() => toggleMenuGroup('model')} style={menuGroupHeaderStyle(isMobile)}>
+                      <button type="button" aria-expanded={!foldedMenuGroups.has('model')} aria-controls="composer-menu-model-region" onClick={() => toggleMenuGroup('model')} style={menuGroupHeaderStyle(isMobile)}>
                         {foldedMenuGroups.has('model') ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
                         {pt ? 'Modelo' : 'Model'}
                       </button>
-                      <div style={{ display: foldedMenuGroups.has('model') ? 'none' : 'block' }}>
+                      <div id="composer-menu-model-region" style={{ display: foldedMenuGroups.has('model') ? 'none' : 'block' }}>
                       {answeringNow ? null : modelReason ? (
                         <p style={{ margin: 0, padding: '6px 8px', fontSize: 10.5, lineHeight: 1.45, color: 'var(--text-tertiary)' }}>
                           {modelReason}
@@ -4011,11 +4023,12 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                       {/* NOTIFICATIONS for THIS session. Delivery only — the session still reads as
                           waiting. Styled as the model buttons above; the divider is the same 1px
                           rule the model block opens with. */}
-                      <button type="button" aria-expanded={!foldedMenuGroups.has('notifications')} onClick={() => toggleMenuGroup('notifications')} style={menuGroupHeaderStyle(isMobile)}>
+                      {menuGroups.includes('notifications') && <>
+                      <button type="button" aria-expanded={!foldedMenuGroups.has('notifications')} aria-controls="composer-menu-notifications-region" onClick={() => toggleMenuGroup('notifications')} style={menuGroupHeaderStyle(isMobile)}>
                         {foldedMenuGroups.has('notifications') ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
                         {pt ? 'Notificações' : 'Notifications'}
                       </button>
-                      <div style={{ display: foldedMenuGroups.has('notifications') ? 'none' : 'block' }}><div style={{ height: 1, background: 'var(--border)', margin: '4px 2px' }} />
+                      <div id="composer-menu-notifications-region" style={{ display: foldedMenuGroups.has('notifications') ? 'none' : 'block' }}><div style={{ height: 1, background: 'var(--border)', margin: '4px 2px' }} />
                       <button
                         onClick={() => { setMoreOpen(false); toggleSessionMuted(notifyKey) }}
                         title={notifyMuted ? mutedTooltip(pt) : undefined}
@@ -4032,6 +4045,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                           : (pt ? 'Silenciar notificações' : 'Mute notifications')}
                       </button>
                       </div>
+                      </>}
 
                       {/* THE SKILLS LIST LIVED HERE AND IS GONE. It was the only place to see
                           them; there is a dedicated view now, and two lists of one thing are two

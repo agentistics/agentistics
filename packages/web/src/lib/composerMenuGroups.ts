@@ -8,14 +8,17 @@ export interface ComposerMenuVisibility {
   hasPrompts: boolean
   dictationReady: boolean
   hasModel: boolean
+  hasNotifications: boolean
 }
 
 export function visibleComposerMenuGroups(input: ComposerMenuVisibility): ComposerMenuGroupId[] {
   if (input.answeringNow) return []
   const groups: ComposerMenuGroupId[] = []
-  if (!input.dictationReady || (input.isMobile && input.hasPrompts)) groups.push('message')
+  // Dictation is available in this group on every surface. Mobile history is an
+  // additional item, not the reason the group exists.
+  groups.push('message')
   if (input.hasModel) groups.push('model')
-  groups.push('notifications')
+  if (input.hasNotifications) groups.push('notifications')
   return groups
 }
 

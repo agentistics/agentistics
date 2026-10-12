@@ -5,15 +5,19 @@ import {
 } from './composerMenuGroups'
 
 describe('visibleComposerMenuGroups', () => {
-  const base = { answeringNow: false, dictationReady: true, hasModel: true }
+  const base = { answeringNow: false, dictationReady: true, hasModel: true, hasNotifications: true }
 
-  test('shows mobile history in Mensagem, but keeps desktop row behavior', () => {
+  test('shows mobile history and desktop dictation in Mensagem', () => {
     expect(visibleComposerMenuGroups({ ...base, isMobile: true, hasPrompts: true })).toEqual(['message', 'model', 'notifications'])
-    expect(visibleComposerMenuGroups({ ...base, isMobile: false, hasPrompts: true })).toEqual(['model', 'notifications'])
+    expect(visibleComposerMenuGroups({ ...base, isMobile: false, hasPrompts: true })).toEqual(['message', 'model', 'notifications'])
   })
 
   test('shows dictation refusal as Mensagem and omits unavailable model groups', () => {
     expect(visibleComposerMenuGroups({ ...base, isMobile: false, dictationReady: false, hasModel: false, hasPrompts: false })).toEqual(['message', 'notifications'])
+  })
+
+  test('omits notification group when its item is unavailable', () => {
+    expect(visibleComposerMenuGroups({ ...base, isMobile: false, hasPrompts: true, hasNotifications: false })).toEqual(['message', 'model'])
   })
 
   test('answering a question hides the whole menu', () => {
