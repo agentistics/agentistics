@@ -107,6 +107,7 @@ describe('LEADER.HANDOFF.HINT', () => {
     expect(why).not.toHaveProperty('costContinueUSD')
     expect(why).not.toHaveProperty('costSuccessorUSD')
     expect(why).not.toHaveProperty('breakEvenTurns')
+    expect(why.avgCostPerTurnUSD).toBeCloseTo(0.3)
   })
 
   it('finds the newest fixed handoff candidate, without recursing', async () => {

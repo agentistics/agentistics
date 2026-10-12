@@ -72,6 +72,14 @@ describe('spawn role assignment and delivery', () => {
     expect(await applyRoleTitle('m1', '[ LÍDER ] - Child', 'leader', 'pt', deps)).toBe(false)
   })
 
+  test('a stored worker role strips the leader prefix, even from a placeholder title', async () => {
+    const rows = [{ id: 'm2', title: '[ LÍDER ] - sessão sem registro 8c8c707d07' }]
+    const { deps, renames } = fake(rows)
+    expect(await applyRoleTitle('m2', '[ LÍDER ] - sessão sem registro 8c8c707d07', 'worker', 'pt', deps)).toBe(true)
+    expect(renames).toEqual([['m2', 'sessão sem registro 8c8c707d07']])
+    expect(await applyRoleTitle('m2', 'Plain', 'worker', 'pt', deps)).toBe(false)
+  })
+
   test('a child defaults to worker, a handoff can request leader, and an explicit role wins', async () => {
     const { deps } = fake([])
     expect(await ensureSpawnRole(['child'], 'worker', deps)).toBe('worker')

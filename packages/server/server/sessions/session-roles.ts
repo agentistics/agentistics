@@ -475,11 +475,10 @@ export async function applyRoleTitle(
   lang: RoleLang,
   providedDeps?: RoleDeps,
 ): Promise<boolean> {
-  if (role !== 'leader') return false
-  const deps = providedDeps ?? await defaultRoleDeps()
-  if (isPlaceholderTitle(title)) return false
+  if (role === 'leader' && isPlaceholderTitle(title)) return false
   const wanted = titleForRole(title, role, lang)
   if (wanted === '' || wanted === title) return false
+  const deps = providedDeps ?? await defaultRoleDeps()
   return (await deps.rename(rowId, wanted).catch(() => ({ ok: false }))).ok
 }
 

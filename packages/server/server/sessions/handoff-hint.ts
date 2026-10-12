@@ -98,12 +98,13 @@ export function computeHandoffWhy(row: HandoffHintRow, deps: HandoffWhyDeps = {}
   const model = deps.model ?? row.model
   // An unpriced model has no figure: omit the costs instead of showing a fake zero.
   const price = model && hasModelPrice(model) ? getModelPrice(model).cacheRead : undefined
-  if (price !== undefined && Number.isFinite(row.contextTokens)) {
-    const perTurn = row.contextTokens! / 1_000_000 * price
-    const measured = Number.isFinite(row.turns) && row.turns! > 0 && Number.isFinite(row.costUSD)
-      ? row.costUSD! / row.turns! : undefined
-    out.avgCostPerTurnUSD = measured ?? perTurn
-  }
+  // A measured cost (spend / turns) needs no price table, so it stays even for an unpriced model.
+  const measured = Number.isFinite(row.turns) && row.turns! > 0 && Number.isFinite(row.costUSD)
+    ? row.costUSD! / row.turns! : undefined
+  const perTurn = price !== undefined && Number.isFinite(row.contextTokens)
+    ? row.contextTokens! / 1_000_000 * price : undefined
+  const avg = measured ?? perTurn
+  if (avg !== undefined) out.avgCostPerTurnUSD = avg
   const samples = (deps.pastLeaderTurns ?? []).filter(n => Number.isFinite(n) && n > 0)
   const projected = samples.length ? samples.reduce((a, n) => a + n, 0) / samples.length : 40
   out.projectedTurns = Math.round(projected)
