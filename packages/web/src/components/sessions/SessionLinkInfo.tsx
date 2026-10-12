@@ -282,15 +282,13 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
   )
 }
 
-export function SessionLinkInfo({ session, links, lang, onGo, isMobile = false, onButtonRef }: {
+export function SessionLinkInfo({ session, links, lang, onGo, isMobile = false }: {
   session: Partial<Pick<ControlSession, 'id' | 'startedAt' | 'conversationId' | 'away' | 'actionable' | 'state'>>
   links: SessionLinks | null
   lang: 'pt' | 'en'
   onGo: (path: string) => void
   /** Touch target: 44px on a phone, 22px on desktop. */
   isMobile?: boolean
-  /** Lets the owning session page activate this session's control without a document-wide lookup. */
-  onButtonRef?: (button: HTMLButtonElement | null) => void
 }) {
   const pt = lang === 'pt'
   const [open, setOpen] = useState(false)
@@ -330,7 +328,7 @@ export function SessionLinkInfo({ session, links, lang, onGo, isMobile = false, 
   const size = isMobile ? 44 : 22
   return (
     <>
-      <button ref={button => { btnRef.current = button; onButtonRef?.(button) }} type="button" onClick={toggle} aria-label={label} title={label}
+      <button ref={btnRef} type="button" onClick={toggle} aria-label={label} title={label}
         aria-haspopup="dialog" aria-expanded={open} data-testid="session-link-info"
         style={{
           all: 'unset', boxSizing: 'border-box', cursor: 'pointer', flexShrink: 0, width: size, height: size,
