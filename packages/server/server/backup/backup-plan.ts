@@ -168,6 +168,13 @@ export const HARNESS_SECRETS: Record<HarnessId, ExcludeRule[]> = {
 /** Secrets that are not scoped to one harness. */
 const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
   {
+    pattern: '.agentistics/mobile-push-vapid.sealed', match: 'prefix', reason: 'secret',
+    restoreWith: 'agentop vault init (then re-enable mobile push)',
+    why: 'The VAPID private signing key is sealed by the vault. It is excluded as key material because '
+      + 'a backup must not carry a credential that can authenticate push messages; a new machine generates '
+      + 'a fresh key and devices re-register.',
+  },
+  {
     pattern: '.agentistics/connections', match: 'prefix', reason: 'secret',
     restoreWith: 'agentop member connect <url> <token>',
     why: 'Per-central member tokens. team-tokens.ts stores only hashes centrally; this is the token itself.',
@@ -548,6 +555,9 @@ const ALWAYS: string[] = [
   // file and nothing regenerates it — and it was missing from the backup until
   // `backup-coverage.lint.test.ts` was written to make an undecided path impossible.
   '.agentistics/event-subscriptions.json',
+  // Mobile device endpoints and public subscription keys are user configuration needed to restore push
+  // delivery. The VAPID private signing key is separate and excluded above as sealed credential material.
+  '.agentistics/mobile-push-subscriptions.json',
   // Images and files attached to sessions from the web (`sessions/attachment-web.ts`). User
   // content, referenced by sessions that DO travel, and reproducible from nowhere: 97 files / 12 MB
   // on the reference machine. It grows, which is an argument for watching it, not for dropping it —
