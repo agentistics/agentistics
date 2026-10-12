@@ -144,7 +144,7 @@ import { startAgentClient, reconcileNow } from './team-agent-client'
 import { validateIngestToken } from './team-tokens'
 import { getAccount } from './accounts'
 import { getTeam } from './teams'
-import { stateFor as checkinState, putState as putCheckin, reportFromIdentity as reportCheckin, runNow as runCheckin, startCheckinTimer } from './checkin'
+import { stateFor as checkinState, putState as putCheckin, reportFromIdentity as reportCheckin, runNow as runCheckin, startCheckinTimer, validateCheckinRound } from './checkin'
 import { discoverProjectDisks } from './disk-picker'
 import { allowedRoots, listFolders, rootListing } from './fs-folders'
 import { forgetProjects } from './sessions/project-source'
@@ -2068,6 +2068,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         if (typeof body.headline === 'string' && (body.headline.includes('\n') || body.headline.includes('\r') || [...body.headline].length > 140)) {
           return json({ error: 'invalid_headline', message: 'headline must be one line and at most 140 characters' }, 400)
         }
+        if (!validateCheckinRound(body)) return json({ error: 'invalid_report', message: 'structured report entries have invalid shapes' }, 400)
         const { verifySessionIdentity } = await import('./sessions/session-identity')
         const sender = body.session ? await verifySessionIdentity(body.session.id, body.session.token) : null
         if (!sender) return json({ error: 'unverified_sender' }, 403)

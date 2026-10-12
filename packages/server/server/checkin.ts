@@ -74,6 +74,21 @@ export interface CheckinState extends CheckinConfig {
 }
 type Stored = CheckinState & { pending?: boolean }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
+const optionalString = (value: Record<string, unknown>, key: string): boolean => value[key] === undefined || typeof value[key] === 'string'
+const validLink = (value: unknown): boolean => isRecord(value) && (value.kind === 'session' || value.kind === 'subtask' || value.kind === 'task') && typeof value.id === 'string' && optionalString(value, 'taskId')
+
+/** Runtime boundary check for the structured arrays accepted by the check-in report route. */
+export function validateCheckinRound(round: Record<string, unknown>): boolean {
+  const valid = (key: string, check: (entry: unknown) => boolean) => round[key] === undefined || (Array.isArray(round[key]) && round[key].every(check))
+  return valid('delivered', entry => isRecord(entry) && typeof entry.text === 'string' && optionalString(entry, 'ref'))
+    && valid('inProgress', entry => isRecord(entry) && typeof entry.item === 'string' && typeof entry.stage === 'string' && optionalString(entry, 'release') && optionalString(entry, 'session'))
+    && valid('next', entry => isRecord(entry) && typeof entry.text === 'string' && optionalString(entry, 'when'))
+    && valid('health', entry => isRecord(entry) && typeof entry.label === 'string' && typeof entry.value === 'string' && (entry.state === 'ok' || entry.state === 'warn' || entry.state === 'bad'))
+    && valid('actions', entry => isRecord(entry) && typeof entry.text === 'string' && (entry.link === undefined || validLink(entry.link)))
+    && valid('needs', entry => isRecord(entry) && typeof entry.subject === 'string' && typeof entry.text === 'string' && (entry.critical === undefined || typeof entry.critical === 'boolean') && (entry.link === undefined || validLink(entry.link)))
+}
+
 const labels: Record<CheckinItemId, string> = {
   fleet: 'Sessões e memória', handbacks: 'Entregas dos workers', limits: 'Limites de uso',
   releases: 'Releases e motor', 'mcp-configs': 'Configs MCP dos harnesses', handoff: 'Passagem (HANDOFF)',
