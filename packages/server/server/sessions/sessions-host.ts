@@ -15,6 +15,7 @@ import { anyGrant, scrubDeep, scrubTerminalLine } from '../vault/grants'
 import { canonicalOfTuiMode, type ConversationLinkReason, type HarnessId, type SessionMode } from '@agentistics/core'
 import { createLimiter } from '../utils'
 import { retainKeys } from '../prune-keys'
+import { statSync } from 'node:fs'
 import type { HarnessProcess } from '../live-sessions'
 import { rulesFor } from './attention-rules'
 import { approvalTail, attentionOf, digestFrame, frameTail } from './attention'
@@ -48,6 +49,10 @@ import { backgroundWork } from './attention'
 import { adapterActivity, planScreen, type AdapterStateFeed } from './adapter-state'
 import { tailActivity, tailSkipsScreen, tailStateOf, type TailReading, type TailStateMemo } from './tail-state'
 import { linkDecision, liveLinks, moveAllowed } from './relink-policy'
+
+function statQuiet(path: string): { size: number; mtimeMs: number } | null {
+  try { const st = statSync(path); return { size: st.size, mtimeMs: st.mtimeMs } } catch { return null }
+}
 
 /** How often the cockpit refreshes. Five seconds is the interval the feature was specified at. */
 export const SESSION_POLL_MS = Number(process.env.AGENTISTICS_SESSION_POLL_MS) > 0
@@ -402,6 +407,8 @@ export function createSessionsPoller(o: {
   // it, while a return to work is believed at once — so the "waiting on you" count stops lying.
   let confirmMemory: ConfirmMemory = EMPTY_CONFIRM_MEMORY
   const prevProcStats = new Map<number, ProcStatSample>()
+  /** The last chat tail read per row, with the transcript stamp it was read at — see `readChatTail`. */
+  const chatTailMemo = new Map<string, { path: string; size: number; mtimeMs: number; turns: ChatTurn[] }>()
   // When the after-the-fact read last ran for a row. A DEAD row's answer cannot change (its log is
   // final), so it runs once; a LIVE row the live read has not linked gets another go every minute.
   const afterTheFactTried = new Map<string, number>()
@@ -544,7 +551,16 @@ export function createSessionsPoller(o: {
             .resolve({ conversationId, ...(cwd ? { cwd } : {}) })
             .catch(() => null)
           if (path) {
-            const turns = await transcript.readRecent(path, TAIL_CHAT_TURNS).catch(() => [] as ChatTurn[])
+            // PERF.IDLE: an unchanged transcript yields the same six turns, so a poll does not re-read
+            // and re-parse its tail every five seconds — only a size or mtime that moved does. Gemini
+            // is read on every poll as before: its reader concatenates a FAMILY of files, and the
+            // newest member alone does not say whether an older one changed.
+            const st = harnessOf.get(r.id) === 'gemini' ? null : statQuiet(path)
+            const kept = chatTailMemo.get(r.id)
+            const turns = st && kept && kept.path === path && kept.size === st.size && kept.mtimeMs === st.mtimeMs
+              ? kept.turns
+              : await transcript.readRecent(path, TAIL_CHAT_TURNS).catch(() => [] as ChatTurn[])
+            if (st && turns !== kept?.turns) chatTailMemo.set(r.id, { path, size: st.size, mtimeMs: st.mtimeMs, turns })
             if (turns.length > 0) chatTails.set(r.id, anyGrant() ? await scrubDeep(r.id, turns) : turns)
             return turns
           }
@@ -717,6 +733,7 @@ export function createSessionsPoller(o: {
         }
       })))
       markFleetPhase(`poll: capture+chatTail x${reconciled.length} (concurrency ${CAPTURE_CONCURRENCY})`, captureStart)
+      retainKeys(chatTailMemo, new Set(reconciled.filter(r => r.backend?.alive).map(r => r.id)))
 
       // The heartbeat: one write, one timestamp, every session the backend reports as ALIVE. See
       // `crash-group.ts` for why one shared timestamp is what makes the grouping exact.

@@ -14,10 +14,10 @@ import { readFile, readdir, stat, writeFile, rename, mkdir } from 'node:fs/promi
 import { basename, dirname, join } from 'node:path'
 import { watch as fsWatch } from 'node:fs'
 import {
-  alternativeWithRoom, newerLimits, parseClaudeRateLimitEvent, parseCodexRateLimits,
+  alternativeWithRoom, HARNESS_ORDER, newerLimits, parseClaudeRateLimitEvent, parseCodexRateLimits,
   planBudget, planPace, planThresholdNotices, registeredPlanLabel, withPlanLabel,
   type HarnessId,
-  type PlanLimits, type PlanNoticeState, type PlanThresholdNotice,
+  type LivePlanSession, type PlanLimits, type PlanNoticeState, type PlanThresholdNotice,
 } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, CODEX_SESSIONS_DIR } from './config'
 import { readTailBytes, windowLines } from './sessions/transcript-window'
@@ -30,6 +30,39 @@ interface Persisted { limits: Record<string, PlanLimits>; notices: PlanNoticeSta
 let state: Persisted = { limits: {}, notices: {} }
 const history = new Map<string, PlanLimits[]>()
 let loaded: Promise<void> | null = null
+
+type LiveUsageSample = { tokens: number; at: number; model: string; harness: HarnessId }
+const liveUsage = new Map<string, LiveUsageSample>()
+const isHarnessId = (value: string): value is HarnessId => HARNESS_ORDER.some(harness => harness === value)
+
+/** Turn the live fleet's rolling token deltas into percentages of each plan's measured burn. */
+export function sampleLivePlanSessions(
+  sessions: readonly { session_id: string; harness: string; model?: string; input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }[],
+  liveIds: readonly string[],
+  nowMs: number,
+  burnByHarness: Partial<Record<HarnessId, number>> = {},
+): LivePlanSession[] {
+  const wanted = new Set(liveIds)
+  for (const id of liveUsage.keys()) if (!wanted.has(id)) liveUsage.delete(id)
+  const rates = new Map<string, { session: typeof sessions[number]; rate: number; harness: HarnessId }>()
+  for (const s of sessions) {
+    if (!isHarnessId(s.harness)) continue
+    if (!wanted.has(s.session_id)) continue
+    const tokens = (s.input_tokens ?? 0) + (s.output_tokens ?? 0) + (s.cache_read_input_tokens ?? 0) + (s.cache_creation_input_tokens ?? 0)
+    const previous = liveUsage.get(s.session_id)
+    const hours = previous ? Math.max(1 / 60, (nowMs - previous.at) / 3_600_000) : 0
+    const rate = previous && tokens >= previous.tokens ? (tokens - previous.tokens) / hours : 0
+    liveUsage.set(s.session_id, { tokens, at: nowMs, model: s.model ?? 'unknown', harness: s.harness })
+    rates.set(s.session_id, { session: s, rate, harness: s.harness })
+  }
+  for (const harness of new Set([...rates.values()].map(x => x.harness))) {
+    const group = [...rates.entries()].filter(([, x]) => x.harness === harness)
+    const total = group.reduce((n, [, x]) => n + x.rate, 0)
+    const burn = Math.max(0, burnByHarness[harness] ?? 0)
+    for (const [id, x] of group) x.rate = total > 0 ? burn * x.rate / total : burn / group.length
+  }
+  return [...rates].map(([id, x]) => ({ id, model: x.session.model ?? 'unknown', burnPctPerHour: x.rate, harness: x.harness }))
+}
 
 const keyOf = (l: Pick<PlanLimits, 'harness' | 'account'>): string => `${l.harness}:${l.account}`
 
@@ -251,7 +284,8 @@ export async function seedPlanLimits(structuredDir: string): Promise<void> {
 export async function planLimitsPayload(
   billing: Parameters<typeof withPlanLabel>[1],
   nowMs = Date.now(),
-): Promise<{ limits: PlanLimits[]; registered: { harness: HarnessId; plan: string }[]; budgets: Array<ReturnType<typeof planBudget> & ReturnType<typeof planPace>>; now: number }> {
+  liveSessions: readonly LivePlanSession[] = [],
+): Promise<{ limits: PlanLimits[]; registered: { harness: HarnessId; plan: string }[]; budgets: Array<ReturnType<typeof planBudget> & ReturnType<typeof planPace>>; freeSlots: number; freeSlotsByHarness: Partial<Record<HarnessId, number>>; liveSessions: LivePlanSession[]; pauseUntil?: number; now: number }> {
   await syncPlanLimitsFromFile()
   const limits = Object.values(state.limits)
     .map(l => withPlanLabel(l, billing, nowMs))
@@ -265,9 +299,16 @@ export async function planLimitsPayload(
   }
   const budgets = limits.map(l => {
     const budget = planBudget(l, nowMs)
-    return { ...budget, ...planPace(l, nowMs, history.get(keyOf(l)) ?? []) }
+    const planSessions = liveSessions.filter(s => !s.harness || s.harness === l.harness)
+    return { ...budget, ...planPace(l, nowMs, history.get(keyOf(l)) ?? [], planSessions) }
   })
-  return { limits, registered, budgets, now: nowMs }
+  const freeSlotsByHarness = Object.fromEntries(budgets.map(b => [b.harness, b.freeSlots])) as Partial<Record<HarnessId, number>>
+  // A caller choosing a harness must not be blocked by another harness's exhausted plan.
+  const availableBudgets = budgets.filter(b => b.status !== 'hold')
+  const freeSlots = availableBudgets.length ? Math.max(...availableBudgets.map(b => b.freeSlots)) : 0
+  const pauseUntil = budgets.map(b => b.pauseUntil).filter((v): v is number => v !== undefined).sort((a, b) => a - b)[0]
+  const publicLiveSessions = liveSessions.map(({ harness: _harness, ...s }) => s)
+  return { limits, registered, budgets, freeSlots, freeSlotsByHarness, liveSessions: publicLiveSessions, ...(pauseUntil !== undefined ? { pauseUntil } : {}), now: nowMs }
 }
 
 /** Tests only. */
@@ -275,6 +316,7 @@ export function __resetPlanLimitsForTest(file: string | null = null): void {
   state = { limits: {}, notices: {} }
   history.clear()
   filePath = file
+  liveUsage.clear()
   fileMtime = 0
   loaded = file ? null : Promise.resolve()
   persistOff = file === null

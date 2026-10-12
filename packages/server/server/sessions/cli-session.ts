@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { mkdir } from 'node:fs/promises'
 import { managedProcessLogPath } from './process-conversation'
-import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
+import { HARNESS_ORDER, hasRolePrefix, type HarnessId } from '@agentistics/core'
 // `GROUPINGS` and never a list typed into the usage text: the help is the only place a person can
 // read what `--group` accepts, and a second copy of that list drifts silently — the CLI would go on
 // accepting an arrangement its own help says nothing about. Same rule `cli-parse.ts` already applies
@@ -37,7 +37,8 @@ import { rulesFor } from './attention-rules'
 import { renameInHarness, renameMessage } from './rename'
 import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefCandidate } from './session-ref'
 import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
-import { addSession, newSessionId, patchSession, readRegistry, retireFallenSessions, retireSession } from './registry'
+import { addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession } from './registry'
+import { callerHoldsIdentity } from './session-identity'
 import { loadConversations } from './conversations'
 import { exactLinksOnDisk } from './reopen-link'
 import { reopenTargetFor } from './reopen-target'
@@ -57,7 +58,7 @@ import { execFailed } from './spawn-outcome'
 import { spawnDeath } from './spawn-check'
 import { parseHarnessAgents } from './harness-agents'
 import { planTakeover, type TakeoverRefusal } from './takeover'
-import { applyRoleTitle, deliverStoredRole, ensureSpawnRole, markRoleDelivered, rekeyStoredRole } from './session-roles'
+import { applyRoleTitle, deliverStoredRole, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor } from './session-roles'
 import type { BackendInitialPrompt, ManagedSession, SessionBackend, SpawnPlan, SpawnPlanError } from './types'
 
 /**
@@ -312,7 +313,7 @@ export function callerSessionId(env: Record<string, string | undefined> = proces
   return id ? id : undefined
 }
 
-async function start(
+export async function start(
   cmd: Extract<SessionCommand, { kind: 'start' }>,
   backend: SessionBackend,
 ): Promise<number> {
@@ -327,9 +328,12 @@ async function start(
   const logFile = managedProcessLogPath(cmd.harness, id, AGENTISTICS_DATA_DIR)
   const parentLink = await parentLinkOf(callerSessionId())
   const parentSessionId = parentLink.parentSessionId
-  const role = cmd.role
-    ? await ensureSpawnRole([offeredConversationId, id], cmd.role)
-    : parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker') : undefined
+  const parentVerified = await callerHoldsIdentity(parentSessionId)
+  // A name that already wears the leader prefix is a statement of intent: never let it silently become a worker.
+  const wantedRole = cmd.role ?? (cmd.label && hasRolePrefix(cmd.label) ? 'leader' as const : undefined)
+  const role = wantedRole
+    ? await ensureSpawnRole([offeredConversationId, id], wantedRole, undefined, await spawnRoleOriginFor(parentSessionId, parentVerified))
+    : parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker', undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) : undefined
   const ctx = buildSpawnContext({ sessionId: id, cwd, harness: cmd.harness, lang, ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
   const planned = planSpawn({
     harness: cmd.harness, cwd, prompt: cmd.prompt, model: cmd.model, effort: cmd.effort,
@@ -357,26 +361,10 @@ async function start(
   // for good. The moment we launched is the moment the claim means; the moment we finished
   // checking is not.
   const spawnedAt = new Date().toISOString()
-  await writeContextFile(planned.plan)
-  try {
-    if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-    await backend.spawn({ id, cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...spawnPromptArg(planned.plan, cmd.harness) })
-  } catch (e) {
-    console.error(`Could not start the session: ${e instanceof Error ? e.message : String(e)}`)
-    return 1
-  }
-
-  // `spawn` returning is not evidence anything is RUNNING — tmux's contract is "I made you a
-  // session". A harness that refuses its arguments has already exited by now, and registering a row
-  // for it is what produced three dead rows called MAIN. See `spawn-outcome.ts`.
-  const failed = await spawnFailure(backend, id, planned.plan.argv[0])
-  if (failed) {
-    console.error(failed)
-    await backend.kill(id).catch(() => {})
-    return 1
-  }
-  if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
-
+  // The row (with its label) is written BEFORE the pane exists. `spawnFailure` waits to see whether the
+  // child dies; a row written after that wait leaves a window in which the fleet poller sees an
+  // unregistered pane and adopts it WITHOUT the name (`session-adopt.ts` cannot know one), so the
+  // `--name` was lost. Removed again below if the spawn fails.
   await addSession({
     id,
     harness: cmd.harness,
@@ -398,6 +386,28 @@ async function start(
       : {}),
     ...(await recordedRepo(cwd)),
   })
+  await writeContextFile(planned.plan)
+  try {
+    if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
+    await backend.spawn({ id, cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...spawnPromptArg(planned.plan, cmd.harness) })
+  } catch (e) {
+    await removeSession(id).catch(() => {})
+    console.error(`Could not start the session: ${e instanceof Error ? e.message : String(e)}`)
+    return 1
+  }
+
+  // `spawn` returning is not evidence anything is RUNNING — tmux's contract is "I made you a
+  // session". A harness that refuses its arguments has already exited by now, and registering a row
+  // for it is what produced three dead rows called MAIN. See `spawn-outcome.ts`.
+  const failed = await spawnFailure(backend, id, planned.plan.argv[0])
+  if (failed) {
+    console.error(failed)
+    await backend.kill(id).catch(() => {})
+    await removeSession(id).catch(() => {})
+    return 1
+  }
+  if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
+
   if (role) await applyRoleTitle(id, cmd.label ?? id, role, lang).catch(() => false)
   // Muted at birth: keyed by the conversation we assigned, else by the managed id (re-keyed when the
   // poller links the conversation). Delivery only — the session still reads as waiting.
@@ -514,7 +524,7 @@ async function resolveTaskAndAttempts(
  * A failure does not abort the rest: with five sessions requested, four that started are four that
  * are running, and pretending otherwise would leave them orphaned. Every outcome is reported.
  */
-async function batch(
+export async function batch(
   cmd: Extract<SessionCommand, { kind: 'batch' }>,
   backend: SessionBackend,
 ): Promise<number> {
@@ -538,13 +548,15 @@ async function batch(
   const resolved = await resolveTaskAndAttempts(cmd).catch(() => null)
   const parentLink = await parentLinkOf(callerSessionId())
   const parentSessionId = parentLink.parentSessionId
+  const parentVerified = await callerHoldsIdentity(parentSessionId)
 
   for (const spec of cmd.specs) {
     const cwd = spec.cwd ? resolve(spec.cwd) : process.cwd()
     const id = newSessionId()
     const offeredConversationId = randomUUID()
     const logFile = managedProcessLogPath(spec.harness, id, AGENTISTICS_DATA_DIR)
-    const role = parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker') : undefined
+    const batchRole = spec.name && hasRolePrefix(spec.name) ? 'leader' as const : parentSessionId ? 'worker' as const : undefined
+    const role = batchRole ? await ensureSpawnRole([offeredConversationId, id], batchRole, undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) : undefined
     const ctx = buildSpawnContext({ sessionId: id, cwd, harness: spec.harness, lang, ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)), ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
     const planned = planSpawn({
       harness: spec.harness,
@@ -568,28 +580,7 @@ async function batch(
     // for good. The moment we launched is the moment the claim means; the moment we finished
     // checking is not.
     const spawnedAt = new Date().toISOString()
-    await writeContextFile(planned.plan)
-    try {
-      if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-      await backend.spawn({
-        id, cwd, argv: planned.plan.argv,
-        ...(planned.plan.env ? { env: planned.plan.env } : {}),
-        ...spawnPromptArg(planned.plan, spec.harness),
-      })
-    } catch (e) {
-      failed.push({ harness: spec.harness, reason: e instanceof Error ? e.message : String(e) })
-      continue
-    }
-    // Same check as `start`: a harness that refused its arguments is already gone, and a batch that
-    // reports N started when N exited is worse than one that reports the refusal — the whole point
-    // of a batch is that nobody is watching each one come up.
-    const died = await spawnFailure(backend, id, planned.plan.argv[0])
-    if (died) {
-      failed.push({ harness: spec.harness, reason: died })
-      await backend.kill(id).catch(() => {})
-      continue
-    }
-    if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
+    // Row first, pane second (same reason as `start`); removed again if the spawn fails.
     await addSession({
       id,
       harness: spec.harness,
@@ -612,6 +603,30 @@ async function batch(
         : {}),
       ...(await recordedRepo(cwd)),
     })
+    await writeContextFile(planned.plan)
+    try {
+      if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
+      await backend.spawn({
+        id, cwd, argv: planned.plan.argv,
+        ...(planned.plan.env ? { env: planned.plan.env } : {}),
+        ...spawnPromptArg(planned.plan, spec.harness),
+      })
+    } catch (e) {
+      await removeSession(id).catch(() => {})
+      failed.push({ harness: spec.harness, reason: e instanceof Error ? e.message : String(e) })
+      continue
+    }
+    // Same check as `start`: a harness that refused its arguments is already gone, and a batch that
+    // reports N started when N exited is worse than one that reports the refusal — the whole point
+    // of a batch is that nobody is watching each one come up.
+    const died = await spawnFailure(backend, id, planned.plan.argv[0])
+    if (died) {
+      failed.push({ harness: spec.harness, reason: died })
+      await backend.kill(id).catch(() => {})
+      await removeSession(id).catch(() => {})
+      continue
+    }
+    if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
     if (spec.notify === 'off') await muteAtSpawn(planned.plan.conversationId ?? id).catch(() => {})
     const liveBackend = await backend.list().catch(() => null)
     const backendIds = liveBackend ? new Set(liveBackend.map(b => b.id)) : null

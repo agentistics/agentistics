@@ -11,6 +11,20 @@ export type SessionRole = 'leader' | 'worker'
 export type SessionRoleRequest = SessionRole | 'auto'
 export type RoleLang = 'en' | 'pt'
 
+/**
+ * Who set a stored role: the person (`manual`, also what an entry with no origin means), the session
+ * itself (`auto`), or a leader session that set it for a child (`{ leader: <managed session id> }`).
+ */
+export type RoleOrigin = 'manual' | 'auto' | { leader: string }
+
+export function parseRoleOrigin(v: unknown): RoleOrigin | undefined {
+  if (v === 'manual' || v === 'auto') return v
+  if (v && typeof v === 'object' && typeof (v as { leader?: unknown }).leader === 'string' && (v as { leader: string }).leader !== '') {
+    return { leader: (v as { leader: string }).leader }
+  }
+  return undefined
+}
+
 export const isSessionRole = (v: unknown): v is SessionRole => v === 'leader' || v === 'worker'
 export const isSessionRoleRequest = (v: unknown): v is SessionRoleRequest => isSessionRole(v) || v === 'auto'
 
@@ -43,7 +57,7 @@ export function roleLine(role: SessionRole | null | undefined): string {
   if (role === 'worker') {
     return 'Your role here: WORKER. You implement one defined piece, test it, commit, and report to whoever started you (agentistics_session_message, kind handback); do not orchestrate other sessions.'
   }
-  return 'Your role here: decide from the request. LEADER organises: break the request into Agentask tasks/subtasks, propose which sessions to open (harness + model each), follow them, have each delivery QA\'d by a different model, and report to the user; do not implement big pieces yourself. WORKER implements one defined piece, tests, commits, and reports to whoever started it. AUTO: one piece → worker; several fronts → leader; you may become leader if the work grows. As soon as it is clear the request is a single piece, call agentistics_session_role with role "worker" to record it; if you become leader, call it with role "leader".'
+  return 'Your role here: decide from the request. LEADER organises: break the request into Agentask tasks/subtasks, propose which sessions to open (harness + model each), follow them, have each delivery QA\'d by a different model, and report to the user; do not implement big pieces yourself. WORKER implements one defined piece, tests, commits, and reports to whoever started it. AUTO: one piece → worker; several fronts → leader; you may become leader if the work grows. Once you decide, record it by calling agentistics_session_role with role "worker" or role "leader" (the leader call also renames you); call it again if you change your mind.'
 }
 
 /** The background note delivered into a session whose role just changed. */

@@ -723,6 +723,13 @@ if (command === 'start') {
 }
 
 if (command === 'server' || command === 'start' || !command) {
+  // FIRST, before anything is claimed: re-execute with two GC marker threads — see gc-markers.ts for
+  // what an idle server paid without it. Same pid, same fds; returns only when it did not happen.
+  // `--bg` only detaches a copy that does this itself: re-executing the parent first would be one exec wasted.
+  if (command === 'server' && !args.includes('--bg') && !args.includes('--background')) {
+    const { reexecWithGcMarkers } = await import('../server/gc-markers.ts')
+    await reexecWithGcMarkers()
+  }
   // WSL2 CAN HAVE OUR PORTS EXCLUDED BY WINDOWS BEFORE WE EVER BIND THEM. Windows' WinNAT reserves
   // a port range for itself every time the Hyper-V/WSL network stack comes up (reboot, `wsl
   // --shutdown`, Docker or a VPN reconnecting), and it is not the same range twice. When it lands

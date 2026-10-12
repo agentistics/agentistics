@@ -440,3 +440,67 @@ describe('the parent link survives the heartbeat rewrite (SESSION.LINK)', () => 
     } finally { await rm(dir, { recursive: true, force: true }) }
   })
 })
+
+describe('adopt (never replaces a row it did not create)', () => {
+  it('appends a record whose id is absent', async () => {
+    const r = createSessionRegistry(file)
+    await r.adopt([session('a1')])
+    expect(await r.read()).toEqual([session('a1')])
+  })
+
+  it('keeps label, task, createdAt and role of an existing row when the adoption is a stale snapshot', async () => {
+    const r = createSessionRegistry(file)
+    await r.add({ ...session('a1'), label: 'X', labelSince: 5, task: 't-1', taskId: 'id-1', createdAt: '2026-08-12T09:00:00.000Z' })
+    await r.adopt([{ ...session('a1'), createdAt: '2026-08-12T11:00:00.000Z', conversationId: 'c1', conversationLink: 'assigned', conversationLinkVia: 'harness-session-file' }])
+    const [row] = await r.read()
+    expect(row).toMatchObject({ id: 'a1', label: 'X', labelSince: 5, task: 't-1', taskId: 'id-1', createdAt: '2026-08-12T09:00:00.000Z', conversationId: 'c1' })
+  })
+
+  it('does not clobber a field the existing row already has', async () => {
+    const r = createSessionRegistry(file)
+    await r.add({ ...session('a1'), conversationId: 'own', conversationLink: 'assigned', conversationLinkVia: 'assigned-id' })
+    await r.adopt([{ ...session('a1'), conversationId: 'other', conversationLink: 'assigned', conversationLinkVia: 'harness-session-file' }])
+    expect((await r.read())[0]).toMatchObject({ conversationId: 'own', conversationLinkVia: 'assigned-id' })
+  })
+})
+
+describe('retireFallenSessions — a row being born', () => {
+  const fresh = (id: string, ageMs: number) => ({ ...session(id), createdAt: new Date(Date.now() - ageMs).toISOString() })
+  it('does not retire a row with no heartbeat created seconds ago (its pane is still being spawned)', async () => {
+    const r = createSessionRegistry(file)
+    await r.add(fresh('A', 2_000))
+    const n = await retireFallenSessions({ newSessionId: 'B', cwd: '/tmp', harness: 'claude', backendIds: new Set(['B']) }, r)
+    expect(n).toBe(0)
+    expect((await r.read())[0]!.endedAt).toBeUndefined()
+  })
+  it('still retires a paneless row that is old, or one that has been seen', async () => {
+    const r = createSessionRegistry(file)
+    await r.add(fresh('old', 120_000))
+    await r.add({ ...fresh('seen', 2_000), lastSeenMs: Date.now() })
+    const n = await retireFallenSessions({ newSessionId: 'B', cwd: '/tmp', harness: 'claude', backendIds: new Set(['B']) }, r)
+    expect(n).toBe(2)
+  })
+})
+
+describe('the kept parse (PERF.IDLE)', () => {
+  const rec = (id: string, label: string) => ({ id, harness: 'claude', cwd: '/w', createdAt: '2026-10-11T00:00:00.000Z', label })
+  it('hands out fresh objects every read, so an edit by one caller never reaches the next', async () => {
+    await writeFile(file, JSON.stringify([rec('aaaa1111bb', 'one')]))
+    const reg = createSessionRegistry(file)
+    const first = await reg.read()
+    first[0]!.label = 'edited in memory'
+    expect((await reg.read())[0]!.label).toBe('one')
+  })
+  it('a rewrite IN PLACE with the same size is still seen (mtime), and so is one through the registry', async () => {
+    await writeFile(file, JSON.stringify([rec('aaaa1111bb', 'one')]))
+    const reg = createSessionRegistry(file)
+    expect((await reg.read())[0]!.label).toBe('one')
+    // Past the kernel's timestamp granularity (a jiffy, ~4 ms): an in-place rewrite of the same size
+    // inside one jiffy is the one change the key cannot see — agentop itself only ever renames.
+    await Bun.sleep(30)
+    await writeFile(file, JSON.stringify([rec('aaaa1111bb', 'two')]))
+    expect((await reg.read())[0]!.label).toBe('two')
+    await reg.patch('aaaa1111bb', { label: 'three' })
+    expect((await reg.read())[0]!.label).toBe('three')
+  })
+})

@@ -8,6 +8,7 @@
  */
 
 import { readFile, statfs } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { loadavg, totalmem, freemem, cpus } from 'node:os'
 import { HOME_DIR } from './config'
 import {
@@ -88,10 +89,11 @@ export interface HardwareResourcesSnapshot {
   sampledAtMs: number
 }
 
-/** Read raw /proc/<pid>/stat and parse it into a sample. */
+/** Read raw /proc/<pid>/stat and parse it into a sample. In line, not through the thread pool: a
+ *  procfs read is microseconds, and the fleet poll asks two per live session (PERF.IDLE). */
 export async function readProcStat(pid: number, timestampMs = Date.now()): Promise<ProcStatSample | null> {
   try {
-    const raw = await readFile(`/proc/${pid}/stat`, 'utf8')
+    const raw = readFileSync(`/proc/${pid}/stat`, 'utf8')
     return parseProcStat(pid, raw, timestampMs)
   } catch {
     return null
@@ -101,7 +103,7 @@ export async function readProcStat(pid: number, timestampMs = Date.now()): Promi
 /** Read raw /proc/<pid>/status VmRSS. */
 export async function readProcRss(pid: number): Promise<number | null> {
   try {
-    const raw = await readFile(`/proc/${pid}/status`, 'utf8')
+    const raw = readFileSync(`/proc/${pid}/status`, 'utf8')
     return parseProcRss(raw)
   } catch {
     return null

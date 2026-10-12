@@ -39,7 +39,7 @@ export interface SessionHubOptions {
   idleIntervalMs?: number
   /** Is something in this snapshot in flight (a turn running)? Its transitions are what notify. */
   busy?: (snap: SessionSnapshot) => boolean
-  /** How long one `read()` keeps the hub ticking with no subscriber. Default 30 s. */
+  /** How long one `read()` keeps the hub ticking with no subscriber. Default 15 s. */
   leaseMs?: number
   /**
    * How old a snapshot `read()` accepts when the hub is NOT ticking. Default 1 s — the same window the
@@ -83,7 +83,12 @@ export interface SessionHub {
   stop(): void
 }
 
-export const DEFAULT_LEASE_MS = 30_000
+/**
+ * Three intervals: a client polling every 5 s renews it with two polls to spare, while a ONE-OFF read
+ * (an MCP call, `agentop session ls`, a script) no longer keeps the whole fleet polled at the full rate
+ * for half a minute after it — at 30 s that was most of an idle server's polls (PERF.IDLE).
+ */
+export const DEFAULT_LEASE_MS = 15_000
 export const DEFAULT_IDLE_MAX_AGE_MS = 1_000
 
 export function createSessionHub(o: SessionHubOptions): SessionHub {

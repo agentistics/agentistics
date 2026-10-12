@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   alternativeWithRoom, currentUsedPct, forecastWindow, mostRoom, parseClaudeRateLimitEvent,
-  parseCodexRateLimits, planBudget, planPace, planThresholdNotices, registeredPlanLabel,
+  parseCodexRateLimits, planBudget, planPace, planSlots, planThresholdNotices, registeredPlanLabel,
   routeRecommendation, PLAN_WINDOW_MS,
   type PlanLimits, type PlanNoticeState,
 } from './planLimits'
@@ -154,4 +154,77 @@ describe('budgets, pacing, and routing', () => {
     expect(pace.suggestedParallel).toBeGreaterThanOrEqual(2)
     expect(routeRecommendation([{ ...planBudget(l, now), ...pace }], 'mechanical').reason).toContain('Under pace')
   })
+
+  test('idle under-pace plans still recommend at least two sessions', () => {
+    const l = { ...withPlan('codex', 11, 35, 'Plus'), updatedAt: now }
+    const pace = planPace(l, now, [{ ...l, updatedAt: now - H, windows: [win('5h', 10, reset5), win('week', 35, resetWeek)] }])
+    expect(pace.burnPctPerHour).toBe(0)
+    expect(pace.paceStatus).toBe('under')
+    expect(pace.freeSlotsMeasured).toBe(false)
+    expect(routeRecommendation([{ ...planBudget(l, now), ...pace }], 'mechanical').cadence.parallel).toBeGreaterThanOrEqual(2)
+  })
+
+  test('a held five-hour budget has no slots even with zero burn', () => {
+    const l = { ...withPlan('codex', 92, 35, 'Plus'), updatedAt: now }
+    const pace = planPace(l, now, [{ ...l, updatedAt: now - H, windows: [win('5h', 92, reset5), win('week', 35, resetWeek)] }])
+    expect(pace.paceStatus).toBe('under')
+    expect(pace.burnPctPerHour).toBe(0)
+    expect(pace.suggestedParallel).toBe(0)
+    expect(pace.freeSlots).toBe(0)
+    expect(pace.pauseUntil).toBe(reset5)
+  })
+
+  test('a held weekly budget has no slots even with zero burn', () => {
+    const l = { ...withPlan('codex', 72, 96, 'Plus'), updatedAt: now }
+    const pace = planPace(l, now, [{ ...l, updatedAt: now - H, windows: [win('5h', 72, reset5), win('week', 96, resetWeek)] }])
+    expect(pace.paceStatus).toBe('under')
+    expect(pace.burnPctPerHour).toBe(0)
+    expect(pace.suggestedParallel).toBe(0)
+    expect(pace.freeSlots).toBe(0)
+    expect(pace.pauseUntil).toBe(resetWeek)
+  })
+
+  test('both windows held: the pause lasts until the weekly reset', () => {
+    const l = { ...withPlan('codex', 92, 96, 'Plus'), updatedAt: now }
+    const pace = planPace(l, now, [{ ...l, updatedAt: now - H, windows: [win('5h', 92, reset5), win('week', 96, resetWeek)] }])
+    expect(pace.freeSlots).toBe(0)
+    expect(pace.pauseUntil).toBe(resetWeek)
+  })
+
+  test('a below-threshold zero-burn budget still offers two sessions', () => {
+    const l = { ...withPlan('codex', 72, 35, 'Plus'), updatedAt: now }
+    const pace = planPace(l, now, [{ ...l, updatedAt: now - H, windows: [win('5h', 72, reset5), win('week', 35, resetWeek)] }])
+    expect(pace.burnPctPerHour).toBe(0)
+    expect(pace.suggestedParallel).toBeGreaterThanOrEqual(2)
+    expect(pace.freeSlots).toBeGreaterThanOrEqual(2)
+  })
+})
+
+test('plan slots use the mean burn of the live sessions', () => {
+  const slots = planSlots({
+    sustainablePctPerHour: 10,
+    liveSessions: [
+      { id: 'a', model: 'sonnet', burnPctPerHour: 2 },
+      { id: 'b', model: 'opus', burnPctPerHour: 4 },
+    ],
+  })
+  expect(slots.freeSlots).toBe(1)
+})
+
+test('11/10 over pace stops new slots and gives a pause-until time', () => {
+  const now = Date.parse('2026-11-10T20:00:00Z')
+  const reset = now + (1 / 0.28) * H
+  const l = lim('codex', [win('5h', 40, reset), win('week', 99, reset)], now)
+  const pace = planPace(l, now, [{
+    ...l,
+    updatedAt: now - H,
+    windows: [win('5h', 40, reset), win('week', 94.6, reset)],
+  }])
+  // 4.4%/h burn against 0.28%/h sustainable: the old ratio-based formula incorrectly offered 8.
+  expect(pace.burnPctPerHour).toBeCloseTo(4.4)
+  expect(pace.sustainablePctPerHour).toBeCloseTo(0.28)
+  expect(pace.paceStatus).toBe('over')
+  expect(pace.suggestedParallel).toBe(0)
+  expect(pace.freeSlots).toBe(0)
+  expect(pace.pauseUntil).toBe(reset)
 })

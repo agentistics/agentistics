@@ -69,6 +69,11 @@ export async function sendHandoffHints(deps: HandoffHintDeps): Promise<number> {
   let sent = 0
   for (const row of await deps.rows().catch(() => [])) {
     if (inFlight.has(row.id)) continue
+    // The row carries the state as the caller last read it. A hint that state does not call for is
+    // not called for by a fresher one either (a level only moves up, bar a failed send putting it
+    // back, which the next run then sees) — so only a row that MAY get a hint pays the fresh read.
+    // It used to be one full registry read per fleet row per fleet build (PERF.IDLE).
+    if (planHandoffHints([row]).length === 0) continue
     inFlight.add(row.id)
     try {
       const prev = await deps.hinted(row.id).catch(() => ({ level: row.hintedLevel ?? 0, tokens: row.hintedTokens }))

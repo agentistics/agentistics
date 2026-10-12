@@ -39,9 +39,26 @@ describe('role lines', () => {
   expect(roleLine('worker')).not.toContain('agentistics_session_role')
   expect(roleLine('leader')).not.toContain('agentistics_session_role')
     expect(roleLine('leader')).not.toContain('decide from the request')
+    // AUTO: the session must record its decision, either way, with the tool.
+    expect(roleLine(undefined)).toContain('agentistics_session_role')
+    expect(roleLine(undefined)).toContain('role "worker"')
+    expect(roleLine(undefined)).toContain('role "leader"')
+    expect(roleLine('leader')).not.toContain('agentistics_session_role')
   })
   test('the change note quotes the role line', () => {
     expect(roleChangeNote('leader')).toBe(`[agentistics] your role is now LEADER — ${roleLine('leader')}`)
     expect(roleChangeNote(null)).toContain('AUTO')
+  })
+})
+
+describe('role origin', () => {
+  test('parseRoleOrigin accepts the three shapes only', async () => {
+    const { parseRoleOrigin } = await import('./sessionRole')
+    expect(parseRoleOrigin('manual')).toBe('manual')
+    expect(parseRoleOrigin('auto')).toBe('auto')
+    expect(parseRoleOrigin({ leader: 'x' })).toEqual({ leader: 'x' })
+    expect(parseRoleOrigin({ leader: '' })).toBeUndefined()
+    expect(parseRoleOrigin('boss')).toBeUndefined()
+    expect(parseRoleOrigin(null)).toBeUndefined()
   })
 })
