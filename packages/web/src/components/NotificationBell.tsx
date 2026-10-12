@@ -9,6 +9,7 @@ import { muteSessionWithToast, SESSION_MUTED_CODE } from '../lib/notifyMenu'
 import { setMuteWorkers, useMuteWorkers } from '../lib/sessionRoles'
 import { usePendingUpdate } from '../lib/pendingUpdate'
 import { ToggleSwitch } from './ToggleSwitch'
+import { answerAwayDigest } from '../lib/awayDigest'
 
 const ICON: Record<NotificationType, { color: string; Icon: typeof AlertCircle }> = {
   error:   { color: '#ef4444', Icon: AlertCircle },
@@ -211,9 +212,8 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
               const answerDigest = async (answer: 'yes' | 'no') => {
                 setDigestBusyId(n.id)
                 try {
-                  const res = await fetch('/api/away/digest/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer, bucket: n.meta?.bucket, lang }) })
-                  const body = await res.json().catch(() => ({})) as { conversationId?: string }
-                  if (res.ok && answer === 'yes' && body.conversationId) { setOpen(false); navigate(`/sessions/${encodeURIComponent(body.conversationId)}`) }
+                  const body = await answerAwayDigest(answer, n.meta?.bucket, lang)
+                  if (body.ok && answer === 'yes' && body.conversationId) { setOpen(false); navigate(`/sessions/${encodeURIComponent(body.conversationId)}`) }
                 } finally { setDigestBusyId(null) }
               }
               const clickable = link !== null || isUpdate || isIdle || isWhatsNew

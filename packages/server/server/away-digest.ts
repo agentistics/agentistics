@@ -28,7 +28,7 @@ export function awayDigestOfferDue(away: AwayState, state: AwayDigestState | und
 }
 
 const safe = (value: unknown): unknown => {
-  if (typeof value === 'string') return redactSecrets(value).slice(0, 500)
+  if (typeof value === 'string') return redactSecrets(value).replace(/\b(token|secret|password|authorization|cookie)\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]').slice(0, 500)
   if (Array.isArray(value)) return value.slice(0, 30).map(safe)
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {}
@@ -39,6 +39,37 @@ const safe = (value: unknown): unknown => {
     return out
   }
   return value
+}
+
+export interface AwayDigestSources {
+  tasks?: readonly { id: string; title: string; status: string }[]
+  events?: readonly { taskId: string; at: string; kind: string; detail?: string; from?: string; to?: string }[]
+  sessions?: readonly { id: string; title?: string; harness?: string; task?: string; taskId?: string; createdAt: string; endedAt?: string }[]
+  notices?: readonly { ts: number; meta?: Record<string, unknown> }[]
+  version?: { current: string; latest: string; updateAvailable: boolean }
+}
+
+/** Pure digest projection used by production and tests. Every source is bounded and windowed. */
+export function buildAwayDigestFromSources(away: AwayState, now: number, sources: AwayDigestSources): Record<string, unknown> {
+  const window = awayDigestWindow(away, now)
+  if (!window) return { window: 'unavailable' }
+  const inWindow = (at: string | number) => { const ms = typeof at === 'number' ? at : Date.parse(at); return Number.isFinite(ms) && ms >= window.since && ms <= window.until }
+  const events = (sources.events ?? []).filter(e => inWindow(e.at)).slice(0, 30)
+  const tasks = sources.tasks ?? []
+  const taskById = new Map(tasks.map(t => [t.id, t]))
+  return {
+    window: { since: new Date(window.since).toISOString(), until: new Date(window.until).toISOString() },
+    tasks: [...new Set(events.map(e => e.taskId))].slice(0, 30).map(id => ({
+      id, title: taskById.get(id)?.title ?? 'unavailable', status: taskById.get(id)?.status ?? 'unavailable',
+      events: events.filter(e => e.taskId === id).map(e => safe(e)),
+    })),
+    checkIns: events.filter(e => e.kind === 'checkin').slice(0, 30).map(e => safe(e)),
+    sessions: (sources.sessions ?? []).filter(s => inWindow(s.createdAt) || (s.endedAt ? inWindow(s.endedAt) : false)).slice(0, 30).map(s => safe(s)),
+    awayNotices: (sources.notices ?? []).filter(n => inWindow(n.ts)).slice(0, 30).map(n => safe({ at: new Date(n.ts).toISOString(), ...(n.meta ?? {}) })),
+    version: sources.version ?? 'unavailable',
+    releases: 'unavailable',
+    pending: 'unavailable',
+  }
 }
 
 export async function buildAwayDigest(away: AwayState, now: number): Promise<Record<string, unknown>> {
@@ -94,6 +125,42 @@ export async function buildAwayDigest(away: AwayState, now: number): Promise<Rec
 const answerLocks = new Map<number, Promise<unknown>>()
 export type AwayDigestAnswer = { ok: true; conversationId: string; bucket: number } | { ok: false; error: 'stale' | 'bad_answer' | 'not_away' | 'failed' }
 
+export interface AwayDigestAnswerDeps {
+  read: () => Promise<{ away?: AwayState; awayDigest?: AwayDigestState }>
+  write: (state: AwayDigestState) => Promise<void>
+  build: (away: AwayState, now: number) => Promise<Record<string, unknown>>
+  startNay: (lang: 'pt' | 'en') => Promise<{ ok: boolean; id?: string; launch?: { harness: string; model?: string; effort?: string } }>
+  prompt: (lang: 'pt' | 'en', id: string, text: string) => Promise<{ ok: boolean }>
+}
+
+export function awayDigestPrompt(lang: 'pt' | 'en', away: AwayState, now: number, digest: Record<string, unknown>): string {
+  const window = `${away.since} ${lang === 'pt' ? 'até' : 'to'} ${new Date(now).toISOString()}`
+  return lang === 'pt'
+    ? `Você recebeu o JSON abaixo. Produza um relatório visual em Markdown com as seções Resumo, Releases, Tarefas, Sessões, Check-ins, Avisos e Esperando por você. Use somente o JSON, não invente fatos; marque dados unavailable como indisponíveis. Janela: ${window}.\n\n${JSON.stringify(digest)}`
+    : `You received the JSON below. Produce a visual Markdown status report with sections Summary, Releases, Tasks, Sessions, Check-ins, Notices, and Waiting for you. Use only the JSON; do not invent facts, and mark unavailable data as unavailable. Window: ${window}.\n\n${JSON.stringify(digest)}`
+}
+
+export async function answerAwayDigestWithDeps(answer: unknown, bucket: unknown, lang: 'pt' | 'en', deps: AwayDigestAnswerDeps, now = Date.now()): Promise<AwayDigestAnswer> {
+  if (answer !== 'yes' && answer !== 'no') return { ok: false, error: 'bad_answer' }
+  if (!Number.isInteger(bucket)) return { ok: false, error: 'stale' }
+  const key = Number(bucket)
+  const prefs = await deps.read()
+  const away = parseAwayState(prefs.away ?? AWAY_OFF)
+  const due = awayDigestOfferDue(away, prefs.awayDigest, now)
+  if (prefs.awayDigest?.conversationId && prefs.awayDigest.lastBucket === key) return { ok: true, conversationId: prefs.awayDigest.conversationId, bucket: key }
+  if (due !== key && prefs.awayDigest?.lastBucket !== key) return { ok: false, error: awayActive(away, now) ? 'stale' : 'not_away' }
+  if (answer === 'no') {
+    await deps.write({ since: away.since, lastBucket: key, snoozedUntil: now + 60 * 60 * 1000 })
+    return { ok: true, conversationId: '', bucket: key }
+  }
+  const digest = await deps.build(away, now)
+  const out = await deps.startNay(lang)
+  if (!out.ok || !out.id) return { ok: false, error: 'failed' }
+  if (!(await deps.prompt(lang, out.id, awayDigestPrompt(lang, away, now, digest))).ok) return { ok: false, error: 'failed' }
+  await deps.write({ since: away.since, lastBucket: key, lastDeliveredAt: now, conversationId: out.id })
+  return { ok: true, conversationId: out.id, bucket: key }
+}
+
 export async function answerAwayDigest(answer: unknown, bucket: unknown, lang: 'pt' | 'en', now = Date.now()): Promise<AwayDigestAnswer> {
   if (answer !== 'yes' && answer !== 'no') return { ok: false, error: 'bad_answer' }
   if (!Number.isInteger(bucket)) return { ok: false, error: 'stale' }
@@ -102,29 +169,16 @@ export async function answerAwayDigest(answer: unknown, bucket: unknown, lang: '
   if (prior) return prior as Promise<AwayDigestAnswer>
   const run = (async (): Promise<AwayDigestAnswer> => {
     const { readPreferences, updatePreferences } = await import('./preferences')
-    const prefs = await readPreferences()
-    const away = parseAwayState(prefs.away ?? AWAY_OFF)
-    const due = awayDigestOfferDue(away, prefs.awayDigest, now)
-    if (prefs.awayDigest?.conversationId && prefs.awayDigest.lastBucket === key) return { ok: true, conversationId: prefs.awayDigest.conversationId, bucket: key }
-    if (due !== key && prefs.awayDigest?.lastBucket !== key) return { ok: false, error: awayActive(away, now) ? 'stale' : 'not_away' }
-    if (answer === 'no') {
-      await updatePreferences(() => ({ awayDigest: { since: away.since, lastBucket: key, snoozedUntil: now + 60 * 60 * 1000 } }))
-      return { ok: true, conversationId: '', bucket: key }
-    }
-    const digest = await buildAwayDigest(away, now)
     const { startNaySession, defaultNayDeps } = await import('./sessions/nay-web')
     const { runFleetAction } = await import('./sessions/fleet-web')
     const { PORT } = await import('./config')
-    const out = await startNaySession(lang, defaultNayDeps(PORT))
-    if (!out.ok || !out.id) return { ok: false, error: 'failed' }
-    const prompt = lang === 'pt'
-      ? `Você recebeu o JSON abaixo. Produza um relatório visual em Markdown com as seções Resumo, Releases, Tarefas, Sessões, Check-ins, Avisos e Esperando por você. Use somente o JSON, não invente fatos; marque dados unavailable como indisponíveis. Janela: ${away.since} até ${new Date(now).toISOString()}.\n\n${JSON.stringify(digest)}`
-      : `You received the JSON below. Produce a visual Markdown status report with sections Summary, Releases, Tasks, Sessions, Check-ins, Notices, and Waiting for you. Use only the JSON; do not invent facts, and mark unavailable data as unavailable. Window: ${away.since} to ${new Date(now).toISOString()}.\n\n${JSON.stringify(digest)}`
-    const sent = await runFleetAction(lang, { action: 'prompt', id: out.id, text: prompt })
-    if (!sent.ok) return { ok: false, error: 'failed' }
-    const conversationId = out.id
-    await updatePreferences(() => ({ awayDigest: { since: away.since, lastBucket: key, lastDeliveredAt: now, conversationId } }))
-    return { ok: true, conversationId, bucket: key }
+    return answerAwayDigestWithDeps(answer, bucket, lang, {
+      read: async () => readPreferences(),
+      write: async state => { await updatePreferences(() => ({ awayDigest: state })) },
+      build: buildAwayDigest,
+      startNay: async selectedLang => { const out = await startNaySession(selectedLang, defaultNayDeps(PORT)); return { ok: out.ok, id: out.id } },
+      prompt: async (selectedLang, id, text) => ({ ok: (await runFleetAction(selectedLang, { action: 'prompt', id, text })).ok }),
+    }, now)
   })()
   answerLocks.set(key, run)
   try { return await run } finally { answerLocks.delete(key) }
