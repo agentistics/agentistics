@@ -942,6 +942,12 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const holdTailUntil = useRef(0)
   /** Messages sent from here and not yet seen in the transcript. See the header. */
   const [echo, setEcho] = useState<string[]>(() => sessionScratch.readEchoes(scratchId))
+  /**
+   * Texts sent from THIS mount, for THIS session. Only these may draw a "not read yet" card before
+   * the first transcript read: an echo RESTORED from storage was sent on an earlier visit and the
+   * session may have consumed it meanwhile, so it waits for the read like the server's copies.
+   */
+  const sentHere = useRef<{ id: string; texts: Set<string> }>({ id: session.id, texts: new Set() })
 
   /**
    * Every change to the echo list, persisted against the session it belongs to.
@@ -1419,7 +1425,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // "Send now (N)" on offer. The same containment rule decides for both (`pendingEchoes`).
     const userTurns = turns.filter(t => t.role === 'user').map(t => t.text)
     const transcriptLoaded = hasSource ? sourceTurns != null || !!sourceUnavailable : loadedId === session.id
-    return visibleQueued(out, userTurns, transcriptLoaded, deliveredRef.current, new Set(echo))
+    const local = sentHere.current.id === session.id ? sentHere.current.texts : new Set<string>()
+    return visibleQueued(out, userTurns, transcriptLoaded, deliveredRef.current, local)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [echo, payload?.pending, turns, deliveredTick, loadedId, session.id])
 
@@ -2337,6 +2344,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     setSending(true)
     setDeliveryFailure(null)
     // A SOURCE draws its own optimistic turn (the native runtime's `sent`); an echo would be a second copy.
+    if (sentHere.current.id !== session.id) sentHere.current = { id: session.id, texts: new Set() }
+    sentHere.current.texts.add(full)
     if (!source) editEcho(list => [...list, full])
     setDraft('')
     sessionScratch.clearDraft(scratchId)

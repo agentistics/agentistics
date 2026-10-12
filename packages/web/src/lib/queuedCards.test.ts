@@ -38,3 +38,11 @@ describe('visibleQueued local echoes', () => {
     expect(visibleQueued(q, [], false, new Set(), new Set(['mine']))).toEqual([{ text: 'mine' }])
   })
 })
+
+describe('visibleQueued restored echoes', () => {
+  test('an echo restored from storage (not sent in this mount) waits for the transcript like a server copy', () => {
+    const q = [{ text: 'sent earlier, maybe consumed' }, { text: 'sent now' }]
+    expect(visibleQueued(q, [], false, new Set(), new Set(['sent now']))).toEqual([{ text: 'sent now' }])
+    expect(visibleQueued(q, ['sent earlier, maybe consumed'], true, new Set(), new Set(['sent now']))).toEqual([{ text: 'sent now' }])
+  })
+})

@@ -19,7 +19,7 @@ import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { fleetSeedNotice, fleetStaleNotice } from './fleetStale'
 import { cacheIsUsable, stripVolatile } from './fleetCache'
 import { notifyFleetTransitions, type SessionActivity } from './sessionNotifications'
-import { confirmSendLanded, parseActResult, sendUnconfirmedMessage, textInPending, textInUserTurns } from './fleetAct'
+import { chatHoldsText, confirmSendLanded, parseActResult, sendUnconfirmedMessage } from './fleetAct'
 import { nativeAct, readNativeFleet } from './nativeFleet'
 import { withNativeSessions } from './nativeFleetRow'
 import { isNativeSessionId } from './sessionRoute'
@@ -655,7 +655,7 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
           const r = await fetch(`/api/fleet/chat?id=${encodeURIComponent(req.id)}&lang=${lang}`)
           if (!r.ok) return false
           const b = await r.json() as { turns?: { role?: string; text?: string }[]; pending?: { text?: string }[] }
-          return textInUserTurns(b.turns ?? [], req.text ?? '') || textInPending(b.pending, req.text ?? '')
+          return chatHoldsText(b, req.text ?? '')
         })
         return landed
           ? { ok: true, message: lang === 'pt' ? 'Mensagem enviada.' : 'Message sent.' }

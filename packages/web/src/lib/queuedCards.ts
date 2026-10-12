@@ -7,7 +7,9 @@ export interface QueuedCard { text: string; at?: number }
  *
  * Until THIS session's transcript has loaded at least once, `userTurns` is empty or partial, so
  * nothing can be reconciled and a message the session already consumed would flash as unread.
- * Draw nothing until then; afterwards the usual containment rule (`pendingEchoes`) decides.
+ * Draw nothing until then except `local` — texts sent from this mount (an echo restored from
+ * storage is NOT local: it may have been consumed while nobody watched). Afterwards the usual
+ * containment rule (`pendingEchoes`) decides.
  */
 export function visibleQueued(
   queued: QueuedCard[],

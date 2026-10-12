@@ -79,6 +79,17 @@ export function textInPending(pending: readonly { text?: string }[] | undefined,
 }
 
 /**
+ * Does a `/api/fleet/chat` answer show `text` as received — a user turn, or held in `pending`
+ * (delivered mid-turn, not in the transcript yet)? The landed-check for a send whose answer was lost.
+ */
+export function chatHoldsText(
+  b: { turns?: readonly { role?: string; text?: string }[]; pending?: readonly { text?: string }[] },
+  text: string,
+): boolean {
+  return textInUserTurns(b.turns ?? [], text) || textInPending(b.pending, text)
+}
+
+/**
  * Ask `check` up to `attempts` times, `intervalMs` apart; `true` as soon as the message is seen.
  * A throwing check counts as "not seen yet" — it must never turn into the answer.
  */
