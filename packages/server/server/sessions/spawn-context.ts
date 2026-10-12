@@ -143,6 +143,21 @@ export async function writeContextFile(plan: SpawnPlan): Promise<boolean> {
   }
 }
 
+/**
+ * AWAY MODE as stored, for the briefing. Best effort: an unreadable preferences file costs the line,
+ * never the spawn. Returned even when expired — `contextText` judges it against the clock.
+ */
+export async function resolveContextAway(): Promise<Pick<ContextInput, 'away'>> {
+  try {
+    const { readPreferences } = await import('../preferences')
+    const { parseAwayState, awayActive } = await import('@agentistics/core')
+    const away = parseAwayState((await readPreferences()).away)
+    return awayActive(away, Date.now()) ? { away } : {}
+  } catch {
+    return {}
+  }
+}
+
 /** The stored role of a session being (re)started, if any — keyed by its managed id or conversation id. */
 export async function resolveContextRole(...keys: (string | undefined)[]): Promise<Pick<ContextInput, 'role'>> {
   try {

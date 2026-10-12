@@ -2037,6 +2037,19 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }, await defaultRoleDeps())
       return json(out, roleStatus(out))
     }
+    // AWAY MODE — the owner is out; sessions started meanwhile are told so (`away.ts`). The browser and
+    // the CLI write it as the person; a session (MCP) must prove itself and be a leader.
+    if (url.pathname === '/api/away' && req.method === 'GET') {
+      const { readAwayView, defaultAwayDeps } = await import('./away')
+      return json(await readAwayView(await defaultAwayDeps()))
+    }
+    if (url.pathname === '/api/away' && req.method === 'PUT') {
+      const body = await req.json().catch(() => ({}))
+      const { setAway, awayStatus, defaultAwayDeps } = await import('./away')
+      const out = await setAway(body, await defaultAwayDeps())
+      if (out.ok) (await import('./sse')).broadcastAwayChanged()
+      return json(out, awayStatus(out))
+    }
     // USER SESSION GROUPS — the door the MCP tools use to organise sessions (see
     // `sessions/session-groups-web.ts`). Matched before `/api/tasks`; it shares no path with it.
     if (url.pathname === '/api/session-groups' && req.method === 'GET') {

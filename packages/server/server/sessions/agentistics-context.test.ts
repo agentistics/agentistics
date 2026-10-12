@@ -267,3 +267,26 @@ describe('role line follows the stored role', () => {
     expect(contextText(base)).toContain('agentistics_session_role')
   })
 })
+
+describe('away mode in the briefing', () => {
+  const NOW = Date.parse('2026-10-12T03:00:00.000Z')
+  const away = { on: true, since: '2026-10-12T02:00:00.000Z', until: '2026-10-12T12:00:00.000Z', authorised: ['releases' as const] }
+  test('absent, off or expired: no line', () => {
+    expect(contextText({ ...base, now: NOW })).not.toContain('AWAY MODE')
+    expect(contextText({ ...base, now: NOW, away: { ...away, on: false } })).not.toContain('AWAY MODE')
+    expect(contextText({ ...base, now: Date.parse('2026-10-12T13:00:00Z'), away })).not.toContain('AWAY MODE')
+  })
+  test('leader gets the decide-and-record line right after the role line', () => {
+    const lines = contextText({ ...base, now: NOW, away, role: 'leader' }).split('\n')
+    const i = lines.findIndex(l => l.startsWith('AWAY MODE'))
+    expect(i).toBeGreaterThan(0)
+    expect(lines[i - 1]).toContain('LEADER')
+    expect(lines[i]).toContain('Never end a turn on a question to the owner')
+    expect(lines[i]).toContain('until 2026-10-12T12:00:00.000Z')
+    expect(lines[i]).toContain('publish releases the leader has approved')
+  })
+  test('worker is told to report to its leader, not the owner', () => {
+    const t = contextText({ ...base, now: NOW, away, role: 'worker', parentId: 'p1' })
+    expect(t).toContain('Do not ask the owner anything')
+  })
+})

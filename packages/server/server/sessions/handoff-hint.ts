@@ -44,10 +44,12 @@ export function planHandoffHints(rows: readonly HandoffHintRow[]): HandoffHint[]
   })
 }
 
-export function handoffHintText(hint: HandoffHint): string {
+/** `awayNote` is `awayHandoffNote` (@agentistics/core): while the owner is away the hint says so, so the
+ *  predecessor writes it into the hand-off file — the successor's briefing carries it too. */
+export function handoffHintText(hint: HandoffHint, awayNote = ''): string {
   const n = Math.round(hint.tokens / 1_000)
   const pct = Math.round(hint.fraction * 100)
-  return `Seu contexto passou de ${n}k tokens (${pct}% da janela). Para economizar, prepare a passagem: escreva o handoff e abra a sessão sucessora (handoff:true).`
+  return `Seu contexto passou de ${n}k tokens (${pct}% da janela). Para economizar, prepare a passagem: escreva o handoff e abra a sessão sucessora (handoff:true).${awayNote}`
 }
 
 export interface HandoffHintDeps {
@@ -57,6 +59,8 @@ export interface HandoffHintDeps {
   hinted: (id: string) => Promise<{ level: number; tokens?: number }>
   /** Persists the state; returns false when it could not be written. */
   markHinted: (id: string, level: number, tokens: number | undefined) => Promise<boolean>
+  /** The away-mode sentence to append (empty when the owner is not away). Optional: absent = none. */
+  awayNote?: () => Promise<string>
 }
 
 const inFlight = new Set<string>()
@@ -80,7 +84,8 @@ export async function sendHandoffHints(deps: HandoffHintDeps): Promise<number> {
       const [hint] = planHandoffHints([{ ...row, hintedLevel: prev.level, hintedTokens: prev.tokens }])
       if (!hint) continue
       if (!(await deps.markHinted(row.id, hint.level, hint.tokens).catch(() => false))) continue
-      const result = await deps.prompt(row.id, `[from agentistics · question]\n${handoffHintText(hint)}`).catch(() => ({ ok: false }))
+      const awayNote = await (deps.awayNote?.() ?? Promise.resolve('')).catch(() => '')
+      const result = await deps.prompt(row.id, `[from agentistics · question]\n${handoffHintText(hint, awayNote)}`).catch(() => ({ ok: false }))
       if (result.ok) sent++
       else await deps.markHinted(row.id, prev.level, prev.tokens).catch(() => false)
     } finally {

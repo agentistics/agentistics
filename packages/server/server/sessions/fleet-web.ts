@@ -291,6 +291,11 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
           return { level: m?.handoffHintLevel ?? 0, ...(m?.handoffHintTokens !== undefined ? { tokens: m.handoffHintTokens } : {}) }
         },
         markHinted: (id, level, tokens) => patchSession(id, { handoffHintLevel: level, ...(tokens !== undefined ? { handoffHintTokens: tokens } : {}) }),
+        awayNote: async () => {
+          const { readPreferences } = await import('../preferences')
+          const { awayHandoffNote, parseAwayState } = await import('@agentistics/core')
+          return awayHandoffNote(parseAwayState((await readPreferences()).away), Date.now())
+        },
       })
     })().catch(() => {})
     // Nay conversations are filed into "Nay › Ativas" / "Nay › Inativas" by whether they run. It

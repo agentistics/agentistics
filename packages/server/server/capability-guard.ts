@@ -100,6 +100,7 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   ['/api/session-notify', 'localShell'],
   ['/api/session-message', 'localShell'],
   ['/api/session-roles', 'localShell'],
+  ['/api/away', 'localShell'],
   // The file store is addressed by file id rather than under `/api/tasks/`, so it needs its own
   // entry: a route that is not registered here is assumed harmless.
   ['/api/task-files', 'localShell'],
