@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { SessionMeta } from '@agentistics/core'
 import { HighlightsBoard } from './HighlightsBoard'
@@ -13,9 +13,19 @@ const session = (over: Partial<SessionMeta> = {}): SessionMeta => ({
   ...over,
 } as SessionMeta)
 
+// bun runs every test file in one process: a `window` left behind (or left non-writable) breaks the
+// next file that installs its own, so each render puts the original back.
+const hadWindow = Object.prototype.hasOwnProperty.call(globalThis, 'window')
+const originalWindow = (globalThis as Record<string, unknown>).window
+afterEach(() => {
+  if (hadWindow) Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: originalWindow })
+  else delete (globalThis as Record<string, unknown>).window
+})
+
 function render(sessions: SessionMeta[]): string {
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
+    writable: true,
     value: { innerWidth: 1280 },
   })
   return renderToStaticMarkup(<HighlightsBoard sessions={sessions} projects={[]} lang="en" />)
