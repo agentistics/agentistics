@@ -83,10 +83,12 @@ let tableMemo: { atMs: number; rows: ProcStatRow[] } | null = null
  * issuing one async read per process sent several hundred tasks through the runtime's thread pool at
  * once: measured (PERF.IDLE, 380 processes) ~5.3 ms of CPU per sweep against ~1.9 ms read in line,
  * most of the difference being pool threads spinning on the burst. `null` when `/proc` is unreadable.
+ * `fresh` skips the memo (and refreshes it): a caller that must see a process born a moment ago — a
+ * kill of a just-spawned pid — cannot be answered from a table read before it existed.
  */
-export function readProcTable(nowMs = Date.now()): ProcStatRow[] | null {
+export function readProcTable(nowMs = Date.now(), fresh = false): ProcStatRow[] | null {
   if (process.platform !== 'linux') return null
-  if (tableMemo && nowMs - tableMemo.atMs < TABLE_TTL_MS && nowMs >= tableMemo.atMs) return tableMemo.rows
+  if (!fresh && tableMemo && nowMs - tableMemo.atMs < TABLE_TTL_MS && nowMs >= tableMemo.atMs) return tableMemo.rows
   let names: string[]
   try { names = readdirSync('/proc') } catch { return null }
   const rows: ProcStatRow[] = []
@@ -149,7 +151,9 @@ function identityOf(row: ProcStatRow, uid: number | undefined, nowMs: number): P
  */
 export async function readProcEntries(alwaysPids: ReadonlySet<number> = new Set()): Promise<ProcEntry[] | null> {
   const nowMs = Date.now()
-  const table = readProcTable(nowMs)
+  // Always a fresh sweep: this is the read that decides (inventory, kill). The memo it leaves is
+  // what the tick's second reader (heavy-io.ts) shares.
+  const table = readProcTable(nowMs, true)
   if (!table) return null
   const up = uptimeSec()
   const uid = process.getuid?.()
