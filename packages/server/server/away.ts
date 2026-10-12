@@ -7,13 +7,17 @@
  * stored role is `leader` (the MCP door). A worker is refused — it would be switching off the very
  * instruction that tells it not to ask the owner. Spec: agentistics-workspace/leader/specs/away-mode-spec.md
  */
-import { AWAY_OFF, awayActive, normalizeAwayInput, parseAwayState, type AwayInputError, type AwayState } from '@agentistics/core'
+import { AWAY_OFF, awayActive, normalizeAwayInput, normalizeAwayNotice, parseAwayState, redactSecrets, type AwayInputError, type AwayState } from '@agentistics/core'
 
 export interface AwayView { state: AwayState; active: boolean }
 
 export type AwayReply =
   | ({ ok: true } & AwayView)
   | { ok: false; error: AwayInputError | 'unverified_sender' | 'leader_only'; detail?: string }
+
+export type AwayNoticeReply =
+  | { ok: true }
+  | { ok: false; error: 'unverified_sender' | 'leader_only' | 'bad_notice' | 'not_away' }
 
 export interface AwayDeps {
   read: () => Promise<unknown>
@@ -22,6 +26,8 @@ export interface AwayDeps {
   verify: (id: unknown, token: unknown) => Promise<string | null>
   roleOf: (managedId: string) => Promise<'leader' | 'worker' | undefined>
   now: () => number
+  /** Raises the owner-facing notification (bell + Nay toast, persisted). */
+  notify?: (text: string, from: string) => void
 }
 
 export function awayView(raw: unknown, now: number): AwayView {
@@ -47,8 +53,25 @@ export async function setAway(body: unknown, deps: AwayDeps): Promise<AwayReply>
   return { ok: true, ...awayView(n.state, now) }
 }
 
-export function awayStatus(r: AwayReply): number {
+/**
+ * A LEADER's notice to the owner while away — the warning or decision that cannot wait, delivered
+ * without blocking the turn on a question. Only a verified leader, only while away is active.
+ */
+export async function sendAwayNotice(body: unknown, deps: AwayDeps): Promise<AwayNoticeReply> {
+  const o = (body && typeof body === 'object' ? body : {}) as { text?: unknown; session?: { id?: unknown; token?: unknown } }
+  const sender = await deps.verify(o.session?.id, o.session?.token)
+  if (!sender) return { ok: false, error: 'unverified_sender' }
+  if ((await deps.roleOf(sender)) !== 'leader') return { ok: false, error: 'leader_only' }
+  const text = normalizeAwayNotice(o.text)
+  if (text === null) return { ok: false, error: 'bad_notice' }
+  if (!awayActive(parseAwayState(await deps.read().catch(() => AWAY_OFF)), deps.now())) return { ok: false, error: 'not_away' }
+  deps.notify?.(redactSecrets(text), sender)
+  return { ok: true }
+}
+
+export function awayStatus(r: AwayReply | AwayNoticeReply): number {
   if (r.ok) return 200
+  if (r.error === 'not_away') return 409
   return r.error === 'unverified_sender' || r.error === 'leader_only' ? 403 : 400
 }
 
@@ -65,5 +88,8 @@ export async function defaultAwayDeps(): Promise<AwayDeps> {
       return storedRoleFor([managedId, row?.conversationId])
     },
     now: () => Date.now(),
+    notify: (text, from) => {
+      void import('./sse').then(m => m.broadcastNotification({ type: 'warning', code: 'away.notice', meta: { text, from } }))
+    },
   }
 }

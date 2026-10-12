@@ -23,9 +23,19 @@ export interface AwayState {
   authorised: AwayAuthId[]
   /** Free text the owner adds (≤ `AWAY_NOTE_MAX`). */
   note?: string
+  /** Ceiling of worker sessions running at once (a cap ABOVE plan_limits' cadence.parallel). */
+  maxWorkers: number
+  /** Ceiling of those running on the strongest model (Opus) at once. */
+  maxOpus: number
 }
 
 export const AWAY_NOTE_MAX = 500
+/** Owner defaults (08/10: at most 6 workers, at most 2 on Opus); the activation dialog can change them. */
+export const AWAY_DEFAULT_MAX_WORKERS = 6
+export const AWAY_DEFAULT_MAX_OPUS = 2
+export const AWAY_MAX_CEILING = 12
+/** Below this much free RAM a leader pauses one worker (the machine crashed with 4 workers on 09/10). */
+export const AWAY_MIN_FREE_RAM_GB = 2
 
 /** The model-facing phrase for each authorisation (English: the model reads it). */
 export const AWAY_AUTH_TEXT: Record<AwayAuthId, string> = {
@@ -41,7 +51,12 @@ export const AWAY_AUTH_LABEL: Record<AwayAuthId, { en: string; pt: string }> = {
   merges: { en: 'Merge PRs the leader reviewed', pt: 'Merge de PRs revisados pelo líder' },
 }
 
-export const AWAY_OFF: AwayState = { on: false, since: '', until: null, authorised: [] }
+export const AWAY_OFF: AwayState = { on: false, since: '', until: null, authorised: [], maxWorkers: AWAY_DEFAULT_MAX_WORKERS, maxOpus: AWAY_DEFAULT_MAX_OPUS }
+
+function ceiling(v: unknown, fallback: number): number | null {
+  if (v === undefined || v === null) return fallback
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= AWAY_MAX_CEILING ? v : null
+}
 
 /** True while the owner is away: switched on and not past `until`. */
 export function awayActive(s: AwayState | null | undefined, now: number): boolean {
@@ -58,16 +73,20 @@ export function parseAwayState(v: unknown): AwayState {
   const until = typeof o.until === 'string' && Number.isFinite(Date.parse(o.until)) ? o.until : null
   const authorised = Array.isArray(o.authorised) ? [...new Set(o.authorised.filter(isAwayAuthId))] : []
   const note = typeof o.note === 'string' && o.note.trim() !== '' ? o.note.trim().slice(0, AWAY_NOTE_MAX) : undefined
+  const maxWorkers = ceiling(o.maxWorkers, AWAY_DEFAULT_MAX_WORKERS) ?? AWAY_DEFAULT_MAX_WORKERS
+  const maxOpus = Math.min(ceiling(o.maxOpus, AWAY_DEFAULT_MAX_OPUS) ?? AWAY_DEFAULT_MAX_OPUS, maxWorkers)
   return {
     on: o.on === true,
     since: typeof o.since === 'string' ? o.since : '',
     until,
     authorised,
     ...(note ? { note } : {}),
+    maxWorkers,
+    maxOpus,
   }
 }
 
-export type AwayInputError = 'on_required' | 'bad_until' | 'until_in_past' | 'unknown_authorisation' | 'note_too_long'
+export type AwayInputError = 'on_required' | 'bad_until' | 'until_in_past' | 'unknown_authorisation' | 'note_too_long' | 'bad_ceiling'
 
 /**
  * Validates a write. `on` is required; turning OFF keeps nothing else. `until` is an ISO instant in
@@ -92,7 +111,10 @@ export function normalizeAwayInput(body: unknown, now: number): { ok: true; stat
   const authorised = AWAY_AUTH_IDS.filter(id => raw.includes(id))
   const note = typeof o.note === 'string' ? o.note.trim() : ''
   if (note.length > AWAY_NOTE_MAX) return { ok: false, error: 'note_too_long' }
-  return { ok: true, state: { on: true, since, until, authorised, ...(note ? { note } : {}) } }
+  const maxWorkers = ceiling(o.maxWorkers, AWAY_DEFAULT_MAX_WORKERS)
+  const maxOpus = ceiling(o.maxOpus, AWAY_DEFAULT_MAX_OPUS)
+  if (maxWorkers === null || maxOpus === null || maxOpus > maxWorkers) return { ok: false, error: 'bad_ceiling' }
+  return { ok: true, state: { on: true, since, until, authorised, ...(note ? { note } : {}), maxWorkers, maxOpus } }
 }
 
 function untilText(s: AwayState): string {
@@ -105,16 +127,42 @@ function authText(s: AwayState): string {
   return s.note ? `${base}; owner's note: ${s.note}` : base
 }
 
+export interface AwayBriefingOptions {
+  /** True when the briefing already carries the plan-limits rule (agentistics_plan_limits is
+   *  available): the away line then POINTS at it instead of repeating it. */
+  planLimitsInBriefing?: boolean
+}
+
+/** The plan-limits rule, worded as the base briefing words it (`briefing.ts`) — used only when the
+ *  base briefing could not print it, so it is never said twice. */
+const PLAN_LIMITS_RULE = 'before opening sessions read agentistics_plan_limits and follow its recommendation: keep cadence.parallel workers running; if paceStatus is under, pull work from the queue; hold only when the 5-hour window is at least 85% (short pause until renewal); the weekly quota is not a brake unless it is at least 95%'
+
 /**
  * The briefing line(s) for a session being started while the owner is away. Empty when inactive —
- * a session started after `until` is never told the owner is out.
+ * a session started after `until` is never told the owner is out. A LEADER gets four lines (scope,
+ * pacing, quality, communication): away mode must make a leader run the fleet at least as carefully
+ * as when the owner is watching — never burn tokens without producing.
  */
-export function awayBriefingLines(s: AwayState | null | undefined, role: 'leader' | 'worker' | undefined, now: number): string[] {
+export function awayBriefingLines(
+  s: AwayState | null | undefined,
+  role: 'leader' | 'worker' | undefined,
+  now: number,
+  o: AwayBriefingOptions = {},
+): string[] {
   if (!s || !awayActive(s, now)) return []
   const head = `AWAY MODE — the owner is away ${untilText(s)}.`
   if (role === 'leader') {
+    const pacing = o.planLimitsInBriefing
+      ? 'apply the agentistics_plan_limits rule above (cadence.parallel, paceStatus, 85% / 95%) before EVERY dispatch, not only the first'
+      : PLAN_LIMITS_RULE
+    const releases = s.authorised.includes('releases')
+      ? 'release only work that passed QA and that you approved, bundled into one release per batch'
+      : 'releases wait for the owner'
     return [
-      `${head} Pre-authorised: ${authText(s)}. These authorisations stand in for the owner's approval wherever the rules below ask for it. Never end a turn on a question to the owner: decide within them, record each decision (on the task or in your hand-off file) and keep going; anything outside them waits in the hand-off file for their return. At a hand-off, tell your successor the owner is away (agentistics tells it too).`,
+      `${head} Pre-authorised: ${authText(s)}. These authorisations stand in for the owner's approval wherever the rules below ask for it; anything outside them waits in the hand-off file for their return.`,
+      `Away pacing (do not burn tokens without producing): ${pacing}. Never run more than ${s.maxWorkers} workers at once, nor more than ${s.maxOpus} of them on the strongest model (Opus); pause one worker when free RAM drops under ${AWAY_MIN_FREE_RAM_GB} GB. Pick each model by the task, per the model-balance rule (Opus: design, coordination, hard bugs; Sonnet: scoped implementation; Haiku: probes).`,
+      `Away quality: QA by a different model from the author, tests only in throwaway runs (agentop run --rm); ${releases}.`,
+      "Away communication: never end a turn on a question to the owner — decide within the authorisations, record each decision (task comment or hand-off file) and keep going. A warning or decision that cannot wait goes to the owner as a notice (agentistics_session_away with `notice`, shown in their bell and Nay), never as a question that blocks the turn. At a hand-off, write in the hand-off file and in the successor's prompt that the owner is away and what is authorised (agentistics tells the successor too).",
     ]
   }
   if (role === 'worker') {
@@ -123,7 +171,7 @@ export function awayBriefingLines(s: AwayState | null | undefined, role: 'leader
     ]
   }
   return [
-    `${head} Pre-authorised: ${authText(s)}. Do not ask the owner: if you lead, decide within these authorisations and record each decision; otherwise report to the session that started you.`,
+    `${head} Pre-authorised: ${authText(s)}. Do not ask the owner: if you lead, decide within these authorisations, pace by agentistics_plan_limits and record each decision; otherwise report to the session that started you.`,
   ]
 }
 
@@ -131,5 +179,15 @@ export function awayBriefingLines(s: AwayState | null | undefined, role: 'leader
 export function awayHandoffNote(s: AwayState | null | undefined, now: number): string {
   if (!s || !awayActive(s, now)) return ''
   const ate = s.until === null ? 'até avisar que voltou' : `até ${s.until}`
-  return ` O dono está fora (modo ausente) ${ate}: registre isso no handoff para o sucessor.`
+  const ok = s.authorised.length > 0 ? s.authorised.join(', ') : 'nada além das regras'
+  return ` O dono está fora (modo ausente) ${ate}; autorizado: ${ok}; teto ${s.maxWorkers} workers / ${s.maxOpus} Opus. Escreva isso no handoff e no prompt do sucessor, e siga o ritmo do agentistics_plan_limits.`
+}
+
+export const AWAY_NOTICE_MAX = 500
+
+/** Validates a leader's notice to the owner. */
+export function normalizeAwayNotice(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const t = v.trim()
+  return t === '' || t.length > AWAY_NOTICE_MAX ? null : t
 }

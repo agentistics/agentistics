@@ -2050,6 +2050,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       if (out.ok) (await import('./sse')).broadcastAwayChanged()
       return json(out, awayStatus(out))
     }
+    if (url.pathname === '/api/away/notice' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({}))
+      const { sendAwayNotice, awayStatus, defaultAwayDeps } = await import('./away')
+      const out = await sendAwayNotice(body, await defaultAwayDeps())
+      return json(out, awayStatus(out))
+    }
     // USER SESSION GROUPS — the door the MCP tools use to organise sessions (see
     // `sessions/session-groups-web.ts`). Matched before `/api/tasks`; it shares no path with it.
     if (url.pathname === '/api/session-groups' && req.method === 'GET') {

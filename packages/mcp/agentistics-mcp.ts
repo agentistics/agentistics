@@ -613,7 +613,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_session_away",
     description:
-      "Read or switch AWAY MODE — the owner is out (asleep, travelling) and the fleet carries on without asking them. With no `on` it reports the state (`active`, `until`, what is pre-authorised). With `on: true` it switches it on: `until` is an ISO instant (omit = until the owner says they are back), `authorised` lists what the owner pre-approved (releases = publish releases the leader approved; workers = open worker sessions within the plan limits; merges = merge PRs the leader reviewed), `note` is free text. `on: false` switches it off. Every session started while it is active is told in its briefing. Only a LEADER session may switch it; use it when the owner tells you they are leaving or are back.",
+      "Read or switch AWAY MODE, or send the owner a notice while away — the owner is out (asleep, travelling) and the fleet carries on without asking them. With no `on` it reports the state (`active`, `until`, what is pre-authorised). With `on: true` it switches it on: `until` is an ISO instant (omit = until the owner says they are back), `authorised` lists what the owner pre-approved (releases = publish releases the leader approved; workers = open worker sessions within the plan limits; merges = merge PRs the leader reviewed), `note` is free text. `on: false` switches it off. Every session started while it is active is told in its briefing. Only a LEADER session may switch it; use it when the owner tells you they are leaving or are back.",
     inputSchema: {
       type: "object",
       properties: {
@@ -621,6 +621,9 @@ const TOOLS: Tool[] = [
         until: { type: "string", description: "ISO instant the away period ends. Omit for 'until I'm back'." },
         authorised: { type: "array", items: { type: "string", enum: ["releases", "workers", "merges"] } },
         note: { type: "string", description: "Free text from the owner (max 500 chars)." },
+        maxWorkers: { type: "number", description: "Ceiling of worker sessions at once while away (default 6)." },
+        maxOpus: { type: "number", description: "Ceiling of those on Opus at once (default 2)." },
+        notice: { type: "string", description: "While away: a warning or decision that cannot wait, sent to the owner's bell/Nay as a notice (max 500 chars) instead of a question that blocks your turn. Leaders only; ignores the other fields." },
       },
       required: [],
     },
@@ -1131,6 +1134,10 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
       }
       case "agentistics_session_away": {
         const a = args as any;
+        if (typeof a?.notice === "string") {
+          const body = await apiSend("POST", "/api/away/notice", { text: a.notice, session: sessionProof(process.env) });
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
         if (typeof a?.on !== "boolean") {
           const body = await apiGet("/api/away");
           return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
@@ -1140,6 +1147,8 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
           ...(a.until !== undefined ? { until: a.until } : {}),
           ...(a.authorised !== undefined ? { authorised: a.authorised } : {}),
           ...(a.note !== undefined ? { note: a.note } : {}),
+          ...(a.maxWorkers !== undefined ? { maxWorkers: a.maxWorkers } : {}),
+          ...(a.maxOpus !== undefined ? { maxOpus: a.maxOpus } : {}),
           session: sessionProof(process.env),
         });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };

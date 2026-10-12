@@ -94,7 +94,7 @@ export function contextText(i: ContextInput): string {
   ]
   lines.push(
     roleLine(i.role),
-    ...awayBriefingLines(i.away, i.role, i.now ?? Date.now()),
+    ...awayBriefingLines(i.away, i.role, i.now ?? Date.now(), { planLimitsInBriefing: i.toolNames?.includes(PLAN_LIMITS_TOOL) === true }),
     'Becoming leader: call agentistics_session_role with role "leader" — it stores the role and renames this session to "[ LEADER ] - <title>" (or "[ LÍDER ] - <title>" in a Portuguese UI) for you, keeping the user\'s title. Do not rename it by hand. If you started the session, pick the title.' +
       (i.role ? '' : ' If you have no stored role (AUTO): as soon as it is clear the request is a single piece, call agentistics_session_role with role "worker" to record it.'),
     'Open other sessions only after the user explicitly approves: `agentop session <harness> --bg --cwd <dir> --name "<title>" -p "<request>"` or `agentop session batch --task "<task>" …`. Every opened session is a WORKER; for a leader hand-off, tell the user it is a leader hand-off so the new session is marked as leader. File each opened session on its subtask and in the task\'s folder.',
