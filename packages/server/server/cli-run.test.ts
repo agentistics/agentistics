@@ -1,10 +1,19 @@
-import { describe, expect, test } from 'bun:test'
+import { afterAll, describe, expect, test } from 'bun:test'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, readFileSync, statSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
-import { isRealAgentopPort, runRun } from './cli-run'
+import { isRealAgentopPort, releaseThrowawayPorts, reserveThrowawayPorts, runRun } from './cli-run'
+
+const testHome = mkdtempSync(join(tmpdir(), 'agentop-run-ports-'))
+const originalHome = process.env.HOME
+process.env.HOME = testHome
+afterAll(() => {
+  if (originalHome === undefined) delete process.env.HOME
+  else process.env.HOME = originalHome
+  rmSync(testHome, { recursive: true, force: true })
+})
 
 const canBindLocalhost = await new Promise<boolean>(resolve => {
   const server = createServer()
@@ -12,6 +21,19 @@ const canBindLocalhost = await new Promise<boolean>(resolve => {
   server.listen(0, '127.0.0.1', () => server.close(() => resolve(true)))
 })
 const integration = canBindLocalhost ? test : test.skip
+
+async function availablePort(): Promise<number> {
+  const server = createServer()
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => resolve())
+  })
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('failed to obtain a test port')
+  const port = address.port
+  await new Promise<void>(resolve => server.close(() => resolve()))
+  return port
+}
 
 function runCli(home: string, args: string[]) {
   return new Promise<{ code: number | null; out: string }>(resolve => {
@@ -33,6 +55,46 @@ describe('agentop run --rm', () => {
     expect(isRealAgentopPort(47292)).toBe(true)
     expect(isRealAgentopPort(47290)).toBe(false)
     expect(isRealAgentopPort(47293)).toBe(false)
+  })
+
+  integration('gives concurrent allocations distinct port sets', async () => {
+    const base = await availablePort()
+    const [first, second] = await Promise.all([reserveThrowawayPorts(base), reserveThrowawayPorts(base)])
+    try {
+      expect(first.apiPort).not.toBe(second.apiPort)
+      expect(first.webPort).not.toBe(second.webPort)
+      expect([first.apiPort, first.webPort].some(port => port === second.apiPort || port === second.webPort)).toBe(false)
+    } finally {
+      releaseThrowawayPorts(first.reservationPaths)
+      releaseThrowawayPorts(second.reservationPaths)
+    }
+  })
+
+  integration('reclaims a reservation owned by a dead PID', async () => {
+    const stale = await reserveThrowawayPorts(await availablePort())
+    releaseThrowawayPorts(stale.reservationPaths)
+    mkdirSync(stale.reservationPaths[0]!, { recursive: true, mode: 0o700 })
+    writeFileSync(join(stale.reservationPaths[0]!, 'reservation.json'), JSON.stringify({ pid: 999_999_999 }), { mode: 0o600 })
+    const reclaimed = await reserveThrowawayPorts(stale.apiPort)
+    try {
+      expect(reclaimed.apiPort).toBe(stale.apiPort)
+      expect(reclaimed.webPort).toBe(stale.webPort)
+    } finally {
+      releaseThrowawayPorts(reclaimed.reservationPaths)
+    }
+  })
+
+  integration('skips a port that is already bound', async () => {
+    const occupied = createServer()
+    await new Promise<void>(resolve => occupied.listen(0, '127.0.0.1', () => resolve()))
+    const address = occupied.address()
+    if (!address || typeof address === 'string') throw new Error('failed to obtain a test port')
+    try {
+      const ports = await reserveThrowawayPorts(address.port)
+      try { expect(ports.apiPort).not.toBe(address.port) } finally { releaseThrowawayPorts(ports.reservationPaths) }
+    } finally {
+      await new Promise<void>(resolve => occupied.close(() => resolve()))
+    }
   })
 
   integration('does not mutate a fake real home and removes the throwaway home', async () => {

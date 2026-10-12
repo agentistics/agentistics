@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
@@ -17,6 +17,9 @@ export type ThrowawayState = {
   home: string
   apiPort: number
   webPort: number
+  reservationPaths?: string[]
+  // Kept for states written by older versions.
+  reservationPath?: string
   pid?: number
   unit?: string
   startedAt: string
@@ -77,21 +80,96 @@ function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { action: 'h
   return { name, ttl, portOffset, remove, command }
 }
 
-async function freePort(preferred: number, reserved: Set<number>): Promise<number> {
-  let port = Math.max(1024, preferred)
-  for (let attempts = 0; attempts < 1000; attempts++) {
-    while (isRealAgentopPort(port) || reserved.has(port)) port++
-    if (port >= 65535) break
-    const candidate = port
-    const ok = await new Promise<boolean>(resolve => {
-      const server = createServer()
-      server.once('error', () => resolve(false))
-      server.listen(candidate, '127.0.0.1', () => server.close(() => resolve(true)))
-    })
-    if (ok) return candidate
-    port++
+type ThrowawayPorts = { apiPort: number; webPort: number; reservationPaths: string[] }
+
+function portReservationRoot(): string { return join(stateRoot(), 'ports') }
+function portReservationPath(port: number): string { return join(portReservationRoot(), String(port)) }
+function allocationLockPath(): string { return join(portReservationRoot(), '.allocation-lock') }
+
+function processIsAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true } catch { return false }
+}
+
+function reclaimDeadReservation(path: string): void {
+  try {
+    const reservation = JSON.parse(readFileSync(join(path, 'reservation.json'), 'utf8')) as { pid?: number }
+    if (typeof reservation.pid !== 'number' || !processIsAlive(reservation.pid)) rmSync(path, { recursive: true, force: true })
+  } catch {
+    // A reservation without its file may still be in the middle of being written.
+    try { if (Date.now() - statSync(path).mtimeMs > 10_000) rmSync(path, { recursive: true, force: true }) } catch {}
   }
-  throw new Error('no free throwaway port is available')
+}
+
+async function acquireAllocationLock(): Promise<string> {
+  const path = allocationLockPath()
+  for (let attempts = 0; attempts < 1000; attempts++) {
+    try {
+      mkdirSync(path, { mode: 0o700 })
+      writeFileSync(join(path, 'reservation.json'), JSON.stringify({ pid: process.pid }), { mode: 0o600 })
+      return path
+    } catch {
+      reclaimDeadReservation(path)
+      await Bun.sleep(5)
+    }
+  }
+  throw new Error('timed out waiting for the throwaway port allocator')
+}
+
+async function portIsFree(port: number): Promise<boolean> {
+  return await new Promise(resolve => {
+    const server = createServer()
+    server.once('error', () => resolve(false))
+    server.listen(port, '127.0.0.1', () => server.close(() => resolve(true)))
+  })
+}
+
+export async function reserveThrowawayPorts(preferred: number): Promise<ThrowawayPorts> {
+  mkdirSync(portReservationRoot(), { recursive: true, mode: 0o700 })
+  const lockPath = await acquireAllocationLock()
+  try {
+    let apiPort = Math.max(1024, preferred)
+    for (let attempts = 0; attempts < 1000 && apiPort < 65534; attempts++, apiPort++) {
+      const webPort = apiPort + 1
+      if (isRealAgentopPort(apiPort) || isRealAgentopPort(webPort)) continue
+      const apiReservationPath = portReservationPath(apiPort)
+      try {
+        mkdirSync(apiReservationPath, { mode: 0o700 })
+      } catch {
+        reclaimDeadReservation(apiReservationPath)
+        try { mkdirSync(apiReservationPath, { mode: 0o700 }) } catch { continue }
+      }
+      writeFileSync(join(apiReservationPath, 'reservation.json'), JSON.stringify({ pid: process.pid }), { mode: 0o600 })
+      const webReservationPath = portReservationPath(webPort)
+      try {
+        mkdirSync(webReservationPath, { mode: 0o700 })
+      } catch {
+        reclaimDeadReservation(webReservationPath)
+        try { mkdirSync(webReservationPath, { mode: 0o700 }) } catch {
+          rmSync(apiReservationPath, { recursive: true, force: true })
+          continue
+        }
+      }
+      writeFileSync(join(webReservationPath, 'reservation.json'), JSON.stringify({ pid: process.pid }), { mode: 0o600 })
+      try {
+        if (await portIsFree(apiPort) && await portIsFree(webPort)) {
+          return { apiPort, webPort, reservationPaths: [apiReservationPath, webReservationPath] }
+        }
+      } catch {
+        // A failed bind probe must not leave a reservation behind.
+      }
+      rmSync(apiReservationPath, { recursive: true, force: true })
+      rmSync(webReservationPath, { recursive: true, force: true })
+    }
+    throw new Error('no free throwaway port is available')
+  } finally {
+    rmSync(lockPath, { recursive: true, force: true })
+  }
+}
+
+export function releaseThrowawayPorts(reservationPaths: string[] | string | undefined): void {
+  for (const reservationPath of reservationPaths ? (Array.isArray(reservationPaths) ? reservationPaths : [reservationPaths]) : []) {
+    rmSync(reservationPath, { recursive: true, force: true })
+  }
 }
 
 function readStates(): ThrowawayState[] {
@@ -108,6 +186,7 @@ async function stopState(state: ThrowawayState): Promise<void> {
     try { process.kill(-state.pid, 'SIGTERM') } catch { try { process.kill(state.pid, 'SIGTERM') } catch {} }
   }
   rmSync(state.home, { recursive: true, force: true })
+  releaseThrowawayPorts(state.reservationPaths ?? state.reservationPath)
   rmSync(statePath(state.name), { force: true })
   console.log(`removed ${state.home}`)
 }
@@ -126,20 +205,19 @@ async function startRun(options: RunOptions): Promise<number> {
   const agentistics = join(home, '.agentistics')
   mkdirSync(agentistics, { recursive: true, mode: 0o700 })
   for (const dir of ['.claude', '.codex', '.gemini', '.copilot']) mkdirSync(join(home, dir), { recursive: true, mode: 0o700 })
-  let apiPort: number
-  let webPort: number
+  let ports: ThrowawayPorts
   try {
     const preferred = options.portOffset === null ? THROWAWAY_PORT_BASE : REAL_API_PORT + options.portOffset
     if (isRealAgentopPort(preferred) || isRealAgentopPort(preferred + 1)) {
       throw new Error(`--port-offset ${options.portOffset} would land on the real agentop ports ${REAL_API_PORT}/${REAL_WEB_PORT}; refused`)
     }
-    apiPort = await freePort(preferred, new Set())
-    webPort = await freePort(apiPort + 1, new Set([apiPort]))
+    ports = await reserveThrowawayPorts(preferred)
   } catch (error) {
     rmSync(home, { recursive: true, force: true })
     throw error
   }
-  const state: ThrowawayState = { name: options.name, home, apiPort, webPort, startedAt: new Date().toISOString(), command: options.command }
+  const { apiPort, webPort, reservationPaths } = ports
+  const state: ThrowawayState = { name: options.name, home, apiPort, webPort, reservationPaths, startedAt: new Date().toISOString(), command: options.command }
   const script = process.argv[1]
   const argv = options.command.length ? options.command : (script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script, 'server'] : [process.execPath, 'server'])
   const env = { ...process.env, HOME: home, USERPROFILE: home, AGENTISTICS_DIR: agentistics, PORT: String(apiPort), WEB_PORT: String(webPort), SERVE_STATIC: '1', AGENTISTICS_SERVER_FOREGROUND: '1', AGENTISTICS_EXPERIMENTAL: '0', TMUX_TMPDIR: join(home, 'tmp'), TMPDIR: join(home, 'tmp'), AGENTISTICS_THROWAWAY: options.name }
