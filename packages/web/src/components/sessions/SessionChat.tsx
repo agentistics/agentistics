@@ -36,7 +36,7 @@ import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerS
 import { mutedTooltip, useMutedKeys } from '../../lib/notifyMenu'
 import { toggleSessionMuted } from '../../lib/mutedSessions'
 import { markDictated, stripDictatedMark } from '../../lib/dictationMark'
-import { AlertTriangle, ArrowDown, Bell, BellOff, ChevronDown, ChevronUp, CornerUpLeft, History, Loader, Mic, Paperclip, RotateCcw, Send, SlidersHorizontal, Square, X } from 'lucide-react'
+import { AlertTriangle, ArrowDown, Bell, BellOff, ChevronDown, ChevronRight, ChevronUp, CornerUpLeft, History, Loader, Mic, Paperclip, RotateCcw, Send, SlidersHorizontal, Square, X } from 'lucide-react'
 import { hasSomethingToSend, stopShown as isStopShown } from '../../lib/composerAction'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { AttentionMarkLine, RecordedBlock } from './AttentionMarks'
@@ -112,6 +112,7 @@ import { modelDisplay } from '../../lib/modelDisplay'
 import { handleComposerDrop } from '../../lib/mentionInsert'
 import { REPO_DRAG_MIME, readRepoDrag } from '../../lib/repoDrag'
 import { useNavigate } from 'react-router-dom'
+import { readComposerMenuFolded, visibleComposerMenuGroups, writeComposerMenuFolded, type ComposerMenuGroupId } from '../../lib/composerMenuGroups'
 import { useFleet } from '../../lib/fleet'
 import {
   applySessionMention, expandSessionMentions, filterMentionCandidates, hashPickerShown, hashQuery, isSameSession,
@@ -308,6 +309,20 @@ const REFRESH_NOTICE_MS = 400
  */
 const TAIL_SLACK = 24
 
+const menuGroupHeaderStyle = (mobile: boolean) => ({
+  display: 'flex', alignItems: 'center', gap: 6, width: '100%', textAlign: 'left' as const,
+  background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+  minHeight: mobile ? 44 : 30, padding: '6px 8px 7px', fontSize: 10.5, fontWeight: 700,
+  textTransform: 'uppercase' as const, letterSpacing: '0.06em', color: 'var(--text-tertiary)',
+})
+
+const menuItemStyle = (mobile: boolean) => ({
+  display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left' as const,
+  minHeight: mobile ? 44 : 36, padding: '6px 8px', borderRadius: 7, border: 'none',
+  background: 'transparent', color: 'var(--text-primary)', fontFamily: 'inherit',
+  fontSize: 12.5, cursor: 'pointer',
+})
+
 interface Attachment { name: string; path: string }
 
 export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onReopened, onOpenTerminal, metrics, source, focusComposerOnMount }: SessionChatProps) {
@@ -456,8 +471,10 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   )
   /** The composer's "more options" menu — dictation and the model live in it. */
   const [moreOpen, setMoreOpen] = useState(false)
+  const [foldedMenuGroups, setFoldedMenuGroups] = useState<Set<ComposerMenuGroupId>>(() => readComposerMenuFolded())
   /** The menu AND its button, so an outside-click handler can tell "inside" from "outside". */
   const moreMenuRef = useRef<HTMLDivElement | null>(null)
+  const moreButtonRef = useRef<HTMLButtonElement | null>(null)
   const modeButtonRef = useRef<HTMLButtonElement | null>(null)
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
   const [modeMenuPos, setModeMenuPos] = useState<MenuPlacement | null>(null)
@@ -632,6 +649,15 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   }, [row?.harness, modelReason, pt, sourceControls?.model])
   const menuModels = sourceControls?.model ? sourceControls.model.options : models
   const menuFreeText = sourceControls?.model ? sourceControls.model.freeText : modelFreeText
+  const toggleMenuGroup = useCallback((id: ComposerMenuGroupId) => {
+    setFoldedMenuGroups(previous => {
+      const next = new Set(previous)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      writeComposerMenuFolded(next)
+      return next
+    })
+  }, [])
 
   /**
    * The session's skills. Fetched when the menu is FIRST opened, not on mount: most sessions are
@@ -1928,12 +1954,22 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
 
   /** Everything the person sent, newest first — the recent-prompts panel's rows. */
   const promptList = useMemo(() => buildPromptList(session.id, turns, queued), [session.id, turns, queued])
+  const menuGroups = useMemo(
+    () => visibleComposerMenuGroups({
+      isMobile,
+      answeringNow,
+      hasPrompts: promptList.length > 0,
+      dictationReady: dictation.state === 'ready',
+      hasModel: Boolean(sourceControls?.model || modelReason || menuModels.length > 0 || menuFreeText),
+    }),
+    [answeringNow, dictation.state, isMobile, menuFreeText, menuModels.length, modelReason, promptList.length, sourceControls?.model],
+  )
 
   const closePrompts = useCallback(() => {
     setPromptsOpen(false)
     // Back to the control that opened the panel, once the dialog has unmounted.
-    requestAnimationFrame(() => historyBtnRef.current?.focus())
-  }, [])
+    requestAnimationFrame(() => (isMobile ? moreButtonRef.current : historyBtnRef.current)?.focus())
+  }, [isMobile])
 
   /**
    * Take the reader to one of their messages and MARK it.
@@ -3711,7 +3747,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     you have already sent, not about composing.
                     NOT WHILE ANSWERING A QUESTION, with the mode chip and the model: all three are
                     about the next TURN, and this is an answer to a dialog already open. */}
-                {promptList.length > 0 && !answeringNow && (
+                {promptList.length > 0 && !answeringNow && !isMobile && (
                   <button
                     ref={historyBtnRef}
                     onClick={() => setPromptsOpen(true)}
@@ -3785,6 +3821,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 {!answeringNow && (
                 <div ref={moreMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
                   <button
+                    ref={moreButtonRef}
                     onClick={() => setMoreOpen(v => !v)}
                     disabled={!canPrompt || sending}
                     aria-label={pt ? 'Mais opções' : 'More options'}
@@ -3808,7 +3845,27 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                       minWidth: 210, maxWidth: 260, padding: 4, borderRadius: 10,
                       background: 'var(--bg-elevated)', border: '1px solid var(--border)',
                       boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+                      maxHeight: isMobile ? 'calc(60vh / var(--ui-zoom, 1))' : undefined,
+                      overflowY: isMobile ? 'auto' : undefined,
                     }}>
+                      {menuGroups.includes('message') && (
+                        <>
+                          <button type="button" aria-expanded={!foldedMenuGroups.has('message')} onClick={() => toggleMenuGroup('message')} style={menuGroupHeaderStyle(isMobile)}>
+                            {foldedMenuGroups.has('message') ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+                            {pt ? 'Mensagem' : 'Message'}
+                          </button>
+                          {!foldedMenuGroups.has('message') && isMobile && promptList.length > 0 && (
+                            <button
+                              onClick={() => { setMoreOpen(false); setPromptsOpen(true) }}
+                              aria-label={pt ? 'Suas mensagens' : 'Your messages'}
+                              aria-haspopup="dialog"
+                              style={menuItemStyle(isMobile)}
+                            >
+                              <History size={14} />
+                              {pt ? 'Suas mensagens' : 'Your messages'}
+                            </button>
+                          )}
+                          <div style={{ display: foldedMenuGroups.has('message') ? 'none' : 'block' }}>
                       {/* DICTATION. Its refusal is a LINE, not a `title`: a phone has no hover, and
                           this is exactly where it is refused most — the Web Speech API needs a
                           secure context, so a dashboard reached over plain HTTP on a LAN never has
@@ -3890,12 +3947,21 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                             </a>
                           )
                       })()}
+                          </div>
+                        </>
+                      )}
 
                       {/* MODEL. Same treatment: where it cannot work, the menu says why instead of
                           offering a control that answers nothing.
                           ABSENT WHILE ANSWERING A QUESTION, with the mode chip and the recall
                           button: choosing a model is a decision about the next turn, and this is an
                           answer to a dialog that is already open. */}
+                      {menuGroups.includes('model') && <>
+                      <button type="button" aria-expanded={!foldedMenuGroups.has('model')} onClick={() => toggleMenuGroup('model')} style={menuGroupHeaderStyle(isMobile)}>
+                        {foldedMenuGroups.has('model') ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+                        {pt ? 'Modelo' : 'Model'}
+                      </button>
+                      <div style={{ display: foldedMenuGroups.has('model') ? 'none' : 'block' }}>
                       {answeringNow ? null : modelReason ? (
                         <p style={{ margin: 0, padding: '6px 8px', fontSize: 10.5, lineHeight: 1.45, color: 'var(--text-tertiary)' }}>
                           {modelReason}
@@ -3903,12 +3969,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                       ) : (menuModels.length > 0 || menuFreeText) && (
                         <>
                           <div style={{ height: 1, background: 'var(--border)', margin: '4px 2px' }} />
-                          <p style={{
-                            margin: '2px 8px 4px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
-                            letterSpacing: '0.06em', color: 'var(--text-tertiary)',
-                          }}>
-                            {pt ? 'Modelo' : 'Model'}
-                          </p>
                           {/* The LABEL is what you read; the ID is what gets typed into the
                               session. Where the server has no labels the two are the same string,
                               which is what this menu showed before. */}
@@ -3945,11 +4005,17 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                       {!answeringNow && sourceControls && (
                         <SourceSettings controls={sourceControls} pt={pt} onRefused={setNotice} />
                       )}
+                      </div>
+                      </>}
 
                       {/* NOTIFICATIONS for THIS session. Delivery only — the session still reads as
                           waiting. Styled as the model buttons above; the divider is the same 1px
                           rule the model block opens with. */}
-                      <div style={{ height: 1, background: 'var(--border)', margin: '4px 2px' }} />
+                      <button type="button" aria-expanded={!foldedMenuGroups.has('notifications')} onClick={() => toggleMenuGroup('notifications')} style={menuGroupHeaderStyle(isMobile)}>
+                        {foldedMenuGroups.has('notifications') ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+                        {pt ? 'Notificações' : 'Notifications'}
+                      </button>
+                      <div style={{ display: foldedMenuGroups.has('notifications') ? 'none' : 'block' }}><div style={{ height: 1, background: 'var(--border)', margin: '4px 2px' }} />
                       <button
                         onClick={() => { setMoreOpen(false); toggleSessionMuted(notifyKey) }}
                         title={notifyMuted ? mutedTooltip(pt) : undefined}
@@ -3965,6 +4031,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                           ? (pt ? 'Reativar notificações' : 'Unmute notifications')
                           : (pt ? 'Silenciar notificações' : 'Mute notifications')}
                       </button>
+                      </div>
 
                       {/* THE SKILLS LIST LIVED HERE AND IS GONE. It was the only place to see
                           them; there is a dedicated view now, and two lists of one thing are two
