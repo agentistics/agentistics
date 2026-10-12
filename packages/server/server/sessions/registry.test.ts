@@ -55,6 +55,16 @@ describe('createSessionRegistry', () => {
     expect(s!.harness).toBe('claude')
   })
 
+  it('keeps the per-session away flag across a read, and a null patch clears it', async () => {
+    const r = createSessionRegistry(file)
+    await r.add({ ...session('a1'), away: true })
+    expect((await r.read())[0]!.away).toBe(true)
+    await r.patch('a1', { away: null })
+    expect('away' in (await r.read())[0]!).toBe(false)
+    await r.patch('a1', { away: true })
+    expect((await r.read())[0]!.away).toBe(true)
+  })
+
   it('reports a patch of an unknown id rather than silently succeeding', async () => {
     expect(await createSessionRegistry(file).patch('nope', { label: 'x' })).toBe(false)
   })

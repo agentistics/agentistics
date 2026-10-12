@@ -183,6 +183,9 @@ function sanitize(raw: unknown): ManagedSession | null {
       ? { harnessNameSince: s.harnessNameSince }
       : {}),
     ...(typeof s.structuredDriver === 'string' && s.structuredDriver ? { structuredDriver: s.structuredDriver } : {}),
+    // Per-session away mode. Missing here, a flag set at spawn or by the switch was wiped by the
+    // first heartbeat rewrite — the session went on being told the owner was out, and the row said not.
+    ...(s.away === true ? { away: true } : {}),
     ...(typeof s.lastSeenMs === 'number' && Number.isFinite(s.lastSeenMs)
       ? { lastSeenMs: s.lastSeenMs }
       : {}),
