@@ -127,6 +127,14 @@ export interface Preferences {
   /** AWAY MODE — the owner is out and sessions must not ask them (`server/away.ts`). Read through
    *  `parseAwayState`/`awayActive` (@agentistics/core); written only by `setAway`. */
   away?: AwayState
+  /** Server-owned away summary offer/delivery state. */
+  awayDigest?: {
+    since: string
+    lastBucket: number
+    snoozedUntil?: number
+    lastDeliveredAt?: number
+    conversationId?: string
+  }
   /** Turns on every experimental feature (`EXPERIMENTAL_FEATURES`, @agentistics/core) at server
    *  start. Absent reads as OFF. An explicit `AGENTISTICS_*` variable still wins either way. Read
    *  by `experimental-boot.ts` BEFORE config.ts loads, so it must stay a plain boolean key. */

@@ -136,6 +136,13 @@ test('a cached verdict is only reused for the version it was computed against', 
   expect(isVersionCacheFresh(null, now, '1.7.0')).toBe(false)
 })
 
+test('cached version info preserves releases for the away digest', () => {
+  const releases = [{ tag: 'v1.8.0', published_at: '2026-01-01T00:00:00.000Z' }]
+  expect(cachedVersionInfo(entry({ releases }), '1.7.0')).toEqual({
+    current: '1.7.0', latest: '1.8.0', hasUpdate: true, critical: false, releases,
+  })
+})
+
 test('an "up to date" verdict goes stale far sooner than an "update available" one', () => {
   // The bug, measured: a machine on 1.13.7 checked at 21:51 and cached `latest: 1.13.7`. v1.14.0
   // shipped at 00:52 — inside the 3-hour window — and `check-update` stayed SILENT for the rest of
