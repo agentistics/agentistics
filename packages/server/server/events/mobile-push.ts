@@ -9,7 +9,7 @@ import { join, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { AGENTISTICS_DATA_DIR } from '../config'
-import { sealToFile, withSecret } from '../vault/service'
+import { sealMachineBoundVapid, withMachineBoundVapid, withSecret } from '../vault/service'
 import type { SessionEvent } from './event-types'
 import { redactSecrets } from '@agentistics/core'
 import { desktopText } from './notify-text'
@@ -141,10 +141,27 @@ export function vapidJwt(endpoint: string, publicKey: string, privateD: string, 
   return `${signingInput}.${b64(signature)}`
 }
 
+type VapidRecord = { publicKey: string; privateKey: string; curve?: string }
+
+async function readMachineVapid(): Promise<VapidRecord | null> {
+  const result = await withMachineBoundVapid(VAPID_FILE, VAPID_NAME, bytes => JSON.parse(new TextDecoder().decode(bytes)) as VapidRecord)
+  return result.ok ? result.value : null
+}
+
+async function readLegacyVapid(): Promise<VapidRecord | null> {
+  const result = await withSecret(VAPID_PURPOSE, VAPID_NAME, VAPID_FILE, bytes => JSON.parse(new TextDecoder().decode(bytes)) as VapidRecord)
+  if (!result.ok) return null
+  // The old file has the same path and public key. Re-seal it in the machine scope while the
+  // human vault is readable, so future phone registrations and sends need no unlock.
+  const body = new TextEncoder().encode(JSON.stringify(result.value))
+  try { await sealMachineBoundVapid(VAPID_FILE, VAPID_NAME, body) } finally { body.fill(0) }
+  return result.value
+}
+
 async function loadVapid(): Promise<{ publicKey: string; privateD: string }> {
-  const result = await withSecret(VAPID_PURPOSE, VAPID_NAME, VAPID_FILE, bytes => JSON.parse(new TextDecoder().decode(bytes)) as { publicKey: string; privateKey: string })
-  if (!result.ok) throw new Error('VAPID key is unavailable; initialize the vault first')
-  return { publicKey: result.value.publicKey, privateD: result.value.privateKey }
+  const value = await readMachineVapid() ?? await readLegacyVapid()
+  if (!value) throw new Error('VAPID key is unavailable on this machine')
+  return { publicKey: value.publicKey, privateD: value.privateKey }
 }
 
 /** Sends an encrypted Web Push request and removes endpoints that the push service no longer knows. */
@@ -200,15 +217,14 @@ export async function sendMobileNotice(
 
 /** Creates the key material once and seals it with the app vault. The return value is public only. */
 export async function ensureVapidPublicKey(): Promise<string> {
-  const existing = await withSecret(VAPID_PURPOSE, VAPID_NAME, VAPID_FILE, async bytes =>
-    JSON.parse(new TextDecoder().decode(bytes)) as { publicKey: string })
-  if (existing?.ok) return existing.value.publicKey
+  const existing = await readMachineVapid() ?? await readLegacyVapid()
+  if (existing) return existing.publicKey
   const pair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' })
   const privateJwk = pair.privateKey.export({ format: 'jwk' }) as JsonWebKey
   const publicJwk = pair.publicKey.export({ format: 'jwk' }) as JsonWebKey
   const publicKey = Buffer.from(pair.publicKey.export({ format: 'der', type: 'spki' })).subarray(-65).toString('base64url')
   const body = new TextEncoder().encode(JSON.stringify({ publicKey, privateKey: privateJwk.d, curve: publicJwk.crv }))
-  try { await sealToFile(VAPID_FILE, VAPID_PURPOSE, VAPID_NAME, body) } finally { body.fill(0) }
+  try { await sealMachineBoundVapid(VAPID_FILE, VAPID_NAME, body) } finally { body.fill(0) }
   return publicKey
 }
 
