@@ -428,17 +428,26 @@ export interface EngineInvocationCache {
 }
 
 /**
- * 1.8 — VAULT.PERSONAL §8.3: a native session's agent USES the personal secrets its person granted to
+ * 1.11 — VAULT.PERSONAL §8.3: a native session's agent USES the personal secrets its person granted to
  * that session, without the model ever seeing a value. The host holds the grants (memory only, gesture
  * to create, gone on lock); the engine asks at TOOL CALL time and never stores what it gets.
  */
 export interface EngineVaultRefs {
   /**
-   * The env overlay for THIS session's granted references (`VAULT_<KEY>[_<FIELD>]` → value), opened now.
-   * `{}` when the session has no grant. Apply it to ONE tool call's process and drop it — never bake it
-   * into a tool set shared by sessions, never write it to the journal, the history or the content store.
+   * OBSOLETE: the legacy env overlay. Hosts return ONLY secrets that do not require "Sempre confirmar".
+   * Confirmable secrets must be requested through `use`.
    */
   env(sessionId: string): Promise<Record<string, string>>
+  /**
+   * The secrets THIS command cites, each decided through the host's use gate now. A refused reference
+   * never appears in `env`; a malformed or unknown reference is refused too.
+   */
+  use?(sessionId: string, refs: string[], ctx: { command: string; callId: string }): Promise<{
+    env: Record<string, string>
+    refused: { ref: string; code: string; sentence: string }[]
+  }>
+  /** Notify the engine when a session's grant is revoked or the vault locks (`'*'`). */
+  onRevoke?(cb: (sessionId: string | '*') => void): () => void
   /**
    * The text with this session's granted values — and their base64/url/hex forms — replaced by
    * `«vault:NAME»`. Unchanged (no work) for a session without a grant. Call it on every tool OUTPUT
