@@ -2121,6 +2121,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       if (out.ok) (await import('./sse')).broadcastAwayChanged()
       return json(out, awayStatus(out))
     }
+    // PER-SESSION AWAY — one session's own flag (`ManagedSession.away`); the person or a verified leader.
+    if (url.pathname === '/api/away/session' && req.method === 'PUT') {
+      const body = await req.json().catch(() => ({})) as { lang?: unknown }
+      const { setSessionAway, sessionAwayStatus, defaultSessionAwayDeps } = await import('./away')
+      const out = await setSessionAway(body, await defaultSessionAwayDeps(body.lang === 'pt' ? 'pt' : 'en'))
+      if (out.ok) {
+        (await import('./sse')).broadcastAwayChanged()
+        void import('./sessions/fleet-web').then(m => m.kickFleet()).catch(() => {})
+      }
+      return json(out, sessionAwayStatus(out))
+    }
     if (url.pathname === '/api/away/notice' && req.method === 'POST') {
       const body = await req.json().catch(() => ({}))
       const { sendAwayNotice, awayStatus, defaultAwayDeps } = await import('./away')

@@ -312,6 +312,13 @@ export interface ManagedSession {
   effort?: string
   /** Explicit leader role, used by the context handoff hint. */
   leader?: boolean
+  /**
+   * PER-SESSION AWAY MODE (`awayMode.ts`, `sessionAwayState`): this session is told the owner is
+   * away even while the global switch is off. Set at spawn (`away`, or inherited from a verified away
+   * parent) or toggled at runtime (`/api/away/session`); carried across a reopen by `inheritedIdentity`.
+   * Absent = not away on its own.
+   */
+  away?: boolean
   /** Highest LEADER.HANDOFF.HINT level already delivered. */
   handoffHintLevel?: number
   /** Context size when the last hint went out; reminders come every +50k after it. */

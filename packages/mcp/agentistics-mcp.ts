@@ -613,7 +613,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_session_away",
     description:
-      "Read or switch AWAY MODE, or send the owner a notice while away — the owner is out (asleep, travelling) and the fleet carries on without asking them. With no `on` it reports the state (`active`, `until`, what is pre-authorised). With `on: true` it switches it on: `until` is an ISO instant (omit = until the owner says they are back), `authorised` lists what the owner pre-approved (releases = publish releases the leader approved; workers = open worker sessions within the plan limits; merges = merge PRs the leader reviewed), `note` is free text. `on: false` switches it off. Every session started while it is active is told in its briefing. Only a LEADER session may switch it; use it when the owner tells you they are leaving or are back.",
+      "Read or switch AWAY MODE, or send the owner a notice while away — the owner is out (asleep, travelling) and the fleet carries on without asking them. With no `on` it reports the state (`active`, `until`, what is pre-authorised). With `on: true` it switches it on: `until` is an ISO instant (omit = until the owner says they are back), `authorised` lists what the owner pre-approved (releases = publish releases the leader approved; workers = open worker sessions within the plan limits; merges = merge PRs the leader reviewed), `note` is free text. `on: false` switches it off. Every session started while it is active is told in its briefing. With `target` (a session's managed id or conversation id) `on` switches THAT session's own away mode instead — it alone is told the owner is out, even with the global switch off, and a running one is told the change; sessions it starts inherit it. Ceilings are per PROVIDER: `topCaps` maps a harness (claude, codex, gemini, copilot, antigravity, kimi, opencode) to how many workers may run on its top model tier at once. Only a LEADER session may switch it; use it when the owner tells you they are leaving or are back.",
     inputSchema: {
       type: "object",
       properties: {
@@ -622,7 +622,8 @@ const TOOLS: Tool[] = [
         authorised: { type: "array", items: { type: "string", enum: ["releases", "workers", "merges"] } },
         note: { type: "string", description: "Free text from the owner (max 500 chars)." },
         maxWorkers: { type: "number", description: "Ceiling of worker sessions at once while away (default 6)." },
-        maxOpus: { type: "number", description: "Ceiling of those on Opus at once (default 2)." },
+        topCaps: { type: "object", additionalProperties: { type: "number" }, description: "Per provider (harness id → number): ceiling of workers on that provider's top model tier at once (Opus, top GPT tier, Gemini Pro, …). A provider with no entry gets 2." },
+        target: { type: "string", description: "A session's managed id or conversation id: switch only that session's own away mode (with `on`)." },
         notice: { type: "string", description: "While away: a warning or decision that cannot wait, sent to the owner's bell/Nay as a notice (max 500 chars) instead of a question that blocks your turn. Leaders only; ignores the other fields." },
       },
       required: [],
@@ -1156,13 +1157,17 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
           const body = await apiGet("/api/away");
           return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
         }
+        if (typeof a.target === "string" && a.target.trim() !== "") {
+          const body = await apiSend("PUT", "/api/away/session", { target: a.target, on: a.on, session: sessionProof(process.env) });
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
         const body = await apiSend("PUT", "/api/away", {
           on: a.on,
           ...(a.until !== undefined ? { until: a.until } : {}),
           ...(a.authorised !== undefined ? { authorised: a.authorised } : {}),
           ...(a.note !== undefined ? { note: a.note } : {}),
           ...(a.maxWorkers !== undefined ? { maxWorkers: a.maxWorkers } : {}),
-          ...(a.maxOpus !== undefined ? { maxOpus: a.maxOpus } : {}),
+          ...(a.topCaps !== undefined ? { topCaps: a.topCaps } : {}),
           session: sessionProof(process.env),
         });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };

@@ -178,7 +178,7 @@ export interface HandoffHintDeps {
   /** Persists the state; returns false when it could not be written. */
   markHinted: (id: string, level: number, tokens: number | undefined) => Promise<boolean>
   /** The away-mode sentence to append (empty when the owner is not away). Optional: absent = none. */
-  awayNote?: () => Promise<string>
+  awayNote?: (id: string) => Promise<string>
 }
 
 const inFlight = new Set<string>()
@@ -202,7 +202,7 @@ export async function sendHandoffHints(deps: HandoffHintDeps): Promise<number> {
       const [hint] = planHandoffHints([{ ...row, hintedLevel: prev.level, hintedTokens: prev.tokens }])
       if (!hint) continue
       if (!(await deps.markHinted(row.id, hint.level, hint.tokens).catch(() => false))) continue
-      const awayNote = await (deps.awayNote?.() ?? Promise.resolve('')).catch(() => '')
+      const awayNote = await (deps.awayNote?.(row.id) ?? Promise.resolve('')).catch(() => '')
       const handoff = row.handoffPath !== undefined || row.handoffBytes !== undefined
         ? { path: row.handoffPath, bytes: row.handoffBytes }
         : await findHandoffFile(row.cwd)

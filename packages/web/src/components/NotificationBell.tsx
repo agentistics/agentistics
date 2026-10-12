@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, BellOff, AlertCircle, AlertTriangle, Info, CheckCircle2, Trash2, X } from 'lucide-react'
+import { Bell, BellOff, AlertCircle, AlertTriangle, Info, CheckCircle2, Trash2, X, Download } from 'lucide-react'
 import { useNotifications, markAllRead, clearNotifications, dismissNotification, resolveNotification, notificationLink, type NotificationType } from '../lib/notifications'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { openWhatsNew } from '../whatsNew/open'
 import { requestIdleReview } from '../lib/idleReviewRequest'
 import { muteSessionWithToast, SESSION_MUTED_CODE } from '../lib/notifyMenu'
 import { setMuteWorkers, useMuteWorkers } from '../lib/sessionRoles'
+import { usePendingUpdate } from '../lib/pendingUpdate'
 import { ToggleSwitch } from './ToggleSwitch'
 
 const ICON: Record<NotificationType, { color: string; Icon: typeof AlertCircle }> = {
@@ -46,7 +47,10 @@ interface Props {
 /** Bell icon with an unread badge and a dropdown of the notification history. */
 export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: Props) {
   const pt = lang === 'pt'
-  const notes = useNotifications()
+  const allNotes = useNotifications()
+  const pinnedUpd = usePendingUpdate()
+  // The pinned row IS the update news; the popup's own persisted copy would be the same news twice.
+  const notes = pinnedUpd ? allNotes.filter(n => n.code !== 'app.update_available') : allNotes
   const isMobile = useIsMobile()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
@@ -87,6 +91,9 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
             background: 'var(--anthropic-orange)', color: '#fff', fontSize: 11.5, fontWeight: 700,
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
           }}>{unread > 9 ? '9+' : unread}</span>
+        )}
+        {pinnedUpd && unread === 0 && (
+          <span data-testid="bell-pinned-dot" style={{ position: 'absolute', top: -2, right: -2, width: 9, height: 9, borderRadius: 5, background: 'var(--anthropic-orange)', border: '2px solid var(--bg-card)', boxSizing: 'border-box' }} />
         )}
         {!label && unread > 0 && (
           <span style={{
@@ -152,6 +159,25 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
             <ToggleSwitch on={muteWorkers} onToggle={() => setMuteWorkers(!muteWorkers)} label={pt ? 'Silenciar workers ativos' : 'Mute active workers'} />
           </div>
 
+          {pinnedUpd && (
+            <div
+              data-testid="bell-pinned-update"
+              role="button" tabIndex={0}
+              onClick={() => { setOpen(false); window.dispatchEvent(new CustomEvent('agentistics:open-update-modal')) }}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(false); window.dispatchEvent(new CustomEvent('agentistics:open-update-modal')) } }}
+              style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '10px 12px', borderBottom: '1px solid var(--border)', background: 'var(--anthropic-orange-dim)', cursor: 'pointer' }}
+            >
+              <Download size={15} color={pinnedUpd.critical ? '#f59e0b' : 'var(--anthropic-orange)'} style={{ flexShrink: 0, marginTop: 1 }} />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {pt ? `Atualizar para v${pinnedUpd.latest.replace(/^v/, '')}` : `Update to v${pinnedUpd.latest.replace(/^v/, '')}`}
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 2, lineHeight: 1.45 }}>
+                  {pt ? `Sugestão fixa: você está na v${pinnedUpd.current.replace(/^v/, '')}. Toque para instalar.` : `Pinned suggestion: you are on v${pinnedUpd.current.replace(/^v/, '')}. Tap to install.`}
+                </div>
+              </div>
+            </div>
+          )}
           {notes.length === 0 ? (
             <div style={{ padding: '24px 12px', textAlign: 'center', fontSize: 12, color: 'var(--text-tertiary)' }}>
               {pt ? 'Nenhuma notificação.' : 'No notifications.'}

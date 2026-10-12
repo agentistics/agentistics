@@ -17,6 +17,7 @@
  * a session's state by one poll interval — which is a bug people report as flicker.
  */
 
+import { AwayChip } from '../components/sessions/AwayChip'
 import { sessionLinks } from '../lib/sessionParent'
 import { SessionCheckinCard, SessionLinkInfo, SessionLinkPanel } from '../components/sessions/SessionLinkInfo'
 import { Drawer } from '../components/Drawer'
@@ -2144,6 +2145,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const [drawerLimitsOpen, setDrawerLimitsOpen] = useState(false)
   const [drawerSessionOpen, setDrawerSessionOpen] = useState(false)
   const [drawerActionsOpen, setDrawerActionsOpen] = useState(false)
+  const [drawerCheckinOpen, setDrawerCheckinOpen] = useState(false)
   const openSessionDrawer = useCallback(() => {
     window.history.pushState({ ...(window.history.state ?? {}), [SESSION_DRAWER_STATE]: true }, '')
     setSessionDrawer(true)
@@ -2651,6 +2653,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
                 fontSize: 13, fontWeight: 650, color: 'var(--text-primary)', minWidth: 0,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               }}>{selected.title}</div>
+              {selected.away === true && <AwayChip pt={pt} compact />}
               <SessionTitleFlag
                 session={{
                   id: selected.id, title: selected.title,
@@ -2951,15 +2954,15 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           </button>
         ), { open: drawerLimitsOpen, toggle: () => setDrawerLimitsOpen(v => !v) })}
 
-        {/* A leader's check-in is a card of its own and open, as in the prototype — folded inside
-            "Sessão" it was the one control a leader reaches for most, and the hardest to find. */}
+        {/* A leader's check-in is a card of its own (folded inside "Sessão" it was the hardest control
+            to find), folded by default like its siblings, its glance figure always shown. */}
         <SessionCheckinCard
           sessionId={sessionIdentityKey(selected)}
           links={sessionLinks(selected, fleet.rows) ?? { parent: null, children: [], task: null }}
           pt={pt}
           isMobile
           onGo={p => leaveDrawerTo(p)}
-          frame={(summary, body) => drawerSection('checkin', 'Check-in', summary, body)}
+          frame={(summary, body) => drawerSection('checkin', 'Check-in', summary, body, { open: drawerCheckinOpen, toggle: () => setDrawerCheckinOpen(v => !v) })}
         />
 
         {drawerSection('session', pt ? 'Sessão' : 'Session', (() => {
@@ -2986,6 +2989,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               pt={pt}
               isMobile
               hideCheckin
+              {...(selected.actionable && selected.state !== 'closed' ? { awayId: selected.id, away: selected.away === true } : {})}
               onGo={p => leaveDrawerTo(p)}
             />
           </div>

@@ -236,6 +236,8 @@ export interface SessionView {
   /** The managed id of the session that started this one — `ManagedSession.parentSessionId`. */
   parentSessionId?: string
   parentConversationId?: string
+  /** `ManagedSession.away` — per-session away mode. */
+  away?: boolean
   /**
    * Whether this harness has probed approval rules at all.
    *
@@ -682,6 +684,7 @@ export function buildSessionViews(o: {
       ...(r.managed?.taskId ? { taskId: r.managed.taskId } : {}),
       ...(r.managed?.parentSessionId ? { parentSessionId: r.managed.parentSessionId } : {}),
       ...(r.managed?.parentConversationId ? { parentConversationId: r.managed.parentConversationId } : {}),
+      ...(r.managed?.away ? { away: true } : {}),
       ...(r.managed?.conversationId ? { conversationId: r.managed.conversationId } : {}),
       ...(conv && r.managed?.conversationId && conv.sessionId !== r.managed.conversationId
         ? { conversationStoreId: conv.sessionId } : {}),

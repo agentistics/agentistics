@@ -21,6 +21,10 @@ describe('inheritedIdentity', () => {
     for (const k of ['id', 'createdAt', 'endedAt', 'lastSeenMs', 'conversationId']) expect(k in r).toBe(false)
   })
   it('is empty without a previous row', () => expect(inheritedIdentity(undefined)).toEqual({}))
+  it('carries the per-session away flag across a reopen', () => {
+    expect(inheritedIdentity({ ...prev, away: true }).away).toBe(true)
+    expect('away' in inheritedIdentity(prev)).toBe(false)
+  })
 })
 
 // Every path that mints a new managed id for an existing conversation must be born through
