@@ -90,6 +90,7 @@ export async function defaultAwayDeps(): Promise<AwayDeps> {
     now: () => Date.now(),
     notify: (text, from) => {
       void import('./sse').then(m => m.broadcastNotification({ type: 'warning', code: 'away.notice', meta: { text, from } }))
+      void import('./events/mobile-push').then(async m => m.sendMobileNotice('Agentistics · aviso', text, await m.readMobileSubscriptions(), m.webPushTransport)).catch(() => {})
     },
   }
 }

@@ -3,7 +3,7 @@ import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, test } from 'bun:test'
 import { AGENTISTICS_DATA_DIR } from '../config'
-import { deriveWebPushKeys, encryptWebPushPayload, ensureVapidPublicKey, isMobileUserAgent, mobileEvents, parseMobileStore, sendMobilePush, vapidJwt, webPushTransport, MOBILE_SUBSCRIPTIONS_FILE, type MobileSubscription } from './mobile-push'
+import { deriveWebPushKeys, encryptWebPushPayload, ensureVapidPublicKey, isMobileUserAgent, mobileEvents, parseMobileStore, sendMobileNotice, sendMobilePush, vapidJwt, webPushTransport, MOBILE_SUBSCRIPTIONS_FILE, type MobileSubscription } from './mobile-push'
 import type { SessionEvent } from './event-types'
 
 const event = (id: string, kind: SessionEvent['kind'] = 'waiting'): SessionEvent => ({
@@ -114,5 +114,19 @@ describe('mobile push', () => {
       expect(remaining.map(item => item.id)).toEqual(status === 500 ? [target.id, other.id] : [other.id])
     }
     await rm(MOBILE_SUBSCRIPTIONS_FILE, { force: true })
+  })
+})
+
+describe('sendMobileNotice', () => {
+  test('sends to enabled mobile subscriptions only and swallows transport failures', async () => {
+    const sent: string[] = []
+    const subs = [sub('m1'), sub('d1', 'desktop'), { ...sub('m2'), enabled: false }, sub('m3')]
+    const transport = async (s: MobileSubscription, p: { title: string; body: string }) => {
+      if (s.id === 'm3') throw new Error('boom')
+      sent.push(`${s.id}:${p.title}:${p.body}`)
+    }
+    const r = await sendMobileNotice('Agentistics · aviso', 'hello', subs, transport)
+    expect(sent).toEqual(['m1:Agentistics · aviso:hello'])
+    expect(r).toEqual({ sent: 1, failed: 1 })
   })
 })

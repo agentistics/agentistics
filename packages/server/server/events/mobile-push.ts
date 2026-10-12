@@ -184,6 +184,18 @@ export async function sendMobilePush(
   return { sent, failed }
 }
 
+/** Sends a plain notice (no session event) to enabled mobile subscriptions. Best-effort: never throws. */
+export async function sendMobileNotice(
+  title: string, body: string, subscriptions: readonly MobileSubscription[], transport: PushTransport,
+): Promise<{ sent: number; failed: number }> {
+  let sent = 0; let failed = 0
+  for (const sub of subscriptions) {
+    if (sub.kind !== 'mobile' || !sub.enabled) continue
+    try { await transport(sub, { title, body, sessionId: '' }); sent++ } catch { failed++ }
+  }
+  return { sent, failed }
+}
+
 /** Creates the key material once and seals it with the app vault. The return value is public only. */
 export async function ensureVapidPublicKey(): Promise<string> {
   const existing = await withSecret(VAPID_PURPOSE, VAPID_NAME, VAPID_FILE, async bytes =>
