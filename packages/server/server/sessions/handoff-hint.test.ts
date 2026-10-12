@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { handoffHintText, planHandoffHints, sendHandoffHints } from './handoff-hint'
+import { computeHandoffWhy, handoffHintText, planHandoffHints, sendHandoffHints } from './handoff-hint'
 
 const row = (extra: Record<string, unknown> = {}) => ({
   id: 'leader-1', title: '[ LEADER ] - engine', contextTokens: 150_000, contextWindow: 400_000, ...extra,
@@ -50,7 +50,7 @@ describe('LEADER.HANDOFF.HINT', () => {
     expect(await sendHandoffHints(s.deps())).toBe(0)
     expect(s.st).toEqual({ level: 1, tokens: 150_000 })
     expect(s.texts[0]).toContain('[from agentistics · question]')
-    expect(s.texts[0]).toContain('150k tokens (38% da janela)')
+    expect(s.texts[0]).toContain('150k tokens (38% do limite)')
     expect(handoffHintText({ id: 'x', level: 1, tokens: 150_000, fraction: 0.375 })).toContain('handoff:true')
   })
 
@@ -79,5 +79,30 @@ describe('LEADER.HANDOFF.HINT', () => {
     }
     expect(await sendHandoffHints(deps)).toBe(0)
     expect(reads).toBe(0)
+  })
+
+  it('defers at the token threshold while working, but the fraction is a hard cap', () => {
+    expect(planHandoffHints([row({ contextWindow: 1_000_000, activity: 'working' })])).toHaveLength(0)
+    expect(planHandoffHints([row({ contextTokens: 140_000, contextWindow: 410_000, activity: 'working' })])).toHaveLength(0)
+    expect(planHandoffHints([row({ contextTokens: 140_000, contextWindow: 300_000, activity: 'working' })])).toHaveLength(1)
+  })
+
+  it('computes numbers and omits unknown inputs', () => {
+    const why = computeHandoffWhy({ ...row(), model: 'claude-sonnet-5', turns: 10 }, {
+      handoffPath: '/tmp/handoff.md', handoffBytes: 4_000, briefingTokens: 1_000,
+    })
+    expect(why.contextTokens).toBe(150_000)
+    expect(why.projectedTurns).toBe(40)
+    expect(why.estimated).toBe(true)
+    expect(why.successor).toEqual({ handoffPath: '/tmp/handoff.md', handoffTokens: 2_000 })
+    expect(why.costContinueUSD).toBeGreaterThan(why.costSuccessorUSD!)
+    expect(computeHandoffWhy({ id: 'x', title: 'x' })).not.toHaveProperty('avgCostPerTurnUSD')
+  })
+
+  it('an unpriced model omits the costs instead of showing zero', () => {
+    const why = computeHandoffWhy({ ...row(), model: 'zzz-unknown', turns: 10, costUSD: 3 }, { handoffBytes: 4_000 })
+    expect(why).not.toHaveProperty('costContinueUSD')
+    expect(why).not.toHaveProperty('costSuccessorUSD')
+    expect(why).not.toHaveProperty('breakEvenTurns')
   })
 })
