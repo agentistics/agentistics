@@ -104,6 +104,7 @@ Commands:
                 exits — in an inbox, in another Claude session, and on your desktop
                 ('events watch' to subscribe, 'events status' to see who is watching)
   experimental  Turn every experimental feature on or off ('experimental enable|disable|status')
+  away          Away mode — the owner is out, sessions decide instead of asking ('away on|off|status')
   journal       The durable event journal: a read-only look ('journal status') and the
                 historical import of this machine's history into it ('journal import')
 __ENGINE_VERBS__
@@ -410,6 +411,8 @@ if (command === 'events') {
   const code = await runEvents(args)
   process.exit(code)
 }
+
+if (command === 'away') process.exit(await (await import('../server/cli-away.ts')).runAway(args))
 
 if (command === 'experimental') {
   const { runExperimental } = await import('../server/cli-experimental.ts')
