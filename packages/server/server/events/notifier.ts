@@ -22,7 +22,7 @@ import { subscribersOf, type Subscription } from './subscriptions'
 import type { SessionEvent } from './event-types'
 import { readPreferences } from '../preferences'
 import { AGENTISTICS_DATA_DIR } from '../config'
-import { readRolesDoc, type RolesDoc } from '../sessions/session-roles'
+import { readRolesDoc, roleOfRow, type RolesDoc } from '../sessions/session-roles'
 import { readMobileSubscriptions, sendMobilePush, webPushTransport } from './mobile-push'
 
 /** The key a session's mute is stored under — the web's `sessionIdentityKey`, so one mute holds
@@ -56,9 +56,7 @@ export const EMPTY_REPORT: DeliveryReport = {
 /** The worker toggle silences active-worker interruptions on every server delivery channel. */
 export function isWorkerMutedEvent(e: Pick<SessionEvent, 'id' | 'conversationId' | 'kind'>, roles: RolesDoc['roles'], muteWorkers: boolean): boolean {
   if (!muteWorkers || e.kind === 'exited') return false
-  // Events carry the same two identities as fleet rows. Resolve both directly here: this helper is
-  // also used before a fleet row is materialized, so it must not depend on a row adapter or UI alias.
-  return roles[e.conversationId ?? e.id] === 'worker' || roles[e.id] === 'worker'
+  return roleOfRow(roles, e) === 'worker'
 }
 
 /**

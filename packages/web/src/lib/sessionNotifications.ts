@@ -529,8 +529,9 @@ setSnoozeReleaseHandler(alert => {
   const settings = getNotificationSettings()
   if (!settings.enabled || settings.doNotDisturb) return
   if (isMutedId(alert.sessionId)) return
-  if (!pushAlert(alert)) return
   const event: NotifyEvent = alert.kind === 'turn' ? 'waiting' : alert.kind === 'approval' ? 'waiting-approval' : 'stale'
+  if (isWorkerMuted(alert.sessionId, event)) return
+  if (!pushAlert(alert)) return
   if (settings.soundEnabled) playNotificationSound(resolveSound(event, alert.nay === true, settings), settings.soundVolume)
 })
 

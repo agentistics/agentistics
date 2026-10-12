@@ -2,10 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import type { SessionMeta } from '@agentistics/core'
 import {
   DEFAULT_NOTIFICATION_SETTINGS, handleSessionStateTransitions, notifyFleetTransitions, observeDeliveries,
-  fleetActivityStates, resetNotificationMemory, type SessionActivity,
+  fleetActivityStates, resetNotificationMemory, saveNotificationSettings, type SessionActivity,
 } from './sessionNotifications'
 import { setSessionMuted } from './mutedSessions'
 import { setMuteWorkers, setSessionRole } from './sessionRoles'
+import { readNayAlerts, releaseDue, snoozeAlert } from './nayNotifyStore'
 
 /**
  * These tests exist because this module interrupts the user: a card, a sound and the bell (in-app
@@ -14,8 +15,6 @@ import { setMuteWorkers, setSessionRole } from './sessionRoles'
  * two that were live in production — one that fired alerts nobody asked for, and one that put a
  * Portuguese word inside an English sentence.
  */
-
-const STORAGE_KEY = 'agentistics.notifications'
 
 /** A minimal localStorage, so the module runs outside a browser; deliveries are observed directly. */
 function installBrowser(): { notifications: Array<{ title: string; body: string }> } {
@@ -30,12 +29,12 @@ function installBrowser(): { notifications: Array<{ title: string; body: string 
   g.window = g
   observeDeliveries(d => { notifications.push({ title: d.title, body: d.body }) })
   // Sound is a no-op here: `playNotificationSound` swallows a missing AudioContext by design.
-  store.set(STORAGE_KEY, JSON.stringify({
+  saveNotificationSettings({
     ...DEFAULT_NOTIFICATION_SETTINGS,
     enabled: true,
     soundEnabled: false,
-    events: { 'waiting-approval': true, waiting: true, working: true, exited: true },
-  }))
+    events: { 'waiting-approval': true, waiting: true, working: true, exited: true, stale: true },
+  })
   return { notifications }
 }
 
@@ -54,6 +53,7 @@ afterEach(() => {
   observeDeliveries(null)
   delete g.localStorage
   setSessionRole('mute-worker-managed', null)
+  setSessionRole('mute-worker-conversation', null)
   setSessionRole('mute-leader', null)
   setMuteWorkers(false)
 })
@@ -258,18 +258,88 @@ describe('a muted session', () => {
 })
 
 describe('muted workers', () => {
+  let sounds = 0
+  let bells: string[] = []
+  const originalFetch = globalThis.fetch
+  const originalDocument = globalThis.document
+  const originalAudioContext = globalThis.AudioContext
+
+  beforeEach(() => {
+    sounds = 0
+    bells = []
+    const g = globalThis as Record<string, unknown>
+    g.document = { visibilityState: 'visible' }
+    g.AudioContext = class {
+      state = 'running'
+      currentTime = 0
+      destination = {}
+      createGain() {
+        return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} }
+      }
+      createOscillator() {
+        return { frequency: { setValueAtTime() {} }, connect() {}, start() { sounds++ }, stop() {} }
+      }
+    }
+    g.fetch = async (url: unknown, init?: RequestInit) => {
+      if (String(url) === '/api/notifications' && init?.method === 'POST') bells.push(String(init.body))
+      return new Response(null, { status: 204 })
+    }
+    saveNotificationSettings({
+      ...DEFAULT_NOTIFICATION_SETTINGS, soundEnabled: true,
+      events: { ...DEFAULT_NOTIFICATION_SETTINGS.events, working: true },
+      eventSounds: { 'waiting-approval': 'chime', waiting: 'chime', working: 'chime', exited: 'chime', stale: 'chime', nay: 'chime' },
+    })
+  })
+
+  afterEach(() => {
+    const g = globalThis as Record<string, unknown>
+    g.fetch = originalFetch
+    if (originalDocument === undefined) delete g.document
+    else g.document = originalDocument
+    if (originalAudioContext === undefined) delete g.AudioContext
+    else g.AudioContext = originalAudioContext
+    resetNotificationMemory()
+  })
+
   it('suppresses turn, approval and responded events before any sidebar row renders', () => {
     setSessionRole('mute-worker-conversation', 'worker')
     setMuteWorkers(true)
     const rows = [{ id: 'mute-worker-managed', conversationId: 'mute-worker-conversation', state: 'working' }]
     let prev = notifyFleetTransitions(null, rows, 'en')
-    prev = notifyFleetTransitions(prev, [{ ...rows[0]!, state: 'waiting' }], 'en')
-    prev = notifyFleetTransitions(prev, [{ ...rows[0]!, state: 'waiting' }], 'en')
+    for (const state of ['waiting', 'waiting-approval', 'working']) {
+      prev = notifyFleetTransitions(prev, [{ ...rows[0]!, state }], 'en')
+      prev = notifyFleetTransitions(prev, [{ ...rows[0]!, state }], 'en')
+    }
     expect(captured).toHaveLength(0)
-    prev = notifyFleetTransitions(prev, [{ ...rows[0]!, state: 'working' }], 'en')
-    notifyFleetTransitions(prev, [{ ...rows[0]!, state: 'working' }], 'en')
-    expect(captured).toHaveLength(0)
+    expect(bells).toEqual([])
+    expect(readNayAlerts()).toEqual([])
+    expect(sounds).toBe(0)
   })
+
+  for (const muteOnReturn of [false, true]) {
+    it(`a snoozed worker approval ${muteOnReturn ? 'stays silent when muted' : 'returns with sound when unmuted'}`, async () => {
+      setSessionRole('mute-worker-conversation', 'worker')
+      setMuteWorkers(false)
+      const row = { id: 'mute-worker-managed', conversationId: 'mute-worker-conversation' }
+      let prev = notifyFleetTransitions(null, [{ ...row, state: 'working' }], 'en')
+      prev = notifyFleetTransitions(prev, [{ ...row, state: 'waiting-approval' }], 'en')
+      notifyFleetTransitions(prev, [{ ...row, state: 'waiting-approval' }], 'en')
+      expect(captured[0]?.title).toContain('Needs Approval')
+      expect(bells).toHaveLength(1)
+      expect(readNayAlerts()).toHaveLength(1)
+      expect(sounds).toBe(3)
+      const alert = readNayAlerts()[0]!
+      expect(alert.kind).toBe('approval')
+      snoozeAlert(alert.key, 60_000, 0)
+      expect(readNayAlerts()).toEqual([])
+      setMuteWorkers(muteOnReturn)
+      releaseDue(60_000)
+      await Promise.resolve()
+      expect(readNayAlerts()).toHaveLength(muteOnReturn ? 0 : 1)
+      expect(sounds).toBe(muteOnReturn ? 3 : 6)
+      expect(bells).toHaveLength(1)
+    })
+  }
 
   it('still notifies leaders and untyped sessions', () => {
     setSessionRole('mute-leader', 'leader')
@@ -287,5 +357,8 @@ describe('muted workers', () => {
       { id: 'mute-untyped', state: 'waiting' },
     ], 'en')
     expect(captured).toHaveLength(2)
+    expect(bells).toHaveLength(2)
+    expect(readNayAlerts()).toHaveLength(2)
+    expect(sounds).toBe(6)
   })
 })
