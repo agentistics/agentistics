@@ -32,4 +32,15 @@ describe('away digest source projection', () => {
     expect(digest.releases).toBe('unavailable')
     expect(digest.pending).toBe('unavailable')
   })
+
+  test('keeps only cached releases published inside the digest window', () => {
+    const digest = buildAwayDigestFromSources(away, now, {
+      awayDigest: { since: away.since, lastBucket: 20 },
+      releases: [
+        { tag: 'v1.0.0', published_at: new Date(since + 1).toISOString() },
+        { tag: 'v0.9.0', published_at: new Date(since - 1).toISOString() },
+      ],
+    })
+    expect(digest.releases).toEqual([{ tag: 'v1.0.0', published_at: new Date(since + 1).toISOString() }])
+  })
 })

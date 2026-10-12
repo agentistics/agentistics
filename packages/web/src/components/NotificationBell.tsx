@@ -212,7 +212,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
               const answerDigest = async (answer: 'yes' | 'no') => {
                 setDigestBusyId(n.id)
                 try {
-                  const body = await answerAwayDigest(answer, n.meta?.bucket, lang)
+                  const body = await answerAwayDigest(answer, n.meta?.bucket, n.meta?.since, lang)
                   if (body.ok && answer === 'yes' && body.conversationId) { setOpen(false); navigate(`/sessions/${encodeURIComponent(body.conversationId)}`) }
                 } finally { setDigestBusyId(null) }
               }

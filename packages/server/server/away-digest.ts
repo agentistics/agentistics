@@ -12,14 +12,14 @@ export interface AwayDigestState {
   conversationId?: string
 }
 
-export function awayDigestWindow(away: AwayState, now: number): { since: number; until: number } | null {
-  const since = Date.parse(away.since)
+export function awayDigestWindow(away: AwayState, now: number, digest?: AwayDigestState): { since: number; until: number } | null {
+  const since = Math.max(Date.parse(away.since), digest?.since === away.since && digest.lastDeliveredAt ? digest.lastDeliveredAt : -Infinity)
   if (!awayActive(away, now) || !Number.isFinite(since)) return null
   return { since, until: now }
 }
 
 export function awayDigestOfferDue(away: AwayState, state: AwayDigestState | undefined, now: number): number | null {
-  const window = awayDigestWindow(away, now)
+  const window = awayDigestWindow(away, now, state)
   if (!window || now - window.since < AWAY_DIGEST_AFTER) return null
   if (state?.since !== away.since) state = undefined
   if (state?.snoozedUntil && now < state.snoozedUntil) return null
@@ -42,16 +42,18 @@ const safe = (value: unknown): unknown => {
 }
 
 export interface AwayDigestSources {
+  awayDigest?: AwayDigestState
   tasks?: readonly { id: string; title: string; status: string }[]
   events?: readonly { taskId: string; at: string; kind: string; detail?: string; from?: string; to?: string }[]
   sessions?: readonly { id: string; title?: string; harness?: string; task?: string; taskId?: string; createdAt: string; endedAt?: string }[]
   notices?: readonly { ts: number; meta?: Record<string, unknown> }[]
   version?: { current: string; latest: string; updateAvailable: boolean }
+  releases?: readonly { tag: string; published_at: string }[]
 }
 
 /** Pure digest projection used by production and tests. Every source is bounded and windowed. */
 export function buildAwayDigestFromSources(away: AwayState, now: number, sources: AwayDigestSources): Record<string, unknown> {
-  const window = awayDigestWindow(away, now)
+  const window = awayDigestWindow(away, now, sources.awayDigest)
   if (!window) return { window: 'unavailable' }
   const inWindow = (at: string | number) => { const ms = typeof at === 'number' ? at : Date.parse(at); return Number.isFinite(ms) && ms >= window.since && ms <= window.until }
   const events = (sources.events ?? []).filter(e => inWindow(e.at)).slice(0, 30)
@@ -67,13 +69,15 @@ export function buildAwayDigestFromSources(away: AwayState, now: number, sources
     sessions: (sources.sessions ?? []).filter(s => inWindow(s.createdAt) || (s.endedAt ? inWindow(s.endedAt) : false)).slice(0, 30).map(s => safe(s)),
     awayNotices: (sources.notices ?? []).filter(n => inWindow(n.ts)).slice(0, 30).map(n => safe({ at: new Date(n.ts).toISOString(), ...(n.meta ?? {}) })),
     version: sources.version ?? 'unavailable',
-    releases: 'unavailable',
+    releases: sources.releases ? sources.releases.filter(r => inWindow(r.published_at)).slice(0, 30).map(r => safe(r)) : 'unavailable',
     pending: 'unavailable',
   }
 }
 
 export async function buildAwayDigest(away: AwayState, now: number): Promise<Record<string, unknown>> {
-  const window = awayDigestWindow(away, now)
+  const { readPreferences } = await import('./preferences')
+  const prefs = await readPreferences()
+  const window = awayDigestWindow(away, now, prefs.awayDigest)
   if (!window) return { window: 'unavailable' }
   const since = new Date(window.since).toISOString()
   const until = new Date(window.until).toISOString()
@@ -117,8 +121,11 @@ export async function buildAwayDigest(away: AwayState, now: number): Promise<Rec
     const { getVersionInfo } = await import('./version')
     const version = await getVersionInfo()
     result.version = { current: version.current, latest: version.latest, updateAvailable: version.hasUpdate }
+    result.releases = version.releases
+      ? version.releases.filter(r => Date.parse(r.published_at) >= window.since && Date.parse(r.published_at) <= window.until).slice(0, 30).map(r => safe(r))
+      : 'unavailable'
   } catch { result.version = 'unavailable' }
-  result.releases = 'unavailable'
+  if (!('releases' in result)) result.releases = 'unavailable'
   return result
 }
 
@@ -140,12 +147,13 @@ export function awayDigestPrompt(lang: 'pt' | 'en', away: AwayState, now: number
     : `You received the JSON below. Produce a visual Markdown status report with sections Summary, Releases, Tasks, Sessions, Check-ins, Notices, and Waiting for you. Use only the JSON; do not invent facts, and mark unavailable data as unavailable. Window: ${window}.\n\n${JSON.stringify(digest)}`
 }
 
-export async function answerAwayDigestWithDeps(answer: unknown, bucket: unknown, lang: 'pt' | 'en', deps: AwayDigestAnswerDeps, now = Date.now()): Promise<AwayDigestAnswer> {
+export async function answerAwayDigestWithDeps(answer: unknown, bucket: unknown, lang: 'pt' | 'en', deps: AwayDigestAnswerDeps, now = Date.now(), since?: unknown): Promise<AwayDigestAnswer> {
   if (answer !== 'yes' && answer !== 'no') return { ok: false, error: 'bad_answer' }
   if (!Number.isInteger(bucket)) return { ok: false, error: 'stale' }
   const key = Number(bucket)
   const prefs = await deps.read()
   const away = parseAwayState(prefs.away ?? AWAY_OFF)
+  if (since !== away.since) return { ok: false, error: 'stale' }
   const due = awayDigestOfferDue(away, prefs.awayDigest, now)
   if (prefs.awayDigest?.conversationId && prefs.awayDigest.lastBucket === key) return { ok: true, conversationId: prefs.awayDigest.conversationId, bucket: key }
   if (due !== key && prefs.awayDigest?.lastBucket !== key) return { ok: false, error: awayActive(away, now) ? 'stale' : 'not_away' }
@@ -161,7 +169,7 @@ export async function answerAwayDigestWithDeps(answer: unknown, bucket: unknown,
   return { ok: true, conversationId: out.id, bucket: key }
 }
 
-export async function answerAwayDigest(answer: unknown, bucket: unknown, lang: 'pt' | 'en', now = Date.now()): Promise<AwayDigestAnswer> {
+export async function answerAwayDigest(answer: unknown, bucket: unknown, lang: 'pt' | 'en', now = Date.now(), since?: unknown): Promise<AwayDigestAnswer> {
   if (answer !== 'yes' && answer !== 'no') return { ok: false, error: 'bad_answer' }
   if (!Number.isInteger(bucket)) return { ok: false, error: 'stale' }
   const key = Number(bucket)
@@ -178,23 +186,33 @@ export async function answerAwayDigest(answer: unknown, bucket: unknown, lang: '
       build: buildAwayDigest,
       startNay: async selectedLang => { const out = await startNaySession(selectedLang, defaultNayDeps(PORT)); return { ok: out.ok, id: out.id } },
       prompt: async (selectedLang, id, text) => ({ ok: (await runFleetAction(selectedLang, { action: 'prompt', id, text })).ok }),
-    }, now)
+    }, now, since)
   })()
   answerLocks.set(key, run)
   try { return await run } finally { answerLocks.delete(key) }
 }
 
 export async function offerAwayDigest(now = Date.now()): Promise<void> {
+  if (offerRun) return offerRun
+  offerRun = offerAwayDigestLocked(now)
+  try { await offerRun } finally { offerRun = null }
+}
+
+async function offerAwayDigestLocked(now: number): Promise<void> {
   const { readPreferences, updatePreferences } = await import('./preferences')
   const prefs = await readPreferences()
   const away = parseAwayState(prefs.away ?? AWAY_OFF)
   const bucket = awayDigestOfferDue(away, prefs.awayDigest, now)
   if (bucket === null) return
+  let claimed = false
   await updatePreferences(cur => {
     const currentAway = parseAwayState(cur.away ?? AWAY_OFF)
     if (currentAway.since !== away.since) return undefined
+    if (awayDigestOfferDue(currentAway, cur.awayDigest, now) !== bucket) return undefined
+    claimed = true
     return { awayDigest: { since: away.since, lastBucket: bucket } }
   })
+  if (!claimed) return
   const { broadcastNotification } = await import('./sse')
   const { sendMobileNotice, readMobileSubscriptions, webPushTransport } = await import('./events/mobile-push')
   const pt = prefs.lang === 'pt'
@@ -203,9 +221,18 @@ export async function offerAwayDigest(now = Date.now()): Promise<void> {
 }
 
 let timer: ReturnType<typeof setInterval> | null = null
+let timerKick: ReturnType<typeof setTimeout> | null = null
+let offerRun: Promise<void> | null = null
 export function startAwayDigestTimer(intervalMs = 60_000): void {
   if (timer) return
   timer = setInterval(() => { void offerAwayDigest() }, intervalMs)
   if (typeof timer === 'object' && timer && 'unref' in timer) (timer as { unref: () => void }).unref()
-  void offerAwayDigest()
+  timerKick = setTimeout(() => { timerKick = null; if (timer) void offerAwayDigest() }, 0)
+}
+
+export function stopAwayDigestTimer(): void {
+  if (timer) clearInterval(timer)
+  if (timerKick) clearTimeout(timerKick)
+  timerKick = null
+  timer = null
 }

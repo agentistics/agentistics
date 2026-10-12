@@ -2141,9 +2141,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(out, awayStatus(out))
     }
     if (url.pathname === '/api/away/digest/answer' && req.method === 'POST') {
-      const body = await req.json().catch(() => ({})) as { answer?: unknown; bucket?: unknown; lang?: unknown }
+      const body = await req.json().catch(() => ({})) as { answer?: unknown; bucket?: unknown; since?: unknown; lang?: unknown }
       const { answerAwayDigest } = await import('./away-digest')
-      const out = await answerAwayDigest(body.answer, body.bucket, body.lang === 'pt' ? 'pt' : 'en')
+      const out = await answerAwayDigest(body.answer, body.bucket, body.lang === 'pt' ? 'pt' : 'en', Date.now(), body.since)
       return json(out, out.ok ? 200 : out.error === 'stale' || out.error === 'not_away' ? 409 : 400)
     }
     // USER SESSION GROUPS — the door the MCP tools use to organise sessions (see

@@ -9,9 +9,9 @@ describe('away digest bell action', () => {
   test('posts the answer payload and returns the Nay conversation', async () => {
     let request: RequestInit | undefined
     globalThis.fetch = (async (_url, init) => { request = init; return new Response(JSON.stringify({ conversationId: 'nay-42' }), { status: 200 }) }) as typeof fetch
-    await expect(answerAwayDigest('yes', 20, 'pt')).resolves.toEqual({ ok: true, conversationId: 'nay-42' })
+    await expect(answerAwayDigest('yes', 20, '2026-01-01T00:00:00.000Z', 'pt')).resolves.toEqual({ ok: true, conversationId: 'nay-42' })
     expect(request?.method).toBe('POST')
-    expect(JSON.parse(String(request?.body))).toEqual({ answer: 'yes', bucket: 20, lang: 'pt' })
+    expect(JSON.parse(String(request?.body))).toEqual({ answer: 'yes', bucket: 20, since: '2026-01-01T00:00:00.000Z', lang: 'pt' })
   })
 
   test('bell renders both buttons, disables them while pending, and opens the returned session', () => {

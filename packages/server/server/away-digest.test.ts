@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { AWAY_DIGEST_AFTER, AWAY_DIGEST_BUCKET, awayDigestOfferDue, awayDigestWindow } from './away-digest'
+import { AWAY_DIGEST_AFTER, AWAY_DIGEST_BUCKET, awayDigestOfferDue, awayDigestWindow, startAwayDigestTimer, stopAwayDigestTimer } from './away-digest'
 
 const start = Date.parse('2026-01-01T00:00:00.000Z')
 const away = { on: true as const, since: new Date(start).toISOString(), until: null, authorizations: [], note: '', workerCeiling: null, topModelCaps: {} }
@@ -27,5 +27,18 @@ describe('away digest trigger', () => {
     const now = start + AWAY_DIGEST_AFTER + 1
     expect(awayDigestOfferDue(away, { since: away.since, lastBucket: 0, snoozedUntil: now + 1000 }, now)).toBeNull()
     expect(awayDigestOfferDue(away, { since: away.since, lastBucket: 19, snoozedUntil: now + 1000 }, now + 1001)).toBe(20)
+  })
+
+  test('starts a delivered digest window at lastDeliveredAt', () => {
+    const delivered = start + AWAY_DIGEST_AFTER + 1
+    expect(awayDigestWindow(away, delivered + 1000, { since: away.since, lastBucket: 20, lastDeliveredAt: delivered })).toEqual({ since: delivered, until: delivered + 1000 })
+    expect(awayDigestOfferDue(away, { since: away.since, lastBucket: 20, lastDeliveredAt: delivered }, delivered + AWAY_DIGEST_AFTER + AWAY_DIGEST_BUCKET)).toBe(21)
+  })
+
+  test('timer start and stop can be reset without leaving a live interval', () => {
+    startAwayDigestTimer(60 * 60 * 1000)
+    stopAwayDigestTimer()
+    startAwayDigestTimer(60 * 60 * 1000)
+    stopAwayDigestTimer()
   })
 })
