@@ -96,6 +96,36 @@ describe('session-meta over a synthetic multi-model, multi-tool, subagent sessio
   })
 })
 
+describe('model labels and pricing from invocation/replay events', () => {
+  test('model.invoked supplies a model when no completion or usage event exists', () => {
+    const onlyInvoked = EVENTS.filter(e => e.type !== 'model.completed' && e.type !== 'model.failed')
+    const projection = project(sessionMetaProjection, onlyInvoked)
+    expect(projection.meta.model).toBe('claude-opus-4-7')
+  })
+
+  test('a mixed priced/unpriced model session keeps the dominant model and prices the known model', () => {
+    let replaced = false
+    const mixed = EVENTS.map(e => {
+      if (!replaced && e.type === 'model.completed') {
+        replaced = true
+        return {
+          ...e,
+          data: {
+            ...e.data,
+            model: 'future-unpriced-model',
+            usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+          },
+        }
+      }
+      return e
+    })
+    const projection = project(sessionMetaProjection, mixed)
+    expect(projection.meta.model).toBe('claude-haiku-4-5')
+    expect(projection.meta.model_usage?.['future-unpriced-model']).toBeDefined()
+    expect(projection.costUSD).toBeGreaterThan(0)
+  })
+})
+
 describe('P1 §8 properties', () => {
   const whole = (p: SessionMetaProjection): unknown => ({ ...p })
 

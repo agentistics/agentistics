@@ -94,6 +94,7 @@ function fmtAgentDuration(ms: number): string {
  * wrong. `sessionCostUSD` is the shared per-model pricing every other surface already used.
  */
 function sessionCost(session: SessionMeta, globalModelUsage: GlobalModelUsage): number | null {
+  if (session.tokens_unavailable) return null
   // Exact per-model pricing when the session names a model — for any harness, and for a session
   // spanning several models (an Antigravity parent with its subagents folded in).
   const exact = sessionCostUSD(session)
@@ -215,6 +216,7 @@ export function SessionDrilldownBody({ session, globalModelUsage, currency, brlR
 
   // Every billed counter. This read `input + output` and reported a 9,8M-token session as 69,8K.
   const breakdown = sessionTokens(session)
+  const tokensUnavailable = session.tokens_unavailable === true
   const totalTokens = totalTokensOf(breakdown)
   const shares = tokenShares(breakdown)
   const totalMessages = (session.user_message_count ?? 0) + (session.assistant_message_count ?? 0)
@@ -265,7 +267,7 @@ export function SessionDrilldownBody({ session, globalModelUsage, currency, brlR
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: narrow ? 'repeat(auto-fit, minmax(96px, 1fr))' : 'repeat(5, 1fr)', gap: narrow ? 8 : 10 }}>
           <Kpi icon={<MessageSquare size={12} />} label={pt ? 'Mensagens' : 'Messages'} value={fmt(totalMessages, fullPrecision)} accent="var(--accent-blue, #3b82f6)" />
-          <Kpi icon={<Zap size={12} />} label="Tokens" value={fmt(totalTokens, fullPrecision)} accent="var(--anthropic-orange)" title={totalTokensExplained(breakdown, tokLang)} />
+          <Kpi icon={<Zap size={12} />} label="Tokens" value={tokensUnavailable ? '—' : fmt(totalTokens, fullPrecision)} accent="var(--anthropic-orange)" title={tokensUnavailable ? undefined : totalTokensExplained(breakdown, tokLang)} />
           <Kpi icon={<Wrench size={12} />} label="Tool calls" value={fmt(totalTools, fullPrecision)} accent="var(--accent-green, #22c55e)" />
           {/* CHARACTERS PER MESSAGE, one tile per side. The denominator is the messages that
               actually said something — most of an assistant's records are tool calls with no
@@ -310,7 +312,7 @@ export function SessionDrilldownBody({ session, globalModelUsage, currency, brlR
             {pt ? 'Divisão de tokens' : 'Token breakdown'}
           </span>
           <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }} title={tokenHelp('total', tokLang)}>
-            {fmt(totalTokens, fullPrecision)} {tokenLabel('total', tokLang).toLowerCase()}
+            {tokensUnavailable ? '—' : `${fmt(totalTokens, fullPrecision)} ${tokenLabel('total', tokLang).toLowerCase()}`}
           </span>
         </div>
         <div style={{ display: 'flex', height: 8, background: 'var(--bg-card)', borderRadius: 4, overflow: 'hidden', marginBottom: 8 }}>
@@ -331,12 +333,12 @@ export function SessionDrilldownBody({ session, globalModelUsage, currency, brlR
               title={tokenHelp(part, tokLang)}
               style={{ color: TOKEN_COLORS[part], fontWeight: 600, minWidth: 0 }}
             >
-              ■ {tokenLabel(part, tokLang)}: {fmt(breakdown[part], fullPrecision)}
+              ■ {tokenLabel(part, tokLang)}: {tokensUnavailable ? '—' : fmt(breakdown[part], fullPrecision)}
             </span>
           ))}
         </div>
         <div style={{ marginTop: 8, fontSize: 10, lineHeight: 1.5, color: 'var(--text-tertiary)' }}>
-          {totalTokensExplained(breakdown, tokLang)}
+          {tokensUnavailable ? (pt ? 'Tokens não informados por este harness.' : 'Token usage was not reported by this harness.') : totalTokensExplained(breakdown, tokLang)}
         </div>
       </div>
 

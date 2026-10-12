@@ -135,6 +135,12 @@ test("sessionTokens prices 1h cache writes at the 1h rate (the same figure as th
   expect(t.cost).toBeGreaterThan(without1h);
 });
 
+test("tokens_unavailable is carried separately so MCP callers can omit tokens and cost", () => {
+  const t = sessionTokens({ session_id: "unmeasured", tokens_unavailable: true, input_tokens: 0, output_tokens: 0 });
+  expect(t.tokensUnavailable).toBe(true);
+  expect(t.input + t.output + t.cacheRead + t.cacheWrite).toBe(0);
+});
+
 import { startedByIndex } from "./session-tokens";
 test("startedByIndex names the parent by title, keyed by managed and conversation id", () => {
   const m = startedByIndex([

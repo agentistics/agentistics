@@ -483,7 +483,7 @@ function MiniSessionsTable({ sessions, c, lang, currency, brlRate, blendedRates 
         // leave those two optional fields off, so a session WITH a known model still priced its
         // 1h-TTL cache writes at the flat 5-minute rate. `blendedSessionCost` is the fallback only
         // for a session `sessionCostUSD` cannot price at all (no model, no `model_usage`).
-        const costUSD = sessionCostUSD(s) ?? blendedSessionCost(s, blendedRates)
+        const costUSD = s.tokens_unavailable ? null : sessionCostUSD(s) ?? blendedSessionCost(s, blendedRates)
         return (
           <div key={i} style={{ display: 'grid', gridTemplateColumns: cols, gap: 6, padding: '4px 0', borderBottom: `1px solid ${c.border}40`, alignItems: 'center' }}>
             <div style={{ color: c.textSec }}>{s.start_time ? format(parseISO(s.start_time), 'MM/dd HH:mm') : '—'}</div>
@@ -491,7 +491,7 @@ function MiniSessionsTable({ sessions, c, lang, currency, brlRate, blendedRates 
             <div style={{ color: c.textSec }}>{sessionTime(s, lang).combined}</div>
             <div style={{ color: c.orange, fontWeight: 600 }}>{msgs}</div>
             <div style={{ color: c.textSec }}>{tools}</div>
-            <div style={{ color: c.textSec }}>{fmtCost(costUSD, currency, brlRate)}</div>
+            <div style={{ color: c.textSec }}>{costUSD === null ? '—' : fmtCost(costUSD, currency, brlRate)}</div>
           </div>
         )
       })}
@@ -1422,4 +1422,3 @@ export function PDFContent({ pdfTheme, sectionOrder, derived, pdfFilters, lang, 
     </div>
   )
 }
-

@@ -37,7 +37,7 @@ const FIRST_PAGE = 20
 /** Cost of one session, priced per model; the blended-free fallback prices all four counters at
  *  the unknown-model rate rather than pricing cache as fresh input (~10x too high). Mirrors
  *  `sessCost` in RepoDetailPage — the same rule, not a second one. */
-function sessionCost(s: SessionMeta): number | undefined {
+export function sessionCost(s: SessionMeta): number | undefined {
   if (s.tokens_unavailable) return undefined
   const byModel = sessionCostUSD(s)
   if (byModel !== null) return byModel

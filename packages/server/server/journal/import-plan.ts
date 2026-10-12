@@ -191,7 +191,7 @@ export function parseImportState(text: string | null, identity: string): ImportS
 
 export type ArtifactSkipReason = 'unchanged' | 'before-from'
 export type StoreSkipReason = 'not-orphan' | 'unchanged' | 'before-from' | 'already-in-journal' | 'no-replay' | 'no-entity-ids'
-export type ArtifactFailReason = 'replay-threw' | 'no-events' | 'journal-dropped' | `rejected:${RejectionReason}`
+export type ArtifactFailReason = 'replay-threw' | 'no-events' | 'journal-dropped' | 'journal-replace-failed' | 'journal-delete-failed' | `rejected:${RejectionReason}`
 export type StoreFailReason = 'corrupt' | 'no-session-id' | 'no-timestamps' | 'unreadable' | 'journal-dropped' | `rejected:${RejectionReason}`
 
 export interface PlannedSource {

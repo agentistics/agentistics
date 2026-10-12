@@ -29,8 +29,9 @@
  * the main one, which subagent a nested one rolls into, which tool a failure belonged to. A fold that
  * decided those as events arrived would give a different answer for a different arrival order.
  *
- * "Last" (the context gauge, the session's model) means last by the ORDER KEY — the record's line
- * ordinal parsed off `sourceRef`, then `occurredAt`, then `eventId` — never by arrival.
+ * The context gauge is last by the ORDER KEY. The session model is the dominant model by reported
+ * token volume, matching the legacy adapters; when no usage was reported it falls back to the
+ * earliest model invocation.
  *
  * ## What is NOT here, and why it is said rather than approximated
  *
@@ -72,6 +73,7 @@ import {
   type AnyAgentisticsEvent,
   type HarnessId,
   type ModelUsageCounters,
+  type ModelUsage,
   type Projection,
   type SessionMeta,
   type TurnEvent,
@@ -195,6 +197,7 @@ export type ProjectedSessionMeta =
     | 'active_minutes' | 'user_response_times'
     | 'model' | 'harness'>>
   & {
+    model_usage?: Record<string, ModelUsage>
     /** Four counters per UTC day, the day of the response's first line — legacy `daily[day].*_tokens`. */
     daily_tokens?: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }>
     /**
@@ -555,6 +558,13 @@ function foldOne(s: SessionMetaState, e: AnyAgentisticsEvent): void {
       if (e.data.model && (!acc.firstModel || compareKey(key, acc.firstModel.key) < 0)) acc.firstModel = { key, model: e.data.model }
       return
     }
+    case 'model.invoked': {
+      const key = keyOf(e)
+      if (e.data.model && (!acc.firstModel || compareKey(key, acc.firstModel.key) < 0)) {
+        acc.firstModel = { key, model: e.data.model }
+      }
+      return
+    }
     case 'tool.requested': {
       // Both names are kept; `HARNESS_TOOL_RULES[harness].counts` decides at finish which one keys the
       // counts (Claude's legacy counts its own names, every other parser `canonicalTool`'s).
@@ -745,6 +755,11 @@ function finish(s: SessionMetaState): SessionMetaProjection {
     const a = s.agents.get(id)
     if (!a) continue
     add(main.tokens, a.tokens)
+    for (const [model, tokens] of a.byModel) {
+      const current = main.byModel.get(model) ?? zero()
+      add(current, tokens)
+      main.byModel.set(model, current)
+    }
     for (const [d, t] of a.daily) { const cur = main.daily.get(d) ?? zero(); add(cur, t); main.daily.set(d, cur) }
     for (const c of a.absentCounters) main.absentCounters.add(c)
     main.sawTtl ||= a.sawTtl; main.ttl1h += a.ttl1h; main.ttl5m += a.ttl5m
@@ -866,7 +881,21 @@ function finish(s: SessionMetaState): SessionMetaProjection {
     if (s.run.conversationId) meta.session_id = s.run.conversationId
     if (HARNESS_IDS.includes(s.run.harness)) meta.harness = s.run.harness as SessionMeta['harness']
   }
-  if (main.firstModel) meta.model = main.firstModel.model
+  const modelUsage: Record<string, ModelUsage> = {}
+  let dominantModel = ''
+  let dominantTokens = -1
+  for (const [model, tokens] of main.byModel) {
+    modelUsage[model] = {
+      inputTokens: tokens.input, outputTokens: tokens.output,
+      cacheReadInputTokens: tokens.cacheRead, cacheCreationInputTokens: tokens.cacheWrite,
+      webSearchRequests: 0, costUSD: 0,
+    }
+    const total = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite
+    if (total > dominantTokens) { dominantTokens = total; dominantModel = model }
+  }
+  if (dominantModel) meta.model = dominantModel
+  else if (main.firstModel) meta.model = main.firstModel.model
+  if (Object.keys(modelUsage).length > 1) meta.model_usage = modelUsage
   if (main.gauge) {
     meta.context_tokens = main.gauge.tokens
     if (main.gauge.window !== undefined) meta.context_window = main.gauge.window
@@ -1010,6 +1039,7 @@ function finish(s: SessionMetaState): SessionMetaProjection {
   // Priced exactly as the legacy path prices: `sessionCostUSD` over the projected counters.
   const costUSD = sessionCostUSD({
     ...(meta.model ? { model: meta.model } : {}),
+    ...(meta.model_usage ? { model_usage: meta.model_usage } : {}),
     input_tokens: meta.input_tokens,
     output_tokens: meta.output_tokens,
     cache_read_input_tokens: meta.cache_read_input_tokens,
