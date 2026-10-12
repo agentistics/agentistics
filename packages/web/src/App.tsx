@@ -56,6 +56,8 @@ import { AgentisticsLoader } from './components/AgentisticsLoader'
 import { VaultHeaderButton } from './components/vault/VaultHeaderButton'
 import AwayPill from './components/AwayPill'
 import { HardwareModal } from './components/HardwareModal'
+import { PlanUsageModal } from './components/PlanUsageModal'
+import { subscribePlanUsageModal } from './lib/planUsageModalRequests'
 import { CleanDialog } from './components/CleanDialog'
 import { useNotificationStream } from './hooks/useNotificationStream'
 import { pushNotification } from './lib/notifications'
@@ -3147,6 +3149,8 @@ export default function AppLayout() {
   // is asked from wherever you are and then dismissed. Desktop opens it from the header icon;
   // mobile from the "More" sheet, where every other header action lives.
   const [hardwareOpen, setHardwareOpen] = useState(false)
+  const [planUsageOpen, setPlanUsageOpen] = useState(false)
+  useEffect(() => subscribePlanUsageModal(() => setPlanUsageOpen(true)), [])
   // Collapsible "fleet stats" tab below the header (updated/members/machines/teams/projects/repos).
   // **CLOSED BY DEFAULT ON A PHONE, OPEN ON THE DESKTOP** — one preference, two defaults. A stored
   // choice wins on both (it is shared on purpose, so it survives a resize); this is only what
@@ -4912,6 +4916,7 @@ export default function AppLayout() {
         />
       )}
 
+      {planUsageOpen && <PlanUsageModal lang={lang === 'pt' ? 'pt' : 'en'} onClose={() => setPlanUsageOpen(false)} />}
       {hardwareOpen && <HardwareModal lang={lang} onClose={() => setHardwareOpen(false)} />}
       <CleanDialog lang={lang === 'pt' ? 'pt' : 'en'} open={cleanOpen} onClose={() => setCleanOpen(false)} />
 

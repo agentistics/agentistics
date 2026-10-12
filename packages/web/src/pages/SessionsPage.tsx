@@ -28,7 +28,7 @@ import { sessionStats } from '../lib/sessionStats'
 import { usePlanLimits, worstUsedPct } from '../lib/planLimits'
 import { PlanUsageRing } from '../components/PlanLimitMeter'
 import { TaskProgressChip } from '../components/tasks/TaskProgressChip'
-import { requestNayTab } from '../lib/nayDockRequests'
+import { requestPlanUsageModal } from '../lib/planUsageModalRequests'
 import { drawerEntryOnTop, sessionDrawerDot, SESSION_DRAWER_STATE } from '../lib/sessionDrawer'
 import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
@@ -2937,7 +2937,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         })(), (
           <button
             type="button"
-            onClick={() => { closeSessionDrawer(); requestNayTab('limits') }}
+            onClick={() => { closeSessionDrawer(); requestPlanUsageModal() }}
             aria-label={pt ? 'Ver todos os limites' : 'See every limit'}
             style={{
               all: 'unset', boxSizing: 'border-box', display: 'block', width: '100%', cursor: 'pointer',
