@@ -34,6 +34,8 @@ let _requests = new Map<string, UseRequest>()
 let _approvals = new Map<string, number>()
 let _requestSeq = 0
 let _useTtlMs = 90_000
+// Engine subscribers are process-local hygiene notifications; values and grant state remain private.
+const _revokeListeners = new Set<(sessionId: string | '*') => void>()
 export type UseCode = 'not-granted' | 'secret-gone' | 'use-denied' | 'use-pending' | 'use-busy' | 'vault-locked' | 'use-unsupported'
 export interface UseContext { command: string | null; harness: string; callId?: string }
 export interface UseRequest {
@@ -57,7 +59,10 @@ function cancelAll(code: UseCode): void {
   for (const r of _requests.values()) if (r.state === 'pending') { r.state = 'cancelled'; for (const w of r.waiters) w(false); r.waiters.clear(); vaultAudit({ type: 'vault.personal-use-cancelled', name: r.itemId, purpose: code }) }
   _requests = new Map(); _approvals = new Map(); _epoch++
 }
-onVaultLock(() => { _grants = new Map(); _scrubbers = new Map(); cancelAll('vault-locked') })
+onVaultLock(() => {
+  _grants = new Map(); _scrubbers = new Map(); cancelAll('vault-locked')
+  for (const listener of _revokeListeners) { try { listener('*') } catch { /* notification is best effort */ } }
+})
 
 /** A reference key from a name: `Banco Itaú` → `banco-itau` (what `vault://` carries; unique per grant). */
 export function refKey(name: string): string {
@@ -99,7 +104,10 @@ export function listGrants(): Grant[] { return [..._grants.values()] }
 export function revokeGrant(sessionId: string): boolean {
   for (const r of _requests.values()) if (r.sessionId === sessionId && r.state === 'pending') { r.state = 'cancelled'; for (const w of r.waiters) w(false); r.waiters.clear() }
   for (const k of _approvals.keys()) if (k.startsWith(`${sessionId}\0`)) _approvals.delete(k)
-  _scrubbers.delete(sessionId); return _grants.delete(sessionId)
+  _scrubbers.delete(sessionId)
+  const revoked = _grants.delete(sessionId)
+  if (revoked) for (const listener of _revokeListeners) { try { listener(sessionId.startsWith('native:') ? sessionId.slice('native:'.length) : sessionId) } catch { /* notification is best effort */ } }
+  return revoked
 }
 
 export function confirmEachUseEnabled(): boolean { return _confirmEachUseOverride ?? vaultConfirmEachUse() }
@@ -158,7 +166,15 @@ export function decideUse(id: string, approve: boolean, windowMin = 10): { ok: t
   if (approve) { _approvals.set(requestKey(r.sessionId, r.itemId, r.field), _now() + Math.max(0, Math.min(60, windowMin)) * 60_000); vaultAudit({ type: 'vault.personal-use-approved', name: r.itemId }) } else { revokeRef(r.sessionId, r.itemId, r.field); vaultAudit({ type: 'vault.personal-use-denied', name: r.itemId }) }
   for (const w of r.waiters) w(approve); r.waiters.clear(); return { ok: true }
 }
-function revokeRef(sessionId: string, itemId: string, field: string): void { const g = _grants.get(sessionId); if (g) g.refs = g.refs.filter(r => !(r.itemId === itemId && r.field === field)) }
+function revokeRef(sessionId: string, itemId: string, field: string): void {
+  const g = _grants.get(sessionId)
+  if (!g) return
+  const hadRef = g.refs.some(r => r.itemId === itemId && r.field === field)
+  g.refs = g.refs.filter(r => !(r.itemId === itemId && r.field === field))
+  if (hadRef) for (const listener of _revokeListeners) {
+    try { listener(sessionId.startsWith('native:') ? sessionId.slice('native:'.length) : sessionId) } catch { /* notification is best effort */ }
+  }
+}
 
 /** §3.6: at most 60 scrub calls a minute per session — a scrub answers whether a guess matches a secret, so it is not free to ask. */
 const SCRUB_LIMIT = 60
@@ -214,13 +230,10 @@ async function legacyNativeEnv(sessionId: string): Promise<Record<string, string
   const env: Record<string, string> = {}
   const g = _grants.get(sessionId)
   if (!g) return env
-  const confirm = confirmEachUseEnabled()
-  const metas = confirm ? await listItems() : []
+  const metas = await listItems()
   for (const r of g.refs) {
-    if (confirm) {
-      const meta = metas.find(x => x.id === r.itemId)
-      if (!meta || meta.deletedAt || needsConfirm(meta)) continue
-    }
+    const meta = metas.find(x => x.id === r.itemId)
+    if (!meta || meta.deletedAt || needsConfirm(meta)) continue
     const v = await revealField(r.itemId, r.field)
     if (v.ok && !v.meta.deletedAt) env[r.env] = v.value
   }
@@ -301,5 +314,35 @@ export function scrubTerminalLine(sessionId: string, line: string): string {
  */
 export const nativeVaultRefs = {
   env: (sessionId: string) => legacyNativeEnv(`native:${sessionId}`),
+  use: async (sessionId: string, refs: string[], ctx: { command: string; callId: string }) => {
+    const nativeSession = `native:${sessionId}`
+    const initialGrant = _grants.get(nativeSession)
+    const initialRefs = initialGrant?.refs.slice() ?? []
+    const displayName = (ref: string): string => initialRefs.find(r => r.ref === ref)?.name ?? ref
+    const refusal = (ref: string, code: string) => ({ ref, code, sentence: `Não rodei: ${displayName(ref)} foi recusado.` })
+    const decided = await Promise.all(refs.map(async ref => {
+      const result = await authorizeUse(nativeSession, ref, { command: ctx.command, harness: 'native', callId: ctx.callId })
+      return { ref, result }
+    }))
+    const refused: { ref: string; code: string; sentence: string }[] = []
+    // The grant may have been revoked or replaced while authorizeUse awaited the vault. Never
+    // put a value obtained under the old grant into a command using the new grant.
+    if (!initialGrant || _grants.get(nativeSession) !== initialGrant) {
+      for (const { ref, result } of decided) refused.push(refusal(ref, result.ok ? 'not-granted' : result.code))
+      return { env: {}, refused }
+    }
+    const env: Record<string, string> = {}
+    for (const { ref, result } of decided) {
+      if (result.ok) {
+        const grantRef = initialRefs.find(r => r.ref === ref)
+        if (grantRef) env[grantRef.env] = result.value
+        else refused.push(refusal(ref, 'not-granted'))
+      } else {
+        refused.push(refusal(ref, result.code))
+      }
+    }
+    return refused.length ? { env: {}, refused } : { env, refused }
+  },
+  onRevoke: (cb: (sessionId: string | '*') => void) => { _revokeListeners.add(cb); return () => { _revokeListeners.delete(cb) } },
   scrub: (sessionId: string, text: string) => scrubFor(`native:${sessionId}`, text),
 }
