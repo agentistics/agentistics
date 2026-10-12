@@ -532,10 +532,12 @@ function MiniHighlightsSection({ sessions, c, lang }: {
   const sessionRank = (s: SessionMeta) =>
     anyActive ? (s.active_minutes ?? -1) : (s.duration_minutes ?? 0)
   const longestSession = sessions.reduce((b, s) => sessionRank(s) > sessionRank(b) ? s : b, firstSession)
-  const mostInputTokens = sessions.reduce((b, s) =>
-    (s.input_tokens ?? 0) > (b.input_tokens ?? 0) ? s : b, firstSession)
-  const mostOutputTokens = sessions.reduce((b, s) =>
-    (s.output_tokens ?? 0) > (b.output_tokens ?? 0) ? s : b, firstSession)
+  const measuredInputSessions = sessions.filter(s => !s.tokens_unavailable && s.input_tokens !== undefined)
+  const measuredOutputSessions = sessions.filter(s => !s.tokens_unavailable && s.output_tokens !== undefined)
+  const mostInputTokens = measuredInputSessions.reduce((b, s) =>
+    s.input_tokens! > b.input_tokens! ? s : b, measuredInputSessions[0] ?? firstSession)
+  const mostOutputTokens = measuredOutputSessions.reduce((b, s) =>
+    s.output_tokens! > b.output_tokens! ? s : b, measuredOutputSessions[0] ?? firstSession)
   const mostMessages = sessions.reduce((b, s) => {
     const v = (s.user_message_count ?? 0) + (s.assistant_message_count ?? 0)
     const bv = (b.user_message_count ?? 0) + (b.assistant_message_count ?? 0)
@@ -556,8 +558,8 @@ function MiniHighlightsSection({ sessions, c, lang }: {
   const avgDuration = avg(sessions
     .map(s => anyActive ? (s.active_minutes ?? 0) : (s.duration_minutes ?? 0))
     .filter(v => v > 0))
-  const avgInput    = avg(sessions.map(s => s.input_tokens ?? 0).filter(v => v > 0))
-  const avgOutput   = avg(sessions.map(s => s.output_tokens ?? 0).filter(v => v > 0))
+  const avgInput    = avg(measuredInputSessions.map(s => s.input_tokens!).filter(v => v > 0))
+  const avgOutput   = avg(measuredOutputSessions.map(s => s.output_tokens!).filter(v => v > 0))
   const avgMessages = avg(sessions.map(s => (s.user_message_count ?? 0) + (s.assistant_message_count ?? 0)).filter(v => v > 0))
   const avgTools    = avg(sessions.map(s => Object.values(s.tool_counts ?? {}).reduce((a, b) => a + b, 0)).filter(v => v > 0))
 
@@ -577,16 +579,16 @@ function MiniHighlightsSection({ sessions, c, lang }: {
     },
     {
       label: pt ? 'Mais tokens de entrada' : 'Most input tokens',
-      value: fmt(mostInputTokens.input_tokens ?? 0),
-      badge: multiplier(mostInputTokens.input_tokens ?? 0, avgInput),
+      value: mostInputTokens.tokens_unavailable || mostInputTokens.input_tokens === undefined ? '—' : fmt(mostInputTokens.input_tokens),
+      badge: mostInputTokens.tokens_unavailable || mostInputTokens.input_tokens === undefined ? null : multiplier(mostInputTokens.input_tokens, avgInput),
       prompt: truncate(sessionLabel(mostInputTokens), 80),
       project: formatProjectName(mostInputTokens.project_path ?? ''),
       accent: '#3b82f6',
     },
     {
       label: pt ? 'Mais tokens de saída' : 'Most output tokens',
-      value: fmt(mostOutputTokens.output_tokens ?? 0),
-      badge: multiplier(mostOutputTokens.output_tokens ?? 0, avgOutput),
+      value: mostOutputTokens.tokens_unavailable || mostOutputTokens.output_tokens === undefined ? '—' : fmt(mostOutputTokens.output_tokens),
+      badge: mostOutputTokens.tokens_unavailable || mostOutputTokens.output_tokens === undefined ? null : multiplier(mostOutputTokens.output_tokens, avgOutput),
       prompt: truncate(sessionLabel(mostOutputTokens), 80),
       project: formatProjectName(mostOutputTokens.project_path ?? ''),
       accent: '#8b5cf6',
