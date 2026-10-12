@@ -247,8 +247,49 @@ describe('VAULT.V4 confirm each use — behaviour (fake clock, fixture vault)', 
     await grantSession('native:n1', [a.id, b.id], [])
     __setConfirmEachUseForTests(true)
     const free = await nativeVaultRefs.use('n1', ['vault://free', 'vault://missing'], { command: 'echo $VAULT_FREE', callId: 'call-2' })
-    expect(free.env).toEqual({ VAULT_FREE: 'MARKER-free-use' })
+    expect(free.env).toEqual({})
     expect(free.refused.map(r => r.ref)).toEqual(['vault://missing'])
+    expect(free.refused[0]!.sentence).toContain('vault://missing')
+  })
+
+  test('native use handles empty, duplicate and case-sensitive reference lists', async () => {
+    const a = (await createItem({ kind: 'api-key', name: 'Free', confirmEach: false, fields: { value: 'MARKER-list' } })).meta
+    await grantSession('native:n1', [a.id], [])
+    expect(await nativeVaultRefs.use('n1', [], { command: 'true', callId: 'empty' })).toEqual({ env: {}, refused: [] })
+    expect(await nativeVaultRefs.use('n1', ['vault://free', 'vault://free'], { command: 'true', callId: 'dup' })).toEqual({
+      env: { VAULT_FREE: 'MARKER-list' }, refused: [],
+    })
+    const wrongCase = await nativeVaultRefs.use('n1', ['VAULT://FREE'], { command: 'true', callId: 'case' })
+    expect(wrongCase.env).toEqual({})
+    expect(wrongCase.refused[0]!.sentence).toContain('VAULT://FREE')
+  })
+
+  test('native use refuses the whole command when a grant is revoked while resolving', async () => {
+    const a = (await createItem({ kind: 'api-key', name: 'Race', confirmEach: false, fields: { value: 'MARKER-race' } })).meta
+    await grantSession('native:n1', [a.id], [])
+    const use = nativeVaultRefs.use('n1', ['vault://race'], { command: 'true', callId: 'race' })
+    expect(revokeGrant('native:n1')).toBe(true)
+    const result = await use
+    expect(result.env).toEqual({})
+    expect(result.refused[0]!.sentence).toContain('Race')
+    expect(JSON.stringify(result)).not.toContain('MARKER-race')
+  })
+
+  test('denying a native use removes the ref and notifies onRevoke using its display name', async () => {
+    const a = (await createItem({ kind: 'api-key', name: 'Sensitive Name', fields: { value: 'MARKER-deny-native' } })).meta
+    await grantSession('native:n1', [a.id], [])
+    __setConfirmEachUseForTests(true)
+    const seen: (string | '*')[] = []
+    const off = nativeVaultRefs.onRevoke!(id => seen.push(id))
+    const waiting = nativeVaultRefs.use('n1', ['vault://sensitive-name'], { command: 'true', callId: 'deny-native' })
+    await pendingCount(1)
+    expect(decideUse(pendingUseRequests()[0]!.id, false).ok).toBe(true)
+    const result = await waiting
+    off()
+    expect(result.env).toEqual({})
+    expect(result.refused[0]!.sentence).toContain('Sensitive Name')
+    expect(seen).toEqual(['n1'])
+    expect(grantOf('native:n1')?.refs).toEqual([])
   })
 
   test('native use opens an approved confirmable ref and revoke notifications cover revoke and lock', async () => {
