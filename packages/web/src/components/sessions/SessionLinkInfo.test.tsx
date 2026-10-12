@@ -26,7 +26,7 @@ describe('SessionLinkInfo', () => {
   })
   it('targets navigate to the session / task routes; a gone parent is not a link', () => {
     const t = linkTargets(links)
-    expect(t.map(x => x.path)).toEqual([sessionPath('p1'), sessionPath('c1'), '/tasks/t1'])
+    expect(t.map(x => x.path)).toEqual([sessionPath('p1'), sessionPath('c1'), '/tasks/t1?tab=activity&filter=checkins'])
     expect(linkTargets({ ...links, parent: { id: 'gone', openable: false } })[0]!.path).toBeNull()
   })
   it('the panel lists parent, child, task and the start time as buttons', () => {

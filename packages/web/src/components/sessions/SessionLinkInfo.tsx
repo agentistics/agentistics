@@ -9,7 +9,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, ChevronRight, Info, Search } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Clock3, Info, List, Pause, Play, RefreshCw, Search } from 'lucide-react'
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { HARNESS_LABELS } from '../../lib/harness'
@@ -25,6 +25,9 @@ import { sessionIdentityKey } from '../../lib/sessionIdentity'
 import { isInsidePortalledMenu } from '../../lib/rowMenu'
 import { TabSelect } from '../../pages/settings/primitives'
 import { RoleChip } from './RoleChip'
+import { ToggleSwitch } from '../ToggleSwitch'
+import { CHECKIN_ITEMS, formatNextRun, useCheckin, type CheckinConfig } from '../../lib/checkin'
+import { parseSnooze, SNOOZE_PRESETS } from '../../lib/nayNotify'
 
 export interface LinkTarget { kind: 'parent' | 'child' | 'task'; key: string; label: string; harness?: string; state?: string; stateLabel?: string; startedAt?: number; path: string | null }
 
@@ -37,7 +40,7 @@ export function linkTargets(links: SessionLinks): LinkTarget[] {
   for (const c of newestFirst(links.children)) {
     out.push({ kind: 'child', key: `c:${c.id}`, label: c.title, harness: c.harness, state: c.state, ...(c.stateLabel ? { stateLabel: c.stateLabel } : {}), ...(c.startedAt ? { startedAt: c.startedAt } : {}), path: sessionPath(c.id) })
   }
-  if (links.task) out.push({ kind: 'task', key: `t:${links.task.id}`, label: links.task.label ?? links.task.id, path: `/tasks/${encodeURIComponent(links.task.id)}` })
+  if (links.task) out.push({ kind: 'task', key: `t:${links.task.id}`, label: links.task.label ?? links.task.id, path: `/tasks/${encodeURIComponent(links.task.id)}?tab=activity&filter=checkins` })
   return out
 }
 
@@ -53,6 +56,37 @@ const ROW_STYLE = {
   all: 'unset', boxSizing: 'border-box', display: 'flex', alignItems: 'center', gap: 8, width: '100%',
   padding: '5px 6px', borderRadius: 6, fontSize: 12.5, color: 'var(--text-primary)', minHeight: 28,
 } as const
+
+const CHECKIN_ROW = { display: 'flex', alignItems: 'center', gap: 7, minHeight: 28, fontSize: 12, color: 'var(--text-secondary)' } as const
+
+function CheckinPanel({ state, pt, isMobile, onGo, update, runNow, taskPath }: {
+  state: NonNullable<ReturnType<typeof useCheckin>['state']>; pt: boolean; isMobile: boolean
+  onGo: (path: string) => void; update: (partial: Partial<CheckinConfig>) => Promise<void>; runNow: () => Promise<void>; taskPath: string | null
+}) {
+  const paused = state.paused !== null
+  const setInterval = (intervalMin: CheckinConfig['intervalMin']) => void update({ intervalMin })
+  const togglePause = () => void update({ paused: paused ? null : { until: null } })
+  const checklist = state.checklist.length ? state.checklist : CHECKIN_ITEMS.map(item => ({ id: item.id, enabled: true }))
+  const last = state.last ? `${state.last.state === 'needs_you' ? (pt ? 'precisa de você' : 'needs you') : state.last.summary}` : (pt ? 'ainda não rodou' : 'not run yet')
+  return <div data-testid="checkin-panel" style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 7 }}>
+    <div style={{ ...SECTION, display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 0 }}>
+      <span>{pt ? 'Check-in' : 'Check-in'}</span>
+      <span style={{ color: paused ? 'var(--text-tertiary)' : 'var(--accent-green)' }}>{paused ? (pt ? 'pausado' : 'paused') : (pt ? `ligado · a cada ${state.intervalMin} min` : `on · every ${state.intervalMin} min`)}</span>
+    </div>
+    <div style={{ display: 'grid', gap: 2 }}>
+      <div style={CHECKIN_ROW}><Clock3 size={15} /><span>{pt ? 'Próxima rodada' : 'Next round'}</span><span style={{ marginLeft: 'auto', color: 'var(--text-primary)' }}>{formatNextRun(state.nextRunAt, Date.now(), pt)}</span></div>
+      <div style={CHECKIN_ROW}><Check size={15} /><span>{pt ? 'Última' : 'Last'}</span><span style={{ marginLeft: 'auto', color: 'var(--text-primary)', textAlign: 'right' }}>{state.lastRunAt ? `${new Date(state.lastRunAt).toLocaleTimeString(pt ? 'pt-BR' : 'en-GB', { hour: '2-digit', minute: '2-digit' })} · ${last}` : last}</span></div>
+      <div style={CHECKIN_ROW}><RefreshCw size={15} /><span>{pt ? 'Intervalo' : 'Interval'}</span><select aria-label={pt ? 'Intervalo do check-in' : 'Check-in interval'} value={state.intervalMin} onChange={e => setInterval(Number(e.target.value) as CheckinConfig['intervalMin'])} style={{ marginLeft: 'auto', background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 5, padding: '4px 6px', font: 'inherit' }}><option value={15}>15 min</option><option value={30}>30 min</option><option value={60}>1 h</option><option value={120}>2 h</option></select></div>
+      <div style={CHECKIN_ROW}><Pause size={15} /><span>{pt ? 'Pausar check-in' : 'Pause check-in'}</span><ToggleSwitch on={paused} onToggle={togglePause} label={pt ? 'Pausar check-in' : 'Pause check-in'} tap={isMobile ? 44 : undefined} /></div>
+      {paused && <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', padding: '0 0 3px 22px', fontSize: 11 }}><span style={{ color: 'var(--text-tertiary)' }}>{pt ? 'Pausar até:' : 'Pause until:'}</span>{SNOOZE_PRESETS.map(p => <button key={p.ms} type="button" onClick={() => { const parsed = parseSnooze(`${p.ms / 60_000}m`); if (parsed.ok) void update({ paused: { until: Date.now() + parsed.ms } }) }} style={{ all: 'unset', cursor: 'pointer', color: 'var(--anthropic-orange)' }}>{p.label[pt ? 'pt' : 'en']}</button>)}<button type="button" onClick={() => void update({ paused: { until: null } })} style={{ all: 'unset', cursor: 'pointer', color: 'var(--anthropic-orange)' }}>{pt ? 'até religar' : 'until resumed'}</button></div>}
+    </div>
+    <div style={{ borderTop: '1px solid var(--border)', paddingTop: 6, marginTop: 4 }}>
+      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', padding: '2px 0' }}>{pt ? 'Roteiro: o que o líder confere' : 'Checklist: what the leader checks'}</div>
+      {CHECKIN_ITEMS.map(item => { const current = checklist.find(x => x.id === item.id); const enabled = current?.enabled ?? true; return <div key={item.id} style={{ ...CHECKIN_ROW, minHeight: isMobile ? 40 : 28 }}><button type="button" aria-label={`${pt ? 'Ativar' : 'Enable'} ${item[pt ? 'pt' : 'en']}`} onClick={() => void update({ checklist: checklist.map(x => x.id === item.id ? { ...x, enabled: !enabled } : x) })} style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', color: enabled ? 'var(--accent-green)' : 'var(--text-tertiary)' }}>{enabled ? <Check size={14} /> : <span style={{ width: 14 }} />}</button><span style={{ color: enabled ? 'var(--text-secondary)' : 'var(--text-tertiary)' }}>{item[pt ? 'pt' : 'en']}</span><ToggleSwitch on={enabled} onToggle={() => void update({ checklist: checklist.map(x => x.id === item.id ? { ...x, enabled: !enabled } : x) })} label={item[pt ? 'pt' : 'en']} tap={isMobile ? 44 : undefined} /></div> })}
+    </div>
+    <div style={{ display: 'flex', gap: 6, marginTop: 7, flexWrap: 'wrap' }}><button type="button" onClick={() => void runNow()} style={{ ...ROW_STYLE, width: 'auto', cursor: 'pointer', border: '1px solid var(--border)' }}><Play size={14} />{pt ? 'Rodar agora' : 'Run now'}</button>{taskPath && <button type="button" onClick={() => onGo(taskPath)} style={{ ...ROW_STYLE, width: 'auto', cursor: 'pointer', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}><List size={14} />{pt ? 'Ver registro' : 'View log'}</button>}</div>
+  </div>
+}
 
 function Row({ t, pt, onGo, touch }: { t: LinkTarget; pt: boolean; onGo: (path: string) => void; touch: boolean }) {
   const harness = t.harness ? (HARNESS_LABELS as Record<string, string>)[t.harness] ?? t.harness : null
@@ -93,6 +127,7 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
   const primaryOrigin = useSessionRoleOrigin(sessionId ?? '')
   const fallbackOrigin = useSessionRoleOrigin(roleFallbackId ?? '')
   const roleOrigin = primaryRole ? primaryOrigin : fallbackOrigin
+  const checkin = useCheckin(role === 'leader' ? sessionId : undefined)
   useEffect(() => { if (searching) inputRef.current?.focus() }, [searching])
 
   const targets = linkTargets(links)
@@ -168,6 +203,7 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
         )
       })}
       {started && <div style={{ ...SECTION, textTransform: 'none', letterSpacing: 0, fontWeight: 400, marginTop: 10 }}>{started}</div>}
+      {role === 'leader' && checkin.state && <CheckinPanel state={checkin.state} pt={pt} isMobile={isMobile} onGo={onGo} update={checkin.update} runNow={checkin.runNow} taskPath={targets.find(t => t.kind === 'task')?.path ?? null} />}
     </div>
   )
 }
