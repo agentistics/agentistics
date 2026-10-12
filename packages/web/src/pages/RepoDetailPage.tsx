@@ -409,11 +409,13 @@ function MembersTable({ sessions, presence, lang, currency, brlRate }: {
       m.sessions++
       m.messages += (s.user_message_count ?? 0) + (s.assistant_message_count ?? 0)
       m.toolCalls += Object.values(s.tool_counts ?? {}).reduce((a, b) => a + b, 0)
-      m.cost += sessCost(s) ?? 0
-      m.inTok += s.input_tokens ?? 0
-      m.outTok += s.output_tokens ?? 0
-      m.cacheRead += s.cache_read_input_tokens ?? 0
-      m.cacheWrite += s.cache_creation_input_tokens ?? 0
+      if (!s.tokens_unavailable) {
+        m.cost += sessCost(s) ?? 0
+        m.inTok += s.input_tokens ?? 0
+        m.outTok += s.output_tokens ?? 0
+        m.cacheRead += s.cache_read_input_tokens ?? 0
+        m.cacheWrite += s.cache_creation_input_tokens ?? 0
+      }
       m.commits += s.git_commits ?? 0
       m.linesAdded += s.lines_added ?? 0
       m.linesRemoved += s.lines_removed ?? 0
