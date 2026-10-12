@@ -6,7 +6,7 @@
  */
 import React, { useEffect, useState } from 'react'
 import { Moon } from 'lucide-react'
-import { AWAY_AUTH_IDS, AWAY_AUTH_LABEL, AWAY_DEFAULT_MAX_WORKERS, AWAY_DEFAULT_TOP_CAP, AWAY_MAX_CEILING, AWAY_NOTE_MAX, AWAY_TOP_MODEL, SURFACE_HARNESS_ORDER, type AwayAuthId, type AwayTopCaps, type HarnessId } from '@agentistics/core'
+import { AWAY_AUTH_IDS, AWAY_AUTH_LABEL, AWAY_DEFAULT_MAX_WORKERS, AWAY_DEFAULT_TOP_CAP, AWAY_MAX_CEILING, AWAY_NOTE_MAX, AWAY_TOP_MODEL, SURFACE_HARNESS_ORDER, type AwayAuthId, type AwayTopCaps, type HarnessId } from '@agentistics/core' // @native-gated: activeCapProviders keeps only harnesses AWAY_TOP_MODEL names
 import { Checkbox, ConfirmModal, FieldTextarea, Select } from '../pages/settings/primitives'
 import { activeCapProviders, setAway, UNTIL_CHOICES, untilChoiceLabel, untilFromChoice, useAway, type UntilChoice } from '../lib/awayMode'
 import { usePlanLimits } from '../lib/planLimits'
@@ -22,7 +22,7 @@ export default function AwayModeDialog({ open, lang, onClose }: { open: boolean;
   const [topCaps, setTopCaps] = useState<AwayTopCaps>({})
   const plans = usePlanLimits()
   const stored = useAway().state?.topCaps ?? {}
-  const providers = activeCapProviders(SURFACE_HARNESS_ORDER, plans.limits, plans.registered, stored)
+  const providers = activeCapProviders(SURFACE_HARNESS_ORDER, plans.limits, plans.registered, stored) // @native-gated: filtered to AWAY_TOP_MODEL
   const capOf = (h: HarnessId) => Math.min(topCaps[h] ?? stored[h] ?? AWAY_DEFAULT_TOP_CAP, maxWorkers)
   const [note, setNote] = useState('')
   const [error, setError] = useState<string | null>(null)
