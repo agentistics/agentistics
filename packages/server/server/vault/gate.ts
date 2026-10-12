@@ -41,7 +41,7 @@ import {
   abandonPending, adoptPending, ensureVaultOpen, lockVault, noteVaultActivity, openWithRecovery, pendingUnlock, protectorById,
   recoveryStepDone, recoveryTodo, refused, sealToFile, secretFs, sentence, setAutoLockPeriod, vaultAudit, vaultDir, vaultLang,
   presenceWord, presenceCandidates, presenceSoon, chooseAutoProtector, vaultStatus, noteCodeUnlock, dropUnlockWindow, unlockWindowAnchor, onVaultLock,
-  consumeFreshPresence,
+  consumeFreshPresence, mintFresh,
 } from './service'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import { realProtectorIo } from './io'
@@ -71,6 +71,8 @@ export type VaultAction =
   | 'phone-enrol-request' | 'phone-enrol-approve'
   // Owner decision 2026-10-06: choosing which proof each kind of action asks (action-policy.ts).
   | 'set-auth-policy'
+  // VAULT.V4: confirm each use of a sensitive secret. Same row as the auto-lock: a setting, code once, 5-min read grant.
+  | 'set-confirm-each-use'
 
 export interface ActionRow { code: boolean; gesture: boolean; grant: 'read' | null }
 
@@ -83,6 +85,7 @@ export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
   list: { code: false, gesture: false, grant: null },
   lock: { code: false, gesture: false, grant: null }, // locking only REDUCES exposure
   'set-auto-lock': { code: true, gesture: false, grant: 'read' },
+  'set-confirm-each-use': { code: true, gesture: false, grant: 'read' },
   // VAULT.UI2: "keep it open" — one more idle window. On this computer the vault is already open and the click
   // is the consent (no proof); from a remote origin it costs the authenticator code, never silently.
   'extend-open': { code: true, gesture: false, grant: null },
@@ -405,8 +408,13 @@ export async function requireVaultStepUp(action: VaultAction, ctx: GateContext):
     if (action === 'reset') return resetUnopenable(ctx)
     return refused('locked', sentence('locked'))
   }
-  // VAULT.UI2: "keep it open" on THIS computer — the vault is already open and the click is the consent.
-  if (action === 'extend-open' && ctx.loopback) {
+  // VAULT.V2 (QA r3 C1): "keep it open" needs the page's own read grant (bound to the HTTP session) or the code.
+  // A bare loopback request is no longer enough: any local process could otherwise hold the vault open forever.
+  if (action === 'extend-open') {
+    if (grantValid(ctx.grant, ctx.session, 'read')) { noteVaultActivity(); return { ok: true } }
+    if (!ctx.code) return refused('stepup-required', sentence('stepup-required'))
+    const c = await checkCodeWith(o.dek, o.kid, ctx.code)
+    if (!c.ok) return c
     noteVaultActivity()
     return { ok: true }
   }
@@ -1411,6 +1419,21 @@ export async function setAutoLockMinutes(minutes: unknown, ctx: GateContext): Pr
   return g
 }
 
+/** VAULT.V4: persist `confirmEachUse` (default OFF — absent reads as off). Step-up gated and audited, like the auto-lock. */
+export async function setConfirmEachUse(enabled: unknown, ctx: GateContext): Promise<GateResult> {
+  if (typeof enabled !== 'boolean') return refused('bad-request', vaultLang() === 'pt' ? 'Informe se o cofre deve confirmar cada uso.' : 'Say whether the vault should confirm each use.')
+  const g = await requireVaultStepUp('set-confirm-each-use', ctx)
+  if (!g.ok) return g
+  const o = await ensureVaultOpen({ create: false, migrate: false })
+  if (!o) return refused('locked', sentence('locked'))
+  const { confirmEachUse: _prev, ...rest } = o.vault
+  const vault: VaultJson = { ...rest, v: 2, ...(enabled ? { confirmEachUse: true } : {}) }
+  await writeVaultJson(vault)
+  o.vault = vault
+  vaultAudit({ type: 'vault.set-confirm-each-use' })
+  return g
+}
+
 /**
  * Owner decision 2026-10-02: choose what an unlock asks besides the gesture (unlock-policy.ts). Gated
  * by the code AND the gesture. The per-day window already running is kept: it is anchored to a real
@@ -1498,3 +1521,47 @@ export function __resetGateForTests(now?: () => number): void {
   _enrolWrong = 0
 }
 
+
+
+// ── VAULT.V4 §3.3: approving ONE use request — its own gate, never `requireVaultStepUp` ──────────
+// No code, no read grant, no "nothing is enrolled so nothing is asked": a vault with no presence device
+// REFUSES (§3.5) instead of letting any local process approve its own request.
+
+const noPresenceRefusal = (): Refusal => refused('no-presence', vaultLang() === 'pt'
+  ? 'Para confirmar cada uso, cadastre o Windows Hello ou uma passkey no cofre — ou desligue "Sempre confirmar" neste segredo.'
+  : 'To confirm each use, enrol Windows Hello or a passkey in the vault — or turn "Always confirm" off for this secret.')
+
+/** The card's own Approve click raises the computer's gesture HERE and hands back a single-use proof bound to this request. */
+export async function proveUseApproval(ctx: { session: string; loopback: boolean; id: string }): Promise<{ ok: true; fresh: string } | Refusal> {
+  if (!ctx.loopback || fromSocket(ctx)) return refused('mobile-gesture-required', vaultLang() === 'pt' ? 'Confirme este uso com a digital do celular.' : 'Confirm this use with your phone biometrics.')
+  if (recoveryTodo()) return refused('recovery-mode', sentence('recovery-mode'))
+  if ((await loadState()).frozen) return refused('stepup-frozen', sentence('stepup-frozen'))
+  const o = await ensureVaultOpen({ create: false, migrate: false })
+  if (!o) return refused('locked', sentence('locked'))
+  if (!hasPresence(o.vault)) return noPresenceRefusal()
+  const g = await proveGesture(o)
+  if (!g.ok) return g
+  const fresh = mintFresh({ session: ctx.session, binding: `use-approve:${ctx.id}` })
+  if (!fresh) return refused('bad-request', 'bad request id')
+  noteVaultActivity()
+  return { ok: true, fresh }
+}
+
+/** Decides whether this caller may approve use request `id`. Raises no gesture itself — it only consumes a proof. */
+export async function requireUseApproval(ctx: { session: string; loopback: boolean; id: string; fresh?: string | null; gestureToken?: string }): Promise<GateResult> {
+  if (fromSocket(ctx)) return refused('mobile-gesture-required', vaultLang() === 'pt' ? 'O agente não aprova o próprio pedido.' : 'The agent cannot approve its own request.')
+  if (recoveryTodo()) return refused('recovery-mode', sentence('recovery-mode'))
+  const binding = `use-approve:${ctx.id}`
+  if (!ctx.loopback) {
+    if (consumeGestureToken(ctx.session, ctx.gestureToken, binding)) return { ok: true }
+    return phoneGestureRefusal()
+  }
+  const o = await ensureVaultOpen({ create: false, migrate: false })
+  if (!o) return refused('locked', sentence('locked'))
+  if (!hasPresence(o.vault)) return noPresenceRefusal()
+  if (!consumeFreshPresence({ session: ctx.session, token: ctx.fresh, binding })) {
+    return refused('presence-required', vaultLang() === 'pt' ? 'Aprove pelo cartão do pedido: o Windows Hello é pedido ali, ligado a este pedido.' : 'Approve from the request card: Windows Hello is asked there, bound to this request.')
+  }
+  noteVaultActivity()
+  return { ok: true }
+}

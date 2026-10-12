@@ -16,7 +16,7 @@ import { readJsonLimited } from '../limits'
 import { originAllowed } from '../cors'
 import * as gate from './gate'
 import { readVaultView, lockVaultNow } from './inventory'
-import { FRESH_BINDING, extendAutoLock, noteVaultActivity, unlockWithGesture, vaultLang, vaultStatus } from './service'
+import { FRESH_BINDING, acceptVaultHeartbeatToken, armVaultHeartbeatToken, extendAutoLock, rotateVaultHeartbeatToken, unlockWithGesture, vaultIsOpen, vaultLang, vaultStatus } from './service'
 import { isLoopbackAddress } from '../native-bind'
 import { opInit } from './ops'
 import { uiReply } from './ui-sentence'
@@ -96,6 +96,26 @@ function send(body: Record<string, unknown>, status: number, headers: Record<str
   return new Response(JSON.stringify(uiReply(body, vaultLang() === 'pt' ? 'pt' : 'en')), { status, headers })
 }
 
+const HEARTBEAT_COOKIE = 'agentistics-vault-heartbeat'
+function cookieValue(req: Request, name: string): string | null {
+  const raw = req.headers.get('cookie') ?? ''
+  for (const part of raw.split(';')) {
+    const i = part.indexOf('=')
+    if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim() || null
+  }
+  return null
+}
+function heartbeatCookie(token: string): string {
+  return `${HEARTBEAT_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict`
+}
+function expiredHeartbeatCookie(): string {
+  return `${HEARTBEAT_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`
+}
+function addHeartbeatCookie(response: Response, token: string | null): Response {
+  response.headers.append('Set-Cookie', token === null ? expiredHeartbeatCookie() : heartbeatCookie(token))
+  return response
+}
+
 /** Answers a `/api/vault*` request, or `null` for a path that is not one of ours. */
 export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv): Promise<Response | null> {
   const json = { ...env.cors, 'Content-Type': 'application/json' }
@@ -153,12 +173,17 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     if (!g.ok) return reply(g)
     const left = extendAutoLock()
     if (left === null) return reply({ ok: false, code: String('locked'), sentence: vaultLang() === 'pt' ? 'O cofre já está trancado.' : 'The vault is already locked.' })
-    return reply({ ok: true, autoLockInMs: left })
+    // A token only for the page's own grant, and under the arm's 30 s throttle (null = too soon: no new cookie).
+    const token = gate.grantValid(grant, session, 'read') ? armVaultHeartbeatToken() : null
+    const res = reply({ ok: true, autoLockInMs: left })
+    return token === null ? res : addHeartbeatCookie(res, token)
   }
   if (path === '/api/vault/lock' && req.method === 'POST') {
     const b = await body()
     const r = await lockVaultNow({ grant, session, code: codeOf(b) })
-    return send(r.ok ? { ok: true, vault: await readVaultView([], async () => [], session, loopback) } : { error: r.error, code: r.code, sentence: r.error }, r.ok ? 200 : statusOf(r.code), noStore)
+    return r.ok
+      ? addHeartbeatCookie(send({ ok: true, vault: await readVaultView([], async () => [], session, loopback) }, 200, noStore), null)
+      : send({ error: r.error, code: r.code, sentence: r.error }, statusOf(r.code), noStore)
   }
   if (path === '/api/vault/init' && req.method === 'POST') {
     // Create the vault from the page: the very code path `agentop vault init` takes (`opInit`), with
@@ -189,8 +214,10 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     // then carries a single-use proof for exactly that action, this session — and nobody else's request.
     const b = await body()
     const binding = typeof b.for === 'string' && FRESH_BINDING.test(b.for) ? b.for : null
+    const wasOpen = vaultIsOpen()
     const u = await unlockWithGesture(undefined, binding ? { session, binding } : undefined)
-    return reply(u.ok ? { ok: true, state: u.state, ...(u.fresh ? { fresh: u.fresh } : {}) } : u)
+    const response = reply(u.ok ? { ok: true, state: u.state, ...(u.fresh ? { fresh: u.fresh } : {}) } : u)
+    return u.ok && u.state === 'open' && !wasOpen ? addHeartbeatCookie(response, rotateVaultHeartbeatToken()) : response
   }
   if (path === '/api/vault/unlock/code' && req.method === 'POST') {
     const b = await body()
@@ -198,11 +225,16 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     // Owner 2026-10-03: the code that completes the unlock IS the step-up — it hands back the
     // 5-minute 'read' grant, so the list right behind the unlock never asks for a second code.
     const r = await gate.completeUnlock(b.code)
-    return reply(r.ok ? { ok: true, grant: gate.mintGrant(session, 'read') } : r)
+    const response = reply(r.ok ? { ok: true, grant: gate.mintGrant(session, 'read') } : r)
+    return r.ok ? addHeartbeatCookie(response, rotateVaultHeartbeatToken()) : response
   }
   if (path === '/api/vault/auto-lock' && req.method === 'POST') {
     const b = await body()
     return reply(await gate.setAutoLockMinutes(b.minutes, { grant, session, code: codeOf(b) }))
+  }
+  if (path === '/api/vault/confirm-each-use' && req.method === 'POST') {
+    const b = await body()
+    return reply(await gate.setConfirmEachUse(b.enabled, { grant, session, code: codeOf(b) }))
   }
   if (path === '/api/vault/unlock-policy' && req.method === 'POST') {
     // Owner decision 2026-10-02: changing what an unlock asks costs the code AND the gesture, fresh.
@@ -223,8 +255,52 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
         ? 'A atividade do cofre só pode vir do painel aberto no próprio computador.'
         : 'Vault activity can only come from the dashboard on this computer.' })
     }
-    noteVaultActivity()
+    const beat = acceptVaultHeartbeatToken(cookieValue(req, HEARTBEAT_COOKIE))
+    if (beat === 'too-soon') {
+      return reply({ ok: false, code: 'activity-too-soon', sentence: vaultLang() === 'pt'
+        ? 'A batida do cofre chegou cedo demais; a próxima conta em 30 segundos.'
+        : 'The vault heartbeat arrived too soon; the next one counts after 30 seconds.' })
+    }
+    if (beat !== 'ok') {
+      return reply({ ok: false, code: 'activity-token', sentence: vaultLang() === 'pt'
+        ? 'Esta batida do cofre não tem um token válido.'
+        : 'This vault heartbeat has no valid token.' })
+    }
     return send({ ok: true }, 200, noStore)
+  }
+  if (path === '/api/vault/activity/arm' && req.method === 'POST') {
+    // A page recovers its tab capability only with PROOF it passed the vault's own gate: loopback, the
+    // real input gesture, AND a valid 'read' grant bound to this HTTP session (minted only by a step-up
+    // the person completed). A local process with curl has no such grant, so it cannot mint a token and
+    // keep the vault open. After a reload the page's in-memory grant is gone: it is refused here
+    // (`activity-grant`) until the person's next step-up/unlock hands the page a new one; the page then
+    // arms on the next trusted gesture. Until then the idle clock simply runs (fails safe: it locks).
+    const b = await body()
+    if (!loopback) {
+      return reply({ ok: false, code: 'activity-not-here', sentence: vaultLang() === 'pt'
+        ? 'A atividade do cofre só pode vir do painel aberto no próprio computador.'
+        : 'Vault activity can only come from the dashboard on this computer.' })
+    }
+    if (!vaultIsOpen()) {
+      return reply({ ok: false, code: 'vault-locked', sentence: vaultLang() === 'pt' ? 'O cofre já está trancado.' : 'The vault is already locked.' })
+    }
+    if (b.gesture !== true) {
+      return reply({ ok: false, code: 'activity-gesture', sentence: vaultLang() === 'pt'
+        ? 'Armar a atividade do cofre exige uma interação real nesta página.'
+        : 'Arming vault activity requires a real interaction on this page.' })
+    }
+    if (!gate.grantValid(grant, session, 'read')) {
+      return reply({ ok: false, code: 'activity-grant', sentence: vaultLang() === 'pt'
+        ? 'Para manter o cofre aberto por atividade, confirme sua identidade nesta página.'
+        : 'To keep the vault open by activity, confirm your identity on this page.' })
+    }
+    const token = armVaultHeartbeatToken()
+    if (token === null) {
+      return reply({ ok: false, code: 'activity-too-soon', sentence: vaultLang() === 'pt'
+        ? 'O token de atividade foi armado há pouco; tente de novo em 30 segundos.'
+        : 'The activity token was armed a moment ago; try again in 30 seconds.' })
+    }
+    return addHeartbeatCookie(send({ ok: true }, 200, noStore), token)
   }
 
   // ── SECRETS.4 §7.1: the enrolment wizard and the sections' actions ────────────────────────────
