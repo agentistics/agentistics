@@ -18,7 +18,7 @@
  * than the bubble, and letting it set the width is how a message ends up outside its own card.
  */
 
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useId, useRef, useState } from 'react'
 import { stripDictatedMark } from '../../lib/dictationMark'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -296,17 +296,21 @@ export function ReasoningBlock({ text, pt }: { text: string; pt: boolean }) {
   )
 }
 
+const SYSTEM_CHIP_STYLE: React.CSSProperties = {
+  fontSize: 10.5, lineHeight: 1.4, color: 'var(--text-tertiary)',
+  padding: '3px 10px', borderRadius: 999,
+  background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+  maxWidth: '90%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+  fontFamily: 'inherit',
+}
+
 function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt: boolean }) {
   const { label, help, tab } = chatNote(note, pt)
   const [shown, setShown] = useState(false)
   const isMobile = useIsMobile()
 
   const chip: React.CSSProperties = {
-    fontSize: 10.5, lineHeight: 1.4, color: 'var(--text-tertiary)',
-    padding: '3px 10px', borderRadius: 999,
-    background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-    maxWidth: '90%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-    fontFamily: 'inherit',
+    ...SYSTEM_CHIP_STYLE,
     // Sleek chip dimensions on mobile and desktop
     ...(isMobile ? { padding: '4px 10px', margin: '2px 0' } : {}),
   }
@@ -355,16 +359,21 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
 
 function CheckinNotice({ text, pt, onOpen }: { text: string; pt: boolean; onOpen?: () => void }) {
   const [open, setOpen] = useState(false)
+  const bodyId = useId()
+  const chip: React.CSSProperties = {
+    ...SYSTEM_CHIP_STYLE,
+    overflow: 'visible', textOverflow: 'clip', whiteSpace: 'normal',
+  }
   return <div style={{ display: 'flex', justifyContent: 'center', padding: '2px 0' }}>
-    <div style={{ width: 'min(100%, 560px)', border: '1px solid var(--border-subtle)', borderRadius: 10, background: 'var(--bg-elevated)', overflow: 'hidden' }}>
-      <button type="button" aria-expanded={open} onClick={() => setOpen(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 7, width: '100%', minHeight: 36, padding: '6px 10px', border: 0, background: 'transparent', color: 'var(--text-secondary)', font: 'inherit', fontSize: 11.5, textAlign: 'left', cursor: 'pointer' }}>
+    <div style={{ width: 'min(100%, 560px)', overflow: 'hidden' }}>
+      <button type="button" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen(v => !v)} style={{ ...chip, display: 'flex', alignItems: 'center', gap: 7, width: '100%', minHeight: 36, textAlign: 'left', cursor: 'pointer' }}>
         <ListChecks size={14} style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
         <span style={{ fontWeight: 650 }}>{pt ? 'Check-in da liderança · sistema' : 'Leadership check-in · system'}</span>
         <ChevronDown size={14} style={{ marginLeft: 'auto', transform: open ? 'rotate(180deg)' : 'none' }} />
       </button>
-      {open && <div style={{ padding: '0 10px 8px', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{checkinPromptBody(text)}</div>}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0 10px 8px' }}>
-        <button type="button" onClick={onOpen} disabled={!onOpen} style={{ minHeight: 44, padding: '6px 12px', border: '1px solid var(--border)', borderRadius: 7, background: 'var(--bg-surface)', color: 'var(--text-primary)', font: 'inherit', fontSize: 12, cursor: onOpen ? 'pointer' : 'default' }}>{pt ? 'Abrir check-in' : 'Open check-in'}</button>
+      <div id={bodyId} hidden={!open} style={{ marginTop: 3, padding: '7px 10px 8px', border: '1px solid var(--border-subtle)', borderRadius: 8, background: 'var(--bg-elevated)', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{checkinPromptBody(text)}</div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '3px 0 0' }}>
+        <button type="button" onClick={onOpen} disabled={!onOpen} style={{ ...chip, minHeight: 44, padding: '6px 12px', color: 'var(--text-primary)', cursor: onOpen ? 'pointer' : 'default' }}>{pt ? 'Abrir check-in' : 'Open check-in'}</button>
       </div>
     </div>
   </div>
