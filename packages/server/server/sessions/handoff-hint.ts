@@ -1,5 +1,5 @@
 /** LEADER.HANDOFF.HINT / WHY — low-noise handoff timing and its explainable numbers. */
-import { getModelPrice } from '@agentistics/core'
+import { getModelPrice, hasModelPrice } from '@agentistics/core'
 
 export const HANDOFF_HINT_DEFAULT_TOKENS = 150_000
 export const HANDOFF_HINT_DEFAULT_FRACTION = 0.35
@@ -64,7 +64,9 @@ export function computeHandoffWhy(row: HandoffHintRow, deps: HandoffWhyDeps = {}
   const out: HandoffWhy = { workInFlight: [...(deps.workInFlight ?? row.workInFlight ?? [])] }
   if (Number.isFinite(row.contextTokens)) out.contextTokens = row.contextTokens
   if (Number.isFinite(row.turns)) out.turnsDone = row.turns
-  const price = (deps.model ?? row.model) ? getModelPrice(deps.model ?? row.model!).cacheRead : undefined
+  const model = deps.model ?? row.model
+  // An unpriced model has no figure: omit the costs instead of showing a fake zero.
+  const price = model && hasModelPrice(model) ? getModelPrice(model).cacheRead : undefined
   if (price !== undefined && Number.isFinite(row.contextTokens)) {
     const perTurn = row.contextTokens! / 1_000_000 * price
     const measured = Number.isFinite(row.turns) && row.turns! > 0 && Number.isFinite(row.costUSD)

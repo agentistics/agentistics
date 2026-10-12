@@ -98,4 +98,11 @@ describe('LEADER.HANDOFF.HINT', () => {
     expect(why.costContinueUSD).toBeGreaterThan(why.costSuccessorUSD!)
     expect(computeHandoffWhy({ id: 'x', title: 'x' })).not.toHaveProperty('avgCostPerTurnUSD')
   })
+
+  it('an unpriced model omits the costs instead of showing zero', () => {
+    const why = computeHandoffWhy({ ...row(), model: 'zzz-unknown', turns: 10, costUSD: 3 }, { handoffBytes: 4_000 })
+    expect(why).not.toHaveProperty('costContinueUSD')
+    expect(why).not.toHaveProperty('costSuccessorUSD')
+    expect(why).not.toHaveProperty('breakEvenTurns')
+  })
 })
