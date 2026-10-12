@@ -144,7 +144,7 @@ import { startAgentClient, reconcileNow } from './team-agent-client'
 import { validateIngestToken } from './team-tokens'
 import { getAccount } from './accounts'
 import { getTeam } from './teams'
-import { stateFor as checkinState, putState as putCheckin, reportFromIdentity as reportCheckin, runNow as runCheckin, startCheckinTimer } from './checkin'
+import { stateFor as checkinState, putState as putCheckin, reportFromIdentity as reportCheckin, runNow as runCheckin, startCheckinTimer, validateCheckinRound } from './checkin'
 import { discoverProjectDisks } from './disk-picker'
 import { allowedRoots, listFolders, rootListing } from './fs-folders'
 import { forgetProjects } from './sessions/project-source'
@@ -2064,11 +2064,19 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // LEADER CHECK-INS — agenda state, immediate run, and the MCP report share this server store.
     if (url.pathname === '/api/checkin' || url.pathname.startsWith('/api/checkin/')) {
       if (url.pathname === '/api/checkin/report' && req.method === 'POST') {
-        const body = await req.json().catch(() => ({})) as { state?: unknown; summary?: unknown; actions?: unknown; needs?: unknown; session?: { id?: unknown; token?: unknown } }
+        const body = await req.json().catch(() => ({})) as { state?: unknown; summary?: unknown; headline?: unknown; delivered?: unknown; inProgress?: unknown; next?: unknown; health?: unknown; actions?: unknown; needs?: unknown; session?: { id?: unknown; token?: unknown } }
+        if (typeof body.headline === 'string' && (body.headline.includes('\n') || body.headline.includes('\r') || [...body.headline].length > 140)) {
+          return json({ error: 'invalid_headline', message: 'headline must be one line and at most 140 characters' }, 400)
+        }
+        if (!validateCheckinRound(body)) return json({ error: 'invalid_report', message: 'structured report entries have invalid shapes' }, 400)
         const { verifySessionIdentity } = await import('./sessions/session-identity')
         const sender = body.session ? await verifySessionIdentity(body.session.id, body.session.token) : null
         if (!sender) return json({ error: 'unverified_sender' }, 403)
-        const reported = await reportCheckin(sender, { state: String(body.state) as any, summary: String(body.summary), ...(Array.isArray(body.actions) ? { actions: body.actions as any } : {}), ...(Array.isArray(body.needs) ? { needs: body.needs as any } : {}) })
+        const reported = await reportCheckin(sender, { state: String(body.state) as any, summary: String(body.summary),
+          ...(typeof body.headline === 'string' ? { headline: body.headline } : {}), ...(Array.isArray(body.delivered) ? { delivered: body.delivered as any } : {}),
+          ...(Array.isArray(body.inProgress) ? { inProgress: body.inProgress as any } : {}), ...(Array.isArray(body.next) ? { next: body.next as any } : {}),
+          ...(Array.isArray(body.health) ? { health: body.health as any } : {}), ...(Array.isArray(body.actions) ? { actions: body.actions as any } : {}),
+          ...(Array.isArray(body.needs) ? { needs: body.needs as any } : {}) })
         // A verified session that is not a leader is refused in words, never answered `200 null`.
         if (reported && 'error' in reported) return json(reported, 409)
         return reported ? json(reported) : json({ error: 'not_a_leader' }, 403)

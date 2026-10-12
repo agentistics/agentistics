@@ -1,7 +1,8 @@
+import { readFileSync } from 'node:fs'
 import { afterAll, describe, expect, test } from 'bun:test'
 import {
   defaultConfig, due, fireDue, mergeConfig, nextRun, promptFor, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
-  type CheckinAction, type CheckinDeps, type CheckinNeed,
+  type CheckinAction, type CheckinDeps, type CheckinNeed, validateCheckinRound,
 } from './checkin'
 
 let preferences: Record<string, unknown> = {}
@@ -43,6 +44,43 @@ function reset() {
 }
 
 describe('check-in agenda', () => {
+  test('rejects malformed entries in every structured report array', () => {
+    for (const key of ['delivered', 'inProgress', 'next', 'health', 'actions', 'needs']) {
+      for (const value of [null, {}, 'text', [null], [[]], ['text'], [{}]]) {
+        expect(validateCheckinRound({ [key]: value })).toBe(false)
+      }
+      expect(validateCheckinRound({ [key]: [] })).toBe(true)
+    }
+    for (const round of [
+      { delivered: [{ text: 42 }] }, { delivered: [{ text: 'done', ref: 42 }] },
+      { inProgress: [{ item: 'QA', stage: 42 }] }, { inProgress: [{ item: 'QA', stage: 'review', release: false }] },
+      { inProgress: [{ item: 'QA', stage: 'review', session: 42 }] },
+      { next: [{ text: 'deploy', when: 42 }] },
+      { health: [{ label: 42, value: 'online', state: 'ok' }] },
+      { health: [{ label: 'MCP', value: 42, state: 'ok' }] },
+      { health: [{ label: 'MCP', value: 'online', state: 'unknown' }] },
+      { actions: [{ text: 'open', link: null }] },
+      { actions: [{ text: 'open', link: { kind: 'unknown', id: '1' } }] },
+      { actions: [{ text: 'open', link: { kind: 'task', id: 42 } }] },
+      { needs: [{ subject: 'Review', text: 'review', critical: 'yes' }] },
+      { needs: [{ subject: 'Review', text: 'review', link: { kind: 'subtask', id: '1', taskId: 42 } }] },
+    ]) expect(validateCheckinRound(round)).toBe(false)
+    expect(validateCheckinRound({
+      delivered: [{ text: 'done', ref: 'abc' }], inProgress: [{ item: 'QA', stage: 'review', release: 'soon', session: '1' }],
+      next: [{ text: 'deploy', when: 'tomorrow' }],
+      health: ['ok', 'warn', 'bad'].map(state => ({ label: 'MCP', value: 'online', state })),
+      actions: [{ text: 'open', link: { kind: 'session', id: '1' } }],
+      needs: [{ subject: 'Review', text: 'review', critical: true, link: { kind: 'subtask', id: '1', taskId: '2' } }],
+    })).toBe(true)
+    expect(validateCheckinRound({})).toBe(true)
+  })
+  test('the report route rejects invalid structured entries with HTTP 400 before reporting', () => {
+    // index.ts starts the server on import; pin its boundary wiring without starting a host.
+    const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8')
+    const route = source.slice(source.indexOf("if (url.pathname === '/api/checkin/report'"), source.indexOf('const reported = await reportCheckin'))
+    expect(route).toMatch(/if \(!validateCheckinRound\(body\)\) return json\(\{ error: 'invalid_report',[^\n]+, 400\)/)
+  })
+
   test('defaults are complete and scheduled', async () => {
     reset()
     const state = await stateFor('conversation-leader', 1_000)
@@ -171,5 +209,19 @@ describe('check-in agenda', () => {
     reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
     await recordReport(leader.conversationId, { state: 'ok', summary: 'Done', actions: [{ text: 'Closed it' }] }, 42)
     expect(JSON.parse(activity[0].detail).actions).toEqual([{ text: 'Closed it' }])
+  })
+
+  test('recordReport persists structured round fields in state and activity', async () => {
+    reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+    const round = {
+      state: 'ok' as const, summary: 'fallback', headline: 'Shipped the check-in view',
+      delivered: [{ text: 'Structured reports', ref: 'abc' }],
+      inProgress: [{ item: 'QA', stage: 'review', release: 'today', session: 'sess-1' }],
+      next: [{ text: 'Run mobile QA', when: 'tomorrow' }],
+      health: [{ label: 'MCP', value: 'connected', state: 'ok' as const }],
+    }
+    const state = await recordReport(leader.conversationId, round, 42)
+    expect(state.last).toMatchObject(round)
+    expect(JSON.parse(activity[0].detail)).toMatchObject(round)
   })
 })

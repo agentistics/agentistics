@@ -36,6 +36,8 @@ export function RailSection({ id, title, badge, defaultOpen = false, children }:
   return (
     <div style={{ ...surface, overflow: 'hidden' }}>
       <button
+        type="button"
+        aria-expanded={open}
         onClick={() => setRailOpen(id, !open)}
         style={{
           display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',

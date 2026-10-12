@@ -5,6 +5,15 @@ export type CheckinItemId = 'fleet' | 'handbacks' | 'limits' | 'releases' | 'mcp
 export type CheckinRoundState = 'ok' | 'resolved' | 'needs_you'
 export type CheckinLink = { kind: 'session' | 'subtask' | 'task'; id: string; taskId?: string }
 export interface CheckinNeedWire { subject: string; text: string; critical?: boolean; link?: CheckinLink }
+export interface CheckinDelivered { text: string; ref?: string }
+export interface CheckinInProgress { item: string; stage: string; release?: string; session?: string }
+export interface CheckinNext { text: string; when?: string }
+export type CheckinHealthState = 'ok' | 'warn' | 'bad'
+export interface CheckinHealth { label: string; value: string; state: CheckinHealthState }
+export interface CheckinRound {
+  state: CheckinRoundState; summary: string; headline?: string; delivered?: CheckinDelivered[]
+  inProgress?: CheckinInProgress[]; next?: CheckinNext[]; health?: CheckinHealth[]; at?: number; needs?: CheckinNeedWire[]
+}
 export interface CheckinConfig {
   intervalMin: 15 | 30 | 60 | 120
   paused: null | { until: number | null }
@@ -15,7 +24,7 @@ export interface CheckinState extends CheckinConfig {
   lastRunAt: number | null
   nextRunAt: number | null
   /** `at` and `needs` ride the SSE event of a round (CONTRACT §3 data); optional so older servers still parse. */
-  last: { state: CheckinRoundState; summary: string; at?: number; needs?: CheckinNeedWire[] } | null
+  last: CheckinRound | null
 }
 
 export const CHECKIN_ITEMS: readonly { id: CheckinItemId; pt: string; en: string }[] = [
