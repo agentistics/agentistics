@@ -9,7 +9,7 @@
  * docs/superpowers/specs/2026-10-08-session-context-injection.md
  */
 
-import { roleLine } from '@agentistics/core'
+import { awayBriefingLines, roleLine, type AwayState } from '@agentistics/core'
 import { briefingText, PLAN_LIMITS_TOOL } from '../briefing'
 
 export type ContextLang = 'en' | 'pt'
@@ -38,6 +38,10 @@ export interface ContextInput {
   folder?: { path: string; siblings: readonly string[]; /** A top-level folder: its `siblings` are its sub-folders. */ top?: boolean }
   lang?: ContextLang
   toolNames?: readonly string[]
+  /** AWAY MODE as stored (`server/away.ts`); the line is printed only while it is active at `now`. */
+  away?: AwayState
+  /** The clock `away` is judged against (ms). Defaults to `Date.now()`; tests pass it. */
+  now?: number
 }
 
 /** The block is fenced so the chat UI can recognise it and render it collapsed. */
@@ -64,7 +68,7 @@ const TOOL_GROUPS = {
     'agentistics_task_subtask', 'agentistics_task_link', 'agentistics_task_blocked_by', 'agentistics_task_next',
     'agentistics_task_claim', 'agentistics_task_activity', 'agentistics_task_edit', 'agentistics_task_session', 'agentistics_task_delete',
   ],
-  Sessions: ['agentistics_sessions', 'agentistics_session_groups', 'agentistics_session_group_create', 'agentistics_session_group_edit', 'agentistics_session_notify', 'agentistics_session_message', 'agentistics_session_role'],
+  Sessions: ['agentistics_sessions', 'agentistics_session_groups', 'agentistics_session_group_create', 'agentistics_session_group_edit', 'agentistics_session_notify', 'agentistics_session_message', 'agentistics_session_role', 'agentistics_session_away'],
   Metrics: ['agentistics_summary', 'agentistics_costs', 'agentistics_projects', 'agentistics_repos', 'agentistics_harnesses', 'agentistics_plan_limits', 'agentistics_tags', 'agentistics_tag_detail'],
   Dashboards: ['agentistics_component_catalog', 'agentistics_get_layouts', 'agentistics_create_layout', 'agentistics_add_component', 'agentistics_remove_component', 'agentistics_set_active_layout', 'agentistics_delete_layout', 'agentistics_export_pdf', 'agentistics_build_layout'],
 } as const
@@ -86,12 +90,13 @@ export function contextText(i: ContextInput): string {
     `You are running inside agentistics, an app that manages and measures coding-assistant sessions. Session: ${i.sessionId}. Project folder: ${i.cwd}.`,
     'Tools — the "agentistics" MCP server gives you:',
     `- Tasks (Agentask): ${TOOL_GROUPS.Tasks.join(', ')} — plan, claim, edit, link, comment, coordinate, and close work.`,
-    `- Sessions: ${TOOL_GROUPS.Sessions.join(', ')} — list, message another session, notify the user, and organise sidebar folders.`,
+    `- Sessions: ${TOOL_GROUPS.Sessions.join(', ')} — list, message another session, notify the user, organise sidebar folders, and read or (leaders) set away mode.`,
     METRICS_DASHBOARDS_LINE,
     briefingText(i.lang ?? 'en', { planLimitsAvailable: i.toolNames?.includes(PLAN_LIMITS_TOOL) }),
   ]
   lines.push(
     roleLine(i.role),
+    ...awayBriefingLines(i.away, i.role, i.now ?? Date.now(), { planLimitsInBriefing: i.toolNames?.includes(PLAN_LIMITS_TOOL) === true }),
     'Becoming leader: call agentistics_session_role with role "leader" — it stores the role and renames this session to "[ LEADER ] - <title>" (or "[ LÍDER ] - <title>" in a Portuguese UI) for you, keeping the user\'s title. Do not rename it by hand. If you started the session, pick the title.' +
       (i.role ? '' : ' If you have no stored role (AUTO): as soon as it is clear the request is a single piece, call agentistics_session_role with role "worker" to record it.'),
     'Open other sessions only after the user explicitly approves: `agentop session <harness> --bg --cwd <dir> --name "<title>" --folder "<folder>" -p "<request>"` or `agentop session batch --task "<task>" --folder "<folder>" …` (`agentop session folders` lists them; no --folder leaves the session loose in the sidebar). Every opened session is a WORKER; for a leader hand-off, tell the user it is a leader hand-off so the new session is marked as leader. File each opened session on its subtask and in the task\'s folder.',

@@ -132,7 +132,7 @@ import { SPAWN_SPECS, planSpawn, tuiStartModes } from './sessions/spawn-spec'
 import { answerStructured, structuredIntentOf, structuredReopenOrigin } from './sessions/structured-route'
 import { agentisticsMcpLaunch } from './mcp-launch'
 import { prependContext } from './sessions/agentistics-context'
-import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextParent, resolveContextRole, resolveContextTask, writeContextFile } from './sessions/spawn-context'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, writeContextFile } from './sessions/spawn-context'
 import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor } from './sessions/session-roles'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
@@ -2084,6 +2084,7 @@ async function spawnManaged(req: {
     ? { role }
     : await resolveContextRole(id, req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId)
   const ctx = buildSpawnContext({
+      ...(await resolveContextAway()),
       sessionId: id,
       cwd: req.cwd,
       harness: req.harness,
