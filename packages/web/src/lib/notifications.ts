@@ -268,6 +268,10 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Aviso do líder (modo ausente)', message: '{text}' },
     en: { title: 'Leader notice (away mode)', message: '{text}' },
   },
+  'away.digest_offer': {
+    pt: { title: 'Resumo do modo ausente', message: 'Fiquei fora há mais de 5 horas. Quer que a Nay prepare um resumo do que aconteceu?' },
+    en: { title: 'Away-mode summary', message: 'I’ve been away for more than 5 hours. Would you like Nay to prepare a summary of what happened?' },
+  },
   'sessions.idle': {
     pt: { title: 'Sessões ociosas', message: '{count} {sessionsNoun} sem mensagem sua há um tempo: {names}{more}. {freed}Clique para revisar.' },
     en: { title: 'Idle sessions', message: '{count} {sessionsNoun} you have not messaged in a while: {names}{more}. {freed}Click to review.' },

@@ -1,0 +1,157 @@
+/** Server-owned away-mode summary offers and the bounded digest sent to Nay. */
+import { AWAY_OFF, awayActive, parseAwayState, redactSecrets, type AwayState } from '@agentistics/core'
+
+export const AWAY_DIGEST_AFTER = 5 * 60 * 60 * 1000
+export const AWAY_DIGEST_BUCKET = 15 * 60 * 1000
+
+export interface AwayDigestState {
+  since: string
+  lastBucket: number
+  snoozedUntil?: number
+  lastDeliveredAt?: number
+  conversationId?: string
+}
+
+export function awayDigestWindow(away: AwayState, now: number): { since: number; until: number } | null {
+  const since = Date.parse(away.since)
+  if (!awayActive(away, now) || !Number.isFinite(since)) return null
+  return { since, until: now }
+}
+
+export function awayDigestOfferDue(away: AwayState, state: AwayDigestState | undefined, now: number): number | null {
+  const window = awayDigestWindow(away, now)
+  if (!window || now - window.since < AWAY_DIGEST_AFTER) return null
+  if (state?.since !== away.since) state = undefined
+  if (state?.snoozedUntil && now < state.snoozedUntil) return null
+  const bucket = Math.floor((now - window.since) / AWAY_DIGEST_BUCKET)
+  return state?.lastBucket === bucket ? null : bucket
+}
+
+const safe = (value: unknown): unknown => {
+  if (typeof value === 'string') return redactSecrets(value).slice(0, 500)
+  if (Array.isArray(value)) return value.slice(0, 30).map(safe)
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [key, item] of Object.entries(value)) {
+      if (/token|secret|password|authorization|cookie|key/i.test(key)) continue
+      out[key] = safe(item)
+    }
+    return out
+  }
+  return value
+}
+
+export async function buildAwayDigest(away: AwayState, now: number): Promise<Record<string, unknown>> {
+  const window = awayDigestWindow(away, now)
+  if (!window) return { window: 'unavailable' }
+  const since = new Date(window.since).toISOString()
+  const until = new Date(window.until).toISOString()
+  const result: Record<string, unknown> = { window: { since, until } }
+
+  try {
+    const { loadTaskWorld } = await import('./sessions/task-source')
+    const world = await loadTaskWorld()
+    const taskById = new Map(world.book.tasks.map(t => [t.id, t]))
+    const events = world.book.events.filter(e => {
+      const at = Date.parse(e.at)
+      return Number.isFinite(at) && at >= window.since && at <= window.until
+    }).slice(-30)
+    result.tasks = [...new Set(events.map(e => e.taskId))].slice(0, 30).map(id => {
+      const task = taskById.get(id)
+      return { id, title: task?.title ?? 'unavailable', status: task?.status ?? 'unavailable', events: events.filter(e => e.taskId === id).map(e => safe({ at: e.at, kind: e.kind, detail: e.detail, from: e.from, to: e.to })) }
+    })
+    result.checkIns = events.filter(e => e.kind === 'checkin').map(e => safe({ taskId: e.taskId, at: e.at, detail: e.detail })).slice(0, 30)
+    result.pending = [
+      ...world.book.subtasks.filter(s => s.status === 'in_review').map(s => ({ kind: 'subtask', id: s.id, status: s.status })),
+      ...world.book.comments.filter(c => c.kind === 'block').map(c => ({ kind: 'block', taskId: c.taskId, at: c.createdAt })),
+    ].slice(0, 30)
+  } catch { result.tasks = 'unavailable'; result.checkIns = 'unavailable'; result.pending = 'unavailable' }
+
+  try {
+    const { readRegistry } = await import('./sessions/registry')
+    const sessions = await readRegistry()
+    result.sessions = sessions.filter(s => {
+      const created = Date.parse(s.createdAt)
+      const ended = s.endedAt ? Date.parse(s.endedAt) : NaN
+      return (Number.isFinite(created) && created >= window.since && created <= window.until) || (Number.isFinite(ended) && ended >= window.since && ended <= window.until)
+    }).slice(0, 30).map(s => safe({ id: s.id, title: s.label ?? s.harnessName ?? 'unavailable', harness: s.harness, task: s.task ?? s.taskId, createdAt: s.createdAt, endedAt: s.endedAt }))
+  } catch { result.sessions = 'unavailable' }
+
+  try {
+    const { readNotificationsFrom, NOTIFICATIONS_FILE } = await import('./notifications-store')
+    const notices = await readNotificationsFrom(NOTIFICATIONS_FILE)
+    result.awayNotices = notices.filter(n => n.code === 'away.notice' && n.ts >= window.since && n.ts <= window.until).slice(0, 30).map(n => safe({ at: new Date(n.ts).toISOString(), ...(n.meta ?? {}) }))
+  } catch { result.awayNotices = 'unavailable' }
+  try {
+    const { getVersionInfo } = await import('./version')
+    const version = await getVersionInfo()
+    result.version = { current: version.current, latest: version.latest, updateAvailable: version.hasUpdate }
+  } catch { result.version = 'unavailable' }
+  result.releases = 'unavailable'
+  return result
+}
+
+const answerLocks = new Map<number, Promise<unknown>>()
+export type AwayDigestAnswer = { ok: true; conversationId: string; bucket: number } | { ok: false; error: 'stale' | 'bad_answer' | 'not_away' | 'failed' }
+
+export async function answerAwayDigest(answer: unknown, bucket: unknown, lang: 'pt' | 'en', now = Date.now()): Promise<AwayDigestAnswer> {
+  if (answer !== 'yes' && answer !== 'no') return { ok: false, error: 'bad_answer' }
+  if (!Number.isInteger(bucket)) return { ok: false, error: 'stale' }
+  const key = Number(bucket)
+  const prior = answerLocks.get(key)
+  if (prior) return prior as Promise<AwayDigestAnswer>
+  const run = (async (): Promise<AwayDigestAnswer> => {
+    const { readPreferences, updatePreferences } = await import('./preferences')
+    const prefs = await readPreferences()
+    const away = parseAwayState(prefs.away ?? AWAY_OFF)
+    const due = awayDigestOfferDue(away, prefs.awayDigest, now)
+    if (prefs.awayDigest?.conversationId && prefs.awayDigest.lastBucket === key) return { ok: true, conversationId: prefs.awayDigest.conversationId, bucket: key }
+    if (due !== key && prefs.awayDigest?.lastBucket !== key) return { ok: false, error: awayActive(away, now) ? 'stale' : 'not_away' }
+    if (answer === 'no') {
+      await updatePreferences(() => ({ awayDigest: { since: away.since, lastBucket: key, snoozedUntil: now + 60 * 60 * 1000 } }))
+      return { ok: true, conversationId: '', bucket: key }
+    }
+    const digest = await buildAwayDigest(away, now)
+    const { startNaySession, defaultNayDeps } = await import('./sessions/nay-web')
+    const { runFleetAction } = await import('./sessions/fleet-web')
+    const { PORT } = await import('./config')
+    const out = await startNaySession(lang, defaultNayDeps(PORT))
+    if (!out.ok || !out.id) return { ok: false, error: 'failed' }
+    const prompt = lang === 'pt'
+      ? `Você recebeu o JSON abaixo. Produza um relatório visual em Markdown com as seções Resumo, Releases, Tarefas, Sessões, Check-ins, Avisos e Esperando por você. Use somente o JSON, não invente fatos; marque dados unavailable como indisponíveis. Janela: ${away.since} até ${new Date(now).toISOString()}.\n\n${JSON.stringify(digest)}`
+      : `You received the JSON below. Produce a visual Markdown status report with sections Summary, Releases, Tasks, Sessions, Check-ins, Notices, and Waiting for you. Use only the JSON; do not invent facts, and mark unavailable data as unavailable. Window: ${away.since} to ${new Date(now).toISOString()}.\n\n${JSON.stringify(digest)}`
+    const sent = await runFleetAction(lang, { action: 'prompt', id: out.id, text: prompt })
+    if (!sent.ok) return { ok: false, error: 'failed' }
+    const conversationId = out.id
+    await updatePreferences(() => ({ awayDigest: { since: away.since, lastBucket: key, lastDeliveredAt: now, conversationId } }))
+    return { ok: true, conversationId, bucket: key }
+  })()
+  answerLocks.set(key, run)
+  try { return await run } finally { answerLocks.delete(key) }
+}
+
+export async function offerAwayDigest(now = Date.now()): Promise<void> {
+  const { readPreferences, updatePreferences } = await import('./preferences')
+  const prefs = await readPreferences()
+  const away = parseAwayState(prefs.away ?? AWAY_OFF)
+  const bucket = awayDigestOfferDue(away, prefs.awayDigest, now)
+  if (bucket === null) return
+  await updatePreferences(cur => {
+    const currentAway = parseAwayState(cur.away ?? AWAY_OFF)
+    if (currentAway.since !== away.since) return undefined
+    return { awayDigest: { since: away.since, lastBucket: bucket } }
+  })
+  const { broadcastNotification } = await import('./sse')
+  const { sendMobileNotice, readMobileSubscriptions, webPushTransport } = await import('./events/mobile-push')
+  const pt = prefs.lang === 'pt'
+  broadcastNotification({ type: 'info', code: 'away.digest_offer', meta: { bucket, since: away.since, notificationKey: `away.digest:${away.since}:${bucket}` } })
+  void sendMobileNotice(pt ? 'Agentistics · Resumo do modo ausente' : 'Agentistics · Away-mode summary', pt ? 'Fiquei fora há mais de 5 horas. Quer que a Nay prepare um resumo do que aconteceu?' : 'I’ve been away for more than 5 hours. Would you like Nay to prepare a summary of what happened?', await readMobileSubscriptions(), webPushTransport).catch(() => {})
+}
+
+let timer: ReturnType<typeof setInterval> | null = null
+export function startAwayDigestTimer(intervalMs = 60_000): void {
+  if (timer) return
+  timer = setInterval(() => { void offerAwayDigest() }, intervalMs)
+  if (typeof timer === 'object' && timer && 'unref' in timer) (timer as { unref: () => void }).unref()
+  void offerAwayDigest()
+}

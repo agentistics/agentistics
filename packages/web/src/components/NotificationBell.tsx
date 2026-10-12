@@ -54,6 +54,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
   const isMobile = useIsMobile()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
+  const [digestBusyId, setDigestBusyId] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const unread = notes.filter(n => !n.read).length
   const muteWorkers = useMuteWorkers()
@@ -205,6 +206,16 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
               const isWhatsNew = n.code === 'app.whats_new'
               const isClean = n.code === 'clean.suggestion'
               const isJournalFailed = n.meta?.loadingKind === 'journal' && n.meta?.state === 'failed'
+              const isAwayDigest = n.code === 'away.digest_offer'
+              const digestBusy = digestBusyId === n.id
+              const answerDigest = async (answer: 'yes' | 'no') => {
+                setDigestBusyId(n.id)
+                try {
+                  const res = await fetch('/api/away/digest/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer, bucket: n.meta?.bucket, lang }) })
+                  const body = await res.json().catch(() => ({})) as { conversationId?: string }
+                  if (res.ok && answer === 'yes' && body.conversationId) { setOpen(false); navigate(`/sessions/${encodeURIComponent(body.conversationId)}`) }
+                } finally { setDigestBusyId(null) }
+              }
               const clickable = link !== null || isUpdate || isIdle || isWhatsNew
               const go = () => {
                 setOpen(false)
@@ -246,6 +257,12 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
                     <button onClick={e => { e.stopPropagation(); setOpen(false); window.dispatchEvent(new CustomEvent('agentistics:retry-journal-import')) }} style={{ flexShrink: 0, padding: '4px 7px', borderRadius: 6, border: '1px solid var(--anthropic-orange)60', background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)', cursor: 'pointer', font: 'inherit', fontSize: 11 }}>
                       {pt ? 'Tentar importar de novo' : 'Retry the import'}
                     </button>
+                  )}
+                  {isAwayDigest && (
+                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                      <button className="ag-tap" disabled={digestBusy} onClick={e => { e.stopPropagation(); void answerDigest('yes') }} style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)', color: 'var(--text-primary)', cursor: digestBusy ? 'wait' : 'pointer', font: 'inherit', fontSize: 11 }}>{pt ? 'Sim, abrir resumo' : 'Yes, open summary'}</button>
+                      <button className="ag-tap" disabled={digestBusy} onClick={e => { e.stopPropagation(); void answerDigest('no') }} style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: digestBusy ? 'wait' : 'pointer', font: 'inherit', fontSize: 11 }}>{pt ? 'Não agora' : 'Not now'}</button>
+                    </div>
                   )}
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0,

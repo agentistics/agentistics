@@ -148,6 +148,7 @@ import { stateFor as checkinState, putState as putCheckin, reportFromIdentity as
 import { discoverProjectDisks } from './disk-picker'
 import { allowedRoots, listFolders, rootListing } from './fs-folders'
 import { forgetProjects } from './sessions/project-source'
+import { startAwayDigestTimer } from './away-digest'
 
 // ---------------------------------------------------------------------------
 // Reads the first `cwd` field found in a JSONL session file.
@@ -2138,6 +2139,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const { sendAwayNotice, awayStatus, defaultAwayDeps } = await import('./away')
       const out = await sendAwayNotice(body, await defaultAwayDeps())
       return json(out, awayStatus(out))
+    }
+    if (url.pathname === '/api/away/digest/answer' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({})) as { answer?: unknown; bucket?: unknown; lang?: unknown }
+      const { answerAwayDigest } = await import('./away-digest')
+      const out = await answerAwayDigest(body.answer, body.bucket, body.lang === 'pt' ? 'pt' : 'en')
+      return json(out, out.ok ? 200 : out.error === 'stale' || out.error === 'not_away' ? 409 : 400)
     }
     // USER SESSION GROUPS — the door the MCP tools use to organise sessions (see
     // `sessions/session-groups-web.ts`). Matched before `/api/tasks`; it shares no path with it.
@@ -5062,6 +5069,7 @@ startHostAllowlistRefresh()
 // PORT (47291) is always the api + mcp endpoint.
 Bun.serve<WSData>({ hostname: '0.0.0.0', port: PORT, idleTimeout: 60, maxRequestBodySize: LIMITS.ingestBodyBytes, websocket: _wsHandlers, fetch: handleCompressed })
 startCheckinTimer()
+startAwayDigestTimer()
 // Binary mode also serves the web dashboard on WEB_PORT (47292) — that's the URL you open.
 // Same handler → the SPA's same-origin `/api/*` calls resolve against 47292 and just work,
 // while 47291 stays the dedicated api + mcp port.
