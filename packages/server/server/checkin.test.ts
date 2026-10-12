@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import {
-  checkinActivity, defaultConfig, due, fireDue, mergeConfig, nextRun, promptFor, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
+  checkinActivity, checkinLimitInputs, defaultConfig, due, fireDue, mergeConfig, nextRun, promptFor, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
   runNow, type CheckinAction, type CheckinDeps, type CheckinNeed,
 } from './checkin'
 
@@ -207,6 +207,76 @@ describe('idle check-ins', () => {
     const emitted = JSON.parse(frames.at(-1)!.split('data: ')[1]!.trim())
     expect(emitted.fingerprint).toBeUndefined()
     expect(emitted.lastFiredAt).toBeUndefined()
+  })
+  for (const usedPct of [0, 85]) {
+    test(`stored ${usedPct}% usage triggers one delivery when its window renews`, async () => {
+      await begin()
+      const records = [{ harness: 'codex' as const, account: 'default', source: 'codex-rollout' as const,
+        updatedAt: first, windows: [{ kind: '5h' as const, usedPct, resetsAt: first + 30 * MINUTE }] }]
+      setCheckinDeps({ ...testDeps, readCheckinLimits: async now => ({ registered: {}, limits: checkinLimitInputs(records, now) }) })
+      expect(await fireDue(first + 15 * MINUTE)).toEqual([leader.id])
+      await recordReport(leader.conversationId, { state: 'ok', summary: 'Read' }, first + 15 * MINUTE)
+      const baseline = stored().fingerprint
+      expect(await fireDue(first + 30 * MINUTE)).toEqual([leader.id])
+      expect(stored().fingerprint).not.toBe(baseline)
+      await recordReport(leader.conversationId, { state: 'ok', summary: 'Renewed' }, first + 30 * MINUTE)
+      expect(await fireDue(first + 45 * MINUTE)).toEqual([])
+      expect(records[0]!.windows[0]!.usedPct).toBe(usedPct)
+    })
+  }
+  test('overlapping due rounds share a guard while fingerprint readers are pending', async () => {
+    await begin(); limits = { changed: true }
+    let entered!: () => void
+    let releaseReader!: () => void
+    const reading = new Promise<void>(resolve => { entered = resolve })
+    const blocked = new Promise<void>(resolve => { releaseReader = resolve })
+    let reads = 0
+    setCheckinDeps({ ...testDeps, readCheckinLimits: async () => {
+      if (++reads === 1) { entered(); await blocked }
+      return limits
+    } })
+    const round = fireDue(first + 15 * MINUTE)
+    await reading
+    try {
+      expect(await fireDue(first + 15 * MINUTE)).toEqual([])
+      expect(reads).toBe(1)
+    } finally {
+      releaseReader()
+      await round
+    }
+    expect(prompts).toHaveLength(2)
+  })
+  test('a fingerprint reader error releases the firing guard for retry', async () => {
+    await begin(); limits = { changed: true }
+    setCheckinDeps({ ...testDeps, readCheckinLimits: async () => { throw new Error('reader failed') } })
+    await expect(fireDue(first + 15 * MINUTE)).rejects.toThrow('reader failed')
+    setCheckinDeps(testDeps)
+    expect(await fireDue(first + 15 * MINUTE)).toEqual([leader.id])
+  })
+  test('manual fingerprint errors prevent delivery and preserve delivery history', async () => {
+    await begin()
+    const baseline = { fingerprint: stored().fingerprint, lastFiredAt: stored().lastFiredAt, nextRunAt: stored().nextRunAt }
+    setCheckinDeps({ ...testDeps, readCheckinLimits: async () => { throw new Error('reader failed') } })
+    await expect(runNow(leader.conversationId, first + MINUTE)).rejects.toThrow('reader failed')
+    expect(prompts).toHaveLength(1)
+    expect(stored()).toMatchObject(baseline)
+    expect(stored().pending).toBeUndefined()
+    setCheckinDeps(testDeps)
+    expect(await runNow(leader.conversationId, first + MINUTE)).toBe(true)
+    expect(stored()).toMatchObject({ lastFiredAt: first + MINUTE, pending: true })
+  })
+  test('manual delivery uses the fingerprint captured before sending', async () => {
+    await begin()
+    const baseline = stored().fingerprint
+    setCheckinDeps({ ...testDeps, runFleetAction: (async (_lang, request) => {
+      prompts.push(request); limits = { arrivedDuringDelivery: true }
+      return { ok: true, message: 'sent' }
+    }) as CheckinDeps['runFleetAction'] })
+    expect(await runNow(leader.conversationId, first + MINUTE)).toBe(true)
+    expect(stored().fingerprint).toBe(baseline)
+    setCheckinDeps(testDeps)
+    await recordReport(leader.conversationId, { state: 'ok', summary: 'Read' }, first + MINUTE)
+    expect(await fireDue(first + 16 * MINUTE)).toEqual([leader.id])
   })
   test('heartbeat fires at two hours and late reports cannot delay it', async () => {
     await begin(true)

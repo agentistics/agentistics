@@ -8,7 +8,7 @@ import { readFleet as realReadFleet, runFleetAction as realRunFleetAction } from
 import { loadTaskWorld as realLoadTaskWorld } from './sessions/task-source'
 import { newEventId as realNewEventId, type TaskEvent } from './sessions/task-model'
 import { sseEncoder, sseClients as realSseClients } from './sse'
-import { awayActive, parseAwayState, type HarnessId } from '@agentistics/core'
+import { awayActive, currentUsedPct, parseAwayState, windowRenewed, type HarnessId, type PlanLimits } from '@agentistics/core'
 import { harnessEnabled } from './adapters/types'
 import { createHash } from 'node:crypto'
 import { isClosedRow } from './sessions/fleet-events'
@@ -29,7 +29,7 @@ export interface CheckinDeps {
   sseClients: typeof realSseClients
   /** Cheap, server-side inputs for idle-skip. Each is replaceable in tests. */
   readCheckinActivity: (since: number, leader: string) => Promise<unknown>
-  readCheckinLimits: () => Promise<unknown>
+  readCheckinLimits: (now: number) => Promise<unknown>
   readCheckinRelease: () => Promise<unknown>
   readCheckinMcpConfigs: (cwd: string) => Promise<unknown>
 }
@@ -44,6 +44,13 @@ export function checkinActivity(events: readonly TaskEvent[], leader: string): u
         ? [{ id: e.id, kind: message.kind, at: e.at, taskId: e.taskId, actor: e.actor }] : []
     } catch { return [] }
   })
+}
+
+export function checkinLimitInputs(limits: readonly PlanLimits[], now: number): unknown {
+  return limits.map(({ harness, account, plan, sourcePlan, windows }) => ({
+    harness, account, plan, sourcePlan,
+    windows: windows.map(w => ({ ...w, usedPct: currentUsedPct(w, now), renewed: windowRenewed(w, now) })),
+  }))
 }
 
 const defaultCheckinActivity: CheckinDeps['readCheckinActivity'] = async (_since, leader) => checkinActivity((await deps.loadTaskWorld()).book.events, leader)
@@ -61,10 +68,10 @@ const defaultDeps: CheckinDeps = {
   dataDir: realDataDir,
   sseClients: realSseClients,
   readCheckinActivity: defaultCheckinActivity,
-  readCheckinLimits: async () => {
+  readCheckinLimits: async now => {
     const { planLimitsPayload } = await import('./plan-limits')
     const { limits, registered } = await planLimitsPayload((await deps.readPreferences()).billing)
-    return { registered, limits: limits.map(({ harness, account, plan, sourcePlan, windows }) => ({ harness, account, plan, sourcePlan, windows })) }
+    return { registered, limits: checkinLimitInputs(limits, now) }
   },
   readCheckinRelease: async () => {
     try {
@@ -175,12 +182,12 @@ function stable(value: unknown): string {
   return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${JSON.stringify(k)}:${stable(v)}`).join(',')}}`
 }
 
-async function fingerprint(row: { id: string; cwd: string }, state: CheckinState, rows: readonly any[]): Promise<string> {
+async function fingerprint(row: { id: string; cwd: string }, state: CheckinState, rows: readonly any[], now: number): Promise<string> {
   const enabled = new Set(state.checklist.filter(x => x.enabled).map(x => x.id))
   const inputs: Record<string, unknown> = {}
   if (enabled.has('fleet')) inputs.fleet = rows.filter(r => !isClosedRow(r.id, r.state)).map(r => ({ id: r.id, status: r.status ?? r.state ?? r.activity ?? null })).sort((a, b) => a.id.localeCompare(b.id))
   if (enabled.has('handbacks') || enabled.has('handoff')) inputs.activity = await deps.readCheckinActivity(0, row.id)
-  if (enabled.has('limits')) inputs.limits = await deps.readCheckinLimits()
+  if (enabled.has('limits')) inputs.limits = await deps.readCheckinLimits(now)
   if (enabled.has('releases')) inputs.release = await deps.readCheckinRelease()
   if (enabled.has('mcp-configs')) inputs.mcp = await deps.readCheckinMcpConfigs(row.cwd)
   return createHash('sha256').update(stable(inputs)).digest('hex')
@@ -261,30 +268,33 @@ export async function fireDue(now = Date.now()): Promise<string[]> {
   const rows = (await deps.readFleet('pt')).rows; const roles = (await deps.readRolesDoc(deps.dataDir)).roles; const fired: string[] = []
   for (const row of rows) {
     if (deps.roleOfRow(roles, row) !== 'leader' || firing.has(row.id)) continue
-    const state = await stateFor(row.conversationId ?? row.id, now); if (!due(state, now)) continue
-    const existing = (await allStored())[state.session]
-    if (existing?.pending) await recordReport(state.session, { state: 'needs_you', summary: 'check-in sem resposta' }, now)
-    const currentFingerprint = await fingerprint(row, state, rows)
-    const liveWorker = liveWorkers(rows, roles)
-    const heartbeat = liveWorker && (existing?.lastFiredAt == null || now - existing.lastFiredAt >= HEARTBEAT_MS)
-    if (existing?.fingerprint === currentFingerprint && !heartbeat) {
+    firing.add(row.id)
+    try {
+      const state = await stateFor(row.conversationId ?? row.id, now); if (!due(state, now)) continue
+      const existing = (await allStored())[state.session]
+      if (existing?.pending) await recordReport(state.session, { state: 'needs_you', summary: 'check-in sem resposta' }, now)
+      const currentFingerprint = await fingerprint(row, state, rows, now)
+      const liveWorker = liveWorkers(rows, roles)
+      const heartbeat = liveWorker && (existing?.lastFiredAt == null || now - existing.lastFiredAt >= HEARTBEAT_MS)
+      if (existing?.fingerprint === currentFingerprint && !heartbeat) {
+        await updateStored(all => {
+          const latest = all[state.session] ?? state
+          all[state.session] = { ...latest, skipped: { count: (latest.skipped?.count ?? 0) + 1, lastAt: now }, nextRunAt: scheduledNext(now, latest, liveWorker) }
+        })
+        emit(publicState((await allStored())[state.session]!))
+        continue
+      }
+      const next = await promptForLeader(state).then(text => deps.runFleetAction('pt', { action: 'prompt', id: row.id, text })).catch(() => ({ ok: false }))
       await updateStored(all => {
         const latest = all[state.session] ?? state
-        all[state.session] = { ...latest, skipped: { count: (latest.skipped?.count ?? 0) + 1, lastAt: now }, nextRunAt: scheduledNext(now, latest, liveWorker) }
+        const updated = { ...latest, ...(next.ok ? { fingerprint: currentFingerprint, lastFiredAt: now, pending: true } : {}) }
+        all[state.session] = { ...updated, nextRunAt: scheduledNext(now, updated, liveWorker) }
       })
-      emit(publicState((await allStored())[state.session]!))
-      continue
+      if (next.ok) fired.push(row.id)
+      if (next.ok) emit(publicState((await allStored())[state.session]!))
+    } finally {
+      firing.delete(row.id)
     }
-    firing.add(row.id)
-    const next = await promptForLeader(state).then(text => deps.runFleetAction('pt', { action: 'prompt', id: row.id, text })).catch(() => ({ ok: false }))
-    await updateStored(all => {
-      const latest = all[state.session] ?? state
-      const updated = { ...latest, ...(next.ok ? { fingerprint: currentFingerprint, lastFiredAt: now, pending: true } : {}) }
-      all[state.session] = { ...updated, nextRunAt: scheduledNext(now, updated, liveWorker) }
-    })
-    if (next.ok) fired.push(row.id)
-    if (next.ok) emit(publicState((await allStored())[state.session]!))
-    firing.delete(row.id)
   }
   return fired
 }
@@ -294,9 +304,9 @@ export async function runNow(session: string, now = Date.now()): Promise<boolean
   const roles = (await deps.readRolesDoc(deps.dataDir)).roles
   if (deps.roleOfRow(roles, row) !== 'leader') return false
   const state = await stateFor(row.conversationId ?? row.id, now)
+  const currentFingerprint = await fingerprint(row, state, rows, now)
   const result = await deps.runFleetAction('pt', { action: 'prompt', id: row.id, text: await promptForLeader(state) })
   if (!result.ok) return false
-  const currentFingerprint = await fingerprint(row, state, rows)
   await updateStored(all => { all[state.session] = { ...all[state.session], ...state, fingerprint: currentFingerprint, lastFiredAt: now, nextRunAt: nextRun(now, state), pending: true } })
   emit(publicState((await allStored())[state.session]!))
   return result.ok
