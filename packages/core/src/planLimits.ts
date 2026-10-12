@@ -316,10 +316,11 @@ export function planPace(
   const paceStatus: PlanPaceStatus = ratio > 1.2 ? 'over' : ratio < 0.8 ? 'under' : 'on'
   const five = windowOf(l, '5h')
   const fivePct = five ? currentUsedPct(five, nowMs) : 0
-  const pauseReset = fivePct >= PLAN_BUDGET_HOLD_5H_PCT
-    ? five?.resetsAt
-    : week && weekPct >= PLAN_BUDGET_HOLD_WEEK_PCT
-      ? week.resetsAt
+  // A spent week outlasts a spent 5-hour window: wait for the week reset whenever the week is on hold.
+  const pauseReset = week && weekPct >= PLAN_BUDGET_HOLD_WEEK_PCT
+    ? week.resetsAt
+    : fivePct >= PLAN_BUDGET_HOLD_5H_PCT
+      ? five?.resetsAt
       : undefined
   const budgetHold = pauseReset !== undefined
   const projectedPauseHours = week && burnPctPerHour > 0

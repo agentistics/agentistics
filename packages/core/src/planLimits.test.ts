@@ -184,6 +184,13 @@ describe('budgets, pacing, and routing', () => {
     expect(pace.pauseUntil).toBe(resetWeek)
   })
 
+  test('both windows held: the pause lasts until the weekly reset', () => {
+    const l = { ...withPlan('codex', 92, 96, 'Plus'), updatedAt: now }
+    const pace = planPace(l, now, [{ ...l, updatedAt: now - H, windows: [win('5h', 92, reset5), win('week', 96, resetWeek)] }])
+    expect(pace.freeSlots).toBe(0)
+    expect(pace.pauseUntil).toBe(resetWeek)
+  })
+
   test('a below-threshold zero-burn budget still offers two sessions', () => {
     const l = { ...withPlan('codex', 72, 35, 'Plus'), updatedAt: now }
     const pace = planPace(l, now, [{ ...l, updatedAt: now - H, windows: [win('5h', 72, reset5), win('week', 35, resetWeek)] }])
