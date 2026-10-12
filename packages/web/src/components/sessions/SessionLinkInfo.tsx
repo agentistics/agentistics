@@ -127,7 +127,14 @@ export function SessionCheckinCard({ sessionId, links, pt, isMobile = false, onG
   const checkin = useCheckin(sessionId)
   if (!checkin.state) return null
   const paused = checkin.state.paused !== null
-  const summary = <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: paused ? 'var(--text-tertiary)' : 'var(--accent-green)' }} />{paused ? (pt ? 'pausado' : 'paused') : (pt ? `ligado · a cada ${checkin.state.intervalMin} min` : `on · every ${checkin.state.intervalMin} min`)}</span>
+  const needsYou = !paused && checkin.state.last?.state === 'needs_you'
+  // The folded card's glance figure, like the other drawer rows: a status dot + one short word.
+  const mins = checkin.state.nextRunAt === null ? null : Math.max(0, Math.ceil((checkin.state.nextRunAt - Date.now()) / 60_000))
+  const glance = paused ? (pt ? 'pausado' : 'paused')
+    : needsYou ? (pt ? 'precisa de você' : 'needs you')
+    : mins === null ? (pt ? 'ligado' : 'on') : (pt ? `em ${mins} min` : `in ${mins} min`)
+  const dot = paused ? 'var(--text-tertiary)' : needsYou ? 'var(--accent-red)' : 'var(--accent-green)'
+  const summary = <span data-testid="checkin-glance" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: dot }} /><span style={{ fontWeight: 650 }}>{glance}</span></span>
   return <>{frame(summary, <CheckinPanel bare state={checkin.state} pt={pt} isMobile={isMobile} onGo={onGo} update={checkin.update} runNow={checkin.runNow} taskPath={links.task ? `/tasks/${encodeURIComponent(links.task.id)}?tab=activity&filter=checkins` : null} />)}</>
 }
 
