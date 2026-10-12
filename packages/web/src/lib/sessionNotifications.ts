@@ -17,6 +17,7 @@ import { isSessionMuted } from './mutedSessions'
 import { pushNotification, setMutedCategories, type NotificationType } from './notifications'
 import { isNotificationCategory } from './notificationCategories'
 import { isWorkerMuted } from './sessionRoles'
+import { DEFAULT_QUIET_HOURS, readQuietHours, type QuietHours } from './checkinNotify'
 
 export type SessionActivity = 'working' | 'waiting' | 'waiting-approval' | 'exited'
 /** The four original chimes, plus the thirteen synthesized in `notificationSounds.ts`. */
@@ -72,6 +73,8 @@ export interface NotificationSettings {
    * every event, so nothing that happened is lost — it is only not announced.
    */
   doNotDisturb: boolean
+  /** CHECKIN.S4: the silence for check-in alerts (23h–8h). Only `critical` ones ring inside it. */
+  quietHours: QuietHours
   /** Minutes a waiting session may go unopened before the Nay button says so. `0` = never. */
   staleAfterMin: number
   /** Seconds before a card leaves by itself; `0` never. See `AUTO_DISMISS_OPTIONS_SEC`. */
@@ -111,6 +114,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   soundPreset: 'chime',
   soundVolume: 0.8,
   doNotDisturb: false,
+  quietHours: DEFAULT_QUIET_HOURS,
   staleAfterMin: DEFAULT_STALE_MIN,
   nayAnimation: DEFAULT_NAY_ANIMATION,
   autoDismissSec: DEFAULT_AUTO_DISMISS_SEC,
@@ -141,6 +145,7 @@ export function readNotificationSettings(raw: unknown): NotificationSettings {
     eventSounds: sounds,
     soundPreset: isSoundPreset(parsed.soundPreset) ? parsed.soundPreset : DEFAULT_NOTIFICATION_SETTINGS.soundPreset,
     doNotDisturb: parsed.doNotDisturb === true,
+    quietHours: readQuietHours(parsed.quietHours),
     staleAfterMin: Number.isFinite(stale) && stale >= 0 ? stale : DEFAULT_STALE_MIN,
     nayAnimation: parseNayAnimation(parsed.nayAnimation),
     autoDismissSec: Number.isFinite(autoDismiss) && autoDismiss >= 0 ? autoDismiss : DEFAULT_AUTO_DISMISS_SEC,

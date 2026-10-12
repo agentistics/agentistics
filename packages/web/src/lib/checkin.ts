@@ -3,6 +3,8 @@ import { subscribeEvent } from './eventStream'
 
 export type CheckinItemId = 'fleet' | 'handbacks' | 'limits' | 'releases' | 'mcp-configs' | 'handoff'
 export type CheckinRoundState = 'ok' | 'resolved' | 'needs_you'
+export type CheckinLink = { kind: 'session' | 'subtask' | 'task'; id: string; taskId?: string }
+export interface CheckinNeedWire { subject: string; text: string; critical?: boolean; link?: CheckinLink }
 export interface CheckinConfig {
   intervalMin: 15 | 30 | 60 | 120
   paused: null | { until: number | null }
@@ -12,7 +14,8 @@ export interface CheckinState extends CheckinConfig {
   session: string
   lastRunAt: number | null
   nextRunAt: number | null
-  last: { state: CheckinRoundState; summary: string } | null
+  /** `at` and `needs` ride the SSE event of a round (CONTRACT §3 data); optional so older servers still parse. */
+  last: { state: CheckinRoundState; summary: string; at?: number; needs?: CheckinNeedWire[] } | null
 }
 
 export const CHECKIN_ITEMS: readonly { id: CheckinItemId; pt: string; en: string }[] = [

@@ -48,6 +48,7 @@ import { dismissAlert, snoozeAlert, useNayAlerts, useNayShock } from '../../lib/
 import { playEnter, playExit, type EnterHandle, playShock, prefersReducedMotion } from '../../lib/nayNotifyAnim'
 import { getNotificationSettings, subscribeNotificationSettings, type NotificationSettings } from '../../lib/sessionNotifications'
 import { NayEndSession } from './NayEndSession'
+import { needsTitle, summaryTitle } from '../../lib/checkinNotify'
 import { muteSessionWithToast } from '../../lib/notifyMenu'
 import { sessionIdentityKey } from '../../lib/sessionIdentity'
 
@@ -129,6 +130,7 @@ const SAY: Record<NayAlert['kind'], { pt: string; en: string }> = {
   approval: { pt: 'Ei, olha essa sessão: ela pediu permissão.', en: 'Hey, look at this session: it is asking for permission.' },
   stale: { pt: 'Ei, essa sessão está parada faz tempo.', en: 'Hey, this session has been waiting a while.' },
   limit: { pt: 'Ei, olha o limite do plano.', en: 'Hey, look at the plan limit.' },
+  checkin: { pt: 'Ei, o check-in achou coisas para você.', en: 'Hey, the check-in found things for you.' },
 }
 
 const STATE_CHIP: Record<NayAlert['kind'], { pt: string; en: string; fg: string; bg: string }> = {
@@ -136,6 +138,13 @@ const STATE_CHIP: Record<NayAlert['kind'], { pt: string; en: string; fg: string;
   approval: { pt: 'pede aprovação', en: 'needs approval', fg: 'var(--accent-red)', bg: 'var(--accent-red-dim)' },
   stale: { pt: 'sem abrir', en: 'not opened', fg: 'var(--text-secondary)', bg: 'var(--border)' },
   limit: { pt: 'limite do plano', en: 'plan limit', fg: 'var(--anthropic-orange-light)', bg: 'var(--anthropic-orange-dim)' },
+  checkin: { pt: 'check-in', en: 'check-in', fg: 'var(--accent-red)', bg: 'var(--accent-red-dim)' },
+}
+
+/** Where a check-in item's link leads: the same routes the rest of the app already uses. */
+export function checkinLinkPath(l: { kind: 'session' | 'subtask' | 'task'; id: string; taskId?: string }): string {
+  if (l.kind === 'session') return `/sessions/${encodeURIComponent(l.id)}`
+  return `/tasks/${encodeURIComponent(l.kind === 'subtask' && l.taskId ? l.taskId : l.id)}`
 }
 
 function hhmm(ms: number): string {
@@ -402,7 +411,8 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
   }
 
   const limitText = alert.limit ? limitNoticeText(alert.limit, lang) : null
-  const say = limitText ? limitText.title : SAY[alert.kind][lang]
+  const ck = alert.checkin
+  const say = limitText ? limitText.title : ck ? (ck.summary ? summaryTitle(lang) : needsTitle(ck.items.length, lang)) : SAY[alert.kind][lang]
   const chip = STATE_CHIP[alert.kind]
   const harnessLabel = alert.harness ? (HARNESS_LABELS[alert.harness as HarnessId] ?? alert.harness) : null
   const harnessColor = alert.harness ? (HARNESS_COLORS[alert.harness as HarnessId] ?? 'var(--text-tertiary)') : null
@@ -532,7 +542,20 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
         <div data-nay-body style={{ display: 'grid', gap: 10, flex: '0 1 auto', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', alignContent: 'start' }}>
         <div data-rise data-say style={{ fontSize: 13.5, fontWeight: 500 }}>{say}</div>
 
-        <div data-rise style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '9px 10px', display: 'grid', gap: 6, background: 'var(--bg-surface)' }}>
+        {ck && ck.items.map(item => (
+          <div key={item.subject} data-rise style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '9px 10px', display: 'grid', gap: 6, background: 'var(--bg-surface)' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, lineHeight: 1.4 }}>
+              <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', marginTop: 5, flexShrink: 0, background: 'var(--accent-red)' }} />
+              <span style={{ overflowWrap: 'anywhere' }}>{item.text}{item.critical && <b style={{ marginLeft: 6, color: 'var(--accent-red)', fontSize: 11 }}>{pt ? 'crítico' : 'critical'}</b>}</span>
+            </div>
+            {item.link && (
+              <div><button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); navigate(checkinLinkPath(item.link!)) })}>
+                {pt ? 'Abrir' : 'Open'}
+              </button></div>
+            )}
+          </div>
+        ))}
+        {!ck && <div data-rise style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '9px 10px', display: 'grid', gap: 6, background: 'var(--bg-surface)' }}>
           <div title={alert.name} style={{ fontWeight: 650, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{alert.limit ? (harnessLabel ?? alert.name) : alert.name}</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
             {harnessLabel && (
@@ -565,7 +588,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
               display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere',
             }}>{preview}</div>
           )}
-        </div>
+        </div>}
 
         {alert.demo && (
           <span data-rise style={hint}>{pt ? 'Exemplo das configurações: não há sessão por trás, então só adiar e dispensar funcionam.' : 'A settings example: there is no session behind it, so only snooze and dismiss work.'}</span>
@@ -585,17 +608,17 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
               {pt ? `Continuar no ${HARNESS_LABELS[alert.limit.alt as HarnessId] ?? alert.limit.alt}` : `Continue in ${HARNESS_LABELS[alert.limit.alt as HarnessId] ?? alert.limit.alt}`}
             </button>
           )}
-          {!alert.demo && !alert.limit && (
+          {!alert.demo && !alert.limit && !ck && (
             <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); onReply(alert.sessionId) })}>
               {pt ? 'Responder' : 'Reply'}
             </button>
           )}
-          {!alert.demo && !alert.limit && (
+          {!alert.demo && !alert.limit && !ck && (
             <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); navigate(`/sessions/${encodeURIComponent(alert.sessionId)}`) })}>
               {pt ? 'Ir para a sessão' : 'Go to session'}
             </button>
           )}
-          {!alert.demo && !alert.limit && (
+          {!alert.demo && !alert.limit && !ck && (
             <button
               type="button"
               aria-label={pt ? 'Silenciar esta sessão' : 'Mute this session'}
@@ -609,7 +632,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
               <BellOff size={14} />
             </button>
           )}
-          {alert.kind === 'approval' && !alert.demo && (
+          {alert.kind === 'approval' && !alert.demo && !ck && (
             <button type="button" style={primary} onClick={() => setDrawer(d => (d === 'approve' ? null : 'approve'))}>{pt ? 'Aprovar…' : 'Approve…'}</button>
           )}
           <button type="button" style={{ ...btn, background: 'transparent' }} onClick={() => setDrawer(d => (d === 'snooze' || d === 'snooze-custom' ? null : 'snooze'))}>

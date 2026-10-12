@@ -31,6 +31,8 @@ import { formatSpan, STALE_OPTIONS_MIN } from '../../lib/nayNotify'
 import { SectionHeader, Divider, PrefRow, Toggle, Select } from './primitives'
 import { ArrowUpRight, Volume2, VolumeX, Sparkles, AlertCircle, Clock, Activity, XCircle, Hourglass } from 'lucide-react'
 
+const HOUR_OPTIONS = Array.from({ length: 24 }, (_, h) => ({ value: String(h), label: `${String(h).padStart(2, '0')}h` }))
+
 export default function NotificationsSettings() {
   const ctx = useOutletContext<AppContext>()
   const pt = ctx.lang === 'pt'
@@ -201,6 +203,29 @@ export default function NotificationsSettings() {
       >
         <Toggle on={settings.doNotDisturb} onToggle={() => update({ doNotDisturb: !settings.doNotDisturb })} />
       </PrefRow>
+
+      <PrefRow
+        label={pt ? 'Horário de silêncio' : 'Quiet hours'}
+        sub={pt
+          ? 'Os avisos dos check-ins se acumulam num resumo; só o crítico toca na hora. O resumo vem ao fim do silêncio e quando você volta após 2 h fora.'
+          : 'Check-in alerts pile up into a summary; only critical ones ring at once. The summary comes when the silence ends and when you return after 2 h away.'}
+      >
+        <Toggle on={settings.quietHours.enabled} onToggle={() => update({ quietHours: { ...settings.quietHours, enabled: !settings.quietHours.enabled } })} />
+      </PrefRow>
+      {settings.quietHours.enabled && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{pt ? 'das' : 'from'}</span>
+          <div style={{ minWidth: 90 }}>
+            <Select value={String(settings.quietHours.fromHour)} onChange={v => update({ quietHours: { ...settings.quietHours, fromHour: Number(v) } })}
+              options={HOUR_OPTIONS} />
+          </div>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{pt ? 'às' : 'to'}</span>
+          <div style={{ minWidth: 90 }}>
+            <Select value={String(settings.quietHours.toHour)} onChange={v => update({ quietHours: { ...settings.quietHours, toHour: Number(v) } })}
+              options={HOUR_OPTIONS} />
+          </div>
+        </div>
+      )}
 
       <Divider />
 

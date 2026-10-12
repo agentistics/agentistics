@@ -56,6 +56,7 @@ import { getFabLive, subscribeFabLive } from '../../lib/nayFabLive'
 import { followSettled, forceRest, shouldWake, frameStyle, initFollow, landImpulse, nextQuiet, renderDock, REST_AFTER_FRAMES, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
 import { DockSettings, DockSettingsScreen } from './DockSettings'
 import { NayNotifyCard } from './NayNotifyCard'
+import { startCheckinAlerts } from '../../lib/checkinAlerts'
 import type { UpdateCardPlacement } from './NayUpdateCard'
 import { setOpenSession, setVisibleSessions, useNayAlerts } from '../../lib/nayNotifyStore'
 import { nayFabVisible, useNayFabShownInSession } from '../../lib/nayFabVisibility'
@@ -128,6 +129,7 @@ export interface NayDockProps {
 }
 
 export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdatePrompt }: NayDockProps) {
+  useEffect(() => startCheckinAlerts(), [])
   const pt = lang === 'pt'
   const { fleet, loading, unsupported, stale, act } = useFleet(lang)
   const sessionAlerts = useNayAlerts()
