@@ -117,10 +117,11 @@ export function rankSessions(
 ): Board {
   const acc = new Map<string, Leader>()
   for (const s of sessions) {
+    if (s.tokens_unavailable) continue
     if (!s.session_id) continue
     const e = acc.get(s.session_id) ?? blank(s.session_id, labelOf(s))
     e.cost += sessionCostUSD(s) ?? 0
-    e.tokens += sessionTokenTotal(s)
+    e.tokens += sessionTokenTotal(s) ?? 0
     e.sessions = 1
     e.calls += Object.values(s.tool_counts ?? {}).reduce((a, b) => a + b, 0)
     acc.set(s.session_id, e)
@@ -138,6 +139,7 @@ export function rankSessions(
 export function rankModels(sessions: readonly SessionMeta[], metric: TopMetric, limit = 5): Board {
   const acc = new Map<string, Leader>()
   for (const s of sessions) {
+    if (s.tokens_unavailable) continue
     for (const [model, usage] of sessionModelUsage(s)) {
       if (!model) continue
       const e = acc.get(model) ?? blank(model)
@@ -154,10 +156,11 @@ export function rankModels(sessions: readonly SessionMeta[], metric: TopMetric, 
 export function rankHarnesses(sessions: readonly SessionMeta[], metric: TopMetric, limit = 5): Board {
   const acc = new Map<string, Leader>()
   for (const s of sessions) {
+    if (s.tokens_unavailable) continue
     const key: SurfaceHarnessId = s.harness ?? 'claude'
     const e = acc.get(key) ?? blank(key)
     e.cost += sessionCostUSD(s) ?? 0
-    e.tokens += sessionTokenTotal(s)
+      e.tokens += sessionTokenTotal(s) ?? 0
     e.sessions += 1
     acc.set(key, e)
   }
@@ -167,11 +170,12 @@ export function rankHarnesses(sessions: readonly SessionMeta[], metric: TopMetri
 export function rankProjects(sessions: readonly SessionMeta[], metric: TopMetric, limit = 5): Board {
   const acc = new Map<string, Leader>()
   for (const s of sessions) {
+    if (s.tokens_unavailable) continue
     const key = canonicalProjectPath(s.project_path ?? '')
     if (!key) continue
     const e = acc.get(key) ?? blank(key)
     e.cost += sessionCostUSD(s) ?? 0
-    e.tokens += sessionTokenTotal(s)
+    e.tokens += sessionTokenTotal(s) ?? 0
     e.sessions += 1
     acc.set(key, e)
   }

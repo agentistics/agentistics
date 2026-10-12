@@ -762,3 +762,15 @@ describe('PRICE.UNKNOWN', () => {
     expect(unpricedTokens([['ghost', { ...u(10, 5), cacheReadInputTokens: 100, cacheCreationInputTokens: 7 }], ['claude-opus-4-6', u(99)]])).toBe(122)
   })
 })
+
+describe('tokens_unavailable is absent, not a measured zero (METRICS.FIX)', () => {
+  const base = { model: 'claude-opus-5', input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+  test('no per-model row and no cost for a session whose source stated no usage', () => {
+    expect(sessionModelUsage({ ...base, tokens_unavailable: true })).toEqual([])
+    expect(sessionCostUSD({ ...base, tokens_unavailable: true })).toBeNull()
+  })
+  test('the same zeros WITHOUT the flag stay a measurement', () => {
+    expect(sessionModelUsage(base)).toHaveLength(1)
+    expect(sessionCostUSD(base)).toBe(0)
+  })
+})

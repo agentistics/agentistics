@@ -387,6 +387,21 @@ export const FILE_URI_RE = /file:\/\/(\/[^\s"'`)\]]+)/g
 
 // ---------------------------------------------------------------------------
 
+/**
+ * Whether any turn spans an interval the transcript can actually observe. agy stamps `created_at`
+ * at one-second resolution and gives a reply the SAME stamp as its prompt, so a short exchange has
+ * no measurable response time: its active time is unknown, not 0. Reporting 0 would read as "took
+ * no time"; the surface shows "—" for `undefined` instead.
+ */
+function hasObservableTurnSpan(events: TurnEvent[]): boolean {
+  let start: number | null = null
+  for (const e of events) {
+    if (e.userPrompt) { start = e.ts; continue }
+    if (start !== null && e.ts > start) return true
+  }
+  return false
+}
+
 /** Pure: parse one conversation's transcript into a SessionMeta.
  *
  *  @param transcript   raw contents of transcript_full.jsonl (or transcript.jsonl)
@@ -649,7 +664,7 @@ export function parseAntigravityTranscriptDetailed(
     start_time: startTime,
     end_time: endTime,
     duration_minutes: durationMinutes,
-    active_minutes: activeMinutesOf(turnEvents),
+    active_minutes: hasObservableTurnSpan(turnEvents) ? activeMinutesOf(turnEvents) : undefined,
     user_message_count: userMessages,
     user_chars: userChars,
     user_char_messages: userCharMsgs,

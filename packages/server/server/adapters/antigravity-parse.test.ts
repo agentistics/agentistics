@@ -790,3 +790,19 @@ test('managedAntigravityCwds is total: missing, broken or non-array input is an 
   expect(managedAntigravityCwds('{not json').size).toBe(0)
   expect(managedAntigravityCwds('{"a":1}').size).toBe(0)
 })
+
+test('active_minutes is absent (not 0) when no turn spans an observable interval', () => {
+  // agy stamps at one-second resolution and gives the reply the SAME created_at as the prompt.
+  const sameSecond = [
+    userInput(0, '2026-07-27T17:13:27Z', 'quick question'),
+    JSON.stringify({ step_index: 1, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', created_at: '2026-07-27T17:13:27Z', content: 'answer' }),
+  ].join('\n')
+  const s = parseAntigravityTranscript(sameSecond, CONV, '/home/padawan')!
+  expect(s.duration_minutes).toBe(0)
+  expect(s.active_minutes).toBeUndefined()
+})
+
+test('active_minutes is still reconstructed when a turn spans distinct seconds', () => {
+  const s = parseAntigravityTranscript(NORMAL, CONV, '/home/padawan')!
+  expect(s.active_minutes).toBe(10)
+})

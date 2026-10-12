@@ -29,8 +29,9 @@
  * the main one, which subagent a nested one rolls into, which tool a failure belonged to. A fold that
  * decided those as events arrived would give a different answer for a different arrival order.
  *
- * "Last" (the context gauge, the session's model) means last by the ORDER KEY — the record's line
- * ordinal parsed off `sourceRef`, then `occurredAt`, then `eventId` — never by arrival.
+ * The context gauge is last by the ORDER KEY. The session model is the dominant model by reported
+ * token volume, matching the legacy adapters; when no usage was reported it falls back to the
+ * earliest model invocation.
  *
  * ## What is NOT here, and why it is said rather than approximated
  *
@@ -72,6 +73,7 @@ import {
   type AnyAgentisticsEvent,
   type HarnessId,
   type ModelUsageCounters,
+  type ModelUsage,
   type Projection,
   type SessionMeta,
   type TurnEvent,
@@ -195,6 +197,7 @@ export type ProjectedSessionMeta =
     | 'active_minutes' | 'user_response_times'
     | 'model' | 'harness'>>
   & {
+    model_usage?: Record<string, ModelUsage>
     /** Four counters per UTC day, the day of the response's first line — legacy `daily[day].*_tokens`. */
     daily_tokens?: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }>
     /**
@@ -299,7 +302,7 @@ function materialize(u: ModelUsageCounters): Tokens {
   return { input: u.input ?? 0, output: u.output ?? 0, cacheRead: u.cacheRead ?? 0, cacheWrite: u.cacheWrite ?? 0 }
 }
 
-export interface TurnStart { key: OrderKey; at: string; stamped: boolean; previousAssistantAt?: string }
+export interface TurnStart { key: OrderKey; at: string; stamped: boolean; previousAssistantAt?: string; /** a harness-opened turn (no person's prompt): bounds active time, never counted as a message */ task?: true }
 export interface TurnEnd { key: OrderKey; at: string; close: 'measured' | 'last-line'; durationMs?: number }
 
 /** A time usable as a clock — legacy's `Date.parse` filter on a line's timestamp. */
@@ -555,6 +558,13 @@ function foldOne(s: SessionMetaState, e: AnyAgentisticsEvent): void {
       if (e.data.model && (!acc.firstModel || compareKey(key, acc.firstModel.key) < 0)) acc.firstModel = { key, model: e.data.model }
       return
     }
+    case 'model.invoked': {
+      const key = keyOf(e)
+      if (e.data.model && (!acc.firstModel || compareKey(key, acc.firstModel.key) < 0)) {
+        acc.firstModel = { key, model: e.data.model }
+      }
+      return
+    }
     case 'tool.requested': {
       // Both names are kept; `HARNESS_TOOL_RULES[harness].counts` decides at finish which one keys the
       // counts (Claude's legacy counts its own names, every other parser `canonicalTool`'s).
@@ -588,6 +598,7 @@ function foldOne(s: SessionMetaState, e: AnyAgentisticsEvent): void {
       // legacy leaves such a line out of `user_message_timestamps`, and so does this projection.
       acc.turns.push({
         key: keyOf(e), at: e.occurredAt, stamped: e.provenance.confidence !== 'estimated',
+        ...(e.data.by === 'task' ? { task: true as const } : {}),
         ...(e.data.previousAssistantAt !== undefined ? { previousAssistantAt: e.data.previousAssistantAt } : {}),
       })
       return
@@ -664,7 +675,7 @@ function compareTurnItems(a: { key: OrderKey; end: boolean }, b: { key: OrderKey
  */
 export function turnTime(
   turns: readonly TurnStart[], ends: readonly TurnEnd[], sawTime: boolean,
-): { activeMinutes?: number; open: boolean; responseTimes: number[] } {
+): { activeMinutes?: number; open: boolean; responseTimes: number[]; span: boolean } {
   type Item = { key: OrderKey; end: true; e: TurnEnd } | { key: OrderKey; end: false; t: TurnStart }
   const items: Item[] = [
     ...turns.map(t => ({ key: t.key, end: false as const, t })),
@@ -703,9 +714,18 @@ export function turnTime(
   }
   flush()
 
-  if (open) return { open: true, responseTimes }
+  // Whether any turn spans an interval the transcript can observe: a close strictly after its prompt.
+  // (Antigravity stamps one-second `created_at` and gives a reply its prompt's stamp, so a short
+  // exchange has no measurable time — its legacy `hasObservableTurnSpan` makes that ABSENT, not 0.)
+  let span = false
+  let startedAt: number | null = null
+  for (const ev of events) {
+    if (ev.userPrompt) { startedAt = ev.ts; continue }
+    if (startedAt !== null && (ev.measuredMs !== undefined || ev.ts > startedAt)) { span = true; break }
+  }
+  if (open) return { open: true, responseTimes, span }
   const activeMinutes = events.length > 0 ? activeMinutesOf(events) : (sawTime ? 0 : undefined)
-  return { ...(activeMinutes !== undefined ? { activeMinutes } : {}), open: false, responseTimes }
+  return { ...(activeMinutes !== undefined ? { activeMinutes } : {}), open: false, responseTimes, span }
 }
 
 function finish(s: SessionMetaState): SessionMetaProjection {
@@ -735,6 +755,11 @@ function finish(s: SessionMetaState): SessionMetaProjection {
     const a = s.agents.get(id)
     if (!a) continue
     add(main.tokens, a.tokens)
+    for (const [model, tokens] of a.byModel) {
+      const current = main.byModel.get(model) ?? zero()
+      add(current, tokens)
+      main.byModel.set(model, current)
+    }
     for (const [d, t] of a.daily) { const cur = main.daily.get(d) ?? zero(); add(cur, t); main.daily.set(d, cur) }
     for (const c of a.absentCounters) main.absentCounters.add(c)
     main.sawTtl ||= a.sawTtl; main.ttl1h += a.ttl1h; main.ttl5m += a.ttl5m
@@ -856,7 +881,21 @@ function finish(s: SessionMetaState): SessionMetaProjection {
     if (s.run.conversationId) meta.session_id = s.run.conversationId
     if (HARNESS_IDS.includes(s.run.harness)) meta.harness = s.run.harness as SessionMeta['harness']
   }
-  if (main.firstModel) meta.model = main.firstModel.model
+  const modelUsage: Record<string, ModelUsage> = {}
+  let dominantModel = ''
+  let dominantTokens = -1
+  for (const [model, tokens] of main.byModel) {
+    modelUsage[model] = {
+      inputTokens: tokens.input, outputTokens: tokens.output,
+      cacheReadInputTokens: tokens.cacheRead, cacheCreationInputTokens: tokens.cacheWrite,
+      webSearchRequests: 0, costUSD: 0,
+    }
+    const total = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite
+    if (total > dominantTokens) { dominantTokens = total; dominantModel = model }
+  }
+  if (dominantModel) meta.model = dominantModel
+  else if (main.firstModel) meta.model = main.firstModel.model
+  if (Object.keys(modelUsage).length > 1) meta.model_usage = modelUsage
   if (main.gauge) {
     meta.context_tokens = main.gauge.tokens
     if (main.gauge.window !== undefined) meta.context_window = main.gauge.window
@@ -881,7 +920,7 @@ function finish(s: SessionMetaState): SessionMetaProjection {
   // Same shape as the compactions above: a walk of events that predate `turn.started` says nothing,
   // and a walk of nothing says nothing; only a walk that could have seen a turn reports a count.
   if (turnsRecorded && s.agents.size > 0) {
-    const turns = [...main.turns, ...sessionTurns].sort((a, b) => compareKey(a.key, b.key))
+    const turns = [...main.turns, ...sessionTurns].filter(t => !t.task).sort((a, b) => compareKey(a.key, b.key))
     meta.user_message_count = turns.length
     meta.rounds = turns.length
     meta.user_interruptions = Math.max(0, turns.length - 1)
@@ -897,6 +936,8 @@ function finish(s: SessionMetaState): SessionMetaProjection {
     meta.user_response_times = t.responseTimes
     if (t.open) {
       caveats.push({ field: 'active_minutes', reason: 'a turn has no usable turn.ended yet (the transcript is still open); absent, not a partial sum' })
+    } else if (s.run?.harness === 'antigravity' && !t.span) {
+      caveats.push({ field: 'active_minutes', reason: 'no turn spans an interval the transcript can observe (one-second timestamps, a reply stamped like its prompt); absent, not zero' })
     } else if (t.activeMinutes !== undefined) {
       meta.active_minutes = t.activeMinutes
     }
@@ -998,6 +1039,7 @@ function finish(s: SessionMetaState): SessionMetaProjection {
   // Priced exactly as the legacy path prices: `sessionCostUSD` over the projected counters.
   const costUSD = sessionCostUSD({
     ...(meta.model ? { model: meta.model } : {}),
+    ...(meta.model_usage ? { model_usage: meta.model_usage } : {}),
     input_tokens: meta.input_tokens,
     output_tokens: meta.output_tokens,
     cache_read_input_tokens: meta.cache_read_input_tokens,

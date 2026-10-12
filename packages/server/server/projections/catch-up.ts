@@ -103,14 +103,20 @@ export interface CatchUpReport {
 }
 
 const INFO_FIRST_EVENT = 'journal_first_event'
+/** How many times rows were DELETED from the journal (`Journal.epoch`). A cursor never sees a delete. */
+const INFO_EPOCH = 'journal_epoch'
 
 /** Does the journal still look like the one the store folded from? `null` = yes (or cannot tell). */
-async function journalReplaced(journal: Journal, store: ProjectionStore, maxCursor: number, head: number | null): Promise<string | null> {
+async function journalReplaced(journal: Journal, store: ProjectionStore, maxCursor: number, head: number | null, epoch: number | null): Promise<string | null> {
   const stored = store.info(INFO_FIRST_EVENT)
   const first = await journal.readFrom(0, 1)
   const firstId = first.events[0]?.eventId ?? null
   if (stored !== null && firstId !== null && stored !== firstId) return 'its first event differs'
   if (head !== null && maxCursor > head) return `a stored cursor (${maxCursor}) is past its head (${head})`
+  // The import REPLACES a source whose adapter version changed (its old rows are deleted): what was
+  // folded from them is stale, and no cursor can say so. A store that never recorded the epoch and
+  // meets a journal that has deleted rows cannot trust itself either.
+  if (epoch !== null && (store.info(INFO_EPOCH) ?? '0') !== String(epoch)) return `rows were replaced in the journal (epoch ${store.info(INFO_EPOCH) ?? '0'} → ${epoch})`
   return null
 }
 
@@ -141,7 +147,9 @@ export async function catchUpProjections(opts: CatchUpOptions): Promise<CatchUpR
     const head = opts.journal.head ? await opts.journal.head() : null
     const metas = store.metas()
     const maxCursor = Math.max(0, ...defs.map(d => metas.get(d.id)?.cursor ?? 0))
-    const replaced = await journalReplaced(opts.journal, store, maxCursor, head)
+    // Read ONCE, before anything is folded: a delete that lands mid-pass leaves the stored epoch behind, so the next pass rebuilds.
+    const epoch = opts.journal.epoch ? await opts.journal.epoch() : null
+    const replaced = await journalReplaced(opts.journal, store, maxCursor, head, epoch)
 
     // ── Plan, and reset every projection that rebuilds from scratch ──
     const plans = new Map<string, ProjectionPlan>()
@@ -161,6 +169,7 @@ export async function catchUpProjections(opts: CatchUpOptions): Promise<CatchUpR
     }
     const firstNow = (await opts.journal.readFrom(0, 1)).events[0]?.eventId
     if (firstNow !== undefined && store.info(INFO_FIRST_EVENT) !== firstNow) await store.setInfo(INFO_FIRST_EVENT, firstNow)
+    if (epoch !== null && store.info(INFO_EPOCH) !== String(epoch)) await store.setInfo(INFO_EPOCH, String(epoch))
 
     const rebuilding: Record<string, string> = {}
     for (const [id, p] of plans) if (p.mode === 'rebuild') rebuilding[reports.get(id)!.name] = p.reason

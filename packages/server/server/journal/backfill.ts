@@ -26,6 +26,7 @@
 import { readFileSync } from 'node:fs'
 import { rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { LEGACY_RECORD_VERSION } from './import-plan'
 import { fileIdentity } from './shadow'
 import { RESERVED_BYTES, SWAP_ALARM_FRACTION, type MemorySample } from '../sessions/memory-budget'
 
@@ -38,6 +39,8 @@ export interface BackfillProgress {
   updatedAt: string
   /** Set once, when a whole import ran to its end. The ONE thing the projections wait for. */
   completedAt?: string
+  /** The adapter version of each harness's integration when the import last ran to its end (METRICS.FIX). */
+  adapterVersions?: Record<string, string>
   harness?: string
   phase?: 'artifacts' | 'store'
   done?: number
@@ -74,6 +77,21 @@ export type BackfillDecision =
   | { start: true }
   | { start: false; reason: 'journal-off' | 'central' | 'complete' | 'running-elsewhere' | 'opted-out' }
 
+/**
+ * PURE. Whether a COMPLETED import ran under other adapter versions than the ones running now, for a
+ * harness whose events changed meaning (D8): the import then runs again, and replaces those sources.
+ * A progress file from before `adapterVersions` existed counts as the legacy versions of those harnesses.
+ */
+export function adapterUpgradePending(progress: BackfillProgress | null, current: Record<string, string> | undefined): boolean {
+  if (!progress || !current) return false
+  for (const [harness, legacy] of Object.entries(LEGACY_RECORD_VERSION)) {
+    const now = current[harness]
+    if (now === undefined) continue
+    if ((progress.adapterVersions?.[harness] ?? legacy) !== now) return true
+  }
+  return false
+}
+
 /** PURE. Should this server start the first import now? */
 export function planAutoBackfill(o: {
   journalEnabled: boolean
@@ -85,11 +103,13 @@ export function planAutoBackfill(o: {
   nowMs: number
   /** A `running`/`paused` record newer than this is another live import (a CLI run, a second server). */
   staleMs: number
+  /** The running integrations' adapter versions by harness id; absent = unknown (no upgrade check). */
+  adapterVersions?: Record<string, string>
 }): BackfillDecision {
   if (!o.journalEnabled) return { start: false, reason: 'journal-off' }
   if (o.central) return { start: false, reason: 'central' }
   if (o.optedOut) return { start: false, reason: 'opted-out' }
-  if (backfillComplete(o.progress, o.journalIdentity)) return { start: false, reason: 'complete' }
+  if (backfillComplete(o.progress, o.journalIdentity) && !adapterUpgradePending(o.progress, o.adapterVersions)) return { start: false, reason: 'complete' }
   const p = o.progress
   if (p && (p.state === 'running' || p.state === 'paused') && o.nowMs - Date.parse(p.updatedAt) < o.staleMs) {
     return { start: false, reason: 'running-elsewhere' }
@@ -171,6 +191,8 @@ export interface AutoBackfillDeps {
   central: boolean
   journalPath: string
   progressPath: string
+  /** The running integrations' adapter versions by harness id (`engineIntegrations()`), for the upgrade check. */
+  adapterVersions?: Record<string, string>
   /**
    * The server's environment (the opt-out flag). Passed in: `journal/` never reads the process environment
    * itself — the engine's provider-secrets lint walks this directory (Guard 3).
@@ -191,6 +213,7 @@ export function maybeStartAutoBackfill(d: AutoBackfillDeps): BackfillDecision {
     journalIdentity: fileIdentity(d.journalPath),
     nowMs: (d.now ?? Date.now)(),
     staleMs: 10 * 60_000,
+    ...(d.adapterVersions ? { adapterVersions: d.adapterVersions } : {}),
   })
   if (!decision.start) return decision
   const argv = backgroundImportArgv(

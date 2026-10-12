@@ -49,6 +49,16 @@ describe('what a row says', () => {
     expect(r?.openAttention).toBeUndefined()
   })
 
+  test('a turn the harness opened for a task (turn.started by task) is not a user turn', () => {
+    const r = project(sessionSurfaceProjection, [
+      RUN,
+      ev(1, 'turn.started', { by: 'task' }, '2026-10-01T10:00:01.000Z'),
+      ev(2, 'turn.started', { by: 'user' }, '2026-10-01T10:00:02.000Z'),
+      ev(3, 'turn.started', { by: 'task' }, '2026-10-01T10:00:03.000Z'),
+    ])
+    expect(r?.turns).toBe(1)
+  })
+
   test('absent is not zero: no model response → tokens is null; nothing is invented', () => {
     const r = project(sessionSurfaceProjection, [RUN])
     expect(r?.tokens).toBeNull()
