@@ -2144,6 +2144,8 @@ async function spawnManaged(req: {
   // managed id, which changes here, so the mute moves to the new id or it would silently come undone.
   if (req.inherit && !req.inherit.conversationId && !bornLink?.conversationId) {
     await rekeyMutedSession(req.inherit.id, id).catch(() => {})
+    // Same for its folder: filed under the old managed id, which this reopen retires.
+    await rekeyFolderMember(req.inherit.id, id).catch(() => {})
   }
   // A launch that fails takes its row with it: no row is ever left for a pane that is not there.
   const abandon = () => removeSession(id).catch(() => {})

@@ -191,8 +191,8 @@ let waitForRoom = false
  * waiting once, then only when the number that would fit changes. Ctrl-C leaves, nothing started.
  */
 /** `--folder` refs resolved for THIS command (ref -> folder id). Set once in `runSession`. */
-let folderByRef = new Map<string, { id: string; path: string; siblings: string[] }>()
-const folderCtx = (ref?: string) => { const f = ref ? folderByRef.get(ref) : undefined; return f ? { folder: { path: f.path, siblings: f.siblings } } : {} }
+let folderByRef = new Map<string, { id: string; path: string; siblings: string[]; top: boolean }>()
+const folderCtx = (ref?: string) => { const f = ref ? folderByRef.get(ref) : undefined; return f ? { folder: { path: f.path, siblings: f.siblings, top: f.top } } : {} }
 
 let warnedNoFolder = false
 /** File a just-spawned session into its folder; with none asked, a LEADER caller is told on stderr. */

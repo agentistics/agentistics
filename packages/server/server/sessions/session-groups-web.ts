@@ -34,6 +34,8 @@ export interface GroupsDeps {
   rows: () => Promise<readonly FleetRowForGroups[]>
   read: () => Promise<Preferences>
   update: (mutate: PreferencesMutator) => Promise<Preferences>
+  /** The SSE signal; tests inject a spy. */
+  broadcast?: () => void
 }
 
 const defaultDeps: GroupsDeps = {
@@ -88,7 +90,7 @@ export async function listGroups(deps: GroupsDeps = defaultDeps): Promise<Groups
 }
 
 export interface GroupOpRequest {
-  op: 'create' | 'rename' | 'delete' | 'add' | 'remove' | 'nest'
+  op: 'create' | 'rename' | 'delete' | 'add' | 'remove' | 'nest' | 'broadcast'
   /** A group id, or its name. */
   group?: string
   /** `delete` only: also delete the folder's sub-folders (their sessions go back to no folder). */
@@ -122,6 +124,13 @@ const fail = (code: string, matches?: string[]): GroupOpReply => ({
 })
 
 export async function groupOp(req: GroupOpRequest, deps: GroupsDeps = defaultDeps): Promise<GroupOpReply> {
+  // BROADCAST-ONLY: a one-shot CLI already wrote the folders file itself and only needs the server's SSE
+  // signal. It resolves no session (a freshly rekeyed conversation id is not in the fleet snapshot yet)
+  // and writes nothing.
+  if (req.op === 'broadcast') {
+    ;(deps.broadcast ?? (() => void import('../sse').then(m => m.broadcastSessionGroupsChanged()).catch(() => {})))()
+    return { ok: true, message: 'Folders refresh signalled.' }
+  }
   const rows = await deps.rows().catch(() => [] as FleetRowForGroups[])
 
   // Text an assistant holds -> the key the groups store. A ref that resolves to nothing is REFUSED:

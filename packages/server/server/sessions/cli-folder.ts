@@ -21,11 +21,13 @@ export interface FolderDeps {
   /** Tell a running server the folders changed (its SSE signal is what refreshes open browsers). */
   notify?: (folderId: string, key: string) => Promise<void>
 }
-/** The write above is direct (the server may be stopped); re-filing the same key through the server's
- *  own route is idempotent and makes IT broadcast. Best effort: no server = nothing to refresh. */
-const pingServer = async (folderId: string, key: string): Promise<void> => {
-  await fetch(`http://127.0.0.1:${PORT}/api/session-groups/${encodeURIComponent(folderId)}/sessions`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session: key }),
+/** The write above is direct (the server may be stopped); the server's SSE signal is what refreshes open
+ *  browsers. A broadcast-only call, NOT a re-file: after a rekey the new key (a conversation id) is not in
+ *  the server's fleet snapshot yet, so re-filing it resolved to `no_such_session` and signalled nothing.
+ *  Best effort: no server = nothing to refresh. */
+const pingServer = async (): Promise<void> => {
+  await fetch(`http://127.0.0.1:${PORT}/api/session-groups/broadcast`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
     signal: AbortSignal.timeout(1500),
   }).catch(() => {})
 }
@@ -36,9 +38,9 @@ const groupsOf = (p: Preferences): SessionUserGroupsValue => ({ groups: (p.sessi
 export type FolderResolution = { ok: true; id: string; path: string } | { ok: false; message: string }
 
 /** Resolve every distinct ref up front; the first refusal wins, so nothing starts on a bad ref. */
-export async function resolveFolders(refs: readonly (string | undefined)[], deps: FolderDeps = defaultDeps): Promise<{ ok: true; byRef: Map<string, { id: string; path: string; siblings: string[] }> } | { ok: false; message: string }> {
+export async function resolveFolders(refs: readonly (string | undefined)[], deps: FolderDeps = defaultDeps): Promise<{ ok: true; byRef: Map<string, { id: string; path: string; siblings: string[]; top: boolean }> } | { ok: false; message: string }> {
   const wanted = [...new Set(refs.filter((r): r is string => !!r))]
-  const byRef = new Map<string, { id: string; path: string; siblings: string[] }>()
+  const byRef = new Map<string, { id: string; path: string; siblings: string[]; top: boolean }>()
   if (wanted.length === 0) return { ok: true, byRef }
   const groups = groupsOf(await deps.read())
   for (const ref of wanted) {
@@ -48,7 +50,7 @@ export async function resolveFolders(refs: readonly (string | undefined)[], deps
       const siblings = (r.group.parentId
         ? groups.groups.filter(g => g.id !== r.group.id && g.parentId === r.group.parentId)
         : groups.groups.filter(g => g.parentId === r.group.id)).map(g => folderPath(groups, g))
-      byRef.set(ref, { id: r.group.id, path: r.path, siblings })
+      byRef.set(ref, { id: r.group.id, path: r.path, siblings, top: !r.group.parentId })
       continue
     }
     const all = groups.groups.map(g => `  ${folderLabel(groups, g)}`).join('\n')

@@ -35,7 +35,7 @@ export interface ContextInput {
   /** The stored role (`session-roles.ts`); absent = the session decides from the request. */
   role?: 'leader' | 'worker'
   /** The sidebar folder this session sits in (path) and its sibling folders, when it was filed at spawn. */
-  folder?: { path: string; siblings: readonly string[] }
+  folder?: { path: string; siblings: readonly string[]; /** A top-level folder: its `siblings` are its sub-folders. */ top?: boolean }
   lang?: ContextLang
   toolNames?: readonly string[]
 }
@@ -111,7 +111,7 @@ export function contextText(i: ContextInput): string {
   } else {
     lines.push('This session is not linked to a task. If the work grows beyond a quick question, offer to file it in Agentask — ask first.')
   }
-  if (i.folder) lines.push(`Your sidebar folder: ${i.folder.path}${i.folder.siblings.length > 0 ? `. Sibling folders: ${i.folder.siblings.join(', ')}` : ''}. Workers you open go in the matching folder.`)
+  if (i.folder) lines.push(`Your sidebar folder: ${i.folder.path}${i.folder.siblings.length > 0 ? `. ${i.folder.top ? 'Sub-folders' : 'Sibling folders'}: ${i.folder.siblings.join(', ')}` : ''}. Workers you open go in the matching folder.`)
   if (i.parentId) {
     lines.push(
       `You were started by session ${i.parentId}${i.parentTitle ? ` ("${i.parentTitle}")` : ''}. When you finish, get blocked or need a decision, report to it with agentistics_session_message (kind: handback | block | question) — not to the user — and keep working only on what it asked.`,
