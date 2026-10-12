@@ -969,7 +969,7 @@ export function NewSessionModal({
                 radioLabel={pt ? 'Modo ausente' : 'Away mode'}
                 items={[
                   { key: 'off', label: pt ? 'Desligado' : 'Off', color: 'var(--text-tertiary)' },
-                  { key: 'on', label: pt ? 'Ligado — não me pergunte' : "On — don't ask me", color: '#a78bfa', data: { away: 'on' } },
+                  { key: 'on', label: pt ? 'Ligado — não me pergunte' : "On — don't ask me", color: 'var(--anthropic-orange)', data: { away: 'on' } },
                 ]}
                 value={awayOn ? 'on' : 'off'}
                 onPick={v => { setAwayOn(v === 'on'); setDirty(true) }}
