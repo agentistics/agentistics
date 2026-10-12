@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { SessionLinkInfo, SessionLinkPanel, linkTargets } from './SessionLinkInfo'
+import { CheckinRoundSections, SessionLinkInfo, SessionLinkPanel, linkTargets } from './SessionLinkInfo'
+import type { CheckinRound } from '../../lib/checkin'
 import { sessionPath } from '../../lib/sessionRoute'
 import type { SessionLinks } from '../../lib/sessionParent'
 
@@ -48,6 +49,35 @@ describe('SessionLinkInfo', () => {
     const html = renderToStaticMarkup(<SessionLinkPanel links={links} sessionId="session-1" pt={false} onGo={() => {}} isMobile />)
     const button = html.match(/<button[^>]*aria-label="Change type"[^>]*>/)?.[0] ?? ''
     expect(button).toContain('min-height:44px')
+  })
+})
+
+describe('structured check-in sections', () => {
+  const round: CheckinRound = {
+    state: 'ok', summary: 'fallback', headline: 'Headline',
+    needs: [{ subject: 'Review', text: 'Please review' }],
+    delivered: [{ text: 'Shipped the modal' }, { text: 'Added tests' }],
+    inProgress: [{ item: 'QA', stage: 'review' }],
+    next: [{ text: 'Deploy', when: 'tomorrow' }],
+    health: [{ label: 'MCP', value: 'online', state: 'ok' }],
+  }
+
+  it('renders every non-empty section and its count', () => {
+    const html = renderToStaticMarkup(<CheckinRoundSections round={round} pt={false} />)
+    for (const label of ['Needs you', 'Delivered last', 'In development', 'Next steps', 'Health']) expect(html).toContain(label)
+    expect(html).toContain('>2<')
+  })
+  it('opens the needs section by default and hides empty sections', () => {
+    const html = renderToStaticMarkup(<CheckinRoundSections round={{ state: 'ok', summary: 'Legacy', needs: round.needs }} pt={false} />)
+    expect(html).toContain('aria-expanded="true"')
+    expect(html).toContain('Needs you')
+    expect(html).not.toContain('Delivered last')
+    expect(html).not.toContain('In development')
+  })
+  it('keeps the larger-view opener in the check-in panel contract', () => {
+    const html = renderToStaticMarkup(<SessionLinkPanel links={{ parent: null, children: [], task: null }} pt={false} onGo={() => {}} />)
+    expect(html).not.toContain('checkin-open-larger')
+    expect(html).toContain('session-link-panel')
   })
 })
 

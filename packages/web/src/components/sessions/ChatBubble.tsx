@@ -309,6 +309,17 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
     ...(isMobile ? { padding: '4px 10px', margin: '2px 0' } : {}),
   }
 
+  // CHECKIN.PROMPT-SYSTEM is a notice, but its action belongs to the shared session header so
+  // the same larger report view is used from both places.
+  if (note.includes('agentistics_checkin_report')) {
+    return <div style={{ display: 'flex', justifyContent: 'center', padding: '2px 0' }}>
+      <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('agentistics:open-checkin'))}
+        style={{ ...chip, minHeight: 44, cursor: 'pointer', color: 'var(--text-primary)' }}>
+        {pt ? 'Abrir check-in' : 'Open check-in'}
+      </button>
+    </div>
+  }
+
   if (tab !== null) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', padding: '2px 0' }}>

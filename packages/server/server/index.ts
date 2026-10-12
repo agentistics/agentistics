@@ -2065,6 +2065,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname === '/api/checkin' || url.pathname.startsWith('/api/checkin/')) {
       if (url.pathname === '/api/checkin/report' && req.method === 'POST') {
         const body = await req.json().catch(() => ({})) as { state?: unknown; summary?: unknown; headline?: unknown; delivered?: unknown; inProgress?: unknown; next?: unknown; health?: unknown; actions?: unknown; needs?: unknown; session?: { id?: unknown; token?: unknown } }
+        if (typeof body.headline === 'string' && (body.headline.includes('\n') || body.headline.includes('\r') || [...body.headline].length > 140)) {
+          return json({ error: 'invalid_headline', message: 'headline must be one line and at most 140 characters' }, 400)
+        }
         const { verifySessionIdentity } = await import('./sessions/session-identity')
         const sender = body.session ? await verifySessionIdentity(body.session.id, body.session.token) : null
         if (!sender) return json({ error: 'unverified_sender' }, 403)
