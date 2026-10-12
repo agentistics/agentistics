@@ -27,10 +27,17 @@ export const CHECKIN_ITEMS: readonly { id: CheckinItemId; pt: string; en: string
   { id: 'handoff', pt: 'Passagem (HANDOFF)', en: 'Handoff' },
 ]
 
+/** The prototype's clock: `21h40` in Portuguese, `21:40` in English. */
+export function clockLabel(ms: number, pt = true): string {
+  const d = new Date(ms)
+  const hh = String(d.getHours()).padStart(2, '0'), mm = String(d.getMinutes()).padStart(2, '0')
+  return pt ? `${hh}h${mm}` : `${hh}:${mm}`
+}
+
 export function formatNextRun(nextRunAt: number | null, now = Date.now(), pt = true): string {
   if (nextRunAt === null) return pt ? 'pausado' : 'paused'
   const mins = Math.max(0, Math.ceil((nextRunAt - now) / 60_000))
-  const when = new Date(nextRunAt).toLocaleTimeString(pt ? 'pt-BR' : 'en-GB', { hour: '2-digit', minute: '2-digit' })
+  const when = clockLabel(nextRunAt, pt)
   return pt ? `${when} · em ${mins} min` : `${when} · in ${mins} min`
 }
 

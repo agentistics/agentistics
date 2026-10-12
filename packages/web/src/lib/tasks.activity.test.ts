@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { groupActivity, type TaskEvent } from './tasks'
+import { expandCheckinEvent, groupActivity, type TaskEvent } from './tasks'
 
 const event = (id: string, kind: string, state?: TaskEvent['state'], at = id): TaskEvent => ({
   id, taskId: 'task', at, actor: 'leader', kind, ...(state ? { state } : {}),
@@ -28,5 +28,20 @@ describe('groupActivity', () => {
     expect(groupActivity(events, 'all').map(e => e.kind)).toEqual(['checkin', 'status', 'checkin'])
     expect(groupActivity(events, 'without-checkins').map(e => e.kind)).toEqual(['status'])
     expect(groupActivity(events, 'only-checkins').map(e => e.kind)).toEqual(['checkin', 'checkin'])
+  })
+})
+
+describe('expandCheckinEvent', () => {
+  test('lifts the round fields the server stores in detail', () => {
+    const e = expandCheckinEvent({ id: 'x', taskId: 't', at: '2026-10-12T00:00:00Z', actor: 'L', kind: 'checkin', detail: JSON.stringify({ sessionId: 's', state: 'needs_you', summary: 'two', needs: [{ subject: 'a', text: 'A' }] }) })
+    expect(e.state).toBe('needs_you')
+    expect(e.summary).toBe('two')
+    expect(e.needs?.[0]?.subject).toBe('a')
+  })
+  test('leaves other events and malformed details alone', () => {
+    const status = { id: 'y', taskId: 't', at: '', actor: 'L', kind: 'status', detail: '{"state":"ok"}' }
+    expect(expandCheckinEvent(status)).toBe(status)
+    const bad = { id: 'z', taskId: 't', at: '', actor: 'L', kind: 'checkin', detail: '{nope' }
+    expect(expandCheckinEvent(bad)).toBe(bad)
   })
 })

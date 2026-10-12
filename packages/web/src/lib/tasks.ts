@@ -145,6 +145,27 @@ export interface CheckinRun extends TaskEvent {
 }
 export type GroupedActivity = TaskEvent | CheckinRun
 
+/**
+ * The server stores a check-in round's fields as JSON in `detail` (the task log's `TaskEvent` has no
+ * typed slot for them); lift them onto the event so the Activity tab can group and colour it. A
+ * detail that is not that JSON leaves the event as it was.
+ */
+export function expandCheckinEvent(e: TaskEvent): TaskEvent {
+  if (e.kind !== 'checkin' || e.state !== undefined || !e.detail?.startsWith('{')) return e
+  try {
+    const d = JSON.parse(e.detail) as Partial<Pick<TaskEvent, 'state' | 'summary' | 'sessionId' | 'actions' | 'needs'>>
+    const state = d.state === 'ok' || d.state === 'resolved' || d.state === 'needs_you' ? d.state : undefined
+    return {
+      ...e,
+      ...(state ? { state } : {}),
+      ...(typeof d.summary === 'string' ? { summary: d.summary } : {}),
+      ...(typeof d.sessionId === 'string' ? { sessionId: d.sessionId } : {}),
+      ...(Array.isArray(d.actions) ? { actions: d.actions } : {}),
+      ...(Array.isArray(d.needs) ? { needs: d.needs } : {}),
+    }
+  } catch { return e }
+}
+
 /** Filter and collapse adjacent successful check-ins, preserving the API's event order. */
 export function groupActivity(events: readonly TaskEvent[], filter: ActivityFilter = 'all'): GroupedActivity[] {
   const visible = events.filter(e => filter === 'all' || (filter === 'only-checkins' ? e.kind === 'checkin' : e.kind !== 'checkin'))
@@ -1070,7 +1091,7 @@ export function useTaskActivity(ref?: string, limit = 60) {
     try {
       const r = await fetch(`/api/tasks/activity?${q}`)
       const body = await r.json() as { events?: TaskEvent[] }
-      setEvents(body.events ?? [])
+      setEvents((body.events ?? []).map(expandCheckinEvent))
     } catch {
       // An unreachable server keeps the last log rather than reporting an empty one — the same
       // rule the fleet poller follows. "Nothing happened" and "nobody answered" are different.

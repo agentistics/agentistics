@@ -20,7 +20,7 @@
  */
 
 import { useMemo, useRef, useState, type ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -87,7 +87,9 @@ import { taskPath } from '../../lib/sessionTaskLink'
  */
 function ActivityTab({ id, lang }: { id: string; lang: Lang }) {
   const { events, loading } = useTaskActivity(id, 100)
-  const [filter, setFilter] = useState<ActivityFilter>('all')
+  // `?filter=checkins` (the ⓘ panel's "Ver registro") opens the log already narrowed to check-ins.
+  const [params] = useSearchParams()
+  const [filter, setFilter] = useState<ActivityFilter>(() => params.get('filter') === 'checkins' ? 'only-checkins' : 'all')
   const [openRuns, setOpenRuns] = useState<Set<string>>(() => new Set())
   const grouped = useMemo(() => groupActivity(events, filter), [events, filter])
   const pt = lang === 'pt'
@@ -96,7 +98,8 @@ function ActivityTab({ id, lang }: { id: string; lang: Lang }) {
     { value: 'without-checkins', label: pt ? 'Ocultar check-ins' : 'Hide check-ins', color: 'var(--text-secondary)', dim: 'var(--ag-tint-2)' },
     { value: 'only-checkins', label: pt ? 'Só check-ins' : 'Check-ins only', color: 'var(--accent-green)', dim: 'var(--accent-green-dim)' },
   ] as const
-  const time = (at: string) => new Date(at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  // The prototype's clock: `21h10` in Portuguese, `21:10` in English — never the browser's AM/PM.
+  const time = (at: string) => { const d = new Date(at); const hh = String(d.getHours()).padStart(2, '0'); const mm = String(d.getMinutes()).padStart(2, '0'); return pt ? `${hh}h${mm}` : `${hh}:${mm}` }
   const link = (kind: 'session' | 'subtask' | 'task', target: string, text: string, taskId?: string) => {
     const href = kind === 'session' ? sessionPath(target) : taskPath(taskId ?? target)
     return <a key={`${kind}-${target}-${text}`} href={href} onClick={e => { e.preventDefault(); navigate(href) }} style={{ color: 'var(--anthropic-orange)', textDecoration: 'none' }}>{text}</a>
@@ -114,12 +117,12 @@ function ActivityTab({ id, lang }: { id: string; lang: Lang }) {
       const label = run
         ? `${children.length} ${pt ? 'check-ins sem novidade' : 'check-ins with no news'}, ${time(last.at)}–${time(first.at)}`
         : (e.summary ?? (pt ? 'check-in sem novidade' : 'check-in with no news'))
-      if (run && !expanded) return <button key={e.id} onClick={() => setOpenRuns(prev => new Set(prev).add(e.id))} style={{ display: 'flex', width: '100%', gap: 9, alignItems: 'baseline', textAlign: 'left', border: 0, background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', font: 'inherit', padding: 0 }}><span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>{time(e.at)}</span><span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{label}</span><span aria-hidden="true">›</span></button>
+      if (run && !expanded) return <button key={e.id} onClick={() => setOpenRuns(prev => new Set(prev).add(e.id))} style={{ display: 'flex', width: '100%', gap: 9, alignItems: 'baseline', textAlign: 'left', border: 0, background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', font: 'inherit', padding: 0 }}><span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>{time(e.at)}</span><span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600 }}>{label}</span><span aria-hidden="true">›</span></button>
       return <div key={e.id} style={{ display: 'grid', gap: 6, padding: '7px 9px', borderRadius: 6, background: e.state === 'resolved' ? 'var(--anthropic-orange-dim)' : e.state === 'needs_you' ? 'var(--accent-red-dim)' : 'transparent' }}>
         <div style={{ display: 'flex', gap: 9, alignItems: 'baseline', fontSize: 12 }}><span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>{time(e.at)}</span><span style={{ color: 'var(--text-secondary)' }}><strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{e.actor}</strong>{' '}{label}</span>{run && <button onClick={() => setOpenRuns(prev => { const next = new Set(prev); next.delete(e.id); return next })} style={{ border: 0, background: 'none', color: 'var(--text-tertiary)', cursor: 'pointer' }}>⌃</button>}</div>
         {e.actions?.map(a => <div key={a.text} style={{ fontSize: 12 }}>{a.link ? link(a.link.kind, a.link.id, a.text, a.link.taskId) : a.text}</div>)}
         {e.needs?.map(n => <div key={n.subject} style={{ fontSize: 12, color: n.critical ? 'var(--accent-red)' : 'var(--text-secondary)' }}>{n.link ? link(n.link.kind, n.link.id, n.text, n.link.taskId) : n.text}</div>)}
-        {run && children.slice(0, -1).map(child => <div key={child.id} style={{ ...microLabel, paddingLeft: 35 }}>{time(child.at)} · {child.summary ?? (pt ? 'sem novidade' : 'no news')}</div>)}
+        {run && children.map(child => <div key={child.id} style={{ ...microLabel, paddingLeft: 35 }}>{time(child.at)} · {child.summary ?? (pt ? 'sem novidade' : 'no news')}</div>)}
       </div>
     }
     return <div key={e.id} style={{ display: 'flex', gap: 9, alignItems: 'baseline', fontSize: 12 }}><span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>{time(e.at)}</span><span style={{ color: 'var(--text-secondary)' }}><strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{e.actor}</strong>{' '}{e.kind === 'status' ? `moved ${e.from ?? '?'} → ${e.to ?? '?'}` : e.kind === 'claim' ? (e.detail === 'takeover' ? 'took over' : 'claimed it') : e.kind === 'release' ? 'released it' : e.kind === 'priority' ? `set priority ${e.from ?? '?'} → ${e.to ?? '?'}` : e.kind === 'assign' ? `set the owner to ${e.to || 'nobody'}` : e.kind === 'session' ? `filed a ${e.detail ?? ''} session`.trim() : e.kind === 'move' ? 'reordered it' : e.kind}</span></div>
@@ -910,7 +913,8 @@ export function CommentsTab({ id, detail, onChanged, target, lang = 'en', looseO
   )
 }
 
-export type DeliveryTab = 'threads' | 'overview' | 'sessions' | 'comments' | 'subtasks' | 'files' | 'activity' | 'about'
+export const DELIVERY_TABS = ['threads', 'overview', 'sessions', 'comments', 'subtasks', 'files', 'activity', 'about'] as const
+export type DeliveryTab = typeof DELIVERY_TABS[number]
 
 export interface DeliveryDetailProps {
   id: string
