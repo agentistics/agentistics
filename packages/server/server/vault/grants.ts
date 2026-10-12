@@ -318,7 +318,11 @@ export const nativeVaultRefs = {
     const nativeSession = `native:${sessionId}`
     const initialGrant = _grants.get(nativeSession)
     const initialRefs = initialGrant?.refs.slice() ?? []
-    const displayName = (ref: string): string => initialRefs.find(r => r.ref === ref)?.name ?? ref
+    const displayName = (ref: string): string => {
+      const name = initialRefs.find(r => r.ref === ref)?.name ?? ref
+      const clean = name.replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
+      return clean.slice(0, 80) + (clean.length > 80 ? '…' : '')
+    }
     const refusal = (ref: string, code: string) => ({ ref, code, sentence: `Não rodei: ${displayName(ref)} foi recusado.` })
     const decided = await Promise.all(refs.map(async ref => {
       const result = await authorizeUse(nativeSession, ref, { command: ctx.command, harness: 'native', callId: ctx.callId })
