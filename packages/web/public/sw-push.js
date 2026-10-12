@@ -17,8 +17,10 @@ self.addEventListener('notificationclick', event => {
   const sessionId = event.notification.data?.sessionId
   const target = sessionId ? `/sessions/${encodeURIComponent(sessionId)}` : '/sessions'
   event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
-    const existing = clients.find(client => 'focus' in client)
-    if (existing) return existing.navigate(target).then(client => client?.focus())
+    // navigate() rejects on a window this worker does not control (includeUncontrolled lists those
+    // too), so a failed navigate falls back to opening the session in a new window.
+    const existing = clients.find(client => 'navigate' in client && 'focus' in client)
+    if (existing) return existing.navigate(target).then(client => client?.focus()).catch(() => self.clients.openWindow(target))
     return self.clients.openWindow(target)
   }))
 })

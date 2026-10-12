@@ -11,6 +11,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { sealToFile, withSecret } from '../vault/service'
 import type { SessionEvent } from './event-types'
+import { redactSecrets } from '@agentistics/core'
 import { desktopText } from './notify-text'
 
 export type MobileSubscription = {
@@ -175,8 +176,9 @@ export async function sendMobilePush(
     if (sub.kind !== 'mobile' || !sub.enabled) continue
     for (const event of wanted) {
       try {
+        // The body carries the session's last screen line; a pasted credential must not reach a lock screen.
         const text = desktopText(event)
-        await transport(sub, { title: text.title, body: text.body, sessionId: event.id })
+        await transport(sub, { title: redactSecrets(text.title), body: redactSecrets(text.body), sessionId: event.id })
         sent++
       } catch { failed++ }
     }

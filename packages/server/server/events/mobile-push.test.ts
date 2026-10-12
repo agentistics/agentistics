@@ -37,6 +37,14 @@ describe('mobile push', () => {
     expect(result).toEqual({ sent: 1, failed: 0 })
   })
 
+  test('redacts a credential on the screen line before it is pushed to a phone', async () => {
+    const bodies: string[] = []
+    const e = { ...event('one'), lines: ['export GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789AB'] }
+    await sendMobilePush([e], [sub('mobile')], new Set(), async (_s, payload) => { bodies.push(payload.body) })
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz0123456789AB')
+  })
+
   test('classifies phone and tablet user agents, but not desktop browsers', () => {
     expect(isMobileUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile/15E148')).toBe(true)
     expect(isMobileUserAgent('Mozilla/5.0 (Linux; Android 14; Pixel Tablet) AppleWebKit/537.36')).toBe(true)
