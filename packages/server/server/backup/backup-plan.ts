@@ -558,6 +558,9 @@ const ALWAYS: string[] = [
   // Mobile device endpoints and public subscription keys are user configuration needed to restore push
   // delivery. The VAPID private signing key is separate and excluded above as sealed credential material.
   '.agentistics/mobile-push-subscriptions.json',
+  // Known harness accounts and the per-account "available to agents" switch. Identity fields only
+  // (account id, label, plan), never credentials; the switch is a choice a person made.
+  '.agentistics/accounts.json',
   // Images and files attached to sessions from the web (`sessions/attachment-web.ts`). User
   // content, referenced by sessions that DO travel, and reproducible from nowhere: 97 files / 12 MB
   // on the reference machine. It grows, which is an argument for watching it, not for dropping it —

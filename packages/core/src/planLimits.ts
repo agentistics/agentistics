@@ -38,7 +38,7 @@ export type PlanLimitSource = 'claude-stream' | 'codex-rollout' | 'codex-app-ser
 
 export interface PlanLimits {
   harness: HarnessId
-  /** Account key within the harness; one account per harness today (`'default'`). */
+  /** Meter key within the harness (`'default'`); availability follows the current login. */
   account: string
   /** The plan as registered in Settings → Billing (filled by `withPlanLabel`). */
   plan?: string
@@ -48,6 +48,15 @@ export interface PlanLimits {
   /** Epoch ms of the record the windows were read from. */
   updatedAt: number
   source: PlanLimitSource
+}
+
+/** Availability applies to the harness's current login while meter keys stay unchanged. */
+export function agentVisiblePlans<T extends { harness: HarnessId }>(
+  plans: readonly T[],
+  currentAccounts: readonly { harness: HarnessId; available: boolean }[],
+): T[] {
+  const hidden = new Set(currentAccounts.filter(a => !a.available).map(a => a.harness))
+  return plans.filter(p => !hidden.has(p.harness))
 }
 
 export const PLAN_BUDGET_HOLD_5H_PCT = 85

@@ -16,7 +16,7 @@ import { observeFleet, pushAlert, pushDemoAlert, requestShock, resetNayNotifySto
 import { isSessionMuted } from './mutedSessions'
 import { pushNotification, setMutedCategories, type NotificationType } from './notifications'
 import { isNotificationCategory } from './notificationCategories'
-import { isWorkerMuted } from './sessionRoles'
+import { isWorkerMuted, registerSessionRoleAlias } from './sessionRoles'
 import { DEFAULT_QUIET_HOURS, readQuietHours, type QuietHours } from './checkinNotify'
 
 export type SessionActivity = 'working' | 'waiting' | 'waiting-approval' | 'exited'
@@ -498,12 +498,17 @@ const muteKeyById = new Map<string, string>()
 function isMutedId(id: string): boolean {
   return isSessionMuted(muteKeyById.get(id) ?? id)
 }
+function isWorkerMutedId(id: string, event: NotifyEvent): boolean {
+  // Match server roleOfRow: the conversation role wins; its registered alias falls back to the
+  // managed id when only that identity has a role. Checking the managed id first reverses this.
+  return isWorkerMuted(muteKeyById.get(id) ?? id, event)
+}
 
 function deliver(d: Delivery, settings: NotificationSettings): void {
   // MUTE SUPPRESSES DELIVERY ONLY — bell, card, shock, sound. The session's state (`waiting`) is
   // computed upstream of here and never touched. The observer still sees it: it is the decision log.
   if (isMutedId(d.bell.id)) return
-  if (isWorkerMuted(d.bell.id, d.event)) return
+  if (isWorkerMutedId(d.bell.id, d.event)) return
   deliveryObserver?.({ event: d.event, title: d.title, body: d.body, nay: d.nay === true })
   if (typeof document !== 'undefined') {
     pushNotification({
@@ -529,8 +534,9 @@ setSnoozeReleaseHandler(alert => {
   const settings = getNotificationSettings()
   if (!settings.enabled || settings.doNotDisturb) return
   if (isMutedId(alert.sessionId)) return
-  if (!pushAlert(alert)) return
   const event: NotifyEvent = alert.kind === 'turn' ? 'waiting' : alert.kind === 'approval' ? 'waiting-approval' : 'stale'
+  if (isWorkerMutedId(alert.sessionId, event)) return
+  if (!pushAlert(alert)) return
   if (settings.soundEnabled) playNotificationSound(resolveSound(event, alert.nay === true, settings), settings.soundVolume)
 })
 
@@ -618,7 +624,13 @@ export function notifyFleetTransitions(
   lang: 'pt' | 'en',
 ): Record<string, SessionActivity> {
   const seen = fleetActivityStates(rows)
-  for (const r of rows) muteKeyById.set(r.id, r.conversationId ?? r.id)
+  for (const r of rows) {
+    const stableKey = r.conversationId ?? r.id
+    muteKeyById.set(r.id, stableKey)
+    // Role assignment is server-owned and can be keyed by either identity. The notification path
+    // must not depend on the sidebar having rendered this row first.
+    if (r.conversationId) registerSessionRoleAlias(r.id, r.conversationId)
+  }
   raiseStale(rows, lang)
   // `null` is the first snapshot — see the rule above. It is deliberately distinct from `{}`, which
   // is a machine that genuinely had no sessions a moment ago and now has one.

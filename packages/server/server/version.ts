@@ -71,6 +71,7 @@ export interface VersionCacheEntry {
   fetchedAt: number
   /** Last attempt, successful or not — drives the retry spacing. */
   attemptedAt?: number
+  releases?: { tag: string; published_at: string }[]
 }
 
 let _cache: VersionCacheEntry | null = null
@@ -90,6 +91,7 @@ export function parseVersionCache(raw: string): VersionCacheEntry | null {
       attemptedAt: typeof o.attemptedAt === 'number' && Number.isFinite(o.attemptedAt)
         ? o.attemptedAt
         : undefined,
+      releases: Array.isArray(o.releases) ? o.releases.filter((r): r is { tag: string; published_at: string } => !!r && typeof r === 'object' && typeof (r as any).tag === 'string' && typeof (r as any).published_at === 'string') : undefined,
     }
   } catch {
     return null
@@ -124,7 +126,7 @@ export function isVersionCacheFresh(
  */
 export function cachedVersionInfo(entry: VersionCacheEntry | null, current: string): VersionInfo | null {
   if (!entry || entry.current !== current || entry.fetchedAt <= 0) return null
-  return { current, latest: entry.latest, hasUpdate: entry.hasUpdate, critical: entry.critical }
+  return { current, latest: entry.latest, hasUpdate: entry.hasUpdate, critical: entry.critical, releases: entry.releases }
 }
 
 /**
@@ -192,11 +194,13 @@ export interface VersionInfo {
   /** True when at least one release newer than `current` is flagged critical
    *  (see isCriticalRelease). Critical updates are installed without consent. */
   critical: boolean
+  releases?: { tag: string; published_at: string }[]
 }
 
 /** The shape we read from the GitHub releases API (only the fields we use). */
 export interface ReleaseLike {
   tag_name: string
+  published_at?: string | null
   body?: string | null
   draft?: boolean
   prerelease?: boolean
@@ -306,12 +310,7 @@ export async function getVersionInfo(opts: { force?: boolean } = {}): Promise<Ve
   const now = Date.now()
   if (!opts.force) {
     if (isInProcessFresh(_cache, now, CURRENT_VERSION)) {
-      return {
-        current: CURRENT_VERSION,
-        latest: _cache!.latest,
-        hasUpdate: _cache!.hasUpdate,
-        critical: _cache!.critical,
-      }
+      return cachedVersionInfo(_cache, CURRENT_VERSION)!
     }
     const disk = readVersionCache()
     if (isVersionCacheFresh(disk, now, CURRENT_VERSION)) {
@@ -339,9 +338,10 @@ export async function getVersionInfo(opts: { force?: boolean } = {}): Promise<Ve
     if (!resp.ok) throw new Error(`GitHub API ${resp.status}`)
     const releases = await resp.json() as ReleaseLike[]
     const { latest, hasUpdate, critical } = resolveLatestRelease(releases, CURRENT_VERSION)
-    _cache = { current: CURRENT_VERSION, latest, hasUpdate, critical, fetchedAt: now, attemptedAt: now }
+    const cachedReleases = releases.filter(r => typeof r.published_at === 'string').map(r => ({ tag: r.tag_name, published_at: r.published_at! }))
+    _cache = { current: CURRENT_VERSION, latest, hasUpdate, critical, fetchedAt: now, attemptedAt: now, releases: cachedReleases }
     writeVersionCache(_cache)
-    return { current: CURRENT_VERSION, latest, hasUpdate, critical }
+    return { current: CURRENT_VERSION, latest, hasUpdate, critical, releases: cachedReleases }
   } catch {
     // Network unavailable or rate-limited. Stamp the attempt so the next shells don't retry
     // immediately (VERSION_RETRY_MS), and fall back to the last verdict we actually got.
@@ -354,6 +354,7 @@ export async function getVersionInfo(opts: { force?: boolean } = {}): Promise<Ve
       critical: kept?.critical ?? false,
       fetchedAt: kept?.fetchedAt ?? 0,
       attemptedAt: now,
+      releases: kept?.releases,
     })
     return cachedVersionInfo(kept, CURRENT_VERSION)
       ?? { current: CURRENT_VERSION, latest: CURRENT_VERSION, hasUpdate: false, critical: false }

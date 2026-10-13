@@ -97,11 +97,20 @@ describe('planSpawn', () => {
   })
 
   it('puts a codex prompt in the positional slot and marks it for submit', () => {
-    const r = planSpawn({ harness: 'codex', cwd: '/tmp', prompt: 'implement X', model: 'o3' })
+    const r = planSpawn({ harness: 'codex', cwd: '/tmp', prompt: 'implement X', model: 'o3' }, { codexNoDaemon: true })
     expect(r).toEqual({
       ok: true,
       plan: { argv: ['codex', '--no-daemon', '--model', 'o3', 'implement X'], initialPrompt: { mode: 'submit' } },
     })
+  })
+
+  it('omits --no-daemon when Codex does not support it or support is unknown', () => {
+    for (const capabilities of [{}, { codexNoDaemon: false }]) {
+      expect(planSpawn({ harness: 'codex', cwd: '/tmp', prompt: 'hello' }, capabilities))
+        .toEqual({ ok: true, plan: { argv: ['codex', 'hello'], initialPrompt: { mode: 'submit' } } })
+      expect(planSpawn({ harness: 'codex', cwd: '/tmp', resumeId: 'thread-1' }, capabilities))
+        .toEqual({ ok: true, plan: { argv: ['codex', 'resume', 'thread-1'], conversationId: 'thread-1' } })
+    }
   })
 
   it('kimi 2.1.1 resumes by the session DIRECTORY name: the bare uuid the store keys on gets its `session_` prefix, once', () => {

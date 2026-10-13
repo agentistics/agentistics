@@ -7,6 +7,41 @@ import {
   LOCK_STALE_MS, LOCK_ACQUIRE_TIMEOUT_MS, __setTestOnlyDisableLock,
   __setTestOnlyForceLockVanished, __setTestOnlyAcquireTimeoutMs, PreferencesLockTimeoutError,
 } from './preferences'
+import type { CheckinConfig } from './checkin'
+
+test('check-in defaults writes accept every per-session interval and supported global pause', async () => {
+  const { primary } = tmpPaths()
+  for (const intervalMin of [15, 30, 60, 120] as const) {
+    for (const paused of [null, { until: null }]) {
+      const checkinDefaults: CheckinConfig = { intervalMin, paused, checklist: [{ id: 'fleet', enabled: false }] }
+      await writePreferencesTo(primary, null, { checkinDefaults })
+      expect((await readPreferencesFrom(primary, null)).checkinDefaults).toEqual(checkinDefaults)
+    }
+  }
+})
+
+test('malformed check-in defaults reject the entire preferences write and preserve stored choices', async () => {
+  const { primary } = tmpPaths()
+  const valid: CheckinConfig = { intervalMin: 60, paused: { until: null }, checklist: [{ id: 'fleet', enabled: false }] }
+  await writePreferencesTo(primary, null, { checkinDefaults: valid, theme: 'dark' })
+  const malformed: unknown[] = [
+    null, 'invalid', [], {},
+    { ...valid, intervalMin: 1, paused: { until: 123 } },
+    ...[1, 45, '60', null].map(intervalMin => ({ ...valid, intervalMin })),
+    ...[{}, [], true, { until: 123 }, { until: 'later' }].map(paused => ({ ...valid, paused })),
+    ...[null, {}, [null], [{ id: 'unknown', enabled: true }], [{ id: 'fleet', enabled: 'no' }]].map(checklist => ({ ...valid, checklist })),
+  ]
+  for (const checkinDefaults of malformed) {
+    await expect(writePreferencesTo(primary, null, { checkinDefaults: checkinDefaults as CheckinConfig, theme: 'light' }))
+      .rejects.toThrow('invalid checkinDefaults')
+    const stored = await readPreferencesFrom(primary, null)
+    expect(stored.checkinDefaults).toEqual(valid)
+    expect(stored.theme).toBe('dark')
+  }
+  // Unrelated saves do not revalidate, replace or reseed an existing agenda.
+  await writePreferencesTo(primary, null, { theme: 'light' })
+  expect((await readPreferencesFrom(primary, null)).checkinDefaults).toEqual(valid)
+})
 
 // Regression: preferences were stored under CLAUDE_DIR, which in Docker (machine +
 // self-contributing central) is the host ~/.claude mounted READ-ONLY at /host-claude.

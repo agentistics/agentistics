@@ -1200,6 +1200,50 @@ export async function destroyRunnerVault(): Promise<void> {
   await destroyVault(io(), dir, protectorsFor(v, undefined, dir))
 }
 
+// App-identity material that must survive a human-vault lock belongs in the machine-bound
+// runner scope. It is still encrypted at rest by the platform protector; the runner handle is
+// deliberately kept private so callers cannot use it for arbitrary human secrets.
+const MACHINE_BOUND_VAPID_PURPOSE = 'cloud-runner/mobile-push-vapid' as const
+
+async function machineBoundHandle(): Promise<RunnerHandle | null> {
+  const opened = await openRunnerVault()
+  if (opened.ok) return opened.handle
+  if (opened.state !== 'uninitialized') return null
+  const choice = await chooseAutoProtector()
+  if (!choice.ok) return null
+  const made = await initRunnerVault(choice.protector, 'agentistics-machine')
+  if (!made.ok) return null
+  return made.handle
+}
+
+/** Read machine-bound app identity material without opening the human vault. */
+export async function withMachineBoundVapid<T>(
+  path: string, name: string, use: (plaintext: Uint8Array) => Promise<T> | T,
+): Promise<{ ok: true; value: T } | { ok: false; absent: boolean }> {
+  const fs = secretFs()
+  const st = await fs.lstat(path)
+  if (!st) return { ok: false, absent: true }
+  if (isModeTooOpen(st.mode)) return { ok: false, absent: false }
+  const sealed = await fs.readFile(path)
+  if (!sealed) return { ok: false, absent: true }
+  const handle = await machineBoundHandle()
+  if (!handle) return { ok: false, absent: false }
+  const opened = handle.open(MACHINE_BOUND_VAPID_PURPOSE, name, sealed)
+  if (!opened.ok) { handle.close(); return { ok: false, absent: false } }
+  try { return { ok: true, value: await use(opened.plaintext) } } finally { opened.plaintext.fill(0); handle.close() }
+}
+
+/** Seal app identity material with the machine-bound runner scope (0600, atomic). */
+export async function sealMachineBoundVapid(path: string, name: string, plaintext: Uint8Array): Promise<void> {
+  const handle = await machineBoundHandle()
+  if (!handle) throw await notOpenRefusal()
+  try {
+    const sealed = handle.seal(MACHINE_BOUND_VAPID_PURPOSE, name, plaintext)
+    const r = await writePrivateAtomic(secretFs(), path, sealed)
+    if (r.chmodFailed) process.stderr.write(`agentop: could not set ${displayPath(path)} to mode 600 (${r.chmodFailed}) — it is encrypted, but check the directory's permissions.\n`)
+  } finally { handle.close() }
+}
+
 // ── test seams ────────────────────────────────────────────────────────────────────────────────
 
 export function __resetVaultForTests(opts: {

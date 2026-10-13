@@ -60,6 +60,7 @@ const EXACT: ReadonlyMap<string, keyof Capabilities> = new Map<string, keyof Cap
 
 /** Prefix (no trailing slash) → capability. Matches `<prefix>` and `<prefix>/…` only. */
 const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
+  ['/api/accounts', 'localTranscripts'],
   // Registration writes device credentials and reads the sealed VAPID key, so every mobile-push
   // route is host-local power and must be refused when this machine's local capability is off.
   ['/api/mobile-push', 'localShell'],
