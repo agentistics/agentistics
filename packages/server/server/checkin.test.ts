@@ -101,6 +101,78 @@ describe('check-in agenda', () => {
     expect(state).toEqual({ ...defaultConfig(), session: 'conversation-leader', lastRunAt: null, nextRunAt: 1_801_000, last: null })
   })
 
+  test('new leader inherits global interval and checklist, including after a handoff', async () => {
+    reset()
+    preferences.checkinDefaults = { ...defaultConfig(), intervalMin: 60, checklist: [{ id: 'fleet', enabled: false }] }
+    const state = await stateFor('new-leader', 1_000)
+    expect(state.intervalMin).toBe(60)
+    expect(state.nextRunAt).toBe(3_601_000)
+    expect(state.checklist).toHaveLength(6)
+    expect(state.checklist.find(x => x.id === 'fleet')?.enabled).toBe(false)
+    expect(state.checklist.find(x => x.id === 'limits')?.enabled).toBe(true)
+    expect((await stateFor('handoff-leader', 2_000)).intervalMin).toBe(60)
+  })
+
+  test('disabled global default pauses new leaders without changing existing agendas', async () => {
+    reset()
+    await stateFor('existing-leader', 1_000)
+    preferences.checkinDefaults = { ...defaultConfig(), paused: { until: null } }
+    const state = await stateFor('new-leader', 2_000)
+    expect(state.paused).toEqual({ until: null })
+    expect(state.nextRunAt).toBeNull()
+    expect(due(state, 9_000_000)).toBe(false)
+    expect((await stateFor('existing-leader', 3_000)).paused).toBeNull()
+  })
+
+  test('per-session override wins and later global edits only seed new leaders', async () => {
+    reset()
+    preferences.checkinDefaults = { ...defaultConfig(), intervalMin: 60, paused: { until: null } }
+    const state = await putState('custom-leader', { intervalMin: 15, paused: null }, 1_000)
+    expect(state.intervalMin).toBe(15)
+    expect(state.nextRunAt).toBe(901_000)
+    preferences.checkinDefaults = { ...defaultConfig(), intervalMin: 120 }
+    expect((await stateFor('custom-leader', 2_000)).intervalMin).toBe(15)
+    expect((await stateFor('new-leader', 2_000)).intervalMin).toBe(120)
+  })
+
+  test('a concurrent session override wins over first-read global seeding', async () => {
+    reset()
+    preferences.checkinDefaults = { ...defaultConfig(), intervalMin: 120 }
+    setCheckinDeps({ ...testDeps, updatePreferences: (async (mutate: (p: any) => any) => {
+      preferences.checkin = { 'new-leader': { ...defaultConfig(), intervalMin: 15,
+        session: 'new-leader', lastRunAt: null, nextRunAt: 901_000, last: null } }
+      const patch = mutate(preferences)
+      preferences = { ...preferences, ...patch }
+      return preferences
+    }) as CheckinDeps['updatePreferences'] })
+    const state = await stateFor('new-leader', 1_000)
+    expect(state.intervalMin).toBe(15)
+    expect(state.nextRunAt).toBe(901_000)
+  })
+
+  test('first PUT and first report also inherit defaults before their own changes', async () => {
+    reset()
+    preferences.checkinDefaults = { ...defaultConfig(), intervalMin: 120, checklist: [{ id: 'fleet', enabled: false }] }
+    const put = await putState('put-leader', { paused: { until: null } }, 1_000)
+    expect(put.intervalMin).toBe(120)
+    expect(put.checklist.find(x => x.id === 'fleet')?.enabled).toBe(false)
+    const report = await recordReport('report-leader', { state: 'ok', summary: 'Done' }, 2_000)
+    expect(report.intervalMin).toBe(120)
+    expect(report.nextRunAt).toBe(7_202_000)
+    expect(report.checklist.find(x => x.id === 'fleet')?.enabled).toBe(false)
+  })
+
+  test('malformed global defaults fall back to the built-in agenda', async () => {
+    reset()
+    for (const value of [null, 'invalid', { intervalMin: 1, checklist: [null, { id: 'fleet', enabled: 'no' }], paused: { until: 1 } }]) {
+      preferences.checkinDefaults = value
+      const state = await stateFor(String(value), 1_000)
+      expect(state.intervalMin).toBe(30)
+      expect(state.paused).toBeNull()
+      expect(state.checklist).toEqual(defaultConfig().checklist)
+    }
+  })
+
   test('PUT merges partial config without resetting unrelated fields', async () => {
     reset()
     await putState('conversation-leader', { intervalMin: 60, checklist: [{ id: 'fleet', enabled: false }] }, 1_000)

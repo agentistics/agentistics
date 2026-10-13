@@ -1,4 +1,5 @@
 import { readPreferences as realReadPreferences, updatePreferences as realUpdatePreferences } from './preferences'
+import type { Preferences } from './preferences'
 import { AGENTISTICS_DATA_DIR as realDataDir, HOME_DIR } from './config'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -167,6 +168,20 @@ const labels: Record<CheckinItemId, string> = {
   fleet: 'Sessões e memória', handbacks: 'Entregas dos workers', limits: 'Limites de uso',
   releases: 'Releases e motor', 'mcp-configs': 'Configs MCP dos harnesses', handoff: 'Passagem (HANDOFF)',
 }
+/** Saved defaults seed a new agenda once; existing agendas keep their own choices. */
+export function leaderDefaults(prefs: Preferences): CheckinConfig {
+  const base = defaultConfig()
+  const saved = prefs.checkinDefaults
+  if (!isRecord(saved)) return base
+  const checklist = Array.isArray(saved.checklist) ? saved.checklist.filter(
+    (item): item is { id: CheckinItemId; enabled: boolean } => isRecord(item) && CHECKIN_ITEMS.includes(item.id as CheckinItemId) && typeof item.enabled === 'boolean',
+  ) : undefined
+  return mergeConfig(base, {
+    intervalMin: saved.intervalMin as CheckinConfig['intervalMin'],
+    paused: isRecord(saved.paused) && saved.paused.until === null ? { until: null } : null,
+    checklist,
+  })
+}
 export const defaultConfig = (): CheckinConfig => ({ intervalMin: 30, paused: null, checklist: CHECKIN_ITEMS.map(id => ({ id, enabled: true })) })
 const pausedNow = (c: CheckinConfig, now: number): boolean => c.paused !== null && (c.paused.until === null || c.paused.until > now)
 export const nextRun = (now: number, c: CheckinConfig): number | null => pausedNow(c, now) ? null : now + c.intervalMin * 60_000
@@ -191,11 +206,11 @@ function emit(state: CheckinState): void {
   for (const c of [...deps.sseClients]) { try { c.enqueue(payload) } catch { deps.sseClients.delete(c) } }
 }
 async function allStored(): Promise<Record<string, Stored>> { return ((await deps.readPreferences()).checkin ?? {}) as Record<string, Stored> }
-async function updateStored<T>(mutate: (all: Record<string, Stored>) => T): Promise<T> {
+async function updateStored<T>(mutate: (all: Record<string, Stored>, prefs: Preferences) => T): Promise<T> {
   let result!: T
   await deps.updatePreferences(current => {
     const all = { ...((current.checkin ?? {}) as Record<string, Stored>) }
-    result = mutate(all)
+    result = mutate(all, current)
     return { checkin: all }
   })
   return result
@@ -232,22 +247,31 @@ async function fingerprint(row: { id: string; cwd: string }, state: CheckinState
   if (enabled.has('mcp-configs')) inputs.mcp = await deps.readCheckinMcpConfigs(row.cwd)
   return createHash('sha256').update(stable(inputs)).digest('hex')
 }
-export async function stateFor(session: string, now = Date.now()): Promise<CheckinState> {
-  const all = await allStored(); const old = all[session]
-  const config = old ? mergeConfig(defaultConfig(), old) : defaultConfig()
+function agendaState(session: string, old: Stored | undefined, prefs: Preferences, now: number): CheckinState {
+  const config = old ? mergeConfig(defaultConfig(), old) : leaderDefaults(prefs)
   const expired = config.paused !== null && config.paused.until !== null && config.paused.until <= now
   const resumed = expired ? { ...config, paused: null } : config
   // A timed pause that ran out resumes AT its deadline: the round it held back is due now, not one
   // whole interval after somebody happened to look at the panel.
   const nextRunAt = expired ? config.paused!.until : (old?.nextRunAt ?? nextRun(now, resumed))
-  const state: CheckinState = { ...resumed, session, lastRunAt: old?.lastRunAt ?? null, nextRunAt, last: old?.last ?? null, ...(old?.skipped ? { skipped: old.skipped } : {}) }
-  if (!old || state.paused !== config.paused) await updateStored(current => { current[session] = { ...current[session], ...state }; return state })
-  return state
+  return { ...resumed, session, lastRunAt: old?.lastRunAt ?? null, nextRunAt, last: old?.last ?? null, ...(old?.skipped ? { skipped: old.skipped } : {}) }
+}
+export async function stateFor(session: string, now = Date.now()): Promise<CheckinState> {
+  const prefs = await deps.readPreferences()
+  const old = (prefs.checkin as Record<string, Stored> | undefined)?.[session]
+  const state = agendaState(session, old, prefs, now)
+  if (old && state.paused === old.paused) return state
+  // Re-read within the preference write chain: a concurrent per-session override wins over seeding.
+  return updateStored((all, current) => {
+    const state = agendaState(session, all[session], current, now)
+    all[session] = { ...all[session], ...state }
+    return state
+  })
 }
 export async function putState(session: string, patch: Partial<CheckinConfig>, now = Date.now()): Promise<CheckinState> {
   const alive = await workersAlive()
-  const state = await updateStored(all => {
-    const old = all[session] ?? { ...defaultConfig(), session, lastRunAt: null, nextRunAt: null, last: null }
+  const state = await updateStored((all, prefs) => {
+    const old = all[session] ?? { ...leaderDefaults(prefs), session, lastRunAt: null, nextRunAt: null, last: null }
     const config = mergeConfig(old, patch)
     const state: Stored = { ...old, ...config, session, lastRunAt: old.lastRunAt, nextRunAt: config.paused ? null : (old.nextRunAt ?? nextRun(now, config)), last: old.last, ...(old.skipped ? { skipped: old.skipped } : {}) }
     if (stable(config.checklist) !== stable(old.checklist)) delete state.fingerprint
@@ -261,8 +285,8 @@ export async function putState(session: string, patch: Partial<CheckinConfig>, n
 }
 export async function recordReport(session: string, round: CheckinRound, now = Date.now()): Promise<CheckinState> {
   const alive = await workersAlive()
-  const state = await updateStored(all => {
-    const old = all[session] ?? { ...defaultConfig(), session, lastRunAt: null, nextRunAt: null, last: null }
+  const state = await updateStored((all, prefs) => {
+    const old = all[session] ?? { ...leaderDefaults(prefs), session, lastRunAt: null, nextRunAt: null, last: null }
     const { pending: _pending, ...previous } = old
     const resumed = previous.paused && previous.paused.until !== null && previous.paused.until <= now ? { ...previous, paused: null } : previous
     const state: CheckinState = { ...resumed, session, last: round, lastRunAt: now, nextRunAt: nextRun(now, resumed) }

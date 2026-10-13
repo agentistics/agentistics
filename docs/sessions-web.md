@@ -307,6 +307,8 @@ web holds no rule of its own about what a session may take.
 
 ## Leader check-ins
 
+Settings → Sessions → **Leader check-ins** saves the enabled state, interval and checklist used when each new leader’s agenda is created, including after handoffs. Existing agendas keep their per-session choices; away mode and quiet-round rules still apply.
+
 Scheduled rounds skip unchanged enabled inputs and retain their delivery fingerprint across
 restarts and configuration edits. Session messages record their resolved recipient and
 handback/block/question kind in the mirrored `comment` event; ordinary comments are ignored.

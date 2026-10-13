@@ -6,6 +6,7 @@ import type { ArchiveMode } from '../../components/ArchiveConsentModal'
 import { Divider, PrefRow, SectionHeader, Toggle } from './primitives'
 import SessionPresetsSection from './SessionPresetsSection'
 import AwaySection from './AwaySection'
+import CheckinDefaultsSection from './CheckinDefaultsSection'
 import { useIdlePrefs, setIdlePrefs } from '../../lib/idleSessionsPrefs'
 import { useIsMobile } from '../../hooks/useIsMobile'
 
@@ -262,6 +263,10 @@ export default function SessionsSettings() {
           page — a saved template to fire from the Sessions workspace — while the rest below is
           switches and a one-time preservation choice. */}
       <SessionPresetsSection />
+
+      <Divider />
+
+      <CheckinDefaultsSection pt={pt} isMobile={isMobile} />
 
       <Divider />
 

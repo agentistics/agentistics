@@ -44,6 +44,25 @@ export const CHECKIN_ITEMS: readonly { id: CheckinItemId; pt: string; en: string
   { id: 'handoff', pt: 'Passagem (HANDOFF)', en: 'Handoff' },
 ]
 
+/** Same built-in agenda as the server; saved defaults only allow an indefinite pause. */
+export function checkinDefaults(value?: unknown): CheckinConfig {
+  const saved = value && typeof value === 'object' ? value as Partial<CheckinConfig> : {}
+  return {
+    intervalMin: [15, 30, 60, 120].includes(saved.intervalMin as number) ? saved.intervalMin! : 30,
+    paused: saved.paused?.until === null ? { until: null } : null,
+    checklist: CHECKIN_ITEMS.map(({ id }) => ({ id, enabled: Array.isArray(saved.checklist)
+      ? saved.checklist.find(item => item?.id === id && typeof item.enabled === 'boolean')?.enabled ?? true : true })),
+  }
+}
+
+export async function saveCheckinDefaults(config: CheckinConfig): Promise<void> {
+  const response = await fetch('/api/preferences', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ checkinDefaults: config }),
+  })
+  if (!response.ok) throw new Error('save failed')
+}
+
 /** The prototype's clock: `21h40` in Portuguese, `21:40` in English. */
 export function clockLabel(ms: number, pt = true): string {
   const d = new Date(ms)
