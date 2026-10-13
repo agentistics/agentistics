@@ -3,7 +3,7 @@ import { buildAwayDigestFromSources } from './away-digest'
 
 const since = Date.parse('2026-01-01T00:00:00.000Z')
 const now = since + 5 * 60 * 60 * 1000
-const away = { on: true as const, since: new Date(since).toISOString(), until: null, authorizations: [], note: '', workerCeiling: null, topModelCaps: {} }
+const away = { on: true as const, since: new Date(since).toISOString(), until: null, authorised: [], note: '', maxWorkers: 6, topCaps: {} }
 
 describe('away digest source projection', () => {
   test('filters the inclusive window, bounds lists, redacts secrets, and marks missing sources unavailable', () => {

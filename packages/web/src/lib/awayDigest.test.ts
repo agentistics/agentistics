@@ -15,7 +15,7 @@ describe('away digest bell action', () => {
   })
 
   test('returns stale status and never lets the response body override HTTP failure', async () => {
-    globalThis.fetch = (async () => new Response(JSON.stringify({ ok: true }), { status: 409 })) as typeof fetch
+    globalThis.fetch = (async () => new Response(JSON.stringify({ ok: true }), { status: 409 })) as unknown as typeof fetch
     expect(await answerAwayDigest('yes', 20, 'old-window', 'en')).toMatchObject({ ok: false, status: 409 })
   })
 

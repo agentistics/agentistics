@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { AWAY_DIGEST_AFTER, AWAY_DIGEST_BUCKET, awayDigestOfferDue, awayDigestOfferState, awayDigestWindow, startAwayDigestTimer, stopAwayDigestTimer } from './away-digest'
 
 const start = Date.parse('2026-01-01T00:00:00.000Z')
-const away = { on: true as const, since: new Date(start).toISOString(), until: null, authorizations: [], note: '', workerCeiling: null, topModelCaps: {} }
+const away = { on: true as const, since: new Date(start).toISOString(), until: null, authorised: [], note: '', maxWorkers: 6, topCaps: {} }
 
 describe('away digest trigger', () => {
   test('is silent before five hours and due at the first boundary', () => {

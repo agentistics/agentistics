@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { answerAwayDigestWithDeps, awayDigestPrompt, type AwayDigestAnswerDeps, type AwayDigestState } from './away-digest'
 
 const start = Date.parse('2026-01-01T00:00:00.000Z')
-const away = { on: true as const, since: new Date(start).toISOString(), until: null, authorizations: [], note: '', workerCeiling: null, topModelCaps: {} }
+const away = { on: true as const, since: new Date(start).toISOString(), until: null, authorised: [], note: '', maxWorkers: 6, topCaps: {} }
 const bucket = 20
 
 function fixture(overrides: Partial<{ state: AwayDigestState; start: AwayDigestAnswerDeps['startNay']; prompt: AwayDigestAnswerDeps['prompt'] }> = {}) {
@@ -76,7 +76,7 @@ describe('away digest answers', () => {
       const nextDeps = {
         ...next.deps,
         read: async () => ({ away: nextAway, awayDigest: { since: nextAway.since, lastBucket: bucket } }),
-        update: async mutate => { mutate({ away: nextAway, awayDigest: next.state }) },
+        update: async (mutate: Parameters<AwayDigestAnswerDeps["update"]>[0]) => { mutate({ away: nextAway, awayDigest: next.state }) },
       }
       expect(await answerAwayDigestWithDeps('yes', bucket, 'en', nextDeps, now, away.since)).toEqual({ ok: false, error: 'stale' })
       expect(await answerAwayDigestWithDeps('yes', bucket, 'en', nextDeps, now, nextAway.since)).toEqual({ ok: true, conversationId: 'nay-1', bucket })
