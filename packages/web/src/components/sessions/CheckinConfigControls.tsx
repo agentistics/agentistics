@@ -1,5 +1,6 @@
 import { Pause, RefreshCw } from 'lucide-react'
 import { ToggleSwitch } from '../ToggleSwitch'
+import { Select } from '../../pages/settings/primitives'
 import { CHECKIN_ITEMS, type CheckinConfig } from '../../lib/checkin'
 import { parseSnooze, SNOOZE_PRESETS } from '../../lib/nayNotify'
 
@@ -12,7 +13,10 @@ export function CheckinConfigControls({ config, pt, isMobile, update, disabled =
   const paused = config.paused !== null
   const checklist = CHECKIN_ITEMS.map(item => ({ id: item.id, enabled: config.checklist.find(x => x.id === item.id)?.enabled ?? true }))
   return <><div style={{ display: 'grid', gap: 2 }}>
-      <div style={CHECKIN_ROW}><RefreshCw size={15} /><span>{pt ? 'Intervalo' : 'Interval'}</span><select disabled={disabled} aria-label={pt ? 'Intervalo do check-in' : 'Check-in interval'} value={config.intervalMin} onChange={e => void update({ intervalMin: Number(e.target.value) as CheckinConfig['intervalMin'] })} style={{ marginLeft: 'auto', background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 5, padding: '4px 6px', minHeight: isMobile ? 44 : undefined, font: 'inherit' }}><option value={15}>15 min</option><option value={30}>30 min</option><option value={60}>1 h</option><option value={120}>2 h</option></select></div>
+      <div style={CHECKIN_ROW}><RefreshCw size={15} /><span>{pt ? 'Intervalo' : 'Interval'}</span><div style={{ marginLeft: 'auto' }}><Select disabled={disabled} value={String(config.intervalMin)} onChange={value => void update({ intervalMin: Number(value) as CheckinConfig['intervalMin'] })} options={[
+        { value: '15', label: '15 min' }, { value: '30', label: '30 min' },
+        { value: '60', label: '1 h' }, { value: '120', label: '2 h' },
+      ]} /></div></div>
       <div style={CHECKIN_ROW}><Pause size={15} /><span>{global ? (pt ? 'Habilitar check-in' : 'Enable check-in') : (pt ? 'Pausar check-in' : 'Pause check-in')}</span><span style={{ marginLeft: 'auto', display: 'inline-flex' }}><ToggleSwitch on={global ? !paused : paused} onToggle={() => void update({ paused: paused ? null : { until: null } })} disabled={disabled} label={global ? (pt ? 'Habilitar check-in' : 'Enable check-in') : (pt ? 'Pausar check-in' : 'Pause check-in')} tap={isMobile ? 44 : undefined} /></span></div>
       {!global && paused && <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', padding: '0 0 3px 22px', fontSize: 11 }}><span style={{ color: 'var(--text-tertiary)' }}>{pt ? 'Pausar até:' : 'Pause until:'}</span>{SNOOZE_PRESETS.map(p => <button key={p.ms} type="button" onClick={() => { const parsed = parseSnooze(`${p.ms / 60_000}m`); if (parsed.ok) void update({ paused: { until: Date.now() + parsed.ms } }) }} style={{ all: 'unset', cursor: 'pointer', color: 'var(--anthropic-orange)' }}>{p.label[pt ? 'pt' : 'en']}</button>)}<button type="button" onClick={() => void update({ paused: { until: null } })} style={{ all: 'unset', cursor: 'pointer', color: 'var(--anthropic-orange)' }}>{pt ? 'até religar' : 'until resumed'}</button></div>}
     </div>

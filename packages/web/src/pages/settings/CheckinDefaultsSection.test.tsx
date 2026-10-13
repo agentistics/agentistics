@@ -4,20 +4,31 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import CheckinDefaultsSection from './CheckinDefaultsSection'
 import { CheckinConfigControls } from '../../components/sessions/CheckinConfigControls'
 import { ToggleSwitch } from '../../components/ToggleSwitch'
+import { Select } from './primitives'
 import { buildCheckinPatch, checkinDefaults, saveCheckinDefaults, type CheckinConfig } from '../../lib/checkin'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
 
+// Select reaches for `useIsMobile()`, and static markup has no window (same stub as primitives.test).
+const withWindow = (fn: () => string): string => {
+  const g = globalThis as { window?: unknown }
+  const had = 'window' in g
+  if (!had) g.window = { innerWidth: 1440, innerHeight: 900, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), addEventListener() {}, removeEventListener() {} }
+  try { return fn() } finally { if (!had) delete g.window }
+}
+
 describe('leader check-in defaults in Settings', () => {
   test.each([false, true])('renders the section and shared controls in pt/en (mobile=%s)', isMobile => {
     for (const pt of [false, true]) {
-      const html = renderToStaticMarkup(<CheckinDefaultsSection pt={pt} isMobile={isMobile} />)
+      const html = withWindow(() => renderToStaticMarkup(<CheckinDefaultsSection pt={pt} isMobile={isMobile} />))
       expect(html).toContain(pt ? 'Check-in dos líderes' : 'Leader check-ins')
       expect(html).toContain(pt ? 'Habilitar check-in' : 'Enable check-in')
       expect(html).toContain(pt ? 'líderes atuais mantêm suas escolhas' : 'current leaders keep their choices')
       expect(html.match(/role="switch"/g)).toHaveLength(7)
       expect(html).toContain('disabled=""')
+      expect(html).toContain('aria-haspopup="listbox"')
+      expect(html).not.toContain('<select')
       if (isMobile) expect(html).toContain('min-height:44px')
     }
   })
@@ -46,7 +57,10 @@ describe('leader check-in defaults in Settings', () => {
       })
       return found
     }
-    find(tree(), node => node.type === 'select').props.onChange({ target: { value: '60' } })
+    const interval = find(tree(), node => node.type === Select)
+    expect(interval.props.value).toBe('30')
+    expect(interval.props.options.map((option: { value: string }) => option.value)).toEqual(['15', '30', '60', '120'])
+    interval.props.onChange('60')
     await Promise.all(pending)
     find(tree(), node => node.type === ToggleSwitch && node.props.label === 'Enable check-in').props.onToggle()
     await Promise.all(pending)

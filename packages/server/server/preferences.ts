@@ -961,6 +961,11 @@ export function guardTeamConnectionsWipe(
 /** Merge `prefs` over the current preferences and persist to `primary`. Exported for tests. */
 export async function writePreferencesTo(primary: string, legacy: string | null, prefs: Preferences): Promise<void> {
   return enqueueWrite(async () => {
+    if (prefs.checkinDefaults !== undefined) {
+      // Load only at the write boundary: checkin itself imports the preferences store.
+      const { validateCheckinDefaults } = await import('./checkin')
+      if (!validateCheckinDefaults(prefs.checkinDefaults)) throw new Error('invalid checkinDefaults')
+    }
     const release = await acquireFileLock(primary)
     try {
       const { prefs: current } = await readEffective(primary, legacy)

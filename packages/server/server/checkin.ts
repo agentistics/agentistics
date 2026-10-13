@@ -140,6 +140,7 @@ export interface CheckinConfig {
   paused: null | { until: number | null }
   checklist: { id: CheckinItemId; enabled: boolean }[]
 }
+const CHECKIN_INTERVALS = [15, 30, 60, 120] as const
 export interface CheckinState extends CheckinConfig {
   session: string
   lastRunAt: number | null
@@ -150,6 +151,14 @@ export interface CheckinState extends CheckinConfig {
 type Stored = CheckinState & { pending?: boolean; fingerprint?: string; lastFiredAt?: number | null }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
+/** Global defaults support enabled or indefinitely paused check-ins, never a timed snooze. */
+export function validateCheckinDefaults(value: unknown): value is CheckinConfig {
+  return isRecord(value)
+    && CHECKIN_INTERVALS.includes(value.intervalMin as CheckinConfig['intervalMin'])
+    && (value.paused === null || (isRecord(value.paused) && value.paused.until === null))
+    && Array.isArray(value.checklist)
+    && value.checklist.every(item => isRecord(item) && CHECKIN_ITEMS.includes(item.id as CheckinItemId) && typeof item.enabled === 'boolean')
+}
 const optionalString = (value: Record<string, unknown>, key: string): boolean => value[key] === undefined || typeof value[key] === 'string'
 const validLink = (value: unknown): boolean => isRecord(value) && (value.kind === 'session' || value.kind === 'subtask' || value.kind === 'task') && typeof value.id === 'string' && optionalString(value, 'taskId')
 
@@ -186,7 +195,7 @@ export const defaultConfig = (): CheckinConfig => ({ intervalMin: 30, paused: nu
 const pausedNow = (c: CheckinConfig, now: number): boolean => c.paused !== null && (c.paused.until === null || c.paused.until > now)
 export const nextRun = (now: number, c: CheckinConfig): number | null => pausedNow(c, now) ? null : now + c.intervalMin * 60_000
 export function mergeConfig(base: CheckinConfig, patch: Partial<CheckinConfig>): CheckinConfig {
-  const intervalMin = [15, 30, 60, 120].includes(patch.intervalMin as number) ? patch.intervalMin! : base.intervalMin
+  const intervalMin = CHECKIN_INTERVALS.includes(patch.intervalMin as CheckinConfig['intervalMin']) ? patch.intervalMin! : base.intervalMin
   const checklist = patch.checklist ? CHECKIN_ITEMS.map(id => ({ id, enabled: patch.checklist!.find(x => x.id === id)?.enabled ?? base.checklist.find(x => x.id === id)?.enabled ?? true })) : base.checklist
   return { intervalMin: intervalMin as CheckinConfig['intervalMin'], paused: patch.paused === undefined ? base.paused : patch.paused, checklist }
 }
