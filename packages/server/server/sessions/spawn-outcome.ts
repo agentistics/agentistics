@@ -132,10 +132,10 @@ export function execFailed(outcome: SpawnOutcome, bin: string): boolean {
 }
 
 /**
- * The shorter window `spawnManaged` waits — milliseconds.
+ * The shorter window `spawnManaged` waits for a resume — milliseconds.
  *
  * What it exists to catch is an exec that FAILED, which kills the pane before tmux has returned;
- * four polls see it. The harness's own slower refusal (`SETTLE_MS`) stays the CLI's check: on the
- * browser's path every healthy session pays the whole window, and `reopenEntries` pays it per row.
+ * four polls see it. Fresh starts use `SETTLE_MS` on both the CLI and server paths to observe slower
+ * startup refusals. Resumes keep this shorter window, which `reopenEntries` pays per row.
  */
 export const LAUNCH_SETTLE_MS = 1_000

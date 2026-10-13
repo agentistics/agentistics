@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, renameSync } from 'node:fs'
+import { chmodSync, mkdtempSync, rmSync, writeFileSync, readFileSync, renameSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { routeRecommendation } from '@agentistics/core'
+import { noteFreshSpawn, resetHarnessSpawnability } from './sessions/harness-spawnable'
+import { spawnOutcome } from './sessions/spawn-outcome'
 import {
   __resetPlanLimitsForTest, ingestPlanLimits, latestCodexLimits, noteStructuredLine, planLimitsPayload,
   sampleLivePlanSessions, setPlanLimitsSink, syncPlanLimitsFromFile, watchPlanLimitsFile,
@@ -10,8 +12,77 @@ import {
 
 const fx = (n: string) => readFileSync(join(import.meta.dir, '../../core/src/__fixtures__', n), 'utf8').trim()
 let dir = ''
-beforeEach(() => { __resetPlanLimitsForTest(); dir = mkdtempSync(join(tmpdir(), 'pl-test-')) })
-afterEach(() => { setPlanLimitsSink(null); if (dir.includes('pl-test-')) rmSync(dir, { recursive: true, force: true }) })
+let savedPath: string | undefined
+let savedHome: string | undefined
+beforeEach(() => {
+  __resetPlanLimitsForTest()
+  resetHarnessSpawnability()
+  dir = mkdtempSync(join(tmpdir(), 'pl-test-'))
+  savedPath = process.env.PATH
+  savedHome = process.env.HOME
+  process.env.PATH = dir
+  process.env.HOME = dir
+  for (const bin of ['claude', 'codex']) {
+    writeFileSync(join(dir, bin), '#!/bin/sh\nexit 0\n')
+    chmodSync(join(dir, bin), 0o755)
+  }
+})
+afterEach(() => {
+  process.env.PATH = savedPath
+  process.env.HOME = savedHome
+  resetHarnessSpawnability()
+  setPlanLimitsSink(null)
+  if (dir.includes('pl-test-')) rmSync(dir, { recursive: true, force: true })
+})
+
+async function spawnabilityBudget(now: number) {
+  for (const harness of ['claude', 'codex'] as const) await ingestPlanLimits({
+    harness, account: 'default', plan: harness === 'claude' ? 'Max' : 'Plus',
+    windows: [{ kind: '5h', usedPct: 11, resetsAt: now + 3_600_000 }],
+    updatedAt: now, source: harness === 'claude' ? 'claude-stream' : 'codex-rollout',
+  })
+  return planLimitsPayload(undefined, now)
+}
+
+test('missing binary keeps usage but removes slots and routing eligibility', async () => {
+  unlinkSync(join(dir, 'codex'))
+  const body = await spawnabilityBudget(Date.now())
+  expect(body.budgets.find(b => b.harness === 'codex')).toMatchObject({
+    spawnable: false, freeSlots: 0, suggestedParallel: 0, fiveHourPct: 11,
+  })
+  expect(body.harnesses.codex?.unavailableReason).toContain('PATH')
+  expect(body.freeSlotsByHarness.codex).toBe(0)
+  expect(body.freeSlots).toBe(body.freeSlotsByHarness.claude!)
+  const rec = routeRecommendation(body.budgets, 'spec-impl')
+  expect(rec.harness).toBe('claude')
+  expect(rec.alternatives).not.toContain('codex')
+})
+
+test('startup failure blocks workers; a later success restores slots and recommendation', async () => {
+  const now = Date.now()
+  noteFreshSpawn('codex', spawnOutcome(['error: unexpected argument', 'Pane is dead (status 2)']), now, now)
+  const failed = await spawnabilityBudget(now)
+  expect(failed.harnesses.codex?.spawnable).toBe(false)
+  expect(failed.budgets.find(b => b.harness === 'codex')).toMatchObject({ freeSlots: 0, suggestedParallel: 0, fiveHourPct: 11 })
+  expect(routeRecommendation(failed.budgets, 'spec-impl').harness).toBe('claude')
+  noteFreshSpawn('codex', undefined, now + 1, now + 1)
+  const healthy = await planLimitsPayload(undefined, now + 1)
+  expect(healthy.harnesses.codex).toEqual({ spawnable: true })
+  expect(healthy.budgets.find(b => b.harness === 'codex')!.suggestedParallel).toBeGreaterThan(0)
+  expect(routeRecommendation(healthy.budgets, 'spec-impl').harness).toBe('codex')
+})
+
+test('when every binary is missing there are no aggregate slots or recommended workers', async () => {
+  unlinkSync(join(dir, 'codex'))
+  unlinkSync(join(dir, 'claude'))
+  const body = await spawnabilityBudget(Date.now())
+  expect(body.freeSlots).toBe(0)
+  expect(body.freeSlotsByHarness).toEqual({ claude: 0, codex: 0 })
+  expect(body.limits).toHaveLength(2)
+  expect(routeRecommendation(body.budgets, 'spec-impl')).toMatchObject({
+    harness: null, alternatives: [], cadence: { parallel: 0 },
+  })
+})
 
 test('codex: the newest rate_limits line of a rollout tail', async () => {
   const p = join(dir, 'rollout-x.jsonl')

@@ -22,6 +22,7 @@ import { taskCommentRequest } from "./task-comment-args.js";
 import { sessionProof } from "./session-proof.js";
 import { nativeVisibleFrom, projectionSurfaceOn, type RouteKind } from "@agentistics/core";
 import { planLimitsTool } from "./plan-limits-tool.js";
+import { harnessesTool } from "./harnesses-tool.js";
 import { legacyCosts, legacyHarnesses, legacyProjects, legacyRepos, legacySummary } from "./legacy-analytics.js";
 import { PROJECTED_TOOLS, ProjectionUnavailable, type MetricsQueryFn, type ProjectedTool } from "./projected-analytics.js";
 
@@ -1199,10 +1200,11 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
       }
 
       case "agentistics_harnesses": {
-        return text(await analytics("agentistics_harnesses", undefined, {
+        const [rows, availability] = await Promise.all([analytics("agentistics_harnesses", undefined, {
           legacy: () => apiGet("/api/data"),
           metrics: (q) => fetch(`${API}/api/runtime/metrics?${q}`),
-        }));
+        }), apiGet("/api/plan-limits")]);
+        return text(harnessesTool(rows, availability));
       }
 
       case "agentistics_plan_limits": {
