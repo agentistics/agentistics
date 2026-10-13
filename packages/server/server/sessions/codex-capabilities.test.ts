@@ -17,7 +17,7 @@ describe('Codex --no-daemon capability', () => {
     }
   })
 
-  it.each(['nonzero exit', 'timeout'])('omits the flag and caches a help probe failure: %s', async reason => {
+  it.each(['nonzero exit', 'timeout'])('omits the flag and retries (never caches) a help probe failure: %s', async reason => {
     let calls = 0
     const probe = createCodexCapabilityProbe({
       binary: () => '/bin/codex', mtime: async () => 1,
@@ -25,12 +25,24 @@ describe('Codex --no-daemon capability', () => {
     })
     expect(await probe()).toBe(false)
     expect(await probe()).toBe(false)
-    expect(calls).toBe(1)
+    expect(calls).toBe(2)
     for (const resumeId of [undefined, 'thread-1']) {
       const planned = planSpawn({ harness: 'codex', cwd: '/tmp', resumeId }, { codexNoDaemon: await probe() })
       expect(planned.ok).toBe(true)
       if (planned.ok) expect(planned.plan.argv).not.toContain('--no-daemon')
     }
+  })
+
+  it('recovers once a failed probe later reads help with the flag', async () => {
+    let calls = 0
+    const probe = createCodexCapabilityProbe({
+      binary: () => '/bin/codex', mtime: async () => 1,
+      help: async () => { calls++; if (calls === 1) throw new Error('timeout'); return '--no-daemon' },
+    })
+    expect(await probe()).toBe(false)
+    expect(await probe()).toBe(true)
+    expect(await probe()).toBe(true)
+    expect(calls).toBe(2)
   })
 
   it('shares concurrent probes and invalidates on path or mtime changes', async () => {

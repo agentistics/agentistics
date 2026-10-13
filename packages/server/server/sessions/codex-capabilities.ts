@@ -4,7 +4,7 @@ import { promisify } from 'node:util'
 import type { HarnessId } from '@agentistics/core'
 import { adoptUserBinOnPath, userSearchPath } from './user-path'
 
-export const CODEX_HELP_TIMEOUT_MS = 1_500
+export const CODEX_HELP_TIMEOUT_MS = 3_000
 const execFileAsync = promisify(execFile)
 
 export interface CodexProbeDeps {
@@ -13,7 +13,11 @@ export interface CodexProbeDeps {
   help: (path: string) => Promise<string>
 }
 
-/** One help probe per binary path + mtime, including failures and concurrent callers. */
+/**
+ * One help probe per binary path + mtime, shared by concurrent callers. Only a help text that was
+ * actually read is cached; an error, timeout or non-zero exit omits the flag for THIS call and is
+ * retried on the next spawn (without --no-daemon, pane-pid → transcript linking breaks).
+ */
 export function createCodexCapabilityProbe(deps: CodexProbeDeps): () => Promise<boolean> {
   const cache = new Map<string, { mtime: number; supported: Promise<boolean> }>()
   return async () => {
@@ -24,9 +28,15 @@ export function createCodexCapabilityProbe(deps: CodexProbeDeps): () => Promise<
       const hit = cache.get(path)
       if (hit?.mtime === mtime) return await hit.supported
       const supported = Promise.resolve().then(() => deps.help(path))
-        .then(help => /(?:^|\s)--no-daemon(?=\s|$)/m.test(help), () => false)
-      cache.set(path, { mtime, supported })
-      return await supported
+        .then(help => /(?:^|\s)--no-daemon(?=\s|$)/m.test(help))
+      const entry = { mtime, supported }
+      cache.set(path, entry)
+      try {
+        return await supported
+      } catch {
+        if (cache.get(path) === entry) cache.delete(path)
+        return false
+      }
     } catch { return false }
   }
 }
