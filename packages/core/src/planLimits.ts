@@ -65,6 +65,8 @@ export const PLAN_BUDGET_TIGHT_WEEK_PCT = 80
 
 export type PlanBudgetStatus = 'ok' | 'tight' | 'hold'
 export interface PlanBudget {
+  spawnable?: boolean
+  unavailableReason?: string
   harness: HarnessId
   plan: string
   fiveHourPct: number
@@ -384,7 +386,7 @@ export function routeRecommendation(
   authorHarness?: string,
 ): RouteRecommendation {
   const allowTight = kind === 'lead'
-  const eligible = budgets.filter(b => b.plan !== 'unregistered' && b.status !== 'hold' && (allowTight || b.status !== 'tight') && b.harness !== (kind === 'qa' ? authorHarness : undefined))
+  const eligible = budgets.filter(b => b.spawnable !== false && b.plan !== 'unregistered' && b.status !== 'hold' && (allowTight || b.status !== 'tight') && b.harness !== (kind === 'qa' ? authorHarness : undefined))
   const ordered = [...eligible].sort((a, b) => {
     const ap = a.paceStatus === 'under' ? 0 : 1
     const bp = b.paceStatus === 'under' ? 0 : 1
@@ -397,6 +399,9 @@ export function routeRecommendation(
   const chosen = ordered.find(b => preference.some(([h]) => h === b.harness))
   const pick = chosen ?? ordered[0]
   if (!pick) {
+    if (budgets.length && budgets.every(b => b.spawnable === false)) {
+      return { harness: null, reason: 'No harness can start a new session.', alternatives: [], cadence: { parallel: 0, note: 'Install or repair a harness before opening workers.' } }
+    }
     const earliest = budgets.filter(b => b.status === 'hold').sort((a, b) => a.weekResetsAt - b.weekResetsAt)[0]
     const reset = earliest ? new Date(earliest.weekResetsAt).toISOString() : 'the next reset'
     return { harness: null, reason: `all plans on hold until ${reset}`, alternatives: [], cadence: { parallel: 0, note: 'Wait for a plan to renew.' } }

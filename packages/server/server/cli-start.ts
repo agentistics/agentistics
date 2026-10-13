@@ -140,7 +140,7 @@ import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
 import { bornConversationLink } from './sessions/born-link'
 import { recordRewind } from './sessions/rewind-pending'
-import { codexStartupFailure, execFailed, LAUNCH_SETTLE_MS } from './sessions/spawn-outcome'
+import { codexStartupFailure, execFailed, LAUNCH_SETTLE_MS, SETTLE_MS } from './sessions/spawn-outcome'
 import { planTakeover } from './sessions/takeover'
 import { findProjects } from './sessions/project-source'
 import { candidatePath } from './sessions/project-search'
@@ -2196,9 +2196,9 @@ async function spawnManaged(req: {
 
   // `spawn` returning is not evidence anything is RUNNING — tmux's contract is "I made you a
   // session". A dead pane is killed and its row removed, so the failure is the answer the caller
-  // gets. The window is `LAUNCH_SETTLE_MS`, not the CLI's `SETTLE_MS`: an exec that fails dies at
-  // once, and every healthy session pays the whole window.
-  const died = await spawnDeath(backend, id, LAUNCH_SETTLE_MS)
+  // gets. Fresh sessions use the full startup window to catch slower argument rejections;
+  // resumes retain the shorter exec check and do not change fresh-spawn health.
+  const died = await spawnDeath(backend, id, req.resumeId ? LAUNCH_SETTLE_MS : SETTLE_MS, req.resumeId ? undefined : req.harness)
   if (died) {
     await backend.kill(id).catch(() => {})
     await abandon()
