@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, renameSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, renameSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createHarnessAccounts, probeAccountIdentity, __setHarnessAccountsForTest } from './harness-accounts'
+import { planLimitsTool } from '../../mcp/plan-limits-tool'
 import { routeRecommendation } from '@agentistics/core'
 import {
   __resetPlanLimitsForTest, ingestPlanLimits, latestCodexLimits, noteStructuredLine, planLimitsPayload,
@@ -10,7 +12,11 @@ import {
 
 const fx = (n: string) => readFileSync(join(import.meta.dir, '../../core/src/__fixtures__', n), 'utf8').trim()
 let dir = ''
-beforeEach(() => { __resetPlanLimitsForTest(); dir = mkdtempSync(join(tmpdir(), 'pl-test-')) })
+beforeEach(() => {
+  __resetPlanLimitsForTest()
+  dir = mkdtempSync(join(tmpdir(), 'pl-test-'))
+  __setHarnessAccountsForTest(createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => ({ key: 'default', label: 'Conta padrão' }) }))
+})
 afterEach(() => { setPlanLimitsSink(null); if (dir.includes('pl-test-')) rmSync(dir, { recursive: true, force: true }) })
 
 test('codex: the newest rate_limits line of a rollout tail', async () => {
@@ -166,4 +172,147 @@ test('a process with no sink stores the record but judges no threshold', async (
   const disk = JSON.parse(readFileSync(file, 'utf8'))
   expect(Object.keys(disk.limits)).toEqual(['claude:default'])
   expect(disk.notices).toEqual({})
+})
+
+test('unavailable current accounts disappear from agent budgets, slots, sessions and recommendations', async () => {
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async harness => ({ key: `${harness}-login`, label: harness }) })
+  __setHarnessAccountsForTest(store)
+  await store.current(['claude', 'codex'])
+  await store.setAvailable('claude', 'claude-login', false)
+  const now = Date.now()
+  for (const harness of ['claude', 'codex'] as const) await ingestPlanLimits({
+    harness, account: 'default', plan: 'Plus', windows: [{ kind: '5h', usedPct: 10, resetsAt: now + 3_600_000 }],
+    updatedAt: now, source: harness === 'claude' ? 'claude-stream' : 'codex-rollout',
+  })
+  const body = await planLimitsPayload(undefined, now, [{ id: 'hidden-session', harness: 'claude', model: 'opus', burnPctPerHour: 1 }])
+  expect(body.limits.map(l => l.account)).toEqual(['default', 'default'])
+  expect(body.budgets.map(b => b.harness)).toEqual(['codex'])
+  expect(body.hiddenFromAgents.map(b => b.harness)).toEqual(['claude'])
+  expect(body.freeSlotsByHarness.claude).toBeUndefined()
+  expect(body.freeSlots).toBe(body.freeSlotsByHarness.codex!)
+  expect(body.liveSessions).toEqual([])
+  const rec = routeRecommendation(body.budgets, 'spec-impl')
+  expect(rec.harness).toBe('codex')
+  expect(rec.alternatives).not.toContain('claude')
+  const agentResponse = planLimitsTool({ kind: 'spec-impl' }, body)
+  expect(agentResponse).not.toHaveProperty('hiddenFromAgents')
+  expect(JSON.stringify(agentResponse)).not.toContain('claude')
+  await store.setAvailable('codex', 'codex-login', false)
+  const hidden = await planLimitsPayload(undefined, now)
+  expect(hidden.budgets).toEqual([])
+  expect(hidden.freeSlots).toBe(0)
+  expect(hidden.freeSlotsByHarness).toEqual({})
+  expect(hidden.pauseUntil).toBeUndefined()
+  expect(routeRecommendation(hidden.budgets, 'spec-impl').harness).toBeNull()
+})
+
+test('real auth and config file probes expose only identity fields in results, registry and payload', async () => {
+  const home = join(dir, 'home')
+  const directories = { codexHome: join(home, '.codex'), copilotHome: join(home, '.copilot') }
+  const file = join(dir, 'accounts.json')
+  mkdirSync(join(home, '.codex'), { recursive: true })
+  mkdirSync(join(home, '.copilot'), { recursive: true })
+  // Obviously fake placeholders exercise the actual credential-document I/O boundary.
+  const fake = {
+    OPENAI_API_KEY: 'FAKE_API_KEY',
+    tokens: { access_token: 'FAKE_ACCESS_TOKEN', refresh_token: 'FAKE_REFRESH_TOKEN', id_token: 'FAKE_ID_TOKEN' },
+  }
+  writeFileSync(join(home, '.codex', 'auth.json'), JSON.stringify({ account_id: 'fixture-account', ...fake }))
+  writeFileSync(join(home, '.copilot', 'config.json'), JSON.stringify({
+    lastLoggedInUser: { login: 'fixture-user', host: 'github.com', token: 'FAKE_USER_TOKEN' },
+    github_token: 'FAKE_GITHUB_TOKEN', ...fake,
+  }))
+  const results = await Promise.all([probeAccountIdentity('codex', directories), probeAccountIdentity('copilot', directories)])
+  expect(results).toEqual([
+    { key: 'fixture-account', label: 'fixture-account' },
+    { key: 'github.com:fixture-user', label: 'fixture-user' },
+  ])
+  // Use the real file-reading probes with explicit roots; never rely on HOME or read owner files.
+  const store = createHarnessAccounts({ file, probe: harness => probeAccountIdentity(harness, directories) })
+  __setHarnessAccountsForTest(store)
+  const accounts = await store.current(['codex', 'copilot'])
+  const now = Date.now()
+  await ingestPlanLimits({ harness: 'codex', account: 'default', windows: [{ kind: '5h', usedPct: 10, resetsAt: now + 3_600_000 }], updatedAt: now, source: 'codex-rollout' })
+  const body = await planLimitsPayload(undefined, now, [{ id: 'fixture-session', harness: 'copilot', model: 'fixture-model', burnPctPerHour: 0 }])
+  for (const output of [JSON.stringify(results), JSON.stringify(accounts), readFileSync(file, 'utf8'), JSON.stringify(body), JSON.stringify(planLimitsTool({ kind: 'spec-impl' }, body))]) {
+    expect(output).not.toContain('FAKE')
+    for (const field of ['tokens', 'access_token', 'refresh_token', 'id_token', 'OPENAI_API_KEY', 'github_token']) expect(output).not.toContain(field)
+  }
+})
+
+test('disabled account stays hidden through probe timeout, restart, error and successful recovery', async () => {
+  let now = Date.now()
+  let mode: 'success' | 'timeout' | 'error' = 'success'
+  const file = join(dir, 'accounts.json')
+  const options = { file, now: () => now, timeoutMs: 15, probe: async () => {
+    if (mode === 'timeout') return await new Promise<{ key: string; label: string }>(() => {})
+    if (mode === 'error') throw new Error('Probe unavailable')
+    return { key: 'known-login', label: 'Known account' }
+  } }
+  let store = createHarnessAccounts(options)
+  __setHarnessAccountsForTest(store)
+  await store.current(['claude'])
+  await store.setAvailable('claude', 'known-login', false)
+  // Routing requires a registered plan, independently of the account availability toggle.
+  await ingestPlanLimits({ harness: 'claude', account: 'default', plan: 'Max', windows: [{ kind: '5h', usedPct: 10, resetsAt: now + 3_600_000 }], updatedAt: now, source: 'claude-stream' })
+  const registry = readFileSync(file, 'utf8')
+  const assertHidden = async () => {
+    const body = await planLimitsPayload(undefined, now, [{ id: 'disabled-session', harness: 'claude', model: 'opus', burnPctPerHour: 1 }])
+    expect(body.budgets).toEqual([])
+    expect(body.freeSlots).toBe(0)
+    expect(body.freeSlotsByHarness).toEqual({})
+    expect(body.liveSessions).toEqual([])
+    expect(body.hiddenFromAgents.map(b => b.harness)).toEqual(['claude'])
+    const output = planLimitsTool({ kind: 'spec-impl' }, body)
+    expect(output.recommendation?.harness).toBeNull()
+    expect(JSON.stringify(output)).not.toContain('claude')
+    expect(JSON.stringify(output)).not.toContain('disabled-session')
+  }
+  await assertHidden()
+  now += 60_000
+  mode = 'timeout'
+  expect((await store.current(['claude']))[0]).toMatchObject({ key: 'default', available: false })
+  await assertHidden()
+  expect(readFileSync(file, 'utf8')).toBe(registry)
+  store = createHarnessAccounts(options)
+  __setHarnessAccountsForTest(store)
+  await assertHidden() // A cold cache timeout preserves the persisted restriction.
+  now += 60_000
+  mode = 'error'
+  await assertHidden()
+  expect(readFileSync(file, 'utf8')).toBe(registry)
+  now += 60_000
+  mode = 'success'
+  expect((await store.current(['claude']))[0]).toMatchObject({ key: 'known-login', available: false })
+  await assertHidden()
+  expect(JSON.parse(readFileSync(file, 'utf8'))).toHaveLength(1)
+  await store.setAvailable('claude', 'known-login', true)
+  const recovered = await planLimitsPayload(undefined, now)
+  expect(recovered.budgets.map(b => b.harness)).toEqual(['claude'])
+  expect(recovered.hiddenFromAgents).toEqual([])
+  expect(recovered.budgets[0]).toMatchObject({ plan: 'Max', status: 'ok' })
+  expect(planLimitsTool({ kind: 'spec-impl' }, recovered).recommendation?.harness).toBe('claude')
+})
+
+test('disabled meterless account live sessions are hidden from payload and MCP', async () => {
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => ({ key: 'default', label: 'Conta padrão' }) })
+  __setHarnessAccountsForTest(store)
+  await store.current(['gemini'])
+  await store.setAvailable('gemini', 'default', false)
+  const now = Date.now()
+  await ingestPlanLimits({ harness: 'codex', account: 'default', windows: [{ kind: '5h', usedPct: 10, resetsAt: now + 3_600_000 }], updatedAt: now, source: 'codex-rollout' })
+  const sessions = [
+    { id: 'meterless-disabled', harness: 'gemini' as const, model: 'gemini', burnPctPerHour: 0 },
+    { id: 'visible-session', harness: 'codex' as const, model: 'codex', burnPctPerHour: 1 },
+  ]
+  const body = await planLimitsPayload(undefined, now, sessions)
+  expect(body.limits.map(l => l.harness)).toEqual(['codex'])
+  expect(body.liveSessions.map(s => s.id)).toEqual(['visible-session'])
+  expect(body.freeSlotsByHarness.gemini).toBeUndefined()
+  const output = planLimitsTool({ kind: 'spec-impl' }, body)
+  expect(output.liveSessions.map(s => s.id)).toEqual(['visible-session'])
+  expect(JSON.stringify(output)).not.toContain('gemini')
+  expect(JSON.stringify(output)).not.toContain('meterless-disabled')
+  await store.setAvailable('gemini', 'default', true)
+  expect((await planLimitsPayload(undefined, now, sessions)).liveSessions.map(s => s.id)).toEqual(['meterless-disabled', 'visible-session'])
 })
