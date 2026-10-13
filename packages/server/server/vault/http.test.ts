@@ -57,7 +57,7 @@ async function http(method: 'GET' | 'POST', path: string, body?: unknown, grant?
   const headers: Record<string, string> = { 'sec-fetch-site': 'same-origin', ...(method === 'POST' ? { 'content-type': 'application/json' } : {}), ...(grant ? { 'x-vault-grant': grant } : {}), ...(cookie ? { cookie } : {}) }
   // VAULT.PERSONAL §10: the gesture unlock answers ONLY the page on this computer, so it is sent as one —
   // and so are the reads (review M3: the no-proof list is the rule for a page on this computer).
-  const local = path === '/api/vault/unlock' || path === '/api/vault/activity' || path === '/api/vault/activity/arm' || method === 'GET'
+  const local = path === '/api/vault/unlock' || path === '/api/vault/activity' || path === '/api/vault/activity/arm' || path === '/api/vault/extend' || method === 'GET'
   if (local) Object.assign(headers, { host: 'localhost:47292', origin: 'http://localhost:47292' })
   const req = new Request(`${local ? 'http://localhost:47292' : 'http://local'}${path}`, { method, headers, ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}) })
   const res = await handleVaultHttp(req, new URL(req.url), { cors: {}, session: 'session-A', ...(local ? { peer: '127.0.0.1' } : {}) })
@@ -454,6 +454,26 @@ describe('the routes that already existed keep their gate (stepup, lock, auto-lo
     lockVault('user')
     await http('POST', '/api/vault/unlock', {})
     expect((await beat(t2)).json.code).toBe('activity-token')
+  })
+
+  test('extend: a non-loopback peer cannot extend the window or mint a heartbeat token', async () => {
+    lockVault('user')
+    await http('POST', '/api/vault/unlock', {})
+    T += 10 * 60_000
+    const before = autoLockRemainingMs()
+    // Even forged local provenance and a valid vault grant cannot replace the TCP peer check.
+    for (const grant of [undefined, mintGrant('http:session-A', 'read')]) {
+      const req = new Request('http://localhost:47292/api/vault/extend', {
+        method: 'POST', headers: { host: 'localhost:47292', origin: 'http://localhost:47292',
+          'sec-fetch-site': 'same-origin', 'content-type': 'application/json', ...(grant ? { 'x-vault-grant': grant } : {}) },
+        body: '{}',
+      })
+      const res = await handleVaultHttp(req, new URL(req.url), { cors: {}, session: 'session-A', peer: '192.0.2.10' })
+      expect(res!.status).toBe(403)
+      expect(await res!.json()).toMatchObject({ ok: false, code: 'activity-not-here' })
+      expect(res!.headers.get('set-cookie')).toBeNull()
+      expect(autoLockRemainingMs()).toBe(before)
+    }
   })
 
   test('extend: a bare local curl is refused (window unchanged, no token); with the page\'s grant it works, throttled', async () => {

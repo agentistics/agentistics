@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtemp } from 'node:fs/promises'
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
+import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { memoryProtector } from '@agentistics/vault'
@@ -33,6 +33,22 @@ const grantEnv = async (sid: string) => {
 }
 
 describe('per-session grants', () => {
+  test('marker write failure is diagnosed without logging values or names', async () => {
+    const value = 'MARKER-log-private-value'
+    const name = 'MARKER-log-private-name'
+    const item = (await createItem({ kind: 'api-key', name, fields: { value } })).meta
+    // A regular file where the run directory should be makes mkdir fail deterministically.
+    await writeFile(markerDir, '')
+    const log = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect((await grantSession('MARKER-log-private-session', [item.id], [])).ok).toBe(true)
+      expect(log).toHaveBeenCalledTimes(1)
+      expect(log.mock.calls[0]).toEqual(['[vault] could not write grant history marker; offline output withholding is unavailable'])
+      const output = JSON.stringify(log.mock.calls)
+      for (const privateText of [value, name, markerDir, 'MARKER-log-private-session']) expect(output).not.toContain(privateText)
+    } finally { log.mockRestore() }
+  })
+
   test('items and whole groups; references, env names; a briefing that carries no value', async () => {
     const g = (await createGroup('pelvie')).group
     const a = (await createItem({ kind: 'login', name: 'Painel Pelvie', groupId: g.id, fields: { login: 'adm', password: 'MARKER-1' } })).meta

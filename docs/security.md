@@ -650,8 +650,10 @@ of §7a/§7b: every record is sealed in the human scope, under the one purpose `
   a card ("Seu cofre vai se trancar em 5 min. Manter aberto?" — [Manter aberto] [Trancar agora]) and a
   notification lands in Notificações, once per window (`nextWarn`; an extension or any use re-arms it).
   [Manter aberto] moves the idle clock by ONE window (`extendAutoLock`, audited
-  `vault.auto-lock-extended`): a click on this computer, the authenticator code from a remote origin
-  (`extend-open`). It never extends silently, and nobody answering means it locks exactly as before.
+  `vault.auto-lock-extended`): the page's read grant or the authenticator code (`extend-open`).
+  The HTTP `/api/vault/extend` route also requires the same `loopbackRequest`
+  check as `/activity` and `/activity/arm` before reading the body: loopback TCP peer and Host,
+  no proxy headers, and a loopback Origin. It never extends silently, and nobody answering means it locks exactly as before.
 - **The vault locks with the screen.** On Linux from logind (`PrepareForSleep`, `Lock`); on a Windows
   host from WSL through a `powershell.exe` child subscribed to `SessionSwitch` (Win+L, user switch,
   logoff, remote disconnect) and `PowerModeChanged` (suspend). **What cannot be detected, said plainly:**
@@ -1343,4 +1345,19 @@ proof is a single-use presence token bound to `use-approve:<id>`, minted by `POS
 Windows Hello there); a phone sends a single-use passkey token. A vault with no presence device refuses (`no-presence`): turn "Always confirm"
 off for that secret or enrol a device. A bare `approve` raises no gesture. **Stated limit:** a local process of the same user can still call
 `prove` and so make Hello appear; the person sees only the system prompt, not the card — the value is delivered only if they confirm it.
+`POST /api/vault/personal/use/<id>/prove` requires a pending request and permits at most three
+proof attempts per request. `proveUseApproval` requires a loopback page, an open vault and an
+enrolled presence protector; it also refuses recovery mode and a frozen step-up gate. Its response
+contains `fresh`, a random token bound to the HTTP session and the exact `use-approve:<id>`
+action marker. Only the token's hash is held in memory; it is valid for 90 seconds, checked when it is consumed; approval consumes
+it through `x-vault-fresh`. This marker is an action binding, not a file, and `/prove` returns no
+secret value. A remote approval uses the existing phone gesture-token path instead.
+
+Separately, granting a session writes an empty mode-0600 `grant-<session>` history file in the
+vault run directory (characters outside `[A-Za-z0-9_-]` in the session ID become underscores).
+This file survives revocation: when the service cannot answer a PostToolUse scrub request,
+the CLI withholds output for a session with that marker. A missing file permits output; an
+unexpected error checking it withholds output. Marker-write failures are logged without values,
+names or paths; the write remains best effort, so a failed write cannot guarantee offline
+withholding. The file contains no secret and is unrelated to the `/prove` action marker.
 `personal-scrub` is limited to 60 calls/min per session. Only `personal.ts`, `personal-http.ts` and `grants.ts` may use `revealField` (lint).
