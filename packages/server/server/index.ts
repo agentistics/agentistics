@@ -1240,6 +1240,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return await handleUserUiPrefs(req, CORS_HEADERS)
     }
 
+    if (url.pathname === '/api/accounts' || url.pathname.startsWith('/api/accounts/')) {
+      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
+      const { handleAccountsRequest } = await import('./accounts-web')
+      const adapters = await getEnabledAdapters()
+      return handleAccountsRequest(req, adapters.map(a => a.id), CORS_HEADERS)
+    }
+
     if (url.pathname === '/api/billing/plan-prices' && req.method === 'GET') {
       // Reads two public vendor pages — no host access, so no capability registration. It is
       // anchored: a page that fails its known-good figure returns nothing rather than a wrong

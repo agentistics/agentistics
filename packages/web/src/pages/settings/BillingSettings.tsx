@@ -28,6 +28,8 @@ import {
 
 
   SectionHeader,
+  RecordCard,
+  RowSwitch,
   Select,
   TabSelect,
 } from './primitives'
@@ -55,6 +57,16 @@ interface ScrapedPlanPrice {
   amount: number
   currency: BillingCurrency
   source: string
+}
+
+interface HarnessAccount {
+  key: string
+  harness: HarnessId
+  label: string
+  plan?: string
+  available: boolean
+  firstSeen: number
+  lastSeen: number
 }
 
 const newPeriodId = (): string =>
@@ -99,6 +111,37 @@ export default function BillingSettings() {
   const [detections, setDetections] = useState<BillingDetection[] | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [planPrices, setPlanPrices] = useState<ScrapedPlanPrice[]>([])
+
+  const [accounts, setAccounts] = useState<HarnessAccount[]>([])
+  const [accountsError, setAccountsError] = useState(false)
+  const [pendingAccounts, setPendingAccounts] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/accounts')
+      .then(async r => {
+        if (!r.ok) throw new Error('Accounts request failed')
+        return r.json() as Promise<{ accounts: HarnessAccount[] }>
+      })
+      .then(body => { if (!cancelled) setAccounts(body.accounts) })
+      .catch(() => { if (!cancelled) setAccountsError(true) })
+    return () => { cancelled = true }
+  }, [])
+
+  const toggleAccount = async (account: HarnessAccount) => {
+    const id = `${account.harness}:${account.key}`
+    setPendingAccounts(held => new Set(held).add(id))
+    setAccountsError(false)
+    try {
+      const response = await fetch(`/api/accounts/${encodeURIComponent(account.harness)}/${encodeURIComponent(account.key)}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ available: !account.available }),
+      })
+      if (!response.ok) throw new Error('Account update failed')
+      const body = await response.json() as { account: HarnessAccount }
+      setAccounts(held => held.map(a => a.harness === account.harness && a.key === account.key ? body.account : a))
+    } catch { setAccountsError(true) }
+    finally { setPendingAccounts(held => { const next = new Set(held); next.delete(id); return next }) }
+  }
 
   // Live vendor prices. Best-effort by construction: the endpoint is anchored, so it returns
   // nothing rather than a wrong figure, and nothing simply means the built-in catalog stands.
@@ -248,6 +291,25 @@ export default function BillingSettings() {
 
   return (
     <div>
+      <SectionHeader label={pt ? 'Contas' : 'Accounts'} />
+      {accountsError && <p role="alert">{pt ? 'Não foi possível carregar ou salvar as contas. Tente de novo.' : 'Could not load or save accounts. Try again.'}</p>}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
+        {accounts.map(account => (
+          <RecordCard
+            key={`${account.harness}:${account.key}`}
+            title={account.label === 'Conta padrão' && !pt ? 'Default account' : account.label}
+            subtitle={[HARNESS_LABELS[account.harness], account.plan].filter(Boolean).join(' · ')}
+            fields={[]}
+            actions={<RowSwitch
+              on={account.available}
+              onToggle={() => { void toggleAccount(account) }}
+              disabled={pendingAccounts.has(`${account.harness}:${account.key}`)}
+              label={pt ? 'Disponível para os agentes' : 'Available to agents'}
+              sub={pt ? 'Desligada: continua logada, mas os agentes não a enxergam nem a usam' : 'Off: stays logged in, but agents cannot see or use it'}
+            />}
+          />
+        ))}
+      </div>
       <SectionHeader label={pt ? 'Como você é cobrado' : 'How you are billed'} />
       <p style={{ fontSize: 12.5, color: 'var(--text-tertiary)', lineHeight: 1.55, margin: '0 0 14px' }}>
         {pt
