@@ -9,7 +9,7 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown, ChevronRight, Clock3, Info, List, Moon, Pause, Play, RefreshCw, Search, X, Maximize2 } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Clock3, Info, List, Moon, Play, Search, X, Maximize2 } from 'lucide-react'
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { HARNESS_LABELS } from '../../lib/harness'
@@ -26,10 +26,10 @@ import { isInsidePortalledMenu } from '../../lib/rowMenu'
 import { TabSelect } from '../../pages/settings/primitives'
 import { RoleChip } from './RoleChip'
 import { ToggleSwitch } from '../ToggleSwitch'
-import { CHECKIN_ITEMS, clockLabel, formatNextRun, formatSkipped, useCheckin, type CheckinConfig, type CheckinRound } from '../../lib/checkin'
+import { clockLabel, formatNextRun, formatSkipped, useCheckin, type CheckinConfig, type CheckinRound } from '../../lib/checkin'
 import { useTaskActivity, type TaskEvent } from '../../lib/tasks'
 import { RailSection } from '../tasks/RailSection'
-import { parseSnooze, SNOOZE_PRESETS } from '../../lib/nayNotify'
+import { CheckinConfigControls } from './CheckinConfigControls'
 import { setSessionAway, useAway } from '../../lib/awayMode'
 import { Sheet } from '../../pages/vault/vaultUi'
 
@@ -89,9 +89,6 @@ export function CheckinPanel({ state, pt, isMobile, onGo, update, runNow, taskPa
   const paused = state.paused !== null
   const [ran, setRan] = useState<null | 'busy' | 'ok' | 'refused'>(null)
   const run = async () => { setRan('busy'); setRan(await runNow() ? 'ok' : 'refused') }
-  const setInterval = (intervalMin: CheckinConfig['intervalMin']) => void update({ intervalMin })
-  const togglePause = () => void update({ paused: paused ? null : { until: null } })
-  const checklist = state.checklist.length ? state.checklist : CHECKIN_ITEMS.map(item => ({ id: item.id, enabled: true }))
   const activity = useTaskActivity(taskId, 20)
   const last = state.last ? `${state.last.state === 'needs_you' ? (pt ? 'precisa de você' : 'needs you') : state.last.summary}` : (pt ? 'ainda não rodou' : 'not run yet')
   return <div data-testid="checkin-panel" style={bare ? {} : { borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 7 }}>
@@ -103,14 +100,8 @@ export function CheckinPanel({ state, pt, isMobile, onGo, update, runNow, taskPa
       <div style={CHECKIN_ROW}><Clock3 size={15} /><span>{pt ? 'Próxima rodada' : 'Next round'}</span><span style={{ marginLeft: 'auto', color: 'var(--text-primary)' }}>{formatNextRun(state.nextRunAt, Date.now(), pt)}</span></div>
       <div style={{ display: 'grid', gap: 7, padding: '4px 0 7px' }}><div style={{ ...CHECKIN_ROW, alignItems: 'flex-start' }}><Check size={15} style={{ marginTop: 2, flexShrink: 0 }} /><div style={{ minWidth: 0, flex: 1 }}><div style={{ color: 'var(--text-tertiary)', marginBottom: 4 }}>{pt ? 'Última' : 'Last'}{state.lastRunAt && ` · ${clockLabel(state.lastRunAt, pt)}`}</div>{state.last ? <><div style={{ color: 'var(--text-primary)', fontWeight: 600, lineHeight: 1.4 }}>{state.last.headline ?? last}</div><CheckinRoundSections round={state.last} pt={pt} /></> : <div style={{ color: 'var(--text-primary)' }}>{last}</div>}</div></div><button type="button" data-testid="checkin-open-larger" onClick={() => onModalChange?.(true)} style={{ ...ROW_STYLE, width: 'auto', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--border)', marginLeft: 22 }}><Maximize2 size={13} />{pt ? 'Abrir maior' : 'Open larger'}</button></div>
       {formatSkipped(state.skipped, pt) && <div role="status" style={{ ...CHECKIN_ROW, fontSize: 11, color: 'var(--text-tertiary)' }}>{formatSkipped(state.skipped, pt)}</div>}
-      <div style={CHECKIN_ROW}><RefreshCw size={15} /><span>{pt ? 'Intervalo' : 'Interval'}</span><select aria-label={pt ? 'Intervalo do check-in' : 'Check-in interval'} value={state.intervalMin} onChange={e => setInterval(Number(e.target.value) as CheckinConfig['intervalMin'])} style={{ marginLeft: 'auto', background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 5, padding: '4px 6px', font: 'inherit' }}><option value={15}>15 min</option><option value={30}>30 min</option><option value={60}>1 h</option><option value={120}>2 h</option></select></div>
-      <div style={CHECKIN_ROW}><Pause size={15} /><span>{pt ? 'Pausar check-in' : 'Pause check-in'}</span><span style={{ marginLeft: 'auto', display: 'inline-flex' }}><ToggleSwitch on={paused} onToggle={togglePause} label={pt ? 'Pausar check-in' : 'Pause check-in'} tap={isMobile ? 44 : undefined} /></span></div>
-      {paused && <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', padding: '0 0 3px 22px', fontSize: 11 }}><span style={{ color: 'var(--text-tertiary)' }}>{pt ? 'Pausar até:' : 'Pause until:'}</span>{SNOOZE_PRESETS.map(p => <button key={p.ms} type="button" onClick={() => { const parsed = parseSnooze(`${p.ms / 60_000}m`); if (parsed.ok) void update({ paused: { until: Date.now() + parsed.ms } }) }} style={{ all: 'unset', cursor: 'pointer', color: 'var(--anthropic-orange)' }}>{p.label[pt ? 'pt' : 'en']}</button>)}<button type="button" onClick={() => void update({ paused: { until: null } })} style={{ all: 'unset', cursor: 'pointer', color: 'var(--anthropic-orange)' }}>{pt ? 'até religar' : 'until resumed'}</button></div>}
     </div>
-    <div style={{ borderTop: '1px solid var(--border)', paddingTop: 6, marginTop: 4 }}>
-      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', padding: '2px 0' }}>{pt ? 'Roteiro: o que o líder confere' : 'Checklist: what the leader checks'}</div>
-      {CHECKIN_ITEMS.map(item => { const current = checklist.find(x => x.id === item.id); const enabled = current?.enabled ?? true; return <div key={item.id} style={{ ...CHECKIN_ROW, minHeight: isMobile ? 40 : 28 }}><span style={{ color: enabled ? 'var(--text-secondary)' : 'var(--text-tertiary)' }}>{item[pt ? 'pt' : 'en']}</span><span style={{ marginLeft: 'auto', display: 'inline-flex' }}><ToggleSwitch on={enabled} onToggle={() => void update({ checklist: checklist.map(x => x.id === item.id ? { ...x, enabled: !enabled } : x) })} label={item[pt ? 'pt' : 'en']} tap={isMobile ? 44 : undefined} /></span></div> })}
-    </div>
+    <CheckinConfigControls config={state} pt={pt} isMobile={isMobile} update={update} />
     <div style={{ display: 'flex', gap: 6, marginTop: 7, flexWrap: 'wrap' }}><button type="button" disabled={ran === 'busy'} onClick={() => void run()} style={{ ...ROW_STYLE, width: 'auto', cursor: 'pointer', border: '1px solid var(--border)', ...(isMobile ? { minHeight: 44 } : {}) }}><Play size={14} />{pt ? 'Rodar agora' : 'Run now'}</button>{taskPath && <button type="button" onClick={() => onGo(taskPath)} style={{ ...ROW_STYLE, width: 'auto', cursor: 'pointer', border: '1px solid var(--border)', color: 'var(--text-secondary)', ...(isMobile ? { minHeight: 44 } : {}) }}><List size={14} />{pt ? 'Ver registro' : 'View log'}</button>}</div>
     {ran && ran !== 'busy' && <div role="status" style={{ fontSize: 11.5, marginTop: 5, color: ran === 'ok' ? 'var(--accent-green)' : 'var(--accent-red)' }}>{ran === 'ok' ? (pt ? 'Check-in enviado ao líder.' : 'Check-in sent to the leader.') : (pt ? 'O líder não aceitou o check-in agora (ocupado, num diálogo ou parado). Tente de novo em instantes.' : 'The leader did not take the check-in now (busy, in a dialog or stopped). Try again shortly.')}</div>}
     {modalOpen && state.last && <CheckinModal round={state.last} history={activity.events.filter(e => e.kind === 'checkin')} pt={pt} isMobile={isMobile} onClose={() => onModalChange?.(false)} />}
