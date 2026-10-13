@@ -1349,7 +1349,7 @@ off for that secret or enrol a device. A bare `approve` raises no gesture. **Sta
 proof attempts per request. `proveUseApproval` requires a loopback page, an open vault and an
 enrolled presence protector; it also refuses recovery mode and a frozen step-up gate. Its response
 contains `fresh`, a random token bound to the HTTP session and the exact `use-approve:<id>`
-action marker. Only the token's hash is held in memory, for at most 90 seconds; approval consumes
+action marker. Only the token's hash is held in memory; it is valid for 90 seconds, checked when it is consumed; approval consumes
 it through `x-vault-fresh`. This marker is an action binding, not a file, and `/prove` returns no
 secret value. A remote approval uses the existing phone gesture-token path instead.
 
