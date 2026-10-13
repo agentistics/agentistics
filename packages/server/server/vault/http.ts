@@ -168,6 +168,13 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     return reply(await gate.stepUpForRead(b.code, session))
   }
   if (path === '/api/vault/extend' && req.method === 'POST') {
+    // Extending can arm the same heartbeat token as /activity/arm: require its local-page trust.
+    if (!loopback) {
+      await req.body?.cancel().catch(() => {})
+      return reply({ ok: false, code: 'activity-not-here', sentence: vaultLang() === 'pt'
+        ? 'A atividade do cofre só pode vir do painel aberto no próprio computador.'
+        : 'Vault activity can only come from the dashboard on this computer.' })
+    }
     const b = await body()
     const g = await gate.requireVaultStepUp('extend-open', { session, grant, loopback, code: codeOf(b) })
     if (!g.ok) return reply(g)

@@ -11,6 +11,7 @@
  * after a confirmation naming each) and re-entering the secrets.
  */
 import { existsSync, rmSync } from 'node:fs'
+import { stat } from 'node:fs/promises'
 import {
   checkPassphrase, destroyVault, migratedSentence, passphraseCheckSentence, refusalSentence,
   setupCodeCommand, setupCodeTtyRefusal, type ProtectorId,
@@ -589,12 +590,18 @@ async function cmdPostTool(): Promise<number> {
   try { r = (await askVault({ op: 'personal-scrub', managedId: managedId(), text }, { timeoutMs: HOOK_ASK_TIMEOUT_MS }))?.reply as typeof r } catch { r = undefined }
   let hadGrant = true // unknown reads as "had one": fail closed
   if (!r?.ok) {
-    const { existsSync } = await import('node:fs')
     const { join } = await import('node:path')
     const { runDir } = await import('./vault/service')
-    try { hadGrant = existsSync(join(runDir(), grantMarkerName(managedId()!))) } catch { hadGrant = true }
+    hadGrant = await grantMarkerExists(join(runDir(), grantMarkerName(managedId()!)))
   }
   const ans = postToolDecision(input.tool_response, r, hadGrant)
   if (ans) process.stdout.write(ans)
   return 0
+}
+
+/** Missing history means no grant; an unreadable history remains fail-closed. */
+export async function grantMarkerExists(path: string): Promise<boolean> {
+  try { await stat(path); return true } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ENOENT'
+  }
 }

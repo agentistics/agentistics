@@ -93,7 +93,10 @@ export async function grantSession(sessionId: string, itemIds: readonly string[]
   _grants.set(sessionId, g)
   // A hook cannot ask the server whether this session ever had a grant when the server is down, so the grant leaves an empty 0600 marker in the run dir (§3.11-B exception). Never removed on revoke: output seen under a grant stays fail-closed.
   const dir = _markerDir ?? runDir()
-  try { mkdirSync(dir, { recursive: true, mode: 0o700 }); writeFileSync(join(dir, grantMarkerName(sessionId)), '', { mode: 0o600 }) } catch { /* best effort: without a marker the hook passes output through, as before the grant existed */ }
+  try { mkdirSync(dir, { recursive: true, mode: 0o700 }); writeFileSync(join(dir, grantMarkerName(sessionId)), '', { mode: 0o600 }) } catch {
+    // Do not log the error: filesystem messages can include user-controlled paths or names.
+    console.error('[vault] could not write grant history marker; offline output withholding is unavailable')
+  }
   _scrubbers.delete(sessionId)
   await warmScrubber(sessionId)
   return { ok: true, grant: g }
