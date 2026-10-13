@@ -25,6 +25,7 @@
  */
 
 import { tmuxBackend } from './backend-tmux'
+import { spawnCapabilities } from './codex-capabilities'
 import type { SessionBackend } from './types'
 
 
@@ -74,7 +75,7 @@ export async function resolveBackend(): Promise<SessionBackend> {
           // MODE.EVERYWHERE — the TUI continues in the mode the session was IN, where its CLI has a flag
           // for it; one it has none for opens in the harness's default, and the chip then says so.
           ...(i.mode ? { mode: i.mode } : {}),
-        })
+        }, await spawnCapabilities(i.harness))
         if (!planned.ok) return null
         return { id: req.id, cwd: req.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}) }
       },

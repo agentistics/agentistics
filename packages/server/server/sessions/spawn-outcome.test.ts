@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { execFailed, spawnOutcome } from './spawn-outcome'
+import { codexStartupFailure, execFailed, spawnOutcome } from './spawn-outcome'
 
 describe('spawnOutcome', () => {
   it('reads the refusal that produced three dead rows called MAIN', () => {
@@ -86,5 +86,17 @@ describe('execFailed — the binary never ran', () => {
 
   it('is false for a pane that is alive', () => {
     expect(execFailed(spawnOutcome(['> ']), 'claude')).toBe(false)
+  })
+})
+
+describe('Codex startup failure', () => {
+  it('names the installed version and update action instead of raw usage text', () => {
+    expect(codexStartupFailure('0.155.1', 2))
+      .toBe('Codex 0.155.1 failed to start (status 2). Update Codex and try again.')
+  })
+
+  it('still gives an update action when the version probe fails', () => {
+    expect(codexStartupFailure(undefined))
+      .toBe('Codex (installed version unknown) failed to start. Update Codex and try again.')
   })
 })

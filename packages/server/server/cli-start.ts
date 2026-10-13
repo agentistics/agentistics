@@ -129,6 +129,8 @@ import { scanProcesses, type HarnessProcess } from './live-sessions'
 import { resolveBackend } from './sessions'
 import { inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
 import { SPAWN_SPECS, planSpawn, tuiStartModes } from './sessions/spawn-spec'
+import { spawnCapabilities } from './sessions/codex-capabilities'
+import { readHarnessVersion } from './sessions/harness-version'
 import { answerStructured, structuredIntentOf, structuredReopenOrigin } from './sessions/structured-route'
 import { agentisticsMcpLaunch } from './mcp-launch'
 import { prependContext } from './sessions/agentistics-context'
@@ -138,7 +140,7 @@ import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
 import { bornConversationLink } from './sessions/born-link'
 import { recordRewind } from './sessions/rewind-pending'
-import { execFailed, LAUNCH_SETTLE_MS } from './sessions/spawn-outcome'
+import { codexStartupFailure, execFailed, LAUNCH_SETTLE_MS } from './sessions/spawn-outcome'
 import { planTakeover } from './sessions/takeover'
 import { findProjects } from './sessions/project-source'
 import { candidatePath } from './sessions/project-search'
@@ -2118,7 +2120,7 @@ async function spawnManaged(req: {
     // Offered for a FRESH session; `planSpawn` applies it only where the CLI accepts one and reports
     // back what it actually did. A resume ignores it — that conversation already has an id.
     conversationId: offeredConversationId,
-  })
+  }, await spawnCapabilities(req.harness))
   if (!planned.ok) return { ok: false, message: explainSpawnError(planned.error, s) }
 
   // THE BINARY MUST BE REACHABLE FROM HERE. The pane is spawned with THIS process's PATH (see
@@ -2202,6 +2204,7 @@ async function spawnManaged(req: {
     await abandon()
     const message = bin && execFailed(died, bin)
       ? s.sessNotOnPath(bin, process.env.PATH ?? '')
+      : req.harness === 'codex' ? codexStartupFailure(await readHarnessVersion('codex'), died.status)
       : died.message ? s.sessDiedAtSpawn(died.message) : s.sessDiedAtSpawnStatus(died.status)
     return { ok: false, message }
   }
