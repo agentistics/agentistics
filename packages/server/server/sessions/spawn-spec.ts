@@ -119,6 +119,7 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     // `codex --help` (0.161.0): `--no-daemon Run without the shared background server`. This
     // avoids the daemon feature-settings negotiation that blocks every first message; it is scoped
     // to this managed process and does not alter ~/.codex/config.toml or other Codex clients.
+    // codex-cli 0.155.1 has no such flag: pass it only when the installed binary's help confirms it.
     startupArgs: ['--no-daemon'],
     prompt: { kind: 'positional' },
     modelFlag: '--model', // `-m, --model <MODEL>`
@@ -385,8 +386,8 @@ export function conversationLinkGoneForever(harness: HarnessId): boolean {
     && !HARNESS_PROCESS_TRANSCRIPTS[harness]?.managedLog
 }
 
-/** Decide the exact argv (and any text to type in) for a requested session. */
-export function planSpawn(req: SpawnRequest): SpawnPlanResult {
+/** Decide the exact argv (and any text to type in); unconfirmed capabilities default to absent. */
+export function planSpawn(req: SpawnRequest, capabilities: { codexNoDaemon?: boolean } = {}): SpawnPlanResult {
   const spec = SPAWN_SPECS[req.harness]
   if (!spec) return { ok: false, error: { code: 'unsupported-harness', harness: req.harness } }
 
@@ -415,7 +416,8 @@ export function planSpawn(req: SpawnRequest): SpawnPlanResult {
     return { ok: false, error: { code: 'resume-id-unusable', harness: req.harness, id: req.resumeId } }
   }
 
-  const argv: string[] = [spec.bin, ...(spec.startupArgs ?? [])]
+  const startupArgs = req.harness === 'codex' && !capabilities.codexNoDaemon ? [] : spec.startupArgs ?? []
+  const argv: string[] = [spec.bin, ...startupArgs]
   // The resume argv goes FIRST because one of these is a subcommand (`codex resume <id>`), and a
   // subcommand that follows a flag is not a subcommand any more.
   if (req.resumeId && spec.resume) argv.push(...spec.resume(req.resumeId))

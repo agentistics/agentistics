@@ -14,6 +14,10 @@ permission, a question, queued text, interrupt and subsequent prompts.
 
 The public integration makes these changes:
 
+- Terminal launches and resumes pass `--no-daemon` only when the installed `codex --help`
+  advertises it (present in 0.161.0, absent in 0.155.1). The bounded probe is cached per binary
+  path and modification time; a failed probe omits the flag so older Codex can still start.
+  Existing startup failure messages include the installed version and an instruction to update Codex.
 - Codex effort is passed as `-c model_reasoning_effort="<value>"` for the terminal fallback and
   as protocol fields for structured sessions. The installed server's model catalog declares
   `low`, `medium`, `high`, `xhigh`, `max` and `ultra`; only `low` has been used in real inference here.
