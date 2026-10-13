@@ -10,9 +10,13 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { readGithubConfig, writeGithubConfig } from './backup/github-store'
 import { sealedPathFor } from './vault/whole-file'
+import type { GhPresence } from './backup/github-cli'
 import {
   connectGithub, disconnectGithub, readGithubSection, updateGithubSection,
 } from './backup-routes'
+
+/** The machine's real `gh` makes a network call (6 s on a slow link) — tests never wait on it. */
+const noGh = async (): Promise<GhPresence> => ({ installed: false, account: null })
 
 
 describe('the GitHub versioning section — the token never leaves the machine', () => {
@@ -40,7 +44,7 @@ describe('the GitHub versioning section — the token never leaves the machine',
 
   test('an unconfigured machine says so, and says nothing else', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'agentistics-ghroute-'))
-    const status = await readGithubSection(join(dir, 'nothing.json'))
+    const status = await readGithubSection(join(dir, 'nothing.json'), noGh)
     expect(status.configured).toBe(false)
     // The unconfigured shape also says whether `gh` can be offered — the machine running the suite
     // may or may not have it, so the assertion is on the SHAPE, never on this machine's answer.
@@ -240,7 +244,7 @@ describe('disconnecting the repository', () => {
     const res = await disconnectGithub(file)
     expect(res.ok).toBe(true)
     expect(existsSync(file) || existsSync(sealedPathFor(file))).toBe(false)
-    expect((await readGithubSection(file)).configured).toBe(false)
+    expect((await readGithubSection(file, noGh)).configured).toBe(false)
     rmSync(dir, { recursive: true, force: true })
   })
 
