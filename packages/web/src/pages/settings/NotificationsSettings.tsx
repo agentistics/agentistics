@@ -30,7 +30,7 @@ import { NOTIFICATION_CATEGORIES } from '../../lib/notificationCategories'
 import { formatSpan, STALE_OPTIONS_MIN } from '../../lib/nayNotify'
 import { SectionHeader, Divider, PrefRow, Toggle, Select } from './primitives'
 import { ArrowUpRight, Volume2, VolumeX, Sparkles, AlertCircle, Clock, Activity, XCircle, Hourglass } from 'lucide-react'
-import { getMobilePushState, setMobilePushEnabled } from '../../lib/mobilePush'
+import { getMobilePushState, mobilePushFailureMessage, MobilePushError, setMobilePushEnabled } from '../../lib/mobilePush'
 
 const HOUR_OPTIONS = Array.from({ length: 24 }, (_, h) => ({ value: String(h), label: `${String(h).padStart(2, '0')}h` }))
 
@@ -56,6 +56,11 @@ export default function NotificationsSettings() {
 
   function updateEventSound(eventKey: NotifyEvent, value: SoundPreset) {
     update({ eventSounds: { ...(settings.eventSounds || DEFAULT_NOTIFICATION_SETTINGS.eventSounds), [eventKey]: value } })
+  }
+
+  function formatMobilePushError(error: unknown): string {
+    if (error instanceof MobilePushError) return mobilePushFailureMessage(error.status, error.detail, pt)
+    return pt ? 'Não foi possível atualizar as notificações. Tente novamente.' : 'Could not update notifications. Try again.'
   }
 
   const muted = new Set(settings.mutedCategories ?? [])
@@ -242,10 +247,18 @@ export default function NotificationsSettings() {
       >
         <Toggle on={mobilePush.enabled} onToggle={() => {
           setMobilePushError(null)
-          void setMobilePushEnabled(!mobilePush.enabled).then(setMobilePush).catch(e => setMobilePushError(e instanceof Error ? e.message : (pt ? 'Não foi possível atualizar as notificações' : 'Could not update notifications')))
+          void setMobilePushEnabled(!mobilePush.enabled).then(setMobilePush).catch(e => setMobilePushError(formatMobilePushError(e)))
         }} disabled={!mobilePush.supported} />
       </PrefRow>
-      {mobilePushError && <div style={{ color: '#ef4444', fontSize: 12, marginTop: 8 }}>{mobilePushError}</div>}
+      {mobilePushError && <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', color: '#ef4444', fontSize: 12, marginTop: 8 }}>
+        <span>{mobilePushError}</span>
+        <button type="button" onClick={() => {
+          setMobilePushError(null)
+          void setMobilePushEnabled(true).then(setMobilePush).catch(e => setMobilePushError(formatMobilePushError(e)))
+        }} style={{ border: '1px solid currentColor', borderRadius: 6, background: 'transparent', color: 'inherit', padding: '5px 9px', cursor: 'pointer', font: 'inherit' }}>
+          {pt ? 'Tentar novamente' : 'Try again'}
+        </button>
+      </div>}
 
       <Divider />
 

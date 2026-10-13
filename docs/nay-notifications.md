@@ -95,6 +95,10 @@ When a session replies (`waiting`) and the page is **not** `/sessions`, the butt
 
 ## Delivery rules (`sessionNotifications.ts` → `deliver`)
 
+- **Mute workers** checks the conversation's role first, falling back to the managed session's
+  role when the conversation has none, matching the server. This applies to every delivery channel
+  and to a snoozed card returning; conflicting roles never silence a conversation marked leader
+  or let a conversation marked worker through. Ended sessions retain their notification exception.
 - Every event is written to the **bell** (`lib/notifications.ts`, codes `session.turn_ended`,
   `session.needs_approval`, `session.stale`, `session.working`, `session.exited`). Its `meta` is the
   same in every tab (the minute, not the millisecond), so the server's dedupe keeps one row. The

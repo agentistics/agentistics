@@ -5,6 +5,15 @@ export type CheckinItemId = 'fleet' | 'handbacks' | 'limits' | 'releases' | 'mcp
 export type CheckinRoundState = 'ok' | 'resolved' | 'needs_you'
 export type CheckinLink = { kind: 'session' | 'subtask' | 'task'; id: string; taskId?: string }
 export interface CheckinNeedWire { subject: string; text: string; critical?: boolean; link?: CheckinLink }
+export interface CheckinDelivered { text: string; ref?: string }
+export interface CheckinInProgress { item: string; stage: string; release?: string; session?: string }
+export interface CheckinNext { text: string; when?: string }
+export type CheckinHealthState = 'ok' | 'warn' | 'bad'
+export interface CheckinHealth { label: string; value: string; state: CheckinHealthState }
+export interface CheckinRound {
+  state: CheckinRoundState; summary: string; headline?: string; delivered?: CheckinDelivered[]
+  inProgress?: CheckinInProgress[]; next?: CheckinNext[]; health?: CheckinHealth[]; at?: number; needs?: CheckinNeedWire[]
+}
 export interface CheckinConfig {
   intervalMin: 15 | 30 | 60 | 120
   paused: null | { until: number | null }
@@ -15,7 +24,15 @@ export interface CheckinState extends CheckinConfig {
   lastRunAt: number | null
   nextRunAt: number | null
   /** `at` and `needs` ride the SSE event of a round (CONTRACT §3 data); optional so older servers still parse. */
-  last: { state: CheckinRoundState; summary: string; at?: number; needs?: CheckinNeedWire[] } | null
+  last: CheckinRound | null
+  skipped?: { count: number; lastAt: number }
+}
+
+export function formatSkipped(skipped: CheckinState['skipped'], pt = true): string | null {
+  if (!skipped || skipped.count < 1) return null
+  return pt
+    ? `${skipped.count} rodada${skipped.count === 1 ? '' : 's'} pulada${skipped.count === 1 ? '' : 's'} (nada mudou) · última às ${clockLabel(skipped.lastAt, true)}`
+    : `${skipped.count} skipped round${skipped.count === 1 ? '' : 's'} (nothing changed) · last at ${clockLabel(skipped.lastAt, false)}`
 }
 
 export const CHECKIN_ITEMS: readonly { id: CheckinItemId; pt: string; en: string }[] = [
@@ -26,6 +43,25 @@ export const CHECKIN_ITEMS: readonly { id: CheckinItemId; pt: string; en: string
   { id: 'mcp-configs', pt: 'Configs MCP dos harnesses', en: 'Harness MCP configs' },
   { id: 'handoff', pt: 'Passagem (HANDOFF)', en: 'Handoff' },
 ]
+
+/** Same built-in agenda as the server; saved defaults only allow an indefinite pause. */
+export function checkinDefaults(value?: unknown): CheckinConfig {
+  const saved = value && typeof value === 'object' ? value as Partial<CheckinConfig> : {}
+  return {
+    intervalMin: [15, 30, 60, 120].includes(saved.intervalMin as number) ? saved.intervalMin! : 30,
+    paused: saved.paused?.until === null ? { until: null } : null,
+    checklist: CHECKIN_ITEMS.map(({ id }) => ({ id, enabled: Array.isArray(saved.checklist)
+      ? saved.checklist.find(item => item?.id === id && typeof item.enabled === 'boolean')?.enabled ?? true : true })),
+  }
+}
+
+export async function saveCheckinDefaults(config: CheckinConfig): Promise<void> {
+  const response = await fetch('/api/preferences', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ checkinDefaults: config }),
+  })
+  if (!response.ok) throw new Error('save failed')
+}
 
 /** The prototype's clock: `21h40` in Portuguese, `21:40` in English. */
 export function clockLabel(ms: number, pt = true): string {

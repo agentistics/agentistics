@@ -86,6 +86,11 @@ export function spawnOutcome(frame: readonly string[]): SpawnOutcome {
 /** How many lines above the notice count as the program's message. */
 export const MESSAGE_LINES = 6
 
+/** A Codex startup refusal needs an update action, rather than a screen full of CLI usage. */
+export function codexStartupFailure(version: string | undefined, status?: number): string {
+  return `Codex ${version ?? '(installed version unknown)'} failed to start${status !== undefined ? ` (status ${status})` : ''}. Update Codex and try again.`
+}
+
 /**
  * How long to keep asking before believing a session started — milliseconds.
  *

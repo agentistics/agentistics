@@ -31,6 +31,8 @@ import { toControlSession } from './control-session'
 import { recordedRepo, repoFacts } from './repo-facts'
 import { emptyReason, renderSessionTable, resolveWidth } from './session-table'
 import { SPAWN_SPECS, planSpawn } from './spawn-spec'
+import { spawnCapabilities } from './codex-capabilities'
+import { readHarnessVersion } from './harness-version'
 import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveContextTaskByRef, resolveSpawnAwayFor, writeContextFile } from './spawn-context'
 import { rulesFor } from './attention-rules'
 // The harness half of a rename. Shared with the cockpit's Rename verb — see `rename.ts`.
@@ -55,7 +57,7 @@ import { AGENTISTICS_DATA_DIR, TASKS_FILE } from '../config'
 import { createTaskStore } from './task-store'
 import { newAttemptId, newTaskId, type Attempt, type Task } from './task-model'
 import { liveConversationHolders } from './live-claims'
-import { execFailed } from './spawn-outcome'
+import { codexStartupFailure, execFailed } from './spawn-outcome'
 import { spawnDeath } from './spawn-check'
 import { parseHarnessAgents } from './harness-agents'
 import { planTakeover, type TakeoverRefusal } from './takeover'
@@ -340,6 +342,7 @@ async function spawnFailure(backend: SessionBackend, id: string, bin?: string): 
   if (bin && execFailed(outcome, bin)) {
     return `\`${bin}\` could not be executed — is it on PATH? PATH: ${process.env.PATH ?? '(empty)'}`
   }
+  if (bin === 'codex') return codexStartupFailure(await readHarnessVersion(bin), outcome.status)
   // The harness's own words, because they are the only actionable part. A status with no message is
   // still better than "it did not start".
   return outcome.message
@@ -383,7 +386,7 @@ export async function start(
     ...(logFile ? { logFile } : {}),
     conversationId: offeredConversationId,
     context: ctx,
-  })
+  }, await spawnCapabilities(cmd.harness))
   if (!planned.ok) { console.error(explainPlanError(planned.error)); return 1 }
 
   // The memory GATE, before anything is registered or launched — `requested: 1` is this one
@@ -613,7 +616,7 @@ export async function batch(
       ...(spec.model ? { model: spec.model } : {}),
       ...(spec.effort ? { effort: spec.effort } : {}),
       conversationId: offeredConversationId,
-    })
+    }, await spawnCapabilities(spec.harness))
     if (!planned.ok) { failed.push({ harness: spec.harness, reason: explainPlanError(planned.error) }); continue }
 
     // Stamped BEFORE the process is launched, not after it has been checked for a crash.
@@ -757,7 +760,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
     const m = row.entry
     const id = newSessionId()
     const logFile = managedProcessLogPath(m.harness, id, AGENTISTICS_DATA_DIR)
-    const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...(logFile ? { logFile } : {}), ...inheritedLaunch(m, m.harness) })
+    const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...(logFile ? { logFile } : {}), ...inheritedLaunch(m, m.harness) }, await spawnCapabilities(m.harness))
     if (!planned.ok) { skipped.push(m.id); continue }
     try {
       if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
@@ -1100,7 +1103,7 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
 
   const id = newSessionId()
   const logFile = managedProcessLogPath(live.harness, id, AGENTISTICS_DATA_DIR)
-  const planned = planSpawn({ harness: live.harness, cwd: live.cwd, resumeId: live.sessionId, ...(logFile ? { logFile } : {}) })
+  const planned = planSpawn({ harness: live.harness, cwd: live.cwd, resumeId: live.sessionId, ...(logFile ? { logFile } : {}) }, await spawnCapabilities(live.harness))
   const plan = planTakeover({
     conversationId: live.sessionId,
     harness: live.harness,

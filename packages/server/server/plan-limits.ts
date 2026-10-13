@@ -14,12 +14,13 @@ import { readFile, readdir, stat, writeFile, rename, mkdir } from 'node:fs/promi
 import { basename, dirname, join } from 'node:path'
 import { watch as fsWatch } from 'node:fs'
 import {
-  alternativeWithRoom, HARNESS_ORDER, newerLimits, parseClaudeRateLimitEvent, parseCodexRateLimits,
+  agentVisiblePlans, alternativeWithRoom, HARNESS_ORDER, newerLimits, parseClaudeRateLimitEvent, parseCodexRateLimits,
   planBudget, planPace, planThresholdNotices, registeredPlanLabel, withPlanLabel,
   type HarnessId,
   type LivePlanSession, type PlanLimits, type PlanNoticeState, type PlanThresholdNotice,
 } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, CODEX_SESSIONS_DIR } from './config'
+import { currentHarnessAccounts } from './harness-accounts'
 import { readTailBytes, windowLines } from './sessions/transcript-window'
 
 let filePath: string | null = null
@@ -285,7 +286,7 @@ export async function planLimitsPayload(
   billing: Parameters<typeof withPlanLabel>[1],
   nowMs = Date.now(),
   liveSessions: readonly LivePlanSession[] = [],
-): Promise<{ limits: PlanLimits[]; registered: { harness: HarnessId; plan: string }[]; budgets: Array<ReturnType<typeof planBudget> & ReturnType<typeof planPace>>; freeSlots: number; freeSlotsByHarness: Partial<Record<HarnessId, number>>; liveSessions: LivePlanSession[]; pauseUntil?: number; now: number }> {
+): Promise<{ limits: PlanLimits[]; registered: { harness: HarnessId; plan: string }[]; budgets: Array<ReturnType<typeof planBudget> & ReturnType<typeof planPace>>; hiddenFromAgents: Array<ReturnType<typeof planBudget> & ReturnType<typeof planPace>>; freeSlots: number; freeSlotsByHarness: Partial<Record<HarnessId, number>>; liveSessions: LivePlanSession[]; pauseUntil?: number; now: number }> {
   await syncPlanLimitsFromFile()
   const limits = Object.values(state.limits)
     .map(l => withPlanLabel(l, billing, nowMs))
@@ -297,18 +298,25 @@ export async function planLimitsPayload(
     const plan = registeredPlanLabel(billing, h, nowMs)
     if (plan && !limits.some(l => l.harness === h)) registered.push({ harness: h, plan })
   }
-  const budgets = limits.map(l => {
+  const currentAccounts = await currentHarnessAccounts([
+    ...limits.map(l => l.harness),
+    ...liveSessions.flatMap(s => s.harness ? [s.harness] : []),
+  ])
+  const allBudgets = limits.map(l => {
     const budget = planBudget(l, nowMs)
     const planSessions = liveSessions.filter(s => !s.harness || s.harness === l.harness)
     return { ...budget, ...planPace(l, nowMs, history.get(keyOf(l)) ?? [], planSessions) }
   })
+  const budgets = agentVisiblePlans(allBudgets, currentAccounts)
+  const hiddenFromAgents = allBudgets.filter(b => !budgets.includes(b))
   const freeSlotsByHarness = Object.fromEntries(budgets.map(b => [b.harness, b.freeSlots])) as Partial<Record<HarnessId, number>>
   // A caller choosing a harness must not be blocked by another harness's exhausted plan.
   const availableBudgets = budgets.filter(b => b.status !== 'hold')
   const freeSlots = availableBudgets.length ? Math.max(...availableBudgets.map(b => b.freeSlots)) : 0
   const pauseUntil = budgets.map(b => b.pauseUntil).filter((v): v is number => v !== undefined).sort((a, b) => a - b)[0]
-  const publicLiveSessions = liveSessions.map(({ harness: _harness, ...s }) => s)
-  return { limits, registered, budgets, freeSlots, freeSlotsByHarness, liveSessions: publicLiveSessions, ...(pauseUntil !== undefined ? { pauseUntil } : {}), now: nowMs }
+  const hiddenHarnesses = new Set(currentAccounts.filter(a => !a.available).map(a => a.harness))
+  const publicLiveSessions = liveSessions.filter(s => !s.harness || !hiddenHarnesses.has(s.harness)).map(({ harness: _harness, ...s }) => s)
+  return { limits, registered, budgets, hiddenFromAgents, freeSlots, freeSlotsByHarness, liveSessions: publicLiveSessions, ...(pauseUntil !== undefined ? { pauseUntil } : {}), now: nowMs }
 }
 
 /** Tests only. */

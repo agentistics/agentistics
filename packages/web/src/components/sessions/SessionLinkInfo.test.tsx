@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
+import { Children, isValidElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { SessionLinkInfo, SessionLinkPanel, linkTargets } from './SessionLinkInfo'
+import { CheckinPanel, CheckinRoundSections, SessionLinkInfo, SessionLinkPanel, linkTargets } from './SessionLinkInfo'
+import type { CheckinRound } from '../../lib/checkin'
 import { sessionPath } from '../../lib/sessionRoute'
 import type { SessionLinks } from '../../lib/sessionParent'
 
@@ -48,6 +50,73 @@ describe('SessionLinkInfo', () => {
     const html = renderToStaticMarkup(<SessionLinkPanel links={links} sessionId="session-1" pt={false} onGo={() => {}} isMobile />)
     const button = html.match(/<button[^>]*aria-label="Change type"[^>]*>/)?.[0] ?? ''
     expect(button).toContain('min-height:44px')
+  })
+})
+
+describe('structured check-in sections', () => {
+  // RailSection reads viewport width during SSR; effects and DOM listeners do not run.
+  const env = globalThis as unknown as { window?: { innerWidth: number } }
+  const previousWindow = env.window
+  beforeAll(() => { env.window = { innerWidth: 1280 } })
+  afterAll(() => { if (previousWindow === undefined) delete env.window; else env.window = previousWindow })
+  const round: CheckinRound = {
+    state: 'ok', summary: 'fallback', headline: 'Headline',
+    needs: [{ subject: 'Review', text: 'Please review' }],
+    delivered: [{ text: 'Shipped the modal' }, { text: 'Added tests' }],
+    inProgress: [{ item: 'QA', stage: 'review' }],
+    next: [{ text: 'Deploy', when: 'tomorrow' }],
+    health: [{ label: 'MCP', value: 'online', state: 'ok' }],
+  }
+
+  it('renders every non-empty section and its count', () => {
+    const html = renderToStaticMarkup(<CheckinRoundSections round={round} pt={false} />)
+    for (const label of ['Needs you', 'Delivered last', 'In development', 'Next steps', 'Health']) expect(html).toContain(label)
+    expect(html).toContain('>2<')
+  })
+  it('opens the needs section by default and hides empty sections', () => {
+    const html = renderToStaticMarkup(<CheckinRoundSections round={{ state: 'ok', summary: 'Legacy', needs: round.needs }} pt={false} />)
+    expect(html).toContain('aria-expanded="true"')
+    expect(html).toContain('Needs you')
+    expect(html).not.toContain('Delivered last')
+    expect(html).not.toContain('In development')
+  })
+  it.each([false, true])('opens the Sheet from the populated check-in panel (mobile=%s)', isMobile => {
+    env.window!.innerWidth = isMobile ? 390 : 1280
+    let modalOpen = false
+    let click: (() => void) | undefined
+    // Capture the real button handler while SSR renders the panel with its hooks.
+    function Panel() {
+      const tree = CheckinPanel({ state: { session: 'leader', paused: null, intervalMin: 30, checklist: [], nextRunAt: 1, lastRunAt: 1, last: round }, pt: false, isMobile, onGo: () => {}, update: async () => {}, runNow: async () => true, taskPath: null, modalOpen, onModalChange: open => { modalOpen = open } })
+      function visit(node: ReactNode) {
+        Children.forEach(node, child => {
+          if (!isValidElement<{ children?: ReactNode; 'data-testid'?: string; onClick?: () => void }>(child)) return
+          if (child.props['data-testid'] === 'checkin-open-larger') click = child.props.onClick
+          visit(child.props.children)
+        })
+      }
+      visit(tree)
+      return tree
+    }
+    const closed = renderToStaticMarkup(<Panel />)
+    expect(closed).toContain('data-testid="checkin-open-larger"')
+    expect(closed).not.toContain('data-testid="checkin-modal"')
+    expect(click).toBeFunction()
+    click!()
+    expect(modalOpen).toBe(true)
+    const opened = renderToStaticMarkup(<Panel />)
+    expect(opened).toContain('data-testid="checkin-modal"')
+    expect(opened).toContain('role="dialog"')
+    expect(opened).toContain('aria-modal="true"')
+    expect(opened).toContain('aria-label="Check-in details"')
+  })
+  it.each([
+    [false, ['Healthy', 'Warning', 'Critical']],
+    [true, ['Saudável', 'Atenção', 'Crítico']],
+  ] as const)('localizes every health accessibility label (pt=%s)', (pt, labels) => {
+    const health = (['ok', 'warn', 'bad'] as const).map(state => ({ label: 'MCP', value: 'online', state }))
+    const html = renderToStaticMarkup(<CheckinRoundSections round={{ ...round, health }} pt={pt} expanded />)
+    for (const label of labels) expect(html).toContain(`aria-label="${label}"`)
+    for (const state of ['ok', 'warn', 'bad']) expect(html).not.toContain(`aria-label="${state}"`)
   })
 })
 

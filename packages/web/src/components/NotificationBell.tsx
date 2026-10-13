@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bell, BellOff, AlertCircle, AlertTriangle, Info, CheckCircle2, Trash2, X, Download } from 'lucide-react'
-import { useNotifications, markAllRead, clearNotifications, dismissNotification, resolveNotification, notificationLink, type NotificationType } from '../lib/notifications'
+import { useNotifications, markAllRead, clearNotifications, dismissNotification, pushLocalNotification, resolveNotification, notificationLink, type NotificationType } from '../lib/notifications'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { openWhatsNew } from '../whatsNew/open'
 import { requestIdleReview } from '../lib/idleReviewRequest'
@@ -9,6 +9,7 @@ import { muteSessionWithToast, SESSION_MUTED_CODE } from '../lib/notifyMenu'
 import { setMuteWorkers, useMuteWorkers } from '../lib/sessionRoles'
 import { usePendingUpdate } from '../lib/pendingUpdate'
 import { ToggleSwitch } from './ToggleSwitch'
+import { answerAwayDigest } from '../lib/awayDigest'
 
 const ICON: Record<NotificationType, { color: string; Icon: typeof AlertCircle }> = {
   error:   { color: '#ef4444', Icon: AlertCircle },
@@ -54,6 +55,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
   const isMobile = useIsMobile()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
+  const [digestBusyId, setDigestBusyId] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const unread = notes.filter(n => !n.read).length
   const muteWorkers = useMuteWorkers()
@@ -205,6 +207,24 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
               const isWhatsNew = n.code === 'app.whats_new'
               const isClean = n.code === 'clean.suggestion'
               const isJournalFailed = n.meta?.loadingKind === 'journal' && n.meta?.state === 'failed'
+              const isAwayDigest = n.code === 'away.digest_offer'
+              const digestBusy = digestBusyId === n.id
+              const answerDigest = async (answer: 'yes' | 'no') => {
+                setDigestBusyId(n.id)
+                try {
+                  const body = await answerAwayDigest(answer, n.meta?.bucket, n.meta?.since, lang)
+                  if (!body.ok) {
+                    const stale = body.status === 409
+                    if (stale) dismissNotification(n.id)
+                    pushLocalNotification({ type: 'error', code: stale ? 'away.digest_stale' : 'away.digest_failed' })
+                    return
+                  }
+                  dismissNotification(n.id)
+                  if (answer === 'yes' && body.conversationId) { setOpen(false); navigate(`/sessions/${encodeURIComponent(body.conversationId)}`) }
+                } catch {
+                  pushLocalNotification({ type: 'error', code: 'away.digest_failed' })
+                } finally { setDigestBusyId(null) }
+              }
               const clickable = link !== null || isUpdate || isIdle || isWhatsNew
               const go = () => {
                 setOpen(false)
@@ -246,6 +266,12 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
                     <button onClick={e => { e.stopPropagation(); setOpen(false); window.dispatchEvent(new CustomEvent('agentistics:retry-journal-import')) }} style={{ flexShrink: 0, padding: '4px 7px', borderRadius: 6, border: '1px solid var(--anthropic-orange)60', background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)', cursor: 'pointer', font: 'inherit', fontSize: 11 }}>
                       {pt ? 'Tentar importar de novo' : 'Retry the import'}
                     </button>
+                  )}
+                  {isAwayDigest && (
+                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                      <button className="ag-tap" disabled={digestBusy} onClick={e => { e.stopPropagation(); void answerDigest('yes') }} style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)', color: 'var(--text-primary)', cursor: digestBusy ? 'wait' : 'pointer', font: 'inherit', fontSize: 11 }}>{pt ? 'Sim, abrir resumo' : 'Yes, open summary'}</button>
+                      <button className="ag-tap" disabled={digestBusy} onClick={e => { e.stopPropagation(); void answerDigest('no') }} style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: digestBusy ? 'wait' : 'pointer', font: 'inherit', fontSize: 11 }}>{pt ? 'Não agora' : 'Not now'}</button>
+                    </div>
                   )}
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0,

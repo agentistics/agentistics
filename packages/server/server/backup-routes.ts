@@ -22,6 +22,7 @@ import {
 import { BACKUP_LAYERS, omittedSecrets, type BackupLayer } from './backup/backup-plan'
 import { formatBytes, layerTotal, retainedTotal } from './backup/backup-size'
 import { githubFitVerdict, type GithubFitVerdict } from './backup/backup-github'
+import type { GhPresence } from './backup/github-cli'
 import { lastBackup, lastPerHarness, lastBackupRun, loadBackupHistory, type BackupPresence } from './backup/backup-store'
 import { SCHEDULE_IDS, scheduleStatus, type ScheduleId } from './backup/schedule'
 import { loadConsolidated } from './consolidate'
@@ -334,14 +335,16 @@ export type GithubSection =
     suggestedLabel: string | null
   }
 
-export async function readGithubSection(file?: string): Promise<GithubSection> {
+export async function readGithubSection(
+  file?: string, probe?: () => Promise<GhPresence>,
+): Promise<GithubSection> {
   const { readGithubConfig } = await import('./backup/github-store')
   const config = await readGithubConfig(file)
   if (!config) {
     const { describeGhAuth, probeGh } = await import('./backup/github-cli')
     // Probed only on the UNCONFIGURED path: it spawns a process and makes a network call, and a
-    // configured machine has no question left for it to answer.
-    return { configured: false, gh: describeGhAuth(await probeGh()) }
+    // configured machine has no question left for it to answer. `probe` lets tests skip both.
+    return { configured: false, gh: describeGhAuth(await (probe ?? probeGh)()) }
   }
   return {
     configured: true,

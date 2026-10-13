@@ -131,6 +131,11 @@ export interface TaskEvent {
   sessionId?: string
   actions?: CheckinAction[]
   needs?: CheckinNeed[]
+  headline?: string
+  delivered?: Array<{ text: string; ref?: string }>
+  inProgress?: Array<{ item: string; stage: string; release?: string; session?: string }>
+  next?: Array<{ text: string; when?: string }>
+  health?: Array<{ label: string; value: string; state: 'ok' | 'warn' | 'bad' }>
 }
 
 export interface CheckinLink { kind: 'session' | 'subtask' | 'task'; id: string; taskId?: string }
@@ -153,7 +158,7 @@ export type GroupedActivity = TaskEvent | CheckinRun
 export function expandCheckinEvent(e: TaskEvent): TaskEvent {
   if (e.kind !== 'checkin' || e.state !== undefined || !e.detail?.startsWith('{')) return e
   try {
-    const d = JSON.parse(e.detail) as Partial<Pick<TaskEvent, 'state' | 'summary' | 'sessionId' | 'actions' | 'needs'>>
+    const d = JSON.parse(e.detail) as Partial<Pick<TaskEvent, 'state' | 'summary' | 'sessionId' | 'actions' | 'needs' | 'headline' | 'delivered' | 'inProgress' | 'next' | 'health'>>
     const state = d.state === 'ok' || d.state === 'resolved' || d.state === 'needs_you' ? d.state : undefined
     return {
       ...e,
@@ -162,6 +167,11 @@ export function expandCheckinEvent(e: TaskEvent): TaskEvent {
       ...(typeof d.sessionId === 'string' ? { sessionId: d.sessionId } : {}),
       ...(Array.isArray(d.actions) ? { actions: d.actions } : {}),
       ...(Array.isArray(d.needs) ? { needs: d.needs } : {}),
+      ...(typeof d.headline === 'string' ? { headline: d.headline } : {}),
+      ...(Array.isArray(d.delivered) ? { delivered: d.delivered } : {}),
+      ...(Array.isArray(d.inProgress) ? { inProgress: d.inProgress } : {}),
+      ...(Array.isArray(d.next) ? { next: d.next } : {}),
+      ...(Array.isArray(d.health) ? { health: d.health } : {}),
     }
   } catch { return e }
 }

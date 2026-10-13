@@ -381,6 +381,7 @@ export async function addComment(
     newThread?: { title: string; kind?: ThreadKind }
     /** A VERIFIED session id — the route verifies (`session-identity.ts`), never this function. */
     session?: string
+    message?: { to: string; kind: 'handback' | 'block' | 'question' }
     /** The person wrote it on the board (no session identity). */
     owner?: boolean
     /** What the record is (handback, block, decision). Absent = a note. */
@@ -433,7 +434,7 @@ export async function addComment(
     ...(o.kind && o.kind !== 'note' ? { kind: o.kind } : {}),
   })
   if (threadId) await noteThreadComment(threadId, o.session)
-  await w.store.logEvents([event(task.id, author, 'comment', { detail: commentTargetPhrase(plan.target) })])
+  await w.store.logEvents([event(task.id, author, 'comment', { detail: o.message && o.session ? JSON.stringify({ message: { ...o.message, from: o.session } }) : commentTargetPhrase(plan.target) })])
   return { ok: true, id, ...(threadId ? { threadId } : {}) }
 }
 

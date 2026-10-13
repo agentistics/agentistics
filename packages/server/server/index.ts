@@ -144,10 +144,11 @@ import { startAgentClient, reconcileNow } from './team-agent-client'
 import { validateIngestToken } from './team-tokens'
 import { getAccount } from './accounts'
 import { getTeam } from './teams'
-import { stateFor as checkinState, putState as putCheckin, reportFromIdentity as reportCheckin, runNow as runCheckin, startCheckinTimer } from './checkin'
+import { stateFor as checkinState, putState as putCheckin, reportFromIdentity as reportCheckin, runNow as runCheckin, startCheckinTimer, validateCheckinRound } from './checkin'
 import { discoverProjectDisks } from './disk-picker'
 import { allowedRoots, listFolders, rootListing } from './fs-folders'
 import { forgetProjects } from './sessions/project-source'
+import { startAwayDigestTimer } from './away-digest'
 
 // ---------------------------------------------------------------------------
 // Reads the first `cwd` field found in a JSONL session file.
@@ -1240,6 +1241,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return await handleUserUiPrefs(req, CORS_HEADERS)
     }
 
+    if (url.pathname === '/api/accounts' || url.pathname.startsWith('/api/accounts/')) {
+      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
+      const { handleAccountsRequest } = await import('./accounts-web')
+      const adapters = await getEnabledAdapters()
+      return handleAccountsRequest(req, adapters.map(a => a.id), CORS_HEADERS)
+    }
+
     if (url.pathname === '/api/billing/plan-prices' && req.method === 'GET') {
       // Reads two public vendor pages — no host access, so no capability registration. It is
       // anchored: a page that fails its known-good figure returns nothing rather than a wrong
@@ -2064,11 +2072,19 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // LEADER CHECK-INS — agenda state, immediate run, and the MCP report share this server store.
     if (url.pathname === '/api/checkin' || url.pathname.startsWith('/api/checkin/')) {
       if (url.pathname === '/api/checkin/report' && req.method === 'POST') {
-        const body = await req.json().catch(() => ({})) as { state?: unknown; summary?: unknown; actions?: unknown; needs?: unknown; session?: { id?: unknown; token?: unknown } }
+        const body = await req.json().catch(() => ({})) as { state?: unknown; summary?: unknown; headline?: unknown; delivered?: unknown; inProgress?: unknown; next?: unknown; health?: unknown; actions?: unknown; needs?: unknown; session?: { id?: unknown; token?: unknown } }
+        if (typeof body.headline === 'string' && (body.headline.includes('\n') || body.headline.includes('\r') || [...body.headline].length > 140)) {
+          return json({ error: 'invalid_headline', message: 'headline must be one line and at most 140 characters' }, 400)
+        }
+        if (!validateCheckinRound(body)) return json({ error: 'invalid_report', message: 'structured report entries have invalid shapes' }, 400)
         const { verifySessionIdentity } = await import('./sessions/session-identity')
         const sender = body.session ? await verifySessionIdentity(body.session.id, body.session.token) : null
         if (!sender) return json({ error: 'unverified_sender' }, 403)
-        const reported = await reportCheckin(sender, { state: String(body.state) as any, summary: String(body.summary), ...(Array.isArray(body.actions) ? { actions: body.actions as any } : {}), ...(Array.isArray(body.needs) ? { needs: body.needs as any } : {}) })
+        const reported = await reportCheckin(sender, { state: String(body.state) as any, summary: String(body.summary),
+          ...(typeof body.headline === 'string' ? { headline: body.headline } : {}), ...(Array.isArray(body.delivered) ? { delivered: body.delivered as any } : {}),
+          ...(Array.isArray(body.inProgress) ? { inProgress: body.inProgress as any } : {}), ...(Array.isArray(body.next) ? { next: body.next as any } : {}),
+          ...(Array.isArray(body.health) ? { health: body.health as any } : {}), ...(Array.isArray(body.actions) ? { actions: body.actions as any } : {}),
+          ...(Array.isArray(body.needs) ? { needs: body.needs as any } : {}) })
         // A verified session that is not a leader is refused in words, never answered `200 null`.
         if (reported && 'error' in reported) return json(reported, 409)
         return reported ? json(reported) : json({ error: 'not_a_leader' }, 403)
@@ -2138,6 +2154,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const { sendAwayNotice, awayStatus, defaultAwayDeps } = await import('./away')
       const out = await sendAwayNotice(body, await defaultAwayDeps())
       return json(out, awayStatus(out))
+    }
+    if (url.pathname === '/api/away/digest/answer' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({})) as { answer?: unknown; bucket?: unknown; since?: unknown; lang?: unknown }
+      const { answerAwayDigest } = await import('./away-digest')
+      const out = await answerAwayDigest(body.answer, body.bucket, body.lang === 'pt' ? 'pt' : 'en', Date.now(), body.since)
+      return json(out, out.ok ? 200 : out.error === 'stale' || out.error === 'not_away' ? 409 : 400)
     }
     // USER SESSION GROUPS — the door the MCP tools use to organise sessions (see
     // `sessions/session-groups-web.ts`). Matched before `/api/tasks`; it shares no path with it.
@@ -5062,6 +5084,7 @@ startHostAllowlistRefresh()
 // PORT (47291) is always the api + mcp endpoint.
 Bun.serve<WSData>({ hostname: '0.0.0.0', port: PORT, idleTimeout: 60, maxRequestBodySize: LIMITS.ingestBodyBytes, websocket: _wsHandlers, fetch: handleCompressed })
 startCheckinTimer()
+startAwayDigestTimer()
 // Binary mode also serves the web dashboard on WEB_PORT (47292) — that's the URL you open.
 // Same handler → the SPA's same-origin `/api/*` calls resolve against 47292 and just work,
 // while 47291 stays the dedicated api + mcp port.

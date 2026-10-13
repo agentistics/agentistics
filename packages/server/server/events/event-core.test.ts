@@ -4,7 +4,7 @@ import { MAX_TAIL_LINES, parseEvent, parseEvents, serializeEvent } from './event
 import { EMPTY_MEMORY, planEvents, seedMemory, type EventMemory } from './event-plan'
 import { EMPTY_CURSOR, advanceCursor, planRead, planRotation } from './event-rotate'
 import { EVENT_VERSION, type EventCandidate, type EventKind, type SessionEvent } from './event-types'
-import { deliver, eventMuteKey } from './notifier'
+import { deliver, eventMuteKey, isWorkerMutedEvent } from './notifier'
 import type { SessionActivity } from '../sessions/types'
 
 const NOW = '2026-08-14T12:00:00.000Z'
@@ -224,6 +224,12 @@ describe('rotation and the cursor', () => {
 })
 
 describe('a muted session is not delivered', () => {
+  test('worker mute applies by managed or conversation identity, but not exited', () => {
+    const roles = { 'conversation-worker': 'worker' as const }
+    expect(isWorkerMutedEvent(ev('managed-worker', 'conversation-worker'), roles, true)).toBe(true)
+    expect(isWorkerMutedEvent({ ...ev('managed-worker', 'conversation-worker'), kind: 'exited' }, roles, true)).toBe(false)
+    expect(isWorkerMutedEvent(ev('leader', 'conversation-worker'), { leader: 'leader' }, true)).toBe(false)
+  })
   const ev = (id: string, conversationId?: string): SessionEvent => ({
     v: EVENT_VERSION, seq: 1, at: '2026-10-02T10:00:00.000Z', source: 'poll', kind: 'waiting',
     id, cwd: '/tmp/x', ...(conversationId ? { conversationId } : {}),
