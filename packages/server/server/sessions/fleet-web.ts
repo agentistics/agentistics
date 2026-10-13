@@ -17,6 +17,7 @@
  */
 
 import { bounded } from './bounded'
+import { createSessionRowCache, resolveSessionRow, shareSessionRowCache } from './session-row-resolution'
 import { PROMPT_ACK_MS, withDeadline } from './prompt-deadline'
 import type { CanonicalMode, HarnessId, ProjectKind } from '@agentistics/core'
 import type { StartHost } from '../cli-start'
@@ -145,6 +146,7 @@ const NO_TERMINAL = {
 }
 
 const HOSTS = new Map<CliLang, StartHost>()
+const DETAIL_ROWS = createSessionRowCache(Date.now, lastHubSnapshot)
 
 /** Exported so sibling routes share the ONE host — building a second fires a second version check. */
 export async function hostForFleet(lang: CliLang): Promise<StartHost> {
@@ -205,6 +207,7 @@ async function hostFor(lang: CliLang): Promise<StartHost> {
   }
   // The hub is resolved with the host, so the memo above can key on its snapshot from the first call.
   await fleetSessionHub().catch(() => null)
+  shareSessionRowCache(host, DETAIL_ROWS)
   HOSTS.set(lang, host)
   return host
 }
@@ -235,6 +238,7 @@ function lastHubSnapshot(): unknown {
  * act's own response, and never throws.
  */
 export function kickFleet(id?: string): void {
+  DETAIL_ROWS.clear()
   // The acted-on row's SCREEN is read on that poll even when its harness states its state
   // (`adapter-state.ts`): an act can change what only the frame shows (a mode, a dialog closing).
   if (id) forceRowScreen(id)
@@ -767,13 +771,12 @@ export interface FleetSkills {
  * Never throws — the picker's whole job is to save typing, and it must not be the thing that takes
  * the composer's menu down.
  */
-export async function readFleetSkills(lang: CliLang, id: string): Promise<FleetSkills> {
+export async function readFleetSkills(lang: CliLang, id: string, host?: StartHost): Promise<FleetSkills> {
   const s = controlStrings(lang)
   try {
-    const host = await hostFor(lang)
+    host ??= await hostFor(lang)
     if (!host.sessions) return { skills: [], reason: s.sessionsNoHost }
-    const fleet = await host.sessions()
-    const row = fleet.sessions.find(r => r.id === id || r.conversationId === id)
+    const row = await resolveSessionRow(host, id, true)
     if (!row) {
       return {
         skills: [],
@@ -857,13 +860,12 @@ export async function readFleetSkillBody(
  * which; a confident `0` would read as a conversation that has never been compacted.
  */
 export async function readConversationFacts(
-  lang: CliLang, id: string,
+  lang: CliLang, id: string, host?: StartHost,
 ): Promise<{ compactions?: number; unavailable?: string }> {
   const pt = lang === 'pt'
-  const host = await hostFor(lang)
+  host ??= await hostFor(lang)
   if (!host.sessions) return { unavailable: controlStrings(lang).sessionsNoHost }
-  const fleet = await host.sessions()
-  const row = fleet.sessions.find(r => r.id === id || r.conversationId === id)
+  const row = await resolveSessionRow(host, id, true)
   if (!row?.conversationId) {
     return {
       unavailable: row?.conversationBlind ?? (pt
@@ -890,13 +892,12 @@ export async function readConversationFacts(
 }
 
 export async function readFleetPullRequests(
-  lang: CliLang, id: string,
+  lang: CliLang, id: string, host?: StartHost,
 ): Promise<{ pulls: unknown[]; limit?: number; unavailable?: string; detail?: string }> {
   const pt = lang === 'pt'
-  const host = await hostFor(lang)
+  host ??= await hostFor(lang)
   if (!host.sessions) return { pulls: [], unavailable: 'no-repo' }
-  const fleet = await host.sessions()
-  const row = fleet.sessions.find(r => r.id === id || r.conversationId === id)
+  const row = await resolveSessionRow(host, id, true)
   if (!row?.cwd) {
     return {
       pulls: [],
@@ -1212,8 +1213,7 @@ export async function readFleetArtifact(
   const host = await hostFor(lang)
   if (!host.sessions) return { ok: false, message: controlStrings(lang).sessionsNoHost }
 
-  const fleet = await host.sessions()
-  const row = fleet.sessions.find(r => r.id === id || r.conversationId === id)
+  const row = await resolveSessionRow(host, id, true)
   if (!row) {
     return {
       ok: false,
@@ -1261,7 +1261,7 @@ export async function readFleetArtifact(
  * session ever touched.
  */
 export async function readFleetArtifactMedia(
-  lang: CliLang, id: string, path: string,
+  lang: CliLang, id: string, path: string, host?: StartHost,
 ): Promise<
   | { ok: true; bytes: Uint8Array; mime: string; name: string }
   | { ok: false; message: string; status: number }
@@ -1283,10 +1283,9 @@ export async function readFleetArtifactMedia(
     }
   }
 
-  const host = await hostFor(lang)
+  host ??= await hostFor(lang)
   if (!host.sessions) return { ok: false, status: 404, message: controlStrings(lang).sessionsNoHost }
-  const fleet = await host.sessions()
-  const row = fleet.sessions.find(r => r.id === id || r.conversationId === id)
+  const row = await resolveSessionRow(host, id, true)
   if (!row?.cwd) {
     return {
       ok: false, status: 404,
@@ -1372,8 +1371,7 @@ export async function readFleetViewedMedia(
   const pt = lang === 'pt'
   const host = await hostFor(lang)
   if (!host.sessions) return { ok: false, status: 404, message: controlStrings(lang).sessionsNoHost }
-  const fleet = await host.sessions()
-  const row = fleet.sessions.find(r => r.id === id || r.conversationId === id)
+  const row = await resolveSessionRow(host, id, true)
   if (!row?.cwd) {
     return { ok: false, status: 404, message: pt ? 'Essa sessão não está na lista desta máquina.' : 'That session is not in this machine’s list.' }
   }
@@ -1437,8 +1435,7 @@ export async function listSessionArtifacts(
   host: StartHost, lang: CliLang, id: string,
 ): Promise<{ files: { raw: string; path: string; bytes: number }[]; unavailable?: string; outside?: string }> {
   if (!host.sessions) return { files: [] }
-  const fleet = await host.sessions()
-  const row = fleet.sessions.find(r => r.id === id)
+  const row = await resolveSessionRow(host, id)
   if (!row?.cwd) return { files: [] }
   const { readSessionChat } = await import('./chat-web')
   const chat = await readSessionChat(host, lang, row.id)

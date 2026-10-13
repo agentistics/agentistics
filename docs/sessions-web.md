@@ -20,6 +20,15 @@ about the web one specifically.
 
 ## The conversation
 
+Opening a session shares a row and cwd resolution across chat, skills, pull requests, conversation
+facts and artifacts. The cache is keyed by canonical host, language and session reference, shares
+in-flight reads with chat stream wrappers, and expires two seconds after resolution. A new hub
+snapshot, fleet action or fresh stream read invalidates it; the existing host snapshot memo remains
+the fallback. At most 256 entries and pending resolutions are admitted; stalled resolutions time
+out after ten seconds, and excess requests fail without starting another fleet read. A timed-out
+request keeps its admission slot until the underlying fleet read settles.
+Each handler keeps its existing lookup rules and missing-session response.
+
 Read through `harness-transcript.ts` — five of the six harnesses have a reader, and the sixth's
 absence is a **finding, not a gap** (see session-manager.md). A harness with no reader is refused
 **in words that name it**, never with a blank pane.

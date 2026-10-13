@@ -3321,19 +3321,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const { readSessionChat } = await import('./sessions/chat-web')
       const { hostForFleet, fleetLang } = await import('./sessions/fleet-web')
       const { chatStreamResponse, ROW_TTL_MS } = await import('./sessions/chat-stream')
+      const { createChatRowHost } = await import('./sessions/session-row-resolution')
       const lang = fleetLang(url.searchParams.get('lang'))
       const host = await hostForFleet(lang)
       // The row is reused between changes: a transcript append does not move the session in the
       // fleet, and re-walking every pane per appended line is the cost being removed.
-      const memo = Object.create(host) as typeof host
-      let rowAt = 0
-      let rows: ReturnType<NonNullable<typeof host.sessions>> | null = null
-      if (host.sessions) {
-        memo.sessions = () => {
-          if (!rows || Date.now() - rowAt >= ROW_TTL_MS) { rowAt = Date.now(); rows = host.sessions!.call(host); void rows.catch(() => { rows = null }) }
-          return rows
-        }
-      }
+      const rowHost = createChatRowHost(host, ROW_TTL_MS)
       // ENGINE.MAP F1.2: with `adapter-chat` on and an engine whose integration serves this harness's
       // chat, the conversation comes from the engine's channel (`adapter-chat.ts`). Flag off — the
       // default — and nothing below this branch changes, byte for byte.
@@ -3351,7 +3344,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const { fleetSessionHub } = await import('./sessions/fleet-web')
       const hub = await fleetSessionHub().catch(() => null)
       const res = chatStreamResponse(id, {
-        read: (fresh, onPath) => { if (fresh) rows = null; return readSessionChat(memo, lang, id, undefined, onPath, surface) },
+        read: (fresh, onPath) => { if (fresh) rowHost.fresh(); return readSessionChat(rowHost.host, lang, id, undefined, onPath, surface) },
         // A path not on disk yet is retried on the ONE poller's ticks, never by fresh polls (P-03).
         ...(hub ? { onFleetTick: (cb: () => void) => hub.subscribe(() => cb()) } : {}),
       }, req.signal)

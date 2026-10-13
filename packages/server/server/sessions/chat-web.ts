@@ -24,6 +24,7 @@
  * on it saying why. The link was never the problem; there was no reader.
  */
 
+import { resolveSessionRow } from './session-row-resolution'
 import { stripContextTurns } from './agentistics-context'
 import { anyGrant, scrubDeep } from '../vault/grants'
 import { isExternalRowId } from './external-continue'
@@ -199,8 +200,7 @@ async function readSessionChatCore(
   const s = controlStrings(lang)
   if (!host.sessions) return { turns: [], unavailable: s.sessionsNoHost, live: false }
 
-  const fleet = await host.sessions()
-  const row = fleet.sessions.find(r => r.id === id)
+  const row = await resolveSessionRow(host, id)
   if (!row) {
     return {
       turns: [],
