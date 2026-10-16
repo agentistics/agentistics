@@ -30,6 +30,9 @@ export function inheritedIdentity(prev: ManagedSession | undefined): Partial<Man
   if (prev.attemptId) out.attemptId = prev.attemptId
   if (prev.parentSessionId) out.parentSessionId = prev.parentSessionId
   if (prev.parentConversationId) out.parentConversationId = prev.parentConversationId
+  if (prev.handoffSeq !== undefined) out.handoffSeq = prev.handoffSeq
+  if (prev.handoffFrom) out.handoffFrom = prev.handoffFrom
+  if (prev.handoffTo) out.handoffTo = prev.handoffTo
   if (prev.away === true) out.away = true
   if (prev.harnessName) {
     out.harnessName = prev.harnessName

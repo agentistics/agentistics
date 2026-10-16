@@ -13,6 +13,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ManagedSession } from './types'
+import { createSessionRegistry } from './registry'
 
 const t = (role: 'user' | 'assistant', text: string, min: number, extra: Partial<ChatTurn> = {}): ChatTurn =>
   ({ role, text, at: new Date(Date.UTC(2026, 9, 16, 14, min)).toISOString(), ...extra })
@@ -181,7 +182,9 @@ describe('HANDOFF.RELAY — kill is best-effort (fix1 H1/M5)', () => {
     const r = await flushBeforeKill('lead-1', async to => { sent.push(to); return true }, 'pt', { registry: reg, ...io(patches), comment, now: NOW })
     expect(r.warning).toBeNull()
     expect(sent).toEqual(['next'])
-    expect(patches).toHaveLength(1)
+    expect(patches).toHaveLength(2)
+    expect(patches[0]).toMatchObject({ handoffRelayClosing: new Date(NOW).toISOString() })
+    expect(patches[1]).toMatchObject({ handoffRelayedAt: later[7]!.at })
   })
 
   it('a session that was never handed off, and one past the 48 h window, are left alone', async () => {
@@ -242,12 +245,74 @@ describe('HANDOFF.RELAY — kill is best-effort (fix1 H1/M5)', () => {
     expect(sent).toEqual(['next'])
   })
 
-  it('fix3 M-D: the periodic loop ignores an ENDED predecessor (no second send after a killed one)', async () => {
-    const ended = row({ handoffTo: 'next', handoffRelayedAt: cursor, endedAt: '2026-10-16T15:00:00.000Z' })
+  it('fix4 M2: the periodic loop ignores a kill-marked predecessor', async () => {
+    const ended = row({ handoffTo: 'next', handoffRelayedAt: cursor, handoffRelayClosing: new Date(NOW).toISOString() })
     const reg = [ended, row({ id: 'next', conversationId: 'c2' })]
     let sent = 0
     expect(await flushAllHandoffRelays(async () => { sent++; return true }, NOW, { registry: reg, ...io() })).toBe(0)
     expect(sent).toBe(0)
+  })
+
+  it('fix4 M3: an ended predecessor without a kill marker still forwards owed messages', async () => {
+    const ended = row({ handoffTo: 'next', handoffRelayedAt: cursor, endedAt: new Date(NOW).toISOString() })
+    let sends = 0
+    expect(await flushAllHandoffRelays(async () => { sends++; return true }, NOW, {
+      registry: [ended, row({ id: 'next' })], ...io(),
+    })).toBe(1)
+    expect(sends).toBe(1)
+  })
+
+  it('fix4 M2: a loop with a stale snapshot cannot resend during late-send grace', async () => {
+    const reg = [parent, row({ id: 'next' })]
+    let finish!: (ok: boolean) => void
+    let started!: () => void
+    const sending = new Promise<void>(resolve => { started = resolve })
+    let sends = 0
+    const patches: unknown[] = []
+    const killing = flushBeforeKill(parent.id, () => {
+      sends++
+      started()
+      return new Promise<boolean>(resolve => { finish = resolve })
+    }, 'en', { registry: reg, ...io(patches), comment, now: NOW, sendTimeoutMs: 10, lateGraceMs: 500 })
+    await sending
+    await new Promise(resolve => setTimeout(resolve, 40))
+    expect(patches).toEqual([{ handoffRelayClosing: new Date(NOW).toISOString() }])
+    expect(await flushAllHandoffRelays(async () => { sends++; return true }, NOW, { registry: reg, ...io() })).toBe(0)
+    finish(true)
+    expect((await killing).warning).toBeNull()
+    expect(sends).toBe(1)
+    expect(patches[1]).toMatchObject({ handoffRelayedAt: later[7]!.at })
+  })
+
+  it('fix4 M2: a separate registry reader sees closing before send and after a kill timeout', async () => {
+    const dir = await mkdtemp(join(process.cwd(), '.relay-registry-test-'))
+    const file = join(dir, 'sessions.json')
+    const store = createSessionRegistry(file)
+    let closingBeforeSend: string | undefined
+    let finish!: (ok: boolean) => void
+    let sends = 0
+    try {
+      await store.add(parent)
+      await store.add(row({ id: 'next' }))
+      const r = await flushBeforeKill(parent.id, async () => {
+        sends++
+        const fresh = await createSessionRegistry(file).read()
+        closingBeforeSend = fresh.find(m => m.id === parent.id)?.handoffRelayClosing
+        return new Promise<boolean>(resolve => { finish = resolve })
+      }, 'en', { registry: await store.read(), read: io().read, patch: store.patch, comment,
+        now: NOW, sendTimeoutMs: 100, lateGraceMs: 30 })
+      expect(closingBeforeSend).toBe(new Date(NOW).toISOString())
+      expect(r.warning).toContain('did not answer in time')
+      const fresh = await createSessionRegistry(file).read()
+      expect(fresh.find(m => m.id === parent.id)?.handoffRelayedAt).toBe(cursor)
+      expect(await flushAllHandoffRelays(async () => { sends++; return true }, NOW, {
+        registry: fresh, read: io().read, patch: store.patch,
+      })).toBe(0)
+      expect(sends).toBe(1)
+    } finally {
+      finish?.(false)
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
   it('fix3 M-D: a send that lands after the timeout is not reported as undelivered, and moves the cursor', async () => {
@@ -259,7 +324,9 @@ describe('HANDOFF.RELAY — kill is best-effort (fix1 H1/M5)', () => {
     expect(r.warning).toBeNull()
     expect(comments).toHaveLength(0)
     expect(sends).toBe(1)
-    expect(patches).toHaveLength(1)
+    expect(patches).toHaveLength(2)
+    expect(patches[0]).toMatchObject({ handoffRelayClosing: new Date(NOW).toISOString() })
+    expect(patches[1]).toMatchObject({ handoffRelayedAt: later[7]!.at })
   })
 })
 

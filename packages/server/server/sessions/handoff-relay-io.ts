@@ -185,10 +185,11 @@ const inFlight = new Set<string>()
 async function flushOnce(
   m: ManagedSession, registry: readonly ManagedSession[], send: RelaySend,
   io: Parameters<typeof flushHandoffRelay>[3] = {},
+  settle: (r: FlushResult) => Promise<FlushResult> = async r => r,
 ): Promise<FlushResult> {
   if (inFlight.has(m.id)) return { ok: true, delivered: false }
   inFlight.add(m.id)
-  try { return await flushHandoffRelay(m, registry, send, io) } finally { inFlight.delete(m.id) }
+  try { return await settle(await flushHandoffRelay(m, registry, send, io)) } finally { inFlight.delete(m.id) }
 }
 
 /** The periodic pass: every predecessor still inside its watch window. Returns how many forwarded. */
@@ -200,9 +201,8 @@ export async function flushAllHandoffRelays(
   let n = 0
   for (const m of registry) {
     if (!relayWatched(m, now)) continue
-    // An ENDED predecessor is the kill path's business (`flushBeforeKill`): a send that outlived its
-    // timeout there was not cancelled, so re-sending from this loop would deliver it twice.
-    if (m.endedAt) continue
+    // Only a kill owns the final flush. Crash/restore/retire rows can still owe owner messages.
+    if (m.handoffRelayClosing) continue
     const r = await flushOnce(m, registry, send, { ...(io.read ? { read: io.read } : {}), ...(io.patch ? { patch: io.patch } : {}) }).catch(() => ({ ok: false, delivered: false }) as FlushResult)
     if (r.delivered) n++
   }
@@ -256,20 +256,23 @@ export async function flushBeforeKill(
     const registry = io.registry ?? await readRegistry().catch(() => [] as ManagedSession[])
     const row = registry.find(m => m.id === id)
     if (!row?.handoffTo || !relayWatched(row, io.now ?? Date.now())) return { warning: null }
+    // Persist BEFORE reading/sending: the CLI kill and the server loop are separate processes.
+    // Keep this marker after the kill, including when an owed-message notice was needed.
+    const patch = io.patch ?? patchSession
+    if (!await patch(row.id, { handoffRelayClosing: new Date(io.now ?? Date.now()).toISOString() })) return { warning: null }
     const read = io.read ?? ((m: ManagedSession) => readSessionTurns(m, { fromCursor: m.handoffRelayedAt ?? '' }))
     const bounded = withTimeout(send, io.sendTimeoutMs ?? KILL_SEND_TIMEOUT_MS)
-    const r = await flushOnce(row, registry, bounded.send, {
-      read, ...(io.patch ? { patch: io.patch } : {}),
+    const r = await flushOnce(row, registry, bounded.send, { read, patch }, async result => {
+      // Keep inFlight until late() settles too, protecting even a loop with an older snapshot.
+      if (!result.ok && result.reason === 'send-failed' && bounded.timedOut() && await bounded.late(io.lateGraceMs ?? LATE_SEND_GRACE_MS)) {
+        await patch(row.id, {
+          ...(result.owed?.cursor ? { handoffRelayedAt: result.owed.cursor } : {}),
+          handoffRelayAwaiting: result.owed?.awaiting ? true : null,
+        }).catch(() => false)
+        return { ok: true, delivered: true, ...(result.truncated ? { truncated: true } : {}) }
+      }
+      return result
     })
-    // A timed-out send may still have arrived: never report "not delivered" for it, and move the
-    // cursor so nothing re-sends it.
-    if (!r.ok && r.reason === 'send-failed' && bounded.timedOut() && await bounded.late(io.lateGraceMs ?? LATE_SEND_GRACE_MS)) {
-      await (io.patch ?? patchSession)(row.id, {
-        ...(r.owed?.cursor ? { handoffRelayedAt: r.owed.cursor } : {}),
-        handoffRelayAwaiting: r.owed?.awaiting ? true : null,
-      }).catch(() => false)
-      return { warning: null }
-    }
     const reason = r.ok ? (r.truncated ? 'truncated' as const : null) : (r.reason ?? null)
     if (!reason) return { warning: null }
     const s = cliStrings(lang)
