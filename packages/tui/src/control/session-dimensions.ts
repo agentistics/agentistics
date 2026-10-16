@@ -126,8 +126,8 @@ export function statusKey(state: SessionState): SessionState {
  * row (the VS Code extension's `FleetRow`, read over HTTP) asks THIS function rather than restating
  * which states count as active. Every existing caller passes a `ControlSession` and is unaffected.
  */
-export function sessionRunning(s: Pick<ControlSession, 'state'>): boolean {
-  return ACTIVE_STATES.includes(s.state)
+export function sessionRunning(s: { state: string }): boolean {
+  return ACTIVE_STATES.some(state => state === s.state)
 }
 
 /**
