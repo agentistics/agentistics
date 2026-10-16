@@ -2,12 +2,10 @@
  * AccountsSection — Settings → Accounts: one compact, collapsed row per assistant; opening a row
  * shows that assistant's accounts (state, limits, the Agents switch) and its "Add account".
  *
- * The disclosure is the app's own (RailSection's button: chevron + `aria-expanded` + 44px target on
- * mobile). One assistant is open at a time (`nextOpen`). Every figure on a collapsed row comes from
+ * The disclosure is the app's shared `Disclosure` (the one RailSection uses too). One assistant is open at a time (`nextOpen`). Every figure on a collapsed row comes from
  * `summarizeHarnesses`, over the same list the expanded rows draw.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { HARNESS_ORDER, type HarnessId, type PlanLimits } from '@agentistics/core'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { usePlanLimits } from '../../lib/planLimits'
@@ -18,11 +16,13 @@ import { PlanLimitBars, PlanLimitsBlock } from '../../components/PlanLimitMeter'
 import { CenteredLoader } from '../../components/CenteredLoader'
 import { MetricNote } from '../../components/MetricNote'
 import { DialogActions, FieldInput, RowSwitch, ScopeNote, SectionHeader, StatusDot, Toggle, dialogButtonStyle } from './primitives'
-import { Pill } from './HarnessesSettings'
+import { Pill } from '../../components/Pill'
+import { Disclosure } from '../../components/Disclosure'
 import {
-  accountTitle, accountWhose, nextOpen, summarizeHarnesses,
+  accountKey, accountState, accountTitle, accountWhose, isUnidentified, nextOpen, summarizeHarnesses,
   type AccountRowData, type HarnessSummary,
 } from './accountsSummary'
+import { createAccountMutator, reconcileNickname } from './accountMutations'
 
 type Lang = 'pt' | 'en'
 
@@ -53,6 +53,10 @@ const T = (pt: boolean) => ({
   hiddenChip: pt ? 'Oculta dos agentes' : 'Hidden from agents',
   signedIn: pt ? 'Logada' : 'Signed in',
   signedOut: pt ? 'Saiu desta máquina' : 'Signed out',
+  unconfirmedRow: pt ? 'Login não confirmado' : 'Not confirmed',
+  unconfirmedNote: pt ? 'O assistente não confirma qual conta está logada — entre nele para gerenciá-la aqui.' : 'The assistant does not confirm which account is signed in — sign in to it to manage it here.',
+  unconfirmedHarness: (n: number) => (pt ? `${n} não confirmada${n === 1 ? '' : 's'}` : `${n} not confirmed`),
+  saveFailed: (name: string) => (pt ? `Não foi possível salvar a conta “${name}”. Tente de novo.` : `Could not save the account “${name}”. Try again.`),
   add: pt ? 'Adicionar conta' : 'Add account',
   agy: pt ? 'O Antigravity ainda não permite manter uma segunda conta separada.' : 'Antigravity cannot keep a second account apart yet.',
   stateOk: pt ? 'Tudo certo' : 'All good',
@@ -63,6 +67,7 @@ const T = (pt: boolean) => ({
 
 function stateOf(s: HarnessSummary, t: ReturnType<typeof T>): { dot: 'ok' | 'warn' | 'error'; word: string } {
   if (s.state === 'error') return { dot: 'error', word: t.errors(s.failed) }
+  if (s.state === 'unconfirmed') return { dot: 'warn', word: t.unconfirmedHarness(s.unconfirmed) }
   if (s.state === 'needs-login') return { dot: 'warn', word: t.needsLogin(s.signedOut) }
   return { dot: 'ok', word: t.stateOk }
 }
@@ -80,54 +85,52 @@ function HarnessRow({ s, open, onToggleOpen, props, isMobile }: {
   const st = stateOf(s, t)
   const mine = props.accounts.filter(a => a.harness === s.harness)
   const panelId = `accounts-panel-${s.harness}`
-  const Chevron = open ? ChevronDown : ChevronRight
   return (
     <div data-accounts-harness={s.harness} style={{ borderTop: '1px solid var(--border)' }}>
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-controls={panelId}
-        onClick={onToggleOpen}
-        style={{
-          ...grid(isMobile), width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer',
-          padding: isMobile ? '12px 14px' : '10px 14px', minHeight: isMobile ? 44 : undefined, fontFamily: 'inherit',
-        }}
-      >
-        {!isMobile && <Chevron size={14} style={{ color: 'var(--text-tertiary)' }} />}
-        <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-          {isMobile && <Chevron size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />}
-          <HarnessMark harness={s.harness} size={24} />
-          <span style={{ minWidth: 0 }}>
-            <b style={{ display: 'block', fontSize: 13.5, color: 'var(--text-primary)' }}>{label}</b>
-            <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-tertiary)' }}>
-              {t.accounts(s.total)} · {t.agentsOn(s.agentsOn)}
+      <Disclosure
+        open={open}
+        onToggle={onToggleOpen}
+        panelId={panelId}
+        panelLabel={label}
+        keepMounted
+        buttonStyle={{ ...grid(isMobile), fontFamily: 'inherit' }}
+        panelStyle={{ background: 'var(--bg-elevated)', borderTop: '1px solid var(--border)' }}
+        header={chevron => (
+          <>
+            {!isMobile && chevron}
+            <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+              {isMobile && chevron}
+              <HarnessMark harness={s.harness} size={24} />
+              <span style={{ minWidth: 0 }}>
+                <b style={{ display: 'block', fontSize: 13.5, color: 'var(--text-primary)' }}>{label}</b>
+                <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-tertiary)' }}>
+                  {t.accounts(s.total)} · {t.agentsOn(s.agentsOn)}
+                </span>
+              </span>
             </span>
-          </span>
-        </span>
-        <div style={{ minWidth: 0, fontSize: 11.5, color: 'var(--text-tertiary)' }}>
-          {s.worst
-            ? <PlanLimitBars limits={s.worst} now={props.now} lang={props.lang} />
-            : t.noMeter}
+            <div style={{ minWidth: 0, fontSize: 11.5, color: 'var(--text-tertiary)' }}>
+              {s.worst
+                ? <PlanLimitBars limits={s.worst} now={props.now} lang={props.lang} />
+                : t.noMeter}
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{s.hidden > 0 ? t.hidden(s.hidden) : t.noneHidden}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+              <StatusDot state={st.dot} />{st.word}
+            </div>
+          </>
+        )}
+      >
+        {mine.map(a => <AccountRow key={accountKey(a)} a={a} props={props} isMobile={isMobile} />)}
+        <div style={{ padding: isMobile ? '10px 14px' : '10px 14px 12px', borderTop: '1px solid var(--border)' }}>
+          {props.noSecondAccount?.has(s.harness)
+            ? <MetricNote>{t.agy}</MetricNote>
+            : props.onAdd && (
+              <button type="button" style={dialogButtonStyle('secondary', isMobile)} onClick={() => props.onAdd?.(s.harness)}>
+                {t.add}
+              </button>
+            )}
         </div>
-        <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{s.hidden > 0 ? t.hidden(s.hidden) : t.noneHidden}</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
-          <StatusDot state={st.dot} />{st.word}
-        </div>
-      </button>
-      {open && (
-        <div id={panelId} role="region" aria-label={label} style={{ background: 'var(--bg-elevated)', borderTop: '1px solid var(--border)' }}>
-          {mine.map(a => <AccountRow key={a.id} a={a} props={props} isMobile={isMobile} />)}
-          <div style={{ padding: isMobile ? '10px 14px' : '10px 14px 12px', borderTop: '1px solid var(--border)' }}>
-            {props.noSecondAccount?.has(s.harness)
-              ? <MetricNote>{t.agy}</MetricNote>
-              : props.onAdd && (
-                <button type="button" style={dialogButtonStyle('secondary', isMobile)} onClick={() => props.onAdd?.(s.harness)}>
-                  {t.add}
-                </button>
-              )}
-          </div>
-        </div>
-      )}
+      </Disclosure>
     </div>
   )
 }
@@ -138,21 +141,25 @@ function AccountRow({ a, props, isMobile }: { a: AccountRowData; props: Accounts
   const label = HARNESS_LABELS[a.harness] ?? a.harness
   const title = accountTitle(a, label, pt)
   const whose = accountWhose(a, pt)
-  const limits = props.limits?.find(l => l.account === a.id) ?? null
+  const unconfirmed = isUnidentified(a)
+  const limits = unconfirmed ? null : props.limits?.find(l => l.account === a.id) ?? null
   const busy = props.pendingIds.has(a.id)
-  const state = a.retired ? { dot: 'warn' as const, word: t.signedOut } : { dot: 'ok' as const, word: t.signedIn }
+  const st = accountState(a)
+  const state = st === 'unconfirmed' ? { dot: 'warn' as const, word: t.unconfirmedRow }
+    : st === 'signed-out' ? { dot: 'warn' as const, word: t.signedOut }
+    : { dot: 'ok' as const, word: t.signedIn }
   return (
-    <div data-account-row={a.id} style={{
+    <div data-account-row={accountKey(a)} style={{
       ...(isMobile ? { display: 'flex', flexDirection: 'column', gap: 8 } : { display: 'grid', gridTemplateColumns: '20px minmax(0,1.5fr) minmax(0,1.3fr) 110px 170px', gap: 12, alignItems: 'center' }),
       padding: '12px 14px', borderTop: '1px solid var(--border)',
     }}>
       <button type="button" onClick={() => props.onDetail(a)} style={{
-        background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', minWidth: 0,
-        minHeight: isMobile ? 44 : undefined, ...(isMobile ? {} : { gridColumn: '1 / 3', paddingLeft: 32 }),
+        background: 'none', border: 'none', padding: isMobile ? 0 : '0 0 0 32px', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', minWidth: 0,
+        minHeight: isMobile ? 44 : undefined, ...(isMobile ? {} : { gridColumn: '1 / 3' }),
       }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <b style={{ fontSize: 13, color: 'var(--text-primary)' }}>{title}</b>
-          {!a.available && !a.retired && <Pill tone="neutral">{t.hiddenChip}</Pill>}
+          {!unconfirmed && !a.available && !a.retired && <Pill tone="neutral">{t.hiddenChip}</Pill>}
         </span>
         {whose && <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-tertiary)' }}>{whose}</span>}
         <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--text-tertiary)' }}>
@@ -162,12 +169,17 @@ function AccountRow({ a, props, isMobile }: { a: AccountRowData; props: Accounts
       <div style={{ minWidth: 0, fontSize: 11.5, color: 'var(--text-tertiary)' }}>
         {limits ? <PlanLimitBars limits={limits} now={props.now} lang={props.lang} /> : t.noMeter}
       </div>
-      {isMobile
+      {unconfirmed
+        ? <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)', gridColumn: isMobile ? undefined : '4 / 6' }}>{t.unconfirmedNote}</span>
+        : isMobile
         ? <RowSwitch on={a.available} onToggle={() => props.onToggle(a)} disabled={busy} label={`${t.agents} · ${title}`} />
         : <div style={{ display: 'flex', gap: 8, alignItems: 'center', gridColumn: '4 / 6' }}>
           <Toggle on={a.available} onToggle={() => props.onToggle(a)} disabled={busy} label={t.toggleAria(title)} />
           <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{t.agents}</span>
         </div>}
+      {props.failedIds.has(a.id) && !unconfirmed && (
+        <p role="alert" style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12, color: 'var(--accent-red)' }}>{t.saveFailed(title)}</p>
+      )}
     </div>
   )
 }
@@ -206,8 +218,12 @@ export default function AccountsSection({ lang }: { lang: Lang }) {
   const [error, setError] = useState(false)
   const [pendingIds, setPending] = useState<Set<string>>(new Set())
   const [failedIds, setFailed] = useState<Set<string>>(new Set())
-  const [detailId, setDetailId] = useState<string | null>(null)
+  const [detailKey, setDetailKey] = useState<string | null>(null)
   const [nick, setNick] = useState('')
+  const mutator = useRef(createAccountMutator<ApiAccount>((id, body) =>
+    fetch(`/api/accounts/${encodeURIComponent(id)}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }))).current
 
   const load = useCallback(() => {
     setError(false)
@@ -218,22 +234,25 @@ export default function AccountsSection({ lang }: { lang: Lang }) {
   }, [])
   useEffect(() => { load() }, [load])
 
+  const detail = accounts?.find(a => accountKey(a) === detailKey) ?? null
+  const detailEditable = detail !== null && !isUnidentified(detail)
+  useEffect(() => { setNick(detail?.nickname ?? '') }, [detailKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** One PATCH at a time per account; a second request for a busy account is dropped, never raced. */
   const patch = async (a: AccountRowData, body: { available?: boolean; nickname?: string }) => {
+    if (isUnidentified(a) || mutator.has(a.id)) return
     setPending(h => new Set(h).add(a.id))
-    try {
-      const r = await fetch(`/api/accounts/${encodeURIComponent(a.id)}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-      })
-      if (!r.ok) throw new Error('patch')
-      const { account } = await r.json() as { account: ApiAccount }
-      setAccounts(h => (h ?? []).map(x => x.id === a.id ? account : x))
+    const res = await mutator.patch(a.id, body)
+    setPending(h => { const n = new Set(h); n.delete(a.id); return n })
+    if (res.status === 'ok') {
+      setAccounts(h => (h ?? []).map(x => x.id === a.id ? res.account : x))
       setFailed(h => { const n = new Set(h); n.delete(a.id); return n })
-    } catch { setFailed(h => new Set(h).add(a.id)) }
-    finally { setPending(h => { const n = new Set(h); n.delete(a.id); return n }) }
+      if (body.nickname !== undefined) setNick(d => reconcileNickname(d, body.nickname!, res.account.nickname))
+    } else if (res.status === 'failed') {
+      setFailed(h => new Set(h).add(a.id))
+    }
   }
 
-  const detail = accounts?.find(a => a.id === detailId) ?? null
-  useEffect(() => { setNick(detail?.nickname ?? '') }, [detailId]) // eslint-disable-line react-hooks/exhaustive-deps
   const t = T(pt)
 
   return (
@@ -259,36 +278,39 @@ export default function AccountsSection({ lang }: { lang: Lang }) {
       {accounts !== null && accounts.length > 0 && (
         <AccountsView lang={lang} accounts={accounts} limits={limits} now={now} pendingIds={pendingIds} failedIds={failedIds}
           onToggle={a => { void patch(a, { available: !a.available }) }}
-          onDetail={a => setDetailId(a.id)}
+          onDetail={a => setDetailKey(accountKey(a))}
           noSecondAccount={new Set<HarnessId>(['antigravity'])} />
       )}
-      <Drawer open={detail !== null} lang={lang} onClose={() => setDetailId(null)}
+      <Drawer open={detail !== null} lang={lang} onClose={() => setDetailKey(null)}
         title={detail ? accountTitle(detail, HARNESS_LABELS[detail.harness] ?? detail.harness, pt) : ''}
-        dirty={detail !== null && nick !== (detail.nickname ?? '')}
+        dirty={detailEditable && nick.trim() !== (detail.nickname ?? '')}
         footer={detail && (
           <DialogActions>
-            <button type="button" style={dialogButtonStyle('primary', false)} disabled={nick === (detail.nickname ?? '')}
-              onClick={() => { void patch(detail, { nickname: nick }) }}>{pt ? 'Salvar apelido' : 'Save nickname'}</button>
+            <button type="button" style={dialogButtonStyle('primary', false)}
+              disabled={!detailEditable || pendingIds.has(detail.id) || nick.trim() === (detail.nickname ?? '')}
+              onClick={() => { void patch(detail, { nickname: nick.trim() }) }}>{pt ? 'Salvar apelido' : 'Save nickname'}</button>
           </DialogActions>
         )}>
         {detail && (
           <div>
-            <FieldInput label={pt ? 'Apelido' : 'Nickname'} value={nick} onChange={setNick} maxLength={40}
-              sub={pt ? 'É só este nome que os agentes veem — nunca o e-mail.' : 'Agents only ever see this name — never the e-mail.'} />
+            {detailEditable
+              ? <FieldInput label={pt ? 'Apelido' : 'Nickname'} value={nick} onChange={setNick} maxLength={40}
+                sub={pt ? 'É só este nome que os agentes veem — nunca o e-mail.' : 'Agents only ever see this name — never the e-mail.'} />
+              : <ScopeNote>{t.unconfirmedNote}</ScopeNote>}
             <p style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
               {accountWhose({ label: detail.label }, pt) ?? detail.label} · {detail.plan ?? t.noPlan}
               {detail.root ? <><br />{detail.root}</> : null}
             </p>
             {(() => {
-              const l = limits?.find(x => x.account === detail.id)
+              const l = detailEditable ? limits?.find(x => x.account === detail.id) : null
               return l ? <PlanLimitsBlock limits={l} now={now} lang={lang} details /> : null
             })()}
-            <RowSwitch on={detail.available} onToggle={() => { void patch(detail, { available: !detail.available }) }}
+            {detailEditable && <RowSwitch on={detail.available} onToggle={() => { void patch(detail, { available: !detail.available }) }}
               disabled={pendingIds.has(detail.id)} label={t.agents}
               sub={detail.available
                 ? (pt ? 'Ligada: entra no roteamento e nos limites que os agentes leem.' : 'On: part of routing and of the limits agents read.')
-                : (pt ? 'Desligada: continua logada para você; os agentes não a veem.' : 'Off: still signed in for you; agents do not see it.')} />
-            {failedIds.has(detail.id) && <ScopeNote>{pt ? 'Não foi possível salvar. Tente de novo.' : 'Could not save. Try again.'}</ScopeNote>}
+                : (pt ? 'Desligada: continua logada para você; os agentes não a veem.' : 'Off: still signed in for you; agents do not see it.')} />}
+            {failedIds.has(detail.id) && <p role="alert" style={{ fontSize: 12.5, color: 'var(--accent-red)' }}>{t.saveFailed(accountTitle(detail, HARNESS_LABELS[detail.harness] ?? detail.harness, pt))}</p>}
           </div>
         )}
       </Drawer>
