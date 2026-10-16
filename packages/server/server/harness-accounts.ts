@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { readFile, mkdir, writeFile, rename, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR } from './config'
 import { withFileLock } from './sessions/file-lock'
@@ -115,6 +115,20 @@ export async function probeAccountIdentity(harness: HarnessId, root: string | nu
 const bindingKey = (harness: HarnessId, root: string | null) => `${harness}:${root ?? ''}`
 const mintId = () => `acc_${randomBytes(6).toString('hex')}`
 const emptyFile = (): AccountsFile => ({ version: 2, accounts: [], bindings: {}, segments: {} })
+/** One spelling per directory: absolute, no trailing slash. Applied at the store's boundary. */
+const normRoot = (root: string | null | undefined): string | null => root == null ? null : resolve(root)
+/** Display names only: no control characters or newlines, at most 40 characters. */
+export function sanitizeNickname(value: string): string {
+  return value.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').trim().slice(0, 40).trim()
+}
+class LockContended extends Error { constructor() { super('Account registry lock unavailable') } }
+const isAccount = (a: unknown): a is HarnessAccount => {
+  const x = a as Partial<HarnessAccount> | null
+  return !!x && typeof x === 'object' && typeof x.id === 'string' && HARNESS_ORDER.includes(x.harness as HarnessId)
+    && !!text(x.key) && !!text(x.label)
+}
+const plainRecord = (v: unknown): Record<string, unknown> =>
+  v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {}
 
 /** A store owns its cache and serializes registry read/modify/write operations. */
 export function createHarnessAccounts(options: {
@@ -129,10 +143,10 @@ export function createHarnessAccounts(options: {
   const unknown = (): Detection => ({ identity: fallback(), confirmed: false })
   const cache = new Map<string, { at: number; identity: Promise<Detection> }>()
   let queue: Promise<unknown> = Promise.resolve()
+  /** Writers only: a read/modify/write without the cross-process lock is refused. */
   function serial<T>(work: () => Promise<T>): Promise<T> {
     const result = queue.then(() => withFileLock(options.file, async ({ contended }) => {
-      // Never perform a read/modify/write without the cross-process lock.
-      if (contended) throw new Error('Account registry lock unavailable')
+      if (contended) throw new LockContended()
       return work()
     }))
     queue = result.catch(() => {})
@@ -164,30 +178,82 @@ export function createHarnessAccounts(options: {
     await writeFile(tmp, JSON.stringify(data), { mode: 0o600 })
     await rename(tmp, options.file)
   }
-  /** Called only under the file lock: migration mints and persists ids exactly once. */
-  async function read(): Promise<AccountsFile> {
+  const backedUp = new Set<string>()
+  async function backup(raw: string): Promise<void> {
+    if (backedUp.has(raw)) return
+    backedUp.add(raw)
+    for (const suffix of ['', `.${randomBytes(3).toString('hex')}`]) {
+      try { await writeFile(`${options.file}.bak.${now()}${suffix}`, raw, { mode: 0o600, flag: 'wx' }); return } catch { /* name taken */ }
+    }
+  }
+  /**
+   * Parse the registry. `dirty` means the on-disk bytes need rewriting (v1 migration, unreadable or
+   * unknown-version content). With `persist` (under the lock) that rewrite happens, after a backup
+   * of anything that is not a v1 list; without it nothing is touched, so readers never need the lock.
+   */
+  async function load(persist: boolean): Promise<{ data: AccountsFile; dirty: boolean }> {
+    let text_: string
+    try { text_ = await readFile(options.file, 'utf8') } catch { return { data: emptyFile(), dirty: false } }
     let raw: unknown
-    try { raw = JSON.parse(await readFile(options.file, 'utf8')) } catch { return emptyFile() }
-    if (!Array.isArray(raw)) {
-      const data = raw as AccountsFile | null
-      return data?.version === 2 && Array.isArray(data.accounts) && data.bindings && data.segments ? data : emptyFile()
+    try { raw = JSON.parse(text_) } catch {
+      if (persist) await backup(text_)
+      return { data: emptyFile(), dirty: false }
     }
-    const data = emptyFile()
-    for (const a of raw) {
-      if (!a || !HARNESS_ORDER.includes(a.harness) || !text(a.key) || !text(a.label)) continue
-      const account: HarnessAccount = {
-        id: mintId(), root: null, key: a.key, harness: a.harness, label: a.label,
-        ...(text(a.plan) ? { plan: a.plan } : {}), available: a.available !== false,
-        firstSeen: typeof a.firstSeen === 'number' ? a.firstSeen : now(),
-        lastSeen: typeof a.lastSeen === 'number' ? a.lastSeen : now(),
+    if (Array.isArray(raw)) {
+      const data = emptyFile()
+      for (const a of raw) {
+        if (!a || !HARNESS_ORDER.includes(a.harness) || !text(a.key) || !text(a.label)) continue
+        const firstSeen = typeof a.firstSeen === 'number' ? a.firstSeen : now()
+        const lastSeen = typeof a.lastSeen === 'number' ? a.lastSeen : now()
+        const same = data.accounts.find(x => x.harness === a.harness && x.key === a.key)
+        let account: HarnessAccount
+        if (same) {
+          // Duplicate (harness,key) entries are one account: keep the oldest start, newest sighting.
+          account = same
+          account.firstSeen = Math.min(same.firstSeen, firstSeen)
+          account.available = same.available && a.available !== false
+          if (lastSeen >= same.lastSeen) {
+            account.label = a.label
+            if (text(a.plan)) account.plan = a.plan
+          }
+          account.lastSeen = Math.max(same.lastSeen, lastSeen)
+        } else {
+          account = {
+            id: mintId(), root: null, key: a.key, harness: a.harness, label: a.label,
+            ...(text(a.plan) ? { plan: a.plan } : {}), available: a.available !== false, firstSeen, lastSeen,
+          }
+          data.accounts.push(account)
+        }
+        const key = bindingKey(account.harness, null)
+        const previous = data.accounts.find(x => x.id === data.bindings[key])
+        if (account.key !== 'default' && (!previous || account.lastSeen >= previous.lastSeen)) data.bindings[key] = account.id
       }
-      data.accounts.push(account)
-      const key = bindingKey(account.harness, null)
-      const previous = data.accounts.find(a => a.id === data.bindings[key])
-      if (account.key !== 'default' && (!previous || account.lastSeen >= previous.lastSeen)) data.bindings[key] = account.id
+      if (persist) await write(data)
+      return { data, dirty: !persist }
     }
-    await write(data)
-    return data
+    const doc = raw as { version?: unknown; accounts?: unknown; bindings?: unknown; segments?: unknown } | null
+    if (!doc || typeof doc !== 'object' || doc.version !== 2) {
+      if (persist) await backup(text_)
+      return { data: emptyFile(), dirty: !persist }
+    }
+    const accounts = (Array.isArray(doc.accounts) ? doc.accounts : []).filter(isAccount)
+    const ids = new Set(accounts.map(a => a.id))
+    const bindings: Record<string, string> = {}
+    for (const [k, v] of Object.entries(plainRecord(doc.bindings))) if (typeof v === 'string' && ids.has(v)) bindings[k] = v
+    const segments: Record<string, number> = {}
+    for (const [k, v] of Object.entries(plainRecord(doc.segments))) if (typeof v === 'number' && Number.isFinite(v)) segments[k] = v
+    return { data: { version: 2, accounts, bindings, segments }, dirty: false }
+  }
+  /** Called only under the file lock: migration mints and persists ids exactly once. */
+  const read = async (): Promise<AccountsFile> => (await load(true)).data
+  /** Lock-free read. Writers publish by atomic rename, so a reader sees a whole file. */
+  async function snapshot(): Promise<AccountsFile> {
+    const first = await load(false)
+    if (!first.dirty) return first.data
+    try { return await serial(read) } catch (error) {
+      if (error instanceof LockContended) return first.data
+      throw error
+    }
   }
   function adopt(data: AccountsFile, harness: HarnessId, root: string | null, detected: AccountIdentity) {
     const key = bindingKey(harness, root)
@@ -209,26 +275,42 @@ export function createHarnessAccounts(options: {
   }
   function current(harness: HarnessId, root?: string | null): Promise<HarnessAccount>
   function current(harnesses: readonly HarnessId[]): Promise<HarnessAccount[]>
-  async function current(harnesses: HarnessId | readonly HarnessId[], root: string | null = null): Promise<HarnessAccount | HarnessAccount[]> {
+  async function current(harnesses: HarnessId | readonly HarnessId[], rootArg: string | null = null): Promise<HarnessAccount | HarnessAccount[]> {
+    const root = normRoot(rootArg)
     const legacy = typeof harnesses !== 'string'
     const requested = legacy ? [...new Set(harnesses)] : [harnesses]
     const detected = await Promise.all(requested.map(async harness => ({ harness, ...await identity(harness, root) })))
-    return serial(async () => {
-      const data = await read()
+    const resolveAll = (data: AccountsFile, mutate: boolean) => {
       let changed = false
-      const accounts = detected.map(({ harness, identity: detected, confirmed }) => {
+      const accounts = detected.map(({ harness, identity: found, confirmed }) => {
+        const bound = data.accounts.find(a => a.id === data.bindings[bindingKey(harness, root)])
         if (!confirmed) {
-          const lastKnown = data.accounts.find(a => a.id === data.bindings[bindingKey(harness, root)])
           // Legacy callers use default as the unknown identity, retaining its availability.
-          if (lastKnown) return legacy ? { ...lastKnown, ...fallback(), plan: undefined } : lastKnown
+          if (bound) return legacy ? { ...bound, ...fallback(), plan: undefined } : bound
           return { ...fallback(), id: '', harness, root, available: true, firstSeen: now(), lastSeen: now() }
         }
+        if (!mutate) return data.accounts.find(a => a.harness === harness && a.key === found.key) ?? bound
+          ?? { ...fallback(), id: '', harness, root, available: true, firstSeen: now(), lastSeen: now() }
         changed = true
-        return adopt(data, harness, root, detected).account
+        return adopt(data, harness, root, found).account
       })
-      if (changed) await write(data)
-      return legacy ? accounts : accounts[0]!
-    })
+      return { accounts, changed }
+    }
+    const done = (accounts: HarnessAccount[]) => legacy ? accounts : accounts[0]!
+    const seen = await snapshot()
+    if (!detected.some(d => d.confirmed)) return done(resolveAll(seen, false).accounts)
+    try {
+      return done(await serial(async () => {
+        const data = await read()
+        const { accounts, changed } = resolveAll(data, true)
+        if (changed) await write(data)
+        return accounts
+      }))
+    } catch (error) {
+      // Contention refuses the WRITE only; the caller still gets the last-known answer.
+      if (error instanceof LockContended) return done(resolveAll(seen, false).accounts)
+      throw error
+    }
   }
   async function update(id: string, patch: { available?: boolean; nickname?: string }): Promise<HarnessAccount | null> {
     return serial(async () => {
@@ -236,25 +318,29 @@ export function createHarnessAccounts(options: {
       const account = data.accounts.find(a => a.id === id)
       if (!account) return null
       if (patch.available !== undefined) account.available = patch.available
-      if (patch.nickname !== undefined) account.nickname = patch.nickname
+      if (patch.nickname !== undefined) {
+        const nickname = sanitizeNickname(patch.nickname)
+        if (nickname) account.nickname = nickname
+        else delete account.nickname
+      }
       await write(data)
       return account
     })
   }
   return {
     current,
-    readAccounts: () => serial(read),
-    byId: (id: string) => serial(async () => (await read()).accounts.find(a => a.id === id) ?? null),
+    readAccounts: () => snapshot(),
+    byId: async (id: string) => (await snapshot()).accounts.find(a => a.id === id) ?? null,
     async bind(root: string | null, detected: AccountIdentity & { harness: HarnessId }) {
       return serial(async () => {
         const data = await read()
-        const result = adopt(data, detected.harness, root, detected)
+        const result = adopt(data, detected.harness, normRoot(root), detected)
         await write(data)
         return result
       })
     },
     async forceProbe(harness: HarnessId, root: string | null = null): Promise<AccountIdentity> {
-      return (await identity(harness, root, true)).identity
+      return (await identity(harness, normRoot(root), true)).identity
     },
     async startSegment(id: string, ms: number): Promise<void> {
       return serial(async () => {
@@ -268,11 +354,9 @@ export function createHarnessAccounts(options: {
     setNickname: (id: string, nickname: string) => update(id, { nickname }),
     async list(harnesses: readonly HarnessId[] = HARNESS_ORDER): Promise<HarnessAccount[]> {
       const currentAccounts = await current(harnesses)
-      return serial(async () => {
-        const accounts = (await read()).accounts
-        // Preserve slice-1's unknown rows before any identity has been confirmed.
-        return [...accounts, ...currentAccounts.filter(a => !a.id)]
-      })
+      const accounts = (await snapshot()).accounts
+      // Preserve slice-1's unknown rows before any identity has been confirmed.
+      return [...accounts, ...currentAccounts.filter(a => !a.id)]
     },
     async setAvailable(harness: HarnessId, key: string, available: boolean): Promise<HarnessAccount | null> {
       return serial(async () => {

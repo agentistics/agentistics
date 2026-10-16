@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtemp, mkdir, readFile, rm, writeFile, stat, chmod, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { readdir } from 'node:fs/promises'
 import { codexIdentity, createHarnessAccounts, probeAccountIdentity, __setHarnessAccountsForTest, IDENTITY_PROBES, ISOLATION_ENV } from './harness-accounts'
 import { handleAccountsRequest } from './accounts-web'
 import { routeCapability } from './capability-guard'
@@ -15,7 +16,7 @@ test('registers identities, caches probes for 60 seconds, preserves availability
   let now = 1000, calls = 0
   const file = join(dir, 'accounts.json')
   const store = createHarnessAccounts({ file, now: () => now, probe: async () => { calls++; return identity } })
-  expect((await store.list(['codex']))[0]).toMatchObject({ ...identity, id: expect.stringMatching(/^acc_[a-f0-9]{12}$/), root: null, harness: 'codex', available: true, firstSeen: 1000, lastSeen: 1000 })
+  expect((await store.list(['codex']))[0]).toEqual({ ...identity, id: expect.stringMatching(/^acc_[0-9a-f]{12}$/), root: null, harness: 'codex', available: true, firstSeen: 1000, lastSeen: 1000 })
   await store.setAvailable('codex', identity.key, false)
   now += 59_999
   expect((await store.current(['codex']))[0]?.available).toBe(false)
@@ -263,7 +264,8 @@ test('PATCH by id updates availability and nickname while retaining legacy PATCH
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   }), ['codex'])
   expect((await (await patch(account.id, { available: false, nickname: 'Work' })).json()).account).toMatchObject({ id: account.id, available: false, nickname: 'Work' })
-  expect((await (await patch(account.id, { nickname: '' })).json()).account.nickname).toBe('')
+  expect((await (await patch(account.id, { nickname: '  A\nB\u0007' + 'x'.repeat(60) })).json()).account.nickname).toBe(('A B ' + 'x'.repeat(60)).slice(0, 40))
+  expect((await (await patch(account.id, { nickname: '' })).json()).account).not.toHaveProperty('nickname')
   for (const body of [{}, null, [], { available: 'no' }, { nickname: false }]) expect((await patch(account.id, body)).status).toBe(400)
   expect((await patch('unknown', { nickname: 'Work' })).status).toBe(404)
   expect((await patch('%xx', { nickname: 'Work' })).status).toBe(400)
@@ -273,4 +275,74 @@ test('PATCH by id updates availability and nickname while retaining legacy PATCH
 test('the identity registry never logs labels, emails or probe documents', async () => {
   const source = await readFile(join(import.meta.dir, 'harness-accounts.ts'), 'utf8')
   expect(source).not.toMatch(/console\s*(?:\.|\[)/)
+})
+
+test('a fresh lock never fails reads; writes wait and then refuse', async () => {
+  const file = join(dir, 'accounts.json')
+  const store = createHarnessAccounts({ file, probe: async () => identity })
+  const known = await store.current('codex')
+  await mkdir(`${file}.lock`)
+  expect((await store.readAccounts()).accounts).toHaveLength(1)
+  expect((await store.byId(known.id))?.id).toBe(known.id)
+  expect((await store.list(['codex']))).toHaveLength(1)
+  const started = Date.now()
+  await expect(store.setAvailable('codex', identity.key, false)).rejects.toThrow('lock unavailable')
+  expect(Date.now() - started).toBeGreaterThanOrEqual(4000)
+  expect((await store.readAccounts()).accounts[0]!.available).toBe(true)
+}, 15_000)
+
+test('a write waits for a manually held lock and proceeds once it is released', async () => {
+  const file = join(dir, 'accounts.json')
+  const store = createHarnessAccounts({ file, probe: async () => identity })
+  await store.current('codex')
+  await mkdir(`${file}.lock`)
+  let done = false
+  const pending = store.setAvailable('codex', identity.key, false).then(r => { done = true; return r })
+  await new Promise(r => setTimeout(r, 300))
+  expect(done).toBe(false)
+  await rm(`${file}.lock`, { recursive: true })
+  expect((await pending)?.available).toBe(false)
+})
+
+test('a v2 document is normalised field by field', async () => {
+  const file = join(dir, 'accounts.json')
+  await writeFile(file, JSON.stringify({ version: 2, accounts: [{ id: 'acc_aaaaaaaaaaaa', harness: 'codex', key: 'k', label: 'L', root: null, available: true, firstSeen: 1, lastSeen: 1 }, { nope: 1 }] }))
+  const data = await createHarnessAccounts({ file }).readAccounts()
+  expect(data.accounts).toHaveLength(1)
+  expect(data.bindings).toEqual({})
+  expect(data.segments).toEqual({})
+})
+
+test('unknown versions and unparseable files are backed up (0600) before being overwritten', async () => {
+  for (const content of [JSON.stringify({ version: 3, accounts: [{ keep: 'me' }] }), '{ not json']) {
+    const file = join(dir, `accounts-${content.length}.json`)
+    await writeFile(file, content)
+    const store = createHarnessAccounts({ file, probe: async () => identity })
+    await store.current('codex')
+    const backups = (await readdir(dir)).filter(n => n.startsWith(`${file.split('/').pop()}.bak.`))
+    expect(backups).toHaveLength(1)
+    expect(await readFile(join(dir, backups[0]!), 'utf8')).toBe(content)
+    expect((await stat(join(dir, backups[0]!))).mode & 0o777).toBe(0o600)
+    expect(JSON.parse(await readFile(file, 'utf8')).version).toBe(2)
+  }
+})
+
+test('v1 duplicates of one (harness,key) merge into a single account', async () => {
+  const file = join(dir, 'accounts.json')
+  await writeFile(file, JSON.stringify([
+    { ...identity, harness: 'codex', available: false, firstSeen: 5, lastSeen: 10 },
+    { ...identity, label: 'Newer', harness: 'codex', firstSeen: 2, lastSeen: 20 },
+  ]))
+  const data = await createHarnessAccounts({ file }).readAccounts()
+  expect(data.accounts).toHaveLength(1)
+  expect(data.accounts[0]).toMatchObject({ label: 'Newer', available: false, firstSeen: 2, lastSeen: 20 })
+  expect(Object.values(data.bindings)).toEqual([data.accounts[0]!.id])
+})
+
+test('roots are normalised once: trailing slashes and relative segments share one binding', async () => {
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async (_, root) => ({ key: root!, label: 'x' }) })
+  const a = await store.current('codex', '/one/')
+  const b = await store.current('codex', '/one/../one')
+  expect(b.id).toBe(a.id)
+  expect(Object.keys((await store.readAccounts()).bindings)).toEqual(['codex:/one'])
 })
