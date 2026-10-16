@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { handoffCheckinPatch, handoffInheritPatch, handoffPinPatch, handoffTitle, inheritHandoffPrefs, nextHandoffSeq } from './handoff-inherit'
+import { handoffCheckinPatch, handoffInheritPatch, handoffPinPatch, handoffTitle, inheritHandoffPrefs, nextHandoffSeq, rekeyCheckinSession } from './handoff-inherit'
 import type { Preferences } from '../preferences'
 
 const parent = { id: 'p1', conversationId: 'conv-p' }
@@ -46,6 +46,26 @@ describe('check-in', () => {
     expect(out['conv-c'].pending).toBeUndefined()
     expect(out['conv-c'].fingerprint).toBeUndefined()
     expect(out['conv-p']).toBeDefined()
+  })
+  it('keeps a Codex successor agenda when its conversation is linked after spawn', async () => {
+    const codexChild = { id: 'codex-managed', harness: 'codex' }
+    let current = prefs({ checkin: { 'conv-p': { ...agenda, paused: true, checklist: ['review'] } } })
+    current = { ...current, ...handoffCheckinPatch(current, parent, codexChild) }
+    const inherited = current.checkin![codexChild.id]
+    // A concurrent poll may seed defaults at the conversation key before the migration.
+    current.checkin!['codex-conversation'] = { intervalMin: 5 }
+    await rekeyCheckinSession(codexChild.id, 'codex-conversation', async mutate => {
+      current = { ...current, ...mutate(current) }
+    })
+    expect(current.checkin!['codex-conversation']).toEqual({ ...inherited as object, session: 'codex-conversation' })
+    expect(current.checkin![codexChild.id]).toBeUndefined()
+    expect(current.checkin!['conv-p']).toBeDefined()
+  })
+  it('both conversation-link paths migrate check-in alongside folder membership', async () => {
+    const src = await Bun.file(new URL('../cli-start.ts', import.meta.url)).text()
+    for (const id of ['id', 'sid']) {
+      expect(src).toContain(`await rekeyCheckinSession(${id}, conversationId, updatePreferences)`)
+    }
   })
   it('does nothing without an agenda, or when the successor already has one', () => {
     expect(handoffCheckinPatch(prefs({}), parent, child)).toBeUndefined()

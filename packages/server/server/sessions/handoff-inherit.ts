@@ -85,3 +85,20 @@ export async function inheritHandoffPrefs(
   } catch { return false }
   return changed
 }
+
+/** Preserve a managed-id agenda when a harness first links its conversation. */
+export async function rekeyCheckinSession(
+  managedId: string, conversationId: string,
+  update: (mutate: PreferencesMutator) => Promise<unknown>,
+): Promise<void> {
+  if (!managedId || !conversationId || managedId === conversationId) return
+  await update(cur => {
+    const all = cur.checkin
+    if (!all || all[managedId] === undefined) return undefined
+    const next = { ...all }
+    // The managed agenda is authoritative: a poll may already have seeded conversation defaults.
+    next[conversationId] = { ...all[managedId] as Record<string, unknown>, session: conversationId }
+    delete next[managedId]
+    return { checkin: next }
+  })
+}

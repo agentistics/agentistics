@@ -34,6 +34,8 @@ import { loadNativeFleet, runNativeVerb, isNativeSessionId } from './sessions/na
 import { spawn } from 'node:child_process'
 import { rekeyMutedSession } from './sessions/session-notify-web'
 import { rekeyFolderMember } from './sessions/cli-folder'
+import { rekeyCheckinSession } from './sessions/handoff-inherit'
+import { updatePreferences } from './preferences'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, writeSync } from 'node:fs'
 import { basename, dirname, join, resolve as resolvePath } from 'node:path'
@@ -1578,6 +1580,7 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
         .then(async r => {
           await rekeyMutedSession(id, conversationId).catch(() => {})
           await rekeyFolderMember(id, conversationId).catch(() => {})
+          await rekeyCheckinSession(id, conversationId, updatePreferences).catch(() => {})
           await rekeyStoredRole([id], [id, conversationId]).catch(() => {})
           return r
         }),
@@ -1764,6 +1767,7 @@ function recordProcessLink(sid: string, conversationId: string, link: 'assigned'
     .then(async r => {
       await rekeyMutedSession(sid, conversationId).catch(() => {})
       await rekeyFolderMember(sid, conversationId).catch(() => {})
+      await rekeyCheckinSession(sid, conversationId, updatePreferences).catch(() => {})
       await rekeyStoredRole([sid], [sid, conversationId]).catch(() => {})
       return r
     })
