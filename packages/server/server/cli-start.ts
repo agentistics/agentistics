@@ -133,6 +133,7 @@ import { spawnCapabilities } from './sessions/codex-capabilities'
 import { readHarnessVersion } from './sessions/harness-version'
 import { answerStructured, structuredIntentOf, structuredReopenOrigin } from './sessions/structured-route'
 import { agentisticsMcpLaunch } from './mcp-launch'
+import { applyAccountToPlan } from './sessions/account-plan'
 import { prependContext } from './sessions/agentistics-context'
 import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveSpawnAwayFor, writeContextFile } from './sessions/spawn-context'
 import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor } from './sessions/session-roles'
@@ -2036,6 +2037,8 @@ async function spawnManaged(req: {
    * gated normally.
    */
   skipAdmission?: boolean
+  /** multi-account: see `SpawnSessionRequest.account`. */
+  account?: { env: Record<string, string>; loginArgv?: string[] }
 }, s: CliStrings, lang: CliLang): Promise<SpawnSessionResult> {
   const backend = await resolveBackend()
   const blocked = await backend.unavailable()
@@ -2122,6 +2125,7 @@ async function spawnManaged(req: {
     conversationId: offeredConversationId,
   }, await spawnCapabilities(req.harness))
   if (!planned.ok) return { ok: false, message: explainSpawnError(planned.error, s) }
+  if (req.account) applyAccountToPlan(planned.plan, req.account)
 
   // THE BINARY MUST BE REACHABLE FROM HERE. The pane is spawned with THIS process's PATH (see
   // `newSessionArgs`), so `Bun.which` answers exactly what the pane's exec will find — and a
@@ -4563,6 +4567,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.away !== undefined ? { away: req.away } : {}),
         ...(req.force ? { force: true } : {}),
         ...(req.origin ? { origin: req.origin } : {}),
+        ...(req.account ? { account: req.account } : {}),
       }, S(), lang).then(async r => {
         // NW-02: a session started for a BOARD task is filed there by id, not only named after it.
         if (r.ok && r.id && taskId) {

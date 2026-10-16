@@ -203,6 +203,13 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
       + 'table exists to keep out of an archive.',
   },
   {
+    // The TRAILING SLASH matters: `.agentistics/accounts.json` (the registry, in ALWAYS) must not match.
+    pattern: '.agentistics/accounts/', match: 'prefix', reason: 'secret',
+    restoreWith: 'Billing → Add account (sign in again)',
+    why: 'Per-account harness config roots (account-roots.ts). Each holds that account\'s own login '
+      + '(OAuth credentials) next to symlinks to the default root\'s settings; a backup must carry neither.',
+  },
+  {
     pattern: '.agentistics/provider-keys', match: 'prefix', reason: 'secret',
     restoreWith: 'agentop provider key set anthropic',
     why: 'Provider API keys entered for the native runtime (credentials.ts, 0600, never logged).',

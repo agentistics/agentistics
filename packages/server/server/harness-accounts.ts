@@ -365,6 +365,18 @@ export function createHarnessAccounts(options: {
       })
     },
     update,
+    /** Retire: invisible to agents, history and billing kept. Re-binding the same login un-retires it. */
+    async retire(id: string): Promise<HarnessAccount | null> {
+      return serial(async () => {
+        const data = await read()
+        const account = data.accounts.find(a => a.id === id)
+        if (!account) return null
+        account.retired = true
+        account.available = false
+        await write(data)
+        return account
+      })
+    },
     setNickname: (id: string, nickname: string) => update(id, { nickname }),
     async list(harnesses: readonly HarnessId[] = HARNESS_ORDER): Promise<HarnessAccount[]> {
       const currentAccounts = await current(harnesses)
@@ -396,6 +408,7 @@ export const forceProbe = (harness: HarnessId, root: string | null = null) => st
 export const currentHarnessAccounts = (harnesses: readonly HarnessId[]) => store.current(harnesses)
 export const listHarnessAccounts = (harnesses?: readonly HarnessId[]) => store.list(harnesses)
 export const setAccountAvailable = (harness: HarnessId, key: string, available: boolean) => store.setAvailable(harness, key, available)
+export const retireAccount = (id: string) => store.retire(id)
 export const updateAccount = (id: string, patch: { available?: boolean; nickname?: string }) => store.update(id, patch)
 
 /** Tests install an isolated registry and probes; never read the owner's login. */
