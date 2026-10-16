@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { beforeAll, describe, expect, test } from 'bun:test'
 import { batch } from './cli-session'
 import { readRegistry } from './registry'
 import { createTaskStore } from './task-store'
@@ -13,7 +13,19 @@ import type { SessionBackend } from './types'
 // A git hook exports GIT_DIR & co.; a temp repo must not resolve to the hooked one.
 for (const k of Object.keys(process.env)) if (k.startsWith('GIT_') && k !== 'GIT_TERMINAL_PROMPT') delete process.env[k]
 
+// Pass the environment explicitly: hook variables must not reach fixture git subprocesses.
+const gitClean = (args: string[]) => Bun.spawnSync(['git', ...args], {
+  env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))),
+})
+
 describe('batch — the registry row brackets the spawn', () => {
+  beforeAll(async () => {
+    const store = createTaskStore(TASKS_FILE)
+    const now = '2026-10-16T00:00:00Z'
+    await store.upsertTask({ id: 't-s4row', title: 'S4 row task', status: 'in_progress', createdAt: now, updatedAt: now })
+    await store.upsertSubtask({ id: 's-s4row', taskId: 't-s4row', title: 'S4 row subtask', done: false, status: 'todo', createdAt: now, updatedAt: now })
+  })
+
   test('the row exists BEFORE the pane is spawned, and is removed when the spawn fails', async () => {
     const seen: boolean[] = []
     const backend = {
@@ -44,10 +56,6 @@ describe('batch — the registry row brackets the spawn', () => {
   })
 
   test('a --subtask reaches the ROW (taskId, subtaskId and the real task title), not only the briefing', async () => {
-    const store = createTaskStore(TASKS_FILE)
-    const now = '2026-10-16T00:00:00Z'
-    await store.upsertTask({ id: 't-s4row', title: 'S4 row task', status: 'in_progress', createdAt: now, updatedAt: now })
-    await store.upsertSubtask({ id: 's-s4row', taskId: 't-s4row', title: 'S4 row subtask', done: false, status: 'todo', createdAt: now, updatedAt: now })
     let row: Awaited<ReturnType<typeof readRegistry>>[number] | undefined
     const backend = {
       id: 'tmux', unavailable: async () => undefined,
@@ -137,7 +145,8 @@ describe('batch — the registry row brackets the spawn', () => {
 
   test('H1: a person (no parent session, no role) starts in a main checkout another session is live in', async () => {
     const d = realpathSync(mkdtempSync(join(tmpdir(), 'h1-')))
-    Bun.spawnSync(['git', 'init', '-q', d])
+    expect(gitClean(['init', '-q', d]).exitCode).toBe(0)
+    expect(gitClean(['-C', d, 'remote', 'add', 'origin', 'https://github.com/fixture/spawn-s4.git']).exitCode).toBe(0)
     await addSession({ id: 'h1-live', harness: 'claude', cwd: d, createdAt: '2026-10-16T00:00:00Z' })
     const prev = process.env.AGENTOP_MANAGED_ID
     delete process.env.AGENTOP_MANAGED_ID
@@ -147,8 +156,15 @@ describe('batch — the registry row brackets the spawn', () => {
       await quiet(() => batch({ kind: 'batch', task: 'S4 row task', json: true, force: true, specs: [{ harness: 'claude', prompt: 'x', cwd: d }] } as Parameters<typeof batch>[0], fake(b, ['h1-live'])))
       expect(a.length).toBe(1)
       expect(b.length).toBe(1)
+      // Negative controls: the exact same checkout really does refuse workers.
+      const workers: Array<{ id: string }> = []
+      await quiet(() => start({ kind: 'start', role: 'worker', harness: 'claude', background: true, prompt: 'x', cwd: d, force: true } as Parameters<typeof start>[0], fake(workers, ['h1-live'])))
+      process.env.AGENTOP_MANAGED_ID = 'h1-parent'
+      await quiet(() => batch({ kind: 'batch', task: 'S4 row task', json: true, force: true, specs: [{ harness: 'claude', prompt: 'x', cwd: d }] } as Parameters<typeof batch>[0], fake(workers, ['h1-live'])))
+      expect(workers).toEqual([])
     } finally {
       if (prev !== undefined) process.env.AGENTOP_MANAGED_ID = prev
+      else delete process.env.AGENTOP_MANAGED_ID
       await removeSession('h1-live'); rmSync(d, { recursive: true, force: true })
     }
   })

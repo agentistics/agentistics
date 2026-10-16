@@ -4529,14 +4529,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // `session start` / `batch`: references resolved on the board, a group member filed on its
       // group, a hand-off inheriting its predecessor's filing, cwd and folder. A refusal spawns nothing.
       const { planSpawnFilingSafe, attachAfterSpawn } = await import('./sessions/spawn-filing-io')
-      const { filingRow, refusalText } = await import('./sessions/spawn-row')
-      const filing = await planSpawnFilingSafe({
-        // No parent and no role = a person at a wizard: neither worker nor leader (spec rule 6).
-        role: req.handoff ? 'leader' : (req.role ?? (req.parentSessionId ? 'worker' : undefined)),
-        taskRef: req.taskId, subtaskRef: req.subtaskId, cwd: req.cwd,
-        callerSessionId: req.parentSessionId,
-        ...(req.handoff && req.parentSessionId ? { handoffOf: req.parentSessionId } : {}),
-      })
+      const { filingRow, refusalText, spawnSessionFilingRequest } = await import('./sessions/spawn-row')
+      const filing = await planSpawnFilingSafe(spawnSessionFilingRequest(req))
       if (!filing.ok) return { ok: false, message: refusalText(filing) }
       const taskId = filing.taskId
       const subtaskId = filing.subtaskId
@@ -4565,7 +4559,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         // NW-02: a session started for a BOARD task is filed there by id, not only named after it.
         if (r.ok && r.id && taskId) {
           const a = await attachAfterSpawn({ taskId, ...(subtaskId ? { subtaskId } : {}) }, r.id)
-          if (!a.ok) attachNote = `The session started but the board did not file it (${a.reason}).`
+          if (!a.ok) attachNote = S().spawnFilingFailed(a.reason)
         }
         // The folder the plan chose (the predecessor's, the task's, or where the caller works).
         // Never fails the spawn: the session is already running, and an error here would invite a

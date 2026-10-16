@@ -135,9 +135,9 @@ export async function planSpawnFiling(o: SpawnFilingRequest): Promise<FilingPlan
   throw new Error('unreachable')
 }
 
-/** `planAttach`'s refusals (a blocked subtask, a group member) are the SAME at every spawn site: before anything starts. */
+/** Workers fail fast. Persons and hand-offs spawn first, then report the board's attach refusal. */
 function checkAttach(plan: FilingPlan, book: Pick<TaskBook, 'tasks' | 'subtasks'>): FilingPlan {
-  if (!plan.ok || !plan.taskId || !plan.subtaskId) return plan
+  if (!plan.ok || plan.role !== 'worker' || !plan.taskId || !plan.subtaskId) return plan
   const a = planAttach({
     target: { kind: 'subtask', id: plan.subtaskId },
     taskIds: book.tasks.map(t => t.id),
@@ -159,7 +159,7 @@ export async function planSpawnFilingSafe(o: SpawnFilingRequest): Promise<Filing
 
 /**
  * Record the filing on the board after the session is up, at every spawn site alike. A refusal is
- * returned (the caller reports it) and the subtask the row was stamped with is cleared, so a row
+ * returned (the caller reports it) and the filing the row was stamped with is cleared, so a row
  * never stays filed where the board said no.
  */
 export async function attachAfterSpawn(
@@ -171,7 +171,8 @@ export async function attachAfterSpawn(
     const { attachSession } = await import('./task-web')
     const r = await attachSession(plan.taskId, sessionId, plan.subtaskId ? { subtaskId: plan.subtaskId } : {})
     if (r.ok) return { ok: true }
-    if (plan.subtaskId) { const { patchSession } = await import('./registry'); await patchSession(sessionId, { subtaskId: null }).catch(() => false) }
+    const { patchSession } = await import('./registry')
+    await patchSession(sessionId, { task: null, taskId: null, subtaskId: null }).catch(() => false)
     return { ok: false, reason: r.reason }
   } catch (e) {
     return { ok: false, reason: e instanceof Error ? e.message : String(e) }
