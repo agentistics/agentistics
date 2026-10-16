@@ -2219,7 +2219,7 @@ async function spawnManaged(req: {
   }
   if (storedContextRole.role) await markRoleDelivered([planned.plan.conversationId, id], storedContextRole.role)
   if (handoffParentRow) {
-    await import('./sessions/handoff-relay-io').then(m => m.recordHandoffLink(handoffParentRow.id, id, relay)).catch(() => {})
+    await import('./sessions/handoff-relay-io').then(m => m.recordHandoffLink(handoffParentRow.id, id, relay, handoffParentRow.handoffSeq)).catch(() => {})
   }
 
   // F2.0 — a STRUCTURED session got the opening context from its driver (its declared channel), so a
@@ -4552,6 +4552,16 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         subtaskId = parent?.subtaskId
         handoffParent = parent
       }
+      // The successor keeps the predecessor's title; the generation counter lives in the ⓘ panel.
+      let label = req.label
+      if (req.handoff && req.parentSessionId) {
+        if (!handoffParent) {
+          const { readRegistry } = await import('./sessions/registry')
+          handoffParent = (await readRegistry()).find(m => m.id === req.parentSessionId)
+        }
+        const { handoffTitle } = await import('./sessions/handoff-inherit')
+        label = handoffTitle(handoffParent?.label, req.label)
+      }
       // A group MEMBER can never hold a session (`subtask_in_group`): file it on the member's GROUP
       // instead of leaving the session unfiled while its briefing claims the member.
       if (taskId && subtaskId) {
@@ -4567,7 +4577,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.model ? { model: req.model } : {}),
         ...(req.effort ? { effort: req.effort } : {}),
         ...(req.mode ? { mode: req.mode } : {}),
-        ...(req.label ? { label: req.label } : {}),
+        ...(label ? { label } : {}),
         ...(req.task ? { task: req.task } : {}),
         ...(taskId ? { contextTaskId: taskId } : {}),
         ...(taskId && subtaskId ? { contextSubtaskId: subtaskId } : {}),
@@ -4593,9 +4603,9 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
             const parent = handoffParent ?? reg.find(m => m.id === req.parentSessionId)
             const child = reg.find(m => m.id === r.id) ?? { id: r.id }
             if (parent) {
-              const { fileHandoffInParentGroup } = await import('./sessions/handoff-group')
+              const { inheritHandoffPrefs } = await import('./sessions/handoff-inherit')
               const { updatePreferences } = await import('./preferences')
-              await fileHandoffInParentGroup(parent, child, updatePreferences)
+              await inheritHandoffPrefs(parent, child, updatePreferences)
             }
           } catch { /* a folder is a convenience, not the spawn */ }
         }

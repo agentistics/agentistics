@@ -331,6 +331,8 @@ export interface ManagedSession {
    */
   handoffTo?: string
   handoffFrom?: string
+  /** The SUCCESSOR's generation (predecessor's + 1), shown in the ⓘ panel — the title never carries it. */
+  handoffSeq?: number
   handoffRelayedAt?: string
   handoffRelayAwaiting?: boolean
   /** HANDOFF.CALC: this leader's context after its first ~15 calls — a sample of the successor base F. */
