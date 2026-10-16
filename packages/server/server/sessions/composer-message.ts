@@ -52,40 +52,64 @@ export function createComposerMessageStore(directory: string) {
   // path -> parsed set, valid while the file's mtime/size are unchanged: no disk read per poll.
   const cache = new Map<string, { sig: string; values: Set<string> }>()
   const sigOf = async (path: string) => { const st = await stat(path).catch(() => null); return st ? `${st.mtimeMs}:${st.size}` : '' }
-  async function load(path: string): Promise<Set<string>> {
-    const sig = await sigOf(path)
+
+  // One file operation at a time (reads that miss, trims, appends), so a trim can never overwrite a
+  // concurrent append and two concurrent reads cannot both promote the same fingerprints.
+  let queue: Promise<unknown> = Promise.resolve()
+  function serial<T>(work: () => Promise<T>): Promise<T> {
+    const job = queue.then(work)
+    queue = job.catch(() => undefined)
+    return job
+  }
+
+  /** Must run inside the queue. Caches only when the file did not change while it was read. */
+  async function loadLocked(path: string): Promise<Set<string>> {
+    const before = await sigOf(path)
     const hit = cache.get(path)
-    if (hit && hit.sig === sig) return hit.values
-    const raw = sig ? await readFile(path, 'utf8').catch(() => '') : ''
+    if (hit && hit.sig === before) return hit.values
+    const raw = before ? await readFile(path, 'utf8').catch(() => '') : ''
     // Ignore a partial or corrupt line, keeping every other record usable.
     let lines = raw.split('\n').filter(value => LINE.test(value))
+    let trimmed = false
     if (lines.length > MAX_LINES) {
+      trimmed = true
       lines = lines.slice(-MAX_LINES)
       try { await writeFile(path, `${lines.join('\n')}\n`, { mode: 0o600 }) } catch { /* trimming is best effort */ }
     }
     const values = new Set(lines)
-    cache.set(path, { sig: await sigOf(path), values })
+    const after = await sigOf(path)
+    // Any signature change other than our own trim means somebody wrote during the read: the set may
+    // be incomplete, so do not publish it under the newer signature.
+    if (trimmed || after === before) cache.set(path, { sig: after, values })
+    else cache.delete(path)
     return values
   }
+  /** Fast path without the queue when the signature still matches. */
+  async function load(path: string): Promise<Set<string>> {
+    const hit = cache.get(path)
+    if (hit && hit.sig === await sigOf(path)) return hit.values
+    return serial(() => loadLocked(path))
+  }
 
-  // One append at a time, so two concurrent reads cannot both promote the same fingerprints.
-  let queue: Promise<unknown> = Promise.resolve()
   function append(id: string, values: string[]): Promise<void> {
     if (id === '' || values.length === 0) return Promise.resolve()
-    const job = queue.then(async () => {
+    return serial(async () => {
       try {
         await mkdir(directory, { recursive: true, mode: 0o700 })
         const path = pathFor(id)
-        const present = await load(path)
+        const present = await loadLocked(path)
         const fresh = [...new Set(values)].filter(value => !present.has(value))
         if (fresh.length === 0) return
         await appendFile(path, `${fresh.join('\n')}\n`, { mode: 0o600 })
         for (const value of fresh) present.add(value)
+        if (present.size > MAX_LINES) {
+          const kept = [...present].slice(-MAX_LINES)
+          present.clear(); for (const value of kept) present.add(value)
+          try { await writeFile(path, `${kept.join('\n')}\n`, { mode: 0o600 }) } catch { /* best effort */ }
+        }
         cache.set(path, { sig: await sigOf(path), values: present })
       } catch { /* A display hint must not turn a confirmed delivery into a send failure. */ }
     })
-    queue = job
-    return job
   }
 
   async function record(id: string, text: string): Promise<void> {

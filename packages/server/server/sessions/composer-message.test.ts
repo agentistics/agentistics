@@ -143,11 +143,16 @@ describe('durable composer message fingerprints', () => {
     // an in-place edit changes size, so the cache must notice it.
     await appendFile(file, `${'a'.repeat(64)}\n`)
     expect((await store.read(['session-1']))(wrapped(prose))).toBe(true)
-    const stat = await import('node:fs/promises')
-    const spy = spyOn(stat, 'readFile')
+    const fsp = await import('node:fs/promises')
+    const spy = spyOn(fsp, 'readFile')
     try {
+      // Positive control: an external append invalidates the signature, so this read MUST hit the spy.
+      await appendFile(file, `${'b'.repeat(64)}\n`)
+      await store.read(['session-1'])
+      const logReads = () => spy.mock.calls.filter(call => String(call[0]).endsWith('.log')).length
+      expect(logReads()).toBe(1)
       await store.read(['session-1']); await store.read(['session-1'])
-      expect(spy.mock.calls.filter(call => String(call[0]).endsWith('.log'))).toHaveLength(0)
+      expect(logReads()).toBe(1)
     } finally { spy.mockRestore() }
   })
 
@@ -169,5 +174,18 @@ describe('durable composer message fingerprints', () => {
     const kept = (await readFile(path, 'utf8')).split('\n').filter(Boolean)
     expect(kept).toHaveLength(2000)
     expect(kept[0]).toBe(all[100])
+  })
+
+  test('appends keep the 2000-line cap', async () => {
+    const path = join(directory, `${createHash('sha256').update('session-1').digest('hex')}.log`)
+    await mkdir(directory, { recursive: true })
+    const all = Array.from({ length: 2000 }, (_, i) => createHash('sha256').update(String(i)).digest('hex'))
+    await writeFile(path, `${all.join('\n')}\n`)
+    const store = createComposerMessageStore(directory)
+    await store.record('session-1', prose)
+    const kept = (await readFile(path, 'utf8')).split('\n').filter(Boolean)
+    expect(kept).toHaveLength(2000)
+    expect(kept[0]).toBe(all[1])
+    expect((await store.read(['session-1']))(prose)).toBe(true)
   })
 })
