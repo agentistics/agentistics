@@ -86,6 +86,7 @@ const USAGE = `Usage:
   agentop session list
   agentop session attach <id|name>
   agentop session kill   <id|name> [--folder <folder>]
+  agentop session retire <id|name> [--cancel] [--quiet-for 60s] [--deadline 30m] [--folder <folder>] [--json]
   agentop session folders [--json]
   agentop session rename <id|name> "label"
   agentop session note   <id|name> "text"
@@ -256,7 +257,7 @@ export async function runSession(argv: string[]): Promise<number> {
   }
 
   // Folders are resolved BEFORE anything starts: a bad ref refuses the whole command.
-  const folderRefs = cmd.kind === 'batch' ? cmd.specs.map(sp => sp.folder) : cmd.kind === 'start' || cmd.kind === 'open' || cmd.kind === 'kill' ? [cmd.folder] : []
+  const folderRefs = cmd.kind === 'batch' ? cmd.specs.map(sp => sp.folder) : cmd.kind === 'start' || cmd.kind === 'open' || cmd.kind === 'kill' || cmd.kind === 'retire' ? [cmd.folder] : []
   if (cmd.kind === 'folders') {
     const tree = await folderTree()
     if (cmd.json) console.log(JSON.stringify({ folders: tree }, null, 2))
@@ -280,6 +281,11 @@ export async function runSession(argv: string[]): Promise<number> {
     case 'ls': return ls(cmd, backend)
     case 'attach': return attach(cmd.ref, backend)
     case 'kill': return kill(cmd.ref, backend, cmd.folder)
+    case 'retire': {
+      const f = cmd.folder ? folderByRef.get(cmd.folder) : undefined
+      const { retireCommand } = await import('./cli-retire')
+      return retireCommand({ ...cmd, ...(f ? { folderId: f.id, folderPath: f.path } : {}), caller: callerSessionId() })
+    }
     // `labelSince` travels WITH the label, always. `pickTitle` settles a disagreement between the
     // name typed here and the one the harness holds by RECENCY, and it can only do that when both
     // sides say when — so a rename written without a timestamp can never win, whatever the user
@@ -1243,6 +1249,13 @@ async function kill(ref: string, backend: SessionBackend, folder?: string): Prom
   if (!found.ok) { console.error(refError(ref, found.reason, found.matches)); return 1 }
   const { id } = found.session
   const statusBefore = reconciled.find(r => r.id === id)?.status
+  // Killing the session this command runs INSIDE would cut its own tool call: it becomes a retire.
+  const { killIsSelf, KILL_SELF_SENTENCE, retireCommand } = await import('./cli-retire')
+  if (killIsSelf(id, callerSessionId())) {
+    console.error(KILL_SELF_SENTENCE)
+    const f = folder ? folderByRef.get(folder) : undefined
+    return retireCommand({ ref: id, ...(f ? { folderId: f.id, folderPath: f.path } : {}), caller: id })
+  }
 
   const confirmed = await backend.kill(id)
   // A session that was already `lost` (the backend has nothing by this id — there was never

@@ -92,6 +92,11 @@ export type SessionCommand =
   | { kind: 'attach'; ref: string }
   /** `--folder <ref>`: after ending it, move it to that folder (e.g. "…/Finalizadas"). */
   | { kind: 'kill'; ref: string; folder?: string }
+  /**
+   * Ask the server to end the session once it is provably quiet (`retire-plan.ts`); `--cancel` drops a
+   * pending request. `--folder`: file it there once retired. Durations take `s`/`m`/`h` (`60s`, `30m`).
+   */
+  | { kind: 'retire'; ref: string; cancel?: boolean; folder?: string; quietForMs?: number; deadlineMs?: number; json?: boolean }
   /** The folder tree, so a caller can pick a `--folder` ref. */
   | { kind: 'folders'; json?: boolean }
   /** NATIVE sessions only (`ses_…`): file an ended one away, bring it back, or delete it. */
@@ -150,6 +155,54 @@ function takeFolder(args: string[]): { folder?: string; rest: string[] } | { err
   return { ...(folder ? { folder } : {}), rest }
 }
 
+/** `60s` / `30m` / `1h` / `90` (seconds) → ms; `null` for anything else. */
+export function parseDurationMs(v: string): number | null {
+  const m = /^(\d+(?:\.\d+)?)(ms|s|m|h)?$/.exec(v.trim())
+  if (!m) return null
+  const n = Number(m[1])
+  const unit = m[2] ?? 's'
+  const ms = unit === 'ms' ? n : unit === 's' ? n * 1000 : unit === 'm' ? n * 60_000 : n * 3_600_000
+  return Number.isFinite(ms) ? Math.round(ms) : null
+}
+
+const RETIRE_USAGE = 'Usage: agentop session retire <id|name> [--cancel] [--quiet-for 60s] [--deadline 30m] [--folder <folder>] [--json]'
+
+function parseRetire(args: string[], json: boolean): SessionCommand {
+  const f = takeFolder(args)
+  if ('error' in f) return { kind: 'error', message: f.error }
+  let ref: string | undefined
+  let cancel = false
+  let quietForMs: number | undefined
+  let deadlineMs: number | undefined
+  const rest = f.rest
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i]!
+    if (a === '--json') continue
+    if (a === '--cancel') { cancel = true; continue }
+    if (a === '--quiet-for' || a === '--deadline') {
+      const v = rest[i + 1]
+      const ms = v === undefined ? null : parseDurationMs(v)
+      if (ms === null || (a === '--deadline' && ms <= 0)) return { kind: 'error', message: `Bad value for ${a}: ${v ?? '(missing)'} — use e.g. 60s, 30m, 1h.` }
+      if (a === '--quiet-for') quietForMs = ms
+      else deadlineMs = ms
+      i++
+      continue
+    }
+    if (a.startsWith('--')) return { kind: 'error', message: `Unknown flag for retire: ${a}\n${RETIRE_USAGE}` }
+    if (ref !== undefined) return { kind: 'error', message: RETIRE_USAGE }
+    ref = a
+  }
+  if (!ref) return { kind: 'error', message: RETIRE_USAGE }
+  return {
+    kind: 'retire', ref,
+    ...(cancel ? { cancel: true } : {}),
+    ...(f.folder ? { folder: f.folder } : {}),
+    ...(quietForMs !== undefined ? { quietForMs } : {}),
+    ...(deadlineMs !== undefined ? { deadlineMs } : {}),
+    ...(json ? { json: true } : {}),
+  }
+}
+
 function isHarness(v: string): v is HarnessId {
   return (HARNESS_ORDER as readonly string[]).includes(v)
 }
@@ -192,6 +245,8 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
     return { kind: 'kill', ref, ...(f.folder ? { folder: f.folder } : {}) }
   }
 
+  if (head === 'retire') return parseRetire(argv.slice(1), jsonFlag)
+
   if (head === 'archive' || head === 'unarchive' || head === 'delete') {
     const ref = argv[1]
     if (!ref) return { kind: 'error', message: `Usage: agentop session ${head} <ses_…>  (native Agentistics sessions)` }
@@ -215,7 +270,7 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
   if (!isHarness(head)) {
     return {
       kind: 'error',
-      message: `Unknown harness or action: ${head}. Expected one of ${HARNESS_ORDER.join(', ')} — or ls, list, folders, attach, kill, rename, note, archive, unarchive, delete.`,
+      message: `Unknown harness or action: ${head}. Expected one of ${HARNESS_ORDER.join(', ')} — or ls, list, folders, attach, kill, retire, rename, note, archive, unarchive, delete.`,
     }
   }
 
