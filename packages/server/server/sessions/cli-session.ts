@@ -1249,7 +1249,7 @@ async function kill(ref: string, backend: SessionBackend, folder?: string): Prom
   const flushed = await flushBeforeKill(id, async (to, text) => {
     const harness = registry.find(m => m.id === to)?.harness ?? ''
     return backend.sendTextReliable ? backend.sendTextReliable(to, text, harness) : backend.sendText(to, text)
-  })
+  }, await resolveLang())
   if (flushed.warning) console.error(flushed.warning)
 
   const confirmed = await backend.kill(id)

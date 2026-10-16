@@ -301,6 +301,10 @@ export interface CliStrings {
   sessTaskDeleted: (task: string, freed: number) => string
   sessTaskReopened: (task: string) => string
   sessKillUnconfirmed: (id: string) => string
+  /** The line appended to the owed text when it is recorded (comment / notice). */
+  relayOwedNote: (id: string, successor: string, reason: 'missing' | 'dead' | 'send-failed' | 'truncated') => string
+  /** The warning printed/returned by a kill; `dest` says where the owed messages went. */
+  relayKillWarning: (id: string, successor: string, reason: 'missing' | 'dead' | 'send-failed' | 'truncated', dest: 'task' | 'notice' | 'none') => string
   sessRenamed: string
   /**
    * A rename that landed in BOTH places — agentop's label and the harness's own name.
@@ -530,6 +534,19 @@ export interface CliStrings {
   engineVersionLine: (status: EngineStatus) => string
 }
 
+const RELAY_WHY_EN = {
+  missing: 'the successor session no longer exists',
+  dead: 'the successor session had already ended',
+  'send-failed': 'the successor did not answer in time',
+  truncated: 'the conversation was too long to check in full',
+} as const
+const RELAY_WHY_PT = {
+  missing: 'a sessão sucessora não existe mais',
+  dead: 'a sessão sucessora já tinha sido encerrada',
+  'send-failed': 'a sucessora não respondeu a tempo',
+  truncated: 'a conversa era longa demais para conferir inteira',
+} as const
+
 const EN: CliStrings = {
   lang: 'en',
   tagline: 'AI coding-assistant analytics · agentop',
@@ -724,6 +741,10 @@ const EN: CliStrings = {
     ? `"${task}" removed.`
     : `"${task}" removed — ${freed} session(s) kept, now unfiled.`,
   sessTaskReopened: (task: string) => `"${task}" reopened.`,
+  relayOwedNote: (id: string, successor: string, r: 'missing' | 'dead' | 'send-failed' | 'truncated') =>
+    `(These messages could not be delivered to the successor session ${successor} before ${id} was ended: ${RELAY_WHY_EN[r]}.)`,
+  relayKillWarning: (id: string, successor: string, r: 'missing' | 'dead' | 'send-failed' | 'truncated', dest: 'task' | 'notice' | 'none') =>
+    `Ended ${id}, but the owner's last messages did not reach the successor ${successor} (${RELAY_WHY_EN[r]}). ${dest === 'task' ? 'The text was saved as a comment on the task.' : dest === 'notice' ? 'The text was saved in your notifications (the bell).' : 'The text could not be saved anywhere.'}`,
   sessKillUnconfirmed: (id: string) =>
     `could not confirm ${id} was stopped — it may still be running, so its record was kept.`,
   sessRenamed: 'session renamed.',
@@ -1123,6 +1144,10 @@ const PT: CliStrings = {
     ? `"${task}" removida.`
     : `"${task}" removida — ${freed} sessão(ões) mantida(s), agora sem tarefa.`,
   sessTaskReopened: (task: string) => `"${task}" reaberta.`,
+  relayOwedNote: (id: string, successor: string, r: 'missing' | 'dead' | 'send-failed' | 'truncated') =>
+    `(Estas mensagens não puderam ser entregues à sessão sucessora ${successor} antes de encerrar ${id}: ${RELAY_WHY_PT[r]}.)`,
+  relayKillWarning: (id: string, successor: string, r: 'missing' | 'dead' | 'send-failed' | 'truncated', dest: 'task' | 'notice' | 'none') =>
+    `Encerrei ${id}, mas as últimas mensagens do dono não chegaram à sucessora ${successor} (${RELAY_WHY_PT[r]}). ${dest === 'task' ? 'O texto ficou salvo como comentário na tarefa.' : dest === 'notice' ? 'O texto ficou salvo nas suas notificações (o sino).' : 'Não foi possível salvar o texto em nenhum lugar.'}`,
   sessKillUnconfirmed: (id: string) =>
     `não deu para confirmar que ${id} foi encerrada — ela pode continuar rodando, então o registro dela foi mantido.`,
   sessRenamed: 'sessão renomeada.',
