@@ -1,11 +1,18 @@
-import { expect, test } from 'bun:test'
+import { expect, mock, test } from 'bun:test'
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { ChatBubble, SystemEventRow } from './ChatBubble'
+import * as realFleet from '../../lib/fleet'
 import { parseSystemEvent } from '../../lib/systemEvent'
 
 const g = globalThis as Record<string, unknown>
 g.window ??= { innerWidth: 1200, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), addEventListener() {}, removeEventListener() {} }
+
+// Seed the fleet so the sender resolves to a title only through useFleet.
+mock.module('../../lib/fleet', () => ({
+  ...realFleet,
+  useFleet: () => ({ fleet: { rows: [{ id: 'ab12cdef', conversationId: 'c1', title: 'Leader Xyzzy' }] } }),
+}))
+const { ChatBubble, SystemEventRow } = await import('./ChatBubble')
 
 const turn = (text: string) => ({ role: 'user', text } as never)
 
@@ -29,54 +36,44 @@ test('normal user turn is not an event row', () => {
 test('handback turn with a sender goes through the fleet row and shows the sender', () => {
   const html = renderToStaticMarkup(<ChatBubble turn={turn('[from session ab12 · handback]\nxyzzy-body-marker')} lang="en" harness="claude" />)
   expect(html).toContain('handed back')
-  expect(html).toContain('ab12')
+  expect(html).toContain('Leader Xyzzy')
   expect(html).toContain('aria-expanded="false"')
   expect(html).not.toContain('xyzzy-body-marker')
 })
 
-/** Renders a function component against a minimal hook dispatcher so a click can be replayed (no DOM lib here). */
-function renderWithState(Comp: (p: never) => React.ReactElement, props: unknown) {
-  const slots: unknown[] = []
-  const internals = (React as unknown as Record<string, { H: unknown }>).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE!
-  let i = 0
-  const dispatcher = {
-    useState(init: unknown) {
-      const idx = i++
-      if (!(idx in slots)) slots[idx] = typeof init === 'function' ? (init as () => unknown)() : init
-      const set = (v: unknown) => { slots[idx] = typeof v === 'function' ? (v as (x: unknown) => unknown)(slots[idx]) : v }
-      return [slots[idx], set]
-    },
-    useEffect() {},
+const findButton = (el: React.ReactNode): React.ReactElement<{ onClick: () => void; 'aria-expanded': boolean }> | null => {
+  let hit: React.ReactElement<{ onClick: () => void; 'aria-expanded': boolean }> | null = null
+  const visit = (n: React.ReactNode) => {
+    React.Children.forEach(n, c => {
+      if (hit || !React.isValidElement<{ children?: React.ReactNode }>(c)) return
+      if (c.type === 'button') { hit = c as never; return }
+      visit(c.props.children)
+    })
   }
-  return () => {
-    i = 0
-    const prev = internals.H
-    internals.H = dispatcher
-    try { return (Comp as unknown as (p: unknown) => React.ReactElement)(props) } finally { internals.H = prev }
-  }
-}
-const findButton = (el: React.ReactElement): React.ReactElement<{ onClick: () => void; 'aria-expanded': boolean }> => {
-  const hit = (n: unknown): React.ReactElement | null => {
-    if (!React.isValidElement(n)) return null
-    if (n.type === 'button') return n
-    for (const c of React.Children.toArray((n.props as { children?: React.ReactNode }).children)) { const r = hit(c); if (r) return r }
-    return null
-  }
-  return hit(el) as never
+  visit(el)
+  return hit
 }
 
 test('clicking the chip toggles the body', () => {
   const ev = parseSystemEvent('[from session abc · handback]\nxyzzy-body-marker')!
-  const render = renderWithState(SystemEventRow as never, { event: ev, pt: false })
-  const first = render()
-  expect(findButton(first).props['aria-expanded']).toBe(false)
-  expect(renderToStaticMarkup(first)).not.toContain('xyzzy-body-marker')
-  findButton(first).props.onClick()
-  const second = render()
-  expect(findButton(second).props['aria-expanded']).toBe(true)
-  expect(JSON.stringify(second)).toContain('xyzzy-body-marker')
-  findButton(second).props.onClick()
-  const third = render()
-  expect(findButton(third).props['aria-expanded']).toBe(false)
-  expect(JSON.stringify(third)).not.toContain('xyzzy-body-marker')
+  let open = false
+  let click: (() => void) | undefined
+  function Row() {
+    const tree = SystemEventRow({ event: ev, pt: false, open, onOpenChange: v => { open = v } })
+    click = findButton(tree)?.props.onClick
+    return tree
+  }
+  const closed = renderToStaticMarkup(<Row />)
+  expect(closed).toContain('aria-expanded="false"')
+  expect(closed).not.toContain('xyzzy-body-marker')
+  click!()
+  expect(open).toBe(true)
+  const opened = renderToStaticMarkup(<Row />)
+  expect(opened).toContain('aria-expanded="true"')
+  expect(opened).toContain('xyzzy-body-marker')
+  click!()
+  expect(open).toBe(false)
+  const again = renderToStaticMarkup(<Row />)
+  expect(again).toContain('aria-expanded="false"')
+  expect(again).not.toContain('xyzzy-body-marker')
 })

@@ -1230,14 +1230,16 @@ function ShellRunBlock({ run, pt }: { run: NonNullable<ChatTurn['shell']>; pt: b
 }
 
 /** A message agentistics injected: one compact row, full text on click. No bubble, no echo chrome. */
-export function SystemEventRow({ event, pt, titleOf, defaultOpen = false }: { event: SystemEvent; pt: boolean; titleOf?: (id: string) => string | undefined; defaultOpen?: boolean }) {
-  const [open, setOpen] = useState(defaultOpen)
+export function SystemEventRow({ event, pt, titleOf, defaultOpen = false, open: controlledOpen, onOpenChange }: { event: SystemEvent; pt: boolean; titleOf?: (id: string) => string | undefined; defaultOpen?: boolean; open?: boolean; onOpenChange?: (open: boolean) => void }) {
+  const [innerOpen, setInnerOpen] = useState(defaultOpen)
+  const open = controlledOpen ?? innerOpen
+  const setOpen = (v: boolean) => { if (controlledOpen === undefined) setInnerOpen(v); onOpenChange?.(v) }
   const isMobile = useIsMobile()
   return (
-    <div style={{ alignSelf: 'center', maxWidth: '92%', margin: '4px 0' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '4px 0' }}>
       <button
         type="button"
-        onClick={() => setOpen(o => !o)}
+        onClick={() => setOpen(!open)}
         aria-expanded={open}
         style={{ ...systemChipStyle(isMobile), display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', minHeight: 24 }}
       >
@@ -1247,7 +1249,7 @@ export function SystemEventRow({ event, pt, titleOf, defaultOpen = false }: { ev
       </button>
       {open && (
         <div style={{
-          marginTop: 4, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border-subtle)',
+          marginTop: 4, padding: '8px 10px', borderRadius: 8, maxWidth: '92%', border: '1px solid var(--border-subtle)',
           background: 'var(--bg-base)', color: 'var(--text-secondary)', fontSize: 12,
           lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
         }}>{event.body || (pt ? '(sem texto)' : '(no text)')}</div>
