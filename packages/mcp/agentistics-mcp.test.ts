@@ -65,3 +65,29 @@ test("plan limits MCP tool answers with a recommendation from the real payload s
   expect(out.readAt).toBe(now);
   expect(planLimitsTool(undefined, { budgets, now }).recommendation).toBeUndefined();
 });
+
+test("plan limits MCP tool excludes unavailable harnesses and preserves their usage", async () => {
+  const { planBudget, planPace } = await import("@agentistics/core");
+  const now = Date.parse("2026-10-10T00:00:00Z");
+  const limits = {
+    harness: "codex" as const, account: "default", plan: "Plus", updatedAt: now, source: "codex-rollout" as const,
+    windows: [{ kind: "5h" as const, usedPct: 11, resetsAt: now + 3_600_000 }],
+  };
+  const budget = {
+    ...planBudget(limits, now), ...planPace(limits, now),
+    spawnable: false, unavailableReason: "codex failed to start: update codex", freeSlots: 0, suggestedParallel: 0,
+  };
+  const out = planLimitsTool({ kind: "spec-impl" }, { budgets: [budget], now });
+  expect(out.budgets[0].fiveHourPct).toBe(11);
+  expect(out.budgets[0].spawnable).toBe(false);
+  expect(out.freeSlots).toBe(0);
+  expect(out.freeSlotsByHarness.codex).toBe(0);
+  expect(out.recommendation).toMatchObject({ harness: null, alternatives: [], cadence: { parallel: 0 } });
+});
+
+test("plan limits MCP tool forwards availability without budget samples", () => {
+  const harnesses = { codex: { spawnable: false, unavailableReason: "codex failed to start: update codex" } };
+  const out = planLimitsTool(undefined, { budgets: [], harnesses });
+  expect(out.budgets).toEqual([]);
+  expect(out.harnesses).toEqual(harnesses);
+});
