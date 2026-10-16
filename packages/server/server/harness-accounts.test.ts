@@ -362,22 +362,55 @@ test('v1 file under a held lock: reads never expose ids that differ from the per
   expect((await store.readAccounts()).accounts[0]!.id).toBe(persisted.accounts[0]!.id)
 }, 15_000)
 
-test('a failed backup keeps the original bytes, caches no marker and is retried later', async () => {
-  if (process.getuid?.() === 0) return // permission-based failure injection needs a non-root user
-  const sub = join(dir, 'reg')
-  await mkdir(sub)
-  const file = join(sub, 'accounts.json')
+const bindOnce = (store: ReturnType<typeof createHarnessAccounts>) => store.bind('/r', { ...identity, harness: 'codex' })
+
+test('a failed backup propagates, keeps the original bytes, caches no marker and is retried later', async () => {
+  const file = join(dir, 'accounts.json')
   const original = JSON.stringify({ version: 9, accounts: [{ keep: 'me' }] })
   await writeFile(file, original)
-  const store = createHarnessAccounts({ file, probe: async () => identity })
-  await chmod(sub, 0o500)
-  try {
-    await expect(store.setAvailable('codex', 'x', false)).rejects.toThrow()
-  } finally { await chmod(sub, 0o700) }
+  let fail = true
+  const attempts: string[] = []
+  const store = createHarnessAccounts({
+    file, probe: async () => identity,
+    writeBackup: async (path, raw) => {
+      attempts.push(path)
+      if (fail) throw Object.assign(new Error('injected ENOSPC'), { code: 'ENOSPC' })
+      await writeFile(path, raw, { mode: 0o600, flag: 'wx' })
+    },
+  })
+  await expect(bindOnce(store)).rejects.toThrow('injected ENOSPC')
+  expect(attempts).toHaveLength(1)
   expect(await readFile(file, 'utf8')).toBe(original)
-  expect((await readdir(sub)).filter(n => n.includes('.bak.'))).toEqual([])
-  await store.setAvailable('codex', 'x', false)
-  const baks = (await readdir(sub)).filter(n => n.includes('.bak.'))
+  fail = false
+  await bindOnce(store)
+  expect(attempts).toHaveLength(2)
+  const baks = (await readdir(dir)).filter(n => n.includes('.bak.'))
   expect(baks).toHaveLength(1)
-  expect(await readFile(join(sub, baks[0]!), 'utf8')).toBe(original)
+  expect(await readFile(join(dir, baks[0]!), 'utf8')).toBe(original)
+  expect(JSON.parse(await readFile(file, 'utf8')).version).toBe(2)
+  expect(JSON.parse(await readFile(file, 'utf8')).accounts[0].key).toBe(identity.key)
+})
+
+test('backup name collisions are retried, then exhaustion throws and the original survives', async () => {
+  const file = join(dir, 'accounts.json')
+  const original = '{ not json'
+  await writeFile(file, original)
+  let attempts = 0
+  const store = createHarnessAccounts({
+    file, probe: async () => identity,
+    writeBackup: async () => { attempts++; throw Object.assign(new Error('exists'), { code: 'EEXIST' }) },
+  })
+  await expect(bindOnce(store)).rejects.toThrow('exists')
+  expect(attempts).toBe(3)
+  expect(await readFile(file, 'utf8')).toBe(original)
+  let calls = 0
+  const retry = createHarnessAccounts({
+    file, probe: async () => identity,
+    writeBackup: async (path, raw) => {
+      if (calls++ === 0) throw Object.assign(new Error('exists'), { code: 'EEXIST' })
+      await writeFile(path, raw, { mode: 0o600, flag: 'wx' })
+    },
+  })
+  await bindOnce(retry)
+  expect(calls).toBe(2)
 })

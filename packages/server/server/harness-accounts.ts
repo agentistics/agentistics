@@ -136,6 +136,8 @@ export function createHarnessAccounts(options: {
   probe?: (harness: HarnessId, root: string | null) => Promise<AccountIdentity>
   now?: () => number
   timeoutMs?: number
+  /** Test seam: how a backup file is written (exclusive create). Default writes the file. */
+  writeBackup?: (path: string, raw: string) => Promise<void>
 }) {
   const probe = options.probe ?? probeAccountIdentity
   const now = options.now ?? Date.now
@@ -178,13 +180,14 @@ export function createHarnessAccounts(options: {
     await writeFile(tmp, JSON.stringify(data), { mode: 0o600 })
     await rename(tmp, options.file)
   }
+  const writeBackup = options.writeBackup ?? ((path: string, raw: string) => writeFile(path, raw, { mode: 0o600, flag: 'wx' }))
   const backedUp = new Set<string>()
   async function backup(raw: string): Promise<void> {
     if (backedUp.has(raw)) return
     let last: unknown
     for (const suffix of ['', `.${randomBytes(3).toString('hex')}`, `.${randomBytes(3).toString('hex')}`]) {
       try {
-        await writeFile(`${options.file}.bak.${now()}${suffix}`, raw, { mode: 0o600, flag: 'wx' })
+        await writeBackup(`${options.file}.bak.${now()}${suffix}`, raw)
         backedUp.add(raw)
         return
       } catch (error) {
