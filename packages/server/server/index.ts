@@ -787,7 +787,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const live = await readLocalLiveSnapshot(data.sessions)
         const latest = await planLimitsPayload(prefs.billing, now)
         const burnByHarness = Object.fromEntries(latest.budgets.map(b => [b.harness, b.burnPctPerHour])) as Partial<Record<import('@agentistics/core').HarnessId, number>>
-        liveSessions = sampleLivePlanSessions(data.sessions, live.liveSessionIds, now, burnByHarness)
+        const { processSessionHub } = await import('./sessions/session-hub')
+        // Peek only: plan reads must not start fleet polls or extend the hub's demand lease.
+        const working = new Set((processSessionHub()?.last()?.sessions ?? [])
+          .filter(s => s.activity === 'working')
+          .flatMap(s => [s.id, ...(s.conversationId ? [s.conversationId] : []), ...(s.conversationStoreId ? [s.conversationStoreId] : [])]))
+        liveSessions = sampleLivePlanSessions(data.sessions, live.liveSessionIds, now, burnByHarness, working)
       }
       const body = TEAM_CENTRAL ? { limits: [], registered: [], budgets: [], freeSlots: 0, freeSlotsByHarness: {}, liveSessions: [], now } : await planLimitsPayload(prefs.billing, now, liveSessions)
       return new Response(JSON.stringify(body), { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })

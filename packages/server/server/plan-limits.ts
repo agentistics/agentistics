@@ -44,6 +44,7 @@ export function sampleLivePlanSessions(
   liveIds: readonly string[],
   nowMs: number,
   burnByHarness: Partial<Record<HarnessId, number>> = {},
+  working?: ReadonlySet<string>,
 ): LivePlanSession[] {
   const wanted = new Set(liveIds)
   for (const id of liveUsage.keys()) if (!wanted.has(id)) liveUsage.delete(id)
@@ -53,16 +54,16 @@ export function sampleLivePlanSessions(
     if (!wanted.has(s.session_id)) continue
     const tokens = (s.input_tokens ?? 0) + (s.output_tokens ?? 0) + (s.cache_read_input_tokens ?? 0) + (s.cache_creation_input_tokens ?? 0)
     const previous = liveUsage.get(s.session_id)
-    const hours = previous ? Math.max(1 / 60, (nowMs - previous.at) / 3_600_000) : 0
-    const rate = previous && tokens >= previous.tokens ? (tokens - previous.tokens) / hours : 0
+    const recent = previous && previous.harness === s.harness && nowMs >= previous.at && nowMs - previous.at <= 10 * 60_000
+    const rate = recent ? Math.max(0, tokens - previous.tokens) : 0
     liveUsage.set(s.session_id, { tokens, at: nowMs, model: s.model ?? 'unknown', harness: s.harness })
-    rates.set(s.session_id, { session: s, rate, harness: s.harness })
+    if (working?.has(s.session_id) || rate > 0) rates.set(s.session_id, { session: s, rate, harness: s.harness })
   }
   for (const harness of new Set([...rates.values()].map(x => x.harness))) {
     const group = [...rates.entries()].filter(([, x]) => x.harness === harness)
     const total = group.reduce((n, [, x]) => n + x.rate, 0)
     const burn = Math.max(0, burnByHarness[harness] ?? 0)
-    for (const [id, x] of group) x.rate = total > 0 ? burn * x.rate / total : burn / group.length
+    for (const [, x] of group) x.rate = total > 0 ? burn * x.rate / total : 0
   }
   return [...rates].map(([id, x]) => ({ id, model: x.session.model ?? 'unknown', burnPctPerHour: x.rate, harness: x.harness }))
 }
@@ -306,7 +307,9 @@ export async function planLimitsPayload(
   ])
   const allBudgets = limits.map(l => {
     const budget = planBudget(l, nowMs)
-    const planSessions = liveSessions.filter(s => !s.harness || s.harness === l.harness)
+    // Only measured sessions enter planSlots' per-session average. Working sessions with no
+    // billed tokens remain in the public live summary, without diluting the measured burn.
+    const planSessions = liveSessions.filter(s => s.burnPctPerHour > 0 && (!s.harness || s.harness === l.harness))
     return { ...budget, ...planPace(l, nowMs, history.get(keyOf(l)) ?? [], planSessions) }
   })
   const budgets = agentVisiblePlans(allBudgets, currentAccounts)
