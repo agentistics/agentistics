@@ -50,6 +50,20 @@ describe('structured relay termination', () => {
     } finally { r.cleanup() }
   })
 
+  test('a child that obeys TERM and leaves nothing in its group: the relay exits without the grace', async () => {
+    const r = startRelay('exec sleep 300\n')
+    try {
+      await waitFile(r, RELAY_FILES.pid)
+      const child = (JSON.parse(readFileSync(join(r.dir, RELAY_FILES.pid), 'utf8')) as { child: number }).child; r.track(child)
+      const t0 = Date.now()
+      process.kill(r.proc.pid!, 'SIGTERM')
+      await until(() => !alive(r.proc.pid!), 6000)
+      expect(alive(child)).toBe(false)
+      // Well inside the 3 s grace, which is only for descendants that ignore TERM.
+      expect(Date.now() - t0).toBeLessThan(1500)
+    } finally { r.cleanup() }
+  })
+
   test('a parent that obeys TERM while its grandchild ignores it: the grandchild dies too', async () => {
     const r = startRelay('(trap "" TERM; exec sleep 300) &\necho $! > "$(dirname "$0")/gc.pid"\nwait\n')
     try {
