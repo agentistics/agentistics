@@ -253,3 +253,33 @@ describe('fleetEventsResponse', () => {
     expect(unsubscribed).toBe(true)
   })
 })
+
+describe('a live row that ENDS leaves the window — the client must learn it ended', () => {
+  // Measured 2026-10-16: the web stream asks `closed=0`, so a session killed while `waiting` became
+  // `exited`, left the window, and was neither upserted nor removed. The browser kept the row it was
+  // last sent — `waiting` — and the aside counted 28 "precisam de você" over 6 real ones.
+  const fleet = (state: string, extra: Partial<ControlSession> = {}) => [row('live'), row('w', { state, ...extra } as Partial<ControlSession>)]
+  const pay = (rows: ControlSession[]): FleetFramePayload => ({
+    sessions: rows.map(r => fr(r.id, { state: r.state } as Partial<FleetRow>)), rows, attention: 0, tasks: [], finishedTasks: [],
+  })
+
+  for (const limit of [0, 1]) {
+    test(`closed=${limit}: the killed row reaches the client as ended, once, and is then untracked`, () => {
+      const f0 = buildFleetFrame(pay(fleet('waiting')), limit)
+      const first = planFleetDelta(EMPTY_SENT, f0)
+      let wire = applyFleetWire(null, 'snapshot', snapshotBody(1, f0))
+      expect((wire.rows.find(r => r.id === 'w') as { state?: string } | undefined)?.state).toBe('waiting')
+
+      // `closed:old` is newer than nothing; with limit 1 it still pushes `w` out on a later frame.
+      const f1 = buildFleetFrame(pay([...fleet('exited', { endedAt: 100 }), row('closed:new', { state: 'closed', endedAt: 200 } as Partial<ControlSession>)]), limit)
+      const d1 = planFleetDelta(first.next, f1)
+      expect(d1.delta.upsert).toContain('w')
+      wire = applyFleetWire(wire, 'delta', deltaBody(2, f1, d1.delta))
+      expect((wire.rows.find(r => r.id === 'w') as { state?: string } | undefined)?.state).toBe('exited')
+      expect((wire.sessions.find(r => r.id === 'w') as { state?: string } | undefined)?.state).toBe('exited')
+
+      // Untracked from then on: an unchanged fleet sends nothing more about it.
+      expect(planFleetDelta(d1.next, f1).empty).toBe(true)
+    })
+  }
+})
