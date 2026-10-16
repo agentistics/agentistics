@@ -55,7 +55,7 @@ import { shellRunViewModel } from '../../lib/shellRun'
 export interface ChatTurn {
   role: 'user' | 'assistant'
   text: string
-  /** The server matched this turn to a recent send from our composer. */
+  /** The server matched this turn to a durable send fingerprint from our composer. */
   composer?: boolean
   pending?: boolean
   /**

@@ -155,6 +155,16 @@ advertise the cycle key.
 
 ## The composer
 
+Messages delivered by the web composer keep their ordinary chat rendering even when the harness
+wraps a long message in `pasted_content`. The server stores only SHA-256 fingerprints under
+`<AGENTISTICS_DATA_DIR>/composer-messages/`, included in backups. These records have no ten-minute
+expiry or fifty-send cap, survive server restarts, and follow the conversation when it is linked
+or reopened. Matching compares the prose and image count because Claude may replace attachment
+paths with `[Image #N]` markers. Unmatched harness pastes keep the expandable pasted-text block;
+explicit pasted-text file attachments keep their attachment rendering. This changes display
+metadata only; it does not change bracketed paste or any other harness input behavior. Older
+messages whose in-memory fingerprints were already lost cannot be identified retroactively.
+
 - **Dictation shows what it is hearing.** `interimResults` is on, the interim text is previewed, and
   the mic pulses while it is live — a control that records silently is one you cannot tell is broken.
 - **The SERVER may not deny the microphone to its own page.** The baseline security header said

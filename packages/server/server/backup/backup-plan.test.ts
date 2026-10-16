@@ -53,6 +53,7 @@ test('cross-harness data is always in, whatever the harness selection', () => {
   const rels = planSources({ layers: ['metrics'], harnesses: [] }).map(e => e.rel)
   expect(rels).toContain('.agentistics/tags.json')
   expect(rels).toContain('.agentistics/workflows')
+  expect(rels).toContain('.agentistics/composer-messages')
   expect(rels).toContain('.claude/stats-cache.json')
 })
 
