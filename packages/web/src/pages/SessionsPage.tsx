@@ -2984,6 +2984,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             <SessionLinkPanel
               links={sessionLinks(selected, fleet.rows) ?? { parent: null, children: [], task: null }}
               {...(selected.startedAt ? { startedAt: selected.startedAt } : {})}
+              {...(selected.handoffSeq ? { handoffSeq: selected.handoffSeq } : {})}
               sessionId={sessionIdentityKey(selected)}
               roleFallbackId={selected.id}
               pt={pt}

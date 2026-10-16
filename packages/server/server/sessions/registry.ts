@@ -54,6 +54,14 @@ export interface SessionPatch {
   leader?: boolean
   handoffHintLevel?: number
   handoffHintTokens?: number
+  handoffTo?: string
+  handoffFrom?: string
+  handoffSeq?: number
+  handoffRelayClosing?: string
+  handoffRelayedAt?: string
+  /** `null` clears it (registry patch rule). */
+  handoffRelayAwaiting?: boolean | null
+  handoffBaseTokens?: number
   label?: string
   /** Written alongside `label`, never on its own — see `ManagedSession.labelSince`. */
   labelSince?: number
@@ -142,6 +150,14 @@ function sanitize(raw: unknown): ManagedSession | null {
       ? { handoffHintLevel: s.handoffHintLevel } : {}),
     ...(typeof s.handoffHintTokens === 'number' && Number.isFinite(s.handoffHintTokens) && s.handoffHintTokens >= 0
       ? { handoffHintTokens: s.handoffHintTokens } : {}),
+    ...(typeof s.handoffTo === 'string' && s.handoffTo ? { handoffTo: s.handoffTo } : {}),
+    ...(typeof s.handoffFrom === 'string' && s.handoffFrom ? { handoffFrom: s.handoffFrom } : {}),
+    ...(typeof s.handoffSeq === 'number' && Number.isInteger(s.handoffSeq) && s.handoffSeq >= 2 ? { handoffSeq: s.handoffSeq } : {}),
+    ...(typeof s.handoffRelayedAt === 'string' && s.handoffRelayedAt ? { handoffRelayedAt: s.handoffRelayedAt } : {}),
+    ...(typeof s.handoffRelayClosing === 'string' && s.handoffRelayClosing ? { handoffRelayClosing: s.handoffRelayClosing } : {}),
+    ...(s.handoffRelayAwaiting === true ? { handoffRelayAwaiting: true } : {}),
+    ...(typeof s.handoffBaseTokens === 'number' && Number.isFinite(s.handoffBaseTokens) && s.handoffBaseTokens > 0
+      ? { handoffBaseTokens: s.handoffBaseTokens } : {}),
     ...(typeof s.label === 'string' ? { label: s.label } : {}),
     ...(typeof s.labelSince === 'number' && Number.isFinite(s.labelSince)
       ? { labelSince: s.labelSince }

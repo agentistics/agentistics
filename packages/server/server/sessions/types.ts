@@ -348,6 +348,22 @@ export interface ManagedSession {
   handoffHintLevel?: number
   /** Context size when the last hint went out; reminders come every +50k after it. */
   handoffHintTokens?: number
+  /**
+   * HANDOFF.RELAY — a leader hand-off links both rows. On the PREDECESSOR: the successor's managed id
+   * (`handoffTo`), the time of the last predecessor turn already relayed (`handoffRelayedAt`, the
+   * forward cursor) and whether an owner message was still unanswered then (`handoffRelayAwaiting`).
+   * On the SUCCESSOR: the predecessor's managed id (`handoffFrom`). See `handoff-relay.ts`.
+   */
+  handoffTo?: string
+  handoffFrom?: string
+  /** The SUCCESSOR's generation (predecessor's + 1), shown in the ⓘ panel — the title never carries it. */
+  handoffSeq?: number
+  /** Kill owns the final flush from this instant; periodic passes must never re-send it. */
+  handoffRelayClosing?: string
+  handoffRelayedAt?: string
+  handoffRelayAwaiting?: boolean
+  /** HANDOFF.CALC: this leader's context after its first ~15 calls — a sample of the successor base F. */
+  handoffBaseTokens?: number
   label?: string
   /**
    * When the label was written, epoch ms — so a name typed HERE can be compared with one typed

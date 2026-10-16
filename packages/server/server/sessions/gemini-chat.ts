@@ -43,6 +43,8 @@ import { parseGeminiShell } from './bash-mode'
 
 /** The bootstrap block gemini writes under the user role on startup. Not a person talking. */
 const SESSION_CONTEXT = /^<session_context>/
+/** Entries the harness or agentistics typed under the user role: notes, never the person (HANDOFF.RELAY). */
+const INJECTED = /^(?:<system-reminder>|<task-notification>|<local-command|<agentistics-context>|\[from agentistics\b)/
 
 /** Gemini's own message types, mapped onto the two roles a turn can have. `null` = not a turn. */
 function roleOf(type: unknown): ChatTurn['role'] | null {
@@ -96,9 +98,11 @@ export function parseGeminiChatTurns(lines: readonly string[], max: number): Cha
     if (role === 'user' && SESSION_CONTEXT.test(text)) return
     // A `!` the person ran in the CLI: one entry holding the command AND what it printed.
     const shell = role === 'user' ? parseGeminiShell(text) : null
+    const injected = role === 'user' && INJECTED.test(text)
     turns.push({
       role,
       text: shell ? `!${shell.command}` : text,
+      ...(injected ? { system: 'an injected note' } : {}),
       ...(shell ? { shell } : {}),
       ...(typeof msg.timestamp === 'string' && msg.timestamp ? { at: msg.timestamp } : {}),
     })

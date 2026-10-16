@@ -55,6 +55,8 @@ export interface Conversation {
   tokenParts?: TokenParts
   /** SS-05: how many turns the person took (`user_message_count`), when recorded. */
   turns?: number
+  /** Assistant responses (`assistant_message_count`) — the CALL count the hand-off math grows per. */
+  calls?: number
   costUSD?: number
   /**
    * How full the context window was on the last turn, and out of how much — the gauge's two halves.
@@ -139,6 +141,7 @@ export function toConversation(s: SessionMeta): Conversation {
       ...(s.cache_creation_input_tokens !== undefined ? { cacheWrite: s.cache_creation_input_tokens } : {}),
     } } : {}),
     ...(s.user_message_count ? { turns: s.user_message_count } : {}),
+    ...(s.assistant_message_count ? { calls: s.assistant_message_count } : {}),
     // BOTH or NEITHER. Half a gauge is not a weaker gauge, it is an unreadable one: a measurement
     // with no window has no percentage, and a window with no measurement has no level.
     ...(s.context_tokens && window

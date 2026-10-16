@@ -1359,6 +1359,14 @@ async function kill(ref: string, backend: SessionBackend, folder?: string): Prom
     return retireCommand({ ref: id, ...(f ? { folderId: f.id, folderPath: f.path } : {}), caller: id })
   }
 
+  // HANDOFF.RELAY: a predecessor's last answer to the owner reaches its successor before it dies.
+  const { flushBeforeKill } = await import('./handoff-relay-io')
+  const flushed = await flushBeforeKill(id, async (to, text) => {
+    const harness = registry.find(m => m.id === to)?.harness ?? ''
+    return backend.sendTextReliable ? backend.sendTextReliable(to, text, harness) : backend.sendText(to, text)
+  }, await resolveLang())
+  if (flushed.warning) console.error(flushed.warning)
+
   const confirmed = await backend.kill(id)
   // A session that was already `lost` (the backend has nothing by this id — there was never
   // anything for `kill` to do) or `exited` (the hosted command already finished) is safe to clear
