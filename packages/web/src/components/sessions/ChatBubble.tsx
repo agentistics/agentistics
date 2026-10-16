@@ -1243,7 +1243,7 @@ export function SystemEventRow({ event, pt, titleOf, defaultOpen = false, open: 
         aria-expanded={open}
         style={{ ...systemChipStyle(isMobile), display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', minHeight: 24 }}
       >
-        <Info size={12} color="var(--anthropic-orange)" />
+        <Info size={12} color="var(--anthropic-orange)" style={{ flexShrink: 0 }} />
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{systemEventLine(event, pt, event.sender ? titleOf?.(event.sender) : undefined)}</span>
         <ChevronDown size={12} style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : undefined }} />
       </button>

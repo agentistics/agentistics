@@ -2,6 +2,9 @@ import { describe, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { SystemEventRow } from './ChatBubble'
 
+const g = globalThis as Record<string, unknown>
+g.window ??= { innerWidth: 1200, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), addEventListener() {}, removeEventListener() {} }
+
 describe('SystemEventRow', () => {
   test('collapsed: one localized line, no echo chrome, body hidden', () => {
     const html = renderToStaticMarkup(<SystemEventRow event={{ kind: 'handback', sender: 'ab12', body: 'all green' }} pt titleOf={() => 'Migração'} />)
