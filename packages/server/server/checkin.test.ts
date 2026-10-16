@@ -3,10 +3,11 @@ import { afterAll, describe, expect, spyOn, test } from 'bun:test'
 import { planBudget, planPace, type PlanLimits } from '@agentistics/core'
 import {
   checkinActivity, checkinLimitInputs, checkinDefaultFollowers, inheritsDefaults, defaultConfig, anyDue, due, fireDue, mergeConfig, nextRun, promptFor, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
-  runNow, type CheckinAction, type CheckinDeps, type CheckinNeed, validateCheckinRound,
+  runNow, checkinTick, resetCheckinSweep, type CheckinAction, type CheckinDeps, type CheckinNeed, validateCheckinRound,
 } from './checkin'
 
 let preferences: Record<string, unknown> = {}
+let fleetReads = 0
 let rows: any[] = []
 let roles: Record<string, string> = {}
 let prompts: any[] = []
@@ -26,7 +27,7 @@ const testDeps: Partial<CheckinDeps> = {
   readRegistry: (async () => rows) as CheckinDeps['readRegistry'],
   readRolesDoc: (async () => ({ roles })) as unknown as CheckinDeps['readRolesDoc'],
   roleOfRow: ((r: Record<string, string>, row: { id: string; conversationId?: string }) => r[row.conversationId ?? row.id] ?? r[row.id]) as CheckinDeps['roleOfRow'],
-  readFleet: (async () => ({ rows })) as unknown as CheckinDeps['readFleet'],
+  readFleet: (async () => { fleetReads++; return { rows } }) as unknown as CheckinDeps['readFleet'],
   runFleetAction: (async (_lang: string, request: unknown) => { prompts.push(request); if (delivery === 'throw') throw new Error('delivery failed'); return { ok: delivery === 'ok', message: 'sent' } }) as CheckinDeps['runFleetAction'],
   loadTaskWorld: (async () => ({ store: { logEvents: async (events: unknown[]) => { activity.push(...events) } } })) as CheckinDeps['loadTaskWorld'],
   readCheckinActivity: async (_since, id) => checkinActivity(activity, id),
@@ -395,11 +396,20 @@ async function begin(withWorker = false) {
 }
 
 describe('timer precheck', () => {
-  test('anyDue passes with nothing stored so a tick can seed leaders', async () => {
+  test('anyDue is false with nothing stored; fireDue still seeds leaders', async () => {
     reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
-    expect(await anyDue(0)).toBe(true)
+    expect(await anyDue(0)).toBe(false)
     await fireDue(0)
     expect(stored()).toBeDefined()
+  })
+  test('empty storage + no leader: fleet scanned once, then not until the sweep deadline', async () => {
+    reset(); rows = []; roles = {}
+    resetCheckinSweep()
+    fleetReads = 0
+    await checkinTick(1_000_000); await checkinTick(1_015_000); await checkinTick(1_030_000)
+    expect(fleetReads).toBe(1)
+    await checkinTick(1_000_000 + 5 * MINUTE)
+    expect(fleetReads).toBe(2)
   })
   test('a changed global default fires on the new interval', async () => {
     reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }

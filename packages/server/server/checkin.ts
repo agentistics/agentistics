@@ -365,25 +365,26 @@ function guard(session: string): () => void {
   firing.set(session, new Promise<void>(resolve => { release = resolve }))
   return () => { firing.delete(session); release() }
 }
+/** One 15 s tick. Empty storage is discovered by the sweep (first pass immediately, then every SWEEP_MS), never every tick. */
+export async function checkinTick(now = Date.now()): Promise<void> {
+  // A periodic sweep also seeds leaders that appeared after the first agenda was stored.
+  const sweep = now - lastSweep >= SWEEP_MS
+  if (sweep) lastSweep = now
+  if (!(await anyDue(now)) && !sweep) return
+  await fireDue(now)
+}
+export function resetCheckinSweep(): void { lastSweep = 0 }
 export function startCheckinTimer(): void {
   if (timer) return
-  const tick = async () => {
-    const now = Date.now()
-    // A periodic sweep also seeds leaders that appeared after the first agenda was stored.
-    const sweep = now - lastSweep >= SWEEP_MS
-    if (sweep) lastSweep = now
-    if (!(await anyDue(now)) && !sweep) return
-    await fireDue(now)
-  }
-  timer = setInterval(() => { void tick() }, 15_000); timer.unref?.(); void tick()
+  timer = setInterval(() => { void checkinTick() }, 15_000); timer.unref?.(); void checkinTick()
 }
 /** Cheap gate for the 15 s tick: one preferences read, no fleet or roles read unless a round may be due. */
 export async function anyDue(now: number): Promise<boolean> {
   const prefs = await deps.readPreferences()
   const stored = (prefs.checkin ?? {}) as Record<string, Stored>
   const entries = Object.entries(stored)
-  // Nothing stored yet: only fireDue (which reads the fleet) can seed the leaders' agendas.
-  if (entries.length === 0) return true
+  // Nothing stored yet: nothing can be due. Seeding is the tick's sweep (first pass, then every SWEEP_MS).
+  if (entries.length === 0) return false
   // Inherited agendas whose defaults changed must be persisted, or every tick would push their
   // deadline forward again. Done here, without a fleet read, and only when something drifted.
   const drifted = entries.filter(([session, old]) => old.inherits !== false && stable(agendaState(session, old, prefs, now)) !== stable(publicState(old)))
