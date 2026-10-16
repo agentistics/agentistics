@@ -120,6 +120,8 @@ while :; do :; done
 `)
     try {
       await waitFile(r, 'ready')
+      // The child can print `ready` before the relay has written its pid file.
+      await waitFile(r, RELAY_FILES.pid)
       const child = (JSON.parse(readFileSync(join(r.dir, RELAY_FILES.pid), 'utf8')) as { child: number }).child
       r.track(child)
       process.kill(r.proc.pid!, 'SIGTERM')
