@@ -35,6 +35,8 @@ export interface PlanLimitWindow {
   usedPct: number
   /** Epoch ms at which the window renews. */
   resetsAt: number
+  /** The reset was projected after renewal, rather than reported by the harness. */
+  projected?: true
 }
 
 export type PlanLimitSource = 'claude-stream' | 'claude-usage-api' | 'codex-rollout' | 'codex-app-server'
@@ -75,6 +77,7 @@ export interface PlanBudget {
   fiveHourPct: number
   weekPct: number
   weekResetsAt: number
+  weekResetProjected?: true
   daysToWeekReset: number
   dailyBudgetPct: number
   status: PlanBudgetStatus
@@ -267,6 +270,14 @@ export function windowRenewed(w: PlanLimitWindow, nowMs: number): boolean {
   return nowMs >= w.resetsAt
 }
 
+/** Project a renewed window into its current period without changing the stored reading. */
+export function effectiveWindow(w: PlanLimitWindow, nowMs: number): PlanLimitWindow {
+  if (!windowRenewed(w, nowMs)) return w
+  const length = PLAN_WINDOW_MS[w.kind]
+  const periods = Math.floor((nowMs - w.resetsAt) / length) + 1
+  return { kind: w.kind, usedPct: 0, resetsAt: w.resetsAt + periods * length, projected: true }
+}
+
 /** The used percentage that applies NOW — `0` once the window renewed (a fact, not a guess). */
 export function currentUsedPct(w: PlanLimitWindow, nowMs: number): number {
   return windowRenewed(w, nowMs) ? 0 : w.usedPct
@@ -291,7 +302,8 @@ export type PlanForecast =
  * `resetsAt - length`; a pace measured over less than a minute is clamped to one minute.
  */
 export function forecastWindow(w: PlanLimitWindow, nowMs: number): PlanForecast {
-  if (windowRenewed(w, nowMs)) return { kind: 'renewed' }
+  w = effectiveWindow(w, nowMs)
+  if (w.projected) return { kind: 'renewed' }
   if (w.usedPct >= 100) return { kind: 'exhausted', until: w.resetsAt }
   if (w.usedPct <= 0) return { kind: 'lasts' }
   const opened = w.resetsAt - PLAN_WINDOW_MS[w.kind]
@@ -303,14 +315,16 @@ export function forecastWindow(w: PlanLimitWindow, nowMs: number): PlanForecast 
 
 /** The fullest window that applies now (the one that binds first). */
 export function bindingPct(l: PlanLimits, nowMs: number): number {
-  return Math.max(0, ...l.windows.map(w => currentUsedPct(w, nowMs)))
+  return Math.max(0, ...l.windows.map(w => effectiveWindow(w, nowMs).usedPct))
 }
 
 const windowOf = (l: PlanLimits, kind: PlanWindowKind): PlanLimitWindow | undefined => l.windows.find(w => w.kind === kind)
 
 export function planBudget(l: PlanLimits, nowMs: number): PlanBudget {
-  const five = windowOf(l, '5h')
-  const week = windowOf(l, 'week')
+  const fiveWindow = windowOf(l, '5h')
+  const five = fiveWindow && effectiveWindow(fiveWindow, nowMs)
+  const weekWindow = windowOf(l, 'week')
+  const week = weekWindow && effectiveWindow(weekWindow, nowMs)
   const fiveHourPct = five ? currentUsedPct(five, nowMs) : 0
   const weekPct = week ? currentUsedPct(week, nowMs) : 0
   const weekResetsAt = week?.resetsAt ?? nowMs
@@ -327,6 +341,7 @@ export function planBudget(l: PlanLimits, nowMs: number): PlanBudget {
     plan: l.plan ?? l.sourcePlan ?? 'unregistered',
     fiveHourPct, weekPct, weekResetsAt, daysToWeekReset, dailyBudgetPct, status,
     updatedAt: l.updatedAt, stale: limitsStale(l, nowMs),
+    ...(week?.projected ? { weekResetProjected: true } : {}),
   }
 }
 
@@ -336,17 +351,21 @@ export function planPace(
   history: readonly PlanLimits[] = [],
   liveSessions: readonly LivePlanSession[] = [],
 ): PlanPace {
-  const week = windowOf(l, 'week')
+  const weekWindow = windowOf(l, 'week')
+  const week = weekWindow && effectiveWindow(weekWindow, nowMs)
   const weekPct = week ? currentUsedPct(week, nowMs) : 0
   const hoursToReset = week ? Math.max(0.5, (week.resetsAt - nowMs) / 3_600_000) : 0.5
   const sustainablePctPerHour = Math.max(0, (100 - weekPct) / hoursToReset)
   const readings = [...history.filter(x => x.updatedAt !== l.updatedAt), l]
     .filter(x => x.harness === l.harness && x.account === l.account)
+    .filter(x => !week || x.updatedAt >= week.resetsAt - PLAN_WINDOW_MS.week)
     .sort((a, b) => a.updatedAt - b.updatedAt)
   const first = readings.find(x => nowMs - x.updatedAt <= 6 * 3_600_000)
   const last = readings.at(-1)
-  const firstWeek = first && windowOf(first, 'week')
-  const lastWeek = last && windowOf(last, 'week')
+  const firstWindow = first && windowOf(first, 'week')
+  const lastWindow = last && windowOf(last, 'week')
+  const firstWeek = firstWindow && effectiveWindow(firstWindow, nowMs)
+  const lastWeek = lastWindow && effectiveWindow(lastWindow, nowMs)
   const elapsedHours = firstWeek && lastWeek && last!.updatedAt > first!.updatedAt
     ? Math.max(1 / 60, (last!.updatedAt - first!.updatedAt) / 3_600_000) : 0
   // With only one reading there is no measured burn yet; classify as on pace until the ring has
@@ -356,7 +375,8 @@ export function planPace(
     : sustainablePctPerHour
   const ratio = sustainablePctPerHour > 0 ? burnPctPerHour / sustainablePctPerHour : 0
   const paceStatus: PlanPaceStatus = ratio > 1.2 ? 'over' : ratio < 0.8 ? 'under' : 'on'
-  const five = windowOf(l, '5h')
+  const fiveWindow = windowOf(l, '5h')
+  const five = fiveWindow && effectiveWindow(fiveWindow, nowMs)
   const fivePct = five ? currentUsedPct(five, nowMs) : 0
   // A spent week outlasts a spent 5-hour window: wait for the week reset whenever the week is on hold.
   const pauseReset = week && weekPct >= PLAN_BUDGET_HOLD_WEEK_PCT
