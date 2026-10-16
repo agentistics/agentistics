@@ -287,6 +287,7 @@ describe('renewed windows project their next period', () => {
       harness: 'claude', plan: 'unregistered', fiveHourPct: 25, weekPct: 35,
       weekResetsAt: 1792112400000, daysToWeekReset: 6.010701979166667,
       dailyBudgetPct: 10.81404471978358, status: 'tight',
+      updatedAt: 1791593075349, stale: false,
     })
     expect(planPace(l, rec.t)).toEqual({
       paceStatus: 'on', burnPctPerHour: 0.4505851966576492,
