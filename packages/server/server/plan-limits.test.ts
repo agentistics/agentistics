@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHarnessAccounts, probeAccountIdentity, __setHarnessAccountsForTest } from './harness-accounts'
 import { planLimitsTool } from '../../mcp/plan-limits-tool'
-import { routeRecommendation } from '@agentistics/core'
+import { HARNESS_ORDER, routeRecommendation } from '@agentistics/core'
 import { noteFreshSpawn, resetHarnessSpawnability } from './sessions/harness-spawnable'
 import { spawnOutcome } from './sessions/spawn-outcome'
 import {
@@ -128,13 +128,100 @@ test('payload exposes pacing budgets alongside limits', async () => {
   expect(rec.reason).toContain(body.budgets[0]!.note)
 })
 
-test('live usage drops sessions that are no longer live', () => {
-  const session = (id: string, tokens: number) => ({ session_id: id, harness: 'codex' as const, model: 'sonnet', input_tokens: tokens })
-  sampleLivePlanSessions([session('a', 100), session('b', 0)], ['a', 'b'], 0, { codex: 5 })
-  sampleLivePlanSessions([session('a', 200), session('b', 0)], ['a', 'b'], 3_600_000, { codex: 5 })
-  sampleLivePlanSessions([session('b', 0)], ['b'], 7_200_000, { codex: 5 })
-  const rates = sampleLivePlanSessions([session('a', 300), session('b', 0)], ['a', 'b'], 10_800_000, { codex: 5 })
-  expect(rates.find(s => s.id === 'a')?.burnPctPerHour).toBe(2.5)
+for (const harness of HARNESS_ORDER) {
+  const session = (id: string, tokens: number) => ({ session_id: id, harness, model: 'unknown', input_tokens: tokens })
+  const burn = { [harness]: 2 }
+  const ids = ['a', 'b', 'c']
+
+  test(`${harness}: idle sessions never share measured plan burn`, () => {
+    const sessions = ids.map(id => session(id, 100))
+    expect(sampleLivePlanSessions(sessions, ids, 0, burn)).toEqual([])
+    expect(sampleLivePlanSessions(sessions, ids, 60_000, burn)).toEqual([])
+  })
+
+  test(`${harness}: one working session with token growth takes the whole burn`, () => {
+    sampleLivePlanSessions(ids.map(id => session(id, 100)), ids, 0, burn)
+    const live = sampleLivePlanSessions([session('a', 103), session('b', 100), session('c', 100)], ids, 60_000, burn, new Set(['a']))
+    expect(live).toEqual([{ id: 'a', harness, model: 'unknown', burnPctPerHour: 2 }])
+  })
+
+  test(`${harness}: working sessions share burn by token delta, never equally`, () => {
+    sampleLivePlanSessions(ids.map(id => session(id, 100)), ids, 0, burn)
+    const live = sampleLivePlanSessions([session('a', 103), session('b', 101), session('c', 100)], ids, 60_000, burn, new Set(ids))
+    expect(live.map(s => s.burnPctPerHour)).toEqual([1.5, 0.5, 0])
+  })
+
+  test(`${harness}: external sessions need a second sample with recent token growth`, () => {
+    expect(sampleLivePlanSessions([session('a', 100)], ['a'], 0, burn)).toEqual([])
+    expect(sampleLivePlanSessions([session('a', 101)], ['a'], 10 * 60_000, burn)[0]?.burnPctPerHour).toBe(2)
+    expect(sampleLivePlanSessions([session('a', 102)], ['a'], 20 * 60_000 + 1, burn)).toEqual([])
+    expect(sampleLivePlanSessions([session('a', 103)], ['a'], 21 * 60_000, burn)[0]?.burnPctPerHour).toBe(2)
+  })
+
+  test(`${harness}: working sessions without billed tokens stay at zero burn`, () => {
+    const sessions = [session('a', 100)]
+    const expected = [{ id: 'a', harness, model: 'unknown', burnPctPerHour: 0 }]
+    expect(sampleLivePlanSessions(sessions, ['a'], 0, burn, new Set(['a']))).toEqual(expected)
+    expect(sampleLivePlanSessions(sessions, ['a'], 60_000, burn, new Set(['a']))).toEqual(expected)
+    expect(sampleLivePlanSessions(sessions, ['a'], 120_000, burn)).toEqual([])
+  })
+}
+
+test('live usage drops samples for sessions that are no longer live', () => {
+  const session = (tokens: number) => ({ session_id: 'a', harness: HARNESS_ORDER[0]!, input_tokens: tokens })
+  sampleLivePlanSessions([session(100)], ['a'], 0)
+  sampleLivePlanSessions([], [], 60_000)
+  expect(sampleLivePlanSessions([session(200)], ['a'], 120_000)).toEqual([])
+})
+
+test('token resets and samples from the future do not establish activity', () => {
+  const session = (tokens: number) => ({ session_id: 'a', harness: HARNESS_ORDER[0]!, input_tokens: tokens })
+  sampleLivePlanSessions([session(100)], ['a'], 60_000)
+  expect(sampleLivePlanSessions([session(101)], ['a'], 0)).toEqual([])
+  expect(sampleLivePlanSessions([session(50)], ['a'], 60_000)).toEqual([])
+})
+
+test('waiting fleet payload has no live sessions and uses plan burn alone for slots', async () => {
+  const now = Date.parse('2026-11-10T20:00:00Z')
+  await ingestPlanLimits({ harness: 'codex', account: 'default', windows: [
+    { kind: 'week', usedPct: 50, resetsAt: now + 10 * 3_600_000 },
+  ], updatedAt: now - 3_600_000, source: 'codex-rollout' })
+  await ingestPlanLimits({ harness: 'codex', account: 'default', windows: [
+    { kind: 'week', usedPct: 52, resetsAt: now + 10 * 3_600_000 },
+  ], updatedAt: now, source: 'codex-rollout' })
+  const sessions = ['a', 'b', 'c'].map(session_id => ({ session_id, harness: 'codex', input_tokens: 100 }))
+  const ids = sessions.map(s => s.session_id)
+  sampleLivePlanSessions(sessions, ids, now - 60_000, { codex: 2 })
+  const live = sampleLivePlanSessions(sessions, ids, now, { codex: 2 }, new Set())
+  const body = await planLimitsPayload(undefined, now, live)
+  expect(body.liveSessions).toEqual([])
+  expect(body.budgets[0]?.burnPctPerHour).toBe(2)
+  expect(body.freeSlotsByHarness.codex).toBe(2)
+
+  const measured = [{ id: 'measured', harness: 'codex' as const, model: 'unknown', burnPctPerHour: 2 }]
+  const baseline = await planLimitsPayload(undefined, now, measured)
+  const withUnbilled = await planLimitsPayload(undefined, now, [
+    ...measured, { id: 'unbilled', harness: 'codex', model: 'unknown', burnPctPerHour: 0 },
+  ])
+  expect(withUnbilled.freeSlotsByHarness).toEqual(baseline.freeSlotsByHarness)
+  expect(withUnbilled.budgets[0]?.liveSessions).toEqual(baseline.budgets[0]?.liveSessions)
+  expect(withUnbilled.liveSessions.map(s => s.id)).toEqual(['measured', 'unbilled'])
+  const onlyUnbilled = await planLimitsPayload(undefined, now, [
+    { id: 'unbilled', harness: 'codex', model: 'unknown', burnPctPerHour: 0 },
+  ])
+  expect(onlyUnbilled.freeSlotsByHarness).toEqual(body.freeSlotsByHarness)
+})
+
+test('plan limits handler peeks at working fleet identities without reading the hub', () => {
+  const source = readFileSync(join(import.meta.dir, 'index.ts'), 'utf8')
+  const handler = source.slice(source.indexOf("if (url.pathname === '/api/plan-limits'"), source.indexOf("if (url.pathname === '/api/events'"))
+  expect(handler).toContain('processSessionHub()?.last()')
+  expect(handler).not.toMatch(/\.read\s*\(/)
+  expect(handler).toContain("s.activity === 'working'")
+  expect(handler).toContain('s.conversationId')
+  expect(handler).toContain('s.conversationStoreId')
+  expect(handler).toContain('s.id')
+  expect(handler).toContain('burnByHarness, working)')
 })
 
 test('pacing pools are per harness: Claude over does not remove Codex slots', async () => {
