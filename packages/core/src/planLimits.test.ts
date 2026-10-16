@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  agentVisible, harnessAggregate, meterDiscontinuity, resetNoticesFor,
   alternativeWithRoom, bindingPct, currentUsedPct, effectiveWindow, forecastWindow, mostRoom, parseClaudeRateLimitEvent,
   parseCodexRateLimits, planBudget, planPace, planSlots, planThresholdNotices, registeredPlanLabel,
   routeRecommendation, PLAN_WINDOW_MS,
@@ -305,5 +306,78 @@ describe('renewed windows project their next period', () => {
     expect(pace.burnPctPerHour).toBeCloseTo(3)
     expect(pace).toEqual(planPace(latest, now, [first]))
     expect(planPace(latest, now, [before]).burnPctPerHour).toBeCloseTo(planPace(latest, now).sustainablePctPerHour)
+  })
+})
+
+describe('per-account primitives (B1)', () => {
+  const now = Date.parse('2026-10-10T00:00:00Z')
+  const H = 3_600_000
+  const w = (kind: '5h' | 'week', usedPct: number, resetsAt: number) => ({ kind, usedPct, resetsAt })
+  const mk = (harness: any, account: string, five: number, week: number, updatedAt = now): PlanLimits =>
+    ({ harness, account, plan: 'Max', windows: [w('5h', five, now + 3 * H), w('week', week, now + 72 * H)], updatedAt, source: 'claude-stream' })
+  const row = (l: PlanLimits) => ({ ...planBudget(l, now), ...planPace(l, now), account: l.account, updatedAt: l.updatedAt })
+
+  test('agentVisible filters by account id, not harness', () => {
+    const rows = [{ harness: 'claude' as const, account: 'acc_a' }, { harness: 'claude' as const, account: 'acc_b' }]
+    const accounts = [
+      { id: 'acc_a', harness: 'claude' as const, available: false },
+      { id: 'acc_b', harness: 'claude' as const, available: true },
+    ]
+    expect(agentVisible(rows, accounts).map(r => r.account)).toEqual(['acc_b'])
+    expect(agentVisible(rows, accounts.map(a => ({ ...a, available: false })))).toEqual([])
+    expect(agentVisible(rows, [{ id: 'acc_a', available: true, retired: true }, accounts[1]!]).map(r => r.account)).toEqual(['acc_b'])
+  })
+
+  test('legacy default rows follow the harness only when it has a hidden current account', () => {
+    const legacy = [{ harness: 'claude' as const, account: 'default' }, { harness: 'codex' as const, account: 'default' }]
+    expect(agentVisible(legacy, [{ id: 'x', harness: 'claude', available: false }]).map(r => r.harness)).toEqual(['codex'])
+    expect(agentVisible(legacy, [])).toHaveLength(2)
+    expect(agentVisible([{ harness: 'claude' as const, account: 'acc_zz' }], [])).toEqual([])
+  })
+
+  test('aggregate sums free slots of non-held accounts; hold only when all hold', () => {
+    const a = { ...row(mk('claude', 'acc_a', 10, 20)), freeSlots: 2 }
+    const b = { ...row(mk('claude', 'acc_b', 10, 30)), freeSlots: 3 }
+    const held = { ...row(mk('claude', 'acc_c', 90, 50)), freeSlots: 0 }
+    const [agg] = harnessAggregate([a, b, held])
+    expect(agg).toMatchObject({ harness: 'claude', freeSlots: 5, accounts: 3 })
+    expect(agg!.status).not.toBe('hold')
+    expect(harnessAggregate([held])[0]!.status).toBe('hold')
+  })
+
+  test('route picks the account with most room; ties go to the newest', () => {
+    const a = row(mk('claude', 'acc_a', 10, 45))
+    const b = row(mk('claude', 'acc_b', 10, 30))
+    const r = routeRecommendation([a, b], 'hard-bug')
+    expect(r.harness).toBe('claude')
+    expect(r.account).toBe('acc_b')
+    expect(r.accountAlternatives).toEqual([{ harness: 'claude', account: 'acc_a' }])
+    const t1 = row(mk('claude', 'acc_old', 10, 30, now - H))
+    const t2 = row(mk('claude', 'acc_new', 10, 30, now))
+    expect(routeRecommendation([t1, t2], 'hard-bug').account).toBe('acc_new')
+  })
+
+  test('planPace ignores readings before the segment start', () => {
+    const before = mk('claude', 'acc_a', 10, 10, now - 3 * H)
+    const latest = mk('claude', 'acc_a', 10, 40, now)
+    expect(planPace(latest, now, [before]).burnPctPerHour).toBeCloseTo(10)
+    expect(planPace(latest, now, [before], [], now - H).burnPctPerHour).toBeCloseTo(planPace(latest, now).sustainablePctPerHour)
+  })
+
+  test('resetNoticesFor clears only that account', () => {
+    const st = { 'claude:acc_a:5h': { resetsAt: 1, told: 75 }, 'claude:acc_b:5h': { resetsAt: 1, told: 75 } }
+    expect(Object.keys(resetNoticesFor(st, 'claude', 'acc_a'))).toEqual(['claude:acc_b:5h'])
+  })
+
+  test('meterDiscontinuity needs all three conditions', () => {
+    const prev = mk('claude', 'acc_a', 50, 60, now)
+    const at = now + 1000
+    const base = { ...prev, updatedAt: at }
+    const week = (usedPct: number, resetsAt: number): PlanLimits => ({ ...base, windows: [w('week', usedPct, resetsAt)] })
+    const pw = prev.windows[1]!
+    expect(meterDiscontinuity(prev, week(40, pw.resetsAt + 2 * H))).toBe(true)
+    expect(meterDiscontinuity(prev, week(40, pw.resetsAt + 10 * 60_000))).toBe(false) // reset barely moved
+    expect(meterDiscontinuity(prev, week(55, pw.resetsAt + 2 * H))).toBe(false) // drop < 15
+    expect(meterDiscontinuity({ ...prev, windows: [w('week', 60, now - 1)] }, week(40, now + 2 * H))).toBe(false) // old renewed
   })
 })
