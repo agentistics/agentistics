@@ -346,3 +346,38 @@ test('roots are normalised once: trailing slashes and relative segments share on
   expect(b.id).toBe(a.id)
   expect(Object.keys((await store.readAccounts()).bindings)).toEqual(['codex:/one'])
 })
+
+test('v1 file under a held lock: reads never expose ids that differ from the persisted ones', async () => {
+  const file = join(dir, 'accounts.json')
+  await writeFile(file, JSON.stringify([{ harness: 'codex', key: 'k1', label: 'L', available: true, firstSeen: 1, lastSeen: 2 }]))
+  const store = createHarnessAccounts({ file, probe: async () => identity })
+  await mkdir(`${file}.lock`)
+  const during = [await store.readAccounts(), await store.readAccounts()]
+  expect(during.flatMap(d => d.accounts.map(a => a.id))).toEqual([])
+  expect(JSON.parse(await readFile(file, 'utf8'))).toBeInstanceOf(Array)
+  await rm(`${file}.lock`, { recursive: true })
+  const persisted = await store.readAccounts()
+  expect(persisted.accounts).toHaveLength(1)
+  expect(JSON.parse(await readFile(file, 'utf8')).accounts[0].id).toBe(persisted.accounts[0]!.id)
+  expect((await store.readAccounts()).accounts[0]!.id).toBe(persisted.accounts[0]!.id)
+}, 15_000)
+
+test('a failed backup keeps the original bytes, caches no marker and is retried later', async () => {
+  if (process.getuid?.() === 0) return // permission-based failure injection needs a non-root user
+  const sub = join(dir, 'reg')
+  await mkdir(sub)
+  const file = join(sub, 'accounts.json')
+  const original = JSON.stringify({ version: 9, accounts: [{ keep: 'me' }] })
+  await writeFile(file, original)
+  const store = createHarnessAccounts({ file, probe: async () => identity })
+  await chmod(sub, 0o500)
+  try {
+    await expect(store.setAvailable('codex', 'x', false)).rejects.toThrow()
+  } finally { await chmod(sub, 0o700) }
+  expect(await readFile(file, 'utf8')).toBe(original)
+  expect((await readdir(sub)).filter(n => n.includes('.bak.'))).toEqual([])
+  await store.setAvailable('codex', 'x', false)
+  const baks = (await readdir(sub)).filter(n => n.includes('.bak.'))
+  expect(baks).toHaveLength(1)
+  expect(await readFile(join(sub, baks[0]!), 'utf8')).toBe(original)
+})

@@ -181,10 +181,20 @@ export function createHarnessAccounts(options: {
   const backedUp = new Set<string>()
   async function backup(raw: string): Promise<void> {
     if (backedUp.has(raw)) return
-    backedUp.add(raw)
-    for (const suffix of ['', `.${randomBytes(3).toString('hex')}`]) {
-      try { await writeFile(`${options.file}.bak.${now()}${suffix}`, raw, { mode: 0o600, flag: 'wx' }); return } catch { /* name taken */ }
+    let last: unknown
+    for (const suffix of ['', `.${randomBytes(3).toString('hex')}`, `.${randomBytes(3).toString('hex')}`]) {
+      try {
+        await writeFile(`${options.file}.bak.${now()}${suffix}`, raw, { mode: 0o600, flag: 'wx' })
+        backedUp.add(raw)
+        return
+      } catch (error) {
+        // Only a name collision is retried; anything else (ENOSPC, EACCES...) must stop the caller
+        // before the original file is replaced.
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        last = error
+      }
     }
+    throw last
   }
   /**
    * Parse the registry. `dirty` means the on-disk bytes need rewriting (v1 migration, unreadable or
@@ -251,7 +261,8 @@ export function createHarnessAccounts(options: {
     const first = await load(false)
     if (!first.dirty) return first.data
     try { return await serial(read) } catch (error) {
-      if (error instanceof LockContended) return first.data
+      // Never expose ids minted from an unpersisted v1 list: they would differ from the real ones.
+      if (error instanceof LockContended) return emptyFile()
       throw error
     }
   }
