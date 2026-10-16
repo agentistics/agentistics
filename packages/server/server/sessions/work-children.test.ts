@@ -64,9 +64,7 @@ describe('workChildren — measured idle trees are quiet, a running command is n
     })
     it(`${name}: a command run by the harness (and its subtree) is work`, () => {
       // Under the innermost chain node, as a Bash tool would.
-      const inner = tree.length ? tree[tree.length > 3 ? 1 : 0]! : null
       const parent = name === 'claude' ? 100 : name === 'gemini' ? 1102833 : name === 'kimi' ? 1113226 : name === 'copilot' ? 1106299 : 1099025
-      void inner
       const r = workChildren([...tree, ...RUNNING(parent)], pane, h, { mcpCommands: MCP })
       expect(kids(r)).toEqual([9000, 9001])
     })
@@ -113,7 +111,7 @@ describe('workChildren — unmeasured and unknown are never quiet (M1, M2)', () 
   it('helpers ADD to the table instead of replacing it', () => {
     const t = [n(1, 100, 'rg', 'rg --version'), n(2, 100, 'daemon', '/x/codex app-server daemon')]
     expect(kids(workChildren(t, 100, 'claude', { helpers: [/^rg /] }))).toEqual([2])
-    expect(kids(workChildren(t, 100, 'codex', { helpers: [/^rg /] }))).toEqual([])
+    expect(kids(workChildren(t, 100, 'codex', { helpers: [/^rg /] }))).toEqual([2])
   })
   it('an unreadable /proc (null tree) is checked:false, not quiet', () => {
     expect(workChildren(null, 100, 'claude')).toEqual({ checked: false, reason: 'unreadable' })
@@ -135,6 +133,20 @@ describe('workChildren — the harness chain (M3)', () => {
   it('an exec-replaced `node build.js` directly under a gemini chain is work (only gemini itself is chain)', () => {
     const t = [...GEMINI_IDLE, n(500, 1102833, 'node', 'node build.js')]
     expect(kids(workChildren(t, 1102821, 'gemini'))).toEqual([500])
+  })
+  it('codex: a command under the app-server daemon is work (N1; shape from the idle tree, live command not yet measured)', () => {
+    const t = [...CODEX_IDLE, n(7000, 1099180, 'bash', 'bash -lc sleep 600'), n(7001, 7000, 'sleep', 'sleep 600')]
+    expect(kids(workChildren(t, 1099014, 'codex', { mcpCommands: MCP }))).toEqual([7000, 7001])
+  })
+  it('codex -> bun test -> codex exec counts `bun test` (N2: chain rules stop at the first holder)', () => {
+    const t = [n(2, 1, 'codex', '/x/codex'), n(3, 2, 'bun', 'bun test'), n(4, 3, 'codex', '/x/codex exec x')]
+    expect(kids(workChildren(t, 1, 'codex'))).toEqual([3, 4])
+    const t2 = [n(2, 1, 'codex', '/x/codex'), n(3, 2, 'node', 'node /u/.bun/bin/codex exec x')]
+    expect(kids(workChildren(t2, 1, 'codex'))).toEqual([3])
+  })
+  it('gemini installed as node …/@google/gemini-cli/dist/index.js is chain (N3)', () => {
+    const t = [n(2, 1, 'node', 'node /u/lib/node_modules/@google/gemini-cli/dist/index.js'), n(3, 2, 'agentop', '/u/agentop mcp')]
+    expect(kids(workChildren(t, 1, 'gemini'))).toEqual([])
   })
   it('caller-supplied holders override the table', () => {
     const t = [n(2, 1, 'myshim', 'x'), n(3, 2, 'claude', 'claude'), n(4, 3, 'bash', 'bash -c make')]
@@ -166,10 +178,24 @@ describe('readProcTree (real /proc)', () => {
     }
     expect(await readProcTree(2 ** 22 - 3)).toEqual([])
   })
-  it('a zombie child is not a work child', async () => {
-    const child = spawn('true', [], { stdio: 'ignore' })
-    await new Promise((r) => setTimeout(r, 150)) // exited, not yet reaped by node's SIGCHLD handling is racy; either way it must not appear
-    const t = await readProcTree(process.pid)
-    expect(t!.some((p) => p.pid === child.pid && p.argv === '')).toBe(false)
+  it('a zombie grandchild is not a work child', async () => {
+    // sh forks `true`, then execs sleep, which never waits: `true` stays a zombie child of sleep.
+    const child = spawn('sh', ['-c', 'true & exec sleep 30'], { stdio: 'ignore' })
+    try {
+      let zombie = 0
+      for (let i = 0; i < 40 && !zombie; i++) {
+        await new Promise((r) => setTimeout(r, 50))
+        try {
+          const ids = (await Bun.file(`/proc/${child.pid}/task/${child.pid}/children`).text()).trim().split(/\s+/).filter(Boolean)
+          zombie = Number(ids[0] ?? 0)
+        } catch { /* not ready */ }
+      }
+      expect(zombie).toBeGreaterThan(0) // the zombie really exists, so the assertion below can fail
+      const t = await readProcTree(process.pid)
+      expect(t!.some((p) => p.pid === child.pid)).toBe(true)
+      expect(t!.some((p) => p.pid === zombie)).toBe(false)
+    } finally {
+      child.kill()
+    }
   })
 })

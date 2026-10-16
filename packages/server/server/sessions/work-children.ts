@@ -48,8 +48,13 @@ export const HELPER_PROCESSES: Record<HarnessId, RegExp[] | null> = {
   claude: [],
   // codex 0.161.0, 2026-10-16, idle in a throwaway (HOME with only auth.json + config.toml copied):
   // volta-shim(pane) -> node shim -> native codex -> two `codex app-server …` daemons (one runs
-  // `agentop mcp`). The daemons are the harness's own helpers.
-  codex: [/^\S*\/codex app-server(\s|$)/],
+  // `agentop mcp`). The daemons are exe `codex`, so they are CHAIN (holders), not helpers: the app
+  // server is the agent core, and a command codex runs is expected under it. Their `agentop mcp` child
+  // is still excluded as a direct child of a chain node. NOT YET MEASURED: a codex session WHILE it
+  // runs a command (codex quota paused 2026-10-16) — where that command hangs (TUI vs daemon) and
+  // whether the managed daemon is shared across sessions are open; walking the daemon as chain makes
+  // the answer right either way for a command under the pane's own subtree.
+  codex: [],
   // gemini 0.64.0, 2026-10-16, idle in a trusted folder: volta-shim -> node -> node(gemini) -> `agentop mcp`.
   gemini: [],
   // copilot 1.0.95, 2026-10-16, idle at its start screen: volta-shim -> node -> native copilot -> `agentop mcp`.
@@ -73,7 +78,10 @@ export interface HarnessChain {
 export const HARNESS_CHAIN: Record<HarnessId, HarnessChain | null> = {
   claude: { exes: ['claude'], argv: [] },
   codex: { exes: ['codex'], argv: [/^(\S*\/)?node (\S*\/)?codex(\s|$)/] },
-  gemini: { exes: [], argv: [/^(\S*\/)?node (--\S+ )*(\S*\/)?gemini(\s|$)/] },
+  gemini: {
+    exes: [],
+    argv: [/^(\S*\/)?node (--\S+ )*(\S*\/)?gemini(\s|$)/, /^(\S*\/)?node (--\S+ )*\S*\/gemini-cli\/\S*(\s|$)/],
+  },
   copilot: { exes: ['copilot'], argv: [/^(\S*\/)?node (\S*\/)?copilot(\/\S*)?(\s|$)/] },
   antigravity: null,
   kimi: { exes: ['kimi', 'kimi.bak', 'kimi-code'], argv: [] },
@@ -157,20 +165,27 @@ export function workChildren(
   const isExcluded = (p: ProcNode): boolean =>
     AGENTOP_MCP.test(p.argv) || mcp.some((m) => matchesMcp(p.argv, m)) || table.some((re) => re.test(p.argv))
   const out: ProcNode[] = []
-  const walk = (pid: number, inChain: boolean): void => {
+  // Same shape as `holderPids`: non-holder chain links count only on the path from the pane DOWN TO
+  // the first holder; below it only a holder under a holder is chain (`codex -> bun test -> codex exec`
+  // keeps `bun test` as work).
+  const walk = (pid: number, inChain: boolean, underHolder: boolean): void => {
     for (const c of byParent.get(pid) ?? []) {
       if (inChain) {
         if (isExcluded(c)) continue // the whole subtree: an npx shim has a node below it
-        if (isHolder(c) || chainArgv.some((re) => re.test(c.argv)) || (!SHELLS.has(c.exe ?? '') && holderBelow(c.pid))) {
-          walk(c.pid, true)
+        if (isHolder(c)) {
+          walk(c.pid, true, true)
+          continue
+        }
+        if (!underHolder && (chainArgv.some((re) => re.test(c.argv)) || (!SHELLS.has(c.exe ?? '') && holderBelow(c.pid)))) {
+          walk(c.pid, true, false)
           continue
         }
       }
       out.push(c)
-      walk(c.pid, false)
+      walk(c.pid, false, underHolder)
     }
   }
-  walk(panePid, true)
+  walk(panePid, true, false)
   return { checked: true, children: out }
 }
 
