@@ -1,8 +1,10 @@
 import type { SessionMeta } from '@agentistics/core'
 import type { HarnessAdapter } from './types'
 import { harnessEnabled } from './types'
-import { CLAUDE_DIR } from '../config'
+import { join } from 'path'
+import { CLAUDE_DIR, PARSE_CACHE_ENABLED, harnessRoots } from '../config'
 import { loadSessionMetas, scanProjects } from '../data'
+import { openParseCache, NOOP_PARSE_CACHE, type ParseCache } from '../parse-cache'
 
 export const claudeAdapter: HarnessAdapter = {
   id: 'claude',
@@ -15,11 +17,44 @@ export const claudeAdapter: HarnessAdapter = {
     return harnessEnabled('claude')
   },
   async loadSessions(): Promise<SessionMeta[]> {
-    const metaMap = await loadSessionMetas()
-    const knownIds = new Set(metaMap.keys())
-    const { extraSessions } = await scanProjects(knownIds, metaMap)
-    return tagClaude([...metaMap.values(), ...extraSessions])
+    const roots = await harnessRoots('claude')
+    return withParseCache(cache => Promise.all(roots.map(r => loadClaudeRoot(r.root, r.account, r.isDefault, cache))))
   },
+}
+
+/**
+ * One claude root. The default root keeps the module's own paths (and its archive-free read); any
+ * other root is read from `<root>/usage-data/session-meta` and `<root>/projects` and stamped with the
+ * root's account. `stats-cache.json` is never read here: it stays the default root's, so a second
+ * root cannot change the Claude totals (spec §4 D8). Transcripts go through the parse cache (the same
+ * SQLite file the default root's walk uses; slots are keyed by absolute path), so a second root is not
+ * re-parsed on every rebuild. Without a `cache` the walk opens and closes its own.
+ */
+export async function loadClaudeRoot(root: string, account?: string, isDefault = root === CLAUDE_DIR, cache?: ParseCache): Promise<SessionMeta[]> {
+  if (!cache) return withParseCache(c => loadClaudeRoot(root, account, isDefault, c).then(s => [s]))
+  const metaMap = await loadSessionMetas(isDefault ? undefined : [join(root, 'usage-data', 'session-meta')])
+  const knownIds = new Set(metaMap.keys())
+  const { extraSessions } = await scanProjects(knownIds, metaMap, isDefault ? undefined : [join(root, 'projects')], undefined, cache)
+  const sessions = tagClaude([...metaMap.values(), ...extraSessions])
+  return account ? sessions.map(s => ({ ...s, account })) : sessions
+}
+
+/** Sessions of every NON-default claude root; the default root is read by `buildApiResponse` itself. */
+export async function claudeExtraRootSessions(): Promise<SessionMeta[]> {
+  const roots = (await harnessRoots('claude')).filter(r => !r.isDefault)
+  if (roots.length === 0) return []
+  return withParseCache(cache => Promise.all(roots.map(r => loadClaudeRoot(r.root, r.account, false, cache))))
+}
+
+/** One parse cache for one read: opened, shared by every root, flushed (so its rows stay live for
+ *  the build's 30-day gc) and closed. */
+async function withParseCache(read: (cache: ParseCache) => Promise<SessionMeta[][]>): Promise<SessionMeta[]> {
+  const cache = PARSE_CACHE_ENABLED ? await openParseCache() : NOOP_PARSE_CACHE
+  try {
+    const out = (await read(cache)).flat()
+    cache.flush()
+    return out
+  } finally { cache.close() }
 }
 
 /**
