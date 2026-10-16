@@ -7,7 +7,7 @@
  * can never disagree with what opens under it.
  */
 import { currentUsedPct } from '@agentistics/core'
-import type { HarnessId, PlanLimits } from '@agentistics/core'
+import type { HarnessId, PlanLimits, PlanLimitWindow } from '@agentistics/core'
 
 export interface AccountRowData {
   id: string
@@ -24,7 +24,33 @@ export interface AccountRowData {
 /** The literal the server stores when a harness cannot say whose account a folder holds. */
 export const UNNAMED_LABEL = 'Conta padrão'
 
-export type HarnessState = 'ok' | 'needs-login' | 'error'
+/** Either spelling of the placeholder, any case — as a label or as a typed nickname it names nobody. */
+export function isPlaceholderName(v: string | undefined | null): boolean {
+  const t = (v ?? '').trim().toLowerCase()
+  return t === 'conta padrão' || t === 'default account'
+}
+
+/**
+ * An account the registry could not identify (id ''): the harness fallback row. It has no route to
+ * PATCH, so it can be neither switched nor nicknamed, and being listed proves nothing about a login.
+ */
+export function isUnidentified(a: Pick<AccountRowData, 'id'>): boolean {
+  return a.id === ''
+}
+
+/** A key unique among rows: the id, or — for the unidentified fallback — the harness it stands for. */
+export function accountKey(a: Pick<AccountRowData, 'id' | 'harness'>): string {
+  return a.id !== '' ? a.id : `unidentified:${a.harness}`
+}
+
+export type AccountState = 'unconfirmed' | 'signed-out' | 'signed-in'
+
+export function accountState(a: Pick<AccountRowData, 'id' | 'retired'>): AccountState {
+  if (isUnidentified(a)) return 'unconfirmed'
+  return a.retired ? 'signed-out' : 'signed-in'
+}
+
+export type HarnessState = 'ok' | 'unconfirmed' | 'needs-login' | 'error'
 
 export interface HarnessSummary {
   harness: HarnessId
@@ -33,30 +59,53 @@ export interface HarnessSummary {
   hidden: number
   /** Accounts the harness no longer holds a login for. */
   signedOut: number
+  /** Accounts the registry could not identify; their login is not confirmed. */
+  unconfirmed: number
   /** Accounts whose last switch change failed. */
   failed: number
   state: HarnessState
-  /** The limits of the account whose worst window is highest; `null` when none reported a window. */
+  /** Per window kind, the highest reading across accounts (each with its own reset); `null` when none. */
   worst: PlanLimits | null
 }
 
 /** Nickname → login → "<Harness> account": never a bare "Conta padrão". */
 export function accountTitle(a: Pick<AccountRowData, 'nickname' | 'label'>, harnessLabel: string, pt: boolean): string {
-  if (a.nickname) return a.nickname
-  if (a.label && a.label !== UNNAMED_LABEL) return a.label
+  if (a.nickname && !isPlaceholderName(a.nickname)) return a.nickname
+  if (a.label && !isPlaceholderName(a.label)) return a.label
   return pt ? `Conta do ${harnessLabel}` : `${harnessLabel} account`
 }
 
 /** The second line: WHOSE account it is, or — when the harness cannot tell — that it cannot. */
 export function accountWhose(a: Pick<AccountRowData, 'nickname' | 'label'>, pt: boolean): string | null {
-  if (a.label === UNNAMED_LABEL) {
-    return a.nickname ? null : (pt ? 'o assistente não informa qual conta é' : 'the assistant does not say which account')
+  const nick = a.nickname && !isPlaceholderName(a.nickname) ? a.nickname : null
+  if (isPlaceholderName(a.label)) {
+    return nick ? null : (pt ? 'o assistente não informa qual conta é' : 'the assistant does not say which account')
   }
-  return a.nickname ? a.label : null
+  return nick ? a.label : null
 }
 
 export function worstPct(limits: PlanLimits, now: number): number {
   return limits.windows.reduce((m, w) => Math.max(m, currentUsedPct(w, now)), 0)
+}
+
+/**
+ * The worst bars across accounts: for EACH window kind independently, the reading with the highest
+ * current percentage, carrying its own reset data. A single account's pair would hide another
+ * account's higher window of the other kind.
+ */
+export function worstBars(limits: readonly PlanLimits[], now: number): PlanLimits | null {
+  const best = new Map<PlanLimitWindow['kind'], { w: PlanLimitWindow; pct: number }>()
+  let from: PlanLimits | null = null
+  for (const l of limits) {
+    for (const w of l.windows) {
+      const pct = currentUsedPct(w, now)
+      const cur = best.get(w.kind)
+      if (!cur || pct > cur.pct) best.set(w.kind, { w, pct })
+      from ??= l
+    }
+  }
+  if (!from) return null
+  return { ...from, windows: [...best.values()].map(b => b.w) }
 }
 
 /** One summary per harness present, in the order given; accounts keep their input order. */
@@ -71,16 +120,11 @@ export function summarizeHarnesses(
   for (const harness of order) {
     const mine = accounts.filter(a => a.harness === harness)
     if (mine.length === 0) continue
-    const live = mine.filter(a => !a.retired)
+    const live = mine.filter(a => !a.retired && !isUnidentified(a))
     const ids = new Set(live.map(a => a.id))
-    let worst: PlanLimits | null = null
-    let worstValue = -1
-    for (const l of limits ?? []) {
-      if (l.harness !== harness || !ids.has(l.account) || l.windows.length === 0) continue
-      const v = worstPct(l, now)
-      if (v > worstValue) { worst = l; worstValue = v }
-    }
-    const signedOut = mine.length - live.length
+    const worst = worstBars((limits ?? []).filter(l => l.harness === harness && ids.has(l.account)), now)
+    const signedOut = mine.filter(a => a.retired).length
+    const unconfirmed = mine.filter(isUnidentified).length
     const failed = mine.filter(a => failedIds.has(a.id)).length
     out.push({
       harness,
@@ -88,8 +132,9 @@ export function summarizeHarnesses(
       agentsOn: live.filter(a => a.available).length,
       hidden: live.filter(a => !a.available).length,
       signedOut,
+      unconfirmed,
       failed,
-      state: failed > 0 ? 'error' : signedOut > 0 ? 'needs-login' : 'ok',
+      state: failed > 0 ? 'error' : signedOut > 0 ? 'needs-login' : unconfirmed > 0 ? 'unconfirmed' : 'ok',
       worst,
     })
   }
