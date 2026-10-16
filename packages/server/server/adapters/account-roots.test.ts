@@ -3,7 +3,9 @@ import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHarnessAccounts, __setHarnessAccountsForTest } from '../harness-accounts'
-import { harnessRoots, resetHarnessRootsMemo } from '../config'
+import { AGENTISTICS_DATA_DIR, DEFAULT_HARNESS_DIRS, harnessRoots, resetHarnessRootsMemo } from '../config'
+import { HARNESS_ORDER } from '@agentistics/core'
+import { NOOP_PARSE_CACHE, openParseCache, type ParseCache } from '../parse-cache'
 import { loadCodexRoot } from './codex'
 import { loadCopilotRoot } from './copilot'
 import { loadGeminiRoot } from './gemini'
@@ -12,7 +14,12 @@ import { loadClaudeRoot } from './claude'
 
 let dir: string
 beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'acct-roots-')); resetHarnessRootsMemo() })
-afterEach(async () => { await rm(dir, { recursive: true, force: true }); resetHarnessRootsMemo() })
+afterEach(async () => {
+  // Put the module's own store back: a store left pointing at a deleted temp dir leaks into every
+  // later test file in the same bun process.
+  __setHarnessAccountsForTest(createHarnessAccounts({ file: join(AGENTISTICS_DATA_DIR, 'accounts.json') }))
+  await rm(dir, { recursive: true, force: true }); resetHarnessRootsMemo()
+})
 
 const put = async (path: string, text: string) => { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, text) }
 const jl = (...lines: unknown[]) => lines.map(l => JSON.stringify(l)).join('\n')
@@ -49,7 +56,7 @@ const LOADERS: Array<[string, (root: string, id: string) => Promise<void>, (root
   ['copilot', writeCopilot, loadCopilotRoot],
   ['gemini', writeGemini, loadGeminiRoot],
   ['kimi', writeKimi, loadKimiRoot],
-  ['claude', writeClaude, (r, a) => loadClaudeRoot(r, a, false)],
+  ['claude', writeClaude, (r, a) => loadClaudeRoot(r, a, false, NOOP_PARSE_CACHE)],
 ]
 
 for (const [name, write, load] of LOADERS) {
@@ -82,6 +89,10 @@ test('harnessRoots: default + non-retired bound roots; retired and unbound are s
   const first = await store.bind(a, { harness: 'codex', key: 'one', label: 'one' })
   await store.bind(b, { harness: 'codex', key: 'two', label: 'two' })
   await store.bind(join(dir, 'claude-root'), { harness: 'claude', key: 'c', label: 'c' })
+  // An UNBOUND registry root: an account naming a root no binding points at.
+  const raw = JSON.parse(await readFile(file, 'utf8'))
+  raw.accounts.push({ ...raw.accounts.find((x: { id: string }) => x.id === first.account.id), id: 'acc_unbound', key: 'three', label: 'three', root: join(dir, 'root-c') })
+  await writeFile(file, JSON.stringify(raw))
   __setHarnessAccountsForTest(store)
   const roots = await harnessRoots('codex', 1)
   expect(roots[0]!.isDefault).toBe(true)
@@ -89,6 +100,7 @@ test('harnessRoots: default + non-retired bound roots; retired and unbound are s
   expect(roots.slice(1).every(r => !!r.account)).toBe(true)
   expect((await harnessRoots('claude', 1)).filter(r => !r.isDefault)).toHaveLength(1)
   expect(await harnessRoots('antigravity', 1)).toEqual([])
+  expect(await harnessRoots('opencode', 1)).toEqual([])
   // Retire one: after the 5 s memo it is gone.
   const data = JSON.parse(await readFile(file, 'utf8'))
   data.accounts.find((x: { id: string }) => x.id === first.account.id).retired = true
@@ -104,4 +116,30 @@ test('claude: a second root is read without its stats-cache.json (default root o
   expect(out.map(s => s.session_id)).toEqual(['sx'])
   const src = await readFile(join(import.meta.dir, 'claude.ts'), 'utf8')
   expect(src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '')).not.toMatch(/stats-cache|STATS_CACHE/)
+})
+
+const writeClaudeTranscript = (root: string, id: string) => put(join(root, 'projects', '-p', `${id}.jsonl`), jl(
+  { type: 'user', sessionId: id, uuid: 'u1', cwd: '/p', timestamp: '2026-05-01T10:00:00.000Z', message: { role: 'user', content: 'hello' } },
+  { type: 'assistant', sessionId: id, uuid: 'u2', cwd: '/p', timestamp: '2026-05-01T10:00:05.000Z', message: { id: 'msg1', role: 'assistant', model: 'claude-sonnet-4-6', content: [{ type: 'text', text: 'hi' }], usage: { input_tokens: 3, output_tokens: 4 } } },
+))
+
+test('claude: a second root\'s transcripts go through the parse cache (a rebuild does not re-parse them)', async () => {
+  const second = join(dir, 'second')
+  await writeClaudeTranscript(second, 'tx1')
+  const real = await openParseCache(join(dir, 'cache.db'))
+  let gets = 0, hits = 0
+  const spy: ParseCache = { ...real, get: <T,>(kind: Parameters<ParseCache['get']>[0], stamp: Parameters<ParseCache['get']>[1], variant?: string) => { gets++; const v = real.get<T>(kind, stamp, variant); if (v !== null) hits++; return v } }
+  const first = await loadClaudeRoot(second, 'acc', false, spy)
+  expect(first.map(s => s.session_id)).toEqual(['tx1'])
+  expect(gets).toBeGreaterThan(0)
+  const again = await loadClaudeRoot(second, 'acc', false, spy)
+  expect(hits).toBeGreaterThan(0)
+  expect(again.map(s => [s.session_id, s.account])).toEqual([['tx1', 'acc']])
+  real.close()
+})
+
+test('the default-root table names EVERY harness explicitly (antigravity and opencode as null)', () => {
+  expect(Object.keys(DEFAULT_HARNESS_DIRS).sort()).toEqual([...HARNESS_ORDER].sort())
+  expect(DEFAULT_HARNESS_DIRS.antigravity).toBeNull()
+  expect(DEFAULT_HARNESS_DIRS.opencode).toBeNull()
 })

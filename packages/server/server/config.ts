@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { accountHome } from './account-home'
 import { resolveDataDir } from './data-dir'
 import { loadEnvConfig } from './env-config'
-import { featureOn } from '@agentistics/core'
+import { featureOn, type HarnessId } from '@agentistics/core'
 
 loadEnvConfig()
 
@@ -474,8 +474,12 @@ export interface HarnessRoot {
   isDefault: boolean
 }
 
-const DEFAULT_HARNESS_DIRS: Record<string, string> = {
+/** Each harness's default root. `null` = the harness is not read through account roots at all:
+ *  antigravity has no isolation variable and keeps its own single-directory reader, and opencode has
+ *  no adapter. Keyed by `HarnessId`, so a new harness does not compile until it is decided here. */
+export const DEFAULT_HARNESS_DIRS: Record<HarnessId, string | null> = {
   claude: CLAUDE_DIR, codex: CODEX_DIR, gemini: GEMINI_DIR, copilot: COPILOT_DIR, kimi: KIMI_DIR,
+  antigravity: null, opencode: null,
 }
 const ROOTS_TTL_MS = 5_000
 const rootsMemo = new Map<string, { at: number; value: Promise<HarnessRoot[]> }>()
@@ -485,10 +489,10 @@ export function resetHarnessRootsMemo(): void { rootsMemo.clear() }
 
 /**
  * The default root plus every non-retired registry root of `harness`. Read from the registry file
- * only (`readAccounts`, never a probe). Antigravity has no isolation variable, so it is never
- * given a second root: it returns its single default.
+ * only (`readAccounts`, never a probe). A harness whose `DEFAULT_HARNESS_DIRS` entry is `null`
+ * (antigravity, opencode) returns `[]`: its own reader is untouched and never gets a second root.
  */
-export function harnessRoots(harness: string, now: number = Date.now()): Promise<HarnessRoot[]> {
+export function harnessRoots(harness: HarnessId, now: number = Date.now()): Promise<HarnessRoot[]> {
   const held = rootsMemo.get(harness)
   if (held && now - held.at < ROOTS_TTL_MS) return held.value
   const value = (async (): Promise<HarnessRoot[]> => {
