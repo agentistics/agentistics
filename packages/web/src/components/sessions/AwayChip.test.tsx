@@ -24,6 +24,15 @@ function find(node: ReactNode, type: unknown): any {
 afterEach(() => __setAwayForTest(null))
 
 describe('session away header toggle', () => {
+  test('global ON with the own flag OFF reads as effectively away, labelled global', () => {
+    withWidth(1440, () => {
+      __setAwayForTest({ ...AWAY_OFF, on: true })
+      const html = renderToStaticMarkup(<AwayChip id="managed" away={false} pt={false} />)
+      expect(html).toContain('aria-checked="true"')
+      expect(html).toContain('Away (global)')
+      expect(renderToStaticMarkup(<AwayChip id="managed" away={false} pt compact={false} />)).toContain('Ausente (global)')
+    })
+  })
   test.each([390, 1440])('renders both states, pt/en and theme tokens at width %s', width => {
     withWidth(width, () => {
       for (const pt of [false, true]) for (const away of [false, true]) {

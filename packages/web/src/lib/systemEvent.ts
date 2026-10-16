@@ -18,7 +18,7 @@ export interface SystemEvent {
 
 const HEADER = /^\s*\[from (agentistics|session ([^\s\]·]+)) · ([a-z-]+)\]\s*(?:\r?\n|$)/
 // Before the producer added a header, these prompts were stored as ordinary user turns.
-const LEGACY_CHECKIN = /^(?:Faça o check-in da liderança agora\.|Run the leadership check-in now\.)/
+const LEGACY_CHECKIN = /^\s*(?:Faça o check-in da liderança agora\.|Run the leadership check-in now\.)/
 
 export function parseSystemEvent(text: string): SystemEvent | null {
   const m = HEADER.exec(text)

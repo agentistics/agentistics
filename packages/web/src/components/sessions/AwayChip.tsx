@@ -13,7 +13,9 @@ export function AwayChip({ pt, compact = false, id, away = true }: { pt: boolean
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => { setPending(null) }, [id, away])
-  const on = pending ?? away
+  const on = pending ?? away // the session's OWN flag: what a click toggles
+  const viaGlobal = !on && global.active
+  const effective = on || global.active // what the chip shows: the true state
   const label = pt ? 'Modo ausente nesta sessão' : 'Away mode on this session'
   const confirm = async () => {
     if (!id || busy) return
@@ -23,13 +25,13 @@ export function AwayChip({ pt, compact = false, id, away = true }: { pt: boolean
     if (result.ok) { setPending(!on); setOpen(false) }
     else setError(pt ? `Não foi possível alterar (${result.error}).` : `Could not change it (${result.error}).`)
   }
-  const style = { ...SESSION_CHIP_STYLE, color: on ? 'var(--anthropic-orange)' : 'var(--text-tertiary)', alignSelf: 'center', flexShrink: 0 }
+  const style = { ...SESSION_CHIP_STYLE, color: effective ? 'var(--anthropic-orange)' : 'var(--text-tertiary)', alignSelf: 'center', flexShrink: 0 }
   if (!id) return <span data-testid="session-away-chip" title={label} style={style}><Moon size={11} aria-hidden />{!compact && (pt ? 'Ausente' : 'Away')}</span>
   return <>
-    <button type="button" data-testid="session-away-chip" role="switch" aria-checked={on} aria-label={label} title={label}
+    <button type="button" data-testid="session-away-chip" role="switch" aria-checked={effective} aria-label={label} title={label}
       onClick={() => { setScope('session'); setError(null); setOpen(true) }}
       style={{ ...style, minWidth: 44, minHeight: 44, background: 'transparent', cursor: 'pointer', justifyContent: 'center' }}>
-      <Moon size={14} aria-hidden />{!compact && (on ? (pt ? 'Ausente' : 'Away') : (pt ? 'Definir ausente' : 'Set away'))}
+      <Moon size={14} aria-hidden />{!compact && (viaGlobal ? (pt ? 'Ausente (global)' : 'Away (global)') : on ? (pt ? 'Ausente' : 'Away') : (pt ? 'Definir ausente' : 'Set away'))}
     </button>
     <AwayScopeDialog pt={pt} open={open} on={on} scope={scope} setScope={setScope} busy={busy} error={error}
       globalActive={global.active} onConfirm={() => { void confirm() }} onCancel={() => { if (!busy) setOpen(false) }} />

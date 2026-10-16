@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { afterAll, describe, expect, spyOn, test } from 'bun:test'
 import { planBudget, planPace, type PlanLimits } from '@agentistics/core'
 import {
-  checkinActivity, checkinLimitInputs, checkinDefaultFollowers, inheritsDefaults, defaultConfig, due, fireDue, mergeConfig, nextRun, promptFor, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
+  checkinActivity, checkinLimitInputs, checkinDefaultFollowers, inheritsDefaults, defaultConfig, anyDue, due, fireDue, mergeConfig, nextRun, promptFor, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
   runNow, type CheckinAction, type CheckinDeps, type CheckinNeed, validateCheckinRound,
 } from './checkin'
 
@@ -393,6 +393,16 @@ async function begin(withWorker = false) {
   await fireDue(first)
   await recordReport(leader.conversationId, { state: 'ok', summary: 'Done' }, first)
 }
+
+describe('timer precheck', () => {
+  test('anyDue is false with nothing stored and true once a stored round is due', async () => {
+    reset()
+    expect(await anyDue(Date.now())).toBe(false)
+    preferences = { checkin: { 'conversation-leader': { ...defaultConfig(), session: 'conversation-leader', lastRunAt: null, nextRunAt: 1000, last: null, inherits: false } } }
+    expect(await anyDue(999)).toBe(false)
+    expect(await anyDue(1000)).toBe(true)
+  })
+})
 
 describe('idle check-ins', () => {
   test('unchanged idle inputs skip and emit a public skip count', async () => {

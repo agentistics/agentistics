@@ -90,12 +90,12 @@ export async function setAway(req: AwayRequest): Promise<{ ok: true } | { ok: fa
  * the session is running and its effective state changed, tells it. Resolves to the server's
  * error code on refusal; the fleet row follows on the next fleet push.
  */
-export async function setSessionAway(id: string, on: boolean, lang: 'pt' | 'en', scope?: 'active'): Promise<{ ok: true; notified: boolean; effective: boolean } | { ok: false; error: string }> {
+export async function setSessionAway(id: string, on: boolean, lang: 'pt' | 'en', scope?: 'active'): Promise<{ ok: true; queued: boolean; effective: boolean } | { ok: false; error: string }> {
   try {
     const r = await fetch('/api/away/session', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target: id, on, lang, scope }) })
-    const body = await r.json().catch(() => ({})) as { ok?: boolean; notified?: boolean; effective?: boolean; error?: string }
+    const body = await r.json().catch(() => ({})) as { ok?: boolean; queued?: boolean; effective?: boolean; error?: string }
     if (!r.ok || body.ok !== true) return { ok: false, error: body.error ?? `http_${r.status}` }
-    return { ok: true, notified: body.notified === true, effective: body.effective === true }
+    return { ok: true, queued: body.queued === true, effective: body.effective === true }
   } catch {
     return { ok: false, error: 'unreachable' }
   }

@@ -35,7 +35,7 @@ test('expanded check-in row shows the checklist and its localized action', () =>
   expect(html).toContain('Check-in da liderança · sistema')
   expect(html).toContain('Abrir check-in')
   expect(html).toContain('xyzzy-checklist-marker')
-  expect(html).toContain('min-height:44px')
+  expect(html).toContain('min-height:24px')
 })
 
 test('open check-in dispatches the existing session-scoped UI event', () => {

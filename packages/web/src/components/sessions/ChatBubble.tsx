@@ -1250,7 +1250,7 @@ export function SystemEventRow({ event, pt, sessionId, titleOf, defaultOpen = fa
       {event.kind === 'checkin' && <button
         type="button"
         onClick={() => window.dispatchEvent(new CustomEvent('agentistics:open-checkin', { detail: { sessionId } }))}
-        style={{ ...systemChipStyle(isMobile), minHeight: 44, cursor: 'pointer', color: 'var(--text-primary)' }}
+        style={{ ...systemChipStyle(isMobile), minHeight: isMobile ? 44 : 24, cursor: 'pointer', color: 'var(--text-primary)' }}
       >{pt ? 'Abrir check-in' : 'Open check-in'}</button>}
       {open && (
         <div style={{

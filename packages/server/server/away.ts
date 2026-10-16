@@ -12,7 +12,7 @@ import { AWAY_OFF, awayActive, awayLiveNotice, normalizeAwayInput, normalizeAway
 export interface AwayView { state: AwayState; active: boolean; activeSessions?: number; cooldownMs?: number }
 
 export type AwayReply =
-  | ({ ok: true; notified?: number } & AwayView)
+  | ({ ok: true } & AwayView)
   | { ok: false; error: AwayInputError | 'unverified_sender' | 'leader_only'; detail?: string }
 
 export type AwayNoticeReply =
@@ -39,6 +39,8 @@ export interface LiveAwayDeps {
   prompt: (id: string, text: string) => Promise<{ ok: boolean }>
   planLimitsInBriefing?: boolean
   patch?: (id: string, away: boolean) => Promise<void>
+  /** Clears/sets many flags in ONE registry write; preferred over `patch` in a loop. */
+  patchMany?: (ids: readonly string[], away: boolean) => Promise<void>
 }
 
 /** State changes are immediate; only prompts wait for quiet and a per-session cooldown. */
@@ -100,9 +102,14 @@ function queueAwayNotice(id: string, before: AwayState | null, after: AwayState 
 /** Snapshot the old own flag before clearing it; global OFF means back everywhere. */
 export async function notifyLiveSessions(before: AwayState, after: AwayState, deps: LiveAwayDeps, now: number, exclude?: string): Promise<number> {
   const rows = await deps.rows()
+  // Global OFF clears every own flag, running or not — in ONE registry write, not a patch per row.
+  const toClear = after.on ? [] : rows.filter(r => r.away).map(r => r.id)
+  if (toClear.length) {
+    if (deps.patchMany) await deps.patchMany(toClear, false)
+    else for (const id of toClear) await deps.patch?.(id, false)
+  }
   for (const row of rows) {
     const ownAfter = after.on ? row.away : false
-    if (!after.on && row.away) await deps.patch?.(row.id, false)
     if (!row.running) continue
     if (exclude !== undefined && (row.id === exclude || row.conversationId === exclude)) {
       pendingAway.delete(row.id)
@@ -208,6 +215,7 @@ export async function defaultAwayDeps(): Promise<AwayDeps> {
     now: () => Date.now(),
     live: {
       patch: async (id, away) => { await (await import('./sessions/registry')).patchSession(id, { away: away ? true : null }) },
+      patchMany: async (ids, away) => { await (await import('./sessions/registry')).patchSessions(ids, { away: away ? true : null }) },
       rows: liveRows,
       roleOf: liveRoleOf,
       prompt: livePrompt,
@@ -223,7 +231,7 @@ export async function defaultAwayDeps(): Promise<AwayDeps> {
 // ─── Per-session away (`ManagedSession.away`) ──────────────────────────────────────────────────
 
 export type SessionAwayReply =
-  | { ok: true; id: string; away: boolean; effective: boolean; notified: boolean; message?: string }
+  | { ok: true; id: string; away: boolean; effective: boolean; queued: boolean; message?: string }
   | { ok: false; error: 'unverified_sender' | 'leader_only' | 'on_required' | 'target_required' | 'no_such_session' }
 
 export interface SessionAwayDeps {
@@ -261,9 +269,10 @@ async function setSessionAwayMutation(body: unknown, deps: SessionAwayDeps): Pro
   if (typeof o.on !== 'boolean') return { ok: false, error: 'on_required' }
   if (o.scope === 'active') {
     const rows = (await deps.rows()).filter(r => r.running)
-    for (const row of rows) await setSessionAwayMutation({ target: row.id, on: o.on }, deps)
+    let anyQueued = false
+    for (const row of rows) { const r = await setSessionAwayMutation({ target: row.id, on: o.on }, deps); if (r.ok && r.queued) anyQueued = true }
     const global = parseAwayState(await deps.read())
-    return { ok: true, id: '*', away: o.on, effective: sessionAwayState(global, o.on, deps.now()) !== null, notified: false }
+    return { ok: true, id: '*', away: o.on, effective: sessionAwayState(global, o.on, deps.now()) !== null, queued: anyQueued }
   }
   const target = typeof o.target === 'string' ? o.target.trim() : ''
   if (!target) return { ok: false, error: 'target_required' }
@@ -274,13 +283,13 @@ async function setSessionAwayMutation(body: unknown, deps: SessionAwayDeps): Pro
   const before = row.away === true
   if (before !== o.on) await deps.patch(row.id, o.on)
   const effective = sessionAwayState(global, o.on, now) !== null
-  const notified = false
-  if (row.running && before !== o.on) {
+  const queued = row.running && before !== o.on
+  if (queued) {
     const role = await deps.roleOf(row.conversationId ?? row.id) ?? await deps.roleOf(row.id)
     queueAwayNotice(row.id, sessionAwayState(global, before, now), sessionAwayState(global, o.on, now), role,
       async text => (await deps.rows()).some(r => r.id === row.id && r.running) ? deps.prompt(row.id, text) : { ok: false, gone: true }, now, deps.planLimitsInBriefing, true)
   }
-  return { ok: true, id: row.id, away: o.on, effective, notified }
+  return { ok: true, id: row.id, away: o.on, effective, queued }
 }
 
 export function sessionAwayStatus(r: SessionAwayReply): number {

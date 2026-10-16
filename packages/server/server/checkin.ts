@@ -367,9 +367,16 @@ export function startCheckinTimer(): void {
   if (timer) return
   const tick = async () => {
     const now = Date.now()
+    if (!(await anyDue(now))) return
     await fireDue(now)
   }
   timer = setInterval(() => { void tick() }, 15_000); timer.unref?.(); void tick()
+}
+/** Cheap gate for the 15 s tick: one preferences read, no fleet or roles read unless a round is due. */
+export async function anyDue(now: number): Promise<boolean> {
+  const prefs = await deps.readPreferences()
+  const stored = (prefs.checkin ?? {}) as Record<string, Stored>
+  return Object.entries(stored).some(([session, old]) => due(agendaState(session, old, prefs, now), now))
 }
 export async function fireDue(now = Date.now()): Promise<string[]> {
   const rows = (await deps.readFleet('pt')).rows; const roles = (await deps.readRolesDoc(deps.dataDir)).roles; const fired: string[] = []

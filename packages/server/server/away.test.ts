@@ -82,7 +82,7 @@ describe('per-session away route', () => {
   it('switches one session on, records it and tells the running session', async () => {
     const { d, patched, typed } = sdeps([{ id: 's1', running: true }])
     const r = await setSessionAway({ target: 's1', on: true }, d)
-    expect(r).toEqual({ ok: true, id: 's1', away: true, effective: true, notified: false })
+    expect(r).toEqual({ ok: true, id: 's1', away: true, effective: true, queued: true })
     expect(typed).toEqual([])
     await flushAwayNotices(NOW + AWAY_QUIET_MS)
     expect(patched).toEqual([['s1', true]])
@@ -91,17 +91,17 @@ describe('per-session away route', () => {
   })
   it('switching off tells the session; a stopped one is only recorded', async () => {
     const a = sdeps([{ id: 's1', away: true, running: true }])
-    expect(await setSessionAway({ target: 's1', on: false }, a.d)).toMatchObject({ ok: true, away: false, effective: false, notified: false })
+    expect(await setSessionAway({ target: 's1', on: false }, a.d)).toMatchObject({ ok: true, away: false, effective: false, queued: true })
     await flushAwayNotices(NOW + AWAY_QUIET_MS)
     expect(a.typed[0]![1]).toContain('away mode is now OFF')
     const b = sdeps([{ id: 's2', conversationId: 'c2', running: false }])
-    expect(await setSessionAway({ target: 'c2', on: true }, b.d)).toMatchObject({ ok: true, id: 's2', notified: false })
+    expect(await setSessionAway({ target: 'c2', on: true }, b.d)).toMatchObject({ ok: true, id: 's2', queued: false })
     expect(b.typed).toEqual([])
     expect(b.patched).toEqual([['s2', true]])
   })
   it('under the global switch the effective state does not move, so nothing is typed', async () => {
     const { d, typed } = sdeps([{ id: 's1', away: true, running: true }], { on: true, since: '', until: null, authorised: [] })
-    expect(await setSessionAway({ target: 's1', on: false }, d)).toMatchObject({ ok: true, effective: true, notified: false })
+    expect(await setSessionAway({ target: 's1', on: false }, d)).toMatchObject({ ok: true, effective: true, queued: true })
     expect(typed).toEqual([])
   })
   it('resolves a verified managed sender through its conversation role', async () => {
@@ -195,6 +195,17 @@ describe('away live fan-out and anti-flood', () => {
     expect(await flushAwayNotices(NOW + AWAY_QUIET_MS + AWAY_COOLDOWN_MS - 1)).toBe(0)
     expect(await flushAwayNotices(NOW + AWAY_QUIET_MS + AWAY_COOLDOWN_MS)).toBe(2)
     expect(f.typed[2]!.text).toContain('owner is back')
+  })
+  it('global OFF clears flags in ONE batched write when the registry supports it', async () => {
+    const f = fleet()
+    f.rows[0]!.away = true
+    const batches: string[][] = []
+    const live = { ...f.live, patch: async () => { throw new Error('patch loop used') },
+      patchMany: async (ids: readonly string[]) => { batches.push([...ids]); for (const r of f.rows) if (ids.includes(r.id)) r.away = false } }
+    const { d } = deps({ live, now: () => NOW })
+    await setAway({ on: false }, d)
+    expect(batches).toEqual([['L', 'X']])
+    expect(f.rows.every(r => !r.away)).toBe(true)
   })
   it('global OFF clears all own flags immediately, including stopped sessions', async () => {
     const f = fleet()

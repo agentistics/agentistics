@@ -34,9 +34,9 @@ describe('session away requests', () => {
     const sent: { url: string; body: unknown }[] = []
     globalThis.fetch = (async (url: unknown, init: RequestInit) => {
       sent.push({ url: String(url), body: JSON.parse(String(init.body)) })
-      return Response.json({ ok: true, notified: false, effective: true })
+      return Response.json({ ok: true, queued: false, effective: true })
     }) as unknown as typeof fetch
-    expect(await setSessionAway('managed', true, 'pt')).toEqual({ ok: true, notified: false, effective: true })
+    expect(await setSessionAway('managed', true, 'pt')).toEqual({ ok: true, queued: false, effective: true })
     await setSessionAway('managed', false, 'en', 'active')
     expect(sent).toEqual([
       { url: '/api/away/session', body: { target: 'managed', on: true, lang: 'pt' } },

@@ -12,6 +12,10 @@ describe('parseSystemEvent', () => {
       expect(parseSystemEvent(body)).toEqual({ kind: 'checkin', body })
     }
   })
+  test('legacy prompt tolerates leading whitespace; a quoted reply stays ordinary text', () => {
+    expect(parseSystemEvent('\n  Run the leadership check-in now.\nx')?.kind).toBe('checkin')
+    expect(parseSystemEvent('> [from agentistics · check-in]\nreply')).toBeNull()
+  })
   test('merely mentioning check-in is ordinary user text', () => {
     expect(parseSystemEvent('Can you explain the leadership check-in?')).toBeNull()
     expect(parseSystemEvent('Please discuss: Faça o check-in da liderança agora.')).toBeNull()

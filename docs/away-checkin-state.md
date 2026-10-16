@@ -99,3 +99,10 @@ Reused UI primitives: `SESSION_CHIP_STYLE` from `RoleChip`, `ConfirmModal`, `Sel
 `ToggleSwitch` controls). The activation dialog keeps its existing `Checkbox` and
 `FieldTextarea`. The header toggle uses the existing outlined chip shape and
 Lucide `Moon`; shared colors use CSS variables for light/dark themes.
+
+## Pending notices are in memory
+
+The "away changed" notices waiting out the 45 s quiet window (and the per-session cooldown record)
+live in the server process only. A server restart inside that window silently drops the queued
+notice: the session keeps the instruction it last heard until the next away change. The away
+state itself (global flag, per-session flags) is persisted and unaffected.
