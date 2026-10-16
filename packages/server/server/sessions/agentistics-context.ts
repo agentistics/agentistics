@@ -9,6 +9,8 @@
  * docs/superpowers/specs/2026-10-08-session-context-injection.md
  */
 
+import { flowLines } from '../briefing-flow'
+export { flowLines }
 import { awayBriefingLines, roleLine, type AwayState } from '@agentistics/core'
 import { briefingText, PLAN_LIMITS_TOOL } from '../briefing'
 
@@ -100,8 +102,8 @@ export function contextText(i: ContextInput): string {
   lines.push(
     roleLine(i.role),
     ...awayBriefingLines(i.away, i.role, i.now ?? Date.now(), { planLimitsInBriefing: i.toolNames?.includes(PLAN_LIMITS_TOOL) === true }),
-    'Becoming leader: call agentistics_session_role with role "leader" — it stores the role and renames this session to "[ LEADER ] - <title>" (or "[ LÍDER ] - <title>" in a Portuguese UI) for you, keeping the user\'s title. Do not rename it by hand. If you started the session, pick the title.' +
-      (i.role ? '' : ' If you have no stored role (AUTO): as soon as it is clear the request is a single piece, call agentistics_session_role with role "worker" to record it.'),
+    ...flowLines(i.lang ?? 'en', i.role, !!i.taskId),
+    'Becoming leader: call agentistics_session_role with role "leader" — it stores the role and renames this session to "[ LEADER ] - <title>" (or "[ LÍDER ] - <title>" in a Portuguese UI) for you, keeping the user\'s title. Do not rename it by hand. If you started the session, pick the title.' ,
     'Open other sessions only after the user explicitly approves: `agentop session <harness> --bg --cwd <dir> --name "<title>" --folder "<folder>" -p "<request>"` or `agentop session batch --task "<task>" --folder "<folder>" …` (`agentop session folders` lists them; no --folder leaves the session loose in the sidebar). Every opened session is a WORKER; for a leader hand-off, tell the user it is a leader hand-off so the new session is marked as leader. File each opened session on its subtask and in the task\'s folder.',
     'Model/harness balance: use the strongest model for design, coordination, and hard bugs; a mid model for clearly scoped implementation; a light model for probes/screenshots; QA must use a different model from the author. Respect the user\'s usage rules. No usage rules are saved yet: before proposing sessions, ask the user once what plans, quotas, and preferences they allow.',
     'Specification skill rule: if you are a leader, or a worker facing a complex implementation, ASK the user in this session whether to use a specification skill (SDD, such as superpowers). Use it only after a yes; never make it automatic. If none is installed for this harness, you may suggest installing one, but install only after the user\'s OK. Never start every session with it.',
@@ -114,10 +116,10 @@ export function contextText(i: ContextInput): string {
     const sub = i.subtaskId ? `, subtask ${i.subtaskId}${i.subtaskTitle ? ` "${i.subtaskTitle}"` : ''}` : ''
     lines.push(
       `This session belongs to Agentask task ${i.taskId}${i.taskTitle ? ` "${i.taskTitle}"` : ''}${sub}. Record progress there: comment on the subtask (or the task) at each milestone and move its status; never mark it done before the user validates.`,
-      'Board lifecycle: (1) you are filed on this task/subtask, which is in_progress; (2) comment at each milestone; (3) when you finish, send kind=handback with agentistics_session_message — your subtask then moves to in_review (if the board has that status); (4) it becomes done only after approval.',
+      'Board lifecycle: you are filed on this task/subtask (in_progress); a handback (kind=handback via agentistics_session_message) moves your subtask to in_review (if the board has that status); it becomes done only after approval.',
     )
   } else {
-    lines.push('This session is not linked to a task. If the work grows beyond a quick question, offer to file it in Agentask — ask first.')
+    lines.push('This session is not linked to a task. Follow flow step "Task" above unless this is a quick question.')
   }
   if (i.folder) lines.push(`Your sidebar folder: ${i.folder.path}${i.folder.siblings.length > 0 ? `. ${i.folder.top ? 'Sub-folders' : 'Sibling folders'}: ${i.folder.siblings.join(', ')}` : ''}. Workers you open go in the matching folder.`)
   if (i.parentId) {

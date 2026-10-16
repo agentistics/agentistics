@@ -6,19 +6,17 @@
  * summary's own filter), so pressing a part never changes the numbers the other parts show — a
  * summary that reshuffled itself under the finger would be unreadable.
  */
-import { ACTIVE_STATES } from '@agentistics/tui/control/session-fleet'
+import { sessionRunning } from '@agentistics/tui/control/session-fleet'
 
 export type SummaryPart = 'active' | 'working' | 'needs'
 
 export interface SummaryCounts { active: number; working: number; needs: number }
 
-const ACTIVE = new Set<string>(ACTIVE_STATES)
-
 /** `waiting` and `waiting-approval` are the two states that want a person. */
 const NEEDS = new Set<string>(['waiting', 'waiting-approval'])
 
 export function summaryMatches(state: string, part: SummaryPart): boolean {
-  if (part === 'active') return ACTIVE.has(state)
+  if (part === 'active') return sessionRunning({ state })
   if (part === 'working') return state === 'working'
   return NEEDS.has(state)
 }
