@@ -54,7 +54,8 @@ import { MagnifierButton } from './components/a11y/MagnifierButton'
 import { NotificationBell } from './components/NotificationBell'
 import { AgentisticsLoader } from './components/AgentisticsLoader'
 import { VaultHeaderButton } from './components/vault/VaultHeaderButton'
-import { AwayChip } from './components/sessions/AwayChip'
+import { AwayChip, awayMenuItems } from './components/sessions/AwayChip'
+import { useAway } from './lib/awayMode'
 import AwayPill from './components/AwayPill'
 import { HardwareModal } from './components/HardwareModal'
 import { PlanUsageModal } from './components/PlanUsageModal'
@@ -2261,6 +2262,7 @@ export default function AppLayout() {
   const headerSession = splitActive ? undefined : selectedFleetSession
   const headerSessionRow = splitActive ? undefined : selectedSessionRow
   const headerMuted = useSessionMuted(headerSession)
+  const awayGlobal = useAway()
 
   /**
    * THE TWO GLOBAL STUDIO SHORTCUTS (design items 8 and 11) — `Ctrl/Cmd+B` opens or closes the
@@ -3720,6 +3722,7 @@ export default function AppLayout() {
           row={headerSessionRow}
           lang={lang === 'pt' ? 'pt' : 'en'}
           act={headerFleetAct}
+          extra={awayMenuItems(headerSession, lang === 'pt', awayGlobal.active)}
           onGone={() => navigate('/sessions')}
           // A reopen mints a NEW session; going to it is what makes the verb visibly do something
           // — WITH the state that says it is on its way, or the page shows the fleet overview

@@ -8,34 +8,45 @@ import { Moon } from 'lucide-react'
 import { ConfirmModal } from '../pages/settings/primitives'
 import { awayUntilLabel, setAway, useAway } from '../lib/awayMode'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { SESSION_CHIP_STYLE } from './sessions/RoleChip'
 
-export default function AwayPill({ lang, enabled }: { lang: 'pt' | 'en'; enabled: boolean }) {
+/**
+ * How the top-bar pill looks — change this ONE constant to swap it.
+ * A: the small outlined chip the session role chip uses, accent coloured, moon + "Ausente".
+ * B: icon-only moon button, the same 32px square as the vault and bell beside it, tinted.
+ * C: plain "Ausente" text in the bar's quiet type, accent coloured, no box.
+ */
+export type AwayPillVariant = 'A' | 'B' | 'C'
+export const AWAY_PILL_VARIANT: AwayPillVariant = 'A'
+
+export default function AwayPill({ lang, enabled, variant = AWAY_PILL_VARIANT }: { lang: 'pt' | 'en'; enabled: boolean; variant?: AwayPillVariant }) {
   const pt = lang === 'pt'
   const away = useAway()
   const isMobile = useIsMobile()
   const [confirm, setConfirm] = useState(false)
   if (!enabled || !away.active || !away.state) return null
   const until = awayUntilLabel(away.state, lang, Date.now())
-  const label = pt ? `Modo ausente ${until}` : `Away ${until}`
+  const label = pt ? `Modo ausente ${until} — clique para desligar` : `Away mode ${until} — click to turn off`
+  const accent = 'var(--anthropic-orange)'
+  const word = pt ? 'Ausente' : 'Away'
+  const base = { flexShrink: 0, cursor: 'pointer', fontFamily: 'inherit', background: 'transparent', color: accent } as const
+  let style: React.CSSProperties; let content: React.ReactNode
+  if (variant === 'B' || isMobile) {
+    style = { ...base, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8,
+      border: '1px solid var(--border)', background: 'var(--anthropic-orange-dim)' }
+    content = <Moon size={14} aria-hidden />
+  } else if (variant === 'C') {
+    style = { ...base, display: 'inline-flex', alignItems: 'center', border: 'none', padding: '0 2px', fontSize: 11, fontWeight: 600 }
+    content = word
+  } else {
+    style = { ...base, ...SESSION_CHIP_STYLE, color: accent }
+    content = <><Moon size={11} aria-hidden />{word}</>
+  }
   return (
     <>
-      <button
-        type="button"
-        title={label}
-        aria-label={label}
-        onClick={() => setConfirm(true)}
-        className={isMobile ? 'ag-tap-icon' : undefined}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
-          height: 32, minWidth: 32,
-          justifyContent: 'center', padding: isMobile ? '0 8px' : '0 10px', borderRadius: 8,
-          border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)',
-          color: 'var(--anthropic-orange)', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        <Moon size={14} />
-        {!isMobile && <span>{pt ? 'Ausente' : 'Away'} · {until.replace(/^(até|until) /, '')}</span>}
+      <button type="button" data-testid="away-pill" title={label} aria-label={label}
+        onClick={() => setConfirm(true)} className={isMobile ? 'ag-tap-icon' : undefined} style={style}>
+        {content}
       </button>
       <ConfirmModal
         open={confirm}
