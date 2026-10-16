@@ -112,7 +112,8 @@ export async function resolveChatTranscriptPath(
   // The remembered path is VERIFIED before it is answered — Claude Code re-files a transcript under
   // the project directory of the session's CURRENT cwd, and deletes it outright after 30 days. See
   // `resolveMemoizedPath`, which is where all three resolvers' shared shape lives.
-  return resolveMemoizedPath(pathMemo, sessionId, {
+  // Account roots must not share cached hits or misses for the same conversation id.
+  return resolveMemoizedPath(pathMemo, `${projectsDir}:${sessionId}`, {
     exists,
     direct: async () => {
       const p = join(projectsDir, encodeProjectDir(cwd), `${sessionId}.jsonl`)

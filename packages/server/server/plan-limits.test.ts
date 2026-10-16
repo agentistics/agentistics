@@ -6,8 +6,8 @@ import { createHarnessAccounts, probeAccountIdentity, __setHarnessAccountsForTes
 import { planLimitsTool } from '../../mcp/plan-limits-tool'
 import { HARNESS_ORDER, routeRecommendation } from '@agentistics/core'
 import {
-  __resetPlanLimitsForTest, __setManagedLookupForTest, __settleCodexRolloutsForTest, ingestPlanLimits, latestCodexLimits, noteCodexRollout,
-  noteStructuredLine, planLimitsPayload, sampleLivePlanSessions, sessionAccountOf, setPlanLimitsSink, syncPlanLimitsFromFile,
+  __resetPlanLimitsForTest, __setLiveTranscriptPathForTest, __setManagedLookupForTest, __settleCodexRolloutsForTest, ingestPlanLimits, latestCodexLimits, noteCodexRollout,
+  noteStructuredLine, planLimitsPayload, planAccountKey, sampleLivePlanSessions, sessionAccountOf, setPlanLimitsSink, syncPlanLimitsFromFile,
   watchPlanLimitsFile,
 } from './plan-limits'
 import type { PlanThresholdNotice } from '@agentistics/core'
@@ -18,10 +18,11 @@ beforeEach(() => {
   __resetPlanLimitsForTest()
   // Attribution reads the managed-session registry: a test never reads the owner's real one.
   __setManagedLookupForTest(async () => [])
+  __setLiveTranscriptPathForTest(async () => null)
   dir = mkdtempSync(join(tmpdir(), 'pl-test-'))
   __setHarnessAccountsForTest(createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => ({ key: 'default', label: 'Conta padrão' }) }))
 })
-afterEach(() => { setPlanLimitsSink(null); __setManagedLookupForTest(null); if (dir.includes('pl-test-')) rmSync(dir, { recursive: true, force: true }) })
+afterEach(() => { setPlanLimitsSink(null); __setManagedLookupForTest(null); __setLiveTranscriptPathForTest(null); if (dir.includes('pl-test-')) rmSync(dir, { recursive: true, force: true }) })
 
 test('codex: the newest rate_limits line of a rollout tail', async () => {
   const p = join(dir, 'rollout-x.jsonl')
@@ -78,7 +79,7 @@ for (const harness of HARNESS_ORDER) {
   test(`${harness}: one working session with token growth takes the whole burn`, async () => {
     await sampleLivePlanSessions(ids.map(id => session(id, 100)), ids, 0, burn)
     const live = await sampleLivePlanSessions([session('a', 103), session('b', 100), session('c', 100)], ids, 60_000, burn, new Set(['a']))
-    expect(live).toEqual([{ id: 'a', harness, model: 'unknown', burnPctPerHour: 2 }])
+    expect(live).toEqual([{ id: 'a', harness, account: 'default', model: 'unknown', burnPctPerHour: 2 }])
   })
 
   test(`${harness}: working sessions share burn by token delta, never equally`, async () => {
@@ -96,7 +97,7 @@ for (const harness of HARNESS_ORDER) {
 
   test(`${harness}: working sessions without billed tokens stay at zero burn`, async () => {
     const sessions = [session('a', 100)]
-    const expected = [{ id: 'a', harness, model: 'unknown', burnPctPerHour: 0 }]
+    const expected = [{ id: 'a', harness, account: 'default', model: 'unknown', burnPctPerHour: 0 }]
     expect((await sampleLivePlanSessions(sessions, ['a'], 0, burn, new Set(['a'])))).toEqual(expected)
     expect((await sampleLivePlanSessions(sessions, ['a'], 60_000, burn, new Set(['a'])))).toEqual(expected)
     expect((await sampleLivePlanSessions(sessions, ['a'], 120_000, burn))).toEqual([])
@@ -646,50 +647,89 @@ test('C2: one row per visible account; off accounts only in hiddenFromAgents; sl
 })
 
 for (const harness of HARNESS_ORDER) {
-  test(`H1 ${harness}: hidden and unknown account sessions never reach visible slots or MCP`, async () => {
-    const store = accountsWithLogin({ value: 'unused' })
+  test(`N1 ${harness}: a bound default account keeps legacy and external session burn`, async () => {
+    const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
+    __setHarnessAccountsForTest(store)
+    await store.bind(null, { harness, key: 'bound', label: 'Bound' })
+    const registry = await store.readAccounts()
+    const bound = registry.bindings[`${harness}:`]!
+    // Use a stable, migrated id and no fictional SessionMeta.account field.
+    writeFileSync(join(dir, 'accounts.json'), JSON.stringify({ ...registry,
+      accounts: registry.accounts.map(a => ({ ...a, id: 'acc_x' })), bindings: { [`${harness}:`]: 'acc_x' },
+    }))
     const now = now0()
-    const { account: hidden } = await store.bind(join(dir, 'hidden'), { harness, key: 'hidden', label: 'hidden@example.com' })
-    const { account: visible } = await store.bind(join(dir, 'visible'), { harness, key: 'visible', label: 'visible@example.com' })
-    await store.update(hidden.id, { available: false })
-    for (const [account, burn] of [[hidden.id, 10], [visible.id, 2]] as const) {
-      for (const [at, used] of [[now - H, 20], [now, 20 + burn]] as const) {
-        await ingestPlanLimits({ harness, account, source: 'codex-rollout', updatedAt: at,
-          windows: [{ kind: 'week', usedPct: used, resetsAt: now + 24 * H }] })
-      }
+    for (const [at, used] of [[now - H, 20], [now, 24]] as const) {
+      await ingestPlanLimits({ harness, account: 'acc_x', source: 'codex-rollout', updatedAt: at,
+        windows: [{ kind: 'week', usedPct: used, resetsAt: now + 24 * H }] })
     }
-    // ManagedSession.accountId wins over transcript attribution, also when matched by conversation id.
-    __setManagedLookupForTest(async () => [{ id: 'managed-hidden', conversationId: 'hidden-session', accountId: hidden.id }])
-    const sessions = (tokens: number) => [
-      { session_id: 'hidden-session', harness, account: visible.id, input_tokens: tokens },
-      { session_id: 'visible-session', harness, account: visible.id, input_tokens: tokens },
-      { session_id: 'unknown-session', harness, input_tokens: tokens },
-      { session_id: 'unregistered-session', harness, account: 'unregistered', input_tokens: tokens },
-    ]
-    const ids = sessions(0).map(s => s.session_id)
-    const burn = { [`${harness}:${hidden.id}`]: 10, [`${harness}:${visible.id}`]: 2 }
-    await sampleLivePlanSessions(sessions(100), ids, now - 60_000, burn)
-    const live = await sampleLivePlanSessions(sessions(101), ids, now, burn, new Set(ids))
-    expect(live.find(s => s.id === 'hidden-session')).toMatchObject({ account: hidden.id, burnPctPerHour: 10 })
-    expect(live.find(s => s.id === 'visible-session')).toMatchObject({ account: visible.id, burnPctPerHour: 2 })
-    // Even a caller supplying measured burn without attribution must not affect visible slots.
-    const withUnknownBurn = live.map(s => s.id === 'unknown-session' || s.id === 'unregistered-session' ? { ...s, burnPctPerHour: 7 } : s)
-    const body = await planLimitsPayload(undefined, now, withUnknownBurn)
-    const baseline = await planLimitsPayload(undefined, now, live.filter(s => s.account === visible.id))
-    expect(body.liveSessions.map(s => s.id)).toEqual(['visible-session'])
-    expect(body.budgets).toEqual(baseline.budgets)
-    expect(body.freeSlotsByAccount).toEqual(baseline.freeSlotsByAccount)
-    expect(body.budgets[0]?.liveSessions.map(s => s.id)).toEqual(['visible-session'])
-    expect(body.budgets[0]?.accountLabel).not.toContain('#2')
-    expect(body.hiddenFromAgents[0]?.liveSessions.map(s => s.id)).toEqual(['hidden-session'])
-    const out = JSON.stringify(planLimitsTool({ kind: 'spec-impl' }, body))
-    for (const value of [hidden.id, 'hidden-session', 'unknown-session', 'unregistered-session', '@']) expect(out).not.toContain(value)
+    expect(bound).toBeTruthy()
+    let reads = 0
+    __setManagedLookupForTest(async () => { reads++; return [{ id: 'managed-legacy', conversationId: 'legacy' }] })
+    const sampled = async (id: string) => {
+      const latest = await planLimitsPayload(undefined, now)
+      const burn = Object.fromEntries([...latest.budgets, ...latest.hiddenFromAgents].map(b => [planAccountKey(b.harness, b.account), b.burnPctPerHour]))
+      const session = (tokens: number) => ({ session_id: id, harness, input_tokens: tokens })
+      await sampleLivePlanSessions([session(100)], [id], now - 60_000, burn)
+      const live = await sampleLivePlanSessions([session(101)], [id], now, burn, new Set([id]))
+      expect(live[0]).toMatchObject({ account: 'acc_x', burnPctPerHour: latest.budgets[0]!.burnPctPerHour })
+      expect(live[0]!.burnPctPerHour).toBeGreaterThan(0)
+      const body = await planLimitsPayload(undefined, now, live)
+      expect(body.budgets[0]!.liveSessions.map(s => s.id)).toEqual([id])
+      expect(body.liveSessions.map(s => s.id)).toEqual([id])
+      return body
+    }
+    const external = await sampled('external')
+    const legacy = await sampled('legacy')
+    expect(external.freeSlotsByAccount).toEqual(legacy.freeSlotsByAccount)
+    expect(reads).toBe(4)
   })
 
+  for (const retired of [false, true]) {
+    test(`N2 ${harness}: ${retired ? 'retired' : 'hidden'} roots hide only their own external sessions`, async () => {
+      const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
+      __setHarnessAccountsForTest(store)
+      const now = now0()
+      const hiddenRoot = join(dir, 'hidden')
+      const { account: hidden } = await store.bind(hiddenRoot, { harness, key: 'hidden', label: 'Hidden' })
+      const { account: visible } = await store.bind(join(dir, 'visible'), { harness, key: 'visible', label: 'Visible' })
+      if (retired) {
+        const doc = await store.readAccounts()
+        writeFileSync(join(dir, 'accounts.json'), JSON.stringify({ ...doc, accounts: doc.accounts.map(a => a.id === hidden.id ? { ...a, retired: true } : a) }))
+      } else await store.update(hidden.id, { available: false })
+      for (const [account, burn] of [[hidden.id, 10], [visible.id, 2]] as const) {
+        for (const [at, used] of [[now - H, 20], [now, 20 + burn]] as const) {
+          await ingestPlanLimits({ harness, account, source: 'codex-rollout', updatedAt: at,
+            windows: [{ kind: 'week', usedPct: used, resetsAt: now + 24 * H }] })
+        }
+      }
+      let reads = 0
+      __setManagedLookupForTest(async () => { reads++; return [{ id: 'managed-hidden', conversationId: 'linked-hidden', accountId: hidden.id }] })
+      __setLiveTranscriptPathForTest(async s => s.session_id === 'path-hidden' ? join(hiddenRoot, 'sessions', 'transcript.jsonl') :
+        s.session_id === 'path-visible' ? join(dir, 'visible', 'sessions', 'transcript.jsonl') : null)
+      const sessions = (tokens: number) => ['linked-hidden', 'path-hidden', 'path-visible', 'external'].map(session_id => ({ session_id, harness, input_tokens: tokens }))
+      const ids = sessions(0).map(s => s.session_id)
+      const burn = { [planAccountKey(harness, hidden.id)]: 10, [planAccountKey(harness, visible.id)]: 2 }
+      await sampleLivePlanSessions(sessions(100), ids, now - 60_000, burn)
+      const live = await sampleLivePlanSessions(sessions(101), ids, now, burn, new Set(ids))
+      expect(reads).toBe(2) // one registry read per call, independent of session count
+      expect(live.map(s => [s.account, s.burnPctPerHour])).toEqual([[hidden.id, 5], [hidden.id, 5], [visible.id, 1], [visible.id, 1]])
+      const body = await planLimitsPayload(undefined, now, live)
+      expect(body.liveSessions.map(s => s.id)).toEqual(['path-visible', 'external'])
+      expect(body.budgets[0]!.liveSessions.map(s => s.id)).toEqual(['path-visible', 'external'])
+      expect(body.hiddenFromAgents[0]!.liveSessions.map(s => s.id)).toEqual(['linked-hidden', 'path-hidden'])
+      const out = JSON.stringify(planLimitsTool({ kind: 'spec-impl' }, body))
+      for (const value of [hidden.id, 'linked-hidden', 'path-hidden', '@']) expect(out).not.toContain(value)
+      // Direct payload callers also retain unknown sessions despite old hidden roots.
+      const direct = await planLimitsPayload(undefined, now, [{ id: 'direct', harness, model: 'unknown', burnPctPerHour: 2 }])
+      expect(direct.budgets[0]!.liveSessions.map(s => s.id)).toEqual(['direct'])
+    })
+  }
+
   test(`H1 ${harness}: separate visible quotas distribute burn only within their account`, async () => {
+    __setManagedLookupForTest(async () => [{ id: 'a', accountId: 'acc_a' }, { id: 'b', accountId: 'acc_b' }])
     const sessions = (tokens: number) => [
-      { session_id: 'a', harness, account: 'acc_a', input_tokens: tokens },
-      { session_id: 'b', harness, account: 'acc_b', input_tokens: tokens },
+      { session_id: 'a', harness, input_tokens: tokens },
+      { session_id: 'b', harness, input_tokens: tokens },
     ]
     const burn = { [`${harness}:acc_a`]: 10, [`${harness}:acc_b`]: 4 }
     await sampleLivePlanSessions(sessions(100), ['a', 'b'], 0, burn)
@@ -697,6 +737,29 @@ for (const harness of HARNESS_ORDER) {
     expect(live.map(s => s.burnPctPerHour)).toEqual([10, 4])
   })
 }
+
+test('N2: real external rollout lookup crosses account roots without sharing cached misses', async () => {
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
+  __setHarnessAccountsForTest(store)
+  const hiddenRoot = join(dir, 'hidden')
+  const visibleRoot = join(dir, 'visible')
+  const { account: hidden } = await store.bind(hiddenRoot, { harness: 'codex', key: 'hidden', label: 'Hidden' })
+  const { account: visible } = await store.bind(visibleRoot, { harness: 'codex', key: 'visible', label: 'Visible' })
+  await store.update(hidden.id, { available: false })
+  const id = '11111111-2222-4333-8444-555555555555'
+  const day = join(visibleRoot, 'sessions', '2026', '10', '16')
+  mkdirSync(day, { recursive: true })
+  writeFileSync(join(day, `rollout-2026-10-16T12-00-00-${id}.jsonl`), '')
+  __setLiveTranscriptPathForTest(null)
+  const session = (tokens: number) => ({ session_id: id, harness: 'codex', input_tokens: tokens })
+  const burn = { [planAccountKey('codex', hidden.id)]: 10, [planAccountKey('codex', visible.id)]: 2 }
+  await sampleLivePlanSessions([session(100)], [id], 0, burn)
+  const live = await sampleLivePlanSessions([session(101)], [id], 60_000, burn)
+  expect(live[0]).toMatchObject({ account: visible.id, burnPctPerHour: 2 })
+  // A hit in visibleRoot must not leak through the memo when searching hiddenRoot for this id.
+  const { resolveCodexTranscript } = await import('./sessions/harness-transcript')
+  expect(await resolveCodexTranscript({ conversationId: id }, join(hiddenRoot, 'sessions'), Date.now() + 31_000)).toBeNull()
+})
 
 test('L7: default legacy labels do not duplicate real #1; hidden rows do not skip numbers', async () => {
   const store = accountsWithLogin({ value: 'unused' })

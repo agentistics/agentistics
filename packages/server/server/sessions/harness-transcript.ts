@@ -232,7 +232,8 @@ export async function resolveCodexTranscript(
   // no file, and remembering that answer for the life of the process made the conversation
   // unreadable for the life of the process. Codex has no cheap direct path, so the scan itself is
   // what the TTL paces.
-  return resolveMemoizedPath(codexPathMemo, ref.conversationId, {
+  // Account roots must not share cached hits or misses for the same conversation id.
+  return resolveMemoizedPath(codexPathMemo, `${sessionsDir}:${ref.conversationId}`, {
     exists,
     direct: () => recentCodexRollout(ref.conversationId, sessionsDir, now),
     scan: () => scanCodexRollout(ref.conversationId, sessionsDir),
@@ -332,7 +333,7 @@ export async function resolveGeminiTranscript(
   now: number = Date.now(),
 ): Promise<string | null> {
   if (UUID_RE.test(ref.conversationId)) {
-    return resolveMemoizedPath(geminiPathMemo, ref.conversationId, {
+    return resolveMemoizedPath(geminiPathMemo, `${tmpDir}:${ref.conversationId}`, {
       exists,
       scan: () => findGeminiChatByUuid(ref.conversationId, tmpDir),
       now,
@@ -451,7 +452,7 @@ export async function resolveKimiTranscript(
   // probe here (one `readdir` of the workspaces plus a `stat` or two each — a machine holds a handful),
   // so it runs on every resolve: gating it behind the miss TTL kept a wire written ~1 s after the first
   // message off screen for up to 30 s, exactly as it did for codex.
-  return resolveMemoizedPath(kimiPathMemo, ref.conversationId, {
+  return resolveMemoizedPath(kimiPathMemo, `${sessionsDir}:${ref.conversationId}`, {
     exists,
     direct: () => findKimiWire(ref.conversationId, sessionsDir),
     scan: async () => null,

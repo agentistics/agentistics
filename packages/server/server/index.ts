@@ -781,7 +781,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // PLAN.LIMITS — the 5-hour and weekly windows each harness account last reported, with the
     // plan registered in Settings → Billing. Reads only what the host already stored.
     if (url.pathname === '/api/plan-limits' && req.method === 'GET') {
-      const [{ planLimitsPayload, sampleLivePlanSessions }, prefs] = await Promise.all([import('./plan-limits'), readPreferences()])
+      const [{ planLimitsPayload, sampleLivePlanSessions, planAccountKey }, prefs] = await Promise.all([import('./plan-limits'), readPreferences()])
       const now = Date.now()
       let liveSessions: import('@agentistics/core').LivePlanSession[] = []
       if (!TEAM_CENTRAL) {
@@ -789,7 +789,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const live = await readLocalLiveSnapshot(data.sessions)
         const latest = await planLimitsPayload(prefs.billing, now)
         const burnByAccount: Record<string, number> = {}
-        for (const b of [...latest.budgets, ...latest.hiddenFromAgents]) burnByAccount[`${b.harness}:${b.account}`] = b.burnPctPerHour
+        for (const b of [...latest.budgets, ...latest.hiddenFromAgents]) burnByAccount[planAccountKey(b.harness, b.account)] = b.burnPctPerHour
         const { processSessionHub } = await import('./sessions/session-hub')
         // Peek only: plan reads must not start fleet polls or extend the hub's demand lease.
         const working = new Set((processSessionHub()?.last()?.sessions ?? [])
