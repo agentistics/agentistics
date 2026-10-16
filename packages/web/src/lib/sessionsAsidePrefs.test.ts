@@ -197,3 +197,21 @@ describe('arrangeChangedCount', () => {
     expect(arrangeChangedCount({ groupBy: 'task', sort: { by: 'name', dir: 'asc' }, cardColor: 'neutral', order: ['x'], hiddenFolders: 2 })).toBe(5)
   })
 })
+
+describe('sortExplicit migration and server sync fields', () => {
+  test('a non-default stored sort with no flag reads as explicit', () => {
+    expect(parseAsideGroupPrefs({ sort: { by: 'name', dir: 'asc' } }).sortExplicit).toBe(true)
+  })
+  test('a default stored sort with no flag stays not explicit', () => {
+    expect(parseAsideGroupPrefs({ sort: { by: 'state', dir: 'desc' } }).sortExplicit).toBe(false)
+    expect(parseAsideGroupPrefs({}).sortExplicit).toBe(false)
+  })
+  test('an explicit false flag is respected even with a non-default sort', () => {
+    expect(parseAsideGroupPrefs({ sort: { by: 'name', dir: 'asc' }, sortExplicit: false }).sortExplicit).toBe(false)
+  })
+  test('sortExplicit and expandedEndedGroups come through a server document (what the sync applies)', () => {
+    const p = parseAsideGroupPrefs({ sortExplicit: true, expandedEndedGroups: ['a', 3, 'b'] })
+    expect(p.sortExplicit).toBe(true)
+    expect(p.expandedEndedGroups).toEqual(['a', 'b'])
+  })
+})

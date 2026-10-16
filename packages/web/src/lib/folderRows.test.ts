@@ -28,3 +28,11 @@ describe('splitFolderRows', () => {
     expect(r.ended.map(x => x.id)).toEqual(['1', '3'])
   })
 })
+
+import { endedAutoOpen } from './folderRows'
+describe('endedAutoOpen', () => {
+  const e1 = s('1', 'a', 'exited', 1), e2 = s('2', 'b', 'exited', 2)
+  test('no search never auto-opens', () => expect(endedAutoOpen(false, [e1], [e1])).toBe(false))
+  test('search with a matching ended row opens', () => expect(endedAutoOpen(true, [e1, e2], [e2])).toBe(true))
+  test('search where no ended row matches (dimmed folder opened) stays closed', () => expect(endedAutoOpen(true, [e1, e2], [])).toBe(false))
+})

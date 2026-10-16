@@ -41,7 +41,7 @@ import { SessionsGroupMenu } from './SessionsGroupMenu'
 import type { SessionOrder } from '@agentistics/tui/control/session-order'
 import { displayName, toggleHidden } from '../../lib/groupNameMask'
 import { folderFold } from '../../lib/folderFold'
-import { splitFolderRows } from '../../lib/folderRows'
+import { splitFolderRows, endedAutoOpen } from '../../lib/folderRows'
 import { ATTN_BAR_CLASS, ATTN_COUNT_CLASS, attentionCount, attentionIds, pruneDismissed } from './AttentionDot'
 import { rowSelected } from '../../lib/fleetSelection'
 import { filterFleet, ignoredDimensions } from '../../lib/fleetFilter'
@@ -528,6 +528,8 @@ export function SessionsAside({
     setFoldedPinnedState(p.foldedPinned)
     setFoldedGroupsSectionState(p.foldedGroupsSection)
     setHiddenGroups(new Set(p.hiddenUserGroups))
+    setSortExplicit(p.sortExplicit)
+    setExpandedEndedState(new Set(p.expandedEndedGroups))
   }), [])
   const toggleGroupNameHidden = (id: string) => {
     const next = toggleHidden(hiddenGroups, id)
@@ -1190,7 +1192,7 @@ export function SessionsAside({
                       </div>
                     )
                   }
-                  const endedOpen = expandedEnded.has(group.id) || (searching && ended.length > 0)
+                  const endedOpen = expandedEnded.has(group.id) || endedAutoOpen(searching, ended, entry.rows)
                   return (
                     <>
                       {live.map(renderRow)}

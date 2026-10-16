@@ -25,3 +25,18 @@ export function splitFolderRows(
     ended: arrange(rows.filter(r => !isActive(r))),
   }
 }
+
+/**
+ * PURE: should the "Ended" block open by itself during a search? Only when an ended row actually
+ * MATCHES — a dimmed folder opened by hand lists everything it holds (`showAll`), and its
+ * non-matching ended rows must not be auto-expanded just because a search is active.
+ */
+export function endedAutoOpen(
+  searching: boolean,
+  ended: readonly ControlSession[],
+  matching: readonly ControlSession[],
+): boolean {
+  if (!searching) return false
+  const ids = new Set(matching.map(r => r.id))
+  return ended.some(r => ids.has(r.id))
+}

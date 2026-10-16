@@ -109,6 +109,10 @@ function readOrder(v: unknown): Partial<Record<AsideGroupBy, string[]>> {
   return out
 }
 
+function sortDiffersFromDefault(o: SessionOrder): boolean {
+  return o.by !== DEFAULT_ORDER.by || o.dir !== DEFAULT_ORDER.dir
+}
+
 export function readAsideGroupPrefs(): AsideGroupPrefs {
   return parseAsideGroupPrefs(doc.get())
 }
@@ -135,7 +139,8 @@ export function parseAsideGroupPrefs(stored: unknown): AsideGroupPrefs {
         : [],
       foldedPinned: p.foldedPinned === true,
       foldedGroupsSection: p.foldedGroupsSection === true,
-      sortExplicit: p.sortExplicit === true,
+      // A stored sort that is not the default, from before the flag existed, WAS a choice.
+      sortExplicit: typeof p.sortExplicit === 'boolean' ? p.sortExplicit : sortDiffersFromDefault(readSessionSort(p.sort)),
       expandedEndedGroups: Array.isArray(p.expandedEndedGroups)
         ? p.expandedEndedGroups.filter((x): x is string => typeof x === 'string')
         : [],
