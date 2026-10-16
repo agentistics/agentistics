@@ -713,6 +713,41 @@ describe('per-account billing', () => {
     expect(c?.harnesses).toEqual(['claude'])
   })
 
+  test('monthlyCommitment is partial when one account of the harness is short, even if the union spans the month', () => {
+    const shortOne = timeline(sub('s', '2026-04-20', '2026-04-30', 30))
+    const c = monthlyCommitment({
+      profiles: {},
+      month: '2026-04-15',
+      brlRate: 5,
+      accounts: accs('acc_a', 'acc_b'),
+      accountProfiles: { acc_a: full('a', 100), acc_b: shortOne },
+    })
+    expect(c?.partial).toBe(true)
+    expect(c?.usd).toBeCloseTo((100 * 30 + 30 * 11) / AVG_DAYS_PER_MONTH, 9)
+  })
+
+  test('monthlyCommitment refuses a harness with an invalid account timeline, whatever its siblings hold', () => {
+    const bad = timeline(sub('x', '2026-04-01', '2026-04-20', 10), sub('y', '2026-04-10', '2026-04-30', 10))
+    const apiOnly = timeline({ id: 'p', mode: 'api', from: '2026-04-01' } as BillingPeriod)
+    const refused = monthlyCommitment({
+      profiles: {},
+      month: '2026-04-15',
+      brlRate: 5,
+      accounts: accs('acc_a', 'acc_b', 'acc_c'),
+      accountProfiles: { acc_a: bad, acc_b: apiOnly, acc_c: full('c', 100) },
+    })
+    expect(refused).toBeNull()
+    const valid = monthlyCommitment({
+      profiles: {},
+      month: '2026-04-15',
+      brlRate: 5,
+      accounts: accs('acc_b', 'acc_c'),
+      accountProfiles: { acc_b: apiOnly, acc_c: full('c', 100) },
+    })
+    expect(valid?.hasUsageBilling).toBe(true)
+    expect(valid?.usd).toBeCloseTo((100 * 30) / AVG_DAYS_PER_MONTH, 9)
+  })
+
   test('monthlyCommitment without accounts is unchanged', () => {
     const profiles = { claude: full('d', 100) }
     const a = monthlyCommitment({ profiles, month: '2026-04-15', brlRate: 5 })
