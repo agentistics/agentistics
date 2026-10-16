@@ -16,8 +16,10 @@
  * - once every `SCREEN_REFRESH_MS` regardless, for what only the frame carries (the mode chip, a
  *   rate-limit banner, the raw tail), and on the next poll after an act on the row (`forceScreen`).
  *
- * A row whose harness declares NO state (gemini; opencode has no chat at all), a row with no exact
- * conversation link, and every row with the flag off, are untouched: the screen decides, as before.
+ * F4.A: the same subscription also keeps the row's last `TAIL_WINDOW` turns (`tail`), so a row whose
+ * harness serves a chat is followed even when it declares NO state (gemini) — its reading then stays
+ * `undefined` and the screen decides its activity, as before. opencode has no chat at all; a row with
+ * no exact conversation link, and every row with the flag off, are untouched.
  *
  * Pure decisions (`planScreen`, `adapterActivity`) are exported and tested; the feed holds one engine
  * subscription per conversation and drops it when the row stops running.
