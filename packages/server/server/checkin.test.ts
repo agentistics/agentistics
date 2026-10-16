@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { afterAll, describe, expect, spyOn, test } from 'bun:test'
 import { planBudget, planPace, type PlanLimits } from '@agentistics/core'
 import {
-  checkinActivity, checkinLimitInputs, defaultConfig, due, fireDue, mergeConfig, nextRun, promptFor, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
+  checkinActivity, checkinLimitInputs, checkinDefaultFollowers, inheritsDefaults, defaultConfig, due, fireDue, mergeConfig, nextRun, promptFor, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
   runNow, type CheckinAction, type CheckinDeps, type CheckinNeed, validateCheckinRound,
 } from './checkin'
 
@@ -126,7 +126,7 @@ describe('check-in agenda', () => {
     expect((await stateFor('handoff-leader', 2_000)).intervalMin).toBe(60)
   })
 
-  test('disabled global default pauses new leaders without changing existing agendas', async () => {
+  test('disabled global default pauses both new and inherited existing agendas', async () => {
     reset()
     await stateFor('existing-leader', 1_000)
     preferences.checkinDefaults = { ...defaultConfig(), paused: { until: null } }
@@ -134,10 +134,10 @@ describe('check-in agenda', () => {
     expect(state.paused).toEqual({ until: null })
     expect(state.nextRunAt).toBeNull()
     expect(due(state, 9_000_000)).toBe(false)
-    expect((await stateFor('existing-leader', 3_000)).paused).toBeNull()
+    expect((await stateFor('existing-leader', 3_000)).paused).toEqual({ until: null })
   })
 
-  test('per-session override wins and later global edits only seed new leaders', async () => {
+  test('per-session override wins over later global edits', async () => {
     reset()
     preferences.checkinDefaults = { ...defaultConfig(), intervalMin: 60, paused: { until: null } }
     const state = await putState('custom-leader', { intervalMin: 15, paused: null }, 1_000)
@@ -146,6 +146,63 @@ describe('check-in agenda', () => {
     preferences.checkinDefaults = { ...defaultConfig(), intervalMin: 120 }
     expect((await stateFor('custom-leader', 2_000)).intervalMin).toBe(15)
     expect((await stateFor('new-leader', 2_000)).intervalMin).toBe(120)
+  })
+
+  test('existing untouched leaders follow interval and checklist edits live', async () => {
+    reset()
+    await stateFor('inherited', 1_000)
+    preferences.checkinDefaults = { ...defaultConfig(), intervalMin: 120, checklist: [{ id: 'fleet', enabled: false }] }
+    const updated = await stateFor('inherited', 2_000)
+    expect(updated.intervalMin).toBe(120)
+    expect(updated.nextRunAt).toBe(7_202_000)
+    expect(updated.checklist.find(x => x.id === 'fleet')?.enabled).toBe(false)
+    expect((preferences.checkin as any).inherited.inherits).toBe(true)
+    expect(updated).not.toHaveProperty('inherits')
+    expect((await stateFor('inherited', 3_000)).nextRunAt).toBe(updated.nextRunAt)
+  })
+  test('even an explicit choice equal to defaults remains an override after reports', async () => {
+    reset()
+    await putState('custom', { intervalMin: 30 }, 1_000)
+    await recordReport('custom', { state: 'ok', summary: 'Done' }, 2_000)
+    preferences.checkinDefaults = { ...defaultConfig(), intervalMin: 120 }
+    expect((await stateFor('custom', 3_000)).intervalMin).toBe(30)
+    expect((preferences.checkin as any).custom.inherits).toBe(false)
+  })
+  test('inherited pause and resume follow defaults but a checklist override preserves the whole agenda', async () => {
+    reset()
+    await stateFor('follows', 1_000)
+    await putState('custom', { checklist: [{ id: 'fleet', enabled: false }] }, 1_000)
+    preferences.checkinDefaults = { ...defaultConfig(), intervalMin: 120, paused: { until: null } }
+    expect((await stateFor('follows', 2_000)).nextRunAt).toBeNull()
+    expect((await stateFor('custom', 2_000)).intervalMin).toBe(30)
+    expect((await stateFor('custom', 2_000)).paused).toBeNull()
+    preferences.checkinDefaults = { ...defaultConfig(), intervalMin: 120 }
+    expect((await stateFor('follows', 3_000)).nextRunAt).toBe(7_203_000)
+    expect((await stateFor('custom', 3_000)).checklist.find(x => x.id === 'fleet')?.enabled).toBe(false)
+  })
+  test('legacy built-in agendas follow, distinguishable legacy custom choices remain adjusted', () => {
+    expect(inheritsDefaults(defaultConfig())).toBe(true)
+    expect(inheritsDefaults({ ...defaultConfig(), intervalMin: 60 })).toBe(false)
+    expect(inheritsDefaults({ ...defaultConfig(), inherits: false })).toBe(false)
+    expect(inheritsDefaults({ ...defaultConfig(), intervalMin: 60, inherits: true })).toBe(true)
+  })
+  test('counts active leaders only, including leaders without an agenda yet', async () => {
+    reset()
+    rows = [leader, worker, { ...leader, id: 'new', conversationId: 'new-conv' }, { ...leader, id: 'closed', conversationId: 'closed-conv', state: 'closed' }]
+    roles = { [leader.conversationId]: 'leader', [worker.conversationId]: 'worker', 'new-conv': 'leader', 'closed-conv': 'leader' }
+    await putState(leader.conversationId, { intervalMin: 60 }, 1_000)
+    expect(await checkinDefaultFollowers()).toEqual({ following: 1, adjusted: 1 })
+  })
+  test('rapid default changes update schedules without sending configuration prompts', async () => {
+    reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+    await stateFor(leader.conversationId, 1_000)
+    for (const intervalMin of [120, 15, 60, 120]) {
+      preferences.checkinDefaults = { ...defaultConfig(), intervalMin }
+      await fireDue(2_000)
+    }
+    expect(prompts).toEqual([])
+    expect((await stateFor(leader.conversationId, 3_000)).intervalMin).toBe(120)
+    expect((await stateFor(leader.conversationId, 3_000)).nextRunAt).toBe(7_202_000)
   })
 
   test('a concurrent session override wins over first-read global seeding', async () => {

@@ -7,9 +7,9 @@
  * stored role is `leader` (the MCP door). A worker is refused — it would be switching off the very
  * instruction that tells it not to ask the owner. Spec: agentistics-workspace/leader/specs/away-mode-spec.md
  */
-import { AWAY_OFF, awayActive, awayLiveNotice, awayStateSignature, normalizeAwayInput, normalizeAwayNotice, parseAwayState, redactSecrets, sessionAwayNotice, sessionAwayState, type AwayInputError, type AwayState } from '@agentistics/core'
+import { AWAY_OFF, awayActive, awayLiveNotice, normalizeAwayInput, normalizeAwayNotice, parseAwayState, redactSecrets, sessionAwayState, type AwayInputError, type AwayState } from '@agentistics/core'
 
-export interface AwayView { state: AwayState; active: boolean }
+export interface AwayView { state: AwayState; active: boolean; activeSessions?: number; cooldownMs?: number }
 
 export type AwayReply =
   | ({ ok: true; notified?: number } & AwayView)
@@ -38,32 +38,85 @@ export interface LiveAwayDeps {
   /** Type the text into a running session through the composer's send path. */
   prompt: (id: string, text: string) => Promise<{ ok: boolean }>
   planLimitsInBriefing?: boolean
+  patch?: (id: string, away: boolean) => Promise<void>
 }
 
-/** Per session: the state fingerprint it was last told, so the same state is never typed twice. */
-const lastTold = new Map<string, string>()
-export function resetAwayLiveDedupe(): void { lastTold.clear() }
+/** State changes are immediate; only prompts wait for quiet and a per-session cooldown. */
+export const AWAY_QUIET_MS = 45_000
+export const AWAY_COOLDOWN_MS = 5 * 60_000
+interface PendingAway {
+  before: AwayState | null; after: AwayState | null; role: 'leader' | 'worker' | undefined
+  send: (text: string) => Promise<{ ok: boolean; gone?: boolean }>; quietAt: number; planLimits: boolean
+  /** Only this session's own flag changed: the notice says "for this session". */
+  perSession?: boolean
+}
+const pendingAway = new Map<string, PendingAway>()
+const lastTold = new Map<string, { state: AwayState | null; at: number }>()
+let noticeTimer: ReturnType<typeof setTimeout> | undefined
+let flushing: Promise<number> | undefined
+export function resetAwayLiveDedupe(): void {
+  pendingAway.clear(); lastTold.clear()
+  if (noticeTimer) clearTimeout(noticeTimer)
+  noticeTimer = undefined
+}
+function armAwayNotices(): void {
+  if (noticeTimer) clearTimeout(noticeTimer)
+  if (!pendingAway.size) { noticeTimer = undefined; return }
+  const at = Math.min(...[...pendingAway].map(([id, job]) => Math.max(job.quietAt, (lastTold.get(id)?.at ?? -Infinity) + AWAY_COOLDOWN_MS)))
+  noticeTimer = setTimeout(() => { noticeTimer = undefined; void flushAwayNotices(Date.now()) }, Math.max(0, at - Date.now()))
+  noticeTimer.unref?.()
+}
+export async function flushAwayNotices(now: number): Promise<number> {
+  if (flushing) { await flushing; return flushAwayNotices(now) }
+  flushing = (async () => {
+    let sentCount = 0
+    for (const [id, job] of pendingAway) {
+      const told = lastTold.get(id)
+      if (now < job.quietAt || (told && now - told.at < AWAY_COOLDOWN_MS)) continue
+      pendingAway.delete(id)
+      const notice = awayLiveNotice(told ? told.state : job.before, job.after, false, job.role, now, { planLimitsInBriefing: job.planLimits })
+      if (!notice) continue
+      const text = job.perSession ? forThisSession(notice) : notice
+      const sent: { ok: boolean; gone?: boolean } = await job.send(text).catch(() => ({ ok: false }))
+      if (sent.ok) { lastTold.set(id, { state: job.after, at: now }); sentCount++ }
+      else if (!sent.gone && !pendingAway.has(id)) pendingAway.set(id, { ...job, quietAt: now + AWAY_QUIET_MS })
+    }
+    return sentCount
+  })()
+  try { return await flushing } finally { flushing = undefined; armAwayNotices() }
+}
+function forThisSession(text: string): string {
+  return text
+    .replace(/^\[agentistics · away mode is now (ON|OFF)\]/, '[agentistics · away mode is now $1 for this session]')
+    .replace('The owner is back:', 'The owner is back for this session:')
+}
+function queueAwayNotice(id: string, before: AwayState | null, after: AwayState | null, role: PendingAway['role'], send: PendingAway['send'], now: number, planLimits = false, perSession = false): void {
+  const previous = pendingAway.get(id)
+  // A global change queued after a per-session one wins the wording: the session hears the global notice.
+  pendingAway.set(id, { before: previous ? previous.before : before, after, role, send, quietAt: now + AWAY_QUIET_MS, planLimits, perSession })
+  armAwayNotices()
+}
 
-/**
- * Fan a global away change out to every RUNNING session: leaders hear every change, workers only the
- * on/off flips (`awayLiveNotice`). Exited sessions are skipped, and a session already told this very
- * state is not told again. Returns how many were reached. Delivery is the composer path, never an MCP
- * tool, so a session on an old MCP gets it too.
- */
+/** Snapshot the old own flag before clearing it; global OFF means back everywhere. */
 export async function notifyLiveSessions(before: AwayState, after: AwayState, deps: LiveAwayDeps, now: number, exclude?: string): Promise<number> {
-  const rows = (await deps.rows().catch(() => [])).filter(r => r.running)
-  const results = await Promise.all(rows.map(async r => {
-    if (exclude !== undefined && (r.id === exclude || r.conversationId === exclude)) return 0
-    const role = await deps.roleOf(r.id, r.conversationId).catch(() => undefined)
-    const text = awayLiveNotice(before, after, r.away, role, now, { planLimitsInBriefing: deps.planLimitsInBriefing === true })
-    if (text === null) return 0
-    const sig = awayStateSignature(sessionAwayState(after, r.away, now)) + (role === 'leader' ? ':L' : '')
-    if (lastTold.get(r.id) === sig) return 0
-    const sent = await deps.prompt(r.id, text).catch(() => ({ ok: false }))
-    if (sent.ok) lastTold.set(r.id, sig)
-    return sent.ok ? 1 : 0
-  }))
-  return results.reduce<number>((a, b) => a + b, 0)
+  const rows = await deps.rows()
+  for (const row of rows) {
+    const ownAfter = after.on ? row.away : false
+    if (!after.on && row.away) await deps.patch?.(row.id, false)
+    if (!row.running) continue
+    if (exclude !== undefined && (row.id === exclude || row.conversationId === exclude)) {
+      pendingAway.delete(row.id)
+      lastTold.set(row.id, { state: sessionAwayState(after, ownAfter, now), at: now })
+      continue
+    }
+    const role = await deps.roleOf(row.id, row.conversationId).catch(() => undefined)
+    queueAwayNotice(row.id, sessionAwayState(before, row.away, now), sessionAwayState(after, ownAfter, now), role,
+      async text => {
+        const current = (await deps.rows()).find(r => r.id === row.id && r.running)
+        return current ? deps.prompt(row.id, text) : { ok: false, gone: true }
+      }, now, deps.planLimitsInBriefing)
+  }
+  return 0
 }
 
 export function awayView(raw: unknown, now: number): AwayView {
@@ -71,11 +124,23 @@ export function awayView(raw: unknown, now: number): AwayView {
   return { state, active: awayActive(state, now) }
 }
 
-export async function readAwayView(deps: Pick<AwayDeps, 'read' | 'now'>): Promise<AwayView> {
-  return awayView(await deps.read().catch(() => AWAY_OFF), deps.now())
+export async function readAwayView(deps: Pick<AwayDeps, 'read' | 'now'> & Pick<Partial<AwayDeps>, 'live'>): Promise<AwayView> {
+  const view = awayView(await deps.read().catch(() => AWAY_OFF), deps.now())
+  const live = deps.live
+  return { ...view, ...(live ? { activeSessions: (await live.rows()).filter(r => r.running).length, cooldownMs: Math.max(0, ...[...lastTold.values()].map(t => t.at + AWAY_COOLDOWN_MS - deps.now()), ...[...pendingAway.values()].map(j => j.quietAt - deps.now())) } : {}) }
 }
 
-export async function setAway(body: unknown, deps: AwayDeps): Promise<AwayReply> {
+// Serialize owner changes across both endpoints: a later explicit session ON must survive OFF.
+let awayWrites: Promise<unknown> = Promise.resolve()
+function mutateAway<T>(action: () => Promise<T>): Promise<T> {
+  const result = awayWrites.then(action)
+  awayWrites = result.catch(() => {})
+  return result
+}
+export function setAway(body: unknown, deps: AwayDeps): Promise<AwayReply> {
+  return mutateAway(() => setAwayMutation(body, deps))
+}
+async function setAwayMutation(body: unknown, deps: AwayDeps): Promise<AwayReply> {
   const o = (body && typeof body === 'object' ? body : {}) as { session?: { id?: unknown; token?: unknown } }
   let sender: string | undefined
   if (o.session !== undefined) {
@@ -88,7 +153,7 @@ export async function setAway(body: unknown, deps: AwayDeps): Promise<AwayReply>
   if (!n.ok) return { ok: false, error: n.error, ...(n.detail !== undefined ? { detail: n.detail } : {}) }
   const before = parseAwayState(await deps.read().catch(() => AWAY_OFF))
   await deps.write(n.state)
-  if (deps.live) void notifyLiveSessions(before, n.state, deps.live, now, sender).catch(() => {})
+  if (deps.live) await notifyLiveSessions(before, n.state, deps.live, now, sender)
   return { ok: true, ...awayView(n.state, now) }
 }
 
@@ -120,7 +185,7 @@ async function liveRows() {
 }
 async function liveRoleOf(id: string, conversationId?: string) {
   const { storedRoleFor } = await import('./sessions/session-roles')
-  return storedRoleFor([id, conversationId])
+  return storedRoleFor([conversationId, id])
 }
 async function livePrompt(id: string, text: string) {
   const { runFleetAction } = await import('./sessions/fleet-web')
@@ -137,11 +202,12 @@ export async function defaultAwayDeps(): Promise<AwayDeps> {
     roleOf: async managedId => {
       const { readRegistry } = await import('./sessions/registry')
       const { storedRoleFor } = await import('./sessions/session-roles')
-      const row = (await readRegistry()).find(m => m.id === managedId)
-      return storedRoleFor([managedId, row?.conversationId])
+      const row = (await readRegistry()).find(m => m.id === managedId || m.conversationId === managedId)
+      return storedRoleFor([row?.conversationId, row?.id, managedId])
     },
     now: () => Date.now(),
     live: {
+      patch: async (id, away) => { await (await import('./sessions/registry')).patchSession(id, { away: away ? true : null }) },
       rows: liveRows,
       roleOf: liveRoleOf,
       prompt: livePrompt,
@@ -177,17 +243,28 @@ export interface SessionAwayDeps {
 /**
  * Switch ONE session's own away flag. The person (no `session` field) or a verified LEADER may; the
  * flag is written to the registry (it survives a restart and is carried by a reopen) and, when the
- * session's EFFECTIVE state changed and its pane is running, the session is told — the same send
+ * session's EFFECTIVE state changed and its pane is running, the final notice is queued — the same send
  * path `agentistics_session_message` uses — so it never keeps acting on an instruction that is gone.
  */
-export async function setSessionAway(body: unknown, deps: SessionAwayDeps): Promise<SessionAwayReply> {
-  const o = (body && typeof body === 'object' ? body : {}) as { target?: unknown; on?: unknown; session?: { id?: unknown; token?: unknown } }
+export function setSessionAway(body: unknown, deps: SessionAwayDeps): Promise<SessionAwayReply> {
+  return mutateAway(() => setSessionAwayMutation(body, deps))
+}
+async function setSessionAwayMutation(body: unknown, deps: SessionAwayDeps): Promise<SessionAwayReply> {
+  const o = (body && typeof body === 'object' ? body : {}) as { target?: unknown; scope?: unknown; on?: unknown; session?: { id?: unknown; token?: unknown } }
   if (o.session !== undefined) {
     const sender = await deps.verify(o.session?.id, o.session?.token)
     if (!sender) return { ok: false, error: 'unverified_sender' }
-    if ((await deps.roleOf(sender)) !== 'leader') return { ok: false, error: 'leader_only' }
+    const senderRow = (await deps.rows()).find(r => r.id === sender || r.conversationId === sender)
+    const role = await deps.roleOf(senderRow?.conversationId ?? sender) ?? await deps.roleOf(senderRow?.id ?? sender)
+    if (role !== 'leader') return { ok: false, error: 'leader_only' }
   }
   if (typeof o.on !== 'boolean') return { ok: false, error: 'on_required' }
+  if (o.scope === 'active') {
+    const rows = (await deps.rows()).filter(r => r.running)
+    for (const row of rows) await setSessionAwayMutation({ target: row.id, on: o.on }, deps)
+    const global = parseAwayState(await deps.read())
+    return { ok: true, id: '*', away: o.on, effective: sessionAwayState(global, o.on, deps.now()) !== null, notified: false }
+  }
   const target = typeof o.target === 'string' ? o.target.trim() : ''
   if (!target) return { ok: false, error: 'target_required' }
   const row = (await deps.rows()).find(r => r.id === target || r.conversationId === target)
@@ -197,18 +274,13 @@ export async function setSessionAway(body: unknown, deps: SessionAwayDeps): Prom
   const before = row.away === true
   if (before !== o.on) await deps.patch(row.id, o.on)
   const effective = sessionAwayState(global, o.on, now) !== null
-  let notified = false
-  let message: string | undefined
+  const notified = false
   if (row.running && before !== o.on) {
-    const role = await deps.roleOf(row.id).catch(() => undefined) ?? (row.conversationId ? await deps.roleOf(row.conversationId).catch(() => undefined) : undefined)
-    const text = sessionAwayNotice(global, before, o.on, role, now, { planLimitsInBriefing: deps.planLimitsInBriefing === true })
-    if (text) {
-      const sent = await deps.prompt(row.id, text).catch(() => ({ ok: false, message: undefined }))
-      notified = sent.ok
-      if (!sent.ok && sent.message) message = sent.message
-    }
+    const role = await deps.roleOf(row.conversationId ?? row.id) ?? await deps.roleOf(row.id)
+    queueAwayNotice(row.id, sessionAwayState(global, before, now), sessionAwayState(global, o.on, now), role,
+      async text => (await deps.rows()).some(r => r.id === row.id && r.running) ? deps.prompt(row.id, text) : { ok: false, gone: true }, now, deps.planLimitsInBriefing, true)
   }
-  return { ok: true, id: row.id, away: o.on, effective, notified, ...(message ? { message } : {}) }
+  return { ok: true, id: row.id, away: o.on, effective, notified }
 }
 
 export function sessionAwayStatus(r: SessionAwayReply): number {
@@ -223,8 +295,7 @@ export async function defaultSessionAwayDeps(lang: 'pt' | 'en' = 'en'): Promise<
     read: base.read,
     verify: base.verify,
     roleOf: async key => {
-      const { storedRoleFor } = await import('./sessions/session-roles')
-      return storedRoleFor([key])
+      return base.roleOf(key)
     },
     rows: async () => {
       const { readRegistry } = await import('./sessions/registry')

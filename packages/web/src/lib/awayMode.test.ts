@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'bun:test'
-import { activeCapProviders, awayUntilLabel, untilFromChoice } from './awayMode'
+import { afterEach, describe, expect, it } from 'bun:test'
+import { activeCapProviders, awayUntilLabel, setSessionAway, untilFromChoice } from './awayMode'
 
 describe('away mode helpers', () => {
   const now = new Date(2026, 9, 11, 23, 50).getTime()
@@ -24,5 +24,27 @@ describe('activeCapProviders', () => {
   })
   it('never lists a harness no ceiling can name', () => {
     expect(activeCapProviders(order, [{ harness: 'agentistics' }], [], {})).toEqual([])
+  })
+})
+
+describe('session away requests', () => {
+  const originalFetch = globalThis.fetch
+  afterEach(() => { globalThis.fetch = originalFetch })
+  it('uses the same endpoint for individual and all-active scopes, without changing global state', async () => {
+    const sent: { url: string; body: unknown }[] = []
+    globalThis.fetch = (async (url: unknown, init: RequestInit) => {
+      sent.push({ url: String(url), body: JSON.parse(String(init.body)) })
+      return Response.json({ ok: true, notified: false, effective: true })
+    }) as unknown as typeof fetch
+    expect(await setSessionAway('managed', true, 'pt')).toEqual({ ok: true, notified: false, effective: true })
+    await setSessionAway('managed', false, 'en', 'active')
+    expect(sent).toEqual([
+      { url: '/api/away/session', body: { target: 'managed', on: true, lang: 'pt' } },
+      { url: '/api/away/session', body: { target: 'managed', on: false, lang: 'en', scope: 'active' } },
+    ])
+  })
+  it('returns route refusals so the confirmation can keep its error visible', async () => {
+    globalThis.fetch = (async () => Response.json({ ok: false, error: 'leader_only' }, { status: 403 })) as unknown as typeof fetch
+    expect(await setSessionAway('managed', true, 'pt')).toEqual({ ok: false, error: 'leader_only' })
   })
 })

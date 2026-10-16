@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { Children, isValidElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import CheckinDefaultsSection from './CheckinDefaultsSection'
+import CheckinDefaultsSection, { CheckinDefaultCounts } from './CheckinDefaultsSection'
 import { CheckinConfigControls } from '../../components/sessions/CheckinConfigControls'
 import { ToggleSwitch } from '../../components/ToggleSwitch'
 import { Select } from './primitives'
@@ -24,12 +24,20 @@ describe('leader check-in defaults in Settings', () => {
       const html = withWindow(() => renderToStaticMarkup(<CheckinDefaultsSection pt={pt} isMobile={isMobile} />))
       expect(html).toContain(pt ? 'Check-in dos líderes' : 'Leader check-ins')
       expect(html).toContain(pt ? 'Habilitar check-in' : 'Enable check-in')
-      expect(html).toContain(pt ? 'líderes atuais mantêm suas escolhas' : 'current leaders keep their choices')
+      expect(html).toContain(pt ? 'seguem este padrão, inclusive quando ele muda' : 'follow these defaults as they change')
       expect(html.match(/role="switch"/g)).toHaveLength(7)
       expect(html).toContain('disabled=""')
       expect(html).toContain('aria-haspopup="listbox"')
       expect(html).not.toContain('<select')
       if (isMobile) expect(html).toContain('min-height:44px')
+    }
+  })
+
+  test('shows active follower/override counts in both languages, including zero', () => {
+    for (const pt of [true, false]) for (const counts of [{ following: 7, adjusted: 2 }, { following: 0, adjusted: 0 }]) {
+      const html = renderToStaticMarkup(<CheckinDefaultCounts counts={counts} pt={pt} />)
+      expect(html).toContain(pt ? `${counts.following} sessões seguem o padrão · ${counts.adjusted} ajustadas`
+        : `${counts.following} sessions follow defaults · ${counts.adjusted} adjusted`)
     }
   })
 

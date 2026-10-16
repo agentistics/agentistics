@@ -148,7 +148,7 @@ export interface CheckinState extends CheckinConfig {
   last: CheckinRound | null
   skipped?: { count: number; lastAt: number }
 }
-type Stored = CheckinState & { pending?: boolean; fingerprint?: string; lastFiredAt?: number | null }
+type Stored = CheckinState & { inherits?: boolean; pending?: boolean; fingerprint?: string; lastFiredAt?: number | null }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
 /** Global defaults support enabled or indefinitely paused check-ins, never a timed snooze. */
@@ -177,7 +177,7 @@ const labels: Record<CheckinItemId, string> = {
   fleet: 'Sessões e memória', handbacks: 'Entregas dos workers', limits: 'Limites de uso',
   releases: 'Releases e motor', 'mcp-configs': 'Configs MCP dos harnesses', handoff: 'Passagem (HANDOFF)',
 }
-/** Saved defaults seed a new agenda once; existing agendas keep their own choices. */
+/** Sessions without an owner override follow these defaults on every read and scheduler tick. */
 export function leaderDefaults(prefs: Preferences): CheckinConfig {
   const base = defaultConfig()
   const saved = prefs.checkinDefaults
@@ -225,7 +225,7 @@ async function updateStored<T>(mutate: (all: Record<string, Stored>, prefs: Pref
   return result
 }
 function publicState(stored: Stored): CheckinState {
-  const { pending: _pending, fingerprint: _fingerprint, lastFiredAt: _lastFiredAt, ...state } = stored
+  const { inherits: _inherits, pending: _pending, fingerprint: _fingerprint, lastFiredAt: _lastFiredAt, ...state } = stored
   return state
 }
 
@@ -256,33 +256,54 @@ async function fingerprint(row: { id: string; cwd: string }, state: CheckinState
   if (enabled.has('mcp-configs')) inputs.mcp = await deps.readCheckinMcpConfigs(row.cwd)
   return createHash('sha256').update(stable(inputs)).digest('hex')
 }
+/** Legacy agendas equal to the built-in config were automatic; preserve all other choices. */
+export function inheritsDefaults(old: (CheckinConfig & { inherits?: boolean }) | undefined): boolean {
+  return old?.inherits ?? (!old || stable(mergeConfig(defaultConfig(), old)) === stable(defaultConfig()))
+}
+export async function checkinDefaultFollowers(): Promise<{ following: number; adjusted: number }> {
+  const prefs = await deps.readPreferences()
+  const roles = (await deps.readRolesDoc(deps.dataDir)).roles
+  const rows = (await deps.readFleet('en')).rows.filter(r => !isClosedRow(r.id, r.state) && deps.roleOfRow(roles, r) === 'leader')
+  const stored = (prefs.checkin ?? {}) as Record<string, Stored>
+  const following = rows.filter(r => inheritsDefaults(stored[r.conversationId ?? r.id])).length
+  return { following, adjusted: rows.length - following }
+}
 function agendaState(session: string, old: Stored | undefined, prefs: Preferences, now: number): CheckinState {
-  const config = old ? mergeConfig(defaultConfig(), old) : leaderDefaults(prefs)
+  const config = inheritsDefaults(old) ? leaderDefaults(prefs) : mergeConfig(defaultConfig(), old!)
+  const changed = old && stable(config) !== stable(mergeConfig(defaultConfig(), old))
   const expired = config.paused !== null && config.paused.until !== null && config.paused.until <= now
   const resumed = expired ? { ...config, paused: null } : config
   // A timed pause that ran out resumes AT its deadline: the round it held back is due now, not one
   // whole interval after somebody happened to look at the panel.
-  const nextRunAt = expired ? config.paused!.until : (old?.nextRunAt ?? nextRun(now, resumed))
+  const nextRunAt = expired ? config.paused!.until : changed ? nextRun(now, resumed) : (old?.nextRunAt ?? nextRun(now, resumed))
   return { ...resumed, session, lastRunAt: old?.lastRunAt ?? null, nextRunAt, last: old?.last ?? null, ...(old?.skipped ? { skipped: old.skipped } : {}) }
 }
 export async function stateFor(session: string, now = Date.now()): Promise<CheckinState> {
   const prefs = await deps.readPreferences()
   const old = (prefs.checkin as Record<string, Stored> | undefined)?.[session]
   const state = agendaState(session, old, prefs, now)
-  if (old && state.paused === old.paused) return state
+  if (old?.inherits !== undefined && stable(state) === stable(publicState(old))) return state
   // Re-read within the preference write chain: a concurrent per-session override wins over seeding.
-  return updateStored((all, current) => {
+  const result = await updateStored((all, current) => {
     const state = agendaState(session, all[session], current, now)
-    all[session] = { ...all[session], ...state }
+    all[session] = { ...all[session], ...state, inherits: inheritsDefaults(all[session]) }
     return state
   })
+  if (old && stable(result) !== stable(publicState(old))) emit(result)
+  return result
 }
 export async function putState(session: string, patch: Partial<CheckinConfig>, now = Date.now()): Promise<CheckinState> {
   const alive = await workersAlive()
   const state = await updateStored((all, prefs) => {
-    const old = all[session] ?? { ...leaderDefaults(prefs), session, lastRunAt: null, nextRunAt: null, last: null }
-    const config = mergeConfig(old, patch)
-    const state: Stored = { ...old, ...config, session, lastRunAt: old.lastRunAt, nextRunAt: config.paused ? null : (old.nextRunAt ?? nextRun(now, config)), last: old.last, ...(old.skipped ? { skipped: old.skipped } : {}) }
+    const old = all[session] ?? { ...leaderDefaults(prefs), inherits: true, session, lastRunAt: null, nextRunAt: null, last: null }
+    const current = agendaState(session, old, prefs, now)
+    const config = mergeConfig(current, patch)
+    const customized = ['intervalMin', 'paused', 'checklist'].some(key => Object.prototype.hasOwnProperty.call(patch, key))
+    const state: Stored = {
+      ...old, ...config, inherits: customized ? false : inheritsDefaults(old), session,
+      lastRunAt: old.lastRunAt, nextRunAt: config.paused ? null : (current.nextRunAt ?? nextRun(now, config)),
+      last: old.last, ...(old.skipped ? { skipped: old.skipped } : {}),
+    }
     if (stable(config.checklist) !== stable(old.checklist)) delete state.fingerprint
     if (patch.intervalMin !== undefined || patch.paused !== undefined) state.nextRunAt = nextRun(now, config)
     state.nextRunAt = scheduledNext(now, state, alive, state.nextRunAt)
@@ -295,8 +316,8 @@ export async function putState(session: string, patch: Partial<CheckinConfig>, n
 export async function recordReport(session: string, round: CheckinRound, now = Date.now()): Promise<CheckinState> {
   const alive = await workersAlive()
   const state = await updateStored((all, prefs) => {
-    const old = all[session] ?? { ...leaderDefaults(prefs), session, lastRunAt: null, nextRunAt: null, last: null }
-    const { pending: _pending, ...previous } = old
+    const old = all[session] ?? { ...leaderDefaults(prefs), inherits: true, session, lastRunAt: null, nextRunAt: null, last: null }
+    const { pending: _pending, ...previous } = { ...old, ...agendaState(session, old, prefs, now), inherits: inheritsDefaults(old) }
     const resumed = previous.paused && previous.paused.until !== null && previous.paused.until <= now ? { ...previous, paused: null } : previous
     const state: CheckinState = { ...resumed, session, last: round, lastRunAt: now, nextRunAt: nextRun(now, resumed) }
     state.nextRunAt = scheduledNext(now, state, alive)
@@ -346,9 +367,6 @@ export function startCheckinTimer(): void {
   if (timer) return
   const tick = async () => {
     const now = Date.now()
-    const stored = await allStored()
-    // Due, or held by a timed pause that has run out (nothing else would ever resume it).
-    if (!Object.values(stored).some(s => (s.nextRunAt !== null && s.nextRunAt <= now) || (s.paused?.until != null && s.paused.until <= now))) return
     await fireDue(now)
   }
   timer = setInterval(() => { void tick() }, 15_000); timer.unref?.(); void tick()
@@ -356,7 +374,7 @@ export function startCheckinTimer(): void {
 export async function fireDue(now = Date.now()): Promise<string[]> {
   const rows = (await deps.readFleet('pt')).rows; const roles = (await deps.readRolesDoc(deps.dataDir)).roles; const fired: string[] = []
   for (const row of rows) {
-    if (deps.roleOfRow(roles, row) !== 'leader' || firing.has(row.id)) continue
+    if (isClosedRow(row.id, row.state) || deps.roleOfRow(roles, row) !== 'leader' || firing.has(row.id)) continue
     const releaseGuard = guard(row.id)
     try {
       const state = await stateFor(row.conversationId ?? row.id, now); if (!due(state, now)) continue
