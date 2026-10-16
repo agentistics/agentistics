@@ -384,3 +384,18 @@ test('disabled meterless account live sessions are hidden from payload and MCP',
   await store.setAvailable('gemini', 'default', true)
   expect((await planLimitsPayload(undefined, now, sessions)).liveSessions.map(s => s.id)).toEqual(['meterless-disabled', 'visible-session'])
 })
+
+test('a hidden harness is absent from the harnesses map while a visible non-spawnable one keeps its reason', async () => {
+  const now = Date.now()
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), now: () => now, probe: async () => ({ key: 'known-login', label: 'Known account' }) })
+  __setHarnessAccountsForTest(store)
+  await store.current(['claude'])
+  await store.setAvailable('claude', 'known-login', false)
+  await ingestPlanLimits({ harness: 'claude', account: 'default', plan: 'Max', windows: [{ kind: '5h', usedPct: 10, resetsAt: now + 3_600_000 }], updatedAt: now, source: 'claude-stream' })
+  const body = await planLimitsPayload(undefined, now, [])
+  expect(Object.keys(body.harnesses)).not.toContain('claude')
+  expect(JSON.stringify(planLimitsTool({ kind: 'spec-impl' }, body))).not.toContain('claude')
+  // gemini has no binary on this PATH: visible to agents, not spawnable, reason kept.
+  expect(body.harnesses.gemini?.spawnable).toBe(false)
+  expect(body.harnesses.gemini?.unavailableReason).toBeTruthy()
+})

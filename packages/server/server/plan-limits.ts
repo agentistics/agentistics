@@ -323,7 +323,9 @@ export async function planLimitsPayload(
   const pauseUntil = budgets.map(b => b.pauseUntil).filter((v): v is number => v !== undefined).sort((a, b) => a - b)[0]
   const hiddenHarnesses = new Set(currentAccounts.filter(a => !a.available).map(a => a.harness))
   const publicLiveSessions = liveSessions.filter(s => !s.harness || !hiddenHarnesses.has(s.harness)).map(({ harness: _harness, ...s }) => s)
-  return { harnesses, limits, registered, budgets, hiddenFromAgents, freeSlots, freeSlotsByHarness, liveSessions: publicLiveSessions, ...(pauseUntil !== undefined ? { pauseUntil } : {}), now: nowMs }
+  // Hidden-from-agents wins over spawnability: a hidden harness must not be named in the map.
+  const publicHarnesses = Object.fromEntries(Object.entries(harnesses).filter(([h]) => !hiddenHarnesses.has(h as HarnessId))) as Partial<Record<HarnessId, HarnessSpawnability>>
+  return { harnesses: publicHarnesses, limits, registered, budgets, hiddenFromAgents, freeSlots, freeSlotsByHarness, liveSessions: publicLiveSessions, ...(pauseUntil !== undefined ? { pauseUntil } : {}), now: nowMs }
 }
 
 /** Tests only. */
