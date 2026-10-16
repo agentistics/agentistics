@@ -46,6 +46,45 @@ interface Props {
 }
 
 /** Bell icon with an unread badge and a dropdown of the notification history. */
+/** The away-digest actions: their own row BELOW the message, never beside it (the text column must keep its width). */
+export function AwayDigestActions({ pt, busy, onAnswer }: { pt: boolean; busy: boolean; onAnswer: (a: 'yes' | 'no') => void }) {
+  return (
+    <div data-testid="away-digest-actions" style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 8 }}>
+      <button className="ag-tap" disabled={busy} onClick={e => { e.stopPropagation(); onAnswer('yes') }} style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)', color: 'var(--text-primary)', cursor: busy ? 'wait' : 'pointer', font: 'inherit', fontSize: 11 }}>{pt ? 'Sim, abrir resumo' : 'Yes, open summary'}</button>
+      <button className="ag-tap" disabled={busy} onClick={e => { e.stopPropagation(); onAnswer('no') }} style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: busy ? 'wait' : 'pointer', font: 'inherit', fontSize: 11 }}>{pt ? 'Não agora' : 'Not now'}</button>
+    </div>
+  )
+}
+
+/** The text column of a bell row: title, message, then the actions on their own rows BELOW the message. */
+export function NotificationRowBody({ pt, title, message, isJournalFailed, isClean, isAwayDigest, digestBusy, onAnswer, onRetryJournal, onClean }: {
+  pt: boolean; title: React.ReactNode; message?: React.ReactNode; isJournalFailed: boolean; isClean: boolean; isAwayDigest: boolean
+  digestBusy: boolean; onAnswer: (a: 'yes' | 'no') => void; onRetryJournal: () => void; onClean: () => void
+}) {
+  return (
+    <>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)' }}>{title}</div>
+      {message && (
+        <div data-testid="bell-message" style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 2, lineHeight: 1.45, wordBreak: 'break-word' }}>
+          {message}
+        </div>
+      )}
+      {isJournalFailed && (
+        <button data-testid="bell-journal-retry" onClick={e => { e.stopPropagation(); onRetryJournal() }} style={{ marginTop: 8, padding: '4px 7px', borderRadius: 6, border: '1px solid var(--anthropic-orange)60', background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)', cursor: 'pointer', font: 'inherit', fontSize: 11 }}>
+          {pt ? 'Tentar importar de novo' : 'Retry the import'}
+        </button>
+      )}
+      {isClean && <div style={{ marginTop: 8 }}><button
+        className="ag-tap"
+        data-testid="bell-clean-action"
+        onClick={e => { e.stopPropagation(); onClean() }}
+        style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', font: 'inherit', fontSize: 11 }}
+      >{pt ? 'Ver o que dá para limpar' : 'See what can be cleaned'}</button></div>}
+      {isAwayDigest && <AwayDigestActions pt={pt} busy={digestBusy} onAnswer={onAnswer} />}
+    </>
+  )
+}
+
 export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: Props) {
   const pt = lang === 'pt'
   const allNotes = useNotifications()
@@ -255,24 +294,11 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
                 >
                   <Icon size={15} color={color} style={{ flexShrink: 0, marginTop: 1 }} />
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)' }}>{title}</div>
-                    {message && (
-                      <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 2, lineHeight: 1.45, wordBreak: 'break-word' }}>
-                        {message}
-                      </div>
-                    )}
+                    <NotificationRowBody pt={pt} title={title} message={message} isJournalFailed={isJournalFailed} isClean={isClean} isAwayDigest={isAwayDigest}
+                      digestBusy={digestBusy} onAnswer={a => { void answerDigest(a) }}
+                      onRetryJournal={() => { setOpen(false); window.dispatchEvent(new CustomEvent('agentistics:retry-journal-import')) }}
+                      onClean={() => { setOpen(false); window.dispatchEvent(new CustomEvent('agentistics:open-clean')) }} />
                   </div>
-                  {isJournalFailed && (
-                    <button onClick={e => { e.stopPropagation(); setOpen(false); window.dispatchEvent(new CustomEvent('agentistics:retry-journal-import')) }} style={{ flexShrink: 0, padding: '4px 7px', borderRadius: 6, border: '1px solid var(--anthropic-orange)60', background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)', cursor: 'pointer', font: 'inherit', fontSize: 11 }}>
-                      {pt ? 'Tentar importar de novo' : 'Retry the import'}
-                    </button>
-                  )}
-                  {isAwayDigest && (
-                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                      <button className="ag-tap" disabled={digestBusy} onClick={e => { e.stopPropagation(); void answerDigest('yes') }} style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)', color: 'var(--text-primary)', cursor: digestBusy ? 'wait' : 'pointer', font: 'inherit', fontSize: 11 }}>{pt ? 'Sim, abrir resumo' : 'Yes, open summary'}</button>
-                      <button className="ag-tap" disabled={digestBusy} onClick={e => { e.stopPropagation(); void answerDigest('no') }} style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: digestBusy ? 'wait' : 'pointer', font: 'inherit', fontSize: 11 }}>{pt ? 'Não agora' : 'Not now'}</button>
-                    </div>
-                  )}
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0,
                     alignSelf: 'flex-start',
@@ -303,11 +329,6 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
                         <BellOff size={13} />
                       </button>
                     )}
-                    {isClean && <button
-                      className="ag-tap"
-                      onClick={e => { e.stopPropagation(); setOpen(false); window.dispatchEvent(new CustomEvent('agentistics:open-clean')) }}
-                      style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', font: 'inherit', fontSize: 11 }}
-                    >{pt ? 'Ver o que dá para limpar' : 'See what can be cleaned'}</button>}
                     {/* Per-item delete. Always visible, never hover-only: the bell is rendered on
                         mobile too, where hover does not exist, and the hit area is a full 44px
                         there (the icon stays small — only the touch target grows). */}
