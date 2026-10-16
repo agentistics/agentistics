@@ -16,6 +16,7 @@ import { stat } from 'node:fs/promises'
 import { cliStrings } from '../cli-i18n'
 import { patchSession, readRegistry } from './registry'
 import type { ManagedSession } from './types'
+import { nextHandoffSeq } from './handoff-inherit'
 
 /** Turns read from the predecessor — wide enough for a long leader turn, bounded for a poll. */
 const RELAY_READ_TURNS = 400
@@ -92,13 +93,13 @@ export async function captureHandoffRelay(
 }
 
 /** Link both rows once the successor exists: the injection above counts as delivered. */
-export async function recordHandoffLink(parentId: string, childId: string, captured: CapturedRelay | undefined): Promise<void> {
+export async function recordHandoffLink(parentId: string, childId: string, captured: CapturedRelay | undefined, parentSeq?: number): Promise<void> {
   await patchSession(parentId, {
     handoffTo: childId,
     handoffRelayedAt: captured?.cursor ?? new Date().toISOString(),
     handoffRelayAwaiting: captured?.awaiting === true ? true : null,
   }).catch(() => false)
-  await patchSession(childId, { handoffFrom: parentId }).catch(() => false)
+  await patchSession(childId, { handoffFrom: parentId, handoffSeq: nextHandoffSeq(parentSeq) }).catch(() => false)
 }
 
 /**

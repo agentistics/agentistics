@@ -240,6 +240,8 @@ export interface SessionView {
   parentConversationId?: string
   /** `ManagedSession.away` — per-session away mode. */
   away?: boolean
+  /** `ManagedSession.handoffSeq` — the leader hand-off generation. */
+  handoffSeq?: number
   /**
    * Whether this harness has probed approval rules at all.
    *
@@ -687,6 +689,7 @@ export function buildSessionViews(o: {
       ...(r.managed?.parentSessionId ? { parentSessionId: r.managed.parentSessionId } : {}),
       ...(r.managed?.parentConversationId ? { parentConversationId: r.managed.parentConversationId } : {}),
       ...(r.managed?.away ? { away: true } : {}),
+      ...(r.managed?.handoffSeq ? { handoffSeq: r.managed.handoffSeq } : {}),
       ...(r.managed?.conversationId ? { conversationId: r.managed.conversationId } : {}),
       ...(conv && r.managed?.conversationId && conv.sessionId !== r.managed.conversationId
         ? { conversationStoreId: conv.sessionId } : {}),

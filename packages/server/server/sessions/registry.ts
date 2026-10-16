@@ -56,6 +56,7 @@ export interface SessionPatch {
   handoffHintTokens?: number
   handoffTo?: string
   handoffFrom?: string
+  handoffSeq?: number
   handoffRelayedAt?: string
   /** `null` clears it (registry patch rule). */
   handoffRelayAwaiting?: boolean | null
@@ -148,6 +149,7 @@ function sanitize(raw: unknown): ManagedSession | null {
       ? { handoffHintTokens: s.handoffHintTokens } : {}),
     ...(typeof s.handoffTo === 'string' && s.handoffTo ? { handoffTo: s.handoffTo } : {}),
     ...(typeof s.handoffFrom === 'string' && s.handoffFrom ? { handoffFrom: s.handoffFrom } : {}),
+    ...(typeof s.handoffSeq === 'number' && Number.isInteger(s.handoffSeq) && s.handoffSeq >= 2 ? { handoffSeq: s.handoffSeq } : {}),
     ...(typeof s.handoffRelayedAt === 'string' && s.handoffRelayedAt ? { handoffRelayedAt: s.handoffRelayedAt } : {}),
     ...(s.handoffRelayAwaiting === true ? { handoffRelayAwaiting: true } : {}),
     ...(typeof s.handoffBaseTokens === 'number' && Number.isFinite(s.handoffBaseTokens) && s.handoffBaseTokens > 0

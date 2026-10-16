@@ -922,6 +922,8 @@ export interface ControlSession {
   parentConversationId?: string
   /** Per-session AWAY MODE (`ManagedSession.away`): on for this session alone. Absent = not on its own. */
   away?: boolean
+  /** Leader hand-off generation (2 = first successor), shown in the ⓘ panel. Absent = never handed off. */
+  handoffSeq?: number
 }
 
 /**
