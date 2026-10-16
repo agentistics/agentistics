@@ -23,7 +23,7 @@ describe('away digest bell action', () => {
     const source = readFileSync(new URL('../components/NotificationBell.tsx', import.meta.url), 'utf8')
     expect(source).toContain('Sim, abrir resumo')
     expect(source).toContain('Não agora')
-    expect(source).toContain('disabled={digestBusy}')
+    expect(source).toContain('busy={digestBusy}')
     expect(source).toContain('navigate(`/sessions/${encodeURIComponent(body.conversationId)}`)')
   })
 })

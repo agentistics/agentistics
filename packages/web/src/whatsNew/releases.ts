@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.136.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Avisos do sistema no chat (entregas, bloqueios, modo ausente) aparecem como uma linha compacta com o nome da sessão; clique para ver o texto.',
+        en: 'System notices in the chat (handbacks, blocks, away mode) show as one compact line with the session name; click to read the text.',
+      },
+      {
+        pt: 'O modo ausente ligado e desligado agora são avisos diferentes.',
+        en: 'Away mode turning on and off now read as different notices.',
+      },
+      {
+        pt: 'No sino de notificações, os botões de ação ficam numa linha própria, abaixo da mensagem.',
+        en: 'In the notification bell, action buttons sit on their own row below the message.',
+      },
+    ],
+  },
   '2.136.0': {
     features: [
       {

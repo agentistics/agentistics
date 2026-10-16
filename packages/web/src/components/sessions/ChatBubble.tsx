@@ -26,8 +26,10 @@ import remarkGfm from 'remark-gfm'
 // message written across several lines renders as one run-on paragraph — which is what "the
 // messages are not formatted" turned out to mean. `HarnessChat` has always used it.
 import remarkBreaks from 'remark-breaks'
-import { ArrowUpRight, Check, ChevronDown, Clock, Copy, CornerUpLeft, Ellipsis, ExternalLink, Forward, Image as ImageIcon, KeyRound, Link2, ListChecks, Loader, Mic, User } from 'lucide-react'
+import { ArrowUpRight, Info, Check, ChevronDown, Clock, Copy, CornerUpLeft, Ellipsis, ExternalLink, Forward, Image as ImageIcon, KeyRound, Link2, ListChecks, Loader, Mic, User } from 'lucide-react'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
+import { useFleet } from '../../lib/fleet'
+import { parseSystemEvent, systemEventLine, type SystemEvent } from '../../lib/systemEvent'
 import { chatNote, type ChatNoteTab } from '../../lib/chatNote'
 import { openArtifacts } from '../../lib/artifactsStore'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -294,12 +296,9 @@ export function ReasoningBlock({ text, pt }: { text: string; pt: boolean }) {
   )
 }
 
-function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt: boolean }) {
-  const { label, help, tab } = chatNote(note, pt)
-  const [shown, setShown] = useState(false)
-  const isMobile = useIsMobile()
-
-  const chip: React.CSSProperties = {
+/** The pill every system notice and event row wears. One definition so the two cannot drift. */
+function systemChipStyle(isMobile: boolean): React.CSSProperties {
+  return {
     fontSize: 10.5, lineHeight: 1.4, color: 'var(--text-tertiary)',
     padding: '3px 10px', borderRadius: 999,
     background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
@@ -308,6 +307,14 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
     // Sleek chip dimensions on mobile and desktop
     ...(isMobile ? { padding: '4px 10px', margin: '2px 0' } : {}),
   }
+}
+
+function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt: boolean }) {
+  const { label, help, tab } = chatNote(note, pt)
+  const [shown, setShown] = useState(false)
+  const isMobile = useIsMobile()
+
+  const chip = systemChipStyle(isMobile)
 
   // CHECKIN.PROMPT-SYSTEM is a notice, but its action belongs to the shared session header so
   // the same larger report view is used from both places.
@@ -362,7 +369,7 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
   )
 }
 
-export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessionId, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, onQuoteClick, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect, vaultGrant }: ChatBubbleProps) {
+const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, sessionId, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, onQuoteClick, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect, vaultGrant }: ChatBubbleProps) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const mine = turn.role === 'user'
@@ -1221,3 +1228,49 @@ function ShellRunBlock({ run, pt }: { run: NonNullable<ChatTurn['shell']>; pt: b
     </div>
   )
 }
+
+/** A message agentistics injected: one compact row, full text on click. No bubble, no echo chrome. */
+export function SystemEventRow({ event, pt, titleOf, defaultOpen = false, open: controlledOpen, onOpenChange }: { event: SystemEvent; pt: boolean; titleOf?: (id: string) => string | undefined; defaultOpen?: boolean; open?: boolean; onOpenChange?: (open: boolean) => void }) {
+  const [innerOpen, setInnerOpen] = useState(defaultOpen)
+  const open = controlledOpen ?? innerOpen
+  const setOpen = (v: boolean) => { if (controlledOpen === undefined) setInnerOpen(v); onOpenChange?.(v) }
+  const isMobile = useIsMobile()
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '4px 0' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        style={{ ...systemChipStyle(isMobile), display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', minHeight: 24 }}
+      >
+        <Info size={12} color="var(--anthropic-orange)" style={{ flexShrink: 0 }} />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{systemEventLine(event, pt, event.sender ? titleOf?.(event.sender) : undefined)}</span>
+        <ChevronDown size={12} style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : undefined }} />
+      </button>
+      {open && (
+        <div style={{
+          marginTop: 4, padding: '8px 10px', borderRadius: 8, maxWidth: '92%', border: '1px solid var(--border-subtle)',
+          background: 'var(--bg-base)', color: 'var(--text-secondary)', fontSize: 12,
+          lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        }}>{event.body || (pt ? '(sem texto)' : '(no text)')}</div>
+      )}
+    </div>
+  )
+}
+
+function FleetSystemEventRow({ event, lang }: { event: SystemEvent; lang: ChatBubbleProps['lang'] }) {
+  const rows = useFleet(lang).fleet.rows
+  const titleOf = useCallback((id: string) => {
+    const r = rows.find(x => x.id === id || x.id.startsWith(id) || x.conversationId === id)
+    return r?.title || undefined
+  }, [rows])
+  return <SystemEventRow event={event} pt={lang === 'pt'} titleOf={titleOf} />
+}
+
+export const ChatBubble = memo(function ChatBubble(props: ChatBubbleProps) {
+  const event = props.turn.role === 'user' ? parseSystemEvent(props.turn.text) : null
+  if (event) return event.sender
+    ? <FleetSystemEventRow event={event} lang={props.lang} />
+    : <SystemEventRow event={event} pt={props.lang === 'pt'} />
+  return <ChatBubbleInner {...props} />
+})
