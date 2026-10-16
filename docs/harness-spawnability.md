@@ -8,8 +8,11 @@ Usage meters and totals remain visible when a harness is unavailable.
 A harness is unavailable when its launcher binary cannot resolve on the user
 PATH (including `~/.local/bin`), or its most recent checked fresh spawn exited
 unsuccessfully during the startup window within the past 30 minutes. Startup
-health is held in the spawning process's memory, without a new persistent store.
-A later successful fresh spawn clears the failure; resume checks do not change it.
+health is held in the server's memory, without a new persistent store. CLI fresh
+spawn checks report classified outcomes through the existing OS-account-authenticated
+service socket; an unreachable service does not fail the CLI command.
+A wholly unobservable capture check preserves the previous result.
+A later observed successful fresh spawn clears the failure; resume checks do not change it.
 Older concurrent spawn checks cannot overwrite a newer fresh spawn's result.
 
 Unavailable budgets have `freeSlots: 0` and `suggestedParallel: 0`. Routing

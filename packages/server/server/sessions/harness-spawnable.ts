@@ -36,5 +36,5 @@ export function harnessSpawnabilities(now = Date.now()): Partial<Record<HarnessI
   return Object.fromEntries(HARNESS_ORDER.map(h => [h, harnessSpawnability(h, now)]))
 }
 
-/** Tests only; startup health is deliberately process-local. */
+/** Tests only; startup health is deliberately held in server memory. */
 export function resetHarnessSpawnability(): void { outcomes.clear() }

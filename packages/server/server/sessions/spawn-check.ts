@@ -27,18 +27,22 @@ export async function spawnDeath(
   id: string,
   deadlineMs: number = SETTLE_MS,
   freshHarness?: HarnessId,
+  record: typeof noteFreshSpawn | ((harness: HarnessId, outcome: SpawnOutcome | undefined, startedAt: number) => Promise<void>) = noteFreshSpawn,
 ): Promise<SpawnOutcome | undefined> {
   const startedAt = Date.now()
   const deadline = startedAt + deadlineMs
-  let outcome = spawnOutcome([])
+  let observed = false
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, POLL_MS))
-    outcome = spawnOutcome(await backend.capture(id, 40).catch(() => [] as string[]))
+    let frame: string[]
+    try { frame = await backend.capture(id, 40) } catch { continue }
+    observed = true
+    const outcome = spawnOutcome(frame)
     if (outcome.died) {
-      if (freshHarness) noteFreshSpawn(freshHarness, outcome, startedAt)
+      if (freshHarness) await record(freshHarness, outcome, startedAt)
       return outcome
     }
   }
-  if (freshHarness) noteFreshSpawn(freshHarness, undefined, startedAt)
+  if (freshHarness && observed) await record(freshHarness, undefined, startedAt)
   return undefined
 }
