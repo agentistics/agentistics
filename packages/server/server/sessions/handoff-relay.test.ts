@@ -253,6 +253,15 @@ describe('HANDOFF.RELAY — kill is best-effort (fix1 H1/M5)', () => {
     expect(sent).toBe(0)
   })
 
+  it('fix5 N1: a stale kill marker on a predecessor that never ended does not block the loop', async () => {
+    const live = row({ handoffTo: 'next', handoffRelayedAt: cursor, handoffRelayClosing: new Date(NOW - 5 * 60_000).toISOString() })
+    let sent = 0
+    expect(await flushAllHandoffRelays(async () => { sent++; return true }, NOW, {
+      registry: [live, row({ id: 'next' })], ...io(),
+    })).toBe(1)
+    expect(sent).toBe(1)
+  })
+
   it('fix4 M3: an ended predecessor without a kill marker still forwards owed messages', async () => {
     const ended = row({ handoffTo: 'next', handoffRelayedAt: cursor, endedAt: new Date(NOW).toISOString() })
     let sends = 0
