@@ -146,6 +146,11 @@ export interface FleetFrame {
   window: Array<{ id: string; session: FleetRow; row: ControlSession; base: string; gauges: RowGauges }>
   /** Every row id in the whole fleet (window or not) — what `remove` is judged against. */
   allIds: Set<string>
+  /**
+   * The rows OUTSIDE the window (references, never serialized here), by id — so a row a stream sent
+   * while it was live can be sent ONE LAST TIME when it ends and leaves the window (`planFleetDelta`).
+   */
+  outside: Map<string, { session: FleetRow; row: ControlSession }>
   closedTotal: number
   /** Top-level fields, each already serialized — what `meta` is diffed on. */
   meta: Record<string, string>
@@ -204,6 +209,12 @@ export function closedVersionOf(p: Pick<FleetFramePayload, 'sessions' | 'rows'>,
   return h.digest('hex').slice(0, 16)
 }
 
+/** A row's serialization WITHOUT the gauges — what a change is judged on. */
+function baseOf(session: FleetRow, row: ControlSession): string {
+  const { cpuPercent: _cpu, rssBytes: _rss, ...rest } = row
+  return JSON.stringify([session, rest])
+}
+
 /** PURE. Build the shared frame from one `/api/fleet` payload. */
 export function buildFleetFrame(p: FleetFramePayload, closedLimit: number): FleetFrame {
   // `sessions[i]` is `fleetRow(rows[i])` for the managed half and the same object order throughout
@@ -211,12 +222,17 @@ export function buildFleetFrame(p: FleetFramePayload, closedLimit: number): Flee
   const byId = new Map(p.sessions.map(s => [s.id, s]))
   const { indexes, closedTotal } = windowOf(p.rows, closedLimit)
   const window: FleetFrame['window'] = []
+  const inWindow = new Set(indexes)
+  const outside: FleetFrame['outside'] = new Map()
+  p.rows.forEach((row, i) => {
+    const session = byId.get(row.id)
+    if (!inWindow.has(i) && session) outside.set(row.id, { session, row })
+  })
   for (const i of indexes) {
     const row = p.rows[i]!
     const session = byId.get(row.id)
     if (!session) continue
-    const { cpuPercent, rssBytes, ...rest } = row
-    window.push({ id: row.id, session, row, base: JSON.stringify([session, rest]), gauges: { cpu: cpuPercent, rss: rssBytes } })
+    window.push({ id: row.id, session, row, base: baseOf(session, row), gauges: { cpu: row.cpuPercent, rss: row.rssBytes } })
   }
   const metaValues: Record<string, unknown> = {
     attention: p.attention,
@@ -231,7 +247,7 @@ export function buildFleetFrame(p: FleetFramePayload, closedLimit: number): Flee
   }
   const meta: Record<string, string> = {}
   for (const [k, v] of Object.entries(metaValues)) meta[k] = JSON.stringify(v)
-  return { window, allIds: new Set(p.rows.map(r => r.id)), closedTotal, meta, metaValues }
+  return { window, allIds: new Set(p.rows.map(r => r.id)), outside, closedTotal, meta, metaValues }
 }
 
 /** What one stream remembers having sent. */
@@ -256,8 +272,14 @@ export interface FleetDelta {
  * PURE. What one stream must send to go from `sent` to `frame`, and what it will have sent afterwards.
  *
  * `upsert`: window rows that are new or whose content changed. `remove`: rows sent before that are no
- * longer in the FLEET (a row that slid out of the closed window still exists and is simply no longer
- * tracked). An empty delta (nothing in any field) means: send nothing.
+ * longer in the FLEET. An empty delta (nothing in any field) means: send nothing.
+ *
+ * **A row that LEAVES the window CHANGED is upserted ONE LAST TIME, then untracked.**
+ * That is how a session ends: `waiting` -> `exited`, and with `closed=0` (what the web asks for) an
+ * ended row is outside the window at once. It used to be "simply no longer tracked" — neither upserted
+ * nor removed — so the client kept the copy it was last sent and showed a killed session as
+ * `waiting` / "precisa de você" for as long as the page stayed open (measured: 28 against 6 real).
+ * The client's merge keeps a row it holds until told otherwise, so silence is never "it ended".
  */
 export function planFleetDelta(sent: SentState, frame: FleetFrame): { delta: FleetDelta; next: SentState; empty: boolean } {
   const upsert: string[] = []
@@ -272,6 +294,12 @@ export function planFleetDelta(sent: SentState, frame: FleetFrame): { delta: Fle
     nextGauges.set(w.id, changed || !sentGauges ? w.gauges : sentGauges)
   }
   const remove = [...sent.rows.keys()].filter(id => !frame.allIds.has(id))
+  for (const [id, sentBase] of sent.rows) {
+    if (nextRows.has(id)) continue
+    const o = frame.outside.get(id)
+    // Unchanged (a closed row that merely slid out of the window): the client already holds it.
+    if (o && baseOf(o.session, o.row) !== sentBase) upsert.push(id)
+  }
   const meta: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(frame.meta)) if (sent.meta[k] !== v) meta[k] = frame.metaValues[k]
   for (const k of Object.keys(sent.meta)) if (!(k in frame.meta)) meta[k] = null
@@ -303,7 +331,8 @@ export function snapshotBody(seq: number, frame: FleetFrame): Record<string, unk
 /** PURE. The `delta` event body. */
 export function deltaBody(seq: number, frame: FleetFrame, d: FleetDelta): Record<string, unknown> {
   const pick = new Set(d.upsert)
-  const allRawSessions = frame.window.map(w => compactFleetSession(w.session, w.row))
+  const departed = d.upsert.flatMap(id => { const o = frame.outside.get(id); return o ? [compactFleetSession(o.session, o.row)] : [] })
+  const allRawSessions = [...frame.window.map(w => compactFleetSession(w.session, w.row)), ...departed]
   const all = compactFleetRows(allRawSessions)
   const sessions = all.sessions.filter(row => pick.has(String(row.id)))
   const verbCatalog = all.verbCatalog
