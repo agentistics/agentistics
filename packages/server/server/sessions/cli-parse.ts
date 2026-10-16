@@ -43,6 +43,8 @@ export type SessionCommand =
       away?: boolean
       /** `--folder <ref>`: the sidebar folder (id, name or "Parent/Child") the session is filed into at spawn. */
       folder?: string
+      /** `--shared-cwd`: allow a main checkout another live session already works in. */
+      sharedCwd?: boolean
       /** A refusal is machine-readable too — see `admissionRefusalBody`. */
       json?: boolean
     }
@@ -88,6 +90,8 @@ export type SessionCommand =
       force?: boolean
       /** `--away` / `--no-away` for every session of the batch (absent = inherit). */
       away?: boolean
+      /** `--shared-cwd`: allow a main checkout another live session already works in. */
+      sharedCwd?: boolean
     }
   | { kind: 'open'; task: string; json?: boolean; force?: boolean; folder?: string }
   | { kind: 'attach'; ref: string }
@@ -285,6 +289,7 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
     if (arg === '--bg' || arg === '--background') { cmd.background = true; continue }
     if (arg === '--json') { cmd.json = true; continue }
     if (arg === '--force') { cmd.force = true; continue }
+    if (arg === '--shared-cwd') { cmd.sharedCwd = true; continue }
     if (arg === '--away') { cmd.away = true; continue }
     if (arg === '--no-away') { cmd.away = false; continue }
     if (arg === '--task') {
@@ -302,7 +307,7 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
     const value = argv[i + 1]
     if (
       value === undefined || VALUE_FLAGS.has(value)
-      || value === '--bg' || value === '--background' || value === '--force'
+      || value === '--bg' || value === '--background' || value === '--force' || value === '--shared-cwd'
     ) {
       return { kind: 'error', message: `Missing value for ${arg}` }
     }
@@ -407,6 +412,7 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
   const shared: { cwd?: string; model?: string; effort?: string; attempt?: string; notify?: NotifySwitch; folder?: string } = {}
 
   let force = false
+  let sharedCwd = false
   let away: boolean | undefined
 
   for (let i = 0; i < argv.length; i++) {
@@ -419,9 +425,10 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
     // a per-session force would mean "start this one anyway, refuse the rest", which is not what
     // the memory gate decides (see `spawn-admission.ts`: a batch is admitted or refused as a unit).
     if (arg === '--force') { force = true; continue }
+    if (arg === '--shared-cwd') { sharedCwd = true; continue }
     if (!VALUE_FLAGS.has(arg)) return { kind: 'error', message: `Unknown option: ${arg}` }
     const value = argv[i + 1]
-    if (value === undefined || VALUE_FLAGS.has(value) || value === '--json' || value === '--force') {
+    if (value === undefined || VALUE_FLAGS.has(value) || value === '--json' || value === '--force' || value === '--shared-cwd') {
       return { kind: 'error', message: `Missing value for ${arg}` }
     }
     i++
@@ -459,7 +466,7 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
 
   if (!task) return { kind: 'error', message: 'batch needs --task "<name>" so the sessions belong together.' }
   if (specs.length === 0) return { kind: 'error', message: 'batch needs at least one --session "<harness>: <prompt>".' }
-  return { kind: 'batch', task, ...(subtask ? { subtask } : {}), specs, ...(json ? { json: true } : {}), ...(force ? { force: true } : {}), ...(away !== undefined ? { away } : {}) }
+  return { kind: 'batch', task, ...(subtask ? { subtask } : {}), specs, ...(json ? { json: true } : {}), ...(force ? { force: true } : {}), ...(sharedCwd ? { sharedCwd: true } : {}), ...(away !== undefined ? { away } : {}) }
 }
 
 /** `<harness>[@<cwd>]: <prompt>` — the one string that describes a session in a batch. */

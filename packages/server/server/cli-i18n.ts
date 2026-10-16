@@ -335,6 +335,8 @@ export interface CliStrings {
   sessFileNoConversation: string
   /** SS-09: the board refused the filing — its reason, in words. */
   sessFileRefused: (reason: string) => string
+  /** Spawn succeeded; explain a refused board filing without inviting another spawn. */
+  spawnFilingFailed: (reason: string) => string
   sessTaskEmpty: (task: string) => string
   sessTaskOpened: (task: string, opened: number, skipped: number, held: number) => string
   sessTaskNoneOpened: (task: string, skipped: number) => string
@@ -746,6 +748,18 @@ const EN: CliStrings = {
   sessFiled: (task: string) => `filed under ${task} — its cost rolls up there from now on.`,
   sessFileNoConversation: 'agentop cannot see which conversation this external session is, so there is nothing to file — start it from agentop, or file it from the web once its conversation is known.',
   sessFileRefused: (reason: string) => `the board did not file it: ${reason}.`,
+  spawnFilingFailed: (reason: string) => {
+    const reasons: Record<string, string> = {
+      no_such_task: 'the task no longer exists',
+      no_such_session: 'the session is not registered on the board yet',
+      no_such_subtask: 'the subtask no longer exists',
+      needs_subtask: 'choose a subtask first',
+      wrong_delivery: 'the subtask belongs to another task',
+      blocked: 'the subtask has unfinished blockers',
+      subtask_in_group: 'choose the group instead of its member',
+    }
+    return `The session started, but the board did not file it: ${reasons[reason] ?? 'the board could not confirm the filing'}.`
+  },
   sessTaskEmpty: (task: string) => `no sessions are filed under "${task}".`,
   sessTaskOpened: (task: string, opened: number, skipped: number, held: number) =>
     `reopened ${opened} session(s) of "${task}".`
@@ -1145,6 +1159,18 @@ const PT: CliStrings = {
   sessFiled: (task: string) => `arquivada em ${task} — o custo dela soma lá a partir de agora.`,
   sessFileNoConversation: 'o agentop não consegue ver qual conversa é esta sessão externa, então não há o que arquivar — inicie pelo agentop, ou arquive pela web quando a conversa for conhecida.',
   sessFileRefused: (reason: string) => `o board não arquivou: ${reason}.`,
+  spawnFilingFailed: (reason: string) => {
+    const reasons: Record<string, string> = {
+      no_such_task: 'a tarefa não existe mais',
+      no_such_session: 'a sessão ainda não está registrada no quadro',
+      no_such_subtask: 'a subtarefa não existe mais',
+      needs_subtask: 'escolha uma subtarefa primeiro',
+      wrong_delivery: 'a subtarefa pertence a outra tarefa',
+      blocked: 'a subtarefa tem bloqueios pendentes',
+      subtask_in_group: 'escolha o grupo em vez de um membro',
+    }
+    return `A sessão iniciou, mas o quadro não a vinculou: ${reasons[reason] ?? 'o quadro não conseguiu confirmar o vínculo'}.`
+  },
   sessTaskEmpty: (task: string) => `nenhuma sessão está na tarefa "${task}".`,
   sessTaskOpened: (task: string, opened: number, skipped: number, held: number) =>
     `${opened} sessão(ões) de "${task}" reabertas.`

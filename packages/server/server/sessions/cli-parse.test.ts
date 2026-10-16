@@ -336,3 +336,23 @@ describe('retire minimum quiet interval', () => {
       .toMatchObject({ kind: 'retire', quietForMs: 10_000 })
   })
 })
+
+describe('spawn filing flags (S4)', () => {
+  it('start takes --task, --subtask and --shared-cwd', () => {
+    const cmd = parseSessionArgs(['claude', '--bg', '--task', 't-1', '--subtask', 'Planner', '--shared-cwd'])
+    expect(cmd).toMatchObject({ kind: 'start', task: 't-1', subtask: 'Planner', sharedCwd: true })
+  })
+  it('--shared-cwd is a switch: it never eats the next flag as its value', () => {
+    expect(parseSessionArgs(['claude', '--shared-cwd', '--name', 'x'])).toMatchObject({ kind: 'start', sharedCwd: true, label: 'x' })
+  })
+  it('a value flag followed by --shared-cwd is a missing value', () => {
+    expect(parseSessionArgs(['claude', '--cwd', '--shared-cwd'])).toMatchObject({ kind: 'error' })
+  })
+  it('batch takes --subtask and --shared-cwd', () => {
+    const cmd = parseSessionArgs(['batch', '--task', 'T', '--subtask', 'S', '--shared-cwd', '--session', 'claude: go'])
+    expect(cmd).toMatchObject({ kind: 'batch', task: 'T', subtask: 'S', sharedCwd: true })
+  })
+  it('without the switch there is no sharedCwd key', () => {
+    expect(parseSessionArgs(['claude'])).not.toHaveProperty('sharedCwd')
+  })
+})

@@ -4529,67 +4529,55 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * than a session that starts and immediately dies with a usage error on a screen nobody sees.
      */
     async spawnSession(req: SpawnSessionRequest): Promise<SpawnSessionResult> {
-      let taskId = req.taskId
-      let subtaskId = req.subtaskId
-      let handoffParent: ManagedSession | undefined
-      // Leader hand-off: no filing of its own → take the parent's. Resolved BEFORE the spawn so the
-      // child's briefing names the same task/subtask it is filed on (it said "not linked" otherwise).
-      if (!taskId && req.handoff && req.parentSessionId) {
-        const { readRegistry } = await import('./sessions/registry')
-        const parent = (await readRegistry()).find(m => m.id === req.parentSessionId)
-        taskId = parent?.taskId
-        subtaskId = parent?.subtaskId
-        handoffParent = parent
-      }
-      // A group MEMBER can never hold a session (`subtask_in_group`): file it on the member's GROUP
-      // instead of leaving the session unfiled while its briefing claims the member.
-      if (taskId && subtaskId) {
-        const { loadTaskWorld } = await import('./sessions/task-source')
-        const sub = (await loadTaskWorld().catch(() => null))?.book.subtasks.find(s => s.id === subtaskId)
-        if (sub?.parentGroupId) subtaskId = sub.parentGroupId
-      }
+      // WHERE this session is filed is the one planner's answer (`spawn-filing.ts`), shared with
+      // `session start` / `batch`: references resolved on the board, a group member filed on its
+      // group, a hand-off inheriting its predecessor's filing, cwd and folder. A refusal spawns nothing.
+      const { planSpawnFilingSafe, attachAfterSpawn } = await import('./sessions/spawn-filing-io')
+      const { filingRow, refusalText, spawnSessionFilingRequest } = await import('./sessions/spawn-row')
+      const filing = await planSpawnFilingSafe(spawnSessionFilingRequest(req))
+      if (!filing.ok) return { ok: false, message: refusalText(filing) }
+      const taskId = filing.taskId
+      const subtaskId = filing.subtaskId
+      const rowFiling = filingRow(filing, req.task)
       return spawnManaged({
         harness: req.harness as HarnessId,
-        cwd: req.cwd,
+        cwd: filing.cwd,
         attach: req.attach,
         ...(req.prompt ? { prompt: req.prompt } : {}),
         ...(req.model ? { model: req.model } : {}),
         ...(req.effort ? { effort: req.effort } : {}),
         ...(req.mode ? { mode: req.mode } : {}),
         ...(req.label ? { label: req.label } : {}),
-        ...(req.task ? { task: req.task } : {}),
+        ...(rowFiling.task ? { task: rowFiling.task } : {}),
         ...(taskId ? { contextTaskId: taskId } : {}),
         ...(taskId && subtaskId ? { contextSubtaskId: subtaskId } : {}),
         ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
         ...(req.parentSessionId && req.parentVerified ? { parentVerified: true } : {}),
         ...(req.handoff ? { handoff: true } : {}),
-        ...(req.role ? { role: req.role } : {}),
+        ...(req.handoff ? { role: 'leader' as const } : req.role ? { role: req.role } : {}),
         ...(req.away !== undefined ? { away: req.away } : {}),
         ...(req.force ? { force: true } : {}),
         ...(req.origin ? { origin: req.origin } : {}),
         ...(req.account ? { account: req.account } : {}),
       }, S(), lang).then(async r => {
+        let attachNote = ''
         // NW-02: a session started for a BOARD task is filed there by id, not only named after it.
         if (r.ok && r.id && taskId) {
-          const { attachSession } = await import('./sessions/task-web')
-          await attachSession(taskId, r.id, subtaskId ? { subtaskId } : {}).catch(() => null)
+          const a = await attachAfterSpawn({ taskId, ...(subtaskId ? { subtaskId } : {}) }, r.id)
+          if (!a.ok) attachNote = S().spawnFilingFailed(a.reason)
         }
-        // A hand-off child also joins the parent's sidebar folder. Never fails the spawn: the session
-        // is already running, and an error here would invite a retry that starts a second leader.
-        if (r.ok && r.id && req.handoff && req.parentSessionId) {
+        // The folder the plan chose (the predecessor's, the task's, or where the caller works).
+        // Never fails the spawn: the session is already running, and an error here would invite a
+        // retry that starts a second leader.
+        if (r.ok && r.id && filing.folderId) {
           try {
             const { readRegistry } = await import('./sessions/registry')
-            const reg = await readRegistry()
-            const parent = handoffParent ?? reg.find(m => m.id === req.parentSessionId)
-            const child = reg.find(m => m.id === r.id) ?? { id: r.id }
-            if (parent) {
-              const { fileHandoffInParentGroup } = await import('./sessions/handoff-group')
-              const { updatePreferences } = await import('./preferences')
-              await fileHandoffInParentGroup(parent, child, updatePreferences)
-            }
+            const row = (await readRegistry()).find(m => m.id === r.id)
+            const { fileInFolder } = await import('./sessions/cli-folder')
+            await fileInFolder(filing.folderId, { id: r.id, ...(row?.conversationId ? { conversationId: row.conversationId } : {}) })
           } catch { /* a folder is a convenience, not the spawn */ }
         }
-        return r
+        return attachNote ? { ...r, message: `${r.message ? r.message + ' ' : ''}${attachNote}` } : r
       })
     },
   }
