@@ -23,9 +23,10 @@ import type { SessionView } from './session-view'
 import type { ManagedSession, RetireRequest } from './types'
 import type { SessionPatch } from './registry'
 import {
-  activityReasons, decideRetire, nextStreak, retireNoteText, retireReasonsText,
+  MIN_QUIET_FOR_MS, activityReasons, decideRetire, nextStreak, retireNoteText, retireReasonsText,
   type QuietStreak, type RetireDecision,
 } from './retire-plan'
+import type { HarnessTranscript } from './harness-transcript'
 import { WORK_CHILDREN_TRUSTED, type WorkChildrenResult } from './work-children'
 
 export interface RetireRunnerDeps {
@@ -33,6 +34,8 @@ export interface RetireRunnerDeps {
   patch(id: string, patch: SessionPatch): Promise<boolean>
   /** `backend.kill` — true when the backend confirms the pane is gone. */
   kill(id: string): Promise<boolean>
+  /** A hub poll that starts after this call; never a cached activity read. */
+  readFresh(): Promise<SessionSnapshot>
   /** Marks the row ended (`registry.retireSession`). */
   markEnded(id: string): Promise<void>
   fileInFolder(folderId: string, row: { id: string; conversationId?: string }): Promise<boolean>
@@ -43,7 +46,7 @@ export interface RetireRunnerDeps {
   /** A comment on the row's task (best effort). */
   comment(taskId: string, body: string): Promise<void>
   /** A user-facing notification (expire / cancel / retire). */
-  notify(level: 'info' | 'warning', title: string, message: string): void
+  notify(level: 'info' | 'warning', title: string, message: string, code: string, meta: Record<string, unknown>): void
   /** Poll the fleet now (the kill is a fleet event). */
   refresh(id: string): void
   now(): number
@@ -62,6 +65,14 @@ const nameOf = (r: ManagedSession): string => (r.label ? `${r.label} (${r.id})` 
 
 export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
   const streaks = new Map<string, QuietStreak>()
+  const missingSuccessors = new Map<string, { at: number; polls: number }>()
+  const lostRows = new Map<string, { at: number; polls: number }>()
+  const confirm = (map: Map<string, { at: number; polls: number }>, id: string, at: number): boolean => {
+    const prev = map.get(id)
+    const polls = prev ? prev.polls + Number(at > prev.at) : 1
+    map.set(id, { at: Math.max(at, prev?.at ?? at), polls })
+    return polls >= 2
+  }
   let queue: Promise<void> = Promise.resolve()
   const log = d.log ?? (() => {})
 
@@ -75,6 +86,26 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
     const notes = 'notes' in decision ? decision.notes.map(n => retireNoteText(n, fresh.harness)) : []
 
     if (decision.action === 'retire') {
+      if (decision.kill) {
+        const snap = await d.readFresh()
+        const view = snap.sessions.find(v => v.id === row.id)
+        const successor = req.successorId ? snap.sessions.find(v => v.id === req.successorId) : undefined
+        const streak = nextStreak(streaks.get(row.id) ?? null, view?.activity, snap.polledAtMs)
+        if (!snap.unavailable) {
+          if (streak) streaks.set(row.id, streak)
+          else streaks.delete(row.id)
+        }
+        // No further IO between this activity check and backend.kill.
+        if (snap.unavailable || !running(view) ||
+          (req.successorId && (!successor || ['exited', 'lost', 'closed'].includes(successor.status) || successor.activity === 'exited')) ||
+          activityReasons(req, { activity: view?.activity, streak }).length ||
+          d.now() >= Date.parse(req.deadlineAt)) return
+      }
+      if (!decision.kill) {
+        const snap = await d.readFresh()
+        const view = snap.sessions.find(v => v.id === row.id)
+        if (snap.unavailable || !view || !['exited', 'lost', 'closed'].includes(view.status)) return
+      }
       if (decision.kill && !(await d.kill(row.id))) {
         log(`[retire] could not confirm ${row.id} was killed — the request is kept`)
         return
@@ -90,7 +121,7 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
       const body = `Session ${who} retired${succ}${decision.kill ? ' once it was idle' : ' (it had already stopped)'}${filed}.${notes.length ? ` Note: ${notes.join('; ')}.` : ''}`
       log(`[retire] ${body}`)
       if (fresh.taskId) await d.comment(fresh.taskId, body).catch(() => {})
-      d.notify('info', 'Session retired', body)
+      d.notify('info', 'Session retired', body, 'retire.done', { id: row.id, label: fresh.label ?? row.id, successorId: req.successorId ?? '', reason: '' })
       d.refresh(row.id)
       return
     }
@@ -100,7 +131,7 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
       const body = `Retire of ${who} cancelled: its successor ${req.successorId} is no longer running, so the task keeps its current session.`
       log(`[retire] ${body}`)
       if (fresh.taskId) await d.comment(fresh.taskId, body).catch(() => {})
-      d.notify('warning', 'Retire cancelled', body)
+      d.notify('warning', 'Retire cancelled', body, 'retire.cancelled', { id: row.id, label: fresh.label ?? row.id, successorId: req.successorId ?? '', reason: 'successor-dead' })
       return
     }
     // expire
@@ -110,30 +141,50 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
     const body = `Session ${who} was NOT retired: the deadline passed while ${why}. Nothing was killed; end it by hand when it is done (\`agentop session kill ${row.id}\`).`
     log(`[retire] ${body}`)
     if (fresh.taskId) await d.comment(fresh.taskId, body).catch(() => {})
-    d.notify('warning', 'Retire expired', body)
+    d.notify('warning', 'Retire expired', body, 'retire.expired', { id: row.id, label: fresh.label ?? row.id, successorId: req.successorId ?? '', reason: why })
   }
 
   async function consumeOne(snap: SessionSnapshot): Promise<void> {
     // A failed poll hands back the PREVIOUS list: it says nothing new and must not advance a streak.
     if (snap.unavailable) return
-    const pending = (await d.readRegistry()).filter(r => r.retire && !r.retire.expiredAt)
+    const registry = await d.readRegistry()
+    const pending = registry.filter(r => r.retire && !r.retire.expiredAt)
     const ids = new Set(pending.map(r => r.id))
     for (const id of [...streaks.keys()]) if (!ids.has(id)) streaks.delete(id)
+    for (const id of lostRows.keys()) if (!ids.has(id)) lostRows.delete(id)
+    const successors = new Set(pending.map(r => r.retire!.successorId))
+    for (const id of missingSuccessors.keys()) if (!successors.has(id)) missingSuccessors.delete(id)
     if (pending.length === 0) return
     const views = new Map(snap.sessions.map(v => [v.id, v]))
     const now = d.now()
     for (const row of pending) {
-      const req = row.retire!
+      const req = { ...row.retire!, quietForMs: Math.max(MIN_QUIET_FOR_MS, row.retire!.quietForMs) }
+      let successorAlive: boolean | null = null
+      if (req.successorId) {
+        const sv = views.get(req.successorId)
+        const sr = registry.find(r => r.id === req.successorId)
+        if (sv) {
+          missingSuccessors.delete(req.successorId)
+          successorAlive = !['exited', 'lost', 'closed'].includes(sv.status) && sv.activity !== 'exited'
+        } else if (sr?.endedAt) successorAlive = false
+        else if (snap.polledAtMs > Math.max(Date.parse(sr?.createdAt ?? req.requestedAt), Date.parse(req.requestedAt)) + SUCCESSOR_GRACE_MS) {
+          successorAlive = confirm(missingSuccessors, req.successorId, snap.polledAtMs) ? false : null
+        } else missingSuccessors.delete(req.successorId)
+      }
       const v = views.get(row.id)
       const streak = nextStreak(streaks.get(row.id) ?? null, v?.activity, snap.polledAtMs)
       if (streak) streaks.set(row.id, streak)
       else streaks.delete(row.id)
+      // Missing rows are unknown. A transient lost status needs a second distinct poll.
+      const stopped = !!v && (v.status === 'exited' || v.status === 'closed' ||
+        (v.status === 'lost' && confirm(lostRows, row.id, snap.polledAtMs)))
+      if (v?.status !== 'lost') lostRows.delete(row.id)
       const base = {
-        running: running(v),
+        running: !stopped,
         ...(v?.activity ? { activity: v.activity } : {}),
         streak,
         childrenTrusted: WORK_CHILDREN_TRUSTED[row.harness as HarnessId] ?? false,
-        successorAlive: req.successorId ? running(views.get(req.successorId)) : null,
+        successorAlive,
       }
       // The probes cost a transcript read and a /proc walk: only for a row the activity says is quiet.
       const probe = base.running && base.successorAlive !== false && activityReasons(req, base).length === 0
@@ -222,17 +273,11 @@ async function attachRetireRunner(log: (line: string) => void): Promise<(() => v
       readRegistry: reg.readRegistry,
       patch: reg.patchSession,
       kill: id => backend.kill(id),
+      readFresh: () => hub.refresh(),
       markEnded: id => reg.retireSession(id),
       fileInFolder: (f, row) => fileInFolder(f, row),
       async bgTasks(row) {
-        const reader = HARNESS_TRANSCRIPTS[row.harness]
-        // No reader: the harness has no transcript format here, and no harness but Claude has the
-        // background-task concept at all (spec 2.3) — 0 by construction.
-        if (!reader) return 0
-        if (!row.conversationId) return null
-        const p = await reader.resolve({ conversationId: row.conversationId, cwd: row.cwd })
-        if (!p) return null
-        return (await reader.readRecent(p, 400)).filter(t => t.task?.running).length
+        return readRetireBgTasks(row, HARNESS_TRANSCRIPTS)
       },
       async children(row) {
         const pid = (await backend.listPanePids?.())?.get(row.id)
@@ -246,7 +291,7 @@ async function attachRetireRunner(log: (line: string) => void): Promise<(() => v
         const { addComment } = await import('./task-web')
         await addComment(taskId, { author: 'agentop', body })
       },
-      notify: (level, title, message) => broadcastNotification({ type: level, title, message }),
+      notify: (level, title, message, code, meta) => broadcastNotification({ type: level, title, message, code, meta }),
       refresh: id => kickFleet(id),
       now: () => Date.now(),
       log,
@@ -258,4 +303,25 @@ async function attachRetireRunner(log: (line: string) => void): Promise<(() => v
     log(`[retire] not started: ${e instanceof Error ? e.message : String(e)}`)
     return null
   }
+}
+
+/** A successor can be born after the poll started; allow the registry's birth grace. */
+export const SUCCESSOR_GRACE_MS = 30_000
+
+export const BG_TASKS_APPLICABLE: Record<HarnessId, boolean> = {
+  claude: true, codex: false, gemini: false, copilot: false,
+  antigravity: false, kimi: false, opencode: false,
+}
+
+export async function readRetireBgTasks(
+  row: ManagedSession,
+  readers: Record<HarnessId, HarnessTranscript | null>,
+): Promise<number | null> {
+  if (!BG_TASKS_APPLICABLE[row.harness]) return 0
+  const reader = readers[row.harness]
+  if (!reader || !row.conversationId) return null
+  const p = await reader.resolve({ conversationId: row.conversationId, cwd: row.cwd })
+  if (!p) return null
+  const window = await reader.read(p, 400)
+  return window.older ? null : window.turns.filter(t => t.task?.running).length
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  CONFIRM_POLLS, DEFAULT_DEADLINE_MS, DEFAULT_QUIET_FOR_MS, decideRetire, nextStreak, planRetireRequest,
+  MIN_QUIET_FOR_MS, CONFIRM_POLLS, DEFAULT_DEADLINE_MS, DEFAULT_QUIET_FOR_MS, decideRetire, nextStreak, planRetireRequest,
   retireNoteText, retireReasonsText, type QuietStreak, type RetireObservation,
 } from './retire-plan'
 import type { RetireRequest } from './types'
@@ -103,5 +103,24 @@ describe('planRetireRequest', () => {
     expect(planRetireRequest(pending, { by: 'x', successorId: 's2' }, T0)).toEqual({ ok: false, code: 'handoff_pending', successorId: 's1' })
     expect(planRetireRequest(pending, { by: 'x', successorId: 's1', deadlineMs: 5 }, T0).ok).toBe(true)
     expect(planRetireRequest({ ...pending, expiredAt: 'x' }, { by: 'x', successorId: 's2' }, T0).ok).toBe(true)
+  })
+})
+
+describe('retire QA safety gates', () => {
+  it('a named successor whose liveness is unknown blocks', () => {
+    expect(decideRetire(req({ successorId: 's' }), quiet(), at))
+      .toMatchObject({ action: 'wait', reasons: [{ code: 'successor-unknown' }] })
+  })
+  it('unreadable children on a trusted harness block; untrusted still carries a note', () => {
+    for (const children of [null, { checked: false, reason: 'unreadable' }] as const) {
+      expect(decideRetire(req(), quiet({ children }), at))
+        .toMatchObject({ action: 'wait', reasons: [{ code: 'children-unreadable' }] })
+      expect(decideRetire(req(), quiet({ children, childrenTrusted: false }), at))
+        .toEqual({ action: 'retire', kill: true, notes: [{ code: 'children-unchecked', why: 'unreadable' }] })
+    }
+  })
+  it('new requests enforce minimum quietFor even outside the CLI', () => {
+    const p = planRetireRequest(undefined, { by: 'person', quietForMs: 0 }, T0)
+    expect(p).toMatchObject({ ok: true, request: { quietForMs: MIN_QUIET_FOR_MS } })
   })
 })

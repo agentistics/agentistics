@@ -12,9 +12,10 @@
  * - no background task is still unsettled in its transcript (`bgTasksRunning === 0`; an unreadable
  *   count is unknown, and unknown is never quiet);
  * - no WORK child runs in the pane's process tree (`work-children.ts`). A harness whose tree was
- *   never measured, whose `/proc` cannot be read, or whose EMPTY answer is not yet TRUSTED
+ *   never measured or whose EMPTY answer is not yet TRUSTED
  *   (`WORK_CHILDREN_TRUSTED`) does not block — a child it does see still does — the decision carries a note saying children were not
  *   checked, so the result never claims a quiet it did not observe;
+ *   A failed probe on a trusted harness blocks retirement until it can be read.
  * - the successor (a hand-off) is still alive — a successor that died CANCELS the request, so a task
  *   is never left without its leader.
  *
@@ -24,6 +25,8 @@
 import type { RetireRequest, SessionActivity } from './types'
 import type { ProcNode, WorkChildrenResult } from './work-children'
 
+/** Two foreground hub intervals; also enforced for stored requests by the runner. */
+export const MIN_QUIET_FOR_MS = 10_000
 export const DEFAULT_QUIET_FOR_MS = 60_000
 export const DEFAULT_DEADLINE_MS = 30 * 60_000
 /** Polls of `waiting` in a row before it counts — the `event-plan.ts` confirmation. */
@@ -69,6 +72,8 @@ export type RetireReason =
   | { readonly code: 'quiet-too-short'; readonly quietMs: number; readonly wantMs: number }
   | { readonly code: 'bg-tasks'; readonly count: number }
   | { readonly code: 'bg-unknown' }
+  | { readonly code: 'children-unreadable' }
+  | { readonly code: 'successor-unknown' }
   | { readonly code: 'work-child'; readonly children: readonly ProcNode[] }
 
 export type RetireNote = { readonly code: 'children-unchecked'; readonly why: 'unmeasured' | 'unreadable' | 'untrusted' }
@@ -101,11 +106,13 @@ export function decideRetire(req: RetireRequest | undefined, obs: RetireObservat
 
   const reasons = activityReasons(req, obs)
   const notes: RetireNote[] = []
+  if (req.successorId && obs.successorAlive === null) reasons.push({ code: 'successor-unknown' })
   if (reasons.length === 0) {
     if (obs.bgTasksRunning === null) reasons.push({ code: 'bg-unknown' })
     else if (obs.bgTasksRunning > 0) reasons.push({ code: 'bg-tasks', count: obs.bgTasksRunning })
     const c = obs.children
-    if (c === null) notes.push({ code: 'children-unchecked', why: 'unreadable' })
+    if (obs.childrenTrusted && (c === null || (!c.checked && c.reason === 'unreadable'))) reasons.push({ code: 'children-unreadable' })
+    else if (c === null) notes.push({ code: 'children-unchecked', why: 'unreadable' })
     else if (!c.checked) notes.push({ code: 'children-unchecked', why: c.reason })
     // A work child SEEN is evidence whatever the trust; only an EMPTY answer needs trusting.
     else if (c.children.length > 0) reasons.push({ code: 'work-child', children: c.children })
@@ -129,6 +136,8 @@ export function retireReasonText(r: RetireReason): string {
     case 'not-confirmed': return `idle on ${r.polls} of ${CONFIRM_POLLS} polls needed`
     case 'quiet-too-short': return `quiet for only ${secs(r.quietMs)} of the ${secs(r.wantMs)} asked`
     case 'bg-tasks': return `${r.count} background task${r.count === 1 ? '' : 's'} still running`
+    case 'children-unreadable': return 'its child processes could not be read'
+    case 'successor-unknown': return 'its successor has not been observed yet'
     case 'bg-unknown': return 'its background tasks could not be read'
     case 'work-child': {
       const names = r.children.slice(0, 3).map(c => c.argv.split(' ')[0]!.replace(/^.*\//, '') || String(c.pid))
@@ -171,7 +180,7 @@ export function planRetireRequest(
   if (existing && !existing.expiredAt && existing.successorId && existing.successorId !== input.successorId) {
     return { ok: false, code: 'handoff_pending', successorId: existing.successorId }
   }
-  const quietForMs = input.quietForMs ?? DEFAULT_QUIET_FOR_MS
+  const quietForMs = Math.max(MIN_QUIET_FOR_MS, input.quietForMs ?? DEFAULT_QUIET_FOR_MS)
   const deadlineMs = input.deadlineMs ?? DEFAULT_DEADLINE_MS
   return {
     ok: true,

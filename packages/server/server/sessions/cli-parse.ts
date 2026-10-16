@@ -9,6 +9,7 @@
  * `cli.ts`'s `readFlag` comment already warns about for `agentop member`.
  */
 
+import { MIN_QUIET_FOR_MS } from './retire-plan'
 import { HARNESS_ORDER, type HarnessId, type SessionRole } from '@agentistics/core'
 // `GROUPINGS` is the ONE list of the dimensions a fleet can be grouped along — the same rule
 // `HARNESS_SORT` follows: a second hand-written list here would accept a value the table cannot
@@ -183,6 +184,7 @@ function parseRetire(args: string[], json: boolean): SessionCommand {
       const v = rest[i + 1]
       const ms = v === undefined ? null : parseDurationMs(v)
       if (ms === null || (a === '--deadline' && ms <= 0)) return { kind: 'error', message: `Bad value for ${a}: ${v ?? '(missing)'} — use e.g. 60s, 30m, 1h.` }
+      if (a === '--quiet-for' && ms < MIN_QUIET_FOR_MS) return { kind: 'error', message: `--quiet-for must be at least ${MIN_QUIET_FOR_MS / 1000}s (two poll intervals).` }
       if (a === '--quiet-for') quietForMs = ms
       else deadlineMs = ms
       i++
