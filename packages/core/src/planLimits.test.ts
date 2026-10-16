@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
-  alternativeWithRoom, currentUsedPct, forecastWindow, mostRoom, parseClaudeRateLimitEvent,
+  alternativeWithRoom, bindingPct, currentUsedPct, effectiveWindow, forecastWindow, mostRoom, parseClaudeRateLimitEvent,
   parseCodexRateLimits, planBudget, planPace, planSlots, planThresholdNotices, registeredPlanLabel,
   routeRecommendation, PLAN_WINDOW_MS,
   type PlanLimits, type PlanNoticeState,
@@ -227,4 +227,75 @@ test('11/10 over pace stops new slots and gives a pause-until time', () => {
   expect(pace.suggestedParallel).toBe(0)
   expect(pace.freeSlots).toBe(0)
   expect(pace.pauseUntil).toBe(reset)
+})
+
+describe('renewed windows project their next period', () => {
+  const now = Date.parse('2026-10-15T12:00:00Z')
+  const day = 24 * H
+
+  test('a stale weekly reset one day past leaves six days of sustainable budget', () => {
+    const l = lim('codex', [win('5h', 99, now - day), win('week', 99, now - day)], now - 3 * day)
+    const budget = planBudget(l, now)
+    const pace = planPace(l, now)
+    expect(budget.daysToWeekReset).toBeGreaterThan(5.9)
+    expect(budget.daysToWeekReset).toBeLessThan(6.1)
+    expect(budget.weekResetsAt).toBe(now + 6 * day)
+    expect(budget.weekResetProjected).toBe(true)
+    expect(budget.dailyBudgetPct).toBeLessThan(20)
+    expect(budget.status).toBe('ok')
+    expect(budget.fiveHourPct).toBe(0)
+    expect(budget.weekPct).toBe(0)
+    expect(pace.sustainablePctPerHour).toBeCloseTo(100 / 144)
+    expect(pace.sustainablePctPerHour).toBeLessThan(100 / 0.5 * 0.99)
+    expect(bindingPct(l, now)).toBe(0)
+    expect(l.windows[1]).toEqual(win('week', 99, now - day))
+  })
+
+  test('fifteen days past advances three weekly periods without mutating the reading', () => {
+    const w = win('week', 96, now - 15 * day)
+    const projected = effectiveWindow(w, now)
+    expect(projected).toEqual({ kind: 'week', usedPct: 0, resetsAt: w.resetsAt + 3 * PLAN_WINDOW_MS.week, projected: true })
+    expect(projected.resetsAt).toBe(now + 6 * day)
+    expect(effectiveWindow(projected, now)).toBe(projected)
+    expect(w.usedPct).toBe(96)
+    expect(forecastWindow(w, now)).toEqual({ kind: 'renewed' })
+  })
+
+  test('reset boundaries advance to a strictly future reset for either kind', () => {
+    for (const kind of ['5h', 'week'] as const) {
+      const w = win(kind, 100, now)
+      expect(effectiveWindow(w, now - 1)).toBe(w)
+      expect(effectiveWindow(w, now)).toEqual({ kind, usedPct: 0, resetsAt: now + PLAN_WINDOW_MS[kind], projected: true })
+      expect(effectiveWindow(w, now + PLAN_WINDOW_MS[kind]).resetsAt).toBe(now + 2 * PLAN_WINDOW_MS[kind])
+    }
+  })
+
+  test('an unrenewed captured fixture keeps its existing budget and pace', () => {
+    const rec = JSON.parse(fixture('plan-limits-claude.jsonl')) as { t: number; l: string }
+    const l = parseClaudeRateLimitEvent(JSON.parse(rec.l), rec.t)!
+    for (const w of l.windows) expect(effectiveWindow(w, rec.t)).toBe(w)
+    expect(planBudget(l, rec.t)).toEqual({
+      harness: 'claude', plan: 'unregistered', fiveHourPct: 25, weekPct: 35,
+      weekResetsAt: 1792112400000, daysToWeekReset: 6.010701979166667,
+      dailyBudgetPct: 10.81404471978358, status: 'tight',
+    })
+    expect(planPace(l, rec.t)).toEqual({
+      paceStatus: 'on', burnPctPerHour: 0.4505851966576492,
+      sustainablePctPerHour: 0.4505851966576492, suggestedParallel: 1,
+      note: 'On pace: keep the current cadence through the weekly reset.',
+      freeSlots: 1, freeSlotsMeasured: true, liveSessions: [],
+    })
+  })
+
+  test('burn uses only readings at or after the latest weekly renewal', () => {
+    const renewal = now - 2 * H
+    const reset = renewal + PLAN_WINDOW_MS.week
+    const before = lim('codex', [win('week', 1, renewal)], renewal - H)
+    const first = lim('codex', [win('week', 4, reset)], renewal)
+    const latest = lim('codex', [win('week', 10, reset)], now)
+    const pace = planPace(latest, now, [before, first])
+    expect(pace.burnPctPerHour).toBeCloseTo(3)
+    expect(pace).toEqual(planPace(latest, now, [first]))
+    expect(planPace(latest, now, [before]).burnPctPerHour).toBeCloseTo(planPace(latest, now).sustainablePctPerHour)
+  })
 })
