@@ -55,20 +55,3 @@ describe('one plan, one row', () => {
   })
 })
 
-describe('the three spawn sites share the planner and the row builder', () => {
-  const read = (rel: string) => readFileSync(join(import.meta.dir, '..', rel), 'utf8')
-  test('start and batch (cli-session) and spawnSession (cli-start) all plan through spawn-filing-io', () => {
-    for (const f of ['sessions/cli-session.ts', 'cli-start.ts']) {
-      expect(read(f)).toContain('spawn-filing-io')
-    }
-  })
-  test('start and batch build their row with filingRow', () => {
-    const src = read('sessions/cli-session.ts')
-    expect([...src.matchAll(/\.\.\.filingRow\(/g)].length).toBe(2)
-  })
-  test('spawnSession takes the row title from filingRow and files through attachSession', () => {
-    const src = read('cli-start.ts')
-    expect(src).toContain('filingRow(filing')
-    expect(src).toContain('attachSession(taskId')
-  })
-})

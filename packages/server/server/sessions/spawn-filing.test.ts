@@ -416,3 +416,25 @@ describe('small guards (L5, L6)', () => {
     expect(ok(planFiling(base({ taskRef: 't-1', groups, rows }))).folderId).toBe('a')
   })
 })
+
+describe('a spawn with no parent and no role is a PERSON, not a worker (H1)', () => {
+  const live = (): number => 1
+  const base = { repoOf, liveInCwd: live, callerCwd: '/home/u/agentistics', book, rows: [], groups: { groups: [] } } satisfies FilingInput
+  test('a person in a main checkout with a live session is accepted', () => {
+    const p = planFiling({ ...base })
+    expect(p.ok).toBe(true)
+    if (p.ok) expect(p.role).toBeUndefined()
+  })
+  test('the same spawn as a worker is refused', () => {
+    const p = planFiling({ ...base, role: 'worker' })
+    expect(p).toMatchObject({ ok: false, code: 'cwd_shared_checkout' })
+  })
+  test('a person picking a task of another repository is not sent to a worktree', () => {
+    const p = planFiling({ ...base, callerCwd: '/home/u/workspace', taskRef: 't-1' })
+    expect(p.ok).toBe(true)
+  })
+  test('refusal texts carry no CLI-only wording without naming it as the CLI', () => {
+    const p = planFiling({ ...base, role: 'worker' })
+    if (!p.ok) expect(p.detail).toContain('(CLI: --shared-cwd)')
+  })
+})
