@@ -61,10 +61,16 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
   }, [open, onCancel])
   const titleId = React.useId()
   const panelRef = React.useRef<HTMLDivElement>(null)
+  // The opener is read DURING the render that first shows the dialog: an effect is too late, because a
+  // child's autoFocus (the requireText input, the focusCancel button) already ran at commit.
+  const openerRef = React.useRef<HTMLElement | null>(null)
+  const wasOpen = React.useRef(false)
+  if (open && !wasOpen.current && typeof document !== 'undefined') openerRef.current = document.activeElement as HTMLElement | null
+  wasOpen.current = open
   // Dialog focus: remember what had it, move into the panel on open, trap Tab inside, give it back on close.
   React.useEffect(() => {
     if (!open) return
-    const prev = document.activeElement as HTMLElement | null
+    const prev = openerRef.current
     const panel = panelRef.current
     const focusables = () => Array.from(panel?.querySelectorAll<HTMLElement>(
       'button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])') ?? [])
