@@ -296,12 +296,9 @@ export function ReasoningBlock({ text, pt }: { text: string; pt: boolean }) {
   )
 }
 
-function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt: boolean }) {
-  const { label, help, tab } = chatNote(note, pt)
-  const [shown, setShown] = useState(false)
-  const isMobile = useIsMobile()
-
-  const chip: React.CSSProperties = {
+/** The pill every system notice and event row wears. One definition so the two cannot drift. */
+function systemChipStyle(isMobile: boolean): React.CSSProperties {
+  return {
     fontSize: 10.5, lineHeight: 1.4, color: 'var(--text-tertiary)',
     padding: '3px 10px', borderRadius: 999,
     background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
@@ -310,6 +307,14 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
     // Sleek chip dimensions on mobile and desktop
     ...(isMobile ? { padding: '4px 10px', margin: '2px 0' } : {}),
   }
+}
+
+function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt: boolean }) {
+  const { label, help, tab } = chatNote(note, pt)
+  const [shown, setShown] = useState(false)
+  const isMobile = useIsMobile()
+
+  const chip = systemChipStyle(isMobile)
 
   // CHECKIN.PROMPT-SYSTEM is a notice, but its action belongs to the shared session header so
   // the same larger report view is used from both places.
@@ -1227,21 +1232,18 @@ function ShellRunBlock({ run, pt }: { run: NonNullable<ChatTurn['shell']>; pt: b
 /** A message agentistics injected: one compact row, full text on click. No bubble, no echo chrome. */
 export function SystemEventRow({ event, pt, titleOf, defaultOpen = false }: { event: SystemEvent; pt: boolean; titleOf?: (id: string) => string | undefined; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen)
+  const isMobile = useIsMobile()
   return (
     <div style={{ alignSelf: 'center', maxWidth: '92%', margin: '4px 0' }}>
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
         aria-expanded={open}
-        style={{
-          display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 9px', borderRadius: 999,
-          border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)',
-          color: 'var(--text-tertiary)', fontSize: 10.5, lineHeight: 1.4, cursor: 'pointer', fontFamily: 'inherit', minHeight: 24,
-        }}
+        style={{ ...systemChipStyle(isMobile), display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', minHeight: 24 }}
       >
         <Info size={12} color="var(--anthropic-orange)" />
-        <span>{systemEventLine(event, pt, event.sender ? titleOf?.(event.sender) : undefined)}</span>
-        <ChevronDown size={12} style={{ transform: open ? 'rotate(180deg)' : undefined }} />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{systemEventLine(event, pt, event.sender ? titleOf?.(event.sender) : undefined)}</span>
+        <ChevronDown size={12} style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : undefined }} />
       </button>
       {open && (
         <div style={{
