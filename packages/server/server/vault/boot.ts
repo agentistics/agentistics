@@ -6,8 +6,8 @@
  * open it (creating it under the first protector that answers when there is something to migrate),
  * run the migration pass, and say what happened — in one line each. A vault that cannot open leaves
  * every plaintext file exactly as it is, writes no new plaintext ever, and says so
- * (`plaintext-pending` / `locked` / `no-protector`). Then the unlock socket is opened, so a
- * passphrase vault can be unlocked without restarting.
+ * (`plaintext-pending` / `locked` / `no-protector`). The shared server bootstrap opens the socket
+ * independently, so a passphrase vault can be unlocked without restarting.
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -19,7 +19,6 @@ import {
 } from './service'
 import { installVaultOps } from './ops'
 import { hardeningLines } from './hardening'
-import { startVaultSocket } from './socket'
 import { sealedPathFor } from './whole-file'
 import { tokensFileFor } from './prefs-tokens'
 import { STANDALONE_CENTRAL_ENV, centralSecretsFile, splitCentralEnv } from './central-env'
@@ -75,7 +74,7 @@ export function pendingSecretValues(): string[] {
 export type Say = (line: string) => void
 
 /** Service start. Never throws. */
-export async function bootVault(say: Say = (l) => process.stderr.write(`agentop: ${l}\n`), opts: { socket?: boolean } = {}): Promise<void> {
+export async function bootVault(say: Say = (l) => process.stderr.write(`agentop: ${l}\n`)): Promise<void> {
   // This process IS the service: the one place a human data key may live (SECRETS.4 §5.2).
   becomeVaultHolder()
   installVaultOps()
@@ -98,11 +97,6 @@ export async function bootVault(say: Say = (l) => process.stderr.write(`agentop:
     }
   } catch {
     say('the vault could not be checked at start; secrets stay as they are and nothing is written in plain text.')
-  }
-  if (opts.socket !== false) {
-    const r = await startVaultSocket()
-    if (!r.ok && r.reason === 'in-use') say('another agentop service already answers on the vault unlock socket; this one does not take it over.')
-    else if (!r.ok && r.reason !== 'EADDRINUSE') say(`the vault unlock socket could not be opened (${r.reason}); \`agentop vault unlock\` will not reach this service.`)
   }
 }
 

@@ -3,7 +3,8 @@
  *
  * The closed list of ops, and the rule each one is held to: NO op returns a human-scope plaintext.
  *
- *   fresh-spawn                 classified CLI startup result, recorded in server memory
+ *   fresh-spawn                 non-secret CLI startup result, recorded in server memory; shares
+ *                               this socket without a vault key or an unlocked vault
  *   status / lock / unlock      the vault's state; drop the key; give a passphrase vault its passphrase
  *   seal                        plaintext in (the body), the SEALED bytes out — for a CLI that has a
  *                               value the user just typed and must store it
@@ -54,6 +55,8 @@ import { MAX_BODY } from './wire'
 import { realProtectorIo } from './io'
 
 type Reply = OpResult['reply']
+// Reports may be delayed by startup polling; accept at most five minutes of clock skew or delay.
+const FRESH_SPAWN_SKEW_MS = 5 * 60_000
 const bad = (): OpResult => ({ reply: refused('bad-request', 'bad request') })
 const str = (v: unknown, max = 4096): v is string => typeof v === 'string' && v.length > 0 && v.length <= max
 
@@ -557,11 +560,13 @@ export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch
   if (typeof h.op === 'string' && HUMAN_OPS.has(h.op)) noteVaultActivity()
   switch (h.op) {
     case 'fresh-spawn': {
+      const now = Date.now()
       if (!HARNESS_ORDER.includes(h.harness as HarnessId)
-        || typeof h.startedAt !== 'number' || !Number.isFinite(h.startedAt) || h.startedAt < 0
+        || typeof h.startedAt !== 'number' || !Number.isSafeInteger(h.startedAt) || h.startedAt < 0
+        || Math.abs(h.startedAt - now) > FRESH_SPAWN_SKEW_MS
         || typeof h.died !== 'boolean'
         || (h.status !== undefined && (typeof h.status !== 'number' || !Number.isSafeInteger(h.status) || h.status < 0))) return bad()
-      noteFreshSpawn(h.harness as HarnessId, { died: h.died, status: h.status as number | undefined, message: '' }, h.startedAt)
+      noteFreshSpawn(h.harness as HarnessId, { died: h.died, status: h.status as number | undefined, message: '' }, h.startedAt, now)
       return { reply: { ok: true } }
     }
     case 'status': return opStatus()

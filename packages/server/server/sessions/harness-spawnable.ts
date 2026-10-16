@@ -13,7 +13,8 @@ const outcomes = new Map<HarnessId, { startedAt: number; checkedAt: number; fail
 
 /** Fresh starts only: a refused resume says nothing about whether a new worker can start. */
 export function noteFreshSpawn(harness: HarnessId, outcome: SpawnOutcome | undefined, startedAt: number, now = Date.now()): void {
-  if ((outcomes.get(harness)?.startedAt ?? -Infinity) > startedAt) return
+  const last = outcomes.get(harness)
+  if (last && now - last.checkedAt < STARTUP_FAILURE_TTL_MS && last.startedAt > startedAt) return
   outcomes.set(harness, { startedAt, checkedAt: now, failed: outcome?.died === true && outcome.status !== 0 })
 }
 

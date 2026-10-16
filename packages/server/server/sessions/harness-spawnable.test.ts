@@ -49,3 +49,12 @@ test('a wholly unobservable fresh check preserves the previous failure', async (
   await spawnDeath({ capture: async () => { throw new Error('capture unavailable') } }, 'unobservable', 1, 'codex')
   expect(harnessSpawnability('codex', Date.now(), installed).spawnable).toBe(false)
 })
+
+for (const failed of [true, false]) {
+  test(`expired ${failed ? 'failure' : 'success'} drops its ordering veto`, () => {
+    // A bounded future clock skew must stop vetoing updates after the observation expires.
+    noteFreshSpawn('codex', failed ? failure : undefined, STARTUP_FAILURE_TTL_MS * 2, 0)
+    noteFreshSpawn('codex', failure, STARTUP_FAILURE_TTL_MS, STARTUP_FAILURE_TTL_MS)
+    expect(harnessSpawnability('codex', STARTUP_FAILURE_TTL_MS + 1, installed).spawnable).toBe(false)
+  })
+}
