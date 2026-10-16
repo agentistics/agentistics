@@ -9,7 +9,9 @@
  * The walks run BACKWARDS, so a result is always observed before the `tool_use` it answers.
  */
 
-export type BgEnd = 'done' | 'stopped' | 'never-started' | 'session-ended'
+import type { ChatTaskEnd } from '@agentistics/core'
+
+export type BgEnd = ChatTaskEnd
 
 interface LaunchResult { isError: boolean; shellId: string | null }
 
@@ -25,6 +27,8 @@ const ID_RES = [
   /\b(?:task_id|shell_id|agentId)["']?\s*[:=]\s*["']?([A-Za-z0-9_-]+)/,
   /\bID:\s*([A-Za-z0-9_-]+)/,
 ]
+/** Only the result of one of these tools says "this task was stopped" (spec 2.3a). */
+const STOP_TOOLS = new Set(['TaskStop', 'KillShell'])
 const STOPPED_RES = [
   /Successfully (?:stopped|killed) (?:task|shell|background shell)[:\s]+([A-Za-z0-9_-]+)/i,
 ]
@@ -42,10 +46,23 @@ function resultText(part: Record<string, unknown>): string {
 
 export function createBgObserver(): BgObserver {
   const launches = new Map<string, LaunchResult>()
-  const stopped = new Set<string>()
+  /** Stop-shaped result text, keyed by the tool_use it answers (judged at settle time: the walk
+   *  runs backwards, so the `tool_use` naming the tool arrives AFTER its result). */
+  const stopResults = new Map<string, string>()
+  const toolNames = new Map<string, string>()
+  let stopped: Set<string> | null = null
 
   return {
     observe(e) {
+      if (e.type === 'assistant') {
+        const c = (e.message as Record<string, unknown> | undefined)?.content
+        if (Array.isArray(c)) {
+          for (const p of c as Record<string, unknown>[]) {
+            if (p.type === 'tool_use' && typeof p.id === 'string' && typeof p.name === 'string') toolNames.set(p.id, p.name)
+          }
+        }
+        return
+      }
       if (e.type !== 'user') return
       const content = (e.message as Record<string, unknown> | undefined)?.content
       if (!Array.isArray(content)) return
@@ -53,14 +70,14 @@ export function createBgObserver(): BgObserver {
         if (part.type !== 'tool_result') continue
         const text = resultText(part)
         const isError = part.is_error === true
+        const id = typeof part.tool_use_id === 'string' ? part.tool_use_id : ''
+        if (!id) continue
         if (!isError) {
           for (const re of STOPPED_RES) {
             const m = re.exec(text)
-            if (m) { stopped.add(m[1]!); break }
+            if (m) { stopResults.set(id, m[1]!); stopped = null; break }
           }
         }
-        const id = typeof part.tool_use_id === 'string' ? part.tool_use_id : ''
-        if (!id) continue
         let shellId: string | null = null
         for (const re of ID_RES) {
           const m = re.exec(text)
@@ -70,11 +87,18 @@ export function createBgObserver(): BgObserver {
       }
     },
     settle(toolUseId, sessionEnded) {
+      if (!stopped) {
+        const set = new Set<string>()
+        for (const [useId, shell] of stopResults) if (STOP_TOOLS.has(toolNames.get(useId) ?? '')) set.add(shell)
+        stopped = set
+      }
+      const stoppedIds = stopped
       const r = launches.get(toolUseId)
-      // (b) a launch that answered with an error, or with no background id, never started.
-      if (r && (r.isError || !r.shellId)) return 'never-started'
-      // (a) the shell id the launch announced was later stopped.
-      if (r?.shellId && stopped.has(r.shellId)) return 'stopped'
+      // (b) only a result the harness marked as an error is a launch that never started; a
+      // successful result whose text carries no id we recognise is still a running task.
+      if (r?.isError) return 'never-started'
+      // (a) the shell id the launch announced was later stopped by TaskStop/KillShell.
+      if (r?.shellId && stoppedIds.has(r.shellId)) return 'stopped'
       // (c) the session is over: nothing can still be running.
       if (sessionEnded) return 'session-ended'
       return null

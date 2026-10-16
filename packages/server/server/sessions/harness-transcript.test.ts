@@ -513,3 +513,22 @@ describe('a REOPENED gemini conversation spans several files (measured on 0.63.0
     expect((await reader.readRecent(solo, 10)).map(t => t.text)).toEqual(['solo question'])
   })
 })
+
+it('the claude fleet-poll reader forwards sessionEnded, so an ended row stops showing a running task', async () => {
+  const { mkdtemp, writeFile, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const dir = await mkdtemp(join(tmpdir(), 'ht-ended-'))
+  try {
+    const f = join(dir, 't.jsonl')
+    await writeFile(f, [
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { run_in_background: true, description: 'watch', command: 'sleep 600' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'Command running in background with ID: abc', is_error: false }] } },
+    ].map(l => JSON.stringify(l)).join('\n') + '\n')
+    const r = transcriptReaderFor('claude')!
+    const live = await r.readRecent(f, 6)
+    const ended = await r.readRecent(f, 6, { sessionEnded: true })
+    expect(live.find(t => t.task)?.task).toEqual({ label: 'watch', running: true })
+    expect(ended.find(t => t.task)?.task).toEqual({ label: 'watch', running: false, ended: 'session-ended' })
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})

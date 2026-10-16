@@ -71,7 +71,7 @@ export interface HarnessTranscript {
   /** The conversation, oldest first, capped at `max` turns from the end. */
   read(path: string, max: number, opts?: { sessionEnded?: boolean }): Promise<TranscriptRead>
   /** The last `max` turns only, read from the END of the file. The fleet poll's budget. */
-  readRecent(path: string, max: number): Promise<ChatTurn[]>
+  readRecent(path: string, max: number, opts?: { sessionEnded?: boolean }): Promise<ChatTurn[]>
 }
 
 /**
@@ -482,7 +482,7 @@ const CLAUDE: HarnessTranscript = {
     return linked ? followFork(linked, ref.pending ? { pending: ref.pending } : {}) : null
   },
   read: (path, max, opts) => readChatWindow(path, max, opts),
-  readRecent: (path, max) => readRecentChatTurns(path, max),
+  readRecent: (path, max, opts) => readRecentChatTurns(path, max, opts),
 }
 
 /**
