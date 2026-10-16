@@ -200,6 +200,9 @@ export async function flushAllHandoffRelays(
   let n = 0
   for (const m of registry) {
     if (!relayWatched(m, now)) continue
+    // An ENDED predecessor is the kill path's business (`flushBeforeKill`): a send that outlived its
+    // timeout there was not cancelled, so re-sending from this loop would deliver it twice.
+    if (m.endedAt) continue
     const r = await flushOnce(m, registry, send, { ...(io.read ? { read: io.read } : {}), ...(io.patch ? { patch: io.patch } : {}) }).catch(() => ({ ok: false, delivered: false }) as FlushResult)
     if (r.delivered) n++
   }
@@ -214,11 +217,23 @@ export interface KillFlush {
 /** The forward send in the kill path is bounded: a wedged pane must not hold the kill. */
 export const KILL_SEND_TIMEOUT_MS = 12_000
 
-function withTimeout(send: RelaySend, ms: number): RelaySend {
-  return (to, text) => new Promise<boolean>(resolve => {
-    const timer = setTimeout(() => resolve(false), ms)
-    send(to, text).then(ok => { clearTimeout(timer); resolve(ok) }, () => { clearTimeout(timer); resolve(false) })
-  })
+/** How long a kill waits, after its send timed out, to learn whether that send landed anyway. */
+export const LATE_SEND_GRACE_MS = 3_000
+
+interface BoundedSend { send: RelaySend; timedOut: () => boolean; late: (graceMs: number) => Promise<boolean> }
+
+/** The send is NOT cancelled on timeout, so `late` reports whether it still landed (within a grace). */
+function withTimeout(send: RelaySend, ms: number): BoundedSend {
+  let timedOut = false
+  let settled: Promise<boolean> = Promise.resolve(false)
+  return {
+    timedOut: () => timedOut,
+    late: graceMs => Promise.race([settled, new Promise<boolean>(r => setTimeout(() => r(false), graceMs))]),
+    send: (to, text) => new Promise<boolean>(resolve => {
+      const timer = setTimeout(() => { timedOut = true; resolve(false) }, ms)
+      settled = send(to, text).then(ok => { clearTimeout(timer); resolve(ok); return ok }, () => { clearTimeout(timer); resolve(false); return false })
+    }),
+  }
 }
 
 /**
@@ -234,7 +249,7 @@ export async function flushBeforeKill(
   io: {
     now?: number; registry?: readonly ManagedSession[]; read?: (m: ManagedSession) => Promise<TurnsRead>
     patch?: typeof patchSession; comment?: (taskRef: string, body: string, subtaskId?: string) => Promise<boolean>
-    notify?: (title: string, message: string) => Promise<boolean> | boolean; sendTimeoutMs?: number
+    notify?: (title: string, message: string) => Promise<boolean> | boolean; sendTimeoutMs?: number; lateGraceMs?: number
   } = {},
 ): Promise<KillFlush> {
   try {
@@ -242,9 +257,19 @@ export async function flushBeforeKill(
     const row = registry.find(m => m.id === id)
     if (!row?.handoffTo || !relayWatched(row, io.now ?? Date.now())) return { warning: null }
     const read = io.read ?? ((m: ManagedSession) => readSessionTurns(m, { fromCursor: m.handoffRelayedAt ?? '' }))
-    const r = await flushOnce(row, registry, withTimeout(send, io.sendTimeoutMs ?? KILL_SEND_TIMEOUT_MS), {
+    const bounded = withTimeout(send, io.sendTimeoutMs ?? KILL_SEND_TIMEOUT_MS)
+    const r = await flushOnce(row, registry, bounded.send, {
       read, ...(io.patch ? { patch: io.patch } : {}),
     })
+    // A timed-out send may still have arrived: never report "not delivered" for it, and move the
+    // cursor so nothing re-sends it.
+    if (!r.ok && r.reason === 'send-failed' && bounded.timedOut() && await bounded.late(io.lateGraceMs ?? LATE_SEND_GRACE_MS)) {
+      await (io.patch ?? patchSession)(row.id, {
+        ...(r.owed?.cursor ? { handoffRelayedAt: r.owed.cursor } : {}),
+        handoffRelayAwaiting: r.owed?.awaiting ? true : null,
+      }).catch(() => false)
+      return { warning: null }
+    }
     const reason = r.ok ? (r.truncated ? 'truncated' as const : null) : (r.reason ?? null)
     if (!reason) return { warning: null }
     const s = cliStrings(lang)

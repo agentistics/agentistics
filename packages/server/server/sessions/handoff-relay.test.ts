@@ -198,7 +198,7 @@ describe('HANDOFF.RELAY — kill is best-effort (fix1 H1/M5)', () => {
     comments.length = 0
     const reg = [parent, row({ id: 'next', conversationId: 'c2' })]
     const t0 = Date.now()
-    const r = await flushBeforeKill('lead-1', () => new Promise<boolean>(() => {}), 'en', { registry: reg, ...io(), comment, now: NOW, sendTimeoutMs: 30 })
+    const r = await flushBeforeKill('lead-1', () => new Promise<boolean>(() => {}), 'en', { registry: reg, ...io(), comment, now: NOW, sendTimeoutMs: 30, lateGraceMs: 20 })
     expect(Date.now() - t0).toBeLessThan(2000)
     expect(r.warning).toContain('did not answer in time')
     expect(r.warning).not.toContain('send-failed')
@@ -240,6 +240,26 @@ describe('HANDOFF.RELAY — kill is best-effort (fix1 H1/M5)', () => {
     expect(await flushAllHandoffRelays(send, NOW, { registry: reg, ...io() })).toBe(1)
     expect(await flushAllHandoffRelays(send, Date.parse(cursor!) + 49 * 3600_000, { registry: reg, ...io() })).toBe(0)
     expect(sent).toEqual(['next'])
+  })
+
+  it('fix3 M-D: the periodic loop ignores an ENDED predecessor (no second send after a killed one)', async () => {
+    const ended = row({ handoffTo: 'next', handoffRelayedAt: cursor, endedAt: '2026-10-16T15:00:00.000Z' })
+    const reg = [ended, row({ id: 'next', conversationId: 'c2' })]
+    let sent = 0
+    expect(await flushAllHandoffRelays(async () => { sent++; return true }, NOW, { registry: reg, ...io() })).toBe(0)
+    expect(sent).toBe(0)
+  })
+
+  it('fix3 M-D: a send that lands after the timeout is not reported as undelivered, and moves the cursor', async () => {
+    comments.length = 0
+    const reg = [parent, row({ id: 'next', conversationId: 'c2' })]
+    const patches: unknown[] = []
+    let sends = 0
+    const r = await flushBeforeKill('lead-1', () => { sends++; return new Promise<boolean>(res => setTimeout(() => res(true), 60)) }, 'en', { registry: reg, ...io(patches), comment, now: NOW, sendTimeoutMs: 20, lateGraceMs: 500 })
+    expect(r.warning).toBeNull()
+    expect(comments).toHaveLength(0)
+    expect(sends).toBe(1)
+    expect(patches).toHaveLength(1)
   })
 })
 
@@ -297,4 +317,5 @@ describe('HANDOFF.RELAY — injected prompts are not the owner (fix1 M2), in eve
       expect(turns.filter(isOwnerTurn).map(x => x.text)).toEqual(['pergunta real'])
     } finally { await rm(dir, { recursive: true, force: true }) }
   })
+
 })
