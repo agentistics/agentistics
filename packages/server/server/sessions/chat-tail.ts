@@ -35,6 +35,7 @@ import { resolveViewedImagePath, VIEWED_IMAGE_RE } from './viewed-image'
 import type { ChatTurn } from '@agentistics/core'
 import { MAX_TAIL_BYTES, TAIL_BYTES, readTailBytes, windowLines } from './transcript-window'
 import { createTranscriptPathMemo, resolveMemoizedPath } from './transcript-path-memo'
+import { createBgObserver } from './bg-settle'
 
 /** How many uuid entries the branch rule may parse per chat turn the window can hold. A turn is
  *  several entries (text, tool calls, results), so the budget must cover more than one each. */
@@ -126,6 +127,7 @@ export async function resolveChatTranscriptPath(
 interface Cached {
   mtimeMs: number
   turns: ChatTurn[]
+  sessionEnded: boolean
 }
 
 /** Parsed turns, keyed by transcript path — re-parsed only when the file's mtime has moved. */
@@ -517,24 +519,25 @@ export function toolActivityNames(turn: ChatTurn): string[] {
  * collected — so a long-running session's transcript is neither fully read nor fully `JSON.parse`d
  * to show the last few lines. See `TAIL_BYTES` for why the window grows instead of truncating.
  */
-export async function readRecentChatTurns(path: string, max = 6): Promise<ChatTurn[]> {
+export async function readRecentChatTurns(path: string, max = 6, opts: { sessionEnded?: boolean } = {}): Promise<ChatTurn[]> {
+  const sessionEnded = opts.sessionEnded === true
   let mtimeMs: number
   try { mtimeMs = (await stat(path)).mtimeMs } catch { return [] }
 
   const hit = contentCache.get(path)
-  if (hit && hit.mtimeMs === mtimeMs) return hit.turns
+  if (hit && hit.mtimeMs === mtimeMs && hit.sessionEnded === sessionEnded) return hit.turns
 
-  let turns = await readTurnsFromTail(path, max, TAIL_BYTES)
+  let turns = await readTurnsFromTail(path, max, TAIL_BYTES, sessionEnded)
   // Fewer turns than asked for, and the window did not reach the start of the file: the answer is
   // incomplete because of the WINDOW, not because the transcript is short. Widen and read again.
   let window = TAIL_BYTES
   while (turns !== null && turns.turns.length < max && !turns.atStart && window < MAX_TAIL_BYTES) {
     window = Math.min(window * 4, MAX_TAIL_BYTES)
-    turns = await readTurnsFromTail(path, max, window)
+    turns = await readTurnsFromTail(path, max, window, sessionEnded)
   }
   const found = turns?.turns ?? []
 
-  contentCache.set(path, { mtimeMs, turns: found })
+  contentCache.set(path, { mtimeMs, turns: found, sessionEnded })
   return found
 }
 
@@ -543,6 +546,7 @@ async function readTurnsFromTail(
   path: string,
   max: number,
   windowBytes: number,
+  sessionEnded = false,
 ): Promise<{ turns: ChatTurn[]; atStart: boolean } | null> {
   const tail = await readTailBytes(path, windowBytes)
   if (!tail) return null
@@ -553,6 +557,7 @@ async function readTurnsFromTail(
   const taskTurns: Array<{ id: string; turn: ChatTurn }> = []
   /** Ids whose `<task-notification>` has already arrived. */
   const finishedTasks = new Set<string>()
+  const bgObs = createBgObserver()
   /**
    * A marker turn's OWN companion, by `promptId` — see `attachment-companion.ts`. The walk runs
    * BACKWARDS and a companion sits AFTER its marker turn in the file (append-only JSONL), so it is
@@ -586,6 +591,7 @@ async function readTurnsFromTail(
 
     const done = taskNotificationFor(rawEntryText(e))
     if (done) finishedTasks.add(done)
+    bgObs.observe(e)
 
     const bg = extractBackgroundTask(e)
     if (bg) {
@@ -618,8 +624,11 @@ async function readTurnsFromTail(
   // that never arrives stays running — which is the truth for a task the session is still on, and
   // for one whose session ended mid-flight there is nothing better to say.
   for (const t of taskTurns) {
-    if (t.turn.task && finishedTasks.has(t.id)) {
+    if (!t.turn.task) continue
+    const ended = finishedTasks.has(t.id) ? 'done' as const : bgObs.settle(t.id, sessionEnded)
+    if (ended) {
       t.turn.task.running = false
+      if (ended !== 'done') t.turn.task.ended = ended
       delete t.turn.pending
     }
   }
@@ -669,6 +678,12 @@ export async function readChatTurns(path: string, max = 400): Promise<ChatTurn[]
   return (await readChatWindow(path, max)).turns
 }
 
+/** How many background tasks in the transcript's tail are still unsettled (spec 2.3). */
+export async function bgTasksRunning(path: string): Promise<number> {
+  const { turns } = await readChatWindow(path)
+  return turns.filter(t => t.task?.running).length
+}
+
 /**
  * The same read, plus whether the window CUT the conversation short.
  *
@@ -682,7 +697,9 @@ export async function readChatTurns(path: string, max = 400): Promise<ChatTurn[]
 export async function readChatWindow(
   path: string,
   max = 400,
+  opts: { sessionEnded?: boolean } = {},
 ): Promise<{ turns: ChatTurn[]; older: boolean }> {
+  const sessionEnded = opts.sessionEnded === true
   let content: string
   try { content = await readFile(path, 'utf-8') } catch { return { turns: [], older: false } }
 
@@ -692,6 +709,7 @@ export async function readChatWindow(
   const taskTurns: Array<{ id: string; turn: ChatTurn }> = []
   /** Ids whose `<task-notification>` has already arrived. */
   const finishedTasks = new Set<string>()
+  const bgObs = createBgObserver()
   /**
    * A marker turn's OWN companion, by `promptId` — see `attachment-companion.ts`. The walk runs
    * BACKWARDS and a companion sits AFTER its marker turn in the file (append-only JSONL), so it is
@@ -724,6 +742,7 @@ export async function readChatWindow(
 
     const done = taskNotificationFor(rawEntryText(e))
     if (done) finishedTasks.add(done)
+    bgObs.observe(e)
 
     const bg = extractBackgroundTask(e)
     if (bg) {
@@ -768,8 +787,11 @@ export async function readChatWindow(
   // that never arrives stays running — which is the truth for a task the session is still on, and
   // for one whose session ended mid-flight there is nothing better to say.
   for (const t of taskTurns) {
-    if (t.turn.task && finishedTasks.has(t.id)) {
+    if (!t.turn.task) continue
+    const ended = finishedTasks.has(t.id) ? 'done' as const : bgObs.settle(t.id, sessionEnded)
+    if (ended) {
       t.turn.task.running = false
+      if (ended !== 'done') t.turn.task.ended = ended
       delete t.turn.pending
     }
   }

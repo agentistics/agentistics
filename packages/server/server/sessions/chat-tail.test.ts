@@ -756,3 +756,49 @@ describe('the assistant VIEWED an image — viewed-image.ts, end to end', () => 
     expect(out[0]!.systemRef).toBeUndefined()
   })
 })
+
+describe('background task settle (P4)', () => {
+  let root: string
+  beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'chat-tail-bg-')) })
+  afterEach(async () => { forgetChatTailContent(); await rm(root, { recursive: true, force: true }) })
+
+  const launch = (id: string, desc: string) => line({
+    type: 'assistant',
+    message: { content: [{ type: 'tool_use', id, name: 'Bash', input: { run_in_background: true, description: desc, command: 'sleep 600' } }] },
+  })
+  const result = (id: string, content: string, is_error = false) => line({
+    type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content, is_error }] },
+  })
+  const write = async (...ls: string[]) => { const f = join(root, 't.jsonl'); await writeFile(f, ls.join('\n') + '\n'); return f }
+  const tasks = (turns: Awaited<ReturnType<typeof readChatWindow>>['turns']) => turns.filter(t => t.task).map(t => t.task!)
+
+  for (const [name, reader] of [
+    ['readChatWindow', (f: string, o?: { sessionEnded?: boolean }) => readChatWindow(f, 400, o).then(r => r.turns)],
+    ['readRecentChatTurns', (f: string, o?: { sessionEnded?: boolean }) => readRecentChatTurns(f, 20, o)],
+  ] as const) {
+    test(`${name}: TaskStop settles as stopped`, async () => {
+      const f = await write(
+        launch('t1', 'watch'), result('t1', 'Command running in background with ID: b14ngvjin'),
+        line({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't2', name: 'TaskStop', input: { task_id: 'b14ngvjin' } }] } }),
+        result('t2', '{"message":"Successfully stopped task: b14ngvjin (sleep 600)"}'),
+      )
+      expect(tasks(await reader(f))).toEqual([{ label: 'watch', running: false, ended: 'stopped' }])
+    })
+    test(`${name}: denied launch never started`, async () => {
+      const f = await write(launch('t1', 'watch'), result('t1', 'Permission denied by the classifier', true))
+      expect(tasks(await reader(f))).toEqual([{ label: 'watch', running: false, ended: 'never-started' }])
+    })
+    test(`${name}: ended session settles unsettled tasks, a live one keeps running`, async () => {
+      const f = await write(launch('t1', 'watch'), result('t1', 'Command running in background with ID: abc'))
+      expect(tasks(await reader(f))).toEqual([{ label: 'watch', running: true }])
+      expect(tasks(await reader(f, { sessionEnded: true }))).toEqual([{ label: 'watch', running: false, ended: 'session-ended' }])
+    })
+    test(`${name}: notification path unchanged`, async () => {
+      const f = await write(
+        launch('t1', 'watch'), result('t1', 'Command running in background with ID: abc'),
+        queuedTurn('<task-notification><tool-use-id>t1</tool-use-id></task-notification>'),
+      )
+      expect(tasks(await reader(f, { sessionEnded: true }))).toEqual([{ label: 'watch', running: false }])
+    })
+  }
+})

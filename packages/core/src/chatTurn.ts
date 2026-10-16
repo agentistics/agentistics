@@ -113,7 +113,7 @@ export interface ChatTurn {
    * `<task-notification>` has come back for it yet — which is what makes a watcher visible WHILE
    * it is the thing you are waiting on, rather than only once it is over.
    */
-  task?: { label: string; running: boolean }
+  task?: { label: string; running: boolean; ended?: 'done' | 'stopped' | 'never-started' | 'session-ended' }
   /**
    * This entry sat under the `user` role and NO PERSON WROTE IT — a background task reporting
    * back, an injected reminder, a `!` command's stdout. The value is a short phrase naming which,
