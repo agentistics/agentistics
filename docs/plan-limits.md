@@ -46,9 +46,12 @@ When a harness has several accounts with room, the router takes the one whose we
 (its quota is lost soonest), then the one with the most room (`pickAccount`). An account without
 a weekly window sorts after accounts with a reported weekly reset; ties still use room.
 
-Live sessions use the managed session’s immutable account id, falling back to transcript account
-metadata. Burn is distributed by token deltas within `(harness, account)` only, so percentages
-from separate quotas are never added. Hidden account sessions appear only in the owner’s
-`hiddenFromAgents` rows. If a harness has any hidden or retired account, sessions with unknown
-accounts are excluded from agent-visible summaries and slots. Otherwise an unattributed session
-can affect slots only when there is one unambiguous meter for it.
+Live sessions use the managed session’s immutable account id, then the account bound to the
+transcript's configuration root (the longest matching root wins). Without either, they use the
+harness's bound default account or its only visible account. This applies to every harness and
+keeps legacy and external sessions on a migrated single account's measured burn. The managed
+registry is read once per sample. Burn is distributed by token deltas within `(harness, account)`
+only, so percentages from separate quotas are never added. Sessions attributed to a hidden or
+retired account appear only in the owner's `hiddenFromAgents` rows; those accounts do not suppress
+unrelated external sessions. Sessions still unresolved remain in the live summary and affect no
+account's slots.
