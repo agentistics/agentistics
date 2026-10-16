@@ -509,9 +509,16 @@ export function computePlanCost(args: {
 }): PlanCostResult {
   const { accounts, accountProfiles, ...rest } = args
   if (!accounts || accounts.length === 0 || !accountProfiles) return computeTimelineCost(rest)
+  return mergePlanCosts(selectedTimelines(args.timeline, accounts, accountProfiles).map((timeline) => computeTimelineCost({ ...rest, timeline })))
+}
 
-  // C per harness = Σ over its accounts, each on its own timeline or else the harness default —
-  // and the default is counted ONCE however many accounts inherit it.
+/** C per harness = Σ over its accounts, each on its own timeline or else the harness default —
+ *  and the default is counted ONCE however many accounts inherit it. */
+function selectedTimelines(
+  fallback: BillingTimeline | undefined,
+  accounts: readonly PlanAccountRef[],
+  accountProfiles: Record<string, BillingTimeline>,
+): (BillingTimeline | undefined)[] {
   const timelines: (BillingTimeline | undefined)[] = []
   let defaultUsed = false
   for (const account of accounts) {
@@ -519,10 +526,10 @@ export function computePlanCost(args: {
     if (own) timelines.push(own)
     else if (!defaultUsed) {
       defaultUsed = true
-      timelines.push(args.timeline)
+      timelines.push(fallback)
     }
   }
-  return mergePlanCosts(timelines.map((timeline) => computeTimelineCost({ ...rest, timeline })))
+  return timelines
 }
 
 /** An account of a harness, as the billing arithmetic needs to know it. */
@@ -928,18 +935,27 @@ export function monthlyCommitment(args: {
   for (const [key, timeline] of entries) {
     const harnessAccounts = accounts?.filter((a) => a.harness === key)
     if (!timeline && !(harnessAccounts && harnessAccounts.length > 0)) continue
-    const plan = computePlanCost({ timeline, window, brlRate, accounts: harnessAccounts, accountProfiles })
-    if (plan.unavailable && plan.apiDayKeys.size === 0) continue
-    if (plan.apiDayKeys.size > 0) hasUsageBilling = true
-    if (plan.subscriptionCostUSD > 0) {
-      usd += plan.subscriptionCostUSD
-      harnesses.push(key)
-      // ANY contributing subscription that does not span the whole month makes the TOTAL a
-      // prorated figure. Taking the longest coverage instead would report a full month whenever
-      // one plan happened to span it, leaving the short one's proration unexplained — the total
-      // is smaller than the sum of the monthly prices and nothing on screen would say why.
-      if (plan.coveredDays < monthDays) anyPartial = true
+    const parts = harnessAccounts && harnessAccounts.length > 0 && accountProfiles
+      ? selectedTimelines(timeline, harnessAccounts, accountProfiles)
+      : [timeline]
+    const results = parts.map((t) => computeTimelineCost({ timeline: t, window, brlRate }))
+    // An invalid timeline refuses the whole harness: merging must not let a valid sibling's
+    // API days or subscription cost leak out around the account whose bill was discarded.
+    if (results.some((r) => r.invalidTimeline)) continue
+    let contributed = false
+    for (const plan of results) {
+      if (plan.unavailable && plan.apiDayKeys.size === 0) continue
+      if (plan.apiDayKeys.size > 0) hasUsageBilling = true
+      if (plan.subscriptionCostUSD > 0) {
+        usd += plan.subscriptionCostUSD
+        contributed = true
+        // ANY contributing subscription that does not span the whole month makes the TOTAL a
+        // prorated figure — judged per timeline, since a union of coverage would hide a short
+        // account behind a full one.
+        if (plan.coveredDays < monthDays) anyPartial = true
+      }
     }
+    if (contributed) harnesses.push(key)
   }
 
   if (harnesses.length === 0 && !hasUsageBilling) return null
