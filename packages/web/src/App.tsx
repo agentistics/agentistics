@@ -54,7 +54,7 @@ import { MagnifierButton } from './components/a11y/MagnifierButton'
 import { NotificationBell } from './components/NotificationBell'
 import { AgentisticsLoader } from './components/AgentisticsLoader'
 import { VaultHeaderButton } from './components/vault/VaultHeaderButton'
-import { AwayChip, awayMenuItems } from './components/sessions/AwayChip'
+import { AwayChip, AwayDialogHost, awayMenuItems } from './components/sessions/AwayChip'
 import { useAway } from './lib/awayMode'
 import AwayPill from './components/AwayPill'
 import { HardwareModal } from './components/HardwareModal'
@@ -4980,6 +4980,7 @@ export default function AppLayout() {
       {retryImportModal}
       {/* Global notification toasts (auto-dismiss with an exit animation; history in the bell) */}
       <NotificationToasts lang={lang} />
+      <AwayDialogHost />
 
       {/* VAULT.PERSONAL §10: the one unlock any screen can ask for (ensureVaultOpen), and — on this
           computer — the phones waiting for approval. A central has no vault of its own here. */}

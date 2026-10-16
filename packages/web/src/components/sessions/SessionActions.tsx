@@ -58,7 +58,7 @@ export interface SessionActionsProps {
     badge?: string
     /** Marks the one that is currently showing, so the menu says where you are. */
     on?: boolean
-    onSelect: () => void
+    onSelect: (trigger?: HTMLElement | null) => void
   }[]
   /**
    * A CONTROL, not a row — drawn above `extra` and above the verbs.
@@ -111,6 +111,7 @@ export function SessionActions({
   const [linking, setLinking] = useState(false)
   const pt = lang === 'pt'
   const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
   const [asking, setAsking] = useState<FleetVerb | null>(null)
   const [draft, setDraft] = useState('')
   const [confirming, setConfirming] = useState(false)
@@ -174,6 +175,7 @@ export function SessionActions({
   return (
     <div style={inline ? { display: 'flex', flexDirection: 'column' } : { position: 'relative', flexShrink: 0 }}>
       {!inline && <button
+        ref={triggerRef}
         onClick={() => setOpen(v => !v)}
         aria-label={pt ? 'Ações da sessão' : 'Session actions'}
         title={pt ? 'Ações da sessão' : 'Session actions'}
@@ -227,7 +229,7 @@ export function SessionActions({
                 {extra.map(x => (
                   <button
                     key={x.id}
-                    onClick={() => { setOpen(false); x.onSelect() }}
+                    onClick={e => { setOpen(false); x.onSelect(triggerRef.current ?? e.currentTarget) }}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left',
                       // 44px: this menu is opened with a thumb, and the rule this repo holds every

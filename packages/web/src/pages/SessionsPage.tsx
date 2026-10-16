@@ -2851,6 +2851,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         }}>
           {selected.title}
         </div>
+        {selected.actionable && <AwayChip id={selected.id} away={selected.away === true} pt={pt} compact />}
       </div>
       {/* `display: flex` is the load-bearing part, not `flex: 1`.
           This div had `flex: 1, minHeight: 0` and no display, so it was a BLOCK. Its child —
