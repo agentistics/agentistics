@@ -8,7 +8,7 @@ import { HARNESS_ORDER, routeRecommendation } from '@agentistics/core'
 import { noteFreshSpawn, resetHarnessSpawnability } from './sessions/harness-spawnable'
 import { spawnOutcome } from './sessions/spawn-outcome'
 import {
-  __resetPlanLimitsForTest, __setManagedLookupForTest, ingestPlanLimits, latestCodexLimits, noteCodexRollout,
+  __resetPlanLimitsForTest, __setManagedLookupForTest, __settleCodexRolloutsForTest, ingestPlanLimits, latestCodexLimits, noteCodexRollout,
   noteStructuredLine, planLimitsPayload, sampleLivePlanSessions, setPlanLimitsSink, syncPlanLimitsFromFile,
   watchPlanLimitsFile,
 } from './plan-limits'
@@ -501,10 +501,13 @@ const claudeLine = (week: [number, number], fiveHour?: [number, number]) => JSON
     ...(fiveHour ? { five_hour: { utilization: fiveHour[0] / 100, resetsAt: fiveHour[1] / 1000 } } : {}),
   } },
 })
-/** Wait until the fire-and-forget taps have landed. */
-const until = async (ok: () => boolean | Promise<boolean>, ms = 3000) => {
+/** Wait until the fire-and-forget taps have landed; a condition never met FAILS, never passes on. */
+const until = async (ok: () => boolean | Promise<boolean>, ms = 10_000) => {
   const end = Date.now() + ms
-  while (!(await ok()) && Date.now() < end) await new Promise(r => setTimeout(r, 10))
+  while (!(await ok())) {
+    if (Date.now() > end) throw new Error('timed out waiting for the plan-limits tap')
+    await new Promise(r => setTimeout(r, 10))
+  }
 }
 const sinkLog = () => {
   const told: PlanThresholdNotice[] = []
@@ -597,16 +600,16 @@ test('codex: a rollout under no known root is dropped; an account root and a lin
     return p
   }
   noteCodexRollout(rollout(join(dir, 'elsewhere'), 1))
-  await new Promise(r => setTimeout(r, 1300))
+  await __settleCodexRolloutsForTest() // the read and its attribution have finished: nothing stored
   expect((await planLimitsPayload(undefined)).limits).toEqual([])
   const root = join(dir, 'codex-second')
   const { account } = await store.bind(root, { harness: 'codex', key: 'codex-second', label: 'second' })
   noteCodexRollout(rollout(root, 2))
-  await until(async () => (await planLimitsPayload(undefined)).limits.length === 1)
+  await __settleCodexRolloutsForTest()
   expect((await planLimitsPayload(undefined)).limits.map(l => l.account)).toEqual([account.id])
   __setManagedLookupForTest(async () => [{ id: 'm1', conversationId: uuid(3), accountId: 'acc_linked00000' }])
   noteCodexRollout(rollout(join(dir, 'elsewhere'), 3))
-  await until(async () => (await planLimitsPayload(undefined)).limits.length === 2)
+  await __settleCodexRolloutsForTest()
   expect((await planLimitsPayload(undefined)).limits.map(l => l.account).sort()).toEqual(['acc_linked00000', account.id].sort())
 })
 
