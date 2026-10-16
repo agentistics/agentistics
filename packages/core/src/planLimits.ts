@@ -66,15 +66,15 @@ export interface VisibilityAccount {
  * leaves its other accounts routable. A row whose account the registry does not know is kept only
  * when it is the legacy `'default'` meter AND its harness has no hidden current account.
  */
-export function agentVisible<T extends { harness: HarnessId; account?: string }>(
+export function agentVisible<T extends { harness: HarnessId; account: string }>(
   rows: readonly T[],
   accounts: readonly VisibilityAccount[],
 ): T[] {
   const byId = new Map(accounts.map(a => [a.id, a]))
   return rows.filter(r => {
-    const known = r.account ? byId.get(r.account) : undefined
+    const known = byId.get(r.account)
     if (known) return known.available && !known.retired
-    if ((r.account ?? 'default') !== 'default') return false
+    if (r.account !== 'default') return false
     return !accounts.some(a => a.harness === r.harness && !a.available && !a.retired)
   })
 }
@@ -475,10 +475,11 @@ export function routeRecommendation(
   authorHarness?: string,
 ): RouteRecommendation {
   const allowTight = kind === 'lead'
-  const aggregates = new Map(harnessAggregate(budgets).map(a => [a.harness, a]))
-  const registered = (h: HarnessId) => budgets.some(b => b.harness === h && b.plan !== 'unregistered')
+  // Routing aggregates fold only registered accounts, so an unregistered meter can never make a
+  // harness look available when every account that could take work is held.
+  const aggregates = new Map(harnessAggregate(budgets.filter(b => b.plan !== 'unregistered')).map(a => [a.harness, a]))
   const eligibleHarness = (agg: HarnessAggregate) =>
-    registered(agg.harness) && agg.status !== 'hold' && (allowTight || agg.status !== 'tight') && agg.harness !== (kind === 'qa' ? authorHarness : undefined)
+    eligibleAccounts(agg.harness).length > 0 && agg.status !== 'hold' && (allowTight || agg.status !== 'tight') && agg.harness !== (kind === 'qa' ? authorHarness : undefined)
   const eligibleAccounts = (h: HarnessId) =>
     budgets.filter(b => b.harness === h && b.plan !== 'unregistered' && b.status !== 'hold' && (allowTight || b.status !== 'tight'))
   const harnesses = [...aggregates.values()].filter(eligibleHarness)
@@ -493,13 +494,15 @@ export function routeRecommendation(
   const preference = ROUTE_PREFERENCES[kind]
   const chosen = ordered.find(a => preference.some(([h]) => h === a.harness))
   const pickAgg = chosen ?? ordered[0]
-  if (!pickAgg) {
+  const noRoute = (): RouteRecommendation => {
     const earliest = budgets.filter(b => b.status === 'hold').sort((a, b) => a.weekResetsAt - b.weekResetsAt)[0]
     const reset = earliest ? new Date(earliest.weekResetsAt).toISOString() : 'the next reset'
     return { harness: null, reason: `all plans on hold until ${reset}`, alternatives: [], accountAlternatives: [], cadence: { parallel: 0, note: 'Wait for a plan to renew.' } }
   }
+  if (!pickAgg) return noRoute()
   // The account with the most room (lowest binding %); ties go to the newest reading.
   const candidates = eligibleAccounts(pickAgg.harness)
+  if (!candidates.length) return noRoute()
   const indexed = candidates.map((b, i) => ({ b, i }))
   indexed.sort((x, y) => roomOf(x.b) - roomOf(y.b) || (y.b.updatedAt ?? 0) - (x.b.updatedAt ?? 0) || y.i - x.i)
   const pick = indexed[0]!.b
