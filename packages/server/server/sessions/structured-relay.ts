@@ -61,7 +61,6 @@ export function runRelay(dir: string): void {
   // The ACP CLI may fork helpers of its own. Keeping the child in a detached process group lets the
   // relay terminate the whole tree, rather than leaving a helper behind when the CLI ignores TERM.
   const child = spawn(spec.bin, spec.args, { cwd: spec.cwd, detached: true, stdio: ['pipe', 'pipe', 'ignore'], env: { ...process.env, ...extra } })
-  writeFileSync(join(dir, RELAY_FILES.pid), JSON.stringify({ relay: process.pid, child: child.pid ?? null }), { mode: 0o600 })
 
   let client: Socket | null = null
   const send = (s: Socket | null, msg: unknown): void => { if (s && !s.destroyed) s.write(`${JSON.stringify(msg)}\n`) }
@@ -187,6 +186,10 @@ export function runRelay(dir: string): void {
   process.on('SIGHUP', () => {})
   process.on('SIGTERM', endChild)
   process.on('SIGINT', endChild)
+  // Published LAST, after the signal handlers exist: whoever reads this file may TERM the relay at once,
+  // and a TERM before the handler is the default action — the relay dies and its child, in a process
+  // group of its own, is orphaned.
+  writeFileSync(join(dir, RELAY_FILES.pid), JSON.stringify({ relay: process.pid, child: child.pid ?? null }), { mode: 0o600 })
 }
 
 if (import.meta.main) {
