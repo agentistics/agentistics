@@ -251,6 +251,14 @@ describe('renewed windows project their next period', () => {
     expect(l.windows[1]).toEqual(win('week', 99, now - day))
   })
 
+  test('near the next projected reset the sustainable rate stays under the absolute criterion', () => {
+    const reset = now - 6 * day - 45 * 60_000
+    const l = lim('codex', [win('week', 40, reset)], now - 7 * day - 3600_000)
+    const at = reset + 7 * day - 15 * 60_000
+    const pace = planPace(l, at)
+    expect(pace.sustainablePctPerHour).toBeLessThanOrEqual(100 / 0.5 * 0.99)
+  })
+
   test('fifteen days past advances three weekly periods without mutating the reading', () => {
     const w = win('week', 96, now - 15 * day)
     const projected = effectiveWindow(w, now)

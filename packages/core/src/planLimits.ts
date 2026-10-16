@@ -312,6 +312,9 @@ export function planBudget(l: PlanLimits, nowMs: number): PlanBudget {
   }
 }
 
+/** Ceiling for the sustainable rate of a projected window: 100 % over the 0.5 h floor, less 1 %. */
+export const PROJECTED_MAX_PCT_PER_HOUR = (100 / 0.5) * 0.99
+
 export function planPace(
   l: PlanLimits,
   nowMs: number,
@@ -322,7 +325,12 @@ export function planPace(
   const week = weekWindow && effectiveWindow(weekWindow, nowMs)
   const weekPct = week ? currentUsedPct(week, nowMs) : 0
   const hoursToReset = week ? Math.max(0.5, (week.resetsAt - nowMs) / 3_600_000) : 0.5
-  const sustainablePctPerHour = Math.max(0, (100 - weekPct) / hoursToReset)
+  // A projected (unobserved) period never reports a rate above the plan's absolute criterion:
+  // the 0.5 h floor above would otherwise make the last minutes of a projected week read 200 %/h.
+  const rawSustainable = Math.max(0, (100 - weekPct) / hoursToReset)
+  const sustainablePctPerHour = week?.projected
+    ? Math.min(rawSustainable, PROJECTED_MAX_PCT_PER_HOUR)
+    : rawSustainable
   const readings = [...history.filter(x => x.updatedAt !== l.updatedAt), l]
     .filter(x => x.harness === l.harness && x.account === l.account)
     .filter(x => !week || x.updatedAt >= week.resetsAt - PLAN_WINDOW_MS.week)
