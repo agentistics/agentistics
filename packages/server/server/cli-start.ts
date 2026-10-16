@@ -2096,7 +2096,16 @@ async function spawnManaged(req: {
   const away = req.away === undefined && req.inherit
     ? req.inherit.away === true
     : await resolveSpawnAwayFor(req.away, req.parentSessionId, req.parentVerified === true)
+  // HANDOFF.RELAY: a leader hand-off's successor is briefed with what the owner said to the
+  // predecessor and the predecessor's last reply, so a hand-off can never swallow an answer.
+  const handoffParentRow = req.handoff && req.parentSessionId
+    ? (await readRegistry().catch(() => [] as ManagedSession[])).find(m => m.id === req.parentSessionId)
+    : undefined
+  const relay = handoffParentRow
+    ? await import('./sessions/handoff-relay-io').then(m => m.captureHandoffRelay(handoffParentRow)).catch(() => undefined)
+    : undefined
   const ctx = buildSpawnContext({
+      ...(relay ? { handoffRelay: relay.section } : {}),
       ...(await resolveContextAway(away)),
       sessionId: id,
       cwd: req.cwd,
@@ -2209,6 +2218,9 @@ async function spawnManaged(req: {
     return { ok: false, message }
   }
   if (storedContextRole.role) await markRoleDelivered([planned.plan.conversationId, id], storedContextRole.role)
+  if (handoffParentRow) {
+    await import('./sessions/handoff-relay-io').then(m => m.recordHandoffLink(handoffParentRow.id, id, relay)).catch(() => {})
+  }
 
   // F2.0 — a STRUCTURED session got the opening context from its driver (its declared channel), so a
   // first-message context left pending for the TUI must not be prepended to its first prompt again.
@@ -3811,6 +3823,10 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const backend = await resolveBackend()
       const blocked = await backend.unavailable()
       if (blocked) return { ok: false, message: blocked }
+      // HANDOFF.RELAY: a predecessor's last answer to the owner reaches its successor before it dies.
+      const { flushBeforeKill } = await import('./sessions/handoff-relay-io')
+      const owed = await flushBeforeKill(id, async (to, text) => (await this.promptSession!(to, text)).ok, lang)
+      if (owed) return { ok: false, message: owed }
       if (!(await backend.kill(id))) return { ok: false, message: s.sessKillUnconfirmed(id) }
       // MARKED finished, never deleted — see `retireSession`'s own docstring. Removing the row
       // took with it the only record of which conversation this was — the store had not caught up,

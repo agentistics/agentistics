@@ -5208,6 +5208,11 @@ if (!TEAM_CENTRAL && CAPS.localShell) {
       const prefs = await readPreferences().catch(() => ({} as { lang?: string }))
       const n = await flushQueuedDeliveries((prefs as { lang?: string }).lang === 'pt' ? 'pt' : 'en')
       if (n > 0) console.log(`[agentask] delivered ${n} queued thread repl${n === 1 ? 'y' : 'ies'}`)
+      // HANDOFF.RELAY: what the owner wrote into a leader AFTER its hand-off reaches the successor.
+      const [{ flushAllHandoffRelays }, { runFleetAction }] = await Promise.all([import('./sessions/handoff-relay-io'), import('./sessions/fleet-web')])
+      const lang = (prefs as { lang?: string }).lang === 'pt' ? 'pt' : 'en'
+      const relayed = await flushAllHandoffRelays(async (id, text) => (await runFleetAction(lang, { action: 'prompt', id, text })).ok)
+      if (relayed > 0) console.log(`[handoff] relayed ${relayed} owner message(s) to a successor`)
     })().catch(err => console.error('[agentask] queued thread replies:', err instanceof Error ? err.message : String(err)))
       .finally(() => { flushing = false })
   }, 30_000).unref()
