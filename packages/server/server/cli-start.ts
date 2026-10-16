@@ -3825,8 +3825,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       if (blocked) return { ok: false, message: blocked }
       // HANDOFF.RELAY: a predecessor's last answer to the owner reaches its successor before it dies.
       const { flushBeforeKill } = await import('./sessions/handoff-relay-io')
-      const owed = await flushBeforeKill(id, async (to, text) => (await this.promptSession!(to, text)).ok, lang)
-      if (owed) return { ok: false, message: owed }
+      const flushed = await flushBeforeKill(id, async (to, text) => (await this.promptSession!(to, text)).ok, lang)
       if (!(await backend.kill(id))) return { ok: false, message: s.sessKillUnconfirmed(id) }
       // MARKED finished, never deleted — see `retireSession`'s own docstring. Removing the row
       // took with it the only record of which conversation this was — the store had not caught up,
@@ -3835,7 +3834,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // ordinary next thing to want.
       await retireSession(id)
       forgetConversations()
-      return { ok: true, message: s.sessKilled(id) }
+      return { ok: true, message: flushed.warning ? `${s.sessKilled(id)} ${flushed.warning}` : s.sessKilled(id) }
     },
 
     /**

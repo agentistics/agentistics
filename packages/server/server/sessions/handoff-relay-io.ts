@@ -10,8 +10,9 @@
 import type { ChatTurn } from '@agentistics/core'
 import { transcriptReaderFor } from './harness-transcript'
 import {
-  forwardHasContent, forwardText, planForward, planRelay, relaySection,
+  forwardHasContent, forwardText, planForward, planRelay, relaySection, type RelayForward,
 } from './handoff-relay'
+import { stat } from 'node:fs/promises'
 import { patchSession, readRegistry } from './registry'
 import type { ManagedSession } from './types'
 
@@ -20,15 +21,33 @@ const RELAY_READ_TURNS = 400
 /** A predecessor is watched this long after its hand-off; past it nobody types into it any more. */
 export const RELAY_WATCH_MS = 48 * 60 * 60 * 1000
 
+/** The 30 s pass and the owner-waiting gate read only the END of a transcript. */
+const RECENT_TURNS = 120
+
 export type TurnsRead = { turns: ChatTurn[] } | { unavailable: string }
 
-export async function readSessionTurns(m: Pick<ManagedSession, 'harness' | 'conversationId' | 'cwd'>): Promise<TurnsRead> {
+export interface ReadOpts {
+  /** Read only the tail (`readRecent`) — the 30 s loop's budget. */
+  recent?: boolean
+  /** Skip the read entirely when the transcript was last written before this instant (ms). */
+  unchangedSince?: number
+}
+
+export async function readSessionTurns(
+  m: Pick<ManagedSession, 'harness' | 'conversationId' | 'cwd'>,
+  opts: ReadOpts = {},
+): Promise<TurnsRead> {
   const reader = transcriptReaderFor(m.harness)
   if (!reader) return { unavailable: `o harness "${m.harness}" não tem leitor de conversa no agentistics` }
   if (!m.conversationId) return { unavailable: 'a sessão não tem conversa vinculada' }
   try {
     const path = await reader.resolve({ conversationId: m.conversationId, ...(m.cwd ? { cwd: m.cwd } : {}) })
     if (!path) return { unavailable: 'o arquivo da conversa não foi encontrado' }
+    if (opts.unchangedSince !== undefined) {
+      const st = await stat(path).catch(() => null)
+      if (st && st.mtimeMs <= opts.unchangedSince) return { turns: [] }
+    }
+    if (opts.recent) return { turns: await reader.readRecent(path, RECENT_TURNS) }
     return { turns: (await reader.read(path, RELAY_READ_TURNS)).turns }
   } catch (e) {
     return { unavailable: `a leitura da conversa falhou (${e instanceof Error ? e.message : String(e)})` }
@@ -87,6 +106,16 @@ export interface FlushResult {
   delivered: boolean
   /** Why it could not be checked (no reader…) — not owed, but not verified either. */
   unverified?: string
+  /** `ok: false` only: why it could not be delivered, and what was owed. */
+  reason?: 'missing' | 'dead' | 'send-failed'
+  owed?: RelayForward
+}
+
+/** A successor row that can still take a prompt (ended / exited / lost rows are not targets). */
+export function successorAlive(m: ManagedSession): boolean {
+  if (m.endedAt) return false
+  const status = (m as { status?: string }).status
+  return status !== 'exited' && status !== 'lost' && status !== 'closed'
 }
 
 /** Forward what the owner wrote into ONE predecessor after its snapshot. */
@@ -96,8 +125,13 @@ export async function flushHandoffRelay(
   send: RelaySend,
   io: { read?: (m: ManagedSession) => Promise<TurnsRead>; patch?: typeof patchSession } = {},
 ): Promise<FlushResult> {
-  const read = io.read ?? readSessionTurns
   const patch = io.patch ?? patchSession
+  const cursorMs = parent.handoffRelayedAt ? Date.parse(parent.handoffRelayedAt) : NaN
+  // Incremental: only the tail, and not even that when nothing was written since the cursor.
+  const read = io.read ?? ((m: ManagedSession) => readSessionTurns(m, {
+    recent: true,
+    ...(Number.isFinite(cursorMs) ? { unchangedSince: cursorMs } : {}),
+  }))
   if (!parent.handoffTo) return { ok: true, delivered: false }
   const got = await read(parent)
   if ('unavailable' in got) return { ok: true, delivered: false, unverified: got.unavailable }
@@ -112,38 +146,85 @@ export async function flushHandoffRelay(
     return { ok: true, delivered: false }
   }
   const successor = successorRow(registry, parent.handoffTo)
-  if (!successor) return { ok: false, delivered: false }
+  if (!successor) return { ok: false, delivered: false, reason: 'missing', owed: fwd }
+  if (!successorAlive(successor)) return { ok: false, delivered: false, reason: 'dead', owed: fwd }
   const sent = await send(successor.id, forwardText(parent.id, fwd)).catch(() => false)
-  if (!sent) return { ok: false, delivered: false }
+  if (!sent) return { ok: false, delivered: false, reason: 'send-failed', owed: fwd }
   await patch(parent.id, cursorPatch).catch(() => false)
   return { ok: true, delivered: true }
 }
 
+/** Inside the 48 h watch window (from the last relayed turn). */
+export function relayWatched(m: Pick<ManagedSession, 'handoffTo' | 'handoffRelayedAt'>, now: number): boolean {
+  if (!m.handoffTo || !m.handoffRelayedAt) return false
+  const since = Date.parse(m.handoffRelayedAt)
+  return !(Number.isFinite(since) && now - since > RELAY_WATCH_MS)
+}
+
+/** One flush per predecessor at a time (the 30 s loop and a kill must not both send). */
+const inFlight = new Set<string>()
+
+async function flushOnce(
+  m: ManagedSession, registry: readonly ManagedSession[], send: RelaySend,
+  io: Parameters<typeof flushHandoffRelay>[3] = {},
+): Promise<FlushResult> {
+  if (inFlight.has(m.id)) return { ok: true, delivered: false }
+  inFlight.add(m.id)
+  try { return await flushHandoffRelay(m, registry, send, io) } finally { inFlight.delete(m.id) }
+}
+
 /** The periodic pass: every predecessor still inside its watch window. Returns how many forwarded. */
-export async function flushAllHandoffRelays(send: RelaySend, now = Date.now()): Promise<number> {
-  const registry = await readRegistry().catch(() => [] as ManagedSession[])
+export async function flushAllHandoffRelays(
+  send: RelaySend, now = Date.now(),
+  io: { registry?: readonly ManagedSession[]; read?: (m: ManagedSession) => Promise<TurnsRead>; patch?: typeof patchSession } = {},
+): Promise<number> {
+  const registry = io.registry ?? await readRegistry().catch(() => [] as ManagedSession[])
   let n = 0
   for (const m of registry) {
-    if (!m.handoffTo || !m.handoffRelayedAt) continue
-    const since = Date.parse(m.handoffRelayedAt)
-    if (Number.isFinite(since) && now - since > RELAY_WATCH_MS) continue
-    const r = await flushHandoffRelay(m, registry, send).catch(() => ({ ok: false, delivered: false }))
+    if (!relayWatched(m, now)) continue
+    const r = await flushOnce(m, registry, send, { ...(io.read ? { read: io.read } : {}), ...(io.patch ? { patch: io.patch } : {}) }).catch(() => ({ ok: false, delivered: false }) as FlushResult)
     if (r.delivered) n++
   }
   return n
 }
 
+export interface KillFlush {
+  /** What happened, in a sentence, when something was owed and could not be delivered; else null. */
+  warning: string | null
+}
+
 /**
- * Before a kill: a predecessor whose last reply (or a later owner message) has not reached its
- * successor is flushed first. `null` = proceed; a sentence = refuse, nothing was killed.
+ * Before a kill: forward what is still owed to the successor — BEST EFFORT. A kill is never refused
+ * because of the relay. When the successor is missing, dead or the send fails, what was owed is
+ * recorded as a comment on the successor's (else the predecessor's) task, and the kill proceeds.
  */
-export async function flushBeforeKill(id: string, send: RelaySend, lang: 'en' | 'pt' = 'pt'): Promise<string | null> {
-  const registry = await readRegistry().catch(() => [] as ManagedSession[])
-  const row = registry.find(m => m.id === id)
-  if (!row?.handoffTo) return null
-  const r = await flushHandoffRelay(row, registry, send).catch(() => ({ ok: false, delivered: false }))
-  if (r.ok) return null
-  return lang === 'pt'
-    ? `Não encerrei ${id}: a última resposta ao dono (ou uma mensagem dele) ainda não chegou à sessão sucessora ${row.handoffTo}, e o encaminhamento falhou. Tente de novo em instantes.`
-    : `Did not kill ${id}: the owner's last answer (or a message from the owner) has not reached the successor ${row.handoffTo} yet, and forwarding it failed. Try again in a moment.`
+export async function flushBeforeKill(
+  id: string, send: RelaySend, lang: 'en' | 'pt' = 'pt',
+  io: { now?: number; registry?: readonly ManagedSession[]; read?: (m: ManagedSession) => Promise<TurnsRead>; patch?: typeof patchSession; comment?: (taskRef: string, body: string, subtaskId?: string) => Promise<boolean> } = {},
+): Promise<KillFlush> {
+  try {
+    const registry = io.registry ?? await readRegistry().catch(() => [] as ManagedSession[])
+    const row = registry.find(m => m.id === id)
+    if (!row?.handoffTo || !relayWatched(row, io.now ?? Date.now())) return { warning: null }
+    const r = await flushOnce(row, registry, send, { ...(io.read ? { read: io.read } : {}), ...(io.patch ? { patch: io.patch } : {}) })
+    if (r.ok || !r.owed) return { warning: null }
+    const successor = successorRow(registry, row.handoffTo)
+    const taskId = successor?.taskId ?? row.taskId
+    const subtaskId = successor?.taskId ? successor.subtaskId : row.subtaskId
+    const body = `${forwardText(row.id, r.owed)}\n\n(O encaminhamento à sessão sucessora ${row.handoffTo} falhou — ${r.reason} — antes de encerrar ${row.id}.)`
+    const comment = io.comment ?? defaultComment
+    const recorded = taskId ? await comment(taskId, body, subtaskId).catch(() => false) : false
+    const warning = lang === 'pt'
+      ? `Encerrei ${id}, mas a última resposta ao dono não chegou à sucessora ${row.handoffTo} (${r.reason}).${recorded ? ' Ficou registrada como comentário na tarefa.' : ' Não há tarefa vinculada para registrar.'}`
+      : `Killed ${id}, but the owner's last answer did not reach the successor ${row.handoffTo} (${r.reason}).${recorded ? ' It was recorded as a task comment.' : ' No task is linked to record it.'}`
+    return { warning }
+  } catch {
+    return { warning: null }
+  }
+}
+
+async function defaultComment(taskRef: string, body: string, subtaskId?: string): Promise<boolean> {
+  const { addComment } = await import('./task-web')
+  const res = await addComment(taskRef, { author: 'agentistics · relay', body, ...(subtaskId ? { subtaskId } : {}) })
+  return res.ok
 }

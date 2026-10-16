@@ -92,6 +92,8 @@ export const HANDOFF_RAMP_CALLS = 15
 export const HANDOFF_WRITE_CALLS = 3
 export const CACHE_WRITE_TO_READ = 12.5
 export const HANDOFF_MIN_GAIN_TOKENS = 100_000
+/** The hint fires no later than this share of the window (small windows auto-compact first). */
+export const HANDOFF_MAX_WINDOW_FRACTION = 0.8
 export const HANDOFF_DEFAULT_GROWTH = 1_300
 /** What any session holds before its first call (system prompt, tools, memory) — measured ~63k. */
 export const SESSION_START_TOKENS = 60_000
@@ -118,7 +120,10 @@ export function handoffTargetTokens(base: number, g: number, current: number): n
 /** The size the hint fires at: T*, floored by F + 100k and by the default fraction of the window. */
 export function handoffThreshold(base: number, g: number, current: number, window?: number): number {
   const floor = Math.max(base + HANDOFF_MIN_GAIN_TOKENS, window && window > 0 ? HANDOFF_HINT_DEFAULT_FRACTION * window : 0)
-  return Math.max(handoffTargetTokens(base, g, current), floor)
+  const t = Math.max(handoffTargetTokens(base, g, current), floor)
+  // Capped at 80 % of the window: a 200k model would otherwise floor at F + 100k = its whole
+  // window, auto-compact first, and never be told.
+  return window && window > 0 ? Math.min(t, HANDOFF_MAX_WINDOW_FRACTION * window) : t
 }
 
 /** F from the samples: their median, or the fallback with none. */

@@ -378,9 +378,9 @@ async function ownerWaitingOn(id: string): Promise<boolean> {
   const m = (await readRegistry().catch(() => [] as ManagedSession[])).find(r => r.id === id)
   if (!m) return false
   const { readSessionTurns } = await import('./handoff-relay-io')
-  const { planRelay } = await import('./handoff-relay')
-  const got = await readSessionTurns(m)
-  return 'turns' in got && planRelay(got.turns).unanswered
+  const { ownerWaitingFresh } = await import('./handoff-relay')
+  const got = await readSessionTurns(m, { recent: true })
+  return 'turns' in got && ownerWaitingFresh(got.turns)
 }
 
 /** The numbers behind the leader's handoff hint, for the future modal and API clients. */

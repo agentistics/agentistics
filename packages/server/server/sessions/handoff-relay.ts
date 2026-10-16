@@ -25,7 +25,7 @@ export const RELAY_MAX_OWNER_MESSAGES = 10
 export const RELAY_MAX_CHARS = 2_000
 export const RELAY_MAX_REPLY_CHARS = 6_000
 
-const NOT_OWNER = /^(?:\[from session\b|\[from agentistics\b|<agentistics-context>|<task-notification>|<system-reminder>|<local-command|<command-name>)/
+const NOT_OWNER = /^(?:\[from session\b|\[from agentistics\b|<agentistics-context>|<task-notification>|<system-reminder>|<local-command|<command-name>|<session_context>|<scheduled-task|<cron\b|<user-prompt-submit-hook|CRON\s+\d{1,2}h\d{2}\b|\[(?:cron|scheduled)\b|\[SCHEDULED\b)/i
 
 export function isOwnerTurn(turn: Pick<ChatTurn, 'role' | 'text' | 'system'>): boolean {
   if (turn.role !== 'user' || turn.system) return false
@@ -75,6 +75,22 @@ function replyAfter(turns: readonly ChatTurn[], from: number): RelayMessage | un
   }
   if (parts.length === 0) return undefined
   return { ...(at ? { at } : {}), text: tail(parts.join('\n\n'), RELAY_MAX_REPLY_CHARS) }
+}
+
+/** The "owner has an unanswered message" gate expires: a stale message must not hold a hint forever. */
+export const OWNER_WAIT_MAX_MS = 30 * 60 * 1000
+
+/**
+ * The owner's latest message is recent (< 30 min) and the assistant has produced NOTHING after it —
+ * a tool-only or interrupted turn still counts as having answered, and an old message never blocks.
+ */
+export function ownerWaitingFresh(turns: readonly ChatTurn[], now = Date.now()): boolean {
+  let last = -1
+  turns.forEach((t, i) => { if (isOwnerTurn(t)) last = i })
+  if (last < 0) return false
+  if (turns.slice(last + 1).some(t => t.role === 'assistant')) return false
+  const at = turns[last]!.at ? Date.parse(turns[last]!.at!) : NaN
+  return Number.isFinite(at) && now - at <= OWNER_WAIT_MAX_MS
 }
 
 function lastTurnAt(turns: readonly ChatTurn[]): string | undefined {
