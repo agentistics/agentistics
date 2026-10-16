@@ -14,7 +14,7 @@ import { readFile, readdir, stat, writeFile, rename, mkdir } from 'node:fs/promi
 import { basename, dirname, join } from 'node:path'
 import { watch as fsWatch } from 'node:fs'
 import {
-  agentVisiblePlans, alternativeWithRoom, HARNESS_ORDER, newerLimits, parseClaudeRateLimitEvent, parseCodexRateLimits,
+  agentVisible, alternativeWithRoom, HARNESS_ORDER, newerLimits, parseClaudeRateLimitEvent, parseCodexRateLimits,
   planBudget, planPace, planThresholdNotices, registeredPlanLabel, withPlanLabel,
   type HarnessId,
   type LivePlanSession, type PlanLimits, type PlanNoticeState, type PlanThresholdNotice,
@@ -307,8 +307,13 @@ export async function planLimitsPayload(
     const planSessions = liveSessions.filter(s => !s.harness || s.harness === l.harness)
     return { ...budget, ...planPace(l, nowMs, history.get(keyOf(l)) ?? [], planSessions) }
   })
-  const budgets = agentVisiblePlans(allBudgets, currentAccounts)
-  const hiddenFromAgents = allBudgets.filter(b => !budgets.includes(b))
+  // Legacy meters are `'default'`; the harness-level login stands in for the registry until C1.
+  const budgets = agentVisible(
+    allBudgets.map(b => ({ ...b, account: 'default' })),
+    currentAccounts.map(a => ({ id: `${a.harness}:current`, harness: a.harness, available: a.available })),
+  ).map(({ account: _account, ...b }) => b)
+  const keep = new Set(budgets.map(b => b.harness))
+  const hiddenFromAgents = allBudgets.filter(b => !keep.has(b.harness))
   const freeSlotsByHarness = Object.fromEntries(budgets.map(b => [b.harness, b.freeSlots])) as Partial<Record<HarnessId, number>>
   // A caller choosing a harness must not be blocked by another harness's exhausted plan.
   const availableBudgets = budgets.filter(b => b.status !== 'hold')

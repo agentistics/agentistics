@@ -40,7 +40,7 @@ export type PlanLimitSource = 'claude-stream' | 'codex-rollout' | 'codex-app-ser
 
 export interface PlanLimits {
   harness: HarnessId
-  /** Meter key within the harness (`'default'`); availability follows the current login. */
+  /** The account id (`acc_…`); `'default'` only for legacy meters recorded before accounts existed. */
   account: string
   /** The plan as registered in Settings → Billing (filled by `withPlanLabel`). */
   plan?: string
@@ -52,13 +52,31 @@ export interface PlanLimits {
   source: PlanLimitSource
 }
 
-/** Availability applies to the harness's current login while meter keys stay unchanged. */
-export function agentVisiblePlans<T extends { harness: HarnessId }>(
-  plans: readonly T[],
-  currentAccounts: readonly { harness: HarnessId; available: boolean }[],
+/** An account as the registry reports it, for visibility decisions. */
+export interface VisibilityAccount {
+  id: string
+  /** Only needed to resolve legacy `'default'` rows, which name no registered account. */
+  harness?: HarnessId
+  available: boolean
+  retired?: boolean
+}
+
+/**
+ * Availability is decided per ACCOUNT id, never per harness: hiding one account of a harness
+ * leaves its other accounts routable. A row whose account the registry does not know is kept only
+ * when it is the legacy `'default'` meter AND its harness has no hidden current account.
+ */
+export function agentVisible<T extends { harness: HarnessId; account?: string }>(
+  rows: readonly T[],
+  accounts: readonly VisibilityAccount[],
 ): T[] {
-  const hidden = new Set(currentAccounts.filter(a => !a.available).map(a => a.harness))
-  return plans.filter(p => !hidden.has(p.harness))
+  const byId = new Map(accounts.map(a => [a.id, a]))
+  return rows.filter(r => {
+    const known = r.account ? byId.get(r.account) : undefined
+    if (known) return known.available && !known.retired
+    if ((r.account ?? 'default') !== 'default') return false
+    return !accounts.some(a => a.harness === r.harness && !a.available && !a.retired)
+  })
 }
 
 export const PLAN_BUDGET_HOLD_5H_PCT = 85
@@ -139,7 +157,11 @@ export interface RouteRecommendation {
   harness: HarnessId | null
   model?: string
   reason: string
+  /** The account of `harness` with the most room, when the rows named accounts. */
+  account?: string
   alternatives: HarnessId[]
+  /** Every other routable `{harness, account}`, same-harness accounts included. */
+  accountAlternatives: { harness: HarnessId; account: string }[]
   cadence: { parallel: number; note: string }
 }
 
@@ -320,6 +342,8 @@ export function planPace(
   nowMs: number,
   history: readonly PlanLimits[] = [],
   liveSessions: readonly LivePlanSession[] = [],
+  /** Readings before this instant (a new account segment) are ignored. */
+  segmentStart?: number,
 ): PlanPace {
   const weekWindow = windowOf(l, 'week')
   const week = weekWindow && effectiveWindow(weekWindow, nowMs)
@@ -333,6 +357,7 @@ export function planPace(
     : rawSustainable
   const readings = [...history.filter(x => x.updatedAt !== l.updatedAt), l]
     .filter(x => x.harness === l.harness && x.account === l.account)
+    .filter(x => segmentStart === undefined || x.updatedAt >= segmentStart)
     .filter(x => !week || x.updatedAt >= week.resetsAt - PLAN_WINDOW_MS.week)
     .sort((a, b) => a.updatedAt - b.updatedAt)
   const first = readings.find(x => nowMs - x.updatedAt <= 6 * 3_600_000)
@@ -405,15 +430,59 @@ const ROUTE_PREFERENCES: Record<RouteKind, readonly [HarnessId, string?][]> = {
   probe: [['claude', 'haiku'], ['gemini']],
 }
 
+/** A budget row, optionally attributed to one account of its harness. */
+export type AccountBudget = PlanBudget & Partial<PlanPace> & { account?: string; updatedAt?: number }
+
+export interface HarnessAggregate {
+  harness: HarnessId
+  /** Σ free slots of the accounts that are not on hold. */
+  freeSlots: number
+  /** `hold` only when every account is on hold; otherwise the best status among the rest. */
+  status: PlanBudgetStatus
+  /** The best pace among accounts not on hold. */
+  paceStatus?: PlanPaceStatus
+  accounts: number
+}
+
+const STATUS_RANK: Record<PlanBudgetStatus, number> = { ok: 0, tight: 1, hold: 2 }
+const PACE_RANK: Record<PlanPaceStatus, number> = { under: 0, on: 1, over: 2 }
+
+/** Per harness, fold the visible accounts into one routing answer. */
+export function harnessAggregate(rows: readonly AccountBudget[]): HarnessAggregate[] {
+  const by = new Map<HarnessId, AccountBudget[]>()
+  for (const r of rows) by.set(r.harness, [...(by.get(r.harness) ?? []), r])
+  return [...by].map(([harness, list]) => {
+    const live = list.filter(r => r.status !== 'hold')
+    const status: PlanBudgetStatus = live.length
+      ? live.reduce<PlanBudgetStatus>((best, r) => (STATUS_RANK[r.status] < STATUS_RANK[best] ? r.status : best), 'hold')
+      : 'hold'
+    const paces = live.flatMap(r => (r.paceStatus ? [r.paceStatus] : []))
+    const paceStatus = paces.length ? paces.reduce((best, p) => (PACE_RANK[p] < PACE_RANK[best] ? p : best)) : undefined
+    return {
+      harness, status, accounts: list.length,
+      freeSlots: live.reduce((sum, r) => sum + (r.freeSlots ?? 0), 0),
+      ...(paceStatus ? { paceStatus } : {}),
+    }
+  })
+}
+
+const roomOf = (b: AccountBudget): number => Math.max(b.fiveHourPct, b.weekPct)
+
 export function routeRecommendation(
   /** The flat `{ ...planBudget, ...planPace }` row `/api/plan-limits` serves; pace fields are optional. */
-  budgets: readonly (PlanBudget & Partial<PlanPace>)[],
+  budgets: readonly AccountBudget[],
   kind: RouteKind,
   authorHarness?: string,
 ): RouteRecommendation {
   const allowTight = kind === 'lead'
-  const eligible = budgets.filter(b => b.plan !== 'unregistered' && b.status !== 'hold' && (allowTight || b.status !== 'tight') && b.harness !== (kind === 'qa' ? authorHarness : undefined))
-  const ordered = [...eligible].sort((a, b) => {
+  const aggregates = new Map(harnessAggregate(budgets).map(a => [a.harness, a]))
+  const registered = (h: HarnessId) => budgets.some(b => b.harness === h && b.plan !== 'unregistered')
+  const eligibleHarness = (agg: HarnessAggregate) =>
+    registered(agg.harness) && agg.status !== 'hold' && (allowTight || agg.status !== 'tight') && agg.harness !== (kind === 'qa' ? authorHarness : undefined)
+  const eligibleAccounts = (h: HarnessId) =>
+    budgets.filter(b => b.harness === h && b.plan !== 'unregistered' && b.status !== 'hold' && (allowTight || b.status !== 'tight'))
+  const harnesses = [...aggregates.values()].filter(eligibleHarness)
+  const ordered = [...harnesses].sort((a, b) => {
     const ap = a.paceStatus === 'under' ? 0 : 1
     const bp = b.paceStatus === 'under' ? 0 : 1
     if (ap !== bp) return ap - bp
@@ -422,22 +491,37 @@ export function routeRecommendation(
     return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi)
   })
   const preference = ROUTE_PREFERENCES[kind]
-  const chosen = ordered.find(b => preference.some(([h]) => h === b.harness))
-  const pick = chosen ?? ordered[0]
-  if (!pick) {
+  const chosen = ordered.find(a => preference.some(([h]) => h === a.harness))
+  const pickAgg = chosen ?? ordered[0]
+  if (!pickAgg) {
     const earliest = budgets.filter(b => b.status === 'hold').sort((a, b) => a.weekResetsAt - b.weekResetsAt)[0]
     const reset = earliest ? new Date(earliest.weekResetsAt).toISOString() : 'the next reset'
-    return { harness: null, reason: `all plans on hold until ${reset}`, alternatives: [], cadence: { parallel: 0, note: 'Wait for a plan to renew.' } }
+    return { harness: null, reason: `all plans on hold until ${reset}`, alternatives: [], accountAlternatives: [], cadence: { parallel: 0, note: 'Wait for a plan to renew.' } }
   }
+  // The account with the most room (lowest binding %); ties go to the newest reading.
+  const candidates = eligibleAccounts(pickAgg.harness)
+  const indexed = candidates.map((b, i) => ({ b, i }))
+  indexed.sort((x, y) => roomOf(x.b) - roomOf(y.b) || (y.b.updatedAt ?? 0) - (x.b.updatedAt ?? 0) || y.i - x.i)
+  const pick = indexed[0]!.b
   const selected = preference.find(([h]) => h === pick.harness)
-  const alternatives = ordered.filter(b => b.harness !== pick.harness).map(b => b.harness)
+  const alternatives = ordered.filter(a => a.harness !== pick.harness).map(a => a.harness)
+  const accountAlternatives = ordered.flatMap(a =>
+    eligibleAccounts(a.harness)
+      .filter(b => !(b.harness === pick.harness && b.account === pick.account))
+      .map(b => ({ harness: b.harness, account: b.account ?? 'default' })))
   const paceText = pick.note ? ` ${pick.note}` : ''
+  const measured = candidates.some(b => b.freeSlotsMeasured)
+  const parallel = measured
+    ? pickAgg.freeSlots
+    : (candidates.length > 1 ? candidates.reduce((sum, b) => sum + (b.suggestedParallel ?? 1), 0) : (pick.suggestedParallel ?? 1))
   return {
     harness: pick.harness,
+    ...(pick.account ? { account: pick.account } : {}),
     ...(selected?.[1] ? { model: selected[1] } : {}),
     reason: `${pick.harness} is the preferred eligible plan for ${kind}.${paceText}`,
     alternatives,
-    cadence: { parallel: pick.freeSlotsMeasured ? (pick.freeSlots ?? 0) : (pick.suggestedParallel ?? 1), note: pick.note ?? 'Keep one worker running.' },
+    accountAlternatives,
+    cadence: { parallel, note: pick.note ?? 'Keep one worker running.' },
   }
 }
 
@@ -508,4 +592,29 @@ export function planThresholdNotices(
     next[key] = { resetsAt: samePeriod ? prev.resetsAt : w.resetsAt, told: Math.max(told, reached) }
   }
   return { notices, state: next }
+}
+
+/** Forget what was told for one account (a new segment starts counting from zero). */
+export function resetNoticesFor(state: PlanNoticeState, harness: HarnessId, account: string): PlanNoticeState {
+  const prefix = `${harness}:${account}:`
+  return Object.fromEntries(Object.entries(state).filter(([k]) => !k.startsWith(prefix)))
+}
+
+/** `usedPct` must fall at least this far, with a moved reset and no renewal, to suspect a login switch. */
+const DISCONTINUITY_DROP_PCT = 15
+const DISCONTINUITY_RESET_MS = 60 * 60_000
+
+/**
+ * Spec §5 signal 2: against the last reading of the SAME window kind, `resetsAt` moved by more
+ * than 1 h AND the old window had not yet renewed when the new reading was taken AND `usedPct`
+ * dropped by ≥ 15 points. All three must hold, for at least one window kind.
+ */
+export function meterDiscontinuity(prev: PlanLimits, next: PlanLimits): boolean {
+  return next.windows.some(n => {
+    const p = prev.windows.find(w => w.kind === n.kind)
+    if (!p) return false
+    return Math.abs(n.resetsAt - p.resetsAt) > DISCONTINUITY_RESET_MS
+      && next.updatedAt < p.resetsAt
+      && p.usedPct - n.usedPct >= DISCONTINUITY_DROP_PCT
+  })
 }
