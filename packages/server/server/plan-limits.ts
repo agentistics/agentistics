@@ -16,14 +16,14 @@ import { readFile, readdir, stat, writeFile, rename, mkdir } from 'node:fs/promi
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { watch as fsWatch } from 'node:fs'
 import {
-  agentVisible, alternativeWithRoom, HARNESS_ORDER, meterDiscontinuity, newerLimits, parseClaudeRateLimitEvent,
+  agentVisible, alternativeWithRoom, harnessAggregate, HARNESS_ORDER, meterDiscontinuity, newerLimits, parseClaudeRateLimitEvent,
   parseCodexRateLimits, planBudget, planPace, planThresholdNotices, registeredPlanLabel, resetNoticesFor, withPlanLabel,
   type HarnessId,
   type LivePlanSession, type PlanLimits, type PlanNoticeState, type PlanThresholdNotice,
 } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, CODEX_DIR, CODEX_SESSIONS_DIR } from './config'
 import {
-  bind, byId, currentHarnessAccounts, forceProbe, hasIdentityProbe, readAccounts, startSegment,
+  bind, byId, forceProbe, hasIdentityProbe, listHarnessAccounts, readAccounts, startSegment,
 } from './harness-accounts'
 import { readTailBytes, windowLines } from './sessions/transcript-window'
 
@@ -170,11 +170,35 @@ function persistSoon(): void {
   persistTimer.unref?.()
 }
 
+/** Last `maybeMigrateDefault` run: the registry file is read at most this often per process. */
+let lastMigrateCheck = 0
+
+/**
+ * A `'default'` binding can be CONFIRMED after boot (the first probe that names the login), which
+ * leaves the legacy record beside the account's own. Re-run the load migration then — throttled,
+ * and only while a legacy record exists, so a machine with no binding never pays for it.
+ */
+async function maybeMigrateDefault(): Promise<void> {
+  if (!Object.values(state.limits).some(l => l.account === 'default')) return
+  const t = Date.now()
+  if (t - lastMigrateCheck < 5_000) return
+  lastMigrateCheck = t
+  if (await migrateDefaultRecords()) persistSoon()
+}
+
 /** Store `l` when it is newer than what is held; notices and the SSE signal follow a real change. */
 export async function ingestPlanLimits(l: PlanLimits): Promise<boolean> {
   await load()
   const key = keyOf(l)
-  if (migratedAway.has(key)) return false
+  if (migratedAway.has(key)) {
+    // The migration moved this key's record to the default root's account. Once that binding is
+    // gone (the root was removed) the legacy reading has nowhere else to live: take it back.
+    let bound = true
+    try { bound = Boolean((await readAccounts()).bindings[`${l.harness}:`]) } catch { /* keep dropping */ }
+    if (bound) return false
+    migratedAway.delete(key)
+  }
+  if (l.account !== 'default') await maybeMigrateDefault()
   const held = state.limits[key]
   if (held && newerLimits(held, l) === held) return false
   let newSegment = false
@@ -183,12 +207,20 @@ export async function ingestPlanLimits(l: PlanLimits): Promise<boolean> {
     // Signal 1: the root now holds ANOTHER login — the reading is that account's; the held one
     // (and its hold) is left exactly as it was.
     if (switched) return ingestPlanLimits({ ...l, account: switched })
+    // The awaits above let another reading land: judge against what is held NOW, so an older
+    // reading never overwrites a newer one and one discontinuity opens one segment.
+    const fresh = state.limits[key]
+    if (fresh && newerLimits(fresh, l) === fresh) return false
     // Same login, or a harness that cannot say: a new segment for this account (spec §5).
-    newSegment = true
-    segmentStarts.set(l.account, l.updatedAt)
-    history.delete(key)
-    state.notices = resetNoticesFor(state.notices, l.harness, l.account)
-    await startSegment(l.account, l.updatedAt).catch(() => {})
+    if (fresh && meterDiscontinuity(fresh, l)) {
+      await startSegment(l.account, l.updatedAt).catch(() => {})
+      const again = state.limits[key]
+      if (again && newerLimits(again, l) === again) return false
+      newSegment = true
+      segmentStarts.set(l.account, l.updatedAt)
+      history.delete(key)
+      state.notices = resetNoticesFor(state.notices, l.harness, l.account)
+    }
   }
   state.limits[key] = l
   const readings = history.get(key) ?? []
@@ -333,6 +365,16 @@ export async function managedAccountOf(by: { id?: string; conversationId?: strin
   } catch { return undefined }
 }
 
+/**
+ * The account of one managed session, looked up lazily and remembered ONLY once it is known: an
+ * `undefined` (registry unreadable, row not written yet) is retried on the next line instead of
+ * pinning the session to the default root for its whole life.
+ */
+export function sessionAccountOf(id: string): () => Promise<string | undefined> {
+  let known: string | undefined
+  return async () => (known ??= await managedAccountOf({ id }))
+}
+
 /** Tests only: the managed-session rows attribution reads. */
 export function __setManagedLookupForTest(f: ManagedLookup | null): void {
   managedLookup = f ?? (async () => (await import('./sessions/registry')).readRegistry())
@@ -462,55 +504,108 @@ export async function seedPlanLimits(structuredDir: string): Promise<void> {
   }
 }
 
-/** What `GET /api/plan-limits` answers: every account observed, with its registered plan name. */
+/** Names for the "<Harness> #n" account label — a table, so a new harness fails the build here. */
+const HARNESS_NAMES: Record<HarnessId, string> = {
+  claude: 'Claude Code', codex: 'Codex CLI', gemini: 'Gemini CLI', copilot: 'Copilot CLI',
+  antigravity: 'Antigravity', kimi: 'Kimi Code', 'opencode': 'opencode',
+}
+
+export type AccountBudgetRow = ReturnType<typeof planBudget> & ReturnType<typeof planPace> & { account: string; accountLabel: string }
+
+export interface PlanLimitsPayload {
+  /** Owner surfaces: every account observed, with the owner-only login `label`. */
+  limits: PlanLimits[]
+  /** Plans registered in Billing for an account that has reported no window yet. */
+  registered: { harness: HarnessId; account: string; plan: string }[]
+  budgets: AccountBudgetRow[]
+  hiddenFromAgents: AccountBudgetRow[]
+  freeSlots: number
+  freeSlotsByHarness: Partial<Record<HarnessId, number>>
+  freeSlotsByAccount: Record<string, number>
+  liveSessions: Omit<LivePlanSession, 'harness' | 'account'>[]
+  pauseUntil?: number
+  now: number
+}
+
+/** What `GET /api/plan-limits` answers: one row per account observed, agent-visible ones in `budgets`. */
 export async function planLimitsPayload(
   billing: Parameters<typeof withPlanLabel>[1],
   nowMs = Date.now(),
   liveSessions: readonly LivePlanSession[] = [],
-): Promise<{ limits: PlanLimits[]; registered: { harness: HarnessId; plan: string }[]; budgets: Array<ReturnType<typeof planBudget> & ReturnType<typeof planPace>>; hiddenFromAgents: Array<ReturnType<typeof planBudget> & ReturnType<typeof planPace>>; freeSlots: number; freeSlotsByHarness: Partial<Record<HarnessId, number>>; liveSessions: LivePlanSession[]; pauseUntil?: number; now: number }> {
+): Promise<PlanLimitsPayload> {
   await syncPlanLimitsFromFile()
+  await maybeMigrateDefault()
   let registrySegments: Record<string, number> = {}
   try { registrySegments = (await readAccounts()).segments } catch { /* none known */ }
   const segmentOf = (account: string): number | undefined => {
     const starts = [segmentStarts.get(account), registrySegments[account]].filter((v): v is number => v !== undefined)
     return starts.length ? Math.max(...starts) : undefined
   }
-  const limits = Object.values(state.limits)
-    .map(l => withPlanLabel(l, billing, nowMs))
-    .sort((a, b) => a.harness.localeCompare(b.harness))
-  // Plans registered in Settings → Billing whose harness has reported no window yet: listed by
-  // name with NO meters (nothing observed is not nothing used).
-  const registered: { harness: HarnessId; plan: string }[] = []
-  for (const h of Object.keys(billing?.profiles ?? {}) as HarnessId[]) {
-    const plan = registeredPlanLabel(billing, h, nowMs)
-    if (plan && !limits.some(l => l.harness === h)) registered.push({ harness: h, plan })
-  }
-  const currentAccounts = await currentHarnessAccounts([
-    ...limits.map(l => l.harness),
+  const profileHarnesses = Object.keys(billing?.profiles ?? {}).filter(isHarnessId)
+  // The stored meters are read BEFORE the registry await: an answer never mixes a meter stored
+  // while the accounts were being resolved with accounts resolved before it existed.
+  const stored = Object.values(state.limits)
+  const harnesses = [...new Set<HarnessId>([
+    ...stored.map(l => l.harness),
     ...liveSessions.flatMap(s => s.harness ? [s.harness] : []),
-  ])
-  const allBudgets = limits.map(l => {
+    ...profileHarnesses,
+  ])]
+  const accounts = harnesses.length ? await listHarnessAccounts(harnesses) : []
+  const accountId = (a: { id: string; harness: HarnessId }) => a.id || `${a.harness}:current`
+  const byAccount = new Map(accounts.map(a => [accountId(a), a]))
+  const visibility = accounts.map(a => ({ id: accountId(a), harness: a.harness, available: a.available, ...(a.retired ? { retired: true } : {}) }))
+  // "<Harness> #n" by firstSeen order within the harness; a nickname stands in unless it looks like an email.
+  const labelOf = (harness: HarnessId, account: string): string => {
+    const known = byAccount.get(account)
+    if (known?.nickname && !known.nickname.includes('@')) return known.nickname
+    const ofHarness = accounts.filter(a => a.harness === harness).sort((x, y) => x.firstSeen - y.firstSeen)
+    const n = known ? ofHarness.findIndex(a => accountId(a) === account) + 1 : 1
+    return `${HARNESS_NAMES[harness]} #${Math.max(1, n)}`
+  }
+  const limits = stored
+    .map(l => withPlanLabel(l, billing, nowMs))
+    .map(l => { const label = byAccount.get(l.account)?.label; return label ? { ...l, label } : l })
+    .sort((a, b) => a.harness.localeCompare(b.harness) || a.account.localeCompare(b.account))
+  const allBudgets: AccountBudgetRow[] = limits.map(l => {
     const budget = planBudget(l, nowMs)
     // Only measured sessions enter planSlots' per-session average. Working sessions with no
     // billed tokens remain in the public live summary, without diluting the measured burn.
-    const planSessions = liveSessions.filter(s => s.burnPctPerHour > 0 && (!s.harness || s.harness === l.harness))
-    return { ...budget, ...planPace(l, nowMs, history.get(keyOf(l)) ?? [], planSessions, segmentOf(l.account)) }
+    const planSessions = liveSessions.filter(s => s.burnPctPerHour > 0 && (!s.harness || s.harness === l.harness) && (!s.account || s.account === l.account))
+    return { ...budget, ...planPace(l, nowMs, history.get(keyOf(l)) ?? [], planSessions, segmentOf(l.account)), account: l.account, accountLabel: labelOf(l.harness, l.account) }
   })
-  // Legacy meters are `'default'`; the harness-level login stands in for the registry until C1.
-  const budgets = agentVisible(
-    allBudgets.map(b => ({ ...b, account: 'default' })),
-    currentAccounts.map(a => ({ id: `${a.harness}:current`, harness: a.harness, available: a.available })),
-  ).map(({ account: _account, ...b }) => b)
-  const keep = new Set(budgets.map(b => b.harness))
-  const hiddenFromAgents = allBudgets.filter(b => !keep.has(b.harness))
-  const freeSlotsByHarness = Object.fromEntries(budgets.map(b => [b.harness, b.freeSlots])) as Partial<Record<HarnessId, number>>
+  const budgets = agentVisible(allBudgets, visibility)
+  const shown = new Set(budgets)
+  const hiddenFromAgents = allBudgets.filter(b => !shown.has(b))
+  // Plans registered in Settings → Billing whose account has reported no window yet: listed by
+  // name with NO meters (nothing observed is not nothing used). Hidden accounts are absent.
+  const registered: PlanLimitsPayload['registered'] = []
+  for (const h of profileHarnesses) {
+    const plan = registeredPlanLabel(billing, h, nowMs)
+    if (!plan) continue
+    const mine = accounts.filter(a => a.harness === h && !a.retired)
+    const targets = mine.length ? mine : [{ id: '', harness: h, available: true } as const]
+    for (const a of targets) {
+      const account = a.id || 'default'
+      if (!a.available || limits.some(l => l.harness === h && (l.account === account || (!a.id && !byAccount.has(l.account))))) continue
+      registered.push({ harness: h, account, plan })
+    }
+  }
+  const aggregates = harnessAggregate(budgets)
+  const freeSlotsByHarness = Object.fromEntries(aggregates.map(a => [a.harness, a.freeSlots])) as Partial<Record<HarnessId, number>>
+  const freeSlotsByAccount = Object.fromEntries(budgets.map(b => [b.account, b.freeSlots ?? 0]))
   // A caller choosing a harness must not be blocked by another harness's exhausted plan.
-  const availableBudgets = budgets.filter(b => b.status !== 'hold')
-  const freeSlots = availableBudgets.length ? Math.max(...availableBudgets.map(b => b.freeSlots)) : 0
+  const open = aggregates.filter(a => a.status !== 'hold')
+  const freeSlots = open.length ? Math.max(...open.map(a => a.freeSlots)) : 0
   const pauseUntil = budgets.map(b => b.pauseUntil).filter((v): v is number => v !== undefined).sort((a, b) => a - b)[0]
-  const hiddenHarnesses = new Set(currentAccounts.filter(a => !a.available).map(a => a.harness))
-  const publicLiveSessions = liveSessions.filter(s => !s.harness || !hiddenHarnesses.has(s.harness)).map(({ harness: _harness, ...s }) => s)
-  return { limits, registered, budgets, hiddenFromAgents, freeSlots, freeSlotsByHarness, liveSessions: publicLiveSessions, ...(pauseUntil !== undefined ? { pauseUntil } : {}), now: nowMs }
+  const hiddenAccounts = new Set(visibility.filter(a => !a.available || a.retired).map(a => a.id))
+  const hiddenOutright = (h: HarnessId) => {
+    const live = visibility.filter(a => a.harness === h && !a.retired)
+    return live.length > 0 && live.every(a => !a.available)
+  }
+  const publicLiveSessions = liveSessions
+    .filter(s => s.account ? !hiddenAccounts.has(s.account) : (!s.harness || !hiddenOutright(s.harness)))
+    .map(({ harness: _harness, account: _account, ...s }) => s)
+  return { limits, registered, budgets, hiddenFromAgents, freeSlots, freeSlotsByHarness, freeSlotsByAccount, liveSessions: publicLiveSessions, ...(pauseUntil !== undefined ? { pauseUntil } : {}), now: nowMs }
 }
 
 /** Tests only. */
@@ -521,6 +616,7 @@ export function __resetPlanLimitsForTest(file: string | null = null): void {
   history.clear()
   segmentStarts.clear()
   migratedAway.clear()
+  lastMigrateCheck = 0
   // Without a file of its own, a test must never sync the REAL data dir's file (the hook runs with
   // the owner's HOME): a path that cannot exist keeps `syncPlanLimitsFromFile` empty.
   filePath = file ?? join(AGENTISTICS_DATA_DIR, `.plan-limits-test-none-${process.pid}`, 'plan-limits.json')

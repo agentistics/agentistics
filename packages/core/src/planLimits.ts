@@ -49,6 +49,8 @@ export interface PlanLimits {
   plan?: string
   /** A plan name the harness itself reported (codex `plan_type`), the fallback for `plan`. */
   sourcePlan?: string
+  /** Owner-only: the login label the registry holds for the account. Never forwarded to agents. */
+  label?: string
   windows: PlanLimitWindow[]
   /** Epoch ms of the record the windows were read from. */
   updatedAt: number
@@ -125,6 +127,8 @@ export interface LivePlanSession {
   burnPctPerHour: number
   /** Internal routing hint; API responses omit it. */
   harness?: HarnessId
+  /** The account the session runs on; burn is shared among sessions of the same account. */
+  account?: string
 }
 
 export interface PlanSlotInput {
@@ -163,8 +167,10 @@ export interface RouteRecommendation {
   harness: HarnessId | null
   model?: string
   reason: string
-  /** The account of `harness` with the most room, when the rows named accounts. */
+  /** The account of `harness` that takes the work (week resets first, then most room), when the rows named accounts. */
   account?: string
+  /** Display label of `account` (nickname or "<Harness> #n"), never an email. */
+  accountLabel?: string
   alternatives: HarnessId[]
   /** Every other routable `{harness, account}`, same-harness accounts included. */
   accountAlternatives: { harness: HarnessId; account: string }[]
@@ -462,7 +468,7 @@ const ROUTE_PREFERENCES: Record<RouteKind, readonly [HarnessId, string?][]> = {
 }
 
 /** A budget row, optionally attributed to one account of its harness. */
-export type AccountBudget = PlanBudget & Partial<PlanPace> & { account?: string; updatedAt?: number }
+export type AccountBudget = PlanBudget & Partial<PlanPace> & { account?: string; accountLabel?: string; updatedAt?: number }
 
 export interface HarnessAggregate {
   harness: HarnessId
@@ -499,6 +505,20 @@ export function harnessAggregate(rows: readonly AccountBudget[]): HarnessAggrega
 
 const roomOf = (b: AccountBudget): number => Math.max(b.fiveHourPct, b.weekPct)
 
+/**
+ * Which of one harness's eligible accounts takes the work (Q6, decided): the one whose WEEK resets
+ * first — its remaining quota is lost soonest, so drain it first — then the one with the most room
+ * (lowest binding %), then the newest reading. The ONE place this policy lives.
+ */
+export function pickAccount<T extends AccountBudget>(candidates: readonly T[]): T | undefined {
+  return candidates
+    .map((b, i) => ({ b, i }))
+    .sort((x, y) => x.b.weekResetsAt - y.b.weekResetsAt
+      || roomOf(x.b) - roomOf(y.b)
+      || (y.b.updatedAt ?? 0) - (x.b.updatedAt ?? 0)
+      || y.i - x.i)[0]?.b
+}
+
 export function routeRecommendation(
   /** The flat `{ ...planBudget, ...planPace }` row `/api/plan-limits` serves; pace fields are optional. */
   budgets: readonly AccountBudget[],
@@ -531,12 +551,9 @@ export function routeRecommendation(
     return { harness: null, reason: `all plans on hold until ${reset}`, alternatives: [], accountAlternatives: [], cadence: { parallel: 0, note: 'Wait for a plan to renew.' } }
   }
   if (!pickAgg) return noRoute()
-  // The account with the most room (lowest binding %); ties go to the newest reading.
   const candidates = eligibleAccounts(pickAgg.harness)
-  if (!candidates.length) return noRoute()
-  const indexed = candidates.map((b, i) => ({ b, i }))
-  indexed.sort((x, y) => roomOf(x.b) - roomOf(y.b) || (y.b.updatedAt ?? 0) - (x.b.updatedAt ?? 0) || y.i - x.i)
-  const pick = indexed[0]!.b
+  const pick = pickAccount(candidates)
+  if (!pick) return noRoute()
   const selected = preference.find(([h]) => h === pick.harness)
   const alternatives = ordered.filter(a => a.harness !== pick.harness).map(a => a.harness)
   const accountAlternatives = ordered.flatMap(a =>
@@ -551,6 +568,7 @@ export function routeRecommendation(
   return {
     harness: pick.harness,
     ...(pick.account ? { account: pick.account } : {}),
+    ...(pick.accountLabel ? { accountLabel: pick.accountLabel } : {}),
     ...(selected?.[1] ? { model: selected[1] } : {}),
     reason: `${pick.harness} is the preferred eligible plan for ${kind}.${paceText}`,
     alternatives,

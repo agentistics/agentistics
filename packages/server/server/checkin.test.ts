@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { afterAll, describe, expect, spyOn, test } from 'bun:test'
 import { planBudget, planPace, type PlanLimits } from '@agentistics/core'
 import {
-  checkinActivity, checkinLimitInputs, defaultConfig, due, fireDue, mergeConfig, nextRun, promptFor, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
+  checkinAccountLimits, checkinActivity, checkinLimitInputs, defaultConfig, due, fireDue, mergeConfig, nextRun, promptFor, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
   runNow, type CheckinAction, type CheckinDeps, type CheckinNeed, validateCheckinRound,
 } from './checkin'
 
@@ -365,8 +365,8 @@ describe('idle check-ins', () => {
     const seen: number[] = []
     const reader = spyOn(module, 'planLimitsPayload').mockImplementation(async (_billing, now = Date.now()) => {
       seen.push(now)
-      return { limits: records, registered: [], budgets: records.map(l => ({ ...planBudget(l, now), ...planPace(l, now, history) })),
-        hiddenFromAgents: [], freeSlots: 0, freeSlotsByHarness: {}, liveSessions: [], now }
+      return { limits: records, registered: [], budgets: records.map(l => ({ ...planBudget(l, now), ...planPace(l, now, history), account: l.account, accountLabel: 'Codex CLI #1' })),
+        hiddenFromAgents: [], freeSlots: 0, freeSlotsByHarness: {}, freeSlotsByAccount: {}, liveSessions: [], now }
     })
     const { readCheckinLimits: _reader, ...otherDeps } = testDeps
     setCheckinDeps(otherDeps)
@@ -380,6 +380,14 @@ describe('idle check-ins', () => {
       expect(await fireDue(first + 30 * MINUTE)).toEqual([])
       expect(seen).toEqual([first, first + 15 * MINUTE, first + 30 * MINUTE])
     } finally { reader.mockRestore(); setCheckinDeps(testDeps) }
+  })
+  test('check-in limits: one line per visible account, labelled, hidden accounts omitted', () => {
+    const rec = (account: string): PlanLimits => ({ harness: 'claude', account, source: 'claude-stream', updatedAt: first, windows: [{ kind: 'week', usedPct: 20, resetsAt: first + 72 * 60 * MINUTE }] })
+    const [a, b] = [rec('acc_visible'), rec('acc_off')]
+    const budgets = [{ ...planBudget(a, first), ...planPace(a, first), account: 'acc_visible', accountLabel: 'Claude Code #1' }]
+    const out = checkinAccountLimits([a, b], budgets, first) as { account: string; accountLabel?: string }[]
+    expect(out.map(x => [x.account, x.accountLabel])).toEqual([['acc_visible', 'Claude Code #1']])
+    expect(JSON.stringify(out)).not.toContain('acc_off')
   })
   for (const manualFirst of [false, true]) {
     test(`${manualFirst ? 'manual' : 'scheduled'} round guards concurrent manual/scheduled readers`, async () => {

@@ -60,3 +60,11 @@ test('a registered plan with no reading is a row with no limits (no ring, no zer
   expect(rows.map(r => [r.harness, r.limits === null])).toEqual([['claude', false], ['gemini', true]])
   expect(subscriptionRows(null, [{ harness: 'codex', plan: 'Plus' }])[0]!.limits).toBeNull()
 })
+test('two accounts of one harness are two rows, each named; a single account stays unlabelled', () => {
+  const rd = (account: string) => ({ harness: 'claude', account, plan: 'Max', source: 'stream', updatedAt: 1, windows: [{ kind: '5h', usedPct: 10, resetsAt: 9e12 }] }) as never
+  const labels = { a: 'Work', b: 'Claude Code #2' }
+  expect(subscriptionRows([rd('a'), rd('b')], [], labels).map(r => r.accountLabel)).toEqual(['Work', 'Claude Code #2'])
+  expect(subscriptionRows([rd('a')], [], labels)[0]!.accountLabel).toBeUndefined()
+  // A registered plan of an account that has a reading is not listed twice; one without is.
+  expect(subscriptionRows([rd('a')], [{ harness: 'claude', account: 'a', plan: 'Max' }, { harness: 'claude', account: 'b', plan: 'Max' }], labels)).toHaveLength(2)
+})

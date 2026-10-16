@@ -404,6 +404,22 @@ describe('per-account primitives (B1)', () => {
     expect(harnessAggregate([held])[0]!.status).toBe('hold')
   })
 
+  test('Q6: of two accounts with room, drain the one whose week resets first; tie -> most room', () => {
+    const soon = row({ ...mk('claude', 'acc_soon', 40, 60), windows: [w('5h', 40, now + 3 * H), w('week', 60, now + 24 * H)] })
+    const late = row({ ...mk('claude', 'acc_late', 5, 10), windows: [w('5h', 5, now + 3 * H), w('week', 10, now + 120 * H)] })
+    // acc_late has far more room, but acc_soon's quota is lost first: it takes the work.
+    const r = routeRecommendation([late, soon], 'hard-bug')
+    expect(r.account).toBe('acc_soon')
+    expect(r.accountAlternatives).toEqual([{ harness: 'claude', account: 'acc_late' }])
+    // Same week reset -> the one with the most room.
+    const a = row(mk('claude', 'acc_a', 10, 45))
+    const b = row(mk('claude', 'acc_b', 10, 30))
+    expect(routeRecommendation([a, b], 'hard-bug').account).toBe('acc_b')
+    // A held account is never drained, however soon it resets.
+    const held = row({ ...mk('claude', 'acc_held', 10, 99), windows: [w('5h', 10, now + 3 * H), w('week', 99, now + 6 * H)] })
+    expect(routeRecommendation([held, late], 'hard-bug').account).toBe('acc_late')
+  })
+
   test('route picks the account with most room; ties go to the newest', () => {
     const a = row(mk('claude', 'acc_a', 10, 45))
     const b = row(mk('claude', 'acc_b', 10, 30))

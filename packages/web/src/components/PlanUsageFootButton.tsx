@@ -82,7 +82,7 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn }: { lang: 'pt' |
     const caretLeft = rect.left + rect.width / 2 - (collapsed ? 0 : 8) - CARET / 2
     pop = createPortal(
       <div ref={popRef} role="dialog" aria-labelledby="plan-usage-summary-title" data-plan-usage-popover style={{ ...style, maxWidth: POP_W + 20 }} onMouseEnter={open} onMouseLeave={closeSoon} onFocus={open} onBlur={closeSoon} onKeyDown={onPopKey}>
-        <PlanUsageSummary onOpen={openModal} limits={snap.limits} registered={snap.registered} now={snap.now} lang={lang} />
+        <PlanUsageSummary onOpen={openModal} limits={snap.limits} registered={snap.registered} accountLabels={snap.accountLabels} now={snap.now} lang={lang} />
         {collapsed
           ? <span aria-hidden style={{ ...caret, left: -CARET / 2 - 1, bottom: Math.max(4, rect.height / 2 + 8 - CARET / 2 - 8), borderLeft: '1px solid var(--ag-tint-4)', borderBottom: '1px solid var(--ag-tint-4)' }} />
           : <span aria-hidden style={{ ...caret, bottom: -CARET / 2 - 1, left: Math.min(POP_W - 20, Math.max(8, caretLeft)), borderRight: '1px solid var(--ag-tint-4)', borderBottom: '1px solid var(--ag-tint-4)' }} />}

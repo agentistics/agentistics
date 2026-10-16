@@ -7,7 +7,7 @@ import { planLimitsTool } from '../../mcp/plan-limits-tool'
 import { HARNESS_ORDER, routeRecommendation } from '@agentistics/core'
 import {
   __resetPlanLimitsForTest, __setManagedLookupForTest, __settleCodexRolloutsForTest, ingestPlanLimits, latestCodexLimits, noteCodexRollout,
-  noteStructuredLine, planLimitsPayload, sampleLivePlanSessions, setPlanLimitsSink, syncPlanLimitsFromFile,
+  noteStructuredLine, planLimitsPayload, sampleLivePlanSessions, sessionAccountOf, setPlanLimitsSink, syncPlanLimitsFromFile,
   watchPlanLimitsFile,
 } from './plan-limits'
 import type { PlanThresholdNotice } from '@agentistics/core'
@@ -16,6 +16,8 @@ const fx = (n: string) => readFileSync(join(import.meta.dir, '../../core/src/__f
 let dir = ''
 beforeEach(() => {
   __resetPlanLimitsForTest()
+  // Attribution reads the managed-session registry: a test never reads the owner's real one.
+  __setManagedLookupForTest(async () => [])
   dir = mkdtempSync(join(tmpdir(), 'pl-test-'))
   __setHarnessAccountsForTest(createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => ({ key: 'default', label: 'Conta padrão' }) }))
 })
@@ -274,7 +276,8 @@ test('unavailable current accounts disappear from agent budgets, slots, sessions
     updatedAt: now, source: harness === 'claude' ? 'claude-stream' : 'codex-rollout',
   })
   const body = await planLimitsPayload(undefined, now, [{ id: 'hidden-session', harness: 'claude', model: 'opus', burnPctPerHour: 1 }])
-  expect(body.limits.map(l => l.account)).toEqual(['default', 'default'])
+  // The probe confirmed each harness's login, so the legacy 'default' meters moved to its account.
+  expect(body.limits.every(l => l.account.startsWith('acc_'))).toBe(true)
   expect(body.budgets.map(b => b.harness)).toEqual(['codex'])
   expect(body.hiddenFromAgents.map(b => b.harness)).toEqual(['claude'])
   expect(body.freeSlotsByHarness.claude).toBeUndefined()
@@ -552,4 +555,91 @@ test('migration: a claude:default record and its notices move to the default roo
   expect(disk.notices).toEqual({ [`claude:${alice}:week`]: { resetsAt: now + 72 * H, told: 75 } })
   // The migrated legacy record is never re-ingested from an older file under its old key.
   expect(await ingestPlanLimits({ ...rec, windows: rec.windows as never } as never)).toBe(false)
+})
+
+test('L1: two racing discontinuous readings — the newer one wins and ONE segment opens', async () => {
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async harness => {
+    await new Promise(r => setTimeout(r, 40)) // the probe is slow: both readings are in flight at once
+    return { key: `${harness}-alice`, label: 'alice' }
+  } })
+  __setHarnessAccountsForTest(store)
+  await store.current(['claude'])
+  const alice = (await store.readAccounts()).bindings['claude:']!
+  const { segments } = sinkLog()
+  const now = now0()
+  const rec = (week: number, resetsAt: number, updatedAt: number) => ({ harness: 'claude' as const, account: alice, windows: [{ kind: 'week' as const, usedPct: week, resetsAt }], updatedAt, source: 'claude-stream' as const })
+  expect(await ingestPlanLimits(rec(60, now + 72 * H, now - 2 * H))).toBe(true)
+  const [newer, older] = await Promise.all([
+    ingestPlanLimits(rec(20, now + 120 * H, now)),
+    ingestPlanLimits(rec(22, now + 120 * H, now - H)),
+  ])
+  expect([newer, older]).toEqual([true, false])
+  const body = await planLimitsPayload(undefined, now)
+  expect(body.limits.find(l => l.account === alice)!.updatedAt).toBe(now)
+  expect(segments).toEqual([{ harness: 'claude', account: alice, at: now }])
+})
+
+test('L2: a session whose account is not known yet is looked up again on the next line', async () => {
+  let calls = 0
+  let rows: { id: string; accountId?: string }[] = []
+  __setManagedLookupForTest(async () => { calls++; return rows })
+  const accountOf = sessionAccountOf('m1')
+  expect(await accountOf()).toBeUndefined()
+  rows = [{ id: 'm1', accountId: 'acc_known' }]
+  expect(await accountOf()).toBe('acc_known')
+  expect(await accountOf()).toBe('acc_known')
+  expect(calls).toBe(2) // the miss was retried; the hit was remembered
+})
+
+test('L4: a default binding confirmed after boot migrates the legacy record; removing it frees default readings', async () => {
+  const login = { value: 'alice' }
+  const store = accountsWithLogin(login)
+  const now = now0()
+  const legacy = (updatedAt: number) => ({ harness: 'claude' as const, account: 'default', windows: [{ kind: 'week' as const, usedPct: 40, resetsAt: now + 72 * H }], updatedAt, source: 'claude-stream' as const })
+  setPlanLimitsSink({ changed: () => {}, notify: () => {} })
+  expect(await ingestPlanLimits(legacy(now - H))).toBe(true) // no binding yet: stays 'default'
+  await store.current(['claude']) // the login is confirmed AFTER boot
+  const alice = (await store.readAccounts()).bindings['claude:']!
+  const body = await planLimitsPayload(undefined, now)
+  expect(body.limits.map(l => l.account)).toEqual([alice])
+  // The binding goes away (the default root was removed): a 'default' reading is no longer dropped.
+  const file = join(dir, 'accounts.json')
+  const doc = JSON.parse(readFileSync(file, 'utf8'))
+  writeFileSync(file, JSON.stringify({ ...doc, bindings: {} }))
+  expect(await ingestPlanLimits(legacy(now))).toBe(true)
+})
+
+test('C2: one row per visible account; off accounts only in hiddenFromAgents; slots summed; MCP clean', async () => {
+  const store = accountsWithLogin({ value: 'alice' })
+  const now = now0()
+  const mk = async (harness: 'claude' | 'codex', n: string, patch: { available?: boolean; nickname?: string } = {}) => {
+    const { account } = await store.bind(join(dir, `${harness}-${n}`), { harness, key: `${harness}-${n}`, label: `${n}@example.com` })
+    if (Object.keys(patch).length) await store.update(account.id, patch)
+    await ingestPlanLimits({ harness, account: account.id, plan: harness === 'claude' ? 'Max' : 'Plus', source: harness === 'claude' ? 'claude-stream' : 'codex-rollout', updatedAt: now,
+      windows: [{ kind: '5h', usedPct: 10, resetsAt: now + 3 * H }, { kind: 'week', usedPct: 30, resetsAt: now + 72 * H }] })
+    return account.id
+  }
+  const c1 = await mk('claude', 'one', { nickname: 'Work' })
+  const c2 = await mk('claude', 'two', { available: false })
+  const c3 = await mk('claude', 'three')
+  const x1 = await mk('codex', 'one', { nickname: 'me@x.com' }) // an address is never a label
+  const x2 = await mk('codex', 'two', { available: false })
+  const body = await planLimitsPayload(undefined, now)
+  expect(body.limits.map(l => l.account).sort()).toEqual([c1, c2, c3, x1, x2].sort())
+  expect(body.limits.every(l => typeof l.label === 'string')).toBe(true) // owner-only login label
+  expect(body.budgets.map(b => b.account).sort()).toEqual([c1, c3, x1].sort())
+  expect(body.hiddenFromAgents.map(b => b.account).sort()).toEqual([c2, x2].sort())
+  const labels = Object.fromEntries(body.budgets.map(b => [b.account, b.accountLabel]))
+  expect(labels[c1]).toBe('Work')
+  expect(labels[x1]).toMatch(/^Codex CLI #\d+$/)
+  expect(labels[c3]).toMatch(/^Claude Code #\d+$/)
+  // Σ over the harness's visible accounts, with the parts alongside.
+  expect(Object.keys(body.freeSlotsByAccount).sort()).toEqual([c1, c3, x1].sort())
+  expect(body.freeSlotsByHarness.claude).toBe(body.freeSlotsByAccount[c1]! + body.freeSlotsByAccount[c3]!)
+  expect(body.freeSlotsByHarness.codex).toBe(body.freeSlotsByAccount[x1]!)
+  const out = JSON.stringify(planLimitsTool({ kind: 'spec-impl' }, body))
+  expect(out).not.toContain('@')
+  expect(out).not.toContain('example.com')
+  for (const hidden of [c2, x2, 'hiddenFromAgents', '"limits"', '"label"']) expect(out).not.toContain(hidden)
+  for (const shown of [c1, c3, x1, 'freeSlotsByAccount']) expect(out).toContain(shown)
 })
