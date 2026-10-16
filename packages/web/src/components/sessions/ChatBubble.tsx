@@ -26,8 +26,9 @@ import remarkGfm from 'remark-gfm'
 // message written across several lines renders as one run-on paragraph — which is what "the
 // messages are not formatted" turned out to mean. `HarnessChat` has always used it.
 import remarkBreaks from 'remark-breaks'
-import { ArrowUpRight, Check, ChevronDown, Clock, Copy, CornerUpLeft, Ellipsis, ExternalLink, Forward, Image as ImageIcon, KeyRound, Link2, ListChecks, Loader, Mic, User } from 'lucide-react'
+import { ArrowUpRight, Info, Check, ChevronDown, Clock, Copy, CornerUpLeft, Ellipsis, ExternalLink, Forward, Image as ImageIcon, KeyRound, Link2, ListChecks, Loader, Mic, User } from 'lucide-react'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
+import { parseSystemEvent, systemEventLine, type SystemEvent } from '../../lib/systemEvent'
 import { chatNote, type ChatNoteTab } from '../../lib/chatNote'
 import { openArtifacts } from '../../lib/artifactsStore'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -362,7 +363,7 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
   )
 }
 
-export const ChatBubble = memo(function ChatBubble({ turn, lang, harness, sessionId, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, onQuoteClick, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect, vaultGrant }: ChatBubbleProps) {
+const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, sessionId, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, onQuoteClick, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect, vaultGrant }: ChatBubbleProps) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const mine = turn.role === 'user'
@@ -1221,3 +1222,39 @@ function ShellRunBlock({ run, pt }: { run: NonNullable<ChatTurn['shell']>; pt: b
     </div>
   )
 }
+
+/** A message agentistics injected: one compact row, full text on click. No bubble, no echo chrome. */
+function SystemEventRow({ event, pt }: { event: SystemEvent; pt: boolean }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ alignSelf: 'center', maxWidth: '92%', margin: '4px 0' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 9px', borderRadius: 999,
+          border: '1px solid var(--border-subtle)', background: 'var(--bg-tertiary)',
+          color: 'var(--text-secondary)', fontSize: 11.5, cursor: 'pointer', font: 'inherit', minHeight: 24,
+        }}
+      >
+        <Info size={12} color="var(--anthropic-orange)" />
+        <span>{systemEventLine(event, pt)}</span>
+        <ChevronDown size={12} style={{ transform: open ? 'rotate(180deg)' : undefined }} />
+      </button>
+      {open && (
+        <div style={{
+          marginTop: 4, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border-subtle)',
+          background: 'var(--bg-secondary)', color: 'var(--text-secondary)', fontSize: 12,
+          lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        }}>{event.body || (pt ? '(sem texto)' : '(no text)')}</div>
+      )}
+    </div>
+  )
+}
+
+export const ChatBubble = memo(function ChatBubble(props: ChatBubbleProps) {
+  const event = props.turn.role === 'user' ? parseSystemEvent(props.turn.text) : null
+  if (event) return <SystemEventRow event={event} pt={props.lang === 'pt'} />
+  return <ChatBubbleInner {...props} />
+})
