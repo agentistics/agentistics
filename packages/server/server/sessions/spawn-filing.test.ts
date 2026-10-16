@@ -25,6 +25,9 @@ const DIRS: Record<string, FilingRepo | null> = {
   '/home/u/agentistics-engine': { remote: ENGINE, worktree: false },
   '/home/u/workspace': { worktree: false },
   '/home/u/Agentistics-CASE': { repo: 'Agentistics/Agentistics', worktree: true },
+  '/home/u/elsewhere': { repo: 'agentistics/agentistics', worktree: true },
+  '/home/u/gitlab': { remote: 'gitlab.com/agentistics/agentistics', worktree: false },
+  '/home/u/plain-clone': { repo: 'agentistics', worktree: false },
 }
 const repoOf = (dir: string): FilingRepo | null => (dir in DIRS ? DIRS[dir]! : null)
 
@@ -77,6 +80,7 @@ describe('purity', () => {
         expect(['@agentistics/core', './finished-folder']).toContain(mod!)
       }
       expect(src).not.toMatch(/\bnode:|\bBun\.|process\./)
+      expect(src).not.toMatch(/\brequire\s*\(|\bimport\s*\(|^export\s[^;\n]*\sfrom\s/m)
     }
   })
 })
@@ -329,5 +333,86 @@ describe('hand-off', () => {
     const p = ok(planFiling(base({ handoffOf: R('p', { cwd: '/home/u/workspace' }) })))
     expect(p).toMatchObject({ role: 'leader', folderSource: 'none' })
     expect(p.taskId).toBeUndefined()
+  })
+})
+
+// ── S2 QA follow-ups (M1, M2, L1–L6) ────────────────────────────────────────────────────────────
+
+describe('hand-off inheritance (M1, M2)', () => {
+  const pred = (extra: Partial<ManagedSession>) => R('pred', { cwd: '/home/u/workspace', ...extra })
+
+  test('M1: --subtask alone inherits the predecessor task, so a title on several tasks is not ambiguous', () => {
+    const p = ok(planFiling(base({ handoffOf: pred({ taskId: 't-2' }), subtaskRef: 'Planner' })))
+    expect(p).toMatchObject({ taskId: 't-2', subtaskId: 's-2' })
+  })
+  test('M1: a subtask the inherited task lacks is no_such_subtask, listing that task\'s subtasks', () => {
+    const p = refused(planFiling(base({ handoffOf: pred({ taskId: 't-2' }), subtaskRef: 'Wire batch' })))
+    expect(p.code).toBe('no_such_subtask')
+    expect(p.candidates).toEqual(['Planner (s-2)'])
+  })
+  test('M1: when the inherited task is gone the named subtask resolves board-wide', () => {
+    expect(ok(planFiling(base({ handoffOf: pred({ taskId: 't-gone' }), subtaskRef: 's-1' })))).toMatchObject({ taskId: 't-1', subtaskId: 's-1' })
+  })
+  test('M2: a gone inherited TASK says it came from the predecessor', () => {
+    const p = refused(planFiling(base({ handoffOf: pred({ taskId: 't-gone' }) })))
+    expect(p.code).toBe('no_such_task')
+    expect(p.detail).toContain('inherited from the predecessor pred')
+  })
+  test('M2: a gone inherited SUBTASK says it came from the predecessor', () => {
+    const p = refused(planFiling(base({ handoffOf: pred({ taskId: 't-1', subtaskId: 's-gone' }) })))
+    expect(p.code).toBe('no_such_subtask')
+    expect(p.detail).toContain('inherited from the predecessor pred')
+  })
+  test('M2: an EXPLICIT ref that is gone does not claim to be inherited', () => {
+    const p = refused(planFiling(base({ handoffOf: pred({}), taskRef: 't-nope' })))
+    expect(p.detail).not.toContain('inherited')
+  })
+})
+
+describe('repository comparison (L1, L2)', () => {
+  test('L1: when both sides carry a host, a different host is a different repository', () => {
+    expect(refused(planFiling(base({ taskRef: 't-1', cwd: '/home/u/gitlab' }))).code).toBe('cwd_wrong_repo')
+  })
+  test('L2: a clone with no remote is accepted by its folder name', () => {
+    expect(ok(planFiling(base({ taskRef: 't-1', cwd: '/home/u/plain-clone' }))).cwdSource).toBe('explicit')
+  })
+})
+
+describe('checkout candidates (L3)', () => {
+  test('trailing slashes collapse, vanished directories drop out, newest first', () => {
+    const rows = [
+      R('old', { cwd: '/home/u/agentistics/.claude/worktrees/x/', createdAt: '2026-10-01T00:00:00Z' }),
+      R('gone', { cwd: '/home/u/deleted', createdAt: '2026-10-09T00:00:00Z', repo: { repo: 'agentistics/agentistics', worktree: true } }),
+      R('new', { cwd: '/home/u/elsewhere', createdAt: '2026-10-08T00:00:00Z' }),
+    ]
+    const p = refused(planFiling(base({ taskRef: 't-1', cwd: '/home/u/workspace', rows })))
+    expect(p.candidates).toEqual(['/home/u/elsewhere', '/home/u/agentistics/.claude/worktrees/x'])
+  })
+})
+
+describe('shared checkout probe (L4)', () => {
+  test('the caller itself is excluded from the live count', () => {
+    const seen: Array<string | undefined> = []
+    const p = planFiling(base({
+      callerCwd: '/home/u/agentistics', caller: R('me'),
+      liveInCwd: (_d, ex) => { seen.push(ex); return ex === 'me' ? 0 : 1 },
+    }))
+    expect(ok(p).cwd).toBe('/home/u/agentistics')
+    expect(seen).toEqual(['me'])
+  })
+})
+
+describe('small guards (L5, L6)', () => {
+  test('L5: an empty title is never a candidate', () => {
+    const p = refused(planFiling(base({ book: { tasks: [T('t-e', ''), T('t-1', 'Atomic spawn')], subtasks: [] }, taskRef: 'Atomic' })))
+    expect(p.candidates).toEqual(['Atomic spawn (t-1)'])
+  })
+  test('L6: folder recency compares parsed dates, not strings', () => {
+    const groups = { groups: [{ id: 'a', name: 'A', sessionKeys: ['k1'] }, { id: 'b', name: 'B', sessionKeys: ['k2'] }] }
+    const rows = [
+      R('r1', { taskId: 't-1', conversationId: 'k1', createdAt: '2026-10-10T12:00:05+00:00' }),
+      R('r2', { taskId: 't-1', conversationId: 'k2', createdAt: '2026-10-10T12:00:01Z' }),
+    ]
+    expect(ok(planFiling(base({ taskRef: 't-1', groups, rows }))).folderId).toBe('a')
   })
 })

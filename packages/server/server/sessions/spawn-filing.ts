@@ -75,8 +75,16 @@ export interface FilingInput {
   rows: readonly ManagedSession[]
   groups: SessionUserGroupsValue
   repoOf: (dir: string) => FilingRepo | null
-  /** Running sessions already in that directory. */
-  liveInCwd: (dir: string) => number
+  /**
+   * Running sessions already in that directory, NOT counting `excludeId` — the planner passes the
+   * calling session's own id, so a worker spawning from the main checkout it lives in is not refused
+   * for sharing it with itself.
+   *
+   * Path contract: every path the planner receives (`cwd`, `callerCwd`, the predecessor's and the
+   * rows') is expected absolute and canonical (realpath'd) by the CALLER; the planner only trims
+   * trailing separators when it compares or lists checkouts.
+   */
+  liveInCwd: (dir: string, excludeId?: string) => number
   /** Optional extra checkouts/worktrees of a repository, keyed by its short `org/repo` (lowercase). */
   checkoutsOf?: (repoKey: string) => readonly string[]
 }
@@ -130,7 +138,7 @@ const clean = (s: string | undefined): string | undefined => {
 function closest<T extends { id: string; title: string }>(items: readonly T[], ref: string): string[] {
   const needle = ref.toLowerCase()
   return items
-    .filter(i => { const t = i.title.toLowerCase(); return t.includes(needle) || needle.includes(t) })
+    .filter(i => { const t = i.title.trim().toLowerCase(); return t !== '' && (t.includes(needle) || needle.includes(t)) })
     .slice(0, MAX_CANDIDATES)
     .map(label)
 }
@@ -193,24 +201,55 @@ function resolveFiling(input: FilingInput, taskRef: string | undefined, subtaskR
 
 // ── repository ──────────────────────────────────────────────────────────────────────────────────
 
-/** One comparable key per repository: `org/repo`, lowercase, whatever host or URL form a REMOTE came in. */
-function repoKey(remote: string | undefined): string | undefined {
+/** What identifies a repository: its short `org/repo` (lowercase) and, when a REMOTE said it, the host too. */
+interface RepoId { short: string; full?: string }
+
+function repoId(remote: string | undefined): RepoId | undefined {
   if (!remote) return undefined
-  const k = repoShortName(normalizeGitRemote(remote) || remote).toLowerCase()
-  return k || undefined
+  const full = (normalizeGitRemote(remote) || remote).toLowerCase()
+  const short = repoShortName(full).toLowerCase()
+  if (!short) return undefined
+  return { short, ...(full !== short ? { full } : {}) }
 }
 /** `repo` is ALREADY the short form — normalizing it would read its org as a host. */
-const keyOfFacts = (f: FilingRepo | null | undefined): string | undefined =>
-  f ? repoKey(f.remote) ?? (f.repo?.trim().toLowerCase() || undefined) : undefined
+const idOfFacts = (f: FilingRepo | null | undefined): RepoId | undefined => {
+  if (!f) return undefined
+  const fromRemote = repoId(f.remote)
+  if (fromRemote) return fromRemote
+  const short = f.repo?.trim().toLowerCase()
+  return short ? { short } : undefined
+}
+/** The short key, for the `checkoutsOf` probe and for "is this in any repository at all". */
+const keyOfFacts = (f: FilingRepo | null | undefined): string | undefined => idOfFacts(f)?.short
 const exists = (f: FilingRepo | null): f is FilingRepo => f !== null && !f.missing
 
-/** Known places this repository is checked out: injected list, then registry rows, deduplicated. */
-function checkoutsFor(input: FilingInput, key: string): string[] {
-  const out = new Set<string>(input.checkoutsOf?.(key) ?? [])
-  for (const r of input.rows) {
-    if (out.has(r.cwd)) continue
-    const k = keyOfFacts(r.repo) ?? keyOfFacts(input.repoOf(r.cwd))
-    if (k === key) out.add(r.cwd)
+/**
+ * Whether a directory's repository IS the task's. Hosts are compared when BOTH sides carry one
+ * (github.com/o/r is not gitlab.com/o/r); a host-less side (`ResolvedRepoFacts.repo`) falls back to
+ * `org/repo`. A repository with no remote is only its folder name — one segment — and is accepted
+ * when that is the task repo's last segment.
+ */
+function sameRepo(facts: FilingRepo, want: RepoId): boolean {
+  const have = idOfFacts(facts)
+  if (!have) return false
+  if (have.full && want.full) return have.full === want.full
+  if (have.short === want.short) return true
+  return !facts.remote && !have.short.includes('/') && have.short === want.short.split('/').pop()
+}
+
+const trimSep = (p: string): string => (p.length > 1 ? p.replace(/[\\/]+$/, '') : p)
+const msOf = (iso: string | undefined): number => { const n = Date.parse(iso ?? ''); return Number.isNaN(n) ? -Infinity : n }
+
+/** Known places this repository is checked out: injected list, then EXISTING registry rows newest first. */
+function checkoutsFor(input: FilingInput, want: RepoId): string[] {
+  const out = new Set<string>((input.checkoutsOf?.(want.short) ?? []).map(trimSep))
+  const rows = [...input.rows].sort((a, b) => msOf(b.createdAt) - msOf(a.createdAt))
+  for (const r of rows) {
+    const dir = trimSep(r.cwd)
+    if (out.has(dir)) continue
+    const live = input.repoOf(dir)
+    if (!exists(live)) continue
+    if (sameRepo(live, want) || (r.repo && sameRepo(r.repo, want))) out.add(dir)
   }
   return [...out].slice(0, 10)
 }
@@ -224,15 +263,15 @@ function resolveCwd(input: FilingInput, role: 'worker' | 'leader', task: Task | 
   if (!exists(facts)) return refuse('cwd_missing', `the directory ${cwd} does not exist`)
   if (role === 'leader') return { cwd, source }
 
-  const want = repoKey(task?.repo)
-  if (want && keyOfFacts(facts) !== want) {
+  const want = repoId(task?.repo)
+  if (want && !sameRepo(facts, want)) {
     const candidates = checkoutsFor(input, want)
     return source === 'explicit'
       ? refuse('cwd_wrong_repo', `${cwd} is not a checkout of ${task!.repo} (task ${task!.id}) — pass --cwd with one of its worktrees`, candidates)
       : refuse('cwd_needed', `task ${task!.id} belongs to ${task!.repo} and ${cwd} is outside it — pass --cwd with one of its worktrees`, candidates)
   }
   const inRepo = keyOfFacts(facts) !== undefined
-  if (inRepo && !facts.worktree && input.liveInCwd(cwd) >= 1) {
+  if (inRepo && !facts.worktree && input.liveInCwd(cwd, input.caller?.id) >= 1) {
     if (!input.sharedCwd) {
       return refuse('cwd_shared_checkout',
         `${cwd} is a main checkout another live session already works in — use a worktree (git worktree add .claude/worktrees/<name> -b <branch>) or pass --shared-cwd`)
@@ -251,7 +290,7 @@ const folderOf = (groups: SessionUserGroupsValue, row: ManagedSession): SessionU
 
 /** The folder of the newest row matching `pick`, skipping rows in no folder or a finished one. */
 function newestFolder(input: FilingInput, pick: (r: ManagedSession) => boolean): SessionUserGroup | undefined {
-  const rows = input.rows.filter(pick).sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
+  const rows = input.rows.filter(pick).sort((a, b) => msOf(b.createdAt) - msOf(a.createdAt))
   for (const r of rows) {
     const g = folderOf(input.groups, r)
     if (g) return g
@@ -295,17 +334,36 @@ const pathOf = (groups: SessionUserGroupsValue, g: SessionUserGroup): string => 
 
 // ── the plan ────────────────────────────────────────────────────────────────────────────────────
 
+/** A refusal about a ref the caller never typed says where it came from, so the fix is obvious. */
+function fromPredecessor(r: Refusal, pred: ManagedSession | undefined, task: boolean, sub: boolean): Refusal {
+  if (!pred) return r
+  const taskCode = r.code === 'no_such_task' || r.code === 'ambiguous_task'
+  const subCode = r.code === 'no_such_subtask' || r.code === 'ambiguous_subtask' || r.code === 'subtask_needs_task'
+  if ((taskCode && task) || (subCode && sub)) {
+    return { ...r, detail: `${r.detail} (inherited from the predecessor ${pred.id}; pass --task${sub ? ' and --subtask' : ''} to file elsewhere)` }
+  }
+  return r
+}
+
 export function planFiling(input: FilingInput): FilingPlan {
   const pred = input.handoffOf
   const role: 'worker' | 'leader' = pred ? 'leader' : input.role
   const explicitTask = clean(input.taskRef)
   const explicitSub = clean(input.subtaskRef)
-  // A hand-off inherits the predecessor's filing unless one was named outright.
-  const taskRef = explicitTask ?? (pred && !explicitSub ? clean(pred.taskId) : undefined)
-  const subtaskRef = explicitSub ?? (pred && !explicitTask ? clean(pred.subtaskId) : undefined)
+  // A hand-off inherits the predecessor's filing unless one was named outright. A SUBTASK named
+  // alone still inherits the predecessor's task, so it resolves inside it rather than board-wide
+  // (where a title like "Planner" is on several tasks and refuses as ambiguous).
+  const inheritedTask = !explicitTask && pred ? clean(pred.taskId) : undefined
+  const inheritedSub = !explicitSub && !explicitTask && pred ? clean(pred.subtaskId) : undefined
+  const taskRef = explicitTask ?? inheritedTask
+  const subtaskRef = explicitSub ?? inheritedSub
 
-  const filing = resolveFiling(input, taskRef, subtaskRef)
-  if ('ok' in filing) return filing
+  let filing = resolveFiling(input, taskRef, subtaskRef)
+  // The predecessor's task is gone but a subtask was named: resolve that board-wide instead.
+  if ('ok' in filing && filing.code === 'no_such_task' && inheritedTask && explicitSub) {
+    filing = resolveFiling(input, undefined, subtaskRef)
+  }
+  if ('ok' in filing) return fromPredecessor(filing, pred, inheritedTask !== undefined, inheritedSub !== undefined)
 
   const cwd = resolveCwd(input, role, filing.task)
   if ('ok' in cwd) return cwd

@@ -18,7 +18,7 @@ import { HARNESS_ORDER, hasRolePrefix, type HarnessId } from '@agentistics/core'
 import { GROUPINGS, sessionRunning } from '@agentistics/tui/control/sessions'
 import { controlStrings, sessionWordBook } from '@agentistics/tui/control/i18n'
 import { wrapText } from '@agentistics/tui/control/surface'
-import { parseSessionArgs, LS_DEFAULT, type SessionCommand } from './cli-parse'
+import { parseSessionArgs, LS_DEFAULT, type BatchSpec, type SessionCommand } from './cli-parse'
 import { cliStrings } from '../cli-i18n'
 import { resolveLang, type CliLang } from '../cli-lang'
 import { readPreferences } from '../preferences'
@@ -41,6 +41,9 @@ import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefC
 import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
 import { addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession } from './registry'
 import { callerHoldsIdentity } from './session-identity'
+import { planSpawnFiling } from './spawn-filing-io'
+import type { FilingPlan } from './spawn-filing'
+import { filingJson, filingRow, refusalText, WARNING_TEXT } from './spawn-row'
 import { loadConversations } from './conversations'
 import { callerIsLeader, fileInFolder, rekeyFolderMember, folderLineText, folderTree, NO_FOLDER_WARNING, resolveFolders } from './cli-folder'
 import { exactLinksOnDisk } from './reopen-link'
@@ -81,7 +84,7 @@ function spawnPromptArg(plan: SpawnPlan, harness: HarnessId): { initialPrompt?: 
 const STARTABLE: HarnessId[] = HARNESS_ORDER.filter(h => SPAWN_SPECS[h] !== null)
 
 const USAGE = `Usage:
-  agentop session <harness> [-p "prompt"] [--bg] [--model <id>] [--effort <level>] [--cwd <path>] [--name "label"] [--notify on|off] [--folder <folder>] [--away|--no-away] [--force]
+  agentop session <harness> [-p "prompt"] [--bg] [--model <id>] [--effort <level>] [--cwd <path>] [--name "label"] [--notify on|off] [--folder <folder>] [--task <id|title>] [--subtask <id|title>] [--shared-cwd] [--away|--no-away] [--force]
   agentop session ls     [--all] [--group ${GROUPINGS.join('|')}] [--json]
   agentop session list
   agentop session attach <id|name>
@@ -119,10 +122,17 @@ const USAGE = `Usage:
   starts and lists the candidates — a folder is never created for you. \`kill --folder\` ends the
   session and moves it (e.g. to "…/Finalizadas") in one step. \`folders\` prints the tree to pick from.
 
+  \`--task <id|title>\` / \`--subtask <id|title>\` file the session on the BOARD at spawn, with the task's real
+  title on the row. A reference that matches nothing (or two things) is refused before anything starts and
+  lists the closest titles — it is never kept as a free-text name. A worker is refused when its cwd is not a
+  checkout of the task's repository, or is a main checkout another live session already works in (use a
+  worktree, or \`--shared-cwd\`). With no \`--folder\` the session is filed where the task's other sessions
+  already are. \`--json\` adds the filing block (task, subtask, folder, cwd, role, warnings).
+
 Orchestrating several at once — the form an assistant should use:
 
   agentop session batch --task "<name>" [--cwd <path>] [--model <id>] [--effort <level>] [--folder <folder>] \\
-                       --session "<harness>[@<cwd>]: <prompt>" [--session "..."] [--away|--no-away] [--json] [--force]
+                       --session "<harness>[@<cwd>]: <prompt>" [--session "..."] [--subtask <id|title>] [--shared-cwd] [--away|--no-away] [--json] [--force]
   agentop session open  "<task>" [--folder <folder>] [--json] [--force]
   agentop session list  [--json]
 
@@ -203,12 +213,43 @@ let waitForRoom = false
 let folderByRef = new Map<string, { id: string; path: string; siblings: string[]; top: boolean }>()
 const folderCtx = (ref?: string) => { const f = ref ? folderByRef.get(ref) : undefined; return f ? { folder: { path: f.path, siblings: f.siblings, top: f.top } } : {} }
 
+/** The briefing's folder block for a folder the PLAN chose (explicit, predecessor's or the task's). */
+async function folderCtxFor(folderId: string | undefined): Promise<ReturnType<typeof folderCtx>> {
+  if (!folderId) return {}
+  const r = await resolveFolders([folderId]).catch(() => null)
+  const f = r?.ok ? r.byRef.get(folderId) : undefined
+  return f ? { folder: { path: f.path, siblings: f.siblings, top: f.top } } : {}
+}
+
+function reportFilingRefusal(r: Extract<FilingPlan, { ok: false }>, json: boolean): void {
+  if (json) console.log(JSON.stringify({ started: false, code: r.code, detail: r.detail, ...(r.candidates ? { candidates: r.candidates } : {}) }, null, 2))
+  else console.error(refusalText(r))
+}
+
+/** Record the filing on the board like the web door does (`attachSession`); never fails a running spawn. */
+async function attachFiling(plan: Extract<FilingPlan, { ok: true }>, sessionId: string): Promise<void> {
+  if (!plan.taskId) return
+  const { attachSession } = await import('./task-web')
+  await attachSession(plan.taskId, sessionId, plan.subtaskId ? { subtaskId: plan.subtaskId } : {}).catch(() => null)
+}
+
 let warnedNoFolder = false
 /** File a just-spawned session into its folder; with none asked, a LEADER caller is told on stderr. */
 async function fileAtSpawn(ref: string | undefined, row: { id: string; conversationId?: string | undefined }): Promise<void> {
   const f = ref ? folderByRef.get(ref) : undefined
   if (f) { await fileInFolder(f.id, row).catch(() => false); return }
   if (ref || warnedNoFolder) return
+  await warnLeaderNoFolder()
+}
+
+/** `start`/`batch`: the folder is the PLAN's (an id); with none, a LEADER caller is told on stderr. */
+async function fileAtSpawnPlanned(folderId: string | undefined, row: { id: string; conversationId?: string | undefined }): Promise<void> {
+  if (folderId) { await fileInFolder(folderId, row).catch(() => false); return }
+  if (warnedNoFolder) return
+  await warnLeaderNoFolder()
+}
+
+async function warnLeaderNoFolder(): Promise<void> {
   const { storedRoleFor } = await import('./session-roles')
   const leader = await callerIsLeader(callerSessionId(), storedRoleFor,
     async id => (await readRegistry()).find(m => m.id === id)?.conversationId).catch(() => false)
@@ -367,8 +408,18 @@ export async function start(
   // reaches `tmux new-session -c` and is interpreted by the tmux SERVER's own cwd instead, and it
   // is written verbatim into the registry, where `list` would print it back meaningless from
   // anywhere else.
-  const cwd = cmd.cwd ? resolve(cmd.cwd) : process.cwd()
   const lang = await resolveLang()
+  // WHERE this session is filed is decided once, BEFORE the memory gate: a refusal spawns nothing.
+  const parentSessionIdForPlan = callerSessionId()
+  const filing = await planSpawnFiling({
+    role: cmd.role ?? (cmd.label && hasRolePrefix(cmd.label) ? 'leader' : 'worker'),
+    taskRef: cmd.taskId ?? cmd.task, subtaskRef: cmd.subtask, folderRef: cmd.folder,
+    cwd: cmd.cwd, sharedCwd: cmd.sharedCwd, callerSessionId: parentSessionIdForPlan,
+  }).catch(e => ({ ok: false as const, code: 'cwd_missing' as const, detail: `could not read the board: ${e instanceof Error ? e.message : String(e)}` }))
+  if (!filing.ok) { reportFilingRefusal(filing, cmd.json ?? false); return 1 }
+  for (const w of filing.warnings) if (w !== 'no_folder') console.error(WARNING_TEXT[w])
+  const cwd = filing.cwd
+  const folderId = filing.folderId
   const id = newSessionId()
   const offeredConversationId = randomUUID()
   const logFile = managedProcessLogPath(cmd.harness, id, AGENTISTICS_DATA_DIR)
@@ -381,7 +432,7 @@ export async function start(
     ? await ensureSpawnRole([offeredConversationId, id], wantedRole, undefined, await spawnRoleOriginFor(parentSessionId, parentVerified))
     : parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker', undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) : undefined
   const away = await resolveSpawnAwayFor(cmd.away, parentSessionId, parentVerified)
-  const ctx = buildSpawnContext({ ...(await resolveContextAway(away)), sessionId: id, cwd, harness: cmd.harness, lang, ...folderCtx(cmd.folder), ...(await resolveContextTaskByRef(cmd.taskId ?? cmd.task, cmd.subtask)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
+  const ctx = buildSpawnContext({ ...(await resolveContextAway(away)), sessionId: id, cwd, harness: cmd.harness, lang, ...(await folderCtxFor(folderId)), ...(await resolveContextTaskByRef(filing.taskId, filing.subtaskId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
   const planned = planSpawn({
     harness: cmd.harness, cwd, prompt: cmd.prompt, model: cmd.model, effort: cmd.effort,
     ...(logFile ? { logFile } : {}),
@@ -420,9 +471,8 @@ export async function start(
     ...(cmd.model ? { model: cmd.model } : {}),
     ...(cmd.effort ? { effort: cmd.effort } : {}),
     ...(cmd.label ? { label: cmd.label } : {}),
-    ...(cmd.task ? { task: cmd.task } : {}),
     // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
-    ...(cmd.taskId ? { taskId: cmd.taskId } : {}),
+    ...filingRow(filing),
     ...(cmd.attemptId ? { attemptId: cmd.attemptId } : {}),
     ...(parentSessionId ? { parentSessionId } : {}),
     ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}),
@@ -457,7 +507,8 @@ export async function start(
   if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
 
   if (role) await applyRoleTitle(id, cmd.label ?? id, role, lang).catch(() => false)
-  await fileAtSpawn(cmd.folder, { id, conversationId: planned.plan.conversationId })
+  await fileAtSpawnPlanned(folderId, { id, conversationId: planned.plan.conversationId })
+  await attachFiling(filing, id)
   // Muted at birth: keyed by the conversation we assigned, else by the managed id (re-keyed when the
   // poller links the conversation). Delivery only — the session still reads as waiting.
   if (cmd.notify === 'off') await muteAtSpawn(planned.plan.conversationId ?? id).catch(() => {})
@@ -473,8 +524,11 @@ export async function start(
   })
 
   if (cmd.background) {
-    console.log(`Started ${cmd.harness} session ${id}${cmd.label ? ` (${cmd.label})` : ''} in ${cwd}`)
-    console.log(`Attach with: agentop session attach ${id}`)
+    if (cmd.json) console.log(JSON.stringify({ id, harness: cmd.harness, label: cmd.label ?? null, ...filingJson(filing) }, null, 2))
+    else {
+      console.log(`Started ${cmd.harness} session ${id}${cmd.label ? ` (${cmd.label})` : ''} in ${cwd}`)
+      console.log(`Attach with: agentop session attach ${id}`)
+    }
     return 0
   }
   return execAttach(id, backend)
@@ -525,12 +579,14 @@ function stateWord(v: SessionView): string {
  */
 async function resolveTaskAndAttempts(
   cmd: Extract<SessionCommand, { kind: 'batch' }>,
+  /** The task the planner already resolved by id or title; absent = find by title, else create. */
+  knownTaskId?: string,
 ): Promise<{ taskId: string; attempts: Map<string, string> }> {
   const store = createTaskStore(TASKS_FILE)
   const book = await store.read()
   const now = new Date().toISOString()
 
-  let task = book.tasks.find(t => t.title === cmd.task)
+  let task = (knownTaskId ? book.tasks.find(t => t.id === knownTaskId) : undefined) ?? book.tasks.find(t => t.title === cmd.task)
   if (!task) {
     // A task a batch is starting is `in_progress` by construction: sessions are about to run.
     task = { id: newTaskId(), title: cmd.task, status: 'in_progress', createdAt: now, updatedAt: now }
@@ -577,14 +633,37 @@ export async function batch(
   cmd: Extract<SessionCommand, { kind: 'batch' }>,
   backend: SessionBackend,
 ): Promise<number> {
-  const started: Array<{ id: string; harness: string; cwd: string }> = []
+  const started: Array<{ id: string; harness: string; cwd: string; filing: ReturnType<typeof filingJson> }> = []
   const failed: Array<{ harness: string; reason: string }> = []
+
+  // WHERE each session is filed is decided for the WHOLE batch before anything else: one refusal
+  // refuses it all (nothing has started, so there is no half to strand). `--task` here has always
+  // meant "this task, created if it is not on the board yet" — so a title that matches nothing is
+  // the one refusal that is NOT final: the task is made after the gate and the plan is asked again.
+  const lang = await resolveLang()
+  const callerId = callerSessionId()
+  const planFor = (spec: BatchSpec, taskRef: string) => planSpawnFiling({
+    role: spec.name && hasRolePrefix(spec.name) ? 'leader' : 'worker',
+    taskRef, subtaskRef: cmd.subtask, folderRef: spec.folder, cwd: spec.cwd, sharedCwd: cmd.sharedCwd,
+    callerSessionId: callerId,
+  }).catch(e => ({ ok: false as const, code: 'cwd_missing' as const, detail: `could not read the board: ${e instanceof Error ? e.message : String(e)}` }))
+  const planAll = async (taskRef: string): Promise<Array<Extract<FilingPlan, { ok: true }>> | Extract<FilingPlan, { ok: false }>> => {
+    const plans: Array<Extract<FilingPlan, { ok: true }>> = []
+    for (const spec of cmd.specs) {
+      const p = await planFor(spec, taskRef)
+      if (!p.ok) return p
+      plans.push(p)
+    }
+    return plans
+  }
+  let plans = await planAll(cmd.taskId ?? cmd.task)
+  const createByTitle = !Array.isArray(plans) && plans.code === 'no_such_task' && !/^t-[0-9a-z]+$/.test(cmd.task)
+  if (!Array.isArray(plans) && !createByTitle) { reportFilingRefusal(plans, cmd.json ?? false); return 1 }
 
   // The memory GATE, for the WHOLE batch — `requested` is every session it asks for, and a batch
   // is admitted or refused as a UNIT (see `spawn-admission.ts`'s docstring on `fits`: half a batch
   // is a plan nobody approved). Refused BEFORE the task book is even touched, so a refused batch
   // creates no task, no attempt, and spawns nothing.
-  const lang = await resolveLang()
   if (reportAdmission(
     await admitOrWait(cmd.specs.length, cmd.force ?? false, lang, cmd.json ?? false),
     lang, cmd.json ?? false,
@@ -594,20 +673,29 @@ export async function batch(
   // started before its task existed would carry a name and no id — the unattributed case
   // `task-rollup.ts` has to report as a hole. Best effort: a book that cannot be written costs the
   // ids, never the sessions.
-  const resolved = await resolveTaskAndAttempts(cmd).catch(() => null)
+  const resolved = await resolveTaskAndAttempts(cmd, !Array.isArray(plans) ? undefined : plans[0]?.taskId).catch(() => null)
+  if (!Array.isArray(plans)) {
+    // The task was just created by title: ask again, now that it exists.
+    if (!resolved) { console.error('Not started — the task could not be created on the board.'); return 1 }
+    plans = await planAll(resolved.taskId)
+    if (!Array.isArray(plans)) { reportFilingRefusal(plans, cmd.json ?? false); return 1 }
+  }
   const parentLink = await parentLinkOf(callerSessionId())
   const parentSessionId = parentLink.parentSessionId
   const parentVerified = await callerHoldsIdentity(parentSessionId)
   const away = await resolveSpawnAwayFor(cmd.away, parentSessionId, parentVerified)
 
-  for (const spec of cmd.specs) {
-    const cwd = spec.cwd ? resolve(spec.cwd) : process.cwd()
+  const filingJsons: Array<ReturnType<typeof filingJson>> = []
+  for (const [index, spec] of cmd.specs.entries()) {
+    const filing = plans[index]!
+    for (const w of filing.warnings) if (w !== 'no_folder') console.error(WARNING_TEXT[w])
+    const cwd = filing.cwd
     const id = newSessionId()
     const offeredConversationId = randomUUID()
     const logFile = managedProcessLogPath(spec.harness, id, AGENTISTICS_DATA_DIR)
     const batchRole = spec.name && hasRolePrefix(spec.name) ? 'leader' as const : parentSessionId ? 'worker' as const : undefined
     const role = batchRole ? await ensureSpawnRole([offeredConversationId, id], batchRole, undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) : undefined
-    const ctx = buildSpawnContext({ ...(await resolveContextAway(away)), sessionId: id, cwd, harness: spec.harness, lang, ...folderCtx(spec.folder), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)), ...(await resolveContextTask(resolved?.taskId, undefined, cmd.task).then(async t => (cmd.subtask ? { ...t, ...(await resolveContextTaskByRef(resolved?.taskId, cmd.subtask)) } : t))) })
+    const ctx = buildSpawnContext({ ...(await resolveContextAway(away)), sessionId: id, cwd, harness: spec.harness, lang, ...(await folderCtxFor(filing.folderId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)), ...(await resolveContextTask(filing.taskId, filing.subtaskId, cmd.task)) })
     const planned = planSpawn({
       harness: spec.harness,
       cwd,
@@ -636,9 +724,8 @@ export async function batch(
       harness: spec.harness,
       cwd,
       createdAt: spawnedAt,
-      task: cmd.task,
       // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
-      ...(resolved?.taskId ? { taskId: resolved.taskId } : {}),
+      ...filingRow(filing, cmd.task),
       ...(parentSessionId ? { parentSessionId } : {}),
       ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}),
       ...(away ? { away: true } : {}),
@@ -679,7 +766,9 @@ export async function batch(
     }
     if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
     if (spec.notify === 'off') await muteAtSpawn(planned.plan.conversationId ?? id).catch(() => {})
-    await fileAtSpawn(spec.folder, { id, conversationId: planned.plan.conversationId })
+    await fileAtSpawnPlanned(filing.folderId, { id, conversationId: planned.plan.conversationId })
+    await attachFiling(filing, id)
+    filingJsons.push(filingJson(filing))
     const liveBackend = await backend.list().catch(() => null)
     const backendIds = liveBackend ? new Set(liveBackend.map(b => b.id)) : null
     await retireFallenSessions({
@@ -689,7 +778,7 @@ export async function batch(
       harness: spec.harness,
       backendIds,
     })
-    started.push({ id, harness: spec.harness, cwd })
+    started.push({ id, harness: spec.harness, cwd, filing: filingJsons[filingJsons.length - 1]! })
   }
 
   if (cmd.json) {
