@@ -142,7 +142,7 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
   }
   /** One KIND of option per card — ordering, grouping, display, hidden folders. */
   const card: React.CSSProperties = {
-    display: 'grid', gap: 2, minWidth: 0, padding: 6, borderRadius: 10,
+    display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 2, minWidth: 0, padding: 6, borderRadius: 10,
     border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)',
   }
   const heading: React.CSSProperties = {

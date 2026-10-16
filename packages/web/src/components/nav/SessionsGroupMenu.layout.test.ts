@@ -22,3 +22,15 @@ describe('groupMenuLayout', () => {
     }
   })
 })
+
+import { readFileSync } from 'node:fs'
+
+describe('popover cards cannot widen their column', () => {
+  const src = readFileSync(new URL('./SessionsGroupMenu.tsx', import.meta.url), 'utf8')
+  test('every grid in the panel has an explicit minmax(0, 1fr) track', () => {
+    // A bare `display: grid` sizes its single track to the widest nowrap label (long folder names
+    // pushed the "Mostrar" buttons out of the popover).
+    expect(src).toContain("gridTemplateColumns: 'minmax(0, 1fr)', gap: 2")
+    expect(src).toContain("repeat(2, minmax(0, 1fr))")
+  })
+})
