@@ -188,4 +188,16 @@ describe('durable composer message fingerprints', () => {
     expect(kept[0]).toBe(all[1])
     expect((await store.read(['session-1']))(prose)).toBe(true)
   })
+
+  test('the cap counts physical lines, so duplicate lines cannot grow the file past it', async () => {
+    const path = join(directory, `${createHash('sha256').update('session-1').digest('hex')}.log`)
+    await mkdir(directory, { recursive: true })
+    const unique = Array.from({ length: 1000 }, (_, i) => createHash('sha256').update(`d${i}`).digest('hex'))
+    await writeFile(path, `${[...unique, ...unique].join('\n')}\n`) // 2000 physical lines, 1000 unique
+    const store = createComposerMessageStore(directory)
+    await store.record('session-1', prose)
+    const kept = (await readFile(path, 'utf8')).split('\n').filter(Boolean)
+    expect(kept.length).toBeLessThanOrEqual(2000)
+    expect((await store.read(['session-1']))(prose)).toBe(true)
+  })
 })

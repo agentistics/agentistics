@@ -33,7 +33,11 @@ function fingerprint(text: string, salt: string): string {
   return hash(`${salt}${salt ? '\0' : ''}${attachments.images.length + markers.markers.length}\0${normalizeComposerText(markers.text)}`)
 }
 
-/** Separate instances share only disk state, just as they do across a server restart. */
+/**
+ * Separate instances share only disk state, just as they do across a server restart.
+ * Known limitation: the cache assumes ONE store per process. Two writers on the same directory can race
+ * (one's cached set misses the other's append until the file signature changes); a display hint accepts that.
+ */
 export function createComposerMessageStore(directory: string) {
   // Hash ids as well: external ids and harness conversation ids need not be safe filenames.
   const pathFor = (id: string) => join(directory, `${hash(id)}.log`)
@@ -50,7 +54,7 @@ export function createComposerMessageStore(directory: string) {
   })()
 
   // path -> parsed set, valid while the file's mtime/size are unchanged: no disk read per poll.
-  const cache = new Map<string, { sig: string; values: Set<string> }>()
+  const cache = new Map<string, { sig: string; values: Set<string>; lines: number }>()
   const sigOf = async (path: string) => { const st = await stat(path).catch(() => null); return st ? `${st.mtimeMs}:${st.size}` : '' }
 
   // One file operation at a time (reads that miss, trims, appends), so a trim can never overwrite a
@@ -80,7 +84,7 @@ export function createComposerMessageStore(directory: string) {
     const after = await sigOf(path)
     // Any signature change other than our own trim means somebody wrote during the read: the set may
     // be incomplete, so do not publish it under the newer signature.
-    if (trimmed || after === before) cache.set(path, { sig: after, values })
+    if (trimmed || after === before) cache.set(path, { sig: after, values, lines: lines.length })
     else cache.delete(path)
     return values
   }
@@ -98,16 +102,20 @@ export function createComposerMessageStore(directory: string) {
         await mkdir(directory, { recursive: true, mode: 0o700 })
         const path = pathFor(id)
         const present = await loadLocked(path)
+        let physical = cache.get(path)?.lines ?? present.size
         const fresh = [...new Set(values)].filter(value => !present.has(value))
         if (fresh.length === 0) return
         await appendFile(path, `${fresh.join('\n')}\n`, { mode: 0o600 })
         for (const value of fresh) present.add(value)
-        if (present.size > MAX_LINES) {
+        physical += fresh.length
+        // The cap counts physical lines (a duplicate line is still a line on disk), not unique fingerprints.
+        if (physical > MAX_LINES) {
           const kept = [...present].slice(-MAX_LINES)
           present.clear(); for (const value of kept) present.add(value)
+          physical = kept.length
           try { await writeFile(path, `${kept.join('\n')}\n`, { mode: 0o600 }) } catch { /* best effort */ }
         }
-        cache.set(path, { sig: await sigOf(path), values: present })
+        cache.set(path, { sig: await sigOf(path), values: present, lines: physical })
       } catch { /* A display hint must not turn a confirmed delivery into a send failure. */ }
     })
   }
