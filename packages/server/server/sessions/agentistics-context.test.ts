@@ -312,3 +312,41 @@ describe('away mode in the briefing', () => {
     expect(t).toContain('Do not ask the owner anything')
   })
 })
+
+describe('start flow (any project, any harness)', () => {
+  const steps = ['agentistics_tasks', 'agentistics_task_create', 'agentistics_task_session', 'in_progress → in_review', 'never done', 'handback']
+  const other = { sessionId: 's9', cwd: '/home/u/some-other-project' }
+  for (const harness of HARNESS_ORDER) {
+    test(`${harness}: the numbered flow reaches the spawn text`, () => {
+      const c = contextText(other)
+      const r = planSpawn({ harness, cwd: other.cwd, prompt: 'oi', context: { text: c, block: contextBlock(other), dir: '/d' } })
+      if (!r.ok) return
+      expect(JSON.stringify(r.plan)).toContain('Flow (follow in order')
+    })
+  }
+  test('auto: role step and leader check; steps numbered', () => {
+    const t = contextText(other)
+    for (const w of steps) expect(t).toContain(w)
+    expect(t).toContain('1. Role: decide leader or worker')
+    expect(t).toContain('2. One leader')
+    expect(t).toContain('5. Finish')
+  })
+  test('leader: no role step, keeps the one-leader check', () => {
+    const t = contextText({ ...other, role: 'leader' })
+    expect(t).not.toContain('Role: decide')
+    expect(t).toContain('1. One leader')
+  })
+  test('worker: no role step and no leader check', () => {
+    const t = contextText({ ...other, role: 'worker' })
+    expect(t).not.toContain('One leader')
+    expect(t).toContain('1. Task: look it up')
+  })
+  test('pt flow', () => {
+    const t = contextText({ ...other, lang: 'pt' })
+    expect(t).toContain('Fluxo (siga em ordem')
+    expect(t).toContain('handback = in_review, nunca done')
+  })
+  test('size stays bounded', () => {
+    expect(contextText(other).length).toBeLessThan(9000)
+  })
+})
