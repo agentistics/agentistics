@@ -91,6 +91,12 @@ export function runRelay(dir: string): void {
     if (pid === undefined) return
     try { process.kill(-pid, signal) } catch { try { child.kill(signal) } catch { /* already dead */ } }
   }
+  /** Is anything left in the child's process group (it was started detached: its pid is the pgid)? */
+  const groupAlive = (): boolean => {
+    const pid = child.pid
+    if (pid === undefined) return false
+    try { process.kill(-pid, 0); return true } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM' }
+  }
   const endChild = (): void => {
     // A SIGTERM can arrive after the child exit event has already marked the relay ended. The relay
     // itself still owns a listening socket, so explicitly leave too; otherwise it survives until SIGKILL.
@@ -154,8 +160,18 @@ export function runRelay(dir: string): void {
     client?.end()
     server.close()
     try { unlinkSync(sockPath) } catch { /* already gone */ }
-    if (termAt) setTimeout(() => { killChild('SIGKILL'); process.exit(0) }, groupGrace + 50)
-    else setTimeout(() => process.exit(0), 200).unref?.()
+    if (termAt) {
+      // The grace exists for descendants that ignore TERM; an EMPTY group has none, so the relay
+      // leaves at once. Waiting the full grace regardless made every kill and "open in terminal"
+      // take 3 s, and a stall under load past the caller's deadline read as "still running".
+      const deadline = Date.now() + groupGrace
+      const finish = (): void => {
+        if (!groupAlive()) { process.exit(0); return }
+        if (Date.now() >= deadline) { killChild('SIGKILL'); process.exit(0); return }
+        setTimeout(finish, 50)
+      }
+      finish()
+    } else setTimeout(() => process.exit(0), 200).unref?.()
   })
   child.on('error', () => {
     if (ended) return
