@@ -43,7 +43,7 @@ import { addSession, newSessionId, patchSession, readRegistry, removeSession, re
 import { callerHoldsIdentity } from './session-identity'
 import { attachAfterSpawn, liveIdsOf, planSpawnFilingSafe } from './spawn-filing-io'
 import type { FilingPlan } from './spawn-filing'
-import { filingJson, filingRow, refusalText, WARNING_TEXT } from './spawn-row'
+import { filingJson, filingRow, refusalText, spawnRole, WARNING_TEXT } from './spawn-row'
 import { loadConversations } from './conversations'
 import { callerIsLeader, fileInFolder, rekeyFolderMember, folderLineText, folderTree, NO_FOLDER_WARNING, resolveFolders } from './cli-folder'
 import { exactLinksOnDisk } from './reopen-link'
@@ -415,7 +415,7 @@ export async function start(
   const filing = await planSpawnFilingSafe({
     liveIds: await liveIdsOf(backend),
     // A person with no parent session is neither: only a parent (or an explicit role) makes a worker.
-    role: cmd.role ?? (cmd.label && hasRolePrefix(cmd.label) ? 'leader' : parentSessionIdForPlan ? 'worker' : undefined),
+    role: spawnRole({ explicit: cmd.role, leaderPrefix: !!cmd.label && hasRolePrefix(cmd.label), hasParent: !!parentSessionIdForPlan }),
     taskRef: cmd.taskId ?? cmd.task, subtaskRef: cmd.subtask, folderRef: cmd.folder,
     cwd: cmd.cwd, sharedCwd: cmd.sharedCwd, callerSessionId: parentSessionIdForPlan,
   })
@@ -654,14 +654,17 @@ export async function batch(
     for (const spec of cmd.specs) {
       const p = await planSpawnFilingSafe({
         liveIds,
-        role: spec.name && hasRolePrefix(spec.name) ? 'leader' : callerId ? 'worker' : undefined,
+        role: spawnRole({ leaderPrefix: !!spec.name && hasRolePrefix(spec.name), hasParent: !!callerId }),
         taskRef, subtaskRef: cmd.subtask, folderRef: spec.folder, cwd: spec.cwd, sharedCwd: cmd.sharedCwd,
         callerSessionId: callerId,
         // Earlier specs of this batch already occupy their directories.
         extraLiveCwds: plans.map(x => x.cwd),
         ...(pending ? { pendingTask: { id: PENDING_ID, title: cmd.task } } : {}),
       })
-      if (!p.ok) return pending ? { ...p, detail: p.detail.split(PENDING_ID).join(`"${cmd.task}" (new)`) } : p
+      if (!p.ok) {
+        const display = (text: string) => text.split(PENDING_ID).join(`"${cmd.task}" (new)`)
+        return pending ? { ...p, detail: display(p.detail), ...(p.candidates ? { candidates: p.candidates.map(display) } : {}) } : p
+      }
       plans.push(p)
     }
     return plans

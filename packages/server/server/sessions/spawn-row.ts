@@ -9,8 +9,36 @@
 
 import type { ManagedSession } from './types'
 import type { FilingPlan } from './spawn-filing'
+import type { SpawnFilingRequest } from './spawn-filing-io'
 
 type OkPlan = Extract<FilingPlan, { ok: true }>
+
+/** A person has no inferred role; parented spawns are workers, hand-offs are leaders. */
+export function spawnRole(o: {
+  explicit?: 'worker' | 'leader' | undefined
+  leaderPrefix?: boolean | undefined
+  hasParent?: boolean | undefined
+  handoff?: boolean | undefined
+}): 'worker' | 'leader' | undefined {
+  return o.handoff ? 'leader' : o.explicit ?? (o.leaderPrefix ? 'leader' : o.hasParent ? 'worker' : undefined)
+}
+
+/** The exact filing request used by the web, TUI and VS Code host. Pure for behavioural tests. */
+export function spawnSessionFilingRequest(req: {
+  role?: 'worker' | 'leader' | undefined
+  parentSessionId?: string | undefined
+  handoff?: boolean | undefined
+  taskId?: string | undefined
+  subtaskId?: string | undefined
+  cwd: string
+}): SpawnFilingRequest {
+  return {
+    role: spawnRole({ explicit: req.role, hasParent: !!req.parentSessionId, handoff: req.handoff }),
+    taskRef: req.taskId, subtaskRef: req.subtaskId, cwd: req.cwd,
+    callerSessionId: req.parentSessionId,
+    ...(req.handoff && req.parentSessionId ? { handoffOf: req.parentSessionId } : {}),
+  }
+}
 
 /**
  * The filing fields of a new row. `task` is the board task's REAL title (never the text the caller

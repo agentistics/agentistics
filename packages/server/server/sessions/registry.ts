@@ -58,9 +58,9 @@ export interface SessionPatch {
   /** Written alongside `label`, never on its own — see `ManagedSession.labelSince`. */
   labelSince?: number
   note?: string
-  task?: string
-  /** See `ManagedSession.taskId` — stamped at spawn, patched only when a row is re-attributed. */
-  taskId?: string
+  task?: string | null
+  /** See `ManagedSession.taskId`. `null` clears a filing refused by the board after spawn. */
+  taskId?: string | null
   /**
    * See `ManagedSession.subtaskId`. `null` CLEARS it, which is what moving a session from a subtask
    * back to its task is: leaving the old value behind would keep drawing the row under a subtask it

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { planFiling, type FilingInput, type FilingPlan } from './spawn-filing'
-import { filingJson, filingRow } from './spawn-row'
+import { filingJson, filingRow, spawnRole } from './spawn-row'
 import type { Subtask, Task } from './task-model'
 
 const T = (id: string, title: string): Task => ({ id, title, status: 'todo', createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z' })
@@ -55,3 +55,20 @@ describe('one plan, one row', () => {
   })
 })
 
+
+
+describe('spawnRole shared by start, batch and spawnSession', () => {
+  const cases: Array<[string, Parameters<typeof spawnRole>[0], ReturnType<typeof spawnRole>]> = [
+    ['person', {}, undefined],
+    ['explicit worker', { explicit: 'worker' }, 'worker'],
+    ['parent implies worker', { hasParent: true }, 'worker'],
+    ['explicit leader', { explicit: 'leader' }, 'leader'],
+    ['leader prefix', { leaderPrefix: true }, 'leader'],
+    ['leader prefix beats parent', { leaderPrefix: true, hasParent: true }, 'leader'],
+    ['explicit worker beats prefix', { explicit: 'worker', leaderPrefix: true }, 'worker'],
+    ['explicit leader beats parent', { explicit: 'leader', hasParent: true }, 'leader'],
+    ['handoff', { handoff: true, hasParent: true }, 'leader'],
+    ['handoff beats explicit worker', { handoff: true, explicit: 'worker' }, 'leader'],
+  ]
+  for (const [name, input, role] of cases) test(name, () => expect(spawnRole(input)).toBe(role))
+})
