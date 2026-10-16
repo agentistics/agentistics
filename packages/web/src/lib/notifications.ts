@@ -29,6 +29,15 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Transferência de liderança pendente', message: 'Já existe uma transferência pendente para outra sessão sucessora.' },
     en: { title: 'Leader hand-off pending', message: 'A hand-off to another successor session is already pending.' },
   },
+  // Spawn-filing refusals (spawn-filing-io.ts): shown when a session could not be started.
+  'subtask_refused': {
+    pt: { title: 'Sessão não iniciada', message: 'A subtarefa escolhida não pode receber uma sessão.' },
+    en: { title: 'Session not started', message: 'The chosen subtask cannot take a session.' },
+  },
+  'board_unreadable': {
+    pt: { title: 'Sessão não iniciada', message: 'Não foi possível ler o quadro para arquivar a sessão.' },
+    en: { title: 'Session not started', message: 'The board could not be read to file the session.' },
+  },
   'working': {
     pt: { title: 'Sessão em andamento', message: 'A sessão ainda está trabalhando.' },
     en: { title: 'Session working', message: 'The session is still working.' },
