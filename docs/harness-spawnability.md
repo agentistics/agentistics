@@ -20,3 +20,9 @@ excludes them from both the selected harness and alternatives. If no harness
 can start, the recommendation has no harness and requests zero workers.
 Fresh managed server sessions use the existing five-second startup check, so
 argument rejections that arrive after the shorter exec check are observed too.
+
+Both the direct development server and `agentop server` start the vault socket through
+`server/server-bootstrap.ts`, independently of vault initialization or unlock. `fresh-spawn`
+is a non-secret operation on that shared socket. Reports use integer millisecond
+startup timestamps within five minutes of server time; invalid timestamps are rejected.
+Ordering records expire after 30 minutes, so an expired observation cannot veto a new report.

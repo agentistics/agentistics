@@ -850,8 +850,10 @@ if (command === 'server' || command === 'start' || !command) {
   }
 
   process.env.SERVE_STATIC = '1'
+  const { bootstrapServer } = await import('../server/server-bootstrap.ts')
+  await bootstrapServer()
   // The vault BEFORE the server: open it (migrating any plaintext secret an earlier version left),
-  // or say in one line why it cannot be — then the unlock socket. See vault/boot.ts.
+  // or say in one line why it cannot be. See vault/boot.ts.
   {
     const { bootVault } = await import('../server/vault/boot.ts')
     await bootVault()
