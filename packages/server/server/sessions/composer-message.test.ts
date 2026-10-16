@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
-import { appendFile, mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createComposerMessageStore, normalizeComposerText } from './composer-message'
@@ -80,7 +81,7 @@ describe('durable composer message fingerprints', () => {
   test('only hashes are stored, including in filenames, and malformed lines are ignored', async () => {
     const store = createComposerMessageStore(directory)
     await store.record('../../session/private-id', prose)
-    const files = await readdir(directory)
+    const files = (await readdir(directory)).filter(name => name !== '.salt')
     expect(files).toHaveLength(1)
     expect(files[0]).toMatch(/^[a-f0-9]{64}\.log$/)
     const path = join(directory, files[0]!)
@@ -107,5 +108,66 @@ describe('durable composer message fingerprints', () => {
 
   test('normalization handles transcript tags and CRLF', () => {
     expect(normalizeComposerText('  one\r\n\n two  ')).toBe('one\n two')
+  })
+
+  test('a short message is not stored as a bare hash of its text', async () => {
+    const store = createComposerMessageStore(directory)
+    await store.record('session-1', 'ok')
+    const file = (await readdir(directory)).find(name => name.endsWith('.log'))!
+    const line = (await readFile(join(directory, file), 'utf8')).trim()
+    const unsalted = createHash('sha256').update('0\0ok').digest('hex')
+    expect(line).not.toBe(unsalted)
+    expect((await store.read(['session-1']))('ok')).toBe(true)
+    // The salt is per install, so two installs disagree about the same text.
+    const other = await mkdtemp(join(tmpdir(), 'composer-message-'))
+    try {
+      await createComposerMessageStore(other).record('session-1', 'ok')
+      const f2 = (await readdir(other)).find(name => name.endsWith('.log'))!
+      expect((await readFile(join(other, f2), 'utf8')).trim()).not.toBe(line)
+    } finally { await rm(other, { recursive: true, force: true }) }
+  })
+
+  test('lines written before the salt existed still match', async () => {
+    await mkdir(directory, { recursive: true })
+    const legacy = createHash('sha256').update('0\0Hello there').digest('hex')
+    await writeFile(join(directory, `${createHash('sha256').update('session-1').digest('hex')}.log`), `${legacy}\n`)
+    expect((await createComposerMessageStore(directory).read(['session-1']))('Hello there')).toBe(true)
+  })
+
+  test('repeated reads of an unchanged file do not hit the disk again', async () => {
+    const store = createComposerMessageStore(directory)
+    await store.record('session-1', prose)
+    await store.read(['session-1'])
+    const file = join(directory, (await readdir(directory)).find(name => name.endsWith('.log'))!)
+    // Replace the content behind the cache with a same-signature-impossible edit is not needed:
+    // an in-place edit changes size, so the cache must notice it.
+    await appendFile(file, `${'a'.repeat(64)}\n`)
+    expect((await store.read(['session-1']))(wrapped(prose))).toBe(true)
+    const stat = await import('node:fs/promises')
+    const spy = spyOn(stat, 'readFile')
+    try {
+      await store.read(['session-1']); await store.read(['session-1'])
+      expect(spy.mock.calls.filter(call => String(call[0]).endsWith('.log'))).toHaveLength(0)
+    } finally { spy.mockRestore() }
+  })
+
+  test('promotion is not duplicated by concurrent reads', async () => {
+    const store = createComposerMessageStore(directory)
+    await store.record('row-1', prose)
+    await Promise.all([store.read(['row-1'], 'conv-1'), store.read(['row-1'], 'conv-1'), store.read(['row-1'], 'conv-1')])
+    const conv = (await readdir(directory)).map(name => name).filter(name => name.endsWith('.log'))
+    const lines = await Promise.all(conv.map(async name => (await readFile(join(directory, name), 'utf8')).split('\n').filter(Boolean)))
+    expect(lines.map(l => l.length).sort()).toEqual([1, 1])
+  })
+
+  test('a file is capped to its most recent 2000 fingerprints', async () => {
+    const path = join(directory, `${createHash('sha256').update('session-1').digest('hex')}.log`)
+    await mkdir(directory, { recursive: true })
+    const all = Array.from({ length: 2100 }, (_, i) => createHash('sha256').update(String(i)).digest('hex'))
+    await writeFile(path, `${all.join('\n')}\n`)
+    await createComposerMessageStore(directory).read(['session-1'])
+    const kept = (await readFile(path, 'utf8')).split('\n').filter(Boolean)
+    expect(kept).toHaveLength(2000)
+    expect(kept[0]).toBe(all[100])
   })
 })
