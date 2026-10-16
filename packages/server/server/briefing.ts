@@ -5,9 +5,10 @@
  * chooses whether a harness gets Agent Skills directories or a managed instruction block.
  */
 import { join } from 'node:path'
+import { flowBriefing } from './briefing-flow'
 import type { HarnessId } from '@agentistics/core'
 
-export const BRIEFING_VERSION = 1
+export const BRIEFING_VERSION = 2
 export const MANAGED_OPEN = '<!-- agentistics-managed-briefing: v'
 export const MANAGED_CLOSE = '<!-- /agentistics-managed-briefing -->'
 export const PLAN_LIMITS_TOOL = 'agentistics_plan_limits'
@@ -62,6 +63,7 @@ para fechar o líder antigo depois de assumir. Ao receber uma dica de hand-off a
 `
 
 export const BRIEFING_SKILL_NAMES = [
+  'agentistics-session-flow',
   'agentistics-board-agentask',
   'agentistics-sessions-hand-offs',
   'agentistics-vault',
@@ -80,6 +82,11 @@ export function briefingText(lang: 'en' | 'pt' = 'en', o: { planLimitsAvailable?
 }
 
 const skills: readonly BriefingSkill[] = [
+  {
+    name: 'agentistics-session-flow',
+    description: 'Use at the start of every session, in any project, to follow the numbered agentistics flow (role, task, progress, finish).',
+    body: `# Session flow\n${flowBriefing()}`,
+  },
   {
     name: 'agentistics-board-agentask',
     description: 'Use when planning, filing, updating, or delivering work on the Agentask board.',

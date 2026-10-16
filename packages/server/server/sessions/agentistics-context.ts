@@ -9,6 +9,8 @@
  * docs/superpowers/specs/2026-10-08-session-context-injection.md
  */
 
+import { flowLines } from '../briefing-flow'
+export { flowLines }
 import { awayBriefingLines, roleLine, type AwayState } from '@agentistics/core'
 import { briefingText, PLAN_LIMITS_TOOL } from '../briefing'
 
@@ -45,39 +47,6 @@ export interface ContextInput {
   /** HANDOFF.RELAY: a leader hand-off's successor is told what the owner said to its predecessor and
    *  the predecessor's last reply (`handoff-relay.ts`'s `relaySection`). */
   handoffRelay?: string
-}
-
-/**
- * The numbered start sequence, identical for every harness and every project (agentistics repo or not).
- * Step 1 exists only while the role is still AUTO; steps are numbered after the omission.
- */
-export function flowLines(lang: ContextLang, role?: 'leader' | 'worker', hasTask = false): string[] {
-  const pt = lang === 'pt'
-  const steps: string[] = []
-  if (!role) {
-    steps.push(pt
-      ? 'Papel: decida líder ou worker pelo pedido e chame agentistics_session_role (role "leader" ou "worker") antes de trabalhar.'
-      : 'Role: decide leader or worker from the request and call agentistics_session_role (role "leader" or "worker") before working.')
-  }
-  if (role !== 'worker') {
-    steps.push(pt
-      ? 'Líder único: antes de assumir o papel, veja com agentistics_sessions se já há um líder neste projeto/tarefa; se houver, siga como worker e reporte a ele.'
-      : 'One leader: before taking the role, check agentistics_sessions for an existing leader in this project/task; if one exists, stay a worker and report to it.')
-  }
-  steps.push(pt
-    ? (hasTask
-        ? 'Tarefa: esta sessão já está vinculada; se o trabalho se dividir, crie subtarefas (agentistics_task_subtask) e vincule a sessão com agentistics_task_session.'
-        : 'Tarefa: procure com agentistics_tasks; se não houver, crie com agentistics_task_create (prioridade e tipo definidos) e vincule esta sessão com agentistics_task_session; se o trabalho se dividir, use subtarefas.')
-    : (hasTask
-        ? 'Task: this session is already linked; if the work splits, create subtasks (agentistics_task_subtask) and link the session with agentistics_task_session.'
-        : 'Task: look it up with agentistics_tasks; if none exists, create it with agentistics_task_create (priority and type set) and link this session with agentistics_task_session; use subtasks when the work splits.'))
-  steps.push(pt
-    ? 'Andamento: status in_progress → in_review nos marcos (agentistics_task_status) e comente cada marco (agentistics_task_comment); handback = in_review, nunca done.'
-    : 'Progress: move status in_progress → in_review at milestones (agentistics_task_status) and comment each milestone (agentistics_task_comment); handback = in_review, never done.')
-  steps.push(pt
-    ? 'Fim: handback para a sessão que iniciou esta (agentistics_session_message) ou, sem pai, um comentário na tarefa.'
-    : 'Finish: handback to the session that started this one (agentistics_session_message) or, with no parent, a comment on the task.')
-  return [pt ? 'Fluxo (siga em ordem, em qualquer projeto):' : 'Flow (follow in order, in any project):', ...steps.map((t, n) => `${n + 1}. ${t}`)]
 }
 
 /** The block is fenced so the chat UI can recognise it and render it collapsed. */
@@ -134,8 +103,7 @@ export function contextText(i: ContextInput): string {
     roleLine(i.role),
     ...awayBriefingLines(i.away, i.role, i.now ?? Date.now(), { planLimitsInBriefing: i.toolNames?.includes(PLAN_LIMITS_TOOL) === true }),
     ...flowLines(i.lang ?? 'en', i.role, !!i.taskId),
-    'Becoming leader: call agentistics_session_role with role "leader" — it stores the role and renames this session to "[ LEADER ] - <title>" (or "[ LÍDER ] - <title>" in a Portuguese UI) for you, keeping the user\'s title. Do not rename it by hand. If you started the session, pick the title.' +
-      (i.role ? '' : ' If you have no stored role (AUTO): as soon as it is clear the request is a single piece, call agentistics_session_role with role "worker" to record it.'),
+    'Becoming leader: call agentistics_session_role with role "leader" — it stores the role and renames this session to "[ LEADER ] - <title>" (or "[ LÍDER ] - <title>" in a Portuguese UI) for you, keeping the user\'s title. Do not rename it by hand. If you started the session, pick the title.' ,
     'Open other sessions only after the user explicitly approves: `agentop session <harness> --bg --cwd <dir> --name "<title>" --folder "<folder>" -p "<request>"` or `agentop session batch --task "<task>" --folder "<folder>" …` (`agentop session folders` lists them; no --folder leaves the session loose in the sidebar). Every opened session is a WORKER; for a leader hand-off, tell the user it is a leader hand-off so the new session is marked as leader. File each opened session on its subtask and in the task\'s folder.',
     'Model/harness balance: use the strongest model for design, coordination, and hard bugs; a mid model for clearly scoped implementation; a light model for probes/screenshots; QA must use a different model from the author. Respect the user\'s usage rules. No usage rules are saved yet: before proposing sessions, ask the user once what plans, quotas, and preferences they allow.',
     'Specification skill rule: if you are a leader, or a worker facing a complex implementation, ASK the user in this session whether to use a specification skill (SDD, such as superpowers). Use it only after a yes; never make it automatic. If none is installed for this harness, you may suggest installing one, but install only after the user\'s OK. Never start every session with it.',
@@ -148,7 +116,7 @@ export function contextText(i: ContextInput): string {
     const sub = i.subtaskId ? `, subtask ${i.subtaskId}${i.subtaskTitle ? ` "${i.subtaskTitle}"` : ''}` : ''
     lines.push(
       `This session belongs to Agentask task ${i.taskId}${i.taskTitle ? ` "${i.taskTitle}"` : ''}${sub}. Record progress there: comment on the subtask (or the task) at each milestone and move its status; never mark it done before the user validates.`,
-      'Board lifecycle: (1) you are filed on this task/subtask, which is in_progress; (2) comment at each milestone; (3) when you finish, send kind=handback with agentistics_session_message — your subtask then moves to in_review (if the board has that status); (4) it becomes done only after approval.',
+      'Board lifecycle: you are filed on this task/subtask (in_progress); a handback (kind=handback via agentistics_session_message) moves your subtask to in_review (if the board has that status); it becomes done only after approval.',
     )
   } else {
     lines.push('This session is not linked to a task. Follow flow step "Task" above unless this is a quick question.')

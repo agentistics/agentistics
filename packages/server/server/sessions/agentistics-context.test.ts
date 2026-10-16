@@ -6,7 +6,8 @@ import {
 } from './agentistics-context'
 import { SPAWN_SPECS, planSpawn } from './spawn-spec'
 import { pendingContextFor } from './spawn-context'
-import { CONTEXT_TOOL_NAMES, METRICS_DASHBOARDS_LINE } from './agentistics-context'
+import { CONTEXT_TOOL_NAMES, METRICS_DASHBOARDS_LINE, flowLines } from './agentistics-context'
+import { briefingSkills } from '../briefing'
 import { clearSpecificationSkillCache, specificationSkillsFor } from './specification-skills'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -257,7 +258,7 @@ describe('role line follows the stored role', () => {
     expect(w).not.toContain('decide from the request')
   })
   test('only the AUTO briefing asks to record the worker decision', () => {
-    const marker = 'call agentistics_session_role with role "worker"'
+    const marker = 'decide leader or worker from the request and call agentistics_session_role'
     expect(contextText(base)).toContain(marker)
     expect(contextText({ ...base, role: 'leader' })).not.toContain(marker)
     expect(contextText({ ...base, role: 'worker' })).not.toContain(marker)
@@ -314,39 +315,81 @@ describe('away mode in the briefing', () => {
 })
 
 describe('start flow (any project, any harness)', () => {
-  const steps = ['agentistics_tasks', 'agentistics_task_create', 'agentistics_task_session', 'in_progress → in_review', 'never done', 'handback']
   const other = { sessionId: 's9', cwd: '/home/u/some-other-project' }
-  for (const harness of HARNESS_ORDER) {
-    test(`${harness}: the numbered flow reaches the spawn text`, () => {
+  const spawnable = HARNESS_ORDER.filter(h => SPAWN_SPECS[h] !== null)
+  test('at least the six CLIs are spawnable (opencode has no spawn spec)', () => {
+    expect(spawnable.length).toBeGreaterThanOrEqual(6)
+  })
+  for (const harness of spawnable) {
+    test(`${harness}: spawn is ok and the full numbered flow reaches the instruction channel`, () => {
       const c = contextText(other)
       const r = planSpawn({ harness, cwd: other.cwd, prompt: 'oi', context: { text: c, block: contextBlock(other), dir: '/d' } })
+      expect(r.ok).toBe(true)
       if (!r.ok) return
-      expect(JSON.stringify(r.plan)).toContain('Flow (follow in order')
+      const wire = JSON.stringify(r.plan)
+      for (const line of flowLines('en')) expect(wire).toContain(JSON.stringify(line).slice(1, -1))
     })
   }
-  test('auto: role step and leader check; steps numbered', () => {
-    const t = contextText(other)
-    for (const w of steps) expect(t).toContain(w)
-    expect(t).toContain('1. Role: decide leader or worker')
-    expect(t).toContain('2. One leader')
-    expect(t).toContain('5. Finish')
+  test('auto: role step first (leader check BEFORE registering), steps numbered 1..4', () => {
+    const lines = flowLines('en')
+    expect(lines).toHaveLength(5)
+    expect(lines[1]).toMatch(/^1\. Role: before taking any role, check agentistics_sessions for an existing leader.*exclude this session.*role worker.*otherwise decide/)
+    for (let n = 1; n <= 4; n++) expect(lines[n]).toMatch(new RegExp(`^${n}\\. `))
+    expect(contextText(other)).toContain(lines[4]!)
   })
-  test('leader: no role step, keeps the one-leader check', () => {
-    const t = contextText({ ...other, role: 'leader' })
-    expect(t).not.toContain('Role: decide')
+  test('leader: no auto role step, downgrade is explicit', () => {
+    const t = flowLines('en', 'leader').join('\n')
+    expect(t).not.toContain('Role:')
     expect(t).toContain('1. One leader')
+    expect(t).toContain('exclude this session')
+    expect(t).toContain('role worker')
   })
-  test('worker: no role step and no leader check', () => {
-    const t = contextText({ ...other, role: 'worker' })
+  test('worker: no Role step, no leader check', () => {
+    const t = flowLines('en', 'worker').join('\n')
+    expect(t).not.toContain('Role:')
     expect(t).not.toContain('One leader')
-    expect(t).toContain('1. Task: look it up')
+    expect(t).toContain('1. Task: find or create')
   })
-  test('pt flow', () => {
-    const t = contextText({ ...other, lang: 'pt' })
-    expect(t).toContain('Fluxo (siga em ordem')
-    expect(t).toContain('handback = in_review, nunca done')
+  test('task step: find-or-create then link unconditionally; linked variant', () => {
+    expect(flowLines('en', 'worker').join('\n')).toContain('find or create the task')
+    expect(flowLines('en', 'worker').join('\n')).toContain(', then link this session with agentistics_task_session')
+    const linked = flowLines('en', 'worker', true).join('\n')
+    expect(linked).toContain('already linked')
+    expect(linked).not.toContain('agentistics_task_create')
   })
-  test('size stays bounded', () => {
-    expect(contextText(other).length).toBeLessThan(9000)
+  test('lifecycle: in_progress at start, comments at milestones, in_review on delivery; no-parent comment', () => {
+    const t = flowLines('en').join('\n')
+    expect(t).toContain('set in_progress when you start')
+    expect(t).toContain('set in_review on delivery')
+    expect(t).toContain('with no parent, a comment on the task')
+    expect(t).not.toContain('in_progress → in_review')
+  })
+  test('pt: roles and linked variant', () => {
+    const auto = flowLines('pt').join('\n')
+    expect(auto).toContain('Fluxo (siga em ordem')
+    expect(auto).toContain('1. Papel: antes de assumir qualquer papel')
+    expect(auto).toContain('role worker')
+    expect(flowLines('pt', 'leader').join('\n')).toContain('1. Líder único')
+    const w = flowLines('pt', 'worker', true).join('\n')
+    expect(w).not.toContain('Papel:')
+    expect(w).toContain('já está vinculada')
+    expect(w).toContain('ao entregar, in_review')
+    expect(w).toContain('sem pai, um comentário na tarefa')
+  })
+  test('no duplicate role registration prose; lifecycle line stays consistent', () => {
+    const t = contextText({ ...other, taskId: 'T-1' })
+    expect(t).not.toContain('If you have no stored role (AUTO)')
+    expect(t).toContain('Board lifecycle:')
+  })
+  test('added flow stays bounded in every variant', () => {
+    for (const lang of ['en', 'pt'] as const) for (const role of [undefined, 'leader', 'worker'] as const) for (const task of [false, true]) {
+      expect(flowLines(lang, role, task).join('\n').length).toBeLessThan(1500)
+    }
+  })
+  test('installed briefing carries the flow in en+pt from the same source', () => {
+    const skill = briefingSkills().find(s => s.name === 'agentistics-session-flow')!
+    expect(skill.body).toContain(flowLines('en').join('\n'))
+    expect(skill.body).toContain(flowLines('pt').join('\n'))
+    expect(skill.body.length).toBeLessThan(3500)
   })
 })
