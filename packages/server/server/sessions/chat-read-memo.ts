@@ -25,9 +25,11 @@ export async function readChatMemo(
   max: number,
   harness: string | undefined,
   read: () => Promise<{ turns: ChatTurn[]; older?: boolean }>,
+  /** Anything besides the file that changes the answer (e.g. `ended`), so it keys the memo too. */
+  variant = '',
 ): Promise<{ turns: ChatTurn[]; older?: boolean }> {
   if (harness === 'gemini') return read()
-  const key = `${path}\0${max}`
+  const key = `${path}\0${max}\0${variant}`
   const before = await stat(path).catch(() => null)
   const hit = kept.get(key)
   if (before && hit && hit.size === before.size && hit.mtimeMs === before.mtimeMs) {

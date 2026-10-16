@@ -9,6 +9,7 @@
  * `cli.ts`'s `readFlag` comment already warns about for `agentop member`.
  */
 
+import { MIN_QUIET_FOR_MS } from './retire-plan'
 import { HARNESS_ORDER, type HarnessId, type SessionRole } from '@agentistics/core'
 // `GROUPINGS` is the ONE list of the dimensions a fleet can be grouped along — the same rule
 // `HARNESS_SORT` follows: a second hand-written list here would accept a value the table cannot
@@ -42,6 +43,8 @@ export type SessionCommand =
       away?: boolean
       /** `--folder <ref>`: the sidebar folder (id, name or "Parent/Child") the session is filed into at spawn. */
       folder?: string
+      /** `--shared-cwd`: allow a main checkout another live session already works in. */
+      sharedCwd?: boolean
       /** A refusal is machine-readable too — see `admissionRefusalBody`. */
       json?: boolean
     }
@@ -87,11 +90,18 @@ export type SessionCommand =
       force?: boolean
       /** `--away` / `--no-away` for every session of the batch (absent = inherit). */
       away?: boolean
+      /** `--shared-cwd`: allow a main checkout another live session already works in. */
+      sharedCwd?: boolean
     }
   | { kind: 'open'; task: string; json?: boolean; force?: boolean; folder?: string }
   | { kind: 'attach'; ref: string }
   /** `--folder <ref>`: after ending it, move it to that folder (e.g. "…/Finalizadas"). */
   | { kind: 'kill'; ref: string; folder?: string }
+  /**
+   * Ask the server to end the session once it is provably quiet (`retire-plan.ts`); `--cancel` drops a
+   * pending request. `--folder`: file it there once retired. Durations take `s`/`m`/`h` (`60s`, `30m`).
+   */
+  | { kind: 'retire'; ref: string; cancel?: boolean; folder?: string; quietForMs?: number; deadlineMs?: number; json?: boolean }
   /** The folder tree, so a caller can pick a `--folder` ref. */
   | { kind: 'folders'; json?: boolean }
   /** NATIVE sessions only (`ses_…`): file an ended one away, bring it back, or delete it. */
@@ -150,6 +160,55 @@ function takeFolder(args: string[]): { folder?: string; rest: string[] } | { err
   return { ...(folder ? { folder } : {}), rest }
 }
 
+/** `60s` / `30m` / `1h` / `90` (seconds) → ms; `null` for anything else. */
+export function parseDurationMs(v: string): number | null {
+  const m = /^(\d+(?:\.\d+)?)(ms|s|m|h)?$/.exec(v.trim())
+  if (!m) return null
+  const n = Number(m[1])
+  const unit = m[2] ?? 's'
+  const ms = unit === 'ms' ? n : unit === 's' ? n * 1000 : unit === 'm' ? n * 60_000 : n * 3_600_000
+  return Number.isFinite(ms) ? Math.round(ms) : null
+}
+
+const RETIRE_USAGE = 'Usage: agentop session retire <id|name> [--cancel] [--quiet-for 60s] [--deadline 30m] [--folder <folder>] [--json]'
+
+function parseRetire(args: string[], json: boolean): SessionCommand {
+  const f = takeFolder(args)
+  if ('error' in f) return { kind: 'error', message: f.error }
+  let ref: string | undefined
+  let cancel = false
+  let quietForMs: number | undefined
+  let deadlineMs: number | undefined
+  const rest = f.rest
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i]!
+    if (a === '--json') continue
+    if (a === '--cancel') { cancel = true; continue }
+    if (a === '--quiet-for' || a === '--deadline') {
+      const v = rest[i + 1]
+      const ms = v === undefined ? null : parseDurationMs(v)
+      if (ms === null || (a === '--deadline' && ms <= 0)) return { kind: 'error', message: `Bad value for ${a}: ${v ?? '(missing)'} — use e.g. 60s, 30m, 1h.` }
+      if (a === '--quiet-for' && ms < MIN_QUIET_FOR_MS) return { kind: 'error', message: `--quiet-for must be at least ${MIN_QUIET_FOR_MS / 1000}s (two poll intervals).` }
+      if (a === '--quiet-for') quietForMs = ms
+      else deadlineMs = ms
+      i++
+      continue
+    }
+    if (a.startsWith('--')) return { kind: 'error', message: `Unknown flag for retire: ${a}\n${RETIRE_USAGE}` }
+    if (ref !== undefined) return { kind: 'error', message: RETIRE_USAGE }
+    ref = a
+  }
+  if (!ref) return { kind: 'error', message: RETIRE_USAGE }
+  return {
+    kind: 'retire', ref,
+    ...(cancel ? { cancel: true } : {}),
+    ...(f.folder ? { folder: f.folder } : {}),
+    ...(quietForMs !== undefined ? { quietForMs } : {}),
+    ...(deadlineMs !== undefined ? { deadlineMs } : {}),
+    ...(json ? { json: true } : {}),
+  }
+}
+
 function isHarness(v: string): v is HarnessId {
   return (HARNESS_ORDER as readonly string[]).includes(v)
 }
@@ -192,6 +251,8 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
     return { kind: 'kill', ref, ...(f.folder ? { folder: f.folder } : {}) }
   }
 
+  if (head === 'retire') return parseRetire(argv.slice(1), jsonFlag)
+
   if (head === 'archive' || head === 'unarchive' || head === 'delete') {
     const ref = argv[1]
     if (!ref) return { kind: 'error', message: `Usage: agentop session ${head} <ses_…>  (native Agentistics sessions)` }
@@ -215,7 +276,7 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
   if (!isHarness(head)) {
     return {
       kind: 'error',
-      message: `Unknown harness or action: ${head}. Expected one of ${HARNESS_ORDER.join(', ')} — or ls, list, folders, attach, kill, rename, note, archive, unarchive, delete.`,
+      message: `Unknown harness or action: ${head}. Expected one of ${HARNESS_ORDER.join(', ')} — or ls, list, folders, attach, kill, retire, rename, note, archive, unarchive, delete.`,
     }
   }
 
@@ -228,6 +289,7 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
     if (arg === '--bg' || arg === '--background') { cmd.background = true; continue }
     if (arg === '--json') { cmd.json = true; continue }
     if (arg === '--force') { cmd.force = true; continue }
+    if (arg === '--shared-cwd') { cmd.sharedCwd = true; continue }
     if (arg === '--away') { cmd.away = true; continue }
     if (arg === '--no-away') { cmd.away = false; continue }
     if (arg === '--task') {
@@ -245,7 +307,7 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
     const value = argv[i + 1]
     if (
       value === undefined || VALUE_FLAGS.has(value)
-      || value === '--bg' || value === '--background' || value === '--force'
+      || value === '--bg' || value === '--background' || value === '--force' || value === '--shared-cwd'
     ) {
       return { kind: 'error', message: `Missing value for ${arg}` }
     }
@@ -350,6 +412,7 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
   const shared: { cwd?: string; model?: string; effort?: string; attempt?: string; notify?: NotifySwitch; folder?: string } = {}
 
   let force = false
+  let sharedCwd = false
   let away: boolean | undefined
 
   for (let i = 0; i < argv.length; i++) {
@@ -362,9 +425,10 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
     // a per-session force would mean "start this one anyway, refuse the rest", which is not what
     // the memory gate decides (see `spawn-admission.ts`: a batch is admitted or refused as a unit).
     if (arg === '--force') { force = true; continue }
+    if (arg === '--shared-cwd') { sharedCwd = true; continue }
     if (!VALUE_FLAGS.has(arg)) return { kind: 'error', message: `Unknown option: ${arg}` }
     const value = argv[i + 1]
-    if (value === undefined || VALUE_FLAGS.has(value) || value === '--json' || value === '--force') {
+    if (value === undefined || VALUE_FLAGS.has(value) || value === '--json' || value === '--force' || value === '--shared-cwd') {
       return { kind: 'error', message: `Missing value for ${arg}` }
     }
     i++
@@ -402,7 +466,7 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
 
   if (!task) return { kind: 'error', message: 'batch needs --task "<name>" so the sessions belong together.' }
   if (specs.length === 0) return { kind: 'error', message: 'batch needs at least one --session "<harness>: <prompt>".' }
-  return { kind: 'batch', task, ...(subtask ? { subtask } : {}), specs, ...(json ? { json: true } : {}), ...(force ? { force: true } : {}), ...(away !== undefined ? { away } : {}) }
+  return { kind: 'batch', task, ...(subtask ? { subtask } : {}), specs, ...(json ? { json: true } : {}), ...(force ? { force: true } : {}), ...(sharedCwd ? { sharedCwd: true } : {}), ...(away !== undefined ? { away } : {}) }
 }
 
 /** `<harness>[@<cwd>]: <prompt>` — the one string that describes a session in a batch. */

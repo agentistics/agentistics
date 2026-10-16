@@ -12,6 +12,8 @@ export interface AwaySnapshot {
   /** `null` until the first answer, or when this server has no away route (older build / central). */
   state: AwayState | null
   active: boolean
+  activeSessions?: number
+  cooldownMs?: number
 }
 
 let snap: AwaySnapshot = { state: null, active: false }
@@ -19,9 +21,9 @@ const listeners = new Set<() => void>()
 let stop: (() => void) | null = null
 let expiryTimer: ReturnType<typeof setTimeout> | null = null
 
-function emit(state: AwayState | null): void {
+function emit(state: AwayState | null, impact?: { activeSessions?: number; cooldownMs?: number }): void {
   const active = state ? awayActive(state, Date.now()) : false
-  snap = { state, active }
+  snap = { ...snap, ...impact, state, active }
   if (expiryTimer) { clearTimeout(expiryTimer); expiryTimer = null }
   if (active && state?.until) {
     const ms = Date.parse(state.until) - Date.now()
@@ -31,19 +33,19 @@ function emit(state: AwayState | null): void {
   for (const l of listeners) l()
 }
 
-async function refresh(): Promise<void> {
+export async function refreshAway(): Promise<void> {
   try {
     const r = await fetch('/api/away', { cache: 'no-store' })
     if (!r.ok) return
-    const body = await r.json() as { state?: unknown }
-    emit(parseAwayState(body.state))
+    const body = await r.json() as { state?: unknown; activeSessions?: number; cooldownMs?: number }
+    emit(parseAwayState(body.state), body)
   } catch { /* keep what is on screen */ }
 }
 
 function start(): () => void {
-  void refresh()
-  const offChange = subscribeEvent('away', () => { void refresh() })
-  const offConnected = subscribeEvent('connected', () => { void refresh() })
+  void refreshAway()
+  const offChange = subscribeEvent('away', () => { void refreshAway() })
+  const offConnected = subscribeEvent('connected', () => { void refreshAway() })
   return () => { offChange(); offConnected() }
 }
 
@@ -88,12 +90,12 @@ export async function setAway(req: AwayRequest): Promise<{ ok: true } | { ok: fa
  * the session is running and its effective state changed, tells it. Resolves to the server's
  * error code on refusal; the fleet row follows on the next fleet push.
  */
-export async function setSessionAway(id: string, on: boolean, lang: 'pt' | 'en'): Promise<{ ok: true; notified: boolean; effective: boolean } | { ok: false; error: string }> {
+export async function setSessionAway(id: string, on: boolean, lang: 'pt' | 'en', scope?: 'active'): Promise<{ ok: true; queued: boolean; effective: boolean } | { ok: false; error: string }> {
   try {
-    const r = await fetch('/api/away/session', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target: id, on, lang }) })
-    const body = await r.json().catch(() => ({})) as { ok?: boolean; notified?: boolean; effective?: boolean; error?: string }
+    const r = await fetch('/api/away/session', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target: id, on, lang, scope }) })
+    const body = await r.json().catch(() => ({})) as { ok?: boolean; queued?: boolean; effective?: boolean; error?: string }
     if (!r.ok || body.ok !== true) return { ok: false, error: body.error ?? `http_${r.status}` }
-    return { ok: true, notified: body.notified === true, effective: body.effective === true }
+    return { ok: true, queued: body.queued === true, effective: body.effective === true }
   } catch {
     return { ok: false, error: 'unreachable' }
   }
@@ -140,7 +142,7 @@ export function awayUntilLabel(s: AwayState | null, lang: 'pt' | 'en', now: numb
 }
 
 /** Tests / fixtures. */
-export function __setAwayForTest(state: AwayState | null): void { emit(state) }
+export function __setAwayForTest(state: AwayState | null, impact?: { activeSessions?: number; cooldownMs?: number }): void { emit(state, impact ?? { activeSessions: undefined, cooldownMs: undefined }) }
 export const AWAY_INITIAL: AwayState = AWAY_OFF
 
 /**

@@ -221,6 +221,8 @@ export interface SessionView {
   /** SS-05: the four counters, and the person's turn count — absent where not recorded. */
   tokenParts?: import('./conversations').TokenParts
   turns?: number
+  /** Assistant responses of the conversation (`Conversation.calls`). */
+  calls?: number
   costUSD?: number
   /** How full the context window was on the last turn, and out of how much. Both or neither. */
   contextTokens?: number
@@ -238,6 +240,8 @@ export interface SessionView {
   parentConversationId?: string
   /** `ManagedSession.away` — per-session away mode. */
   away?: boolean
+  /** `ManagedSession.handoffSeq` — the leader hand-off generation. */
+  handoffSeq?: number
   /**
    * Whether this harness has probed approval rules at all.
    *
@@ -685,6 +689,7 @@ export function buildSessionViews(o: {
       ...(r.managed?.parentSessionId ? { parentSessionId: r.managed.parentSessionId } : {}),
       ...(r.managed?.parentConversationId ? { parentConversationId: r.managed.parentConversationId } : {}),
       ...(r.managed?.away ? { away: true } : {}),
+      ...(r.managed?.handoffSeq ? { handoffSeq: r.managed.handoffSeq } : {}),
       ...(r.managed?.conversationId ? { conversationId: r.managed.conversationId } : {}),
       ...(conv && r.managed?.conversationId && conv.sessionId !== r.managed.conversationId
         ? { conversationStoreId: conv.sessionId } : {}),
@@ -727,6 +732,7 @@ export function buildSessionViews(o: {
       ...(conv?.tokens !== undefined ? { tokens: conv.tokens } : {}),
       ...(conv?.tokenParts ? { tokenParts: conv.tokenParts } : {}),
       ...(conv?.turns ? { turns: conv.turns } : {}),
+      ...(conv?.calls ? { calls: conv.calls } : {}),
       ...(conv?.costUSD !== undefined ? { costUSD: conv.costUSD } : {}),
       ...(conv?.contextTokens !== undefined && conv.contextWindow !== undefined
         ? { contextTokens: conv.contextTokens, contextWindow: conv.contextWindow }
@@ -862,6 +868,7 @@ export function buildSessionViews(o: {
       ...(conv?.tokens !== undefined ? { tokens: conv.tokens } : {}),
       ...(conv?.tokenParts ? { tokenParts: conv.tokenParts } : {}),
       ...(conv?.turns ? { turns: conv.turns } : {}),
+      ...(conv?.calls ? { calls: conv.calls } : {}),
       ...(conv?.costUSD !== undefined ? { costUSD: conv.costUSD } : {}),
       ...(conv?.contextTokens !== undefined && conv.contextWindow !== undefined
         ? { contextTokens: conv.contextTokens, contextWindow: conv.contextWindow }
@@ -977,6 +984,7 @@ export function buildSessionViews(o: {
       ...(c.tokens !== undefined ? { tokens: c.tokens } : {}),
       ...(c.tokenParts ? { tokenParts: c.tokenParts } : {}),
       ...(c.turns ? { turns: c.turns } : {}),
+      ...(c.calls ? { calls: c.calls } : {}),
       ...(c.costUSD !== undefined ? { costUSD: c.costUSD } : {}),
       ...(c.contextTokens !== undefined && c.contextWindow !== undefined
         ? { contextTokens: c.contextTokens, contextWindow: c.contextWindow }

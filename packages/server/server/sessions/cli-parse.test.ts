@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { LS_DEFAULT, parseSessionArgs } from './cli-parse'
+import { LS_DEFAULT, parseDurationMs, parseSessionArgs } from './cli-parse'
 
 describe('parseSessionArgs', () => {
   it('parses an explicit spawn role', () => {
@@ -301,5 +301,58 @@ describe('per-session away flags', () => {
   it('batch takes them for every session', () => {
     expect(parseSessionArgs(['batch', '--task', 't', '--away', '--session', 'codex: x'])).toMatchObject({ kind: 'batch', away: true })
     expect(parseSessionArgs(['batch', '--task', 't', '--session', 'codex: x', '--no-away'])).toMatchObject({ kind: 'batch', away: false })
+  })
+})
+
+describe('retire', () => {
+  it('parses the ref, --cancel, durations, --folder and --json', () => {
+    expect(parseSessionArgs(['retire', 'a1'])).toEqual({ kind: 'retire', ref: 'a1' })
+    expect(parseSessionArgs(['retire', 'a1', '--cancel'])).toEqual({ kind: 'retire', ref: 'a1', cancel: true })
+    expect(parseSessionArgs(['retire', '--quiet-for', '30s', 'a1', '--deadline', '10m', '--folder', 'A/Finalizadas', '--json']))
+      .toEqual({ kind: 'retire', ref: 'a1', quietForMs: 30_000, deadlineMs: 600_000, folder: 'A/Finalizadas', json: true })
+  })
+  it('refuses a missing ref, a bad duration, an unknown flag and two refs', () => {
+    expect(parseSessionArgs(['retire']).kind).toBe('error')
+    expect(parseSessionArgs(['retire', 'a1', '--deadline', 'soon']).kind).toBe('error')
+    expect(parseSessionArgs(['retire', 'a1', '--deadline', '0']).kind).toBe('error')
+    expect(parseSessionArgs(['retire', 'a1', '--force']).kind).toBe('error')
+    expect(parseSessionArgs(['retire', 'a1', 'b2']).kind).toBe('error')
+  })
+  it('parseDurationMs', () => {
+    expect(parseDurationMs('60s')).toBe(60_000)
+    expect(parseDurationMs('1.5h')).toBe(5_400_000)
+    expect(parseDurationMs('90')).toBe(90_000)
+    expect(parseDurationMs('250ms')).toBe(250)
+    expect(parseDurationMs('x')).toBeNull()
+  })
+})
+
+describe('retire minimum quiet interval', () => {
+  it('rejects zero and short quietFor; accepts two poll intervals', () => {
+    for (const value of ['0', '1s', '9999ms']) {
+      expect(parseSessionArgs(['retire', 'a1', '--quiet-for', value])).toMatchObject({ kind: 'error' })
+    }
+    expect(parseSessionArgs(['retire', 'a1', '--quiet-for', '10s']))
+      .toMatchObject({ kind: 'retire', quietForMs: 10_000 })
+  })
+})
+
+describe('spawn filing flags (S4)', () => {
+  it('start takes --task, --subtask and --shared-cwd', () => {
+    const cmd = parseSessionArgs(['claude', '--bg', '--task', 't-1', '--subtask', 'Planner', '--shared-cwd'])
+    expect(cmd).toMatchObject({ kind: 'start', task: 't-1', subtask: 'Planner', sharedCwd: true })
+  })
+  it('--shared-cwd is a switch: it never eats the next flag as its value', () => {
+    expect(parseSessionArgs(['claude', '--shared-cwd', '--name', 'x'])).toMatchObject({ kind: 'start', sharedCwd: true, label: 'x' })
+  })
+  it('a value flag followed by --shared-cwd is a missing value', () => {
+    expect(parseSessionArgs(['claude', '--cwd', '--shared-cwd'])).toMatchObject({ kind: 'error' })
+  })
+  it('batch takes --subtask and --shared-cwd', () => {
+    const cmd = parseSessionArgs(['batch', '--task', 'T', '--subtask', 'S', '--shared-cwd', '--session', 'claude: go'])
+    expect(cmd).toMatchObject({ kind: 'batch', task: 'T', subtask: 'S', sharedCwd: true })
+  })
+  it('without the switch there is no sharedCwd key', () => {
+    expect(parseSessionArgs(['claude'])).not.toHaveProperty('sharedCwd')
   })
 })

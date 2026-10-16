@@ -301,6 +301,25 @@ export interface BackendSession {
   lastActivityMs: number
 }
 
+/** See `ManagedSession.retire`. Times are ISO (a local JSON store). */
+export interface RetireRequest {
+  requestedAt: string
+  /** Who asked: the managed id of the calling session, or `person` from a terminal. */
+  by: string
+  /** The session that takes over (a hand-off). A successor that dies CANCELS the request. */
+  successorId?: string
+  /** Folder to file the session into once it is retired (a "Finalizadas"/"Finished" folder). */
+  folderId?: string
+  /** How long the session must have been confirmed `waiting` before it is ended. */
+  quietForMs: number
+  /** Past this, nothing is killed: the request expires and a notification says why. */
+  deadlineAt: string
+  /** Set once the deadline passed without a quiet window. An expired request is never acted on. */
+  expiredAt?: string
+  /** Why it never went quiet, in words. */
+  expiredReason?: string
+}
+
 /** One session as the PRODUCT sees it. Persisted; the backend knows none of this. */
 export interface ManagedSession {
   id: string
@@ -310,6 +329,12 @@ export interface ManagedSession {
   createdAt: string
   model?: string
   effort?: string
+  /**
+   * PLAN.ACCOUNTS: the harness account (`acc_…`, `harness-accounts.ts`) this session runs on. Set
+   * at spawn (D3); read by the plan-limits taps so a meter is filed under the account that produced
+   * it. Absent on a session started before accounts existed: the default root's account.
+   */
+  accountId?: string
   /** Explicit leader role, used by the context handoff hint. */
   leader?: boolean
   /**
@@ -323,6 +348,22 @@ export interface ManagedSession {
   handoffHintLevel?: number
   /** Context size when the last hint went out; reminders come every +50k after it. */
   handoffHintTokens?: number
+  /**
+   * HANDOFF.RELAY — a leader hand-off links both rows. On the PREDECESSOR: the successor's managed id
+   * (`handoffTo`), the time of the last predecessor turn already relayed (`handoffRelayedAt`, the
+   * forward cursor) and whether an owner message was still unanswered then (`handoffRelayAwaiting`).
+   * On the SUCCESSOR: the predecessor's managed id (`handoffFrom`). See `handoff-relay.ts`.
+   */
+  handoffTo?: string
+  handoffFrom?: string
+  /** The SUCCESSOR's generation (predecessor's + 1), shown in the ⓘ panel — the title never carries it. */
+  handoffSeq?: number
+  /** Kill owns the final flush from this instant; periodic passes must never re-send it. */
+  handoffRelayClosing?: string
+  handoffRelayedAt?: string
+  handoffRelayAwaiting?: boolean
+  /** HANDOFF.CALC: this leader's context after its first ~15 calls — a sample of the successor base F. */
+  handoffBaseTokens?: number
   label?: string
   /**
    * When the label was written, epoch ms — so a name typed HERE can be compared with one typed
@@ -399,6 +440,14 @@ export interface ManagedSession {
    * heartbeat stamps it.
    */
   lastSeenMs?: number
+  /**
+   * A pending request to END this session once it is provably quiet (ATOMIC SPAWN §2.2) — written by
+   * `agentop session retire` / a hand-off, carried out by the server's hub (`retire-runner.ts`) through
+   * the pure `retire-plan.ts`. A stored request rather than a wait in the caller, because the session
+   * asked to retire is usually the caller, mid-tool-call. Persisted so it survives a server restart.
+   * Cleared when it is carried out or cancelled; kept with `expiredAt` once the deadline passed.
+   */
+  retire?: RetireRequest
   /**
    * When this session was FINISHED, ISO — set instead of deleting the entry.
    *

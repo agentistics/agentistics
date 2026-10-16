@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { accountHome } from './account-home'
 import { resolveDataDir } from './data-dir'
 import { loadEnvConfig } from './env-config'
-import { featureOn } from '@agentistics/core'
+import { featureOn, type HarnessId } from '@agentistics/core'
 
 loadEnvConfig()
 
@@ -462,4 +462,57 @@ export function envelopePinsFile(connId: string): string {
  *  connection. A proposal sits here until the user acts on it — see envelope-inbox.ts. */
 export function envelopeInboxFile(connId: string): string {
   return join(TEAM_CONN_DIR, `envelope-inbox-${safeConnId(connId)}.json`)
+}
+
+// ---------------------------------------------------------------------------
+// Account roots (PLAN.ACCOUNTS D2): every directory a harness's sessions can live in.
+// ---------------------------------------------------------------------------
+export interface HarnessRoot {
+  root: string
+  /** Account id bound to this root; absent for a default root with no binding. */
+  account?: string
+  isDefault: boolean
+}
+
+/** Each harness's default root. `null` = the harness is not read through account roots at all:
+ *  antigravity has no isolation variable and keeps its own single-directory reader, and opencode has
+ *  no adapter. Keyed by `HarnessId`, so a new harness does not compile until it is decided here. */
+export const DEFAULT_HARNESS_DIRS: Record<HarnessId, string | null> = {
+  claude: CLAUDE_DIR, codex: CODEX_DIR, gemini: GEMINI_DIR, copilot: COPILOT_DIR, kimi: KIMI_DIR,
+  antigravity: null, opencode: null,
+}
+const ROOTS_TTL_MS = 5_000
+const rootsMemo = new Map<string, { at: number; value: Promise<HarnessRoot[]> }>()
+
+/** Test seam: drop the 5 s memo so a changed registry is seen at once. */
+export function resetHarnessRootsMemo(): void { rootsMemo.clear() }
+
+/**
+ * The default root plus every non-retired registry root of `harness`. Read from the registry file
+ * only (`readAccounts`, never a probe). A harness whose `DEFAULT_HARNESS_DIRS` entry is `null`
+ * (antigravity, opencode) returns `[]`: its own reader is untouched and never gets a second root.
+ */
+export function harnessRoots(harness: HarnessId, now: number = Date.now()): Promise<HarnessRoot[]> {
+  const held = rootsMemo.get(harness)
+  if (held && now - held.at < ROOTS_TTL_MS) return held.value
+  const value = (async (): Promise<HarnessRoot[]> => {
+    const def = DEFAULT_HARNESS_DIRS[harness]
+    if (!def) return []
+    const out: HarnessRoot[] = []
+    let file: Awaited<ReturnType<typeof import('./harness-accounts').readAccounts>> | null = null
+    try { file = await (await import('./harness-accounts')).readAccounts() } catch { /* registry unreadable: default only */ }
+    const accounts = file?.accounts ?? []
+    const bindings = file?.bindings ?? {}
+    const bound = accounts.find(a => a.id === bindings[`${harness}:`])
+    out.push({ root: def, isDefault: true, ...(bound ? { account: bound.id } : {}) })
+    for (const a of accounts) {
+      if (a.harness !== harness || a.retired || !a.root || a.root === def) continue
+      if (bindings[`${harness}:${a.root}`] !== a.id) continue
+      if (out.some(r => r.root === a.root)) continue
+      out.push({ root: a.root, account: a.id, isDefault: false })
+    }
+    return out
+  })()
+  rootsMemo.set(harness, { at: now, value })
+  return value
 }

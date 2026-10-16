@@ -48,7 +48,8 @@ before/after fingerprints and their agentistics endpoints remained localhost:472
 The final real web API probe also passed idle and mid-turn restarts, protocol interrupt,
 kill/reopen to the same conversation id, history hydration, and another restart after reopen.
 Content and turn counts were preserved. F2.0b timestamps can differ by milliseconds between
-live and replay, and the host's transient `composer` flag disappears after restart.
+live and replay. The host's `composer` flag was transient at the time of this probe; composer
+fingerprints are now durable (see [the composer](sessions-web.md#the-composer)).
 Measured web spawn exceeded Q1's 2-second target (2.713 seconds in the final probe);
 first live OK arrived 2.194 seconds after sending. These timings are recorded rather than
 called a complete Q1 pass.

@@ -13,6 +13,9 @@
  * structurally (`EngineChatTurn`); `engine-api-mirrors.test.ts` keeps the two EQUAL.
  */
 
+/** Why a background task is over without a `<task-notification>` (`done` = absent). */
+export type ChatTaskEnd = 'done' | 'stopped' | 'never-started' | 'session-ended'
+
 export interface ChatTurn {
   /**
    * When the transcript recorded this turn, ISO.
@@ -24,7 +27,7 @@ export interface ChatTurn {
   at?: string
   role: 'user' | 'assistant'
   text: string
-  /** The web composer delivered this user turn recently; unlike an external paste, unwrap it. */
+  /** The web composer delivered this user turn; unlike an external paste, unwrap it. */
   composer?: boolean
   /**
    * The tools this turn INVOKED, with the first line of each call's own input.
@@ -113,7 +116,7 @@ export interface ChatTurn {
    * `<task-notification>` has come back for it yet — which is what makes a watcher visible WHILE
    * it is the thing you are waiting on, rather than only once it is over.
    */
-  task?: { label: string; running: boolean }
+  task?: { label: string; running: boolean; ended?: ChatTaskEnd }
   /**
    * This entry sat under the `user` role and NO PERSON WROTE IT — a background task reporting
    * back, an injected reminder, a `!` command's stdout. The value is a short phrase naming which,

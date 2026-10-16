@@ -3,7 +3,7 @@ import { join } from 'path'
 import { readFile } from 'fs/promises'
 import type { StatsCache, SessionMeta, ProjectGitStats, HealthIssue, SurfaceHarnessId, WorkflowRun } from '@agentistics/core'
 import { mergeStatsCaches, sessionDay, sanitizeStatsCache, normalizeSessionTimes, sessionTokenTotal, coerceLanguages } from '@agentistics/core'
-import { AGENTISTICS_DATA_DIR, PROJECTS_DIR, SESSION_META_DIR, ARCHIVE_PROJECTS_DIR, ARCHIVE_SESSION_META_DIR, STATS_CACHE_FILE, ARCHIVE_STATS_DIR, ARCHIVE_ENABLED, HOME_DIR, TEAM_MODE, TEAM_CENTRAL, CENTRAL_USER, PARSE_CACHE_ENABLED, JOURNAL_ENABLED } from './config'
+import { AGENTISTICS_DATA_DIR, PROJECTS_DIR, SESSION_META_DIR, ARCHIVE_PROJECTS_DIR, ARCHIVE_SESSION_META_DIR, STATS_CACHE_FILE, ARCHIVE_STATS_DIR, ARCHIVE_ENABLED, HOME_DIR, TEAM_MODE, TEAM_CENTRAL, CENTRAL_USER, PARSE_CACHE_ENABLED, JOURNAL_ENABLED, harnessRoots } from './config'
 import { getArchiveMode } from './preferences'
 import { writeConsolidated, loadConsolidated } from './consolidate'
 import { shadowIngest } from './journal/shadow'
@@ -740,6 +740,25 @@ function onFreshBuild(result: ApiResponse): void {
  * transcript walk, no git, no other harness. Enough for the KPIs (the stats cache IS Claude's whole
  * history), the session lists the store remembers, and every page's chrome.
  */
+/** The account bound to the DEFAULT claude root, or undefined (no binding, or no readable registry). */
+async function claudeDefaultRootAccount(): Promise<string | undefined> {
+  try { return (await harnessRoots('claude')).find(r => r.isDefault)?.account } catch { return undefined }
+}
+
+/** Copies stamped with `account`; the input itself when there is none (no accounts = no change). */
+export function stampAccount(sessions: SessionMeta[], account: string | undefined): SessionMeta[] {
+  return account ? sessions.map(s => ({ ...s, account })) : sessions
+}
+
+/**
+ * PURE: a claude row read from a NON-default account root — one carrying an account other than the
+ * default root's binding. Such rows stay out of `supplementStatsCache` (stats-cache.json is the
+ * default root's alone, spec §4 D8) and are revived after the adapters, never before.
+ */
+export function fromOtherClaudeRoot(s: SessionMeta, defaultAccount: string | undefined): boolean {
+  return (s.harness ?? 'claude') === 'claude' && s.account !== undefined && s.account !== defaultAccount
+}
+
 async function buildQuickResponse(): Promise<ApiResponse> {
   const t0 = performance.now()
   const mode = (ARCHIVE_ENABLED ? await getArchiveMode() : 'off') ?? 'off'
@@ -750,8 +769,9 @@ async function buildQuickResponse(): Promise<ApiResponse> {
     mode === 'consolidate' ? loadConsolidated() : Promise.resolve(new Map<string, SessionMeta>()),
   ])
   const statsCache = sanitizeStatsCache(rawStats ?? ({} as StatsCache))
+  const claudeDefaultAccount = await claudeDefaultRootAccount()
   const byId = new Map<string, SessionMeta>()
-  for (const s of metaMap.values()) byId.set(sessionKey(s), s)
+  for (const s of stampAccount([...metaMap.values()], claudeDefaultAccount)) byId.set(sessionKey(s), s)
   for (const s of stored.values()) if (!byId.has(sessionKey(s))) byId.set(sessionKey(s), s)
   const sessions = [...byId.values()]
   for (const s of sessions) normalizeSessionTimes(s)
@@ -772,7 +792,7 @@ async function buildQuickResponse(): Promise<ApiResponse> {
   }
   const projects = [...projByPath.values()].sort((a, b) => b.sessions.length - a.sessions.length)
   // Claude's own sessions only, exactly as the full build feeds it (stats-cache.json is Claude-only).
-  supplementStatsCache(statsCache, sessions.filter(s => (s.harness ?? 'claude') === 'claude'))
+  supplementStatsCache(statsCache, sessions.filter(s => (s.harness ?? 'claude') === 'claude' && !fromOtherClaudeRoot(s, claudeDefaultAccount)))
   try {
     const { readRegistry } = await import('./sessions/registry')
     const { applySessionLabels, linkManagedSessions } = await import('./sessions/link-sessions')
@@ -1075,7 +1095,11 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     onProgress('finalizing', 0)
 
     const metaSessions = Array.from(metaMap.values())
-    const allSessionsRaw: SessionMeta[] = [...metaSessions, ...extraSessions]
+    // The default claude root is read here, not by the adapter, so its account binding is applied
+    // here too (spec §4 D8 — absent only while the default root has no binding). Copies: the meta
+    // map and the parse cache hand out objects they may hand out again.
+    const claudeDefaultAccount = await claudeDefaultRootAccount()
+    const allSessionsRaw: SessionMeta[] = stampAccount([...metaSessions, ...extraSessions], claudeDefaultAccount)
 
     // Normalise at the boundary — where every harness's sessions ENTER the pipeline — before
     // anything sorts, dedups, or persists them. `start_time`/`end_time` are typed `string`, but
@@ -1162,7 +1186,10 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
       // Live ids are skipped inside the store read, before it copies them (PERF.1).
       const stored = await loadConsolidated({ skipIds: liveIds })
       for (const s of stored.values()) {
-        if ((s.harness ?? 'claude') === 'claude') revive(s)
+        // A claude row from ANOTHER account root is revived with the adapters, like a non-Claude
+        // harness: revived here it would reach `supplementStatsCache` (a second root must never move
+        // the Claude totals) and its stale stored copy would beat the fresh one in the final dedup.
+        if ((s.harness ?? 'claude') === 'claude' && !fromOtherClaudeRoot(s, claudeDefaultAccount)) revive(s)
         else deferredRevival.push(s)
       }
     }
@@ -1197,8 +1224,10 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     const extraHarnessSessions: SessionMeta[] = []
     timer.mark('consolidate')
     for (const adapter of await getEnabledAdapters()) {
-      if (adapter.id === 'claude') continue // already loaded above
-      const extra = await adapter.loadSessions().catch(() => [] as SessionMeta[])
+      // Claude's default root is already loaded above; only its other (account) roots come from here.
+      const extra = adapter.id === 'claude'
+        ? await (await import('./adapters/claude')).claudeExtraRootSessions().catch(() => [] as SessionMeta[])
+        : await adapter.loadSessions().catch(() => [] as SessionMeta[])
       timer.mark(adapter.id)
       for (const s of extra) {
         // Key by (harness, session_id) so IDs never collide across harnesses

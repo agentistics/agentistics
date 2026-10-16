@@ -214,6 +214,14 @@ export function limitNoticeText(m: LimitNoticeMeta, lang: Lang, now = Date.now()
     : { title: `${name}: ${m.threshold}% of the ${win}`, message: `${Math.round(m.pct)}% of the plan's ${win} is used. It resets ${when}.` }
 }
 
+/** `plan.segment`: a sharp drop the probe could not explain — the account counts from zero again. */
+export function segmentNoticeText(harness: string, lang: Lang): { title: string; message: string } {
+  const name = harnessName(harness)
+  return lang === 'pt'
+    ? { title: `${name}: uso caiu de repente`, message: `O uso do ${name} caiu bruscamente — contando do zero para esta conta.` }
+    : { title: `${name}: usage dropped sharply`, message: `${name}'s usage dropped sharply — counting from zero for this account.` }
+}
+
 // ─── The compact reading (new-session cards) and the one warning colour ─────────────────────
 
 /** The forecast's ONLY colour: amber, and only when the window runs out before it renews. */

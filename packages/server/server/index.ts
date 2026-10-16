@@ -269,6 +269,8 @@ if (!TEAM_CENTRAL) {
         code: n.threshold >= 100 ? 'limits.exhausted' : 'limits.threshold',
         meta: { harness: n.harness, window: n.kind, threshold: n.threshold, pct: Math.round(n.usedPct), resetsAt: n.resetsAt, ...(alt ? { alt } : {}) },
       }),
+      // A sharp drop the probe could not explain: that account's burn and notices start over.
+      segment: s => sse.broadcastNotification({ type: 'info', code: 'plan.segment', meta: { harness: s.harness, account: s.account } }),
     })
     // A record another agentop process wrote (it holds no sink) reaches the browser through the file.
     pl.watchPlanLimitsFile()
@@ -429,6 +431,9 @@ void (async () => {
   const { ensureAgyMcp } = await import('./agy-mcp')
   await ensureAgyMcp(PORT).then(r => { if (r.action === 'refuse') console.warn(`[mcp] agy left alone: ${r.reason}`) }, err =>
     console.warn('[mcp] could not register for antigravity:', err instanceof Error ? err.message : String(err)))
+  // Extra account roots (flag `multi-account`) keep their own MCP config: repair them too.
+  await import('./account-roots').then(m => m.accountRoots().reregisterMcp()).catch(err =>
+    console.warn('[mcp] could not repair account roots:', err instanceof Error ? err.message : String(err)))
 })()
 // The model pickers read the CLIs' own lists (`model-catalog.ts`); warm the ones that are COMMANDS
 // (`agy models` goes to the network) so the first wizard open already offers them. A central neither
@@ -787,7 +792,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const live = await readLocalLiveSnapshot(data.sessions)
         const latest = await planLimitsPayload(prefs.billing, now)
         const burnByHarness = Object.fromEntries(latest.budgets.map(b => [b.harness, b.burnPctPerHour])) as Partial<Record<import('@agentistics/core').HarnessId, number>>
-        liveSessions = sampleLivePlanSessions(data.sessions, live.liveSessionIds, now, burnByHarness)
+        const { processSessionHub } = await import('./sessions/session-hub')
+        // Peek only: plan reads must not start fleet polls or extend the hub's demand lease.
+        const working = new Set((processSessionHub()?.last()?.sessions ?? [])
+          .filter(s => s.activity === 'working')
+          .flatMap(s => [s.id, ...(s.conversationId ? [s.conversationId] : []), ...(s.conversationStoreId ? [s.conversationStoreId] : [])]))
+        liveSessions = sampleLivePlanSessions(data.sessions, live.liveSessionIds, now, burnByHarness, working)
       }
       const body = TEAM_CENTRAL ? { limits: [], registered: [], budgets: [], freeSlots: 0, freeSlotsByHarness: {}, liveSessions: [], now } : await planLimitsPayload(prefs.billing, now, liveSessions)
       return new Response(JSON.stringify(body), { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
@@ -2072,6 +2082,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(out, messageStatus(out))
     }
     // LEADER CHECK-INS — agenda state, immediate run, and the MCP report share this server store.
+    if (url.pathname === '/api/checkin/defaults' && req.method === 'GET') {
+      return json(await (await import('./checkin')).checkinDefaultFollowers())
+    }
     if (url.pathname === '/api/checkin' || url.pathname.startsWith('/api/checkin/')) {
       if (url.pathname === '/api/checkin/report' && req.method === 'POST') {
         const body = await req.json().catch(() => ({})) as { state?: unknown; summary?: unknown; headline?: unknown; delivered?: unknown; inProgress?: unknown; next?: unknown; health?: unknown; actions?: unknown; needs?: unknown; session?: { id?: unknown; token?: unknown } }
@@ -2137,7 +2150,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const body = await req.json().catch(() => ({}))
       const { setAway, awayStatus, defaultAwayDeps } = await import('./away')
       const out = await setAway(body, await defaultAwayDeps())
-      if (out.ok) (await import('./sse')).broadcastAwayChanged()
+      if (out.ok) {
+        (await import('./sse')).broadcastAwayChanged()
+        void import('./sessions/fleet-web').then(m => m.kickFleet()).catch(() => {})
+      }
       return json(out, awayStatus(out))
     }
     // PER-SESSION AWAY — one session's own flag (`ManagedSession.away`); the person or a verified leader.
@@ -5208,6 +5224,11 @@ if (!TEAM_CENTRAL && CAPS.localShell) {
       const prefs = await readPreferences().catch(() => ({} as { lang?: string }))
       const n = await flushQueuedDeliveries((prefs as { lang?: string }).lang === 'pt' ? 'pt' : 'en')
       if (n > 0) console.log(`[agentask] delivered ${n} queued thread repl${n === 1 ? 'y' : 'ies'}`)
+      // HANDOFF.RELAY: what the owner wrote into a leader AFTER its hand-off reaches the successor.
+      const [{ flushAllHandoffRelays }, { runFleetAction }] = await Promise.all([import('./sessions/handoff-relay-io'), import('./sessions/fleet-web')])
+      const lang = (prefs as { lang?: string }).lang === 'pt' ? 'pt' : 'en'
+      const relayed = await flushAllHandoffRelays(async (id, text) => (await runFleetAction(lang, { action: 'prompt', id, text })).ok)
+      if (relayed > 0) console.log(`[handoff] relayed ${relayed} owner message(s) to a successor`)
     })().catch(err => console.error('[agentask] queued thread replies:', err instanceof Error ? err.message : String(err)))
       .finally(() => { flushing = false })
   }, 30_000).unref()

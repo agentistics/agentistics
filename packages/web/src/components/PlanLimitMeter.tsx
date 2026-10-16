@@ -8,7 +8,7 @@
  * A harness with no record draws NOTHING (the callers simply have no `PlanLimits` for it) — never a
  * zero bar: nothing observed is not nothing used.
  */
-import { windowRenewed, type PlanLimitWindow, type PlanLimits } from '@agentistics/core'
+import { effectiveWindow, windowRenewed, type PlanLimitWindow, type PlanLimits } from '@agentistics/core'
 import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
 import { HARNESS_LABELS } from '../lib/harness'
@@ -19,6 +19,13 @@ import {
 } from '../lib/planLimits'
 
 type Lang = 'pt' | 'en'
+
+/** Keep computed reset times distinct from the harness's reported times. */
+function windowResetPhrase(w: PlanLimitWindow, now: number, lang: Lang): string {
+  if (!windowRenewed(w, now)) return resetPhrase(w, now, lang)
+  const next = effectiveWindow(w, now)
+  return `${resetPhrase(w, now, lang)} · ${lang === 'pt' ? 'renovação estimada' : 'estimated reset'} ${fmtWhen(next.resetsAt, now, lang)}`
+}
 
 export function PlanUsageRing({ pct, size = 36, stroke = 3, children }: { pct: number | null; size?: number; stroke?: number; children?: ReactNode }) {
   const radius = (size - stroke) / 2
@@ -61,12 +68,13 @@ export function PlanUsageSummary({ limits, registered = [], now, lang, onOpen }:
 function WindowRow({ w, now, lang, ring, forecast = true }: { w: PlanLimitWindow; now: number; lang: Lang; ring: number; forecast?: boolean }) {
   const pt = lang === 'pt'
   const pct = currentUsedPct(w, now)
+  const renewed = windowRenewed(w, now)
   const f = forecast ? warnForecast(w, now) : null
   return <div data-plan-window={w.kind} style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>
-    <PlanUsageRing pct={pct} size={ring}>{ring >= 44 ? `${Math.round(pct)}%` : Math.round(pct)}</PlanUsageRing>
+    <PlanUsageRing pct={pct} size={ring}>{renewed ? '–' : ring >= 44 ? `${Math.round(pct)}%` : Math.round(pct)}</PlanUsageRing>
     <div style={{ minWidth: 0, flex: 1, fontSize: 12 }}>
-      <b style={{ display: 'block', whiteSpace: 'nowrap' }}>{windowLabel(w.kind, lang)} · {Math.round(pct)}% {pt ? 'usado' : 'used'}</b>
-      <span style={{ display: 'block', color: 'var(--text-secondary)' }}>{pt ? `restam ${100 - Math.round(pct)}%` : `${100 - Math.round(pct)}% left`} · {resetPhrase(w, now, lang)}</span>
+      <b style={{ display: 'block', whiteSpace: 'nowrap' }}>{renewed ? `${windowLabel(w.kind, lang)} · –` : `${windowLabel(w.kind, lang)} · ${Math.round(pct)}% ${pt ? 'usado' : 'used'}`}</b>
+      <span style={{ display: 'block', color: 'var(--text-secondary)' }}>{renewed ? '' : `${pt ? `restam ${100 - Math.round(pct)}%` : `${100 - Math.round(pct)}% left`} · `}{windowResetPhrase(w, now, lang)}</span>
       {f && <span style={{ display: 'block', color: LIMIT_WARN, fontWeight: 600 }}>{forecastPhrase(f, now, lang)}</span>}
     </div>
     <LimitLevelIcon pct={pct} lang={lang} />
@@ -134,7 +142,7 @@ export function PlanLimitMeter({ window: w, now, lang, forecast = false }: {
         <span style={{ color: 'var(--text-primary)', fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: 34, textAlign: 'right' }}>{renewed ? '–' : `${shown}%`}</span>
       </div>
       <div style={{ paddingLeft: 50, fontSize: 10.5, color: 'var(--text-tertiary)', lineHeight: 1.35 }}>
-        {resetPhrase(w, now, lang)}
+        {windowResetPhrase(w, now, lang)}
         {f && (
           <span data-plan-forecast style={{ color: LIMIT_WARN, fontWeight: 600 }}>
             {' · '}{forecastPhrase(f, now, lang)}
@@ -239,7 +247,7 @@ export function PlanLimitBars({ limits, now, lang }: { limits: PlanLimits; now: 
             <div style={{ width: `${Math.min(100, Math.max(0, pct))}%`, height: '100%', background: limitTone(pct), borderRadius: 2 }} />
           </div>,
           <span key={`${w.kind}v`} data-plan-window={w.kind} style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-            {renewed ? '–' : `${Math.round(pct)}%`} · {shortWhen(w.resetsAt, now, lang, w.kind)}
+            {renewed ? '–' : `${Math.round(pct)}%`} · {renewed ? windowResetPhrase(w, now, lang) : shortWhen(w.resetsAt, now, lang, w.kind)}
           </span>,
         ]
       })}

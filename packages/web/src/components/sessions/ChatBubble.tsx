@@ -30,6 +30,7 @@ import { ArrowUpRight, Info, Check, ChevronDown, Clock, Copy, CornerUpLeft, Elli
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import { useFleet } from '../../lib/fleet'
 import { parseSystemEvent, systemEventLine, type SystemEvent } from '../../lib/systemEvent'
+import type { ChatTaskEnd } from '@agentistics/core'
 import { chatNote, type ChatNoteTab } from '../../lib/chatNote'
 import { openArtifacts } from '../../lib/artifactsStore'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -55,7 +56,7 @@ import { shellRunViewModel } from '../../lib/shellRun'
 export interface ChatTurn {
   role: 'user' | 'assistant'
   text: string
-  /** The server matched this turn to a recent send from our composer. */
+  /** The server matched this turn to a durable send fingerprint from our composer. */
   composer?: boolean
   pending?: boolean
   /**
@@ -65,7 +66,7 @@ export interface ChatTurn {
    * thing the reader is waiting for, and its END is already reported. Rendered as a status line and
    * never as a message — nobody said it.
    */
-  task?: { label: string; running: boolean }
+  task?: { label: string; running: boolean; ended?: ChatTaskEnd }
   /**
    * This sat under the `user` role and no person wrote it — a background task reporting back, an
    * injected reminder, a `!` command's stdout. The value NAMES the kind; it is never the body.
@@ -567,7 +568,13 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
           <span>
             {running
               ? (pt ? `em segundo plano: ${turn.task.label}` : `in the background: ${turn.task.label}`)
-              : (pt ? `terminou: ${turn.task.label}` : `finished: ${turn.task.label}`)}
+              : turn.task.ended === 'stopped'
+                ? (pt ? `interrompida: ${turn.task.label}` : `stopped: ${turn.task.label}`)
+                : turn.task.ended === 'never-started'
+                  ? (pt ? `não iniciou: ${turn.task.label}` : `never started: ${turn.task.label}`)
+                  : turn.task.ended === 'session-ended'
+                    ? (pt ? `sessão encerrada: ${turn.task.label}` : `session ended: ${turn.task.label}`)
+                    : (pt ? `terminou: ${turn.task.label}` : `finished: ${turn.task.label}`)}
           </span>
         </span>
       </div>
@@ -1230,7 +1237,7 @@ function ShellRunBlock({ run, pt }: { run: NonNullable<ChatTurn['shell']>; pt: b
 }
 
 /** A message agentistics injected: one compact row, full text on click. No bubble, no echo chrome. */
-export function SystemEventRow({ event, pt, titleOf, defaultOpen = false, open: controlledOpen, onOpenChange }: { event: SystemEvent; pt: boolean; titleOf?: (id: string) => string | undefined; defaultOpen?: boolean; open?: boolean; onOpenChange?: (open: boolean) => void }) {
+export function SystemEventRow({ event, pt, sessionId, titleOf, defaultOpen = false, open: controlledOpen, onOpenChange }: { event: SystemEvent; pt: boolean; sessionId?: string; titleOf?: (id: string) => string | undefined; defaultOpen?: boolean; open?: boolean; onOpenChange?: (open: boolean) => void }) {
   const [innerOpen, setInnerOpen] = useState(defaultOpen)
   const open = controlledOpen ?? innerOpen
   const setOpen = (v: boolean) => { if (controlledOpen === undefined) setInnerOpen(v); onOpenChange?.(v) }
@@ -1241,12 +1248,17 @@ export function SystemEventRow({ event, pt, titleOf, defaultOpen = false, open: 
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        style={{ ...systemChipStyle(isMobile), display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', minHeight: 24 }}
+        style={{ ...systemChipStyle(isMobile), display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', minHeight: isMobile && event.kind === 'checkin' ? 44 : 24 }}
       >
         <Info size={12} color="var(--anthropic-orange)" style={{ flexShrink: 0 }} />
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{systemEventLine(event, pt, event.sender ? titleOf?.(event.sender) : undefined)}</span>
         <ChevronDown size={12} style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : undefined }} />
       </button>
+      {event.kind === 'checkin' && <button
+        type="button"
+        onClick={() => window.dispatchEvent(new CustomEvent('agentistics:open-checkin', { detail: { sessionId } }))}
+        style={{ ...systemChipStyle(isMobile), minHeight: isMobile ? 44 : 24, cursor: 'pointer', color: 'var(--text-primary)' }}
+      >{pt ? 'Abrir check-in' : 'Open check-in'}</button>}
       {open && (
         <div style={{
           marginTop: 4, padding: '8px 10px', borderRadius: 8, maxWidth: '92%', border: '1px solid var(--border-subtle)',
@@ -1271,6 +1283,6 @@ export const ChatBubble = memo(function ChatBubble(props: ChatBubbleProps) {
   const event = props.turn.role === 'user' ? parseSystemEvent(props.turn.text) : null
   if (event) return event.sender
     ? <FleetSystemEventRow event={event} lang={props.lang} />
-    : <SystemEventRow event={event} pt={props.lang === 'pt'} />
+    : <SystemEventRow event={event} pt={props.lang === 'pt'} sessionId={props.sessionId} />
   return <ChatBubbleInner {...props} />
 })

@@ -111,10 +111,10 @@ export async function runAway(args: readonly string[]): Promise<number> {
 }
 
 async function runSessionAway(body: { target: string; on: boolean }, port: number): Promise<number> {
-  const say = (r: { ok: boolean; id?: string; away?: boolean; effective?: boolean; notified?: boolean; error?: string; message?: string }): number => {
+  const say = (r: { ok: boolean; id?: string; away?: boolean; effective?: boolean; queued?: boolean; error?: string; message?: string }): number => {
     if (!r.ok) { console.error(`refused: ${r.error ?? 'unknown'}`); return 1 }
     const eff = r.effective ? 'away (effective)' : 'not away'
-    console.log(`session ${r.id}: own away flag ${r.away ? 'ON' : 'OFF'} — now ${eff}${r.notified ? '; the session was told' : r.message ? `; not told: ${r.message}` : ''}`)
+    console.log(`session ${r.id}: own away flag ${r.away ? 'ON' : 'OFF'} — now ${eff}${r.queued ? '; the session will be told after the quiet window' : r.message ? `; not told: ${r.message}` : ''}`)
     return 0
   }
   // A title or an id prefix is resolved HERE, against the same registry the server reads.

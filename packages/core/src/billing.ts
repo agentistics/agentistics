@@ -83,6 +83,15 @@ export interface BillingTimeline {
   periods: BillingPeriod[]
 }
 
+/** The timeline an account prices on: its own, else the harness default (`undefined` if none). */
+export function accountTimeline(
+  billing: BillingSettings | undefined,
+  harness: HarnessId,
+  accountId?: string,
+): BillingTimeline | undefined {
+  return (accountId ? billing?.accountProfiles?.[accountId] : undefined) ?? billing?.profiles?.[harness]
+}
+
 export type BillingProfiles = Partial<Record<HarnessId, BillingTimeline>>
 
 /**
@@ -92,6 +101,12 @@ export type BillingProfiles = Partial<Record<HarnessId, BillingTimeline>>
  */
 export interface BillingSettings {
   profiles: BillingProfiles
+  /**
+   * One timeline per ACCOUNT id (`acc_…`), for harnesses with several logins. `profiles[h]` stays
+   * the default for accounts of `h` that have no timeline of their own. Absent = every account
+   * inherits the harness timeline, i.e. today's arithmetic.
+   */
+  accountProfiles?: Record<string, BillingTimeline>
   /** Set once the user dismisses the first-run invite for good. */
   introDismissed?: boolean
   /** The display basis. A preference exactly like `currency` — it changes no stored data. */
@@ -482,9 +497,83 @@ export interface PlanCostResult {
  * days are uncovered — one malformed row must not take the whole figure down with it.
  */
 export function computePlanCost(args: {
+  /** The harness timeline: the default for any account that has none of its own. */
   timeline: BillingTimeline | undefined
   window: PlanWindow
   /** BRL→USD divisor (`amountUSD = amount / brlRate`), from `AppContext.brlRate`. */
+  brlRate: number
+  /** The harness's accounts. Absent (or with no `accountProfiles`) the result is exactly the
+   *  single-timeline one. */
+  accounts?: readonly PlanAccountRef[]
+  accountProfiles?: Record<string, BillingTimeline>
+}): PlanCostResult {
+  const { accounts, accountProfiles, ...rest } = args
+  if (!accounts || accounts.length === 0 || !accountProfiles) return computeTimelineCost(rest)
+  return mergePlanCosts(selectedTimelines(args.timeline, accounts, accountProfiles).map((timeline) => computeTimelineCost({ ...rest, timeline })))
+}
+
+/** C per harness = Σ over its accounts, each on its own timeline or else the harness default —
+ *  and the default is counted ONCE however many accounts inherit it. */
+function selectedTimelines(
+  fallback: BillingTimeline | undefined,
+  accounts: readonly PlanAccountRef[],
+  accountProfiles: Record<string, BillingTimeline>,
+): (BillingTimeline | undefined)[] {
+  const timelines: (BillingTimeline | undefined)[] = []
+  let defaultUsed = false
+  for (const account of accounts) {
+    const own = accountProfiles[account.id]
+    if (own) timelines.push(own)
+    else if (!defaultUsed) {
+      defaultUsed = true
+      timelines.push(fallback)
+    }
+  }
+  return timelines
+}
+
+/** An account of a harness, as the billing arithmetic needs to know it. */
+export interface PlanAccountRef {
+  id: string
+  harness: HarnessId
+}
+
+/** Σ C, ∪ covered days: the accounts' plans are paid at once, so costs add and days overlap. */
+function mergePlanCosts(parts: readonly PlanCostResult[]): PlanCostResult {
+  if (parts.length === 1) return parts[0] as PlanCostResult
+  const first = parts[0] as PlanCostResult
+  const coveredDayKeys = new Set<BillingDay>()
+  const apiDayKeys = new Set<BillingDay>()
+  const segments: PlanSegment[] = []
+  let subscriptionCostUSD = 0
+  for (const part of parts) {
+    subscriptionCostUSD += part.subscriptionCostUSD
+    for (const day of part.coveredDayKeys) coveredDayKeys.add(day)
+    for (const day of part.apiDayKeys) apiDayKeys.add(day)
+    segments.push(...part.segments)
+  }
+  const invalidTimeline = parts.some((p) => p.invalidTimeline)
+  const coveredDays = coveredDayKeys.size
+  const windowDays = first.windowDays
+  return {
+    subscriptionCostUSD,
+    windowDays,
+    coveredDays,
+    uncoveredDays: windowDays - coveredDays,
+    coverageRatio: windowDays === 0 ? 0 : coveredDays / windowDays,
+    coveredDayKeys,
+    apiDayKeys,
+    segments,
+    usedBrlRate: first.usedBrlRate,
+    brlRateUnusable: parts.some((p) => p.brlRateUnusable),
+    invalidTimeline,
+    unavailable: coveredDays === 0 || invalidTimeline,
+  }
+}
+
+function computeTimelineCost(args: {
+  timeline: BillingTimeline | undefined
+  window: PlanWindow
   brlRate: number
 }): PlanCostResult {
   const { timeline, window, brlRate } = args
@@ -811,8 +900,10 @@ export function monthlyCommitment(args: {
   /** Any day in the month of interest. */
   month: BillingDay
   brlRate: number
+  accounts?: readonly PlanAccountRef[]
+  accountProfiles?: Record<string, BillingTimeline>
 }): MonthlyCommitment | null {
-  const { profiles, month, brlRate } = args
+  const { profiles, month, brlRate, accounts, accountProfiles } = args
   const index = dayIndex(month)
   if (index === null) return null
 
@@ -831,20 +922,40 @@ export function monthlyCommitment(args: {
   let hasUsageBilling = false
   const harnesses: HarnessId[] = []
 
-  for (const [key, timeline] of Object.entries(profiles) as [HarnessId, BillingTimeline][]) {
-    if (!timeline) continue
-    const plan = computePlanCost({ timeline, window, brlRate })
-    if (plan.unavailable && plan.apiDayKeys.size === 0) continue
-    if (plan.apiDayKeys.size > 0) hasUsageBilling = true
-    if (plan.subscriptionCostUSD > 0) {
-      usd += plan.subscriptionCostUSD
-      harnesses.push(key)
-      // ANY contributing subscription that does not span the whole month makes the TOTAL a
-      // prorated figure. Taking the longest coverage instead would report a full month whenever
-      // one plan happened to span it, leaving the short one's proration unexplained — the total
-      // is smaller than the sum of the monthly prices and nothing on screen would say why.
-      if (plan.coveredDays < monthDays) anyPartial = true
+  const entries = Object.entries(profiles) as [HarnessId, BillingTimeline | undefined][]
+  // A harness whose accounts carry their own timelines commits even with no harness default.
+  if (accounts && accountProfiles) {
+    for (const a of accounts) {
+      if (accountProfiles[a.id] && !entries.some(([k]) => k === a.harness)) {
+        entries.push([a.harness, undefined])
+      }
     }
+  }
+
+  for (const [key, timeline] of entries) {
+    const harnessAccounts = accounts?.filter((a) => a.harness === key)
+    if (!timeline && !(harnessAccounts && harnessAccounts.length > 0)) continue
+    const parts = harnessAccounts && harnessAccounts.length > 0 && accountProfiles
+      ? selectedTimelines(timeline, harnessAccounts, accountProfiles)
+      : [timeline]
+    const results = parts.map((t) => computeTimelineCost({ timeline: t, window, brlRate }))
+    // An invalid timeline refuses the whole harness: merging must not let a valid sibling's
+    // API days or subscription cost leak out around the account whose bill was discarded.
+    if (results.some((r) => r.invalidTimeline)) continue
+    let contributed = false
+    for (const plan of results) {
+      if (plan.unavailable && plan.apiDayKeys.size === 0) continue
+      if (plan.apiDayKeys.size > 0) hasUsageBilling = true
+      if (plan.subscriptionCostUSD > 0) {
+        usd += plan.subscriptionCostUSD
+        contributed = true
+        // ANY contributing subscription that does not span the whole month makes the TOTAL a
+        // prorated figure — judged per timeline, since a union of coverage would hide a short
+        // account behind a full one.
+        if (plan.coveredDays < monthDays) anyPartial = true
+      }
+    }
+    if (contributed) harnesses.push(key)
   }
 
   if (harnesses.length === 0 && !hasUsageBilling) return null
@@ -1003,6 +1114,20 @@ export function normalizeBillingSettings(raw: unknown): BillingSettings {
         .filter((p): p is BillingPeriod => p !== null)
       if (periods.length > 0) settings.profiles[key as HarnessId] = { periods }
     }
+  }
+
+  if (r.accountProfiles && typeof r.accountProfiles === 'object') {
+    const out: Record<string, BillingTimeline> = {}
+    for (const [id, value] of Object.entries(r.accountProfiles as Record<string, unknown>)) {
+      if (id === '') continue
+      const periodsRaw = (value as Record<string, unknown> | null)?.periods
+      if (!Array.isArray(periodsRaw)) continue
+      const periods = periodsRaw
+        .map(normalizePeriod)
+        .filter((p): p is BillingPeriod => p !== null)
+      if (periods.length > 0) out[id] = { periods }
+    }
+    if (Object.keys(out).length > 0) settings.accountProfiles = out
   }
 
   return settings

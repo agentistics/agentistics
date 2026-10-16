@@ -61,7 +61,6 @@ export function runRelay(dir: string): void {
   // The ACP CLI may fork helpers of its own. Keeping the child in a detached process group lets the
   // relay terminate the whole tree, rather than leaving a helper behind when the CLI ignores TERM.
   const child = spawn(spec.bin, spec.args, { cwd: spec.cwd, detached: true, stdio: ['pipe', 'pipe', 'ignore'], env: { ...process.env, ...extra } })
-  writeFileSync(join(dir, RELAY_FILES.pid), JSON.stringify({ relay: process.pid, child: child.pid ?? null }), { mode: 0o600 })
 
   let client: Socket | null = null
   const send = (s: Socket | null, msg: unknown): void => { if (s && !s.destroyed) s.write(`${JSON.stringify(msg)}\n`) }
@@ -86,10 +85,31 @@ export function runRelay(dir: string): void {
   let ended = false
   let killTimer: ReturnType<typeof setTimeout> | null = null
   let termAt = 0
+  let stdoutClosed = false
+  let childExited = false
+  const finishOutput = (): void => {
+    if (!stdoutClosed || !childExited) return
+    if (partial !== '') { record(partial); partial = '' }
+    ended = true
+    writeFileSync(join(dir, RELAY_FILES.exit), JSON.stringify({ code: child.exitCode, at: Date.now() }), { mode: 0o600 })
+    send(client, { x: child.exitCode })
+    client?.end()
+    server.close()
+    try { unlinkSync(sockPath) } catch { /* already gone */ }
+    if (!termAt) setTimeout(() => process.exit(0), 200).unref?.()
+  }
+  child.stdout!.on('close', () => { stdoutClosed = true; finishOutput() })
+
   const killChild = (signal: 'SIGTERM' | 'SIGKILL'): void => {
     const pid = child.pid
     if (pid === undefined) return
     try { process.kill(-pid, signal) } catch { try { child.kill(signal) } catch { /* already dead */ } }
+  }
+  /** Is anything left in the child's process group (it was started detached: its pid is the pgid)? */
+  const groupAlive = (): boolean => {
+    const pid = child.pid
+    if (pid === undefined) return false
+    try { process.kill(-pid, 0); return true } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM' }
   }
   const endChild = (): void => {
     // A SIGTERM can arrive after the child exit event has already marked the relay ended. The relay
@@ -142,20 +162,25 @@ export function runRelay(dir: string): void {
   try { unlinkSync(sockPath) } catch { /* none left over */ }
   server.listen(sockPath)
 
-  child.on('exit', code => {
-    if (partial !== '') { record(partial); partial = '' }
-    ended = true
+  child.on('exit', () => {
+    childExited = true
+    finishOutput()
     if (killTimer) clearTimeout(killTimer)
-    // The direct child may have obeyed TERM while a descendant in its group ignored it: the group is
-    // still killed once the grace is over, and the relay stays until then.
     const groupGrace = termAt ? Math.max(0, termAt + KILL_GRACE_MS - Date.now()) : 0
-    writeFileSync(join(dir, RELAY_FILES.exit), JSON.stringify({ code, at: Date.now() }), { mode: 0o600 })
-    send(client, { x: code })
-    client?.end()
-    server.close()
-    try { unlinkSync(sockPath) } catch { /* already gone */ }
-    if (termAt) setTimeout(() => { killChild('SIGKILL'); process.exit(0) }, groupGrace + 50)
-    else setTimeout(() => process.exit(0), 200).unref?.()
+    // Drain stdout before leaving. A descendant that ignored TERM still gets SIGKILL after the
+    // grace, even if it inherited stdout and keeps the pipe open after the direct child exits.
+    if (termAt) {
+      const end = Date.now() + groupGrace + 50
+      const tick = (): void => {
+        if (!groupAlive() && stdoutClosed) { process.exit(0); return }
+        if (Date.now() >= end) {
+          killChild('SIGKILL')
+          if (stdoutClosed) { process.exit(0); return }
+        }
+        setTimeout(tick, 50)
+      }
+      tick()
+    }
   })
   child.on('error', () => {
     if (ended) return
@@ -171,6 +196,10 @@ export function runRelay(dir: string): void {
   process.on('SIGHUP', () => {})
   process.on('SIGTERM', endChild)
   process.on('SIGINT', endChild)
+  // Published LAST, after the signal handlers exist: whoever reads this file may TERM the relay at once,
+  // and a TERM before the handler is the default action — the relay dies and its child, in a process
+  // group of its own, is orphaned.
+  writeFileSync(join(dir, RELAY_FILES.pid), JSON.stringify({ relay: process.pid, child: child.pid ?? null }), { mode: 0o600 })
 }
 
 if (import.meta.main) {

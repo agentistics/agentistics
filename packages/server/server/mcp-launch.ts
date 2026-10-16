@@ -22,6 +22,7 @@
 
 import { existsSync } from 'node:fs'
 import path from 'node:path'
+import type { HarnessId } from '@agentistics/core'
 
 export interface McpLaunch {
   command: string
@@ -115,3 +116,43 @@ export function staleAgentisticsMcps(claudeJson: unknown): StaleMcp[] {
 
 /** The name the canonical registration is kept under, in every harness. */
 export const CANONICAL_MCP_NAME = 'agentistics'
+
+export interface RootMcpRegistration {
+  argv: string[]
+  /** Added to the child's environment so the harness writes into THAT root, not the default one. */
+  env: Record<string, string>
+}
+
+/**
+ * PURE (multi-account). How to register the agentistics MCP inside ONE account root, or `null` when
+ * that root already inherits it. A table keyed by harness, never a chain:
+ *
+ * - claude keeps its MCP servers in `<root>/.claude.json`, which can hold OAuth state and is therefore
+ *   NOT shared with the default root, so the root needs its own registration;
+ * - copilot's `config.json` is not shared either (it holds `loggedInUsers`), so its `mcp-config.json`
+ *   is written through `copilot mcp add`;
+ * - codex (`config.toml`), gemini (`settings.json`) and kimi (`mcp.json`) share the file that holds the
+ *   registration by symlink (`ROOT_SHARED`), so the default root's entry already applies;
+ * - antigravity and opencode have no isolation variable, hence no root.
+ *
+ * The command forms were read from each CLI's own `mcp add --help`.
+ */
+export const ROOT_MCP: Record<HarnessId, ((root: string, launch: McpLaunch, apiUrl: string) => RootMcpRegistration) | null> = {
+  claude: (root, launch, apiUrl) => ({
+    argv: ['claude', 'mcp', 'add', '-s', 'user', CANONICAL_MCP_NAME, '-e', `AGENTISTICS_API=${apiUrl}`, '--', launch.command, ...launch.args],
+    env: { CLAUDE_CONFIG_DIR: root },
+  }),
+  copilot: (root, launch, apiUrl) => ({
+    argv: ['copilot', 'mcp', 'add', '--env', `AGENTISTICS_API=${apiUrl}`, CANONICAL_MCP_NAME, '--', launch.command, ...launch.args],
+    env: { COPILOT_HOME: root },
+  }),
+  codex: null,
+  gemini: null,
+  kimi: null,
+  antigravity: null,
+  opencode: null,
+}
+
+export function rootMcpRegistration(harness: HarnessId, root: string, launch: McpLaunch, apiUrl: string): RootMcpRegistration | null {
+  return ROOT_MCP[harness]?.(root, launch, apiUrl) ?? null
+}

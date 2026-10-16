@@ -183,3 +183,12 @@ describe('per-session away switch', () => {
     expect(renderToStaticMarkup(<SessionLinkPanel links={none} sessionId="s1" pt={false} onGo={() => {}} />)).not.toContain('session-away-row')
   })
 })
+
+describe('hand-off generation in the ⓘ panel', () => {
+  const links = { parent: null, children: [], task: null }
+  it('shows the counter (EN and PT) and nothing when never handed off', () => {
+    expect(renderToStaticMarkup(<SessionLinkPanel links={links} handoffSeq={47} pt={false} onGo={() => {}} />)).toContain('Session 47 (leader hand-off)')
+    expect(renderToStaticMarkup(<SessionLinkPanel links={links} handoffSeq={47} pt onGo={() => {}} />)).toContain('Sessão 47 (passagem de líder)')
+    expect(renderToStaticMarkup(<SessionLinkPanel links={links} pt={false} onGo={() => {}} />)).not.toContain('handoff-generation')
+  })
+})

@@ -42,6 +42,9 @@ export interface ContextInput {
   away?: AwayState
   /** The clock `away` is judged against (ms). Defaults to `Date.now()`; tests pass it. */
   now?: number
+  /** HANDOFF.RELAY: a leader hand-off's successor is told what the owner said to its predecessor and
+   *  the predecessor's last reply (`handoff-relay.ts`'s `relaySection`). */
+  handoffRelay?: string
 }
 
 /** The block is fenced so the chat UI can recognise it and render it collapsed. */
@@ -122,6 +125,7 @@ export function contextText(i: ContextInput): string {
       `You were started by session ${i.parentId}${i.parentTitle ? ` ("${i.parentTitle}")` : ''}. When you finish, get blocked or need a decision, report to it with agentistics_session_message (kind: handback | block | question) — not to the user — and keep working only on what it asked.`,
     )
   }
+  if (i.handoffRelay) lines.push(i.handoffRelay)
   if (i.harnesses && i.harnesses.length > 0) lines.push(`Harnesses installed on this machine: ${i.harnesses.join(', ')}.`)
   if (i.specSkills && i.specSkills.length > 0) lines.push(`Specification skills installed for this harness: ${i.specSkills.join(', ')}`)
   lines.push(
