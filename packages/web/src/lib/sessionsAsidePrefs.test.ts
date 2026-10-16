@@ -103,6 +103,7 @@ describe('writeAsideGroupPrefs', () => {
       hiddenUserGroups: ['g2'],
       foldedPinned: false,
       foldedGroupsSection: false,
+      expandedEndedGroups: [],
     })
   })
 

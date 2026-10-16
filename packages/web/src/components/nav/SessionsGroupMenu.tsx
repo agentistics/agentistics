@@ -80,6 +80,17 @@ const SORT_LABEL: Record<SessionSort, { pt: string; en: string }> = {
   usage: { pt: 'Maior uso', en: 'Heaviest use' },
 }
 
+/** Below this much room the two columns cannot both hold their content, so the popover is ONE column. */
+export const TWO_COLUMN_MIN_WIDTH = 520
+const TWO_COLUMN_WIDTH = 500
+
+/** The popover's width and column count for a viewport — one place, so the test and the panel agree. */
+export function groupMenuLayout(viewportWidth: number, isMobile: boolean): { width: number; columns: 1 | 2 } {
+  const room = viewportWidth - 24
+  if (isMobile || room < TWO_COLUMN_MIN_WIDTH) return { width: Math.max(0, Math.min(room, 420)), columns: 1 }
+  return { width: TWO_COLUMN_WIDTH, columns: 2 }
+}
+
 export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
   const pt = p.lang === 'pt'
   const isMobile = useIsMobile()
@@ -90,7 +101,7 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
   const trigger = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLDivElement>(null)
   // Desktop: two columns of grouped sections, like the filter popover. Phone: one column, full width.
-  const width = isMobile ? Math.min(window.innerWidth - 24, 420) : 500
+  const { width, columns } = groupMenuLayout(window.innerWidth, isMobile)
 
   useEffect(() => {
     if (!open) return
@@ -191,9 +202,10 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
             position: 'fixed', left: at.left, top: at.top, width, zIndex: 1200,
             borderRadius: 12, border: '1px solid var(--border-subtle)',
             background: 'var(--bg-elevated)', padding: 10,
-            display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10, alignItems: 'start',
+            display: 'grid', gridTemplateColumns: columns === 1 ? 'minmax(0, 1fr)' : 'repeat(2, minmax(0, 1fr))', gap: 10, alignItems: 'start',
+            boxSizing: 'border-box',
             boxShadow: 'var(--ag-shadow-menu)',
-            maxHeight: `min(560px, calc(100vh / var(--ui-zoom, 1) - ${at.top + 12}px))`, overflowY: 'auto',
+            maxHeight: `min(560px, calc(100vh / var(--ui-zoom, 1) - ${at.top + 12}px))`, overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain',
           }}>
             {/* ORDERING — what comes first, inside each group and among the groups. */}
             <section style={card} aria-label={pt ? 'Ordenação' : 'Ordering'}>
@@ -258,7 +270,7 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
               )}
             </section>
 
-            <div style={{ display: 'grid', gap: 10, minWidth: 0 }}>
+            <div style={{ display: 'grid', gap: 10, minWidth: 0, gridTemplateColumns: 'minmax(0, 1fr)' }}>
               {/* GROUPING — which dimension the sessions are sub-grouped by. */}
               <section style={card} aria-label={pt ? 'Agrupamento' : 'Grouping'}>
                 <div style={heading}>{pt ? 'Agrupamento' : 'Grouping'}</div>

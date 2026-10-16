@@ -59,11 +59,14 @@ export interface AsideGroupPrefs {
    *  grupo" stay, so a folder can still be added without unfolding first), distinct from any one
    *  folder's own fold (`collapsedUserGroups`). */
   foldedGroupsSection: boolean
+  /** Folders whose "Ended (N)" block is EXPANDED — absent means collapsed (the default). */
+  expandedEndedGroups: string[]
 }
 
 export const DEFAULT_ASIDE_GROUP_PREFS: AsideGroupPrefs = {
   groupBy: 'project', order: {}, collapsed: [], cardColor: 'wash', collapsedUserGroups: [],
   sort: DEFAULT_ORDER, hiddenUserGroups: [], foldedPinned: false, foldedGroupsSection: false,
+  expandedEndedGroups: [],
 }
 
 /** Total: anything that is not a known key and direction reads as the default. */
@@ -130,6 +133,9 @@ export function parseAsideGroupPrefs(stored: unknown): AsideGroupPrefs {
         : [],
       foldedPinned: p.foldedPinned === true,
       foldedGroupsSection: p.foldedGroupsSection === true,
+      expandedEndedGroups: Array.isArray(p.expandedEndedGroups)
+        ? p.expandedEndedGroups.filter((x): x is string => typeof x === 'string')
+        : [],
     }
   } catch { return DEFAULT_ASIDE_GROUP_PREFS }
 }

@@ -41,6 +41,7 @@ import { SessionsGroupMenu } from './SessionsGroupMenu'
 import type { SessionOrder } from '@agentistics/tui/control/session-order'
 import { displayName, toggleHidden } from '../../lib/groupNameMask'
 import { folderFold } from '../../lib/folderFold'
+import { splitFolderRows } from '../../lib/folderRows'
 import { ATTN_BAR_CLASS, ATTN_COUNT_CLASS, attentionCount, attentionIds, pruneDismissed } from './AttentionDot'
 import { rowSelected } from '../../lib/fleetSelection'
 import { filterFleet, ignoredDimensions } from '../../lib/fleetFilter'
@@ -469,6 +470,15 @@ export function SessionsAside({
     next.has(id) ? next.delete(id) : next.add(id)
     setFoldedUserGroupsState(next)
     writeAsideGroupPrefs({ collapsedUserGroups: [...next] })
+  }
+  /** Folders whose "Ended (N)" block is open — collapsed unless listed (per viewer, stored with the arrangement). */
+  const [expandedEnded, setExpandedEndedState] =
+    useState<Set<string>>(new Set(storedGroupPrefs.expandedEndedGroups))
+  const toggleEnded = (id: string) => {
+    const next = new Set(expandedEnded)
+    next.has(id) ? next.delete(id) : next.add(id)
+    setExpandedEndedState(next)
+    writeAsideGroupPrefs({ expandedEndedGroups: [...next] })
   }
   /** Dimmed folders (nothing in them matches) the person opened on this screen — see `folderFold`. */
   const [openedDimmed, setOpenedDimmed] = useState<Set<string>>(() => new Set())
@@ -1125,7 +1135,9 @@ export function SessionsAside({
                 // Indented under the header — a MEMBER, not another top-level row — the same
                 // modest offset the empty-group hint above already lines up with.
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 12, paddingRight: 4, minWidth: 0 }}>
-                  {gRows.map(s => {
+                  {(() => {
+                  const { live, ended } = splitFolderRows(gRows, r => active.has(r.state), sortOrder)
+                  const renderRow = (s: ControlSession) => {
                     const key = pinKeyOf(s)
                     return (
                       <div
@@ -1176,7 +1188,29 @@ export function SessionsAside({
                         />
                       </div>
                     )
-                  })}
+                  }
+                  const endedOpen = expandedEnded.has(group.id) || (searching && ended.length > 0)
+                  return (
+                    <>
+                      {live.map(renderRow)}
+                      {ended.length > 0 && (
+                        <button
+                          onClick={() => toggleEnded(group.id)}
+                          aria-expanded={endedOpen}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 6, minHeight: tap, padding: '3px 4px',
+                            background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                            fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', textAlign: 'left',
+                          }}
+                        >
+                          {endedOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                          {pt ? `Encerradas (${ended.length})` : `Ended (${ended.length})`}
+                        </button>
+                      )}
+                      {endedOpen && ended.map(renderRow)}
+                    </>
+                  )
+                  })()}
                 </div>
               )}
             </>
