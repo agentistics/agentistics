@@ -98,6 +98,21 @@ describe('briefing installer', () => {
     expect(await readFile(join(dir, 'SKILL.md'), 'utf8')).toBe(mine)
   })
 
+  test('uninstall keeps a SKILL.md whose frontmatter the user customized, deletes a pristine one', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'agentistics-briefing-fm-'))
+    await installBriefing({ home, harnesses: ['claude'] })
+    const custom = join(home, '.claude', 'skills', 'agentistics-session-flow', 'SKILL.md')
+    const pristine = join(home, '.claude', 'skills', 'agentistics-vault', 'SKILL.md')
+    const edited = (await readFile(custom, 'utf8')).replace(/^description: .*$/m, 'description: my own words').replace('metadata:', 'owner: me\nmetadata:')
+    await writeFile(custom, edited)
+    await uninstallBriefing({ home, harnesses: ['claude'] })
+    const kept = await readFile(custom, 'utf8')
+    expect(kept).toContain('description: my own words')
+    expect(kept).toContain('owner: me')
+    expect(kept).not.toContain(MANAGED_OPEN)
+    expect(await readFile(pristine, 'utf8').catch(() => null)).toBeNull()
+  })
+
   test('every installer target output carries the full flow (en+pt) and keeps user text', async () => {
     const home = await mkdtemp(join(tmpdir(), 'agentistics-briefing-targets-'))
     const targets = managedTargets(home)
