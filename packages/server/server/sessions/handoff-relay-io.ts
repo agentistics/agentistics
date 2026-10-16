@@ -4,7 +4,7 @@
  * Three moments: the successor's SPAWN reads the predecessor's conversation into its briefing
  * (`captureHandoffRelay` + `recordHandoffLink`); a periodic FLUSH forwards whatever the owner wrote
  * into the predecessor afterwards (`flushAllHandoffRelays`); and a KILL of a predecessor flushes
- * first and refuses when the flush could not deliver (`flushBeforeKill`). Every harness goes through
+ * first, best effort (never refuses the kill) (`flushBeforeKill`). Every harness goes through
  * its own transcript reader (`HARNESS_TRANSCRIPTS`); a harness with none is SAID in the briefing.
  */
 import type { ChatTurn } from '@agentistics/core'
@@ -13,6 +13,7 @@ import {
   forwardHasContent, forwardText, planForward, planRelay, relaySection, type RelayForward,
 } from './handoff-relay'
 import { stat } from 'node:fs/promises'
+import { cliStrings } from '../cli-i18n'
 import { patchSession, readRegistry } from './registry'
 import type { ManagedSession } from './types'
 
@@ -24,11 +25,17 @@ export const RELAY_WATCH_MS = 48 * 60 * 60 * 1000
 /** The 30 s pass and the owner-waiting gate read only the END of a transcript. */
 const RECENT_TURNS = 120
 
-export type TurnsRead = { turns: ChatTurn[] } | { unavailable: string }
+/** `truncated`: a full read whose window began after the cursor, so older unread turns may exist. */
+export type TurnsRead = { turns: ChatTurn[]; truncated?: boolean } | { unavailable: string }
+
+/** A full read (kill path) looks this far back — far beyond the 120-turn tail. */
+const FULL_READ_TURNS = 5000
 
 export interface ReadOpts {
   /** Read only the tail (`readRecent`) — the 30 s loop's budget. */
   recent?: boolean
+  /** Read from the cursor, not the tail: a wide window, and say when it still did not reach it. */
+  fromCursor?: string
   /** Skip the read entirely when the transcript was last written before this instant (ms). */
   unchangedSince?: number
 }
@@ -46,6 +53,13 @@ export async function readSessionTurns(
     if (opts.unchangedSince !== undefined) {
       const st = await stat(path).catch(() => null)
       if (st && st.mtimeMs <= opts.unchangedSince) return { turns: [] }
+    }
+    if (opts.fromCursor !== undefined) {
+      const r = await reader.read(path, FULL_READ_TURNS)
+      const cur = Date.parse(opts.fromCursor)
+      const first = r.turns[0]?.at ? Date.parse(r.turns[0].at) : NaN
+      const truncated = r.older === true && Number.isFinite(cur) && !(Number.isFinite(first) && first <= cur)
+      return { turns: r.turns, ...(truncated ? { truncated: true } : {}) }
     }
     if (opts.recent) return { turns: await reader.readRecent(path, RECENT_TURNS) }
     return { turns: (await reader.read(path, RELAY_READ_TURNS)).turns }
@@ -109,6 +123,8 @@ export interface FlushResult {
   /** `ok: false` only: why it could not be delivered, and what was owed. */
   reason?: 'missing' | 'dead' | 'send-failed'
   owed?: RelayForward
+  /** The read did not reach back to the cursor: older owner messages may not have been seen. */
+  truncated?: boolean
 }
 
 /** A successor row that can still take a prompt (ended / exited / lost rows are not targets). */
@@ -136,14 +152,15 @@ export async function flushHandoffRelay(
   const got = await read(parent)
   if ('unavailable' in got) return { ok: true, delivered: false, unverified: got.unavailable }
   const fwd = planForward(got.turns, parent.handoffRelayedAt, parent.handoffRelayAwaiting === true)
-  if (!fwd) return { ok: true, delivered: false }
+  const truncated = 'truncated' in got && got.truncated === true
+  if (!fwd) return { ok: true, delivered: false, ...(truncated ? { truncated } : {}) }
   const cursorPatch = {
     ...(fwd.cursor ? { handoffRelayedAt: fwd.cursor } : {}),
     handoffRelayAwaiting: fwd.awaiting ? true : null,
   }
   if (!forwardHasContent(fwd)) {
     await patch(parent.id, cursorPatch).catch(() => false)
-    return { ok: true, delivered: false }
+    return { ok: true, delivered: false, ...(truncated ? { truncated } : {}) }
   }
   const successor = successorRow(registry, parent.handoffTo)
   if (!successor) return { ok: false, delivered: false, reason: 'missing', owed: fwd }
@@ -151,7 +168,7 @@ export async function flushHandoffRelay(
   const sent = await send(successor.id, forwardText(parent.id, fwd)).catch(() => false)
   if (!sent) return { ok: false, delivered: false, reason: 'send-failed', owed: fwd }
   await patch(parent.id, cursorPatch).catch(() => false)
-  return { ok: true, delivered: true }
+  return { ok: true, delivered: true, ...(truncated ? { truncated } : {}) }
 }
 
 /** Inside the 48 h watch window (from the last relayed turn). */
@@ -193,34 +210,69 @@ export interface KillFlush {
   warning: string | null
 }
 
+/** The forward send in the kill path is bounded: a wedged pane must not hold the kill. */
+export const KILL_SEND_TIMEOUT_MS = 12_000
+
+function withTimeout(send: RelaySend, ms: number): RelaySend {
+  return (to, text) => new Promise<boolean>(resolve => {
+    const timer = setTimeout(() => resolve(false), ms)
+    send(to, text).then(ok => { clearTimeout(timer); resolve(ok) }, () => { clearTimeout(timer); resolve(false) })
+  })
+}
+
 /**
  * Before a kill: forward what is still owed to the successor — BEST EFFORT. A kill is never refused
- * because of the relay. When the successor is missing, dead or the send fails, what was owed is
- * recorded as a comment on the successor's (else the predecessor's) task, and the kill proceeds.
+ * because of the relay. The transcript is read from the cursor (not only the tail); the send is
+ * bounded by a timeout. When the successor is missing, dead, slow, or the read could not reach the
+ * cursor, what was owed is recorded as a comment on the successor's (else the predecessor's) task
+ * and — when no task takes it — in the owner's notifications (the bell, whether or not away mode
+ * is on). The kill proceeds in every case.
  */
 export async function flushBeforeKill(
   id: string, send: RelaySend, lang: 'en' | 'pt' = 'pt',
-  io: { now?: number; registry?: readonly ManagedSession[]; read?: (m: ManagedSession) => Promise<TurnsRead>; patch?: typeof patchSession; comment?: (taskRef: string, body: string, subtaskId?: string) => Promise<boolean> } = {},
+  io: {
+    now?: number; registry?: readonly ManagedSession[]; read?: (m: ManagedSession) => Promise<TurnsRead>
+    patch?: typeof patchSession; comment?: (taskRef: string, body: string, subtaskId?: string) => Promise<boolean>
+    notify?: (title: string, message: string) => Promise<boolean> | boolean; sendTimeoutMs?: number
+  } = {},
 ): Promise<KillFlush> {
   try {
     const registry = io.registry ?? await readRegistry().catch(() => [] as ManagedSession[])
     const row = registry.find(m => m.id === id)
     if (!row?.handoffTo || !relayWatched(row, io.now ?? Date.now())) return { warning: null }
-    const r = await flushOnce(row, registry, send, { ...(io.read ? { read: io.read } : {}), ...(io.patch ? { patch: io.patch } : {}) })
-    if (r.ok || !r.owed) return { warning: null }
+    const read = io.read ?? ((m: ManagedSession) => readSessionTurns(m, { fromCursor: m.handoffRelayedAt ?? '' }))
+    const r = await flushOnce(row, registry, withTimeout(send, io.sendTimeoutMs ?? KILL_SEND_TIMEOUT_MS), {
+      read, ...(io.patch ? { patch: io.patch } : {}),
+    })
+    const reason = r.ok ? (r.truncated ? 'truncated' as const : null) : (r.reason ?? null)
+    if (!reason) return { warning: null }
+    const s = cliStrings(lang)
     const successor = successorRow(registry, row.handoffTo)
     const taskId = successor?.taskId ?? row.taskId
     const subtaskId = successor?.taskId ? successor.subtaskId : row.subtaskId
-    const body = `${forwardText(row.id, r.owed)}\n\n(O encaminhamento à sessão sucessora ${row.handoffTo} falhou — ${r.reason} — antes de encerrar ${row.id}.)`
+    const owedText = r.owed
+      ? forwardText(row.id, r.owed)
+      : `${row.id}: ${lang === 'pt' ? 'pode haver mensagens antigas do dono que não foram conferidas — veja a conversa dessa sessão.' : 'there may be older owner messages that were not checked — see that session\'s conversation.'}`
+    const body = `${owedText}\n\n${s.relayOwedNote(row.id, row.handoffTo, reason)}`
     const comment = io.comment ?? defaultComment
-    const recorded = taskId ? await comment(taskId, body, subtaskId).catch(() => false) : false
-    const warning = lang === 'pt'
-      ? `Encerrei ${id}, mas a última resposta ao dono não chegou à sucessora ${row.handoffTo} (${r.reason}).${recorded ? ' Ficou registrada como comentário na tarefa.' : ' Não há tarefa vinculada para registrar.'}`
-      : `Killed ${id}, but the owner's last answer did not reach the successor ${row.handoffTo} (${r.reason}).${recorded ? ' It was recorded as a task comment.' : ' No task is linked to record it.'}`
-    return { warning }
+    const notify = io.notify ?? defaultNotify
+    let dest: 'task' | 'notice' | 'none' = 'none'
+    if (taskId && await attempt(() => comment(taskId, body, subtaskId))) dest = 'task'
+    else if (await attempt(() => notify(lang === 'pt' ? 'Mensagens do dono não entregues' : 'Owner messages not delivered', body))) dest = 'notice'
+    return { warning: s.relayKillWarning(id, row.handoffTo, reason, dest) }
   } catch {
     return { warning: null }
   }
+}
+
+async function attempt(fn: () => Promise<boolean> | boolean): Promise<boolean> {
+  try { return (await fn()) === true } catch { return false }
+}
+
+async function defaultNotify(title: string, message: string): Promise<boolean> {
+  const { broadcastNotification } = await import('../sse')
+  broadcastNotification({ type: 'warning', title, message })
+  return true
 }
 
 async function defaultComment(taskRef: string, body: string, subtaskId?: string): Promise<boolean> {

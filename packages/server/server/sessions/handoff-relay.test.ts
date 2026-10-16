@@ -162,7 +162,7 @@ describe('HANDOFF.RELAY — kill is best-effort (fix1 H1/M5)', () => {
   it('a missing successor row never blocks', async () => {
     comments.length = 0
     const r = await flushBeforeKill('lead-1', async () => true, 'en', { registry: [parent], ...io(), comment, now: NOW })
-    expect(r.warning).toContain('Killed lead-1')
+    expect(r.warning).toContain('Ended lead-1')
     expect(comments[0]![0]).toBe('t-1')
   })
 
@@ -170,7 +170,7 @@ describe('HANDOFF.RELAY — kill is best-effort (fix1 H1/M5)', () => {
     comments.length = 0
     const reg = [parent, row({ id: 'next', conversationId: 'c2' })]
     const r = await flushBeforeKill('lead-1', async () => false, 'pt', { registry: reg, ...io(), comment, now: NOW })
-    expect(r.warning).toContain('send-failed')
+    expect(r.warning).toContain('não respondeu a tempo')
     expect(comments).toHaveLength(1)
   })
 
@@ -192,6 +192,45 @@ describe('HANDOFF.RELAY — kill is best-effort (fix1 H1/M5)', () => {
     const reg = [parent, row({ id: 'next', conversationId: 'c2' })]
     expect((await flushBeforeKill('lead-1', send, 'pt', { registry: reg, ...io(), comment, now: old })).warning).toBeNull()
     expect(sent).toBe(0)
+  })
+
+  it('fix2 M-A: a send that hangs is a send-failed after the timeout and the kill proceeds', async () => {
+    comments.length = 0
+    const reg = [parent, row({ id: 'next', conversationId: 'c2' })]
+    const t0 = Date.now()
+    const r = await flushBeforeKill('lead-1', () => new Promise<boolean>(() => {}), 'en', { registry: reg, ...io(), comment, now: NOW, sendTimeoutMs: 30 })
+    expect(Date.now() - t0).toBeLessThan(2000)
+    expect(r.warning).toContain('did not answer in time')
+    expect(r.warning).not.toContain('send-failed')
+    expect(comments).toHaveLength(1)
+  })
+
+  it('fix2 M-B: with no task the owed text goes to the notice inbox, with or without away mode', async () => {
+    const reg = [row({ handoffTo: 'next', handoffRelayedAt: cursor }), row({ id: 'next', conversationId: 'c2', endedAt: '2026-10-16T15:00:00.000Z' })]
+    const notices: Array<[string, string]> = []
+    const r = await flushBeforeKill('lead-1', async () => true, 'pt', { registry: reg, ...io(), comment, notify: (t, m) => { notices.push([t, m]); return true }, now: NOW })
+    expect(notices).toHaveLength(1)
+    expect(notices[0]![1]).toContain('e o motor?')
+    expect(r.warning).toContain('sino')
+    expect(r.warning).not.toContain('dead')
+  })
+
+  it('fix2 M-B: nothing could take the text — the warning says so', async () => {
+    const reg = [row({ handoffTo: 'next', handoffRelayedAt: cursor })]
+    const r = await flushBeforeKill('lead-1', async () => true, 'en', { registry: reg, ...io(), comment, notify: () => { throw new Error('x') }, now: NOW })
+    expect(r.warning).toContain('could not be saved anywhere')
+  })
+
+  it('fix2 M-C: a window that did not reach the cursor is reported as owed, not skipped', async () => {
+    const reg = [parent, row({ id: 'next', conversationId: 'c2' })]
+    const notices: string[] = []
+    const r = await flushBeforeKill('lead-1', async () => true, 'en', {
+      registry: reg, comment: async () => false, notify: (_t, m) => { notices.push(m); return true }, now: NOW,
+      read: async () => ({ turns: later, truncated: true }),
+      patch: async () => true,
+    })
+    expect(r.warning).toContain('too long to check in full')
+    expect(notices[0]).toContain('older owner messages')
   })
 
   it('flushAllHandoffRelays forwards inside the window, skips outside, counts deliveries', async () => {
