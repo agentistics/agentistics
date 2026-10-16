@@ -57,6 +57,7 @@ import { newAttemptId, newTaskId, type Attempt, type Task } from './task-model'
 import { liveConversationHolders } from './live-claims'
 import { execFailed } from './spawn-outcome'
 import { spawnDeath } from './spawn-check'
+import { reportFreshSpawn } from './spawn-report'
 import { parseHarnessAgents } from './harness-agents'
 import { planTakeover, type TakeoverRefusal } from './takeover'
 import { applyRoleTitle, deliverStoredRole, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor } from './session-roles'
@@ -333,7 +334,7 @@ async function nativeCliVerb(kind: 'kill' | 'rename' | 'archive' | 'unarchive' |
 }
 
 async function spawnFailure(backend: SessionBackend, id: string, bin?: string, freshHarness?: HarnessId): Promise<string | undefined> {
-  const outcome = await spawnDeath(backend, id, undefined, freshHarness)
+  const outcome = await spawnDeath(backend, id, undefined, freshHarness, reportFreshSpawn)
   if (!outcome) return undefined
   // A binary that could not be EXECUTED says nothing on the way out (see `execFailed`), and the
   // only thing that fixes it is the PATH — so name it rather than print a bare status.

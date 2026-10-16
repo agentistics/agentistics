@@ -43,3 +43,9 @@ test('fresh spawn polling records failure and clears it on success; resume check
   await spawnDeath(backend, 'resume-failure', 1)
   expect(harnessSpawnability('codex', Date.now(), installed).spawnable).toBe(true)
 })
+
+test('a wholly unobservable fresh check preserves the previous failure', async () => {
+  noteFreshSpawn('codex', failure, 0)
+  await spawnDeath({ capture: async () => { throw new Error('capture unavailable') } }, 'unobservable', 1, 'codex')
+  expect(harnessSpawnability('codex', Date.now(), installed).spawnable).toBe(false)
+})

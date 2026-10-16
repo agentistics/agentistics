@@ -3,6 +3,7 @@
  *
  * The closed list of ops, and the rule each one is held to: NO op returns a human-scope plaintext.
  *
+ *   fresh-spawn                 classified CLI startup result, recorded in server memory
  *   status / lock / unlock      the vault's state; drop the key; give a passphrase vault its passphrase
  *   seal                        plaintext in (the body), the SEALED bytes out — for a CLI that has a
  *                               value the user just typed and must store it
@@ -27,6 +28,8 @@
  * Every op validates its own inputs; an unknown op is `bad-request`. `ops.test.ts` runs each op with
  * a marker secret in the vault and asserts the marker appears in no reply and no reply body.
  */
+import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
+import { noteFreshSpawn } from '../sessions/harness-spawnable'
 import { grantOf, grantedRef, scrubFor, scrubWithinLimit, useRef } from './grants'
 import { buildVaultBundle, stageBundleRestore } from './bundle-io'
 import { existsSync } from 'node:fs'
@@ -553,6 +556,14 @@ export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch
   // called by harnesses, hooks and services — an agent loop must never keep the vault open.
   if (typeof h.op === 'string' && HUMAN_OPS.has(h.op)) noteVaultActivity()
   switch (h.op) {
+    case 'fresh-spawn': {
+      if (!HARNESS_ORDER.includes(h.harness as HarnessId)
+        || typeof h.startedAt !== 'number' || !Number.isFinite(h.startedAt) || h.startedAt < 0
+        || typeof h.died !== 'boolean'
+        || (h.status !== undefined && (typeof h.status !== 'number' || !Number.isSafeInteger(h.status) || h.status < 0))) return bad()
+      noteFreshSpawn(h.harness as HarnessId, { died: h.died, status: h.status as number | undefined, message: '' }, h.startedAt)
+      return { reply: { ok: true } }
+    }
     case 'status': return opStatus()
     case 'unlock-code': return opUnlockCode(h)
     case 'recover': return opRecover(h)
@@ -596,7 +607,7 @@ export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch
  * scanned) and `recovery-begin` (the 24 words, to be written down).
  */
 export const VAULT_OPS = [
-  'status', 'lock', 'unlock', 'unlock-code', 'recover', 'authenticator-begin', 'authenticator-confirm',
+  'fresh-spawn', 'status', 'lock', 'unlock', 'unlock-code', 'recover', 'authenticator-begin', 'authenticator-confirm',
   'recovery-begin', 'recovery-confirm', 'setup-code', 'presence-enroll', 'set-auto-lock', 'activity', 'seal', 'prefs-tokens', 'github-config', 'github-fetch', 'central-mongo-kind',
   'central-compose', 'central-native-tool', 'central-env-write', 'vault-init', 'vault-rekey', 'vault-add-passphrase', 'vault-reset',
   'personal-refs', 'personal-ref', 'personal-scrub', 'vault-bundle', 'vault-stage-bundle',

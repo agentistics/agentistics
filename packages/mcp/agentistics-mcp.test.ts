@@ -84,3 +84,10 @@ test("plan limits MCP tool excludes unavailable harnesses and preserves their us
   expect(out.freeSlotsByHarness.codex).toBe(0);
   expect(out.recommendation).toMatchObject({ harness: null, alternatives: [], cadence: { parallel: 0 } });
 });
+
+test("plan limits MCP tool forwards availability without budget samples", () => {
+  const harnesses = { codex: { spawnable: false, unavailableReason: "codex failed to start: update codex" } };
+  const out = planLimitsTool(undefined, { budgets: [], harnesses });
+  expect(out.budgets).toEqual([]);
+  expect(out.harnesses).toEqual(harnesses);
+});
