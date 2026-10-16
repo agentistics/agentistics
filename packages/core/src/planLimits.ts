@@ -515,7 +515,7 @@ const roomOf = (b: AccountBudget): number => Math.max(b.fiveHourPct, b.weekPct)
 export function pickAccount<T extends AccountBudget>(candidates: readonly T[]): T | undefined {
   return candidates
     .map((b, i) => ({ b, i }))
-    .sort((x, y) => x.b.weekResetsAt - y.b.weekResetsAt
+    .sort((x, y) => (x.b.daysToWeekReset > 0 ? x.b.weekResetsAt : Infinity) - (y.b.daysToWeekReset > 0 ? y.b.weekResetsAt : Infinity)
       || roomOf(x.b) - roomOf(y.b)
       || (y.b.updatedAt ?? 0) - (x.b.updatedAt ?? 0)
       || y.i - x.i)[0]?.b

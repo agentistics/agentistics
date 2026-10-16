@@ -414,3 +414,14 @@ test('backup name collisions are retried, then exhaustion throws and the origina
   await bindOnce(retry)
   expect(calls).toBe(2)
 })
+
+
+test('L1: a late older segment write never moves the persisted boundary backwards', async () => {
+  const file = join(dir, 'accounts.json')
+  const first = createHarnessAccounts({ file })
+  const second = createHarnessAccounts({ file })
+  const { account } = await first.bind('/first', { ...identity, harness: 'codex' })
+  await first.startSegment(account.id, 2000)
+  await second.startSegment(account.id, 1000)
+  expect((await second.readAccounts()).segments[account.id]).toBe(2000)
+})

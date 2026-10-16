@@ -5,16 +5,7 @@ import { HARNESS_CAPABILITIES } from '@agentistics/core'
  *  Surfaced as a "what is this?" doc link next to the Dynamic Workflows headings. */
 export const DYNAMIC_WORKFLOWS_DOC = 'https://code.claude.com/docs/en/workflows'
 
-export const HARNESS_LABELS: Record<SurfaceHarnessId, string> = {
-  claude: 'Claude Code',
-  codex: 'Codex CLI',
-  gemini: 'Gemini CLI',
-  copilot: 'Copilot CLI',
-  antigravity: 'Antigravity',
-  kimi: 'Kimi Code',
-  opencode: 'opencode',
-  agentistics: 'Agentistics',
-}
+export { HARNESS_LABELS } from '@agentistics/core'
 
 export const HARNESS_COLORS: Record<SurfaceHarnessId, string> = {
   claude: '#D97706',
