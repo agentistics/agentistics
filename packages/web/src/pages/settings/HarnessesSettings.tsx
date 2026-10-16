@@ -10,6 +10,19 @@ import { sessionPath } from '../../lib/sessionRoute'
 import { harnessSetupNote } from '../../lib/harnessNotes'
 import { CenteredLoader } from '../../components/CenteredLoader'
 
+/** The small tinted pill (11px/700, radius 20) the status badges are drawn with. */
+export function Pill({ tone, children }: { tone: 'ok' | 'warn' | 'error' | 'neutral'; children: React.ReactNode }) {
+  const color = { ok: 'var(--accent-green)', warn: 'var(--anthropic-orange)', error: 'var(--accent-red)', neutral: 'var(--text-secondary)' }[tone]
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color,
+      background: `color-mix(in srgb, ${color} 12%, transparent)`,
+      border: `1px solid color-mix(in srgb, ${color} 30%, transparent)`,
+      padding: '2px 8px', borderRadius: 20, whiteSpace: 'nowrap',
+    }}>{children}</span>
+  )
+}
+
 export function HarnessStatusBadge({ h, pt = false }: { h: HarnessChatStatus; pt?: boolean }) {
   if (h.updateAvailable) {
     return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: 'var(--anthropic-orange)', background: 'color-mix(in srgb, var(--anthropic-orange) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--anthropic-orange) 30%, transparent)', padding: '2px 8px', borderRadius: 20 }}>{pt ? 'Atualização disponível' : 'Update available'}</span>
