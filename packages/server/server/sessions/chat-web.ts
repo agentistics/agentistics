@@ -31,7 +31,7 @@ import type { StartHost } from '../cli-start'
 import { applyPendingRewind, forgetRewind, pendingRewindFor } from './rewind-pending'
 import type { CliLang } from '../cli-lang'
 import { controlStrings } from '@agentistics/tui/control/i18n'
-import type { ChatTurn } from '@agentistics/core'
+import { historicalWireRow, type ChatTurn } from '@agentistics/core'
 import type { AttachmentMessage, AttachmentSend, HarnessId } from '@agentistics/core'
 import { ATTACHMENT_DIR, readAttachmentLog } from './attachment-web'
 import { transcriptReaderFor } from './harness-transcript'
@@ -212,6 +212,8 @@ async function readSessionChatCore(
   }
 
   onRow(row)
+  // The row is over (not merely idle): a background task still drawn as running can no longer be.
+  const sessionEnded = historicalWireRow(row)
   // EXT.OPEN: an EXTERNAL row is a RUNNING process (agentop only cannot see its screen), so its
   // conversation is live and more is expected — it is read exactly like a session agentop hosts.
   const live = row.state === 'working' || row.state === 'waiting' || row.state === 'waiting-approval'
@@ -367,7 +369,7 @@ async function readSessionChatCore(
   // stale memo in `transcript-path-memo.ts`; this is the symptom guard beside it, so the next cause
   // says something instead of drawing a blank pane.
   onPath(path)
-  const read = await readChatMemo(path, maxTurns, row.harness, () => reader.read(path, maxTurns)).catch(() => null)
+  const read = await readChatMemo(path, maxTurns, row.harness, () => reader.read(path, maxTurns, { sessionEnded }), sessionEnded ? 'ended' : '').catch(() => null)
   if (read === null) {
     const availability = transcriptAvailability({
       harness: row.harness, resolved: true, readFailed: true, live, nowMs: Date.now(),

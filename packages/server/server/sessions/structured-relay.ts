@@ -85,6 +85,21 @@ export function runRelay(dir: string): void {
   let ended = false
   let killTimer: ReturnType<typeof setTimeout> | null = null
   let termAt = 0
+  let stdoutClosed = false
+  let childExited = false
+  const finishOutput = (): void => {
+    if (!stdoutClosed || !childExited) return
+    if (partial !== '') { record(partial); partial = '' }
+    ended = true
+    writeFileSync(join(dir, RELAY_FILES.exit), JSON.stringify({ code: child.exitCode, at: Date.now() }), { mode: 0o600 })
+    send(client, { x: child.exitCode })
+    client?.end()
+    server.close()
+    try { unlinkSync(sockPath) } catch { /* already gone */ }
+    if (!termAt) setTimeout(() => process.exit(0), 200).unref?.()
+  }
+  child.stdout!.on('close', () => { stdoutClosed = true; finishOutput() })
+
   const killChild = (signal: 'SIGTERM' | 'SIGKILL'): void => {
     const pid = child.pid
     if (pid === undefined) return
@@ -147,30 +162,25 @@ export function runRelay(dir: string): void {
   try { unlinkSync(sockPath) } catch { /* none left over */ }
   server.listen(sockPath)
 
-  child.on('exit', code => {
-    if (partial !== '') { record(partial); partial = '' }
-    ended = true
+  child.on('exit', () => {
+    childExited = true
+    finishOutput()
     if (killTimer) clearTimeout(killTimer)
-    // The direct child may have obeyed TERM while a descendant in its group ignored it: the group is
-    // still killed once the grace is over, and the relay stays until then.
     const groupGrace = termAt ? Math.max(0, termAt + KILL_GRACE_MS - Date.now()) : 0
-    writeFileSync(join(dir, RELAY_FILES.exit), JSON.stringify({ code, at: Date.now() }), { mode: 0o600 })
-    send(client, { x: code })
-    client?.end()
-    server.close()
-    try { unlinkSync(sockPath) } catch { /* already gone */ }
+    // Drain stdout before leaving. A descendant that ignored TERM still gets SIGKILL after the
+    // grace, even if it inherited stdout and keeps the pipe open after the direct child exits.
     if (termAt) {
-      // The grace exists for descendants that ignore TERM; an EMPTY group has none, so the relay
-      // leaves at once. Waiting the full grace regardless made every kill and "open in terminal"
-      // take 3 s, and a stall under load past the caller's deadline read as "still running".
-      const deadline = Date.now() + groupGrace
-      const finish = (): void => {
-        if (!groupAlive()) { process.exit(0); return }
-        if (Date.now() >= deadline) { killChild('SIGKILL'); process.exit(0); return }
-        setTimeout(finish, 50)
+      const end = Date.now() + groupGrace + 50
+      const tick = (): void => {
+        if (!groupAlive() && stdoutClosed) { process.exit(0); return }
+        if (Date.now() >= end) {
+          killChild('SIGKILL')
+          if (stdoutClosed) { process.exit(0); return }
+        }
+        setTimeout(tick, 50)
       }
-      finish()
-    } else setTimeout(() => process.exit(0), 200).unref?.()
+      tick()
+    }
   })
   child.on('error', () => {
     if (ended) return

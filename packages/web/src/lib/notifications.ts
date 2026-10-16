@@ -25,6 +25,26 @@ type Localized = { title: string; message?: string }
 /** Localized copy for server- and client-emitted notification codes. Resolved at
  *  render time by resolveNotification so switching the language re-translates. */
 export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }> = {
+  'handoff_pending': {
+    pt: { title: 'Transferência de liderança pendente', message: 'Já existe uma transferência pendente para outra sessão sucessora.' },
+    en: { title: 'Leader hand-off pending', message: 'A hand-off to another successor session is already pending.' },
+  },
+  'working': {
+    pt: { title: 'Sessão em andamento', message: 'A sessão ainda está trabalhando.' },
+    en: { title: 'Session working', message: 'The session is still working.' },
+  },
+  'retire.done': {
+    pt: { title: 'Sessão encerrada', message: 'A sessão {label} ({id}) foi encerrada.' },
+    en: { title: 'Session retired', message: 'Session {label} ({id}) was retired.' },
+  },
+  'retire.cancelled': {
+    pt: { title: 'Encerramento cancelado', message: 'A sucessora {successorId} parou. A sessão {label} ({id}) foi mantida.' },
+    en: { title: 'Retire cancelled', message: 'Successor {successorId} stopped. Session {label} ({id}) was kept.' },
+  },
+  'retire.expired': {
+    pt: { title: 'Prazo de encerramento expirado', message: 'A sessão {label} ({id}) foi mantida: {reason}. Nenhum processo foi encerrado.' },
+    en: { title: 'Retire expired', message: 'Session {label} ({id}) was kept: {reason}. Nothing was killed.' },
+  },
   'clean.suggestion': {
     pt: { title: 'Há espaço para liberar', message: '{count} item(ns) concluído(s) ou parado(s) podem ser removido(s). Veja o que dá para limpar.' },
     en: { title: 'You can free some space', message: '{count} completed or idle item(s) can be removed. See what can be cleaned.' },

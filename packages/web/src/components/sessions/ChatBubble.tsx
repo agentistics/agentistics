@@ -30,6 +30,7 @@ import { ArrowUpRight, Info, Check, ChevronDown, Clock, Copy, CornerUpLeft, Elli
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import { useFleet } from '../../lib/fleet'
 import { parseSystemEvent, systemEventLine, type SystemEvent } from '../../lib/systemEvent'
+import type { ChatTaskEnd } from '@agentistics/core'
 import { chatNote, type ChatNoteTab } from '../../lib/chatNote'
 import { openArtifacts } from '../../lib/artifactsStore'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -65,7 +66,7 @@ export interface ChatTurn {
    * thing the reader is waiting for, and its END is already reported. Rendered as a status line and
    * never as a message — nobody said it.
    */
-  task?: { label: string; running: boolean }
+  task?: { label: string; running: boolean; ended?: ChatTaskEnd }
   /**
    * This sat under the `user` role and no person wrote it — a background task reporting back, an
    * injected reminder, a `!` command's stdout. The value NAMES the kind; it is never the body.
@@ -567,7 +568,13 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
           <span>
             {running
               ? (pt ? `em segundo plano: ${turn.task.label}` : `in the background: ${turn.task.label}`)
-              : (pt ? `terminou: ${turn.task.label}` : `finished: ${turn.task.label}`)}
+              : turn.task.ended === 'stopped'
+                ? (pt ? `interrompida: ${turn.task.label}` : `stopped: ${turn.task.label}`)
+                : turn.task.ended === 'never-started'
+                  ? (pt ? `não iniciou: ${turn.task.label}` : `never started: ${turn.task.label}`)
+                  : turn.task.ended === 'session-ended'
+                    ? (pt ? `sessão encerrada: ${turn.task.label}` : `session ended: ${turn.task.label}`)
+                    : (pt ? `terminou: ${turn.task.label}` : `finished: ${turn.task.label}`)}
           </span>
         </span>
       </div>

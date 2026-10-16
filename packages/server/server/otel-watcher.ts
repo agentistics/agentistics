@@ -648,9 +648,13 @@ async function main() {
   const plan = serverDaemonPlan({ central: TEAM_CENTRAL, container: IN_CONTAINER })
   const where = TEAM_CENTRAL ? 'a central' : 'a container'
   let events: { stop(): Promise<void> } | null = null
+  let retirer: { stop(): void } | null = null
   if (plan.eventProducer) {
     const { startEventProducer } = await import('./events/daemon')
     events = await startEventProducer()
+    // Retire requests (ATOMIC SPAWN §2.2) are carried out on the same hub, in the server only.
+    const { startRetireRunner } = await import('./sessions/retire-runner')
+    retirer = await startRetireRunner()
   } else {
     console.log(`[events] not started — ${where} has no host sessions to watch`)
   }
@@ -670,6 +674,7 @@ async function main() {
   // Graceful shutdown
   const shutdown = async () => {
     console.log('\n[watcher] Shutting down...')
+    retirer?.stop()
     await events?.stop()
     backups?.stop()
     if (otel) await otel.shutdown()

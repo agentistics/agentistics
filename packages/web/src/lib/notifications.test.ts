@@ -413,3 +413,23 @@ test('local digest failure reaches the toast store with localized copy without f
   s.pushLocalNotification({ type: 'error', code: 'away.digest_stale' })
   expect(s.resolveNotification(s.readNotifications()[0]!, 'en').message).toBe('This offer is no longer available.')
 })
+
+describe('retirement notification localization', () => {
+  test('all retire codes resolve in both languages with metadata', async () => {
+    const { resolveNotification } = await import('./notifications')
+    for (const code of ['retire.done', 'retire.cancelled', 'retire.expired']) {
+      const n: AppNotification = { id: 'retire1', type: 'info', code, ts: 0, read: false,
+        meta: { id: 'p1', label: 'Leader', successorId: 's1', reason: 'still working' } }
+      const en = resolveNotification(n, 'en')
+      const pt = resolveNotification(n, 'pt')
+      expect(en.title).not.toBe(pt.title)
+      for (const localized of [en, pt]) {
+        expect(localized.message).toContain('p1')
+        expect(localized.message).toContain('Leader')
+        expect(localized.message).not.toMatch(/\{\w+\}/)
+        if (code === 'retire.cancelled') expect(localized.message).toContain('s1')
+        if (code === 'retire.expired') expect(localized.message).toContain('still working')
+      }
+    }
+  })
+})
