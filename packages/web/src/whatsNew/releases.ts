@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.135.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Os limites do plano do Claude voltaram a atualizar em sessões no terminal (antes ficavam parados em 0%); uma leitura antiga agora aparece como desatualizada.',
+        en: 'Claude plan limits update again for terminal sessions (they were stuck at 0%); an old reading now shows as out of date.',
+      },
+    ],
+  },
   '2.133.0': {
     features: [
       {
