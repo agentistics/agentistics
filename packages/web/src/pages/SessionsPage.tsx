@@ -2983,7 +2983,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               all: 'unset', boxSizing: 'border-box', display: 'block', width: '100%', cursor: 'pointer',
             }}
           >
-            <PlanUsageSummary limits={planLimits.limits} registered={planLimits.registered} now={planLimits.now} lang={tPt} />
+            <PlanUsageSummary limits={planLimits.limits} registered={planLimits.registered} accountLabels={planLimits.accountLabels} now={planLimits.now} lang={tPt} />
           </button>
         ), { open: drawerLimitsOpen, toggle: () => setDrawerLimitsOpen(v => !v) })}
 
