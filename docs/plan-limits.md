@@ -20,5 +20,26 @@ native auth file, and Copilot uses host plus login. Other harnesses use the defa
 Copilot's config reader accepts full-line `//` comments without changing slashes inside JSON strings.
 The local auth/config documents are parsed in-process and discarded at the reader boundary; only
 whitelisted identity strings are returned or persisted, and the documents are never logged.
-Availability persists for each detected identity. Plan meter account keys remain `default`.
-This does not add multiple simultaneous logins or switch accounts.
+Availability persists for each detected identity.
+
+## One row per account (C2)
+
+Meters are keyed by account id (`acc_…`); a meter recorded before accounts existed is `default`
+until the confirmed login of the default root migrates it (at load, and again when a binding is
+confirmed later). `GET /api/plan-limits` answers:
+
+- `budgets[]` — one row per agent-visible account, with `account` and `accountLabel` (the nickname,
+  or `"<Harness> #n"` by first-seen order; an address is never a label, so a nickname containing
+  `@` falls back to the numbered form).
+- `limits[]` — owner surfaces: every account, with the owner-only login `label`.
+- `registered[]` — a Billing plan for an account that has reported no window yet, per account.
+- `freeSlotsByHarness` — the sum over the harness's visible accounts that are not on hold;
+  `freeSlotsByAccount` carries the parts.
+- `hiddenFromAgents` — the rows of accounts switched off (owner API only).
+
+The MCP tool forwards `budgets`, `freeSlotsByAccount` and the recommendation `account` /
+`accountLabel`; never `limits`, owner labels or `hiddenFromAgents`. The check-in report has one
+line per visible account.
+
+When a harness has several accounts with room, the router takes the one whose week resets first
+(its quota is lost soonest), then the one with the most room (`pickAccount`).
