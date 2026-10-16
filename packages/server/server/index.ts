@@ -269,6 +269,8 @@ if (!TEAM_CENTRAL) {
         code: n.threshold >= 100 ? 'limits.exhausted' : 'limits.threshold',
         meta: { harness: n.harness, window: n.kind, threshold: n.threshold, pct: Math.round(n.usedPct), resetsAt: n.resetsAt, ...(alt ? { alt } : {}) },
       }),
+      // A sharp drop the probe could not explain: that account's burn and notices start over.
+      segment: s => sse.broadcastNotification({ type: 'info', code: 'plan.segment', meta: { harness: s.harness, account: s.account } }),
     })
     // A record another agentop process wrote (it holds no sink) reaches the browser through the file.
     pl.watchPlanLimitsFile()
@@ -790,7 +792,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const live = await readLocalLiveSnapshot(data.sessions)
         const latest = await planLimitsPayload(prefs.billing, now)
         const burnByHarness = Object.fromEntries(latest.budgets.map(b => [b.harness, b.burnPctPerHour])) as Partial<Record<import('@agentistics/core').HarnessId, number>>
-        liveSessions = sampleLivePlanSessions(data.sessions, live.liveSessionIds, now, burnByHarness)
+        const { processSessionHub } = await import('./sessions/session-hub')
+        // Peek only: plan reads must not start fleet polls or extend the hub's demand lease.
+        const working = new Set((processSessionHub()?.last()?.sessions ?? [])
+          .filter(s => s.activity === 'working')
+          .flatMap(s => [s.id, ...(s.conversationId ? [s.conversationId] : []), ...(s.conversationStoreId ? [s.conversationStoreId] : [])]))
+        liveSessions = sampleLivePlanSessions(data.sessions, live.liveSessionIds, now, burnByHarness, working)
       }
       const body = TEAM_CENTRAL ? { limits: [], registered: [], budgets: [], freeSlots: 0, freeSlotsByHarness: {}, liveSessions: [], now } : await planLimitsPayload(prefs.billing, now, liveSessions)
       return new Response(JSON.stringify(body), { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
