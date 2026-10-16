@@ -17,9 +17,10 @@ describe('LEADER.HANDOFF.HINT', () => {
     // g measured: (153k − 60k) / 72 calls ≈ 1.3k.
     expect(planHandoffHints([row({ contextTokens: 153_000, calls: 72 })])).toHaveLength(0)
     expect(planHandoffHints([row({ contextTokens: 250_000, calls: 146 })])).toHaveLength(1)
-    // A 200k window floors at F + 100k = 200k, not at 25% (50k).
-    expect(handoffThreshold(100_000, 1_300, 153_000, 200_000)).toBe(200_000)
+    // A 200k window would floor at F + 100k = its whole window: capped at 80 % so it still fires.
+    expect(handoffThreshold(100_000, 1_300, 153_000, 200_000)).toBe(160_000)
     expect(planHandoffHints([row({ contextTokens: 153_000, contextWindow: 200_000, calls: 72 })])).toHaveLength(0)
+    expect(planHandoffHints([row({ contextTokens: 165_000, contextWindow: 200_000, calls: 90 })])).toHaveLength(1)
   })
 
   it('T* = F + sqrt(2·H·g) with H = cache write of F + ramp + 3 calls at the current size', () => {

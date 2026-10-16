@@ -1246,11 +1246,11 @@ async function kill(ref: string, backend: SessionBackend, folder?: string): Prom
 
   // HANDOFF.RELAY: a predecessor's last answer to the owner reaches its successor before it dies.
   const { flushBeforeKill } = await import('./handoff-relay-io')
-  const owed = await flushBeforeKill(id, async (to, text) => {
+  const flushed = await flushBeforeKill(id, async (to, text) => {
     const harness = registry.find(m => m.id === to)?.harness ?? ''
     return backend.sendTextReliable ? backend.sendTextReliable(to, text, harness) : backend.sendText(to, text)
   })
-  if (owed) { console.error(owed); return 1 }
+  if (flushed.warning) console.error(flushed.warning)
 
   const confirmed = await backend.kill(id)
   // A session that was already `lost` (the backend has nothing by this id — there was never
