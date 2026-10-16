@@ -192,6 +192,17 @@ async function flushOnce(
   try { return await settle(await flushHandoffRelay(m, registry, send, io)) } finally { inFlight.delete(m.id) }
 }
 
+/** A kill marker older than this on a row that never ended means the kill failed: the loop resumes. */
+export const RELAY_CLOSING_STALE_MS = 60_000
+
+/** True while a kill owns the final flush: the row ended after the marker, or the marker is recent. */
+export function killOwnsFlush(m: ManagedSession, now: number): boolean {
+  if (!m.handoffRelayClosing) return false
+  if (m.endedAt) return true
+  const at = Date.parse(m.handoffRelayClosing)
+  return Number.isFinite(at) && now - at < RELAY_CLOSING_STALE_MS
+}
+
 /** The periodic pass: every predecessor still inside its watch window. Returns how many forwarded. */
 export async function flushAllHandoffRelays(
   send: RelaySend, now = Date.now(),
@@ -202,7 +213,7 @@ export async function flushAllHandoffRelays(
   for (const m of registry) {
     if (!relayWatched(m, now)) continue
     // Only a kill owns the final flush. Crash/restore/retire rows can still owe owner messages.
-    if (m.handoffRelayClosing) continue
+    if (killOwnsFlush(m, now)) continue
     const r = await flushOnce(m, registry, send, { ...(io.read ? { read: io.read } : {}), ...(io.patch ? { patch: io.patch } : {}) }).catch(() => ({ ok: false, delivered: false }) as FlushResult)
     if (r.delivered) n++
   }
