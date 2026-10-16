@@ -539,16 +539,18 @@ async function runFleetActionOnce(
       // Runs only on a CONFIRMED delivery (now or late, see the race below). Besides the display
       // queue it records the composer fingerprint, so the chat shows this turn as the person's own
       // message even when the harness stored it as a paste (`recordComposerMessage`).
-      const record = () => {
-        recordComposerMessage(req.id, text)
+      const record = async () => {
+        await recordComposerMessage(req.id, text)
         void (async () => {
           try {
             const row = (await host.sessions?.())?.sessions.find(r => r.id === req.id || r.conversationId === req.id)
             const conv = row ? conversationOfRow(row) : ''
             // No link yet (codex, gemini, kimi, antigravity before their first message is claimed):
             // hold the echo (and any attachment record) under the ROW id; `readSessionChat` migrates the echo and reads the record under both keys once the link lands.
-            if (conv) recordPrompt(conv, text)
-            else if (row) recordPrompt(row.id, text)
+            if (conv) {
+              await recordComposerMessage(conv, text)
+              recordPrompt(conv, text)
+            } else if (row) recordPrompt(row.id, text)
             const carried = attachmentMessageOf(conv || row?.id || '', sentAtMs, text)
             if (carried) await recordAttachmentMessage(carried)
           } catch { /* the message went; the queue is a view of it, not the record */ }
@@ -560,13 +562,13 @@ async function runFleetActionOnce(
       // the pane's write lock; past `PROMPT_ACK_MS` the keys are in flight, so the browser is told
       // the message was accepted and a LATE failure is raised as a notification instead.
       const raced = await withDeadline(host.promptSession(req.id, text), PROMPT_ACK_MS, late => {
-        if ('value' in late && late.value.ok) { record(); return }
+        if ('value' in late && late.value.ok) { void record(); return }
         const message = 'value' in late ? late.value.message : (lang === 'pt' ? 'A mensagem não foi entregue.' : 'The message was not delivered.')
         void import('../sse').then(m => m.broadcastNotification({ type: 'error', title: 'Message not delivered', message })).catch(() => {})
       })
       if (!raced.settled) return { ok: true, message: (lang === 'pt' ? 'Mensagem enviada.' : 'Message sent.') }
       const out = raced.value
-      if (out.ok) record()
+      if (out.ok) await record()
       return out
     }
     case 'cycleMode':
@@ -1500,7 +1502,9 @@ async function continueExternal(lang: CliLang, req: FleetActionRequest, text: st
   })
   if (out.ok) {
     recordPrompt(plan.conversationId, text)
-    recordComposerMessage(req.id, text)
+    await recordComposerMessage(req.id, text)
+    await recordComposerMessage(plan.conversationId, text)
+    if (out.id) await recordComposerMessage(out.id, text)
   }
   return { ok: out.ok, message: out.ok ? cli.sessContinuedHere : out.message, ...(out.id ? { id: out.id } : {}) }
 }

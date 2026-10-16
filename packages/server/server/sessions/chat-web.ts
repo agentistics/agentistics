@@ -46,7 +46,7 @@ import { planSessionSource } from './session-source'
 import type { SessionSurfaceDeps } from './session-surface-deps'
 import { CLAUDE_DIR } from '../config'
 import { safeReadJson } from '../utils'
-import { isComposerMessage } from './composer-message'
+import { readComposerMessages } from './composer-message'
 import { forkCapabilitySentence } from './fork-capability'
 
 /** What the journal remembers of a conversation whose transcript is gone — numbers only (D5, Q3). */
@@ -412,7 +412,8 @@ export async function finishChatRead(
     if (cut.stale) forgetRewind(conversationId)
     else read.turns = cut.turns
   }
-  read.turns = read.turns.map(turn => turn.role === 'user' && isComposerMessage(id, turn.text)
+  const isComposerMessage = await readComposerMessages([id, pendingId], conversationId)
+  read.turns = read.turns.map(turn => turn.role === 'user' && isComposerMessage(turn.text)
     ? { ...turn, composer: true }
     : turn)
   // What is still waiting, judged against the user turns THIS read returned. The window matters and

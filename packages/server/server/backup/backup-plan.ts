@@ -586,6 +586,8 @@ const ALWAYS: string[] = [
   // `[Image #N]` back to a chip on the restored machine, which is the defect the record
   // exists to fix. Kilobytes: one line per file.
   '.agentistics/attachment-sends.jsonl',
+  // Hash-only composer provenance must survive alongside the conversation it describes.
+  '.agentistics/composer-messages',
   // The durable event journal (P1 §6, decision D2). `metrics`, included: its whole point is
   // surviving the harness's own 30-day cleanup, so once a transcript is gone the journal is the
   // ONLY copy of those events — nothing regenerates it. STATED LIMITS, both for a follow-up rather
