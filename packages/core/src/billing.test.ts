@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test'
 import {
   AVG_DAYS_PER_MONTH,
+  accountTimeline,
   aggregatePlanBasis,
   allocatePlanCost,
   billingReadiness,
@@ -644,5 +645,98 @@ describe('billingReadiness', () => {
 
   test('an empty scope is not ready and asks for nothing', () => {
     expect(billingReadiness({ profiles: {} }, [])).toEqual({ ready: false, readyHarnesses: [], gaps: [] })
+  })
+})
+
+// ── ACCT.BILLING: N accounts per harness ─────────────────────────────────────────────────────
+
+describe('per-account billing', () => {
+  const april = { from: '2026-04-01', to: '2026-04-30' }
+  const full = (id: string, amount: number) => timeline(sub(id, '2026-04-01', '2026-04-30', amount))
+  const accs = (...ids: string[]) => ids.map((id) => ({ id, harness: 'claude' as const }))
+
+  test('two overlapping subscriptions: C is the sum, days are the union', () => {
+    const r = computePlanCost({
+      timeline: undefined,
+      window: april,
+      brlRate: 5,
+      accounts: accs('acc_a', 'acc_b'),
+      accountProfiles: { acc_a: full('a', 100), acc_b: full('b', 200) },
+    })
+    expect(r.subscriptionCostUSD).toBeCloseTo((300 * 30) / AVG_DAYS_PER_MONTH, 9)
+    expect(r.coveredDays).toBe(30)
+    expect(r.segments).toHaveLength(2)
+    expect(r.unavailable).toBe(false)
+  })
+
+  test('one own timeline + two inheriting: the default is counted once', () => {
+    const r = computePlanCost({
+      timeline: full('d', 100),
+      window: april,
+      brlRate: 5,
+      accounts: accs('acc_a', 'acc_b', 'acc_c'),
+      accountProfiles: { acc_a: full('a', 50) },
+    })
+    expect(r.subscriptionCostUSD).toBeCloseTo((150 * 30) / AVG_DAYS_PER_MONTH, 9)
+  })
+
+  test('no accounts argument: identical to the single-timeline result', () => {
+    const base = { timeline: full('d', 100), window: april, brlRate: 5 }
+    const plain = computePlanCost(base)
+    expect(computePlanCost({ ...base, accountProfiles: { acc_a: full('a', 50) } })).toEqual(plain)
+    expect(computePlanCost({ ...base, accounts: accs('acc_a') })).toEqual(plain)
+    expect(computePlanCost({ ...base, accounts: accs('acc_a'), accountProfiles: {} })).toEqual(plain)
+  })
+
+  test('overlap inside ONE account timeline is still refused', () => {
+    const bad = timeline(sub('x', '2026-04-01', '2026-04-20', 10), sub('y', '2026-04-10', '2026-04-30', 10))
+    const r = computePlanCost({
+      timeline: undefined,
+      window: april,
+      brlRate: 5,
+      accounts: accs('acc_a', 'acc_b'),
+      accountProfiles: { acc_a: bad, acc_b: full('b', 100) },
+    })
+    expect(r.invalidTimeline).toBe(true)
+    expect(r.unavailable).toBe(true)
+  })
+
+  test('monthlyCommitment sums accounts, even with no harness default', () => {
+    const c = monthlyCommitment({
+      profiles: {},
+      month: '2026-04-15',
+      brlRate: 5,
+      accounts: accs('acc_a', 'acc_b'),
+      accountProfiles: { acc_a: full('a', 100), acc_b: full('b', 200) },
+    })
+    expect(c?.usd).toBeCloseTo((300 * 30) / AVG_DAYS_PER_MONTH, 9)
+    expect(c?.harnesses).toEqual(['claude'])
+  })
+
+  test('monthlyCommitment without accounts is unchanged', () => {
+    const profiles = { claude: full('d', 100) }
+    const a = monthlyCommitment({ profiles, month: '2026-04-15', brlRate: 5 })
+    const b = monthlyCommitment({ profiles, month: '2026-04-15', brlRate: 5, accountProfiles: { acc_a: full('a', 9) } })
+    expect(b).toEqual(a)
+  })
+
+  test('normalizeBillingSettings reads accountProfiles and drops junk', () => {
+    const s = normalizeBillingSettings({
+      profiles: {},
+      accountProfiles: { acc_a: { periods: [sub('a', '2026-04-01', undefined, 100), { bad: 1 }] }, acc_b: { periods: [] }, '': { periods: [sub('z', '2026-04-01', undefined, 1)] } },
+    })
+    expect(Object.keys(s.accountProfiles ?? {})).toEqual(['acc_a'])
+    expect(s.accountProfiles?.acc_a?.periods).toHaveLength(1)
+    expect(normalizeBillingSettings({ profiles: {} }).accountProfiles).toBeUndefined()
+  })
+
+  test('accountTimeline prefers the account, falls back to the harness', () => {
+    const b = normalizeBillingSettings({
+      profiles: { claude: full('d', 1) },
+      accountProfiles: { acc_a: full('a', 2) },
+    })
+    expect(accountTimeline(b, 'claude', 'acc_a')?.periods[0]?.id).toBe('a')
+    expect(accountTimeline(b, 'claude', 'acc_z')?.periods[0]?.id).toBe('d')
+    expect(accountTimeline(b, 'codex')).toBeUndefined()
   })
 })
