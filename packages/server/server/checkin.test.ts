@@ -365,7 +365,7 @@ describe('idle check-ins', () => {
     const seen: number[] = []
     const reader = spyOn(module, 'planLimitsPayload').mockImplementation(async (_billing, now = Date.now()) => {
       seen.push(now)
-      return { limits: records, registered: [], budgets: records.map(l => ({ ...planBudget(l, now), ...planPace(l, now, history) })),
+      return { harnesses: {}, limits: records, registered: [], budgets: records.map(l => ({ ...planBudget(l, now), ...planPace(l, now, history), spawnable: true as const })),
         hiddenFromAgents: [], freeSlots: 0, freeSlotsByHarness: {}, liveSessions: [], now }
     })
     const { readCheckinLimits: _reader, ...otherDeps } = testDeps

@@ -11,6 +11,8 @@
  */
 
 import type { SessionBackend } from './types'
+import type { HarnessId } from '@agentistics/core'
+import { noteFreshSpawn } from './harness-spawnable'
 import { POLL_MS, SETTLE_MS, spawnOutcome, type SpawnOutcome } from './spawn-outcome'
 
 /**
@@ -24,13 +26,23 @@ export async function spawnDeath(
   backend: Pick<SessionBackend, 'capture'>,
   id: string,
   deadlineMs: number = SETTLE_MS,
+  freshHarness?: HarnessId,
+  record: typeof noteFreshSpawn | ((harness: HarnessId, outcome: SpawnOutcome | undefined, startedAt: number) => Promise<void>) = noteFreshSpawn,
 ): Promise<SpawnOutcome | undefined> {
-  const deadline = Date.now() + deadlineMs
-  let outcome = spawnOutcome([])
+  const startedAt = Date.now()
+  const deadline = startedAt + deadlineMs
+  let observed = false
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, POLL_MS))
-    outcome = spawnOutcome(await backend.capture(id, 40).catch(() => [] as string[]))
-    if (outcome.died) return outcome
+    let frame: string[]
+    try { frame = await backend.capture(id, 40) } catch { continue }
+    observed = true
+    const outcome = spawnOutcome(frame)
+    if (outcome.died) {
+      if (freshHarness) await record(freshHarness, outcome, startedAt)
+      return outcome
+    }
   }
+  if (freshHarness && observed) await record(freshHarness, undefined, startedAt)
   return undefined
 }

@@ -59,6 +59,7 @@ import { newAttemptId, newTaskId, type Attempt, type Task } from './task-model'
 import { liveConversationHolders } from './live-claims'
 import { codexStartupFailure, execFailed } from './spawn-outcome'
 import { spawnDeath } from './spawn-check'
+import { reportFreshSpawn } from './spawn-report'
 import { parseHarnessAgents } from './harness-agents'
 import { planTakeover, type TakeoverRefusal } from './takeover'
 import { applyRoleTitle, deliverStoredRole, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor } from './session-roles'
@@ -334,8 +335,8 @@ async function nativeCliVerb(kind: 'kill' | 'rename' | 'archive' | 'unarchive' |
   return 0
 }
 
-async function spawnFailure(backend: SessionBackend, id: string, bin?: string): Promise<string | undefined> {
-  const outcome = await spawnDeath(backend, id)
+async function spawnFailure(backend: SessionBackend, id: string, bin?: string, freshHarness?: HarnessId): Promise<string | undefined> {
+  const outcome = await spawnDeath(backend, id, undefined, freshHarness, reportFreshSpawn)
   if (!outcome) return undefined
   // A binary that could not be EXECUTED says nothing on the way out (see `execFailed`), and the
   // only thing that fixes it is the PATH — so name it rather than print a bare status.
@@ -446,7 +447,7 @@ export async function start(
   // `spawn` returning is not evidence anything is RUNNING — tmux's contract is "I made you a
   // session". A harness that refuses its arguments has already exited by now, and registering a row
   // for it is what produced three dead rows called MAIN. See `spawn-outcome.ts`.
-  const failed = await spawnFailure(backend, id, planned.plan.argv[0])
+  const failed = await spawnFailure(backend, id, planned.plan.argv[0], cmd.harness)
   if (failed) {
     console.error(failed)
     await backend.kill(id).catch(() => {})
@@ -669,7 +670,7 @@ export async function batch(
     // Same check as `start`: a harness that refused its arguments is already gone, and a batch that
     // reports N started when N exited is worse than one that reports the refusal — the whole point
     // of a batch is that nobody is watching each one come up.
-    const died = await spawnFailure(backend, id, planned.plan.argv[0])
+    const died = await spawnFailure(backend, id, planned.plan.argv[0], spec.harness)
     if (died) {
       failed.push({ harness: spec.harness, reason: died })
       await backend.kill(id).catch(() => {})

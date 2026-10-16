@@ -45,6 +45,7 @@ afterAll(() => stopVaultSocket())
 
 describe('every vault.sock op, with marker secrets in the vault', () => {
   const requests: Record<(typeof VAULT_OPS)[number], { req: Record<string, unknown> & { op: string }; body?: Uint8Array }> = {
+    'fresh-spawn': { req: { op: 'fresh-spawn', harness: 'codex', startedAt: 0, died: false } },
     status: { req: { op: 'status' } },
     lock: { req: { op: 'lock' } },
     unlock: { req: { op: 'unlock' } },

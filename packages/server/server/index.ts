@@ -1,7 +1,7 @@
 // embeddedDist is loaded inside server/sse.ts (conditional on SERVE_STATIC=1)
 
 // FIRST: this process is the vault's holder (SECRETS.4 §5.2) before any module below reads a secret.
-import './vault/holder'
+import { bootstrapServer } from './server-bootstrap'
 import { readFile } from 'node:fs/promises'
 import { PORT, WEB_PORT, TEAM_CENTRAL, TEAM_PASSWORD, TEAM_ORG, INGEST_ONLY } from './config'
 import type { Server, ServerWebSocket } from 'bun'
@@ -5078,6 +5078,8 @@ async function handleCompressed(req: Request, server: Server<WSData>): Promise<R
   const res = await handleRequest(req, server)
   return res ? compressResponse(req, res) : res
 }
+
+await bootstrapServer()
 
 try {
 // Build the DNS-rebinding allowlist before the first request can arrive, and keep it fresh (an

@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.136.0': {
+    features: [
+      {
+        pt: 'Os limites de plano não oferecem mais vagas num assistente que não consegue abrir sessões nesta máquina.',
+        en: 'Plan limits no longer offer slots on an assistant that cannot start sessions on this machine.',
+      },
+    ],
+    fixes: [],
+  },
   '2.135.1': {
     features: [],
     fixes: [
