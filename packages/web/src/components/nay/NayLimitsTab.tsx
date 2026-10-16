@@ -13,8 +13,8 @@ import { PlanUsageCard } from '../PlanLimitMeter'
 export function NayLimitsTab({ lang, isMobile, onNavigate }: { lang: 'pt' | 'en'; isMobile: boolean; onNavigate?: () => void }) {
   const pt = lang === 'pt'
   const navigate = useNavigate()
-  const { limits, registered, now } = usePlanLimits()
-  const rows = subscriptionRows(limits, registered)
+  const { limits, registered, accountLabels, now } = usePlanLimits()
+  const rows = subscriptionRows(limits, registered, accountLabels)
   const newest = Math.max(0, ...(limits ?? []).map(l => l.updatedAt))
   return (
     <div data-nay-limits style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: isMobile ? '8px 10px' : '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -28,8 +28,8 @@ export function NayLimitsTab({ lang, isMobile, onNavigate }: { lang: 'pt' | 'en'
         </p>
       ) : (<>
         {rows.map(r => r.limits
-          ? <PlanUsageCard key={`${r.harness}:${r.limits.account}`} limits={r.limits} now={now} lang={lang} />
-          : <PlanUsageCard key={r.harness} limits={null} pending={{ harness: r.harness, plan: r.plan ?? '' }} now={now} lang={lang} />)}
+          ? <PlanUsageCard key={`${r.harness}:${r.limits.account}`} limits={r.limits} accountLabel={r.accountLabel} now={now} lang={lang} />
+          : <PlanUsageCard key={`${r.harness}:${r.plan}`} limits={null} accountLabel={r.accountLabel} pending={{ harness: r.harness, plan: r.plan ?? '' }} now={now} lang={lang} />)}
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', fontSize: 11.5, color: 'var(--text-tertiary)', padding: '2px 2px 0' }}>
           {newest > 0 && <span>{pt ? `Atualizado há ${fmtSpan(Math.max(0, now - newest), lang)}` : `Updated ${fmtSpan(Math.max(0, now - newest), lang)} ago`}</span>}
           {newest > 0 && <span aria-hidden>·</span>}
