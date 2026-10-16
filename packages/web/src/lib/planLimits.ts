@@ -89,6 +89,7 @@ export function windowShortLabel(kind: PlanWindowKind, lang: Lang): string {
 
 export const SOURCE_LABEL: Record<PlanLimitSource, { pt: string; en: string }> = {
   'claude-stream': { pt: 'eventos do Claude Code', en: 'Claude Code events' },
+  'claude-usage-api': { pt: 'uso da assinatura do Claude Code', en: 'Claude Code subscription usage' },
   'codex-rollout': { pt: 'registro da sessão do Codex', en: 'Codex session log' },
   'codex-app-server': { pt: 'protocolo do Codex', en: 'Codex protocol' },
 }
