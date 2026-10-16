@@ -23,7 +23,7 @@ export const NOTIFICATION_CATEGORIES: readonly CategoryInfo[] = [
 
 const PREFIX: ReadonlyArray<[string, NotificationCategory]> = [
   ['app.', 'updates'], ['sessions.', 'idle'], ['tasks.', 'tasks'], ['backup.', 'backup'],
-  ['member.', 'team'], ['central.', 'team'], ['machine.', 'team'], ['iam.', 'accounts'], ['hardware.', 'hardware'], ['limits.', 'limits'],
+  ['member.', 'team'], ['central.', 'team'], ['machine.', 'team'], ['iam.', 'accounts'], ['hardware.', 'hardware'], ['limits.', 'limits'], ['plan.', 'limits'],
 ]
 
 /** The category a notification code belongs to, or null when none claims it (then it is never muted). */

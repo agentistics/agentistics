@@ -13,16 +13,18 @@
  * At boot the newest few of each are read once, so a restart does not forget the last value.
  */
 import { readFile, readdir, stat, writeFile, rename, mkdir } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { watch as fsWatch } from 'node:fs'
 import {
-  agentVisible, alternativeWithRoom, HARNESS_ORDER, newerLimits, parseClaudeRateLimitEvent, parseCodexRateLimits,
-  planBudget, planPace, planThresholdNotices, registeredPlanLabel, withPlanLabel,
+  agentVisible, alternativeWithRoom, HARNESS_ORDER, meterDiscontinuity, newerLimits, parseClaudeRateLimitEvent,
+  parseCodexRateLimits, planBudget, planPace, planThresholdNotices, registeredPlanLabel, resetNoticesFor, withPlanLabel,
   type HarnessId,
   type LivePlanSession, type PlanLimits, type PlanNoticeState, type PlanThresholdNotice,
 } from '@agentistics/core'
-import { AGENTISTICS_DATA_DIR, CODEX_SESSIONS_DIR } from './config'
-import { currentHarnessAccounts } from './harness-accounts'
+import { AGENTISTICS_DATA_DIR, CODEX_DIR, CODEX_SESSIONS_DIR } from './config'
+import {
+  bind, byId, currentHarnessAccounts, forceProbe, hasIdentityProbe, readAccounts, startSegment,
+} from './harness-accounts'
 import { readTailBytes, windowLines } from './sessions/transcript-window'
 
 let filePath: string | null = null
@@ -73,6 +75,8 @@ const keyOf = (l: Pick<PlanLimits, 'harness' | 'account'>): string => `${l.harne
 type Sink = {
   notify: (n: PlanThresholdNotice, alt: string | null) => void
   changed: () => void
+  /** Spec §5: a sharp drop the probe could not explain — this account counts from zero again. */
+  segment?: (s: { harness: HarnessId; account: string; at: number }) => void
 }
 /**
  * Set ONLY in the server process, which makes it the OWNER: the one process that raises notices and
@@ -101,8 +105,44 @@ function load(): Promise<void> {
     const f = await readFileState()
     if (f) state = f
     try { fileMtime = (await stat(FILE())).mtimeMs } catch { /* absent */ }
+    if (f && await migrateDefaultRecords()) persistSoon()
   })()
   return loaded
+}
+
+/** Legacy `<harness>:default` keys re-keyed to an account id; the persist drops them from the file. */
+const migratedAway = new Set<string>()
+
+/**
+ * Step 4 of C1: a meter recorded before accounts existed (`account: 'default'`) belongs to the
+ * account the DEFAULT root is bound to — a binding exists only after a CONFIRMED probe, so nothing
+ * is re-keyed on a guess. With no binding the record stays where it is. Notice state moves with it.
+ */
+async function migrateDefaultRecords(): Promise<boolean> {
+  const legacy = Object.entries(state.limits).filter(([, l]) => l.account === 'default')
+  if (!legacy.length) return false
+  let bindings: Record<string, string>
+  try { bindings = (await readAccounts()).bindings } catch { return false }
+  let moved = false
+  for (const [oldKey, l] of legacy) {
+    const id = bindings[`${l.harness}:`]
+    if (!id) continue
+    const next = { ...l, account: id }
+    const newKey = keyOf(next)
+    state.limits[newKey] = state.limits[newKey] ? newerLimits(state.limits[newKey], next) : next
+    delete state.limits[oldKey]
+    migratedAway.add(oldKey)
+    for (const [k, v] of Object.entries(state.notices)) {
+      if (!k.startsWith(`${oldKey}:`)) continue
+      const nk = `${newKey}:${k.slice(oldKey.length + 1)}`
+      if (!state.notices[nk]) state.notices[nk] = v
+      delete state.notices[k]
+    }
+    const h = history.get(oldKey)
+    if (h) { history.set(newKey, [...(history.get(newKey) ?? []), ...h.map(x => ({ ...x, account: id }))]); history.delete(oldKey) }
+    moved = true
+  }
+  return moved
 }
 
 let fileMtime = 0
@@ -118,6 +158,7 @@ function persistSoon(): void {
       const disk = await readFileState()
       const limits = { ...(disk?.limits ?? {}) }
       for (const [k, l] of Object.entries(state.limits)) limits[k] = newerLimits(limits[k], l)
+      for (const k of migratedAway) delete limits[k]
       const out: Persisted = { limits, notices: sink ? state.notices : (disk?.notices ?? state.notices) }
       const tmp = `${FILE()}.${process.pid}.tmp`
       await mkdir(dirname(FILE()), { recursive: true })
@@ -133,8 +174,22 @@ function persistSoon(): void {
 export async function ingestPlanLimits(l: PlanLimits): Promise<boolean> {
   await load()
   const key = keyOf(l)
+  if (migratedAway.has(key)) return false
   const held = state.limits[key]
   if (held && newerLimits(held, l) === held) return false
+  let newSegment = false
+  if (held && l.account !== 'default' && meterDiscontinuity(held, l)) {
+    const switched = await accountSwitch(l)
+    // Signal 1: the root now holds ANOTHER login — the reading is that account's; the held one
+    // (and its hold) is left exactly as it was.
+    if (switched) return ingestPlanLimits({ ...l, account: switched })
+    // Same login, or a harness that cannot say: a new segment for this account (spec §5).
+    newSegment = true
+    segmentStarts.set(l.account, l.updatedAt)
+    history.delete(key)
+    state.notices = resetNoticesFor(state.notices, l.harness, l.account)
+    await startSegment(l.account, l.updatedAt).catch(() => {})
+  }
   state.limits[key] = l
   const readings = history.get(key) ?? []
   readings.push(l)
@@ -150,9 +205,30 @@ export async function ingestPlanLimits(l: PlanLimits): Promise<boolean> {
   }
   persistSoon()
   const all = Object.values(state.limits)
+  if (newSegment) sink?.segment?.({ harness: l.harness, account: l.account, at: l.updatedAt })
   for (const n of notices) sink?.notify(n, n.threshold >= 100 ? alternativeWithRoom(all, n.harness, Date.now()) : null)
   sink?.changed()
   return true
+}
+
+/** Segment starts this process knows of (the registry's `segments` is the durable copy). */
+const segmentStarts = new Map<string, number>()
+
+/**
+ * A discontinuous reading: re-probe the account's root, bypassing the 60 s cache. A confirmed
+ * DIFFERENT key re-binds the root and answers the account the reading belongs to; anything else
+ * (same key, no probe for this harness, a probe that could not tell) answers null.
+ */
+async function accountSwitch(l: PlanLimits): Promise<string | null> {
+  if (!hasIdentityProbe(l.harness)) return null
+  try {
+    const account = await byId(l.account)
+    if (!account) return null
+    const identity = await forceProbe(l.harness, account.root)
+    if (identity.key === 'default' || identity.key === account.key) return null
+    const bound = await bind(account.root, { ...identity, harness: l.harness })
+    return bound.account.id === l.account ? null : bound.account.id
+  } catch { return null }
 }
 
 /**
@@ -196,13 +272,89 @@ export function watchPlanLimitsFile(): () => void {
   return () => { if (w) { w.close(); fileWatchers.delete(w) } if (t) clearTimeout(t) }
 }
 
-/** The claude tap: one raw stream-json line as the relay delivered it. Never throws. */
-export function noteStructuredLine(line: string, atMs: number): void {
+/**
+ * WHOSE meter a reading is (spec §5 "Attribution"). Parsers emit `'default'`; a tap rewrites it
+ * before ingest. A reading from the DEFAULT root takes that root's binding and, with none yet,
+ * stays `'default'` (exactly the pre-accounts behaviour; the load migration re-keys it once a
+ * probe confirms the login). A reading from any other root takes that root's binding or is
+ * DROPPED (null): a meter under the wrong account is worse than none — it lifts a hold.
+ */
+export async function attributeReading(harness: HarnessId, root: string | null): Promise<string | null> {
+  let bindings: Record<string, string> = {}
+  try { bindings = (await readAccounts()).bindings } catch { /* unreadable registry: as if empty */ }
+  return bindings[`${harness}:${root ?? ''}`] ?? (root === null ? 'default' : null)
+}
+
+/** Ingest a reading from `root` once attributed; dropped when the account cannot be determined. */
+export async function ingestFromRoot(l: PlanLimits, root: string | null, accountId?: string): Promise<boolean> {
+  const account = accountId || await attributeReading(l.harness, root)
+  if (!account) return false
+  return ingestPlanLimits({ ...l, account })
+}
+
+/**
+ * Where each harness keeps its rollouts, per config root: a reading is attributed by the root its
+ * file sits under. Only harnesses whose meter is a FILE are here; the rest have no path tap.
+ */
+const ROLLOUT_HOME: Record<HarnessId, { home: () => string; sub: string } | null> = {
+  claude: null, codex: { home: () => CODEX_DIR, sub: 'sessions' },
+  gemini: null, copilot: null, antigravity: null, kimi: null, opencode: null,
+}
+
+/**
+ * The root a rollout path belongs to: the default home (null) or an account root the registry
+ * binds. `undefined` when it sits under none of them — such a reading is dropped.
+ */
+export async function rolloutRoot(harness: HarnessId, path: string): Promise<string | null | undefined> {
+  const spec = ROLLOUT_HOME[harness]
+  if (!spec) return undefined
+  const under = (dir: string) => resolve(path).startsWith(`${resolve(dir, spec.sub)}${sep}`)
+  let roots: string[] = []
+  try {
+    const prefix = `${harness}:`
+    roots = Object.keys((await readAccounts()).bindings).filter(k => k.startsWith(prefix) && k.length > prefix.length)
+      .map(k => k.slice(prefix.length))
+  } catch { /* unreadable registry: only the default home is known */ }
+  // The longest match wins, so an account root nested under the default home is not mistaken for it.
+  const hit = roots.filter(under).sort((a, b) => b.length - a.length)[0]
+  if (hit) return hit
+  return under(spec.home()) ? null : undefined
+}
+
+type ManagedLookup = () => Promise<readonly { id: string; conversationId?: string; accountId?: string }[]>
+let managedLookup: ManagedLookup = async () => (await import('./sessions/registry')).readRegistry()
+
+/** The account a managed session runs on (`ManagedSession.accountId`), when it carries one. */
+export async function managedAccountOf(by: { id?: string; conversationId?: string }): Promise<string | undefined> {
+  try {
+    const rows = await managedLookup()
+    const hit = rows.find(r => (by.id && r.id === by.id) || (by.conversationId && r.conversationId === by.conversationId))
+    return hit?.accountId || undefined
+  } catch { return undefined }
+}
+
+/** Tests only: the managed-session rows attribution reads. */
+export function __setManagedLookupForTest(f: ManagedLookup | null): void {
+  managedLookup = f ?? (async () => (await import('./sessions/registry')).readRegistry())
+}
+
+/**
+ * The claude tap: one raw stream-json line as the relay delivered it. `accountId` is the
+ * structured session's `ManagedSession.accountId` (or a lookup, called only for a rate-limit
+ * line); a session started before accounts existed carries none and is the default root's.
+ * Never throws.
+ */
+export function noteStructuredLine(
+  line: string, atMs: number,
+  accountId?: string | Promise<string | undefined> | (() => Promise<string | undefined>),
+): void {
   if (!line.includes('rate_limit_event')) return
   let parsed: unknown
   try { parsed = JSON.parse(line) } catch { return }
   const l = parseClaudeRateLimitEvent(parsed, atMs)
-  if (l) void ingestPlanLimits(l)
+  if (!l) return
+  void Promise.resolve().then(() => typeof accountId === 'function' ? accountId() : accountId)
+    .then(a => ingestFromRoot(l, null, a)).catch(() => {})
 }
 
 /** The newest `rate_limits` record in the last 256 KB of a codex rollout, or null. */
@@ -227,10 +379,25 @@ export function noteCodexRollout(path: string): void {
   if (!/rollout-.*\.jsonl$/.test(path) || codexPending.has(path)) return
   const t = setTimeout(() => {
     codexPending.delete(path)
-    void latestCodexLimits(path).then(l => { if (l) void ingestPlanLimits(l) }).catch(() => {})
+    void latestCodexLimits(path).then(l => { if (l) return ingestRollout(l, path) }).catch(() => {})
   }, 1000)
   t.unref?.()
   codexPending.set(path, t)
+}
+
+const CONVERSATION_IN_NAME = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i
+
+/**
+ * A rollout reading is the account of the managed session that links its conversation when there
+ * is one, else the binding of the root the file sits under; under no known root it is dropped.
+ */
+export async function ingestRollout(l: PlanLimits, path: string): Promise<boolean> {
+  const conversationId = CONVERSATION_IN_NAME.exec(basename(path))?.[1]
+  const linked = conversationId ? await managedAccountOf({ conversationId }) : undefined
+  if (linked) return ingestPlanLimits({ ...l, account: linked })
+  const root = await rolloutRoot(l.harness, path)
+  if (root === undefined) return false
+  return ingestFromRoot(l, root)
 }
 
 async function newestFiles(dir: string, match: (name: string) => boolean, depth: number, limit: number): Promise<string[]> {
@@ -265,6 +432,7 @@ export async function seedPlanLimits(structuredDir: string): Promise<void> {
   }
   outs.sort((a, b) => b.m - a.m)
   for (const { p } of outs.slice(0, 5)) {
+    const account = managedAccountOf({ id: basename(dirname(p)) })
     const tail = await readTailBytes(p, 256 * 1024)
     if (!tail) continue
     const lines = windowLines(tail)
@@ -274,13 +442,13 @@ export async function seedPlanLimits(structuredDir: string): Promise<void> {
         const rec = JSON.parse(lines[i]!) as { t?: unknown; l?: unknown }
         if (typeof rec.l !== 'string' || typeof rec.t !== 'number') continue
         const l = parseClaudeRateLimitEvent(JSON.parse(rec.l), rec.t)
-        if (l) { await ingestPlanLimits(l); break }
+        if (l) { await ingestFromRoot(l, null, await account); break }
       } catch { /* keep looking */ }
     }
   }
   for (const p of await newestFiles(CODEX_SESSIONS_DIR, n => /^rollout-.*\.jsonl$/.test(n), 3, 3)) {
     const l = await latestCodexLimits(p)
-    if (l) await ingestPlanLimits(l)
+    if (l) await ingestRollout(l, p)
   }
 }
 
@@ -291,6 +459,12 @@ export async function planLimitsPayload(
   liveSessions: readonly LivePlanSession[] = [],
 ): Promise<{ limits: PlanLimits[]; registered: { harness: HarnessId; plan: string }[]; budgets: Array<ReturnType<typeof planBudget> & ReturnType<typeof planPace>>; hiddenFromAgents: Array<ReturnType<typeof planBudget> & ReturnType<typeof planPace>>; freeSlots: number; freeSlotsByHarness: Partial<Record<HarnessId, number>>; liveSessions: LivePlanSession[]; pauseUntil?: number; now: number }> {
   await syncPlanLimitsFromFile()
+  let registrySegments: Record<string, number> = {}
+  try { registrySegments = (await readAccounts()).segments } catch { /* none known */ }
+  const segmentOf = (account: string): number | undefined => {
+    const starts = [segmentStarts.get(account), registrySegments[account]].filter((v): v is number => v !== undefined)
+    return starts.length ? Math.max(...starts) : undefined
+  }
   const limits = Object.values(state.limits)
     .map(l => withPlanLabel(l, billing, nowMs))
     .sort((a, b) => a.harness.localeCompare(b.harness))
@@ -310,7 +484,7 @@ export async function planLimitsPayload(
     // Only measured sessions enter planSlots' per-session average. Working sessions with no
     // billed tokens remain in the public live summary, without diluting the measured burn.
     const planSessions = liveSessions.filter(s => s.burnPctPerHour > 0 && (!s.harness || s.harness === l.harness))
-    return { ...budget, ...planPace(l, nowMs, history.get(keyOf(l)) ?? [], planSessions) }
+    return { ...budget, ...planPace(l, nowMs, history.get(keyOf(l)) ?? [], planSessions, segmentOf(l.account)) }
   })
   // Legacy meters are `'default'`; the harness-level login stands in for the registry until C1.
   const budgets = agentVisible(
@@ -333,6 +507,8 @@ export async function planLimitsPayload(
 export function __resetPlanLimitsForTest(file: string | null = null): void {
   state = { limits: {}, notices: {} }
   history.clear()
+  segmentStarts.clear()
+  migratedAway.clear()
   filePath = file
   liveUsage.clear()
   fileMtime = 0

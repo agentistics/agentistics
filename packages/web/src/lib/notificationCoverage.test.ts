@@ -65,3 +65,15 @@ describe('notification coverage', () => {
     expect(out.title.trim()).not.toBe('')
   })
 })
+
+describe('plan.segment', () => {
+  it('names the harness in both languages and never renders blank', () => {
+    const n = { id: 's', code: 'plan.segment', meta: { harness: 'codex', account: 'acc_x' }, type: 'info', at: 0, read: false }
+    const en = resolveNotification(n as never, 'en')
+    const pt = resolveNotification(n as never, 'pt')
+    expect(en.title).toContain('Codex')
+    expect(en.message).toContain('counting from zero')
+    expect(pt.message).toContain('contando do zero')
+    expect(`${en.message}${pt.message}`).not.toContain('acc_x')
+  })
+})

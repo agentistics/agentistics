@@ -24,7 +24,7 @@
  * conversation's protocol traffic — the same text the harness's own transcript holds — and no secret
  * (`StructuredSpawn.env` never carries one). It is deleted when the session ends.
  */
-import { noteStructuredLine } from '../plan-limits'
+import { managedAccountOf, noteStructuredLine } from '../plan-limits'
 import { clearComposing, noteComposingLine } from './structured-composing'
 import { spawn as spawnChild } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -247,8 +247,12 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
           let exitResolve!: (c: number | null) => void
           const exited = new Promise<number | null>(r => { exitResolve = r })
           try { startRelay(id, { bin, args: [...args], cwd, ...(env ? { env: { ...env } } : {}) }) } catch { exitResolve(null); lines.end() }
+          // The account this session runs on (ManagedSession.accountId): looked up once, and only
+          // when a rate-limit line actually arrives — no registry read for a session that never says one.
+          let account: Promise<string | undefined> | undefined
+          const accountOf = () => (account ??= managedAccountOf({ id }))
           conn = relayConnection(path.join(dir, FILES.sock), 0, {
-            line: (l, t) => { noteStructuredLine(l, t); noteComposingLine(id, saved.harness, l); lines.push(l, t) },
+            line: (l, t) => { noteStructuredLine(l, t, accountOf); noteComposingLine(id, saved.harness, l); lines.push(l, t) },
             exit: c => { clearComposing(id); lines.end(); exitResolve(c) },
             // Another server took the child over: this one goes quiet, and must not read the
             // silence as an exit (that would make it fall back and start a second copy).
@@ -353,8 +357,10 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
           const same = was && was.bin === bin && was.cwd === cwd && JSON.stringify(was.args) === JSON.stringify([...args])
             && JSON.stringify(was.env ?? {}) === JSON.stringify(env ?? {})
           if (!same) fail('the re-created driver launched a different command')
+          let account: Promise<string | undefined> | undefined
+          const accountOf = () => (account ??= managedAccountOf({ id }))
           conn = relayConnection(path.join(dir, FILES.sock), out.length, {
-            line: (l, ts) => { noteStructuredLine(l, ts); noteComposingLine(id, replayHarness, l); if (replaying) pendingLive.push({ l, t: ts }); else lines.push(l, ts) },
+            line: (l, ts) => { noteStructuredLine(l, ts, accountOf); noteComposingLine(id, replayHarness, l); if (replaying) pendingLive.push({ l, t: ts }); else lines.push(l, ts) },
             exit: c => {
               clearComposing(id)
               // Held until the record is replayed: the driver must see the session as it was first.
