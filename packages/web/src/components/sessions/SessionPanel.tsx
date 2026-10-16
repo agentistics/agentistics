@@ -104,6 +104,9 @@ export interface SessionPanelProps {
    *  App.tsx already shows the title/tabs/actions for this session; draw none of your own." */
   view?: SessionView
   onViewChange?: (v: SessionView) => void
+  /** The open-sessions tab strip (flag `sessionTabs`), drawn as the first row INSIDE the
+   *  conversation panel, above the chat. Absent with the flag off — nothing else changes. */
+  tabStrip?: ReactNode
   /** Passed straight to `SessionChat` — see its own `onArtifacts`. This panel reads none of it. */
   onArtifacts?: SessionChatProps['onArtifacts']
   /** Passed straight to `SessionChat` — see `SessionComposerMetrics`'s own header. This panel
@@ -187,7 +190,7 @@ export interface SessionPanelProps {
 }
 
 export function SessionPanel({
-  session, row, lang, theme, act, authorName, onGone, onOpened, view: viewProp, onViewChange,
+  session, row, lang, theme, act, authorName, onGone, onOpened, view: viewProp, onViewChange, tabStrip,
   onArtifacts, metrics, shellEnabled, shellCapable, onShellEnabledChange, editorEnabled, onOpenTerminal,
   onOpenShellFullscreen, onStudioBandRef, hardwareOffered, studioSeen = true,
   studioFullscreen, onStudioFullscreenChange,
@@ -461,6 +464,7 @@ export function SessionPanel({
         // `SessionsPage.tsx`'s old `CENTRAL_PANE` comment already gave for skipping `isMobile`.
         ...(isMobile ? {} : { border: '1px solid var(--border)', borderRadius: 10 }),
       }}>
+        {tabStrip ?? null}
         {/* KEYED BY THE SESSION, and this is a correctness fix rather than a hint to React.
             Without it the same instance is reused when `session` changes, so every piece of state
             that is READ ONCE AT MOUNT belongs to whichever session was open first: the draft

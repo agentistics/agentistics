@@ -28,3 +28,9 @@ export const studioSeenStore = createSharedPref<boolean>({
   key: 'agentistics.studio.seen', prefKey: 'studioSeen', fallback: false,
   adoptLocalWhenAbsent: true, parse: asBool, decode: raw => raw === '1', encode: bit,
 })
+
+/** Are the session TABS (a strip of open conversations above the chat) on? Experimental: absent = off. */
+export const sessionTabsStore = createSharedPref<boolean>({
+  key: 'agentistics-session-tabs-on', prefKey: 'sessionTabs', fallback: false,
+  adoptLocalWhenAbsent: true, parse: asBool, decode: flag, encode: bit,
+})
