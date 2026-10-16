@@ -71,8 +71,9 @@ export async function uninstallBriefing(o: InstallOptions): Promise<InstallResul
         const content = await read(path)
         if (content?.includes(MANAGED_OPEN)) {
           const after = removeManagedBlocks(content)
-          // Only our generated frontmatter left → nothing of the user's remains: delete the file.
-          const bare = after.replace(/^---\nname: [^\n]*\ndescription: [^\n]*\nmetadata:\n  agentistics-version: "\d+"\n---\n?/, '').trim() === ''
+          // Delete only when what remains is byte-equal to the frontmatter WE generate (any user edit keeps the file).
+          const ver = after.match(/agentistics-version: "(\d+)"/)?.[1]
+          const bare = ver !== undefined && after.trim() === skillMarkdown(skill, Number(ver)).split('\n\n')[0]!.trim()
           if (bare) { await rm(path); out.push({ harness: target.harness, path, changed: true, removed: true }) }
           else { await writeFile(path, after, { mode: 0o600 }); out.push({ harness: target.harness, path, changed: true }) }
         }
