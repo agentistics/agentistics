@@ -4,10 +4,10 @@ import type { HarnessId } from '@agentistics/core'
 import { availableHarnesses } from './sessions/harness-available'
 import { AGENTISTICS_DATA_DIR, HOME_DIR } from './config'
 import { readPreferences } from './preferences'
-import { BRIEFING_VERSION, briefingSkills, managedBlock, managedTargets, removeManagedBlocks, replaceManagedBlock, skillMarkdown, type ManagedTarget } from './briefing'
+import { BRIEFING_VERSION, MANAGED_OPEN, briefingSkills, managedBlock, managedTargets, removeManagedBlocks, replaceManagedBlock, skillMarkdown, type ManagedTarget } from './briefing'
 
 export type InstallOptions = { home: string; harnesses?: readonly HarnessId[]; uninstall?: boolean; planLimitsAvailable?: boolean; toolNames?: readonly string[] }
-export type InstallResult = { harness: HarnessId; path: string; changed: boolean; removed?: boolean }[]
+export type InstallResult = { harness: HarnessId; path: string; changed: boolean; removed?: boolean; skipped?: boolean }[]
 
 export const BRIEFING_STATE_FILE = join(AGENTISTICS_DATA_DIR, 'briefing-state.json')
 
@@ -41,8 +41,16 @@ export async function installBriefing(o: InstallOptions): Promise<InstallResult>
         const path = join(root, skill.name, 'SKILL.md')
         const desired = skillMarkdown(skill)
         const prior = await read(path)
-        if (prior !== desired) { await mkdir(dirname(path), { recursive: true, mode: 0o700 }); await writeFile(path, desired, { mode: 0o600 }) }
-        out.push({ harness: target.harness, path, changed: prior !== desired })
+        if (prior !== null && !prior.includes(MANAGED_OPEN)) {
+          // A file we did not write: never overwrite it.
+          console.warn(`[briefing] skipped ${path}: exists and is not managed by agentistics`)
+          out.push({ harness: target.harness, path, changed: false, skipped: true })
+          continue
+        }
+        // Owned file: replace only the managed block (and our version stamp), keep user text around it.
+        const next = prior === null ? desired : replaceManagedBlock(prior, managedBlock(skill)).replace(/(agentistics-version: )"\d+"/, `$1"${BRIEFING_VERSION}"`)
+        if (prior !== next) { await mkdir(dirname(path), { recursive: true, mode: 0o700 }); await writeFile(path, next, { mode: 0o600 }) }
+        out.push({ harness: target.harness, path, changed: prior !== next })
       }
       continue
     }
@@ -61,7 +69,13 @@ export async function uninstallBriefing(o: InstallOptions): Promise<InstallResul
       for (const skill of briefingSkills()) {
         const path = join(dirname(target.path), 'skills', skill.name, 'SKILL.md')
         const content = await read(path)
-        if (content?.includes('agentistics-managed-briefing:')) { await rm(path); out.push({ harness: target.harness, path, changed: true, removed: true }) }
+        if (content?.includes(MANAGED_OPEN)) {
+          const after = removeManagedBlocks(content)
+          // Only our generated frontmatter left → nothing of the user's remains: delete the file.
+          const bare = after.replace(/^---\nname: [^\n]*\ndescription: [^\n]*\nmetadata:\n  agentistics-version: "\d+"\n---\n?/, '').trim() === ''
+          if (bare) { await rm(path); out.push({ harness: target.harness, path, changed: true, removed: true }) }
+          else { await writeFile(path, after, { mode: 0o600 }); out.push({ harness: target.harness, path, changed: true }) }
+        }
         await pruneEmpty(dirname(path))
       }
       continue

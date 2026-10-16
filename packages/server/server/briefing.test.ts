@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { BRIEFING_VERSION, PLAN_LIMITS_TOOL, briefingSkills, briefingText, managedBlock, managedTargets, removeManagedBlocks, replaceManagedBlock, skillMarkdown } from './briefing'
+import { BRIEFING_VERSION, MANAGED_OPEN, PLAN_LIMITS_TOOL, briefingSkills, briefingText, managedBlock, managedTargets, removeManagedBlocks, replaceManagedBlock, skillMarkdown } from './briefing'
+import { flowLines } from './briefing-flow'
 import { ensureBriefingInstalled, installBriefing, uninstallBriefing } from './briefing-installer'
 
 describe('managed briefing source', () => {
@@ -57,6 +58,59 @@ describe('managed briefing source', () => {
 })
 
 describe('briefing installer', () => {
+  const flowSkill = () => briefingSkills().find(x => x.name === 'agentistics-session-flow')!
+  test('v1 -> v2 upgrade keeps user text around the managed block in an owned SKILL.md', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'agentistics-briefing-v1-'))
+    const path = join(home, '.claude', 'skills', 'agentistics-vault', 'SKILL.md')
+    const vault = briefingSkills().find(x => x.name === 'agentistics-vault')!
+    await mkdir(join(home, '.claude', 'skills', 'agentistics-vault'), { recursive: true })
+    const v1 = skillMarkdown(vault, 1).replace('\n---\n\n', '\n---\n\nMY NOTES BEFORE\n\n').replace(/\n$/, '\n\nMY NOTES AFTER\n')
+    await writeFile(path, v1)
+    const r = await installBriefing({ home, harnesses: ['claude'] })
+    expect(r.find(x => x.path === path)?.changed).toBe(true)
+    const next = await readFile(path, 'utf8')
+    expect(next).toContain('MY NOTES BEFORE')
+    expect(next).toContain('MY NOTES AFTER')
+    expect(next).toContain(`${MANAGED_OPEN}${BRIEFING_VERSION} agentistics-vault`)
+    expect(next).not.toContain(`${MANAGED_OPEN}1 `)
+    expect(next).toContain(`agentistics-version: "${BRIEFING_VERSION}"`)
+    // idempotent, and uninstall keeps the user's text (file not deleted)
+    expect((await installBriefing({ home, harnesses: ['claude'] })).some(x => x.changed)).toBe(false)
+    await uninstallBriefing({ home, harnesses: ['claude'] })
+    const left = await readFile(path, 'utf8')
+    expect(left).toContain('MY NOTES BEFORE')
+    expect(left).toContain('MY NOTES AFTER')
+    expect(left).not.toContain(MANAGED_OPEN)
+  })
+
+  test('an unowned SKILL.md with the same name is never overwritten (skipped)', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'agentistics-briefing-collide-'))
+    const dir = join(home, '.claude', 'skills', 'agentistics-session-flow')
+    await mkdir(dir, { recursive: true })
+    const mine = '---\nname: agentistics-session-flow\ndescription: mine\n---\nMy own skill\n'
+    await writeFile(join(dir, 'SKILL.md'), mine)
+    const r = await installBriefing({ home, harnesses: ['claude'] })
+    expect(await readFile(join(dir, 'SKILL.md'), 'utf8')).toBe(mine)
+    expect(r.find(x => x.path === join(dir, 'SKILL.md'))).toMatchObject({ changed: false, skipped: true })
+    // the other skills were still installed
+    expect(await readFile(join(home, '.claude', 'skills', 'agentistics-vault', 'SKILL.md'), 'utf8')).toContain(MANAGED_OPEN)
+    await uninstallBriefing({ home, harnesses: ['claude'] })
+    expect(await readFile(join(dir, 'SKILL.md'), 'utf8')).toBe(mine)
+  })
+
+  test('every installer target output carries the full flow (en+pt) and keeps user text', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'agentistics-briefing-targets-'))
+    const targets = managedTargets(home)
+    for (const t of targets.filter(x => !x.skills)) { await mkdir(join(t.path, '..'), { recursive: true }); await writeFile(t.path, '# User rules\n') }
+    await installBriefing({ home, harnesses: targets.map(t => t.harness) })
+    expect(targets).toHaveLength(6)
+    for (const t of targets) {
+      const out = t.skills ? await readFile(join(home, '.claude', 'skills', 'agentistics-session-flow', 'SKILL.md'), 'utf8') : await readFile(t.path, 'utf8')
+      for (const line of [...flowLines('en'), ...flowLines('pt')]) expect(out).toContain(line)
+      if (!t.skills) expect(out).toContain('# User rules')
+    }
+  })
+
   test('is idempotent and uninstall preserves user instructions', async () => {
     const home = await mkdtemp(join(tmpdir(), 'agentistics-briefing-'))
     const codex = join(home, '.codex', 'AGENTS.md')
