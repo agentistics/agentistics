@@ -357,6 +357,8 @@ export async function reportFromIdentity(session: string | null, round: CheckinR
 }
 
 let timer: ReturnType<typeof setInterval> | undefined
+const SWEEP_MS = 5 * 60_000
+let lastSweep = 0
 const firing = new Map<string, Promise<void>>()
 function guard(session: string): () => void {
   let release!: () => void
@@ -367,16 +369,36 @@ export function startCheckinTimer(): void {
   if (timer) return
   const tick = async () => {
     const now = Date.now()
-    if (!(await anyDue(now))) return
+    // A periodic sweep also seeds leaders that appeared after the first agenda was stored.
+    const sweep = now - lastSweep >= SWEEP_MS
+    if (sweep) lastSweep = now
+    if (!(await anyDue(now)) && !sweep) return
     await fireDue(now)
   }
   timer = setInterval(() => { void tick() }, 15_000); timer.unref?.(); void tick()
 }
-/** Cheap gate for the 15 s tick: one preferences read, no fleet or roles read unless a round is due. */
+/** Cheap gate for the 15 s tick: one preferences read, no fleet or roles read unless a round may be due. */
 export async function anyDue(now: number): Promise<boolean> {
   const prefs = await deps.readPreferences()
   const stored = (prefs.checkin ?? {}) as Record<string, Stored>
-  return Object.entries(stored).some(([session, old]) => due(agendaState(session, old, prefs, now), now))
+  const entries = Object.entries(stored)
+  // Nothing stored yet: only fireDue (which reads the fleet) can seed the leaders' agendas.
+  if (entries.length === 0) return true
+  // Inherited agendas whose defaults changed must be persisted, or every tick would push their
+  // deadline forward again. Done here, without a fleet read, and only when something drifted.
+  const drifted = entries.filter(([session, old]) => old.inherits !== false && stable(agendaState(session, old, prefs, now)) !== stable(publicState(old)))
+  let current = prefs
+  if (drifted.length) {
+    await updateStored((all, latest) => {
+      for (const [session] of drifted) {
+        if (!all[session] || all[session].inherits === false) continue
+        all[session] = { ...all[session], ...agendaState(session, all[session], latest, now), inherits: inheritsDefaults(all[session]) }
+      }
+    })
+    current = await deps.readPreferences()
+  }
+  const latest = (current.checkin ?? {}) as Record<string, Stored>
+  return Object.entries(latest).some(([session, old]) => due(agendaState(session, old, current, now), now))
 }
 export async function fireDue(now = Date.now()): Promise<string[]> {
   const rows = (await deps.readFleet('pt')).rows; const roles = (await deps.readRolesDoc(deps.dataDir)).roles; const fired: string[] = []

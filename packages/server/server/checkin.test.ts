@@ -395,10 +395,26 @@ async function begin(withWorker = false) {
 }
 
 describe('timer precheck', () => {
-  test('anyDue is false with nothing stored and true once a stored round is due', async () => {
-    reset()
-    expect(await anyDue(Date.now())).toBe(false)
-    preferences = { checkin: { 'conversation-leader': { ...defaultConfig(), session: 'conversation-leader', lastRunAt: null, nextRunAt: 1000, last: null, inherits: false } } }
+  test('anyDue passes with nothing stored so a tick can seed leaders', async () => {
+    reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+    expect(await anyDue(0)).toBe(true)
+    await fireDue(0)
+    expect(stored()).toBeDefined()
+  })
+  test('a changed global default fires on the new interval', async () => {
+    reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+    await fireDue(0)
+    const t0 = stored().nextRunAt
+    preferences = { ...preferences, checkinDefaults: { ...defaultConfig(), intervalMin: 15 } }
+    // Ticks before the new deadline must persist the change, not keep pushing it forward.
+    await anyDue(MINUTE); await anyDue(2 * MINUTE)
+    expect(stored().intervalMin).toBe(15)
+    expect(stored().nextRunAt).toBe(MINUTE + 15 * MINUTE)
+    expect(t0).not.toBe(stored().nextRunAt)
+    expect(await anyDue(16 * MINUTE)).toBe(true)
+  })
+  test('anyDue is true once a stored round is due', async () => {
+    reset(); preferences = { checkin: { 'conversation-leader': { ...defaultConfig(), session: 'conversation-leader', lastRunAt: null, nextRunAt: 1000, last: null, inherits: false } } }
     expect(await anyDue(999)).toBe(false)
     expect(await anyDue(1000)).toBe(true)
   })
