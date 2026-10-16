@@ -463,3 +463,52 @@ export function envelopePinsFile(connId: string): string {
 export function envelopeInboxFile(connId: string): string {
   return join(TEAM_CONN_DIR, `envelope-inbox-${safeConnId(connId)}.json`)
 }
+
+// ---------------------------------------------------------------------------
+// Account roots (PLAN.ACCOUNTS D2): every directory a harness's sessions can live in.
+// ---------------------------------------------------------------------------
+export interface HarnessRoot {
+  root: string
+  /** Account id bound to this root; absent for a default root with no binding. */
+  account?: string
+  isDefault: boolean
+}
+
+const DEFAULT_HARNESS_DIRS: Record<string, string> = {
+  claude: CLAUDE_DIR, codex: CODEX_DIR, gemini: GEMINI_DIR, copilot: COPILOT_DIR, kimi: KIMI_DIR,
+}
+const ROOTS_TTL_MS = 5_000
+const rootsMemo = new Map<string, { at: number; value: Promise<HarnessRoot[]> }>()
+
+/** Test seam: drop the 5 s memo so a changed registry is seen at once. */
+export function resetHarnessRootsMemo(): void { rootsMemo.clear() }
+
+/**
+ * The default root plus every non-retired registry root of `harness`. Read from the registry file
+ * only (`readAccounts`, never a probe). Antigravity has no isolation variable, so it is never
+ * given a second root: it returns its single default.
+ */
+export function harnessRoots(harness: string, now: number = Date.now()): Promise<HarnessRoot[]> {
+  const held = rootsMemo.get(harness)
+  if (held && now - held.at < ROOTS_TTL_MS) return held.value
+  const value = (async (): Promise<HarnessRoot[]> => {
+    const def = DEFAULT_HARNESS_DIRS[harness]
+    if (!def) return []
+    const out: HarnessRoot[] = []
+    let file: Awaited<ReturnType<typeof import('./harness-accounts').readAccounts>> | null = null
+    try { file = await (await import('./harness-accounts')).readAccounts() } catch { /* registry unreadable: default only */ }
+    const accounts = file?.accounts ?? []
+    const bindings = file?.bindings ?? {}
+    const bound = accounts.find(a => a.id === bindings[`${harness}:`])
+    out.push({ root: def, isDefault: true, ...(bound ? { account: bound.id } : {}) })
+    for (const a of accounts) {
+      if (a.harness !== harness || a.retired || !a.root || a.root === def) continue
+      if (bindings[`${harness}:${a.root}`] !== a.id) continue
+      if (out.some(r => r.root === a.root)) continue
+      out.push({ root: a.root, account: a.id, isDefault: false })
+    }
+    return out
+  })()
+  rootsMemo.set(harness, { at: now, value })
+  return value
+}

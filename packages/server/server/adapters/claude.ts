@@ -1,7 +1,8 @@
 import type { SessionMeta } from '@agentistics/core'
 import type { HarnessAdapter } from './types'
 import { harnessEnabled } from './types'
-import { CLAUDE_DIR } from '../config'
+import { join } from 'path'
+import { CLAUDE_DIR, harnessRoots } from '../config'
 import { loadSessionMetas, scanProjects } from '../data'
 
 export const claudeAdapter: HarnessAdapter = {
@@ -15,11 +16,29 @@ export const claudeAdapter: HarnessAdapter = {
     return harnessEnabled('claude')
   },
   async loadSessions(): Promise<SessionMeta[]> {
-    const metaMap = await loadSessionMetas()
-    const knownIds = new Set(metaMap.keys())
-    const { extraSessions } = await scanProjects(knownIds, metaMap)
-    return tagClaude([...metaMap.values(), ...extraSessions])
+    const roots = await harnessRoots('claude')
+    return (await Promise.all(roots.map(r => loadClaudeRoot(r.root, r.account, r.isDefault)))).flat()
   },
+}
+
+/**
+ * One claude root. The default root keeps the module's own paths (and its archive-free read); any
+ * other root is read from `<root>/usage-data/session-meta` and `<root>/projects` and stamped with the
+ * root's account. `stats-cache.json` is never read here: it stays the default root's, so a second
+ * root cannot change the Claude totals (spec §4 D8).
+ */
+export async function loadClaudeRoot(root: string, account?: string, isDefault = root === CLAUDE_DIR): Promise<SessionMeta[]> {
+  const metaMap = await loadSessionMetas(isDefault ? undefined : [join(root, 'usage-data', 'session-meta')])
+  const knownIds = new Set(metaMap.keys())
+  const { extraSessions } = await scanProjects(knownIds, metaMap, isDefault ? undefined : [join(root, 'projects')])
+  const sessions = tagClaude([...metaMap.values(), ...extraSessions])
+  return account ? sessions.map(s => ({ ...s, account })) : sessions
+}
+
+/** Sessions of every NON-default claude root; the default root is read by `buildApiResponse` itself. */
+export async function claudeExtraRootSessions(): Promise<SessionMeta[]> {
+  const roots = (await harnessRoots('claude')).filter(r => !r.isDefault)
+  return (await Promise.all(roots.map(r => loadClaudeRoot(r.root, r.account, false)))).flat()
 }
 
 /**

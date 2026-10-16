@@ -1197,8 +1197,10 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     const extraHarnessSessions: SessionMeta[] = []
     timer.mark('consolidate')
     for (const adapter of await getEnabledAdapters()) {
-      if (adapter.id === 'claude') continue // already loaded above
-      const extra = await adapter.loadSessions().catch(() => [] as SessionMeta[])
+      // Claude's default root is already loaded above; only its other (account) roots come from here.
+      const extra = adapter.id === 'claude'
+        ? await (await import('./adapters/claude')).claudeExtraRootSessions().catch(() => [] as SessionMeta[])
+        : await adapter.loadSessions().catch(() => [] as SessionMeta[])
       timer.mark(adapter.id)
       for (const s of extra) {
         // Key by (harness, session_id) so IDs never collide across harnesses
