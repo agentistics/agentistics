@@ -53,7 +53,12 @@ export interface FilingRepo {
 }
 
 export interface FilingInput {
-  role: 'worker' | 'leader'
+  /**
+   * `worker` (a parent session started it, or `--role worker`) is held to rules 3-4; `leader` is
+   * exempt; `undefined` is a PERSON or an unknown caller — the web/TUI wizard, a plain
+   * `agentop session claude` — and is held to neither (spec rule 6: no parent leaves the role alone).
+   */
+  role?: 'worker' | 'leader' | undefined
   /** Task id or exact title. */
   taskRef?: string
   /** Subtask id or exact title. */
@@ -100,6 +105,7 @@ export type FilingRefusal =
   | 'no_such_subtask' | 'ambiguous_subtask' | 'subtask_needs_task'
   | 'no_such_folder' | 'ambiguous_folder'
   | 'cwd_missing' | 'cwd_wrong_repo' | 'cwd_needed' | 'cwd_shared_checkout'
+  | 'subtask_refused' | 'board_unreadable'
 
 export type FilingPlan = {
   ok: true
@@ -116,7 +122,8 @@ export type FilingPlan = {
   folderSource: FolderSource
   cwd: string
   cwdSource: CwdSource
-  role: 'worker' | 'leader'
+  /** Absent for a person / unknown caller. */
+  role?: 'worker' | 'leader'
   warnings: FilingWarning[]
 } | { ok: false; code: FilingRefusal; detail: string; candidates?: string[] }
 
@@ -184,7 +191,7 @@ function resolveFiling(input: FilingInput, taskRef: string | undefined, subtaskR
     const r = byIdOrTitle(subtasks, subtaskRef)
     if (!r.ok) {
       return r.matches.length > 1
-        ? refuse('ambiguous_subtask', `"${subtaskRef}" names ${r.matches.length} subtasks — pass --task or the id`, r.matches.map(label))
+        ? refuse('ambiguous_subtask', `"${subtaskRef}" names ${r.matches.length} subtasks — name the task or use the id`, r.matches.map(label))
         : refuse('no_such_subtask', `no subtask has the id or exact title "${subtaskRef}"`, closest(subtasks, subtaskRef))
     }
     sub = r.item
@@ -254,27 +261,27 @@ function checkoutsFor(input: FilingInput, want: RepoId): string[] {
   return [...out].slice(0, 10)
 }
 
-function resolveCwd(input: FilingInput, role: 'worker' | 'leader', task: Task | undefined): { cwd: string; source: CwdSource; shared?: true } | Refusal {
+function resolveCwd(input: FilingInput, role: 'worker' | 'leader' | undefined, task: Task | undefined): { cwd: string; source: CwdSource; shared?: true } | Refusal {
   const explicit = clean(input.cwd)
   const fromPred = !explicit && input.handoffOf ? input.handoffOf.cwd : undefined
   const cwd = explicit ?? fromPred ?? input.callerCwd
   const source: CwdSource = explicit ? 'explicit' : fromPred ? 'predecessor' : 'caller'
   const facts = input.repoOf(cwd)
   if (!exists(facts)) return refuse('cwd_missing', `the directory ${cwd} does not exist`)
-  if (role === 'leader') return { cwd, source }
+  if (role !== 'worker') return { cwd, source }
 
   const want = repoId(task?.repo)
   if (want && !sameRepo(facts, want)) {
     const candidates = checkoutsFor(input, want)
     return source === 'explicit'
-      ? refuse('cwd_wrong_repo', `${cwd} is not a checkout of ${task!.repo} (task ${task!.id}) — pass --cwd with one of its worktrees`, candidates)
-      : refuse('cwd_needed', `task ${task!.id} belongs to ${task!.repo} and ${cwd} is outside it — pass --cwd with one of its worktrees`, candidates)
+      ? refuse('cwd_wrong_repo', `${cwd} is not a checkout of ${task!.repo} (task ${task!.id}) — use one of its worktrees (CLI: --cwd)`, candidates)
+      : refuse('cwd_needed', `task ${task!.id} belongs to ${task!.repo} and ${cwd} is outside it — start the session in one of its worktrees (CLI: --cwd)`, candidates)
   }
   const inRepo = keyOfFacts(facts) !== undefined
   if (inRepo && !facts.worktree && input.liveInCwd(cwd, input.caller?.id) >= 1) {
     if (!input.sharedCwd) {
       return refuse('cwd_shared_checkout',
-        `${cwd} is a main checkout another live session already works in — use a worktree (git worktree add .claude/worktrees/<name> -b <branch>) or pass --shared-cwd`)
+        `${cwd} is a main checkout another live session already works in — use a worktree (git worktree add .claude/worktrees/<name> -b <branch>) or allow sharing (CLI: --shared-cwd)`)
     }
     return { cwd, source, shared: true }
   }
@@ -340,14 +347,14 @@ function fromPredecessor(r: Refusal, pred: ManagedSession | undefined, task: boo
   const taskCode = r.code === 'no_such_task' || r.code === 'ambiguous_task'
   const subCode = r.code === 'no_such_subtask' || r.code === 'ambiguous_subtask' || r.code === 'subtask_needs_task'
   if ((taskCode && task) || (subCode && sub)) {
-    return { ...r, detail: `${r.detail} (inherited from the predecessor ${pred.id}; pass --task${sub ? ' and --subtask' : ''} to file elsewhere)` }
+    return { ...r, detail: `${r.detail} (inherited from the predecessor ${pred.id}; name the task${sub ? ' and subtask' : ''} explicitly to file elsewhere)` }
   }
   return r
 }
 
 export function planFiling(input: FilingInput): FilingPlan {
   const pred = input.handoffOf
-  const role: 'worker' | 'leader' = pred ? 'leader' : input.role
+  const role: 'worker' | 'leader' | undefined = pred ? 'leader' : input.role
   const explicitTask = clean(input.taskRef)
   const explicitSub = clean(input.subtaskRef)
   // A hand-off inherits the predecessor's filing unless one was named outright. A SUBTASK named
@@ -385,7 +392,7 @@ export function planFiling(input: FilingInput): FilingPlan {
     folderSource: folder.source,
     cwd: cwd.cwd,
     cwdSource: cwd.source,
-    role,
+    ...(role ? { role } : {}),
     warnings,
   }
 }

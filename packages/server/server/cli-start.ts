@@ -4528,14 +4528,15 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // WHERE this session is filed is the one planner's answer (`spawn-filing.ts`), shared with
       // `session start` / `batch`: references resolved on the board, a group member filed on its
       // group, a hand-off inheriting its predecessor's filing, cwd and folder. A refusal spawns nothing.
-      const { planSpawnFiling } = await import('./sessions/spawn-filing-io')
+      const { planSpawnFilingSafe, attachAfterSpawn } = await import('./sessions/spawn-filing-io')
       const { filingRow, refusalText } = await import('./sessions/spawn-row')
-      const filing = await planSpawnFiling({
-        role: req.handoff ? 'leader' : (req.role ?? 'worker'),
+      const filing = await planSpawnFilingSafe({
+        // No parent and no role = a person at a wizard: neither worker nor leader (spec rule 6).
+        role: req.handoff ? 'leader' : (req.role ?? (req.parentSessionId ? 'worker' : undefined)),
         taskRef: req.taskId, subtaskRef: req.subtaskId, cwd: req.cwd,
         callerSessionId: req.parentSessionId,
         ...(req.handoff && req.parentSessionId ? { handoffOf: req.parentSessionId } : {}),
-      }).catch(e => ({ ok: false as const, code: 'cwd_missing' as const, detail: `could not read the board: ${e instanceof Error ? e.message : String(e)}` }))
+      })
       if (!filing.ok) return { ok: false, message: refusalText(filing) }
       const taskId = filing.taskId
       const subtaskId = filing.subtaskId
@@ -4560,10 +4561,11 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.force ? { force: true } : {}),
         ...(req.origin ? { origin: req.origin } : {}),
       }, S(), lang).then(async r => {
+        let attachNote = ''
         // NW-02: a session started for a BOARD task is filed there by id, not only named after it.
         if (r.ok && r.id && taskId) {
-          const { attachSession } = await import('./sessions/task-web')
-          await attachSession(taskId, r.id, subtaskId ? { subtaskId } : {}).catch(() => null)
+          const a = await attachAfterSpawn({ taskId, ...(subtaskId ? { subtaskId } : {}) }, r.id)
+          if (!a.ok) attachNote = `The session started but the board did not file it (${a.reason}).`
         }
         // The folder the plan chose (the predecessor's, the task's, or where the caller works).
         // Never fails the spawn: the session is already running, and an error here would invite a
@@ -4576,7 +4578,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
             await fileInFolder(filing.folderId, { id: r.id, ...(row?.conversationId ? { conversationId: row.conversationId } : {}) })
           } catch { /* a folder is a convenience, not the spawn */ }
         }
-        return r
+        return attachNote ? { ...r, message: `${r.message ? r.message + ' ' : ''}${attachNote}` } : r
       })
     },
   }

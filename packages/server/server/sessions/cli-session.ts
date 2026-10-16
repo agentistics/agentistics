@@ -41,7 +41,7 @@ import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefC
 import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
 import { addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession } from './registry'
 import { callerHoldsIdentity } from './session-identity'
-import { planSpawnFiling } from './spawn-filing-io'
+import { attachAfterSpawn, liveIdsOf, planSpawnFilingSafe } from './spawn-filing-io'
 import type { FilingPlan } from './spawn-filing'
 import { filingJson, filingRow, refusalText, WARNING_TEXT } from './spawn-row'
 import { loadConversations } from './conversations'
@@ -226,11 +226,12 @@ function reportFilingRefusal(r: Extract<FilingPlan, { ok: false }>, json: boolea
   else console.error(refusalText(r))
 }
 
-/** Record the filing on the board like the web door does (`attachSession`); never fails a running spawn. */
-async function attachFiling(plan: Extract<FilingPlan, { ok: true }>, sessionId: string): Promise<void> {
-  if (!plan.taskId) return
-  const { attachSession } = await import('./task-web')
-  await attachSession(plan.taskId, sessionId, plan.subtaskId ? { subtaskId: plan.subtaskId } : {}).catch(() => null)
+/** Record the filing on the board like the web door does; a refusal is SAID (stderr) and never fails a running spawn. */
+async function attachFiling(plan: Extract<FilingPlan, { ok: true }>, sessionId: string): Promise<string | null> {
+  const r = await attachAfterSpawn(plan, sessionId)
+  if (r.ok) return null
+  console.error(`Warning: the session ${sessionId} started but the board did not file it (${r.reason}).`)
+  return r.reason
 }
 
 let warnedNoFolder = false
@@ -411,11 +412,13 @@ export async function start(
   const lang = await resolveLang()
   // WHERE this session is filed is decided once, BEFORE the memory gate: a refusal spawns nothing.
   const parentSessionIdForPlan = callerSessionId()
-  const filing = await planSpawnFiling({
-    role: cmd.role ?? (cmd.label && hasRolePrefix(cmd.label) ? 'leader' : 'worker'),
+  const filing = await planSpawnFilingSafe({
+    liveIds: await liveIdsOf(backend),
+    // A person with no parent session is neither: only a parent (or an explicit role) makes a worker.
+    role: cmd.role ?? (cmd.label && hasRolePrefix(cmd.label) ? 'leader' : parentSessionIdForPlan ? 'worker' : undefined),
     taskRef: cmd.taskId ?? cmd.task, subtaskRef: cmd.subtask, folderRef: cmd.folder,
     cwd: cmd.cwd, sharedCwd: cmd.sharedCwd, callerSessionId: parentSessionIdForPlan,
-  }).catch(e => ({ ok: false as const, code: 'cwd_missing' as const, detail: `could not read the board: ${e instanceof Error ? e.message : String(e)}` }))
+  })
   if (!filing.ok) { reportFilingRefusal(filing, cmd.json ?? false); return 1 }
   for (const w of filing.warnings) if (w !== 'no_folder') console.error(WARNING_TEXT[w])
   const cwd = filing.cwd
@@ -508,7 +511,7 @@ export async function start(
 
   if (role) await applyRoleTitle(id, cmd.label ?? id, role, lang).catch(() => false)
   await fileAtSpawnPlanned(folderId, { id, conversationId: planned.plan.conversationId })
-  await attachFiling(filing, id)
+  const attachFailed = await attachFiling(filing, id)
   // Muted at birth: keyed by the conversation we assigned, else by the managed id (re-keyed when the
   // poller links the conversation). Delivery only — the session still reads as waiting.
   if (cmd.notify === 'off') await muteAtSpawn(planned.plan.conversationId ?? id).catch(() => {})
@@ -524,7 +527,7 @@ export async function start(
   })
 
   if (cmd.background) {
-    if (cmd.json) console.log(JSON.stringify({ id, harness: cmd.harness, label: cmd.label ?? null, ...filingJson(filing) }, null, 2))
+    if (cmd.json) console.log(JSON.stringify({ id, harness: cmd.harness, label: cmd.label ?? null, ...filingJson(filing), ...(attachFailed ? { attachFailed } : {}) }, null, 2))
     else {
       console.log(`Started ${cmd.harness} session ${id}${cmd.label ? ` (${cmd.label})` : ''} in ${cwd}`)
       console.log(`Attach with: agentop session attach ${id}`)
@@ -639,26 +642,34 @@ export async function batch(
   // WHERE each session is filed is decided for the WHOLE batch before anything else: one refusal
   // refuses it all (nothing has started, so there is no half to strand). `--task` here has always
   // meant "this task, created if it is not on the board yet" — so a title that matches nothing is
-  // the one refusal that is NOT final: the task is made after the gate and the plan is asked again.
+  // planned against a SYNTHETIC task standing in for the one that will be created: every other
+  // refusal (--subtask, --folder, a missing @cwd, a shared checkout) then shows up BEFORE the board
+  // is written, and a refused batch creates no task and no attempt.
   const lang = await resolveLang()
   const callerId = callerSessionId()
-  const planFor = (spec: BatchSpec, taskRef: string) => planSpawnFiling({
-    role: spec.name && hasRolePrefix(spec.name) ? 'leader' : 'worker',
-    taskRef, subtaskRef: cmd.subtask, folderRef: spec.folder, cwd: spec.cwd, sharedCwd: cmd.sharedCwd,
-    callerSessionId: callerId,
-  }).catch(e => ({ ok: false as const, code: 'cwd_missing' as const, detail: `could not read the board: ${e instanceof Error ? e.message : String(e)}` }))
-  const planAll = async (taskRef: string): Promise<Array<Extract<FilingPlan, { ok: true }>> | Extract<FilingPlan, { ok: false }>> => {
+  const PENDING_ID = 't-pending-batch'
+  const liveIds = await liveIdsOf(backend)
+  const planAll = async (taskRef: string, pending: boolean): Promise<Array<Extract<FilingPlan, { ok: true }>> | Extract<FilingPlan, { ok: false }>> => {
     const plans: Array<Extract<FilingPlan, { ok: true }>> = []
     for (const spec of cmd.specs) {
-      const p = await planFor(spec, taskRef)
-      if (!p.ok) return p
+      const p = await planSpawnFilingSafe({
+        liveIds,
+        role: spec.name && hasRolePrefix(spec.name) ? 'leader' : callerId ? 'worker' : undefined,
+        taskRef, subtaskRef: cmd.subtask, folderRef: spec.folder, cwd: spec.cwd, sharedCwd: cmd.sharedCwd,
+        callerSessionId: callerId,
+        // Earlier specs of this batch already occupy their directories.
+        extraLiveCwds: plans.map(x => x.cwd),
+        ...(pending ? { pendingTask: { id: PENDING_ID, title: cmd.task } } : {}),
+      })
+      if (!p.ok) return pending ? { ...p, detail: p.detail.split(PENDING_ID).join(`"${cmd.task}" (new)`) } : p
       plans.push(p)
     }
     return plans
   }
-  let plans = await planAll(cmd.taskId ?? cmd.task)
-  const createByTitle = !Array.isArray(plans) && plans.code === 'no_such_task' && !/^t-[0-9a-z]+$/.test(cmd.task)
-  if (!Array.isArray(plans) && !createByTitle) { reportFilingRefusal(plans, cmd.json ?? false); return 1 }
+  let plans = await planAll(cmd.taskId ?? cmd.task, false)
+  const createByTitle = !Array.isArray(plans) && plans.code === 'no_such_task' && !cmd.taskId && !/^t-[0-9a-z]+$/.test(cmd.task)
+  if (createByTitle) plans = await planAll(PENDING_ID, true)
+  if (!Array.isArray(plans)) { reportFilingRefusal(plans, cmd.json ?? false); return 1 }
 
   // The memory GATE, for the WHOLE batch — `requested` is every session it asks for, and a batch
   // is admitted or refused as a UNIT (see `spawn-admission.ts`'s docstring on `fits`: half a batch
@@ -673,12 +684,11 @@ export async function batch(
   // started before its task existed would carry a name and no id — the unattributed case
   // `task-rollup.ts` has to report as a hole. Best effort: a book that cannot be written costs the
   // ids, never the sessions.
-  const resolved = await resolveTaskAndAttempts(cmd, !Array.isArray(plans) ? undefined : plans[0]?.taskId).catch(() => null)
-  if (!Array.isArray(plans)) {
-    // The task was just created by title: ask again, now that it exists.
+  const resolved = await resolveTaskAndAttempts(cmd, createByTitle ? undefined : plans[0]?.taskId).catch(() => null)
+  if (createByTitle) {
     if (!resolved) { console.error('Not started — the task could not be created on the board.'); return 1 }
-    plans = await planAll(resolved.taskId)
-    if (!Array.isArray(plans)) { reportFilingRefusal(plans, cmd.json ?? false); return 1 }
+    // The plans were made against the stand-in: stamp the real id.
+    plans = plans.map(p => ({ ...p, taskId: resolved.taskId }))
   }
   const parentLink = await parentLinkOf(callerSessionId())
   const parentSessionId = parentLink.parentSessionId
@@ -767,8 +777,8 @@ export async function batch(
     if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
     if (spec.notify === 'off') await muteAtSpawn(planned.plan.conversationId ?? id).catch(() => {})
     await fileAtSpawnPlanned(filing.folderId, { id, conversationId: planned.plan.conversationId })
-    await attachFiling(filing, id)
-    filingJsons.push(filingJson(filing))
+    const attachFailed = await attachFiling(filing, id)
+    filingJsons.push({ ...filingJson(filing), ...(attachFailed ? { attachFailed } : {}) } as ReturnType<typeof filingJson>)
     const liveBackend = await backend.list().catch(() => null)
     const backendIds = liveBackend ? new Set(liveBackend.map(b => b.id)) : null
     await retireFallenSessions({

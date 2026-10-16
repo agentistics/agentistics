@@ -31,7 +31,7 @@ export function filingJson(plan: OkPlan): {
   subtaskId: string | null
   folder: { id: string; path: string; source: OkPlan['folderSource'] } | null
   cwd: string
-  role: 'worker' | 'leader'
+  role: 'worker' | 'leader' | null
   warnings: OkPlan['warnings']
 } {
   return {
@@ -39,7 +39,7 @@ export function filingJson(plan: OkPlan): {
     subtaskId: plan.subtaskId ?? null,
     folder: plan.folderId ? { id: plan.folderId, path: plan.folderPath ?? plan.folderId, source: plan.folderSource } : null,
     cwd: plan.cwd,
-    role: plan.role,
+    role: plan.role ?? null,
     warnings: plan.warnings,
   }
 }
