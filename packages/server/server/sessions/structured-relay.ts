@@ -61,7 +61,6 @@ export function runRelay(dir: string): void {
   // The ACP CLI may fork helpers of its own. Keeping the child in a detached process group lets the
   // relay terminate the whole tree, rather than leaving a helper behind when the CLI ignores TERM.
   const child = spawn(spec.bin, spec.args, { cwd: spec.cwd, detached: true, stdio: ['pipe', 'pipe', 'ignore'], env: { ...process.env, ...extra } })
-  writeFileSync(join(dir, RELAY_FILES.pid), JSON.stringify({ relay: process.pid, child: child.pid ?? null }), { mode: 0o600 })
 
   let client: Socket | null = null
   const send = (s: Socket | null, msg: unknown): void => { if (s && !s.destroyed) s.write(`${JSON.stringify(msg)}\n`) }
@@ -90,6 +89,12 @@ export function runRelay(dir: string): void {
     const pid = child.pid
     if (pid === undefined) return
     try { process.kill(-pid, signal) } catch { try { child.kill(signal) } catch { /* already dead */ } }
+  }
+  /** Is anything left in the child's process group (it was started detached: its pid is the pgid)? */
+  const groupAlive = (): boolean => {
+    const pid = child.pid
+    if (pid === undefined) return false
+    try { process.kill(-pid, 0); return true } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM' }
   }
   const endChild = (): void => {
     // A SIGTERM can arrive after the child exit event has already marked the relay ended. The relay
@@ -154,8 +159,18 @@ export function runRelay(dir: string): void {
     client?.end()
     server.close()
     try { unlinkSync(sockPath) } catch { /* already gone */ }
-    if (termAt) setTimeout(() => { killChild('SIGKILL'); process.exit(0) }, groupGrace + 50)
-    else setTimeout(() => process.exit(0), 200).unref?.()
+    if (termAt) {
+      // The grace exists for descendants that ignore TERM; an EMPTY group has none, so the relay
+      // leaves at once. Waiting the full grace regardless made every kill and "open in terminal"
+      // take 3 s, and a stall under load past the caller's deadline read as "still running".
+      const deadline = Date.now() + groupGrace
+      const finish = (): void => {
+        if (!groupAlive()) { process.exit(0); return }
+        if (Date.now() >= deadline) { killChild('SIGKILL'); process.exit(0); return }
+        setTimeout(finish, 50)
+      }
+      finish()
+    } else setTimeout(() => process.exit(0), 200).unref?.()
   })
   child.on('error', () => {
     if (ended) return
@@ -171,6 +186,10 @@ export function runRelay(dir: string): void {
   process.on('SIGHUP', () => {})
   process.on('SIGTERM', endChild)
   process.on('SIGINT', endChild)
+  // Published LAST, after the signal handlers exist: whoever reads this file may TERM the relay at once,
+  // and a TERM before the handler is the default action — the relay dies and its child, in a process
+  // group of its own, is orphaned.
+  writeFileSync(join(dir, RELAY_FILES.pid), JSON.stringify({ relay: process.pid, child: child.pid ?? null }), { mode: 0o600 })
 }
 
 if (import.meta.main) {
