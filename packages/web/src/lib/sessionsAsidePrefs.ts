@@ -59,11 +59,16 @@ export interface AsideGroupPrefs {
    *  grupo" stay, so a folder can still be added without unfolding first), distinct from any one
    *  folder's own fold (`collapsedUserGroups`). */
   foldedGroupsSection: boolean
+  /** Folders whose "Ended (N)" block is EXPANDED — absent means collapsed (the default). */
+  expandedEndedGroups: string[]
+  /** Has the person ever picked a sort? Until then folders keep their drag order. */
+  sortExplicit: boolean
 }
 
 export const DEFAULT_ASIDE_GROUP_PREFS: AsideGroupPrefs = {
   groupBy: 'project', order: {}, collapsed: [], cardColor: 'wash', collapsedUserGroups: [],
   sort: DEFAULT_ORDER, hiddenUserGroups: [], foldedPinned: false, foldedGroupsSection: false,
+  expandedEndedGroups: [], sortExplicit: false,
 }
 
 /** Total: anything that is not a known key and direction reads as the default. */
@@ -104,6 +109,10 @@ function readOrder(v: unknown): Partial<Record<AsideGroupBy, string[]>> {
   return out
 }
 
+function sortDiffersFromDefault(o: SessionOrder): boolean {
+  return o.by !== DEFAULT_ORDER.by || o.dir !== DEFAULT_ORDER.dir
+}
+
 export function readAsideGroupPrefs(): AsideGroupPrefs {
   return parseAsideGroupPrefs(doc.get())
 }
@@ -130,6 +139,11 @@ export function parseAsideGroupPrefs(stored: unknown): AsideGroupPrefs {
         : [],
       foldedPinned: p.foldedPinned === true,
       foldedGroupsSection: p.foldedGroupsSection === true,
+      // A stored sort that is not the default, from before the flag existed, WAS a choice.
+      sortExplicit: typeof p.sortExplicit === 'boolean' ? p.sortExplicit : sortDiffersFromDefault(readSessionSort(p.sort)),
+      expandedEndedGroups: Array.isArray(p.expandedEndedGroups)
+        ? p.expandedEndedGroups.filter((x): x is string => typeof x === 'string')
+        : [],
     }
   } catch { return DEFAULT_ASIDE_GROUP_PREFS }
 }
