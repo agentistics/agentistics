@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { AWAY_COOLDOWN_MS, AWAY_QUIET_MS, flushAwayNotices, awayStatus, readAwayView, resetAwayLiveDedupe, sendAwayNotice, sessionAwayStatus, setAway, setSessionAway, type AwayDeps, type SessionAwayDeps } from './away'
+import { AWAY_COOLDOWN_MS, AWAY_QUIET_MS, flushAwayNotices, awayStatus, readAwayView, resetAwayLiveDedupe, sendAwayNotice, sessionAwayStatus, setAway, setSessionAway, awaySessionRows, type AwaySessionRow, type AwayDeps, type SessionAwayDeps } from './away'
 import { routeCapability } from './capability-guard'
 
 const NOW = Date.now()
@@ -20,6 +20,43 @@ function deps(over: Partial<AwayDeps> = {}) {
 describe('away routes', () => {
   it('reads off by default', async () => {
     expect(await readAwayView(deps().d)).toEqual({ state: { on: false, since: '', until: null, authorised: [], maxWorkers: 6, topCaps: {} }, active: false })
+  })
+  it('counts 4 waiting + 4 working + 89 running-truthy lost rows as 8, matching notice recipients', async () => {
+    const rows: AwaySessionRow[] = [
+      ...Array.from({ length: 4 }, (_, i) => ({ id: `waiting-${i}`, state: 'waiting', running: true })),
+      ...Array.from({ length: 4 }, (_, i) => ({ id: `working-${i}`, state: 'working', running: true })),
+      ...Array.from({ length: 89 }, (_, i) => ({ id: `lost-${i}`, state: 'lost', running: true })),
+      ...['exited', 'closed', 'orphan'].map(state => ({ id: state, state, running: true })),
+      { id: 'stopped', state: 'waiting', running: false },
+    ]
+    const typed: string[] = []
+    const { d } = deps({ live: {
+      rows: async () => rows,
+      roleOf: async () => 'worker',
+      prompt: async id => { typed.push(id); return { ok: true } },
+    } })
+    expect((await readAwayView(d)).activeSessions).toBe(8)
+    await setAway({ on: true }, d)
+    expect(await flushAwayNotices(NOW + AWAY_QUIET_MS)).toBe(8)
+    expect(typed).toEqual(rows.slice(0, 8).map(row => row.id))
+  })
+  it('uses fleet liveness, preserves dead registry flags for cleanup, and includes live external sessions', async () => {
+    const rows = awaySessionRows([
+      { id: 'waiting' }, { id: 'working' }, { id: 'lost', away: true },
+      { id: 'exited' }, { id: 'closed' }, { id: 'orphan', away: true },
+      { id: 'ended', endedAt: new Date(NOW).toISOString() },
+    ], [
+      { id: 'waiting', state: 'waiting' }, { id: 'working', state: 'working' },
+      { id: 'lost', state: 'lost' }, { id: 'exited', state: 'exited' },
+      { id: 'closed', state: 'closed' }, { id: 'ended', state: 'waiting' },
+      { id: 'external', state: 'unknown' }, { id: 'approval', state: 'waiting-approval' },
+    ])
+    const { d } = deps({ live: {
+      rows: async () => rows, roleOf: async () => 'worker', prompt: async () => ({ ok: true }),
+    } })
+    expect((await readAwayView(d)).activeSessions).toBe(4)
+    expect(rows.find(row => row.id === 'orphan')).toMatchObject({ away: true, running: false })
+    expect(rows.find(row => row.id === 'lost')).toMatchObject({ away: true, running: false })
   })
   it('the person (no session field) may set it, and it persists', async () => {
     const { d, stored } = deps()
@@ -64,7 +101,7 @@ describe('away notice', () => {
 })
 
 describe('per-session away route', () => {
-  function sdeps(rows: { id: string; conversationId?: string; away?: boolean; running: boolean }[], global: unknown = undefined, over: Partial<SessionAwayDeps> = {}) {
+  function sdeps(rows: AwaySessionRow[], global: unknown = undefined, over: Partial<SessionAwayDeps> = {}) {
     const patched: Array<[string, boolean]> = []
     const typed: Array<[string, string]> = []
     const d: SessionAwayDeps = {
@@ -80,7 +117,7 @@ describe('per-session away route', () => {
     return { d, patched, typed }
   }
   it('switches one session on, records it and tells the running session', async () => {
-    const { d, patched, typed } = sdeps([{ id: 's1', running: true }])
+    const { d, patched, typed } = sdeps([{ id: 's1', state: 'waiting', running: true }])
     const r = await setSessionAway({ target: 's1', on: true }, d)
     expect(r).toEqual({ ok: true, id: 's1', away: true, effective: true, queued: true })
     expect(typed).toEqual([])
@@ -90,27 +127,27 @@ describe('per-session away route', () => {
     expect(typed[0]![1]).toContain('Do not ask the owner anything')
   })
   it('switching off tells the session; a stopped one is only recorded', async () => {
-    const a = sdeps([{ id: 's1', away: true, running: true }])
+    const a = sdeps([{ id: 's1', away: true, state: 'waiting', running: true }])
     expect(await setSessionAway({ target: 's1', on: false }, a.d)).toMatchObject({ ok: true, away: false, effective: false, queued: true })
     await flushAwayNotices(NOW + AWAY_QUIET_MS)
     expect(a.typed[0]![1]).toContain('away mode is now OFF')
-    const b = sdeps([{ id: 's2', conversationId: 'c2', running: false }])
+    const b = sdeps([{ id: 's2', conversationId: 'c2', state: 'exited', running: false }])
     expect(await setSessionAway({ target: 'c2', on: true }, b.d)).toMatchObject({ ok: true, id: 's2', queued: false })
     expect(b.typed).toEqual([])
     expect(b.patched).toEqual([['s2', true]])
   })
   it('under the global switch the effective state does not move, so nothing is typed', async () => {
-    const { d, typed } = sdeps([{ id: 's1', away: true, running: true }], { on: true, since: '', until: null, authorised: [] })
+    const { d, typed } = sdeps([{ id: 's1', away: true, state: 'waiting', running: true }], { on: true, since: '', until: null, authorised: [] })
     expect(await setSessionAway({ target: 's1', on: false }, d)).toMatchObject({ ok: true, effective: true, queued: true })
     expect(typed).toEqual([])
   })
   it('resolves a verified managed sender through its conversation role', async () => {
-    const { d } = sdeps([{ id: 'managed-lead', conversationId: 'conv-lead', running: true }, { id: 's1', running: true }], undefined,
+    const { d } = sdeps([{ id: 'managed-lead', conversationId: 'conv-lead', state: 'waiting', running: true }, { id: 's1', state: 'waiting', running: true }], undefined,
       { verify: async () => 'managed-lead', roleOf: async id => id === 'conv-lead' ? 'leader' : undefined })
     expect(await setSessionAway({ target: 's1', on: true, session: { id: 'conv-lead', token: 'good' } }, d)).toMatchObject({ ok: true })
   })
   it('active scope snapshots running sessions only and shares the global anti-flood queue', async () => {
-    const { d, patched, typed } = sdeps([{ id: 'a', running: true }, { id: 'b', running: true }, { id: 'ended', running: false }])
+    const { d, patched, typed } = sdeps([{ id: 'a', state: 'waiting', running: true }, { id: 'b', state: 'waiting', running: true }, { id: 'ended', state: 'exited', running: false }])
     await setSessionAway({ on: true, scope: 'active' }, d)
     await setSessionAway({ on: false, scope: 'active' }, d)
     await flushAwayNotices(NOW + AWAY_QUIET_MS)
@@ -120,8 +157,22 @@ describe('per-session away route', () => {
     await flushAwayNotices(NOW + AWAY_QUIET_MS)
     expect(typed.map(p => p[0])).toEqual(['a', 'b'])
   })
+  it('active scope and individual notices reject dead states even with running=true', async () => {
+    const rows: AwaySessionRow[] = [
+      { id: 'live', state: 'waiting', running: true },
+      ...['lost', 'exited', 'closed', 'orphan'].map(state => ({ id: state, state, running: true })),
+    ]
+    const { d, patched, typed } = sdeps(rows)
+    await setSessionAway({ on: true, scope: 'active' }, d)
+    expect(patched).toEqual([['live', true]])
+    for (const row of rows.slice(1)) {
+      expect(await setSessionAway({ target: row.id, on: true }, d)).toMatchObject({ ok: true, queued: false })
+    }
+    expect(await flushAwayNotices(NOW + AWAY_QUIET_MS)).toBe(1)
+    expect(typed.map(([id]) => id)).toEqual(['live'])
+  })
   it('refusals: worker proof, unknown target, missing on', async () => {
-    const { d } = sdeps([{ id: 's1', running: true }])
+    const { d } = sdeps([{ id: 's1', state: 'waiting', running: true }])
     const w = await setSessionAway({ target: 's1', on: true, session: { id: 'w1', token: 'good' } }, d)
     expect(sessionAwayStatus(w)).toBe(403)
     expect(await setSessionAway({ target: 's1', on: true, session: { id: 'lead', token: 'good' } }, d)).toMatchObject({ ok: true })
@@ -135,9 +186,9 @@ describe('away live fan-out and anti-flood', () => {
   function fleet() {
     let now = NOW
     const rows = [
-      { id: 'L', conversationId: 'cL', running: true, away: false },
-      { id: 'W', conversationId: 'cW', running: true, away: false },
-      { id: 'X', conversationId: 'cX', running: false, away: true },
+      { id: 'L', conversationId: 'cL', state: 'waiting', running: true, away: false },
+      { id: 'W', conversationId: 'cW', state: 'waiting', running: true, away: false },
+      { id: 'X', conversationId: 'cX', state: 'exited', running: false, away: true },
     ]
     const typed: { id: string; text: string }[] = []
     const live = {
@@ -226,6 +277,15 @@ describe('away live fan-out and anti-flood', () => {
     await setAway({ on: true, session: { id: 'cL', token: 'good' } }, f.d)
     f.rows[1]!.running = false
     await flushAwayNotices(NOW + AWAY_QUIET_MS)
+    expect(f.typed).toEqual([])
+  })
+  it('rechecks the resolved fleet state before delivering a queued notice', async () => {
+    const f = fleet()
+    await setAway({ on: true }, f.d)
+    f.rows[0]!.state = 'lost'
+    f.rows[1]!.state = 'exited'
+    expect((await readAwayView(f.d)).activeSessions).toBe(0)
+    expect(await flushAwayNotices(NOW + AWAY_QUIET_MS)).toBe(0)
     expect(f.typed).toEqual([])
   })
   it('a later explicit individual ON survives global OFF, even when requested concurrently', async () => {

@@ -103,6 +103,13 @@ export async function buildAwayDigest(away: AwayState, now: number): Promise<Rec
     ].slice(0, 30)
   } catch { result.tasks = 'unavailable'; result.checkIns = 'unavailable'; result.pending = 'unavailable' }
 
+  // The current active total is the same one shown by the away dialog, independent of the
+  // bounded list of sessions created/ended during the digest window below.
+  try {
+    const { defaultAwayDeps, readAwayView } = await import('./away')
+    result.activeSessions = (await readAwayView(await defaultAwayDeps())).activeSessions
+  } catch { result.activeSessions = 'unavailable' }
+
   try {
     const { readRegistry } = await import('./sessions/registry')
     const sessions = await readRegistry()

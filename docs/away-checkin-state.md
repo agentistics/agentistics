@@ -106,3 +106,10 @@ The "away changed" notices waiting out the 45 s quiet window (and the per-sessio
 live in the server process only. A server restart inside that window silently drops the queued
 notice: the session keeps the instruction it last heard until the next away change. The away
 state itself (global flag, per-session flags) is persisted and unaffected.
+
+The away dialog's `activeSessions` total and the away digest's current active total use
+the fleet's resolved rows and shared `sessionRunning` predicate, just like the aside
+summary. A missing registry `endedAt` is not proof that a session is alive: lost, exited,
+closed and registry-only orphan rows do not count or receive away notices. Live external
+rows (`unknown` activity) still count, as they do in the fleet. Global OFF continues to
+clear own away flags on every registry row, including stopped and orphaned sessions.

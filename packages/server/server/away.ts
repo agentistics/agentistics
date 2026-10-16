@@ -8,6 +8,7 @@
  * instruction that tells it not to ask the owner. Spec: agentistics-workspace/leader/specs/away-mode-spec.md
  */
 import { AWAY_OFF, awayActive, awayLiveNotice, normalizeAwayInput, normalizeAwayNotice, parseAwayState, redactSecrets, sessionAwayState, type AwayInputError, type AwayState } from '@agentistics/core'
+import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 
 export interface AwayView { state: AwayState; active: boolean; activeSessions?: number; cooldownMs?: number }
 
@@ -32,8 +33,21 @@ export interface AwayDeps {
   live?: LiveAwayDeps
 }
 
+export interface AwaySessionRow {
+  id: string
+  conversationId?: string
+  away?: boolean
+  state: string
+  running: boolean
+}
+
+/** The same active predicate as the fleet/aside, with delivery liveness rechecked. */
+export function awaySessionRunning(row: AwaySessionRow): boolean {
+  return row.running && sessionRunning(row)
+}
+
 export interface LiveAwayDeps {
-  rows: () => Promise<readonly { id: string; conversationId?: string; away?: boolean; running: boolean }[]>
+  rows: () => Promise<readonly AwaySessionRow[]>
   roleOf: (managedId: string, conversationId?: string) => Promise<'leader' | 'worker' | undefined>
   /** Type the text into a running session through the composer's send path. */
   prompt: (id: string, text: string) => Promise<{ ok: boolean }>
@@ -110,7 +124,7 @@ export async function notifyLiveSessions(before: AwayState, after: AwayState, de
   }
   for (const row of rows) {
     const ownAfter = after.on ? row.away : false
-    if (!row.running) continue
+    if (!awaySessionRunning(row)) continue
     if (exclude !== undefined && (row.id === exclude || row.conversationId === exclude)) {
       pendingAway.delete(row.id)
       lastTold.set(row.id, { state: sessionAwayState(after, ownAfter, now), at: now })
@@ -119,7 +133,7 @@ export async function notifyLiveSessions(before: AwayState, after: AwayState, de
     const role = await deps.roleOf(row.id, row.conversationId).catch(() => undefined)
     queueAwayNotice(row.id, sessionAwayState(before, row.away, now), sessionAwayState(after, ownAfter, now), role,
       async text => {
-        const current = (await deps.rows()).find(r => r.id === row.id && r.running)
+        const current = (await deps.rows()).find(r => r.id === row.id && awaySessionRunning(r))
         return current ? deps.prompt(row.id, text) : { ok: false, gone: true }
       }, now, deps.planLimitsInBriefing)
   }
@@ -134,7 +148,7 @@ export function awayView(raw: unknown, now: number): AwayView {
 export async function readAwayView(deps: Pick<AwayDeps, 'read' | 'now'> & Pick<Partial<AwayDeps>, 'live'>): Promise<AwayView> {
   const view = awayView(await deps.read().catch(() => AWAY_OFF), deps.now())
   const live = deps.live
-  return { ...view, ...(live ? { activeSessions: (await live.rows()).filter(r => r.running).length, cooldownMs: Math.max(0, ...[...lastTold.values()].map(t => t.at + AWAY_COOLDOWN_MS - deps.now()), ...[...pendingAway.values()].map(j => j.quietAt - deps.now())) } : {}) }
+  return { ...view, ...(live ? { activeSessions: (await live.rows()).filter(awaySessionRunning).length, cooldownMs: Math.max(0, ...[...lastTold.values()].map(t => t.at + AWAY_COOLDOWN_MS - deps.now()), ...[...pendingAway.values()].map(j => j.quietAt - deps.now())) } : {}) }
 }
 
 // Serialize owner changes across both endpoints: a later explicit session ON must survive OFF.
@@ -186,9 +200,33 @@ export function awayStatus(r: AwayReply | AwayNoticeReply): number {
   return r.error === 'unverified_sender' || r.error === 'leader_only' ? 403 : 400
 }
 
-async function liveRows() {
+/** Keep registry-only rows for flag cleanup, but never infer liveness from a missing endedAt. */
+export function awaySessionRows(
+  registry: readonly { id: string; conversationId?: string; away?: boolean; endedAt?: string }[],
+  fleet: readonly { id: string; conversationId?: string; away?: boolean; state: string }[],
+): AwaySessionRow[] {
+  const byId = new Map(fleet.map(row => [row.id, row]))
+  const registered = new Set(registry.map(row => row.id))
+  return [
+    ...registry.map(row => {
+      const current = byId.get(row.id)
+      return {
+        id: row.id, conversationId: row.conversationId, away: row.away,
+        state: current?.state ?? 'lost',
+        running: !row.endedAt && current !== undefined && sessionRunning(current),
+      }
+    }),
+    ...fleet.filter(row => !registered.has(row.id)).map(row => ({ ...row, running: sessionRunning(row) })),
+  ]
+}
+
+async function liveRows(): Promise<AwaySessionRow[]> {
   const { readRegistry } = await import('./sessions/registry')
-  return (await readRegistry()).map(r => ({ id: r.id, ...(r.conversationId ? { conversationId: r.conversationId } : {}), ...(r.away ? { away: true } : {}), running: !r.endedAt }))
+  const { hostForFleet } = await import('./sessions/fleet-web')
+  const host = await hostForFleet('en')
+  if (!host.sessions) throw new Error('Fleet sessions unavailable')
+  const [registry, fleet] = await Promise.all([readRegistry(), host.sessions()])
+  return awaySessionRows(registry, fleet.sessions)
 }
 async function liveRoleOf(id: string, conversationId?: string) {
   const { storedRoleFor } = await import('./sessions/session-roles')
@@ -238,8 +276,8 @@ export interface SessionAwayDeps {
   read: () => Promise<unknown>
   verify: AwayDeps['verify']
   roleOf: (managedIdOrConversation: string) => Promise<'leader' | 'worker' | undefined>
-  /** Registry rows (id, conversation id, current flag, whether a pane is running). */
-  rows: () => Promise<readonly { id: string; conversationId?: string; away?: boolean; running: boolean }[]>
+  /** Registry and fleet rows, including resolved activity and delivery liveness. */
+  rows: () => Promise<readonly AwaySessionRow[]>
   patch: (id: string, away: boolean) => Promise<void>
   /** Type the notice into a running session through the composer's send path. */
   prompt: (id: string, text: string) => Promise<{ ok: boolean; message?: string }>
@@ -268,7 +306,7 @@ async function setSessionAwayMutation(body: unknown, deps: SessionAwayDeps): Pro
   }
   if (typeof o.on !== 'boolean') return { ok: false, error: 'on_required' }
   if (o.scope === 'active') {
-    const rows = (await deps.rows()).filter(r => r.running)
+    const rows = (await deps.rows()).filter(awaySessionRunning)
     let anyQueued = false
     for (const row of rows) { const r = await setSessionAwayMutation({ target: row.id, on: o.on }, deps); if (r.ok && r.queued) anyQueued = true }
     const global = parseAwayState(await deps.read())
@@ -283,11 +321,11 @@ async function setSessionAwayMutation(body: unknown, deps: SessionAwayDeps): Pro
   const before = row.away === true
   if (before !== o.on) await deps.patch(row.id, o.on)
   const effective = sessionAwayState(global, o.on, now) !== null
-  const queued = row.running && before !== o.on
+  const queued = awaySessionRunning(row) && before !== o.on
   if (queued) {
     const role = await deps.roleOf(row.conversationId ?? row.id) ?? await deps.roleOf(row.id)
     queueAwayNotice(row.id, sessionAwayState(global, before, now), sessionAwayState(global, o.on, now), role,
-      async text => (await deps.rows()).some(r => r.id === row.id && r.running) ? deps.prompt(row.id, text) : { ok: false, gone: true }, now, deps.planLimitsInBriefing, true)
+      async text => (await deps.rows()).some(r => r.id === row.id && awaySessionRunning(r)) ? deps.prompt(row.id, text) : { ok: false, gone: true }, now, deps.planLimitsInBriefing, true)
   }
   return { ok: true, id: row.id, away: o.on, effective, queued }
 }
@@ -306,11 +344,7 @@ export async function defaultSessionAwayDeps(lang: 'pt' | 'en' = 'en'): Promise<
     roleOf: async key => {
       return base.roleOf(key)
     },
-    rows: async () => {
-      const { readRegistry } = await import('./sessions/registry')
-      // An ended row has no pane to tell; a LOST one (no `endedAt`) is tried and refuses on its own.
-      return (await readRegistry()).map(r => ({ id: r.id, ...(r.conversationId ? { conversationId: r.conversationId } : {}), ...(r.away ? { away: true } : {}), running: !r.endedAt }))
-    },
+    rows: liveRows,
     patch: async (id, away) => {
       const { patchSession } = await import('./sessions/registry')
       await patchSession(id, { away: away ? true : null })

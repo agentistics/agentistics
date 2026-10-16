@@ -8,6 +8,14 @@ const rows = [
 ]
 
 describe('asideSummary', () => {
+  test('4 waiting + 4 working + 89 lost counts exactly 8 active sessions', () => {
+    expect(summaryCounts([
+      ...Array.from({ length: 4 }, () => ({ state: 'waiting' })),
+      ...Array.from({ length: 4 }, () => ({ state: 'working' })),
+      ...Array.from({ length: 89 }, () => ({ state: 'lost' })),
+      ...['exited', 'closed', 'orphan'].map(state => ({ state })),
+    ])).toEqual({ active: 8, working: 4, needs: 4 })
+  })
   test('counts', () => {
     const c = summaryCounts(rows)
     expect(c.working).toBe(2)
