@@ -5,7 +5,7 @@ import * as realFleet from '../../lib/fleet'
 import { parseSystemEvent } from '../../lib/systemEvent'
 
 const g = globalThis as Record<string, unknown>
-g.window ??= { innerWidth: 1200, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), addEventListener() {}, removeEventListener() {} }
+g.window ??= { innerWidth: 1200, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), addEventListener() {}, removeEventListener() {}, dispatchEvent: () => true }
 
 // Seed the fleet so the sender resolves to a title only through useFleet.
 mock.module('../../lib/fleet', () => ({
@@ -15,6 +15,63 @@ mock.module('../../lib/fleet', () => ({
 const { ChatBubble, SystemEventRow } = await import('./ChatBubble')
 
 const turn = (text: string) => ({ role: 'user', text } as never)
+
+test('marked and legacy check-in user turns render collapsed system rows without user chrome', () => {
+  for (const opener of ['[from agentistics · check-in]\nFaça o check-in da liderança agora.', 'Faça o check-in da liderança agora.', 'Run the leadership check-in now.']) {
+    const html = renderToStaticMarkup(<ChatBubble turn={{ role: 'user', text: `${opener}\nxyzzy-checklist-marker`, pending: true }} lang="en" harness="claude" sessionId="leader-id" awaiting awaitingSinceMs={0} />)
+    expect(html).toContain('Leadership check-in · system')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('Open check-in')
+    expect(html).not.toContain('xyzzy-checklist-marker')
+    expect(html).not.toContain('Send now')
+    expect(html).not.toContain('role="status"')
+    expect(html).not.toContain('lucide-user')
+  }
+})
+
+test('expanded check-in row shows the checklist and its localized action', () => {
+  const event = parseSystemEvent('[from agentistics · check-in]\nxyzzy-checklist-marker')!
+  const html = renderToStaticMarkup(<SystemEventRow event={event} pt defaultOpen />)
+  expect(html).toContain('Check-in da liderança · sistema')
+  expect(html).toContain('Abrir check-in')
+  expect(html).toContain('xyzzy-checklist-marker')
+  expect(html).toContain('min-height:44px')
+})
+
+test('open check-in dispatches the existing session-scoped UI event', () => {
+  const hadOwn = Object.prototype.hasOwnProperty.call(window, 'dispatchEvent')
+  const originalDispatch = window.dispatchEvent
+  const received: CustomEvent<{ sessionId: string }>[] = []
+  window.dispatchEvent = ((event: Event) => { received.push(event as CustomEvent<{ sessionId: string }>); return true })
+  try {
+    function Row() {
+      const tree = SystemEventRow({ event: { kind: 'checkin', body: 'checklist' }, pt: false, sessionId: 'leader-id' })
+      React.Children.forEach(tree.props.children, child => {
+        if (React.isValidElement<{ children?: React.ReactNode; onClick?: () => void }>(child) && child.type === 'button' && child.props.children === 'Open check-in') child.props.onClick!()
+      })
+      return tree
+    }
+    renderToStaticMarkup(<Row />)
+    expect(received).toHaveLength(1)
+    expect(received[0]?.type).toBe('agentistics:open-checkin')
+    expect(received[0]?.detail).toEqual({ sessionId: 'leader-id' })
+  } finally {
+    if (hadOwn) window.dispatchEvent = originalDispatch
+    else delete (window as { dispatchEvent?: unknown }).dispatchEvent
+  }
+})
+
+test('check-in controls have 44px touch targets at 390px', () => {
+  const viewport = window as { innerWidth: number }
+  const originalWidth = viewport.innerWidth
+  viewport.innerWidth = 390
+  try {
+    const html = renderToStaticMarkup(<SystemEventRow event={{ kind: 'checkin', body: 'checklist' }} pt={false} />)
+    expect(html.match(/min-height:44px/g)).toHaveLength(2)
+  } finally {
+    viewport.innerWidth = originalWidth
+  }
+})
 
 test('injected away turn renders the event row, not a bubble', () => {
   const html = renderToStaticMarkup(<ChatBubble turn={turn('[from agentistics · away]\nxyzzy-body-marker')} lang="en" harness="claude" />)

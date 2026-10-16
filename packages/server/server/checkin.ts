@@ -201,7 +201,7 @@ export function mergeConfig(base: CheckinConfig, patch: Partial<CheckinConfig>):
 }
 export function promptFor(c: CheckinConfig): string {
   const items = c.checklist.filter(x => x.enabled).map(x => `- ${labels[x.id]}`).join('\n')
-  return `Faça o check-in da liderança agora.\n${items}\n\nQuando terminar, chame agentistics_checkin_report.`
+  return `[from agentistics · check-in]\nFaça o check-in da liderança agora.\n${items}\n\nQuando terminar, chame agentistics_checkin_report.`
 }
 async function promptForLeader(c: CheckinConfig): Promise<string> {
   const prompt = promptFor(c)

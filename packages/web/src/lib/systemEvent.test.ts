@@ -2,6 +2,27 @@ import { describe, expect, test } from 'bun:test'
 import { parseSystemEvent, systemEventLine } from './systemEvent'
 
 describe('parseSystemEvent', () => {
+  test('marked check-in keeps the checklist and away instructions as the body', () => {
+    const body = 'Faça o check-in da liderança agora.\n- Review sessions\nAWAY MODE — decide within the authorisations.'
+    expect(parseSystemEvent(`[from agentistics · check-in]\n${body}`)).toEqual({ kind: 'checkin', body })
+  })
+  test('legacy Portuguese and English check-in prompts keep their full text', () => {
+    for (const opener of ['Faça o check-in da liderança agora.', 'Run the leadership check-in now.']) {
+      const body = `${opener}\n- Review sessions\n\nagentistics_checkin_report`
+      expect(parseSystemEvent(body)).toEqual({ kind: 'checkin', body })
+    }
+  })
+  test('merely mentioning check-in is ordinary user text', () => {
+    expect(parseSystemEvent('Can you explain the leadership check-in?')).toBeNull()
+    expect(parseSystemEvent('Please discuss: Faça o check-in da liderança agora.')).toBeNull()
+    expect(parseSystemEvent('Please discuss: Run the leadership check-in now.')).toBeNull()
+    expect(parseSystemEvent('[from session abc · check-in]\nx')).toBeNull()
+  })
+  test('check-in system lines are localized', () => {
+    const event = parseSystemEvent('[from agentistics · check-in]\nx')!
+    expect(systemEventLine(event, true)).toBe('Check-in da liderança · sistema')
+    expect(systemEventLine(event, false)).toBe('Leadership check-in · system')
+  })
   test('agentistics headers', () => {
     expect(parseSystemEvent('[from agentistics · away]\nAway off')).toEqual({ kind: 'away', body: 'Away off' })
     expect(parseSystemEvent('[from agentistics · question]\nhand off?')?.kind).toBe('question')

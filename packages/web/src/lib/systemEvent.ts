@@ -6,24 +6,27 @@
  * `[from session <id> · handback|block|question]` (the session-message route). The chat must not
  * draw them as something the person typed.
  */
-export type SystemEventKind = 'away' | 'away-off' | 'question' | 'handback' | 'block' | 'session-question'
+export type SystemEventKind = 'away' | 'away-off' | 'question' | 'handback' | 'block' | 'session-question' | 'checkin'
 
 export interface SystemEvent {
   kind: SystemEventKind
   /** The sending session's id (or short id) for `from session` headers. */
   sender?: string
-  /** Everything after the header line. */
+  /** Everything after the header line, or the full legacy prompt. */
   body: string
 }
 
 const HEADER = /^\s*\[from (agentistics|session ([^\s\]·]+)) · ([a-z-]+)\]\s*(?:\r?\n|$)/
+// Before the producer added a header, these prompts were stored as ordinary user turns.
+const LEGACY_CHECKIN = /^(?:Faça o check-in da liderança agora\.|Run the leadership check-in now\.)/
 
 export function parseSystemEvent(text: string): SystemEvent | null {
   const m = HEADER.exec(text)
-  if (!m) return null
+  if (!m) return LEGACY_CHECKIN.test(text) ? { kind: 'checkin', body: text } : null
   const what = m[3]!
   const body = text.slice(m[0].length).trim()
   if (m[1] === 'agentistics') {
+    if (what === 'check-in') return { kind: 'checkin', body }
     if (what === 'away') return { kind: /away mode is now OFF/i.test(body) ? 'away-off' : 'away', body }
     if (what === 'question') return { kind: 'question', body }
     return null
@@ -37,6 +40,7 @@ export function parseSystemEvent(text: string): SystemEvent | null {
 export function systemEventLine(e: SystemEvent, pt: boolean, who?: string): string {
   const name = who || e.sender || ''
   switch (e.kind) {
+    case 'checkin': return pt ? 'Check-in da liderança · sistema' : 'Leadership check-in · system'
     case 'away-off': return pt ? 'Modo ausente desligado nesta sessão' : 'Away mode turned off for this session'
     case 'away': return pt ? 'Modo ausente atualizado' : 'Away mode updated'
     case 'question': return pt ? 'Dica de passagem de contexto' : 'Context hand-off hint'

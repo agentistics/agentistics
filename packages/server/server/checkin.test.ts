@@ -58,6 +58,19 @@ function reset() {
 }
 
 describe('check-in agenda', () => {
+  test('the leader prompt starts with the system event header and keeps the checklist', () => {
+    const prompt = promptFor(defaultConfig())
+    expect(prompt.startsWith('[from agentistics · check-in]\nFaça o check-in da liderança agora.\n')).toBe(true)
+    expect(prompt).toContain('\n- ')
+    expect(prompt).toEndWith('Quando terminar, chame agentistics_checkin_report.')
+  })
+
+  test('manual check-in uses the same system event header', async () => {
+    reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+    expect(await runNow(leader.conversationId, 1_000)).toBe(true)
+    expect(prompts[0].text).toBe(promptFor(defaultConfig()))
+  })
+
   test('rejects malformed entries in every structured report array', () => {
     for (const key of ['delivered', 'inProgress', 'next', 'health', 'actions', 'needs']) {
       for (const value of [null, {}, 'text', [null], [[]], ['text'], [{}]]) {
@@ -251,6 +264,7 @@ describe('check-in agenda', () => {
     preferences = { away: { on: true, until: null, authorised: [], maxWorkers: 6, topCaps: {} } }
     await putState(leader.conversationId, { intervalMin: 15 }, 1_000)
     await fireDue(1_000 + 15 * 60_000)
+    expect(prompts[0].text.startsWith('[from agentistics · check-in]\n')).toBe(true)
     expect(prompts[0].text).toContain('decide within the authorisations, record the decision, and never ask the owner')
     expect(promptFor(defaultConfig())).not.toContain('AWAY MODE')
   })
