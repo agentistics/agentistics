@@ -1235,8 +1235,8 @@ export function SystemEventRow({ event, pt, titleOf, defaultOpen = false }: { ev
         aria-expanded={open}
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 9px', borderRadius: 999,
-          border: '1px solid var(--border-subtle)', background: 'var(--bg-tertiary)',
-          color: 'var(--text-secondary)', fontSize: 11.5, cursor: 'pointer', font: 'inherit', minHeight: 24,
+          border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)',
+          color: 'var(--text-tertiary)', fontSize: 10.5, lineHeight: 1.4, cursor: 'pointer', fontFamily: 'inherit', minHeight: 24,
         }}
       >
         <Info size={12} color="var(--anthropic-orange)" />
@@ -1246,7 +1246,7 @@ export function SystemEventRow({ event, pt, titleOf, defaultOpen = false }: { ev
       {open && (
         <div style={{
           marginTop: 4, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border-subtle)',
-          background: 'var(--bg-secondary)', color: 'var(--text-secondary)', fontSize: 12,
+          background: 'var(--bg-base)', color: 'var(--text-secondary)', fontSize: 12,
           lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
         }}>{event.body || (pt ? '(sem texto)' : '(no text)')}</div>
       )}
@@ -1265,6 +1265,8 @@ function FleetSystemEventRow({ event, lang }: { event: SystemEvent; lang: ChatBu
 
 export const ChatBubble = memo(function ChatBubble(props: ChatBubbleProps) {
   const event = props.turn.role === 'user' ? parseSystemEvent(props.turn.text) : null
-  if (event) return <FleetSystemEventRow event={event} lang={props.lang} />
+  if (event) return event.sender
+    ? <FleetSystemEventRow event={event} lang={props.lang} />
+    : <SystemEventRow event={event} pt={props.lang === 'pt'} />
   return <ChatBubbleInner {...props} />
 })

@@ -29,3 +29,14 @@ describe('parseSystemEvent', () => {
     expect(systemEventLine(e, false, 'Title')).toBe('Session Title is blocked')
   })
 })
+
+import { parseSystemEvent as parseR2 } from './systemEvent'
+test('r2: multi-line body and CRLF headers parse', () => {
+  expect(parseR2('[from session ab1 · block]\nl1\nl2\n')).toEqual({ kind: 'block', sender: 'ab1', body: 'l1\nl2' })
+  expect(parseR2('[from agentistics · away]\r\nAway mode is now OFF')?.kind).toBe('away-off')
+})
+test('r2: header-like prose does not match', () => {
+  expect(parseR2('please see [from session x · handback] text')).toBeNull()
+  expect(parseR2('[from session x · handback] same line')).toBeNull()
+  expect(parseR2('hello\n[from agentistics · away]\nx')).toBeNull()
+})
