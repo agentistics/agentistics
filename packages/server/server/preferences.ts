@@ -80,7 +80,7 @@ export interface CustomGridItem {
 export interface Preferences {
   /** Server-owned leadership check-in agendas, keyed by conversation id. */
   checkin?: Record<string, unknown>
-  /** Defaults copied once when a new leader agenda is created. */
+  /** Live defaults for leader agendas without an individual override. */
   checkinDefaults?: import('./checkin').CheckinConfig
   /** Opt out of automatic managed briefing skill updates at server start. */
   briefingAutoInstall?: boolean

@@ -533,4 +533,12 @@ describe('the kept parse (PERF.IDLE)', () => {
     await reg.patch('aaaa1111bb', { label: 'three' })
     expect((await reg.read())[0]!.label).toBe('three')
   })
+  it('patchMany patches every matching row in one write and clears on null', async () => {
+    await writeFile(file, JSON.stringify([{ ...rec('aaaa1111bb', 'one'), away: true }, { ...rec('cccc2222dd', 'two'), away: true }, rec('eeee3333ff', 'three')]))
+    const reg = createSessionRegistry(file)
+    expect(await reg.patchMany(['aaaa1111bb', 'cccc2222dd', 'nope'], { away: null })).toBe(2)
+    const rows = await reg.read()
+    expect(rows.some(r => (r as { away?: boolean }).away)).toBe(false)
+    expect(await reg.patchMany(['nope'], { away: null })).toBe(0)
+  })
 })

@@ -2653,7 +2653,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
                 fontSize: 13, fontWeight: 650, color: 'var(--text-primary)', minWidth: 0,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               }}>{selected.title}</div>
-              {selected.away === true && <AwayChip pt={pt} compact />}
+              {selected.actionable && <AwayChip id={selected.id} away={selected.away === true} pt={pt} compact />}
               <SessionTitleFlag
                 session={{
                   id: selected.id, title: selected.title,

@@ -2,6 +2,7 @@
  * Header pill shown ONLY while away mode is active — beside the bell, so the person sees at a glance
  * that the fleet believes they are out. Click → confirm → off ("I'm back"). Mobile: icon-only, its 44px projected by `.ag-tap-icon`.
  */
+import { AwayImpact } from './AwayImpact'
 import React, { useState } from 'react'
 import { Moon } from 'lucide-react'
 import { ConfirmModal } from '../pages/settings/primitives'
@@ -42,13 +43,13 @@ export default function AwayPill({ lang, enabled }: { lang: 'pt' | 'en'; enabled
         icon={<Moon size={17} />}
         title={pt ? 'Voltou?' : 'Back?'}
         message={pt
-          ? `O modo ausente está ligado ${until}. Desligar faz as próximas sessões voltarem a perguntar a você quando precisarem.`
-          : `Away mode is on ${until}. Turning it off lets new sessions ask you again when they need to.`}
+          ? `O modo ausente está ligado ${until}. Desligar limpa o modo ausente de todas as sessões, inclusive as que já estão abertas.`
+          : `Away mode is on ${until}. Turning it off clears away mode for every session, including those already open.`}
         confirmLabel={pt ? 'Desligar — voltei' : "Turn off — I'm back"}
         cancelLabel={pt ? 'Continuar fora' : 'Stay away'}
         onConfirm={() => { setConfirm(false); void setAway({ on: false }) }}
         onCancel={() => setConfirm(false)}
-      />
+      ><AwayImpact pt={pt} open={confirm} /></ConfirmModal>
     </>
   )
 }

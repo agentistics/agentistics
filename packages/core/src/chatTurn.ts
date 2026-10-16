@@ -27,7 +27,7 @@ export interface ChatTurn {
   at?: string
   role: 'user' | 'assistant'
   text: string
-  /** The web composer delivered this user turn recently; unlike an external paste, unwrap it. */
+  /** The web composer delivered this user turn; unlike an external paste, unwrap it. */
   composer?: boolean
   /**
    * The tools this turn INVOKED, with the first line of each call's own input.

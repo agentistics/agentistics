@@ -110,6 +110,8 @@ export interface SessionRegistry {
   remove(id: string): Promise<void>
   /** False when no session carries that id — never a silent success. */
   patch(id: string, patch: SessionPatch): Promise<boolean>
+  /** The same patch on every id given, in ONE read-modify-write. Returns how many rows matched. */
+  patchMany(ids: readonly string[], patch: SessionPatch): Promise<number>
   /**
    * Stamp `lastSeenMs` on every id given, in ONE write — the poller's heartbeat.
    *
@@ -436,6 +438,23 @@ export function createSessionRegistry(file: string): SessionRegistry {
         return true
       })
     },
+    patchMany(ids, patch) {
+      return enqueue(async () => {
+        const wanted = new Set(ids)
+        const list = await read()
+        let matched = 0
+        const next = list.map(s => {
+          if (!wanted.has(s.id)) return s
+          matched++
+          const merged = { ...s, ...patch } as Record<string, unknown>
+          for (const [k, v] of Object.entries(patch)) if (v === null) delete merged[k]
+          return merged as unknown as ManagedSession
+        })
+        if (matched === 0) return 0
+        await write(next)
+        return matched
+      })
+    },
     touch(ids, atMs) {
       return enqueue(async () => {
         const wanted = new Set(ids)
@@ -467,6 +486,10 @@ export const patchSession = (
   id: string,
   patch: SessionPatch,
 ): Promise<boolean> => defaultRegistry.patch(id, patch)
+export const patchSessions = (
+  ids: readonly string[],
+  patch: SessionPatch,
+): Promise<number> => defaultRegistry.patchMany(ids, patch)
 export const touchSessions = (
   ids: readonly string[],
   atMs: number,

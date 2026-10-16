@@ -173,7 +173,7 @@ export function SessionAwayRow({ managedId, away, pt, isMobile = false }: { mana
     setNote(null)
     const r = await setSessionAway(managedId, next, pt ? 'pt' : 'en')
     if (!r.ok) { setPending(null); setNote(pt ? `Não foi possível mudar (${r.error}).` : `Could not change it (${r.error}).`); return }
-    setNote(r.notified ? (pt ? 'A sessão foi avisada.' : 'The session was told.') : null)
+    setNote(r.queued ? (pt ? 'A sessão será avisada em instantes.' : 'The session will be told shortly.') : null)
   }
   const sub = global.active
     ? (pt ? 'O modo ausente global está ligado: esta sessão já sabe que você está fora.' : 'Global away mode is on: this session already knows you are out.')

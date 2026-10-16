@@ -1,8 +1,10 @@
 /**
  * Settings → Sessions → Away mode. A `RowSwitch`: on opens the one activation dialog
- * (`AwayModeDialog`), off switches it off at once. Hidden where this server cannot drive sessions
+ * (`AwayModeDialog`), off asks for confirmation before clearing every own flag. Hidden where this server cannot drive sessions
  * (no `localShell`), because away mode only changes what sessions here are told.
  */
+import { AwayImpact } from '../../components/AwayImpact'
+import { ConfirmModal } from './primitives'
 import React, { useState } from 'react'
 import { Moon } from 'lucide-react'
 import { AWAY_AUTH_LABEL } from '@agentistics/core'
@@ -14,6 +16,7 @@ export default function AwaySection({ lang, capable }: { lang: 'pt' | 'en'; capa
   const pt = lang === 'pt'
   const away = useAway()
   const [dialog, setDialog] = useState(false)
+  const [confirmOff, setConfirmOff] = useState(false)
   if (!capable) return null
   const sub = away.active && away.state
     ? `${awayUntilLabel(away.state, lang, Date.now())} · ${away.state.authorised.map(a => AWAY_AUTH_LABEL[a][lang]).join(', ') || (pt ? 'nada pré-autorizado' : 'nothing pre-authorised')}`
@@ -28,8 +31,14 @@ export default function AwaySection({ lang, capable }: { lang: 'pt' | 'en'; capa
         icon={<Moon size={15} />}
         label={pt ? 'Estou fora (dormindo, viajando)' : "I'm away (asleep, travelling)"}
         sub={sub}
-        onToggle={() => { if (away.active) void setAway({ on: false }); else setDialog(true) }}
+        onToggle={() => { if (away.active) setConfirmOff(true); else setDialog(true) }}
       />
+      <ConfirmModal open={confirmOff} tone="default" title={pt ? 'Voltou?' : 'Back?'}
+        message={pt ? 'Isto limpa o modo ausente de todas as sessões.' : 'This clears away mode for every session.'}
+        confirmLabel={pt ? 'Desligar' : 'Turn off'} cancelLabel={pt ? 'Cancelar' : 'Cancel'}
+        onConfirm={() => { setConfirmOff(false); void setAway({ on: false }) }} onCancel={() => setConfirmOff(false)}>
+        <AwayImpact pt={pt} open={confirmOff} />
+      </ConfirmModal>
       <AwayModeDialog open={dialog} lang={lang} onClose={() => setDialog(false)} />
     </>
   )

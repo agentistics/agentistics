@@ -2082,6 +2082,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(out, messageStatus(out))
     }
     // LEADER CHECK-INS — agenda state, immediate run, and the MCP report share this server store.
+    if (url.pathname === '/api/checkin/defaults' && req.method === 'GET') {
+      return json(await (await import('./checkin')).checkinDefaultFollowers())
+    }
     if (url.pathname === '/api/checkin' || url.pathname.startsWith('/api/checkin/')) {
       if (url.pathname === '/api/checkin/report' && req.method === 'POST') {
         const body = await req.json().catch(() => ({})) as { state?: unknown; summary?: unknown; headline?: unknown; delivered?: unknown; inProgress?: unknown; next?: unknown; health?: unknown; actions?: unknown; needs?: unknown; session?: { id?: unknown; token?: unknown } }
@@ -2147,7 +2150,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const body = await req.json().catch(() => ({}))
       const { setAway, awayStatus, defaultAwayDeps } = await import('./away')
       const out = await setAway(body, await defaultAwayDeps())
-      if (out.ok) (await import('./sse')).broadcastAwayChanged()
+      if (out.ok) {
+        (await import('./sse')).broadcastAwayChanged()
+        void import('./sessions/fleet-web').then(m => m.kickFleet()).catch(() => {})
+      }
       return json(out, awayStatus(out))
     }
     // PER-SESSION AWAY — one session's own flag (`ManagedSession.away`); the person or a verified leader.
