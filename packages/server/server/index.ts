@@ -272,6 +272,8 @@ if (!TEAM_CENTRAL) {
     })
     // A record another agentop process wrote (it holds no sink) reaches the browser through the file.
     pl.watchPlanLimitsFile()
+    // TUI claude sessions emit no stream-json: read the subscription usage Claude Code's /usage reads.
+    void import('./claude-usage').then(m => m.startClaudeUsagePoll()).catch(() => {})
     return pl.seedPlanLimits(sd.STRUCTURED_DIR)
   }).catch(err => console.warn('[plan-limits] seed failed:', String(err)))
 }
