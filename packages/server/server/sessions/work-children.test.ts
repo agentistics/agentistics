@@ -148,6 +148,25 @@ describe('workChildren — the harness chain (M3)', () => {
     const t = [n(2, 1, 'node', 'node /u/lib/node_modules/@google/gemini-cli/dist/index.js'), n(3, 2, 'agentop', '/u/agentop mcp')]
     expect(kids(workChildren(t, 1, 'gemini'))).toEqual([])
   })
+  it('L1: a pane that IS the holder seeds underHolder — claude(pane) -> bun test -> claude -p counts `bun test`', () => {
+    const t = [n(100, 1, 'claude', 'claude'), n(200, 100, 'bun', 'bun test'), n(201, 200, 'claude', 'claude -p x')]
+    expect(kids(workChildren(t, 100, 'claude'))).toEqual([200, 201])
+    // The live tree (`readProcTree`) holds descendants only: the pane's exe comes from the caller.
+    const live = t.slice(1)
+    expect(kids(workChildren(live, 100, 'claude', { paneExe: 'claude' }))).toEqual([200, 201])
+    // kimi's pane is a holder too.
+    const k = [n(201, 100, 'bun', 'bun test'), n(202, 201, 'kimi', 'kimi -p x')]
+    expect(kids(workChildren(k, 100, 'kimi', { paneExe: 'kimi' }))).toEqual([201, 202])
+    // A pane that is a shim (codex) is unchanged: the shim chain down to the first holder is not work.
+    const c = [n(3, 1, 'node', 'node /u/.bun/bin/codex'), n(4, 3, 'codex', '/x/codex')]
+    expect(kids(workChildren(c, 1, 'codex', { paneExe: 'volta-shim' }))).toEqual([])
+  })
+  it('L2: only an @google/gemini-cli/ install path is chain — a clone being built is work', () => {
+    const t = [...GEMINI_IDLE, n(500, 1102833, 'node', 'node /u/src/gemini-cli/scripts/build.js')]
+    expect(kids(workChildren(t, 1102821, 'gemini'))).toEqual([500])
+    const own = [n(2, 1, 'node', 'node /u/lib/node_modules/@google/gemini-cli/dist/index.js')]
+    expect(kids(workChildren(own, 1, 'gemini'))).toEqual([])
+  })
   it('caller-supplied holders override the table', () => {
     const t = [n(2, 1, 'myshim', 'x'), n(3, 2, 'claude', 'claude'), n(4, 3, 'bash', 'bash -c make')]
     expect(kids(workChildren(t, 1, 'claude', { holders: ['claude'] }))).toEqual([4])
