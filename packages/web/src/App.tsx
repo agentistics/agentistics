@@ -3633,7 +3633,7 @@ export default function AppLayout() {
           }}>
             {headerSession.title}
           </span>
-          {headerSession.away === true && <AwayChip pt={lang === 'pt'} />}
+          {headerSession.actionable && <AwayChip id={headerSession.id} away={headerSession.away === true} pt={lang === 'pt'} />}
           {headerMuted && (
             <span role="img" aria-label={mutedTooltip(lang === 'pt')} title={mutedTooltip(lang === 'pt')}
               style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0, color: 'var(--text-tertiary)' }}>

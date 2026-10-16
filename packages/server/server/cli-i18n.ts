@@ -301,6 +301,10 @@ export interface CliStrings {
   sessTaskDeleted: (task: string, freed: number) => string
   sessTaskReopened: (task: string) => string
   sessKillUnconfirmed: (id: string) => string
+  /** The line appended to the owed text when it is recorded (comment / notice). */
+  relayOwedNote: (id: string, successor: string, reason: 'missing' | 'dead' | 'send-failed' | 'truncated') => string
+  /** The warning printed/returned by a kill; `dest` says where the owed messages went. */
+  relayKillWarning: (id: string, successor: string, reason: 'missing' | 'dead' | 'send-failed' | 'truncated', dest: 'task' | 'notice' | 'none') => string
   sessRenamed: string
   /**
    * A rename that landed in BOTH places — agentop's label and the harness's own name.
@@ -335,6 +339,8 @@ export interface CliStrings {
   sessFileNoConversation: string
   /** SS-09: the board refused the filing — its reason, in words. */
   sessFileRefused: (reason: string) => string
+  /** Spawn succeeded; explain a refused board filing without inviting another spawn. */
+  spawnFilingFailed: (reason: string) => string
   sessTaskEmpty: (task: string) => string
   sessTaskOpened: (task: string, opened: number, skipped: number, held: number) => string
   sessTaskNoneOpened: (task: string, skipped: number) => string
@@ -530,6 +536,19 @@ export interface CliStrings {
   engineVersionLine: (status: EngineStatus) => string
 }
 
+const RELAY_WHY_EN = {
+  missing: 'the successor session no longer exists',
+  dead: 'the successor session had already ended',
+  'send-failed': 'the successor did not answer in time',
+  truncated: 'the conversation was too long to check in full',
+} as const
+const RELAY_WHY_PT = {
+  missing: 'a sessão sucessora não existe mais',
+  dead: 'a sessão sucessora já tinha sido encerrada',
+  'send-failed': 'a sucessora não respondeu a tempo',
+  truncated: 'a conversa era longa demais para conferir inteira',
+} as const
+
 const EN: CliStrings = {
   lang: 'en',
   tagline: 'AI coding-assistant analytics · agentop',
@@ -724,6 +743,10 @@ const EN: CliStrings = {
     ? `"${task}" removed.`
     : `"${task}" removed — ${freed} session(s) kept, now unfiled.`,
   sessTaskReopened: (task: string) => `"${task}" reopened.`,
+  relayOwedNote: (id: string, successor: string, r: 'missing' | 'dead' | 'send-failed' | 'truncated') =>
+    `(These messages could not be delivered to the successor session ${successor} before ${id} was ended: ${RELAY_WHY_EN[r]}.)`,
+  relayKillWarning: (id: string, successor: string, r: 'missing' | 'dead' | 'send-failed' | 'truncated', dest: 'task' | 'notice' | 'none') =>
+    `Ended ${id}, but the owner's last messages did not reach the successor ${successor} (${RELAY_WHY_EN[r]}). ${dest === 'task' ? 'The text was saved as a comment on the task.' : dest === 'notice' ? 'The text was saved in your notifications (the bell).' : 'The text could not be saved anywhere.'}`,
   sessKillUnconfirmed: (id: string) =>
     `could not confirm ${id} was stopped — it may still be running, so its record was kept.`,
   sessRenamed: 'session renamed.',
@@ -746,6 +769,18 @@ const EN: CliStrings = {
   sessFiled: (task: string) => `filed under ${task} — its cost rolls up there from now on.`,
   sessFileNoConversation: 'agentop cannot see which conversation this external session is, so there is nothing to file — start it from agentop, or file it from the web once its conversation is known.',
   sessFileRefused: (reason: string) => `the board did not file it: ${reason}.`,
+  spawnFilingFailed: (reason: string) => {
+    const reasons: Record<string, string> = {
+      no_such_task: 'the task no longer exists',
+      no_such_session: 'the session is not registered on the board yet',
+      no_such_subtask: 'the subtask no longer exists',
+      needs_subtask: 'choose a subtask first',
+      wrong_delivery: 'the subtask belongs to another task',
+      blocked: 'the subtask has unfinished blockers',
+      subtask_in_group: 'choose the group instead of its member',
+    }
+    return `The session started, but the board did not file it: ${reasons[reason] ?? 'the board could not confirm the filing'}.`
+  },
   sessTaskEmpty: (task: string) => `no sessions are filed under "${task}".`,
   sessTaskOpened: (task: string, opened: number, skipped: number, held: number) =>
     `reopened ${opened} session(s) of "${task}".`
@@ -1123,6 +1158,10 @@ const PT: CliStrings = {
     ? `"${task}" removida.`
     : `"${task}" removida — ${freed} sessão(ões) mantida(s), agora sem tarefa.`,
   sessTaskReopened: (task: string) => `"${task}" reaberta.`,
+  relayOwedNote: (id: string, successor: string, r: 'missing' | 'dead' | 'send-failed' | 'truncated') =>
+    `(Estas mensagens não puderam ser entregues à sessão sucessora ${successor} antes de encerrar ${id}: ${RELAY_WHY_PT[r]}.)`,
+  relayKillWarning: (id: string, successor: string, r: 'missing' | 'dead' | 'send-failed' | 'truncated', dest: 'task' | 'notice' | 'none') =>
+    `Encerrei ${id}, mas as últimas mensagens do dono não chegaram à sucessora ${successor} (${RELAY_WHY_PT[r]}). ${dest === 'task' ? 'O texto ficou salvo como comentário na tarefa.' : dest === 'notice' ? 'O texto ficou salvo nas suas notificações (o sino).' : 'Não foi possível salvar o texto em nenhum lugar.'}`,
   sessKillUnconfirmed: (id: string) =>
     `não deu para confirmar que ${id} foi encerrada — ela pode continuar rodando, então o registro dela foi mantido.`,
   sessRenamed: 'sessão renomeada.',
@@ -1145,6 +1184,18 @@ const PT: CliStrings = {
   sessFiled: (task: string) => `arquivada em ${task} — o custo dela soma lá a partir de agora.`,
   sessFileNoConversation: 'o agentop não consegue ver qual conversa é esta sessão externa, então não há o que arquivar — inicie pelo agentop, ou arquive pela web quando a conversa for conhecida.',
   sessFileRefused: (reason: string) => `o board não arquivou: ${reason}.`,
+  spawnFilingFailed: (reason: string) => {
+    const reasons: Record<string, string> = {
+      no_such_task: 'a tarefa não existe mais',
+      no_such_session: 'a sessão ainda não está registrada no quadro',
+      no_such_subtask: 'a subtarefa não existe mais',
+      needs_subtask: 'escolha uma subtarefa primeiro',
+      wrong_delivery: 'a subtarefa pertence a outra tarefa',
+      blocked: 'a subtarefa tem bloqueios pendentes',
+      subtask_in_group: 'escolha o grupo em vez de um membro',
+    }
+    return `A sessão iniciou, mas o quadro não a vinculou: ${reasons[reason] ?? 'o quadro não conseguiu confirmar o vínculo'}.`
+  },
   sessTaskEmpty: (task: string) => `nenhuma sessão está na tarefa "${task}".`,
   sessTaskOpened: (task: string, opened: number, skipped: number, held: number) =>
     `${opened} sessão(ões) de "${task}" reabertas.`

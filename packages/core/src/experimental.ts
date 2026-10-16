@@ -77,6 +77,16 @@ export const EXPERIMENTAL_FEATURES: readonly ExperimentalFeature[] = [
       pt: 'Chat das sessões pelo canal de chat do engine (um leitor por transcrição, texto ao vivo e estado) em vez dos leitores do próprio host, para todo harness cuja integração o oferece.',
     },
   },
+  {
+    id: 'multi-account',
+    env: 'AGENTISTICS_MULTI_ACCOUNT',
+    // Opt-in: only '1'. Absent reads as OFF; the account-root routes answer 404 until it is on.
+    isOn: raw => raw === '1',
+    description: {
+      en: 'Several accounts per harness at the same time: separate login folders, signed in from the app.',
+      pt: 'Várias contas por harness ao mesmo tempo: pastas de login separadas, com a entrada feita pelo app.',
+    },
+  },
 ]
 
 export type ExperimentalSource =

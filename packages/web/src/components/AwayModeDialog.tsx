@@ -4,6 +4,7 @@
  * what `agentistics_plan_limits` reads) and a free note — then it frees the person. Built only from
  * the settings primitives (`ConfirmModal`, `Select`, `Checkbox`, `FieldTextarea`); nothing hand-rolled.
  */
+import { AwayImpact } from './AwayImpact'
 import React, { useEffect, useState } from 'react'
 import { Moon } from 'lucide-react'
 import { AWAY_AUTH_IDS, AWAY_AUTH_LABEL, AWAY_DEFAULT_MAX_WORKERS, AWAY_DEFAULT_TOP_CAP, AWAY_MAX_CEILING, AWAY_NOTE_MAX, AWAY_TOP_MODEL, SURFACE_HARNESS_ORDER, type AwayAuthId, type AwayTopCaps, type HarnessId } from '@agentistics/core' // @native-gated: activeCapProviders keeps only harnesses AWAY_TOP_MODEL names
@@ -57,6 +58,7 @@ export default function AwayModeDialog({ open, lang, onClose }: { open: boolean;
       onConfirm={() => { void confirm() }}
       onCancel={onClose}
     >
+      <AwayImpact pt={pt} open={open} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {label(pt ? 'Até quando' : 'Until when')}

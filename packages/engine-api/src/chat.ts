@@ -49,7 +49,7 @@ export interface EngineChatTurn {
   }>
   thinking?: string
   pending?: boolean
-  task?: { label: string; running: boolean }
+  task?: { label: string; running: boolean; ended?: 'done' | 'stopped' | 'never-started' | 'session-ended' }
   system?: string
   systemRef?: string
   imagePaths?: string[]

@@ -5,7 +5,7 @@ import { existsSync } from 'fs'
 import type { SessionMeta } from '@agentistics/core'
 import type { HarnessAdapter } from './types'
 import { harnessEnabled } from './types'
-import { CODEX_DIR, CODEX_SESSIONS_DIR } from '../config'
+import { CODEX_DIR, CODEX_SESSIONS_DIR, harnessRoots } from '../config'
 import { createLimiter, safeReadDir } from '../utils'
 import { createFileMemo, registerMemo, versionOf } from './file-memo'
 
@@ -28,6 +28,22 @@ async function collectRolloutFiles(dir: string): Promise<string[]> {
   return out
 }
 
+/** Every rollout under one codex root, stamped with the root's account when it has one. */
+export async function loadCodexRoot(root: string, account?: string): Promise<SessionMeta[]> {
+  const { parseCodexRollout } = await import('./codex-parse')
+  // Sorted: the walk pushes in completion order, and the build's output order follows this list.
+  const files = (await collectRolloutFiles(join(root, 'sessions'))).sort()
+  const limit = createLimiter(20)
+  const sessions = await Promise.all(files.map(f => limit(async () => memo.get(f, await versionOf([f]), async () => {
+    const content = await readFile(f, 'utf-8').catch(() => '')
+    const fallbackId = f.split('/').pop()?.replace(/\.jsonl$/, '') ?? f
+    return parseCodexRollout(content, fallbackId)
+  }))))
+  return sessions
+    .filter((s): s is SessionMeta => s !== null && !!s.start_time)
+    .map(s => (account ? { ...s, account } : s))
+}
+
 export const codexAdapter: HarnessAdapter = {
   id: 'codex',
   dataRoot: CODEX_DIR,
@@ -35,15 +51,7 @@ export const codexAdapter: HarnessAdapter = {
     return harnessEnabled('codex') && existsSync(CODEX_SESSIONS_DIR)
   },
   async loadSessions(): Promise<SessionMeta[]> {
-    const { parseCodexRollout } = await import('./codex-parse')
-    // Sorted: the walk pushes in completion order, and the build's output order follows this list.
-    const files = (await collectRolloutFiles(CODEX_SESSIONS_DIR)).sort()
-    const limit = createLimiter(20)
-    const sessions = await Promise.all(files.map(f => limit(async () => memo.get(f, await versionOf([f]), async () => {
-      const content = await readFile(f, 'utf-8').catch(() => '')
-      const fallbackId = f.split('/').pop()?.replace(/\.jsonl$/, '') ?? f
-      return parseCodexRollout(content, fallbackId)
-    }))))
-    return sessions.filter((s): s is SessionMeta => s !== null && !!s.start_time)
+    const roots = await harnessRoots('codex')
+    return (await Promise.all(roots.map(r => loadCodexRoot(r.root, r.account)))).flat()
   },
 }

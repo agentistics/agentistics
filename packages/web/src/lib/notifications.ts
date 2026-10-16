@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { idleSessionNoun } from './idleExecution'
 import { notificationMuted } from './notificationCategories'
-import { limitNoticeMeta, limitNoticeText } from './planLimits'
+import { limitNoticeMeta, limitNoticeText, segmentNoticeText } from './planLimits'
 
 export type NotificationType = 'error' | 'warning' | 'info' | 'success'
 
@@ -25,6 +25,35 @@ type Localized = { title: string; message?: string }
 /** Localized copy for server- and client-emitted notification codes. Resolved at
  *  render time by resolveNotification so switching the language re-translates. */
 export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }> = {
+  'handoff_pending': {
+    pt: { title: 'Transferência de liderança pendente', message: 'Já existe uma transferência pendente para outra sessão sucessora.' },
+    en: { title: 'Leader hand-off pending', message: 'A hand-off to another successor session is already pending.' },
+  },
+  // Spawn-filing refusals (spawn-filing-io.ts): shown when a session could not be started.
+  'subtask_refused': {
+    pt: { title: 'Sessão não iniciada', message: 'A subtarefa escolhida não pode receber uma sessão.' },
+    en: { title: 'Session not started', message: 'The chosen subtask cannot take a session.' },
+  },
+  'board_unreadable': {
+    pt: { title: 'Sessão não iniciada', message: 'Não foi possível ler o quadro para arquivar a sessão.' },
+    en: { title: 'Session not started', message: 'The board could not be read to file the session.' },
+  },
+  'working': {
+    pt: { title: 'Sessão em andamento', message: 'A sessão ainda está trabalhando.' },
+    en: { title: 'Session working', message: 'The session is still working.' },
+  },
+  'retire.done': {
+    pt: { title: 'Sessão encerrada', message: 'A sessão {label} ({id}) foi encerrada.' },
+    en: { title: 'Session retired', message: 'Session {label} ({id}) was retired.' },
+  },
+  'retire.cancelled': {
+    pt: { title: 'Encerramento cancelado', message: 'A sucessora {successorId} parou. A sessão {label} ({id}) foi mantida.' },
+    en: { title: 'Retire cancelled', message: 'Successor {successorId} stopped. Session {label} ({id}) was kept.' },
+  },
+  'retire.expired': {
+    pt: { title: 'Prazo de encerramento expirado', message: 'A sessão {label} ({id}) foi mantida: {reason}. Nenhum processo foi encerrado.' },
+    en: { title: 'Retire expired', message: 'Session {label} ({id}) was kept: {reason}. Nothing was killed.' },
+  },
   'clean.suggestion': {
     pt: { title: 'Há espaço para liberar', message: '{count} item(ns) concluído(s) ou parado(s) podem ser removido(s). Veja o que dá para limpar.' },
     en: { title: 'You can free some space', message: '{count} completed or idle item(s) can be removed. See what can be cleaned.' },
@@ -50,6 +79,11 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
   'limits.exhausted': {
     pt: { title: 'Limite do plano esgotado', message: 'Uma janela do plano chegou a 100%.' },
     en: { title: 'Plan limit used up', message: 'A plan window reached 100%.' },
+  },
+  // PLAN.ACCOUNTS §5 — generic copy; `segmentNoticeText` names the harness from `meta.harness`.
+  'plan.segment': {
+    pt: { title: 'Uso do plano caiu de repente', message: 'O uso caiu bruscamente — contando do zero para esta conta.' },
+    en: { title: 'Plan usage dropped sharply', message: 'Usage dropped sharply — counting from zero for this account.' },
   },
   'telemetry.first_use': {
     pt: { title: 'Uso anônimo do Agentistics', message: 'Enviar um sinal anônimo de uso (um número aleatório, a versão e o sistema) uma vez por dia, para sabermos quantas pessoas usam o Agentistics. Nada do seu trabalho é enviado.' },
@@ -377,6 +411,7 @@ export function resolveNotification(n: AppNotification, lang: 'pt' | 'en'): Loca
     const m = limitNoticeMeta(n.meta)
     if (m) return limitNoticeText(m, lang)
   }
+  if (n.code === 'plan.segment' && typeof n.meta?.harness === 'string') return segmentNoticeText(n.meta.harness, lang)
   const loc = n.code ? NOTIFICATION_TEXT[n.code]?.[lang] : undefined
   // A CODE WITH NO TEXT MUST NOT RENDER AS A BLANK CARD.
   //

@@ -922,6 +922,8 @@ export interface ControlSession {
   parentConversationId?: string
   /** Per-session AWAY MODE (`ManagedSession.away`): on for this session alone. Absent = not on its own. */
   away?: boolean
+  /** Leader hand-off generation (2 = first successor), shown in the ⓘ panel. Absent = never handed off. */
+  handoffSeq?: number
 }
 
 /**
@@ -1951,6 +1953,12 @@ export interface SpawnSessionRequest {
    * harness's protocol instead of a TUI. Absent = a terminal-born session, always a TUI.
    */
   origin?: 'web' | 'terminal'
+  /**
+   * multi-account: the config root this session runs in (its isolation env) and, for a LOGIN session,
+   * the login command that replaces the harness's usual argv. Built by the server (`account-roots.ts`);
+   * it is NOT a field of the wire body (`FleetSpawnBody`), so a browser can never choose an env.
+   */
+  account?: { env: Record<string, string>; loginArgv?: string[] }
 }
 
 export interface ResumeSessionRequest {

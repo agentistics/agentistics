@@ -173,7 +173,7 @@ export function SessionAwayRow({ managedId, away, pt, isMobile = false }: { mana
     setNote(null)
     const r = await setSessionAway(managedId, next, pt ? 'pt' : 'en')
     if (!r.ok) { setPending(null); setNote(pt ? `Não foi possível mudar (${r.error}).` : `Could not change it (${r.error}).`); return }
-    setNote(r.notified ? (pt ? 'A sessão foi avisada.' : 'The session was told.') : null)
+    setNote(r.queued ? (pt ? 'A sessão será avisada em instantes.' : 'The session will be told shortly.') : null)
   }
   const sub = global.active
     ? (pt ? 'O modo ausente global está ligado: esta sessão já sabe que você está fora.' : 'Global away mode is on: this session already knows you are out.')
@@ -196,8 +196,8 @@ export function SessionAwayRow({ managedId, away, pt, isMobile = false }: { mana
   )
 }
 
-export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, pt, onGo, isMobile = false, hideCheckin = false, awayId, away = false, openCheckinModal = false, onCheckinModalChange }: {
-  links: SessionLinks; startedAt?: number; sessionId?: string; roleFallbackId?: string; pt: boolean; onGo: (path: string) => void; isMobile?: boolean
+export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, pt, onGo, isMobile = false, hideCheckin = false, awayId, away = false, openCheckinModal = false, onCheckinModalChange, handoffSeq }: {
+  links: SessionLinks; startedAt?: number; /** Leader hand-off generation (the title never carries it). */ handoffSeq?: number; sessionId?: string; roleFallbackId?: string; pt: boolean; onGo: (path: string) => void; isMobile?: boolean
   /** The phone drawer draws the check-in as a card of its own (`SessionCheckinCard`). */
   hideCheckin?: boolean
   /** The MANAGED id the per-session away switch acts on; absent = no switch (not a managed row). */
@@ -231,6 +231,7 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
     ['task', pt ? 'Tarefa' : 'Task'],
   ]
   const started = when(startedAt, pt)
+  const generation = handoffSeq ? (pt ? `Sessão ${handoffSeq} (passagem de líder)` : `Session ${handoffSeq} (leader hand-off)`) : null
   const rowOf = (t: LinkTarget) => <Row key={t.key} t={t} pt={pt} onGo={onGo} touch={isMobile} />
   const searchLabel = pt ? 'Buscar nas sessões' : 'Search sessions'
   const close = () => { setSearching(false); setQuery('') }
@@ -297,14 +298,15 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
           </div>
         )
       })}
-      {started && <div style={{ ...SECTION, textTransform: 'none', letterSpacing: 0, fontWeight: 400, marginTop: 10 }}>{started}</div>}
+      {generation && <div data-testid="handoff-generation" style={{ ...SECTION, textTransform: 'none', letterSpacing: 0, fontWeight: 400, marginTop: 10 }}>{generation}</div>}
+      {started && <div style={{ ...SECTION, textTransform: 'none', letterSpacing: 0, fontWeight: 400, marginTop: generation ? 2 : 10 }}>{started}</div>}
       {role === 'leader' && !hideCheckin && checkin.state && <CheckinPanel state={checkin.state} pt={pt} isMobile={isMobile} onGo={onGo} update={checkin.update} runNow={checkin.runNow} taskId={links.task?.id} taskPath={links.task ? `/tasks/${encodeURIComponent(links.task.id)}?tab=activity&filter=checkins` : null} modalOpen={checkinModalOpen} onModalChange={changeCheckinModal} />}
     </div>
   )
 }
 
 export function SessionLinkInfo({ session, links, lang, onGo, isMobile = false }: {
-  session: Partial<Pick<ControlSession, 'id' | 'startedAt' | 'conversationId' | 'away' | 'actionable' | 'state'>>
+  session: Partial<Pick<ControlSession, 'id' | 'startedAt' | 'conversationId' | 'away' | 'actionable' | 'state' | 'handoffSeq'>>
   links: SessionLinks | null
   lang: 'pt' | 'en'
   onGo: (path: string) => void
@@ -383,7 +385,7 @@ export function SessionLinkInfo({ session, links, lang, onGo, isMobile = false }
           maxHeight: 'calc(60vh / var(--ui-zoom, 1))', overflowY: 'auto', padding: '4px 10px 10px', borderRadius: 10,
           background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
         }}>
-          <SessionLinkPanel links={links ?? { parent: null, children: [], task: null }} {...(session.startedAt ? { startedAt: session.startedAt } : {})} sessionId={session.id ? sessionIdentityKey(session as { id: string; conversationId?: string }) : undefined} roleFallbackId={session.id} pt={pt} isMobile={isMobile} openCheckinModal={checkinModalRequested} onCheckinModalChange={setCheckinModalRequested}
+          <SessionLinkPanel links={links ?? { parent: null, children: [], task: null }} {...(session.startedAt ? { startedAt: session.startedAt } : {})} {...(session.handoffSeq ? { handoffSeq: session.handoffSeq } : {})} sessionId={session.id ? sessionIdentityKey(session as { id: string; conversationId?: string }) : undefined} roleFallbackId={session.id} pt={pt} isMobile={isMobile} openCheckinModal={checkinModalRequested} onCheckinModalChange={setCheckinModalRequested}
             {...(session.id && session.actionable && session.state !== 'closed' ? { awayId: session.id, away: session.away === true } : {})}
             onGo={p => { setOpen(false); onGo(p) }} />
         </div>, document.body)}

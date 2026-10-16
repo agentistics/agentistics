@@ -16,6 +16,11 @@ describe('inheritedIdentity', () => {
       subtaskId: 's-1', attemptId: 'a-1', harnessName: 'hn', harnessNameSince: 7,
     })
   })
+  it('preserves the hand-off generation and both links across a reopen', () => {
+    const identity = inheritedIdentity({ ...prev, handoffSeq: 47, handoffFrom: 'ancestor', handoffTo: 'successor' })
+    expect(identity).toMatchObject({ handoffSeq: 47, handoffFrom: 'ancestor', handoffTo: 'successor' })
+    expect(inheritedIdentity(prev).handoffSeq).toBeUndefined()
+  })
   it('never carries per-process facts', () => {
     const r = inheritedIdentity(prev) as Record<string, unknown>
     for (const k of ['id', 'createdAt', 'endedAt', 'lastSeenMs', 'conversationId']) expect(k in r).toBe(false)

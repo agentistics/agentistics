@@ -27,7 +27,7 @@ import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { MANAGED_SESSIONS_FILE } from '../config'
 import { CONVERSATION_LINK_REASONS as LINK_REASONS, type ConversationLinkReason } from '@agentistics/core'
-import type { ManagedSession } from './types'
+import type { ManagedSession, RetireRequest } from './types'
 import { withFileLock } from './file-lock'
 
 /** Distinguishes two writes from the SAME process; the pid distinguishes the processes. */
@@ -54,13 +54,21 @@ export interface SessionPatch {
   leader?: boolean
   handoffHintLevel?: number
   handoffHintTokens?: number
+  handoffTo?: string
+  handoffFrom?: string
+  handoffSeq?: number
+  handoffRelayClosing?: string
+  handoffRelayedAt?: string
+  /** `null` clears it (registry patch rule). */
+  handoffRelayAwaiting?: boolean | null
+  handoffBaseTokens?: number
   label?: string
   /** Written alongside `label`, never on its own — see `ManagedSession.labelSince`. */
   labelSince?: number
   note?: string
-  task?: string
-  /** See `ManagedSession.taskId` — stamped at spawn, patched only when a row is re-attributed. */
-  taskId?: string
+  task?: string | null
+  /** See `ManagedSession.taskId`. `null` clears a filing refused by the board after spawn. */
+  taskId?: string | null
   /**
    * See `ManagedSession.subtaskId`. `null` CLEARS it, which is what moving a session from a subtask
    * back to its task is: leaving the old value behind would keep drawing the row under a subtask it
@@ -85,6 +93,8 @@ export interface SessionPatch {
   structuredDriver?: string
   /** See `ManagedSession.away`. `null` clears it (a session switched back off). */
   away?: true | null
+  /** See `ManagedSession.retire`. `null` clears it (carried out or cancelled). */
+  retire?: RetireRequest | null
 }
 
 export interface SessionRegistry {
@@ -100,6 +110,8 @@ export interface SessionRegistry {
   remove(id: string): Promise<void>
   /** False when no session carries that id — never a silent success. */
   patch(id: string, patch: SessionPatch): Promise<boolean>
+  /** The same patch on every id given, in ONE read-modify-write. Returns how many rows matched. */
+  patchMany(ids: readonly string[], patch: SessionPatch): Promise<number>
   /**
    * Stamp `lastSeenMs` on every id given, in ONE write — the poller's heartbeat.
    *
@@ -140,6 +152,14 @@ function sanitize(raw: unknown): ManagedSession | null {
       ? { handoffHintLevel: s.handoffHintLevel } : {}),
     ...(typeof s.handoffHintTokens === 'number' && Number.isFinite(s.handoffHintTokens) && s.handoffHintTokens >= 0
       ? { handoffHintTokens: s.handoffHintTokens } : {}),
+    ...(typeof s.handoffTo === 'string' && s.handoffTo ? { handoffTo: s.handoffTo } : {}),
+    ...(typeof s.handoffFrom === 'string' && s.handoffFrom ? { handoffFrom: s.handoffFrom } : {}),
+    ...(typeof s.handoffSeq === 'number' && Number.isInteger(s.handoffSeq) && s.handoffSeq >= 2 ? { handoffSeq: s.handoffSeq } : {}),
+    ...(typeof s.handoffRelayedAt === 'string' && s.handoffRelayedAt ? { handoffRelayedAt: s.handoffRelayedAt } : {}),
+    ...(typeof s.handoffRelayClosing === 'string' && s.handoffRelayClosing ? { handoffRelayClosing: s.handoffRelayClosing } : {}),
+    ...(s.handoffRelayAwaiting === true ? { handoffRelayAwaiting: true } : {}),
+    ...(typeof s.handoffBaseTokens === 'number' && Number.isFinite(s.handoffBaseTokens) && s.handoffBaseTokens > 0
+      ? { handoffBaseTokens: s.handoffBaseTokens } : {}),
     ...(typeof s.label === 'string' ? { label: s.label } : {}),
     ...(typeof s.labelSince === 'number' && Number.isFinite(s.labelSince)
       ? { labelSince: s.labelSince }
@@ -190,6 +210,32 @@ function sanitize(raw: unknown): ManagedSession | null {
       ? { lastSeenMs: s.lastSeenMs }
       : {}),
     ...sanitizeRepo(s.repo),
+    ...sanitizeRetire(s.retire),
+  }
+}
+
+/**
+ * A retire request, only if it is SHAPED like one (`ManagedSession.retire`). A hand-edited request
+ * with an unparseable deadline would otherwise reach `retire-plan.ts` as `NaN` and be compared
+ * against the clock — a malformed one drops the FIELD and keeps the session.
+ */
+function sanitizeRetire(raw: unknown): { retire?: RetireRequest } {
+  if (!raw || typeof raw !== 'object') return {}
+  const r = raw as Record<string, unknown>
+  const iso = (v: unknown): v is string => typeof v === 'string' && Number.isFinite(Date.parse(v))
+  if (!iso(r.requestedAt) || !iso(r.deadlineAt) || typeof r.by !== 'string' || !r.by) return {}
+  if (typeof r.quietForMs !== 'number' || !Number.isFinite(r.quietForMs) || r.quietForMs < 0) return {}
+  return {
+    retire: {
+      requestedAt: r.requestedAt,
+      by: r.by,
+      ...(typeof r.successorId === 'string' && r.successorId ? { successorId: r.successorId } : {}),
+      ...(typeof r.folderId === 'string' && r.folderId ? { folderId: r.folderId } : {}),
+      quietForMs: r.quietForMs,
+      deadlineAt: r.deadlineAt,
+      ...(iso(r.expiredAt) ? { expiredAt: r.expiredAt } : {}),
+      ...(typeof r.expiredReason === 'string' && r.expiredReason ? { expiredReason: r.expiredReason } : {}),
+    },
   }
 }
 
@@ -392,6 +438,23 @@ export function createSessionRegistry(file: string): SessionRegistry {
         return true
       })
     },
+    patchMany(ids, patch) {
+      return enqueue(async () => {
+        const wanted = new Set(ids)
+        const list = await read()
+        let matched = 0
+        const next = list.map(s => {
+          if (!wanted.has(s.id)) return s
+          matched++
+          const merged = { ...s, ...patch } as Record<string, unknown>
+          for (const [k, v] of Object.entries(patch)) if (v === null) delete merged[k]
+          return merged as unknown as ManagedSession
+        })
+        if (matched === 0) return 0
+        await write(next)
+        return matched
+      })
+    },
     touch(ids, atMs) {
       return enqueue(async () => {
         const wanted = new Set(ids)
@@ -423,6 +486,10 @@ export const patchSession = (
   id: string,
   patch: SessionPatch,
 ): Promise<boolean> => defaultRegistry.patch(id, patch)
+export const patchSessions = (
+  ids: readonly string[],
+  patch: SessionPatch,
+): Promise<number> => defaultRegistry.patchMany(ids, patch)
 export const touchSessions = (
   ids: readonly string[],
   atMs: number,

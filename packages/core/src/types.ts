@@ -456,6 +456,9 @@ export interface SessionMeta {
    *  Absent for single-model sessions: then `model` alone prices the session. */
   model_usage?: Record<string, ModelUsage>
   harness: SurfaceHarnessId
+  /** Registry account id of the root this session was read from. Absent for the default root
+   *  without a binding (PLAN.ACCOUNTS D2). */
+  account?: string
   /** Owning user in team mode. Undefined for local/Solo sessions. */
   user?: string
   /** Normalized git remote of the session's repo (`host/org/repo`, no protocol) — the

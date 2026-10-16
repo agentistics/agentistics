@@ -34,6 +34,8 @@ import { loadNativeFleet, runNativeVerb, isNativeSessionId } from './sessions/na
 import { spawn } from 'node:child_process'
 import { rekeyMutedSession } from './sessions/session-notify-web'
 import { rekeyFolderMember } from './sessions/cli-folder'
+import { rekeyCheckinSession } from './sessions/handoff-inherit'
+import { updatePreferences } from './preferences'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, writeSync } from 'node:fs'
 import { basename, dirname, join, resolve as resolvePath } from 'node:path'
@@ -133,6 +135,7 @@ import { spawnCapabilities } from './sessions/codex-capabilities'
 import { readHarnessVersion } from './sessions/harness-version'
 import { answerStructured, structuredIntentOf, structuredReopenOrigin } from './sessions/structured-route'
 import { agentisticsMcpLaunch } from './mcp-launch'
+import { applyAccountToPlan } from './sessions/account-plan'
 import { prependContext } from './sessions/agentistics-context'
 import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveSpawnAwayFor, writeContextFile } from './sessions/spawn-context'
 import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor } from './sessions/session-roles'
@@ -1578,6 +1581,7 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
         .then(async r => {
           await rekeyMutedSession(id, conversationId).catch(() => {})
           await rekeyFolderMember(id, conversationId).catch(() => {})
+          await rekeyCheckinSession(id, conversationId, updatePreferences).catch(() => {})
           await rekeyStoredRole([id], [id, conversationId]).catch(() => {})
           return r
         }),
@@ -1764,6 +1768,7 @@ function recordProcessLink(sid: string, conversationId: string, link: 'assigned'
     .then(async r => {
       await rekeyMutedSession(sid, conversationId).catch(() => {})
       await rekeyFolderMember(sid, conversationId).catch(() => {})
+      await rekeyCheckinSession(sid, conversationId, updatePreferences).catch(() => {})
       await rekeyStoredRole([sid], [sid, conversationId]).catch(() => {})
       return r
     })
@@ -2036,6 +2041,8 @@ async function spawnManaged(req: {
    * gated normally.
    */
   skipAdmission?: boolean
+  /** multi-account: see `SpawnSessionRequest.account`. */
+  account?: { env: Record<string, string>; loginArgv?: string[] }
 }, s: CliStrings, lang: CliLang): Promise<SpawnSessionResult> {
   const backend = await resolveBackend()
   const blocked = await backend.unavailable()
@@ -2096,7 +2103,16 @@ async function spawnManaged(req: {
   const away = req.away === undefined && req.inherit
     ? req.inherit.away === true
     : await resolveSpawnAwayFor(req.away, req.parentSessionId, req.parentVerified === true)
+  // HANDOFF.RELAY: a leader hand-off's successor is briefed with what the owner said to the
+  // predecessor and the predecessor's last reply, so a hand-off can never swallow an answer.
+  const handoffParentRow = req.handoff && req.parentSessionId
+    ? (await readRegistry().catch(() => [] as ManagedSession[])).find(m => m.id === req.parentSessionId)
+    : undefined
+  const relay = handoffParentRow
+    ? await import('./sessions/handoff-relay-io').then(m => m.captureHandoffRelay(handoffParentRow)).catch(() => undefined)
+    : undefined
   const ctx = buildSpawnContext({
+      ...(relay ? { handoffRelay: relay.section } : {}),
       ...(await resolveContextAway(away)),
       sessionId: id,
       cwd: req.cwd,
@@ -2122,6 +2138,7 @@ async function spawnManaged(req: {
     conversationId: offeredConversationId,
   }, await spawnCapabilities(req.harness))
   if (!planned.ok) return { ok: false, message: explainSpawnError(planned.error, s) }
+  if (req.account) applyAccountToPlan(planned.plan, req.account)
 
   // THE BINARY MUST BE REACHABLE FROM HERE. The pane is spawned with THIS process's PATH (see
   // `newSessionArgs`), so `Bun.which` answers exactly what the pane's exec will find — and a
@@ -2209,6 +2226,9 @@ async function spawnManaged(req: {
     return { ok: false, message }
   }
   if (storedContextRole.role) await markRoleDelivered([planned.plan.conversationId, id], storedContextRole.role)
+  if (handoffParentRow) {
+    await import('./sessions/handoff-relay-io').then(m => m.recordHandoffLink(handoffParentRow.id, id, relay, handoffParentRow.handoffSeq)).catch(() => {})
+  }
 
   // F2.0 — a STRUCTURED session got the opening context from its driver (its declared channel), so a
   // first-message context left pending for the TUI must not be prepended to its first prompt again.
@@ -3811,6 +3831,9 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const backend = await resolveBackend()
       const blocked = await backend.unavailable()
       if (blocked) return { ok: false, message: blocked }
+      // HANDOFF.RELAY: a predecessor's last answer to the owner reaches its successor before it dies.
+      const { flushBeforeKill } = await import('./sessions/handoff-relay-io')
+      const flushed = await flushBeforeKill(id, async (to, text) => (await this.promptSession!(to, text)).ok, lang)
       if (!(await backend.kill(id))) return { ok: false, message: s.sessKillUnconfirmed(id) }
       // MARKED finished, never deleted — see `retireSession`'s own docstring. Removing the row
       // took with it the only record of which conversation this was — the store had not caught up,
@@ -3819,7 +3842,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // ordinary next thing to want.
       await retireSession(id)
       forgetConversations()
-      return { ok: true, message: s.sessKilled(id) }
+      return { ok: true, message: flushed.warning ? `${s.sessKilled(id)} ${flushed.warning}` : s.sessKilled(id) }
     },
 
     /**
@@ -4525,52 +4548,65 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * than a session that starts and immediately dies with a usage error on a screen nobody sees.
      */
     async spawnSession(req: SpawnSessionRequest): Promise<SpawnSessionResult> {
-      let taskId = req.taskId
-      let subtaskId = req.subtaskId
+      // WHERE this session is filed is the one planner's answer (`spawn-filing.ts`), shared with
+      // `session start` / `batch`: references resolved on the board, a group member filed on its
+      // group, a hand-off inheriting its predecessor's filing, cwd and folder. A refusal spawns nothing.
+      const { planSpawnFilingSafe, attachAfterSpawn } = await import('./sessions/spawn-filing-io')
+      const { filingRow, refusalText, spawnSessionFilingRequest } = await import('./sessions/spawn-row')
+      const filing = await planSpawnFilingSafe(spawnSessionFilingRequest(req))
+      if (!filing.ok) return { ok: false, message: refusalText(filing) }
+      const taskId = filing.taskId
+      const subtaskId = filing.subtaskId
+      const rowFiling = filingRow(filing, req.task)
+      // Leader hand-off: the successor keeps the predecessor's title (generation counter in the ⓘ panel).
+      let label = req.label
       let handoffParent: ManagedSession | undefined
-      // Leader hand-off: no filing of its own → take the parent's. Resolved BEFORE the spawn so the
-      // child's briefing names the same task/subtask it is filed on (it said "not linked" otherwise).
-      if (!taskId && req.handoff && req.parentSessionId) {
+      if (req.handoff && req.parentSessionId) {
         const { readRegistry } = await import('./sessions/registry')
-        const parent = (await readRegistry()).find(m => m.id === req.parentSessionId)
-        taskId = parent?.taskId
-        subtaskId = parent?.subtaskId
-        handoffParent = parent
-      }
-      // A group MEMBER can never hold a session (`subtask_in_group`): file it on the member's GROUP
-      // instead of leaving the session unfiled while its briefing claims the member.
-      if (taskId && subtaskId) {
-        const { loadTaskWorld } = await import('./sessions/task-source')
-        const sub = (await loadTaskWorld().catch(() => null))?.book.subtasks.find(s => s.id === subtaskId)
-        if (sub?.parentGroupId) subtaskId = sub.parentGroupId
+        handoffParent = (await readRegistry()).find(m => m.id === req.parentSessionId)
+        const { handoffTitle } = await import('./sessions/handoff-inherit')
+        label = handoffTitle(handoffParent?.label, req.label)
       }
       return spawnManaged({
         harness: req.harness as HarnessId,
-        cwd: req.cwd,
+        cwd: filing.cwd,
         attach: req.attach,
         ...(req.prompt ? { prompt: req.prompt } : {}),
         ...(req.model ? { model: req.model } : {}),
         ...(req.effort ? { effort: req.effort } : {}),
         ...(req.mode ? { mode: req.mode } : {}),
-        ...(req.label ? { label: req.label } : {}),
-        ...(req.task ? { task: req.task } : {}),
+        ...(label ? { label } : {}),
+        ...(rowFiling.task ? { task: rowFiling.task } : {}),
         ...(taskId ? { contextTaskId: taskId } : {}),
         ...(taskId && subtaskId ? { contextSubtaskId: subtaskId } : {}),
         ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
         ...(req.parentSessionId && req.parentVerified ? { parentVerified: true } : {}),
         ...(req.handoff ? { handoff: true } : {}),
-        ...(req.role ? { role: req.role } : {}),
+        ...(req.handoff ? { role: 'leader' as const } : req.role ? { role: req.role } : {}),
         ...(req.away !== undefined ? { away: req.away } : {}),
         ...(req.force ? { force: true } : {}),
         ...(req.origin ? { origin: req.origin } : {}),
+        ...(req.account ? { account: req.account } : {}),
       }, S(), lang).then(async r => {
+        let attachNote = ''
         // NW-02: a session started for a BOARD task is filed there by id, not only named after it.
         if (r.ok && r.id && taskId) {
-          const { attachSession } = await import('./sessions/task-web')
-          await attachSession(taskId, r.id, subtaskId ? { subtaskId } : {}).catch(() => null)
+          const a = await attachAfterSpawn({ taskId, ...(subtaskId ? { subtaskId } : {}) }, r.id)
+          if (!a.ok) attachNote = S().spawnFilingFailed(a.reason)
         }
-        // A hand-off child also joins the parent's sidebar folder. Never fails the spawn: the session
-        // is already running, and an error here would invite a retry that starts a second leader.
+        // The folder the plan chose (the predecessor's, the task's, or where the caller works).
+        // Never fails the spawn: the session is already running, and an error here would invite a
+        // retry that starts a second leader.
+        if (r.ok && r.id && filing.folderId) {
+          try {
+            const { readRegistry } = await import('./sessions/registry')
+            const row = (await readRegistry()).find(m => m.id === r.id)
+            const { fileInFolder } = await import('./sessions/cli-folder')
+            await fileInFolder(filing.folderId, { id: r.id, ...(row?.conversationId ? { conversationId: row.conversationId } : {}) })
+          } catch { /* a folder is a convenience, not the spawn */ }
+        }
+        // A hand-off successor also inherits the predecessor's pin and check-in agenda (and its folder,
+        // idempotently, if the planner filed none). Never fails the spawn, for the same reason.
         if (r.ok && r.id && req.handoff && req.parentSessionId) {
           try {
             const { readRegistry } = await import('./sessions/registry')
@@ -4578,13 +4614,13 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
             const parent = handoffParent ?? reg.find(m => m.id === req.parentSessionId)
             const child = reg.find(m => m.id === r.id) ?? { id: r.id }
             if (parent) {
-              const { fileHandoffInParentGroup } = await import('./sessions/handoff-group')
+              const { inheritHandoffPrefs } = await import('./sessions/handoff-inherit')
               const { updatePreferences } = await import('./preferences')
-              await fileHandoffInParentGroup(parent, child, updatePreferences)
+              await inheritHandoffPrefs(parent, child, updatePreferences)
             }
           } catch { /* a folder is a convenience, not the spawn */ }
         }
-        return r
+        return attachNote ? { ...r, message: `${r.message ? r.message + ' ' : ''}${attachNote}` } : r
       })
     },
   }

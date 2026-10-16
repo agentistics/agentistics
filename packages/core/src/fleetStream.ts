@@ -77,7 +77,8 @@ export function expandFleetVerbs(wire: FleetWire): FleetWire {
   return result as unknown as FleetWire
 }
 
-function historicalWireRow(row: { id: string; state?: unknown }): boolean {
+/** The row is over, not merely idle: a closed history row, or an exited / lost session. */
+export function historicalWireRow(row: { id: string; state?: unknown }): boolean {
   return row.id.startsWith('closed:') || row.state === 'closed' || row.state === 'exited' || row.state === 'lost'
 }
 
