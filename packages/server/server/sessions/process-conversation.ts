@@ -77,7 +77,7 @@ const HOLDER_MAX_DEPTH = 5
  * that is gone (measured 2026-10-08: kimi 0.41 swapped its binary mid-probe and the pane process
  * read `…/bin/kimi.bak (deleted)`), and that process is still the harness.
  */
-async function exeName(pid: number): Promise<string | null> {
+export async function exeName(pid: number): Promise<string | null> {
   try {
     return basename((await readlink(`/proc/${pid}/exe`)).replace(/ \(deleted\)$/, ''))
   } catch {
