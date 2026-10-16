@@ -335,6 +335,64 @@ describe('per-account primitives (B1)', () => {
     expect(agentVisible([{ harness: 'claude' as const, account: 'acc_zz' }], [])).toEqual([])
   })
 
+  test('a row with no account is rejected, never treated as the legacy default', () => {
+    const unattributed = [{ harness: 'codex' }] as unknown as { harness: 'codex'; account: string }[]
+    expect(agentVisible(unattributed, [])).toEqual([])
+  })
+
+  test('visibility composes into routing: one hidden account, then both hidden', () => {
+    const rows = [
+      { ...row(mk('codex', 'acc_a', 10, 20)), harness: 'codex' as const },
+      { ...row(mk('codex', 'acc_b', 10, 30)), harness: 'codex' as const },
+    ]
+    const accts = (a: boolean, b: boolean) => [
+      { id: 'acc_a', harness: 'codex' as const, available: a },
+      { id: 'acc_b', harness: 'codex' as const, available: b },
+    ]
+    const one = routeRecommendation(agentVisible(rows.map(r => ({ ...r, account: r.account! })), accts(false, true)), 'mechanical')
+    expect(one.account).toBe('acc_b')
+    const none = routeRecommendation(agentVisible(rows.map(r => ({ ...r, account: r.account! })), accts(false, false)), 'mechanical')
+    expect(none.harness).toBeNull()
+  })
+
+  test('route: registered held account + unregistered ok account does not crash', () => {
+    const held = { ...row(mk('claude', 'acc_a', 90, 50)), status: 'hold' as const }
+    const unreg = { ...row(mk('claude', 'acc_b', 10, 10)), plan: 'unregistered' }
+    expect(routeRecommendation([held, unreg], 'lead').harness).toBeNull()
+    const alt = row(mk('codex', 'acc_c', 10, 10))
+    const r = routeRecommendation([held, unreg, { ...alt, harness: 'codex' as const }], 'lead')
+    expect(r.harness).toBe('codex')
+    expect(r.account).toBe('acc_c')
+  })
+
+  test('route: registered tight account + unregistered ok account is not eligible off-lead', () => {
+    const tight = { ...row(mk('claude', 'acc_a', 10, 85)), status: 'tight' as const }
+    const unreg = { ...row(mk('claude', 'acc_b', 10, 10)), plan: 'unregistered' }
+    expect(routeRecommendation([tight, unreg], 'mechanical').harness).toBeNull()
+    expect(routeRecommendation([tight, unreg], 'lead').account).toBe('acc_a')
+  })
+
+  test.each(['claude', 'codex', 'gemini', 'copilot'] as const)('aggregate pace/slots are harness-generic (%s)', h => {
+    const p = (account: string, paceStatus: 'under' | 'on' | 'over', freeSlots: number, status: 'ok' | 'hold' = 'ok') =>
+      ({ ...row(mk(h, account, 10, 20)), harness: h, paceStatus, freeSlots, status })
+    const [agg] = harnessAggregate([p('a', 'over', 1), p('b', 'on', 2), p('c', 'under', 4, 'hold'), p('d', 'under', 0, 'hold')])
+    expect(agg).toMatchObject({ harness: h, freeSlots: 3, paceStatus: 'on' })
+    expect(harnessAggregate([p('c', 'under', 4, 'hold')])[0]).toMatchObject({ status: 'hold', freeSlots: 0 })
+    expect(harnessAggregate([p('c', 'under', 4, 'hold')])[0]!.paceStatus).toBeUndefined()
+  })
+
+  test('meterDiscontinuity boundaries: exactly 1h / exactly 15 points / no matching kind', () => {
+    const prev = mk('claude', 'acc_a', 50, 60, now)
+    const pw = prev.windows[1]!
+    const next = (usedPct: number, resetsAt: number, kind: '5h' | 'week' = 'week'): PlanLimits =>
+      ({ ...prev, updatedAt: now + 1000, windows: [w(kind, usedPct, resetsAt)] })
+    expect(meterDiscontinuity(prev, next(40, pw.resetsAt + H))).toBe(false) // exactly 1h is not > 1h
+    expect(meterDiscontinuity(prev, next(40, pw.resetsAt + H + 1))).toBe(true)
+    expect(meterDiscontinuity(prev, next(45, pw.resetsAt + 2 * H))).toBe(true) // drop of exactly 15
+    expect(meterDiscontinuity(prev, next(46, pw.resetsAt + 2 * H))).toBe(false)
+    expect(meterDiscontinuity({ ...prev, windows: [w('week', 60, pw.resetsAt)] }, next(10, pw.resetsAt + 2 * H, '5h'))).toBe(false)
+  })
+
   test('aggregate sums free slots of non-held accounts; hold only when all hold', () => {
     const a = { ...row(mk('claude', 'acc_a', 10, 20)), freeSlots: 2 }
     const b = { ...row(mk('claude', 'acc_b', 10, 30)), freeSlots: 3 }
