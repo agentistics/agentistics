@@ -7,6 +7,8 @@
  * Two taps, both reading what the harness already wrote (no request that would spend quota):
  * - claude: every stdout line a STRUCTURED (web-born) session's relay delivers
  *   (`structured-durable.ts`), cheap-filtered on the literal `rate_limit_event` before parsing;
+ * - claude (TUI sessions): `claude-usage.ts` polls the subscription usage endpoint Claude Code's own
+ *   `/usage` reads, with the login it already keeps — the TUI writes no stream-json to tap;
  * - codex: the tail of a rollout file the session-directory watcher saw change (`sse.ts`).
  * At boot the newest few of each are read once, so a restart does not forget the last value.
  */

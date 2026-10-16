@@ -7,6 +7,9 @@
  * Sources, both official and both free (no extra request that would spend quota):
  * - claude: the stream-json `rate_limit_event` every structured turn emits
  *   (`rate_limit_info.unifiedWindows.{five_hour,seven_day}`, `utilization` 0..1, `resetsAt` epoch s).
+ * - claude (TUI sessions, which emit no stream-json): the subscription usage endpoint Claude Code's
+ *   own `/usage` reads (`GET /api/oauth/usage`, `{five_hour,seven_day}.{utilization 0..100,
+ *   resets_at ISO}`), asked with the local login the user already has — a read, it spends no quota.
  * - codex: the `rate_limits` block on every rollout `token_count` event
  *   (`primary`/`secondary`, `used_percent` 0..100, `window_minutes` 300 / 10080, `resets_at` epoch s).
  *
@@ -34,7 +37,7 @@ export interface PlanLimitWindow {
   resetsAt: number
 }
 
-export type PlanLimitSource = 'claude-stream' | 'codex-rollout' | 'codex-app-server'
+export type PlanLimitSource = 'claude-stream' | 'claude-usage-api' | 'codex-rollout' | 'codex-app-server'
 
 export interface PlanLimits {
   harness: HarnessId
@@ -75,6 +78,9 @@ export interface PlanBudget {
   daysToWeekReset: number
   dailyBudgetPct: number
   status: PlanBudgetStatus
+  /** When the record was read; with `stale`, an old reading says so instead of passing for a fresh one. */
+  updatedAt: number
+  stale: boolean
 }
 
 export type PlanPaceStatus = 'under' | 'on' | 'over'
@@ -168,6 +174,30 @@ export function parseClaudeRateLimitEvent(line: unknown, atMs: number): PlanLimi
   }
   if (!windows.length || !finite(atMs)) return null
   return { harness: 'claude', account: 'default', windows, updatedAt: atMs, source: 'claude-stream' }
+}
+
+/**
+ * The body of Claude Code's `GET /api/oauth/usage` (already `JSON.parse`d) → a claude record, or
+ * `null` when neither window is usable. `utilization` is a PERCENTAGE here (0..100), unlike the
+ * stream event's 0..1. A window the endpoint reports with `utilization: 0` and no `resets_at` has
+ * not opened yet: it is a real 0, recorded as already renewed (`resetsAt = atMs`). A non-zero
+ * utilization with no readable reset time is dropped — a percentage without its renewal would be
+ * kept past the renewal it cannot name.
+ */
+export function parseClaudeUsageResponse(body: unknown, atMs: number): PlanLimits | null {
+  const o = obj(body)
+  if (!o || !finite(atMs)) return null
+  const windows: PlanLimitWindow[] = []
+  const pairs: [string, PlanWindowKind][] = [['five_hour', '5h'], ['seven_day', 'week']]
+  for (const [key, kind] of pairs) {
+    const w = obj(o[key])
+    if (!w || !finite(w.utilization)) continue
+    const reset = typeof w.resets_at === 'string' ? Date.parse(w.resets_at) : NaN
+    if (Number.isFinite(reset)) windows.push({ kind, usedPct: round1(w.utilization), resetsAt: reset })
+    else if (w.utilization === 0) windows.push({ kind, usedPct: 0, resetsAt: atMs })
+  }
+  if (!windows.length) return null
+  return { harness: 'claude', account: 'default', windows, updatedAt: atMs, source: 'claude-usage-api' }
 }
 
 /**
@@ -296,6 +326,7 @@ export function planBudget(l: PlanLimits, nowMs: number): PlanBudget {
     harness: l.harness,
     plan: l.plan ?? l.sourcePlan ?? 'unregistered',
     fiveHourPct, weekPct, weekResetsAt, daysToWeekReset, dailyBudgetPct, status,
+    updatedAt: l.updatedAt, stale: limitsStale(l, nowMs),
   }
 }
 
