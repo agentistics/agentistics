@@ -15,17 +15,20 @@ export async function handleAccountsRequest(
     if (path === '/api/accounts/roots') {
       if (req.method === 'GET') { roots.ensurePoller(); return json({ roots: await roots.list() }) }
       if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
+      if (!(req.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) return json({ error: 'Expected application/json' }, 415)
       let body: { harness?: unknown } | null
       try { body = await req.json() } catch { return json({ error: 'Invalid request' }, 400) }
       const harness = body && typeof body.harness === 'string' ? body.harness as HarnessId : null
       if (!harness || !HARNESS_ORDER.includes(harness)) return json({ error: 'Expected a harness' }, 400)
       const out = await roots.addRoot(harness)
-      return out.ok ? json(out) : json({ error: out.reason, message: out.message }, out.reason === 'unsupported' ? 422 : out.reason === 'disabled' ? 404 : 502)
+      return out.ok ? json(out) : json({ error: out.reason, message: out.message }, out.reason === 'unsupported' || out.reason === 'unsafe_path' ? 422 : out.reason === 'disabled' ? 404 : 502)
     }
     const m = /^\/api\/accounts\/roots\/([^/]+)$/.exec(path)
     if (!m) return json({ error: 'Not found' }, 404)
     if (req.method !== 'DELETE') return json({ error: 'Method not allowed' }, 405)
     let confirm: unknown
+    const raw = await req.clone().text().catch(() => '')
+    if (raw && !(req.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) return json({ error: 'Expected application/json' }, 415)
     try { confirm = ((await req.json().catch(() => null)) as { confirm?: unknown } | null)?.confirm } catch { confirm = undefined }
     if (confirm !== undefined && typeof confirm !== 'string') return json({ error: 'confirm must be a string' }, 400)
     const out = await roots.removeRoot(decodeURIComponent(m[1]!), confirm === undefined ? {} : { confirm })

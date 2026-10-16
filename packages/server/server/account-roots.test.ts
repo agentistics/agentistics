@@ -90,6 +90,8 @@ describe('createRoot', () => {
   test('flag off refuses', async () => {
     const out = await make({ flagOn: () => false }).roots.createRoot('claude')
     expect(out.ok).toBe(false)
+    if (!out.ok) expect(out.reason).toBe('disabled')
+    await expect(stat(join(tmp, 'accounts'))).rejects.toThrow()
   })
 })
 
@@ -172,16 +174,45 @@ describe('removeRoot', () => {
     expect(r.ok).toBe(false)
     expect((await stat(outside)).isDirectory()).toBe(true)
   })
+  test('a BOUND account whose root is a symlink or outside the base reaches the real guard', async () => {
+    const outside = join(tmp, 'precious2'); await mkdir(outside)
+    await writeFile(join(outside, 'keep'), 'x')
+    const link = join(tmp, 'accounts', 'claude', 'r_link')
+    await mkdir(join(tmp, 'accounts', 'claude'), { recursive: true })
+    await symlink(outside, link)
+    const m = make()
+    await m.store.bind(link, { harness: 'claude', key: 'k1', label: 'l' })
+    await m.store.bind(outside, { harness: 'claude', key: 'k2', label: 'l' })
+    const acc = (await m.store.readAccounts()).accounts
+    for (const a of acc.filter(a => a.root)) {
+      const r = await m.roots.removeRoot(a.id, { confirm: a.root! })
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.reason).toBe('not_a_root')
+      expect((await m.store.byId(a.id))!.retired).toBeUndefined()
+    }
+    expect((await stat(join(outside, 'keep'))).isFile()).toBe(true)
+  })
 })
 
 describe('routes', () => {
   const call = (path: string, method: string, body?: unknown, deps = {}) =>
-    handleAccountsRequest(new Request(`http://x${path}`, { method, body: body ? JSON.stringify(body) : undefined }), HARNESS_ORDER, {}, deps as never)
+    handleAccountsRequest(new Request(`http://x${path}`, {
+      method, body: body ? JSON.stringify(body) : undefined, headers: body ? { 'content-type': 'application/json' } : undefined,
+    }), HARNESS_ORDER, {}, deps as never)
   test('flag off → 404 on every roots route', async () => {
     const off = { base: join(tmp, 'accounts'), flagOn: () => false }
     expect((await call('/api/accounts/roots', 'GET', undefined, off)).status).toBe(404)
     expect((await call('/api/accounts/roots', 'POST', { harness: 'claude' }, off)).status).toBe(404)
     expect((await call('/api/accounts/roots/r_1', 'DELETE', undefined, off)).status).toBe(404)
+    await expect(stat(join(tmp, 'accounts'))).rejects.toThrow()
+  })
+  test('a POST whose content-type is not JSON is refused (forces a CORS preflight)', async () => {
+    const deps = { base: join(tmp, 'accounts'), flagOn: () => true }
+    const res = await handleAccountsRequest(new Request('http://x/api/accounts/roots', {
+      method: 'POST', body: JSON.stringify({ harness: 'claude' }), headers: { 'content-type': 'text/plain' },
+    }), HARNESS_ORDER, {}, deps as never)
+    expect(res.status).toBe(415)
+    await expect(stat(join(tmp, 'accounts'))).rejects.toThrow()
   })
   test('POST creates and DELETE needs confirm for the directory', async () => {
     const deps = {

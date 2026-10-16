@@ -427,6 +427,9 @@ void (async () => {
   const { ensureAgyMcp } = await import('./agy-mcp')
   await ensureAgyMcp(PORT).then(r => { if (r.action === 'refuse') console.warn(`[mcp] agy left alone: ${r.reason}`) }, err =>
     console.warn('[mcp] could not register for antigravity:', err instanceof Error ? err.message : String(err)))
+  // Extra account roots (flag `multi-account`) keep their own MCP config: repair them too.
+  await import('./account-roots').then(m => m.accountRoots().reregisterMcp()).catch(err =>
+    console.warn('[mcp] could not repair account roots:', err instanceof Error ? err.message : String(err)))
 })()
 // The model pickers read the CLIs' own lists (`model-catalog.ts`); warm the ones that are COMMANDS
 // (`agy models` goes to the network) so the first wizard open already offers them. A central neither

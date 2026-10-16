@@ -25,7 +25,7 @@ import { chmod, lstat, mkdir, readdir, rm, stat, symlink } from 'node:fs/promise
 import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { HARNESS_ORDER, featureOn, type HarnessId } from '@agentistics/core'
-import { AGENTISTICS_DATA_DIR } from './config'
+import { AGENTISTICS_DATA_DIR, PORT } from './config'
 import {
   ISOLATION_ENV, IDENTITY_PROBES, bind as bindAccount, byId, forceProbe, readAccounts, retireAccount,
   type AccountIdentity,
@@ -72,10 +72,14 @@ export const LOGIN_START: Record<HarnessId, { argv: string[] } | null> = {
 
 /**
  * A file whose EXISTENCE (never its content) shows a harness without an identity probe has been
- * signed in. `null`: the only evidence is that the login session ended.
+ * signed in. A harness with neither a probe nor a marker never binds a root by itself: "the login
+ * session ended" is not a login (someone can close the pane). kimi: `config.toml` is not in its
+ * `ROOT_SHARED`, so it appears in a root only once kimi wrote its own configuration there. Being on
+ * disk, the evidence survives a server restart.
  */
 const LOGIN_MARKER: Record<HarnessId, string | null> = {
-  claude: null, codex: null, copilot: null, kimi: null, antigravity: null, opencode: null,
+  claude: null, codex: null, copilot: null, antigravity: null, opencode: null,
+  kimi: 'config.toml',
   gemini: join('.gemini', 'oauth_creds.json'),
 }
 
@@ -95,7 +99,7 @@ export const looksLikeCredential = (name: string): boolean => CREDENTIAL_NAME.te
 
 const say = (en: string) => en
 
-export type RootRefusal = 'disabled' | 'unsupported' | 'unknown_harness' | 'login_unavailable'
+export type RootRefusal = 'disabled' | 'unsupported' | 'unknown_harness' | 'login_unavailable' | 'unsafe_path'
 export interface RootCreated {
   ok: true
   pendingId: string
@@ -145,7 +149,7 @@ export interface AccountRootsDeps {
 
 // The trailing slash is deliberate: `backup-plan.ts` excludes `.agentistics/accounts/` (credentials live
 // inside) without also catching the `accounts.json` registry, which a bare prefix would.
-const defaultBase = () => join(AGENTISTICS_DATA_DIR, 'accounts/')
+const defaultBase = () => join(resolve(AGENTISTICS_DATA_DIR), 'accounts')
 
 /** PURE. The env a session of this root gets (and the login session needs). */
 export function rootEnv(harness: HarnessId, root: string): Record<string, string> {
@@ -160,7 +164,7 @@ export async function linkSharedFiles(
   const linked: string[] = []
   for (const name of names) {
     if (looksLikeCredential(name) || name.includes('/') || name.includes('..')) continue
-    const source = join(from, name)
+    const source = join(resolve(from), name)
     try { await lstat(source) } catch { continue }
     try {
       await symlink(source, join(to, name))
@@ -194,6 +198,17 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
     const rel = resolve(path).slice(resolve(base()).length + 1).split(sep)
     return resolve(path).startsWith(resolve(base()) + sep) && rel.length === 2 && rel.every(Boolean)
       && HARNESS_ORDER.includes(rel[0] as HarnessId)
+  }
+
+  /** True when any existing component from `<base>` down to `path` is a symlink (or `base` itself is). */
+  const hasSymlinkPart = async (path: string): Promise<boolean> => {
+    const start = resolve(base())
+    const parts = [start, ...resolve(path).slice(start.length + 1).split(sep).filter(Boolean).map((_, i, arr) => join(start, ...arr.slice(0, i + 1)))]
+    for (const part of parts) {
+      const info = await lstat(part).catch(() => null)
+      if (info?.isSymbolicLink()) return true
+    }
+    return false
   }
 
   async function listDirs(): Promise<PendingRoot[]> {
@@ -237,7 +252,13 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
     }
     const pendingId = `r_${randomBytes(6).toString('hex')}`
     const root = join(base(), harness, pendingId)
+    if (await hasSymlinkPart(join(base(), harness))) {
+      return { ok: false, reason: 'unsafe_path', message: say('The accounts folder contains a link, so it was left alone.') }
+    }
     await mkdir(join(base(), harness), { recursive: true, mode: 0o700 })
+    if (await hasSymlinkPart(join(base(), harness))) {
+      return { ok: false, reason: 'unsafe_path', message: say('The accounts folder contains a link, so it was left alone.') }
+    }
     await chmod(base(), 0o700)
     await chmod(join(base(), harness), 0o700)
     const config = join(root, ROOT_CONFIG_SUBDIR[harness])
@@ -265,7 +286,9 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
   async function addRoot(harness: HarnessId): Promise<{ ok: true; pendingId: string; root: string; sessionId?: string; message: string } | RootRefused> {
     const made = await createRoot(harness)
     if (!made.ok) return made
-    const out = await startLogin(harness, made.pendingId, made.root)
+    const out = await startLogin(harness, made.pendingId, made.root).catch(error => ({
+      ok: false as const, message: error instanceof Error ? error.message : say('Signing in could not be started.'),
+    }))
     if (!out.ok) {
       await rm(made.root, { recursive: true, force: true })
       return { ok: false, reason: 'login_unavailable', message: out.message }
@@ -280,16 +303,18 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
     const accounts = (await listAccounts()).accounts
     for (const dir of await listDirs()) {
       if (accounts.some(a => a.root && resolve(a.root) === resolve(dir.root))) continue
-      const live = dir.loginSessionId ? await sessionLive(dir.loginSessionId).catch(() => true) : false
       let identity: AccountIdentity | null = null
       if (IDENTITY_PROBES[dir.harness]) {
         const found = await probe(dir.harness, dir.root).catch(() => null)
         if (found && found.key !== 'default') identity = found
       } else {
-        // No probe: sign-in evidence is the marker file's existence (never read), else the login ended.
+        // No probe: only the harness's own marker on disk shows a login, and the fallback key is never an identity.
         const marker = LOGIN_MARKER[dir.harness]
-        const signedIn = marker ? await stat(join(dir.root, marker)).then(() => true, () => false) : !live && !!dir.loginSessionId
-        if (signedIn) identity = await probe(dir.harness, dir.root).catch(() => null)
+        const signedIn = marker ? await stat(join(dir.root, marker)).then(() => true, () => false) : false
+        if (signedIn) {
+          const found = await probe(dir.harness, dir.root).catch(() => null)
+          if (found && found.key !== 'default') identity = found
+        }
       }
       if (!identity) continue
       const { account } = await bind(dir.root, { harness: dir.harness, ...identity })
@@ -297,6 +322,15 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
       await audit({ action: 'account.update', ip: 'local', targetId: account.id, meta: { op: 'root_login', harness: dir.harness } })
     }
     return bound
+  }
+
+  /** Boot pass (spec §4.3): every claude/copilot root gets the MCP registration again. Best effort. */
+  async function reregisterMcp(): Promise<void> {
+    if (!flagOn()) return
+    for (const dir of await listDirs()) {
+      if (!rootMcpRegistration(dir.harness, dir.root, { command: '', args: [] }, '')) continue
+      await registerMcp(dir.harness, dir.root).catch(() => {})
+    }
   }
 
   function ensurePoller(intervalMs = 60_000): void {
@@ -337,12 +371,14 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
         return { ok: false, status: 409, reason: 'root_in_use', message: say('A session is still running in this account. End it first.') }
       }
     }
+    if (body.confirm === root) {
+      const bad = !isRootPath(root) || await hasSymlinkPart(root)
+      if (bad) return { ok: false, status: 400, reason: 'not_a_root', message: say('That folder is not an account root.') }
+    }
     let retired = false
     if (account) { await retire(account.id); retired = true; await audit({ action: 'account.update', ip: 'local', targetId: account.id, meta: { op: 'root_retire', harness: account.harness } }) }
     let removedDir = false
     if (body.confirm === root) {
-      if (!isRootPath(root)) return { ok: false, status: 400, reason: 'not_a_root', message: say('That folder is not an account root.') }
-      if ((await lstat(root).catch(() => null))?.isSymbolicLink()) return { ok: false, status: 400, reason: 'not_a_root', message: say('That folder is not an account root.') }
       await rm(root, { recursive: true, force: true })
       removedDir = true
       if (dir) logins.delete(dir.pendingId)
@@ -351,17 +387,30 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
     return { ok: true, retired, removedDir, root, ...(removedDir ? {} : { confirmWith: root }) }
   }
 
-  return { createRoot, startLogin, addRoot, list, pollPending, ensurePoller, stopPoller, removeRoot, flagOn }
+  return { createRoot, startLogin, addRoot, list, pollPending, ensurePoller, stopPoller, removeRoot, reregisterMcp, flagOn }
 }
 
-/** Register the agentistics MCP inside one root, through the harness's own `mcp add`. Best effort. */
-async function defaultRegisterMcp(harness: HarnessId, root: string): Promise<void> {
-  const port = process.env.AGENTISTICS_PORT ?? '47291'
-  const reg = rootMcpRegistration(harness, root, agentisticsMcpLaunch(), `http://localhost:${port}`)
+export interface McpChild { exited: Promise<number>; kill: (signal?: string) => void }
+
+/**
+ * Register the agentistics MCP inside one root, through the harness's own `mcp add`. Best effort:
+ * the child gets no stdin and no pipes to fill, and is killed if it does not finish (a first-run
+ * prompt in a fresh config dir must not hang the request).
+ */
+export async function registerRootMcp(
+  harness: HarnessId, root: string,
+  opts: { spawn?: (argv: string[], env: Record<string, string>) => McpChild; timeoutMs?: number } = {},
+): Promise<void> {
+  const reg = rootMcpRegistration(harness, root, agentisticsMcpLaunch(), `http://localhost:${PORT}`)
   if (!reg) return
-  const proc = Bun.spawn(reg.argv, { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, ...reg.env } })
-  await proc.exited
+  const spawn = opts.spawn ?? ((argv, env) => Bun.spawn(argv, {
+    stdin: 'ignore', stdout: 'ignore', stderr: 'ignore', env: { ...process.env, ...env },
+  }) as unknown as McpChild)
+  const child = spawn(reg.argv, reg.env)
+  const timer = setTimeout(() => child.kill('SIGKILL'), opts.timeoutMs ?? 10_000)
+  try { await Promise.race([child.exited, new Promise<void>(done => setTimeout(done, (opts.timeoutMs ?? 10_000) + 50))]) } finally { clearTimeout(timer) }
 }
+const defaultRegisterMcp = (harness: HarnessId, root: string) => registerRootMcp(harness, root)
 
 let instance: ReturnType<typeof createAccountRoots> | undefined
 export function accountRoots(deps?: AccountRootsDeps): ReturnType<typeof createAccountRoots> {

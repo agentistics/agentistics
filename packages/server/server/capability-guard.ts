@@ -60,6 +60,10 @@ const EXACT: ReadonlyMap<string, keyof Capabilities> = new Map<string, keyof Cap
 
 /** Prefix (no trailing slash) → capability. Matches `<prefix>` and `<prefix>/…` only. */
 const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
+  // Account roots START a login session (tmux + the harness CLI), run `mcp add` and delete a credential
+  // folder: shell power, so they ride the gate the fleet rides (and the DNS-rebinding Host gate with it).
+  // Before `/api/accounts` because the FIRST matching prefix wins.
+  ['/api/accounts/roots', 'localShell'],
   ['/api/accounts', 'localTranscripts'],
   // Registration writes device credentials and reads the sealed VAPID key, so every mobile-push
   // route is host-local power and must be refused when this machine's local capability is off.
