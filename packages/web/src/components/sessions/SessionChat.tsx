@@ -1,20 +1,12 @@
 /**
  * SessionChat — one live session, read as a conversation.
  *
- * TWO SOURCES, each used for what it is good at, because neither can do the whole job:
- *
- * - The TRANSCRIPT (`/api/fleet/chat`) is the truth — role-tagged, complete, exactly what the
- *   assistant wrote. It arrives per TURN, because Claude writes a message to its JSONL once the
- *   message is finished. It can never stream token by token.
- * - The FRAME (`/api/fleet/stream`, captured twice a second) is live — it is the terminal, and the
- *   text appears on it as it is produced. But it is a rendered TUI, wrapped to the pane width with
- *   a status strip and an input box in it.
- *
- * So completed turns are bubbles from the transcript, and the turn IN FLIGHT is drawn from the
- * frame and replaced by the transcript's version the moment it lands. The live bubble is labelled
- * as read-from-the-screen and never becomes history: a misread frame is corrected within seconds,
- * while a misread turn kept as history would be wrong forever.
- *
+ * Completed turns come from the TRANSCRIPT (`/api/fleet/chat`): role-tagged, complete, exactly what
+ * the assistant wrote. The turn IN FLIGHT comes from a STRUCTURED source — a structured session's
+ * protocol, or the engine's chat channel (`source: 'adapter'`, its `live` text) — and is replaced by
+ * the transcript's version the moment it lands. F4.A: the terminal SCREEN is no longer read here; a
+ * rendered TUI frame is not a conversation, and `WorkingNote` is the only "busy" signal otherwise.
+
  * A SENT MESSAGE IS ECHOED IMMEDIATELY. It reaches the session the instant it is typed into the
  * pane, but it only enters the transcript when the harness writes it, which is a poll or two later
  * — so pressing enter appeared to do nothing while the message had in fact been delivered. That was
@@ -2592,14 +2584,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
             onDismiss={() => setSendNowRun(null)}
           />
 
-          {/* `live` (the screen read off the terminal frame) is deliberately NOT rendered here any
-              more — it used to show as a full-size bubble, and a CLI's own screen carries its own
-              chrome (a footer like "auto mode on · esc to interrupt") that `liveTurn.ts`'s line
-              filter cannot promise to catch for every harness, so a raw, oversized read-from-the-
-              screen block was both the wrong SIZE for a "something is happening" signal and the
-              wrong PLACE for whatever chrome slipped through. `live` still drives the follow-the-
-              tail effect below (new screen content is a sign to keep scrolling), and `WorkingNote`
-              is the one and only "the session is busy" indicator now — small, grey, no raw text. */}
+          {/* The screen is not drawn here (F4.A): in-flight text comes only from a structured
+              source, and `WorkingNote` is the one "the session is busy" indicator — small, grey,
+              no raw text. */}
 
           {/* The conversation on screen is one this tab cached before you left, and the current one
               is on its way. AT THE TAIL rather than the top: the view lands at the end, which is
