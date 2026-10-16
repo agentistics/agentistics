@@ -326,8 +326,39 @@ describe('start flow (any project, any harness)', () => {
       const r = planSpawn({ harness, cwd: other.cwd, prompt: 'oi', context: { text: c, block: contextBlock(other), dir: '/d' } })
       expect(r.ok).toBe(true)
       if (!r.ok) return
-      const wire = JSON.stringify(r.plan)
-      for (const line of flowLines('en')) expect(wire).toContain(JSON.stringify(line).slice(1, -1))
+      const plan = r.plan as { argv: string[]; env?: Record<string, string>; contextFile?: { dir: string; name: string; text: string }; contextExtraFiles?: { name: string; text: string }[]; contextVia?: string; initialPrompt?: { mode: string; text?: string } }
+      const spec = SPAWN_SPECS[harness]!
+      // Select the harness's REAL channel and assert the full flow arrives through it.
+      let channel: string
+      switch (plan.contextVia) {
+        case 'args': {
+          expect(spec.context?.kind).toBe('args')
+          channel = plan.argv.join('\n')
+          break
+        }
+        case 'env-dir': {
+          expect(spec.context?.kind).toBe('env-dir')
+          const e = spec.context as { env: string; file: string }
+          expect(plan.env?.[e.env]).toBe(plan.contextFile!.dir)
+          expect(plan.contextFile!.name).toBe(e.file)
+          channel = plan.contextFile!.text
+          break
+        }
+        case 'files': {
+          expect(plan.contextFile).toBeDefined()
+          channel = [plan.contextFile!.text, ...(plan.contextExtraFiles ?? []).map(f => f.text)].join('\n')
+          break
+        }
+        case 'first-message': {
+          // No official channel: the fenced block rides the first message (positional/flag argv or typed text).
+          channel = [plan.initialPrompt?.text ?? '', ...plan.argv].join('\n')
+          expect(channel).toContain(CONTEXT_OPEN)
+          break
+        }
+        default:
+          throw new Error(`${harness}: context not delivered (${String(plan.contextVia)})`)
+      }
+      for (const line of flowLines('en')) expect(channel.includes(line) || channel.includes(JSON.stringify(line).slice(1, -1))).toBe(true)
     })
   }
   test('auto: role step first (leader check BEFORE registering), steps numbered 1..4', () => {
