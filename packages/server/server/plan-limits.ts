@@ -374,15 +374,25 @@ export async function latestCodexLimits(path: string): Promise<PlanLimits | null
 }
 
 const codexPending = new Map<string, ReturnType<typeof setTimeout>>()
+const codexInFlight = new Set<Promise<unknown>>()
+const readRollout = (path: string): void => {
+  codexPending.delete(path)
+  const p = latestCodexLimits(path).then(l => { if (l) return ingestRollout(l, path) }).catch(() => {})
+  codexInFlight.add(p)
+  void p.finally(() => codexInFlight.delete(p))
+}
 /** The codex tap: a rollout the watcher saw change. Debounced per file (a turn writes many lines). */
 export function noteCodexRollout(path: string): void {
   if (!/rollout-.*\.jsonl$/.test(path) || codexPending.has(path)) return
-  const t = setTimeout(() => {
-    codexPending.delete(path)
-    void latestCodexLimits(path).then(l => { if (l) return ingestRollout(l, path) }).catch(() => {})
-  }, 1000)
+  const t = setTimeout(() => readRollout(path), 1000)
   t.unref?.()
   codexPending.set(path, t)
+}
+
+/** Tests only: run every debounced rollout read now and wait until each has been ingested. */
+export async function __settleCodexRolloutsForTest(): Promise<void> {
+  for (const [path, t] of [...codexPending]) { clearTimeout(t); readRollout(path) }
+  while (codexInFlight.size) await Promise.all([...codexInFlight])
 }
 
 const CONVERSATION_IN_NAME = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i
@@ -505,11 +515,15 @@ export async function planLimitsPayload(
 
 /** Tests only. */
 export function __resetPlanLimitsForTest(file: string | null = null): void {
+  for (const t of codexPending.values()) clearTimeout(t)
+  codexPending.clear()
   state = { limits: {}, notices: {} }
   history.clear()
   segmentStarts.clear()
   migratedAway.clear()
-  filePath = file
+  // Without a file of its own, a test must never sync the REAL data dir's file (the hook runs with
+  // the owner's HOME): a path that cannot exist keeps `syncPlanLimitsFromFile` empty.
+  filePath = file ?? join(AGENTISTICS_DATA_DIR, `.plan-limits-test-none-${process.pid}`, 'plan-limits.json')
   liveUsage.clear()
   fileMtime = 0
   loaded = file ? null : Promise.resolve()
