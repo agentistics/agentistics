@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { PlanLimits } from '@agentistics/core'
-import { accountTitle, accountWhose, nextOpen, summarizeHarnesses, type AccountRowData } from './accountsSummary'
+import { accountKey, accountState, accountTitle, accountWhose, nextOpen, summarizeHarnesses, worstBars, type AccountRowData } from './accountsSummary'
 
 const NOW = 1_000_000
 const acc = (o: Partial<AccountRowData> & { id: string }): AccountRowData => ({
@@ -28,8 +28,19 @@ describe('summarizeHarnesses', () => {
     const c = out[0]!
     expect([c.total, c.agentsOn, c.hidden, c.signedOut]).toEqual([3, 1, 1, 1])
   })
-  test('worst bar is the highest window among accounts still signed in', () => {
-    expect(out[0]!.worst?.account).toBe('a2')
+  test('worst bars are the highest 5h and the highest week among accounts still signed in', () => {
+    const w = out[0]!.worst!.windows
+    expect(w.find(x => x.kind === '5h')!.usedPct).toBe(20)
+    expect(w.find(x => x.kind === 'week')!.usedPct).toBe(90)
+  })
+  test('crossed maxima: each window is picked independently, keeping its own reset', () => {
+    const a = lim('claude', 'x', 95, 10)
+    const b = lim('claude', 'y', 20, 94)
+    b.windows[1]!.resetsAt = NOW + 5_000_000
+    const w = worstBars([a, b], NOW)!.windows
+    expect(w.map(x => [x.kind, x.usedPct])).toEqual([['5h', 95], ['week', 94]])
+    expect(w.find(x => x.kind === 'week')!.resetsAt).toBe(NOW + 5_000_000)
+    expect(worstBars([], NOW)).toBeNull()
   })
   test('no reported window means no bar, never a zero', () => {
     expect(out[2]!.worst).toBeNull()
@@ -46,7 +57,29 @@ describe('summarizeHarnesses', () => {
   })
 })
 
+describe('unidentified accounts (id "")', () => {
+  const accounts = [acc({ id: '', harness: 'gemini', label: 'Conta padrão' }), acc({ id: '', harness: 'codex', label: 'Conta padrão' })]
+  test('own presentation key, state "unconfirmed", never counted as signed in or agents-on', () => {
+    expect(new Set(accounts.map(accountKey)).size).toBe(2)
+    expect(accountState(accounts[0]!)).toBe('unconfirmed')
+    const out = summarizeHarnesses(accounts, null, NOW, ['codex', 'gemini'])
+    expect(out.map(s => [s.total, s.agentsOn, s.hidden, s.unconfirmed, s.state])).toEqual([[1, 0, 0, 1, 'unconfirmed'], [1, 0, 0, 1, 'unconfirmed']])
+  })
+  test('an identified account keeps its id as key; retired reads signed-out', () => {
+    expect(accountKey(acc({ id: 'a1' }))).toBe('a1')
+    expect(accountState(acc({ id: 'a1', retired: true }))).toBe('signed-out')
+    expect(accountState(acc({ id: 'a1' }))).toBe('signed-in')
+  })
+})
+
 describe('titles', () => {
+  test('placeholder spellings in any case are no label and no nickname', () => {
+    for (const p of ['Default account', 'default ACCOUNT', 'conta padrão', 'Conta Padrão']) {
+      expect(accountTitle({ label: p }, 'Codex', false)).toBe('Codex account')
+      expect(accountTitle({ nickname: p, label: 'a@b' }, 'Codex', false)).toBe('a@b')
+      expect(accountWhose({ label: p }, false)).toContain('does not say')
+    }
+  })
   test('nickname → login → harness account, never a bare "Conta padrão"', () => {
     expect(accountTitle({ nickname: 'Freela', label: 'a@b' }, 'Gemini CLI', true)).toBe('Freela')
     expect(accountTitle({ label: 'a@b' }, 'Gemini CLI', true)).toBe('a@b')
