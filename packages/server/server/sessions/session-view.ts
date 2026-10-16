@@ -221,6 +221,8 @@ export interface SessionView {
   /** SS-05: the four counters, and the person's turn count — absent where not recorded. */
   tokenParts?: import('./conversations').TokenParts
   turns?: number
+  /** Assistant responses of the conversation (`Conversation.calls`). */
+  calls?: number
   costUSD?: number
   /** How full the context window was on the last turn, and out of how much. Both or neither. */
   contextTokens?: number
@@ -727,6 +729,7 @@ export function buildSessionViews(o: {
       ...(conv?.tokens !== undefined ? { tokens: conv.tokens } : {}),
       ...(conv?.tokenParts ? { tokenParts: conv.tokenParts } : {}),
       ...(conv?.turns ? { turns: conv.turns } : {}),
+      ...(conv?.calls ? { calls: conv.calls } : {}),
       ...(conv?.costUSD !== undefined ? { costUSD: conv.costUSD } : {}),
       ...(conv?.contextTokens !== undefined && conv.contextWindow !== undefined
         ? { contextTokens: conv.contextTokens, contextWindow: conv.contextWindow }
@@ -862,6 +865,7 @@ export function buildSessionViews(o: {
       ...(conv?.tokens !== undefined ? { tokens: conv.tokens } : {}),
       ...(conv?.tokenParts ? { tokenParts: conv.tokenParts } : {}),
       ...(conv?.turns ? { turns: conv.turns } : {}),
+      ...(conv?.calls ? { calls: conv.calls } : {}),
       ...(conv?.costUSD !== undefined ? { costUSD: conv.costUSD } : {}),
       ...(conv?.contextTokens !== undefined && conv.contextWindow !== undefined
         ? { contextTokens: conv.contextTokens, contextWindow: conv.contextWindow }
@@ -977,6 +981,7 @@ export function buildSessionViews(o: {
       ...(c.tokens !== undefined ? { tokens: c.tokens } : {}),
       ...(c.tokenParts ? { tokenParts: c.tokenParts } : {}),
       ...(c.turns ? { turns: c.turns } : {}),
+      ...(c.calls ? { calls: c.calls } : {}),
       ...(c.costUSD !== undefined ? { costUSD: c.costUSD } : {}),
       ...(c.contextTokens !== undefined && c.contextWindow !== undefined
         ? { contextTokens: c.contextTokens, contextWindow: c.contextWindow }
