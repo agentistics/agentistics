@@ -8,9 +8,11 @@ import { HARNESS_ORDER, routeRecommendation } from '@agentistics/core'
 import { noteFreshSpawn, resetHarnessSpawnability } from './sessions/harness-spawnable'
 import { spawnOutcome } from './sessions/spawn-outcome'
 import {
-  __resetPlanLimitsForTest, ingestPlanLimits, latestCodexLimits, noteStructuredLine, planLimitsPayload,
-  sampleLivePlanSessions, setPlanLimitsSink, syncPlanLimitsFromFile, watchPlanLimitsFile,
+  __resetPlanLimitsForTest, __setManagedLookupForTest, ingestPlanLimits, latestCodexLimits, noteCodexRollout,
+  noteStructuredLine, planLimitsPayload, sampleLivePlanSessions, setPlanLimitsSink, syncPlanLimitsFromFile,
+  watchPlanLimitsFile,
 } from './plan-limits'
+import type { PlanThresholdNotice } from '@agentistics/core'
 
 const fx = (n: string) => readFileSync(join(import.meta.dir, '../../core/src/__fixtures__', n), 'utf8').trim()
 let dir = ''
@@ -35,6 +37,7 @@ afterEach(() => {
   process.env.HOME = savedHome
   resetHarnessSpawnability()
   setPlanLimitsSink(null)
+  __setManagedLookupForTest(null)
   if (dir.includes('pl-test-')) rmSync(dir, { recursive: true, force: true })
 })
 
@@ -485,4 +488,144 @@ test('a hidden harness is absent from the harnesses map while a visible non-spaw
   // gemini has no binary on this PATH: visible to agents, not spawnable, reason kept.
   expect(body.harnesses.gemini?.spawnable).toBe(false)
   expect(body.harnesses.gemini?.unavailableReason).toBeTruthy()
+})
+
+// ─── C1: meter attribution + switch detection (spec §5; D1–D3 of §1) ─────────────────────────
+
+const H = 3_600_000
+/** A claude `rate_limit_event` stream line; `week`/`fiveHour` are [percent, resetsAt ms]. */
+const claudeLine = (week: [number, number], fiveHour?: [number, number]) => JSON.stringify({
+  type: 'rate_limit_event',
+  rate_limit_info: { unifiedWindows: {
+    seven_day: { utilization: week[0] / 100, resetsAt: week[1] / 1000 },
+    ...(fiveHour ? { five_hour: { utilization: fiveHour[0] / 100, resetsAt: fiveHour[1] / 1000 } } : {}),
+  } },
+})
+/** Wait until the fire-and-forget taps have landed. */
+const until = async (ok: () => boolean | Promise<boolean>, ms = 3000) => {
+  const end = Date.now() + ms
+  while (!(await ok()) && Date.now() < end) await new Promise(r => setTimeout(r, 10))
+}
+const sinkLog = () => {
+  const told: PlanThresholdNotice[] = []
+  const segments: { harness: string; account: string; at: number }[] = []
+  setPlanLimitsSink({ changed: () => {}, notify: n => { told.push(n) }, segment: x => { segments.push(x) } })
+  return { told, segments }
+}
+const accountsWithLogin = (key: { value: string }) => {
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async harness => ({ key: `${harness}-${key.value}`, label: key.value }) })
+  __setHarnessAccountsForTest(store)
+  return store
+}
+const now0 = () => Math.floor(Date.now() / 1000) * 1000
+
+test('D1: a login switch in one root stores the new account apart; the old record and its hold stay', async () => {
+  const login = { value: 'alice' }
+  const store = accountsWithLogin(login)
+  await store.current(['claude'])
+  const alice = (await store.readAccounts()).bindings['claude:']!
+  const { told } = sinkLog()
+  const now = now0()
+  noteStructuredLine(claudeLine([96, now + 72 * H], [50, now + 2 * H]), now - 60_000)
+  await until(async () => (await planLimitsPayload(undefined, now)).limits.length === 1)
+  login.value = 'bob' // the owner logged another account into the same root
+  noteStructuredLine(claudeLine([10, now + 24 * H], [5, now + 4 * H]), now)
+  await until(async () => (await planLimitsPayload(undefined, now)).limits.length === 2)
+  const bob = (await store.readAccounts()).bindings['claude:']!
+  expect(bob).not.toBe(alice)
+  const body = await planLimitsPayload(undefined, now)
+  const byAccount = Object.fromEntries(body.limits.map(l => [l.account, l]))
+  expect(Object.keys(byAccount).sort()).toEqual([alice, bob].sort())
+  expect(byAccount[alice]!.windows.find(w => w.kind === 'week')!.usedPct).toBe(96)
+  expect(byAccount[bob]!.windows.find(w => w.kind === 'week')!.usedPct).toBe(10)
+  // Alice's weekly hold is not lifted by Bob's low reading.
+  expect(body.budgets.some(b => b.status === 'hold' && b.weekPct === 96)).toBe(true)
+  // Notices are independent: Bob's EARLIER weekly reset still tells 95 % (D3 through a switch).
+  noteStructuredLine(claudeLine([96, now + 24 * H], [5, now + 4 * H]), now + 1000)
+  await until(() => told.length === 2)
+  expect(told.map(n => [n.account, n.kind, n.threshold])).toEqual([[alice, 'week', 95], [bob, 'week', 95]])
+})
+
+test('D2: a sharp drop the probe cannot explain starts a segment — burn restarts, no under dip', async () => {
+  const store = accountsWithLogin({ value: 'alice' })
+  await store.current(['claude'])
+  const alice = (await store.readAccounts()).bindings['claude:']!
+  const { segments } = sinkLog()
+  const now = now0()
+  noteStructuredLine(claudeLine([50, now + 72 * H]), now - 2 * H)
+  await until(async () => (await planLimitsPayload(undefined, now)).limits.length === 1)
+  noteStructuredLine(claudeLine([60, now + 72 * H]), now - H)
+  await until(async () => (await planLimitsPayload(undefined, now)).limits[0]?.updatedAt === now - H)
+  noteStructuredLine(claudeLine([20, now + 120 * H]), now)
+  await until(() => segments.length === 1)
+  expect(segments).toEqual([{ harness: 'claude', account: alice, at: now }])
+  expect((await store.readAccounts()).segments[alice]).toBe(now)
+  const body = await planLimitsPayload(undefined, now)
+  expect(body.limits.map(l => l.account)).toEqual([alice])
+  const [pace] = body.budgets
+  // Only the new segment counts: one reading, so the burn reads at the sustainable rate.
+  expect(pace!.paceStatus).not.toBe('under')
+  expect(pace!.burnPctPerHour).toBeCloseTo(pace!.sustainablePctPerHour)
+})
+
+test('D3: a reading from another account\'s session neither lifts a hold nor mutes its own notice', async () => {
+  const store = accountsWithLogin({ value: 'alice' })
+  await store.current(['claude'])
+  const alice = (await store.readAccounts()).bindings['claude:']!
+  const { account: bob } = await store.bind(join(dir, 'claude-bob'), { harness: 'claude', key: 'claude-bob', label: 'bob' })
+  const { told } = sinkLog()
+  const now = now0()
+  noteStructuredLine(claudeLine([96, now + 72 * H]), now - 60_000)
+  await until(() => told.length === 1)
+  // A structured session running on Bob's account: its stream carries Bob's (earlier) reset.
+  noteStructuredLine(claudeLine([96, now + 24 * H]), now, Promise.resolve(bob.id))
+  await until(() => told.length === 2)
+  expect(told.map(n => [n.account, n.resetsAt])).toEqual([[alice, now + 72 * H], [bob.id, now + 24 * H]])
+  const body = await planLimitsPayload(undefined, now)
+  expect(Object.fromEntries(body.limits.map(l => [l.account, l.updatedAt]))).toEqual({ [alice]: now - 60_000, [bob.id]: now })
+})
+
+test('codex: a rollout under no known root is dropped; an account root and a linked session attribute it', async () => {
+  const store = accountsWithLogin({ value: 'alice' })
+  const line = fx('plan-limits-codex.jsonl')
+  const uuid = (n: number) => `0000000${n}-aaaa-4bbb-8ccc-dddddddddddd`
+  const rollout = (root: string, n: number) => {
+    const d = join(root, 'sessions', '2026', '10', '10')
+    mkdirSync(d, { recursive: true })
+    const p = join(d, `rollout-2026-10-10T00-00-0${n}-${uuid(n)}.jsonl`)
+    writeFileSync(p, `${line}\n`)
+    return p
+  }
+  noteCodexRollout(rollout(join(dir, 'elsewhere'), 1))
+  await new Promise(r => setTimeout(r, 1300))
+  expect((await planLimitsPayload(undefined)).limits).toEqual([])
+  const root = join(dir, 'codex-second')
+  const { account } = await store.bind(root, { harness: 'codex', key: 'codex-second', label: 'second' })
+  noteCodexRollout(rollout(root, 2))
+  await until(async () => (await planLimitsPayload(undefined)).limits.length === 1)
+  expect((await planLimitsPayload(undefined)).limits.map(l => l.account)).toEqual([account.id])
+  __setManagedLookupForTest(async () => [{ id: 'm1', conversationId: uuid(3), accountId: 'acc_linked00000' }])
+  noteCodexRollout(rollout(join(dir, 'elsewhere'), 3))
+  await until(async () => (await planLimitsPayload(undefined)).limits.length === 2)
+  expect((await planLimitsPayload(undefined)).limits.map(l => l.account).sort()).toEqual(['acc_linked00000', account.id].sort())
+})
+
+test('migration: a claude:default record and its notices move to the default root\'s confirmed account', async () => {
+  const store = accountsWithLogin({ value: 'alice' })
+  await store.current(['claude'])
+  const alice = (await store.readAccounts()).bindings['claude:']!
+  const now = now0()
+  const file = join(dir, 'plan-limits.json')
+  const rec = { harness: 'claude', account: 'default', windows: [{ kind: 'week', usedPct: 80, resetsAt: now + 72 * H }], updatedAt: now, source: 'claude-stream' }
+  writeFileSync(file, JSON.stringify({ limits: { 'claude:default': rec }, notices: { 'claude:default:week': { resetsAt: now + 72 * H, told: 75 } } }))
+  __resetPlanLimitsForTest(file)
+  setPlanLimitsSink({ changed: () => {}, notify: () => {} })
+  const body = await planLimitsPayload(undefined, now)
+  expect(body.limits.map(l => l.account)).toEqual([alice])
+  await new Promise(r => setTimeout(r, 700)) // persistSoon
+  const disk = JSON.parse(readFileSync(file, 'utf8'))
+  expect(Object.keys(disk.limits)).toEqual([`claude:${alice}`])
+  expect(disk.notices).toEqual({ [`claude:${alice}:week`]: { resetsAt: now + 72 * H, told: 75 } })
+  // The migrated legacy record is never re-ingested from an older file under its old key.
+  expect(await ingestPlanLimits({ ...rec, windows: rec.windows as never } as never)).toBe(false)
 })

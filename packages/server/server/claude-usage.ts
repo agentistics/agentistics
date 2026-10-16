@@ -15,7 +15,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseClaudeUsageResponse, type PlanLimits } from '@agentistics/core'
 import { HOME_DIR } from './config'
-import { ingestPlanLimits } from './plan-limits'
+import { ingestFromRoot } from './plan-limits'
 
 export const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 export const CLAUDE_USAGE_POLL_MS = 5 * 60_000
@@ -79,7 +79,8 @@ export function startClaudeUsagePoll(deps: UsageDeps = {}): () => void {
   let stopped = false
   const tick = async (): Promise<void> => {
     const r = await fetchClaudeUsage(deps).catch((): UsageResult => ({ skip: 'network' }))
-    if ('limits' in r) await ingestPlanLimits(r.limits).catch(() => false)
+    // The poll reads the DEFAULT root's login, so its reading is that root's account.
+    if ('limits' in r) await ingestFromRoot(r.limits, null).catch(() => false)
     delay = 'skip' in r && r.skip === 'rate-limited' ? Math.min(MAX_BACKOFF_MS, delay * 2) : CLAUDE_USAGE_POLL_MS
     if (stopped) return
     timer = setTimeout(() => { void tick() }, delay)

@@ -310,6 +310,12 @@ export interface ManagedSession {
   createdAt: string
   model?: string
   effort?: string
+  /**
+   * PLAN.ACCOUNTS: the harness account (`acc_…`, `harness-accounts.ts`) this session runs on. Set
+   * at spawn (D3); read by the plan-limits taps so a meter is filed under the account that produced
+   * it. Absent on a session started before accounts existed: the default root's account.
+   */
+  accountId?: string
   /** Explicit leader role, used by the context handoff hint. */
   leader?: boolean
   /**

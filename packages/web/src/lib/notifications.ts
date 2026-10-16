@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { idleSessionNoun } from './idleExecution'
 import { notificationMuted } from './notificationCategories'
-import { limitNoticeMeta, limitNoticeText } from './planLimits'
+import { limitNoticeMeta, limitNoticeText, segmentNoticeText } from './planLimits'
 
 export type NotificationType = 'error' | 'warning' | 'info' | 'success'
 
@@ -50,6 +50,11 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
   'limits.exhausted': {
     pt: { title: 'Limite do plano esgotado', message: 'Uma janela do plano chegou a 100%.' },
     en: { title: 'Plan limit used up', message: 'A plan window reached 100%.' },
+  },
+  // PLAN.ACCOUNTS §5 — generic copy; `segmentNoticeText` names the harness from `meta.harness`.
+  'plan.segment': {
+    pt: { title: 'Uso do plano caiu de repente', message: 'O uso caiu bruscamente — contando do zero para esta conta.' },
+    en: { title: 'Plan usage dropped sharply', message: 'Usage dropped sharply — counting from zero for this account.' },
   },
   'telemetry.first_use': {
     pt: { title: 'Uso anônimo do Agentistics', message: 'Enviar um sinal anônimo de uso (um número aleatório, a versão e o sistema) uma vez por dia, para sabermos quantas pessoas usam o Agentistics. Nada do seu trabalho é enviado.' },
@@ -377,6 +382,7 @@ export function resolveNotification(n: AppNotification, lang: 'pt' | 'en'): Loca
     const m = limitNoticeMeta(n.meta)
     if (m) return limitNoticeText(m, lang)
   }
+  if (n.code === 'plan.segment' && typeof n.meta?.harness === 'string') return segmentNoticeText(n.meta.harness, lang)
   const loc = n.code ? NOTIFICATION_TEXT[n.code]?.[lang] : undefined
   // A CODE WITH NO TEXT MUST NOT RENDER AS A BLANK CARD.
   //

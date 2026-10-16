@@ -269,6 +269,8 @@ if (!TEAM_CENTRAL) {
         code: n.threshold >= 100 ? 'limits.exhausted' : 'limits.threshold',
         meta: { harness: n.harness, window: n.kind, threshold: n.threshold, pct: Math.round(n.usedPct), resetsAt: n.resetsAt, ...(alt ? { alt } : {}) },
       }),
+      // A sharp drop the probe could not explain: that account's burn and notices start over.
+      segment: s => sse.broadcastNotification({ type: 'info', code: 'plan.segment', meta: { harness: s.harness, account: s.account } }),
     })
     // A record another agentop process wrote (it holds no sink) reaches the browser through the file.
     pl.watchPlanLimitsFile()
