@@ -60,6 +60,17 @@ export const NATIVE_HARNESS_ID = 'agentistics' as const
 /** Every harness a SURFACE may show: the adapters plus the native one. `HarnessId` stays the ADAPTER set. */
 export type SurfaceHarnessId = HarnessId | typeof NATIVE_HARNESS_ID
 
+export const HARNESS_LABELS: Record<SurfaceHarnessId, string> = {
+  claude: 'Claude Code',
+  codex: 'Codex CLI',
+  gemini: 'Gemini CLI',
+  copilot: 'Copilot CLI',
+  antigravity: 'Antigravity',
+  kimi: 'Kimi Code',
+  opencode: 'opencode',
+  agentistics: 'Agentistics',
+}
+
 export interface HarnessCapabilities {
   tokens: boolean
   cost: boolean

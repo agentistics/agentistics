@@ -16,7 +16,7 @@ import { readFile, readdir, stat, writeFile, rename, mkdir } from 'node:fs/promi
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { watch as fsWatch } from 'node:fs'
 import {
-  agentVisible, alternativeWithRoom, harnessAggregate, HARNESS_ORDER, meterDiscontinuity, newerLimits, parseClaudeRateLimitEvent,
+  agentVisible, alternativeWithRoom, harnessAggregate, HARNESS_LABELS, HARNESS_ORDER, meterDiscontinuity, newerLimits, parseClaudeRateLimitEvent,
   parseCodexRateLimits, planBudget, planPace, planThresholdNotices, registeredPlanLabel, resetNoticesFor, withPlanLabel,
   type HarnessId,
   type LivePlanSession, type PlanLimits, type PlanNoticeState, type PlanThresholdNotice,
@@ -36,38 +36,39 @@ let state: Persisted = { limits: {}, notices: {} }
 const history = new Map<string, PlanLimits[]>()
 let loaded: Promise<void> | null = null
 
-type LiveUsageSample = { tokens: number; at: number; model: string; harness: HarnessId }
+type LiveUsageSample = { tokens: number; at: number; model: string; harness: HarnessId; account?: string }
 const liveUsage = new Map<string, LiveUsageSample>()
 const isHarnessId = (value: string): value is HarnessId => HARNESS_ORDER.some(harness => harness === value)
 
 /** Turn the live fleet's rolling token deltas into percentages of each plan's measured burn. */
-export function sampleLivePlanSessions(
-  sessions: readonly { session_id: string; harness: string; model?: string; input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }[],
+export async function sampleLivePlanSessions(
+  sessions: readonly { session_id: string; harness: string; account?: string; model?: string; input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }[],
   liveIds: readonly string[],
   nowMs: number,
-  burnByHarness: Partial<Record<HarnessId, number>> = {},
+  burnByAccount: Readonly<Record<string, number>> = {},
   working?: ReadonlySet<string>,
-): LivePlanSession[] {
+): Promise<LivePlanSession[]> {
   const wanted = new Set(liveIds)
   for (const id of liveUsage.keys()) if (!wanted.has(id)) liveUsage.delete(id)
-  const rates = new Map<string, { session: typeof sessions[number]; rate: number; harness: HarnessId }>()
+  const rates = new Map<string, { session: typeof sessions[number]; rate: number; harness: HarnessId; account?: string }>()
   for (const s of sessions) {
     if (!isHarnessId(s.harness)) continue
     if (!wanted.has(s.session_id)) continue
+    const account = await sessionAccountOf(s.session_id)() ?? s.account
     const tokens = (s.input_tokens ?? 0) + (s.output_tokens ?? 0) + (s.cache_read_input_tokens ?? 0) + (s.cache_creation_input_tokens ?? 0)
     const previous = liveUsage.get(s.session_id)
-    const recent = previous && previous.harness === s.harness && nowMs >= previous.at && nowMs - previous.at <= 10 * 60_000
+    const recent = previous && previous.harness === s.harness && previous.account === account && nowMs >= previous.at && nowMs - previous.at <= 10 * 60_000
     const rate = recent ? Math.max(0, tokens - previous.tokens) : 0
-    liveUsage.set(s.session_id, { tokens, at: nowMs, model: s.model ?? 'unknown', harness: s.harness })
-    if (working?.has(s.session_id) || rate > 0) rates.set(s.session_id, { session: s, rate, harness: s.harness })
+    liveUsage.set(s.session_id, { tokens, at: nowMs, model: s.model ?? 'unknown', harness: s.harness, account })
+    if (working?.has(s.session_id) || rate > 0) rates.set(s.session_id, { session: s, rate, harness: s.harness, account })
   }
-  for (const harness of new Set([...rates.values()].map(x => x.harness))) {
-    const group = [...rates.entries()].filter(([, x]) => x.harness === harness)
+  for (const key of new Set([...rates.values()].map(x => `${x.harness}:${x.account ?? 'default'}`))) {
+    const group = [...rates.entries()].filter(([, x]) => `${x.harness}:${x.account ?? 'default'}` === key)
     const total = group.reduce((n, [, x]) => n + x.rate, 0)
-    const burn = Math.max(0, burnByHarness[harness] ?? 0)
+    const burn = Math.max(0, burnByAccount[key] ?? 0)
     for (const [, x] of group) x.rate = total > 0 ? burn * x.rate / total : 0
   }
-  return [...rates].map(([id, x]) => ({ id, model: x.session.model ?? 'unknown', burnPctPerHour: x.rate, harness: x.harness }))
+  return [...rates].map(([id, x]) => ({ id, model: x.session.model ?? 'unknown', burnPctPerHour: x.rate, harness: x.harness, ...(x.account ? { account: x.account } : {}) }))
 }
 
 const keyOf = (l: Pick<PlanLimits, 'harness' | 'account'>): string => `${l.harness}:${l.account}`
@@ -372,7 +373,7 @@ export async function managedAccountOf(by: { id?: string; conversationId?: strin
  */
 export function sessionAccountOf(id: string): () => Promise<string | undefined> {
   let known: string | undefined
-  return async () => (known ??= await managedAccountOf({ id }))
+  return async () => (known ??= await managedAccountOf({ id, conversationId: id }))
 }
 
 /** Tests only: the managed-session rows attribution reads. */
@@ -504,12 +505,6 @@ export async function seedPlanLimits(structuredDir: string): Promise<void> {
   }
 }
 
-/** Names for the "<Harness> #n" account label — a table, so a new harness fails the build here. */
-const HARNESS_NAMES: Record<HarnessId, string> = {
-  claude: 'Claude Code', codex: 'Codex CLI', gemini: 'Gemini CLI', copilot: 'Copilot CLI',
-  antigravity: 'Antigravity', kimi: 'Kimi Code', 'opencode': 'opencode',
-}
-
 export type AccountBudgetRow = ReturnType<typeof planBudget> & ReturnType<typeof planPace> & { account: string; accountLabel: string }
 
 export interface PlanLimitsPayload {
@@ -558,19 +553,31 @@ export async function planLimitsPayload(
   const labelOf = (harness: HarnessId, account: string): string => {
     const known = byAccount.get(account)
     if (known?.nickname && !known.nickname.includes('@')) return known.nickname
-    const ofHarness = accounts.filter(a => a.harness === harness).sort((x, y) => x.firstSeen - y.firstSeen)
-    const n = known ? ofHarness.findIndex(a => accountId(a) === account) + 1 : 1
-    return `${HARNESS_NAMES[harness]} #${Math.max(1, n)}`
+    const ofHarness = accounts.filter(a => a.harness === harness && a.available && !a.retired).sort((x, y) => x.firstSeen - y.firstSeen)
+    const n = ofHarness.findIndex(a => accountId(a) === account) + 1
+    return n > 0 ? `${HARNESS_LABELS[harness]} #${n}` : HARNESS_LABELS[harness]
   }
   const limits = stored
     .map(l => withPlanLabel(l, billing, nowMs))
     .map(l => { const label = byAccount.get(l.account)?.label; return label ? { ...l, label } : l })
     .sort((a, b) => a.harness.localeCompare(b.harness) || a.account.localeCompare(b.account))
+  const hasHiddenAccount = (h?: HarnessId) => visibility.some(a => (!h || a.harness === h) && (!a.available || a.retired))
+  const sessionVisible = (s: LivePlanSession) => {
+    const known = s.account ? byAccount.get(s.account) : undefined
+    return known ? known.available && !known.retired && (!s.harness || known.harness === s.harness) : !hasHiddenAccount(s.harness)
+  }
+  // Unattributed sessions can belong only to an unambiguous single account. Never copy them
+  // into every quota on a harness, even when all of those accounts happen to be visible.
+  const belongsTo = (s: LivePlanSession, l: PlanLimits) => {
+    if (s.harness && s.harness !== l.harness) return false
+    if (s.account) return s.account === l.account
+    return !hasHiddenAccount(s.harness) && limits.filter(x => !s.harness || x.harness === s.harness).length === 1
+  }
   const allBudgets: AccountBudgetRow[] = limits.map(l => {
     const budget = planBudget(l, nowMs)
     // Only measured sessions enter planSlots' per-session average. Working sessions with no
     // billed tokens remain in the public live summary, without diluting the measured burn.
-    const planSessions = liveSessions.filter(s => s.burnPctPerHour > 0 && (!s.harness || s.harness === l.harness) && (!s.account || s.account === l.account))
+    const planSessions = liveSessions.filter(s => s.burnPctPerHour > 0 && belongsTo(s, l))
     return { ...budget, ...planPace(l, nowMs, history.get(keyOf(l)) ?? [], planSessions, segmentOf(l.account)), account: l.account, accountLabel: labelOf(l.harness, l.account) }
   })
   const budgets = agentVisible(allBudgets, visibility)
@@ -597,13 +604,8 @@ export async function planLimitsPayload(
   const open = aggregates.filter(a => a.status !== 'hold')
   const freeSlots = open.length ? Math.max(...open.map(a => a.freeSlots)) : 0
   const pauseUntil = budgets.map(b => b.pauseUntil).filter((v): v is number => v !== undefined).sort((a, b) => a - b)[0]
-  const hiddenAccounts = new Set(visibility.filter(a => !a.available || a.retired).map(a => a.id))
-  const hiddenOutright = (h: HarnessId) => {
-    const live = visibility.filter(a => a.harness === h && !a.retired)
-    return live.length > 0 && live.every(a => !a.available)
-  }
   const publicLiveSessions = liveSessions
-    .filter(s => s.account ? !hiddenAccounts.has(s.account) : (!s.harness || !hiddenOutright(s.harness)))
+    .filter(sessionVisible)
     .map(({ harness: _harness, account: _account, ...s }) => s)
   return { limits, registered, budgets, hiddenFromAgents, freeSlots, freeSlotsByHarness, freeSlotsByAccount, liveSessions: publicLiveSessions, ...(pauseUntil !== undefined ? { pauseUntil } : {}), now: nowMs }
 }

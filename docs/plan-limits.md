@@ -2,8 +2,8 @@
 
 Settings → Billing lists detected harness accounts and their availability to agents. Switching an
 account off keeps its login and owner-visible meters intact. Agent budgets, free slot totals,
-per-harness slots, live session summaries, and routing recommendations exclude that harness while
-its current account is unavailable. The owner API includes the excluded budgets in
+per-harness slots, live session summaries, and routing recommendations exclude that account while
+it is unavailable; other available accounts of the same harness remain usable. The owner API includes the excluded budgets in
 `hiddenFromAgents`; the MCP plan-limits tool does not expose that list.
 
 `GET /api/accounts` discovers current accounts for enabled adapters and lists known accounts.
@@ -29,8 +29,9 @@ until the confirmed login of the default root migrates it (at load, and again wh
 confirmed later). `GET /api/plan-limits` answers:
 
 - `budgets[]` — one row per agent-visible account, with `account` and `accountLabel` (the nickname,
-  or `"<Harness> #n"` by first-seen order; an address is never a label, so a nickname containing
-  `@` falls back to the numbered form).
+  or `"<Harness> #n"` by first-seen order among visible, non-retired accounts; an address is never
+  a label, so a nickname containing `@` falls back to the numbered form). Unmigrated `default`
+  meters use the harness name without a number.
 - `limits[]` — owner surfaces: every account, with the owner-only login `label`.
 - `registered[]` — a Billing plan for an account that has reported no window yet, per account.
 - `freeSlotsByHarness` — the sum over the harness's visible accounts that are not on hold;
@@ -42,4 +43,12 @@ The MCP tool forwards `budgets`, `freeSlotsByAccount` and the recommendation `ac
 line per visible account.
 
 When a harness has several accounts with room, the router takes the one whose week resets first
-(its quota is lost soonest), then the one with the most room (`pickAccount`).
+(its quota is lost soonest), then the one with the most room (`pickAccount`). An account without
+a weekly window sorts after accounts with a reported weekly reset; ties still use room.
+
+Live sessions use the managed session’s immutable account id, falling back to transcript account
+metadata. Burn is distributed by token deltas within `(harness, account)` only, so percentages
+from separate quotas are never added. Hidden account sessions appear only in the owner’s
+`hiddenFromAgents` rows. If a harness has any hidden or retired account, sessions with unknown
+accounts are excluded from agent-visible summaries and slots. Otherwise an unattributed session
+can affect slots only when there is one unambiguous meter for it.

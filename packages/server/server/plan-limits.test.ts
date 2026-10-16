@@ -66,55 +66,55 @@ test('payload exposes pacing budgets alongside limits', async () => {
 
 for (const harness of HARNESS_ORDER) {
   const session = (id: string, tokens: number) => ({ session_id: id, harness, model: 'unknown', input_tokens: tokens })
-  const burn = { [harness]: 2 }
+  const burn = { [`${harness}:default`]: 2 }
   const ids = ['a', 'b', 'c']
 
-  test(`${harness}: idle sessions never share measured plan burn`, () => {
+  test(`${harness}: idle sessions never share measured plan burn`, async () => {
     const sessions = ids.map(id => session(id, 100))
-    expect(sampleLivePlanSessions(sessions, ids, 0, burn)).toEqual([])
-    expect(sampleLivePlanSessions(sessions, ids, 60_000, burn)).toEqual([])
+    expect((await sampleLivePlanSessions(sessions, ids, 0, burn))).toEqual([])
+    expect((await sampleLivePlanSessions(sessions, ids, 60_000, burn))).toEqual([])
   })
 
-  test(`${harness}: one working session with token growth takes the whole burn`, () => {
-    sampleLivePlanSessions(ids.map(id => session(id, 100)), ids, 0, burn)
-    const live = sampleLivePlanSessions([session('a', 103), session('b', 100), session('c', 100)], ids, 60_000, burn, new Set(['a']))
+  test(`${harness}: one working session with token growth takes the whole burn`, async () => {
+    await sampleLivePlanSessions(ids.map(id => session(id, 100)), ids, 0, burn)
+    const live = await sampleLivePlanSessions([session('a', 103), session('b', 100), session('c', 100)], ids, 60_000, burn, new Set(['a']))
     expect(live).toEqual([{ id: 'a', harness, model: 'unknown', burnPctPerHour: 2 }])
   })
 
-  test(`${harness}: working sessions share burn by token delta, never equally`, () => {
-    sampleLivePlanSessions(ids.map(id => session(id, 100)), ids, 0, burn)
-    const live = sampleLivePlanSessions([session('a', 103), session('b', 101), session('c', 100)], ids, 60_000, burn, new Set(ids))
+  test(`${harness}: working sessions share burn by token delta, never equally`, async () => {
+    await sampleLivePlanSessions(ids.map(id => session(id, 100)), ids, 0, burn)
+    const live = await sampleLivePlanSessions([session('a', 103), session('b', 101), session('c', 100)], ids, 60_000, burn, new Set(ids))
     expect(live.map(s => s.burnPctPerHour)).toEqual([1.5, 0.5, 0])
   })
 
-  test(`${harness}: external sessions need a second sample with recent token growth`, () => {
-    expect(sampleLivePlanSessions([session('a', 100)], ['a'], 0, burn)).toEqual([])
-    expect(sampleLivePlanSessions([session('a', 101)], ['a'], 10 * 60_000, burn)[0]?.burnPctPerHour).toBe(2)
-    expect(sampleLivePlanSessions([session('a', 102)], ['a'], 20 * 60_000 + 1, burn)).toEqual([])
-    expect(sampleLivePlanSessions([session('a', 103)], ['a'], 21 * 60_000, burn)[0]?.burnPctPerHour).toBe(2)
+  test(`${harness}: external sessions need a second sample with recent token growth`, async () => {
+    expect((await sampleLivePlanSessions([session('a', 100)], ['a'], 0, burn))).toEqual([])
+    expect((await sampleLivePlanSessions([session('a', 101)], ['a'], 10 * 60_000, burn))[0]?.burnPctPerHour).toBe(2)
+    expect((await sampleLivePlanSessions([session('a', 102)], ['a'], 20 * 60_000 + 1, burn))).toEqual([])
+    expect((await sampleLivePlanSessions([session('a', 103)], ['a'], 21 * 60_000, burn))[0]?.burnPctPerHour).toBe(2)
   })
 
-  test(`${harness}: working sessions without billed tokens stay at zero burn`, () => {
+  test(`${harness}: working sessions without billed tokens stay at zero burn`, async () => {
     const sessions = [session('a', 100)]
     const expected = [{ id: 'a', harness, model: 'unknown', burnPctPerHour: 0 }]
-    expect(sampleLivePlanSessions(sessions, ['a'], 0, burn, new Set(['a']))).toEqual(expected)
-    expect(sampleLivePlanSessions(sessions, ['a'], 60_000, burn, new Set(['a']))).toEqual(expected)
-    expect(sampleLivePlanSessions(sessions, ['a'], 120_000, burn)).toEqual([])
+    expect((await sampleLivePlanSessions(sessions, ['a'], 0, burn, new Set(['a'])))).toEqual(expected)
+    expect((await sampleLivePlanSessions(sessions, ['a'], 60_000, burn, new Set(['a'])))).toEqual(expected)
+    expect((await sampleLivePlanSessions(sessions, ['a'], 120_000, burn))).toEqual([])
   })
 }
 
-test('live usage drops samples for sessions that are no longer live', () => {
+test('live usage drops samples for sessions that are no longer live', async () => {
   const session = (tokens: number) => ({ session_id: 'a', harness: HARNESS_ORDER[0]!, input_tokens: tokens })
-  sampleLivePlanSessions([session(100)], ['a'], 0)
-  sampleLivePlanSessions([], [], 60_000)
-  expect(sampleLivePlanSessions([session(200)], ['a'], 120_000)).toEqual([])
+  await sampleLivePlanSessions([session(100)], ['a'], 0)
+  await sampleLivePlanSessions([], [], 60_000)
+  expect((await sampleLivePlanSessions([session(200)], ['a'], 120_000))).toEqual([])
 })
 
-test('token resets and samples from the future do not establish activity', () => {
+test('token resets and samples from the future do not establish activity', async () => {
   const session = (tokens: number) => ({ session_id: 'a', harness: HARNESS_ORDER[0]!, input_tokens: tokens })
-  sampleLivePlanSessions([session(100)], ['a'], 60_000)
-  expect(sampleLivePlanSessions([session(101)], ['a'], 0)).toEqual([])
-  expect(sampleLivePlanSessions([session(50)], ['a'], 60_000)).toEqual([])
+  await sampleLivePlanSessions([session(100)], ['a'], 60_000)
+  expect((await sampleLivePlanSessions([session(101)], ['a'], 0))).toEqual([])
+  expect((await sampleLivePlanSessions([session(50)], ['a'], 60_000))).toEqual([])
 })
 
 test('waiting fleet payload has no live sessions and uses plan burn alone for slots', async () => {
@@ -127,8 +127,8 @@ test('waiting fleet payload has no live sessions and uses plan burn alone for sl
   ], updatedAt: now, source: 'codex-rollout' })
   const sessions = ['a', 'b', 'c'].map(session_id => ({ session_id, harness: 'codex', input_tokens: 100 }))
   const ids = sessions.map(s => s.session_id)
-  sampleLivePlanSessions(sessions, ids, now - 60_000, { codex: 2 })
-  const live = sampleLivePlanSessions(sessions, ids, now, { codex: 2 }, new Set())
+  await sampleLivePlanSessions(sessions, ids, now - 60_000, { 'codex:default': 2 })
+  const live = await sampleLivePlanSessions(sessions, ids, now, { 'codex:default': 2 }, new Set())
   const body = await planLimitsPayload(undefined, now, live)
   expect(body.liveSessions).toEqual([])
   expect(body.budgets[0]?.burnPctPerHour).toBe(2)
@@ -157,7 +157,8 @@ test('plan limits handler peeks at working fleet identities without reading the 
   expect(handler).toContain('s.conversationId')
   expect(handler).toContain('s.conversationStoreId')
   expect(handler).toContain('s.id')
-  expect(handler).toContain('burnByHarness, working)')
+  expect(handler).toContain('burnByAccount, working)')
+  expect(handler).not.toContain('burnByHarness')
 })
 
 test('pacing pools are per harness: Claude over does not remove Codex slots', async () => {
@@ -642,4 +643,83 @@ test('C2: one row per visible account; off accounts only in hiddenFromAgents; sl
   expect(out).not.toContain('example.com')
   for (const hidden of [c2, x2, 'hiddenFromAgents', '"limits"', '"label"']) expect(out).not.toContain(hidden)
   for (const shown of [c1, c3, x1, 'freeSlotsByAccount']) expect(out).toContain(shown)
+})
+
+for (const harness of HARNESS_ORDER) {
+  test(`H1 ${harness}: hidden and unknown account sessions never reach visible slots or MCP`, async () => {
+    const store = accountsWithLogin({ value: 'unused' })
+    const now = now0()
+    const { account: hidden } = await store.bind(join(dir, 'hidden'), { harness, key: 'hidden', label: 'hidden@example.com' })
+    const { account: visible } = await store.bind(join(dir, 'visible'), { harness, key: 'visible', label: 'visible@example.com' })
+    await store.update(hidden.id, { available: false })
+    for (const [account, burn] of [[hidden.id, 10], [visible.id, 2]] as const) {
+      for (const [at, used] of [[now - H, 20], [now, 20 + burn]] as const) {
+        await ingestPlanLimits({ harness, account, source: 'codex-rollout', updatedAt: at,
+          windows: [{ kind: 'week', usedPct: used, resetsAt: now + 24 * H }] })
+      }
+    }
+    // ManagedSession.accountId wins over transcript attribution, also when matched by conversation id.
+    __setManagedLookupForTest(async () => [{ id: 'managed-hidden', conversationId: 'hidden-session', accountId: hidden.id }])
+    const sessions = (tokens: number) => [
+      { session_id: 'hidden-session', harness, account: visible.id, input_tokens: tokens },
+      { session_id: 'visible-session', harness, account: visible.id, input_tokens: tokens },
+      { session_id: 'unknown-session', harness, input_tokens: tokens },
+      { session_id: 'unregistered-session', harness, account: 'unregistered', input_tokens: tokens },
+    ]
+    const ids = sessions(0).map(s => s.session_id)
+    const burn = { [`${harness}:${hidden.id}`]: 10, [`${harness}:${visible.id}`]: 2 }
+    await sampleLivePlanSessions(sessions(100), ids, now - 60_000, burn)
+    const live = await sampleLivePlanSessions(sessions(101), ids, now, burn, new Set(ids))
+    expect(live.find(s => s.id === 'hidden-session')).toMatchObject({ account: hidden.id, burnPctPerHour: 10 })
+    expect(live.find(s => s.id === 'visible-session')).toMatchObject({ account: visible.id, burnPctPerHour: 2 })
+    // Even a caller supplying measured burn without attribution must not affect visible slots.
+    const withUnknownBurn = live.map(s => s.id === 'unknown-session' || s.id === 'unregistered-session' ? { ...s, burnPctPerHour: 7 } : s)
+    const body = await planLimitsPayload(undefined, now, withUnknownBurn)
+    const baseline = await planLimitsPayload(undefined, now, live.filter(s => s.account === visible.id))
+    expect(body.liveSessions.map(s => s.id)).toEqual(['visible-session'])
+    expect(body.budgets).toEqual(baseline.budgets)
+    expect(body.freeSlotsByAccount).toEqual(baseline.freeSlotsByAccount)
+    expect(body.budgets[0]?.liveSessions.map(s => s.id)).toEqual(['visible-session'])
+    expect(body.budgets[0]?.accountLabel).not.toContain('#2')
+    expect(body.hiddenFromAgents[0]?.liveSessions.map(s => s.id)).toEqual(['hidden-session'])
+    const out = JSON.stringify(planLimitsTool({ kind: 'spec-impl' }, body))
+    for (const value of [hidden.id, 'hidden-session', 'unknown-session', 'unregistered-session', '@']) expect(out).not.toContain(value)
+  })
+
+  test(`H1 ${harness}: separate visible quotas distribute burn only within their account`, async () => {
+    const sessions = (tokens: number) => [
+      { session_id: 'a', harness, account: 'acc_a', input_tokens: tokens },
+      { session_id: 'b', harness, account: 'acc_b', input_tokens: tokens },
+    ]
+    const burn = { [`${harness}:acc_a`]: 10, [`${harness}:acc_b`]: 4 }
+    await sampleLivePlanSessions(sessions(100), ['a', 'b'], 0, burn)
+    const live = await sampleLivePlanSessions(sessions(101), ['a', 'b'], 60_000, burn)
+    expect(live.map(s => s.burnPctPerHour)).toEqual([10, 4])
+  })
+}
+
+test('L7: default legacy labels do not duplicate real #1; hidden rows do not skip numbers', async () => {
+  const store = accountsWithLogin({ value: 'unused' })
+  const now = now0()
+  const { account: hidden } = await store.bind(join(dir, 'hidden'), { harness: 'codex', key: 'hidden', label: 'Hidden' })
+  await store.update(hidden.id, { available: false })
+  const { account: first } = await store.bind(join(dir, 'first'), { harness: 'codex', key: 'first', label: 'First' })
+  const { account: second } = await store.bind(join(dir, 'second'), { harness: 'codex', key: 'second', label: 'Second' })
+  for (const account of ['default', first.id, second.id]) await ingestPlanLimits({ harness: 'codex', account, source: 'codex-rollout', updatedAt: now,
+    windows: [{ kind: 'week', usedPct: 10, resetsAt: now + 24 * H }] })
+  const body = await planLimitsPayload(undefined, now)
+  const labels = Object.fromEntries([...body.budgets, ...body.hiddenFromAgents].map(b => [b.account, b.accountLabel]))
+  expect(labels[first.id]).toBe('Codex CLI #1')
+  expect(labels[second.id]).toBe('Codex CLI #2')
+  expect(labels.default).toBe('Codex CLI')
+})
+
+test('L8: MCP fallback sums free slots per harness and excludes held accounts', () => {
+  const now = now0()
+  const mk = (harness: 'claude' | 'codex', account: string, freeSlots: number, status: 'ok' | 'hold' = 'ok') => ({
+    harness, account, freeSlots, status, fiveHourPct: 0, weekPct: 0, weekResetsAt: now + H,
+  })
+  const result = planLimitsTool(undefined, { budgets: [mk('claude', 'a', 2), mk('claude', 'b', 3), mk('claude', 'held', 9, 'hold'), mk('codex', 'c', 4)] })
+  expect(result.freeSlotsByHarness).toEqual({ claude: 5, codex: 4 })
+  expect(result.freeSlots).toBe(5)
 })

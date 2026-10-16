@@ -420,6 +420,14 @@ describe('per-account primitives (B1)', () => {
     expect(routeRecommendation([held, late], 'hard-bug').account).toBe('acc_late')
   })
 
+  test('Q6: a missing week window sorts after real weekly resets, then ties use room', () => {
+    const noWeek = row({ ...mk('claude', 'acc_no_week', 80, 0), windows: [w('5h', 80, now + 3 * H)] })
+    const weekly = row({ ...mk('claude', 'acc_week', 5, 10), windows: [w('5h', 5, now + 3 * H), w('week', 10, now + 120 * H)] })
+    expect(routeRecommendation([noWeek, weekly], 'hard-bug').account).toBe('acc_week')
+    const roomy = row({ ...mk('claude', 'acc_roomy', 5, 0), windows: [w('5h', 5, now + 3 * H)] })
+    expect(routeRecommendation([noWeek, roomy], 'hard-bug').account).toBe('acc_roomy')
+  })
+
   test('route picks the account with most room; ties go to the newest', () => {
     const a = row(mk('claude', 'acc_a', 10, 45))
     const b = row(mk('claude', 'acc_b', 10, 30))

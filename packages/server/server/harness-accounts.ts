@@ -360,7 +360,7 @@ export function createHarnessAccounts(options: {
       return serial(async () => {
         const data = await read()
         if (!data.accounts.some(a => a.id === id)) return
-        data.segments[id] = ms
+        data.segments[id] = Math.max(data.segments[id] ?? 0, ms)
         await write(data)
       })
     },
