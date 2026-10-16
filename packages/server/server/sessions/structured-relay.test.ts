@@ -97,3 +97,26 @@ describe('structured relay termination', () => {
     } finally { r.cleanup() }
   })
 })
+
+describe('structured relay stdout drain', () => {
+  test('TERM preserves the last lines and an unterminated tail before exit', async () => {
+    const r = startRelay(`trap 'i=0; while [ "$i" -lt 2000 ]; do echo "last-$i"; i=$((i + 1)); done; printf final-tail; exit 0' TERM
+printf ready > ready
+while :; do :; done
+`)
+    try {
+      await waitFile(r, 'ready')
+      const child = (JSON.parse(readFileSync(join(r.dir, RELAY_FILES.pid), 'utf8')) as { child: number }).child
+      r.track(child)
+      process.kill(r.proc.pid!, 'SIGTERM')
+      await until(() => !alive(r.proc.pid!), 4000)
+      const lines = readFileSync(join(r.dir, RELAY_FILES.out), 'utf8').trim().split('\n')
+        .map(line => (JSON.parse(line) as { l: string }).l)
+      expect(lines).toHaveLength(2001)
+      expect(lines[0]).toBe('last-0')
+      expect(lines[1999]).toBe('last-1999')
+      expect(lines[2000]).toBe('final-tail')
+      expect(existsSync(join(r.dir, RELAY_FILES.exit))).toBe(true)
+    } finally { r.cleanup() }
+  }, 10000)
+})

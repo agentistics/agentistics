@@ -715,3 +715,34 @@ channel, while `C-z` — outside the allowlist — acked `bad_key`. In the brows
 EventSources: opening the band opened one stream and closed none, collapsing it closed one,
 re-opening opened a second, and backgrounding the tab closed it. At 390px `scrollWidth` equalled
 `innerWidth`, every control in the sheet measured 44x44, and the inputs computed to 16px.
+
+
+## Deferred retirement safety
+
+`agentop session retire <ref>` stores a request for the server hub. The default quiet period is
+60 seconds; `--quiet-for` must be at least 10 seconds (two default foreground poll intervals).
+Requests created through other callers or already stored receive the same minimum in the runner.
+Two distinct polls must observe `waiting`. After transcript and process probes, the runner refreshes
+the hub and checks `waiting` and the quiet duration again immediately before killing. A failed
+refresh, resumed work, or a deadline reached during the probes leaves the session alive.
+
+Claude background tasks are counted only when the transcript window is complete. A window with
+older turns is unknown and blocks retirement. Other harnesses have no background-task concept and
+need no conversation id or transcript for this probe. A failed process probe blocks retirement on a
+trusted harness; unmeasured or untrusted harnesses still carry the explicit unchecked note.
+
+A missing successor is unknown during its 30-second birth grace, measured from the later of its
+registry creation and the retire request. Cancellation requires an explicit terminal status or two
+distinct missing snapshots after that grace. An `unregistered` successor is alive. A missing
+predecessor is never filed as ended from absence alone; `lost` requires two consecutive distinct
+polls. All terminal rows, including explicit `exited` or `closed`, are checked in a fresh hub poll
+before filing them as ended.
+
+Retirement notifications use `retire.done`, `retire.cancelled`, and `retire.expired` with metadata
+and English/Portuguese display strings. Expiry reasons retain the diagnostic English text.
+Structured relays wait for stdout to close before publishing exit and leaving, preserving final
+lines and unterminated output while retaining process-group termination after the grace period.
+
+Known limitation (S5 QA L3, deferred to S6): configured MCP commands are read only for Claude.
+For other harnesses, an extra MCP server can conservatively count as a work child and delay
+retirement until expiry. The shared `agentop mcp` exclusion still applies to every harness.

@@ -326,3 +326,13 @@ describe('retire', () => {
     expect(parseDurationMs('x')).toBeNull()
   })
 })
+
+describe('retire minimum quiet interval', () => {
+  it('rejects zero and short quietFor; accepts two poll intervals', () => {
+    for (const value of ['0', '1s', '9999ms']) {
+      expect(parseSessionArgs(['retire', 'a1', '--quiet-for', value])).toMatchObject({ kind: 'error' })
+    }
+    expect(parseSessionArgs(['retire', 'a1', '--quiet-for', '10s']))
+      .toMatchObject({ kind: 'retire', quietForMs: 10_000 })
+  })
+})
