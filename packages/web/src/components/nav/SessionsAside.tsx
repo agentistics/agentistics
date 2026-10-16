@@ -322,7 +322,8 @@ export function SessionsAside({
   const setGroupBy = (v: AsideGroupBy) => { setGroupByState(v); writeAsideGroupPrefs({ groupBy: v }) }
   // How the sessions INSIDE each group are ordered. Per-viewer, like the rest of the arrangement.
   const [sortOrder, setSortOrderState] = useState<SessionOrder>(storedGroupPrefs.sort)
-  const setSortOrder = (v: SessionOrder) => { setSortOrderState(v); writeAsideGroupPrefs({ sort: v }) }
+  const [sortExplicit, setSortExplicit] = useState(storedGroupPrefs.sortExplicit)
+  const setSortOrder = (v: SessionOrder) => { setSortOrderState(v); setSortExplicit(true); writeAsideGroupPrefs({ sort: v, sortExplicit: true }) }
   const [groupOrder, setGroupOrderState] =
     useState<Partial<Record<AsideGroupBy, string[]>>>(storedGroupPrefs.order)
   const setGroupOrder = (by: AsideGroupBy, keys: string[]) => {
@@ -1136,7 +1137,7 @@ export function SessionsAside({
                 // modest offset the empty-group hint above already lines up with.
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 12, paddingRight: 4, minWidth: 0 }}>
                   {(() => {
-                  const { live, ended } = splitFolderRows(gRows, r => active.has(r.state), sortOrder)
+                  const { live, ended } = splitFolderRows(gRows, r => active.has(r.state), sortOrder, sortExplicit)
                   const renderRow = (s: ControlSession) => {
                     const key = pinKeyOf(s)
                     return (

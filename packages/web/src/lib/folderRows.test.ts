@@ -22,4 +22,9 @@ describe('splitFolderRows', () => {
     const r = splitFolderRows(rows, live, { by: 'started', dir: 'desc' })
     expect(r.ended.map(x => x.id)).toEqual(['3', '1'])
   })
+  test('without an explicit sort the folder keeps its drag order', () => {
+    const r = splitFolderRows(rows, live, { by: 'name', dir: 'asc' }, false)
+    expect(r.live.map(x => x.id)).toEqual(['2', '4'])
+    expect(r.ended.map(x => x.id)).toEqual(['1', '3'])
+  })
 })

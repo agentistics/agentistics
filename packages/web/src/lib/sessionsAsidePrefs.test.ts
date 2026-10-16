@@ -104,6 +104,7 @@ describe('writeAsideGroupPrefs', () => {
       foldedPinned: false,
       foldedGroupsSection: false,
       expandedEndedGroups: [],
+      sortExplicit: false,
     })
   })
 

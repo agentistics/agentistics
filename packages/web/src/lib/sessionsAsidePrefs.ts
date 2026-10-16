@@ -61,12 +61,14 @@ export interface AsideGroupPrefs {
   foldedGroupsSection: boolean
   /** Folders whose "Ended (N)" block is EXPANDED — absent means collapsed (the default). */
   expandedEndedGroups: string[]
+  /** Has the person ever picked a sort? Until then folders keep their drag order. */
+  sortExplicit: boolean
 }
 
 export const DEFAULT_ASIDE_GROUP_PREFS: AsideGroupPrefs = {
   groupBy: 'project', order: {}, collapsed: [], cardColor: 'wash', collapsedUserGroups: [],
   sort: DEFAULT_ORDER, hiddenUserGroups: [], foldedPinned: false, foldedGroupsSection: false,
-  expandedEndedGroups: [],
+  expandedEndedGroups: [], sortExplicit: false,
 }
 
 /** Total: anything that is not a known key and direction reads as the default. */
@@ -133,6 +135,7 @@ export function parseAsideGroupPrefs(stored: unknown): AsideGroupPrefs {
         : [],
       foldedPinned: p.foldedPinned === true,
       foldedGroupsSection: p.foldedGroupsSection === true,
+      sortExplicit: p.sortExplicit === true,
       expandedEndedGroups: Array.isArray(p.expandedEndedGroups)
         ? p.expandedEndedGroups.filter((x): x is string => typeof x === 'string')
         : [],

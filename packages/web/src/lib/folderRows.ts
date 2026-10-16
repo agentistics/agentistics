@@ -16,9 +16,12 @@ export function splitFolderRows(
   rows: readonly ControlSession[],
   isActive: (s: ControlSession) => boolean,
   order: SessionOrder,
+  /** False while the person never picked a sort: the folder keeps its own (drag) order. */
+  applySort = true,
 ): FolderRows {
+  const arrange = (l: ControlSession[]) => (applySort ? sortSessions(l, order) : l)
   return {
-    live: sortSessions(rows.filter(isActive), order),
-    ended: sortSessions(rows.filter(r => !isActive(r)), order),
+    live: arrange(rows.filter(isActive)),
+    ended: arrange(rows.filter(r => !isActive(r))),
   }
 }
