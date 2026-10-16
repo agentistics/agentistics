@@ -6,6 +6,7 @@ import { TASKS_FILE } from '../config'
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { gitTestEnv } from '@agentistics/core/gitTestEnv'
 import { addSession, removeSession } from './registry'
 import { start } from './cli-session'
 import type { SessionBackend } from './types'
@@ -14,9 +15,7 @@ import type { SessionBackend } from './types'
 for (const k of Object.keys(process.env)) if (k.startsWith('GIT_') && k !== 'GIT_TERMINAL_PROMPT') delete process.env[k]
 
 // Pass the environment explicitly: hook variables must not reach fixture git subprocesses.
-const gitClean = (args: string[]) => Bun.spawnSync(['git', ...args], {
-  env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))),
-})
+const gitClean = (args: string[]) => Bun.spawnSync(['git', ...args], { env: gitTestEnv() })
 
 describe('batch — the registry row brackets the spawn', () => {
   beforeAll(async () => {
