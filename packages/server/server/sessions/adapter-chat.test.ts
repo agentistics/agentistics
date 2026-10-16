@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import type { ChatSourceRef, HarnessChat, HarnessChatDelta } from '@agentistics/engine-api'
 import type { ChatTurn } from '@agentistics/core'
 import {
-  adapterChatResponse, adapterRefused, clearAdapterRefusals, pickAdapterChat, readAdapterChat, refuseAdapter,
+  adapterChatResponse, firstWindow, adapterRefused, clearAdapterRefusals, pickAdapterChat, readAdapterChat, refuseAdapter,
   rowLive, sameAdapterSource, type AdapterChatDeps, type AdapterChatRow,
 } from './adapter-chat'
 import type { ChatPayload } from './chat-web'
@@ -266,5 +266,36 @@ describe('sameAdapterSource — is the opened channel still the row\'s (AGY.CHAT
     expect(sameAdapterSource({ structured: false, conversationId: 'c1' }, { structured: false, conversationId: 'c2' })).toBe(false)
     expect(sameAdapterSource({ structured: false, conversationId: 'c1' }, null)).toBe(false)
     expect(sameAdapterSource({ structured: false, conversationId: 'c1' }, { structured: true })).toBe(false)
+  })
+})
+
+describe('firstWindow — one read, then stop following', () => {
+  const src = { sourceRef: 's1' } as unknown as ChatSourceRef
+  const synchronous = (calls: { n: number }): HarnessChat => ({
+    follow: (_s: ChatSourceRef, _max: number, on: (d: HarnessChatDelta) => void) => {
+      on({ kind: 'window', turns: [{ role: 'assistant', text: 'hi' }], older: false } as HarnessChatDelta)
+      return () => { calls.n++ }
+    },
+  }) as unknown as HarnessChat
+
+  test('a window delivered synchronously unsubscribes exactly once', async () => {
+    const calls = { n: 0 }
+    const w = await firstWindow(synchronous(calls), src, 6, 50)
+    await new Promise(r => setTimeout(r, 0))
+    expect(w?.turns.map(t => t.text)).toEqual(['hi'])
+    expect(calls.n).toBe(1)
+  })
+
+  test('a window delivered later unsubscribes exactly once', async () => {
+    const calls = { n: 0 }
+    const chat = {
+      follow: (_s: ChatSourceRef, _max: number, on: (d: HarnessChatDelta) => void) => {
+        setTimeout(() => on({ kind: 'window', turns: [], older: false } as HarnessChatDelta), 1)
+        return () => { calls.n++ }
+      },
+    } as unknown as HarnessChat
+    await firstWindow(chat, src, 6, 50)
+    await new Promise(r => setTimeout(r, 5))
+    expect(calls.n).toBe(1)
   })
 })

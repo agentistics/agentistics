@@ -358,7 +358,8 @@ export function firstWindow(
       if (done) return
       done = true
       clearTimeout(timer)
-      // `follow` may deliver the window synchronously, before it has returned its unsubscribe.
+      // `follow` may deliver the window synchronously, before it has returned its unsubscribe: the
+      // microtask runs after `unfollow` is assigned, so it is the ONE release on either path.
       queueMicrotask(() => { try { unfollow?.() } catch { /* total by contract */ } })
       resolve(v)
     }
@@ -366,6 +367,5 @@ export function firstWindow(
     unfollow = chat.follow(src, max, d => {
       if (d.kind === 'window') finish(applyHarnessChatDeltas({ turns: [], older: false }, [d], max))
     })
-    if (done) { try { unfollow() } catch { /* total */ } }
   })
 }
