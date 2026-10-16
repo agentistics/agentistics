@@ -50,7 +50,8 @@ import { catalogFields } from '../model-catalog-fields'
 import { artifactPathsFromTurns, type AllowedArtifact } from './artifact-file'
 import type { ArtifactResponse } from './artifact-web'
 import { readRegistry, patchSession } from './registry'
-import { computeHandoffWhy, findHandoffFile, sendHandoffHints, type HandoffHintRow } from './handoff-hint'
+import type { ManagedSession } from './types'
+import { computeHandoffWhy, findHandoffFile, HANDOFF_RAMP_CALLS, isLeaderRow, sendHandoffHints, type HandoffHintRow } from './handoff-hint'
 
 // The REQUEST shape lives in the leaf `fleet-row.ts` so `index.ts` can name it without naming
 // this module — see the note there.
@@ -268,10 +269,19 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
       const [registry, raw] = await Promise.all([readRegistry().catch(() => []), fleetSessionHub().then(h => h.read())])
       const titles = new Map(fleet.sessions.map(row => [row.id, fleetRow(row, s).title]))
       const byId = new Map(registry.map(row => [row.id, row]))
+      const baseSamples = handoffBaseSamples(registry)
       const rows: HandoffHintRow[] = await Promise.all(raw.sessions.map(async view => {
         const managed = byId.get(view.id)
         const handoff = await findHandoffFile(view.cwd)
+        // HANDOFF.CALC: record this leader's context after its first ~15 calls — a sample of F.
+        if (managed && managed.handoffBaseTokens === undefined && view.contextTokens !== undefined
+          && isLeaderRow({ title: titles.get(view.id) ?? '', ...(managed.leader ? { leader: true } : {}) })
+          && view.calls !== undefined && view.calls >= HANDOFF_RAMP_CALLS && view.calls <= HANDOFF_RAMP_CALLS + 10) {
+          await patchSession(view.id, { handoffBaseTokens: view.contextTokens }).catch(() => false)
+        }
         return {
+          baseSamples,
+          ...(view.calls !== undefined ? { calls: view.calls } : {}),
           id: view.id,
           title: titles.get(view.id) ?? '',
           ...(managed?.leader ? { leader: true } : {}),
@@ -304,6 +314,7 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
           return { level: m?.handoffHintLevel ?? 0, ...(m?.handoffHintTokens !== undefined ? { tokens: m.handoffHintTokens } : {}) }
         },
         markHinted: (id, level, tokens) => patchSession(id, { handoffHintLevel: level, ...(tokens !== undefined ? { handoffHintTokens: tokens } : {}) }),
+        ownerWaiting: id => ownerWaitingOn(id),
         awayNote: async id => {
           const { readPreferences } = await import('../preferences')
           const { awayHandoffNote, parseAwayState, sessionAwayState } = await import('@agentistics/core')
@@ -353,6 +364,25 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
   }
 }
 
+/** F's samples: the newest leaders' context after their first ~15 calls (`handoffBaseTokens`). */
+export function handoffBaseSamples(registry: readonly ManagedSession[], max = 10): number[] {
+  return registry
+    .filter(m => m.handoffBaseTokens !== undefined)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, max)
+    .map(m => m.handoffBaseTokens!)
+}
+
+/** The owner's latest message in this session has no reply yet (HANDOFF.RELAY's own reading). */
+async function ownerWaitingOn(id: string): Promise<boolean> {
+  const m = (await readRegistry().catch(() => [] as ManagedSession[])).find(r => r.id === id)
+  if (!m) return false
+  const { readSessionTurns } = await import('./handoff-relay-io')
+  const { planRelay } = await import('./handoff-relay')
+  const got = await readSessionTurns(m)
+  return 'turns' in got && planRelay(got.turns).unanswered
+}
+
 /** The numbers behind the leader's handoff hint, for the future modal and API clients. */
 export async function readHandoffWhy(lang: CliLang, id: string): Promise<ReturnType<typeof computeHandoffWhy> | null> {
   await hostFor(lang)
@@ -369,6 +399,8 @@ export async function readHandoffWhy(lang: CliLang, id: string): Promise<ReturnT
     ...(view.model !== undefined ? { model: view.model } : {}),
     ...(view.turns !== undefined ? { turns: view.turns } : {}),
     ...(view.costUSD !== undefined ? { costUSD: view.costUSD } : {}),
+    ...(view.calls !== undefined ? { calls: view.calls } : {}),
+    baseSamples: handoffBaseSamples(registry),
     ...(view.activity !== undefined ? { activity: view.activity, state: view.activity } : {}),
     ...((view.activity === 'working' || view.background) ? {
       workInFlight: [

@@ -59,6 +59,7 @@ export interface SessionPatch {
   handoffRelayedAt?: string
   /** `null` clears it (registry patch rule). */
   handoffRelayAwaiting?: boolean | null
+  handoffBaseTokens?: number
   label?: string
   /** Written alongside `label`, never on its own — see `ManagedSession.labelSince`. */
   labelSince?: number
@@ -149,6 +150,8 @@ function sanitize(raw: unknown): ManagedSession | null {
     ...(typeof s.handoffFrom === 'string' && s.handoffFrom ? { handoffFrom: s.handoffFrom } : {}),
     ...(typeof s.handoffRelayedAt === 'string' && s.handoffRelayedAt ? { handoffRelayedAt: s.handoffRelayedAt } : {}),
     ...(s.handoffRelayAwaiting === true ? { handoffRelayAwaiting: true } : {}),
+    ...(typeof s.handoffBaseTokens === 'number' && Number.isFinite(s.handoffBaseTokens) && s.handoffBaseTokens > 0
+      ? { handoffBaseTokens: s.handoffBaseTokens } : {}),
     ...(typeof s.label === 'string' ? { label: s.label } : {}),
     ...(typeof s.labelSince === 'number' && Number.isFinite(s.labelSince)
       ? { labelSince: s.labelSince }

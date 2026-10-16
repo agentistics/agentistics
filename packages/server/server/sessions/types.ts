@@ -333,6 +333,8 @@ export interface ManagedSession {
   handoffFrom?: string
   handoffRelayedAt?: string
   handoffRelayAwaiting?: boolean
+  /** HANDOFF.CALC: this leader's context after its first ~15 calls — a sample of the successor base F. */
+  handoffBaseTokens?: number
   label?: string
   /**
    * When the label was written, epoch ms — so a name typed HERE can be compared with one typed
