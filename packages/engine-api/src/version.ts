@@ -113,7 +113,12 @@
  * authorization) and `onRevoke` (grant/vault-lock notifications). The legacy `env` member remains for
  * older engines but hosts must return only non-confirmable secrets from it.
  */
-export const ENGINE_API_VERSION = '1.11.0'
+/**
+ * 1.12.0 — spawn-atomic S1: `ChatTurn.task.ended` (optional) says why a background task is over
+ * without a `<task-notification>` (`stopped` | `never-started` | `session-ended`). Absent means a
+ * notification settled it or it is still running. Engine → host only, so a 1.11 engine never sets it.
+ */
+export const ENGINE_API_VERSION = '1.12.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

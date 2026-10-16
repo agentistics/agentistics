@@ -408,7 +408,7 @@ export function createSessionsPoller(o: {
   let confirmMemory: ConfirmMemory = EMPTY_CONFIRM_MEMORY
   const prevProcStats = new Map<number, ProcStatSample>()
   /** The last chat tail read per row, with the transcript stamp it was read at — see `readChatTail`. */
-  const chatTailMemo = new Map<string, { path: string; size: number; mtimeMs: number; turns: ChatTurn[] }>()
+  const chatTailMemo = new Map<string, { path: string; size: number; mtimeMs: number; ended: boolean; turns: ChatTurn[] }>()
   // When the after-the-fact read last ran for a row. A DEAD row's answer cannot change (its log is
   // final), so it runs once; a LIVE row the live read has not linked gets another go every minute.
   const afterTheFactTried = new Map<string, number>()
@@ -557,10 +557,12 @@ export function createSessionsPoller(o: {
             // newest member alone does not say whether an older one changed.
             const st = harnessOf.get(r.id) === 'gemini' ? null : statQuiet(path)
             const kept = chatTailMemo.get(r.id)
-            const turns = st && kept && kept.path === path && kept.size === st.size && kept.mtimeMs === st.mtimeMs
+            // A row that is over reads its tail with background tasks settled (`session-ended`).
+            const ended = r.status === 'lost' || r.status === 'exited' || !!r.managed?.endedAt
+            const turns = st && kept && kept.path === path && kept.size === st.size && kept.mtimeMs === st.mtimeMs && kept.ended === ended
               ? kept.turns
-              : await transcript.readRecent(path, TAIL_CHAT_TURNS).catch(() => [] as ChatTurn[])
-            if (st && turns !== kept?.turns) chatTailMemo.set(r.id, { path, size: st.size, mtimeMs: st.mtimeMs, turns })
+              : await transcript.readRecent(path, TAIL_CHAT_TURNS, { sessionEnded: ended }).catch(() => [] as ChatTurn[])
+            if (st && turns !== kept?.turns) chatTailMemo.set(r.id, { path, size: st.size, mtimeMs: st.mtimeMs, ended, turns })
             if (turns.length > 0) chatTails.set(r.id, anyGrant() ? await scrubDeep(r.id, turns) : turns)
             return turns
           }

@@ -28,6 +28,7 @@ import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { ArrowUpRight, Check, ChevronDown, Clock, Copy, CornerUpLeft, Ellipsis, ExternalLink, Forward, Image as ImageIcon, KeyRound, Link2, ListChecks, Loader, Mic, User } from 'lucide-react'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
+import type { ChatTaskEnd } from '@agentistics/core'
 import { chatNote, type ChatNoteTab } from '../../lib/chatNote'
 import { openArtifacts } from '../../lib/artifactsStore'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -63,7 +64,7 @@ export interface ChatTurn {
    * thing the reader is waiting for, and its END is already reported. Rendered as a status line and
    * never as a message — nobody said it.
    */
-  task?: { label: string; running: boolean; ended?: 'done' | 'stopped' | 'never-started' | 'session-ended' }
+  task?: { label: string; running: boolean; ended?: ChatTaskEnd }
   /**
    * This sat under the `user` role and no person wrote it — a background task reporting back, an
    * injected reminder, a `!` command's stdout. The value NAMES the kind; it is never the body.

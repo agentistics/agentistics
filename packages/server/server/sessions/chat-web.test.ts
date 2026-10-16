@@ -280,3 +280,16 @@ describe('processLinkNote — off Linux, the row says why its link is slower', (
     expect(processLinkNote(true, 'darwin', 'antigravity', 'en')).toBeUndefined()
   })
 })
+
+test('the row state decides sessionEnded for the reader (exited/lost/closed over; waiting/working not)', async () => {
+  const seen: Record<string, boolean | undefined> = {}
+  for (const state of ['exited', 'lost', 'closed', 'waiting', 'working']) {
+    const reader = () => ({
+      resolve: async () => '/some/found/transcript.jsonl',
+      read: async (_p: string, _m: number, opts?: { sessionEnded?: boolean }) => { seen[state] = opts?.sessionEnded; return { turns: [], older: false } },
+      readRecent: async () => [],
+    })
+    await readSessionChat(hostWith(state), 'en', 'sess1', reader as never)
+  }
+  expect(seen).toEqual({ exited: true, lost: true, closed: true, waiting: false, working: false })
+})

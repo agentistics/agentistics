@@ -785,7 +785,7 @@ describe('background task settle (P4)', () => {
       expect(tasks(await reader(f))).toEqual([{ label: 'watch', running: false, ended: 'stopped' }])
     })
     test(`${name}: denied launch never started`, async () => {
-      const f = await write(launch('t1', 'watch'), result('t1', 'Permission denied by the classifier', true))
+      const f = await write(launch('t1', 'watch'), result('t1', 'Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Merge Without Review].', true))
       expect(tasks(await reader(f))).toEqual([{ label: 'watch', running: false, ended: 'never-started' }])
     })
     test(`${name}: ended session settles unsettled tasks, a live one keeps running`, async () => {
