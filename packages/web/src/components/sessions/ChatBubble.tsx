@@ -28,6 +28,7 @@ import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { ArrowUpRight, Info, Check, ChevronDown, Clock, Copy, CornerUpLeft, Ellipsis, ExternalLink, Forward, Image as ImageIcon, KeyRound, Link2, ListChecks, Loader, Mic, User } from 'lucide-react'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
+import { useFleet } from '../../lib/fleet'
 import { parseSystemEvent, systemEventLine, type SystemEvent } from '../../lib/systemEvent'
 import { chatNote, type ChatNoteTab } from '../../lib/chatNote'
 import { openArtifacts } from '../../lib/artifactsStore'
@@ -1224,8 +1225,8 @@ function ShellRunBlock({ run, pt }: { run: NonNullable<ChatTurn['shell']>; pt: b
 }
 
 /** A message agentistics injected: one compact row, full text on click. No bubble, no echo chrome. */
-function SystemEventRow({ event, pt }: { event: SystemEvent; pt: boolean }) {
-  const [open, setOpen] = useState(false)
+export function SystemEventRow({ event, pt, titleOf, defaultOpen = false }: { event: SystemEvent; pt: boolean; titleOf?: (id: string) => string | undefined; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
   return (
     <div style={{ alignSelf: 'center', maxWidth: '92%', margin: '4px 0' }}>
       <button
@@ -1239,7 +1240,7 @@ function SystemEventRow({ event, pt }: { event: SystemEvent; pt: boolean }) {
         }}
       >
         <Info size={12} color="var(--anthropic-orange)" />
-        <span>{systemEventLine(event, pt)}</span>
+        <span>{systemEventLine(event, pt, event.sender ? titleOf?.(event.sender) : undefined)}</span>
         <ChevronDown size={12} style={{ transform: open ? 'rotate(180deg)' : undefined }} />
       </button>
       {open && (
@@ -1253,8 +1254,17 @@ function SystemEventRow({ event, pt }: { event: SystemEvent; pt: boolean }) {
   )
 }
 
+function FleetSystemEventRow({ event, lang }: { event: SystemEvent; lang: ChatBubbleProps['lang'] }) {
+  const rows = useFleet(lang).fleet.rows
+  const titleOf = useCallback((id: string) => {
+    const r = rows.find(x => x.id === id || x.id.startsWith(id) || x.conversationId === id)
+    return r?.title || undefined
+  }, [rows])
+  return <SystemEventRow event={event} pt={lang === 'pt'} titleOf={titleOf} />
+}
+
 export const ChatBubble = memo(function ChatBubble(props: ChatBubbleProps) {
   const event = props.turn.role === 'user' ? parseSystemEvent(props.turn.text) : null
-  if (event) return <SystemEventRow event={event} pt={props.lang === 'pt'} />
+  if (event) return <FleetSystemEventRow event={event} lang={props.lang} />
   return <ChatBubbleInner {...props} />
 })

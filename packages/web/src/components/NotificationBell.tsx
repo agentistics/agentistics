@@ -46,6 +46,16 @@ interface Props {
 }
 
 /** Bell icon with an unread badge and a dropdown of the notification history. */
+/** The away-digest actions: their own row BELOW the message, never beside it (the text column must keep its width). */
+export function AwayDigestActions({ pt, busy, onAnswer }: { pt: boolean; busy: boolean; onAnswer: (a: 'yes' | 'no') => void }) {
+  return (
+    <div data-testid="away-digest-actions" style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 8 }}>
+      <button className="ag-tap" disabled={busy} onClick={e => { e.stopPropagation(); onAnswer('yes') }} style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)', color: 'var(--text-primary)', cursor: busy ? 'wait' : 'pointer', font: 'inherit', fontSize: 11 }}>{pt ? 'Sim, abrir resumo' : 'Yes, open summary'}</button>
+      <button className="ag-tap" disabled={busy} onClick={e => { e.stopPropagation(); onAnswer('no') }} style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: busy ? 'wait' : 'pointer', font: 'inherit', fontSize: 11 }}>{pt ? 'Não agora' : 'Not now'}</button>
+    </div>
+  )
+}
+
 export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: Props) {
   const pt = lang === 'pt'
   const allNotes = useNotifications()
@@ -266,12 +276,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
                       {pt ? 'Tentar importar de novo' : 'Retry the import'}
                     </button>
                   )}
-                  {isAwayDigest && (
-                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 8 }}>
-                      <button className="ag-tap" disabled={digestBusy} onClick={e => { e.stopPropagation(); void answerDigest('yes') }} style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)', color: 'var(--text-primary)', cursor: digestBusy ? 'wait' : 'pointer', font: 'inherit', fontSize: 11 }}>{pt ? 'Sim, abrir resumo' : 'Yes, open summary'}</button>
-                      <button className="ag-tap" disabled={digestBusy} onClick={e => { e.stopPropagation(); void answerDigest('no') }} style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: digestBusy ? 'wait' : 'pointer', font: 'inherit', fontSize: 11 }}>{pt ? 'Não agora' : 'Not now'}</button>
-                    </div>
-                  )}
+                  {isAwayDigest && <AwayDigestActions pt={pt} busy={digestBusy} onAnswer={a => { void answerDigest(a) }} />}
                   </div>
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0,
