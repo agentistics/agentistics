@@ -301,6 +301,25 @@ export interface BackendSession {
   lastActivityMs: number
 }
 
+/** See `ManagedSession.retire`. Times are ISO (a local JSON store). */
+export interface RetireRequest {
+  requestedAt: string
+  /** Who asked: the managed id of the calling session, or `person` from a terminal. */
+  by: string
+  /** The session that takes over (a hand-off). A successor that dies CANCELS the request. */
+  successorId?: string
+  /** Folder to file the session into once it is retired (a "Finalizadas"/"Finished" folder). */
+  folderId?: string
+  /** How long the session must have been confirmed `waiting` before it is ended. */
+  quietForMs: number
+  /** Past this, nothing is killed: the request expires and a notification says why. */
+  deadlineAt: string
+  /** Set once the deadline passed without a quiet window. An expired request is never acted on. */
+  expiredAt?: string
+  /** Why it never went quiet, in words. */
+  expiredReason?: string
+}
+
 /** One session as the PRODUCT sees it. Persisted; the backend knows none of this. */
 export interface ManagedSession {
   id: string
@@ -399,6 +418,14 @@ export interface ManagedSession {
    * heartbeat stamps it.
    */
   lastSeenMs?: number
+  /**
+   * A pending request to END this session once it is provably quiet (ATOMIC SPAWN §2.2) — written by
+   * `agentop session retire` / a hand-off, carried out by the server's hub (`retire-runner.ts`) through
+   * the pure `retire-plan.ts`. A stored request rather than a wait in the caller, because the session
+   * asked to retire is usually the caller, mid-tool-call. Persisted so it survives a server restart.
+   * Cleared when it is carried out or cancelled; kept with `expiredAt` once the deadline passed.
+   */
+  retire?: RetireRequest
   /**
    * When this session was FINISHED, ISO — set instead of deleting the entry.
    *

@@ -27,7 +27,7 @@ import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { MANAGED_SESSIONS_FILE } from '../config'
 import { CONVERSATION_LINK_REASONS as LINK_REASONS, type ConversationLinkReason } from '@agentistics/core'
-import type { ManagedSession } from './types'
+import type { ManagedSession, RetireRequest } from './types'
 import { withFileLock } from './file-lock'
 
 /** Distinguishes two writes from the SAME process; the pid distinguishes the processes. */
@@ -85,6 +85,8 @@ export interface SessionPatch {
   structuredDriver?: string
   /** See `ManagedSession.away`. `null` clears it (a session switched back off). */
   away?: true | null
+  /** See `ManagedSession.retire`. `null` clears it (carried out or cancelled). */
+  retire?: RetireRequest | null
 }
 
 export interface SessionRegistry {
@@ -190,6 +192,32 @@ function sanitize(raw: unknown): ManagedSession | null {
       ? { lastSeenMs: s.lastSeenMs }
       : {}),
     ...sanitizeRepo(s.repo),
+    ...sanitizeRetire(s.retire),
+  }
+}
+
+/**
+ * A retire request, only if it is SHAPED like one (`ManagedSession.retire`). A hand-edited request
+ * with an unparseable deadline would otherwise reach `retire-plan.ts` as `NaN` and be compared
+ * against the clock — a malformed one drops the FIELD and keeps the session.
+ */
+function sanitizeRetire(raw: unknown): { retire?: RetireRequest } {
+  if (!raw || typeof raw !== 'object') return {}
+  const r = raw as Record<string, unknown>
+  const iso = (v: unknown): v is string => typeof v === 'string' && Number.isFinite(Date.parse(v))
+  if (!iso(r.requestedAt) || !iso(r.deadlineAt) || typeof r.by !== 'string' || !r.by) return {}
+  if (typeof r.quietForMs !== 'number' || !Number.isFinite(r.quietForMs) || r.quietForMs < 0) return {}
+  return {
+    retire: {
+      requestedAt: r.requestedAt,
+      by: r.by,
+      ...(typeof r.successorId === 'string' && r.successorId ? { successorId: r.successorId } : {}),
+      ...(typeof r.folderId === 'string' && r.folderId ? { folderId: r.folderId } : {}),
+      quietForMs: r.quietForMs,
+      deadlineAt: r.deadlineAt,
+      ...(iso(r.expiredAt) ? { expiredAt: r.expiredAt } : {}),
+      ...(typeof r.expiredReason === 'string' && r.expiredReason ? { expiredReason: r.expiredReason } : {}),
+    },
   }
 }
 

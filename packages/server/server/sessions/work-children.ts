@@ -67,6 +67,26 @@ export const HELPER_PROCESSES: Record<HarnessId, RegExp[] | null> = {
   opencode: null,
 }
 
+/**
+ * May a `checked: true, children: []` answer for this harness be believed by `retire-plan.ts`? An
+ * empty WORK set is only as good as the measurement behind it. `false` makes the retire plan treat
+ * the harness exactly like `checked: false` (children not checked, said in words).
+ *
+ * codex is `false` (2026-10-16): the idle tree was measured, but a codex session RUNNING a command
+ * was not, and its managed `app-server` daemon may be SHARED or detached between sessions — a command
+ * could then run outside this pane's subtree and read as quiet. Flipped by the leader after a live
+ * two-session measurement. A `Record` so a new harness is a decision, not a default.
+ */
+export const WORK_CHILDREN_TRUSTED: Record<HarnessId, boolean> = {
+  claude: true,
+  codex: false,
+  gemini: true,
+  copilot: true,
+  antigravity: true,
+  kimi: true,
+  opencode: true,
+}
+
 /** The harness's own process chain below the pane (see the header). */
 export interface HarnessChain {
   /** Executable basenames (`/proc/<pid>/exe`, ` (deleted)` stripped) that are the harness itself. */
@@ -80,7 +100,9 @@ export const HARNESS_CHAIN: Record<HarnessId, HarnessChain | null> = {
   codex: { exes: ['codex'], argv: [/^(\S*\/)?node (\S*\/)?codex(\s|$)/] },
   gemini: {
     exes: [],
-    argv: [/^(\S*\/)?node (--\S+ )*(\S*\/)?gemini(\s|$)/, /^(\S*\/)?node (--\S+ )*\S*\/gemini-cli\/\S*(\s|$)/],
+    // The second rule names the npm PACKAGE path, never any `gemini-cli/` directory: a clone of the
+    // CLI's own repo being built (`node ~/src/gemini-cli/scripts/build.js`) is work (S3 QA L2).
+    argv: [/^(\S*\/)?node (--\S+ )*(\S*\/)?gemini(\s|$)/, /^(\S*\/)?node (--\S+ )*\S*\/@google\/gemini-cli\/\S*(\s|$)/],
   },
   copilot: { exes: ['copilot'], argv: [/^(\S*\/)?node (\S*\/)?copilot(\/\S*)?(\s|$)/] },
   antigravity: null,
@@ -102,6 +124,12 @@ export interface WorkChildrenOptions {
   readonly mcpCommands?: readonly string[]
   /** Extra helper patterns, ADDED to the harness's `HELPER_PROCESSES` entry (never replacing it). */
   readonly helpers?: readonly RegExp[]
+  /**
+   * The pane's own executable basename. `readProcTree` returns DESCENDANTS only, so a pane that IS the
+   * harness (claude, kimi) cannot be recognised from the tree; absent, the tree's own node for the
+   * pane is used when it carries one.
+   */
+  readonly paneExe?: string | null
 }
 
 export type WorkChildrenResult =
@@ -185,7 +213,10 @@ export function workChildren(
       walk(c.pid, false, underHolder)
     }
   }
-  walk(panePid, true, false)
+  // A pane that is itself a holder (claude, kimi) starts the walk BELOW a holder, so the non-holder
+  // chain rules are already spent: `claude(pane) -> bun test -> claude -p` counts `bun test` (S3 QA L1).
+  const paneExe = opts.paneExe !== undefined ? opts.paneExe : (tree.find((p) => p.pid === panePid)?.exe ?? null)
+  walk(panePid, true, paneExe !== null && holders.includes(paneExe))
   return { checked: true, children: out }
 }
 
