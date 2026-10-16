@@ -319,7 +319,7 @@ test('disabled account stays hidden through probe timeout, restart, error and su
   } }
   let store = createHarnessAccounts(options)
   __setHarnessAccountsForTest(store)
-  await store.current(['claude'])
+  const [account] = await store.current(['claude'])
   await store.setAvailable('claude', 'known-login', false)
   // Routing requires a registered plan, independently of the account availability toggle.
   await ingestPlanLimits({ harness: 'claude', account: 'default', plan: 'Max', windows: [{ kind: '5h', usedPct: 10, resetsAt: now + 3_600_000 }], updatedAt: now, source: 'claude-stream' })
@@ -353,7 +353,12 @@ test('disabled account stays hidden through probe timeout, restart, error and su
   mode = 'success'
   expect((await store.current(['claude']))[0]).toMatchObject({ key: 'known-login', available: false })
   await assertHidden()
-  expect(JSON.parse(readFileSync(file, 'utf8'))).toHaveLength(1)
+  expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({
+    version: 2,
+    accounts: [{ ...account, available: false, lastSeen: now }],
+    bindings: { 'claude:': account!.id },
+    segments: {},
+  })
   await store.setAvailable('claude', 'known-login', true)
   const recovered = await planLimitsPayload(undefined, now)
   expect(recovered.budgets.map(b => b.harness)).toEqual(['claude'])
