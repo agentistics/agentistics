@@ -82,6 +82,15 @@ export async function loadGeminiRoot(root: string, account?: string): Promise<Se
     .map(s => (account ? { ...s, account } : s))
 }
 
+/**
+ * Where a root's gemini data lives. The default root IS the config dir (`GEMINI_DIR`, `~/.gemini`);
+ * an account root is a HOME (`GEMINI_CLI_HOME` — gemini creates `.gemini` inside it), so its data is
+ * `<root>/.gemini` (account-roots.ts `ROOT_CONFIG_SUBDIR.gemini`).
+ */
+export function geminiConfigDir(root: string, isDefault: boolean): string {
+  return isDefault ? root : join(root, '.gemini')
+}
+
 export const geminiAdapter: HarnessAdapter = {
   id: 'gemini',
   dataRoot: GEMINI_DIR,
@@ -90,6 +99,6 @@ export const geminiAdapter: HarnessAdapter = {
   },
   async loadSessions(): Promise<SessionMeta[]> {
     const roots = await harnessRoots('gemini')
-    return (await Promise.all(roots.map(r => loadGeminiRoot(r.root, r.account)))).flat()
+    return (await Promise.all(roots.map(r => loadGeminiRoot(geminiConfigDir(r.root, r.isDefault), r.account)))).flat()
   },
 }

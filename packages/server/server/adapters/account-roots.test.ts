@@ -8,7 +8,7 @@ import { HARNESS_ORDER } from '@agentistics/core'
 import { NOOP_PARSE_CACHE, openParseCache, type ParseCache } from '../parse-cache'
 import { loadCodexRoot } from './codex'
 import { loadCopilotRoot } from './copilot'
-import { loadGeminiRoot } from './gemini'
+import { geminiAdapter, loadGeminiRoot } from './gemini'
 import { loadKimiRoot } from './kimi'
 import { loadClaudeRoot } from './claude'
 
@@ -142,4 +142,16 @@ test('the default-root table names EVERY harness explicitly (antigravity and ope
   expect(Object.keys(DEFAULT_HARNESS_DIRS).sort()).toEqual([...HARNESS_ORDER].sort())
   expect(DEFAULT_HARNESS_DIRS.antigravity).toBeNull()
   expect(DEFAULT_HARNESS_DIRS.opencode).toBeNull()
+})
+
+test('gemini: an account root is a HOME, so the adapter reads <root>/.gemini (GEMINI_CLI_HOME)', async () => {
+  const home = join(dir, 'gemini-home')
+  await writeGemini(join(home, '.gemini'), 'acct-1')
+  await writeGemini(home, 'wrong-1') // a <root>/tmp tree must NOT be what an account root reads
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => ({ key: 'k', label: 'k' }) })
+  const { account } = await store.bind(home, { harness: 'gemini', key: 'g', label: 'g' })
+  __setHarnessAccountsForTest(store)
+  const mine = (await geminiAdapter.loadSessions()).filter(s => s.account === account.id)
+  expect(mine).toHaveLength(1)
+  expect(mine[0]!.session_id).toContain('acct-1')
 })
