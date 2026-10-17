@@ -86,6 +86,16 @@ describe('decideSpawnAccount — every harness alike', () => {
       expect(spawnAccountStatus('account_signed_out')).toBe(409)
     })
 
+    test(`${h}: a visible account with no binding and no known default login runs the default root`, () => {
+      // 2.140.5: Codex's "Conta padrão" could not be bound (no readable e-mail) and every agent spawn was refused.
+      const unbound = { ...home, bound: false }
+      expect(decideSpawnAccount({ harness: h, agentCaller: true, context: on([unbound]) })).toEqual({ ok: true })
+      expect(decideSpawnAccount({ harness: h, agentCaller: false, context: on([unbound]) })).toEqual({ ok: true })
+      // Naming it is still refused: an unbound account never runs under whatever login holds a root.
+      expect(decideSpawnAccount({ harness: h, requested: unbound.id, agentCaller: true, context: on([unbound]) }))
+        .toEqual({ ok: false, reason: 'account_signed_out', detail: unbound.id })
+    })
+
     test(`${h}: a visible secondary-only account is picked before an unregistered default root`, () => {
       expect(decideSpawnAccount({ harness: h, agentCaller: true, context: on([second]) }))
         .toEqual({ ok: true, account: { id: second.id, root: second.root } })

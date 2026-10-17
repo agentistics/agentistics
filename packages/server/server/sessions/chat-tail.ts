@@ -705,11 +705,18 @@ export async function bgTasksRunning(path: string): Promise<number> {
 export async function readChatWindow(
   path: string,
   max = 400,
-  opts: { sessionEnded?: boolean } = {},
+  opts: { sessionEnded?: boolean; maxBytes?: number } = {},
 ): Promise<{ turns: ChatTurn[]; older: boolean }> {
   const sessionEnded = opts.sessionEnded === true
   let content: string
-  try { content = await readFile(path, 'utf-8') } catch { return { turns: [], older: false } }
+  if (opts.maxBytes !== undefined) {
+    // Retirement needs the whole history, but must never read an unbounded growing file.
+    const bounded = await readTailBytes(path, opts.maxBytes)
+    if (!bounded?.atStart) return { turns: [], older: true }
+    content = bounded.text
+  } else {
+    try { content = await readFile(path, 'utf-8') } catch { return { turns: [], older: false } }
+  }
 
   const lines = content.split('\n')
   const turns: ChatTurn[] = []

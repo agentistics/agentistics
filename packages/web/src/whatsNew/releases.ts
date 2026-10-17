@@ -10,6 +10,27 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.140.8': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O Codex aparece uma vez só em "Uso dos planos": a conta conectada é reconhecida sozinha e mantém o apelido e o plano.',
+        en: 'Codex shows once in "Plan usage": the signed-in account is recognised on its own and keeps its nickname and plan.',
+      },
+      {
+        pt: 'Abrir uma sessão do Codex ou de outro assistente não falha mais quando o login padrão ainda não foi identificado.',
+        en: 'Opening a Codex or other assistant session no longer fails while the default login is still unidentified.',
+      },
+      {
+        pt: 'Sessões abertas em segundo plano ficam na pasta escolhida, em vez de aparecerem soltas na lateral.',
+        en: 'Sessions opened in the background stay in the chosen folder instead of showing loose in the sidebar.',
+      },
+      {
+        pt: 'A passagem de líder conclui mesmo em conversas longas ou quando o líder anterior já foi encerrado.',
+        en: 'A leader hand-off completes even in long conversations or when the previous leader has already ended.',
+      },
+    ],
+  },
   '2.140.7': {
     features: [],
     fixes: [
