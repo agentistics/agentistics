@@ -41,7 +41,7 @@ import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefC
 import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
 import { handoffTitle } from './handoff-inherit'
 import { addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession } from './registry'
-import { callerHoldsIdentity } from './session-identity'
+import { callerHoldsIdentity, callerRunsInSession } from './session-identity'
 import { attachAfterSpawn, liveIdsOf, planSpawnFilingSafe } from './spawn-filing-io'
 import type { FilingPlan } from './spawn-filing'
 import { filingJson, filingRow, refusalText, spawnRole, WARNING_TEXT } from './spawn-row'
@@ -415,6 +415,7 @@ export function callerSessionId(env: Record<string, string | undefined> = proces
 export async function start(
   cmd: Extract<SessionCommand, { kind: 'start' }>,
   backend: SessionBackend,
+  deps: { provesCaller?: (id: string) => Promise<boolean> } = {},
 ): Promise<number> {
   // A relative --cwd must resolve against the CALLER's directory: passed through unresolved it
   // reaches `tmux new-session -c` and is interpreted by the tmux SERVER's own cwd instead, and it
@@ -425,7 +426,11 @@ export async function start(
   const parentSessionIdForPlan = callerSessionId()
   // `--handoff` is the API's `handoff: true`: only a VERIFIED calling session can have a successor, so
   // without one it is refused before anything starts (never quietly started as an ordinary session).
-  if (cmd.handoff && !(parentSessionIdForPlan && await callerHoldsIdentity(parentSessionIdForPlan))) {
+  // The proof is the PANE, not the environment: the pane pid agentop created for that session must be an
+  // ancestor of this process (`callerRunsInSession`), so an exported AGENTOP_MANAGED_ID proves nothing.
+  const provesCaller = deps.provesCaller
+    ?? ((cid: string) => callerRunsInSession(cid, async () => (backend as { listPanePids?: () => Promise<Map<string, number>> }).listPanePids?.()))
+  if (cmd.handoff && !(parentSessionIdForPlan && await provesCaller(parentSessionIdForPlan))) {
     console.error('--handoff needs a verified calling session (run it from inside the leader being replaced).')
     return 1
   }
@@ -542,7 +547,11 @@ export async function start(
     // Pin (same position), check-in agenda and, idempotently, the folder — never fails the spawn.
     await import('./handoff-inherit').then(async m => {
       const { updatePreferences } = await import('../preferences')
-      await m.inheritHandoffPrefs(handoffParentRow, { id, conversationId: planned.plan.conversationId }, updatePreferences)
+      // Re-read: the server may have linked a conversation (codex/kimi/antigravity) during the startup wait,
+      // and the pin/agenda must land under the CURRENT identity key, as the API path does.
+      const fresh = (await readRegistry().catch(() => [] as ManagedSession[])).find(r => r.id === id)
+      const parentNow = (await readRegistry().catch(() => [] as ManagedSession[])).find(r => r.id === handoffParentRow.id) ?? handoffParentRow
+      await m.inheritHandoffPrefs(parentNow, { id, conversationId: fresh?.conversationId ?? planned.plan.conversationId }, updatePreferences)
     }).catch(() => {})
   }
   // Muted at birth: keyed by the conversation we assigned, else by the managed id (re-keyed when the
@@ -1414,12 +1423,8 @@ async function kill(ref: string, backend: SessionBackend, folder?: string): Prom
     // `fileInFolder` is a MOVE and unpins. If this session handed off and the successor does not hold
     // its pin yet (the hand-off inheritance did not run, or the pin was added afterwards), give the
     // slot to the successor first so filing the predecessor never silently drops it.
-    const dying = registry.find(m => m.id === id)
-    if (dying?.handoffTo) {
-      const { updatePreferences } = await import('../preferences')
-      const successor = (await import('./handoff-relay-io')).successorRow(registry, dying.handoffTo)
-      await (await import('./handoff-inherit')).passPinToSuccessor(dying, successor, updatePreferences)
-    }
+    const { updatePreferences } = await import('../preferences')
+    await (await import('./handoff-relay-io')).passPinForKill(registry.find(m => m.id === id), registry, updatePreferences)
     const conv = registry.find(m => m.id === id)?.conversationId
     const moved = await fileInFolder(f.id, { id, conversationId: conv }).catch(() => false)
     console.log(moved ? `Moved ${id} to ${f.path}.` : `Could not move ${id} to ${f.path}.`)

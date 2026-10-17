@@ -21,6 +21,7 @@
  */
 
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
@@ -89,4 +90,38 @@ export async function verifySessionIdentity(id: unknown, token: unknown): Promis
   if (typeof id !== 'string' || typeof token !== 'string') return null
   const key = await loadKey(false).catch(() => null)
   return key && tokenProves(key, id, token) ? id : null
+}
+
+/** Pure: the ancestor chain (self first) of `startPid`, read from `/proc/<pid>/status` `PPid:`. Bounded; stops at pid 1. */
+export function ancestorChain(startPid: number, readStatus: (pid: number) => string | undefined): number[] {
+  const out: number[] = []
+  let pid = startPid
+  for (let depth = 0; depth < 32 && pid > 1 && !out.includes(pid); depth++) {
+    out.push(pid)
+    const next = Number(/^PPid:\s*(\d+)/m.exec(readStatus(pid) ?? '')?.[1])
+    if (!Number.isInteger(next)) break
+    pid = next
+  }
+  return out
+}
+
+const readProcStatus = (pid: number): string | undefined => {
+  try { return readFileSync(`/proc/${pid}/status`, 'utf8') } catch { return undefined }
+}
+
+/**
+ * The CLI's proof that it runs INSIDE session `id`: the environment claim (`callerHoldsIdentity`, which an
+ * outside process can forge by exporting the variable) AND the pane agentop itself created for `id` being an
+ * ANCESTOR of this process. The pane pid comes from the tmux server, so a forged env var in a process that
+ * was not started under that pane proves nothing. No pane pid (no tmux backend, no `/proc`): not proven.
+ */
+export async function callerRunsInSession(
+  id: string | undefined,
+  panePids: () => Promise<ReadonlyMap<string, number> | undefined>,
+  opts: { env?: Record<string, string | undefined>; pid?: number; readStatus?: (pid: number) => string | undefined } = {},
+): Promise<boolean> {
+  if (!id || !(await callerHoldsIdentity(id, opts.env))) return false
+  const pane = (await panePids().catch(() => undefined))?.get(id)
+  if (!pane) return false
+  return ancestorChain(opts.pid ?? process.pid, opts.readStatus ?? readProcStatus).includes(pane)
 }
