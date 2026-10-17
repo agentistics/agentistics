@@ -297,4 +297,29 @@ describe('tool result pairing', () => {
     ])
     expect(turns.flatMap(t => t.tools ?? []).every(t => t.failed === undefined)).toBe(true)
   })
+
+  // Shape recorded from a real Codex 0.161 rollout (paths and text anonymised).
+  const realOut = (code: number) => [
+    { type: 'input_text', text: 'Script completed\nWall time 0.2 seconds\nOutput:\n' },
+    { type: 'input_text', text: JSON.stringify({ status: 'fulfilled', value: { chunk_id: 'a1', wall_time_seconds: 0.01, exit_code: code, output: 'x' } }) },
+  ]
+  const realCall = (id: string, cmd: string) => line({
+    type: 'custom_tool_call', name: 'exec', call_id: id,
+    input: `text(await tools.exec_command({cmd:${JSON.stringify(cmd)},max_output_tokens:12000}));\n`,
+  })
+
+  it('detects failure in the real array output shape and shows the command, not the wrapper', () => {
+    const turns = parseCodexChat([
+      realCall('f', 'cat /tmp/missing.md'),
+      realCall('s', 'ls /tmp'),
+      line({ type: 'custom_tool_call_output', call_id: 'f', output: realOut(1) }),
+      line({ type: 'custom_tool_call_output', call_id: 's', output: realOut(0) }),
+    ])
+    const tools = turns.flatMap(t => t.tools ?? [])
+    expect(tools[0]).toMatchObject({ name: 'exec', failed: true })
+    expect(tools[0]!.detail).toContain('cat /tmp/missing.md')
+    expect(tools[0]!.detail).not.toContain('tools.exec_command')
+    expect(tools[1]!.failed).toBeUndefined()
+    expect(tools[1]!.detail).toContain('ls /tmp')
+  })
 })

@@ -114,11 +114,26 @@ export interface EdgeHint {
  * on both — a phone has no strip but still has a session that is running a command. One reading
  * of `live` and `ref`, so the two surfaces can never disagree about what "in flight" means.
  */
+/** A row whose process is over: nothing on it can be "in flight". */
+export function isEndedState(state?: string): boolean {
+  return state === 'ended' || state === 'exited' || state === 'lost' || state === 'closed'
+}
+
+/**
+ * The turns every `liveEvents` consumer (feed, Studio agent badge, subagent feed) should read:
+ * on an ended row a trailing `pending` turn is history, not a running step. Same helper and same
+ * states `currentAction` gates on. Returns the SAME array when nothing changes.
+ */
+export function settleTurns<T extends { pending?: boolean }>(turns: readonly T[], state?: string): readonly T[] {
+  if (!isEndedState(state) || !turns.some(t => t?.pending === true)) return turns
+  return turns.map(t => (t?.pending === true ? { ...t, pending: false } : t))
+}
+
 export function currentAction(
   events: readonly { kind: EdgeHint['kind']; text: string; live?: boolean; ref?: string }[],
   state?: string,
 ): EdgeHint | null {
-  if (state === 'ended' || state === 'exited' || state === 'lost' || state === 'closed') return null
+  if (isEndedState(state)) return null
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]!
     // The `ref` travels with it so the press can open that exact row. Omitted rather than

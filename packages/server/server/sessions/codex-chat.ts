@@ -200,13 +200,23 @@ export function toolDetailOf(rawArguments: unknown): string | null {
   return null
 }
 
+/** `exec` custom calls carry JS (`text(await tools.exec_command({cmd:"…"}))`): show the command, not the wrapper. */
+function execWrapperCommand(input: string): string | null {
+  const m = /\bcmd\s*:\s*("(?:[^"\\]|\\.)*")/.exec(input)
+  if (!m) return null
+  try {
+    const cmd: unknown = JSON.parse(m[1]!)
+    return typeof cmd === 'string' && cmd.trim() !== '' ? commandSummary(cmd) : null
+  } catch { return null }
+}
+
 type Tool = NonNullable<ChatTurn['tools']>[number]
 
 function toolOf(payload: Record<string, unknown>, harness: HarnessId): Tool | null {
   const name = typeof payload.name === 'string' ? payload.name : ''
   if (name === '') return null
   const detail = payload.type === 'custom_tool_call' && typeof payload.input === 'string'
-    ? (toolDetailOf(payload.input) ?? commandSummary(payload.input))
+    ? (toolDetailOf(payload.input) ?? execWrapperCommand(payload.input) ?? commandSummary(payload.input))
     : toolDetailOf(payload.arguments)
   const canonical = canonicalTool(harness, name)
   return {
@@ -356,6 +366,15 @@ export function parseCodexChat(
 
 /** Only structured failure fields or Codex's own shell-result header are evidence. */
 function codexOutputFailed(output: unknown): boolean {
+  // Real Codex 0.161 `custom_tool_call_output.output`: an ARRAY of `{type:'input_text', text}`; the
+  // first part is the "Script completed" header, a later one is JSON carrying `exit_code` (usually
+  // under `value`). Any part that says failed makes the call failed.
+  if (Array.isArray(output)) {
+    return output.some(part => {
+      const text = part !== null && typeof part === 'object' ? (part as Record<string, unknown>).text : part
+      return typeof text === 'string' && text.trim().startsWith('{') && codexOutputFailed(text)
+    })
+  }
   if (typeof output === 'string') {
     try { return codexOutputFailed(JSON.parse(output)) } catch { /* shell envelope */ }
     // Anchored to the metadata header, never arbitrary command stdout containing "error".
@@ -365,6 +384,7 @@ function codexOutputFailed(output: unknown): boolean {
   }
   if (!output || typeof output !== 'object') return false
   const o = output as Record<string, unknown>
+  if (o.value !== null && typeof o.value === 'object' && codexOutputFailed(o.value)) return true
   return o.is_error === true || o.status === 'error' || o.status === 'failed'
     || (typeof o.exit_code === 'number' && o.exit_code !== 0)
     || (o.metadata !== null && typeof o.metadata === 'object' && codexOutputFailed(o.metadata))

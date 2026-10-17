@@ -102,6 +102,7 @@ import { fullscreenModeFor, panelMinimizeAction } from '../lib/panelMenu'
 import {
   artifactsPanelMax, ASIDE_ANIM_MS, ASIDE_EASE, currentAction, edgeHint, PANEL_MIN_WIDTH, panelWidth,
   resolveArtifactLayout, type ArtifactLayout,
+  settleTurns,
 } from '../lib/artifactLayout'
 import {
   openArtifacts, setArtifactCount, setArtifactLive, useArtifactLive, usePanelFocusRequest,
@@ -838,6 +839,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const [artifactsOlder, setArtifactsOlder] = useState<string | undefined>(undefined)
   /** The conversation's turns, for the LIVE tab — the same ones the chat renders. */
   const [artifactTurns, setArtifactTurns] = useState<readonly LiveTurn[]>([])
+  // Ended rows have no step in flight: every liveEvents consumer reads the settled turns.
+  const shownArtifactTurns = useMemo(() => settleTurns(artifactTurns, selected?.state), [artifactTurns, selected?.state])
   /**
    * The session wrote through commands whose paths cannot be read AT ALL, so those files are in no
    * count anywhere.
@@ -1426,7 +1429,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       // claim. `outsideNote` is the server's sentence, passed through untouched.
       unlistedWrites={artifactsUnlisted}
       {...(outsideNote ? { outsideNote } : {})}
-      turns={artifactTurns}
+      turns={shownArtifactTurns}
       // A REQUEST for a DIFFERENT tab than `id` is not this mount's concern — see
       // `artifactsStore.ts`'s own `PanelFocusRequest` header.
       focusRequest={panelFocus && panelFocus.tab === id
@@ -3544,7 +3547,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         sessionId: selected.id,
         lang: pt ? 'pt' : 'en',
         autosave: editorAutosave === true,
-        turns: artifactTurns,
+        turns: shownArtifactTurns,
         // `Studio.tsx`'s own bar is a bare close control now (W1-A): `onExit` closes the panel
         // outright, the closest reading of "leave" the slots model has — displacing it never asks,
         // closing it does.

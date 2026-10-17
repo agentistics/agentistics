@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  artifactsPanelMax, ASIDE_DRAG_CENTRE_MIN, currentAction, edgeHint, PANEL_MIN_WIDTH, resolveArtifactLayout,
+  artifactsPanelMax, ASIDE_DRAG_CENTRE_MIN, currentAction, edgeHint, settleTurns, PANEL_MIN_WIDTH, resolveArtifactLayout,
 } from './artifactLayout'
 
 const at = (o: Partial<Parameters<typeof resolveArtifactLayout>[0]>) =>
@@ -138,5 +138,17 @@ describe('ended sessions have no running strip, regardless of chatActivity', () 
   it('keeps the strip for a live session and clears it on exit without a new transcript', () => {
     expect(edgeHint({ open: false, isMobile: false, events, state: 'working' })).toMatchObject({ text: 'unfinished command' })
     expect(edgeHint({ open: false, isMobile: false, events, state: 'exited' })).toBeNull()
+  })
+})
+
+describe('settleTurns', () => {
+  const turns = [{ pending: true, text: 'a' }, { text: 'b' }]
+  it('keeps live rows untouched (same array)', () => {
+    expect(settleTurns(turns, 'working')).toBe(turns)
+  })
+  it('clears pending on every ended-like state, so liveEvents shows nothing in flight', () => {
+    for (const st of ['ended', 'exited', 'lost', 'closed']) {
+      expect(settleTurns(turns, st).some(t => t.pending === true)).toBe(false)
+    }
   })
 })
