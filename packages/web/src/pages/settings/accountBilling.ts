@@ -6,11 +6,11 @@
  * the SCREEN says about an account's plan and when to ask "which plan is this?".
  */
 import {
-  findPlan, plansForHarness, sortPeriods, validatePeriod,
+  dayFromIndex, dayIndex, findPlan, plansForHarness, sortPeriods, validatePeriod,
   type BillingPeriod, type BillingSettings, type HarnessId,
 } from '@agentistics/core'
 import { applyPlan, emptyDraft, periodFromDraft, periodName, splitTimeline, validateDraft } from './billingForm'
-import { isUnidentified, type AccountRowData } from './accountsSummary'
+import { isPlaceholderName, isUnidentified, type AccountRowData } from './accountsSummary'
 import type { PatchBody, PatchResult } from './accountMutations'
 
 export interface BillingAccount extends AccountRowData { firstSeen?: number }
@@ -44,19 +44,15 @@ export function planSummary(
 
 /**
  * Accounts that raise the "which plan is this?" notice: no timeline of their own and nothing the
- * harness default can price for them (the default is counted ONCE — for the oldest account). A
- * first account with no default is the PRIMARY case: it is asked which plan it is.
+ * harness default can price for them (the default is counted ONCE — for the first account without a
+ * timeline of its own, as core's `selectedTimelines` does). A first account with no default is the
+ * PRIMARY case: it is asked which plan it is.
  */
 export function accountsNeedingPlan<A extends BillingAccount>(accounts: readonly A[], billing: BillingSettings, harnesses: readonly HarnessId[]): A[] {
   const out: A[] = []
   for (const h of harnesses) {
     const mine = billableAccounts(accounts, h)
-    const hasDefault = (billing.profiles[h]?.periods.length ?? 0) > 0
-    mine.forEach((a, i) => {
-      if (ownPeriods(billing, a.id).length > 0) return
-      if (i === 0 && hasDefault) return
-      out.push(a)
-    })
+    for (const a of mine) if (rowScope(billing, mine, a).kind === 'none') out.push(a)
   }
   return out
 }
@@ -162,4 +158,89 @@ export function saveErrorPlace(
   if (!err) return null
   if (err.id !== null && notices[err.id] !== 'failed') return null
   return drawerOpen ? 'drawer' : 'page'
+}
+
+/**
+ * Which timeline an account's row prices on — and therefore edits. The same rule core's
+ * `selectedTimelines` applies: an account's own timeline, else the harness default for the FIRST
+ * account (in list order) that has none, else nothing. A row never shows a plan it is not paying.
+ */
+export type RowScope = { kind: 'own'; id: string } | { kind: 'default'; harness: HarnessId } | { kind: 'none'; id: string }
+
+export function rowScope(billing: BillingSettings, mine: readonly Pick<BillingAccount, 'id' | 'harness'>[], a: Pick<BillingAccount, 'id' | 'harness'>): RowScope {
+  if (ownPeriods(billing, a.id).length > 0) return { kind: 'own', id: a.id }
+  const hasDefault = (billing.profiles[a.harness]?.periods.length ?? 0) > 0
+  const firstWithout = mine.find(x => ownPeriods(billing, x.id).length === 0)
+  return hasDefault && firstWithout?.id === a.id ? { kind: 'default', harness: a.harness } : { kind: 'none', id: a.id }
+}
+
+export function scopePeriods(billing: BillingSettings, s: RowScope): BillingPeriod[] {
+  return s.kind === 'default' ? billing.profiles[s.harness]?.periods ?? [] : ownPeriods(billing, s.id)
+}
+
+/** Writes a scope's periods back: an account's own timeline, or the harness default. */
+export function withScopePeriods(billing: BillingSettings, s: RowScope, periods: BillingPeriod[]): BillingSettings {
+  if (s.kind !== 'default') return withAccountPeriods(billing, s.id, periods)
+  const profiles = { ...billing.profiles }
+  if (periods.length > 0) profiles[s.harness] = { periods }
+  else delete profiles[s.harness]
+  return { ...billing, profiles }
+}
+
+/**
+ * One row of Settings → Billing: an identified account, or — for an assistant with no identified
+ * account at all — the assistant's own timeline. The registry's reserve row (`id: ''`) never becomes
+ * a row of its own: with an identified account beside it, it is the same login said twice.
+ */
+export interface BillingRow {
+  key: string
+  harness: HarnessId
+  /** `null` = the assistant's own timeline (it cannot say which account is signed in). */
+  account: BillingAccount | null
+  /** Nickname, else the login, else the assistant's name (numbered when it has several). */
+  title: string
+  /** What the title does not already say: the assistant, plus the login beside a nickname. */
+  sub: string
+  scope: RowScope
+}
+
+export function billingRows(
+  accounts: readonly BillingAccount[], billing: BillingSettings, harnesses: readonly HarnessId[],
+  harnessLabel: (h: HarnessId) => string, pt: boolean,
+): BillingRow[] {
+  const out: BillingRow[] = []
+  const unknownWho = pt ? 'o assistente não informa qual conta é' : 'the assistant does not say which account'
+  for (const h of harnesses) {
+    const label = harnessLabel(h)
+    const mine = billableAccounts(accounts, h)
+    if (mine.length === 0) {
+      out.push({ key: `harness:${h}`, harness: h, account: null, title: label, sub: unknownWho, scope: { kind: 'default', harness: h } })
+      continue
+    }
+    const unnamed = mine.filter(a => !(a.nickname && !isPlaceholderName(a.nickname)) && isPlaceholderName(a.label))
+    for (const a of mine) {
+      const nick = a.nickname && !isPlaceholderName(a.nickname) ? a.nickname : null
+      const login = isPlaceholderName(a.label) ? null : a.label
+      const n = unnamed.indexOf(a)
+      const title = nick ?? login ?? (unnamed.length > 1 ? `${label} #${n + 1}` : label)
+      const sub = nick ? (login ? `${label} · ${login}` : label) : login ? label : unknownWho
+      out.push({ key: a.id, harness: h, account: a, title, sub, scope: rowScope(billing, mine, a) })
+    }
+  }
+  return out
+}
+
+/**
+ * The seam of a plan change: the period `id` ends the day before `from`. Applied BEFORE the new
+ * period is validated, or the plan still in force overlaps its own successor and the change can
+ * never be saved. A seam that would end the old period before it began is left alone — the new
+ * period then overlaps it and the editor says so.
+ */
+export function closeBefore(periods: readonly BillingPeriod[], id: string, from: string): BillingPeriod[] {
+  const day = dayIndex(from)
+  return periods.map(p => {
+    if (p.id !== id || p.to || day === null) return p
+    const to = dayFromIndex(day - 1)
+    return to < p.from ? p : { ...p, to }
+  })
 }

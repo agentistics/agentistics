@@ -39,9 +39,9 @@ const NOW = Date.now()
 const H = 3600_000
 const TODAY = new Date(NOW).toISOString().slice(0, 10)
 const ALL_ACCOUNTS: BillingAccount[] = [
-  { id: 'acc_c1', harness: 'claude', key: 'c1', label: 'zlucason1@gmail.com', root: null, available: true, firstSeen: 1 },
-  { id: 'acc_c2', harness: 'claude', key: 'c2', label: 'lucas@empresa.com.br', nickname: 'Trabalho', root: '/home/u/.claude-work', available: false, firstSeen: 2 },
-  { id: 'acc_x1', harness: 'codex', key: 'x1', label: 'zlucas@outlook.com', root: null, available: true, firstSeen: 3 },
+  { id: 'acc_c1', harness: 'claude', key: 'c1', label: 'zlucason1@gmail.com', root: null, available: true, firstSeen: Date.parse('2026-08-01T12:00:00Z') },
+  { id: 'acc_c2', harness: 'claude', key: 'c2', label: 'lucas@empresa.com.br', nickname: 'Trabalho', root: '/home/u/.claude-work', available: false, firstSeen: Date.parse('2026-08-20T12:00:00Z') },
+  { id: 'acc_x1', harness: 'codex', key: 'x1', label: 'zlucas@outlook.com', root: null, available: true, firstSeen: Date.parse('2026-09-15T12:00:00Z') },
 ]
 const ACCOUNTS = n === 1 ? ALL_ACCOUNTS.slice(0, 1) : ALL_ACCOUNTS
 const win = (kind: '5h' | 'week', usedPct: number, inH: number) => ({ kind, usedPct, resetsAt: NOW + inH * H })
@@ -363,7 +363,11 @@ function stubFetch() {
   const json = (b: unknown) => Promise.resolve(new Response(JSON.stringify(b), { status: 200, headers: { 'Content-Type': 'application/json' } }))
   window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     const u = String(input instanceof Request ? input.url : input)
-    if (u.includes('/api/accounts')) return json({ accounts: ACCOUNTS.map(a => ({ ...a, lastSeen: NOW, firstSeen: a.firstSeen })) })
+    if (u.includes('/api/accounts')) return json({ accounts: [
+      ...ACCOUNTS.map(a => ({ ...a, lastSeen: NOW, firstSeen: a.firstSeen })),
+      // The registry's reserve row for codex: the same login said twice. The page must not draw it.
+      ...(n === 3 ? [{ id: '', harness: 'codex', key: 'default', label: 'Conta padrão', root: null, available: true }] : []),
+    ] })
     if (u.includes('/api/plan-limits')) return json({ limits: LIMITS, registered: [] })
     if (u.includes('/api/billing/plan-prices')) return json({ prices: [] })
     if (u.includes('/api/billing/detect')) return json({ detections: [] })
@@ -372,7 +376,14 @@ function stubFetch() {
   }) as typeof fetch
 }
 function Before() {
-  const ctx = { lang, data: { harnesses: HARNESSES }, billing: BILLING, saveBilling: async () => {} }
+  const [billing, setBilling] = useState(BILLING)
+  const ctx = {
+    lang, data: { harnesses: HARNESSES }, billing,
+    // Records what the page writes, for the flow check in flow.ts.
+    saveBilling: async (next: BillingShape | ((cur: BillingShape) => BillingShape)) => {
+      setBilling(cur => { const v = typeof next === 'function' ? next(cur) : next; (window as unknown as { __saved: unknown }).__saved = v; return v })
+    },
+  }
   return (
     <MemoryRouter>
       <Routes>
@@ -384,9 +395,9 @@ function Before() {
   )
 }
 
-if (view === 'before') stubFetch()
+if (view === 'before' || view === 'final') stubFetch()
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <div style={{ padding: 'clamp(16px, 3vw, 32px)', minHeight: '100vh', boxSizing: 'border-box' }}>
-    {view === 'before' ? <Before /> : <Options />}
+    {view === 'before' || view === 'final' ? <Before /> : <Options />}
   </div>,
 )

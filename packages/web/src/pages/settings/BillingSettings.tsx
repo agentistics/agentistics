@@ -1,36 +1,37 @@
+/**
+ * Settings → Billing: ONE list of accounts (who, plan, usage, agents) and ONE editor.
+ *
+ * Every account — or, for an assistant that cannot say who is signed in, the assistant itself — is
+ * one row, and that row's button opens the only editor on the page: nickname, plan, price, dates and
+ * the earlier plans. Each meter, login and plan name is drawn once. The row edits the timeline it
+ * actually prices on (its own, or the assistant default it inherits — `rowScope`), so what the row
+ * says and what the editor changes can never be two different plans.
+ */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { Plus, Pencil, Trash2, Sparkles, AlertTriangle, Info, ArrowRightLeft, ChevronDown } from 'lucide-react'
+import { Pencil, Trash2, AlertTriangle, Sparkles } from 'lucide-react'
 import {
-  billingReadiness,
   findPlan,
   plansForHarness,
   sortPeriods,
-  dayFromIndex,
-  dayIndex,
   validateTimeline,
   type BillingDetection,
   type BillingPeriod,
   type BillingCurrency,
   type BillingSettings as BillingSettingsShape,
-  type BillingTimeline,
   type HarnessId,
+  type PlanCatalogEntry,
+  // @harness-adapters-only: plans are a subscription to a vendor's CLI, a per-adapter fact
+  HARNESS_ORDER,
   isAdapterHarness,
 } from '@agentistics/core'
 import type { AppContext } from '../../lib/app-context'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { Drawer } from '../../components/Drawer'
-import {
-  Checkbox,
-  ConfirmModal,
-  FieldInput,
-
-
-  SectionHeader,
-  Select,
-  TabSelect,
-} from './primitives'
+import { DatePicker } from '../../components/DatePicker'
+import { HarnessMark } from '../../components/sessions/HarnessMark'
+import { Checkbox, ConfirmModal, FieldInput, SectionHeader, Select, TabSelect, dialogButtonStyle } from './primitives'
 import {
   applyPlan,
   splitTimeline,
@@ -47,11 +48,12 @@ import {
   validateDraft,
   type PeriodDraft,
 } from './billingForm'
-import AccountsSection from './AccountsSection'
 import { billingNotices, useNoticeSaveState } from '../../lib/billingNotices'
-import { BillingAccountsView, FirstDetectionNotice } from './AccountRow'
-import { accountsNeedingPlan, answerNotice, billableAccounts, noticeAccounts, ownPeriods, saveErrorPlace, saveThenClose, type SaveError, toggleAvailability, unknownPeriod, withAccountPeriods, type BillingAccount } from './accountBilling'
-import { accountTitle } from './accountsSummary'
+import { BillingAccountList, type BillingRowView } from './AccountRow'
+import {
+  accountsNeedingPlan, billingRows, closeBefore, matchDetectedPlan, saveErrorPlace, saveThenClose, scopePeriods, toggleAvailability,
+  unknownPeriod, withScopePeriods, type BillingAccount, type SaveError,
+} from './accountBilling'
 import { createAccountMutator } from './accountMutations'
 import { usePlanLimits } from '../../lib/planLimits'
 
@@ -67,33 +69,24 @@ interface ScrapedPlanPrice {
 const newPeriodId = (): string =>
   `bp_${Math.random().toString(16).slice(2, 8)}${Date.now().toString(16).slice(-6)}`
 
-/** `yyyy-MM-dd` for the native date input's max — nobody is billed for the future. */
+/** `yyyy-MM-dd` for the date picker's max — nobody is billed for the future. */
 const today = (): string => new Date().toISOString().slice(0, 10)
+const dayOf = (ms: number | undefined): string => (ms && Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : today())
+
+const priceText = (p: BillingPeriod, pt: boolean): string | null =>
+  p.price ? `${currencySymbol(p.price.currency)} ${formatAmountDisplay(String(p.price.amount), p.price.currency)}${pt ? '/mês' : '/mo'}` : null
 
 export default function BillingSettings() {
   const ctx = useOutletContext<AppContext>()
   const pt = ctx.lang === 'pt'
   const isMobile = useIsMobile()
 
-  const harnesses: HarnessId[] = useMemo(() => {
-    // Plans are an ADAPTER fact (a subscription to a vendor's CLI): the native harness has none.
-    const present = (ctx.data.harnesses ?? []).filter(isAdapterHarness)
-    return present.length > 0 ? present : ['claude']
-  }, [ctx.data.harnesses])
-
-  const [harness, setHarness] = useState<HarnessId>(harnesses[0] ?? 'claude')
-  useEffect(() => {
-    if (!harnesses.includes(harness)) setHarness(harnesses[0] ?? 'claude')
-  }, [harnesses, harness])
-
-  // Accounts: the editor below targets ONE timeline — an account's own, or the assistant's default.
   const { limits: planLimits, now: limitsNow } = usePlanLimits()
   const [accounts, setAccounts] = useState<BillingAccount[]>([])
-  // The list arrived (a failed fetch never counts): only then may stale `failed` notices be pruned.
+  // The list arrived (a failed fetch never counts): only then may stale `failed` answers be pruned.
   const [accountsLoaded, setAccountsLoaded] = useState(false)
   const [pendingIds, setPending] = useState<Set<string>>(new Set())
   const [failedIds, setFailed] = useState<Set<string>>(new Set())
-  const [target, setTarget] = useState<string | null>(null)
   const mutator = useRef(createAccountMutator<BillingAccount>((id, body) =>
     fetch(`/api/accounts/${encodeURIComponent(id)}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -107,29 +100,35 @@ export default function BillingSettings() {
         setAccounts(b?.accounts ?? [])
         if (b) setAccountsLoaded(true)
       })
-      .catch(() => { /* the default timeline still works without the list */ })
+      .catch(() => { /* the assistants' own timelines still work without the list */ })
     return () => { cancelled = true }
   }, [])
-  const harnessAccounts = useMemo(() => billableAccounts(accounts, harness), [accounts, harness])
-  const targetAccount = target ? harnessAccounts.find(a => a.id === target) ?? null : null
-  useEffect(() => { if (target && !targetAccount) setTarget(null) }, [target, targetAccount])
-  const allBillable = useMemo(() => harnesses.flatMap(h => billableAccounts(accounts, h)), [accounts, harnesses])
-  const needPlan = useMemo(
-    () => accountsNeedingPlan(accounts, ctx.billing, harnesses),
-    [accounts, ctx.billing, harnesses],
-  )
-  // A notice stays until its answer is STORED: `saving` while the write is in flight, `failed` after a
-  // refusal (the app has already put the settings back, so the account still needs a plan).
+
+  // Plans are an ADAPTER fact (a subscription to a vendor's CLI): the native harness has none. An
+  // assistant is listed when it has sessions here or a signed-in account.
+  const harnesses: HarnessId[] = useMemo(() => {
+    const present = new Set<HarnessId>([...(ctx.data.harnesses ?? []).filter(isAdapterHarness), ...accounts.map(a => a.harness)])
+    if (present.size === 0) present.add('claude')
+    return HARNESS_ORDER.filter(h => present.has(h)) // @harness-adapters-only: plans are a per-adapter fact
+  }, [ctx.data.harnesses, accounts])
+
+  const needPlan = useMemo(() => accountsNeedingPlan(accounts, ctx.billing, harnesses), [accounts, ctx.billing, harnesses])
   const noticeState = useNoticeSaveState()
-  const notices = useMemo(
-    () => noticeAccounts(needPlan, allBillable, new Set(Object.keys(noticeState))),
-    [needPlan, allBillable, noticeState],
-  )
   useEffect(() => {
     if (accountsLoaded) billingNotices.prune(new Set(needPlan.map(a => a.id)))
   }, [accountsLoaded, needPlan])
-  const [openHarness, setOpenHarness] = useState<HarnessId | null>(harness)
-  useEffect(() => { setOpenHarness(harness) }, [harness])
+
+  const rows: BillingRowView[] = useMemo(() => billingRows(accounts, ctx.billing, harnesses, h => HARNESS_LABELS[h] ?? h, pt).map(r => {
+    const periods = scopePeriods(ctx.billing, r.scope)
+    const cur = splitTimeline(sortPeriods(periods), today()).current
+    return {
+      ...r,
+      plan: cur ? { name: periodName(cur) || modeLabel(cur.mode, pt ? 'pt' : 'en'), price: priceText(cur, pt) } : null,
+      problem: validateTimeline({ periods }).size > 0,
+      limits: r.account ? planLimits?.find(l => l.account === r.account!.id) ?? null : null,
+    }
+  }), [accounts, ctx.billing, harnesses, pt, planLimits])
+
   const toggleAccount = async (a: BillingAccount) => {
     if (mutator.has(a.id)) return
     setPending(h => new Set(h).add(a.id))
@@ -140,478 +139,245 @@ export default function BillingSettings() {
       setFailed(h => { const n = new Set(h); n.delete(a.id); return n })
     } else if (res.status === 'failed') setFailed(h => new Set(h).add(a.id))
   }
-  /** Every account-plan write goes through here: the notice keeps its state until the write is stored. */
-  const saveTracked = async (id: string, change: (cur: BillingSettingsShape) => BillingSettingsShape): Promise<boolean> => {
-    billingNotices.mark(id, 'saving')
-    try {
-      await ctx.saveBilling(change)
-      billingNotices.clear(id)
-      return true
-    } catch {
-      billingNotices.mark(id, 'failed')
-      return false
-    }
-  }
-  const saveNotice = async (a: BillingAccount, change: (cur: BillingSettingsShape) => BillingSettingsShape) => {
-    await saveTracked(a.id, change)
-  }
-  const answer = async (a: BillingAccount, planId: string) => {
-    if (!answerNotice(ctx.billing, a, planId, today(), newPeriodId)) {
-      setHarness(a.harness); setTarget(a.id); openDraft({ ...emptyDraft(), planId, from: today(), ongoing: true })
-      return
-    }
-    // Built against the CURRENT settings at write time, so two answers merge instead of overwriting.
-    await saveNotice(a, cur => answerNotice(cur, a, planId, today(), newPeriodId) ?? cur)
-  }
-  const dismiss = (a: BillingAccount) =>
-    saveNotice(a, cur => withAccountPeriods(cur, a.id, [unknownPeriod(today(), newPeriodId)]))
-  /** "Edit plan": the existing period drawer, on this account's own timeline. */
-  const editAccountPlan = (a: BillingAccount) => {
-    setHarness(a.harness)
-    setTarget(a.id)
-    const cur = splitTimeline(sortPeriods(ownPeriods(ctx.billing, a.id)), today()).current
-    openDraft(cur ? draftFromPeriod(cur) : emptyDraft())
-  }
 
-  const timeline: BillingTimeline = target
-    ? { periods: ownPeriods(ctx.billing, target) }
-    : ctx.billing.profiles[harness] ?? { periods: [] }
-  const periods = useMemo(() => sortPeriods(timeline.periods), [timeline.periods])
-  const timelineErrors = useMemo(() => validateTimeline(timeline), [timeline])
+  // ── the one editor ──────────────────────────────────────────────────────────────────────────
+  const [editKey, setEditKey] = useState<string | null>(null)
+  const row = editKey ? rows.find(r => r.key === editKey) ?? null : null
+  const periods = useMemo(() => (row ? sortPeriods(scopePeriods(ctx.billing, row.scope)) : []), [row, ctx.billing])
+  const { current, history } = useMemo(() => splitTimeline(periods, today()), [periods])
+  const timelineErrors = useMemo(() => validateTimeline({ periods }), [periods])
 
   const [draft, setDraft] = useState<PeriodDraft | null>(null)
-  // What the drawer opened WITH, so "unsaved changes" means changes — not merely "a drawer is
-  // open". A confirm on every close is one people learn to dismiss without reading, which is
-  // exactly when it stops protecting the edit it exists for.
-  const [draftOrigin, setDraftOrigin] = useState<string>('')
-  const openDraft = useCallback((next: PeriodDraft) => {
-    setDraft(next)
-    setDraftOrigin(JSON.stringify(next))
-    // Each drawer starts clean: an error revealed on the last attempt must not greet the next one.
-    setShowErrors(false)
-  }, [])
-  const draftDirty = draft !== null && JSON.stringify(draft) !== draftOrigin
-  const [confirmDelete, setConfirmDelete] = useState<BillingPeriod | null>(null)
-  const [detections, setDetections] = useState<BillingDetection[] | null>(null)
+  // What the drawer opened WITH, so "unsaved changes" means changes — not merely "a drawer is open".
+  const [origin, setOrigin] = useState('')
+  const [nick, setNick] = useState('')
+  const [showErrors, setShowErrors] = useState(false)
   const [saveError, setSaveError] = useState<SaveError | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<BillingPeriod | null>(null)
+  const [detections, setDetections] = useState<BillingDetection[]>([])
   const [planPrices, setPlanPrices] = useState<ScrapedPlanPrice[]>([])
+  /**
+   * "I changed plan", folded into the plan picker: choosing ANOTHER plan while the one in force is
+   * open starts a new period today and, on save, closes the old one the day before — the seam is
+   * exact by construction, so a plan change can leave neither a gap nor an overlap.
+   */
+  const [changingFrom, setChangingFrom] = useState<BillingPeriod | null>(null)
+  const [seededFrom, setSeededFrom] = useState<string | null>(null)
 
-  // Live vendor prices. Best-effort by construction: the endpoint is anchored, so it returns
-  // nothing rather than a wrong figure, and nothing simply means the built-in catalog stands.
+  // Live vendor prices: best-effort; nothing simply means the built-in catalog stands.
   useEffect(() => {
     let cancelled = false
     fetch('/api/billing/plan-prices')
       .then(r => (r.ok ? r.json() : null))
-      .then((body: { prices?: ScrapedPlanPrice[] } | null) => {
-        if (!cancelled) setPlanPrices(body?.prices ?? [])
-      })
-      .catch(() => { /* the catalog is the floor; a failed fetch changes nothing */ })
+      .then((body: { prices?: ScrapedPlanPrice[] } | null) => { if (!cancelled) setPlanPrices(body?.prices ?? []) })
+      .catch(() => { /* the catalog is the floor */ })
     return () => { cancelled = true }
   }, [])
-
-  // Detection is a convenience, fetched once. A failure is silent: the screen is fully usable by
-  // hand, and an error banner for a feature the user did not ask for is noise.
+  // Detection only pre-selects a plan in the editor. A failure is silent: everything works by hand.
   useEffect(() => {
     let cancelled = false
     fetch('/api/billing/detect')
       .then(r => (r.ok ? r.json() : null))
-      .then((body: { detections?: BillingDetection[] } | null) => {
-        if (!cancelled) setDetections(body?.detections ?? [])
-      })
-      .catch(() => { if (!cancelled) setDetections([]) })
+      .then((body: { detections?: BillingDetection[] } | null) => { if (!cancelled) setDetections(body?.detections ?? []) })
+      .catch(() => { /* by hand */ })
     return () => { cancelled = true }
   }, [])
 
-  const persist = useCallback(async (nextPeriods: BillingPeriod[]): Promise<boolean> => {
-    const change = (cur: BillingSettingsShape): BillingSettingsShape => {
-      if (target) return withAccountPeriods(cur, target, nextPeriods)
-      const profiles = { ...cur.profiles }
-      if (nextPeriods.length > 0) profiles[harness] = { periods: nextPeriods }
-      else delete profiles[harness]
-      return { ...cur, profiles }
-    }
-    setSaveError(null)
-    const tracked = target !== null && needPlan.some(a => a.id === target)
-    const ok = tracked ? await saveTracked(target, change) : await ctx.saveBilling(change).then(() => true, () => false)
-    if (!ok) setSaveError({ msg: pt ? 'Não foi possível salvar. Tente de novo.' : 'Could not save. Try again.', id: tracked ? target : null })
-    return ok
-  }, [ctx, harness, pt, target, needPlan])
+  const livePrice = useCallback((planId: string) => planPrices.find(p => p.planId === planId) ?? null, [planPrices])
+  /** A catalog entry with today's vendor price in place of the compiled-in one, when one was read. */
+  const withLive = useCallback((entry: PlanCatalogEntry): PlanCatalogEntry => {
+    const live = livePrice(entry.id)
+    return live ? { ...entry, monthly: { amount: live.amount, currency: live.currency, verifiedAt: today(), source: live.source } } : entry
+  }, [livePrice])
 
-  const draftErrors = useMemo(
-    () => (draft ? validateDraft(draft, periods, newPeriodId) : []),
-    [draft, periods],
-  )
-  // A blank form is not a form full of mistakes. Errors stay hidden until the user asks to save —
-  // greeting someone with three red lines before they have typed anything reads as "this is
-  // broken", not as "here is what I need".
-  const [showErrors, setShowErrors] = useState(false)
+  const openDraft = (next: PeriodDraft, nickname: string) => {
+    setDraft(next)
+    setNick(nickname)
+    setOrigin(JSON.stringify([next, nickname]))
+    setShowErrors(false)
+    setSaveError(null)
+    setChangingFrom(null)
+  }
+  const openRow = (r: BillingRowView) => {
+    const own = sortPeriods(scopePeriods(ctx.billing, r.scope))
+    const cur = splitTimeline(own, today()).current
+    setEditKey(r.key)
+    setSeededFrom(null)
+    if (cur) { openDraft(draftFromPeriod(cur), r.account?.nickname ?? ''); return }
+    // Nothing in force: pre-select what the assistant reported, else what detection found.
+    const detection = detections.find(d => d.harness === r.harness && d.source !== 'none' && d.mode !== 'unknown')
+    const planId = (r.account ? matchDetectedPlan(r.harness, r.account.plan) : '') || detection?.planId || ''
+    const entry = planId ? findPlan(planId) : undefined
+    const start = { ...emptyDraft(), from: r.account ? dayOf(r.account.firstSeen) : today(), ongoing: true }
+    openDraft(entry ? applyPlan(start, withLive(entry)) : start, r.account?.nickname ?? '')
+    if (entry && !r.account?.plan && detection) setSeededFrom(pt ? detection.evidencePt : detection.evidenceEn)
+  }
+  const close = () => { setEditKey(null); setDraft(null); setChangingFrom(null) }
+  const dirty = draft !== null && JSON.stringify([draft, nick]) !== origin
+
+  const pickPlan = (planId: string) => {
+    const entry = findPlan(planId)
+    if (!entry || !draft) return
+    if (current && draft.id === current.id && planId !== current.planId) {
+      setChangingFrom(current)
+      setDraft(applyPlan({ ...emptyDraft(), from: today(), ongoing: true }, withLive(entry)))
+      return
+    }
+    if (changingFrom && planId === changingFrom.planId) {
+      setChangingFrom(null)
+      setDraft(draftFromPeriod(changingFrom))
+      return
+    }
+    // A price the previous pick filled in is not one the user typed: the new pick replaces it.
+    const prev = draft.planId ? findPlan(draft.planId) : undefined
+    const prevAmount = prev ? (livePrice(prev.id)?.amount ?? prev.monthly?.amount) : undefined
+    const base = prevAmount !== undefined && draft.amount === String(prevAmount) ? { ...draft, amount: '' } : draft
+    setDraft(applyPlan(base, withLive(entry)))
+  }
+
+  /** The timeline the draft joins: with a plan change, the plan in force already closed at the seam. */
+  const others = useMemo(() => (changingFrom && draft ? closeBefore(periods, changingFrom.id, draft.from) : periods), [periods, changingFrom, draft])
+  const draftErrors = useMemo(() => (draft ? validateDraft(draft, others, newPeriodId) : []), [draft, others])
   const errorFor = (codes: string[]): string | null => {
     if (!showErrors) return null
     const hit = draftErrors.find(e => codes.includes(e.code))
     if (!hit) return null
-    const other = hit.code === 'overlap'
-      ? periods.find(p => p.id === (hit as { withId: string }).withId)
-      : undefined
+    const other = hit.code === 'overlap' ? others.find(p => p.id === (hit as { withId: string }).withId) : undefined
     return describeError(hit, pt ? 'pt' : 'en', other ? periodName(other) : undefined)
   }
 
+  /** Every plan write: the row's own scope, tracked while its account still needs a plan. */
+  const writePeriods = useCallback(async (next: BillingPeriod[]): Promise<boolean> => {
+    if (!row) return false
+    const scope = row.scope
+    const change = (cur: BillingSettingsShape): BillingSettingsShape => withScopePeriods(cur, scope, next)
+    setSaveError(null)
+    const tracked = row.account !== null && needPlan.some(a => a.id === row.account!.id) ? row.account.id : null
+    let ok: boolean
+    if (tracked) {
+      billingNotices.mark(tracked, 'saving')
+      ok = await ctx.saveBilling(change).then(() => true, () => false)
+      if (ok) billingNotices.clear(tracked); else billingNotices.mark(tracked, 'failed')
+    } else ok = await ctx.saveBilling(change).then(() => true, () => false)
+    if (!ok) setSaveError({ msg: pt ? 'Não foi possível salvar. Tente de novo.' : 'Could not save. Try again.', id: tracked })
+    return ok
+  }, [row, needPlan, ctx, pt])
 
-  /** This harness's proposal. `source: 'none'` means nothing was detected, which the empty state
-   *  says out loud rather than leaving a silent gap. */
-  const detection = detections?.find(d => d.harness === harness)
-  /**
-   * The proposal that can actually SEED a period, which is not the same as the proposal that has
-   * something to say. Codex's free tier is detected exactly — `source: 'codex_id_token'`,
-   * `confidence: 'exact'` — and its whole content is "there is nothing to register". Offering
-   * "use what we detected" there would open a form prefilled with nothing under a claim that it
-   * was. The sentence is still shown; only the button is withheld.
-   */
-  const seedable = detection && detection.source !== 'none' && detection.mode !== 'unknown'
-    ? detection
-    : null
-
-  const { current, history } = useMemo(() => splitTimeline(periods, today()), [periods])
-  const [showHistory, setShowHistory] = useState(false)
-
-  const openNew = () => openDraft(emptyDraft())
-  const openFromDetection = () => {
-    if (!detection) return
-    let next = emptyDraft()
-    const entry = detection.planId ? findPlan(detection.planId) : undefined
-    if (entry) next = applyPlan(next, entry)
-    openDraft(next)
+  const saveNickname = async (): Promise<boolean> => {
+    const a = row?.account
+    if (!a || nick.trim() === (a.nickname ?? '')) return true
+    const res = await mutator.patch(a.id, { nickname: nick.trim() })
+    if (res.status !== 'ok') {
+      setSaveError({ msg: pt ? 'Não foi possível salvar o apelido. Tente de novo.' : 'Could not save the nickname. Try again.', id: null })
+      return false
+    }
+    setAccounts(h => h.map(x => x.id === a.id ? { ...x, ...res.account } : x))
+    return true
   }
 
-  /**
-   * "I changed plan" — the whole operation, in one step.
-   *
-   * Changing plan is TWO edits to the timeline: close the old period and open a new one the day
-   * after. Asking the user to do both by hand is how a timeline ends up with a gap (nothing
-   * covers the seam) or an overlap (both cover it), and both are refused later with an error that
-   * reads as the app being fussy. So the new draft opens starting TODAY and the old period is
-   * closed at yesterday on save — the seam is exact by construction.
-   */
-  const [changingFrom, setChangingFrom] = useState<string | null>(null)
-  const openChange = () => {
-    if (!current) return
-    setChangingFrom(current.id)
-    openDraft({ ...emptyDraft(), from: today(), ongoing: true })
-  }
-
-  const saveDraft = async () => {
-    if (!draft) return
-    // The button is never disabled. A greyed-out control with nothing to explain it is the same
-    // dead click as a toggle that does nothing — pressing it reveals what is missing instead.
-    if (draftErrors.length > 0) { setShowErrors(true); return }
+  const save = async () => {
+    if (!draft || !row) return
+    const planChanged = JSON.stringify(draft) !== JSON.stringify((JSON.parse(origin || '[null]') as [PeriodDraft | null])[0])
+    // The button is never disabled: pressing it reveals what is missing instead.
+    if (planChanged && draftErrors.length > 0) { setShowErrors(true); return }
+    if (!(await saveNickname())) return
+    if (!planChanged) { close(); return }
     const period = periodFromDraft(draft, newPeriodId)
-    let rest = periods.filter(p => p.id !== period.id)
-
-    // Closing the outgoing plan is the second half of "I changed plan", applied here so the two
-    // edits land together. Yesterday relative to the NEW period's start, so the seam is exact
-    // whatever date the user picked.
-    if (changingFrom) {
-      const dayBefore = dayIndex(period.from)
-      rest = rest.map(p =>
-        p.id === changingFrom && dayBefore !== null && !p.to
-          ? { ...p, to: dayFromIndex(dayBefore - 1) }
-          : p)
-    }
-
-    // A refused write has already been rolled back; the draft stays so the user can retry.
-    await saveThenClose(() => persist([...rest, period]), () => { setDraft(null); setChangingFrom(null) })
+    const rest = others.filter(p => p.id !== period.id)
+    await saveThenClose(() => writePeriods([...rest, period]), close)
+  }
+  /** "Not sure yet": the account prices as `unknown` (N/A, never 0) until a plan is registered. */
+  const notSure = async () => {
+    if (!row?.account) return
+    await saveThenClose(() => writePeriods([unknownPeriod(today(), newPeriodId)]), close)
   }
 
-  // A live figure read from the vendor's page today beats the compiled-in one, which is only ever
-  // as fresh as the last release. Both lose to whatever the user typed.
-  const livePrice = useCallback(
-    (planId: string) => planPrices.find(p => p.planId === planId) ?? null,
-    [planPrices],
-  )
-
-  const catalogOptions = useMemo(() => plansForHarness(harness).map(entry => {
-    const live = planPrices.find(p => p.planId === entry.id)
-    const price = live ?? entry.monthly
+  const catalogOptions = useMemo(() => (row ? plansForHarness(row.harness) : []).map(entry => {
+    const price = livePrice(entry.id) ?? entry.monthly
     return {
-      value: entry.id,
-      label: entry.label,
-      hint: price
-        ? `${price.currency} ${price.amount}/${pt ? 'mês' : 'mo'}`
-        : (pt ? 'sem valor publicado' : 'no published price'),
+      value: entry.id, label: entry.label,
+      hint: price ? `${price.currency} ${price.amount}/${pt ? 'mês' : 'mo'}` : (pt ? 'sem valor publicado' : 'no published price'),
     }
-  }), [harness, pt, planPrices])
-
+  }), [row, pt, livePrice])
   const selectedEntry = draft?.planId ? findPlan(draft.planId) : undefined
   const errPlace = saveErrorPlace(saveError, noticeState, draft !== null)
-  const readiness = billingReadiness(ctx.billing, harnesses, allBillable)
+  const editingPast = draft !== null && draft.id !== '' && draft.id !== current?.id
+  const L = { fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 } as const
 
   return (
     <div>
-      <AccountsSection lang={ctx.lang} />
-      <SectionHeader label={pt ? 'Como você é cobrado' : 'How you are billed'} />
+      <SectionHeader label={pt ? 'Assinaturas e uso' : 'Subscriptions & usage'} />
       <p style={{ fontSize: 12.5, color: 'var(--text-tertiary)', lineHeight: 1.55, margin: '0 0 14px' }}>
         {pt
-          ? 'Todo custo no app é uma estimativa de preço de API. Cadastre o que você realmente paga e o app passa a poder mostrar o custo do seu plano — e quanto de valor você extraiu dele. Tudo fica nesta máquina.'
-          : 'Every cost in the app is an API-price estimate. Register what you actually pay and the app can show your plan cost instead — and how much value you got out of it. It all stays on this machine.'}
+          ? 'Uma linha por conta: o plano que você paga e quanto dos limites já usou. Todo custo no app é uma estimativa a preço de API até você cadastrar o plano — aí ele passa a refletir o que você realmente paga. Os agentes só usam as contas com “Agentes” ligado. Tudo fica nesta máquina.'
+          : 'One row per account: the plan you pay for and how much of its limits you have used. Every cost in the app is an API-price estimate until you register the plan — then it reflects what you actually pay. Agents only use accounts with “Agents” on. It all stays on this machine.'}
       </p>
 
-      {harnesses.length > 1 && (
-        <div style={{ marginBottom: 14, ...(isMobile ? { overflowX: 'auto' } : {}) }}>
-          <TabSelect
-            options={harnesses.map(h => ({ value: h, label: HARNESS_LABELS[h] ?? h }))}
-            value={harness}
-            onChange={h => { setHarness(h); setTarget(null) }}
-          />
-        </div>
-      )}
-
-      {timelineErrors.size > 0 && (
-        <div style={{
-          display: 'flex', gap: 9, alignItems: 'flex-start', marginBottom: 14,
-          padding: '10px 12px', borderRadius: 'var(--radius-lg)',
-          border: '1px solid var(--accent-red)', background: 'var(--bg-card)',
-        }}>
-          <AlertTriangle size={15} style={{ color: 'var(--accent-red)', flexShrink: 0, marginTop: 1 }} />
-          <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-            {pt
-              ? 'Há períodos com problema nesta linha do tempo. Enquanto isso não for resolvido, o custo do plano não pode ser calculado para este harness — dois planos cobrindo o mesmo dia cobrariam esse dia duas vezes.'
-              : 'Some periods on this timeline have problems. Until they are fixed the plan cost cannot be computed for this harness — two plans covering the same day would charge that day twice.'}
-          </div>
-        </div>
-      )}
-
-      {notices.map(a => (
-        <FirstDetectionNotice key={a.id} lang={ctx.lang} account={a} status={noticeState[a.id]}
-          onAnswer={(x, planId) => { void answer(x, planId) }} onDismiss={x => { void dismiss(x) }} />
-      ))}
-
-      <BillingAccountsView
-        lang={ctx.lang} harnesses={harnesses} accounts={allBillable} billing={ctx.billing}
-        limits={planLimits} now={limitsNow} today={today()} pendingIds={pendingIds} failedIds={failedIds}
-        openHarness={openHarness} onOpen={h => { setOpenHarness(h); if (h) { setHarness(h); setTarget(null) } }}
-        selectedId={target} onToggle={a => { void toggleAccount(a) }} onEdit={editAccountPlan}
-      />
-      {targetAccount && (
-        <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: '0 0 10px' }}>
-          {pt ? 'Editando o plano de' : 'Editing the plan of'} <b>{accountTitle(targetAccount, HARNESS_LABELS[harness] ?? harness, pt)}</b>
-          {' · '}
-          <button type="button" onClick={() => setTarget(null)} style={{ ...linkBtn, display: 'inline', marginTop: 0 }}>
-            {pt ? 'editar o padrão do assistente' : 'edit the assistant default'}
-          </button>
-        </div>
-      )}
-
-      {/* THE CURRENT PLAN LEADS. "What am I paying?" is the question people arrive with; the
-          timeline is the data model that makes a plan CHANGE priceable, and it belongs below. */}
-      {current ? (
-        <div style={{
-          border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)',
-          background: 'var(--bg-card)', padding: '16px 18px', marginBottom: 12,
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)' }}>
-                {periodName(current) || (pt ? 'Sem plano' : 'No plan')}
-              </div>
-              {/* The billing TYPE in words. It changes what every figure in the app means — a
-                  third-party period computes no plan cost at all — so it is said, not implied. */}
-              <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 3 }}>
-                {modeLabel(current.mode, pt ? 'pt' : 'en')}
-                {current.price && ` \u00b7 ${currencySymbol(current.price.currency)} ${formatAmountDisplay(String(current.price.amount), current.price.currency)}${pt ? '/m\u00eas' : '/mo'}`}
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 5 }}>
-                {pt ? 'desde' : 'since'} {current.from}
-                {current.to
-                  ? ` \u00b7 ${pt ? 'at\u00e9' : 'until'} ${current.to}`
-                  : ` \u00b7 ${pt ? 'em curso' : 'ongoing'}`}
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-              <button onClick={() => openDraft(draftFromPeriod(current))} style={iconBtn} title={pt ? 'Editar' : 'Edit'}>
-                <Pencil size={15} />
-              </button>
-              <button onClick={() => setConfirmDelete(current)} style={{ ...iconBtn, color: 'var(--accent-red)' }} title={pt ? 'Remover' : 'Remove'}>
-                <Trash2 size={15} />
-              </button>
-            </div>
-          </div>
-          {/* One action, named for what actually happens. "Add period" is the database talking;
-              nobody adds a period, they change plan — and doing both halves in one step is what
-              keeps the timeline correct instead of making it a chore. */}
-          <button onClick={openChange} style={{
-            marginTop: 14, display: 'inline-flex', alignItems: 'center', gap: 7,
-            padding: isMobile ? '12px 16px' : '9px 14px',
-            width: isMobile ? '100%' : undefined, justifyContent: isMobile ? 'center' : undefined,
-            borderRadius: 'var(--radius-md)', border: '1px solid var(--border)',
-            background: 'var(--bg-elevated)', color: 'var(--text-primary)',
-            fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-          }}>
-            <ArrowRightLeft size={14} />
-            {pt ? 'Troquei de plano' : 'I changed plan'}
-          </button>
-        </div>
-      ) : (
-        <div style={{
-          border: '1px dashed var(--border)', borderRadius: 'var(--radius-lg)',
-          background: 'var(--bg-card)', padding: 18, marginBottom: 12,
-        }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 5 }}>
-            {periods.length > 0
-              ? (pt ? 'Nenhum plano ativo hoje' : 'No plan active today')
-              : (pt ? 'Voc\u00ea ainda n\u00e3o cadastrou como paga' : 'You have not registered how you pay')}
-          </div>
-          <p style={{ fontSize: 12.5, color: 'var(--text-tertiary)', lineHeight: 1.55, margin: '0 0 14px' }}>
-            {periods.length > 0
-              ? (pt
-                  ? 'Os per\u00edodos abaixo j\u00e1 terminaram. Cadastre o plano atual para voltar a calcular o custo real.'
-                  : 'The periods below have all ended. Register the current plan to compute the real cost again.')
-              : (pt
-                  ? 'Sem isso, todo custo continua sendo uma estimativa a pre\u00e7os de API.'
-                  : 'Without it, every cost stays an API-price estimate.')}
-          </p>
-          {/* Detection is the PRIMARY action here, not a card beside one. It answers most of the
-              form, and the sentence under it names the single thing it cannot know. */}
-          {seedable ? (
-            <>
-              <button onClick={openFromDetection} style={primaryBtn(isMobile)}>
-                <Sparkles size={15} />
-                {seedable.planId
-                  ? (pt ? `Usar ${findPlan(seedable.planId)?.label ?? seedable.planId}` : `Use ${findPlan(seedable.planId)?.label ?? seedable.planId}`)
-                  : (pt ? 'Usar o que detectamos' : 'Use what we detected')}
-              </button>
-              <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 8, lineHeight: 1.5 }}>
-                {pt ? seedable.evidencePt : seedable.evidenceEn}{' '}
-                <strong style={{ color: 'var(--text-secondary)' }}>
-                  {pt ? 'Falta s\u00f3 a data em que voc\u00ea come\u00e7ou a pagar.' : 'Only the date you started paying is missing.'}
-                </strong>
-              </div>
-              <button onClick={openNew} style={linkBtn}>
-                {pt ? 'ou cadastrar manualmente' : 'or register it manually'}
-              </button>
-            </>
-          ) : (
-            <>
-              {/* Detected, but with nothing to prefill \u2014 the free tier being the case that exists
-                  today. The finding is still worth saying: it is the answer to "why is this empty". */}
-              {detection && detection.source !== 'none' && (
-                <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', margin: '0 0 12px', lineHeight: 1.5 }}>
-                  {pt ? detection.evidencePt : detection.evidenceEn}
-                </div>
-              )}
-              <button onClick={openNew} style={primaryBtn(isMobile)}>
-                <Plus size={15} />
-                {pt ? 'Cadastrar meu plano' : 'Register my plan'}
-              </button>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* History, collapsed. It exists so a window spanning a plan change is priced correctly, and
-          it is consulted far less often than the plan in force. */}
-      {history.length > 0 && (
-        <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
-          <button
-            onClick={() => setShowHistory(v => !v)}
-            style={{
-              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              gap: 8, padding: '11px 14px', border: 'none', background: 'transparent',
-              cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600,
-              color: 'var(--text-secondary)', minHeight: isMobile ? 44 : undefined,
-            }}
-          >
-            <span>{pt ? `Hist\u00f3rico (${history.length})` : `History (${history.length})`}</span>
-            <ChevronDown size={15} style={{ transform: showHistory ? 'rotate(180deg)' : undefined, transition: 'transform 0.18s' }} />
-          </button>
-          {showHistory && history.map(p => (
-            <div key={p.id} style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-              padding: '10px 14px', borderTop: '1px solid var(--border)',
-            }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
-                  {periodName(p) || (pt ? 'Sem plano' : 'No plan')}
-                </div>
-                <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                  {modeLabel(p.mode, pt ? 'pt' : 'en')}
-                  {p.price && ` \u00b7 ${currencySymbol(p.price.currency)} ${formatAmountDisplay(String(p.price.amount), p.price.currency)}`}
-                  {' \u00b7 '}{p.from} \u2192 {p.to ?? (pt ? 'em curso' : 'ongoing')}
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
-                <button onClick={() => openDraft(draftFromPeriod(p))} style={iconBtn} title={pt ? 'Editar' : 'Edit'}>
-                  <Pencil size={14} />
-                </button>
-                <button onClick={() => setConfirmDelete(p)} style={{ ...iconBtn, color: 'var(--accent-red)' }} title={pt ? 'Remover' : 'Remove'}>
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
+      <BillingAccountList lang={ctx.lang} rows={rows} now={limitsNow} pendingIds={pendingIds} failedIds={failedIds}
+        selectedKey={editKey} onToggle={a => { void toggleAccount(a) }} onEdit={openRow} />
 
       {errPlace === 'page' && saveError && (
-        <div style={{ marginTop: 10, fontSize: 12, color: 'var(--accent-red)' }}>{saveError.msg}</div>
+        <div role="alert" style={{ marginTop: 10, fontSize: 12, color: 'var(--accent-red)' }}>{saveError.msg}</div>
       )}
 
-      {!readiness.ready && periods.length > 0 && timelineErrors.size === 0 && (
-        <p style={{ marginTop: 14, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-          <Info size={12} style={{ verticalAlign: -1, marginRight: 5 }} />
-          {pt
-            ? 'Ainda falta algo para calcular o custo do plano. Confira os períodos acima.'
-            : 'Something is still missing before the plan cost can be computed. Check the periods above.'}
-        </p>
-      )}
-
-      <Drawer
-        open={draft !== null}
-        title={draft?.id ? (pt ? 'Editar período' : 'Edit period') : (pt ? 'Novo período' : 'New period')}
-        onClose={() => setDraft(null)}
-        lang={pt ? 'pt' : 'en'}
-        dirty={draftDirty}
+      <Drawer open={draft !== null && row !== null} title={row?.title ?? ''} onClose={close} lang={pt ? 'pt' : 'en'} dirty={dirty}
         footer={
-          <button
-            onClick={saveDraft}
-            style={{
-              width: '100%', padding: '12px 16px', borderRadius: 'var(--radius-lg)',
-              border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
-              background: 'var(--anthropic-orange)', color: '#fff', cursor: 'pointer',
-            }}
-          >
-            {pt ? 'Salvar' : 'Save'}
-          </button>
-        }
-      >
-        {draft && (
+          <div style={{ display: 'flex', gap: 8, width: '100%', flexDirection: isMobile ? 'column-reverse' : 'row' }}>
+            {!current && row?.account && (
+              <button type="button" style={{ ...dialogButtonStyle('secondary', isMobile), flex: isMobile ? undefined : 1 }} onClick={() => { void notSure() }}>
+                {pt ? 'Não sei agora' : 'Not sure yet'}
+              </button>
+            )}
+            <button type="button" style={{ ...dialogButtonStyle('primary', isMobile), flex: 1 }} onClick={() => { void save() }}>{pt ? 'Salvar' : 'Save'}</button>
+          </div>
+        }>
+        {draft && row && (
           <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, minWidth: 0 }}>
+              <HarnessMark harness={row.harness} size={22} />
+              <span style={{ fontSize: 12.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.sub}</span>
+            </div>
             {errPlace === 'drawer' && saveError && <div role="alert" style={{ marginBottom: 10, fontSize: 12, color: 'var(--accent-red)' }}>{saveError.msg}</div>}
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 }}>
-                {pt ? 'Plano' : 'Plan'}
+            {timelineErrors.size > 0 && (
+              <div role="alert" style={{ display: 'flex', gap: 9, alignItems: 'flex-start', marginBottom: 14, padding: '10px 12px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--accent-red)' }}>
+                <AlertTriangle size={15} style={{ color: 'var(--accent-red)', flexShrink: 0, marginTop: 1 }} />
+                <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                  {pt
+                    ? 'Há períodos com problema abaixo. Enquanto não forem corrigidos, o custo do plano desta conta não pode ser calculado — dois planos no mesmo dia cobrariam esse dia duas vezes.'
+                    : 'Some periods below have problems. Until they are fixed this account’s plan cost cannot be computed — two plans on the same day would charge that day twice.'}
+                </div>
               </div>
-              <Select
-                value={draft.planId}
-                onChange={v => {
-                  const entry = findPlan(v)
-                  if (!entry) return
-                  // A figure read from the vendor's page today supersedes the compiled-in one,
-                  // which is only ever as fresh as the last release. `applyPlan` still refuses to
-                  // overwrite anything the user has already typed.
-                  const live = livePrice(v)
-                  const withLive = live
-                    ? { ...entry, monthly: { amount: live.amount, currency: live.currency, verifiedAt: today(), source: live.source } }
-                    : entry
-                  setDraft(d => (d ? applyPlan(d, withLive) : d))
-                }}
-                options={catalogOptions}
-                placeholder={pt ? 'Escolha um plano' : 'Choose a plan'}
-                searchable
-              />
+            )}
+            {row.account && (
+              <FieldInput label={pt ? 'Apelido' : 'Nickname'} value={nick} onChange={setNick} maxLength={40} placeholder={pt ? 'Ex.: Pessoal' : 'e.g. Personal'}
+                sub={pt ? 'É só este nome que os agentes veem — nunca o e-mail.' : 'Agents only ever see this name — never the e-mail.'} />
+            )}
+            {editingPast && (
+              <div style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 10px' }}>
+                {pt ? 'Editando um plano anterior.' : 'Editing an earlier plan.'}{' '}
+                <button type="button" style={linkBtn} onClick={() => current ? openDraft(draftFromPeriod(current), nick) : openRow(row)}>
+                  {pt ? 'voltar ao plano atual' : 'back to the current plan'}
+                </button>
+              </div>
+            )}
+            <div style={{ marginBottom: 14 }}>
+              <div style={L}>{pt ? 'Plano' : 'Plan'}</div>
+              <Select value={draft.planId} onChange={pickPlan} options={catalogOptions} placeholder={pt ? 'Escolha um plano' : 'Choose a plan'}
+                searchable searchPlaceholder={pt ? 'Buscar plano…' : 'Search plans…'} />
               <FieldError text={errorFor(['missing_plan'])} />
-              {/* Provenance, always. A prefilled amount with no stated origin is indistinguishable
-                  from one the app invented — and one of these two really is only as fresh as the
-                  last release. */}
+              {seededFrom && (
+                <div style={{ display: 'flex', gap: 6, fontSize: 11, color: 'var(--text-tertiary)', marginTop: 6, lineHeight: 1.5 }}>
+                  <Sparkles size={12} style={{ flexShrink: 0, marginTop: 2 }} />{seededFrom}
+                </div>
+              )}
+              {changingFrom && (
+                <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 6, lineHeight: 1.5 }}>
+                  {pt
+                    ? `Troca de plano: ${periodName(changingFrom) || modeLabel(changingFrom.mode, 'pt')} termina na véspera da data de início abaixo.`
+                    : `Plan change: ${periodName(changingFrom) || modeLabel(changingFrom.mode, 'en')} ends the day before the start date below.`}
+                </div>
+              )}
+              {/* Provenance, always: a prefilled amount with no stated origin reads as invented. */}
               {selectedEntry && livePrice(selectedEntry.id) && (
                 <div style={{ fontSize: 11, color: 'var(--accent-green, #22c55e)', marginTop: 6, lineHeight: 1.5 }}>
                   {pt
@@ -622,88 +388,88 @@ export default function BillingSettings() {
               {selectedEntry && !livePrice(selectedEntry.id) && selectedEntry.monthly && (
                 <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 6, lineHeight: 1.5 }}>
                   {pt
-                    ? `Valor da tabela interna, conferido em ${selectedEntry.monthly.verifiedAt}. Não foi possível ler a página do fornecedor agora.`
-                    : `From the built-in table, checked on ${selectedEntry.monthly.verifiedAt}. The vendor's page could not be read just now.`}
-                </div>
-              )}
-              {selectedEntry && (pt ? selectedEntry.notePt : selectedEntry.noteEn) && (
-                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 6, lineHeight: 1.5 }}>
-                  {pt ? selectedEntry.notePt : selectedEntry.noteEn}
+                    ? `Valor da tabela interna, conferido em ${selectedEntry.monthly.verifiedAt}.`
+                    : `From the built-in table, checked on ${selectedEntry.monthly.verifiedAt}.`}
                 </div>
               )}
             </div>
 
             {draft.planId === 'other' && (
               <>
-                <FieldInput
-                  label={pt ? 'Nome do plano' : 'Plan name'}
-                  value={draft.label}
-                  onChange={v => setDraft(d => (d ? { ...d, label: v } : d))}
-                  placeholder={pt ? 'Ex.: gateway da empresa' : 'e.g. company gateway'}
-                />
+                <FieldInput label={pt ? 'Nome do plano' : 'Plan name'} value={draft.label}
+                  onChange={v => setDraft(d => (d ? { ...d, label: v } : d))} placeholder={pt ? 'Ex.: gateway da empresa' : 'e.g. company gateway'} />
                 <FieldError text={errorFor(['missing_label'])} />
               </>
             )}
 
-            {draftWantsPrice(draft) && (
+            {draft.planId !== '' && draftWantsPrice(draft) && (
               <>
-                <MoneyField
-                  label={pt ? 'Valor por mês' : 'Amount per month'}
-                  sub={pt
-                    ? 'O que aparece na sua fatura. O valor sugerido pelo catálogo é só um ponto de partida.'
-                    : 'What your invoice says. The catalog’s suggestion is only a starting point.'}
-                  amount={draft.amount}
-                  currency={draft.currency}
-                  monthSuffix={pt ? '/mês' : '/mo'}
+                <MoneyField label={pt ? 'Valor por mês' : 'Amount per month'}
+                  sub={pt ? 'O que aparece na sua fatura.' : 'What your invoice says.'}
+                  amount={draft.amount} currency={draft.currency} monthSuffix={pt ? '/mês' : '/mo'}
                   onAmountChange={v => setDraft(d => (d ? { ...d, amount: v } : d))}
-                  onCurrencyChange={c => setDraft(d => (d ? { ...d, currency: c } : d))}
-                />
+                  onCurrencyChange={c => setDraft(d => (d ? { ...d, currency: c } : d))} />
                 <FieldError text={errorFor(['missing_price', 'non_positive_price', 'price_on_non_subscription'])} />
               </>
             )}
 
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <DateField
-                label={pt ? 'Começou em' : 'Started on'}
-                value={draft.from}
-                max={today()}
-                onChange={v => setDraft(d => (d ? { ...d, from: v } : d))}
-              />
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+              <DateField label={pt ? 'Começou em' : 'Started on'} value={draft.from} lang={pt ? 'pt' : 'en'}
+                onChange={v => setDraft(d => (d ? { ...d, from: v } : d))} />
               {!draft.ongoing && (
-                <DateField
-                  label={pt ? 'Terminou em' : 'Ended on'}
-                  value={draft.to}
-                  max={today()}
-                  onChange={v => setDraft(d => (d ? { ...d, to: v } : d))}
-                />
+                <DateField label={pt ? 'Terminou em' : 'Ended on'} value={draft.to} lang={pt ? 'pt' : 'en'}
+                  onChange={v => setDraft(d => (d ? { ...d, to: v } : d))} />
               )}
             </div>
             <FieldError text={errorFor(['missing_from', 'bad_day', 'inverted_range'])} />
-
-            <div style={{ marginTop: 4, marginBottom: 12 }}>
-              <Checkbox
-                checked={draft.ongoing}
-                onChange={v => setDraft(d => (d ? { ...d, ongoing: v } : d))}
-                label={pt ? 'Ainda pago este plano' : 'I still pay for this plan'}
-              />
+            <div style={{ marginBottom: 12 }}>
+              <Checkbox checked={draft.ongoing} onChange={v => setDraft(d => (d ? { ...d, ongoing: v } : d))}
+                label={pt ? 'Ainda pago este plano' : 'I still pay for this plan'} />
             </div>
-
             <FieldError text={errorFor(['overlap'])} />
+
+            {current && draft.id === current.id && (
+              <button type="button" style={{ ...linkBtn, color: 'var(--accent-red)' }} onClick={() => setConfirmDelete(current)}>
+                {pt ? 'Remover este plano' : 'Remove this plan'}
+              </button>
+            )}
+
+            {history.length > 0 && (
+              <div style={{ marginTop: 16, border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
+                <div style={{ padding: '9px 14px', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', background: 'var(--bg-elevated)' }}>
+                  {pt ? `Planos anteriores (${history.length})` : `Earlier plans (${history.length})`}
+                </div>
+                {history.map(p => (
+                  <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px 8px 14px', borderTop: '1px solid var(--border)', background: draft.id === p.id ? 'var(--bg-elevated)' : undefined }}>
+                    <div style={{ minWidth: 0, flex: 1, fontSize: 12, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <b style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{periodName(p) || modeLabel(p.mode, pt ? 'pt' : 'en')}</b>
+                      {p.price && ` · ${currencySymbol(p.price.currency)} ${formatAmountDisplay(String(p.price.amount), p.price.currency)}`}
+                      {' · '}{fmtDay(p.from)} → {p.to ? fmtDay(p.to) : (pt ? 'em curso' : 'ongoing')}
+                    </div>
+                    <button type="button" onClick={() => openDraft(draftFromPeriod(p), nick)} style={iconBtn} title={pt ? 'Editar' : 'Edit'} aria-label={pt ? 'Editar' : 'Edit'}><Pencil size={14} /></button>
+                    <button type="button" onClick={() => setConfirmDelete(p)} style={{ ...iconBtn, color: 'var(--accent-red)' }} title={pt ? 'Remover' : 'Remove'} aria-label={pt ? 'Remover' : 'Remove'}><Trash2 size={14} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </Drawer>
 
       <ConfirmModal
         open={confirmDelete !== null}
-        title={pt ? 'Remover período' : 'Remove period'}
+        title={pt ? 'Remover plano' : 'Remove plan'}
         message={pt
-          ? `Remover "${confirmDelete ? periodName(confirmDelete) : ''}"? Os dias que ele cobria deixam de contar para o custo do plano.`
-          : `Remove “${confirmDelete ? periodName(confirmDelete) : ''}”? The days it covered will stop counting towards the plan cost.`}
+          ? `Remover "${confirmDelete ? periodName(confirmDelete) || modeLabel(confirmDelete.mode, 'pt') : ''}"? Os dias que ele cobria deixam de contar para o custo do plano.`
+          : `Remove “${confirmDelete ? periodName(confirmDelete) || modeLabel(confirmDelete.mode, 'en') : ''}”? The days it covered will stop counting towards the plan cost.`}
         confirmLabel={pt ? 'Remover' : 'Remove'}
         cancelLabel={pt ? 'Cancelar' : 'Cancel'}
         onConfirm={async () => {
-          if (confirmDelete) await persist(periods.filter(p => p.id !== confirmDelete.id))
+          const gone = confirmDelete
           setConfirmDelete(null)
+          if (!gone) return
+          const ok = await writePeriods(periods.filter(p => p.id !== gone.id))
+          if (ok && draft?.id === gone.id) close()
         }}
         onCancel={() => setConfirmDelete(null)}
       />
@@ -711,13 +477,12 @@ export default function BillingSettings() {
   )
 }
 
+/** `yyyy-MM-dd` → `dd/MM/yyyy`, the same reading the date picker shows. */
+const fmtDay = (d: string): string => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : d)
 
 /**
  * Errors render inline under their field, never as a toast: on a phone this form is a full-screen
  * drawer, and a toast over it is read once and cannot be re-read.
- *
- * No negative margin. It had `marginTop: -8` tuned against `FieldInput`'s own bottom margin, which
- * the `Select` above it does not have — so the message landed on top of the control it was about.
  */
 function FieldError({ text }: { text: string | null }) {
   if (!text) return null
@@ -729,24 +494,16 @@ function FieldError({ text }: { text: string | null }) {
 }
 
 /**
- * The amount field: currency symbol inside the box, live grouping, currency picker attached.
- *
- * The symbol and the separators are part of the field rather than a label beside it, because the
- * question "am I typing dollars or reais" has to be answerable without looking away from what you
- * are typing — and the two are five-to-one apart, which is not a mistake anyone catches by
- * re-reading a total later.
- *
- * The stored value stays canonical (dot decimal, no grouping); only the display is formatted.
- * `parseAmountInput` is a fixed point over that display, so re-parsing what the field shows on
- * every keystroke is safe — see its test.
+ * The amount field: currency symbol inside the box, live grouping, currency picker attached — so
+ * "am I typing dollars or reais" is answerable without looking away from what you type. The stored
+ * value stays canonical (dot decimal, no grouping); only the display is formatted.
  */
 function MoneyField({ label, sub, amount, currency, monthSuffix, onAmountChange, onCurrencyChange }: {
   label: string
   sub?: string
   amount: string
   currency: BillingCurrency
-  /** "/mo" or "/mês" — this followed the currency instead of the language and read as Portuguese
-   *  inside an English form. */
+  /** "/mo" or "/mês" — follows the language, not the currency. */
   monthSuffix: string
   onAmountChange: (v: string) => void
   onCurrencyChange: (c: BillingCurrency) => void
@@ -755,85 +512,46 @@ function MoneyField({ label, sub, amount, currency, monthSuffix, onAmountChange,
     <div style={{ marginBottom: 14 }}>
       <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 2 }}>{label}</div>
       {sub && <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 5, lineHeight: 1.45 }}>{sub}</div>}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+      {/* Wraps rather than clips: at 390px inside the drawer the currency picker would fall off the edge. */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'stretch', flexWrap: 'wrap' }}>
         <div style={{
-          flex: 1, display: 'flex', alignItems: 'center', gap: 6,
+          flex: '1 1 180px', display: 'flex', alignItems: 'center', gap: 6,
           border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
           background: 'var(--bg-input)', padding: '0 11px',
         }}>
-          <span style={{ color: 'var(--text-tertiary)', fontWeight: 600, flexShrink: 0 }}>
-            {currencySymbol(currency)}
-          </span>
+          <span style={{ color: 'var(--text-tertiary)', fontWeight: 600, flexShrink: 0 }}>{currencySymbol(currency)}</span>
           <input
             inputMode="decimal"
             value={formatAmountDisplay(amount, currency)}
             onChange={e => onAmountChange(parseAmountInput(e.target.value))}
             placeholder={currency === 'BRL' ? '540,00' : '100.00'}
-            // No inline fontSize — the global >=16px guard in index.css is what stops iOS Safari
-            // zooming the viewport and breaking the sticky header.
-            style={{
-              flex: 1, minWidth: 0, padding: '9px 0', border: 'none', outline: 'none',
-              background: 'transparent', color: 'var(--text-primary)', fontFamily: 'inherit',
-            }}
+            // No inline fontSize — the global >=16px guard in index.css stops iOS Safari zooming.
+            style={{ flex: 1, minWidth: 0, padding: '9px 0', border: 'none', outline: 'none', background: 'transparent', color: 'var(--text-primary)', fontFamily: 'inherit' }}
           />
           <span style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}>{monthSuffix}</span>
         </div>
         <div style={{ flexShrink: 0 }}>
-          <TabSelect
-            options={[{ value: 'USD', label: 'USD' }, { value: 'BRL', label: 'BRL' }]}
-            value={currency}
-            onChange={v => onCurrencyChange(v as BillingCurrency)}
-          />
+          <TabSelect options={[{ value: 'USD', label: 'USD' }, { value: 'BRL', label: 'BRL' }]} value={currency}
+            onChange={v => onCurrencyChange(v as BillingCurrency)} />
         </div>
       </div>
     </div>
   )
 }
 
-/** A native date picker. No inline `fontSize` — the global ≥16px guard in index.css is what stops
- *  iOS Safari zooming the viewport and breaking the sticky header. */
-function DateField({ label, value, max, onChange }: {
-  label: string
-  value: string
-  max: string
-  onChange: (v: string) => void
-}) {
+/** The app's own calendar (`DatePicker`, dd/mm/aaaa) in a field-shaped frame. No future days. */
+function DateField({ label, value, lang, onChange }: { label: string; value: string; lang: 'pt' | 'en'; onChange: (v: string) => void }) {
   return (
-    <div style={{ flex: '1 1 150px', marginBottom: 14 }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 }}>{label}</div>
-      <input
-        type="date"
-        value={value}
-        max={max}
-        onChange={e => onChange(e.target.value)}
-        style={{
-          width: '100%', padding: '9px 11px', borderRadius: 'var(--radius-md)',
-          border: '1px solid var(--border)', background: 'var(--bg-input)',
-          color: 'var(--text-primary)', fontFamily: 'inherit',
-        }}
-      />
-    </div>
+    <span data-billing-date style={{ display: 'inline-flex', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', background: 'var(--bg-input)', padding: '3px 4px' }}>
+      <DatePicker value={value} onChange={onChange} label={label} placeholder={lang === 'pt' ? 'dd/mm/aaaa' : 'dd/mm/yyyy'} max={today()} lang={lang}
+        labelStyle={{ textTransform: 'none', letterSpacing: 0, fontSize: 12, fontWeight: 600, opacity: 1 }} />
+    </span>
   )
 }
 
-const cellPad = { padding: '9px 12px', textAlign: 'left' as const }
-/** The one prominent action a screen state offers. Full width on a phone, where a 44px target is
- *  the rule and a floated button is a miss waiting to happen. */
-const primaryBtn = (isMobile: boolean): React.CSSProperties => ({
-  display: 'inline-flex', alignItems: 'center', gap: 8,
-  padding: isMobile ? '13px 18px' : '10px 16px',
-  width: isMobile ? '100%' : undefined,
-  justifyContent: isMobile ? 'center' : undefined,
-  minHeight: isMobile ? 44 : undefined,
-  borderRadius: 'var(--radius-md)', border: 'none',
-  background: 'var(--anthropic-orange)', color: '#fff',
-  fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-})
-
-/** The quiet alternative beside it. Deliberately not a second button: two equally weighted
- *  choices in an empty state is the same as none. */
+/** The quiet secondary action: a link, not a second button competing with Save. */
 const linkBtn: React.CSSProperties = {
-  display: 'block', marginTop: 10, padding: 0, border: 'none', background: 'none',
+  display: 'inline', padding: 0, border: 'none', background: 'none',
   color: 'var(--text-tertiary)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
   textDecoration: 'underline',
 }
@@ -841,15 +559,4 @@ const linkBtn: React.CSSProperties = {
 const iconBtn: React.CSSProperties = {
   background: 'none', border: 'none', cursor: 'pointer', padding: 6,
   color: 'var(--text-tertiary)', display: 'inline-flex', alignItems: 'center',
-}
-
-function Th({ children, align }: { children: React.ReactNode; align?: 'right' }) {
-  return (
-    <th style={{ ...cellPad, textAlign: align ?? 'left', fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.3 }}>
-      {children}
-    </th>
-  )
-}
-function Td({ children, align }: { children: React.ReactNode; align?: 'right' }) {
-  return <td style={{ ...cellPad, textAlign: align ?? 'left', color: 'var(--text-secondary)' }}>{children}</td>
 }

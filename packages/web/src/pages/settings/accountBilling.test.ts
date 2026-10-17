@@ -3,7 +3,7 @@ import { computePlanCost, normalizeBillingSettings, type BillingSettings } from 
 import { createAccountMutator } from './accountMutations'
 import {
   saveThenClose, saveErrorPlace,
-  accountsNeedingPlan, answerNotice, billableAccounts, capabilityNotes, matchDetectedPlan, noticeAccounts, planSummary, toggleAvailability, withAccountPeriods,
+  accountsNeedingPlan, answerNotice, billableAccounts, billingRows, closeBefore, rowScope, scopePeriods, withScopePeriods, capabilityNotes, matchDetectedPlan, noticeAccounts, planSummary, toggleAvailability, withAccountPeriods,
   type BillingAccount,
 } from './accountBilling'
 
@@ -131,5 +131,62 @@ describe('L4/L5 saveErrorPlace', () => {
   test('a failure carried by a later stored write is no longer reported', () => {
     expect(saveErrorPlace(err, {}, true)).toBeNull()
     expect(saveErrorPlace(null, {}, true)).toBeNull()
+  })
+})
+
+const sub = (planId: string, from = '2026-09-01') => ({ id: newId(), mode: 'subscription' as const, planId, price: { amount: 100, currency: 'USD' as const }, from })
+const L = (h: string) => ({ claude: 'Claude Code', codex: 'Codex CLI', gemini: 'Gemini CLI' } as Record<string, string>)[h] ?? h
+
+describe('rowScope — the timeline a row prices on is the one core counts', () => {
+  test('own first; the default goes to the FIRST account without one; nobody else inherits it', () => {
+    const a = acc('a'), b = acc('b', { firstSeen: Date.parse('2026-09-02T00:00:00Z') }), c = acc('c', { firstSeen: Date.parse('2026-09-03T00:00:00Z') })
+    const billing: BillingSettings = { profiles: { claude: { periods: [sub('anthropic-max-5x')] } }, accountProfiles: { a: { periods: [sub('anthropic-pro')] } } }
+    const mine = [a, b, c]
+    expect(rowScope(billing, mine, a)).toEqual({ kind: 'own', id: 'a' })
+    expect(rowScope(billing, mine, b)).toEqual({ kind: 'default', harness: 'claude' })
+    expect(rowScope(billing, mine, c)).toEqual({ kind: 'none', id: 'c' })
+    expect(accountsNeedingPlan(mine, billing, ['claude']).map(x => x.id)).toEqual(['c'])
+  })
+  test('writing a scope back touches only that timeline', () => {
+    const billing: BillingSettings = { profiles: { claude: { periods: [sub('anthropic-max-5x')] } } }
+    const p = sub('anthropic-pro')
+    expect(withScopePeriods(billing, { kind: 'default', harness: 'claude' }, [p]).profiles.claude?.periods).toEqual([p])
+    const own = withScopePeriods(billing, { kind: 'none', id: 'x' }, [p])
+    expect(own.accountProfiles?.x?.periods).toEqual([p])
+    expect(own.profiles.claude?.periods).toHaveLength(1)
+    expect(scopePeriods(own, { kind: 'own', id: 'x' })).toEqual([p])
+    expect(withScopePeriods(billing, { kind: 'default', harness: 'claude' }, []).profiles.claude).toBeUndefined()
+  })
+})
+
+describe('billingRows — one row per account, nothing said twice', () => {
+  test('a nickname takes the title; the login moves to the subtitle beside the assistant', () => {
+    const rows = billingRows([acc('a', { label: 'me@x.io' }), acc('b', { nickname: 'Work', label: 'w@x.io', firstSeen: Date.parse('2026-09-02T00:00:00Z') })], none, ['claude'], L as never, false)
+    expect(rows.map(r => [r.title, r.sub])).toEqual([['me@x.io', 'Claude Code'], ['Work', 'Claude Code · w@x.io']])
+    for (const r of rows) expect(r.sub.includes(r.title)).toBe(false)
+  })
+  test('the reserve row (id "") never becomes a row beside an identified account', () => {
+    const rows = billingRows([acc('acc_1', { harness: 'codex', label: 'Conta padrão' }), acc('', { harness: 'codex', label: 'Conta padrão' })], none, ['codex'], L as never, true)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.title).toBe('Codex CLI')
+    expect(rows[0]!.sub).toBe('o assistente não informa qual conta é')
+  })
+  test('an assistant with no identified account is one row on its own timeline; two unnamed accounts are numbered', () => {
+    const rows = billingRows([acc('', { harness: 'gemini', label: 'Conta padrão' }), acc('k1', { harness: 'codex', label: 'Conta padrão' }), acc('k2', { harness: 'codex', label: 'Default account', firstSeen: Date.parse('2026-09-05T00:00:00Z') })], none, ['codex', 'gemini'], L as never, false)
+    expect(rows.map(r => [r.key, r.title])).toEqual([['k1', 'Codex CLI #1'], ['k2', 'Codex CLI #2'], ['harness:gemini', 'Gemini CLI']])
+    expect(rows[2]!.scope).toEqual({ kind: 'default', harness: 'gemini' })
+    expect(rows[2]!.account).toBeNull()
+  })
+})
+
+describe('closeBefore — the seam of a plan change', () => {
+  test('the plan in force ends the day before its successor starts; others are untouched', () => {
+    const a = { id: 'a', mode: 'subscription' as const, planId: 'anthropic-max-5x', price: { amount: 100, currency: 'USD' as const }, from: '2026-09-01' }
+    const b = { ...a, id: 'b', from: '2026-05-01', to: '2026-08-31' }
+    expect(closeBefore([a, b], 'a', '2026-10-17')).toEqual([{ ...a, to: '2026-10-16' }, b])
+  })
+  test('a seam before the old plan began is not applied', () => {
+    const a = { id: 'a', mode: 'subscription' as const, planId: 'anthropic-pro', price: { amount: 20, currency: 'USD' as const }, from: '2026-09-01' }
+    expect(closeBefore([a], 'a', '2026-08-01')).toEqual([a])
   })
 })
