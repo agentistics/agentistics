@@ -12,7 +12,7 @@ const COLOR: Record<Exclude<PillTone, 'muted'>, string> = {
   ok: 'var(--accent-green)', warn: 'var(--anthropic-orange)', error: 'var(--accent-red)', neutral: 'var(--text-secondary)',
 }
 
-export function Pill({ tone, children }: { tone: PillTone; children: React.ReactNode }) {
+export function Pill({ tone, children, nowrap = false }: { tone: PillTone; children: React.ReactNode; nowrap?: boolean }) {
   const tint: React.CSSProperties = tone === 'muted'
     ? { color: 'var(--text-tertiary)', background: 'var(--bg-elevated)', border: '1px solid var(--border)' }
     : {
@@ -23,7 +23,7 @@ export function Pill({ tone, children }: { tone: PillTone; children: React.React
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700,
-      ...tint, padding: '2px 8px', borderRadius: 20, whiteSpace: 'nowrap',
+      ...tint, padding: '2px 8px', borderRadius: 20, whiteSpace: nowrap ? 'nowrap' : undefined,
     }}>{children}</span>
   )
 }
