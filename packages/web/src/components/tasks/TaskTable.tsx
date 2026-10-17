@@ -22,6 +22,7 @@
  * It computes NOTHING. Every figure arrives already decided from `/api/tasks`.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   Bot, CheckSquare, ChevronDown, ChevronRight, Columns3, MessageSquare, Paperclip, Plus,
@@ -925,6 +926,7 @@ export function TaskTable(p: TaskTableProps) {
     apply(next)
   }
 
+  useEscapeOwner(adding !== null && !p.onRequestCreate, () => { setAdding(null); setDraft('') })
   // Escape leaves Select mode — unless it was meant for something else (a text field, an open
   // dialog): `escapeLeavesMode` is the one place that decides.
   useEffect(() => {
@@ -1505,7 +1507,6 @@ export function TaskTable(p: TaskTableProps) {
                             onChange={e => setDraft(e.target.value)}
                             onBlur={() => { setAdding(null); setDraft('') }}
                             onKeyDown={e => {
-                              if (e.key === 'Escape') { setAdding(null); setDraft('') }
                               if (e.key === 'Enter' && draft.trim()) {
                                 p.onCreate(draft.trim(), g.createStatus, g.createType)
                                 setDraft(''); setAdding(null)

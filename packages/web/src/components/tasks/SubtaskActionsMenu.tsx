@@ -27,6 +27,7 @@
  * the top-level list, so the whole thing stays one popover rather than opening a second one.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -122,6 +123,7 @@ export function SubtaskActionsMenu(p: SubtaskActionsMenuProps) {
 
   const close = () => { setOpen(false); setStep('menu'); setError(null); setPickingBlocker(false) }
 
+  useEscapeOwner(open, close)
   useEffect(() => {
     if (!open) return
     const down = (e: MouseEvent) => {
@@ -129,12 +131,9 @@ export function SubtaskActionsMenu(p: SubtaskActionsMenuProps) {
       if (triggerRef.current?.contains(t)) return
       if (boxRef.current && !boxRef.current.contains(t)) close()
     }
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
     document.addEventListener('mousedown', down)
-    document.addEventListener('keydown', key)
     return () => {
       document.removeEventListener('mousedown', down)
-      document.removeEventListener('keydown', key)
     }
   }, [open])
 

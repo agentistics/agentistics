@@ -15,6 +15,7 @@
  * overflow can clip it and it never drifts away from the title it belongs to.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowDown, ArrowDownUp, ArrowUp } from 'lucide-react'
@@ -45,20 +46,18 @@ export function ColumnSortMenu({ title, color, sort, overridden, options, onPick
   // The panel is portaled into `document.body`, so a capture-phase `window` scroll listener also
   // fires when the panel's OWN option list scrolls — closing on that made options past the fold
   // unreachable. Only a scroll outside the panel closes it.
+  useEscapeOwner(!!at, () => setAt(null))
   useEffect(() => {
     if (!at) return
     const close = () => setAt(null)
     const onScroll = (e: Event) => {
       if (scrollIsOutside(panel.current, e.target)) close()
     }
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
     window.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', close)
-    window.addEventListener('keydown', esc)
     return () => {
       window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', close)
-      window.removeEventListener('keydown', esc)
     }
   }, [at])
 

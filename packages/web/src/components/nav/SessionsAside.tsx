@@ -1,3 +1,4 @@
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { loadClosedFleet } from '../../lib/fleet'
 /**
  * SessionsAside — the fleet, in the sidebar's body.
@@ -1223,6 +1224,8 @@ export function SessionsAside({
     )
   }
 
+  useEscapeOwner(creatingGroup !== null, () => setCreatingGroup(null))
+  useEscapeOwner(renamingGroup !== null, () => setRenamingGroup(null))
   return (
     <GoToSessionContext.Provider value={onGoToSession ?? null}>
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 10, paddingTop: 4 }}>
@@ -2199,7 +2202,6 @@ export function SessionsAside({
               autoFocus
               value={newGroupName}
               onChange={e => setNewGroupName(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Escape') setCreatingGroup(null) }}
               placeholder={pt ? 'ex.: Saved to later' : 'e.g. Saved to later'}
               style={{
                 width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 8,
@@ -2270,7 +2272,6 @@ export function SessionsAside({
               autoFocus
               value={renameGroupDraft}
               onChange={e => setRenameGroupDraft(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Escape') setRenamingGroup(null) }}
               style={{
                 width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 8,
                 border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)',

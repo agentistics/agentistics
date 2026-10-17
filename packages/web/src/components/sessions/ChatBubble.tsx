@@ -18,6 +18,7 @@
  * than the bubble, and letting it set the width is how a message ends up outside its own card.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { stripDictatedMark } from '../../lib/dictationMark'
 import ReactMarkdown from 'react-markdown'
@@ -440,18 +441,16 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
     const left = r ? Math.max(8 - r.left, Math.min(x, window.innerWidth - 8 - 170 - r.left)) : x
     setMenuAt({ x: left, y, ...(href ? { href } : {}) })
   }, [onReply, onForward, onSelectStart, isMobile])
+  useEscapeOwner(menuAt !== null, () => setMenuAt(null))
   useEffect(() => {
     if (menuAt === null) return
     const close = () => setMenuAt(null)
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuAt(null) }
     // `mousedown` rather than `click`, so it closes on the press; and on SCROLL too, because the
     // menu is anchored to a bubble that moves while the conversation does.
     document.addEventListener('mousedown', close)
-    document.addEventListener('keydown', onKey)
     window.addEventListener('scroll', close, true)
     return () => {
       document.removeEventListener('mousedown', close)
-      document.removeEventListener('keydown', onKey)
       window.removeEventListener('scroll', close, true)
     }
   }, [menuAt])
@@ -1098,11 +1097,7 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
 })
 
 function VaultGrantModal({ grant, pt, isMobile, onClose }: { grant: VaultGrantMessage; pt: boolean; isMobile: boolean; onClose: () => void }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  useEscapeOwner(true, onClose)
   return (
     <div style={{ ...overlay, zIndex: 3000 }} role="dialog" aria-modal="true" aria-label={pt ? 'Credencial anexada' : 'Credential attached'} onClick={onClose}>
       <div style={{ ...card, maxWidth: 520, width: '100%', maxHeight: 'calc(88vh / var(--ui-zoom, 1))', overflowY: 'auto', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()}>

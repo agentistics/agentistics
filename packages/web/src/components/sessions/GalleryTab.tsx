@@ -34,6 +34,7 @@
  * bug the reader has to diagnose.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Eye, FileQuestion, FileText, Grid2x2, Images, List, Paperclip, PlayCircle } from 'lucide-react'
 import { agoLabel } from '../../lib/artifactTabs'
@@ -613,11 +614,7 @@ function MessageDialog({ group, pt, isMobile, now, onGoTo, onClose }: {
   onGoTo: () => void
   onClose: () => void
 }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
+  useEscapeOwner(true, onClose)
 
   const when = agoLabel(group.at, now, pt)
   return (

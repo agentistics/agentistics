@@ -17,6 +17,7 @@
  * a session's state by one poll interval — which is a bug people report as flicker.
  */
 
+import { useEscapeOwner } from '../lib/overlayStack'
 import { AwayChip, awayMenuItems } from '../components/sessions/AwayChip'
 import { useAway } from '../lib/awayMode'
 import { sessionLinks } from '../lib/sessionParent'
@@ -2472,6 +2473,13 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    * rather than a bare unconditional minimize, so a PINNED panel is left alone by Esc too — the same
    * "this stays until I say so" promise the pin makes against an accidental click.
    */
+  useEscapeOwner(artShell === 'overlay' && slotLayout.right !== null, () => {
+    const panel = slotLayout.right
+    if (panel === null) return
+    if (overlayOutsideAction({ pinned: false, insideOverlay: false, insideRail: false }) !== 'minimize') return
+    if (panelMinimizeAction(panel, 'rail') === 'collapse-right-park') setRightOpen(false)
+    else closeSlotPanel(panel)
+  })
   useEffect(() => {
     if (artShell !== 'overlay') return
     const panel = slotLayout.right
@@ -2493,16 +2501,9 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       const action = overlayOutsideAction({ pinned: false, insideOverlay, insideRail })
       if (action === 'minimize') minimize()
     }
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      const action = overlayOutsideAction({ pinned: false, insideOverlay: false, insideRail: false })
-      if (action === 'minimize') minimize()
-    }
     document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
     return () => {
       document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
     }
   }, [artShell, slotLayout.right, closeSlotPanel, setRightOpen])
 

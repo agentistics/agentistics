@@ -1,3 +1,4 @@
+import { useEscapeOwner } from '../lib/overlayStack'
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useOutletContext } from 'react-router-dom'
@@ -698,6 +699,8 @@ export default function CustomPage() {
 
   const isDragging = draggedCatalogItem !== null
 
+  useEscapeOwner(renaming, () => setRenaming(false))
+  useEscapeOwner(dupModal !== null, () => setDupModal(null))
   return (
     <div>
       <style>{`
@@ -782,7 +785,7 @@ export default function CustomPage() {
                 className="layout-rename-input"
                 value={renameValue}
                 onChange={e => setRenameValue(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleCommitRename(); if (e.key === 'Escape') setRenaming(false) }}
+                onKeyDown={e => { if (e.key === 'Enter') handleCommitRename(); }}
                 onBlur={handleCommitRename}
                 autoFocus
                 style={{ width: 130 }}
@@ -1271,7 +1274,6 @@ export default function CustomPage() {
                     duplicateLayout(activeLayout, dupModal.newName, dupModal.pinned)
                     setDupModal(null)
                   }
-                  if (e.key === 'Escape') setDupModal(null)
                 }}
                 style={{ width: '100%', boxSizing: 'border-box', padding: '8px 12px', background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', borderRadius: 8, fontSize: 13, color: 'var(--text-primary)', fontFamily: 'inherit', outline: 'none' }}
                 onFocus={e => e.currentTarget.style.borderColor = 'var(--anthropic-orange)60'}

@@ -16,6 +16,7 @@
  * rather than a modal so the row it acts on stays on screen while the question is being answered.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useEffect, useRef, useState } from 'react'
 import { MoreHorizontal, X } from 'lucide-react'
 import { SessionFiling } from '../tasks/SessionFiling'
@@ -172,6 +173,7 @@ export function SessionActions({
   }
 
   const shown = inline || open
+  useEscapeOwner(asking !== null, () => { setAsking(null); setDraft('') })
   return (
     <div style={inline ? { display: 'flex', flexDirection: 'column' } : { position: 'relative', flexShrink: 0 }}>
       {!inline && <button
@@ -273,7 +275,6 @@ export function SessionActions({
                   ref={inputRef}
                   value={draft}
                   onChange={e => setDraft(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Escape') { setAsking(null); setDraft('') } }}
                   style={{
                     width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 8,
                     border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)',

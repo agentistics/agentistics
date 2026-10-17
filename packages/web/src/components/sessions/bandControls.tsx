@@ -1,3 +1,4 @@
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -709,15 +710,13 @@ export function BandOverflowMenu({ label, entries, isMobile = false, icon }: {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  useEscapeOwner(open, () => setOpen(false))
   useEffect(() => {
     if (!open) return
     const away = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false) }
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
     document.addEventListener('mousedown', away)
-    document.addEventListener('keydown', key)
     return () => {
       document.removeEventListener('mousedown', away)
-      document.removeEventListener('keydown', key)
     }
   }, [open])
   // FOCUS THE FIRST ITEM ON OPEN — Tab alone would still reach every item (they are plain buttons),
@@ -1013,15 +1012,13 @@ export function PanelContextMenu({ at, entries, onClose }: {
   onClose: () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  useEscapeOwner(!!at, onClose)
   useEffect(() => {
     if (!at) return
     const away = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose() }
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('mousedown', away)
-    document.addEventListener('keydown', key)
     return () => {
       document.removeEventListener('mousedown', away)
-      document.removeEventListener('keydown', key)
     }
   }, [at, onClose])
   useEffect(() => {
@@ -1098,15 +1095,13 @@ export function PanelTileDropdown({ at, tiles, onPick, onClose, label }: {
   label: string
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  useEscapeOwner(!!at, onClose)
   useEffect(() => {
     if (!at) return
     const away = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose() }
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('mousedown', away)
-    document.addEventListener('keydown', key)
     return () => {
       document.removeEventListener('mousedown', away)
-      document.removeEventListener('keydown', key)
     }
   }, [at, onClose])
   useEffect(() => {

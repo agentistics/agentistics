@@ -1007,7 +1007,6 @@ export function Select({ value, onChange, options, placeholder, disabled, search
         if (opt && !opt.disabled) handleSelect(opt.value)
         break
       }
-      case 'Escape': e.preventDefault(); setOpen(false); break
       case 'Tab': setOpen(false); break
     }
   }
