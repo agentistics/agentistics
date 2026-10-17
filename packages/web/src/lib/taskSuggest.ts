@@ -19,7 +19,8 @@
 
 /** The minimum a caller must supply per session — satisfied by `FleetRow`. */
 export interface SuggestSession {
-  cwd: string
+  /** Absent on a row the reader could not place in a folder; such a row matches nothing. */
+  cwd?: string
   /** The delivery's TITLE. The id lives on the server's record, never on the fleet wire. */
   task?: string
 }
@@ -41,9 +42,11 @@ export interface DeliverySuggestion {
 /** A delivery that is finished takes no new work: filing into it would corrupt its own duration. */
 const OPEN = (status: string): boolean => status !== 'done' && status !== 'abandoned'
 
-/** Trailing separators only. Anything else would make two spellings of one folder two folders. */
-function normalizeDir(dir: string): string {
-  return dir.replace(/[/\\]+$/, '')
+/** Trailing separators only. Anything else would make two spellings of one folder two folders.
+ *  A fleet row can arrive without a folder (an external session the reader could not place): it
+ *  normalizes to '' and matches nothing, instead of crashing the new-session dialog. */
+function normalizeDir(dir: string | undefined): string {
+  return (dir ?? '').replace(/[/\\]+$/, '')
 }
 
 export function suggestDelivery(o: {
@@ -64,7 +67,7 @@ export function suggestDelivery(o: {
   for (const s of o.sessions) {
     // EXACTLY this folder. A prefix match would offer a repository's delivery to a worktree doing
     // something else entirely, which is the confident-wrong answer this module exists to avoid.
-    if (normalizeDir(s.cwd) !== here) continue
+    if (!s.cwd || normalizeDir(s.cwd) !== here) continue
     if (!s.task) continue
     const task = open.get(s.task)
     if (!task) continue
