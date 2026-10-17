@@ -26,6 +26,7 @@ import { getActivePane, usePaneId } from '../../lib/paneScope'
 import { matchTabShortcut } from '../../lib/panelShortcuts'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { SessionRowMenu } from './SessionRowMenu'
+import { HarnessMark } from './HarnessMark'
 import type { MenuEntry } from '../../lib/rowMenu'
 
 const LEADER_PREFIX = /^\[ (LÍDER|LEADER) \] - /
@@ -94,7 +95,7 @@ function Tab({ k, row, active, pinned, mobile, pt, onPick, onClose, onUnpin, onM
     display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, cursor: 'pointer', fontFamily: 'inherit',
     height: mobile ? 44 : 34, padding: '0 6px 0 12px', borderRadius: 0, boxSizing: 'border-box',
     fontSize: 12, whiteSpace: 'nowrap', scrollSnapAlign: 'center',
-    minWidth: mobile ? 132 : 110, maxWidth: 240,
+    minWidth: mobile ? 132 : 110, maxWidth: mobile ? 168 : 240,
     fontWeight: active || needs ? 650 : 500,
     color: active ? 'var(--text-primary)' : ended ? 'var(--text-tertiary)' : 'var(--text-secondary)',
     background: active ? 'var(--bg-surface, var(--bg-elevated))' : 'color-mix(in srgb, var(--bg-elevated) 55%, transparent)',
@@ -125,6 +126,7 @@ function Tab({ k, row, active, pinned, mobile, pt, onPick, onClose, onUnpin, onM
       style={style}
     >
       <TabStatus state={state} label={label} />
+      {row && <span style={{ display: 'inline-flex', flexShrink: 0 }}><HarnessMark harness={row.harness} size={14} /></span>}
       {role === 'leader' && <Crown size={11} aria-label={pt ? 'Líder' : 'Leader'} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />}
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>{title}</span>
       {pinned
