@@ -644,6 +644,8 @@ describe('one conversation, one row (CROSSBIND)', () => {
       for (let i = 0; i < 3; i++) await r.link('queued2', { conversationId: A })
     } finally { console.warn = orig }
     expect(warns.length).toBe(1)
+  })
+})
 
 describe('PLAN.ACCOUNTS D3 — the account survives a round trip and the heartbeat rewrite', () => {
   it('accountId is read back, and a patch of other fields keeps it', async () => {
