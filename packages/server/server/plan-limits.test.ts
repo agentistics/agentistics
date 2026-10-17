@@ -929,6 +929,23 @@ test('C2 LOW L3b: a transcript RESOLVED under the default home, whose binding is
   expect(live[0]!.account).toBe(current.id)
 })
 
+test('C2 R7: a default-home attribution CACHED while the account was active yields once that account retires', async () => {
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
+  __setHarnessAccountsForTest(store)
+  const { account: old } = await store.bind(null, { harness: 'codex', key: 'old', label: 'Old' })
+  const { account: current } = await store.bind(join(dir, 'root-b'), { harness: 'codex', key: 'cur', label: 'Cur' })
+  __setLiveTranscriptPathForTest(async () => join(CODEX_DIR, 'sessions', 'x.jsonl'))
+  const s = { session_id: 'dhc', harness: 'codex', input_tokens: 1 }
+  await sampleLivePlanSessions([s], ['dhc'], 0, {})
+  const before = await sampleLivePlanSessions([{ ...s, input_tokens: 2 }], ['dhc'], 1000, {}, new Set(['dhc']))
+  expect(before[0]!.account).toBe(old.id)
+  const doc = await store.readAccounts()
+  writeFileSync(join(dir, 'accounts.json'), JSON.stringify({ ...doc, accounts: doc.accounts.map(a => a.id === old.id ? { ...a, retired: true } : a) }))
+  const after = await sampleLivePlanSessions([{ ...s, input_tokens: 3 }], ['dhc'], 2000, {}, new Set(['dhc']))
+  expect(after).toHaveLength(1)
+  expect(after[0]!.account).toBe(current.id)
+})
+
 test('C2 LOW L4: default-home transcripts take the default binding; several visible accounts and no binding stay unattributed', async () => {
   const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
   __setHarnessAccountsForTest(store)

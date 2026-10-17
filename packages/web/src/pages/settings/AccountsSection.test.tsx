@@ -102,4 +102,10 @@ describe('AccountsView', () => {
     expect(h).toContain('95%')
     expect(h).toContain('94%')
   })
+
+  test('R4: never the e-mail beside a nickname, in the expanded row', () => {
+    const h = html({ accounts: [acc({ id: 'n1', nickname: 'Work', label: 'me@private.io' })] })
+    expect(h).toContain('Work')
+    expect(h).not.toContain('me@private.io')
+  })
 })

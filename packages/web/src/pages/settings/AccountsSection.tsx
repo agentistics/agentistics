@@ -20,7 +20,7 @@ import { DialogActions, FieldInput, RowSwitch, ScopeNote, SectionHeader, StatusD
 import { Pill } from '../../components/Pill'
 import { Disclosure } from '../../components/Disclosure'
 import {
-  accountKey, accountState, accountTitle, accountWhose, isUnidentified, nextOpen, summarizeHarnesses,
+  accountKey, accountState, accountTitle, accountWhose, isPlaceholderName, isUnidentified, nextOpen, summarizeHarnesses,
   type AccountRowData, type HarnessSummary,
 } from './accountsSummary'
 import { createAccountMutator, reconcileNickname } from './accountMutations'
@@ -141,7 +141,8 @@ function AccountRow({ a, props, isMobile }: { a: AccountRowData; props: Accounts
   const t = T(pt)
   const label = HARNESS_LABELS[a.harness] ?? a.harness
   const title = accountTitle(a, label, pt)
-  const whose = accountWhose(a, pt)
+  // Never the e-mail beside a nickname (same rule as the billing rows).
+  const whose = a.nickname && !isPlaceholderName(a.nickname) ? null : accountWhose(a, pt)
   const unconfirmed = isUnidentified(a)
   const limits = unconfirmed ? null : props.limits?.find(l => l.account === a.id) ?? null
   const busy = props.pendingIds.has(a.id)
@@ -309,7 +310,7 @@ export default function AccountsSection({ lang }: { lang: Lang }) {
                 sub={pt ? 'É só este nome que os agentes veem — nunca o e-mail.' : 'Agents only ever see this name — never the e-mail.'} />
               : <ScopeNote>{t.unconfirmedNote}</ScopeNote>}
             <p style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
-              {accountWhose({ label: detail.label }, pt) ?? detail.label} · {detail.plan ?? t.noPlan}
+              {detail.nickname && !isPlaceholderName(detail.nickname) ? '' : `${accountWhose({ label: detail.label }, pt) ?? detail.label} · `}{detail.plan ?? t.noPlan}
               {detail.root ? <><br />{detail.root}</> : null}
             </p>
             {(() => {

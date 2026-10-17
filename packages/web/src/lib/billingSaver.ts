@@ -25,6 +25,8 @@ export function createBillingSaver(opts: {
   initial: BillingSettings
   put: (b: BillingSettings) => Promise<{ ok: boolean }>
   onChange: (b: BillingSettings) => void
+  /** A write was acknowledged: `b` is exactly what is now stored (it may carry several queued edits). */
+  onStored?: (b: BillingSettings) => void
 }): BillingSaver {
   let current = opts.initial
   let stored = opts.initial
@@ -43,6 +45,7 @@ export function createBillingSaver(opts: {
           const res = await opts.put(sent)
           if (!res.ok) throw new Error('billing save refused')
           stored = sent
+          opts.onStored?.(sent)
         } catch (e) {
           if (mine === seq) set(stored)
           throw e

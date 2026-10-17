@@ -142,3 +142,10 @@ export function capabilityNotes(harness: HarnessId): CapabilityNote[] {
   if (harness === 'antigravity') out.push('singleAccount')
   return out
 }
+
+/** Close the period drawer only once its write is stored; a refused one keeps the user's draft for a retry. */
+export async function saveThenClose(persist: () => Promise<boolean>, close: () => void): Promise<boolean> {
+  const ok = await persist()
+  if (ok) close()
+  return ok
+}
