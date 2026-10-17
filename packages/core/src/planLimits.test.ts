@@ -464,3 +464,12 @@ describe('per-account primitives (B1)', () => {
     expect(meterDiscontinuity({ ...prev, windows: [w('week', 60, now - 1)] }, week(40, now + 2 * H))).toBe(false) // old renewed
   })
 })
+
+test('registered plan label resolves per account, falling back to the harness default', () => {
+  const p = (label: string) => ({ periods: [{ id: label, mode: 'subscription' as const, planId: 'other', label, price: { amount: 1, currency: 'USD' as const }, from: '2026-01-01' }] })
+  const billing = { profiles: { claude: p('Pro') }, accountProfiles: { acc_a: p('Max 20x') } }
+  const now = Date.parse('2026-10-09T12:00:00Z')
+  expect(registeredPlanLabel(billing, 'claude', now, 'acc_a')).toBe('Max 20x')
+  expect(registeredPlanLabel(billing, 'claude', now, 'acc_b')).toBe('Pro')
+  expect(registeredPlanLabel(billing, 'claude', now)).toBe('Pro')
+})

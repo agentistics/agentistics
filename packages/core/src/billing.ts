@@ -553,8 +553,26 @@ function mergePlanCosts(parts: readonly PlanCostResult[]): PlanCostResult {
     segments.push(...part.segments)
   }
   const invalidTimeline = parts.some((p) => p.invalidTimeline)
-  const coveredDays = coveredDayKeys.size
   const windowDays = first.windowDays
+  // One account's hand-edited overlap makes the whole sum unusable: return the empty shape (no cost, no
+  // covered days), exactly what a single invalid timeline returns, never the other accounts' partial C.
+  if (invalidTimeline) {
+    return {
+      subscriptionCostUSD: 0,
+      windowDays,
+      coveredDays: 0,
+      uncoveredDays: windowDays,
+      coverageRatio: 0,
+      coveredDayKeys: new Set(),
+      apiDayKeys: new Set(),
+      segments: [],
+      usedBrlRate: first.usedBrlRate,
+      brlRateUnusable: false,
+      invalidTimeline: true,
+      unavailable: true,
+    }
+  }
+  const coveredDays = coveredDayKeys.size
   return {
     subscriptionCostUSD,
     windowDays,

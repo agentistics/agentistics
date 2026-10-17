@@ -39,6 +39,8 @@ let loaded: Promise<void> | null = null
 
 type LiveUsageSample = { tokens: number; at: number; model: string; harness: HarnessId; account?: string }
 const liveUsage = new Map<string, LiveUsageSample>()
+/** The account a transcript path resolved to, per session: one root scan per session, not per request. */
+const pathAccounts = new Map<string, { harness: HarnessId; account: string }>()
 const isHarnessId = (value: string): value is HarnessId => HARNESS_ORDER.some(harness => harness === value)
 
 /** One key for both the API's measured budgets and the sampler's resolved accounts. */
@@ -51,7 +53,12 @@ const sessionHomes: Record<HarnessId, string> = {
 
 /** Explicit managed ids and transcript roots win over the default/only-visible fallback. */
 function fallbackSessionAccount(harness: HarnessId, registry: AccountsFile, visible: readonly string[]): string | undefined {
-  return registry.bindings[`${harness}:`] ?? (visible.length === 1 ? visible[0] : undefined)
+  const bound = registry.bindings[`${harness}:`]
+  // A default binding that points at a hidden or retired account must not swallow default-home
+  // sessions while exactly one other account is the visible one.
+  const boundGone = bound !== undefined && registry.accounts.some(a => a.id === bound && (!a.available || a.retired))
+  if (bound && !(boundGone && visible.length === 1)) return bound
+  return visible.length === 1 ? visible[0] : undefined
 }
 
 type LiveSessionRef = { session_id: string; harness: string; native_session_id?: string; project_path?: string }
@@ -109,14 +116,20 @@ export async function sampleLivePlanSessions(
   }
   const wanted = new Set(liveIds)
   for (const id of liveUsage.keys()) if (!wanted.has(id)) liveUsage.delete(id)
+  for (const id of pathAccounts.keys()) if (!wanted.has(id)) pathAccounts.delete(id)
   const rates = new Map<string, { session: typeof sessions[number]; rate: number; harness: HarnessId; account?: string }>()
   for (const s of sessions) {
     if (!isHarnessId(s.harness)) continue
     if (!wanted.has(s.session_id)) continue
     let account = managedAccounts.get(s.session_id) ?? (s.native_session_id ? managedAccounts.get(s.native_session_id) : undefined)
     if (!account) {
-      const path = await liveTranscriptPath(s, registry.bindings).catch(() => null)
-      if (path) account = accountAtPath(s.harness, path, registry.bindings)
+      const known = pathAccounts.get(s.session_id)
+      if (known && known.harness === s.harness) account = known.account
+      else {
+        const path = await liveTranscriptPath(s, registry.bindings).catch(() => null)
+        if (path) account = accountAtPath(s.harness, path, registry.bindings)
+        if (account) pathAccounts.set(s.session_id, { harness: s.harness, account })
+      }
       const visible = registry.accounts.filter(a => a.harness === s.harness && a.available && !a.retired).map(a => a.id)
       const metered = Object.keys(burnByAccount).filter(k => k.startsWith(`${s.harness}:`)).map(k => k.slice(s.harness.length + 1))
         .filter(id => !registry.accounts.some(a => a.harness === s.harness && a.id === id && (!a.available || a.retired)))
@@ -124,7 +137,7 @@ export async function sampleLivePlanSessions(
     }
     const tokens = (s.input_tokens ?? 0) + (s.output_tokens ?? 0) + (s.cache_read_input_tokens ?? 0) + (s.cache_creation_input_tokens ?? 0)
     const previous = liveUsage.get(s.session_id)
-    const recent = previous && previous.harness === s.harness && previous.account === account && nowMs >= previous.at && nowMs - previous.at <= 10 * 60_000
+    const recent = previous && previous.harness === s.harness && (previous.account === account || previous.account === undefined) && nowMs >= previous.at && nowMs - previous.at <= 10 * 60_000
     const rate = recent ? Math.max(0, tokens - previous.tokens) : 0
     liveUsage.set(s.session_id, { tokens, at: nowMs, model: s.model ?? 'unknown', harness: s.harness, account })
     if (working?.has(s.session_id) || rate > 0) rates.set(s.session_id, { session: s, rate, harness: s.harness, account })
@@ -605,7 +618,10 @@ export async function planLimitsPayload(
     const starts = [segmentStarts.get(account), registrySegments[account]].filter((v): v is number => v !== undefined)
     return starts.length ? Math.max(...starts) : undefined
   }
-  const profileHarnesses = Object.keys(billing?.profiles ?? {}).filter(isHarnessId)
+  const profileHarnesses = [...new Set([
+    ...Object.keys(billing?.profiles ?? {}).filter(isHarnessId),
+    ...Object.keys(billing?.accountProfiles ?? {}).flatMap(id => registry.accounts.filter(a => a.id === id).map(a => a.harness)),
+  ])]
   // The stored meters are read BEFORE the registry await: an answer never mixes a meter stored
   // while the accounts were being resolved with accounts resolved before it existed.
   const stored = Object.values(state.limits)
@@ -664,11 +680,11 @@ export async function planLimitsPayload(
   // name with NO meters (nothing observed is not nothing used). Hidden accounts are absent.
   const registered: PlanLimitsPayload['registered'] = []
   for (const h of profileHarnesses) {
-    const plan = registeredPlanLabel(billing, h, nowMs)
-    if (!plan) continue
     const mine = accounts.filter(a => a.harness === h && !a.retired)
     const targets = mine.length ? mine : [{ id: '', harness: h, available: true } as const]
     for (const a of targets) {
+      const plan = registeredPlanLabel(billing, h, nowMs, a.id || undefined)
+      if (!plan) continue
       const account = a.id || 'default'
       if (!a.available || limits.some(l => l.harness === h && (l.account === account || (!a.id && !byAccount.has(l.account))))) continue
       registered.push({ harness: h, account, plan })
@@ -706,6 +722,7 @@ export function __resetPlanLimitsForTest(file: string | null = null): void {
   // the owner's HOME): a path that cannot exist keeps `syncPlanLimitsFromFile` empty.
   filePath = file ?? join(AGENTISTICS_DATA_DIR, `.plan-limits-test-none-${process.pid}`, 'plan-limits.json')
   liveUsage.clear()
+  pathAccounts.clear()
   fileMtime = 0
   loaded = file ? null : Promise.resolve()
   persistOff = file === null

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { Plus, Pencil, Trash2, Sparkles, AlertTriangle, Info, ArrowRightLeft, ChevronDown } from 'lucide-react'
 import {
@@ -48,6 +48,11 @@ import {
   type PeriodDraft,
 } from './billingForm'
 import AccountsSection from './AccountsSection'
+import { AccountPlans, FirstDetectionNotice } from './AccountRow'
+import { accountsNeedingPlan, answerNotice, billableAccounts, ownPeriods, toggleAvailability, unknownPeriod, withAccountPeriods, type BillingAccount } from './accountBilling'
+import { accountTitle } from './accountsSummary'
+import { createAccountMutator } from './accountMutations'
+import { usePlanLimits } from '../../lib/planLimits'
 
 /** The wire shape of `GET /api/billing/plan-prices`. Declared here rather than imported: the web
  *  bundle must never reach into `packages/server`. */
@@ -80,7 +85,53 @@ export default function BillingSettings() {
     if (!harnesses.includes(harness)) setHarness(harnesses[0] ?? 'claude')
   }, [harnesses, harness])
 
-  const timeline: BillingTimeline = ctx.billing.profiles[harness] ?? { periods: [] }
+  // Accounts: the editor below targets ONE timeline — an account's own, or the assistant's default.
+  const { limits: planLimits, now: limitsNow } = usePlanLimits()
+  const [accounts, setAccounts] = useState<BillingAccount[]>([])
+  const [pendingIds, setPending] = useState<Set<string>>(new Set())
+  const [failedIds, setFailed] = useState<Set<string>>(new Set())
+  const [target, setTarget] = useState<string | null>(null)
+  const mutator = useRef(createAccountMutator<BillingAccount>((id, body) =>
+    fetch(`/api/accounts/${encodeURIComponent(id)}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }))).current
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/accounts')
+      .then(r => (r.ok ? r.json() : null))
+      .then((b: { accounts?: BillingAccount[] } | null) => { if (!cancelled) setAccounts(b?.accounts ?? []) })
+      .catch(() => { /* the default timeline still works without the list */ })
+    return () => { cancelled = true }
+  }, [])
+  const harnessAccounts = useMemo(() => billableAccounts(accounts, harness), [accounts, harness])
+  const targetAccount = target ? harnessAccounts.find(a => a.id === target) ?? null : null
+  useEffect(() => { if (target && !targetAccount) setTarget(null) }, [target, targetAccount])
+  const needPlan = useMemo(
+    () => accountsNeedingPlan(accounts, ctx.billing, harnesses),
+    [accounts, ctx.billing, harnesses],
+  )
+  const toggleAccount = async (a: BillingAccount) => {
+    if (mutator.has(a.id)) return
+    setPending(h => new Set(h).add(a.id))
+    const res = await toggleAvailability(mutator, a)
+    setPending(h => { const n = new Set(h); n.delete(a.id); return n })
+    if (res.status === 'ok') {
+      setAccounts(h => h.map(x => x.id === a.id ? { ...x, ...res.account } : x))
+      setFailed(h => { const n = new Set(h); n.delete(a.id); return n })
+    } else if (res.status === 'failed') setFailed(h => new Set(h).add(a.id))
+  }
+  const answer = async (a: BillingAccount, planId: string) => {
+    const next = answerNotice(ctx.billing, a, planId, today(), newPeriodId)
+    if (next) await ctx.saveBilling(next)
+    else { setHarness(a.harness); setTarget(a.id); openDraft({ ...emptyDraft(), planId, from: today(), ongoing: true }) }
+  }
+  const dismiss = async (a: BillingAccount) => {
+    await ctx.saveBilling(withAccountPeriods(ctx.billing, a.id, [unknownPeriod(today(), newPeriodId)]))
+  }
+
+  const timeline: BillingTimeline = target
+    ? { periods: ownPeriods(ctx.billing, target) }
+    : ctx.billing.profiles[harness] ?? { periods: [] }
   const periods = useMemo(() => sortPeriods(timeline.periods), [timeline.periods])
   const timelineErrors = useMemo(() => validateTimeline(timeline), [timeline])
 
@@ -128,17 +179,21 @@ export default function BillingSettings() {
   }, [])
 
   const persist = useCallback(async (nextPeriods: BillingPeriod[]) => {
-    const profiles = { ...ctx.billing.profiles }
-    if (nextPeriods.length > 0) profiles[harness] = { periods: nextPeriods }
-    else delete profiles[harness]
-    const next: BillingSettingsShape = { ...ctx.billing, profiles }
+    let next: BillingSettingsShape
+    if (target) next = withAccountPeriods(ctx.billing, target, nextPeriods)
+    else {
+      const profiles = { ...ctx.billing.profiles }
+      if (nextPeriods.length > 0) profiles[harness] = { periods: nextPeriods }
+      else delete profiles[harness]
+      next = { ...ctx.billing, profiles }
+    }
     setSaveError(null)
     try {
       await ctx.saveBilling(next)
     } catch {
       setSaveError(pt ? 'Não foi possível salvar. Tente de novo.' : 'Could not save. Try again.')
     }
-  }, [ctx, harness, pt])
+  }, [ctx, harness, pt, target])
 
   const draftErrors = useMemo(
     () => (draft ? validateDraft(draft, periods, newPeriodId) : []),
@@ -262,7 +317,7 @@ export default function BillingSettings() {
           <TabSelect
             options={harnesses.map(h => ({ value: h, label: HARNESS_LABELS[h] ?? h }))}
             value={harness}
-            onChange={setHarness}
+            onChange={h => { setHarness(h); setTarget(null) }}
           />
         </div>
       )}
@@ -279,6 +334,25 @@ export default function BillingSettings() {
               ? 'Há períodos com problema nesta linha do tempo. Enquanto isso não for resolvido, o custo do plano não pode ser calculado para este harness — dois planos cobrindo o mesmo dia cobrariam esse dia duas vezes.'
               : 'Some periods on this timeline have problems. Until they are fixed the plan cost cannot be computed for this harness — two plans covering the same day would charge that day twice.'}
           </div>
+        </div>
+      )}
+
+      {needPlan.map(a => (
+        <FirstDetectionNotice key={a.id} lang={ctx.lang} account={a} onAnswer={answer} onDismiss={dismiss} />
+      ))}
+
+      <AccountPlans
+        lang={ctx.lang} harness={harness} accounts={harnessAccounts} billing={ctx.billing}
+        limits={planLimits} now={limitsNow} today={today()} pendingIds={pendingIds} failedIds={failedIds}
+        selectedId={target} onToggle={a => { void toggleAccount(a) }} onEdit={a => setTarget(a.id)}
+      />
+      {targetAccount && (
+        <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: '0 0 10px' }}>
+          {pt ? 'Editando o plano de' : 'Editing the plan of'} <b>{accountTitle(targetAccount, HARNESS_LABELS[harness] ?? harness, pt)}</b>
+          {' · '}
+          <button type="button" onClick={() => setTarget(null)} style={{ ...linkBtn, display: 'inline', marginTop: 0 }}>
+            {pt ? 'editar o padrão do assistente' : 'edit the assistant default'}
+          </button>
         </div>
       )}
 
