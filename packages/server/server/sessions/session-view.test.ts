@@ -324,6 +324,25 @@ describe("what the harness says about its OWN session", () => {
     expect(views[0]!.status).toBe('closed')
   })
 
+  it('a history row wears the label agentop gave the ENDED session, not the harness summary', () => {
+    const views = buildSessionViews({
+      reconciled: [
+        row('old', { status: 'exited', managed: managed('old', {
+          label: 'UPX QA R3', conversationId: 'c1', endedAt: '2026-10-16T10:00:00.000Z' }) }),
+        row('new', { status: 'exited', managed: managed('new', {
+          label: '[ LÍDER ] - UPX Discovery', conversationId: 'c1', endedAt: '2026-10-17T10:00:00.000Z' }) }),
+      ],
+      activity: new Map(),
+      processes: [],
+      conversations: [{
+        sessionId: 'c1', title: 'Handoff de líder UPX Discovery', lastActivityMs: 1, startedMs: 0,
+        harness: 'claude' as const, cwd: '/repo/a', resumable: true, firstPrompt: '',
+      }],
+    })
+    const closed = views.find(v => v.status === 'closed')!
+    expect(closed.label).toBe('[ LÍDER ] - UPX Discovery')
+  })
+
   it('never lets a DERIVED name displace a real store title', () => {
     // `agentistics-84` is what the harness invents from the folder when nobody has said anything.
     const views = buildSessionViews({

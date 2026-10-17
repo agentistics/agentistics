@@ -949,6 +949,20 @@ export function buildSessionViews(o: {
   // a harness has no sessions is not a truncated list, it is a wrong one — and the harness FILTER
   // is built from these rows, so it offered three options while the dashboard offered six.
   const closedCandidates = conversations.filter(c => !shown.has(c.sessionId))
+  // The name agentop gave an ENDED session, by the conversation it recorded. The history row below
+  // is built from the conversation store, whose title is the harness's own summary of the first
+  // prompt ("Handoff de líder UPX Discovery"), so a session named "[ LÍDER ] - UPX Discovery" or
+  // "UPX QA R3" came back in history under a name nobody chose. The newest record wins.
+  const endedLabels = new Map<string, string>()
+  const endedStamp = new Map<string, number>()
+  for (const r of o.reconciled) {
+    const m = r.managed
+    const name = (m?.label && m.label.trim() !== '' ? m.label : undefined) ?? m?.harnessName
+    if (!m?.conversationId || !name) continue
+    const at = Date.parse(m.endedAt ?? m.createdAt ?? '') || 0
+    const key = m.conversationId
+    if (at >= (endedStamp.get(key) ?? -1)) { endedStamp.set(key, at); endedLabels.set(key, name) }
+  }
   const closed: SessionView[] = capClosedConversations(
     closedCandidates, o.closedLimit ?? DEFAULT_CLOSED_LIMIT,
   )
@@ -969,7 +983,7 @@ export function buildSessionViews(o: {
        * displaces a real title.
        */
       const own = o.harnessSessions?.byConversation.get(c.sessionId)
-      const named = chosenName(own)
+      const named = chosenName(own) ?? endedLabels.get(c.sessionId)
       return {
       id: closedRowId(c.sessionId),
       harness: c.harness,
