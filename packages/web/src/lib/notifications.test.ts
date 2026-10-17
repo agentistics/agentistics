@@ -419,7 +419,7 @@ describe('retirement notification localization', () => {
     const { resolveNotification } = await import('./notifications')
     for (const code of ['retire.done', 'retire.cancelled', 'retire.expired']) {
       const n: AppNotification = { id: 'retire1', type: 'info', code, ts: 0, read: false,
-        meta: { id: 'p1', label: 'Leader', successorId: 's1', reason: 'still working' } }
+        meta: { id: 'p1', label: 'Leader', successorId: 's1', reason: 'working' } }
       const en = resolveNotification(n, 'en')
       const pt = resolveNotification(n, 'pt')
       expect(en.title).not.toBe(pt.title)
@@ -428,8 +428,36 @@ describe('retirement notification localization', () => {
         expect(localized.message).toContain('Leader')
         expect(localized.message).not.toMatch(/\{\w+\}/)
         if (code === 'retire.cancelled') expect(localized.message).toContain('s1')
-        if (code === 'retire.expired') expect(localized.message).toContain('still working')
+        if (code === 'retire.expired') {
+          expect(localized.message).toContain(localized === en ? 'still working' : 'ainda está trabalhando')
+          if (localized === pt) expect(localized.message).not.toContain('still working')
+        }
       }
     }
   })
+})
+
+
+test('every retirement expiry reason code has translated copy, including multiple reasons', async () => {
+  const { resolveNotification, RETIRE_REASON_TEXT } = await import('./notifications')
+  const codes = ['working', 'waiting-approval', 'activity-unknown', 'not-confirmed', 'quiet-too-short',
+    'bg-tasks', 'bg-unknown', 'children-unreadable', 'successor-unknown', 'work-child', 'deadline']
+  for (const reason of codes) {
+    const n: AppNotification = { id: 'retire-reason', code: 'retire.expired', type: 'warning', ts: 0, read: false,
+      meta: { id: 'p1', label: 'Leader', reason } }
+    expect(RETIRE_REASON_TEXT[reason]).toBeDefined()
+    const text = RETIRE_REASON_TEXT[reason]!
+    expect(text.en).not.toBe(text.pt)
+    expect(resolveNotification(n, 'pt').message).toContain(text.pt)
+    expect(resolveNotification(n, 'pt').message).not.toContain(text.en)
+    expect(resolveNotification(n, 'en').message).toContain(text.en)
+  }
+  for (const lang of ['en', 'pt'] as const) {
+    const n: AppNotification = { id: 'multi', code: 'retire.expired', type: 'warning', ts: 0, read: false,
+      meta: { id: 'p1', label: 'Leader', reason: 'bg-tasks', reasons: ['bg-tasks', 'work-child'] } }
+    const message = resolveNotification(n, lang).message!
+    expect(message).toContain(RETIRE_REASON_TEXT['bg-tasks']![lang])
+    expect(message).toContain(RETIRE_REASON_TEXT['work-child']![lang])
+    expect(message).not.toMatch(/\{\w+\}/)
+  }
 })

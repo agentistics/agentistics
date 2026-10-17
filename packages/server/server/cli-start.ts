@@ -34,8 +34,6 @@ import { loadNativeFleet, runNativeVerb, isNativeSessionId } from './sessions/na
 import { spawn } from 'node:child_process'
 import { rekeyMutedSession } from './sessions/session-notify-web'
 import { rekeyFolderMember } from './sessions/cli-folder'
-import { rekeyCheckinSession } from './sessions/handoff-inherit'
-import { updatePreferences } from './preferences'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, writeSync } from 'node:fs'
 import { basename, dirname, join, resolve as resolvePath } from 'node:path'
@@ -1759,8 +1757,8 @@ async function sampleLinksFor(harness: HarnessId, deadline: () => number, onlyId
 
 /** The one write a process-transcript link makes, wherever it was found. */
 /**
- * Write a conversation link the poller found, and carry the mute/folder/check-in/role keyed by the
- * managed id over to it. REFUSED — and thrown, so every caller reads it as "not linked" — when another
+ * Write a conversation link the poller found; the registry carries the identity-keyed preferences
+ * over (`withIdentityPreferences`). REFUSED — and thrown, so every caller reads it as "not linked" — when another
  * row already owns that conversation (`conversationOwnedElsewhere`, CROSSBIND): a second row on one
  * conversation is one session's chat shown under another's name.
  */
@@ -1774,12 +1772,7 @@ function recordProcessLink(sid: string, conversationId: string, link: 'assigned'
       if (!outcome.ok && outcome.heldBy) throw new Error(`conversation ${conversationId} is owned by session ${outcome.heldBy}`)
       // Not written: the registry lock could not be taken, so the ownership check never ran. Retried next poll.
       if (!outcome.ok && outcome.contended) throw new Error(`conversation ${conversationId} not linked: registry lock contended`)
-      const r = outcome.ok
-      await rekeyMutedSession(sid, conversationId).catch(() => {})
-      await rekeyFolderMember(sid, conversationId).catch(() => {})
-      await rekeyCheckinSession(sid, conversationId, updatePreferences).catch(() => {})
-      await rekeyStoredRole([sid], [sid, conversationId]).catch(() => {})
-      return r
+      return outcome.ok
     })
 }
 

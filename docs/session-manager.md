@@ -738,23 +738,39 @@ Two distinct polls must observe `waiting`. After transcript and process probes, 
 the hub and checks `waiting` and the quiet duration again immediately before killing. A failed
 refresh, resumed work, or a deadline reached during the probes leaves the session alive.
 
-Claude background tasks are counted only when the transcript window is complete. A window with
-older turns is unknown and blocks retirement. Other harnesses have no background-task concept and
+Claude background tasks are counted over the complete transcript, without a turn limit, up to a
+64 MiB byte budget. A larger or unreadable transcript is unknown and blocks retirement. Other harnesses have no background-task concept and
 need no conversation id or transcript for this probe. A failed process probe blocks retirement on a
 trusted harness; unmeasured or untrusted harnesses still carry the explicit unchecked note.
 
 A missing successor is unknown during its 30-second birth grace, measured from the later of its
 registry creation and the retire request. Cancellation requires an explicit terminal status or two
 distinct missing snapshots after that grace. An `unregistered` successor is alive. A missing
-predecessor is never filed as ended from absence alone; `lost` requires two consecutive distinct
-polls. All terminal rows, including explicit `exited` or `closed`, are checked in a fresh hub poll
-before filing them as ended.
+predecessor counts as stopped after two consecutive distinct missing snapshots past a 30-second
+grace from the later of creation and the retire request. One missing snapshot still waits, and
+reappearance resets confirmation. `lost` also requires two consecutive distinct polls. All stopped
+rows are checked in a fresh hub poll before filing them as ended; an unavailable poll blocks filing.
 
 Retirement notifications use `retire.done`, `retire.cancelled`, and `retire.expired` with metadata
-and English/Portuguese display strings. Expiry reasons retain the diagnostic English text.
-Structured relays wait for stdout to close before publishing exit and leaving, preserving final
-lines and unterminated output while retaining process-group termination after the grace period.
+and English/Portuguese display strings. Expiry metadata carries reason codes, translated when
+displayed; registry diagnostics and task comments retain the diagnostic English text. Plan codes
+`handoff_pending` and `working` are not notification codes.
+Structured relays drain stdout before publishing exit and leaving, preserving final lines and
+unterminated output while retaining process-group termination after the grace period. On TERM,
+a pipe held open by an escaped descendant can delay exit only until the group grace plus a
+50 ms scheduling allowance and one extra second for draining; buffered output is then flushed and
+exit is published even if stdout never closes.
 
 Known limitation (S5 QA L3, deferred to S6): configured MCP commands are read only for Claude.
 For other harnesses, an extra MCP server can conservatively count as a work child and delay
 retirement until expiry. The shared `agentop mcp` exclusion still applies to every harness.
+
+### Conversation identity and saved preferences
+
+When a managed session learns its conversation id, its sidebar identity changes from the managed
+id to the conversation id. The production registry carries folder membership, pins, notification
+mutes, check-in agendas, stored roles and floating-panel layouts across that transition for every
+harness. The first registry read also repairs saved managed-id entries for already linked rows,
+using one preferences update for the batch. Preference failures do not reject a recorded link;
+restarting the server retries orphan repair. Open session tabs remain browser-local; the server's
+`ui.sessionTabs` preference is only the feature flag.

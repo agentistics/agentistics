@@ -126,7 +126,12 @@ export function decideSpawnAccount(input: {
   // The owner keeps the default root: its own (hidden) login, or an unregistered one as before
   // accounts existed. An agent with no allowed target left is refused rather than handed either.
   if (!agentCaller) return home ? { ok: true, account: at(home) } : { ok: true }
+  // A visible account the registry could not bind (e.g. a Codex login with no readable e-mail) while
+  // NO binding names the default root's login: that root runs exactly as before accounts existed.
+  // Refusing here blocked every agent spawn of that harness (2.140.5). A default root another
+  // (hidden) login holds is still refused below.
   const signedOut = live.find(visible)
+  if (signedOut && !defaultLoginOf(mine)) return { ok: true }
   return signedOut
     ? { ok: false, reason: 'account_signed_out', detail: signedOut.id }
     : { ok: false, reason: 'account_unavailable', detail: (home ?? live[0]!).id }

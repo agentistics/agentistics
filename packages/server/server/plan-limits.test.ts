@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { CODEX_DIR } from './config'
 import { existsSync, chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, renameSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -898,7 +898,8 @@ test('L7: default legacy labels do not duplicate real #1; hidden rows do not ski
   const labels = Object.fromEntries([...body.budgets, ...body.hiddenFromAgents].map(b => [b.account, b.accountLabel]))
   expect(labels[first.id]).toBe('Codex CLI #1')
   expect(labels[second.id]).toBe('Codex CLI #2')
-  expect(labels.default).toBe('Codex CLI')
+  // BILLING.SIMPLE §7.3: beside other rows the legacy meter never wears the bare harness name.
+  expect(labels.default).toBe('Codex CLI #3')
 })
 
 test('L8: MCP fallback sums free slots per harness and excludes held accounts', () => {
@@ -1196,4 +1197,45 @@ test('a lock that times out once never writes unlocked, then the reading persist
   expect(wroteWhileContended).toBe(false)
   expect(calls).toBeGreaterThanOrEqual(2)
   expect(JSON.parse(readFileSync(limitsFile, 'utf8')).limits['codex:acc_c00000000000'].windows[0].usedPct).toBe(44)
+})
+
+describe('a `default` meter beside identified accounts (BILLING.SIMPLE §7)', () => {
+  const sub = (label: string) => ({ periods: [{ id: 'bp_1', mode: 'subscription' as const, planId: 'other', label, price: { amount: 20, currency: 'USD' as const }, from: '2026-01-01' }] })
+  const codexAccount = (id: string, root: string, firstSeen = 1) =>
+    ({ id, root, key: `k-${id}`, harness: 'codex', label: id, available: true, firstSeen, lastSeen: firstSeen })
+  const seed = async (accounts: unknown[]) => {
+    writeFileSync(join(dir, 'accounts.json'), JSON.stringify({ version: 2, bindings: {}, segments: {}, accounts }))
+    const now = now0()
+    await ingestPlanLimits({ harness: 'codex', account: 'default', plan: 'Plus', windows: [{ kind: '5h', usedPct: 56, resetsAt: now + H }, { kind: 'week', usedPct: 62, resetsAt: now + 72 * H }], updatedAt: now, source: 'codex-rollout' })
+    return now
+  }
+
+  test('one live identified account: the meter is that account\'s, and its plan is not listed as waiting', async () => {
+    const now = await seed([codexAccount('acc_codex000001', '/r1')])
+    const body = await planLimitsPayload({ profiles: {}, accountProfiles: { acc_codex000001: sub('ChatGPT Plus') } }, now)
+    expect(body.limits.map(l => l.account)).toEqual(['acc_codex000001'])
+    expect(body.limits[0]!.plan).toBe('ChatGPT Plus')
+    expect(body.registered).toEqual([])
+    expect(body.budgets.map(b => [b.account, b.accountLabel])).toEqual([['acc_codex000001', 'Codex CLI #1']])
+  })
+
+  test('two live accounts: the meter stays `default`, and no row wears the bare harness name', async () => {
+    const now = await seed([codexAccount('acc_codex000001', '/r1', 1), codexAccount('acc_codex000002', '/r2', 2)])
+    await ingestPlanLimits({ harness: 'codex', account: 'acc_codex000002', plan: 'Plus', windows: [{ kind: '5h', usedPct: 5, resetsAt: now + H }], updatedAt: now, source: 'codex-rollout' })
+    const body = await planLimitsPayload(undefined, now)
+    expect(body.limits.map(l => l.account).sort()).toEqual(['acc_codex000002', 'default'])
+    const labels = [...body.budgets, ...body.hiddenFromAgents].filter(b => b.harness === 'codex').map(b => b.accountLabel)
+    expect(labels).toHaveLength(2)
+    expect(labels).not.toContain('Codex CLI')
+    expect(new Set(labels).size).toBe(2)
+  })
+
+  test('a registered plan whose login already has a meter (a same-login twin) is not waiting', async () => {
+    const twin = { ...codexAccount('acc_codex000002', '/r2'), key: 'k-acc_codex000001' }
+    writeFileSync(join(dir, 'accounts.json'), JSON.stringify({ version: 2, bindings: {}, segments: {}, accounts: [codexAccount('acc_codex000001', '/r1'), twin] }))
+    const now = now0()
+    await ingestPlanLimits({ harness: 'codex', account: 'acc_codex000001', plan: 'Plus', windows: [{ kind: '5h', usedPct: 5, resetsAt: now + H }], updatedAt: now, source: 'codex-rollout' })
+    const body = await planLimitsPayload({ profiles: { codex: sub('ChatGPT Plus') } }, now)
+    expect(body.registered).toEqual([])
+  })
 })
