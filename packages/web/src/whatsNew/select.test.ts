@@ -47,3 +47,18 @@ describe('planWhatsNew', () => {
     expect(planWhatsNew({ current: '2.1.3', seen: '2.1.2', table: T })).toBeNull()
   })
 })
+
+describe('release notes keep up with the shipped version', () => {
+  test('the newest entry is not more than one minor behind package.json', async () => {
+    const pkg = (await import('../../package.json')).default as { version: string }
+    const newest = Object.keys((await import('./releases')).RELEASES).sort((a, b) => compareVersions(b, a) ?? 0)[0]!
+    const [cm] = pkg.version.split('.').slice(1).map(Number)
+    const [nm] = newest.split('.').slice(1).map(Number)
+    // Releases that ship without an entry announce nothing after the update (the 2.137–2.140 gap).
+    expect((cm ?? 0) - (nm ?? 0)).toBeLessThanOrEqual(1)
+  })
+  test('an update across entry-less patch versions still announces the entries in range', () => {
+    const plan = planWhatsNew({ current: '2.140.3', seen: '2.136.1' })
+    expect(plan?.entries.length).toBeGreaterThan(0)
+  })
+})

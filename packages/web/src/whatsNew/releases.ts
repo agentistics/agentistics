@@ -10,6 +10,94 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.140.3': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O aviso de papel da sessão aparece como uma linha de sistema, não como mensagem sua.',
+        en: 'The session role notice shows as a system row, not as a message from you.',
+      },
+      {
+        pt: 'O cofre bloqueado deixou de consultar o servidor sem parar.',
+        en: 'A locked vault no longer keeps polling the server.',
+      },
+      {
+        pt: 'Pastas ocultas ficam no topo da lista e sessões encerradas ocupam menos espaço.',
+        en: 'Hidden folders sit at the top of the list and ended sessions take less room.',
+      },
+    ],
+  },
+  '2.140.1': {
+    features: [
+      {
+        pt: 'No assistente de nova sessão dá para criar um projeto novo na hora.',
+        en: 'The new-session wizard can create a brand-new project on the spot.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.139.0': {
+    features: [
+      {
+        pt: 'O chat por adaptadores agora vem ligado para todos.',
+        en: 'Adapter-based chat is now on for everyone.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.138.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O botão de modo ausente ficou mais claro e Esc fecha a camada aberta por cima, uma de cada vez.',
+        en: 'The away toggle looks clearer and Esc closes the top overlay, one at a time.',
+      },
+      {
+        pt: 'Linhas de sistema no chat ficaram mais discretas.',
+        en: 'System lines in the chat are quieter.',
+      },
+    ],
+  },
+  '2.138.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Mensagens entre sessões aparecem como eventos do sistema, não como se fossem suas.',
+        en: 'Messages between sessions show as system events, not as if you had written them.',
+      },
+    ],
+  },
+  '2.138.0': {
+    features: [
+      {
+        pt: 'O início de uma sessão agora segue um fluxo numerado.',
+        en: 'Starting a session now follows a numbered flow.',
+      },
+      {
+        pt: 'A contagem de sessões em modo ausente atualiza ao vivo.',
+        en: 'The away-session count updates live.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.137.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Sessões encerradas deixam de aparecer como ativas na lateral.',
+        en: 'Ended sessions no longer linger as active in the side list.',
+      },
+    ],
+  },
+  '2.137.0': {
+    features: [
+      {
+        pt: 'Passagem de líder entre sessões mais confiável e início de sessão atômico.',
+        en: 'More reliable leader hand-off between sessions and atomic session start.',
+      },
+    ],
+    fixes: [],
+  },
   '2.136.1': {
     features: [],
     fixes: [
