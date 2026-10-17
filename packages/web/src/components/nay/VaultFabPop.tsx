@@ -12,6 +12,7 @@
  * overlay inside a transformed ancestor would be positioned against the button instead of the screen.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { Suspense, lazy, useEffect, useReducer, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { VaultGlyph as Vault } from '../vault/VaultGlyph'
@@ -68,6 +69,7 @@ export function VaultFabPop({ lang, isMobile, suppressed, children }: {
   useEffect(() => { if (suppressed) { cancelPress(); dispatch({ type: 'dismiss' }) } }, [suppressed])
 
   // Outside press / Escape → it sinks back. The press on the button itself is left to summon again.
+  useEscapeOwner(s.phase === 'shown', () => dispatch({ type: 'dismiss' }))
   useEffect(() => {
     if (s.phase !== 'shown') return
     const onDown = (e: PointerEvent) => {
@@ -75,10 +77,8 @@ export function VaultFabPop({ lang, isMobile, suppressed, children }: {
       if (iconRef.current?.contains(t) || wrapRef.current?.contains(t)) return
       dispatch({ type: 'dismiss' })
     }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') dispatch({ type: 'dismiss' }) }
     window.addEventListener('pointerdown', onDown, true)
-    window.addEventListener('keydown', onKey)
-    return () => { window.removeEventListener('pointerdown', onDown, true); window.removeEventListener('keydown', onKey) }
+    return () => { window.removeEventListener('pointerdown', onDown, true) }
   }, [s.phase])
 
   // `leaving` ends with the animation; a timer backs `animationend` up (a hidden tab never fires it).

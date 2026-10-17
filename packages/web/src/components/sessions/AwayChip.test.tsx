@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { Children, isValidElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { AWAY_OFF } from '@agentistics/core'
-import { AwayChip, AwayScopeDialog } from './AwayChip'
+import { AwayChip, AwayScopeDialog, awayMenuItems } from './AwayChip'
 import { ConfirmModal, Select } from '../../pages/settings/primitives'
 import { __setAwayForTest } from '../../lib/awayMode'
 
@@ -23,28 +23,38 @@ function find(node: ReactNode, type: unknown): any {
 }
 afterEach(() => __setAwayForTest(null))
 
-describe('session away header toggle', () => {
-  test('global ON with the own flag OFF reads as effectively away, labelled global', () => {
+describe('session away header indicator', () => {
+  test('inheriting the global setting draws nothing in the header', () => {
     withWidth(1440, () => {
-      __setAwayForTest({ ...AWAY_OFF, on: true })
-      const html = renderToStaticMarkup(<AwayChip id="managed" away={false} pt={false} />)
-      expect(html).toContain('aria-checked="true"')
-      expect(html).toContain('Away (global)')
-      expect(renderToStaticMarkup(<AwayChip id="managed" away={false} pt compact={false} />)).toContain('Ausente (global)')
-    })
-  })
-  test.each([390, 1440])('renders both states, pt/en and theme tokens at width %s', width => {
-    withWidth(width, () => {
-      for (const pt of [false, true]) for (const away of [false, true]) {
-        const html = renderToStaticMarkup(<AwayChip id="managed" away={away} pt={pt} compact={width === 390} />)
-        expect(html).toContain('role="switch"')
-        expect(html).toContain(`aria-checked="${away}"`)
-        expect(html).toContain('min-height:44px')
-        expect(html).toContain('min-width:44px')
-        expect(html).toContain(pt ? 'Modo ausente nesta sessão' : 'Away mode on this session')
-        expect(html).toContain(away ? 'var(--anthropic-orange)' : 'var(--text-tertiary)')
+      for (const global of [false, true]) {
+        __setAwayForTest({ ...AWAY_OFF, on: global })
+        for (const away of [false, true]) {
+          const html = renderToStaticMarkup(<AwayChip id="managed" away={away} pt={false} />)
+          if (global || !away) expect(html).not.toContain('session-away-chip')
+        }
       }
     })
+  })
+  test.each([390, 1440])('an override (own flag ON, global OFF) shows a small moon at width %s', width => {
+    withWidth(width, () => {
+      for (const pt of [false, true]) {
+        const html = renderToStaticMarkup(<AwayChip id="managed" away pt={pt} />)
+        expect(html).toContain('role="switch"')
+        expect(html).toContain('aria-checked="true"')
+        expect(html).toContain(pt ? 'Modo ausente só nesta sessão' : 'Away mode on this session only')
+        expect(html).toContain('var(--anthropic-orange)')
+        expect(html).not.toContain('>Away<')
+        if (width === 390) expect(html).toContain('min-height:44px')
+        else expect(html).not.toContain('min-height')
+      }
+    })
+  })
+  test('the session menu carries the per-session switch, only for an actionable session', () => {
+    const [item] = awayMenuItems({ id: 'x', actionable: true, away: false }, false, false)
+    expect(item!.label).toBe('Away mode on this session…'); expect(item!.on).toBe(false)
+    expect(awayMenuItems({ id: 'x', actionable: true, away: false }, true, true)[0]!.on).toBe(true)
+    expect(awayMenuItems({ id: 'x', actionable: false }, false, false)).toEqual([])
+    expect(awayMenuItems(undefined, false, false)).toEqual([])
   })
   test('ON and OFF use the existing confirmation and offer the same two scopes', () => {
     for (const on of [true, false]) for (const pt of [true, false]) {

@@ -20,6 +20,7 @@
  * closes; focus is returned by the parent, which owns the History button.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Forward, History, Paperclip, RotateCcw, Search, X } from 'lucide-react'
 import { attachmentName, isImageAttachment, splitMessage } from '../../lib/messageAttachments'
@@ -63,18 +64,11 @@ export function RecentPromptsPanel({
 
   // Escape steps back one level, then closes. A dialog only the mouse can leave is one a keyboard
   // cannot — the same rule the composer's other menus follow.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      e.stopPropagation()
-      if (busy) return
-      if (confirming) { setConfirming(null); setNotice(null); return }
-      if (viewing) { setViewing(null); return }
-      onClose()
-    }
-    document.addEventListener('keydown', onKey, true)
-    return () => document.removeEventListener('keydown', onKey, true)
-  }, [confirming, viewing, busy, onClose])
+  useEscapeOwner(true, () => {
+    if (confirming) { setConfirming(null); setNotice(null); return }
+    if (viewing) { setViewing(null); return }
+    onClose()
+  }, () => !busy)
 
   // Take the keyboard into the dialog (not into the search field: on a phone that would open the
   // soft keyboard over the list before anyone asked to type).

@@ -1,3 +1,4 @@
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useEffect, useRef, useState } from 'react'
 import { planRename, renameKey, TITLE_MAX } from './renameTitle'
 
@@ -23,6 +24,7 @@ export function RenameInput({ value, onSave, onCancel, ariaLabel, style }: {
     const next = save ? planRename(value, draft) : null
     if (next) void onSave(next); else onCancel()
   }
+  useEscapeOwner(true, () => finish(false))
   return (
     <input
       ref={ref}

@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Pencil, Check, AlertTriangle, Info, ChevronDown, Download } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { RevealButton, REVEAL_PAD } from '../../components/PasswordReveal'
 
 // ScopeNote
@@ -53,19 +54,47 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
   // Reset between openings, otherwise the previous answer would pre-arm the next delete.
   React.useEffect(() => { if (open) setTyped('') }, [open])
   const armed = requireText === undefined || typed === requireText
+  // The top-most overlay owns Escape (lib/overlayStack): a Drawer or screen underneath stays open.
+  useEscapeOwner(open, onCancel)
+  const titleId = React.useId()
+  const panelRef = React.useRef<HTMLDivElement>(null)
+  // The opener is read DURING the render that first shows the dialog: an effect is too late, because a
+  // child's autoFocus (the requireText input, the focusCancel button) already ran at commit.
+  const openerRef = React.useRef<HTMLElement | null>(null)
+  const wasOpen = React.useRef(false)
+  if (open && !wasOpen.current && typeof document !== 'undefined') openerRef.current = document.activeElement as HTMLElement | null
+  wasOpen.current = open
+  // Dialog focus: remember what had it, move into the panel on open, trap Tab inside, give it back on close.
   React.useEffect(() => {
     if (!open) return
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
-    document.addEventListener('keydown', h)
-    return () => document.removeEventListener('keydown', h)
-  }, [open, onCancel])
+    const prev = openerRef.current
+    const panel = panelRef.current
+    const focusables = () => Array.from(panel?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])') ?? [])
+    if (panel && !panel.contains(document.activeElement)) (focusables()[0] ?? panel).focus()
+    const trap = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || !panel) return
+      const f = focusables()
+      if (f.length === 0) { e.preventDefault(); panel.focus(); return }
+      const first = f[0]!, last = f[f.length - 1]!
+      if (!panel.contains(document.activeElement)) { e.preventDefault(); first.focus() }
+      else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+    }
+    document.addEventListener('keydown', trap)
+    return () => {
+      document.removeEventListener('keydown', trap)
+      if (prev && prev.isConnected) prev.focus()
+    }
+  }, [open])
   if (!open) return null
   return (
     <div onClick={onCancel} style={{
       position: 'fixed', inset: 0, zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)', padding: 16,
     }}>
-      <div onClick={e => e.stopPropagation()} style={{
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
+        onClick={e => e.stopPropagation()} style={{ outline: 'none',
         width: '100%', maxWidth: 420, background: 'var(--bg-card)', border: '1px solid var(--border)',
         borderRadius: 12, padding: 22, boxShadow: '0 12px 48px rgba(0,0,0,0.5)',
         display: 'flex', flexDirection: 'column', gap: 14,
@@ -76,7 +105,7 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
             : { display: 'inline-flex', padding: 8, borderRadius: 9, background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)' }}>
             {icon ?? (tone === 'danger' ? <AlertTriangle size={17} /> : <Download size={17} />)}
           </span>
-          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
+          <span id={titleId} style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
         </div>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, margin: 0 }}>{message}</p>
         {children}
@@ -924,6 +953,9 @@ export function Select({ value, onChange, options, placeholder, disabled, search
     }
   }, [open])
 
+  // An open list is an overlay of its own: it owns Escape above the dialog/drawer it sits in.
+  useEscapeOwner(open, () => setOpen(false))
+
   // Keep the keyboard-highlighted option scrolled into view.
   React.useEffect(() => {
     if (!open || activeIndex < 0) return
@@ -975,7 +1007,6 @@ export function Select({ value, onChange, options, placeholder, disabled, search
         if (opt && !opt.disabled) handleSelect(opt.value)
         break
       }
-      case 'Escape': e.preventDefault(); setOpen(false); break
       case 'Tab': setOpen(false); break
     }
   }
@@ -1196,7 +1227,6 @@ export function MultiPicker({
     const onDown = (e: MouseEvent) => {
       if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) close()
     }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
     // Same reason as Select — and the same over-broad fix: this capture-phase listener also fires
     // when the panel's OWN checkbox list scrolls (it has to, to fit more than a handful of
     // options), which closed the whole picker the moment a user scrolled to reach — let alone
@@ -1205,16 +1235,15 @@ export function MultiPicker({
       if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) close()
     }
     document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
     window.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', onScroll)
     return () => {
       document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
       window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', onScroll)
     }
   }, [open, close])
+  useEscapeOwner(open, close)
 
   const openPanel = () => {
     if (disabled) return

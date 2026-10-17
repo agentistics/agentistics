@@ -7,6 +7,7 @@
  * to the row.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Pin } from 'lucide-react'
@@ -37,14 +38,12 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMen
   // so every one of its entries is a touch target by construction.
   const isMobile = useIsMobile()
 
+  useEscapeOwner(true, onClose)
   useEffect(() => {
     const away = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node) && !isInsidePortalledMenu(e.target)) onClose() }
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('mousedown', away)
-    document.addEventListener('keydown', key)
     return () => {
       document.removeEventListener('mousedown', away)
-      document.removeEventListener('keydown', key)
     }
   }, [onClose])
 

@@ -17,7 +17,9 @@
  * a session's state by one poll interval — which is a bug people report as flicker.
  */
 
-import { AwayChip } from '../components/sessions/AwayChip'
+import { useEscapeOwner } from '../lib/overlayStack'
+import { AwayChip, awayMenuItems } from '../components/sessions/AwayChip'
+import { useAway } from '../lib/awayMode'
 import { sessionLinks } from '../lib/sessionParent'
 import { SessionCheckinCard, SessionLinkInfo, SessionLinkPanel } from '../components/sessions/SessionLinkInfo'
 import { Drawer } from '../components/Drawer'
@@ -392,6 +394,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const navigate = useNavigate()
   const isMobile = useIsMobile()
   const nayFabShown = useNayFabShownInSession()
+  const awayGlobal = useAway()
   /**
    * Which of the phone's two screens is showing when no session is open.
    *
@@ -2499,6 +2502,13 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    * rather than a bare unconditional minimize, so a PINNED panel is left alone by Esc too — the same
    * "this stays until I say so" promise the pin makes against an accidental click.
    */
+  useEscapeOwner(artShell === 'overlay' && slotLayout.right !== null, () => {
+    const panel = slotLayout.right
+    if (panel === null) return
+    if (overlayOutsideAction({ pinned: false, insideOverlay: false, insideRail: false }) !== 'minimize') return
+    if (panelMinimizeAction(panel, 'rail') === 'collapse-right-park') setRightOpen(false)
+    else closeSlotPanel(panel)
+  })
   useEffect(() => {
     if (artShell !== 'overlay') return
     const panel = slotLayout.right
@@ -2520,16 +2530,9 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       const action = overlayOutsideAction({ pinned: false, insideOverlay, insideRail })
       if (action === 'minimize') minimize()
     }
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      const action = overlayOutsideAction({ pinned: false, insideOverlay: false, insideRail: false })
-      if (action === 'minimize') minimize()
-    }
     document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
     return () => {
       document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
     }
   }, [artShell, slotLayout.right, closeSlotPanel, setRightOpen])
 
@@ -2878,6 +2881,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         }}>
           {selected.title}
         </div>
+        {selected.actionable && <AwayChip id={selected.id} away={selected.away === true} pt={pt} compact />}
       </div>
       {/* `display: flex` is the load-bearing part, not `flex: 1`.
           This div had `flex: 1, minHeight: 0` and no display, so it was a BLOCK. Its child —
@@ -3043,6 +3047,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               onGone={() => leaveDrawerTo('/sessions')}
               onOpened={id => { setSessionDrawer(false); goToReopened(id) }}
               extra={[
+                ...awayMenuItems(selected, pt, awayGlobal.active),
                 /* THE FLOATING NAY BUTTON, on a phone. Inside a session it is hidden by default — it
                    sat on the composer's send button — and this row brings it back (per viewer,
                    `lib/nayFabVisibility.ts`). */

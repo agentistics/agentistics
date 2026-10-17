@@ -1,3 +1,4 @@
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 /**
  * Backup settings — the web's window onto the SAME backup engine `agentop backup` and the
@@ -2033,11 +2034,7 @@ function GithubDisconnectModal({ repo, url, pt, busy, error, onCancel, onConfirm
   const isMobile = useIsMobile()
   const cancelRef = React.useRef<HTMLButtonElement | null>(null)
 
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
-    document.addEventListener('keydown', h)
-    return () => document.removeEventListener('keydown', h)
-  }, [onCancel])
+  useEscapeOwner(true, onCancel)
 
   // CANCEL takes the focus, not the confirm — this dialog's confirm is the destructive one, and a
   // stray Enter on open must not be the thing that fires it. (`RestoreConfirmModal` focuses its
@@ -2957,11 +2954,7 @@ function RestoreConfirmModal({ release, machine, pt, starting, error, onCancel, 
   const [withRepos, setWithRepos] = useState(false)
   const confirmRef = React.useRef<HTMLButtonElement | null>(null)
 
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
-    document.addEventListener('keydown', h)
-    return () => document.removeEventListener('keydown', h)
-  }, [onCancel])
+  useEscapeOwner(true, onCancel)
 
   useEffect(() => { confirmRef.current?.focus() }, [])
 

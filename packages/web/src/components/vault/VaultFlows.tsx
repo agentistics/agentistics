@@ -12,6 +12,7 @@ import { AgentisticsLoader } from '../AgentisticsLoader'
 import { Err, Qr, card, codeBlock, dangerBtn, input, overlay, primaryBtn } from '../MfaSetup'
 import { CodeField } from './VaultUnlock'
 import { presenceKey, vt, vtf, type VaultKey } from '../../lib/vaultText'
+import { useEscapeOwner } from '../../lib/overlayStack'
 import {
   authenticatorBegin, authenticatorConfirm, gestureStep, presenceProgress, cleanSetupCode, setupCodeAccept, setupCodeComplete, clampAutoLock, codeComplete, gateFor, grantAlive,
   loadVault, lockNow, howStep2, parseUnlockHours, setUnlockPolicy, setAuthPolicy, type ActionKind, type ProofChoice, UNLOCK_MODES, type UnlockMode, needsTypedCode, parseAutoLockInput, presenceDisable, presenceEnrol, recoveryBegin,
@@ -282,13 +283,7 @@ export function GateDialog({ lang, view, isMobile, kind, minutes, policy, authPo
   )
 }
 
-export function useEscape(onEsc: () => void) {
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onEsc() }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [onEsc])
-}
+export function useEscape(onEsc: () => void) { useEscapeOwner(true, onEsc) }
 
 // ── the enrolment wizard (§7.3): [setup code] → [device check] → authenticator → presence → recovery key ─────────────────────────
 

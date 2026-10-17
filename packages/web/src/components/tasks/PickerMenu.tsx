@@ -25,6 +25,7 @@
  * own (items, value, order, note); the panel only swaps which one it draws.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, ChevronUp, GripVertical } from 'lucide-react'
@@ -101,20 +102,18 @@ export function PanelMenu({
   const panel = useRef<HTMLDivElement>(null)
   const setOpen = (v: boolean) => { setOpenState(v); onOpenChange?.(v) }
 
+  useEscapeOwner(open, () => setOpen(false))
   useEffect(() => {
     if (!open) return
     const close = () => { setOpenState(false); onOpenChange?.(false) }
     const onScroll = (e: Event) => {
       if (scrollIsOutside(panel.current, e.target)) close()
     }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
     window.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', close)
-    window.addEventListener('keydown', onKey)
     return () => {
       window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', close)
-      window.removeEventListener('keydown', onKey)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])

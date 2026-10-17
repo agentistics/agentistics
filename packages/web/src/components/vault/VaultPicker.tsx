@@ -16,6 +16,7 @@ import { Checkbox, DialogActions, dialogButtonStyle } from '../../pages/settings
 import { filterPersonal, listPersonal, type PersonalGroup, type PersonalMeta } from '../../lib/vaultPersonal'
 import { stripVaultTrigger, type VaultSelection } from '../../lib/vaultChip'
 import { pt_, type PKey } from '../../lib/personalText'
+import { useEscapeOwner } from '../../lib/overlayStack'
 
 type Lang = 'en' | 'pt'
 const T = {
@@ -39,7 +40,7 @@ const T = {
 const t = (k: keyof typeof T, lang: Lang, n?: number) => T[k][lang].replace('{n}', String(n ?? ''))
 
 function Shell({ isMobile, title, onClose, children }: { isMobile: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
-  useEffect(() => { const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h) }, [onClose])
+  useEscapeOwner(true, onClose)
   const o: React.CSSProperties = isMobile ? { ...overlay, padding: 0, zIndex: 3000 } : { ...overlay, zIndex: 3000 }
   const c: React.CSSProperties = isMobile
     ? { ...card, maxWidth: 'none', width: '100%', height: 'calc(100dvh / var(--ui-zoom, 1))', maxHeight: 'calc(100dvh / var(--ui-zoom, 1))', borderRadius: 0, border: 'none', overflowY: 'auto', boxSizing: 'border-box' }

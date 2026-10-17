@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { X, Code2 } from 'lucide-react'
+import { useEscapeOwner } from '../lib/overlayStack'
 
 interface ConfigField {
   key: string
@@ -42,11 +43,7 @@ export function DevConfigPanel({ onClose }: { onClose: () => void }) {
     void loadConfig()
   }, [loadConfig])
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
-  }, [onClose])
+  useEscapeOwner(true, onClose)
 
   const handleSave = async () => {
     setSaving(true)

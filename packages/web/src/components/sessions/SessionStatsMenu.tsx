@@ -14,6 +14,7 @@
  * They send a reader to two different places, so they are two sentences and never one dash.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { sessionOpened, sessionTime } from '../../lib/sessionTime'
@@ -264,6 +265,7 @@ export function SessionStatsMenu({
    */
   const panelRef = useRef<HTMLDivElement | null>(null)
 
+  useEscapeOwner(open && !inline, () => setOpen(false))
   useEffect(() => {
     if (!open || inline) return
     const away = (e: MouseEvent) => {
@@ -271,12 +273,9 @@ export function SessionStatsMenu({
       if (boxRef.current?.contains(t) || panelRef.current?.contains(t)) return
       setOpen(false)
     }
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
     document.addEventListener('mousedown', away)
-    document.addEventListener('keydown', esc)
     return () => {
       document.removeEventListener('mousedown', away)
-      document.removeEventListener('keydown', esc)
     }
   }, [open])
 

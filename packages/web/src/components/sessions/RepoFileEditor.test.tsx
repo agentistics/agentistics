@@ -1622,11 +1622,9 @@ describe('the save wiring, asserted over the source', () => {
     // Sliced to the Escape handler's own body, and matched on the whole expression rather than the
     // word: `stopPropagation` and `inert` both appear in this module's comments, so a bare grep for
     // either is a test a comment can pass.
-    const onKey = src.slice(
-      src.indexOf('const onKey ='), src.indexOf("document.addEventListener('keydown'"),
-    )
-    expect(onKey).toContain('Escape')
-    expect(onKey).toContain('ev.stopPropagation()')
+    // Escape goes through the overlay stack, which closes ONLY the top-most overlay and consumes the key.
+    const prompt = src.slice(src.indexOf('export function RepoConflictPrompt'))
+    expect(prompt.includes('useEscapeOwner(true, onDismiss)')).toBe(true)
     // `includes` again, for its neighbour's reason: a failure here prints `false`, not 40 KB of module.
     // The condition grew a second clause (the preview toggle also hides Monaco with `inert`), so this
     // now matches the WHOLE expression rather than the old exact string — still real code, not a

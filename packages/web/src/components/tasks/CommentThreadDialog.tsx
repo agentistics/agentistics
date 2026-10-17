@@ -23,6 +23,7 @@ import { useTaskDetail } from '../../lib/tasks'
 import { microLabel, surface } from './board'
 import { CommentsTab } from './DeliveryDetail'
 import type { Lang } from './copy'
+import { useEscapeOwner } from '../../lib/overlayStack'
 
 export function CommentThreadDialog({ taskId, target, title, lang, onClose, onChanged }: {
   taskId: string
@@ -37,11 +38,7 @@ export function CommentThreadDialog({ taskId, target, title, lang, onClose, onCh
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const { detail, error, reload } = useTaskDetail(taskId)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  useEscapeOwner(true, onClose)
 
   return createPortal(
     <>

@@ -1,3 +1,4 @@
+import { useEscapeOwner } from '../lib/overlayStack'
 import React, { useMemo, useState } from 'react'
 import { Target, TrendingUp, AlertTriangle, CheckCircle2, Pencil, Check, X } from 'lucide-react'
 import { parseISO } from 'date-fns'
@@ -166,6 +167,7 @@ export function BudgetPanel({ statsCache, budgetUSD, onBudgetChange, currency, b
         ? (pt ? 'Dentro do orçamento' : 'On track')
         : (pt ? 'Sem orçamento definido' : 'No budget set')
 
+  useEscapeOwner(editing, cancel)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {/* Header row */}
@@ -262,7 +264,6 @@ export function BudgetPanel({ statsCache, budgetUSD, onBudgetChange, currency, b
                 onChange={e => setDraft(e.target.value)}
                 onKeyDown={e => {
                   if (e.key === 'Enter') save()
-                  if (e.key === 'Escape') cancel()
                 }}
                 placeholder={pt ? 'ex: 50' : 'e.g. 50'}
                 style={{
