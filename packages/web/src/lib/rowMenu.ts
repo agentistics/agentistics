@@ -47,6 +47,8 @@ export function isInsidePortalledMenu(target: EventTarget | null): boolean {
 
 /** States where the session is mid-turn, so "stop" means the TURN and not the session. */
 const MID_TURN = new Set(['working'])
+/** States where nothing is running, so there is nothing to stop — Reopen is the verb that applies. */
+const ENDED = new Set(['exited', 'lost', 'closed'])
 
 export function rowMenuEntries(
   verbs: readonly RowVerb[],
@@ -55,7 +57,7 @@ export function rowMenuEntries(
   extra: readonly MenuEntry[] = [],
 ): MenuEntry[] {
   const find = (a: string) => verbs.find(v => v.action === a)
-  const stop = MID_TURN.has(state) ? find('interrupt') : find('kill')
+  const stop = ENDED.has(state) ? undefined : MID_TURN.has(state) ? find('interrupt') : find('kill')
   // `archive` exists only on a NATIVE row (the server offers it nowhere else). `delete` is deliberately
   // NOT here: it is permanent and this menu acts on a click with no confirmation — it lives in the
   // session's own menu (`SessionActions`), which asks first.
