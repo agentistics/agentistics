@@ -48,7 +48,7 @@ export function Group({ label, children }: { label: string; children: ReactNode 
 }
 
 /** The facts of one round, grouped. `needs` leads, in the fault tint, when present. */
-export function CheckinRoundBody({ round, pt }: { round: CheckinRound; pt: boolean }) {
+export function CheckinRoundBody({ round, pt, hideEmpty = false }: { round: CheckinRound; pt: boolean; hideEmpty?: boolean }) {
   const c = copy(pt)
   const needs = round.needs ?? [], delivered = round.delivered ?? [], progress = round.inProgress ?? [], next = round.next ?? [], health = round.health ?? []
   const empty = needs.length + delivered.length + progress.length + next.length + health.length === 0
@@ -87,7 +87,7 @@ export function CheckinRoundBody({ round, pt }: { round: CheckinRound; pt: boole
           </div>
         </Group>
       )}
-      {empty && <div style={{ ...TEXT, ...MUTED }}>{round.summary || c.empty}</div>}
+      {empty && !hideEmpty && <div style={{ ...TEXT, ...MUTED }}>{round.summary || c.empty}</div>}
     </div>
   )
 }
@@ -151,14 +151,20 @@ export function CheckinModalView({ round, history, pt, isMobile, onClose }: { ro
   const chip = !(round.state === 'needs_you' && (round.needs?.length ?? 0) > 0)
   return (
     <div data-testid="checkin-modal">
-      <Sheet closeLabel={c.close} isMobile={isMobile} title={checkinTitle(round, pt)} onClose={onClose} maxWidth={720}>
+      <Sheet closeLabel={c.close} isMobile={isMobile} title={checkinTitle(round, pt)} onClose={onClose} maxWidth={960}>
         <div style={{ display: 'grid', gap: 18 }}>
           <header style={{ display: 'grid', gap: 6, justifyItems: 'start' }}>
             <div style={{ color: 'var(--text-primary)', fontSize: 16, fontWeight: 650, lineHeight: 1.35 }}>{round.headline ?? round.summary}</div>
             {chip && <RoundStateChip state={round.state} pt={pt} />}
           </header>
-          <CheckinRoundBody round={round} pt={pt} />
-          <CheckinTimeline history={earlier} pt={pt} isMobile={isMobile} />
+          {/* Two columns on desktop: the round's story on the left, health + earlier rounds on the right. */}
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: isMobile ? 18 : 20, alignItems: 'start' }}>
+            <CheckinRoundBody round={{ ...round, health: [] }} pt={pt} hideEmpty />
+            <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
+              <CheckinRoundBody round={{ state: 'ok', summary: '', health: round.health ?? [] }} pt={pt} hideEmpty />
+              <CheckinTimeline history={earlier} pt={pt} isMobile={isMobile} />
+            </div>
+          </div>
         </div>
       </Sheet>
     </div>

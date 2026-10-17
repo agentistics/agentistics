@@ -18,7 +18,7 @@ test.each([false, true])('modal shows needs first, then sections, chip and timel
   expect(html).toContain('aria-modal="true"')
   expect(html.indexOf('Needs you')).toBeLessThan(html.indexOf('Delivered'))
   for (const t of ['In progress', 'Next steps', 'Health', 'Earlier rounds', 'Earlier round', 'release 17c']) expect(html).toContain(t)
-  expect(html).toContain(isMobile ? 'border-radius:0' : 'max-width:720px')
+  expect(html).toContain(isMobile ? 'border-radius:0' : 'max-width:960px')
   // past rounds start collapsed: their body is not rendered
   expect(html).toContain('aria-expanded="false"')
 })
