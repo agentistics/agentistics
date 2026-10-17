@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { EXPERIMENTAL_APPLIED_ENV } from '@agentistics/core'
+import { EXPERIMENTAL_APPLIED_ENV, applyExperimental, featureOn } from '@agentistics/core'
 import { applyExperimentalLive, buildExperimentalReport, setExperimental } from './experimental-web'
 import { nativeExperimentalOn } from './native-gate'
 import { providerFlagOn } from './config'
@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 type Env = Record<string, string | undefined>
+const onApplied = () => {}
 
 describe('buildExperimentalReport', () => {
   test('carries each feature words and whether the switch governs it', () => {
@@ -18,11 +19,41 @@ describe('buildExperimentalReport', () => {
     expect(provider.description.en.length).toBeGreaterThan(10)
     expect(provider.description.pt.length).toBeGreaterThan(10)
     // journal/projections/adapter-chat are on by default: the preference is not what decides them
-    expect(r.features.filter(f => !f.switchable).map(f => f.id).sort()).toEqual(['adapter-chat', 'journal', 'projections'])
+    expect(r.features.filter(f => !f.switchable).map(f => f.id).sort()).toEqual(['journal', 'projections'])
+    expect(r.features.find(f => f.id === 'adapter-chat')!.switchable).toBe(true)
   })
 })
 
-const onApplied = () => {}
+describe('adapter-chat — default ON, switchable OFF', () => {
+  const on = (env: Env) => featureOn('adapter-chat', env)
+  test('nothing set: ON', () => { expect(on({})).toBe(true) })
+  test('env 0: OFF, even with the global switch on', async () => {
+    const env: Env = { AGENTISTICS_ADAPTER_CHAT: '0' }
+    await setExperimental(true, { env, readPrefs: async () => ({}), writePrefs: async () => {}, onApplied })
+    expect(on(env)).toBe(false)
+  })
+  test('global experimental OFF: OFF live, ON again when re-enabled, no restart', async () => {
+    const env: Env = {}
+    const r = await setExperimental(false, { env, readPrefs: async () => ({}), writePrefs: async () => {}, onApplied })
+    expect(on(env)).toBe(false)
+    expect(r.features.find(f => f.id === 'adapter-chat')!.on).toBe(false)
+    await setExperimental(true, { env, readPrefs: async () => ({ experimental: false }), writePrefs: async () => {}, onApplied })
+    expect(on(env)).toBe(true)
+  })
+  test('boot with preference false: OFF; with an exported 1 it stays ON', () => {
+    const env: Env = {}
+    applyExperimental(false, env)
+    expect(on(env)).toBe(false)
+    const env2: Env = { AGENTISTICS_ADAPTER_CHAT: '1' }
+    applyExperimental(false, env2)
+    expect(on(env2)).toBe(true)
+  })
+  test('row off (report): preference false reports it off, absent reports it on', () => {
+    expect(buildExperimentalReport(false, {}).features.find(f => f.id === 'adapter-chat')!.on).toBe(false)
+    expect(buildExperimentalReport(undefined, {}).features.find(f => f.id === 'adapter-chat')!.on).toBe(true)
+  })
+})
+
 
 describe('setExperimental — applies live, never restarts', () => {
   test('enable: persists, flips the env every gate reads, and reports on', async () => {

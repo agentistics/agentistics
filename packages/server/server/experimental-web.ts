@@ -12,7 +12,7 @@
  * afterwards reads it at boot (`experimental-boot.ts`), so the two doors cannot disagree.
  */
 import {
-  EXPERIMENTAL_APPLIED_ENV, EXPERIMENTAL_FEATURES, applyExperimental, resolveExperimental,
+  EXPERIMENTAL_APPLIED_ENV, EXPERIMENTAL_APPLIED_OFF_ENV, EXPERIMENTAL_FEATURES, applyExperimental, resolveExperimental,
   type ExperimentalStatus,
 } from '@agentistics/core'
 import { readPreferences, writePreferences } from './preferences'
@@ -38,7 +38,7 @@ export function buildExperimentalReport(preference: boolean | undefined, env: En
     enabled: preference === true,
     features: rows.map(r => {
       const f = EXPERIMENTAL_FEATURES.find(x => x.id === r.id)!
-      return { ...r, description: f.description, switchable: f.defaultOn !== true }
+      return { ...r, description: f.description, switchable: f.defaultOn !== true || f.offByPreference === true }
     }),
   }
 }
@@ -54,12 +54,19 @@ export async function readExperimentalReport(env: Env = process.env): Promise<Ex
  * operator exported keeps deciding, in either direction, exactly as at boot.
  */
 export function applyExperimentalLive(enabled: boolean, env: Env): void {
+  // A '0' this rule wrote earlier is not an operator's choice: clear it before either direction decides.
+  for (const id of (env[EXPERIMENTAL_APPLIED_OFF_ENV] ?? '').split(',').filter(Boolean)) {
+    const f = EXPERIMENTAL_FEATURES.find(x => x.id === id)
+    if (f && env[f.env] === '0') delete env[f.env]
+  }
+  delete env[EXPERIMENTAL_APPLIED_OFF_ENV]
   if (enabled) { applyExperimental(true, env); return }
   const written = (env[EXPERIMENTAL_APPLIED_ENV] ?? '').split(',').filter(Boolean)
   for (const f of EXPERIMENTAL_FEATURES) {
     if (written.includes(f.id) && env[f.env] === '1') delete env[f.env]
   }
   delete env[EXPERIMENTAL_APPLIED_ENV]
+  applyExperimental(false, env)
 }
 
 export interface ExperimentalSetDeps {

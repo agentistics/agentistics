@@ -175,6 +175,13 @@ describe('adapterChatResponse', () => {
     s.ctl.abort()
   })
 
+  test('a STOPPED row with no resolvable source closes the stream as FAILED (legacy diagnosis)', async () => {
+    const f = fakeChat({ resolves: false })
+    const s = open(f, { rowAt: () => row({ state: 'exited' }) })
+    await events(s.res, () => false, 200)
+    expect(s.closedWith()).toBe(true)
+  })
+
   test('an engine error closes the stream as FAILED', async () => {
     const f = fakeChat({ throwsOnFollow: true })
     const s = open(f)
@@ -246,6 +253,11 @@ describe('readAdapterChat — the one-shot GET', () => {
   test('no source yet: an empty conversation, not a failure', async () => {
     const out = await readAdapterChat({ conversationId: 'c1', chat: fakeChat({ resolves: false }).chat, row: row(), pending: [], max: 400, finish })
     expect(out).toEqual({ turns: [], live: true, source: 'adapter' })
+  })
+
+  test('a STOPPED row with no resolvable source: null, so the legacy reader gives its diagnosis', async () => {
+    const out = await readAdapterChat({ conversationId: 'c1', chat: fakeChat({ resolves: false }).chat, row: row({ state: 'lost' }), pending: [], max: 400, finish })
+    expect(out).toBeNull()
   })
 
   test('no window in time: null, so the caller serves the legacy read', async () => {

@@ -253,7 +253,11 @@ export function adapterChatResponse(
         pending: deps.pending(),
       })
       if (closed) return
-      if (!found) { schedule(); return } // nothing written yet: the empty conversation, retried on ticks
+      if (!found) {
+        // Stopped row, transcript unresolvable: hand over to the legacy stream and its diagnosis.
+        if (!live) { close(true); return }
+        schedule(); return // live, nothing written yet: the empty conversation, retried on ticks
+      }
       src = found
       unfollow = deps.chat.follow(found, deps.max, onDelta)
     } catch {
@@ -332,7 +336,9 @@ export async function readAdapterChat(o: {
       ...(o.row.cwd ? { cwd: o.row.cwd } : {}),
       pending: o.pending,
     })
-    if (!src) return adapterPayload(await o.finish({ turns: [], older: false }, live), o.row.link)
+    // A live row that has not written yet is an empty conversation; a STOPPED row whose transcript
+    // cannot be resolved is gone, and the legacy reader owns that diagnosis (retention, missing file).
+    if (!src) return live ? adapterPayload(await o.finish({ turns: [], older: false }, live), o.row.link) : null
     const window = await firstWindow(o.chat, src, o.max, o.timeoutMs)
     if (!window) return null
     return adapterPayload(await o.finish(window, live), o.row.link)
