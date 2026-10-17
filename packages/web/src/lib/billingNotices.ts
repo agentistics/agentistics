@@ -26,6 +26,12 @@ export const billingNotices = {
     if (Object.keys(next).length === Object.keys(state).length) return
     state = next; emit()
   },
+  /** Drop a `failed` answer whose account no longer needs a plan (a default was registered since). */
+  prune(needPlanIds: ReadonlySet<string>) {
+    const next = Object.fromEntries(Object.entries(state).filter(([id, s]) => s !== 'failed' || needPlanIds.has(id)))
+    if (Object.keys(next).length === Object.keys(state).length) return
+    state = next; emit()
+  },
   subscribe(l: () => void) { listeners.add(l); return () => { listeners.delete(l) } },
   reset() { state = {}; emit() },
 }

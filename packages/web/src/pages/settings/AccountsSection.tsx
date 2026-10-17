@@ -20,7 +20,7 @@ import { DialogActions, FieldInput, RowSwitch, ScopeNote, SectionHeader, StatusD
 import { Pill } from '../../components/Pill'
 import { Disclosure } from '../../components/Disclosure'
 import {
-  accountKey, accountState, accountTitle, accountWhose, isPlaceholderName, isUnidentified, nextOpen, summarizeHarnesses,
+  accountDetailLine, accountKey, accountState, accountTitle, accountWhose, isPlaceholderName, isUnidentified, nextOpen, summarizeHarnesses,
   type AccountRowData, type HarnessSummary,
 } from './accountsSummary'
 import { createAccountMutator, reconcileNickname } from './accountMutations'
@@ -310,7 +310,7 @@ export default function AccountsSection({ lang }: { lang: Lang }) {
                 sub={pt ? 'É só este nome que os agentes veem — nunca o e-mail.' : 'Agents only ever see this name — never the e-mail.'} />
               : <ScopeNote>{t.unconfirmedNote}</ScopeNote>}
             <p style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
-              {detail.nickname && !isPlaceholderName(detail.nickname) ? '' : `${accountWhose({ label: detail.label }, pt) ?? detail.label} · `}{detail.plan ?? t.noPlan}
+              {accountDetailLine(detail, pt, t.noPlan)}
               {detail.root ? <><br />{detail.root}</> : null}
             </p>
             {(() => {

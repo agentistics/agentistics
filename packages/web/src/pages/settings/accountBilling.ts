@@ -149,3 +149,17 @@ export async function saveThenClose(persist: () => Promise<boolean>, close: () =
   if (ok) close()
   return ok
 }
+
+export interface SaveError { msg: string; /** the notice-tracked account whose write failed, or null */ id: string | null }
+
+/**
+ * Where the save error is shown: once, inside the drawer while it is open, else below the section.
+ * A failure whose own notice has since been settled (a later queued write stored it) is gone.
+ */
+export function saveErrorPlace(
+  err: SaveError | null, notices: Readonly<Record<string, string>>, drawerOpen: boolean,
+): 'drawer' | 'page' | null {
+  if (!err) return null
+  if (err.id !== null && notices[err.id] !== 'failed') return null
+  return drawerOpen ? 'drawer' : 'page'
+}

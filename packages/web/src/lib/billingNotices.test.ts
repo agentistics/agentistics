@@ -42,3 +42,13 @@ describe('billingNotices', () => {
     expect(billingNotices.get()).toEqual({ a: 'failed' })
   })
 })
+
+describe('L2 prune', () => {
+  test('a failed notice is cleared once the account no longer needs a plan; saving stays', () => {
+    billingNotices.reset()
+    billingNotices.mark('a', 'failed'); billingNotices.mark('b', 'failed'); billingNotices.mark('c', 'saving')
+    billingNotices.prune(new Set(['b']))
+    expect(billingNotices.get()).toEqual({ b: 'failed', c: 'saving' })
+    billingNotices.reset()
+  })
+})

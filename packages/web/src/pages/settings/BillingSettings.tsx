@@ -50,7 +50,7 @@ import {
 import AccountsSection from './AccountsSection'
 import { billingNotices, useNoticeSaveState } from '../../lib/billingNotices'
 import { BillingAccountsView, FirstDetectionNotice } from './AccountRow'
-import { accountsNeedingPlan, answerNotice, billableAccounts, noticeAccounts, ownPeriods, saveThenClose, toggleAvailability, unknownPeriod, withAccountPeriods, type BillingAccount } from './accountBilling'
+import { accountsNeedingPlan, answerNotice, billableAccounts, noticeAccounts, ownPeriods, saveErrorPlace, saveThenClose, type SaveError, toggleAvailability, unknownPeriod, withAccountPeriods, type BillingAccount } from './accountBilling'
 import { accountTitle } from './accountsSummary'
 import { createAccountMutator } from './accountMutations'
 import { usePlanLimits } from '../../lib/planLimits'
@@ -119,6 +119,7 @@ export default function BillingSettings() {
     () => noticeAccounts(needPlan, allBillable, new Set(Object.keys(noticeState))),
     [needPlan, allBillable, noticeState],
   )
+  useEffect(() => { billingNotices.prune(new Set(needPlan.map(a => a.id))) }, [needPlan])
   const [openHarness, setOpenHarness] = useState<HarnessId | null>(harness)
   useEffect(() => { setOpenHarness(harness) }, [harness])
   const toggleAccount = async (a: BillingAccount) => {
@@ -184,7 +185,7 @@ export default function BillingSettings() {
   const draftDirty = draft !== null && JSON.stringify(draft) !== draftOrigin
   const [confirmDelete, setConfirmDelete] = useState<BillingPeriod | null>(null)
   const [detections, setDetections] = useState<BillingDetection[] | null>(null)
-  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<SaveError | null>(null)
   const [planPrices, setPlanPrices] = useState<ScrapedPlanPrice[]>([])
 
   // Live vendor prices. Best-effort by construction: the endpoint is anchored, so it returns
@@ -224,7 +225,7 @@ export default function BillingSettings() {
     setSaveError(null)
     const tracked = target !== null && needPlan.some(a => a.id === target)
     const ok = tracked ? await saveTracked(target, change) : await ctx.saveBilling(change).then(() => true, () => false)
-    if (!ok) setSaveError(pt ? 'Não foi possível salvar. Tente de novo.' : 'Could not save. Try again.')
+    if (!ok) setSaveError({ msg: pt ? 'Não foi possível salvar. Tente de novo.' : 'Could not save. Try again.', id: tracked ? target : null })
     return ok
   }, [ctx, harness, pt, target, needPlan])
 
@@ -332,6 +333,7 @@ export default function BillingSettings() {
   }), [harness, pt, planPrices])
 
   const selectedEntry = draft?.planId ? findPlan(draft.planId) : undefined
+  const errPlace = saveErrorPlace(saveError, noticeState, draft !== null)
   const readiness = billingReadiness(ctx.billing, harnesses, allBillable)
 
   return (
@@ -541,8 +543,8 @@ export default function BillingSettings() {
       )}
 
 
-      {saveError && (
-        <div style={{ marginTop: 10, fontSize: 12, color: 'var(--accent-red)' }}>{saveError}</div>
+      {errPlace === 'page' && saveError && (
+        <div style={{ marginTop: 10, fontSize: 12, color: 'var(--accent-red)' }}>{saveError.msg}</div>
       )}
 
       {!readiness.ready && periods.length > 0 && timelineErrors.size === 0 && (
@@ -575,7 +577,7 @@ export default function BillingSettings() {
       >
         {draft && (
           <div>
-            {saveError && <div role="alert" style={{ marginBottom: 10, fontSize: 12, color: 'var(--accent-red)' }}>{saveError}</div>}
+            {errPlace === 'drawer' && saveError && <div role="alert" style={{ marginBottom: 10, fontSize: 12, color: 'var(--accent-red)' }}>{saveError.msg}</div>}
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 }}>
                 {pt ? 'Plano' : 'Plan'}

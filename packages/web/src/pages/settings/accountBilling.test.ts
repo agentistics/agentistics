@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { computePlanCost, normalizeBillingSettings, type BillingSettings } from '@agentistics/core'
 import { createAccountMutator } from './accountMutations'
 import {
-  saveThenClose,
+  saveThenClose, saveErrorPlace,
   accountsNeedingPlan, answerNotice, billableAccounts, capabilityNotes, matchDetectedPlan, noticeAccounts, planSummary, toggleAvailability, withAccountPeriods,
   type BillingAccount,
 } from './accountBilling'
@@ -118,5 +118,18 @@ describe('R3 saveThenClose', () => {
     expect(closed).toBe(0)
     expect(await saveThenClose(async () => true, () => { closed++ })).toBe(true)
     expect(closed).toBe(1)
+  })
+})
+
+describe('L4/L5 saveErrorPlace', () => {
+  const err = { msg: 'x', id: 'a' as string | null }
+  test('shown once: drawer while open, page otherwise', () => {
+    expect(saveErrorPlace(err, { a: 'failed' }, true)).toBe('drawer')
+    expect(saveErrorPlace(err, { a: 'failed' }, false)).toBe('page')
+    expect(saveErrorPlace({ msg: 'x', id: null }, {}, true)).toBe('drawer')
+  })
+  test('a failure carried by a later stored write is no longer reported', () => {
+    expect(saveErrorPlace(err, {}, true)).toBeNull()
+    expect(saveErrorPlace(null, {}, true)).toBeNull()
   })
 })
