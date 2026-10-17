@@ -18,7 +18,7 @@
  * than the bubble, and letting it set the width is how a message ends up outside its own card.
  */
 
-import { openCheckinModal } from '../../lib/checkinModal'
+import { OpenCheckinButton } from './CheckinModal'
 import { useEscapeOwner } from '../../lib/overlayStack'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { stripDictatedMark } from '../../lib/dictationMark'
@@ -347,10 +347,7 @@ function SystemNote({ note, noteRef, pt, sessionId }: { note: string; noteRef?: 
   // the same larger report view is used from both places.
   if (note.includes('agentistics_checkin_report') && sessionId) {
     return <SystemLine isMobile={isMobile}>
-      <button type="button" onClick={() => openCheckinModal(sessionId)}
-        style={{ ...sysLink, ...touch(isMobile) }}>
-        {pt ? 'Abrir check-in' : 'Open check-in'}
-      </button>
+      <OpenCheckinButton sessionId={sessionId} lang={pt ? 'pt' : 'en'} style={{ ...sysLink, ...touch(isMobile) }} fallback={<span>{label}</span>} />
     </SystemLine>
   }
 
@@ -1292,11 +1289,7 @@ export function SystemEventRow({ event, pt, sessionId, titleOf, senderSessionId,
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}{title && <span style={{ color: 'var(--text-tertiary)' }}> · {title}</span>}</span>
         <ChevronDown size={12} style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : undefined }} />
       </button>
-      {event.kind === 'checkin' && sessionId && <button
-        type="button"
-        onClick={() => openCheckinModal(sessionId)}
-        style={{ ...sysLink, ...touch(isMobile) }}
-      >{pt ? 'Abrir check-in' : 'Open check-in'}</button>}
+      {event.kind === 'checkin' && sessionId && <OpenCheckinButton sessionId={sessionId} lang={pt ? 'pt' : 'en'} style={{ ...sysLink, ...touch(isMobile) }} />}
     </SystemLine>
   )
 }

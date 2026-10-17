@@ -13,7 +13,7 @@ import { Sheet } from '../../pages/vault/vaultUi'
 import { Pill, type PillTone } from '../Pill'
 import { microLabel, surface } from '../tasks/board'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { closeCheckinModal, useCheckinModalRequest } from '../../lib/checkinModal'
+import { closeCheckinModal, openCheckinModal, useCheckinModalRequest } from '../../lib/checkinModal'
 import { useCheckin, type CheckinHealthState, type CheckinRound } from '../../lib/checkin'
 import { useTaskActivity, type TaskEvent } from '../../lib/tasks'
 import { useFleet } from '../../lib/fleet'
@@ -178,16 +178,37 @@ export function CheckinModalHost({ lang }: { lang: 'pt' | 'en' }) {
   return <Loaded sessionId={request.sessionId} lang={lang} />
 }
 
-function Loaded({ sessionId, lang }: { sessionId: string; lang: 'pt' | 'en' }) {
-  const isMobile = useIsMobile()
+/** The stored round with the time it ran: the GET answer has no `at` on the round itself. */
+export function roundWithTime(state: { last: CheckinRound | null; lastRunAt: number | null }): CheckinRound | null {
+  const at = state.last?.at ?? state.lastRunAt ?? undefined
+  return state.last ? { ...state.last, ...(at !== undefined ? { at } : {}) } : null
+}
+
+/** The check-in of a session as the chat names it: resolves the identity key and the task. */
+function useCheckinRound(sessionId: string | undefined, lang: 'pt' | 'en') {
   const { fleet } = useFleet(lang)
   // The chat row knows the managed id; the check-in is keyed by the session's identity key.
-  const row = fleet.rows.find(r => r.id === sessionId || r.conversationId === sessionId)
+  const row = sessionId ? fleet.rows.find(r => r.id === sessionId || r.conversationId === sessionId) : undefined
   const key = row ? sessionIdentityKey(row) : sessionId
   const checkin = useCheckin(key)
   const task = row ? sessionLinks(row, fleet.rows)?.task?.id : undefined
+  // GET /api/checkin carries the round without its own `at` (only the SSE event does), so the
+  // moment of the run stands in for it — otherwise the title has no time.
+  const round = checkin.state ? roundWithTime(checkin.state) : null
+  return { round, task }
+}
+
+/** "Open check-in", drawn only when there is a round to show — a click must never do nothing. */
+export function OpenCheckinButton({ sessionId, lang, style, fallback = null }: { sessionId: string | undefined; lang: 'pt' | 'en'; style: CSSProperties; fallback?: ReactNode }) {
+  const { round } = useCheckinRound(sessionId, lang)
+  if (!round) return <>{fallback}</>
+  return <button type="button" onClick={() => openCheckinModal(sessionId)} style={style}>{lang === 'pt' ? 'Abrir check-in' : 'Open check-in'}</button>
+}
+
+function Loaded({ sessionId, lang }: { sessionId: string; lang: 'pt' | 'en' }) {
+  const isMobile = useIsMobile()
+  const { round, task } = useCheckinRound(sessionId, lang)
   const activity = useTaskActivity(task, 20)
-  const round = checkin.state?.last
   if (!round) return null
   return <CheckinModalView round={round} history={activity.events.filter(e => e.kind === 'checkin')} pt={lang === 'pt'} isMobile={isMobile} onClose={closeCheckinModal} />
 }

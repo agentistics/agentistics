@@ -144,7 +144,9 @@ export function Sheet({ closeLabel, isMobile, title, onClose, children, wide, fo
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 18px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <span style={{ fontSize: 15, fontWeight: 650, color: 'var(--text-primary)', flex: 1, minWidth: 0 }}>{title}</span>
           <button type="button" className="ag-tap-icon" aria-label={closeLabel} onClick={onClose}
-            style={{ background: 'transparent', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', padding: 4, display: 'inline-flex' }}><X size={16} /></button>
+            style={{ background: 'transparent', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', padding: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              // 44x44 hit area on a phone; the icon stays 16px and the negative margin keeps the header's height.
+              ...(isMobile ? { boxSizing: 'border-box', width: 44, height: 44, margin: '-12px -12px -12px 0' } : {}) }}><X size={16} /></button>
         </div>
         <div style={{ padding: 18, overflowY: 'auto', minHeight: 0, flex: isMobile ? 1 : undefined }}>{children}</div>
         {footer && <div data-sheet-footer style={{ padding: '0 18px 12px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>{footer}</div>}

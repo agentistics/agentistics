@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { CheckinModalView, roundWhen } from './CheckinModal'
+import { CheckinModalView, roundWhen, roundWithTime } from './CheckinModal'
 import type { CheckinRound } from '../../lib/checkin'
 
 const round: CheckinRound = {
@@ -42,4 +42,18 @@ test('round times: today, yesterday, older', () => {
   expect(roundWhen(new Date(2026, 9, 17, 11, 43).getTime(), true, now)).toBe('11:43')
   expect(roundWhen(new Date(2026, 9, 16, 18, 2).getTime(), true, now)).toBe('ontem 18:02')
   expect(roundWhen(new Date(2026, 9, 15, 18, 2).getTime(), true, now)).toBe('15/10 18:02')
+})
+
+test('a round stored without its own time takes the run time, so the title has one', () => {
+  const stored = { last: { state: 'ok' as const, summary: 's' }, lastRunAt: Date.now() }
+  expect(roundWithTime(stored)?.at).toBe(stored.lastRunAt)
+  expect(roundWithTime({ last: null, lastRunAt: 5 })).toBeNull()
+  expect(roundWithTime({ last: { state: 'ok', summary: 's', at: 7 }, lastRunAt: 5 })?.at).toBe(7)
+})
+
+test('close button has a 44px hit area on mobile only', () => {
+  const m = renderToStaticMarkup(<CheckinModalView round={round} history={[]} pt isMobile onClose={() => {}} />)
+  expect(m).toMatch(/width:44px;height:44px/)
+  const d = renderToStaticMarkup(<CheckinModalView round={round} history={[]} pt isMobile={false} onClose={() => {}} />)
+  expect(d).not.toMatch(/width:44px;height:44px/)
 })

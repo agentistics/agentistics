@@ -1,5 +1,6 @@
 import { roleChangeNote } from '@agentistics/core'
-import { closeCheckinModal, readCheckinModalRequest } from '../../lib/checkinModal'
+import { closeCheckinModal, openCheckinModal, readCheckinModalRequest } from '../../lib/checkinModal'
+import { rememberCheckinState } from '../../lib/checkin'
 import { afterAll, expect, mock, test } from 'bun:test'
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -21,7 +22,10 @@ const { ChatBubble, SystemEventRow } = await import('./ChatBubble')
 
 const turn = (text: string) => ({ role: 'user', text } as never)
 
+const seeded = { session: 'leader-id', paused: null, intervalMin: 30 as const, checklist: [], nextRunAt: 1, lastRunAt: 1, last: { state: 'ok' as const, summary: 's' } }
+
 test('marked and legacy check-in user turns render collapsed system rows without user chrome', () => {
+  rememberCheckinState('leader-id', seeded)
   for (const opener of ['[from agentistics · check-in]\nFaça o check-in da liderança agora.', 'Faça o check-in da liderança agora.', 'Run the leadership check-in now.']) {
     const html = renderToStaticMarkup(<ChatBubble turn={{ role: 'user', text: `${opener}\nxyzzy-checklist-marker`, pending: true }} lang="en" harness="claude" sessionId="leader-id" awaiting awaitingSinceMs={0} />)
     expect(html).toContain('Leadership check-in · system')
@@ -35,6 +39,7 @@ test('marked and legacy check-in user turns render collapsed system rows without
 })
 
 test('expanded check-in row shows the checklist and its localized action', () => {
+  rememberCheckinState('leader-id', seeded)
   const event = parseSystemEvent('[from agentistics · check-in]\nxyzzy-checklist-marker')!
   const html = renderToStaticMarkup(<SystemEventRow event={event} pt defaultOpen sessionId="leader-id" />)
   expect(html).toContain('Check-in da liderança · sistema')
@@ -45,21 +50,28 @@ test('expanded check-in row shows the checklist and its localized action', () =>
   expect(html).toContain('height:1px')
 })
 
-test('open check-in asks the standalone modal store for this session', () => {
+
+test('"Open check-in" is drawn only when the session has a round to show', () => {
+  rememberCheckinState('leader-id', null)
+  const none = renderToStaticMarkup(<SystemEventRow event={{ kind: 'checkin', body: 'checklist' }} pt={false} sessionId="leader-id" />)
+  expect(none).not.toContain('Open check-in')
+  rememberCheckinState('leader-id', seeded)
+  const some = renderToStaticMarkup(<SystemEventRow event={{ kind: 'checkin', body: 'checklist' }} pt={false} sessionId="leader-id" />)
+  expect(some).toContain('Open check-in')
+  rememberCheckinState('leader-id', null)
+})
+
+test('opening with no session id does nothing', () => {
   closeCheckinModal()
-  function Row() {
-    const tree = SystemEventRow({ event: { kind: 'checkin', body: 'checklist' }, pt: false, sessionId: 'leader-id' })
-    React.Children.forEach(tree.props.children, child => {
-      if (React.isValidElement<{ children?: React.ReactNode; onClick?: () => void }>(child) && child.type === 'button' && child.props.children === 'Open check-in') child.props.onClick!()
-    })
-    return tree
-  }
-  renderToStaticMarkup(<Row />)
+  openCheckinModal(undefined)
+  expect(readCheckinModalRequest()).toBeNull()
+  openCheckinModal('leader-id')
   expect(readCheckinModalRequest()).toEqual({ sessionId: 'leader-id' })
   closeCheckinModal()
 })
 
 test('check-in controls have 44px touch targets at 390px', () => {
+  rememberCheckinState('leader-id', seeded)
   const viewport = window as { innerWidth: number }
   const originalWidth = viewport.innerWidth
   viewport.innerWidth = 390
