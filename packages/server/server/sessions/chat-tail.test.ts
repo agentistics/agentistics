@@ -366,6 +366,23 @@ describe('a queued_command carries envelopes too', () => {
     expect(turns.some(t => (t.text ?? '').includes('<task-id>'))).toBe(false)
   })
 
+  test('an agentistics message queued mid-turn keeps its header intact for the chat to classify', async () => {
+    // Owner report (2026-10-17): a `[from agentistics · relay]` message arrived while the session was
+    // mid-turn, was stored as `attachment` / `queued_command` with Claude Code's `<pasted_content>`
+    // wrapper, and was drawn as the owner's own "Texto colado" bubble. The server must hand the text
+    // over UNALTERED (wrapper and header included): the web's `parseSystemEvent` is the one place
+    // that names who wrote it, and it can only do so if nothing here strips or rewraps the header.
+    const relay = '<pasted_content id="f653">\n[from agentistics · relay]\nChegou na sessão anterior:\n> resposta\n</pasted_content id="f653">'
+    const handback = '<pasted_content id="9a1">\n[from session e11a65fd33 · handback]\nMotor → side: done\n</pasted_content id="9a1">'
+    await writeFile(file, [userTurn('go ahead'), queuedTurn(relay), queuedTurn(handback)].join('\n') + '\n')
+    for (const read of [readRecentChatTurns, async (f: string) => (await readChatWindow(f, 50)).turns]) {
+      forgetChatTailContent()
+      const texts = (await read(file)).filter(t => t.role === 'user').map(t => t.text)
+      expect(texts).toContain(relay)
+      expect(texts).toContain(handback)
+    }
+  })
+
   test('a real message queued while the assistant was busy still appears', async () => {
     // The whole point of reading this entry type. Filtering must not cost the feature it serves.
     await writeFile(file, [
