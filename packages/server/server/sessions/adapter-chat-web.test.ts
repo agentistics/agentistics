@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { adapterRowOf } from './adapter-chat-web'
 import type { SessionSnapshot } from './sessions-host'
 import type { SessionView } from './session-view'
@@ -23,5 +25,19 @@ describe('adapterRowOf — the adapter stream reads ONE row off the hub snapshot
   test('a row the snapshot does not hold is gone (null), and so is everything before the first poll', () => {
     expect(adapterRowOf(snap([]), 'a', 'en')).toBeNull()
     expect(adapterRowOf(null, 'a', 'en')).toBeNull()
+  })
+})
+
+describe('F4 fix2 — an open adapter stream follows the switch, not only new ones', () => {
+  const src = readFileSync(join(import.meta.dir, 'adapter-chat-web.ts'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+  const stream = src.slice(src.indexOf('export async function openAdapterChatStream'), src.indexOf('export async function readAdapterChatPayload'))
+  test('`current` answers false the moment adapter-chat is off (the next fleet tick closes the stream)', () => {
+    const cur = stream.slice(stream.indexOf('current: async () => {'))
+    expect(cur.indexOf("if (!featureOn('adapter-chat')) return false")).toBeGreaterThan(0)
+    expect(cur.indexOf("if (!featureOn('adapter-chat')) return false")).toBeLessThan(cur.indexOf('findRow('))
+  })
+  test('the stream registers for the switch reset (closed at once when the switch moves)', () => {
+    expect(stream).toContain('onReset: onChatStreamsReset')
   })
 })

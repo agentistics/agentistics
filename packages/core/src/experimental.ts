@@ -25,6 +25,12 @@ export interface ExperimentalFeature {
    * explicit negative turns it off. Absent means opt-in, as before.
    */
   defaultOn?: boolean
+  /**
+   * A default-ON feature the global switch can still turn OFF: an EXPLICIT `preferences.experimental
+   * === false` writes `<env>=0` (`applyExperimental`), so the escape hatch stays. Absent preference
+   * leaves the default ON.
+   */
+  offByPreference?: boolean
   description: { en: string; pt: string }
 }
 
@@ -69,9 +75,11 @@ export const EXPERIMENTAL_FEATURES: readonly ExperimentalFeature[] = [
   {
     id: 'adapter-chat',
     env: 'AGENTISTICS_ADAPTER_CHAT',
-    // Opt-in: only '1' (ENGINE.MAP 09 §4). Read by the chat routes (`/api/fleet/chat-stream`,
-    // `/api/fleet/chat`); off, they are the legacy readers byte for byte.
-    isOn: raw => raw === '1',
+    // DEFAULT ON since F4.A (ENGINE.MAP 13 §Phase 4): every harness's chat comes from the engine's
+    // channel. The variable stays as the override that turns it OFF (`AGENTISTICS_ADAPTER_CHAT=0`).
+    isOn: onUnlessOff,
+    defaultOn: true,
+    offByPreference: true,
     description: {
       en: 'Session chat from the engine\'s chat channel (one reader per transcript, live text and state) instead of the host\'s own readers, for every harness whose integration serves it.',
       pt: 'Chat das sessões pelo canal de chat do engine (um leitor por transcrição, texto ao vivo e estado) em vez dos leitores do próprio host, para todo harness cuja integração o oferece.',
@@ -114,6 +122,11 @@ type Env = Record<string, string | undefined>
  *  tell "the preference set this" from "somebody exported this" — only the second is an override. */
 export const EXPERIMENTAL_APPLIED_ENV = 'AGENTISTICS_EXPERIMENTAL_APPLIED'
 
+/** Records which variables `applyExperimental` wrote as `0` (a default-ON feature the switch turned off). */
+export const EXPERIMENTAL_APPLIED_OFF_ENV = 'AGENTISTICS_EXPERIMENTAL_APPLIED_OFF'
+
+const appliedOffIds = (env: Env): string[] => (env[EXPERIMENTAL_APPLIED_OFF_ENV] ?? '').split(',').filter(Boolean)
+
 const appliedIds = (env: Env): string[] => (env[EXPERIMENTAL_APPLIED_ENV] ?? '').split(',').filter(Boolean)
 
 /** A variable counts as explicit when it is set to anything non-blank. */
@@ -122,10 +135,14 @@ const explicit = (raw: string | undefined): raw is string => raw !== undefined &
 export function resolveExperimental(preference: boolean | undefined, env: Env): ExperimentalStatus[] {
   return EXPERIMENTAL_FEATURES.map(f => {
     const raw = env[f.env]
-    const writtenByUs = appliedIds(env).includes(f.id) && raw === '1'
+    const writtenByUs = (appliedIds(env).includes(f.id) && raw === '1')
+      || (appliedOffIds(env).includes(f.id) && raw === '0')
     if (explicit(raw) && !writtenByUs) {
       const on = f.isOn(raw)
       return { id: f.id, env: f.env, on, source: 'env' as const, overridden: preference === true && !on, envValue: raw }
+    }
+    if (preference === false && f.offByPreference) {
+      return { id: f.id, env: f.env, on: false, source: 'preference' as const, overridden: false, envValue: undefined }
     }
     return preference === true
       ? { id: f.id, env: f.env, on: true, source: 'preference' as const, overridden: false, envValue: undefined }
@@ -151,13 +168,24 @@ export function featureOn(id: string, env: Env = process.env): boolean {
  * the byte-identical-when-off guarantee lives here.
  */
 export function applyExperimental(preference: boolean | undefined, env: Env): string[] {
+  if (preference === false) {
+    const off: string[] = []
+    for (const f of EXPERIMENTAL_FEATURES) {
+      if (!f.offByPreference || (explicit(env[f.env]) && !appliedOffIds(env).includes(f.id))) continue
+      env[f.env] = '0'
+      off.push(f.id)
+    }
+    if (off.length > 0) env[EXPERIMENTAL_APPLIED_OFF_ENV] = off.join(',')
+    return []
+  }
   if (preference !== true) return []
   const applied: string[] = []
   for (const f of EXPERIMENTAL_FEATURES) {
-    if (explicit(env[f.env]) && !appliedIds(env).includes(f.id)) continue
+    if (explicit(env[f.env]) && !appliedIds(env).includes(f.id) && !appliedOffIds(env).includes(f.id)) continue
     env[f.env] = '1'
     applied.push(f.id)
   }
   if (applied.length > 0) env[EXPERIMENTAL_APPLIED_ENV] = applied.join(',')
+  delete env[EXPERIMENTAL_APPLIED_OFF_ENV]
   return applied
 }

@@ -531,7 +531,12 @@ export function createSessionsPoller(o: {
         }))
       }
 
-      // Read the harness's own transcript instead of the screen, wherever BOTH halves hold: the
+      // The conversation's last turns instead of the screen. F4.A: wherever the engine's channel
+      // follows the row (an EXACT link and an integration that serves its chat — `adapter-state.ts`)
+      // the tail comes from the one cursor the feed holds, and the transcript is not read here.
+      //
+      // A row the channel does not serve (no exact link yet, no chat feed, a no-driver row read
+      // ELSEWHERE) falls back to the harness's own transcript, wherever BOTH halves hold: the
       // conversation id is EXACT and somebody has written a reader for that harness's format
       // (`harness-transcript.ts`). Either missing and the raw screen tail stays the row's only
       // detail content — never a conversation guessed from harness-and-directory.
@@ -541,7 +546,12 @@ export function createSessionsPoller(o: {
       // we did not start; `ManagedSession.conversationId` is the id agentop handed the CLI
       // itself, which is the only one the other harnesses can ever have. Claude's own record is
       // preferred where both exist — it is the LIVE one, while the registry's was recorded once.
-      const readChatTail = async (r: (typeof reconciled)[number]): Promise<ChatTurn[]> => {
+      const readChatTail = async (r: (typeof reconciled)[number]): Promise<readonly ChatTurn[]> => {
+        const fed = adapter?.tail(r.id)
+        if (fed && fed.length > 0) {
+          chatTails.set(r.id, anyGrant() ? await scrubDeep(r.id, fed) : fed)
+          return fed
+        }
         const cwd = r.managed?.cwd
         const conversationId = harnessSessions.byManagedId.get(r.id)?.sessionId
           ?? r.managed?.conversationId

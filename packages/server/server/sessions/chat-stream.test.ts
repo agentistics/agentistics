@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, appendFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chatStreamCount, chatStreamResponse, DEBOUNCE_MS, MAX_CHAT_STREAMS, nextReadDelay, wakeChat } from './chat-stream'
+import { chatStreamCount, chatStreamResponse, DEBOUNCE_MS, MAX_CHAT_STREAMS, nextReadDelay, resetChatStreams, wakeChat } from './chat-stream'
 import type { ChatPayload } from './chat-web'
 
 const dirs: string[] = []
@@ -188,5 +188,24 @@ describe('nextReadDelay — the per-stream duty cycle (PERF.SLOW)', () => {
   })
   test('never longer than a second', () => {
     expect(nextReadDelay(10_000, 10_000, 5_000)).toBe(1_000)
+  })
+})
+
+describe('chat stream — the chat-source switch (F4 fix2)', () => {
+  test('resetChatStreams closes an open legacy stream so its client reconnects to the adapter', async () => {
+    const s = setup()
+    const ctl = new AbortController()
+    const before = chatStreamCount()
+    const res = chatStreamResponse('reset1', s.deps, ctl.signal)!
+    await events(res, e => e.length >= 1)
+    expect(chatStreamCount()).toBe(before + 1)
+    resetChatStreams()
+    expect(chatStreamCount()).toBe(before)
+    const reader = res.body!.getReader()
+    let done = false
+    for (let i = 0; i < 5 && !done; i++) done = (await reader.read()).done
+    expect(done).toBe(true)
+    resetChatStreams() // unregistered on close: the count never goes below where it was
+    expect(chatStreamCount()).toBe(before)
   })
 })
