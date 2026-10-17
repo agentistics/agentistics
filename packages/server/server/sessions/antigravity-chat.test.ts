@@ -112,9 +112,9 @@ describe('parseAntigravityChat', () => {
 
   it('an unmapped tool carries NO canonical field — there is no second reading to state', () => {
     const [turn] = parseAntigravityChat([planner(0, {
-      tool_calls: [{ name: 'manage_task', args: { Action: 'complete', TaskId: 't-1' } }],
+      tool_calls: [{ name: 'browser_subagent_unknown', args: { Action: 'complete', TaskId: 't-1' } }],
     })])
-    expect(turn!.tools![0]!.name).toBe('manage_task')
+    expect(turn!.tools![0]!.name).toBe('browser_subagent_unknown')
     expect(turn!.tools![0]!.canonical).toBeUndefined()
   })
 

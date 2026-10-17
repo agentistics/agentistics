@@ -96,7 +96,7 @@ test('parses a normal conversation', () => {
   expect(s!.user_message_count).toBe(1)
   // Only PLANNER_RESPONSE steps carrying prose count as an assistant reply.
   expect(s!.assistant_message_count).toBe(1)
-  expect(s!.tool_counts).toEqual({ Read: 1, search_web: 1, Bash: 1 })
+  expect(s!.tool_counts).toEqual({ Read: 1, WebSearch: 1, Bash: 1 })
   expect(s!.uses_web_search).toBe(true)
   expect(s!.uses_web_fetch).toBe(false)
   expect(s!.uses_mcp).toBe(false)
