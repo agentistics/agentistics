@@ -31,7 +31,7 @@ describe('session tab strip sits above the session title', () => {
     expect(app).toMatch(/\{\.\.\.\(tabsRowOn && headerSession \? \{\s*aboveHeight: TABS_ROW_H,/)
   })
   test('the phone strip reserves the safe area itself and the title row no longer does', () => {
-    expect(src).toContain("data-tabs-safe-top style={{ paddingTop: 'var(--safe-top)'")
+    expect(src).toContain("data-tabs-safe-top style={{ paddingTop: 'calc(var(--safe-top) + 0px)'")
     expect(src).toContain("paddingTop: tabStripAboveTitle && tabStripEl ? 4 : 'calc(var(--safe-top) + 4px)'")
   })
   test('TopBar renders `above` before `trailing`', () => {
