@@ -99,6 +99,29 @@ export async function inheritHandoffPrefs(
   return changed
 }
 
+/**
+ * Before the predecessor is filed away (`fileInFolder` is a MOVE: it unpins): when it handed off to a
+ * successor that does not hold a pin yet, give the successor the predecessor's slot so the pin is
+ * never silently dropped. No successor, no pin, or the successor already pinned = nothing changes.
+ * Never throws.
+ */
+export async function passPinToSuccessor(
+  predecessor: Ref,
+  successor: Ref | undefined,
+  update: (mutate: PreferencesMutator) => Promise<unknown>,
+): Promise<boolean> {
+  if (!successor) return false
+  let changed = false
+  try {
+    await update(cur => {
+      const patch = handoffPinPatch(cur, predecessor, successor)
+      changed = patch !== undefined
+      return patch
+    })
+  } catch { return false }
+  return changed
+}
+
 /** Preserve a managed-id agenda when a harness first links its conversation. */
 export async function rekeyCheckinSession(
   managedId: string, conversationId: string,
