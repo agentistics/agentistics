@@ -646,6 +646,29 @@ test('spawnManaged still fires the process-link retry when needsProcessLinkRetry
   expect(after).toContain('linkProcessConversationSoon(')
 })
 
+test('a QUEUED spawn runs the same post-spawn step (hand-off mute/note, folder, filing) as the direct one', async () => {
+  const src = stripComments(readFileSync(join(import.meta.dir, 'cli-start.ts'), 'utf8'))
+  // The queue's launch completes through afterStart...
+  const queue = extractTopLevelFunction(src, 'spawnQueue')
+  expect(queue).toContain('q.req.afterStart(r)')
+  // ...the host hands the SAME function to the direct path and to spawnManaged (so to the queue entry)...
+  expect(src).toContain('.then(afterStart)')
+  expect(src).toMatch(/attach: req\.attach,\s*afterStart,/)
+  // ...and spawnManaged forwards the request, afterStart included, to the queue untouched.
+  expect(extractTopLevelFunction(src, 'spawnManaged')).toContain('{ ...req, attach: false, skipAdmission: true, queue: false }')
+  // Behaviour of the queue half, with a stubbed memory gate: start() receives the entry and afterStart runs on its result.
+  const { createSpawnQueue } = await import('./sessions/spawn-queue')
+  const ran: string[] = []
+  const q = createSpawnQueue<{ afterStart: (r: { ok: boolean; id: string }) => Promise<void> }>({
+    admit: async () => true,
+    start: async req => { const r = { ok: true, message: '', id: 'child' }; await req.afterStart(r); return r },
+    notify: () => {},
+  })
+  q.enqueue('claude · /x', { afterStart: async r => { ran.push(r.id) } })
+  await q.tick()
+  expect(ran).toEqual(['child'])
+})
+
 test('production poller wires the exclusive managed log reader', () => {
   expect(sessionsPollerOptions({} as SessionBackend).readManagedConversation).toBe(readManagedConversation)
 })

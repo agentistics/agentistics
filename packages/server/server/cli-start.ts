@@ -1967,7 +1967,12 @@ function spawnQueue(): ReturnType<typeof createSpawnQueue<QueuedSpawnRequest>> {
   if (queueSingleton) return queueSingleton
   queueSingleton = createSpawnQueue<QueuedSpawnRequest>({
     admit: async () => admitSpawn(await readSpawnBudget(), 1).admit,
-    start: async q => spawnManaged(q.req, cliStrings(q.lang), q.lang),
+    start: async q => {
+      const r = await spawnManaged(q.req, cliStrings(q.lang), q.lang)
+      // The same post-spawn step the direct path runs (folder, board filing, hand-off inheritance).
+      if (q.req.afterStart) { try { await q.req.afterStart(r) } catch { /* a convenience, not the spawn */ } }
+      return r
+    },
     notify: n => {
       if (!isServerProcess()) return
       void import('./sse').then(m => m.broadcastNotification(n)).catch(() => {})
@@ -2041,6 +2046,11 @@ async function spawnManaged(req: {
    * gated normally.
    */
   skipAdmission?: boolean
+  /**
+   * Post-spawn filing/inheritance for a caller that needs it. `spawnManaged` never calls it: the
+   * caller runs it on the direct result, and the spawn queue runs it when a QUEUED launch completes.
+   */
+  afterStart?: (r: SpawnSessionResult) => Promise<SpawnSessionResult>
   /** multi-account: see `SpawnSessionRequest.account`. */
   account?: { env: Record<string, string>; loginArgv?: string[] }
 }, s: CliStrings, lang: CliLang): Promise<SpawnSessionResult> {
@@ -4569,27 +4579,9 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         label = handoffTitle(handoffParent?.label, req.label)
         launch = handoffSpawnDefaults(handoffParent, req.harness, req)
       }
-      return spawnManaged({
-        harness: req.harness as HarnessId,
-        cwd: filing.cwd,
-        attach: req.attach,
-        ...(req.prompt ? { prompt: req.prompt } : {}),
-        ...(launch.model ? { model: launch.model } : {}),
-        ...(launch.effort ? { effort: launch.effort } : {}),
-        ...(req.mode ? { mode: req.mode } : {}),
-        ...(label ? { label } : {}),
-        ...(rowFiling.task ? { task: rowFiling.task } : {}),
-        ...(taskId ? { contextTaskId: taskId } : {}),
-        ...(taskId && subtaskId ? { contextSubtaskId: subtaskId } : {}),
-        ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
-        ...(req.parentSessionId && req.parentVerified ? { parentVerified: true } : {}),
-        ...(req.handoff ? { handoff: true } : {}),
-        ...(req.handoff ? { role: 'leader' as const } : req.role ? { role: req.role } : {}),
-        ...(req.away !== undefined ? { away: req.away } : {}),
-        ...(req.force ? { force: true } : {}),
-        ...(req.origin ? { origin: req.origin } : {}),
-        ...(req.account ? { account: req.account } : {}),
-      }, S(), lang).then(async r => {
+      // Runs on the direct result AND, through the spawn queue, when a queued launch completes
+      // (a result that is not `ok` — refused or still queued — changes nothing).
+      const afterStart = async (r: SpawnSessionResult): Promise<SpawnSessionResult> => {
         let attachNote = ''
         // NW-02: a session started for a BOARD task is filed there by id, not only named after it.
         if (r.ok && r.id && taskId) {
@@ -4627,7 +4619,29 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
           } catch { /* a folder is a convenience, not the spawn */ }
         }
         return attachNote ? { ...r, message: `${r.message ? r.message + ' ' : ''}${attachNote}` } : r
-      })
+      }
+      return spawnManaged({
+        harness: req.harness as HarnessId,
+        cwd: filing.cwd,
+        attach: req.attach,
+        afterStart,
+        ...(req.prompt ? { prompt: req.prompt } : {}),
+        ...(launch.model ? { model: launch.model } : {}),
+        ...(launch.effort ? { effort: launch.effort } : {}),
+        ...(req.mode ? { mode: req.mode } : {}),
+        ...(label ? { label } : {}),
+        ...(rowFiling.task ? { task: rowFiling.task } : {}),
+        ...(taskId ? { contextTaskId: taskId } : {}),
+        ...(taskId && subtaskId ? { contextSubtaskId: subtaskId } : {}),
+        ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
+        ...(req.parentSessionId && req.parentVerified ? { parentVerified: true } : {}),
+        ...(req.handoff ? { handoff: true } : {}),
+        ...(req.handoff ? { role: 'leader' as const } : req.role ? { role: req.role } : {}),
+        ...(req.away !== undefined ? { away: req.away } : {}),
+        ...(req.force ? { force: true } : {}),
+        ...(req.origin ? { origin: req.origin } : {}),
+        ...(req.account ? { account: req.account } : {}),
+      }, S(), lang).then(afterStart)
     },
   }
 }

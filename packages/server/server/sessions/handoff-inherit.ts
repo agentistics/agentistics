@@ -93,12 +93,11 @@ export function handoffSpawnDefaults(
   if (given.model) out.model = given.model
   if (given.effort) out.effort = given.effort
   if (!parent || parent.harness !== harness) return out
-  if (!given.model && parent.model) {
-    out.model = parent.model
-    if (!given.effort && parent.effort) out.effort = parent.effort
-  } else if (!given.model && !given.effort && parent.effort) {
-    out.effort = parent.effort
-  }
+  if (!given.model && parent.model) out.model = parent.model
+  // An effort belongs to the model it was chosen for: carry it only when the EFFECTIVE model is the predecessor's
+  // (inherited, or passed explicitly as the same one) or no model is involved at all.
+  const sameModel = out.model === undefined ? !parent.model : out.model === parent.model
+  if (!given.effort && parent.effort && sameModel) out.effort = parent.effort
   return out
 }
 

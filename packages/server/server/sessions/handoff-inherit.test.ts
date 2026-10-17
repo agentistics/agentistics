@@ -166,6 +166,11 @@ describe('launch flags', () => {
     expect(handoffSpawnDefaults(pred, 'claude', { model: 'claude-sonnet-5-5' })).toEqual({ model: 'claude-sonnet-5-5' })
     expect(handoffSpawnDefaults(pred, 'claude', { effort: 'low' })).toEqual({ model: 'claude-opus-5-5', effort: 'low' })
   })
+  it('naming the SAME model keeps the predecessor effort; a different model never does', () => {
+    expect(handoffSpawnDefaults(pred, 'claude', { model: 'claude-opus-5-5' })).toEqual({ model: 'claude-opus-5-5', effort: 'high' })
+    expect(handoffSpawnDefaults(pred, 'claude', { model: 'claude-opus-5-5', effort: 'low' })).toEqual({ model: 'claude-opus-5-5', effort: 'low' })
+    expect(handoffSpawnDefaults(pred, 'claude', { model: 'claude-sonnet-5-5' }).effort).toBeUndefined()
+  })
   it('another harness inherits no flag (a model id means nothing to another CLI)', () => {
     expect(handoffSpawnDefaults(pred, 'codex', {})).toEqual({})
     expect(handoffSpawnDefaults(pred, 'codex', { model: 'gpt-6.1-sol' })).toEqual({ model: 'gpt-6.1-sol' })
