@@ -89,6 +89,8 @@ export default function BillingSettings() {
   // Accounts: the editor below targets ONE timeline — an account's own, or the assistant's default.
   const { limits: planLimits, now: limitsNow } = usePlanLimits()
   const [accounts, setAccounts] = useState<BillingAccount[]>([])
+  // The list arrived (a failed fetch never counts): only then may stale `failed` notices be pruned.
+  const [accountsLoaded, setAccountsLoaded] = useState(false)
   const [pendingIds, setPending] = useState<Set<string>>(new Set())
   const [failedIds, setFailed] = useState<Set<string>>(new Set())
   const [target, setTarget] = useState<string | null>(null)
@@ -100,7 +102,11 @@ export default function BillingSettings() {
     let cancelled = false
     fetch('/api/accounts')
       .then(r => (r.ok ? r.json() : null))
-      .then((b: { accounts?: BillingAccount[] } | null) => { if (!cancelled) setAccounts(b?.accounts ?? []) })
+      .then((b: { accounts?: BillingAccount[] } | null) => {
+        if (cancelled) return
+        setAccounts(b?.accounts ?? [])
+        if (b) setAccountsLoaded(true)
+      })
       .catch(() => { /* the default timeline still works without the list */ })
     return () => { cancelled = true }
   }, [])
@@ -119,7 +125,9 @@ export default function BillingSettings() {
     () => noticeAccounts(needPlan, allBillable, new Set(Object.keys(noticeState))),
     [needPlan, allBillable, noticeState],
   )
-  useEffect(() => { billingNotices.prune(new Set(needPlan.map(a => a.id))) }, [needPlan])
+  useEffect(() => {
+    if (accountsLoaded) billingNotices.prune(new Set(needPlan.map(a => a.id)))
+  }, [accountsLoaded, needPlan])
   const [openHarness, setOpenHarness] = useState<HarnessId | null>(harness)
   useEffect(() => { setOpenHarness(harness) }, [harness])
   const toggleAccount = async (a: BillingAccount) => {

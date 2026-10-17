@@ -18,4 +18,8 @@ describe('BillingSettings wiring (L1)', () => {
     expect(src).toContain("errPlace === 'page'")
     expect(src).toContain('billingNotices.prune(')
   })
+  test('failed notices are pruned only after the account list really loaded (never on the empty first render)', () => {
+    expect(src).toContain('if (accountsLoaded) billingNotices.prune(')
+    expect(src).toContain('if (b) setAccountsLoaded(true)')
+  })
 })
