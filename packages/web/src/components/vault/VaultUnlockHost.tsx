@@ -17,6 +17,7 @@ import { card, overlay } from '../MfaSetup'
 import { loadVault, unlockFor } from '../../lib/vaultApi'
 import { phoneFacts } from '../../lib/phoneVault'
 import { PhoneRequests, VaultUnlock, usePhoneRequests } from './VaultUnlock'
+import { useEscapeOwner } from '../../lib/overlayStack'
 
 type Ask = { resolve: (ok: boolean) => void }
 let _ask: Ask | null = null
@@ -62,12 +63,7 @@ export function VaultUnlockHost({ lang, isMobile, enabled }: { lang: 'en' | 'pt'
     return () => { _hosted--; if (_ask) answer(false) }
   }, [enabled])
   const { requests, refresh } = usePhoneRequests(enabled && loopback)
-  useEffect(() => {
-    if (!ask) return
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') answer(false) }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [ask])
+  useEscapeOwner(!!ask, () => answer(false))
   if (!enabled) return null
 
   const o: React.CSSProperties = isMobile ? { ...overlay, padding: 0, zIndex: 3200 } : { ...overlay, zIndex: 3200 }

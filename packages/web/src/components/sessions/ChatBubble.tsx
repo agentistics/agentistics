@@ -18,6 +18,7 @@
  * than the bubble, and letting it set the width is how a message ends up outside its own card.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { stripDictatedMark } from '../../lib/dictationMark'
 import ReactMarkdown from 'react-markdown'
@@ -297,76 +298,98 @@ export function ReasoningBlock({ text, pt }: { text: string; pt: boolean }) {
   )
 }
 
-/** The pill every system notice and event row wears. One definition so the two cannot drift. */
-function systemChipStyle(isMobile: boolean): React.CSSProperties {
-  return {
-    fontSize: 10.5, lineHeight: 1.4, color: 'var(--text-tertiary)',
-    padding: '3px 10px', borderRadius: 999,
-    background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-    maxWidth: '90%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-    fontFamily: 'inherit',
-    // Sleek chip dimensions on mobile and desktop
-    ...(isMobile ? { padding: '4px 10px', margin: '2px 0' } : {}),
-  }
+/** Quiet text-only controls of a system line: no capsule, no fill, the muted text token. */
+const sysBtn: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 4, padding: 0, border: 'none', background: 'none',
+  font: 'inherit', color: 'inherit', cursor: 'pointer', minWidth: 0,
+}
+// Contrast (WCAG, measured): text = 72% --text-primary → ≥7:1 dark / ≥7:1 light. Link = orange mixed
+// 65/35 into --text-primary → ≈9:1 dark, ≈5.0:1 light on --bg-base (the bare orange is 2.8:1 in light).
+const SYS_TEXT = 'color-mix(in srgb, var(--text-primary) 72%, transparent)'
+const SYS_LINK = 'color-mix(in srgb, var(--anthropic-orange) 65%, var(--text-primary))'
+const sysLink: React.CSSProperties = { ...sysBtn, color: SYS_LINK, flexShrink: 0, whiteSpace: 'nowrap' }
+/** Touch target: the BUTTON is 44px tall on a phone and the row is exactly that tall (no padding), so
+ *  consecutive lines sit back to back without their hit areas overlapping. */
+const touch = (isMobile: boolean): React.CSSProperties => (isMobile ? { minHeight: 44 } : {})
+
+/**
+ * A system event or notice as one inline line: muted small text centred between two hairlines
+ * (the "joined the channel" divider), its action a text link at the END of the same line. One
+ * definition so notes and event rows cannot drift.
+ */
+function SystemLine({ children, below, isMobile = false }: { children: React.ReactNode; below?: React.ReactNode; isMobile?: boolean }) {
+  const hair: React.CSSProperties = { flex: 1, height: 1, background: 'var(--border)', minWidth: 12 }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: 0 }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+        ...(isMobile ? { minHeight: 44, padding: 0 } : { padding: '4px 0' }),
+        fontSize: 11, lineHeight: 1.4, color: SYS_TEXT,
+      }}>
+        <span aria-hidden style={hair} />
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, maxWidth: '88%', minWidth: 0 }}>{children}</span>
+        <span aria-hidden style={hair} />
+      </div>
+      {below}
+    </div>
+  )
 }
 
 function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt: boolean }) {
   const { label, help, tab } = chatNote(note, pt)
   const [shown, setShown] = useState(false)
   const isMobile = useIsMobile()
-
-  const chip = systemChipStyle(isMobile)
+  const text: React.CSSProperties = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }
 
   // CHECKIN.PROMPT-SYSTEM is a notice, but its action belongs to the shared session header so
   // the same larger report view is used from both places.
   if (note.includes('agentistics_checkin_report')) {
-    return <div style={{ display: 'flex', justifyContent: 'center', padding: '2px 0' }}>
+    return <SystemLine isMobile={isMobile}>
       <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('agentistics:open-checkin'))}
-        style={{ ...chip, minHeight: 44, cursor: 'pointer', color: 'var(--text-primary)' }}>
+        style={{ ...sysLink, ...touch(isMobile) }}>
         {pt ? 'Abrir check-in' : 'Open check-in'}
       </button>
-    </div>
+    </SystemLine>
   }
 
   if (tab !== null) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', padding: '2px 0' }}>
+      <SystemLine isMobile={isMobile}>
         <button
           // The REFERENCE goes with the tab. Without it this lands at the top of a list to be
           // searched — the limitation CLAUDE.md records — and the body named the thing all along.
           onClick={() => openArtifacts(tab satisfies ChatNoteTab, noteRef)}
           {...(help ? { title: help, 'aria-label': `${label} — ${help}` } : {})}
-          style={{ ...chip, display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}
+          style={{ ...sysBtn, ...touch(isMobile) }}
         >
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-          <ArrowUpRight size={11} style={{ flexShrink: 0, color: 'var(--anthropic-orange)' }} />
+          <span style={text}>{label}</span>
+          <ArrowUpRight size={13} style={{ flexShrink: 0, color: SYS_LINK }} />
         </button>
-      </div>
+      </SystemLine>
     )
   }
 
-  // Nothing to go to. The chip tells you what it was instead — on TAP as well as hover, because a
+  // Nothing to go to. The line tells you what it was instead — on TAP as well as hover, because a
   // phone has no hover and this is the half of the report that is about not understanding.
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '2px 0',
-    }}>
+    <SystemLine
+      isMobile={isMobile}
+      below={shown && help !== null && (
+        <span role="note" style={{
+          fontSize: 11, lineHeight: 1.45, color: SYS_TEXT, maxWidth: '80%', textAlign: 'center', paddingBottom: 4,
+        }}>{help}</span>
+      )}
+    >
       <button
         onClick={() => setShown(v => !v)}
         aria-expanded={shown}
         disabled={help === null}
         {...(help ? { title: help } : {})}
-        style={{ ...chip, cursor: help === null ? 'default' : 'help' }}
+        style={{ ...sysBtn, cursor: help === null ? 'default' : 'help', ...touch(isMobile) }}
       >
-        {label}{help !== null && ' ⓘ'}
+        <span style={text}>{label}{help !== null && ' ⓘ'}</span>
       </button>
-      {shown && help !== null && (
-        <span role="note" style={{
-          fontSize: 10.5, lineHeight: 1.45, color: 'var(--text-tertiary)',
-          maxWidth: '80%', textAlign: 'center',
-        }}>{help}</span>
-      )}
-    </div>
+    </SystemLine>
   )
 }
 
@@ -440,18 +463,16 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
     const left = r ? Math.max(8 - r.left, Math.min(x, window.innerWidth - 8 - 170 - r.left)) : x
     setMenuAt({ x: left, y, ...(href ? { href } : {}) })
   }, [onReply, onForward, onSelectStart, isMobile])
+  useEscapeOwner(menuAt !== null, () => setMenuAt(null))
   useEffect(() => {
     if (menuAt === null) return
     const close = () => setMenuAt(null)
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuAt(null) }
     // `mousedown` rather than `click`, so it closes on the press; and on SCROLL too, because the
     // menu is anchored to a bubble that moves while the conversation does.
     document.addEventListener('mousedown', close)
-    document.addEventListener('keydown', onKey)
     window.addEventListener('scroll', close, true)
     return () => {
       document.removeEventListener('mousedown', close)
-      document.removeEventListener('keydown', onKey)
       window.removeEventListener('scroll', close, true)
     }
   }, [menuAt])
@@ -1098,11 +1119,7 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
 })
 
 function VaultGrantModal({ grant, pt, isMobile, onClose }: { grant: VaultGrantMessage; pt: boolean; isMobile: boolean; onClose: () => void }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  useEscapeOwner(true, onClose)
   return (
     <div style={{ ...overlay, zIndex: 3000 }} role="dialog" aria-modal="true" aria-label={pt ? 'Credencial anexada' : 'Credential attached'} onClick={onClose}>
       <div style={{ ...card, maxWidth: 520, width: '100%', maxHeight: 'calc(88vh / var(--ui-zoom, 1))', overflowY: 'auto', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()}>
@@ -1243,30 +1260,31 @@ export function SystemEventRow({ event, pt, sessionId, titleOf, defaultOpen = fa
   const setOpen = (v: boolean) => { if (controlledOpen === undefined) setInnerOpen(v); onOpenChange?.(v) }
   const isMobile = useIsMobile()
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '4px 0' }}>
+    <SystemLine
+      isMobile={isMobile}
+      below={open && (
+        <div style={{
+          margin: '2px 0 6px', padding: '6px 10px', borderRadius: 6, maxWidth: '92%', background: 'var(--bg-base)',
+          color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        }}>{event.body || (pt ? '(sem texto)' : '(no text)')}</div>
+      )}
+    >
       <button
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        style={{ ...systemChipStyle(isMobile), display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', minHeight: isMobile && event.kind === 'checkin' ? 44 : 24 }}
+        style={{ ...sysBtn, gap: 5, ...touch(isMobile) }}
       >
-        <Info size={12} color="var(--anthropic-orange)" style={{ flexShrink: 0 }} />
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{systemEventLine(event, pt, event.sender ? titleOf?.(event.sender) : undefined)}</span>
+        <Info size={14} style={{ flexShrink: 0 }} />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{systemEventLine(event, pt, event.sender ? titleOf?.(event.sender) : undefined)}</span>
         <ChevronDown size={12} style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : undefined }} />
       </button>
       {event.kind === 'checkin' && <button
         type="button"
         onClick={() => window.dispatchEvent(new CustomEvent('agentistics:open-checkin', { detail: { sessionId } }))}
-        style={{ ...systemChipStyle(isMobile), minHeight: isMobile ? 44 : 24, cursor: 'pointer', color: 'var(--text-primary)' }}
+        style={{ ...sysLink, ...touch(isMobile) }}
       >{pt ? 'Abrir check-in' : 'Open check-in'}</button>}
-      {open && (
-        <div style={{
-          marginTop: 4, padding: '8px 10px', borderRadius: 8, maxWidth: '92%', border: '1px solid var(--border-subtle)',
-          background: 'var(--bg-base)', color: 'var(--text-secondary)', fontSize: 12,
-          lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-        }}>{event.body || (pt ? '(sem texto)' : '(no text)')}</div>
-      )}
-    </div>
+    </SystemLine>
   )
 }
 

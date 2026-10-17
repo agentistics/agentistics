@@ -27,6 +27,7 @@
  * session's name — a confident wrong answer the reader has no way to detect.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { reopeningLabel, withReopening } from '../../lib/reopeningStore'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -567,6 +568,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   // reader has used elsewhere dismisses on an outside click, so needing to find the button again
   // reads as the menu being stuck. `mousedown` rather than `click`, so it closes on the press
   // instead of waiting for a release that may land somewhere else.
+  useEscapeOwner(moreOpen, () => setMoreOpen(false))
   useEffect(() => {
     if (!moreOpen) return
     const close = (e: MouseEvent) => {
@@ -576,15 +578,12 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       setMoreOpen(false)
     }
     document.addEventListener('mousedown', close)
-    // Escape too: a menu that can only be dismissed with the mouse is one a keyboard cannot leave.
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMoreOpen(false) }
-    document.addEventListener('keydown', onKey)
     return () => {
       document.removeEventListener('mousedown', close)
-      document.removeEventListener('keydown', onKey)
     }
   }, [moreOpen])
 
+  useEscapeOwner(modeMenuOpen, () => setModeMenuOpen(false))
   useEffect(() => {
     if (!modeMenuOpen) return
     const close = (e: MouseEvent) => {
@@ -593,12 +592,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
         setModeMenuOpen(false)
       }
     }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setModeMenuOpen(false) }
     document.addEventListener('mousedown', close)
-    document.addEventListener('keydown', onKey)
     return () => {
       document.removeEventListener('mousedown', close)
-      document.removeEventListener('keydown', onKey)
     }
   }, [modeMenuOpen])
 
@@ -1700,14 +1696,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   // chat that is no longer on screen would forward something the reader cannot see.
   useEffect(() => () => chatSelection.clear(scratchId), [scratchId])
   useEffect(() => { setSelecting(null); setForwardTurns(null) }, [scratchId])
-  // Esc leaves the mode wherever the focus is — the composer's own handler checks first, so the key
-  // never also reaches the stop verb.
-  useEffect(() => {
-    if (selecting === null || forwardTurns !== null) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); setSelecting(null) } }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [selecting, forwardTurns])
+  // Esc leaves the mode wherever the focus is. It is on the overlay stack, so the key never also
+  // reaches the composer's stop verb.
+  useEscapeOwner(selecting !== null, () => setSelecting(null))
 
   const harnessLabel = (HARNESS_LABELS as Record<string, string>)[session.harness] ?? session.harness
   const forwardSource = useMemo(() => ({ title: session.title, harness: harnessLabel }), [session.title, harnessLabel])
@@ -2472,6 +2463,20 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       </Centered>
     )
   }
+
+  // ESCAPE, ONE STEP AT A TIME, through the overlay stack: each picker (/ skills, @ tools, # sessions)
+  // and answering mode closes first, so dismissing a list opened by accident never also reaches the
+  // stop verb — which stays the composer's own, and only sees Escape when nothing here is open.
+  useEscapeOwner(skillPickerOpen, () => setSlashDismissed(true))
+  useEscapeOwner(hashOpen, () => setHashDismissed(true))
+  useEscapeOwner(atOpen, () => {
+    setAtDismissed(true)
+    // Closing the picker ends the pick, so the open `@server:` it left for the NEXT one is
+    // scaffolding now — see `dropEmptyAtTrigger`.
+    setDraft(d => dropEmptyAtTrigger(d))
+  })
+  // ANSWERING MODE LETS GO FIRST: "I am not answering with my own words after all" — the draft is kept.
+  useEscapeOwner(answeringNow, () => setAnswering(null))
 
   return (
     <div
@@ -3239,7 +3244,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                                   if (next) { e.preventDefault(); next.focus(); next.setSelectionRange(0, 0) }
                                   return
                                 }
-                                if (e.key === 'Escape' && selecting !== null) { e.preventDefault(); setSelecting(null); return }
                                 // Same rule as the main field: a phone's return breaks the line.
                                 if (e.key === 'Enter' && !e.shiftKey && !isMobile) { e.preventDefault(); void send(); return }
                                 if (e.key === 'Escape' && stopEnabled) { e.preventDefault(); void stopNow() }
@@ -3395,9 +3399,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         return
                       }
                     }
-                    // Escape closes the picker BEFORE it reaches the stop verb: a person dismissing
-                    // a list they opened by accident must not interrupt the session's turn.
-                    if (e.key === 'Escape' && skillPickerOpen) { e.preventDefault(); setSlashDismissed(true); return }
                     // THE `@` PICKER OWNS THE SAME KEYS, over whichever level is showing. At the
                     // tool level Enter does NOT close it — `insertAtTool` reopens an empty
                     // `@server:` trigger right after the token it writes, which is the whole
@@ -3429,18 +3430,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         return
                       }
                     }
-                    if (e.key === 'Escape' && hashOpen) { e.preventDefault(); setHashDismissed(true); return }
-                    // SELECTION MODE takes Escape before the stop verb — leaving the mode must never
-                    // also interrupt the session's turn.
-                    if (e.key === 'Escape' && selecting !== null) { e.preventDefault(); setSelecting(null); return }
-                    if (e.key === 'Escape' && atOpen) {
-                      e.preventDefault()
-                      setAtDismissed(true)
-                      // Closing the picker ends the pick, so the open `@server:` it left for the
-                      // NEXT one is scaffolding now — see `dropEmptyAtTrigger`.
-                      setDraft(d => dropEmptyAtTrigger(d))
-                      return
-                    }
                     // ON A PHONE, ENTER BREAKS THE LINE. Asked for directly, and it is the
                     // convention every messaging app on a touch keyboard follows: the return key is
                     // the only way to write a second line there, because `shift+enter` needs a
@@ -3449,12 +3438,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     // rule is the opposite one and unchanged — enter sends, shift+enter breaks —
                     // and the picker above follows the same split for the same reason.
                     if (e.key === 'Enter' && !e.shiftKey && !isMobile) { e.preventDefault(); void send() }
-                    // ANSWERING MODE LETS GO FIRST. Escape here means "I am not answering with my
-                    // own words after all" — the draft is kept, because it is what was typed and
-                    // may well be the next message. Only once that is off does Escape reach the
-                    // stop verb; a single key doing both at once is the double-booking the tab bar
-                    // was fixed for.
-                    if (e.key === 'Escape' && answeringNow) { e.preventDefault(); setAnswering(null); return }
                     // The composer's own "esc": stops the CURRENT turn without touching the draft
                     // or the field's own ability to keep taking text — see `stopNow`.
                     if (e.key === 'Escape' && stopEnabled) { e.preventDefault(); void stopNow() }

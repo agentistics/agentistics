@@ -6,6 +6,7 @@ import type { AppContext, PrefsDraft } from '../../lib/app-context'
 import { SectionHeader, Divider, TabSelect, PrefRow, Toggle, Checkbox } from './primitives'
 import { DEFAULT_CARD_ORDER, type CardId } from '../../lib/cardOrder'
 import ProjectDisksSection from './ProjectDisksSection'
+import { sessionTabsStore } from '../../lib/appFlags'
 
 /** One label per `CardId`. Typed as the Record so the build fails if a card is added and this is
  *  not — the same reason `HARNESS_CAPABILITIES` is a Record rather than a list. */
@@ -38,6 +39,8 @@ function seedDraft(ctx: AppContext): PrefsDraft {
 
 export default function PreferencesSettings() {
   const ctx = useOutletContext<AppContext>()
+  const [sessionTabsOn, setSessionTabsOn] = useState(() => sessionTabsStore.get())
+  useEffect(() => sessionTabsStore.subscribe(() => setSessionTabsOn(sessionTabsStore.get())), [])
   // Central-wide delete policy. Owner-only AND central-only: it is not a personal preference —
   // turning it off removes a safety net for everyone on this central. null until read, so the row
   // never flashes a wrong state.
@@ -173,6 +176,14 @@ export default function PreferencesSettings() {
         </>
       )}
 
+      <SectionHeader label={pt ? 'Sessões' : 'Sessions'} />
+      <PrefRow
+        label={pt ? 'Abas de sessões (experimental)' : 'Session tabs (experimental)'}
+        sub={pt ? 'Mostra as conversas abertas como abas no topo da conversa, com fixar e o estado de cada uma.' : 'Shows the open conversations as tabs at the top of the chat, with pinning and each one’s state.'}
+      >
+        <Toggle on={sessionTabsOn} onToggle={() => sessionTabsStore.set(!sessionTabsOn)} />
+      </PrefRow>
+      <Divider />
       {/*  Display  */}
       <SectionHeader label={pt ? 'Privacidade' : 'Privacy'} />
       <PrefRow

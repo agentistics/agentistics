@@ -83,6 +83,7 @@
  * test would notice.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { createSharedPref } from '../../lib/sharedPref'
 import {
   useEffect, useReducer, useRef, useState,
@@ -1937,17 +1938,7 @@ export function RepoConflictPrompt({ path, lang, isMobile, autosave, onResave, o
   const pt = lang === 'pt'
   const dialogRef = useRef<HTMLDivElement | null>(null)
 
-  useEffect(() => {
-    if (typeof document === 'undefined') return
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key !== 'Escape') return
-      // This dialog answers Escape, and nothing above it gets a second go at the same keypress.
-      ev.stopPropagation()
-      onDismiss()
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onDismiss])
+  useEscapeOwner(true, onDismiss)
 
   // Focus leaves whatever had it — Monaco, the Save button — and lands on the dialog itself, which is
   // what makes the Tab wrap below the whole of the keyboard's reach while the question is open.

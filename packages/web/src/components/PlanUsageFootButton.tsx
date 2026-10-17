@@ -1,3 +1,4 @@
+import { useEscapeOwner } from '../lib/overlayStack'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { Gauge } from 'lucide-react'
@@ -34,13 +35,12 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn }: { lang: 'pt' |
   const closeSoon = useCallback(() => { if (timer.current) clearTimeout(timer.current); timer.current = setTimeout(() => setRect(null), GRACE_MS) }, [])
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
   useLayoutEffect(() => { if (rect) close() }, [collapsed]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEscapeOwner(!!rect, close)
   useEffect(() => {
     if (!rect) return
     const onScroll = (e: Event) => { if (scrollIsOutside(popRef.current, e.target)) close() }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
     window.addEventListener('scroll', onScroll, true)
-    window.addEventListener('keydown', onKey)
-    return () => { window.removeEventListener('scroll', onScroll, true); window.removeEventListener('keydown', onKey) }
+    return () => { window.removeEventListener('scroll', onScroll, true) }
   }, [rect, close])
 
   // The popover is portaled to <body>, so the browser's tab order never reaches it from the button.

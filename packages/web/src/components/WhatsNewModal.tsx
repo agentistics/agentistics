@@ -3,6 +3,7 @@ import { Checkbox } from '../pages/settings/primitives'
 import { X, Sparkles, ExternalLink } from 'lucide-react'
 import { overlayPadding } from '../lib/mobileOverlay'
 import type { ReleaseEntry } from '../whatsNew/select'
+import { useEscapeOwner } from '../lib/overlayStack'
 
 interface Props {
   entries: ReleaseEntry[]
@@ -45,11 +46,7 @@ export function ReleaseSection({ entry, lang, first }: { entry: ReleaseEntry; la
 export function WhatsNewModal({ entries, lang, isMobile, onClose, autoOpened, onDontShow }: Props) {
   const t = T[lang]
   const [never, setNever] = useState(false)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  useEscapeOwner(true, onClose)
 
   return (
     <div

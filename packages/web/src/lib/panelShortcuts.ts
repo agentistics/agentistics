@@ -99,3 +99,20 @@ export function shouldHandlePanelShortcut(
   if (isOrdinaryTypingTarget(target)) return null
   return shortcut
 }
+
+// ── Session tabs (flag `sessionTabs`) ──────────────────────────────────────────────────────────
+// `Ctrl+Alt+→/←` step to the next/previous tab and `Ctrl+Alt+1..9` jump to one. `Ctrl+W` is NOT
+// taken: it is the browser's own "close tab". They fire from a text field too — the composer is
+// where focus lives — but not from a terminal, which owns its keyboard.
+
+export type TabShortcut = { kind: 'step'; by: 1 | -1 } | { kind: 'jump'; n: number }
+
+export function matchTabShortcut(e: PanelShortcutInput): TabShortcut | null {
+  if (e.isComposing || e.focusInTerminal) return null
+  if (!(e.ctrl || e.meta) || !e.alt || e.shift) return null
+  if (e.key === 'ArrowRight' || e.code === 'ArrowRight') return { kind: 'step', by: 1 }
+  if (e.key === 'ArrowLeft' || e.code === 'ArrowLeft') return { kind: 'step', by: -1 }
+  // `code` first: with Alt held, `key` can be a dead/compose character on some layouts.
+  const m = /^(?:Digit|Numpad)([1-9])$/.exec(e.code) ?? /^([1-9])$/.exec(e.key)
+  return m ? { kind: 'jump', n: Number(m[1]) } : null
+}

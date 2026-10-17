@@ -86,6 +86,7 @@ export const USER_UI_PREF_REGISTRY = {
   sessionsFiltersOpen: { machine: 'ui', maxBytes: SMALL },
   fleetOpen: { machine: 'ui', maxBytes: SMALL },
   studioSeen: { machine: 'ui', maxBytes: SMALL },
+  sessionTabs: { machine: 'ui', maxBytes: SMALL },
   projectDisk: { machine: 'ui', maxBytes: SMALL },
   centralMachine: { machine: 'ui', maxBytes: SMALL },
   sessionRoles: { machine: 'ui', maxBytes: MEDIUM },

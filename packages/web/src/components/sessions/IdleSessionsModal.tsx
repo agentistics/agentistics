@@ -46,6 +46,7 @@ import type { FleetState } from '../../lib/fleet'
 // break the popover's positioning, since `popoverPosition` measures `window.innerHeight` while the
 // containing block would then be smaller than the window.
 import { Select } from '../../pages/settings/primitives'
+import { useEscapeOwner } from '../../lib/overlayStack'
 
 const NEW_GROUP = '__new__'
 
@@ -135,13 +136,7 @@ export function IdleSessionsModal({ lang, candidates, rows, underPressure, onClo
   const [busy, setBusy] = useState(false)
   const [outcomes, setOutcomes] = useState<IdleOutcome[] | null>(null)
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !busy) { e.stopPropagation(); onClose() }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, busy])
+  useEscapeOwner(true, onClose, () => !busy)
 
   useEffect(() => () => { opener.current?.focus?.() }, [])
 

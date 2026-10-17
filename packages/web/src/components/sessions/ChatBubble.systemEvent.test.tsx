@@ -35,7 +35,9 @@ test('expanded check-in row shows the checklist and its localized action', () =>
   expect(html).toContain('Check-in da liderança · sistema')
   expect(html).toContain('Abrir check-in')
   expect(html).toContain('xyzzy-checklist-marker')
-  expect(html).toContain('min-height:24px')
+  // an inline line, not a capsule: no radius/fill on the row, the action sits on the same line
+  expect(html).not.toContain('border-radius:999px')
+  expect(html).toContain('height:1px')
 })
 
 test('open check-in dispatches the existing session-scoped UI event', () => {
@@ -67,7 +69,11 @@ test('check-in controls have 44px touch targets at 390px', () => {
   viewport.innerWidth = 390
   try {
     const html = renderToStaticMarkup(<SystemEventRow event={{ kind: 'checkin', body: 'checklist' }} pt={false} />)
-    expect(html.match(/min-height:44px/g)).toHaveLength(2)
+    // Two 44px buttons inside a 44px row with no padding and no negative margin: consecutive lines'
+    // hit areas sit back to back and never overlap.
+    expect(html.match(/<button[^>]*min-height:44px/g)).toHaveLength(2)
+    expect(html).toMatch(/min-height:44px;padding:0/)
+    expect(html).not.toMatch(/margin:-8px/)
   } finally {
     viewport.innerWidth = originalWidth
   }

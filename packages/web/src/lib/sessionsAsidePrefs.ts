@@ -13,6 +13,7 @@
  * arrangement is worse than one that opens on the defaults.
  */
 
+import { useSyncExternalStore } from 'react'
 import { createPersonalDoc } from './sharedPref'
 import { DEFAULT_ORDER, SESSION_SORTS, type SessionOrder } from '@agentistics/tui/control/session-order'
 
@@ -63,12 +64,15 @@ export interface AsideGroupPrefs {
   expandedEndedGroups: string[]
   /** Has the person ever picked a sort? Until then folders keep their drag order. */
   sortExplicit: boolean
+  /** Show only the sessions whose role is "leader" (`leadersFilter.ts`). A FILTER, persisted like the
+   *  rest of how this person reads the list — pins stay and folders keep their place. */
+  leadersOnly: boolean
 }
 
 export const DEFAULT_ASIDE_GROUP_PREFS: AsideGroupPrefs = {
   groupBy: 'project', order: {}, collapsed: [], cardColor: 'wash', collapsedUserGroups: [],
   sort: DEFAULT_ORDER, hiddenUserGroups: [], foldedPinned: false, foldedGroupsSection: false,
-  expandedEndedGroups: [], sortExplicit: false,
+  expandedEndedGroups: [], sortExplicit: false, leadersOnly: false,
 }
 
 /** Total: anything that is not a known key and direction reads as the default. */
@@ -141,6 +145,7 @@ export function parseAsideGroupPrefs(stored: unknown): AsideGroupPrefs {
       foldedGroupsSection: p.foldedGroupsSection === true,
       // A stored sort that is not the default, from before the flag existed, WAS a choice.
       sortExplicit: typeof p.sortExplicit === 'boolean' ? p.sortExplicit : sortDiffersFromDefault(readSessionSort(p.sort)),
+      leadersOnly: p.leadersOnly === true,
       expandedEndedGroups: Array.isArray(p.expandedEndedGroups)
         ? p.expandedEndedGroups.filter((x): x is string => typeof x === 'string')
         : [],
@@ -176,4 +181,9 @@ export function arrangeChangedCount(o: {
     o.cardColor !== d.cardColor,
     o.hiddenFolders > 0,
   ].filter(Boolean).length
+}
+
+/** Is the leaders-only filter on — followed live, so the Filtros badge in App and the aside agree. */
+export function useLeadersOnly(): boolean {
+  return useSyncExternalStore(subscribeAsideGroupPrefs, () => readAsideGroupPrefs().leadersOnly, () => false)
 }

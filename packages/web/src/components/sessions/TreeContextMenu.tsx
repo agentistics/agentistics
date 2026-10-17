@@ -41,6 +41,7 @@
  * it the same way.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -123,14 +124,12 @@ export function TreeContextMenu({ x, y, kind, lang, onMention, copyPath, onActio
   const isMobile = useIsMobile()
   const entries = treeMenuEntries(kind, lang, onMention !== undefined, copyPath !== undefined)
 
+  useEscapeOwner(true, onClose)
   useEffect(() => {
     const away = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose() }
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('mousedown', away)
-    document.addEventListener('keydown', key)
     return () => {
       document.removeEventListener('mousedown', away)
-      document.removeEventListener('keydown', key)
     }
   }, [onClose])
 

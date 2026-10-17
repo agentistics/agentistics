@@ -39,7 +39,8 @@
  * belongs to launch time, exactly as `stagedSession.ts`'s own header states.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEscapeOwner } from '../../lib/overlayStack'
+import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronLeft, ChevronRight, Paperclip, Plus, Trash2, X } from 'lucide-react'
 import { validateStagedSessionDraft, type StagedSessionDraft } from '@agentistics/core'
@@ -129,16 +130,10 @@ export function StagedSessionCompose(p: StagedSessionComposeProps) {
     setEffort(e => (nextWizard && nextWizard.efforts.includes(e)) ? e : '')
   }
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      if (lightboxIndex !== null) return // AttachmentLightbox handles its own Escape.
-      if (modelOpen) setModelOpen(false)
-      else if (!saving) p.onClose()
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [modelOpen, saving, lightboxIndex, p])
+  // The dialog and its model list each sit on the overlay stack; the lightbox registers itself
+  // when it opens, so it is always on top of both.
+  useEscapeOwner(true, () => p.onClose(), () => !saving)
+  useEscapeOwner(modelOpen, () => setModelOpen(false))
 
   const attached = useMemo(
     () => attachmentIds.map(id => p.taskFiles.find(f => f.id === id)).filter((f): f is TaskFile => !!f),

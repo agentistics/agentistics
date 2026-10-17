@@ -15,6 +15,7 @@
  * breakpoint, so there is no touch reader being asked to hover. It opens on keyboard focus too.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
@@ -108,18 +109,16 @@ export function SessionsRail({
     : undefined
 
   // A dropdown closes on a click outside it and on Escape — every menu in this app does.
+  useEscapeOwner(!!openFolder, () => setOpenFolder(null))
   useEffect(() => {
     if (!openFolder) return
     const onDown = (e: MouseEvent) => {
       if (dropdownRef.current?.contains(e.target as Node)) return
       setOpenFolder(null)
     }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpenFolder(null) }
     document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
     return () => {
       document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
     }
   }, [openFolder])
 

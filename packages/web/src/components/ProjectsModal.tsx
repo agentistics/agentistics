@@ -4,6 +4,7 @@ import { Search, X, Check } from 'lucide-react'
 import { formatProjectName } from '@agentistics/core'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { OVERLAY_TOP } from '../lib/mobileOverlay'
+import { useEscapeOwner } from '../lib/overlayStack'
 
 interface Props {
   projects: { path: string; sessions: { sessionId: string; created: string }[] }[]
@@ -62,13 +63,7 @@ export function ProjectsModal({ projects, sessionCountByProject, selected, onApp
   }, [])
 
   // ESC closes modal
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
+  useEscapeOwner(true, onClose)
 
   const filtered = projects.filter(p =>
     p.path.toLowerCase().includes(query.toLowerCase())

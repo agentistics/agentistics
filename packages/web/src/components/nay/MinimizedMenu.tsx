@@ -17,6 +17,7 @@
  * from `STATE_COLOR` (the same token every other surface uses), and the harness's display label.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { PictureInPicture2, X } from 'lucide-react'
 import type { HarnessId } from '@agentistics/core'
@@ -94,6 +95,7 @@ export function MinimizedMenu({ pt, items, onRestore, onClose, anchorStyle, supp
   }, [open])
 
   // An outside press or Escape dismisses it.
+  useEscapeOwner(open, () => setOpen(false))
   useEffect(() => {
     if (!open) return
     const onDown = (e: PointerEvent) => {
@@ -101,10 +103,8 @@ export function MinimizedMenu({ pt, items, onRestore, onClose, anchorStyle, supp
       if (anchorRef.current?.contains(t) || menuRef.current?.contains(t)) return
       setOpen(false)
     }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
     window.addEventListener('pointerdown', onDown, true)
-    window.addEventListener('keydown', onKey)
-    return () => { window.removeEventListener('pointerdown', onDown, true); window.removeEventListener('keydown', onKey) }
+    return () => { window.removeEventListener('pointerdown', onDown, true) }
   }, [open])
 
   const onEnter = (e: ReactPointerEvent) => {

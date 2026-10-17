@@ -12,6 +12,7 @@
  * the two cannot disagree about a limit or a paste.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useEffect, useRef, useState } from 'react'
 import { FileText } from 'lucide-react'
 import type { ChatAttachmentRef } from '@agentistics/core'
@@ -124,6 +125,7 @@ export function CommentComposer({ lang, value, onChange, attachments, onAttachme
   const commentRows = trigger?.kind === 'comment' && mentions ? filterComments(mentions.comments, trigger.query) : []
   const pickerRows = trigger?.kind === 'session' ? sessionRows.length : commentRows.length
   const pickerOpen = !!trigger && !dismissed && (pickerRows > 0 || !/\s/.test(trigger.query))
+  useEscapeOwner(pickerOpen, () => setDismissed(true))
   const choose = (i: number) => {
     const at = taRef.current?.selectionStart ?? caret
     const out = trigger?.kind === 'session'
@@ -213,7 +215,6 @@ export function CommentComposer({ lang, value, onChange, attachments, onAttachme
               if (e.key === 'ArrowUp') { e.preventDefault(); setPickIndex(i => (i - 1 + pickerRows) % pickerRows); return }
               if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); choose(pickIndex); return }
             }
-            if (pickerOpen && e.key === 'Escape') { e.preventDefault(); setDismissed(true); return }
             // Same rule as the session composer: Enter breaks the line on a phone, sends elsewhere.
             if (e.key === 'Enter' && !e.shiftKey && !isMobile && !e.nativeEvent.isComposing) { e.preventDefault(); send() }
           }}

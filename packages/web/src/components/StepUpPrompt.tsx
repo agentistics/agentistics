@@ -6,6 +6,7 @@ import { setStepUpPrompter } from '../lib/stepup'
 import type { StepUpAsk } from '../lib/stepup'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { Revealable, REVEAL_PAD } from './PasswordReveal'
+import { useEscapeOwner } from '../lib/overlayStack'
 
 /**
  * Re-authentication dialog for destructive operations. Mounted once by App; `stepUpFetch`
@@ -52,12 +53,7 @@ export function StepUpPrompt({ lang }: { lang: Lang }) {
   }, [])
 
   // A cancelled dialog must resolve, or the awaiting request would hang forever.
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') finish(null) }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, finish])
+  useEscapeOwner(open, () => finish(null))
 
   if (!open) return null
 

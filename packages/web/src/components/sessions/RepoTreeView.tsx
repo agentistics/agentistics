@@ -57,6 +57,7 @@
  * `creating` state for a new file.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, Folder, Loader, MoreHorizontal, X,
@@ -655,6 +656,7 @@ function RenamingRow({ row, indent, isMobile, glyph, mark, renaming, onChange, o
 }) {
   const isDir = row.kind === 'dir'
   const pt = lang === 'pt'
+  useEscapeOwner(true, onCancel)
   return (
     <div>
       <div
@@ -689,7 +691,6 @@ function RenamingRow({ row, indent, isMobile, glyph, mark, renaming, onChange, o
           onClick={e => e.stopPropagation()}
           onKeyDown={e => {
             if (e.key === 'Enter') { e.preventDefault(); onCommit() }
-            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onCancel() }
           }}
           aria-label={pt ? `Renomear ${row.name}` : `Rename ${row.name}`}
           style={{
