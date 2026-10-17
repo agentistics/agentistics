@@ -749,9 +749,23 @@ export async function planLimitsPayload(
     const n = ofHarness.findIndex(a => accountId(a) === account) + 1
     return n > 0 ? `${HARNESS_LABELS[harness]} #${n}` : HARNESS_LABELS[harness]
   }
-  const limits = stored
-    .map(l => withPlanLabel(l, billing, nowMs))
-    .map(l => { const label = byAccount.get(l.account)?.label; return label ? { ...l, label } : l })
+  // A meter recorded as `default` (before its login was identified) is the ONE live account of the
+  // harness when there is exactly one; with none or several it stays `default` — guessing among two
+  // logins would show one plan's meter under the other. `meterKey` keeps the stored key for history.
+  const liveOf = (h: HarnessId) => accounts.filter(a => a.id && a.harness === h && a.available && !a.retired)
+  const meterKey = new Map<PlanLimits, string>()
+  const resolvedStored = stored.map(l => {
+    if (l.account !== 'default') return l
+    const live = liveOf(l.harness)
+    const only = live.length === 1 ? live[0]! : undefined
+    if (!only || stored.some(o => o.harness === l.harness && o.account === only.id)) return l
+    const next = { ...l, account: only.id }
+    meterKey.set(next, keyOf(l))
+    return next
+  })
+  const limits = resolvedStored
+    .map(l => { const next = withPlanLabel(l, billing, nowMs); const k = meterKey.get(l); if (k) meterKey.set(next, k); return next })
+    .map(l => { const label = byAccount.get(l.account)?.label; if (!label) return l; const next = { ...l, label }; const k = meterKey.get(l); if (k) meterKey.set(next, k); return next })
     .sort((a, b) => a.harness.localeCompare(b.harness) || a.account.localeCompare(b.account))
   const spawnability = harnessSpawnabilities(nowMs)
   const resolvedSessions = liveSessions.map(s => {
@@ -775,11 +789,25 @@ export async function planLimitsPayload(
     // billed tokens remain in the public live summary, without diluting the measured burn.
     const planSessions = resolvedSessions.filter(s => s.burnPctPerHour > 0 && belongsTo(s, l))
     const availability = spawnability[l.harness]!
-    return { ...budget, ...planPace(l, nowMs, history.get(keyOf(l)) ?? [], planSessions, segmentOf(l.account)), ...availability,
+    return { ...budget, ...planPace(l, nowMs, history.get(meterKey.get(l) ?? keyOf(l)) ?? [], planSessions, segmentOf(l.account)), ...availability,
       ...(!availability.spawnable ? { freeSlots: 0, suggestedParallel: 0 } : {}),
       account: l.account, accountLabel: labelOf(l.harness, l.account),
     }
   })
+  // Several rows of one harness must be told apart: the bare harness name (a meter of no known
+  // account) beside "<Harness> #1" reads as the same plan twice.
+  for (const h of new Set(allBudgets.map(b => b.harness))) {
+    const rows = allBudgets.filter(b => b.harness === h)
+    if (rows.length < 2) continue
+    const used = new Set(rows.map(b => b.accountLabel))
+    let n = 1
+    for (const b of rows) {
+      if (b.accountLabel !== HARNESS_LABELS[h]) continue
+      while (used.has(`${HARNESS_LABELS[h]} #${n}`)) n++
+      b.accountLabel = `${HARNESS_LABELS[h]} #${n}`
+      used.add(b.accountLabel)
+    }
+  }
   const visibleBudgets = agentVisible(allBudgets, visibility)
   const shown = new Set(visibleBudgets)
   const hiddenFromAgents = allBudgets.filter(b => !shown.has(b))
@@ -802,7 +830,9 @@ export async function planLimitsPayload(
       const plan = registeredPlanLabel(billing, h, nowMs, a.id || undefined)
       if (!plan) continue
       const account = a.id || 'default'
-      if (!a.available || limits.some(l => l.harness === h && (l.account === account || (!a.id && !byAccount.has(l.account))))) continue
+      // A login that already reports a meter (under its own id, an alias, or a same-login twin) is
+      // not "waiting for a reading" — that row would be the same plan twice.
+      if (!a.available || limits.some(l => l.harness === h && (l.account === account || (a.id && sameAccount(l.account, a.id)) || (!a.id && !byAccount.has(l.account))))) continue
       registered.push({ harness: h, account, plan })
     }
   }

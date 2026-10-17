@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { HARNESS_ORDER } from '@agentistics/core'
-import { BG_TASKS_APPLICABLE, readRetireBgTasks, SUCCESSOR_GRACE_MS, createRetireRunner, MCP_COMMAND_SOURCES, type RetireRunnerDeps } from './retire-runner'
+import { BG_TASKS_APPLICABLE, readRetireBgTasks, SUCCESSOR_GRACE_MS, PREDECESSOR_GRACE_MS, RETIRE_TRANSCRIPT_MAX_BYTES, createRetireRunner, MCP_COMMAND_SOURCES, type RetireRunnerDeps } from './retire-runner'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -19,7 +19,7 @@ function world(retire: RetireRequest, extra: ManagedSession[] = []) {
     { id: 'p1', harness: 'claude', cwd: '/w', createdAt: new Date(T0).toISOString(), taskId: 't1', conversationId: 'c1', retire },
     ...extra,
   ]
-  const calls = { kill: [] as string[], ended: [] as string[], filed: [] as string[], comments: [] as string[], notes: [] as string[], codes: [] as string[], refresh: 0, probes: 0 }
+  const calls = { kill: [] as string[], ended: [] as string[], filed: [] as string[], comments: [] as string[], notes: [] as string[], codes: [] as string[], meta: [] as Record<string, unknown>[], refresh: 0, probes: 0 }
   let bg: number | null = 0
   let latest: SessionSnapshot
   let fresh: SessionSnapshot | undefined
@@ -40,7 +40,7 @@ function world(retire: RetireRequest, extra: ManagedSession[] = []) {
     async bgTasks() { calls.probes++; return bg },
     async children() { return { checked: true, children: [] } },
     async comment(_t, body) { calls.comments.push(body) },
-    notify(_l, title, _message, code) { calls.notes.push(title); calls.codes.push(code) },
+    notify(_l, title, _message, code, meta) { calls.notes.push(title); calls.codes.push(code); calls.meta.push(meta) },
     refresh() { calls.refresh++ },
     now: () => now,
   }
@@ -100,6 +100,8 @@ describe('retire runner on the hub', () => {
     expect(w.rows[0]!.retire?.expiredReason).toBe('still working')
     expect(w.calls.notes).toEqual(['Retire expired'])
     expect(w.calls.codes).toEqual(['retire.expired'])
+    expect(w.calls.meta[0]?.reason).toBe('working')
+    expect(w.calls.meta[0]?.reasons).toEqual(['working'])
     // Expired is final: going idle later kills nothing.
     for (let i = 0; i < 5; i++) { await r.consume(w.snap([w.view('p1', 'waiting')])); w.advance(5000) }
     expect(w.calls.kill).toEqual([])
@@ -169,7 +171,7 @@ describe('MCP_COMMAND_SOURCES', () => {
 })
 
 describe('retire QA regressions', () => {
-  it('a cut transcript with a running task above 401 turns is unknown', async () => {
+  it('a transcript exceeding the byte read limit stays unknown and blocks retirement', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'retire-bg-'))
     try {
       const file = join(dir, 'chat.jsonl')
@@ -182,7 +184,7 @@ describe('retire QA regressions', () => {
       expect((await readChatWindow(file, 1000)).turns.some(t => t.task?.running)).toBe(true)
       const row = world(req()).rows[0]!
       expect(await readRetireBgTasks(row, { ...HARNESS_TRANSCRIPTS, claude: {
-        resolve: async () => file, read: readChatWindow, readRecent: async () => { throw new Error('must use window') },
+        resolve: async () => file, read: (p, max, opts) => readChatWindow(p, max, { ...opts, maxBytes: 128 }), readRecent: async () => { throw new Error('must use window') },
       } })).toBeNull()
       const w = world(req())
       w.setBg(null)
@@ -341,4 +343,97 @@ describe('retire stopped-row confirmation', () => {
     expect(w.calls.kill).toEqual([])
     expect(w.calls.ended).toEqual([])
   })
+})
+
+
+describe('retire full transcript probe', () => {
+  for (const outstanding of [false, true]) {
+    it(`900 turns with ${outstanding ? 'one old outstanding task returns 1' : 'no outstanding task returns 0'}`, async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'retire-full-bg-'))
+      try {
+        const file = join(dir, 'chat.jsonl')
+        const lines: unknown[] = outstanding ? [
+          { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'old-bg', name: 'Bash', input: { command: 'sleep 600', run_in_background: true } }] } },
+          { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'old-bg', content: 'Command running in background with ID: old-shell' }] } },
+        ] : []
+        lines.push(...Array.from({ length: 900 }, (_, i) => ({ type: 'user', message: { role: 'user', content: `turn ${i}` } })))
+        await writeFile(file, lines.map(line => JSON.stringify(line)).join('\n') + '\n')
+        expect((await readChatWindow(file, 400)).older).toBe(true)
+        const row = world(req()).rows[0]!
+        const count = await readRetireBgTasks(row, { ...HARNESS_TRANSCRIPTS, claude: {
+          resolve: async () => file,
+          read: (p, max, opts) => {
+            expect(opts?.maxBytes).toBe(RETIRE_TRANSCRIPT_MAX_BYTES)
+            return readChatWindow(p, max, opts)
+          },
+          readRecent: async () => { throw new Error('must read complete history') },
+        } })
+        expect(count).toBe(outstanding ? 1 : 0)
+      } finally { await rm(dir, { recursive: true, force: true }) }
+    })
+  }
+
+  it('a real read failure remains unknown rather than reporting zero', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'retire-unreadable-'))
+    try {
+      expect(await readRetireBgTasks(world(req()).rows[0]!, { ...HARNESS_TRANSCRIPTS, claude: {
+        resolve: async () => join(dir, 'missing.jsonl'), read: readChatWindow,
+        readRecent: async () => { throw new Error('must read complete history') },
+      } })).toBeNull()
+    } finally { await rm(dir, { recursive: true, force: true }) }
+  })
+})
+
+describe('retire absent predecessor confirmation', () => {
+  for (const harness of HARNESS_ORDER) {
+    it(`${harness}: only two distinct missing polls past grace mark ended without a kill`, async () => {
+      const w = world(req())
+      w.rows[0]!.harness = harness
+      const r = createRetireRunner(w.deps)
+      await r.consume(w.snap([]))
+      w.advance(5000)
+      await r.consume(w.snap([]))
+      expect(w.calls.ended).toEqual([]) // two misses inside grace are still unknown
+      w.advance(PREDECESSOR_GRACE_MS)
+      const first = w.snap([])
+      await r.consume(first)
+      await r.consume(first)
+      expect(w.calls.ended).toEqual([]) // one distinct missing poll still waits
+      expect(w.rows[0]!.retire).toBeDefined()
+      w.advance(5000)
+      await r.consume(w.snap([]))
+      expect(w.calls.ended).toEqual(['p1'])
+      expect(w.calls.kill).toEqual([])
+      expect(w.calls.filed).toEqual(['fin:p1'])
+      expect(w.rows[0]!.retire).toBeUndefined()
+    })
+  }
+
+  it('a reappearing predecessor breaks the missing streak', async () => {
+    const w = world(req())
+    const r = createRetireRunner(w.deps)
+    w.advance(PREDECESSOR_GRACE_MS + 1)
+    await r.consume(w.snap([]))
+    w.advance(5000)
+    await r.consume(w.snap([w.view('p1', 'working')]))
+    w.advance(5000)
+    await r.consume(w.snap([]))
+    expect(w.calls.ended).toEqual([])
+    expect(w.calls.kill).toEqual([])
+  })
+
+  for (const unavailable of [false, true]) {
+    it(`a final ${unavailable ? 'unavailable' : 'running'} snapshot blocks ending an absent row`, async () => {
+      const w = world(req())
+      const r = createRetireRunner(w.deps)
+      w.advance(PREDECESSOR_GRACE_MS + 1)
+      await r.consume(w.snap([]))
+      w.advance(5000)
+      w.setFresh(w.snap(unavailable ? [] : [w.view('p1', 'working')], unavailable ? 'failed' : undefined))
+      await r.consume(w.snap([]))
+      expect(w.calls.ended).toEqual([])
+      expect(w.calls.kill).toEqual([])
+      expect(w.rows[0]!.retire).toBeDefined()
+    })
+  }
 })

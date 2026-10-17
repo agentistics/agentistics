@@ -66,6 +66,9 @@ const nameOf = (r: ManagedSession): string => (r.label ? `${r.label} (${r.id})` 
 export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
   const streaks = new Map<string, QuietStreak>()
   const missingSuccessors = new Map<string, { at: number; polls: number }>()
+  const missingRows = new Map<string, { at: number; polls: number }>()
+  const missingPastGrace = (row: ManagedSession, req: RetireRequest, at: number): boolean =>
+    at > Math.max(Date.parse(row.createdAt), Date.parse(req.requestedAt)) + PREDECESSOR_GRACE_MS
   const lostRows = new Map<string, { at: number; polls: number }>()
   const confirm = (map: Map<string, { at: number; polls: number }>, id: string, at: number): boolean => {
     const prev = map.get(id)
@@ -104,7 +107,13 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
       if (!decision.kill) {
         const snap = await d.readFresh()
         const view = snap.sessions.find(v => v.id === row.id)
-        if (snap.unavailable || !view || !['exited', 'lost', 'closed'].includes(view.status)) return
+        if (snap.unavailable) return
+        if (view) {
+          missingRows.delete(row.id)
+          if (!['exited', 'lost', 'closed'].includes(view.status)) { lostRows.delete(row.id); return }
+          if (view.status === 'lost' && !confirm(lostRows, row.id, snap.polledAtMs)) return
+        } else if (!missingPastGrace(fresh, req, snap.polledAtMs) ||
+          !confirm(missingRows, row.id, snap.polledAtMs)) return
       }
       if (decision.kill && !(await d.kill(row.id))) {
         log(`[retire] could not confirm ${row.id} was killed — the request is kept`)
@@ -141,7 +150,7 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
     const body = `Session ${who} was NOT retired: the deadline passed while ${why}. Nothing was killed; end it by hand when it is done (\`agentop session kill ${row.id}\`).`
     log(`[retire] ${body}`)
     if (fresh.taskId) await d.comment(fresh.taskId, body).catch(() => {})
-    d.notify('warning', 'Retire expired', body, 'retire.expired', { id: row.id, label: fresh.label ?? row.id, successorId: req.successorId ?? '', reason: why })
+    d.notify('warning', 'Retire expired', body, 'retire.expired', { id: row.id, label: fresh.label ?? row.id, successorId: req.successorId ?? '', reason: decision.reasons[0]?.code ?? 'deadline', reasons: decision.reasons.map(r => r.code) })
   }
 
   async function consumeOne(snap: SessionSnapshot): Promise<void> {
@@ -151,6 +160,7 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
     const pending = registry.filter(r => r.retire && !r.retire.expiredAt)
     const ids = new Set(pending.map(r => r.id))
     for (const id of [...streaks.keys()]) if (!ids.has(id)) streaks.delete(id)
+    for (const id of missingRows.keys()) if (!ids.has(id)) missingRows.delete(id)
     for (const id of lostRows.keys()) if (!ids.has(id)) lostRows.delete(id)
     const successors = new Set(pending.map(r => r.retire!.successorId))
     for (const id of missingSuccessors.keys()) if (!successors.has(id)) missingSuccessors.delete(id)
@@ -175,9 +185,12 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
       const streak = nextStreak(streaks.get(row.id) ?? null, v?.activity, snap.polledAtMs)
       if (streak) streaks.set(row.id, streak)
       else streaks.delete(row.id)
-      // Missing rows are unknown. A transient lost status needs a second distinct poll.
-      const stopped = !!v && (v.status === 'exited' || v.status === 'closed' ||
-        (v.status === 'lost' && confirm(lostRows, row.id, snap.polledAtMs)))
+      // A missing row needs two distinct polls past birth/request grace; presence resets it.
+      const missingStopped = !v && missingPastGrace(row, req, snap.polledAtMs) &&
+        confirm(missingRows, row.id, snap.polledAtMs)
+      if (v || !missingPastGrace(row, req, snap.polledAtMs)) missingRows.delete(row.id)
+      const stopped = missingStopped || (!!v && (v.status === 'exited' || v.status === 'closed' ||
+        (v.status === 'lost' && confirm(lostRows, row.id, snap.polledAtMs))))
       if (v?.status !== 'lost') lostRows.delete(row.id)
       const base = {
         running: !stopped,
@@ -307,6 +320,8 @@ async function attachRetireRunner(log: (line: string) => void): Promise<(() => v
 
 /** A successor can be born after the poll started; allow the registry's birth grace. */
 export const SUCCESSOR_GRACE_MS = 30_000
+export const PREDECESSOR_GRACE_MS = 30_000
+export const RETIRE_TRANSCRIPT_MAX_BYTES = 64 * 1024 * 1024
 
 export const BG_TASKS_APPLICABLE: Record<HarnessId, boolean> = {
   claude: true, codex: false, gemini: false, copilot: false,
@@ -320,8 +335,10 @@ export async function readRetireBgTasks(
   if (!BG_TASKS_APPLICABLE[row.harness]) return 0
   const reader = readers[row.harness]
   if (!reader || !row.conversationId) return null
-  const p = await reader.resolve({ conversationId: row.conversationId, cwd: row.cwd })
-  if (!p) return null
-  const window = await reader.read(p, 400)
-  return window.older ? null : window.turns.filter(t => t.task?.running).length
+  try {
+    const p = await reader.resolve({ conversationId: row.conversationId, cwd: row.cwd })
+    if (!p) return null
+    const window = await reader.read(p, Number.MAX_SAFE_INTEGER, { maxBytes: RETIRE_TRANSCRIPT_MAX_BYTES })
+    return window.older ? null : window.turns.filter(t => t.task?.running).length
+  } catch { return null }
 }
