@@ -4,6 +4,8 @@
  * one shared store read `/api/plan-limits` again, with no reload.
  */
 import { afterAll, expect, test } from 'bun:test'
+import type { UsageBudgetRow } from './usagePlan'
+import type { PlanReadings } from './planLimits'
 
 type Listener = (e: MessageEvent) => void
 class FakeEventSource {
@@ -41,17 +43,34 @@ test('a plan-limits signal on the open stream refreshes the open tab without a r
   const off = subscribePlanLimits(() => { renders++ }) // the Limits tab is open
   await tick()
   expect(planLimitsSnapshot().limits).toEqual([])
+  expect(planLimitsSnapshot().budgets).toEqual([])
+  expect(planLimitsSnapshot().readings).toEqual([])
   expect(planLimitsSnapshot().registered.map(r => r.harness)).toEqual(['claude'])
 
   // The server stored claude's record (another process wrote it) and signalled.
   const now = Date.now()
   answer = { limits: [{ harness: 'claude', account: 'default', windows: [{ kind: '5h', usedPct: 43, resetsAt: now + 3_600_000 }, { kind: 'week', usedPct: 37, resetsAt: now + 86_400_000 }], updatedAt: now, source: 'claude-stream' }], registered: [] }
+  const budget: UsageBudgetRow = {
+    harness: 'claude', account: 'default', accountLabel: 'Personal', plan: 'Max',
+    fiveHourPct: 43, weekPct: 37, weekResetsAt: now + 86_400_000,
+    daysToWeekReset: 1, dailyBudgetPct: 63, status: 'ok', updatedAt: now, stale: false,
+    paceStatus: 'over', burnPctPerHour: 3, sustainablePctPerHour: 2.625,
+    suggestedParallel: 0, note: '', freeSlots: 0, freeSlotsMeasured: true,
+    liveSessions: [], pauseUntil: now + 60_000,
+  }
+  const budgets = [budget]
+  const hiddenFromAgents: UsageBudgetRow[] = [{ ...budget, harness: 'codex', account: 'hidden', accountLabel: 'Work' }]
+  const readings: PlanReadings[] = [{ harness: 'claude', account: 'default', points: [{ at: now, weekPct: 37, fiveHourPct: 43 }] }]
+  answer = { ...answer as object, budgets, hiddenFromAgents, readings }
   const before = calls
   FakeEventSource.last!.emit('plan-limits')
   await tick()
   expect(calls).toBe(before + 1)
   expect(planLimitsSnapshot().limits!.map(l => l.harness)).toEqual(['claude'])
   expect(planLimitsSnapshot().registered).toEqual([])
+  expect(planLimitsSnapshot().budgets).toEqual([...budgets, ...hiddenFromAgents])
+  expect(planLimitsSnapshot().readings).toEqual(readings)
+  expect(planLimitsSnapshot().accountLabels).toEqual({ default: 'Personal', hidden: 'Work' })
   expect(renders).toBeGreaterThan(1)
   off()
 })
