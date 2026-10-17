@@ -45,6 +45,9 @@ export type SessionCommand =
       folder?: string
       /** `--shared-cwd`: allow a main checkout another live session already works in. */
       sharedCwd?: boolean
+      /** `--handoff`: a LEADER hand-off — the new session is the verified caller's successor and
+       *  inherits what the API hand-off inherits (folder, pin, title, check-in, role, away, relay). */
+      handoff?: boolean
       /** A refusal is machine-readable too — see `admissionRefusalBody`. */
       json?: boolean
     }
@@ -290,6 +293,7 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
     if (arg === '--json') { cmd.json = true; continue }
     if (arg === '--force') { cmd.force = true; continue }
     if (arg === '--shared-cwd') { cmd.sharedCwd = true; continue }
+    if (arg === '--handoff') { cmd.handoff = true; continue }
     if (arg === '--away') { cmd.away = true; continue }
     if (arg === '--no-away') { cmd.away = false; continue }
     if (arg === '--task') {
@@ -307,7 +311,7 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
     const value = argv[i + 1]
     if (
       value === undefined || VALUE_FLAGS.has(value)
-      || value === '--bg' || value === '--background' || value === '--force' || value === '--shared-cwd'
+      || value === '--bg' || value === '--background' || value === '--force' || value === '--shared-cwd' || value === '--handoff'
     ) {
       return { kind: 'error', message: `Missing value for ${arg}` }
     }
