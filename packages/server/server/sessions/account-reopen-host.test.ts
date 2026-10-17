@@ -18,6 +18,9 @@ import { __setSessionBackendForTest } from './index'
 import { __setFleetHostForTest, runFleetAction, runFleetSpawn } from './fleet-web'
 import { addSession, removeSession } from './registry'
 import { newestRowOfConversation } from './spawn-account-io'
+import { __setSpawnBudgetForTest } from './memory-probe'
+import { exactLinksOnDisk } from './reopen-link'
+import { spawnAccountStatus } from './spawn-account'
 import type { ManagedSession, SessionBackend } from './types'
 
 let dir = ''
@@ -199,6 +202,65 @@ describe('4 · account refusals keep their code through the fleet results', () =
     }
     __setFleetHostForTest('en', host as never)
     expect(await runFleetSpawn('en', { harness: 'claude', cwd: dir } as never)).toMatchObject({ ok: false, code: 'account_signed_out' })
+    __setFleetHostForTest('en', null)
+  })
+})
+
+describe('5 · a group reopen with mixed results keeps every typed refusal (D3 fix3)', () => {
+  test('the real host: one row refused for its account, one reopened — an explicit partial result', async () => {
+    let aId = ''
+    let cId = ''
+    await accounts(async store => {
+      await store.bind(null, { harness: 'claude', key: 'org:home', label: 'home' })
+      aId = (await store.bind(join(dir, 'r_a5'), { harness: 'claude', key: 'org:a5', label: 'a5' })).account.id
+      await store.bind(join(dir, 'r_a5'), { harness: 'claude', key: 'org:b5', label: 'b5' }) // A signed out
+      cId = (await store.bind(join(dir, 'r_c5'), { harness: 'claude', key: 'org:c5', label: 'c5' })).account.id
+    })
+    const stamp = Date.now()
+    const convA = `c-mixA-${stamp}`
+    const convC = `c-mixC-${stamp}`
+    const rowA = row({ conversationId: convA, accountId: aId, lastSeenMs: stamp })
+    const rowC = row({ conversationId: convC, accountId: cId, lastSeenMs: stamp })
+    await addSession(rowA)
+    await addSession(rowC)
+    // Prime the reopen-link memo: both transcripts "exist", so the rows resolve without a tree on disk.
+    await exactLinksOnDisk([rowA, rowC], [], Date.now(), async () => '/tmp/x.jsonl')
+    const alive = new Set<string>()
+    const live = {
+      id: 'tmux', unavailable: async () => undefined,
+      spawn: async (req: { id: string }) => { spawned.push(req.id); alive.add(req.id) },
+      list: async () => [...alive].map(id => ({ id, alive: true, exited: false, status: 0 })),
+      capture: async () => [], kill: async () => {},
+      attachCommand: () => [], detachHint: async () => 'x',
+    } as unknown as SessionBackend
+    __setSessionBackendForTest(live)
+    __setSpawnBudgetForTest({ value: null })
+    try {
+      const host = createControlHost('en', NO_TERMINAL)
+      const out = await host.reopenFell!(undefined, { callerVerified: true })
+      expect(spawned.length).toBe(1)
+      expect(out.ok).toBe(false)
+      expect(out.accountRefusal).toBe('account_signed_out')
+      expect(out.fell?.opened).toEqual([rowC.id])
+      expect(out.fell?.refused.map(r => [r.id, r.reason])).toEqual([[rowA.id, 'account_signed_out']])
+      expect(out.fell?.refused[0]!.message).toBeTruthy()
+      expect(out.message).toContain(out.fell!.refused[0]!.message)
+    } finally {
+      __setSessionBackendForTest(backend)
+      __setSpawnBudgetForTest(null)
+      await removeSession(rowA.id)
+      await removeSession(rowC.id)
+    }
+  })
+
+  test('the HTTP status mapping: the fleet result carries the code and the partial list; each code has its status', async () => {
+    const fell = { opened: ['n1'], already: [], refused: [{ id: 'a', reason: 'account_signed_out' as const, message: 'm' }] }
+    __setFleetHostForTest('en', { async reopenFell() { return { ok: false, message: 'p', accountRefusal: 'account_signed_out' as const, fell } } } as never)
+    const out = await runFleetAction('en', { action: 'reopenFell', id: '' } as never)
+    expect(out).toMatchObject({ ok: false, code: 'account_signed_out', fell })
+    expect(spawnAccountStatus(out.code!)).toBe(409)
+    expect(spawnAccountStatus('account_retired')).toBe(409)
+    expect(spawnAccountStatus('account_unavailable')).toBe(403)
     __setFleetHostForTest('en', null)
   })
 })

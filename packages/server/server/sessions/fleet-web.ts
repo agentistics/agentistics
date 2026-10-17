@@ -138,6 +138,8 @@ export interface FleetActionResponse {
    * continuation); `index.ts` answers it with `spawnAccountStatus` (403/409/422).
    */
   code?: SpawnAccountRefusal
+  /** A group reopen's partial result (opened / already running / every refused row with its code). */
+  fell?: { opened: string[]; already: string[]; refused: { id: string; reason: SpawnAccountRefusal; message: string }[] }
 }
 
 /**

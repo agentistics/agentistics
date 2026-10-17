@@ -2401,13 +2401,13 @@ async function reopenEntries(
   lang: CliLang,
   /** PLAN.ACCOUNTS D3: a VERIFIED agent is reopening — each row is held to the account rule. */
   caller: { callerVerified?: boolean } = {},
-): Promise<{ plan: TaskReopenPlan; opened: number; skipped: number; admissionRefusal?: AdmissionRefusal; backendUnreadable?: true; accountRefusals: { reason: AccountRefusalCode; message: string }[] }> {
+): Promise<{ plan: TaskReopenPlan; opened: number; skipped: number; admissionRefusal?: AdmissionRefusal; backendUnreadable?: true; accountRefusals: { id: string; reason: AccountRefusalCode; message: string }[]; openedIds: string[] }> {
   const backend = await resolveBackend()
   // A backend that cannot be LISTED is not one with nothing running: reading it as empty made every
   // live row of the set look fallen, and a reopen started a second assistant inside each live
   // conversation (2026-10-03). Refuse the whole set instead.
   const listed = await backend.list().catch(() => null)
-  if (!listed) return { plan: planTaskReopen({ entries: [], liveIds: new Set(), conversationFor: () => null }), opened: 0, skipped: 0, backendUnreadable: true, accountRefusals: [] }
+  if (!listed) return { plan: planTaskReopen({ entries: [], liveIds: new Set(), conversationFor: () => null }), opened: 0, skipped: 0, backendUnreadable: true, accountRefusals: [], openedIds: [] }
   const conversations = await loadConversations()
   const live = new Set(listed.filter(b => b.alive).map(b => b.id))
   // What is already being driven, so a task reopen cannot put a second assistant into a conversation
@@ -2435,11 +2435,12 @@ async function reopenEntries(
   if (plan.reopen.length > 0) {
     const admission = admitSpawn(await readSpawnBudget(), plan.reopen.length)
     if (!admission.admit) {
-      return { plan, opened: 0, skipped: plan.skipped.length, admissionRefusal: admission.refusal, accountRefusals: [] }
+      return { plan, opened: 0, skipped: plan.skipped.length, admissionRefusal: admission.refusal, accountRefusals: [], openedIds: [] }
     }
   }
 
-  const accountRefusals: { reason: AccountRefusalCode; message: string }[] = []
+  const accountRefusals: { id: string; reason: AccountRefusalCode; message: string }[] = []
+  const openedIds: string[] = []
   let opened = 0
   let skipped = plan.skipped.length
   for (const row of plan.reopen) {
@@ -2478,7 +2479,7 @@ async function reopenEntries(
       holderOf: async () =>
         conversationHeldBy(await liveConversationHolders(await resolveBackend()), row.resumeId, m.id),
       spawn: () => spawnManaged(reopenRowRequest(m, row, caller), s, lang).then(r => {
-        if (!r.ok && r.accountRefusal) accountRefusals.push({ reason: r.accountRefusal, message: r.message })
+        if (!r.ok && r.accountRefusal) accountRefusals.push({ id: m.id, reason: r.accountRefusal, message: r.message })
         return r
       }),
       onSpawned: async newId => {
@@ -2489,7 +2490,7 @@ async function reopenEntries(
         if (m.note && newId) await patchSession(newId, { note: m.note })
       },
     }))
-    if (outcome.kind === 'opened') opened++
+    if (outcome.kind === 'opened') { opened++; openedIds.push(m.id) }
     else if (outcome.kind === 'held') {
       // Somebody else's attempt for this exact conversation landed first, in the time between the
       // plan being built and this row's turn under the lock. Reported the same way `planTaskReopen`
@@ -2501,7 +2502,7 @@ async function reopenEntries(
     }
   }
   forgetConversations()
-  return { plan, opened, skipped, accountRefusals }
+  return { plan, opened, skipped, accountRefusals, openedIds }
 }
 
 /**
@@ -4143,16 +4144,26 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         return { ok: false, message: unknown.length > 0 ? s.sessFellGone(unknown.length) : s.sessFellNonePicked }
       }
 
-      const { plan, opened, skipped, admissionRefusal, backendUnreadable, accountRefusals } = await reopenEntries(chosen, s, lang, caller)
+      const { plan, opened, skipped, admissionRefusal, backendUnreadable, accountRefusals, openedIds } = await reopenEntries(chosen, s, lang, caller)
       if (backendUnreadable) return { ok: false, message: s.sessBackendUnreadable }
       if (admissionRefusal) return { ok: false, message: admissionMessage(admissionRefusal, lang) }
-      // PLAN.ACCOUNTS D3 — a row the account rule refused is said in its own words, and when nothing
-      // opened the refusal keeps its code (the HTTP boundary answers it with its status).
-      const refused = accountRefusals[0]
-      const why = refused ? ` ${refused.message}` : ''
-      return taskReopenSucceeded(plan, opened)
-        ? { ok: true, message: s.sessFellOpened(opened, skipped + unknown.length, plan.heldElsewhere.length) + why }
-        : { ok: false, message: s.sessFellNoneOpened(skipped + unknown.length) + why, ...(refused ? { accountRefusal: refused.reason } : {}) }
+      const base = s.sessFellOpened(opened, skipped + unknown.length, plan.heldElsewhere.length)
+      if (accountRefusals.length === 0) {
+        return taskReopenSucceeded(plan, opened)
+          ? { ok: true, message: base }
+          : { ok: false, message: s.sessFellNoneOpened(skipped + unknown.length) }
+      }
+      // PLAN.ACCOUNTS D3 — EXPLICIT PARTIAL RESULT. Every refused row keeps its typed reason and its
+      // own sentence beside the rows that opened (and the ones already running, which are NOT
+      // "opened"), and the whole answer carries the refusal's code so the HTTP boundary maps its
+      // status. A group with one refused row is never reported as a plain success.
+      const lead = accountRefusals.find(r => r.reason === 'account_unavailable') ?? accountRefusals[0]!
+      return {
+        ok: false,
+        message: (opened > 0 ? base : s.sessFellNoneOpened(skipped + unknown.length)) + accountRefusals.map(r => ` ${r.message}`).join(''),
+        accountRefusal: lead.reason,
+        fell: { opened: openedIds, already: [...plan.already], refused: accountRefusals.map(r => ({ id: r.id, reason: r.reason, message: r.message })) },
+      }
     },
 
     /**

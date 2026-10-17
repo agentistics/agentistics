@@ -1271,6 +1271,8 @@ export interface ActionResult {
   failure?: 'prompt' | 'ended' | 'unconfirmed'
   /** PLAN.ACCOUNTS D3: refused by the account rule — the server maps it to an HTTP status. */
   accountRefusal?: AccountRefusalCode
+  /** A group reopen's explicit partial result: rows opened, rows already running, and EVERY refused row. */
+  fell?: { opened: string[]; already: string[]; refused: { id: string; reason: AccountRefusalCode; message: string }[] }
 }
 
 /**
