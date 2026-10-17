@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { planTmuxLaunch, planTmuxLiteral, sweepStaleLaunchers, tmuxSpawnError } from './tmux-launch'
@@ -112,6 +112,43 @@ describe('launcher cleanup', () => {
       expect(existsSync(fresh)).toBe(true)
       expect(existsSync(other)).toBe(true)
       expect(await sweepStaleLaunchers(join(root, 'missing'))).toBe(0)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+  test('sweep never follows a symlinked session dir or launcher out of the root', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tmux-sweep-'))
+    const outside = await mkdtemp(join(tmpdir(), 'tmux-outside-'))
+    try {
+      const victim = join(outside, 'launch-abc.sh')
+      await writeFile(victim, 'x')
+      const past = new Date(Date.now() - 3_600_000)
+      await utimes(victim, past, past)
+      await symlink(outside, join(root, 's-link'))
+      await mkdir(join(root, 's1'))
+      await symlink(victim, join(root, 's1', 'launch-def.sh'))
+      await sweepStaleLaunchers(root)
+      expect(existsSync(victim)).toBe(true)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
+
+  test('sweep rotates past the per-call cap so every dir is reached', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tmux-sweep-'))
+    try {
+      const past = new Date(Date.now() - 3_600_000)
+      for (let i = 0; i < 520; i++) {
+        const d = join(root, `s${String(i).padStart(4, '0')}`)
+        await mkdir(d)
+        const f = join(d, 'launch-abc.sh')
+        await writeFile(f, 'x')
+        await utimes(f, past, past)
+      }
+      let removed = 0
+      for (let i = 0; i < 3; i++) removed += await sweepStaleLaunchers(root)
+      expect(removed).toBe(520)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
