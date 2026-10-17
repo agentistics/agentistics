@@ -22,6 +22,7 @@ import { countPerKind, defaultProjectParent, pathForHost, PROJECTS_PER_KIND, pro
 import { loadConsolidated } from '../consolidate'
 import { isDirectory, isWholeDiskRoot, isWorktreeDir, scanDirectories, type ScanOptions } from './dir-scan'
 import { DiskIndex, type DiskIndexProgress } from './disk-index'
+import { isHiddenFolder } from '../fs-folders'
 import { discoverProjectDisks, type ProjectDisk } from '../disk-picker'
 import { readPreferences } from '../preferences'
 import {
@@ -281,6 +282,12 @@ function baseName(path: string): string {
  */
 export async function newProjectParent(pt: boolean, home = homedir()): Promise<{ path: string; exists: boolean }> {
   const { candidates } = await allCandidates()
-  const guess = defaultProjectParent(home, candidates.map(c => c.path), pt)
+  // A place the browser would not show back (dot-folders such as ~/.gemini, the prune list, the temp
+  // tree) is never a habit worth copying: judged on the project's parent, segment by segment.
+  const visible = candidates.map(c => c.path).filter(path => {
+    const rel = path.slice(0, Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))).slice(home.length).split(/[\\/]/).filter(Boolean)
+    return !path.startsWith(home) || !rel.some(seg => isHiddenFolder(seg, path))
+  })
+  const guess = defaultProjectParent(home, visible, pt)
   return { path: guess.path, exists: guess.exists && await isDirectory(guess.path) }
 }
