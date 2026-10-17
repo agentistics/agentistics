@@ -26,10 +26,6 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Hidden folders open and close like the other sidebar sections.',
       },
       {
-        pt: 'O resumo de atividade do chat ficou mais claro, com os passos sem resposta contados à parte.',
-        en: 'The chat activity summary reads better, with unanswered steps counted apart.',
-      },
-      {
         pt: 'Arquivos temporários de início de sessão não ficam mais no disco.',
         en: 'Temporary session start files no longer stay on disk.',
       },
@@ -86,8 +82,8 @@ export const RELEASES: Record<string, ReleaseNotes> = {
   '2.139.0': {
     features: [
       {
-        pt: 'O chat por adaptadores agora vem ligado para todos.',
-        en: 'Adapter-based chat is now on for everyone.',
+        pt: 'O chat ao vivo das sessões agora funciona do mesmo jeito para todos os assistentes.',
+        en: 'Live session chat now works the same way for every assistant.',
       },
     ],
     fixes: [],
@@ -139,8 +135,8 @@ export const RELEASES: Record<string, ReleaseNotes> = {
   '2.137.0': {
     features: [
       {
-        pt: 'Passagem de líder entre sessões mais confiável e início de sessão atômico.',
-        en: 'More reliable leader hand-off between sessions and atomic session start.',
+        pt: 'A passagem de líder entre sessões ficou mais confiável, e uma sessão não fica pela metade se algo falhar ao abrir.',
+        en: 'Leader hand-off between sessions is more reliable, and a session is never left half-open when something fails at start.',
       },
     ],
     fixes: [],
