@@ -49,10 +49,6 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Os presets de sessão foram removidos.',
         en: 'Session presets were removed.',
       },
-      {
-        pt: 'As abas de sessões no topo agora seguem o estilo do VS Code, com um × para fechar.',
-        en: 'Session tabs at the top now look like VS Code tabs, with an × to close them.',
-      },
     ],
   },
   '2.140.3': {
