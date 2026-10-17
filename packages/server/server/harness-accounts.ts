@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path'
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR } from './config'
 import { withFileLock } from './sessions/file-lock'
+import { ISOLATION_ENV } from './account-isolation'
 
 export interface HarnessAccount {
   id: string
@@ -53,11 +54,7 @@ async function readCopilotIdentity(file: string): Promise<AccountIdentity> {
   return login ? { key: `${host}:${login}`, label: login } : fallback()
 }
 
-export const ISOLATION_ENV: Record<HarnessId, string | null> = {
-  claude: 'CLAUDE_CONFIG_DIR', codex: 'CODEX_HOME', copilot: 'COPILOT_HOME',
-  gemini: 'GEMINI_CLI_HOME', kimi: 'KIMI_CODE_HOME', antigravity: null,
-  opencode: null,
-}
+export { ISOLATION_ENV }
 const DEFAULT_ROOTS: Record<HarnessId, () => string> = {
   claude: () => process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'),
   codex: () => process.env.CODEX_HOME ?? join(homedir(), '.codex'),

@@ -428,3 +428,35 @@ describe('MODE.EVERYWHERE — the TUI starts in the asked mode, by its own flag'
     expect(r).toEqual({ ok: false, error: { code: 'unknown-mode', harness: 'claude', value: 'yolo' } })
   })
 })
+
+describe('planSpawn — the account root (PLAN.ACCOUNTS D3)', () => {
+  const ISOLATION: Partial<Record<HarnessId, string>> = {
+    claude: 'CLAUDE_CONFIG_DIR', codex: 'CODEX_HOME', copilot: 'COPILOT_HOME', gemini: 'GEMINI_CLI_HOME', kimi: 'KIMI_CODE_HOME',
+  }
+  for (const h of HARNESS_ORDER.filter(h => SPAWN_SPECS[h] !== null)) {
+    const fresh = { harness: h, cwd: '/w', prompt: 'hi', conversationId: '11111111-2222-3333-4444-555555555555' }
+    test(`${h}: the default root is byte-identical (no account, nothing added)`, () => {
+      const before = planSpawn(fresh)
+      expect(planSpawn({ ...fresh })).toEqual(before)
+      if (before.ok) expect(JSON.stringify(before.plan.env ?? {})).not.toContain('/data/accounts')
+    })
+    test(`${h}: an account root is its isolation variable, argv untouched`, () => {
+      const plain = planSpawn(fresh)
+      const out = planSpawn({ ...fresh, account: { root: `/data/accounts/${h}/r_1` } })
+      const variable = ISOLATION[h]
+      if (!variable) {
+        expect(out).toEqual({ ok: false, error: { code: 'account-unsupported', harness: h } })
+        return
+      }
+      expect(out.ok && plain.ok).toBe(true)
+      if (!out.ok || !plain.ok) return
+      expect(out.plan.argv).toEqual(plain.plan.argv)
+      expect(out.plan.env).toEqual({ ...(plain.plan.env ?? {}), [variable]: `/data/accounts/${h}/r_1` })
+    })
+    test(`${h}: a reopen in an account root carries the variable too`, () => {
+      if (!SPAWN_SPECS[h]?.resume || !ISOLATION[h]) return
+      const out = planSpawn({ harness: h, cwd: '/w', resumeId: '11111111-2222-3333-4444-555555555555', account: { root: '/r' } })
+      expect(out.ok && out.plan.env?.[ISOLATION[h]!]).toBe('/r')
+    })
+  }
+})

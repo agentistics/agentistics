@@ -2954,6 +2954,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       try {
         const { fleetLang } = await import('./sessions/fleet-web')
         const { startNaySession, defaultNayDeps } = await import('./sessions/nay-web')
+        const { spawnAccountStatus } = await import('./sessions/spawn-account')
         // The create picker's choice, if any. Shape-checked by `planNayLaunch`; an absent body reads as
         // "use the Settings -> Chat defaults".
         const read = await readJsonLimited<Record<string, unknown> | null>(req, 4096).catch(() => null)
@@ -2962,7 +2963,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           harness: body?.harness, model: body?.model, effort: body?.effort,
         })
         return new Response(JSON.stringify(out), {
-          status: out.code === 'memory_budget' ? 409 : 200,
+          status: out.code === 'memory_budget' ? 409 : out.code ? spawnAccountStatus(out.code) : 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
@@ -2997,6 +2998,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname === '/api/fleet/new' && req.method === 'POST') {
       try {
         const { runFleetSpawn, fleetLang } = await import('./sessions/fleet-web')
+        const { spawnAccountStatus } = await import('./sessions/spawn-account')
         const body = await readJsonLimited<FleetSpawnBody>(req, LIMITS.bodyBytes)
         if (!body.ok) {
           return new Response(JSON.stringify({ ok: false, message: 'bad_request' }), {
@@ -3007,16 +3009,18 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // `parentVerified` is the SERVER's statement, never the wire's: overwrite whatever arrived, then set
         // it only when the body's `session` proof is valid and names the `parent` it claims.
         const spawnBody = body.value as FleetSpawnBody & { session?: { id?: unknown; token?: unknown } }
-        const { markParentVerified } = await import('./sessions/session-roles')
+        const { markParentVerified, markCallerVerified } = await import('./sessions/session-roles')
         const { verifySessionIdentity } = await import('./sessions/session-identity')
         await markParentVerified(spawnBody, verifySessionIdentity)
+        // PLAN.ACCOUNTS D3: an agent is asking only when the body carries a VALID session proof.
+        await markCallerVerified(spawnBody, verifySessionIdentity)
         const out = await runFleetSpawn(fleetLang(url.searchParams.get('lang')), spawnBody)
         // A memory-budget refusal is a DISTINCT status, not the plain `ok: false` every other
         // `planFleetSpawn` refusal answers with (an unknown harness, a relative path, …) — 409
         // Conflict, because the request is well-formed and refused only by the state of the machine
         // right now, which a retry with `force: true` or fewer sessions can resolve.
         return new Response(JSON.stringify(out), {
-          status: out.code === 'memory_budget' ? 409 : 200,
+          status: out.code === 'memory_budget' ? 409 : out.code ? spawnAccountStatus(out.code) : 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {

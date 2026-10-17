@@ -1959,6 +1959,12 @@ export interface SpawnSessionRequest {
    * it is NOT a field of the wire body (`FleetSpawnBody`), so a browser can never choose an env.
    */
   account?: { env: Record<string, string>; loginArgv?: string[] }
+  /**
+   * PLAN.ACCOUNTS D3: the harness account (`acc_…`) to run on, already chosen and checked by the
+   * server (`spawn-account.ts`); the host resolves its root from the registry and stamps it on the
+   * row (`ManagedSession.accountId`). Absent: the default root, exactly as before.
+   */
+  accountId?: string
 }
 
 export interface ResumeSessionRequest {

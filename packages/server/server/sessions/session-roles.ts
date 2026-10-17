@@ -298,6 +298,21 @@ export async function markParentVerified(
   return ok
 }
 
+/**
+ * PLAN.ACCOUNTS D3: `callerVerified` for `/api/fleet/new` — the request carries a VALID session proof,
+ * i.e. an agent is asking (whatever `parent` it names). The SERVER's statement: whatever arrived is
+ * overwritten. Only then is an account that is off for agents refused (`spawn-account.ts`).
+ */
+export async function markCallerVerified(
+  body: { session?: unknown; callerVerified?: unknown },
+  verify: (id: unknown, token: unknown) => Promise<string | null>,
+): Promise<boolean> {
+  const proof = body.session as { id?: unknown; token?: unknown } | null | undefined
+  const ok = !!proof && typeof proof === 'object' && (await verify(proof.id, proof.token)) !== null
+  body.callerVerified = ok
+  return ok
+}
+
 export function roleStatus(out: RoleReply): number {
   if (!out.ok && out.code === 'unverified_sender') return 403
   if (out.ok) return 200

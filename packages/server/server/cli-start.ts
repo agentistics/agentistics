@@ -1693,6 +1693,7 @@ function explainSpawnError(e: SpawnPlanError, s: CliStrings): string {
     case 'effort-unsupported': return s.sessSpawnNoEffort(e.harness)
     case 'unknown-effort': return s.sessSpawnBadEffort(e.harness, e.value, e.accepted)
     case 'unknown-mode': return s.sessSpawnBadMode(e.harness, e.value)
+    case 'account-unsupported': return s.sessSpawnNoAccount(e.harness)
   }
 }
 
@@ -1923,9 +1924,11 @@ async function spawnRow(a: {
   away?: boolean
   model?: string
   effort?: string
+  /** PLAN.ACCOUNTS D3: the account this session runs on, stamped once (immutable). */
+  accountId?: string
   bornLink: Partial<ManagedSession> | null | undefined
 }): Promise<ManagedSession> {
-  const { id, spawnedAt, req, model, effort, bornLink, pendingContext, away } = a
+  const { id, spawnedAt, req, model, effort, bornLink, pendingContext, away, accountId } = a
   return {
     id,
     harness: req.harness,
@@ -1950,6 +1953,7 @@ async function spawnRow(a: {
     // Resolved by the caller; `false` drops an `away` the replaced row carried (an explicit off).
     ...(away === true ? { away: true } : {}),
     ...(away === false ? { away: undefined } : {}),
+    ...(accountId ? { accountId } : {}),
     // Recorded at the one moment it is certain — the harness was just handed this id, or we asked
     // it to reopen this conversation.
     ...(bornLink ?? {}),
@@ -2043,10 +2047,26 @@ async function spawnManaged(req: {
   skipAdmission?: boolean
   /** multi-account: see `SpawnSessionRequest.account`. */
   account?: { env: Record<string, string>; loginArgv?: string[] }
+  /** PLAN.ACCOUNTS D3: see `SpawnSessionRequest.accountId`. A reopen (`inherit`) keeps the row's own. */
+  accountId?: string
 }, s: CliStrings, lang: CliLang): Promise<SpawnSessionResult> {
   const backend = await resolveBackend()
   const blocked = await backend.unavailable()
   if (blocked) return { ok: false, message: blocked }
+
+  // PLAN.ACCOUNTS D3 — the account is IMMUTABLE: a reopen runs in the replaced row's root (its
+  // transcript exists only there), whatever the request or the flag says now. A fresh spawn's
+  // account was chosen and checked by the caller (`spawn-account.ts`); it is re-read here so a
+  // root removed in between refuses in words instead of starting somewhere else.
+  const accountId = req.inherit?.accountId ?? req.accountId
+  let accountRoot: string | null = null
+  if (accountId) {
+    const { recordedSpawnAccount } = await import('./sessions/spawn-account-io')
+    const { spawnAccountMessage } = await import('./sessions/spawn-account')
+    const decided = await recordedSpawnAccount(accountId)
+    if (!decided.ok) return { ok: false, message: spawnAccountMessage(decided.reason, decided.detail, lang === 'pt' ? 'pt' : 'en', !!req.inherit) }
+    accountRoot = decided.account?.root ?? null
+  }
 
   // THE GATE — before anything is spawned or written to the registry. A session that has already
   // been started cannot be un-started, so this has to run first, not merely early.
@@ -2136,6 +2156,7 @@ async function spawnManaged(req: {
     // Offered for a FRESH session; `planSpawn` applies it only where the CLI accepts one and reports
     // back what it actually did. A resume ignores it — that conversation already has an id.
     conversationId: offeredConversationId,
+    ...(accountRoot ? { account: { root: accountRoot } } : {}),
   }, await spawnCapabilities(req.harness))
   if (!planned.ok) return { ok: false, message: explainSpawnError(planned.error, s) }
   if (req.account) applyAccountToPlan(planned.plan, req.account)
@@ -2161,7 +2182,7 @@ async function spawnManaged(req: {
   // <id>" for seconds — the placeholder `control-session.ts` keeps for sessions started OUTSIDE
   // agentop. Born linked — see `born-link.ts` for the window a patch-afterwards left open.
   const bornLink = bornConversationLink(planned.plan.conversationId, req.resumeId)
-  await addSession(await spawnRow({ id, spawnedAt, req: { ...req, ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}) }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx), away }))
+  await addSession(await spawnRow({ id, spawnedAt, req: { ...req, ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}) }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx), away, ...(accountId ? { accountId } : {}) }))
   if (req.inherit) {
     await rekeyStoredRole(
       [req.inherit.id, req.inherit.conversationId, req.resumeId],
@@ -2852,6 +2873,14 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       cwd: req.cwd,
     })
     if (plan.kind === 'refuse') return { ok: false, message: s.sessTakeoverRefused(plan.reason) }
+    // PLAN.ACCOUNTS D3 — a removed account refuses BEFORE any holder is ended (`spawnManaged` would
+    // refuse too, but only after the user's running assistant was already closed).
+    if (previous?.accountId) {
+      const { recordedSpawnAccount } = await import('./sessions/spawn-account-io')
+      const { spawnAccountMessage } = await import('./sessions/spawn-account')
+      const decided = await recordedSpawnAccount(previous.accountId)
+      if (!decided.ok) return { ok: false, message: spawnAccountMessage(decided.reason, decided.detail, lang === 'pt' ? 'pt' : 'en', true) }
+    }
     if (plan.kind === 'takeover') {
       // A pid is not an identity — see `isAssistantPid`. Confirmed against the live scan in the
       // moment before signalling, or the takeover is abandoned: the cost of being wrong here is
@@ -4587,6 +4616,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.force ? { force: true } : {}),
         ...(req.origin ? { origin: req.origin } : {}),
         ...(req.account ? { account: req.account } : {}),
+        ...(req.accountId ? { accountId: req.accountId } : {}),
       }, S(), lang).then(async r => {
         let attachNote = ''
         // NW-02: a session started for a BOARD task is filed there by id, not only named after it.
