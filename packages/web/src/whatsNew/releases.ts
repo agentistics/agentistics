@@ -10,6 +10,35 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.140.4': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Abrir uma sessão encerrada não quebra mais a página.',
+        en: 'Opening an ended session no longer breaks the page.',
+      },
+      {
+        pt: 'Esc fecha o menu de visualização da lista; sessões encerradas oferecem Reabrir em vez de Parar e dizem por que não dá para reabrir quando for o caso.',
+        en: 'Esc closes the list view menu; ended sessions offer Reopen instead of Stop and say why when they cannot be reopened.',
+      },
+      {
+        pt: 'Pastas ocultas abrem e fecham como as outras seções da lateral.',
+        en: 'Hidden folders open and close like the other sidebar sections.',
+      },
+      {
+        pt: 'O resumo de atividade do chat ficou mais claro, com os passos sem resposta contados à parte.',
+        en: 'The chat activity summary reads better, with unanswered steps counted apart.',
+      },
+      {
+        pt: 'Arquivos temporários de início de sessão não ficam mais no disco.',
+        en: 'Temporary session start files no longer stay on disk.',
+      },
+      {
+        pt: 'A tela de novidades volta a aparecer depois de atualizar.',
+        en: 'The what\'s-new screen shows again after an update.',
+      },
+    ],
+  },
   '2.140.3': {
     features: [],
     fixes: [
@@ -27,11 +56,29 @@ export const RELEASES: Record<string, ReleaseNotes> = {
       },
     ],
   },
+  '2.140.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'A passagem de líder não falha mais quando o resumo para o sucessor é longo.',
+        en: 'A leader hand-off no longer fails when the summary for the successor is long.',
+      },
+    ],
+  },
   '2.140.1': {
     features: [
       {
         pt: 'No assistente de nova sessão dá para criar um projeto novo na hora.',
         en: 'The new-session wizard can create a brand-new project on the spot.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.140.0': {
+    features: [
+      {
+        pt: 'A passagem de líder pela linha de comando leva ao sucessor o título, a pasta, o fixado, o check-in, o papel e o modo ausente.',
+        en: 'A leader hand-off from the command line gives the successor its title, folder, pin, check-in, role and away mode.',
       },
     ],
     fixes: [],
