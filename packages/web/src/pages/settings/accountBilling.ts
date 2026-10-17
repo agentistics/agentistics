@@ -209,7 +209,7 @@ export function billingRows(
   harnessLabel: (h: HarnessId) => string, pt: boolean,
 ): BillingRow[] {
   const out: BillingRow[] = []
-  const unknownWho = pt ? 'o assistente não informa qual conta é' : 'the assistant does not say which account'
+  const unknownWho = pt ? 'conta não informada' : 'account not reported'
   for (const h of harnesses) {
     const label = harnessLabel(h)
     const mine = billableAccounts(accounts, h)
@@ -276,14 +276,27 @@ export function defaultStart(periods: readonly BillingPeriod[], today: string): 
 /**
  * The seam of a plan change: the period `id` ends the day before `from`. Applied BEFORE the new
  * period is validated, or the plan still in force overlaps its own successor and the change can
- * never be saved. A seam that would end the old period before it began is left alone — the new
- * period then overlaps it and the editor says so.
+ * never be saved. A change on the old period's first day replaces it. An earlier seam is left
+ * alone — the new period then overlaps it and the editor says so.
  */
 export function closeBefore(periods: readonly BillingPeriod[], id: string, from: string): BillingPeriod[] {
   const day = dayIndex(from)
-  return periods.map(p => {
+  return periods.filter(p => !(p.id === id && day !== null && p.from === from)).map(p => {
     if (p.id !== id || p.to || day === null) return p
     const to = dayFromIndex(day - 1)
     return to < p.from ? p : { ...p, to }
   })
+}
+
+/** Unknown billing is an answer to the notice, but it is not an informed plan. */
+export function planCoverageText(
+  rows: readonly { plan: { mode: BillingPeriod['mode'] } | null; problem: boolean }[],
+  lang: 'pt' | 'en',
+): string {
+  const informed = rows.filter(r => r.plan && r.plan.mode !== 'unknown' && !r.problem).length
+  const missing = rows.length - informed
+  const base = lang === 'pt'
+    ? `${informed} de ${rows.length} com plano informado`
+    : `${informed} of ${rows.length} with a plan`
+  return missing ? `${base} · ${missing} ${lang === 'pt' ? 'sem informar' : 'not set'}` : base
 }

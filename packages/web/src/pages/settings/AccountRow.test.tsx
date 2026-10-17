@@ -21,7 +21,7 @@ const reading = (account: string): PlanLimits => ({
 const view = (accounts: BillingAccount[], harnesses = ['claude'], extra: (r: BillingRowView) => Partial<BillingRowView> = () => ({})): BillingAccountListProps => ({
   lang: 'en', now: 1, pendingIds: new Set(), failedIds: new Set(), selectedKey: null, onToggle: () => {}, onEdit: () => {},
   rows: billingRows(accounts, { profiles: {} }, harnesses as never, L as never, false).map(r => ({
-    ...r, plan: { name: 'Claude Max 5x', price: '$ 100/mo' }, problem: false, limits: r.account ? reading(r.account.id) : null, ...extra(r as BillingRowView),
+    ...r, plan: { name: 'Claude Max 5x', price: '$ 100/mo', mode: 'subscription' as const }, problem: false, limits: r.account ? reading(r.account.id) : null, ...extra(r as BillingRowView),
   })),
 })
 /** What a reader SEES: the markup with its tags (and their aria labels) removed. */
@@ -57,6 +57,18 @@ describe('BillingAccountList — every fact once', () => {
     expect(h).toContain('No plan')
     expect(h).toContain('Set plan')
     expect(h).toContain('0 of 1 with a plan')
+  })
+
+  test('unknown billing is not counted as a plan in either language or layout', () => {
+    for (const width of [1440, 390]) {
+      g.window = { innerWidth: width }
+      try {
+        const props = view(Array.from({ length: 6 }, (_, i) => acc(`c${i}`)), ['claude'], r =>
+          Number(r.key.slice(1)) < 2 ? {} : { plan: { name: 'Cobrança desconhecida', price: null, mode: 'unknown' } })
+        expect(renderToStaticMarkup(<BillingAccountList {...props} lang="pt" />)).toContain('2 de 6 com plano informado · 4 sem informar')
+        expect(renderToStaticMarkup(<BillingAccountList {...props} lang="en" />)).toContain('2 of 6 with a plan · 4 not set')
+      } finally { g.window = { innerWidth: 1280 } }
+    }
   })
 
   test('an assistant with no identified account is one row with no Agents switch', () => {

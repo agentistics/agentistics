@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { computePlanCost, normalizeBillingSettings, type BillingSettings } from '@agentistics/core'
 import { createAccountMutator } from './accountMutations'
 import {
-  saveThenClose, saveErrorPlace,
+  saveThenClose, saveErrorPlace, planCoverageText,
   accountsNeedingPlan, answerNotice, billableAccounts, billingRows, closeBefore, defaultStart, foldUnnamed, planOptionsFor, rowScope, scopePeriods, withScopePeriods, capabilityNotes, matchDetectedPlan, noticeAccounts, planSummary, toggleAvailability, withAccountPeriods,
   type BillingAccount,
 } from './accountBilling'
@@ -169,13 +169,29 @@ describe('billingRows — one row per account, nothing said twice', () => {
     const rows = billingRows([acc('acc_1', { harness: 'codex', label: 'Conta padrão' }), acc('', { harness: 'codex', label: 'Conta padrão' })], none, ['codex'], L as never, true)
     expect(rows).toHaveLength(1)
     expect(rows[0]!.title).toBe('Codex CLI')
-    expect(rows[0]!.sub).toBe('o assistente não informa qual conta é')
+    expect(rows[0]!.sub).toBe('conta não informada')
   })
   test('an assistant with no identified account is one row on its own timeline; two unnamed accounts are numbered', () => {
     const rows = billingRows([acc('', { harness: 'gemini', label: 'Conta padrão' }), acc('k1', { harness: 'codex', label: 'Conta padrão' }), acc('k2', { harness: 'codex', label: 'Default account', firstSeen: Date.parse('2026-09-05T00:00:00Z') })], none, ['codex', 'gemini'], L as never, false)
     expect(rows.map(r => [r.key, r.title])).toEqual([['k1', 'Codex CLI #1'], ['k2', 'Codex CLI #2'], ['harness:gemini', 'Gemini CLI']])
     expect(rows[2]!.scope).toEqual({ kind: 'default', harness: 'gemini' })
     expect(rows[2]!.account).toBeNull()
+    expect(rows[2]!.sub).toBe('account not reported')
+  })
+})
+
+describe('planCoverageText', () => {
+  const row = (mode: 'subscription' | 'api' | 'thirdparty' | 'unknown') => ({ plan: { mode }, problem: false })
+  test('only known, sound current plans count; absent and unknown plans remain unset', () => {
+    const rows = [row('subscription'), row('api'), row('unknown'), row('unknown'), { plan: null, problem: false }, { ...row('subscription'), problem: true }]
+    expect(planCoverageText(rows, 'pt')).toBe('2 de 6 com plano informado · 4 sem informar')
+    expect(planCoverageText(rows, 'en')).toBe('2 of 6 with a plan · 4 not set')
+  })
+  test('all plans set: omit the unset suffix', () => {
+    const rows = Array.from({ length: 6 }, () => row('subscription'))
+    expect(planCoverageText(rows, 'pt')).toBe('6 de 6 com plano informado')
+    expect(planCoverageText(rows, 'en')).toBe('6 of 6 with a plan')
+    expect(planCoverageText([row('thirdparty')], 'pt')).toBe('1 de 1 com plano informado')
   })
 })
 

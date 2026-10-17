@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test'
 import {
   applyPlan,
+  catalogPlanName,
   splitTimeline,
   modeLabel,
   currencySymbol,
@@ -18,6 +19,7 @@ import {
 } from './billingForm'
 import { findPlan } from '@agentistics/core'
 import type { BillingPeriod } from '@agentistics/core'
+import { closeBefore } from './accountBilling'
 
 const id = () => 'bp_new'
 const plan = (planId: string) => findPlan(planId)!
@@ -132,6 +134,19 @@ describe('validateDraft', () => {
   test('editing a period does not report it overlapping itself', () => {
     const draft = draftFromPeriod(existing[0]!)
     expect(validateDraft(draft, existing, id)).toEqual([])
+  })
+
+  test('switching plans on their first day replaces the current period without an overlap', () => {
+    const history = existing[0]!
+    const current: BillingPeriod = { ...history, id: 'bp_current', from: '2026-04-01', to: undefined }
+    const draft = applyPlan({ ...emptyDraft(), from: current.from }, plan('anthropic-max-5x'))
+    const others = closeBefore([history, current], current.id, draft.from)
+    expect(others).toEqual([history])
+    expect(validateDraft(draft, others, id)).toEqual([])
+    const saved = [...others, periodFromDraft(draft, id)]
+    expect(saved).toHaveLength(2)
+    expect(saved.some(p => p.id === current.id)).toBe(false)
+    expect(splitTimeline(saved, current.from).current?.planId).toBe('anthropic-max-5x')
   })
 
   test('a missing amount is reported, not defaulted', () => {
@@ -310,6 +325,17 @@ describe('formatAmountDisplay', () => {
 })
 
 describe('periodName', () => {
+  test('generic catalog choices are localized in the picker and saved period names', () => {
+    for (const [planId, pt, en] of [
+      ['api-payg', 'API — paga pelo uso', 'API — pay as you go'],
+      ['other', 'Outro plano', 'Other plan'],
+    ] as const) {
+      const entry = plan(planId)
+      expect(catalogPlanName(entry, 'pt')).toBe(pt)
+      expect(catalogPlanName(entry, 'en')).toBe(en)
+      expect(periodName({ id: 'p', mode: entry.mode, from: '2026-10-17', planId }, 'pt')).toBe(pt)
+    }
+  })
   test('prefers the user label, then the catalog, then the raw id', () => {
     expect(periodName({ id: 'a', mode: 'subscription', from: '2026-01-01', label: 'Mine' })).toBe('Mine')
     expect(periodName({ id: 'a', mode: 'subscription', from: '2026-01-01', planId: 'anthropic-pro' })).toBe('Claude Pro')

@@ -284,9 +284,18 @@ export function formatPrice(amount: number, currency: BillingCurrency): string {
   return `${currencySymbol(currency)} ${formatAmountDisplay(amountText(amount), currency)}`
 }
 
+/** Localize generic choices while preserving vendor plan names. */
+export function catalogPlanName(entry: PlanCatalogEntry, lang: 'pt' | 'en'): string {
+  if (lang === 'pt') {
+    if (entry.id === 'api-payg') return 'API — paga pelo uso'
+    if (entry.id === 'other') return 'Outro plano'
+  }
+  return entry.label
+}
+
 /** The display name of a period: its own label, else the catalog's, else the raw id. */
-export function periodName(period: BillingPeriod): string {
+export function periodName(period: BillingPeriod, lang: 'pt' | 'en' = 'en'): string {
   if (period.label) return period.label
   const entry = period.planId ? findPlan(period.planId) : undefined
-  return entry?.label ?? period.planId ?? ''
+  return entry ? catalogPlanName(entry, lang) : period.planId ?? ''
 }
