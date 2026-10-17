@@ -631,6 +631,10 @@ export default function CustomPage() {
   }
 
   // Mobile view: render items as a vertical list, no drag/resize
+  // Hooks stay above the mobile early return (React #300).
+  useEscapeOwner(renaming, () => setRenaming(false))
+  useEscapeOwner(dupModal !== null, () => setDupModal(null))
+
   if (isMobile) {
     const sortedItems = [...items].sort((a, b) => a.y !== b.y ? a.y - b.y : a.x - b.x)
     return (
@@ -699,8 +703,6 @@ export default function CustomPage() {
 
   const isDragging = draggedCatalogItem !== null
 
-  useEscapeOwner(renaming, () => setRenaming(false))
-  useEscapeOwner(dupModal !== null, () => setDupModal(null))
   return (
     <div>
       <style>{`
