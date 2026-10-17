@@ -28,6 +28,7 @@ import { PROJECTS_DIR } from '../config'
 import { UUID_RE } from '../git'
 import { isUserRoleMessage } from '../jsonl'
 import { commandSummary, hasUnreadableWrite, shellWrites } from './shell-writes'
+import { patchDetail } from './patch-detail'
 import { classifyUserEntry, type UserEntry } from './chat-envelope'
 import { bashEntryText, parseBashInput, parseBashOutput, type ShellOutput } from './bash-mode'
 import { parseImageCompanion, resolveCompanionImages } from './attachment-companion'
@@ -460,6 +461,10 @@ function extractToolCalls(e: Record<string, unknown>): NonNullable<ChatTurn['too
 function toolDetail(input: unknown): string | null {
   if (typeof input !== 'object' || input === null) return null
   const o = input as Record<string, unknown>
+  for (const key of ['patch', 'input']) {
+    const p = patchDetail(o[key])
+    if (p) return p
+  }
   for (const key of ['command', 'file_path', 'path', 'pattern', 'query', 'url', 'description']) {
     const v = o[key]
     if (typeof v === 'string' && v.trim() !== '') {

@@ -40,7 +40,7 @@ import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { asideCache, asideKey } from '../../lib/asideCache'
-import { resolveSubagentStatus, settleSubagentTurns } from '../../lib/artifactLayout'
+import { resolveSubagentStatus, settleSubagentTurns, shouldPollSubagent, type StatusObservation } from '../../lib/artifactLayout'
 import { focusMissNotice, isFocusedRow, rowsCarry, ROW_FLASH } from '../../lib/noteFocus'
 import { BarChart3, Bot, Brain, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Eye, FileEdit, Loader, PanelRightClose, Pencil, Plug, Plus, Send, Sparkles, Terminal, Trash2, Workflow } from 'lucide-react'
 import { artifactShortfall, type Artifact } from '../../lib/sessionArtifacts'
@@ -2172,16 +2172,21 @@ function SubagentActivity({ sessionId, row, pt, now, state, listedStatus, onBack
   /** The read stopped on its cap — this feed is a window, and says so. */
   const [older, setOlder] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
-  /** The status the fetched activity came with — the authoritative one, fresher than the opened row. */
-  const [fetchedStatus, setFetchedStatus] = useState<SubagentStatus | undefined>(undefined)
-  const status = resolveSubagentStatus(row.status, listedStatus, fetchedStatus)
-  const statusRef = useRef(status)
-  statusRef.current = status
+  /** Each source of the status carries the instant it was observed; the newest one wins. */
+  const [fetchedObs, setFetchedObs] = useState<StatusObservation<SubagentStatus> | undefined>(undefined)
+  const openedObs = useRef<StatusObservation<SubagentStatus>>({ status: row.status, at: Date.now() })
+  const listedObs = useRef<StatusObservation<SubagentStatus> | undefined>(undefined)
+  if (listedStatus !== undefined && listedObs.current?.status !== listedStatus) {
+    listedObs.current = { status: listedStatus, at: Date.now() }
+  }
+  const status = resolveSubagentStatus([openedObs.current, listedObs.current, fetchedObs]) ?? row.status
+  const polling = shouldPollSubagent(status)
   const tailRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     let alive = true
     let timer: ReturnType<typeof setTimeout> | undefined
+    let fetchedLocal: StatusObservation<SubagentStatus> | undefined
     const read = async () => {
       try {
         const res = await fetch(
@@ -2194,16 +2199,16 @@ function SubagentActivity({ sessionId, row, pt, now, state, listedStatus, onBack
         setFailed(null)
         setTurns(body.turns ?? [])
         setOlder(body.older === true)
-        if (typeof body.status === 'string') setFetchedStatus(body.status)
+        if (typeof body.status === 'string') { fetchedLocal = { status: body.status, at: Date.now() }; setFetchedObs(fetchedLocal) }
         // A RUNNING agent is still writing; a finished one cannot change, so it is read once.
-        if (resolveSubagentStatus(statusRef.current, undefined, body.status) === 'running') timer = setTimeout(read, 3000)
+        if (shouldPollSubagent(resolveSubagentStatus([openedObs.current, listedObs.current, fetchedLocal]))) timer = setTimeout(read, 3000)
       } catch {
         if (alive) setFailed(pt ? 'Não foi possível ler este subagente.' : 'This subagent could not be read.')
       }
     }
     void read()
     return () => { alive = false; if (timer) clearTimeout(timer) }
-  }, [sessionId, row.agentId, pt])
+  }, [sessionId, row.agentId, pt, polling])
 
   const feed = useMemo(() => liveEvents(settleSubagentTurns(turns ?? [], status, state)), [turns, status, state])
   // Follow the tail while it is running — the newest step is the one being watched.

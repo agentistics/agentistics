@@ -11,6 +11,13 @@ const line = (type: string, data: Record<string, unknown>): string =>
   JSON.stringify({ type, data, id: 'x', timestamp: AT })
 
 describe('toolDetailOf', () => {
+  it('keeps the patch of an apply_patch call', () => {
+    const patch = '*** Begin Patch\n*** Update File: packages/a/src/x.ts\n@@\n-old\n+new\n*** Add File: packages/a/src/y.ts\n+hello\n*** End Patch'
+    const d = toolDetailOf({ input: patch })!
+    expect(d).toContain('*** Update File: packages/a/src/x.ts')
+    expect(d).toContain('*** Add File: packages/a/src/y.ts')
+    expect(toolDetailOf({ patch })).toBe(d)
+  })
   it('a shell command is summarised past its `cd`', () => {
     expect(toolDetailOf({ command: 'cd /repo && bun test', description: 'run tests' }))
       .toBe('bun test')

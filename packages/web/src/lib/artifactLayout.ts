@@ -135,14 +135,29 @@ export function settleTurns<T extends { pending?: boolean }>(turns: readonly T[]
  * flight, so a trailing `pending` call is history. Only `pending` is cleared: no outcome is invented,
  * so a call without a recorded result stays unmarked rather than reading as a success.
  */
+/** One reading of a subagent's status and the instant it was taken. */
+export interface StatusObservation<S extends string = string> { status: S; at: number }
+
 /**
- * The CURRENT status of an open subagent. Sources: the row captured when the detail opened, the row
- * the list poll last saw, and the status that came with the fetched activity. Running only goes one
- * way, so ANY source that is not `running` wins; the freshest non-running answer is preferred.
+ * The CURRENT status of an open subagent: the MOST RECENT observation wins. Sources are the row the
+ * detail opened with, the row the list poll last saw and the status that came with the fetched
+ * activity, each stamped with when it was observed. Nothing is assumed monotonic — an agent can
+ * stop and be resumed, and a parent can come back live — so a stale stopped/unknown never beats a
+ * newer running one, and a newer terminal one still ends a running one. A tie is read as the
+ * terminal answer (the conservative one). Returns `undefined` for an empty list.
  */
-export function resolveSubagentStatus<S extends string>(opened: S, listed?: S, fetched?: S): S {
-  for (const s of [fetched, listed, opened]) if (s !== undefined && s !== 'running') return s
-  return opened
+export function resolveSubagentStatus<S extends string>(observations: readonly (StatusObservation<S> | undefined)[]): S | undefined {
+  let best: StatusObservation<S> | undefined
+  for (const o of observations) {
+    if (!o) continue
+    if (!best || o.at > best.at || (o.at === best.at && best.status === 'running' && o.status !== 'running')) best = o
+  }
+  return best?.status
+}
+
+/** Whether the activity feed keeps being re-read: only while the resolved status is running. */
+export function shouldPollSubagent(status: string | undefined): boolean {
+  return status === 'running'
 }
 
 export function settleSubagentTurns<T extends { pending?: boolean }>(

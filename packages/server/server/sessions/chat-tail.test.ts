@@ -824,4 +824,16 @@ describe('Claude per-tool failures', () => {
     const { turns } = await readChatWindow(path)
     expect(turns.flatMap(t => t.tools ?? []).map(t => t.failed)).toEqual([true, undefined, undefined])
   })
+
+  test('keeps the patch text of an apply_patch tool call', async () => {
+    const path = join(root, 'patch.jsonl')
+    const patch = '*** Begin Patch\n*** Update File: packages/a/src/x.ts\n@@\n-old\n+new\n*** Add File: packages/a/src/y.ts\n+hello\n*** End Patch'
+    await writeFile(path, line({ type: 'assistant', message: { content: [
+      { type: 'tool_use', id: 'p', name: 'apply_patch', input: { input: patch } },
+    ] } }))
+    const { turns } = await readChatWindow(path)
+    const d = turns.flatMap(t => t.tools ?? [])[0]!.detail!
+    expect(d).toContain('*** Update File: packages/a/src/x.ts')
+    expect(d).toContain('*** Add File: packages/a/src/y.ts')
+  })
 })

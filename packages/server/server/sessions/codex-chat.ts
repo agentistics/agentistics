@@ -55,6 +55,7 @@ import type { HarnessId } from '@agentistics/core'
 import { canonicalTool } from '../harness-activity'
 import type { ChatTurn } from '@agentistics/core'
 import { commandSummary } from './shell-writes'
+import { patchDetail } from './patch-detail'
 import { parseCodexShell } from './bash-mode'
 import { existsSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
@@ -184,6 +185,10 @@ export function toolDetailOf(rawArguments: unknown): string | null {
   try { args = JSON.parse(rawArguments) } catch { return null }
   if (typeof args !== 'object' || args === null) return null
   const o = args as Record<string, unknown>
+  for (const key of ['input', 'patch']) {
+    const p = patchDetail(o[key])
+    if (p) return p
+  }
   for (const key of DETAIL_KEYS) {
     const v = o[key]
     if (typeof v === 'string' && v.trim() !== '') {
@@ -226,7 +231,7 @@ function toolOf(payload: Record<string, unknown>, harness: HarnessId): Tool | nu
   const name = typeof payload.name === 'string' ? payload.name : ''
   if (name === '') return null
   const detail = payload.type === 'custom_tool_call' && typeof payload.input === 'string'
-    ? (toolDetailOf(payload.input) ?? execWrapperCommand(payload.input) ?? commandSummary(payload.input))
+    ? (patchDetail(payload.input) ?? toolDetailOf(payload.input) ?? execWrapperCommand(payload.input) ?? commandSummary(payload.input))
     : toolDetailOf(payload.arguments)
   const canonical = canonicalTool(harness, name)
   return {

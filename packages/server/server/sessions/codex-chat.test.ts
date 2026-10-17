@@ -337,8 +337,19 @@ describe('tool result pairing', () => {
     expect(tools[1]!.detail).toBe('ls /tmp/b')
     expect(tools[2]!.detail).toBe('ls /tmp/c')
     // runtime-expression forms keep the wrapper fallback, not a truncated 'ls'
-    expect(tools[3]!.detail).toContain('tools.exec_command')
-    expect(tools[4]!.detail).toContain('tools.exec_command')
-    expect(tools[5]!.detail).toContain('tools.exec_command')
+    expect(tools[3]!.detail).toBe("text(await tools.exec_command({cmd:'ls ' + target}))")
+    expect(tools[4]!.detail).toBe('text(await tools.exec_command({cmd:`ls ` + target}))')
+    expect(tools[5]!.detail).toBe('const r = paths.map(p => tools.exec_command({cmd:`sed -n 1,5p ${p}`,workdir:"/w"}))')
+  })
+  it('keeps the patch of an apply_patch call so its files can be read', () => {
+    const patch = '*** Begin Patch\n*** Update File: packages/a/src/x.ts\n@@\n-old\n+new\n*** Add File: packages/a/src/y.ts\n+hello\n*** End Patch'
+    const tools = parseCodexChat([
+      line({ type: 'custom_tool_call', name: 'apply_patch', call_id: 'p1', input: patch }),
+      line({ type: 'function_call', name: 'apply_patch', call_id: 'p2', arguments: JSON.stringify({ input: patch }) }),
+    ]).flatMap(t => t.tools ?? [])
+    for (const t of tools) {
+      expect(t.detail).toContain('*** Update File: packages/a/src/x.ts')
+      expect(t.detail).toContain('*** Add File: packages/a/src/y.ts')
+    }
   })
 })

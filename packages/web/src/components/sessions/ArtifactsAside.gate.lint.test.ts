@@ -178,8 +178,10 @@ describe('the subagent feed is settled (the independently fetched consumer)', ()
   it('never feeds fetched turns to liveEvents unsettled', () => {
     expect(fn).not.toMatch(/liveEvents\(\s*turns\b/)
     expect(fn).toMatch(/liveEvents\(settleSubagentTurns\(turns \?\? \[\], status, state\)\)/)
-    expect(fn).toContain('resolveSubagentStatus(row.status, listedStatus, fetchedStatus)')
-    expect(fn).toContain('setFetchedStatus(body.status)')
+    expect(fn).toContain('resolveSubagentStatus([openedObs.current, listedObs.current, fetchedObs])')
+    expect(fn).toContain('setFetchedObs(fetchedLocal)')
+    expect(fn).toContain('shouldPollSubagent(')
+    expect(fn).toMatch(/\}, \[sessionId, row\.agentId, pt, polling\]\)/)
   })
   it('receives the parent row state from the page', () => {
     expect(fn.slice(0, 300)).toContain('state?: string')

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  artifactsPanelMax, ASIDE_DRAG_CENTRE_MIN, currentAction, edgeHint, settleTurns, settleSubagentTurns, resolveSubagentStatus, PANEL_MIN_WIDTH, resolveArtifactLayout,
+  artifactsPanelMax, ASIDE_DRAG_CENTRE_MIN, currentAction, edgeHint, settleTurns, settleSubagentTurns, resolveSubagentStatus, shouldPollSubagent, PANEL_MIN_WIDTH, resolveArtifactLayout,
 } from './artifactLayout'
 
 const at = (o: Partial<Parameters<typeof resolveArtifactLayout>[0]>) =>
@@ -171,22 +171,38 @@ describe('settleSubagentTurns', () => {
   })
 })
 
-describe('resolveSubagentStatus (a detail kept open through a transition)', () => {
+describe('resolveSubagentStatus (freshness, not "terminal wins")', () => {
   const turns = [{ pending: true, text: 'a' }]
-  it('fetched terminal status beats the captured running row', () => {
+  const o = (status: string, at: number) => ({ status, at })
+  it('a newer fetched terminal status beats an older running row, with and without parent state', () => {
     for (const fetched of ['stopped', 'failed', 'unknown']) {
-      const st = resolveSubagentStatus('running', 'running', fetched)
+      const st = resolveSubagentStatus([o('running', 1), o('running', 2), o(fetched, 3)])!
       expect(st).toBe(fetched)
-      // with live parent state AND with parent state missing
+      expect(shouldPollSubagent(st)).toBe(false)
       expect(settleSubagentTurns(turns, st, 'working').some(t => t.pending === true)).toBe(false)
       expect(settleSubagentTurns(turns, st, undefined).some(t => t.pending === true)).toBe(false)
     }
   })
-  it('the refreshed list row also ends a captured running one', () => {
-    expect(resolveSubagentStatus('running', 'stopped', 'running')).toBe('stopped')
+  it('a newer list row ending a captured running one wins', () => {
+    expect(resolveSubagentStatus([o('running', 1), o('stopped', 5), o('running', 2)])).toBe('stopped')
   })
-  it('stays running only when every source says running', () => {
-    expect(resolveSubagentStatus('running', 'running', 'running')).toBe('running')
-    expect(resolveSubagentStatus('running')).toBe('running')
+  it('a newer running observation beats stale unknown/stopped and re-enables polling', () => {
+    for (const stale of ['unknown', 'stopped']) {
+      const fromList = resolveSubagentStatus([o(stale, 1), o('running', 4), o(stale, 2)])
+      expect(fromList).toBe('running')
+      expect(shouldPollSubagent(fromList)).toBe(true)
+      const fromActivity = resolveSubagentStatus([o(stale, 1), o(stale, 2), o('running', 9)])
+      expect(fromActivity).toBe('running')
+      expect(shouldPollSubagent(fromActivity)).toBe(true)
+    }
+  })
+  it('running then terminal still stops polling', () => {
+    expect(shouldPollSubagent(resolveSubagentStatus([o('running', 1), o('unknown', 2)]))).toBe(false)
+  })
+  it('a tie reads as the terminal answer; missing sources are ignored; none is undefined', () => {
+    expect(resolveSubagentStatus([o('running', 3), o('stopped', 3)])).toBe('stopped')
+    expect(resolveSubagentStatus([undefined, o('running', 1)])).toBe('running')
+    expect(resolveSubagentStatus([undefined])).toBeUndefined()
+    expect(shouldPollSubagent(undefined)).toBe(false)
   })
 })

@@ -37,6 +37,7 @@
  * CLI…" and runs for pages.
  */
 
+import { patchDetail } from './patch-detail'
 import type { HarnessId } from '@agentistics/core'
 import { canonicalTool } from '../harness-activity'
 import type { ChatTurn } from '@agentistics/core'
@@ -69,6 +70,10 @@ const DETAIL_KEYS = ['command', 'path', 'file_path', 'filePath', 'pattern', 'que
 export function toolDetailOf(args: unknown): string | null {
   if (typeof args !== 'object' || args === null) return null
   const o = args as Record<string, unknown>
+  for (const key of ['patch', 'input', 'content']) {
+    const p = patchDetail(o[key])
+    if (p) return p
+  }
   for (const key of DETAIL_KEYS) {
     const v = o[key]
     if (typeof v === 'string' && v.trim() !== '') {
