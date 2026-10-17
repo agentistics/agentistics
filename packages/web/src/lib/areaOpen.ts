@@ -24,6 +24,11 @@ export function toggledAreaOpen(map: AreaOpenMap, id: string, active: boolean): 
   return { ...map, [id]: !isAreaOpen(map, id, active) }
 }
 
+/** Selecting an area row opens it: going somewhere is also asking to see what is inside. */
+export function openedArea(map: AreaOpenMap, id: string): AreaOpenMap {
+  return map[id] === true ? map : { ...map, [id]: true }
+}
+
 export const areaOpenStore = createSharedPref<AreaOpenMap>({
   key: 'agentistics-area-open', prefKey: 'areaOpen', fallback: {}, adoptLocalWhenAbsent: true, parse: parseAreaOpen,
 })

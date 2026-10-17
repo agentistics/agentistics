@@ -15,7 +15,7 @@ import {
 import { BetaTag } from '../BetaTag'
 import { FieldInput } from '../../pages/settings/primitives'
 import { ATTN_COUNT_CLASS } from './AttentionDot'
-import { areaOpenStore, isAreaOpen, toggledAreaOpen } from '../../lib/areaOpen'
+import { areaOpenStore, isAreaOpen, openedArea, toggledAreaOpen } from '../../lib/areaOpen'
 
 export const AREA_ICON: Record<AreaIcon, (size: number) => React.ReactNode> = {
   terminal: s => <Terminal size={s} />,
@@ -116,7 +116,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
           href={to}
           aria-label={collapsed ? label : undefined}
           aria-current={active && !area.pages.length ? 'page' : undefined}
-          onClick={e => { e.preventDefault(); go(to) }}
+          onClick={e => { e.preventDefault(); if (hasPages) areaOpenStore.set(openedArea(openMap, area.id)); go(to) }}
           style={{
             display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, boxSizing: 'border-box', flex: 1,
             minHeight: sheet ? 46 : 40, padding: collapsed ? '0' : '0 12px',
