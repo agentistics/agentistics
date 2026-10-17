@@ -82,8 +82,8 @@ export const RELEASES: Record<string, ReleaseNotes> = {
   '2.139.0': {
     features: [
       {
-        pt: 'O chat ao vivo das sessões agora funciona do mesmo jeito para todos os assistentes.',
-        en: 'Live session chat now works the same way for every assistant.',
+        pt: 'O novo chat das sessões vem ativado por padrão nos assistentes compatíveis.',
+        en: 'The new session chat is on by default for supported assistants.',
       },
     ],
     fixes: [],
