@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  artifactsPanelMax, ASIDE_DRAG_CENTRE_MIN, currentAction, edgeHint, settleTurns, PANEL_MIN_WIDTH, resolveArtifactLayout,
+  artifactsPanelMax, ASIDE_DRAG_CENTRE_MIN, currentAction, edgeHint, settleTurns, settleSubagentTurns, PANEL_MIN_WIDTH, resolveArtifactLayout,
 } from './artifactLayout'
 
 const at = (o: Partial<Parameters<typeof resolveArtifactLayout>[0]>) =>
@@ -150,5 +150,23 @@ describe('settleTurns', () => {
     for (const st of ['ended', 'exited', 'lost', 'closed']) {
       expect(settleTurns(turns, st).some(t => t.pending === true)).toBe(false)
     }
+  })
+})
+
+describe('settleSubagentTurns', () => {
+  const turns = [{ pending: true, text: 'a' }, { text: 'b' }]
+  it('leaves a running subagent of a live parent untouched', () => {
+    expect(settleSubagentTurns(turns, 'running', 'working')).toBe(turns)
+    expect(settleSubagentTurns(turns, 'running')).toBe(turns)
+  })
+  it('settles a stopped, failed or finished subagent, and a running one under an ended parent', () => {
+    for (const st of ['stopped', 'failed', 'finished', 'unknown']) {
+      expect(settleSubagentTurns(turns, st, 'working').some(t => t.pending === true)).toBe(false)
+    }
+    expect(settleSubagentTurns(turns, 'running', 'exited').some(t => t.pending === true)).toBe(false)
+  })
+  it('invents no outcome', () => {
+    const out = settleSubagentTurns([{ pending: true, failed: undefined as boolean | undefined }], 'stopped')
+    expect(out[0]!.failed).toBeUndefined()
   })
 })

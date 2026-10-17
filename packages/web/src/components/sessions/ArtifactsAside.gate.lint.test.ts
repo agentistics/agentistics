@@ -172,3 +172,15 @@ describe('the two caveats on the header count are rendered, not merely received'
     expect(code('// const shortfall = artifactShortfall({')).not.toContain('const shortfall =')
   })
 })
+
+describe('the subagent feed is settled (the independently fetched consumer)', () => {
+  const fn = src.slice(src.indexOf('function SubagentActivity('))
+  it('never feeds fetched turns to liveEvents unsettled', () => {
+    expect(fn).not.toMatch(/liveEvents\(\s*turns\b/)
+    expect(fn).toMatch(/liveEvents\(settleSubagentTurns\(turns \?\? \[\], row\.status, state\)\)/)
+  })
+  it('receives the parent row state from the page', () => {
+    expect(fn.slice(0, 300)).toContain('state?: string')
+    expect(has('state={state}') || has('{...(state ? { state } : {})}')).toBe(true)
+  })
+})

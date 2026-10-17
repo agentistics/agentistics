@@ -1430,6 +1430,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       unlistedWrites={artifactsUnlisted}
       {...(outsideNote ? { outsideNote } : {})}
       turns={shownArtifactTurns}
+      {...(selected.state ? { state: selected.state } : {})}
       // A REQUEST for a DIFFERENT tab than `id` is not this mount's concern — see
       // `artifactsStore.ts`'s own `PanelFocusRequest` header.
       focusRequest={panelFocus && panelFocus.tab === id

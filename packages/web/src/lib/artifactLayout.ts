@@ -129,6 +129,19 @@ export function settleTurns<T extends { pending?: boolean }>(turns: readonly T[]
   return turns.map(t => (t?.pending === true ? { ...t, pending: false } : t))
 }
 
+/**
+ * The turns ONE SUBAGENT's own feed should read. A running subagent of a live parent is unchanged
+ * (same array); one that stopped, failed or finished — or whose parent row is over — has no step in
+ * flight, so a trailing `pending` call is history. Only `pending` is cleared: no outcome is invented,
+ * so a call without a recorded result stays unmarked rather than reading as a success.
+ */
+export function settleSubagentTurns<T extends { pending?: boolean }>(
+  turns: readonly T[], status: string, parentState?: string,
+): readonly T[] {
+  const over = status !== 'running' || isEndedState(parentState)
+  return over ? settleTurns(turns, 'ended') : turns
+}
+
 export function currentAction(
   events: readonly { kind: EdgeHint['kind']; text: string; live?: boolean; ref?: string }[],
   state?: string,

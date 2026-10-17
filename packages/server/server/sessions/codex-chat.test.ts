@@ -322,4 +322,19 @@ describe('tool result pairing', () => {
     expect(tools[1]!.failed).toBeUndefined()
     expect(tools[1]!.detail).toContain('ls /tmp')
   })
+
+  it('extracts single-quoted, plain template and quoted-key cmd literals; falls back on runtime expressions', () => {
+    const mk = (id: string, input: string) => line({ type: 'custom_tool_call', name: 'exec', call_id: id, input })
+    const tools = parseCodexChat([
+      mk('a', "text(await tools.exec_command({cmd:'ls /tmp/a'}));"),
+      mk('b', 'text(await tools.exec_command({cmd:`ls /tmp/b`}));'),
+      mk('c', 'text(await tools.exec_command({"cmd":"ls /tmp/c"}));'),
+      mk('d', 'const r = paths.map(p => tools.exec_command({cmd:`sed -n 1,5p ${p}`,workdir:"/w"}));'),
+    ]).flatMap(t => t.tools ?? [])
+    expect(tools[0]!.detail).toContain('ls /tmp/a')
+    expect(tools[1]!.detail).toContain('ls /tmp/b')
+    expect(tools[2]!.detail).toContain('ls /tmp/c')
+    expect(tools[3]!.detail).not.toContain('ls /tmp')
+    expect(tools[3]!.detail).toBeTruthy()
+  })
 })

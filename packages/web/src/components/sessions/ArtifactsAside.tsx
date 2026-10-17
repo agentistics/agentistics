@@ -40,6 +40,7 @@ import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { asideCache, asideKey } from '../../lib/asideCache'
+import { settleSubagentTurns } from '../../lib/artifactLayout'
 import { focusMissNotice, isFocusedRow, rowsCarry, ROW_FLASH } from '../../lib/noteFocus'
 import { BarChart3, Bot, Brain, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Eye, FileEdit, Loader, PanelRightClose, Pencil, Plug, Plus, Send, Sparkles, Terminal, Trash2, Workflow } from 'lucide-react'
 import { artifactShortfall, type Artifact } from '../../lib/sessionArtifacts'
@@ -227,6 +228,8 @@ export interface ArtifactsAsideProps {
    * promise is "this is what is happening".
    */
   turns?: readonly LiveTurn[]
+  /** The row's state, so a subagent feed of an ended parent settles too. */
+  state?: string
   /**
    * EVERYTHING THE STORE KNOWS ABOUT THIS CONVERSATION — the METRICS tab.
    *
@@ -249,7 +252,7 @@ export interface ArtifactsAsideProps {
 
 
 export function ArtifactsAside({
-  sessionId, cwd, lang, artifacts, loading, unavailable, older, turns, onClose,
+  sessionId, cwd, lang, artifacts, loading, unavailable, older, turns, state, onClose,
   unlistedWrites, outsideNote, hideCloseButton, headerControls,
   activeTab, focusRequest, session, onOpenTask, onTaskChanged, metrics, onHandedToChat,
 }: ArtifactsAsideProps) {
@@ -757,7 +760,7 @@ export function ArtifactsAside({
     if (openAgent) {
       return (
         <SubagentActivity
-          sessionId={sessionId} row={openAgent} pt={pt} now={now}
+          sessionId={sessionId} row={openAgent} pt={pt} now={now} {...(state ? { state } : {})}
           onBack={() => setOpenAgent(null)}
         />
       )
@@ -2158,8 +2161,8 @@ function SubagentCard({ row, pt, now, onOpen }: {
  * read by one implementation rather than a second one that would drift. Its rows open the same way,
  * against the subagent's transcript (`stepUrl`'s `agentId`).
  */
-function SubagentActivity({ sessionId, row, pt, now, onBack }: {
-  sessionId: string; row: SubagentRow; pt: boolean; now: number; onBack: () => void
+function SubagentActivity({ sessionId, row, pt, now, state, onBack }: {
+  sessionId: string; row: SubagentRow; pt: boolean; now: number; state?: string; onBack: () => void
 }) {
   const [turns, setTurns] = useState<readonly LiveTurn[] | null>(null)
   /** The read stopped on its cap — this feed is a window, and says so. */
@@ -2192,7 +2195,7 @@ function SubagentActivity({ sessionId, row, pt, now, onBack }: {
     return () => { alive = false; if (timer) clearTimeout(timer) }
   }, [sessionId, row.agentId, row.status, pt])
 
-  const feed = useMemo(() => liveEvents(turns ?? []), [turns])
+  const feed = useMemo(() => liveEvents(settleSubagentTurns(turns ?? [], row.status, state)), [turns, row.status, state])
   // Follow the tail while it is running — the newest step is the one being watched.
   useEffect(() => { if (row.status === 'running') tailRef.current?.scrollIntoView({ block: 'end' }) }, [feed.length, row.status])
 

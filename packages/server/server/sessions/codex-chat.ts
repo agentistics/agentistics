@@ -202,12 +202,21 @@ export function toolDetailOf(rawArguments: unknown): string | null {
 
 /** `exec` custom calls carry JS (`text(await tools.exec_command({cmd:"…"}))`): show the command, not the wrapper. */
 function execWrapperCommand(input: string): string | null {
-  const m = /\bcmd\s*:\s*("(?:[^"\\]|\\.)*")/.exec(input)
+  // Literal forms only, never evaluated: "…", '…', and `…` without `${}`; the key may be quoted.
+  const m = /(?:\bcmd|"cmd"|'cmd')\s*:\s*(?:("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')|(`(?:[^`\\$]|\\.|\$(?!\{))*`))/.exec(input)
   if (!m) return null
-  try {
-    const cmd: unknown = JSON.parse(m[1]!)
-    return typeof cmd === 'string' && cmd.trim() !== '' ? commandSummary(cmd) : null
-  } catch { return null }
+  const unescape = (body: string): string => body.replace(/\\(u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|[\s\S])/g, (_, c: string) => {
+    if (c[0] === 'u' && c.length === 5) return String.fromCharCode(parseInt(c.slice(1), 16))
+    if (c[0] === 'x' && c.length === 3) return String.fromCharCode(parseInt(c.slice(1), 16))
+    return ({ n: '\n', t: '\t', r: '\r', '0': '\0' } as Record<string, string>)[c] ?? c
+  })
+  let cmd: string
+  if (m[1] !== undefined) {
+    try { cmd = JSON.parse(m[1]) as string } catch { return null }
+  } else {
+    cmd = unescape((m[2] ?? m[3]!).slice(1, -1))
+  }
+  return cmd.trim() !== '' ? commandSummary(cmd) : null
 }
 
 type Tool = NonNullable<ChatTurn['tools']>[number]

@@ -25,6 +25,8 @@ export interface EventStream {
    *  subscriber (of any type) unsubscribes. */
   healthy(): boolean
   subscribe(type: string, handler: StreamEventHandler): () => void
+  /** Drop every subscriber and the socket. For tests that must own the connection they open. */
+  reset?(): void
 }
 
 export function createEventStream(makeES: () => EventSource): EventStream {
@@ -82,7 +84,9 @@ export function createEventStream(makeES: () => EventSource): EventStream {
     }
   }
 
-  return { subscribe, healthy: () => es?.readyState === 1 && Date.now() - lastFrameAt < 45_000 }
+  function reset() { handlers.clear(); close() }
+
+  return { subscribe, reset, healthy: () => es?.readyState === 1 && Date.now() - lastFrameAt < 45_000 }
 }
 
 /**
