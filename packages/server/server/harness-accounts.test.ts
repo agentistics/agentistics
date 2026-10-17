@@ -551,6 +551,29 @@ test('a direct bind of two teammates under one org-only key returns two accounts
   expect((await store.bind('/tmp/ta2', { harness: 'claude', key: TEAM_ORG, label: 'a@example.invalid' })).account.id).toBe(a.account.id)
 })
 
+test('a bound root switching between two e-mails of one org rebinds, never relabels', async () => {
+  const file = join(dir, 'accounts.json')
+  await writeTeammates(file)
+  const store = createHarnessAccounts({ file })
+  await store.update('acc_team_b000000', { nickname: 'Bia' })
+  // B's root now reports A's e-mail under the same org-only key: that is A, not B renamed.
+  const toA = await store.bind('/tmp/tb', { harness: 'claude', key: TEAM_ORG, label: 'a@example.invalid' })
+  expect(toA.account.id).toBe('acc_team_a000000')
+  // A third e-mail on the same root is a new person: a new row, A untouched.
+  const toC = await store.bind('/tmp/tb', { harness: 'claude', key: TEAM_ORG, label: 'c@example.invalid' })
+  expect(['acc_team_a000000', 'acc_team_b000000']).not.toContain(toC.account.id)
+  // And back to B.
+  expect((await store.bind('/tmp/tb', { harness: 'claude', key: TEAM_ORG, label: 'b@example.invalid' })).account.id).toBe('acc_team_b000000')
+  // A probe with no person evidence keeps the bound account.
+  expect((await store.bind('/tmp/tb', { harness: 'claude', key: TEAM_ORG, label: TEAM_ORG })).account.id).toBe('acc_team_b000000')
+  const data = await createHarnessAccounts({ file }).readAccounts()
+  const byId = Object.fromEntries(data.accounts.map(a => [a.id, a]))
+  expect(byId.acc_team_a000000).toMatchObject({ label: 'a@example.invalid', nickname: 'Ana' })
+  expect(byId.acc_team_b000000).toMatchObject({ label: 'b@example.invalid', nickname: 'Bia', available: false })
+  expect(data.accounts.filter(a => a.harness === 'claude')).toHaveLength(3)
+  expect(data.aliases ?? {}).toEqual({})
+})
+
 test('v1 migration keeps two teammates under one org-only key apart', async () => {
   const file = join(dir, 'accounts.json')
   await writeFile(file, JSON.stringify([
