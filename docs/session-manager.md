@@ -4,6 +4,15 @@
 sessions are hosted by tmux on its own socket (`-L agentop`), so they survive `agentop` exiting and
 never mix with your own tmux sessions.
 
+Large or multiline launch arguments (including hand-off context and initial briefs) travel through
+a private `0600` shell launcher under `session-context/<session-id>/` in the agentistics data
+directory. tmux receives only the launcher path; the launcher execs the harness with the complete
+original arguments, preserving quotes, accents and trailing newlines. Short single-line launches
+keep their existing invocation. Launchers remain alongside the session's context files; failed
+tmux starts remove their launcher. Harnesses whose context travels in a typed first message load
+large or multiline text into a tmux buffer through stdin, then paste the original bytes and delete
+the buffer. Spawn errors include tmux's stderr and exit code.
+
 There are four front doors onto the same fleet and they hold ONE set of rules: this CLI, the
 control center's `sessions` tab, the web dashboard, and the
 [VS Code extension](vscode-extension.md). The last two reach it over `/api/fleet`, which resolves

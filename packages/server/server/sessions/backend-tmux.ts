@@ -4,6 +4,10 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { mkdir, unlink, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { AGENTISTICS_DATA_DIR } from '../config'
+import { planTmuxLaunch, planTmuxLiteral, tmuxSpawnError } from './tmux-launch'
 import { ensureSessionIdentityKey } from './session-identity'
 import { FOCUS_ATTEMPTS, inputFocusOf } from './input-focus'
 import { highlightedRow, parseRewindMenu, REWIND_MAX_STEPS, rewindRowMatches } from './claude-rewind'
@@ -105,15 +109,15 @@ async function terminalProfile(): Promise<TerminalProfile> {
   return profileCache
 }
 
-async function tmux(args: string[]): Promise<{ code: number; out: string; err: string }> {
+async function tmux(args: string[], stdin?: string): Promise<{ code: number; out: string; err: string }> {
   try {
-    const p = Bun.spawn(['tmux', ...args], { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore', env: utf8LocaleEnv() })
+    const p = Bun.spawn(['tmux', ...args], { stdout: 'pipe', stderr: 'pipe', stdin: stdin === undefined ? 'ignore' : new Blob([stdin]), env: utf8LocaleEnv() })
     const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()])
     return { code: await p.exited, out, err }
-  } catch {
+  } catch (e) {
     // tmux is not on PATH. 127 is what a shell reports for that, and `unavailable()` is what
     // callers are meant to consult — no throw, so a missing tmux never crashes a caller.
-    return { code: 127, out: '', err: '' }
+    return { code: 127, out: '', err: e instanceof Error ? e.message : String(e) }
   }
 }
 
@@ -361,7 +365,9 @@ async function queueDrains(id: string, budgetMs: number): Promise<boolean> {
 
 async function typeAndSubmit(id: string, text: string): Promise<boolean> {
   if (!(await focusInput(id))) return false
-  const typed = await tmux(sendKeysLiteralArgs(id, text))
+  const transport = planTmuxLiteral(id, text)
+  if (transport && (await tmux(transport.load, transport.stdin)).code !== 0) return false
+  const typed = await tmux(transport ? transport.paste : sendKeysLiteralArgs(id, text))
   if (typed.code !== 0) return false
 
   // Let the burst end before the return key, then look at what the typing produced — that frame is
@@ -553,10 +559,22 @@ export const tmuxBackend: SessionBackend = {
     await ensureSessionIdentityKey()
     // The first session of a cold socket also starts the tmux SERVER — in a scope of its own, so the
     // fleet does not live and die with this service's cgroup. See `coldStartArgv`.
-    const { code, out } = await tmuxStartingServer(
-      spawnArgs(profile, { id: req.id, cwd: req.cwd, argv: req.argv, path: env.PATH ?? process.env.PATH, env }),
-    )
-    if (code !== 0) throw new Error(out.trim() || `tmux new-session failed (code ${code})`)
+    const dir = join(AGENTISTICS_DATA_DIR, 'session-context', req.id)
+    const launch = planTmuxLaunch(req.argv, dir, randomUUID())
+    if (launch.file) {
+      await mkdir(dir, { recursive: true, mode: 0o700 })
+      // A unique, private file: an existing launch is never overwritten while a pane reads it.
+      await writeFile(launch.file.path, launch.file.text, { mode: 0o600, flag: 'wx' })
+    }
+    try {
+      const { code, out, err } = await tmuxStartingServer(
+        spawnArgs(profile, { id: req.id, cwd: req.cwd, argv: launch.argv, path: env.PATH ?? process.env.PATH, env }),
+      )
+      if (code !== 0) throw new Error(tmuxSpawnError(code, out, err))
+    } catch (e) {
+      if (launch.file) await unlink(launch.file.path).catch(() => {})
+      throw e
+    }
     if (req.initialPrompt) {
       // Deliver the prompt only once the harness is READY — polled, not a fixed sleep — so a slow
       // start does not lose it and a startup dialog is never submitted into. See `deliverInitialPrompt`.
