@@ -562,6 +562,18 @@ describe('sessionActions', () => {
     expect(shape).toContain('kill')
   })
 
+  it('offers reopen, not stop, on an ended hosted row', () => {
+    const a = on(session('x', { state: 'exited', resume: { id: 'c1' } } as never))
+    expect(a).toContain('resume')
+    expect(a).not.toContain('kill')
+  })
+
+  it('keeps stop on a lost row — its backend may still be running', () => {
+    const a = on(session('x', { state: 'lost', resume: { id: 'c1' } } as never))
+    expect(a).toContain('resume')
+    expect(a).toContain('kill')
+  })
+
   it('enables only what needs no selection when nothing is selected', () => {
     expect(on(undefined)).toEqual(['new', 'search', 'group'])
   })
@@ -1325,6 +1337,7 @@ describe('what a row that is no longer running offers', () => {
     expect(by.rename).toBe(true)
     expect(by.note).toBe(true)
     expect(by.task).toBe(true)
+    // `lost` may still have a live backend the poll could not read, so Stop stays.
     expect(by.kill).toBe(true)
   })
 
