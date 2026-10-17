@@ -1,6 +1,6 @@
 /**
  * SessionTabStrip — the open conversations as tabs, in their own row at the top of the conversation
- * panel (option C of UI.SESSION-TABS, flag `sessionTabs`). The header above it is unchanged.
+ * panel (option A of UI.SESSION-TABS: VS Code style, rectangular edge-to-edge tabs; flag `sessionTabs`). The header above it is unchanged.
  *
  * It holds NO rule: the order, the neighbour a close lands on and the caps are `lib/sessionTabs.ts`;
  * a pin is `lib/pinnedSessions.ts` (never a second store); how a state looks is `STATE_COLOR`.
@@ -24,8 +24,9 @@ import {
 import { getPrevActive, setOpenTabs, setPrevActive, trackStripMount, updateOpenTabs, useOpenTabs } from '../../lib/sessionTabsStore'
 import { getActivePane, usePaneId } from '../../lib/paneScope'
 import { matchTabShortcut } from '../../lib/panelShortcuts'
-import { useIsMobile } from '../../hooks/useIsMobile'
+import { useIsMobile, useIsCoarsePointer } from '../../hooks/useIsMobile'
 import { SessionRowMenu } from './SessionRowMenu'
+import { HarnessMark } from './HarnessMark'
 import type { MenuEntry } from '../../lib/rowMenu'
 
 const LEADER_PREFIX = /^\[ (LÍDER|LEADER) \] - /
@@ -70,17 +71,27 @@ interface TabProps {
   active: boolean
   pinned: boolean
   mobile: boolean
+  /** Coarse pointer (touch): sizing/visibility of the × follow it, not only the width. */
+  touch: boolean
   pt: boolean
   onPick: () => void
   onClose: () => void
+  onUnpin: () => void
   onMenu: (x: number, y: number) => void
   onDropOn: (dragKey: string) => void
   setRef: (el: HTMLDivElement | null) => void
 }
 
-function Tab({ k, row, active, pinned, mobile, pt, onPick, onClose, onMenu, onDropOn, setRef }: TabProps) {
+const FOCUS_RING = '2px solid var(--anthropic-orange)'
+/** Enter/Space on the inner controls act on THEM; they must not reach the tab's own handler (which would activate it). */
+const stopKeys = (e: { key: string; stopPropagation(): void }) => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation() }
+
+function Tab({ k, row, active, pinned, mobile, touch, pt, onPick, onClose, onUnpin, onMenu, onDropOn, setRef }: TabProps) {
   const role = useSessionRole(k)
   const [hover, setHover] = useState(false)
+  const [focus, setFocus] = useState(false)
+  const [btnFocus, setBtnFocus] = useState(false)
+  const big = mobile || touch
   const press = useRef<ReturnType<typeof setTimeout> | null>(null)
   const state = row?.state ?? 'unknown'
   const label = row?.stateLabel ?? (pt ? 'sem estado' : 'no state')
@@ -88,14 +99,21 @@ function Tab({ k, row, active, pinned, mobile, pt, onPick, onClose, onMenu, onDr
   const needs = row !== undefined && needsAttention(row)
   const title = (row?.title ?? k.slice(0, 8)).replace(LEADER_PREFIX, '')
   const clear = () => { if (press.current !== null) { clearTimeout(press.current); press.current = null } }
+  const btn: CSSProperties = {
+    display: 'flex', width: big ? 32 : 20, height: big ? 32 : 20, alignItems: 'center', justifyContent: 'center',
+    borderRadius: 4, flexShrink: 0, padding: 0, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+  }
   const style: CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, cursor: 'pointer', fontFamily: 'inherit',
-    height: mobile ? 44 : 26, padding: '0 10px', borderRadius: 999, boxSizing: 'border-box',
-    fontSize: 11.5, whiteSpace: 'nowrap', scrollSnapAlign: 'center',
+    height: mobile ? 44 : 34, padding: '0 6px 0 12px', borderRadius: 0, boxSizing: 'border-box',
+    fontSize: 12, whiteSpace: 'nowrap', scrollSnapAlign: 'center',
+    minWidth: mobile ? 132 : 110, maxWidth: mobile ? 168 : 240,
     fontWeight: active || needs ? 650 : 500,
     color: active ? 'var(--text-primary)' : ended ? 'var(--text-tertiary)' : 'var(--text-secondary)',
-    background: active ? 'var(--bg-elevated)' : 'transparent',
-    border: `1px solid ${active ? 'var(--border)' : needs ? 'color-mix(in srgb, var(--anthropic-orange) 45%, transparent)' : 'var(--border-subtle)'}`,
+    background: active ? 'var(--bg-surface, var(--bg-elevated))' : 'color-mix(in srgb, var(--bg-elevated) 55%, transparent)',
+    border: 'none', borderRight: '1px solid var(--border-subtle)',
+    borderTop: `2px solid ${active ? 'var(--anthropic-orange)' : 'transparent'}`,
+    boxShadow: needs && !active ? 'inset 0 -2px 0 color-mix(in srgb, var(--anthropic-orange) 55%, transparent)' : 'none',
   }
   return (
     <div
@@ -115,23 +133,39 @@ function Tab({ k, row, active, pinned, mobile, pt, onPick, onClose, onMenu, onDr
       onContextMenu={e => { e.preventDefault(); onMenu(e.clientX, e.clientY) }}
       onTouchStart={e => { const t = e.touches[0]; if (t) { clear(); press.current = setTimeout(() => onMenu(t.clientX, t.clientY), 500) } }}
       onTouchEnd={clear} onTouchMove={clear} onTouchCancel={clear}
+      onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
       style={style}
     >
       <TabStatus state={state} label={label} />
+      {row && <span style={{ display: 'inline-flex', flexShrink: 0 }}><HarnessMark harness={row.harness} size={14} /></span>}
       {role === 'leader' && <Crown size={11} aria-label={pt ? 'Líder' : 'Leader'} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />}
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: pinned ? 120 : 140 }}>{title}</span>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>{title}</span>
       {pinned
-        ? <Pin size={11} aria-label={pt ? 'Fixada' : 'Pinned'} style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
+        ? (
+          <button
+            type="button" aria-label={pt ? 'Desafixar' : 'Unpin'} title={pt ? 'Desafixar' : 'Unpin'}
+            data-tab-unpin
+            onClick={e => { e.stopPropagation(); onUnpin() }}
+            onKeyDown={stopKeys}
+            onFocus={() => setBtnFocus(true)} onBlur={() => setBtnFocus(false)}
+            style={{ ...btn, background: 'transparent', outline: btnFocus ? FOCUS_RING : 'none' }}
+          ><Pin size={12} style={{ color: 'var(--anthropic-orange)' }} /></button>
+        )
         : (
-          <span
-            role="button" aria-label={pt ? 'Fechar aba' : 'Close tab'} title={pt ? 'Fechar aba' : 'Close tab'}
+          <button
+            type="button" aria-label={pt ? 'Fechar aba' : 'Close tab'} title={pt ? 'Fechar aba' : 'Close tab'}
+            data-tab-close
             onClick={e => { e.stopPropagation(); onClose() }}
+            onKeyDown={stopKeys}
+            onFocus={() => setBtnFocus(true)} onBlur={() => setBtnFocus(false)}
             style={{
-              display: 'flex', width: mobile ? 28 : 16, height: mobile ? 28 : 16, alignItems: 'center', justifyContent: 'center',
-              borderRadius: 4, color: 'var(--text-tertiary)', flexShrink: 0, opacity: active || hover || mobile ? 1 : 0,
+              ...btn, color: 'var(--text-secondary)',
+              background: hover ? 'var(--bg-elevated)' : 'transparent',
+              opacity: active || hover || focus || btnFocus || big ? 1 : 0,
+              outline: btnFocus ? FOCUS_RING : 'none',
             }}
-          ><X size={12} /></span>
+          ><X size={13} /></button>
         )}
     </div>
   )
@@ -140,6 +174,7 @@ function Tab({ k, row, active, pinned, mobile, pt, onPick, onClose, onMenu, onDr
 export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }: SessionTabStripProps) {
   const pt = lang === 'pt'
   const mobile = useIsMobile()
+  const touch = useIsCoarsePointer()
   const pane = usePaneId()
   const open = useOpenTabs()
   const allPins = useSyncExternalStore(subscribePinnedSessions, getPinnedIds, pinnedServerSnapshot)
@@ -304,11 +339,11 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
 
   return (
     <div data-session-tabs style={{ flexShrink: 0, minWidth: 0, borderBottom: '1px solid var(--border-subtle)' }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, padding: mobile ? '2px 6px' : '5px 8px' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, padding: 0 }}>
       <div
         ref={attach} className="tabscroll" role="tablist" aria-label={pt ? 'Sessões abertas' : 'Open sessions'} onScroll={measure}
         style={{
-          display: 'flex', alignItems: 'center', gap: 4, overflowX: 'auto', flex: 1, minWidth: 0,
+          display: 'flex', alignItems: 'stretch', gap: 0, overflowX: 'auto', flex: 1, minWidth: 0,
           WebkitOverflowScrolling: 'touch', scrollSnapType: 'x proximity',
           ...(fade !== null ? { maskImage: fade, WebkitMaskImage: fade } : null),
         }}
@@ -316,12 +351,13 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
         {order.map((k, i) => (
           <span key={k} style={{ display: 'contents' }}>
             {i === pins.length && pins.length > 0 && (
-              <span aria-hidden style={{ width: 1, height: 16, background: 'var(--border)', flexShrink: 0, margin: '0 2px' }} />
+              <span aria-hidden style={{ width: 2, alignSelf: 'stretch', background: 'var(--border)', flexShrink: 0 }} />
             )}
             <Tab
-              k={k} row={byKey.get(k)} active={k === activeKey} pinned={pins.includes(k)} mobile={mobile} pt={pt}
+              k={k} row={byKey.get(k)} active={k === activeKey} pinned={pins.includes(k)} mobile={mobile} touch={touch} pt={pt}
               onPick={() => { if (k !== activeKey) goTo(k) }}
               onClose={() => close(k)}
+              onUnpin={() => togglePin(k)}
               onMenu={(x, y) => tabMenu(k, x, y)}
               onDropOn={d => dropOn(d, k)}
               setRef={el => { if (el) tabEls.current.set(k, el); else tabEls.current.delete(k) }}
@@ -333,8 +369,8 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
         type="button" aria-haspopup="menu" aria-label={pt ? 'Todas as abas abertas' : 'All open tabs'}
         onClick={e => listMenu(e.currentTarget)}
         style={{
-          display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, height: mobile ? 44 : 26, minWidth: mobile ? 44 : 0, justifyContent: 'center',
-          padding: '0 8px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-tertiary)',
+          display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, height: mobile ? 44 : 34, minWidth: mobile ? 44 : 0, justifyContent: 'center',
+          padding: '0 8px', borderRadius: 0, border: 'none', background: 'transparent', color: 'var(--text-tertiary)',
           cursor: 'pointer', fontFamily: 'inherit', fontSize: 11,
         }}
       >{order.length}<ChevronDown size={13} /></button>
