@@ -14,9 +14,11 @@
  * A slow disk (Windows over /mnt) must not hold the dialog: the listing has a budget and, past it,
  * answers what it has with `partial: true` — said in words by the UI, never a silently short list.
  */
-import { readdir, realpath } from 'node:fs/promises'
+import { lstat, mkdir, readdir, realpath } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { checkProjectName, type ProjectNameRefusal } from '@agentistics/core'
+import { createTreeEntry } from './sessions/editor-fs'
 import { shouldPruneDirectory } from './sessions/dir-scan'
 import { isExcludedProjectPath } from './sessions/project-source'
 
@@ -122,3 +124,74 @@ function parentOf(path: string, roots: readonly string[]): string | null {
   return up !== path && isAllowedPath(up, roots) ? up : null
 }
 
+
+export type CreateFolderRefusal = ProjectNameRefusal | 'exists' | 'forbidden' | 'parent-missing' | 'failed'
+export type CreateFolderResult =
+  | { ok: true; path: string }
+  | { ok: false; reason: CreateFolderRefusal; path?: string }
+
+/** The HTTP status a refusal is answered with — one table, so the route and its tests agree. */
+export function createFolderStatus(reason: CreateFolderRefusal): number {
+  switch (reason) {
+    case 'forbidden': return 403
+    case 'parent-missing': return 404
+    case 'exists': return 409
+    case 'failed': return 500
+    default: return 400
+  }
+}
+
+/**
+ * Create ONE new project folder, `name` inside `parent` ("Novo projeto" in the new-session wizard).
+ *
+ * The allowlist that decides what may be BROWSED decides where a folder may be created: `parent`
+ * must be absolute and, resolved AND by real path, inside `allowedRoots`. The name is the browser's
+ * own rule re-applied (`checkProjectName`), plus the listing's hidden names — a folder the browser
+ * would not show back is not one to create. `createParent` creates at most ONE missing level, and
+ * only the suggested default (`<home>/projetos` | `<home>/projects`), never an arbitrary chain.
+ * `createTreeEntry` does the last mile: containment again, `lstat` before `mkdir` (a dangling
+ * symlink at the name is "exists"), and a `mkdir` that is not recursive.
+ */
+export async function createProjectFolder(
+  input: { parent: unknown; name: unknown; createParent?: unknown },
+  deps: { scanRoots: readonly string[]; home?: string; temporary?: string },
+): Promise<CreateFolderResult> {
+  const { parent, name: rawName } = input
+  if (typeof parent !== 'string' || typeof rawName !== 'string' || parent === '' || parent.includes('\0') || !isAbsolute(parent)) {
+    return { ok: false, reason: 'forbidden' }
+  }
+  const checked = checkProjectName(rawName)
+  if (!checked.ok) return { ok: false, reason: checked.reason }
+  const home = deps.home ?? homedir()
+  const temporary = deps.temporary ?? tmpdir()
+  const roots = allowedRoots(deps.scanRoots, home)
+  const requested = resolve(parent)
+  if (!isAllowedPath(requested, roots)) return { ok: false, reason: 'forbidden' }
+  const target = join(requested, checked.name)
+  if (isHiddenFolder(checked.name, target, temporary)) return { ok: false, reason: 'dot-name' }
+
+  try {
+    let real: string
+    try {
+      real = await realpath(requested)
+    } catch {
+      const suggested = [join(home, 'projetos'), join(home, 'projects')].some(p => norm(p) === norm(requested))
+      if (input.createParent !== true || !suggested) return { ok: false, reason: 'parent-missing' }
+      // The suggested default, one level, under a home that must exist: created together with the project.
+      try { await lstat(requested) } catch { await mkdir(requested).catch(err => { if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err }) }
+      real = await realpath(requested)
+    }
+    if (!isAllowedPath(real, roots)) return { ok: false, reason: 'forbidden' }
+    const root = roots.filter(r => inside(real, r)).sort((a, b) => b.length - a.length)[0]!
+    const made = await createTreeEntry(root, relative(root, join(real, checked.name)), 'dir')
+    if (made.ok) return { ok: true, path: target }
+    switch (made.reason) {
+      case 'already-exists': return { ok: false, reason: 'exists', path: target }
+      case 'not-found': case 'not-a-directory': return { ok: false, reason: 'parent-missing' }
+      case 'escaped': case 'no-permission': return { ok: false, reason: 'forbidden' }
+      case 'name-too-long': return { ok: false, reason: 'too-long' }
+    }
+  } catch {
+    return { ok: false, reason: 'failed' }
+  }
+}

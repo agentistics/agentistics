@@ -18,7 +18,7 @@
 
 import { homedir } from 'node:os'
 import { tmpdir } from 'node:os'
-import { countPerKind, pathForHost, PROJECTS_PER_KIND, projectKind, projectPathKey, takePerKind, type ProjectKind } from '@agentistics/core'
+import { countPerKind, defaultProjectParent, pathForHost, PROJECTS_PER_KIND, projectKind, projectPathKey, takePerKind, type ProjectKind } from '@agentistics/core'
 import { loadConsolidated } from '../consolidate'
 import { isDirectory, isWholeDiskRoot, isWorktreeDir, scanDirectories, type ScanOptions } from './dir-scan'
 import { DiskIndex, type DiskIndexProgress } from './disk-index'
@@ -271,4 +271,16 @@ export function diskIndexProgress(): DiskIndexProgress[] {
 function baseName(path: string): string {
   const parts = path.replace(/\\/g, '/').replace(/\/+$/, '').split('/')
   return parts[parts.length - 1] ?? path
+}
+
+/**
+ * Where "Novo projeto" puts a folder by default: the folder that already holds most of this
+ * person's projects, else `<home>/projetos|projects` (created together with the project).
+ * Read off the FULL visible list — never the search-filtered rows the wizard holds, or typing
+ * would move it.
+ */
+export async function newProjectParent(pt: boolean, home = homedir()): Promise<{ path: string; exists: boolean }> {
+  const { candidates } = await allCandidates()
+  const guess = defaultProjectParent(home, candidates.map(c => c.path), pt)
+  return { path: guess.path, exists: guess.exists && await isDirectory(guess.path) }
 }

@@ -49,6 +49,8 @@ export type AuditAction =
   // (`shell-override-store.ts`) was set. Its own action, distinct from `shell.input.open`: this
   // one widens what the shell routes will answer for the rest of the process, not one channel.
   | 'shell.override.enabled'
+  // "Novo projeto" created a folder in the new-session wizard (meta: the path, nothing else).
+  | 'fs.mkdir'
   | 'upgrade.started' | 'upgrade.denied'
   // The native runtime's provider settings (provider-web.ts). meta carries the provider id and
   // key FINGERPRINTS only — never the key, never more of it than `sha256:xxxxxxxx`.
