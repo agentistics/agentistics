@@ -16,12 +16,13 @@
  * tabs FILTER it, they never re-order it.
  */
 import { useMemo, useState } from 'react'
-import { FolderClock, FolderGit2, FolderOpen, FolderSymlink, Folder, Loader, Search, X } from 'lucide-react'
-import { projectKind, type ProjectKind } from '@agentistics/core'
+import { FolderClock, FolderGit2, FolderOpen, FolderPlus, FolderSymlink, Folder, Loader, Search, X } from 'lucide-react'
+import { nameFromQuery, projectKind, type ProjectKind } from '@agentistics/core'
 import {
   KIND_TABS, kindCount, kindEmpty, kindHint, kindLabel, kindMore, kindMoreText, type ProjectTab,
 } from '../../lib/projectTabs'
 import { Muted, inputStyle } from './formBits'
+import { NewProjectForm } from './NewProjectForm'
 import { diskLabel, shortPath } from '../../lib/folderBrowser'
 import { chooseFolderLabel } from '../../lib/projectPickerCopy'
 import { FolderBrowser } from './FolderBrowser'
@@ -56,16 +57,40 @@ export interface ProjectPickerProps {
   /** The chosen path, or `''` for "none chosen yet". */
   value: string
   onChange: (path: string) => void
+  /**
+   * "Novo projeto" (t-eab4751cb3): where a new folder goes by default, from `/api/fleet/new`. Absent
+   * (an older server, or a machine that cannot answer) = no create row, today's picker unchanged.
+   */
+  newProjectParent?: { path: string; exists: boolean }
+  /** Told when the "Novo projeto" form opens or closes, so the dialog can name the field for what it is. */
+  onCreatingChange?: (creating: boolean) => void
 }
 
 export function ProjectPicker({
-  lang, isMobile, projects, projectTotals, projectIndexing, projectIndexProgress, projectDisks, projectDisk, onProjectDiskChange, query, onQueryChange, searching, value, onChange,
+  lang, isMobile, projects, projectTotals, projectIndexing, projectIndexProgress, projectDisks, projectDisk, onProjectDiskChange, query, onQueryChange, searching, value, onChange, newProjectParent, onCreatingChange,
 }: ProjectPickerProps) {
   const pt = lang === 'pt'
   /** Which kind of place the list is showing. `all` is the default — see `projectKind`. */
   const [kindTab, setKindTab] = useState<ProjectTab>('all')
   /** "Procurar pasta…" is open: the browser takes the list's place. */
   const [browsing, setBrowsing] = useState(false)
+  /** The "Novo projeto" form has taken the list's place. */
+  const [creating, setCreatingState] = useState(false)
+  const setCreating = (open: boolean) => { setCreatingState(open); onCreatingChange?.(open) }
+  /** The search box doubles as the name: a plain word typed there is offered as the project's name. */
+  const queryName = nameFromQuery(query)
+  const created = (path: string) => { onChange(path); setCreating(false); onQueryChange('') }
+  const form = newProjectParent && (
+    <NewProjectForm
+      lang={lang}
+      isMobile={isMobile}
+      initialName={queryName ?? ''}
+      defaultParent={newProjectParent}
+      disks={projectDisks}
+      onCreated={created}
+      onCancel={() => setCreating(false)}
+    />
+  )
 
   /**
    * The rows, split by KIND, and the counts the tabs carry.
@@ -93,6 +118,8 @@ export function ProjectPicker({
     projectTotals ? kindCount(kindTab, shownProjects.length, projectTotals) : undefined,
     shownProjects.length > 0,
   )
+
+  if (creating && form) return <div>{form}</div>
 
   return (
     <div>
@@ -129,6 +156,7 @@ export function ProjectPicker({
           })()}
           onUse={path => { onChange(path); setBrowsing(false) }}
           onCancel={() => setBrowsing(false)}
+          allowCreate
         />
       ) : (<>
       {projectDisks && projectDisks.length > 1 && (
@@ -226,6 +254,23 @@ export function ProjectPicker({
               width: 28, height: 28,
             }}><X size={14} /></button>
           </div>
+        )}
+        {newProjectParent && (
+          <button type="button" onClick={() => { onChange(''); setCreating(true) }} style={{
+            display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', flexShrink: 0,
+            padding: '8px 10px', borderRadius: 8, border: '1px dashed var(--border)', minWidth: 0,
+            background: 'transparent', color: 'var(--anthropic-orange)', cursor: 'pointer', fontFamily: 'inherit',
+          }}>
+            <FolderPlus size={15} style={{ flexShrink: 0 }} />
+            <span style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {queryName && shownProjects.length === 0 ? (pt ? `Criar projeto novo “${queryName}”` : `Create new project “${queryName}”`) : (pt ? 'Criar projeto novo' : 'Create new project')}
+              </span>
+              <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {pt ? `Uma pasta nova em ${shortPath(newProjectParent.path)}` : `A new folder in ${shortPath(newProjectParent.path)}`}
+              </span>
+            </span>
+          </button>
         )}
         {shownProjects.length === 0 && !value ? (
           /* A SENTENCE PER REASON. "Nothing matched this search" and "nothing of this kind is here"

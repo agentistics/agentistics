@@ -36,3 +36,10 @@ export const sessionTabsStore = createSharedPref<boolean>({
   // only when there is a local value to decide, so flag OFF (the default) still writes nothing.
   adoptLocalWhenAbsent: true, parse: asBool, decode: flag, encode: bit,
 })
+
+/** Are tool calls in the session chat grouped into one quiet, collapsible activity line? Experimental: absent = off. */
+export const chatActivityStore = createSharedPref<boolean>({
+  key: 'agentistics-chat-activity-on', prefKey: 'chatActivity', fallback: false,
+  // Same rule as sessionTabs: flag OFF (the default) writes nothing to localStorage.
+  adoptLocalWhenAbsent: true, parse: asBool, decode: flag, encode: bit,
+})
