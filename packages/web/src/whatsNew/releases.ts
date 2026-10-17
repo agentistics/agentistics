@@ -37,6 +37,18 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Na passagem de líder, a nova sessão leva também as sessões silenciadas, o modelo, o esforço e a nota da anterior, e você fica sabendo quando a passagem não aconteceu.',
         en: 'A leader hand-off now also carries the muted sessions, model, effort and note to the new session, and tells you when the hand-off did not happen.',
       },
+      {
+        pt: 'Quando uma sessão entrega, o chat mostra "Tarefa entregue" com o nome dela; ao abrir, o texto aparece formatado. Avisos assim não oferecem mais "Enviar agora".',
+        en: 'When a session hands back, the chat says "Task handed back" with its name; open it to read the text formatted. Such notices no longer offer "Send now".',
+      },
+      {
+        pt: 'Os check-ins dos líderes passam a ser escritos em linguagem simples.',
+        en: 'Leader check-ins are now written in plain language.',
+      },
+      {
+        pt: 'Os presets de sessão foram removidos.',
+        en: 'Session presets were removed.',
+      },
     ],
   },
   '2.140.3': {
