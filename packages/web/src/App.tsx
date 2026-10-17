@@ -2296,6 +2296,8 @@ export default function AppLayout() {
       e.preventDefault()
       runStudioShortcut(shortcut)
     }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
   }, [inSessionsWorkspace, selectedFleetSession])
 
   /**
@@ -2340,6 +2342,8 @@ export default function AppLayout() {
       // toggle-band
       setBandOpen(!getPanelLayout().bottomOpen)
     }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
   }, [inSessionsWorkspace, isMobile])
 
   // The Chat/Terminal choice lives in the URL (`?view=`) rather than in state here or in
