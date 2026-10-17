@@ -477,6 +477,9 @@ export interface ControlStrings {
   sessionsArchive: string
   sessionsDelete: string
   sessionsEndFirst: string
+  /** Why Reopen is dimmed when no harness-specific explanation exists. Deliberately cause-neutral: a missing link, a
+   *  transcript no longer on disk and a harness that cannot resume all reach it. */
+  sessionsNoReopenTarget: string
   /** Archive/delete asked of a session that is not a native one. */
   sessionsNativeOnly: string
   sessionsClosedNote: string
@@ -1247,6 +1250,7 @@ const EN: ControlStrings = {
   sessionsArchive: 'Archive',
   sessionsDelete: 'Delete',
   sessionsEndFirst: 'End the session first.',
+  sessionsNoReopenTarget: 'This session cannot be reopened from here: no resumable conversation was found for it.',
   sessionsNativeOnly: 'Only a native Agentistics session can be archived or deleted.',
   sessionsClosedNote: 'not running — reopen it to pick this conversation back up.',
   sessionsNoHost: 'session control is not available on this machine.',
@@ -1861,6 +1865,7 @@ const PT: ControlStrings = {
   sessionsArchive: 'Arquivar',
   sessionsDelete: 'Apagar',
   sessionsEndFirst: 'Encerre a sessão antes.',
+  sessionsNoReopenTarget: 'Não dá para reabrir esta sessão daqui: nenhuma conversa retomável foi encontrada para ela.',
   sessionsNativeOnly: 'Só uma sessão nativa do Agentistics pode ser arquivada ou apagada.',
   sessionsClosedNote: 'não está rodando — reabra para retomar esta conversa.',
   sessionsNoHost: 'o controle de sessões não está disponível nesta máquina.',

@@ -16,6 +16,15 @@ about the web one specifically.
 - On a central: [architecture.md § Managing a machine's sessions](architecture.md) and
   [security.md § 8c](security.md)
 
+The aside's **N leaders** toggle counts only sessions in the fleet's active states that match the
+current search and harness/project/repository/model filters. When enabled, it displays those
+leaders in one flat list, including leaders that are pinned or filed in hidden folders. Pinned,
+folder, ended and summary-filter sections are suspended until the toggle is turned off; their
+settings are preserved. The toggle stays visible at zero while enabled so it can be turned off.
+The summary filter does not narrow this flat list; its selection is restored in the normal view.
+When no active leaders match, the list says **No active leaders** (**Nenhum líder ativo**), even
+when workers or ended leaders are pinned.
+
 ---
 
 ## The conversation
@@ -338,6 +347,15 @@ Role changes use the same collapsed system row as away and check-in notices. The
 new notes with `[from agentistics · role]`; the classifier also recognizes the complete historical
 role-change text, including a whole-message `pasted_content` wrapper. Merely mentioning
 `[agentistics]` in a person's message does not make it a system event.
+
+Session handbacks, blocks and questions show localized event labels and a muted sender title,
+without the sidebar's leader prefix. Unknown senders show no raw id. Both chat surfaces resolve full
+or unique short ids against the shared fleet and load its history for ended senders. Expanded notices
+render the same Markdown as assistant messages, stripping nested `pasted_content` wrappers. Session
+messages include a sender link and transcript time when available; the event kind appears once in
+the collapsed line. Queued notices use the same collapsed system row. Only the person's queued
+messages offer **Send now** and contribute to its count; sending still submits the whole harness queue.
+Long unbroken links wrap inside an expanded notice.
 
 The aside's view-options menu starts with a collapsed **Hidden folders** section and its count.
 Expanding it reveals the existing Show controls. Expanded **Ended (N)** folder members use the rail

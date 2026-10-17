@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { handoffCheckinPatch, handoffInheritPatch, handoffPinPatch, handoffTitle, inheritHandoffPrefs, passPinToSuccessor, nextHandoffSeq, rekeyCheckinSession } from './handoff-inherit'
+import { handoffCheckinPatch, handoffInheritPatch, handoffMutePatch, handoffSpawnDefaults, handoffPinPatch, handoffTitle, inheritHandoffPrefs, passPinToSuccessor, nextHandoffSeq, rekeyCheckinSession } from './handoff-inherit'
 import type { Preferences } from '../preferences'
 
 const parent = { id: 'p1', conversationId: 'conv-p' }
@@ -138,5 +138,45 @@ describe('CLI hand-off end to end (preferences)', () => {
     expect(await passPinToSuccessor(parent, undefined, upd(p))).toBe(false)
     expect(await passPinToSuccessor({ id: 'zz' }, child, upd(p))).toBe(false)
     expect(p.pinnedSessions).toEqual(['a', 'conv-p', 'b'])
+  })
+})
+
+describe('mute', () => {
+  it('a muted predecessor hands over a muted successor (under either of its keys)', () => {
+    expect(handoffMutePatch(prefs({ mutedSessions: ['x', 'conv-p'] }), parent, child)?.mutedSessions).toEqual(['x', 'conv-p', 'conv-c'])
+    expect(handoffMutePatch(prefs({ mutedSessions: ['p1'] }), parent, child)?.mutedSessions).toEqual(['p1', 'conv-c'])
+  })
+  it('nothing to change when the predecessor is not muted, or the successor already is', () => {
+    expect(handoffMutePatch(prefs({ mutedSessions: ['x'] }), parent, child)).toBeUndefined()
+    expect(handoffMutePatch(prefs({}), parent, child)).toBeUndefined()
+    expect(handoffMutePatch(prefs({ mutedSessions: ['conv-p', 'conv-c'] }), parent, child)).toBeUndefined()
+  })
+  it('is part of the one inherit patch, beside the pin', () => {
+    const patch = handoffInheritPatch(prefs({ pinnedSessions: ['conv-p'], mutedSessions: ['conv-p'] }), parent, child)
+    expect(patch?.pinnedSessions).toEqual(['conv-c'])
+    expect(patch?.mutedSessions).toEqual(['conv-p', 'conv-c'])
+  })
+})
+
+describe('launch flags', () => {
+  const pred = { harness: 'claude', model: 'claude-opus-5-5', effort: 'high' }
+  it('a hand-off that names nothing takes the predecessor model and effort', () => {
+    expect(handoffSpawnDefaults(pred, 'claude', {})).toEqual({ model: 'claude-opus-5-5', effort: 'high' })
+  })
+  it('a flag that was given always wins, and an effort is not carried onto another model', () => {
+    expect(handoffSpawnDefaults(pred, 'claude', { model: 'claude-sonnet-5-5' })).toEqual({ model: 'claude-sonnet-5-5' })
+    expect(handoffSpawnDefaults(pred, 'claude', { effort: 'low' })).toEqual({ model: 'claude-opus-5-5', effort: 'low' })
+  })
+  it('naming the SAME model keeps the predecessor effort; a different model never does', () => {
+    expect(handoffSpawnDefaults(pred, 'claude', { model: 'claude-opus-5-5' })).toEqual({ model: 'claude-opus-5-5', effort: 'high' })
+    expect(handoffSpawnDefaults(pred, 'claude', { model: 'claude-opus-5-5', effort: 'low' })).toEqual({ model: 'claude-opus-5-5', effort: 'low' })
+    expect(handoffSpawnDefaults(pred, 'claude', { model: 'claude-sonnet-5-5' }).effort).toBeUndefined()
+  })
+  it('another harness inherits no flag (a model id means nothing to another CLI)', () => {
+    expect(handoffSpawnDefaults(pred, 'codex', {})).toEqual({})
+    expect(handoffSpawnDefaults(pred, 'codex', { model: 'gpt-6.1-sol' })).toEqual({ model: 'gpt-6.1-sol' })
+  })
+  it('no predecessor: exactly what was given', () => {
+    expect(handoffSpawnDefaults(undefined, 'claude', { model: 'm' })).toEqual({ model: 'm' })
   })
 })

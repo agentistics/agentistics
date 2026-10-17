@@ -69,7 +69,7 @@ import { panelTitle } from '../lib/panelMeta'
 import { tabStripEdgeFade, tabStripFadeMask } from '../lib/tabStripEdge'
 import { PanelRail, panelTile } from '../components/sessions/PanelRail'
 import { MENTION_ADDED_TOAST } from '../lib/mentionInsert'
-import type { HarnessId, SessionPreset } from '@agentistics/core'
+import type { HarnessId } from '@agentistics/core'
 import { freedBytes } from '@agentistics/core'
 import type { AppContext } from '../lib/app-context'
 import { loadClosedFleet, useFleet, useFleetIndex, type FleetActionId } from '../lib/fleet'
@@ -77,7 +77,6 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { FleetOverview } from '../components/sessions/FleetOverview'
 import { SessionCreating } from '../components/sessions/SessionCreating'
 import { NewSessionModal } from '../components/sessions/NewSessionModal'
-import { PresetLaunchConfirm } from '../components/sessions/PresetLaunchConfirm'
 
 // How long a navigation may keep claiming its session is still coming is `ARRIVAL_WAIT_MS` in
 // `lib/sessionRoute.ts`, beside the rest of the arrival rule. It lived here as `CREATE_WAIT_MS`
@@ -117,8 +116,7 @@ import { useViewportWidth } from '../hooks/useViewportWidth'
 import { railActivityFromHint } from '../lib/railActivity'
 import { useHardwarePressureWatch } from '../hooks/useHardwarePressureWatch'
 import { useIdleSessions } from '../hooks/useIdleSessions'
-import { forcedNote, isAdmissionRefusal } from '../lib/spawnAdmission'
-import { pushNotification, useNotifications } from '../lib/notifications'
+import { useNotifications } from '../lib/notifications'
 import { takeIdleReviewRequest } from '../lib/idleReviewRequest'
 import { publishIdleReview } from '../lib/idleReviewStore'
 import { IdleSessionsModal } from '../components/sessions/IdleSessionsModal'
@@ -389,7 +387,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const {
     lang, isCentral, theme, filters, setFilters, activeOnly, setActiveOnly,
     availableProjects, sessionCountByProject, models, availableHarnesses, derived,
-    data, currency, brlRate, sessionPresets,
+    data, currency, brlRate,
   } = ctx
   const pt = lang === 'pt'
   const navigate = useNavigate()
@@ -412,25 +410,6 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    */
   const [sheetOpen, setSheetOpen] = useState(false)
 
-  /**
-   * The preset launch shelf's own state — see `PresetShelf.tsx` / `PresetLaunchConfirm.tsx`.
-   *
-   * TWO PATHS, decided by whether the preset already names a folder: one WITH a `cwd` goes through
-   * `launchingPreset` (a confirm-then-POST straight to `/api/fleet/new`, the same route the wizard
-   * itself calls); one WITHOUT opens `presetPrefill`, the ordinary `NewSessionModal` pre-filled with
-   * everything but the folder — the wizard's own review step is that preset's consent gate. A
-   * preset is never launched by clicking it alone; see the board note on s-d85c7d9d9d for why.
-   */
-  const [launchingPreset, setLaunchingPreset] = useState<SessionPreset | null>(null)
-  const [presetLaunchBusy, setPresetLaunchBusy] = useState(false)
-  const [presetLaunchError, setPresetLaunchError] = useState<string | null>(null)
-  /**
-   * Set exactly when `presetLaunchError` came from the machine's memory-budget refusal
-   * (`isAdmissionRefusal`) rather than an ordinary spawn error — the only case `PresetLaunchConfirm`
-   * offers its second, deliberate "start anyway" button (re-posts with `force: true`). Cleared
-   * whenever a fresh preset is selected, so the override never survives into a different launch.
-   */
-  const [presetLaunchForceable, setPresetLaunchForceable] = useState(false)
   const [presetPrefill, setPresetPrefill] = useState<NonNullable<
     Parameters<typeof NewSessionModal>[0]['initialPreset']
   > | null>(null)
@@ -443,72 +422,6 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     setPresetPrefill(newSessionPreset)
     navigate(routeLocation.pathname, { replace: true, state: null })
   }, [newSessionPreset, navigate, routeLocation.pathname])
-
-  function selectPreset(preset: SessionPreset) {
-    if (preset.cwd) {
-      setLaunchingPreset(preset)
-      setPresetLaunchError(null)
-      setPresetLaunchForceable(false)
-    } else {
-      setPresetPrefill({
-        harness: preset.harness, prompt: preset.promptTemplate,
-        ...(preset.model ? { model: preset.model } : {}),
-        ...(preset.effort ? { effort: preset.effort } : {}),
-        label: preset.label,
-      })
-    }
-  }
-
-  /**
-   * `force` is the deliberate second click on "start anyway" — see `PresetLaunchConfirm`'s
-   * `onForce`. The ordinary "Launch" button never passes it; only a prior memory-budget refusal on
-   * THIS exact request offers the option at all.
-   */
-  async function confirmPresetLaunch(force = false) {
-    if (!launchingPreset) return
-    setPresetLaunchBusy(true)
-    setPresetLaunchError(null)
-    try {
-      // The SAME route the wizard itself calls (`fleet-spawn.ts`'s `planFleetSpawn`) — never a
-      // second, unvalidated path. A spawn is the most powerful thing this server does.
-      const res = await fetch(`/api/fleet/new?lang=${lang}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          harness: launchingPreset.harness,
-          cwd: launchingPreset.cwd,
-          prompt: launchingPreset.promptTemplate,
-          ...(launchingPreset.model ? { model: launchingPreset.model } : {}),
-          ...(launchingPreset.effort ? { effort: launchingPreset.effort } : {}),
-          label: launchingPreset.label,
-          ...(force ? { force: true as const } : {}),
-        }),
-      })
-      const json = await res.json() as { ok: boolean; message: string; id?: string }
-      if (!json.ok) {
-        setPresetLaunchError(json.message)
-        setPresetLaunchForceable(isAdmissionRefusal(json))
-        setPresetLaunchBusy(false)
-        return
-      }
-      // Forced through despite the budget — surfaced through the persisted notification store
-      // (never silently), the same "already-localized sentence, meta-carried" pattern
-      // `hardware.pressure` uses for its own server-computed sentence.
-      const note = forcedNote(json)
-      if (note) pushNotification({ type: 'success', code: 'sessions.forced_start', meta: { note } })
-      const started = launchingPreset
-      setLaunchingPreset(null)
-      setPresetLaunchBusy(false)
-      setPresetLaunchForceable(false)
-      if (json.id) {
-        navigate(sessionPath(json.id), { state: { creating: { harness: started.harness, label: started.label } } })
-      }
-    } catch {
-      setPresetLaunchError(pt ? 'Erro de rede ao falar com esta máquina.' : 'Network error talking to this machine.')
-      setPresetLaunchForceable(false)
-      setPresetLaunchBusy(false)
-    }
-  }
 
   // Never on a central: it aggregates many machines and hosts none of their sessions, so the only
   // fleet it could read is its own box's, drawn under someone else's rows.
@@ -1434,7 +1347,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       // A REQUEST for a DIFFERENT tab than `id` is not this mount's concern — see
       // `artifactsStore.ts`'s own `PanelFocusRequest` header.
       focusRequest={panelFocus && panelFocus.tab === id
-        ? { ...(panelFocus.ref ? { ref: panelFocus.ref } : {}), at: panelFocus.at } : null}
+        ? { ...(panelFocus.ref ? { ref: panelFocus.ref } : {}), at: panelFocus.at, ...(panelFocus.consumed ? { consumed: true } : {}) } : null}
       // The session itself, for the TASKS tab: what it is filed under, and the composer that files
       // it somewhere new without leaving the session you are sitting in.
       session={{
@@ -2066,6 +1979,25 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     />
   )
 
+  /**
+   * THE TAB STRIP SITS ABOVE THE SESSION'S TITLE (owner 2026-10-17, VS Code: tabs first, then the
+   * title line, then the conversation). Where this page draws that title itself — the phone's bar
+   * and a split pane's header — the strip is hoisted above it (`tabStripAboveTitle`). On a single
+   * desktop pane the title is `App.tsx`'s global top strip, and `App.tsx` itself draws the strip as
+   * the first row of that top area — this page renders none there.
+   */
+  const tabStripAboveTitle = tabsOn && (isMobile || splitRoute !== null)
+  const tabStripEl = tabsOn && selected ? (
+    <SessionTabStrip
+      lang={pt ? 'pt' : 'en'}
+      rows={fleet.rows}
+      fleetReady={!loading && !pollUnsupported}
+      active={selected}
+      onGo={goToTab}
+      onNone={closeThisPane}
+    />
+  ) : null
+
   const panel = selected === undefined ? null : (
     <SessionPanel
       session={selected}
@@ -2077,19 +2009,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       // Follow a reopen to the row it created. Without it the panel keeps an id the fleet no longer
       // carries — see `SessionPanel`'s own `onOpened`.
       onOpened={goToReopened}
-      {...(tabsOn ? {
-        tabStrip: (
-          <SessionTabStrip
-            lang={pt ? 'pt' : 'en'}
-            rows={fleet.rows}
-            fleetReady={!loading && !pollUnsupported}
-            active={selected}
-            onGo={goToTab}
-            onNone={closeThisPane}
-          />
-        ),
-      } : {})}
-      {...(composerMetrics ? { metrics: composerMetrics } : {})}
+            {...(composerMetrics ? { metrics: composerMetrics } : {})}
       // CONTROLLED on both layouts now. Passing `onViewChange` is what suppresses SessionPanel's
       // own header, and mobile draws the same three things in the row that already holds the back
       // button — one bar instead of two stacked ones saying overlapping things.
@@ -2857,6 +2777,10 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     )
     centre = (
       <>
+      {tabStripAboveTitle ? (
+        // Installed as a PWA the strip is now the topmost row, so IT carries the status-bar band.
+        <div data-tabs-safe-top style={{ paddingTop: 'calc(var(--safe-top) + 0px)', background: 'var(--bg-surface)', flexShrink: 0 }}>{tabStripEl}</div>
+      ) : null}
       {/* ONE ICON AND THE TITLE (MOBILE.SESSION, owner-approved prototype v3, 2026-10-11).
           This bar carried seven things — back, links, title, task chip, bell, metrics, verbs — and
           the title, the one thing saying WHICH session this is, was squeezed to "[ LÍDER ] - M…".
@@ -2868,7 +2792,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         minHeight: 56, padding: '4px 14px 4px 4px', flexShrink: 0,
         // Installed as a PWA this is the topmost thing on the screen, so it carries the
         // status-bar band itself — see `--safe-top`.
-        paddingTop: 'calc(var(--safe-top) + 4px)',
+        paddingTop: tabStripAboveTitle && tabStripEl ? 4 : 'calc(var(--safe-top) + 4px)',
         borderBottom: '1px solid var(--border)', background: 'var(--bg-surface)',
         position: 'relative',
       }}>
@@ -3156,8 +3080,6 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               heatmap={derived.heatmapData}
               heatmapByHarness={derived.heatmapByHarness}
               baseline={fleet.baseline}
-              sessionPresets={sessionPresets}
-              onSelectPreset={selectPreset}
               {...(fleet.unavailable ? { unavailable: fleet.unavailable } : {})}
             />
           </div>
@@ -3249,8 +3171,6 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           heatmap={derived.heatmapData}
           heatmapByHarness={derived.heatmapByHarness}
           baseline={fleet.baseline}
-          sessionPresets={sessionPresets}
-          onSelectPreset={selectPreset}
           {...(fleet.unavailable ? { unavailable: fleet.unavailable } : {})}
         />
       </div>
@@ -3311,6 +3231,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   return (
     <>
     {splitRoute && selected ? (
+      <>
+      {tabStripAboveTitle ? tabStripEl : null}
       <SplitPaneHeader
         pane={pane}
         lang={pt ? 'pt' : 'en'}
@@ -3332,6 +3254,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         view={sessionView}
         onViewChange={setSessionView}
       />
+      </>
     ) : null}
     {/* IDLE SESSIONS (Task 6) — the offer itself is `IdleReviewCard`, mounted inside `SessionsAside`
         (both its desktop and mobile-list instances), never here — see that card's own header. This
@@ -3608,21 +3531,6 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         >
           {MENTION_ADDED_TOAST[pt ? 'pt' : 'en']}
         </div>
-      )}
-      {/* The preset launch shelf's own overlays — `position: fixed`, like `mentionNotice` above, so
-          they render correctly regardless of which of this page's several layout branches is
-          active. See `selectPreset`/`confirmPresetLaunch` for the two paths. */}
-      {launchingPreset && (
-        <PresetLaunchConfirm
-          lang={pt ? 'pt' : 'en'}
-          preset={launchingPreset}
-          busy={presetLaunchBusy}
-          error={presetLaunchError}
-          forceable={presetLaunchForceable}
-          onCancel={() => { if (!presetLaunchBusy) { setLaunchingPreset(null); setPresetLaunchForceable(false) } }}
-          onConfirm={() => void confirmPresetLaunch()}
-          onForce={() => void confirmPresetLaunch(true)}
-        />
       )}
       {presetPrefill && (
         <NewSessionModal

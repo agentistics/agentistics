@@ -19,9 +19,10 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { SESSION_SORTS, type SessionOrder, type SessionSort } from '@agentistics/tui/control/session-order'
 import { createPortal } from 'react-dom'
-import { ChevronDown, ChevronsDownUp, ChevronsUpDown, ChevronUp, Eye, GripVertical, LayoutList } from 'lucide-react'
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, ChevronUp, Eye, GripVertical, LayoutList } from 'lucide-react'
 import { reorderByDrag, stepOrder } from '../../lib/dragReorder'
 import { Toggle } from '../../pages/settings/primitives'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -132,6 +133,8 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
       window.removeEventListener('resize', close)
     }
   }, [open])
+
+  useEscapeOwner(open, () => setOpen(false))
 
   // Shared with the panel rail's and the pinned-sessions band's own drag: `reorderByDrag` /
   // `stepOrder` in `dragReorder.ts`. This menu's reorder was the reference implementation that
@@ -315,13 +318,23 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
 export function HiddenFoldersSection(p: Pick<SessionsGroupMenuProps, 'lang' | 'hiddenFolders' | 'onShowFolder'> & { isMobile: boolean }) {
   const pt = p.lang === 'pt'
   const tap = p.isMobile ? 44 : undefined
+  const [folded, setFolded] = useState(true)
   return (
-    <details style={{ ...card, gridColumn: '1 / -1' }} aria-label={pt ? 'Pastas ocultas' : 'Hidden folders'}>
-      <summary style={{ ...heading, cursor: 'pointer', minHeight: tap, padding: '6px 8px' }}>
-        {pt ? 'Pastas ocultas' : 'Hidden folders'}
-        {p.hiddenFolders.length > 0 && <span style={{ marginLeft: 6, fontWeight: 600, opacity: 0.7 }}>{p.hiddenFolders.length}</span>}
-      </summary>
-      {p.hiddenFolders.length === 0 ? (
+    <section style={{ ...card, gridColumn: '1 / -1' }} aria-label={pt ? 'Pastas ocultas' : 'Hidden folders'}>
+      {/* The same disclosure the aside's "Fixadas" / "Grupos" sections use: a chevron button, not a native <details>. */}
+      <button
+        onClick={() => setFolded(v => !v)}
+        aria-expanded={!folded}
+        style={{
+          ...heading, display: 'flex', alignItems: 'center', gap: 6, width: '100%', cursor: 'pointer',
+          minHeight: tap, padding: '6px 8px', background: 'none', border: 'none', fontFamily: 'inherit', textAlign: 'left',
+        }}
+      >
+        {folded ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+        <span>{pt ? 'Pastas ocultas' : 'Hidden folders'}</span>
+        {p.hiddenFolders.length > 0 && <span style={{ marginLeft: 'auto', fontWeight: 600, opacity: 0.7 }}>{p.hiddenFolders.length}</span>}
+      </button>
+      {!folded && (p.hiddenFolders.length === 0 ? (
         <p style={hint}>
           {pt
             ? 'Nenhuma. Oculte uma pasta pelo menu ⋮ dela; ela some da lista com o que tem dentro e volta por aqui.'
@@ -342,7 +355,7 @@ export function HiddenFoldersSection(p: Pick<SessionsGroupMenuProps, 'lang' | 'h
             <Eye size={12} />{pt ? 'Mostrar' : 'Show'}
           </button>
         </div>
-      ))}
-    </details>
+      )))}
+    </section>
   )
 }

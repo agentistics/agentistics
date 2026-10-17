@@ -48,7 +48,7 @@ let pendingWrites = 0
 const listeners = new Set<() => void>()
 const emit = () => { for (const l of listeners) l() }
 
-async function refreshRoles(): Promise<void> {
+export async function refreshRoles(): Promise<void> {
   if (pendingWrites > 0) return
   try {
     const res = await fetch('/api/session-roles')
@@ -60,6 +60,53 @@ async function refreshRoles(): Promise<void> {
     if (JSON.stringify(next) !== JSON.stringify(cache) || JSON.stringify(nextOrigins) !== JSON.stringify(originCache)) { cache = next; originCache = nextOrigins; emit() }
   } catch { /* offline or no host power: keep what we have */ }
 }
+
+/**
+ * Ask the server for the roles NOW, whatever is being written: the pre-notify check must see a
+ * fresh answer, which `refreshRoles` (skipped while a write is pending) cannot promise. One GET is
+ * shared by every caller in flight; a pending local write keeps its optimistic entry, the server's
+ * answer fills in the rest. A session checked within `CHECKED_TTL_MS` is not asked about again.
+ */
+const CHECKED_TTL_MS = 10_000
+const checkedAt = new Map<string, number>()
+let freshInflight: Promise<boolean> | null = null
+/** Bumped by every role write / refresh; a GET started before the bump cannot answer a later need. */
+let roleGen = 0
+let freshInflightGen = 0
+/** When the shared GET was sent: a role written by ANOTHER process (spawn, CLI, MCP) bumps no local
+ *  counter, so a caller may only join a GET sent after its need arose (`needSince`). */
+let freshInflightAt = 0
+let warnedFailOpen = false
+async function fetchRolesFresh(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/session-roles')
+    if (!res.ok) return false
+    const body = (await res.json()) as { roles?: unknown; origins?: unknown }
+    const next = parseRoles(body.roles)
+    const nextOrigins = parseOrigins(body.origins)
+    const merged = pendingWrites > 0 ? { ...next, ...cache } : next
+    const mergedOrigins = pendingWrites > 0 ? { ...nextOrigins, ...originCache } : nextOrigins
+    if (JSON.stringify(merged) !== JSON.stringify(cache) || JSON.stringify(mergedOrigins) !== JSON.stringify(originCache)) { cache = merged; originCache = mergedOrigins; emit() }
+    return true
+  } catch { return false }
+}
+export async function ensureRoleFresh(id: string, now: number = Date.now(), needSince: number = now): Promise<void> {
+  const last = checkedAt.get(id)
+  if (last !== undefined && now - last < CHECKED_TTL_MS) return
+  const gen = roleGen
+  // Join only a GET that started at or after this need; otherwise it may predate our write.
+  if (!freshInflight || freshInflightGen < gen || freshInflightAt < needSince) {
+    freshInflightGen = gen
+    freshInflightAt = Date.now()
+    const p: Promise<boolean> = fetchRolesFresh().finally(() => { if (freshInflight === p) freshInflight = null })
+    freshInflight = p
+  }
+  const ok = await freshInflight
+  if (ok) { if (gen === roleGen) checkedAt.set(id, now) }
+  else if (!warnedFailOpen) { warnedFailOpen = true; console.warn('[roles] pre-notify role check failed; delivering without it') }
+}
+/** Test seam: forget which sessions were already checked. */
+export function __resetRoleChecksForTest(): void { checkedAt.clear(); freshInflight = null; roleGen = 0; freshInflightGen = 0; freshInflightAt = 0; warnedFailOpen = false }
 
 let timer: ReturnType<typeof setInterval> | null = null
 const rolesStore = {
@@ -95,6 +142,8 @@ export function setSessionRole(id: string, role: SessionRole | null): void {
   else { delete next[id]; delete nextOrigins[id] }
   cache = next
   originCache = nextOrigins
+  roleGen++
+  checkedAt.clear()
   emit()
   pendingWrites++
   void (async () => {
@@ -104,9 +153,11 @@ export function setSessionRole(id: string, role: SessionRole | null): void {
         body: JSON.stringify({ ref: id, role: role ?? 'auto' }),
       })
     } catch { /* the cache keeps the choice until the next refresh reconciles it */ }
-    finally { pendingWrites--; void refreshRoles() }
+    finally { pendingWrites--; roleGen++; checkedAt.clear(); void refreshRoles() }
   })()
 }
+/** Test seam: replace the cache the way a server answer would. */
+export function __setRolesForTest(next: SessionRoles): void { cache = next }
 export function getMuteWorkers(): boolean { return muted.get() }
 export function setMuteWorkers(value: boolean): void { muted.set(value) }
 export function isWorkerMuted(id: string, state?: string): boolean {

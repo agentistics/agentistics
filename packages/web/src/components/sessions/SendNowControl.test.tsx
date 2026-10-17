@@ -6,6 +6,8 @@
 import { describe, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { SendNowControl } from './SendNowControl'
+import { personQueuedCount } from '../../lib/queuedCards'
+import { sendNowShown } from '../../lib/promptHistory'
 
 const noop = () => {}
 
@@ -48,5 +50,28 @@ describe('SendNowControl', () => {
     expect(html).toContain('role="alert"')
     expect(html).toContain('Não entregue.')
     expect(html).toContain('Send now')
+  })
+})
+
+
+describe('queued message ownership', () => {
+  const notice = { text: '[from session ab12 · handback]\nready' }
+  function renderQueue(queued: { text: string }[]) {
+    const count = personQueuedCount(queued)
+    return renderToStaticMarkup(<SendNowControl
+      offered={sendNowShown({ harness: 'claude', working: true, queuedCount: count, dialogOpen: false })}
+      count={count} run={null} pt onSend={noop} onDismiss={noop}
+    />)
+  }
+  test('a system-only queue offers nothing', () => {
+    expect(renderQueue([notice])).toBe('')
+  })
+  test('a mixed queue offers send-now with only the person’s count', () => {
+    const html = renderQueue([notice, { text: 'Please review' }, { text: 'Then publish' }])
+    expect(html).toContain('Enviar agora (2)')
+    expect(html).not.toContain('Enviar agora (3)')
+  })
+  test('a typed message still offers send-now', () => {
+    expect(renderQueue([{ text: 'Please review' }])).toContain('Enviar agora')
   })
 })

@@ -1,4 +1,4 @@
-import type { BillingReadiness, BillingSettings, CostBasis, MonthlyCommitment, SavedComparison, SessionPreset, Filters, Lang, Theme, SessionMeta, AppData, StatsCache, SurfaceHarnessId, Project } from '@agentistics/core'
+import type { BillingReadiness, BillingSettings, CostBasis, MonthlyCommitment, SavedComparison, Filters, Lang, Theme, SessionMeta, AppData, StatsCache, SurfaceHarnessId, Project } from '@agentistics/core'
 import type { useDerivedStats } from '../hooks/useData'
 import type { PlanBasisView } from '../hooks/usePlanBasis'
 import type { A11yState } from '../hooks/useAccessibility'
@@ -84,10 +84,6 @@ export interface AppContext {
    *  save would replace the whole timeline with the fragment. */
   /** Serialized; resolves once PERSISTED and rejects when the write failed (the settings are then rolled back). */
   saveBilling: (next: BillingSettings | ((cur: BillingSettings) => BillingSettings)) => Promise<void>
-  /** Saved "quick launch" session templates — see `@agentistics/core`'s `sessionPresets.ts`.
-   *  Per-machine, local only, same as `comparisons`. */
-  sessionPresets: SessionPreset[]
-  saveSessionPresets: (next: SessionPreset[]) => Promise<void>
 
   /** Which basis every cost figure is expressed in. Plumbed exactly like `currency`.
    *  Always `'api'` on a central, which cannot price a fleet from one operator's timeline. */

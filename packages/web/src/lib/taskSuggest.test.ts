@@ -10,6 +10,15 @@ const at = (cwd: string, name?: string): SuggestSession =>
   ({ cwd, ...(name ? { task: name } : {}) })
 
 describe('suggestDelivery', () => {
+  it('skips a fleet row without a folder instead of throwing', () => {
+    const out = suggestDelivery({
+      cwd: HERE,
+      sessions: [{ task: 'ALM board' } as SuggestSession, at(HERE, 'ALM board')],
+      tasks: [task()],
+    })
+    expect(out).toEqual({ taskId: 't1', title: 'ALM board', sameFolder: 1 })
+  })
+
   it('offers the delivery most of this folder is filed under, and says how many', () => {
     const out = suggestDelivery({
       cwd: HERE,

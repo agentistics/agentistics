@@ -116,6 +116,10 @@ export function BudgetPanel({ statsCache, budgetUSD, onBudgetChange, currency, b
   // BudgetPanel reads the Claude stats-cache (Claude-only aggregate data).
   // Showing it for a non-claude harness would mislead the user into thinking
   // they're seeing that harness's spend. Show N/A for any non-claude harness.
+  // Above the non-claude early return (React #300); `cancel` is a hoisted declaration.
+  // Only while the editor is actually shown: a non-Claude harness renders N/A with `editing` still true.
+  useEscapeOwner(editing && !(harness && harness !== 'claude'), cancel)
+
   if (harness && harness !== 'claude') {
     return <NAtag harness={harness} label="Budget & forecast" />
   }
@@ -167,7 +171,6 @@ export function BudgetPanel({ statsCache, budgetUSD, onBudgetChange, currency, b
         ? (pt ? 'Dentro do orçamento' : 'On track')
         : (pt ? 'Sem orçamento definido' : 'No budget set')
 
-  useEscapeOwner(editing, cancel)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {/* Header row */}

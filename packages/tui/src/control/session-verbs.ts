@@ -120,7 +120,10 @@ export function sessionActions(
     // reboot has just emptied the screen. Enabled only when something actually fell — offered and
     // doing nothing is the shape this menu already refuses everywhere else.
     { action: 'reopenFell', enabled: (fleet.fell ?? 0) > 0 },
-    { action: 'kill', enabled: hosted },
+    // Stopping needs something that may still be RUNNING: an `exited` row offers Reopen instead, as
+    // the native rows already do. `lost` keeps Stop — it is also what a row wears when one poll could
+    // not read a backend that is still alive.
+    { action: 'kill', enabled: hosted && selected.state !== 'exited' },
     // These three need no selection at all and are therefore never dim.
     { action: 'new', enabled: true },
     { action: 'search', enabled: true },

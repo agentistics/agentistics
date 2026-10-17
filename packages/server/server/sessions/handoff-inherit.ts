@@ -3,7 +3,8 @@
  *
  * The task/subtask filing, the leader role and away mode are resolved at spawn; the sidebar folder is
  * filed by the spawn-filing planner (`handoffGroupPatch` below is its idempotent backstop). This is
- * the rest of the places a leader is "set up": its PIN and its CHECK-IN agenda, plus the TITLE rule (the successor keeps the predecessor's name) and the generation counter
+ * the rest of the places a leader is "set up": its PIN, its CHECK-IN agenda, its MUTE, its launch
+ * flags (`handoffSpawnDefaults`: model/effort for the same harness), plus the TITLE rule (the successor keeps the predecessor's name) and the generation counter
  * shown in the ⓘ panel instead of the title. All pure; the one write is `inheritHandoffPrefs`, a single
  * mutation inside the preferences write chain (never read-then-write).
  *
@@ -69,11 +70,42 @@ export function handoffCheckinPatch(prefs: Preferences, parent: Ref, child: Ref)
   return { checkin: { ...all, [to]: { ...kept, session: to } } }
 }
 
-/** Every inherited preference in ONE patch (folder, pin, check-in), or `undefined` when none applies. */
+/** A predecessor whose notifications were muted hands over a muted successor. */
+export function handoffMutePatch(prefs: Preferences, parent: Ref, child: Ref): Partial<Preferences> | undefined {
+  const muted = prefs.mutedSessions
+  if (!Array.isArray(muted) || !keysOf(parent).some(k => muted.includes(k))) return undefined
+  const childKey = sessionIdentityKey(child)
+  if (muted.includes(childKey)) return undefined
+  return { mutedSessions: [...muted, childKey] }
+}
+
+/**
+ * The launch flags a successor inherits when the hand-off did not name them: the predecessor's model
+ * and effort, but only for the SAME harness (a model id means nothing to another CLI). A flag that
+ * was given always wins; an effort is inherited only alongside the model it was chosen for.
+ */
+export function handoffSpawnDefaults(
+  parent: { harness?: string; model?: string | undefined; effort?: string | undefined } | undefined,
+  harness: string,
+  given: { model?: string | undefined; effort?: string | undefined },
+): { model?: string; effort?: string } {
+  const out: { model?: string; effort?: string } = {}
+  if (given.model) out.model = given.model
+  if (given.effort) out.effort = given.effort
+  if (!parent || parent.harness !== harness) return out
+  if (!given.model && parent.model) out.model = parent.model
+  // An effort belongs to the model it was chosen for: carry it only when the EFFECTIVE model is the predecessor's
+  // (inherited, or passed explicitly as the same one) or no model is involved at all.
+  const sameModel = out.model === undefined ? !parent.model : out.model === parent.model
+  if (!given.effort && parent.effort && sameModel) out.effort = parent.effort
+  return out
+}
+
+/** Every inherited preference in ONE patch (folder, pin, check-in, mute), or `undefined` when none applies. */
 export function handoffInheritPatch(prefs: Preferences, parent: Ref, child: Ref): Partial<Preferences> | undefined {
   let working = prefs
   let out: Partial<Preferences> | undefined
-  for (const step of [handoffGroupPatch, handoffPinPatch, handoffCheckinPatch]) {
+  for (const step of [handoffGroupPatch, handoffPinPatch, handoffCheckinPatch, handoffMutePatch]) {
     const patch = step(working, parent, child)
     if (!patch) continue
     out = { ...out, ...patch }

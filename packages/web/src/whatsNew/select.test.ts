@@ -47,3 +47,17 @@ describe('planWhatsNew', () => {
     expect(planWhatsNew({ current: '2.1.3', seen: '2.1.2', table: T })).toBeNull()
   })
 })
+
+describe('release notes keep up with the shipped version', () => {
+  test('the shipped version has its own non-empty entry', async () => {
+    const pkg = (await import('../../package.json')).default as { version: string }
+    const notes = (await import('./releases')).RELEASES[pkg.version]
+    // A release that ships without an entry announces nothing after the update (the 2.137–2.140 gap).
+    // Add the next version's entry in the release PR, before the bump lands.
+    expect((notes?.features.length ?? 0) + (notes?.fixes.length ?? 0)).toBeGreaterThan(0)
+  })
+  test('an update across entry-less patch versions still announces the entries in range', () => {
+    const plan = planWhatsNew({ current: '2.140.3', seen: '2.136.1' })
+    expect(plan?.entries.length).toBeGreaterThan(0)
+  })
+})

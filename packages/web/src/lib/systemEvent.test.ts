@@ -1,6 +1,6 @@
 import { roleChangeNote, roleLine } from '@agentistics/core'
 import { describe, expect, test } from 'bun:test'
-import { parseSystemEvent, systemEventLine } from './systemEvent'
+import { parseSystemEvent, systemEventLine, systemEventSender, systemEventTitle } from './systemEvent'
 
 describe('parseSystemEvent', () => {
   test('a session message wrapped as pasted content by the harness is still a system event', () => {
@@ -32,7 +32,7 @@ describe('parseSystemEvent', () => {
     expect(parseSystemEvent('Can you explain the leadership check-in?')).toBeNull()
     expect(parseSystemEvent('Please discuss: Faça o check-in da liderança agora.')).toBeNull()
     expect(parseSystemEvent('Please discuss: Run the leadership check-in now.')).toBeNull()
-    expect(parseSystemEvent('[from session abc · check-in]\nx')).toBeNull()
+    expect(parseSystemEvent('[from session abc · check-in]\nx')?.kind).toBe('session-note')
   })
   test('check-in system lines are localized', () => {
     const event = parseSystemEvent('[from agentistics · check-in]\nx')!
@@ -55,15 +55,15 @@ describe('parseSystemEvent', () => {
     expect(parseSystemEvent('[from session ab12 · block]\nx')?.kind).toBe('block')
     expect(parseSystemEvent('[from session ab12 · question]\nx')?.kind).toBe('session-question')
   })
-  test('ordinary text and unknown kinds are not events', () => {
+  test('ordinary text is not an event; unknown headers are generic system events', () => {
     expect(parseSystemEvent('hello [from agentistics · away]')).toBeNull()
-    expect(parseSystemEvent('[from agentistics · nope]\nx')).toBeNull()
-    expect(parseSystemEvent('[from session a · nope]\nx')).toBeNull()
+    expect(parseSystemEvent('[from agentistics · nope]\nx')?.kind).toBe('notice')
+    expect(parseSystemEvent('[from session a · nope]\nx')?.kind).toBe('session-note')
   })
   test('lines are localized', () => {
     const e = parseSystemEvent('[from session s1 · block]\nx')!
-    expect(systemEventLine(e, true)).toBe('Sessão s1 está bloqueada')
-    expect(systemEventLine(e, false, 'Title')).toBe('Session Title is blocked')
+    expect(systemEventLine(e, true)).toBe('Sessão bloqueada')
+    expect(systemEventLine(e, false, 'Title')).toBe('Session blocked · Title')
   })
 })
 
@@ -94,4 +94,66 @@ test('typed prose merely containing the agentistics marker remains ordinary text
   for (const text of ['Please explain [agentistics]', '[agentistics] is the app name', '[agentistics] your role is now LEADER', `Please review:\n${roleChangeNote('leader')}`]) {
     expect(parseSystemEvent(text)).toBeNull()
   }
+})
+
+
+test('session kind labels in both languages never fall back to sender ids', () => {
+  for (const [kind, pt, en] of [
+    ['handback', 'Tarefa entregue', 'Task handed back'],
+    ['block', 'Sessão bloqueada', 'Session blocked'],
+    ['session-question', 'Pergunta de uma sessão', 'Question from a session'],
+  ] as const) {
+    const event = { kind, sender: 'raw-session-id', body: '' }
+    expect(systemEventLine(event, true)).toBe(pt)
+    expect(systemEventLine(event, false)).toBe(en)
+    expect(systemEventLine(event, true, '[ LÍDER ] - Revisão')).toBe(`${pt} · Revisão`)
+    expect(systemEventLine(event, false, '[ LEADER ] - Review')).toBe(`${en} · Review`)
+  }
+  expect(systemEventTitle('[ LEADER ] - ')).toBeUndefined()
+})
+
+test('sender resolution includes ended rows and full or short conversation ids', () => {
+  const active = { id: 'ab123456', conversationId: 'conv-active', title: 'Active' }
+  const ended = { id: 'closed:claude:conv-ended', conversationId: 'conv-ended', title: 'Ended', state: 'closed' }
+  const rows = [active, ended]
+  for (const id of [active.id, 'ab12', active.conversationId]) expect(systemEventSender(rows, id)).toBe(active)
+  for (const id of [ended.id, 'conv-ended', 'conv-end']) expect(systemEventSender(rows, id)).toBe(ended)
+  expect(systemEventSender(rows, 'unknown')).toBeUndefined()
+  expect(systemEventSender(rows, 'conv-')).toBeUndefined()
+  expect(systemEventSender([...rows, { id: 'ab12', conversationId: 'exact' }], 'ab12')?.id).toBe('ab12')
+})
+
+test('nested whole-message and body pasted wrappers are stripped without losing markdown', () => {
+  const raw = '<pasted_content id="outer">\n<pasted_content id="inner">\n[from session abc · handback]\n<pasted_content id="body">\n## Ready\n<pasted_content id="nested">\n- **Verified**\n</pasted_content id="nested">\n</pasted_content id="body">\n</pasted_content id="inner">\n</pasted_content id="outer">'
+  const event = parseSystemEvent(raw)!
+  expect(event.kind).toBe('handback')
+  expect(event.body).toContain('## Ready')
+  expect(event.body).toContain('- **Verified**')
+  expect(event.body).not.toContain('pasted_content')
+})
+
+describe('relay and unknown headers fail closed', () => {
+  test('the relay header is a relay event, readable', () => {
+    const e = parseSystemEvent('[from agentistics · relay]\nChegou na sessão anterior')!
+    expect(e.kind).toBe('relay')
+    expect(systemEventLine(e, false)).toContain('previous session')
+  })
+  test('unknown headers are system events, never null', () => {
+    expect(parseSystemEvent('[from agentistics · brand-new]\nx')).toEqual({ kind: 'notice', label: 'brand-new', body: 'x' })
+    const s = parseSystemEvent('<pasted_content id="z">\n[from session abc123 · fyi]\nx\n</pasted_content id="z">')!
+    expect(s.kind).toBe('session-note')
+    expect(systemEventLine(s, true)).toBe('Mensagem de uma sessão (fyi)')
+  })
+  test('every producer header in the codebase is recognised', async () => {
+    const { Glob } = await import('bun')
+    const found = new Set<string>()
+    for (const f of new Glob('packages/{server,core,mcp}/**/*.ts').scanSync({ cwd: new URL('../../../../', import.meta.url).pathname })) {
+      if (/\.test\.|node_modules/.test(f)) continue
+      const src = await Bun.file(new URL('../../../../' + f, import.meta.url)).text()
+      for (const m of src.matchAll(/\[from agentistics · ([a-z-]+)\]/g)) found.add(m[1]!)
+    }
+    expect(found.size).toBeGreaterThan(3)
+    for (const k of found) expect(parseSystemEvent(`[from agentistics · ${k}]\nbody`)).not.toBeNull()
+    expect(parseSystemEvent('[from agentistics · relay]\nx')?.kind).toBe('relay')
+  })
 })

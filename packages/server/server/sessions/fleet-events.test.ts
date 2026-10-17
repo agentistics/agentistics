@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  buildFleetFrame, closedPage, compactView, deltaBody, EMPTY_SENT, fleetEventsResponse, GAUGE_CPU_POINTS,
+  buildFleetFrame, closedPage, compactFleetSession, SEARCH_PROMPT_MAX, compactView, deltaBody, EMPTY_SENT, fleetEventsResponse, GAUGE_CPU_POINTS,
   GAUGE_RSS_BYTES, gaugesMoved, planFleetDelta,
   readClosedLimit, snapshotBody, windowOf, type FleetFrame, type FleetFramePayload,
 } from './fleet-events'
@@ -282,4 +282,22 @@ describe('a live row that ENDS leaves the window — the client must learn it en
       expect(planFleetDelta(d1.next, f1).empty).toBe(true)
     })
   }
+})
+
+describe('compactFleetSession search payload', () => {
+  test('keeps only the extra names and the first prompt, never the whole index', () => {
+    const row = { id: 'x', title: 'Shown', searchFields: { name: 'Shown Harness name', folder: '/f', harness: 'h', note: '', task: '', prompt: 'first words' } } as never
+    const out = compactFleetSession({ id: 'x' } as never, row) as Record<string, unknown>
+    expect(out.searchFields).toBeUndefined()
+    expect(out.search).toEqual({ n: 'Shown Harness name', p: 'first words' })
+  })
+  test('bounds the first prompt it carries', () => {
+    const row = { id: 'x', title: 'Shown', searchFields: { name: 'Shown', folder: '', harness: '', note: '', task: '', prompt: 'a'.repeat(20_000) } } as never
+    const out = compactFleetSession({ id: 'x' } as never, row) as { search?: { p?: string } }
+    expect(out.search?.p?.length).toBe(SEARCH_PROMPT_MAX)
+  })
+  test('sends nothing when the title already is the whole name and there is no prompt', () => {
+    const row = { id: 'x', title: 'Shown', searchFields: { name: 'Shown', folder: '', harness: '', note: '', task: '', prompt: '' } } as never
+    expect('search' in compactFleetSession({ id: 'x' } as never, row)).toBe(false)
+  })
 })
