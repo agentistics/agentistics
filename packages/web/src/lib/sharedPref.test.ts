@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { createSharedPref, loadSharedPrefs, migrateLocalOnce, PERSONAL_PREFS, putPersonal, resetSharedPrefs, sameValue } from './sharedPref'
+import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { createSharedPref, loadSharedPrefs, migrateLocalOnce, PERSONAL_PREFS, putPersonal, resetSharedPrefs, restoreSharedPrefs, sameValue } from './sharedPref'
 
 test('equal values compare equal even as different objects', () => {
   expect(sameValue(['a', 'b'], ['a', 'b'])).toBe(true)
@@ -18,6 +18,8 @@ test('order is a change — a reordered pin list must notify', () => {
 test('absent and empty are different, so an unread pref never reads as a cleared one', () => {
   expect(sameValue(undefined, [])).toBe(false)
 })
+
+afterAll(restoreSharedPrefs)
 
 describe('a store registered AFTER loadSharedPrefs() has already landed', () => {
   const originalFetch = globalThis.fetch

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { onWizardOrphaned, claimOrphanWizard, clearWizard, orphanWizard, readWizardSnapshot, saveWizardSnapshot, type WizardSnapshot } from './newSessionWizardStore'
 
 const snap: WizardSnapshot = {
@@ -8,6 +8,9 @@ const snap: WizardSnapshot = {
 
 describe('new-session wizard store', () => {
   beforeEach(clearWizard)
+  // The store is module-level state: the last test leaves a snapshot AND an orphan flag, which the next
+  // file to mount a sessions aside would adopt (opening the wizard) as if the user had left it mid-way.
+  afterAll(clearWizard)
 
   test('an unmount mid-wizard is adopted once, with every answer kept', () => {
     saveWizardSnapshot(snap)

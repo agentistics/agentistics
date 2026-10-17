@@ -5,7 +5,9 @@ import type { ReleaseNotes } from './releases'
 // These tests replace globalThis.fetch and localStorage; put the originals back so later files are not affected.
 const realFetch = globalThis.fetch
 const realStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
-afterAll(() => {
+afterAll(async () => {
+  // These tests reset the shared-pref registry; put the app's module-level stores back for later files.
+  ;(await import('../lib/sharedPref')).restoreSharedPrefs()
   globalThis.fetch = realFetch
   if (realStorage) Object.defineProperty(globalThis, 'localStorage', realStorage)
   else delete (globalThis as { localStorage?: Storage }).localStorage

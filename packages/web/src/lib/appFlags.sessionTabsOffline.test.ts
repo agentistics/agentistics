@@ -1,5 +1,5 @@
-import { afterEach, expect, test } from 'bun:test'
-import { loadSharedPrefs, resetSharedPrefs } from './sharedPref'
+import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test'
+import { loadSharedPrefs, resetSharedPrefs, restoreSharedPrefs } from './sharedPref'
 
 const originalFetch = globalThis.fetch
 const originalStorage = (globalThis as { localStorage?: unknown }).localStorage
@@ -8,6 +8,9 @@ afterEach(() => {
   ;(globalThis as { localStorage?: unknown }).localStorage = originalStorage
   resetSharedPrefs()
 })
+afterAll(restoreSharedPrefs)
+// Own preconditions: a file that ran earlier may have registered the app's real stores.
+beforeEach(resetSharedPrefs)
 
 test('a choice made while the server was unreachable survives a server that answers without the key', async () => {
   const store: Record<string, string> = { 'agentistics-session-tabs-on': '1' }

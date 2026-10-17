@@ -103,14 +103,37 @@ const lastLoaded = new Map<string, Record<string, unknown>>()
 let loadRequested = false
 const inFlight = new Map<string, Promise<void>>()
 
+/** The stores registered before the first `resetSharedPrefs()` — see `restoreSharedPrefs()`. */
+let preserved: Registered[] | null = null
+
 /** Test seam: the module state is process-wide, so a test that loads must be able to reset it. */
 export function resetSharedPrefs(): void {
+  preserved ??= registry.slice()
   armed.clear()
   writableBy.clear()
   lastLoaded.clear()
   inFlight.clear()
   loadRequested = false
   registry.length = 0
+}
+
+/**
+ * Test seam, the other half of `resetSharedPrefs()`: stores are module-level singletons registered
+ * once, when their module first loads (pins, groups, flags, …), and a test file that resets starts
+ * from an empty registry. Without putting them back, every LATER test file in the same process that
+ * mounts a component using one of those stores gets a store that never adopts a server answer.
+ * Call it from `afterAll` in any file that calls `resetSharedPrefs()`.
+ */
+export function restoreSharedPrefs(): void {
+  if (!preserved) return
+  armed.clear()
+  writableBy.clear()
+  lastLoaded.clear()
+  inFlight.clear()
+  loadRequested = false
+  registry.length = 0
+  registry.push(...preserved)
+  preserved = null
 }
 
 /**
