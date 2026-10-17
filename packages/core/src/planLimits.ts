@@ -478,16 +478,23 @@ export type AccountBudget = PlanBudget & Partial<PlanPace> & {
 }
 
 /**
- * A STALE row never drives routing or cadence while a FRESH row of the same harness and plan exists:
- * its pace and slots describe a meter nobody has read for a while (in the reported case, the last
- * reading of one login stored under a second account id), so they could only ever be wrong in the
- * direction of "start more work". The row stays on screen; its slots go to zero, its pace is ignored
- * by `harnessAggregate`/`routeRecommendation`, and `yieldsTo` names the fresh account.
+ * A STALE row never drives routing or cadence while a FRESH row of the SAME LOGIN exists: its pace and
+ * slots describe a meter nobody has read for a while (in the reported case, the last reading of one
+ * login stored under a second account id), so they could only ever be wrong in the direction of
+ * "start more work". Equivalence is the ACCOUNT's identity, decided by the caller (`sameAccount`: an
+ * alias, or the registry's same-login rule) — never the harness and plan name, which two real
+ * accounts on one plan share. Call it on the rows agents may see, so a hidden or retired account can
+ * never suppress a visible one. The row stays on screen; its slots go to zero, its pace is ignored by
+ * `harnessAggregate`/`routeRecommendation`, and `yieldsTo` names the fresh account.
  */
-export function yieldStaleRows<T extends AccountBudget>(rows: readonly T[]): T[] {
+export function yieldStaleRows<T extends AccountBudget>(
+  rows: readonly T[],
+  sameAccount: (a: string, b: string) => boolean,
+): T[] {
   return rows.map(r => {
     if (!r.stale || r.plan === 'unregistered') return r
-    const fresh = rows.find(f => f !== r && !f.stale && f.harness === r.harness && f.plan === r.plan && f.account !== r.account)
+    const fresh = rows.find(f => f !== r && !f.stale && f.harness === r.harness && f.account !== r.account
+      && sameAccount(r.account ?? 'default', f.account ?? 'default'))
     if (!fresh) return r
     return { ...r, freeSlots: 0, suggestedParallel: 0, yieldsTo: fresh.account ?? 'default' }
   })

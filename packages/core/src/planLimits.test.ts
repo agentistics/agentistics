@@ -5,8 +5,8 @@ import {
   agentVisible, harnessAggregate, meterDiscontinuity, resetNoticesFor,
   alternativeWithRoom, bindingPct, currentUsedPct, effectiveWindow, forecastWindow, mostRoom, parseClaudeRateLimitEvent,
   parseCodexRateLimits, planBudget, planPace, planSlots, planThresholdNotices, registeredPlanLabel,
-  routeRecommendation, PLAN_WINDOW_MS,
-  type PlanLimits, type PlanNoticeState,
+  routeRecommendation, yieldStaleRows, PLAN_WINDOW_MS,
+  type AccountBudget, type PlanLimits, type PlanNoticeState,
 } from './planLimits'
 
 const fixture = (name: string) => readFileSync(join(import.meta.dir, '__fixtures__', name), 'utf8').trim()
@@ -472,4 +472,20 @@ test('registered plan label resolves per account, falling back to the harness de
   expect(registeredPlanLabel(billing, 'claude', now, 'acc_a')).toBe('Max 20x')
   expect(registeredPlanLabel(billing, 'claude', now, 'acc_b')).toBe('Pro')
   expect(registeredPlanLabel(billing, 'claude', now)).toBe('Pro')
+})
+
+describe('yieldStaleRows', () => {
+  const row = (account: string, stale: boolean) =>
+    ({ harness: 'claude', plan: 'Claude Max 5x', account, stale, status: 'ok', freeSlots: 3, suggestedParallel: 3 }) as unknown as AccountBudget
+  test('a stale row yields only to the SAME login, never to a plan-name twin', () => {
+    const rows = [row('acc_a', false), row('acc_b', true)]
+    expect(yieldStaleRows(rows, () => false).map(r => r.yieldsTo)).toEqual([undefined, undefined])
+    expect(yieldStaleRows(rows, () => false)[1]!.freeSlots).toBe(3)
+    const same = yieldStaleRows(rows, (x, y) => [x, y].sort().join() === 'acc_a,acc_b')
+    expect(same[1]).toMatchObject({ yieldsTo: 'acc_a', freeSlots: 0, suggestedParallel: 0 })
+  })
+  test('a row outside the given list (hidden from agents) can never be named', () => {
+    const visible = [row('acc_b', true)]
+    expect(yieldStaleRows(visible, () => true)[0]!.yieldsTo).toBeUndefined()
+  })
 })
