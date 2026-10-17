@@ -39,6 +39,7 @@ import { AgentisticsLoader } from '../../components/AgentisticsLoader'
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { consumePanelFocusRequest } from '../../lib/artifactsStore'
 import { asideCache, asideKey } from '../../lib/asideCache'
 import { focusMissNotice, isFreshFocusAsk, isFocusedRow, rowsCarry, ROW_FLASH } from '../../lib/noteFocus'
 import { BarChart3, Bot, Brain, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Eye, FileEdit, Loader, PanelRightClose, Pencil, Plug, Plus, Send, Sparkles, Terminal, Trash2, Workflow } from 'lucide-react'
@@ -157,7 +158,7 @@ export interface ArtifactsAsideProps {
    * asked. `null`/absent when nothing was asked; a request for a DIFFERENT tab than `activeTab` is
    * simply not this mount's concern (the caller already filters by tab before passing it down).
    */
-  focusRequest?: { ref?: string; at: number } | null
+  focusRequest?: { ref?: string; at: number; consumed?: boolean } | null
   sessionId: string
   lang: 'pt' | 'en'
   /**
@@ -763,11 +764,11 @@ export function ArtifactsAside({
   // A background-task note carries the tool-use / task id it answers: open that agent directly.
   useEffect(() => {
     const ref = focusRequest?.ref
-    if (ref === undefined || agentsState === null || agentsState.phase !== 'ready') return
+    if (ref === undefined || focusRequest?.consumed || agentsState === null || agentsState.phase !== 'ready') return
     // Consume the request once: later polls (and "back to the list") must not re-open the agent.
     if (!isFreshFocusAsk(consumedAgentAsk.current, askedAt)) return
     const hit = agentsState.rows.find(r => r.agentId === ref || r.toolUseId === ref)
-    if (hit) { consumedAgentAsk.current = askedAt; setOpenAgent(hit) }
+    if (hit) { consumedAgentAsk.current = askedAt; if (askedAt !== undefined) consumePanelFocusRequest(askedAt); setOpenAgent(hit) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askedAt, agentsState])
 

@@ -1,7 +1,7 @@
 import { test, expect, beforeEach } from 'bun:test'
 import {
   getArtifacts,
-  getArtifactsOf, getPanelFocusRequest, openArtifacts, resetArtifacts, setArtifactCount,
+  getArtifactsOf, getPanelFocusRequest, consumePanelFocusRequest, openArtifacts, resetArtifacts, setArtifactCount,
   setArtifactLive,
 } from './artifactsStore'
 import { resetUnsaved } from './unsavedBuffers'
@@ -131,4 +131,14 @@ test('a new count for the same session keeps what it is doing', () => {
   setArtifactLive('a', { kind: 'delegated', text: 'Explore', ref: 'r' })
   setArtifactCount('a', 5)
   expect(getArtifacts().live).toEqual({ kind: 'delegated', text: 'Explore', ref: 'r' })
+})
+
+test('a consumed focus request stays consumed for a remounted reader', () => {
+  openArtifacts('live', 'agent-1')
+  const req = getPanelFocusRequest()!
+  expect(req.consumed).toBeUndefined()
+  consumePanelFocusRequest(req.at)
+  expect(getPanelFocusRequest()!.consumed).toBe(true)
+  openArtifacts('live', 'agent-1')
+  expect(getPanelFocusRequest()!.consumed).toBeUndefined()
 })

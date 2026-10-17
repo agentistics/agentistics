@@ -70,6 +70,10 @@ export async function refreshRoles(): Promise<void> {
 const CHECKED_TTL_MS = 10_000
 const checkedAt = new Map<string, number>()
 let freshInflight: Promise<boolean> | null = null
+/** Bumped by every role write / refresh; a GET started before the bump cannot answer a later need. */
+let roleGen = 0
+let freshInflightGen = 0
+let warnedFailOpen = false
 async function fetchRolesFresh(): Promise<boolean> {
   try {
     const res = await fetch('/api/session-roles')
@@ -86,11 +90,19 @@ async function fetchRolesFresh(): Promise<boolean> {
 export async function ensureRoleFresh(id: string, now: number = Date.now()): Promise<void> {
   const last = checkedAt.get(id)
   if (last !== undefined && now - last < CHECKED_TTL_MS) return
-  freshInflight ??= fetchRolesFresh().finally(() => { freshInflight = null })
-  if (await freshInflight) checkedAt.set(id, now)
+  const gen = roleGen
+  // Join only a GET that started at or after this need; otherwise it may predate our write.
+  if (!freshInflight || freshInflightGen < gen) {
+    freshInflightGen = gen
+    const p: Promise<boolean> = fetchRolesFresh().finally(() => { if (freshInflight === p) freshInflight = null })
+    freshInflight = p
+  }
+  const ok = await freshInflight
+  if (ok) { if (gen === roleGen) checkedAt.set(id, now) }
+  else if (!warnedFailOpen) { warnedFailOpen = true; console.warn('[roles] pre-notify role check failed; delivering without it') }
 }
 /** Test seam: forget which sessions were already checked. */
-export function __resetRoleChecksForTest(): void { checkedAt.clear(); freshInflight = null }
+export function __resetRoleChecksForTest(): void { checkedAt.clear(); freshInflight = null; roleGen = 0; freshInflightGen = 0; warnedFailOpen = false }
 
 let timer: ReturnType<typeof setInterval> | null = null
 const rolesStore = {
@@ -126,6 +138,8 @@ export function setSessionRole(id: string, role: SessionRole | null): void {
   else { delete next[id]; delete nextOrigins[id] }
   cache = next
   originCache = nextOrigins
+  roleGen++
+  checkedAt.clear()
   emit()
   pendingWrites++
   void (async () => {
@@ -135,7 +149,7 @@ export function setSessionRole(id: string, role: SessionRole | null): void {
         body: JSON.stringify({ ref: id, role: role ?? 'auto' }),
       })
     } catch { /* the cache keeps the choice until the next refresh reconciles it */ }
-    finally { pendingWrites--; void refreshRoles() }
+    finally { pendingWrites--; roleGen++; checkedAt.clear(); void refreshRoles() }
   })()
 }
 /** Test seam: replace the cache the way a server answer would. */

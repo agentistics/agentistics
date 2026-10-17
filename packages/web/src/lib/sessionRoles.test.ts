@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
+import { ensureRoleFresh, __resetRoleChecksForTest } from './sessionRoles'
 import { getSessionRole, isWorkerMuted, leaderTitleFor, registerSessionRoleAlias, roleOriginLabel, setMuteWorkers, setSessionRole } from './sessionRoles'
 
 const ids = ['role-test-worker', 'role-test-leader', 'role-test-unknown']
@@ -62,5 +63,50 @@ describe('leaderTitleFor', () => {
     expect(leaderTitleFor({ leader: 'p' }, { id: 'other', title: 'Other' })).toBeUndefined()
     expect(leaderTitleFor({ leader: 'p' }, null)).toBeUndefined()
     expect(leaderTitleFor('manual', { id: 'p', title: 'Lead' })).toBeUndefined()
+  })
+})
+
+describe('ensureRoleFresh', () => {
+  it('does not let a joiner reuse a GET that started before a role write', async () => {
+    __resetRoleChecksForTest()
+    const realFetch = globalThis.fetch
+    let gets = 0
+    const resolvers: Array<() => void> = []
+    globalThis.fetch = (async (_u: unknown, init?: { method?: string }) => {
+      if (init?.method === 'POST') return new Response('{}')
+      gets++
+      const n = gets
+      await new Promise<void>(r => resolvers.push(r))
+      return new Response(JSON.stringify({ roles: n === 1 ? {} : { 'rf-w': 'worker' } }))
+    }) as typeof fetch
+    try {
+      const a = ensureRoleFresh('rf-a', 1000)
+      setSessionRole('rf-w', 'worker') // write after GET #1 started
+      const b = ensureRoleFresh('rf-w', 1001)
+      await new Promise(r => setTimeout(r, 0))
+      expect(gets).toBeGreaterThanOrEqual(2)
+      while (resolvers.length) resolvers.shift()!()
+      await Promise.all([a, b])
+      expect(getSessionRole('rf-w')).toBe('worker')
+    } finally { globalThis.fetch = realFetch; setSessionRole('rf-w', null) }
+  })
+  it('a role write invalidates the 10s memo', async () => {
+    __resetRoleChecksForTest()
+    const realFetch = globalThis.fetch
+    let gets = 0
+    globalThis.fetch = (async (_u: unknown, init?: { method?: string }) => {
+      if (init?.method === 'POST') return new Response('{}')
+      gets++
+      return new Response(JSON.stringify({ roles: {} }))
+    }) as typeof fetch
+    try {
+      await ensureRoleFresh('rf-m', 5000)
+      const before = gets
+      await ensureRoleFresh('rf-m', 5001)
+      expect(gets).toBe(before)
+      setSessionRole('rf-other', 'worker')
+      await ensureRoleFresh('rf-m', 5002)
+      expect(gets).toBeGreaterThan(before)
+    } finally { globalThis.fetch = realFetch; setSessionRole('rf-other', null) }
   })
 })
