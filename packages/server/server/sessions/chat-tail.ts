@@ -28,7 +28,7 @@ import { PROJECTS_DIR } from '../config'
 import { UUID_RE } from '../git'
 import { isUserRoleMessage } from '../jsonl'
 import { commandSummary, hasUnreadableWrite, shellWrites } from './shell-writes'
-import { patchDetail } from './patch-detail'
+import { isPatchTool, patchDetail } from './patch-detail'
 import { classifyUserEntry, type UserEntry } from './chat-envelope'
 import { bashEntryText, parseBashInput, parseBashOutput, type ShellOutput } from './bash-mode'
 import { parseImageCompanion, resolveCompanionImages } from './attachment-companion'
@@ -430,7 +430,7 @@ function extractToolCalls(e: Record<string, unknown>): NonNullable<ChatTurn['too
   const out: NonNullable<ChatTurn['tools']> = []
   for (const part of msgContent as Record<string, unknown>[]) {
     if (part.type !== 'tool_use' || typeof part.name !== 'string') continue
-    const detail = toolDetail(part.input)
+    const detail = toolDetail(part.input, part.name)
     // The FULL command, for the write reader — `toolDetail` keeps only the first line, and the
     // redirection is usually on a later one.
     const cmd = typeof (part.input as Record<string, unknown> | null)?.['command'] === 'string'
@@ -458,12 +458,14 @@ function extractToolCalls(e: Record<string, unknown>): NonNullable<ChatTurn['too
  * IS, and a path is what a file call is. Everything else is truncated hard — a tool input can be a
  * whole file, and a chat bubble is not where that belongs.
  */
-function toolDetail(input: unknown): string | null {
+function toolDetail(input: unknown, toolName?: string): string | null {
   if (typeof input !== 'object' || input === null) return null
   const o = input as Record<string, unknown>
-  for (const key of ['patch', 'input']) {
-    const p = patchDetail(o[key])
-    if (p) return p
+  if (isPatchTool(toolName)) {
+    for (const key of ['patch', 'input']) {
+      const p = patchDetail(o[key])
+      if (p) return p
+    }
   }
   for (const key of ['command', 'file_path', 'path', 'pattern', 'query', 'url', 'description']) {
     const v = o[key]

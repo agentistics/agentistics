@@ -347,6 +347,7 @@ describe('tool result pairing', () => {
       line({ type: 'custom_tool_call', name: 'apply_patch', call_id: 'p1', input: patch }),
       line({ type: 'function_call', name: 'apply_patch', call_id: 'p2', arguments: JSON.stringify({ input: patch }) }),
     ]).flatMap(t => t.tools ?? [])
+    expect(tools).toHaveLength(2)
     for (const t of tools) {
       expect(t.detail).toContain('*** Update File: packages/a/src/x.ts')
       expect(t.detail).toContain('*** Add File: packages/a/src/y.ts')

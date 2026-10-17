@@ -13,10 +13,12 @@ const line = (type: string, data: Record<string, unknown>): string =>
 describe('toolDetailOf', () => {
   it('keeps the patch of an apply_patch call', () => {
     const patch = '*** Begin Patch\n*** Update File: packages/a/src/x.ts\n@@\n-old\n+new\n*** Add File: packages/a/src/y.ts\n+hello\n*** End Patch'
-    const d = toolDetailOf({ input: patch })!
+    const d = toolDetailOf({ input: patch }, 'apply_patch')!
     expect(d).toContain('*** Update File: packages/a/src/x.ts')
     expect(d).toContain('*** Add File: packages/a/src/y.ts')
-    expect(toolDetailOf({ patch })).toBe(d)
+    expect(toolDetailOf({ patch }, 'apply_patch')).toBe(d)
+    // a write tool carrying patch-shaped content still shows its path
+    expect(toolDetailOf({ path: '/repo/change.patch', content: patch }, 'create')).toBe('/repo/change.patch')
   })
   it('a shell command is summarised past its `cd`', () => {
     expect(toolDetailOf({ command: 'cd /repo && bun test', description: 'run tests' }))

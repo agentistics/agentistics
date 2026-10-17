@@ -55,7 +55,7 @@ import type { HarnessId } from '@agentistics/core'
 import { canonicalTool } from '../harness-activity'
 import type { ChatTurn } from '@agentistics/core'
 import { commandSummary } from './shell-writes'
-import { patchDetail } from './patch-detail'
+import { isPatchTool, patchDetail } from './patch-detail'
 import { parseCodexShell } from './bash-mode'
 import { existsSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
@@ -179,15 +179,17 @@ export function reasoningText(payload: Record<string, unknown>): string {
  */
 const DETAIL_KEYS = ['cmd', 'command', 'path', 'file_path', 'pattern', 'query', 'url']
 
-export function toolDetailOf(rawArguments: unknown): string | null {
+export function toolDetailOf(rawArguments: unknown, toolName?: string): string | null {
   if (typeof rawArguments !== 'string' || rawArguments.trim() === '') return null
   let args: unknown
   try { args = JSON.parse(rawArguments) } catch { return null }
   if (typeof args !== 'object' || args === null) return null
   const o = args as Record<string, unknown>
-  for (const key of ['input', 'patch']) {
-    const p = patchDetail(o[key])
-    if (p) return p
+  if (isPatchTool(toolName)) {
+    for (const key of ['input', 'patch']) {
+      const p = patchDetail(o[key])
+      if (p) return p
+    }
   }
   for (const key of DETAIL_KEYS) {
     const v = o[key]
@@ -231,8 +233,8 @@ function toolOf(payload: Record<string, unknown>, harness: HarnessId): Tool | nu
   const name = typeof payload.name === 'string' ? payload.name : ''
   if (name === '') return null
   const detail = payload.type === 'custom_tool_call' && typeof payload.input === 'string'
-    ? (patchDetail(payload.input) ?? toolDetailOf(payload.input) ?? execWrapperCommand(payload.input) ?? commandSummary(payload.input))
-    : toolDetailOf(payload.arguments)
+    ? ((isPatchTool(name) ? patchDetail(payload.input) : null) ?? toolDetailOf(payload.input) ?? execWrapperCommand(payload.input) ?? commandSummary(payload.input))
+    : toolDetailOf(payload.arguments, name)
   const canonical = canonicalTool(harness, name)
   return {
     // The harness's OWN name is what a conversation shows; `canonical` is the shared vocabulary

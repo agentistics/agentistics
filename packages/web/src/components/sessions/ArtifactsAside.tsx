@@ -59,7 +59,7 @@ import {
   type StepPayload, type StepState,
 } from '../../lib/stepDetail'
 import {
-  SUBAGENT_PAGE, appendPage, runningCount, subagentCount, subagentStatusText, subagentsPollMs,
+  SUBAGENT_PAGE, appendPage, listedObservation, stampPage, runningCount, subagentCount, subagentStatusText, subagentsPollMs,
   subagentsStateOf, unmeasuredText, unpricedText,
   type SubagentRow, type SubagentStatus, type SubagentsPayload, type SubagentsState,
 } from '../../lib/subagents'
@@ -619,7 +619,7 @@ export function ArtifactsAside({
         // Both counts ride every answer, so the OTHER tab's badge is right without it having been
         // opened — and the Forks tab only exists at all once this says there is one.
         if (body.counts) setAgentKinds(body.counts)
-        const fresh = subagentsStateOf(body)
+        const fresh = stampPage(subagentsStateOf(body), Date.now())
         // Merge onto what is already on screen, so a poll never drops the pages somebody loaded.
         const next: SubagentsState = fresh.phase === 'ready'
           ? { ...fresh, rows: appendPage(hit.value?.phase === 'ready' ? hit.value.rows : [], fresh.rows) }
@@ -706,7 +706,7 @@ export function ArtifactsAside({
         `/api/fleet/subagents?id=${encodeURIComponent(sessionId)}&offset=${st.rows.length}&limit=${SUBAGENT_PAGE}&lang=${pt ? 'pt' : 'en'}`,
       )
       if (!res.ok) return
-      const page = subagentsStateOf(await res.json() as SubagentsPayload)
+      const page = stampPage(subagentsStateOf(await res.json() as SubagentsPayload), Date.now())
       if (page.phase !== 'ready') return
       const next: SubagentsState = { ...page, rows: appendPage(st.rows, page.rows) }
       asideCache.write(asideKey(sessionId, 'subagents'), next)
@@ -758,13 +758,13 @@ export function ArtifactsAside({
     // One open agent replaces the list, exactly as an open FILE does — 440px cannot hold a list and
     // a conversation side by side.
     if (openAgent) {
-      const listedStatus = agentsState?.phase === 'ready'
-        ? agentsState.rows.find(r => r.agentId === openAgent.agentId)?.status
+      const listed = agentsState?.phase === 'ready'
+        ? listedObservation(agentsState.rows.find(r => r.agentId === openAgent.agentId))
         : undefined
       return (
         <SubagentActivity
           sessionId={sessionId} row={openAgent} pt={pt} now={now} {...(state ? { state } : {})}
-          {...(listedStatus ? { listedStatus } : {})}
+          {...(listed ? { listed } : {})}
           onBack={() => setOpenAgent(null)}
         />
       )
@@ -2165,8 +2165,8 @@ function SubagentCard({ row, pt, now, onOpen }: {
  * read by one implementation rather than a second one that would drift. Its rows open the same way,
  * against the subagent's transcript (`stepUrl`'s `agentId`).
  */
-function SubagentActivity({ sessionId, row, pt, now, state, listedStatus, onBack }: {
-  sessionId: string; row: SubagentRow; pt: boolean; now: number; state?: string; listedStatus?: SubagentStatus; onBack: () => void
+function SubagentActivity({ sessionId, row, pt, now, state, listed, onBack }: {
+  sessionId: string; row: SubagentRow; pt: boolean; now: number; state?: string; listed?: StatusObservation<SubagentStatus>; onBack: () => void
 }) {
   const [turns, setTurns] = useState<readonly LiveTurn[] | null>(null)
   /** The read stopped on its cap — this feed is a window, and says so. */
@@ -2175,10 +2175,10 @@ function SubagentActivity({ sessionId, row, pt, now, state, listedStatus, onBack
   /** Each source of the status carries the instant it was observed; the newest one wins. */
   const [fetchedObs, setFetchedObs] = useState<StatusObservation<SubagentStatus> | undefined>(undefined)
   const openedObs = useRef<StatusObservation<SubagentStatus>>({ status: row.status, at: Date.now() })
-  const listedObs = useRef<StatusObservation<SubagentStatus> | undefined>(undefined)
-  if (listedStatus !== undefined && listedObs.current?.status !== listedStatus) {
-    listedObs.current = { status: listedStatus, at: Date.now() }
-  }
+  // The list observation arrives stamped with when its RESPONSE was received (`stampRows`);
+  // a re-render or a cached row reuse carries the same stamp, a newer response a newer one.
+  const listedObs = useRef(listed)
+  listedObs.current = listed
   const status = resolveSubagentStatus([openedObs.current, listedObs.current, fetchedObs]) ?? row.status
   const polling = shouldPollSubagent(status)
   const tailRef = useRef<HTMLDivElement | null>(null)

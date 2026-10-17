@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { patchDetail, PATCH_DETAIL_MAX } from './patch-detail'
+import { isPatchTool, patchDetail, PATCH_DETAIL_MAX, PATCH_DETAIL_TOTAL_MAX } from './patch-detail'
 
 const PATCH = '*** Begin Patch\n*** Update File: packages/a/src/x.ts\n@@\n-old\n+new\n*** Add File: packages/a/src/y.ts\n+hello\n*** Delete File: old.ts\n*** End Patch\n'
 
@@ -17,5 +17,18 @@ describe('patchDetail', () => {
     expect(out.length).toBeLessThan(PATCH_DETAIL_MAX + 100)
     expect(out).toContain('*** Update File: a.ts')
     expect(out).toContain('*** Update File: late/b.ts')
+  })
+  it('caps the whole output and says how many files were left out', () => {
+    const many = '*** Begin Patch\n' + 'x'.repeat(PATCH_DETAIL_MAX + 10) + '\n'
+      + Array.from({ length: 400 }, (_, n) => `*** Update File: packages/some/long/path/file-${n}.ts\n+a`).join('\n') + '\n*** End Patch'
+    const out = patchDetail(many)!
+    expect(out.length).toBeLessThanOrEqual(PATCH_DETAIL_TOTAL_MAX + 40)
+    expect(out).toMatch(/… \+\d+ more files$/)
+  })
+  it('isPatchTool matches apply_patch and aliases only', () => {
+    expect(isPatchTool('apply_patch')).toBe(true)
+    expect(isPatchTool('ApplyPatch')).toBe(true)
+    expect(isPatchTool('apply-patch')).toBe(true)
+    expect(isPatchTool('write_file')).toBe(false)
   })
 })

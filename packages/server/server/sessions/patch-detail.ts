@@ -8,6 +8,14 @@
  * survive however large the hunks are.
  */
 export const PATCH_DETAIL_MAX = 4096
+/** Ceiling on the WHOLE output (prefix + appended headers); past it the tail says how many files are left out. */
+export const PATCH_DETAIL_TOTAL_MAX = 8192
+
+/** The tools whose argument IS a patch. Any other tool keeps its ordinary detail priority. */
+const PATCH_TOOLS = new Set(['apply_patch', 'applypatch'])
+export function isPatchTool(name: unknown): boolean {
+  return typeof name === 'string' && PATCH_TOOLS.has(name.trim().toLowerCase().replace(/[-\s]/g, '_').replace(/^_+|_+$/g, ''))
+}
 
 const FILE_HEADER = /^\*\*\* (?:Update|Add|Delete) File: .+$/m
 const FILE_HEADER_G = /^\*\*\* (?:Update|Add|Delete) File: .+$/gm
@@ -27,5 +35,13 @@ export function patchDetail(text: unknown): string | null {
   const head = cut.slice(0, Math.max(cut.lastIndexOf('\n'), 0))
   const seen = new Set(head.match(FILE_HEADER_G) ?? [])
   const rest = (t.match(FILE_HEADER_G) ?? []).filter(h => !seen.has(h))
-  return [head, '…', ...rest].join('\n')
+  const lines = [head, '…']
+  let size = head.length + 2
+  for (let i = 0; i < rest.length; i++) {
+    const h = rest[i]!
+    if (size + h.length + 1 > PATCH_DETAIL_TOTAL_MAX) { lines.push(`… +${rest.length - i} more files`); break }
+    lines.push(h)
+    size += h.length + 1
+  }
+  return lines.join('\n')
 }

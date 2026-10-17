@@ -37,7 +37,7 @@
  * CLI…" and runs for pages.
  */
 
-import { patchDetail } from './patch-detail'
+import { isPatchTool, patchDetail } from './patch-detail'
 import type { HarnessId } from '@agentistics/core'
 import { canonicalTool } from '../harness-activity'
 import type { ChatTurn } from '@agentistics/core'
@@ -67,12 +67,14 @@ const EVENT_NOTES: Record<string, string> = {
 
 const DETAIL_KEYS = ['command', 'path', 'file_path', 'filePath', 'pattern', 'query', 'url', 'intent', 'description']
 
-export function toolDetailOf(args: unknown): string | null {
+export function toolDetailOf(args: unknown, toolName?: string): string | null {
   if (typeof args !== 'object' || args === null) return null
   const o = args as Record<string, unknown>
-  for (const key of ['patch', 'input', 'content']) {
-    const p = patchDetail(o[key])
-    if (p) return p
+  if (isPatchTool(toolName)) {
+    for (const key of ['patch', 'input', 'content']) {
+      const p = patchDetail(o[key])
+      if (p) return p
+    }
   }
   for (const key of DETAIL_KEYS) {
     const v = o[key]
@@ -95,7 +97,7 @@ function toolsOf(data: Record<string, unknown>, harness: HarnessId, results: Rea
     const r = raw as Record<string, unknown>
     const name = typeof r.name === 'string' ? r.name : ''
     if (name === '') continue
-    const detail = toolDetailOf(r.arguments)
+    const detail = toolDetailOf(r.arguments, name)
     const canonical = canonicalTool(harness, name)
     out.push({
       // Copilot's own name for display; the shared one beside it. See `ChatTurn.tools`.
