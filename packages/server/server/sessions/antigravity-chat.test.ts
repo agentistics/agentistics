@@ -208,3 +208,27 @@ describe('parseAntigravityChat', () => {
     expect(turn!.at).toBeUndefined()
   })
 })
+
+it('uses uniquely matching executions within a planner batch, leaving successes unset', () => {
+  const turns = parseAntigravityChat([
+    planner(0, { tool_calls: [{ name: 'run_command', args: { CommandLine: 'false' } }] }),
+    line({ step_index: 1, type: 'RUN_COMMAND', status: 'DONE', exit_code: 1 }),
+    planner(2, { tool_calls: [{ name: 'run_command', args: { CommandLine: 'pwd' } }] }),
+    line({ step_index: 3, type: 'RUN_COMMAND', status: 'DONE', exit_code: 0 }),
+  ])
+  expect(turns.flatMap(t => t.tools ?? []).map(t => t.failed)).toEqual([true, undefined])
+})
+
+it('never assigns a standalone error or an ambiguous execution to a tool call', () => {
+  const turns = parseAntigravityChat([
+    planner(0, { tool_calls: [
+      { name: 'run_command', args: { CommandLine: 'pwd' } },
+      { name: 'run_command', args: { CommandLine: 'false' } },
+    ] }),
+    line({ step_index: 1, type: 'RUN_COMMAND', exit_code: 1 }),
+    line({ step_index: 2, type: 'ERROR_MESSAGE', error: 'unattributed failure' }),
+    planner(3, { tool_calls: [{ name: 'view_file', args: { AbsolutePath: '/a' } }] }),
+    line({ step_index: 4, type: 'ERROR_MESSAGE', error: 'unattributed failure' }),
+  ])
+  expect(turns.flatMap(t => t.tools ?? []).map(t => t.failed)).toEqual([undefined, undefined, undefined])
+})

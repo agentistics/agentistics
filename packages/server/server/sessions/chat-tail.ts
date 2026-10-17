@@ -28,6 +28,7 @@ import { PROJECTS_DIR } from '../config'
 import { UUID_RE } from '../git'
 import { isUserRoleMessage } from '../jsonl'
 import { commandSummary, hasUnreadableWrite, shellWrites } from './shell-writes'
+import { isPatchTool, patchDetail } from './patch-detail'
 import { classifyUserEntry, type UserEntry } from './chat-envelope'
 import { bashEntryText, parseBashInput, parseBashOutput, type ShellOutput } from './bash-mode'
 import { parseImageCompanion, resolveCompanionImages } from './attachment-companion'
@@ -423,14 +424,14 @@ function extractAssistantText(e: Record<string, unknown>): string | null {
 
 /** The tool names an assistant entry is calling, when it carries no text at all — see `ChatTurn.pending`. */
 /** The tools one assistant event invoked, each with the first meaningful line of its input. */
-function extractToolCalls(e: Record<string, unknown>): Array<{ name: string; detail?: string; ref?: string }> {
+function extractToolCalls(e: Record<string, unknown>): NonNullable<ChatTurn['tools']> {
   if (e.type !== 'assistant') return []
   const msgContent = (e.message as Record<string, unknown> | undefined)?.content
   if (!Array.isArray(msgContent)) return []
-  const out: Array<{ name: string; detail?: string; ref?: string }> = []
+  const out: NonNullable<ChatTurn['tools']> = []
   for (const part of msgContent as Record<string, unknown>[]) {
     if (part.type !== 'tool_use' || typeof part.name !== 'string') continue
-    const detail = toolDetail(part.input)
+    const detail = toolDetail(part.input, part.name)
     // The FULL command, for the write reader — `toolDetail` keeps only the first line, and the
     // redirection is usually on a later one.
     const cmd = typeof (part.input as Record<string, unknown> | null)?.['command'] === 'string'
@@ -458,9 +459,15 @@ function extractToolCalls(e: Record<string, unknown>): Array<{ name: string; det
  * IS, and a path is what a file call is. Everything else is truncated hard — a tool input can be a
  * whole file, and a chat bubble is not where that belongs.
  */
-function toolDetail(input: unknown): string | null {
+function toolDetail(input: unknown, toolName?: string): string | null {
   if (typeof input !== 'object' || input === null) return null
   const o = input as Record<string, unknown>
+  if (isPatchTool(toolName)) {
+    for (const key of ['patch', 'input']) {
+      const p = patchDetail(o[key])
+      if (p) return p
+    }
+  }
   for (const key of ['command', 'file_path', 'path', 'pattern', 'query', 'url', 'description']) {
     const v = o[key]
     if (typeof v === 'string' && v.trim() !== '') {
@@ -716,6 +723,7 @@ export async function readChatWindow(
    * BACKWARDS and a companion sits AFTER its marker turn in the file (append-only JSONL), so it is
    * always seen and recorded here before the marker turn itself is reached.
    */
+  const toolResults = new Map<string, boolean>()
   const companions = new Map<string, string[]>()
   /** Bash mode's output entries, waiting for the input that names them. */
   const shells = newShellPairing()
@@ -731,6 +739,14 @@ export async function readChatWindow(
     if (!line) continue
     let e: Record<string, unknown>
     try { e = JSON.parse(line) } catch { continue }
+    const blocks = (e.message as { content?: unknown } | undefined)?.content
+    if (e.type === 'user' && Array.isArray(blocks)) {
+      for (const b of blocks) {
+        if (b?.type === 'tool_result' && typeof b.tool_use_id === 'string' && !toolResults.has(b.tool_use_id)) {
+          toolResults.set(b.tool_use_id, b.is_error === true)
+        }
+      }
+    }
     const isNewest = newest
     newest = false
 
@@ -770,6 +786,7 @@ export async function readChatWindow(
     // splitting them puts the reasoning under the answer it produced.
     const assistantText = extractAssistantText(e)
     const calls = extractToolCalls(e)
+    for (const call of calls) if (call.ref && toolResults.get(call.ref) === true) call.failed = true
     const thinking = extractThinking(e)
     if (assistantText || calls.length > 0 || thinking) {
       add({

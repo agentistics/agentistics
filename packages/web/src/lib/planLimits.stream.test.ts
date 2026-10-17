@@ -32,6 +32,10 @@ globalThis.fetch = (async (url: string) => {
 const tick = () => new Promise(r => setTimeout(r, 5))
 
 test('a plan-limits signal on the open stream refreshes the open tab without a reload', async () => {
+  // A subscriber leaked by an earlier file in the same run would keep the shared socket open, and
+  // this file's fake would never be constructed; start from a closed stream.
+  const { eventStream } = await import('./eventStream')
+  eventStream.reset?.()
   const { subscribePlanLimits, planLimitsSnapshot } = await import('./planLimits')
   let renders = 0
   const off = subscribePlanLimits(() => { renders++ }) // the Limits tab is open

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'bun:test'
 import {
   SUBAGENT_POLL_MS, appendPage, runningCount, subagentCount, subagentStatusText, subagentsPollMs,
-  subagentsStateOf, unmeasuredText, unpricedText, type SubagentRow,
+  subagentsStateOf, unmeasuredText, unpricedText, listedObservation, stampPage, type SubagentRow,
 } from './subagents'
+import { resolveSubagentStatus, shouldPollSubagent } from './artifactLayout'
 
 const row = (o: Partial<SubagentRow> = {}): SubagentRow => ({
   agentId: 'a1', status: 'finished', tokens: { input: 1, output: 1, cacheRead: 1, cacheWrite: 1 },
@@ -86,5 +87,39 @@ describe('appendPage — a page is merged, not stacked', () => {
   it('never throws away pages already asked for', () => {
     const have = [row({ agentId: 'a' }), row({ agentId: 'b' }), row({ agentId: 'c' })]
     expect(appendPage(have, [row({ agentId: 'd' })])).toHaveLength(4)
+  })
+})
+
+describe('list observations carry the instant their response was received', () => {
+  const ready = (status: SubagentRow['status']) => stampPage(
+    { phase: 'ready', rows: [{ agentId: 'a', status } as SubagentRow], total: 1, hasMore: false }, 0)
+  const rowAt = (status: SubagentRow['status'], at: number) => {
+    const st = stampPage({ phase: 'ready', rows: [{ agentId: 'a', status } as SubagentRow], total: 1, hasMore: false }, at)
+    return st.phase === 'ready' ? st.rows[0] : undefined
+  }
+  it('stamps ready pages only and keeps other phases untouched', () => {
+    expect(ready('running').phase).toBe('ready')
+    const failed = { phase: 'failed', message: 'x' } as const
+    expect(stampPage(failed, 5)).toBe(failed)
+    expect(listedObservation(undefined)).toBeUndefined()
+    expect(listedObservation({ agentId: 'a', status: 'running' } as SubagentRow)).toBeUndefined()
+  })
+  it('running list → fetched unknown → a NEWER list response still running restarts polling', () => {
+    const opened = { status: 'running' as const, at: 1 }
+    const fetched = { status: 'unknown' as const, at: 2 }
+    expect(shouldPollSubagent(resolveSubagentStatus([opened, listedObservation(rowAt('running', 1)), fetched]))).toBe(false)
+    const newer = listedObservation(rowAt('running', 3))
+    expect(shouldPollSubagent(resolveSubagentStatus([opened, newer, fetched]))).toBe(true)
+  })
+  it('fetched running → a NEWER list response terminal stops polling', () => {
+    const opened = { status: 'running' as const, at: 1 }
+    const fetched = { status: 'running' as const, at: 2 }
+    expect(shouldPollSubagent(resolveSubagentStatus([opened, listedObservation(rowAt('running', 1)), fetched]))).toBe(true)
+    expect(shouldPollSubagent(resolveSubagentStatus([opened, listedObservation(rowAt('finished', 3)), fetched]))).toBe(false)
+  })
+  it('a re-used (cached) row keeps its stamp, so it never outranks newer evidence', () => {
+    const row = rowAt('running', 1)
+    expect(listedObservation(row)).toEqual(listedObservation(row))
+    expect(resolveSubagentStatus([listedObservation(row), { status: 'unknown', at: 2 }])).toBe('unknown')
   })
 })

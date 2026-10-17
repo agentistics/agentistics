@@ -24,6 +24,8 @@ export type SubagentStatus = 'running' | 'finished' | 'failed' | 'stopped' | 'un
 
 export interface SubagentRow {
   agentId: string
+  /** CLIENT-ONLY: when the list response carrying this row was received (`stampRows`). */
+  observedAt?: number
   agentType?: string
   description?: string
   model?: string
@@ -68,6 +70,25 @@ export const SUBAGENT_PAGE = 20
  * is ordered by last activity, so a running agent MOVES. Appending blindly would draw it twice, and
  * replacing the whole list would throw away the pages somebody already asked for.
  */
+/**
+ * Stamp every row of a LIST RESPONSE with the instant it was received. Called once where the
+ * response lands, so a newer response with the SAME status is a newer observation, while a render
+ * or a cached-row reuse keeps the stamp it was given.
+ */
+export function stampRows(rows: readonly SubagentRow[], at: number): SubagentRow[] {
+  return rows.map(r => ({ ...r, observedAt: at }))
+}
+
+/** `stampRows` over a ready state; any other phase is returned untouched. */
+export function stampPage(state: SubagentsState, at: number): SubagentsState {
+  return state.phase === 'ready' ? { ...state, rows: stampRows(state.rows, at) } : state
+}
+
+/** A row's list observation (status + when the list saw it), or undefined when never stamped. */
+export function listedObservation(row: SubagentRow | undefined): { status: SubagentStatus; at: number } | undefined {
+  return row && row.observedAt !== undefined ? { status: row.status, at: row.observedAt } : undefined
+}
+
 export function appendPage(have: readonly SubagentRow[], page: readonly SubagentRow[]): SubagentRow[] {
   const merged = [...have]
   for (const row of page) {

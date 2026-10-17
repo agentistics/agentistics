@@ -55,6 +55,7 @@ import type { HarnessId } from '@agentistics/core'
 import { canonicalTool } from '../harness-activity'
 import type { ChatTurn } from '@agentistics/core'
 import { commandSummary } from './shell-writes'
+import { isPatchTool, patchDetail } from './patch-detail'
 import { parseCodexShell } from './bash-mode'
 import { existsSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
@@ -178,12 +179,18 @@ export function reasoningText(payload: Record<string, unknown>): string {
  */
 const DETAIL_KEYS = ['cmd', 'command', 'path', 'file_path', 'pattern', 'query', 'url']
 
-export function toolDetailOf(rawArguments: unknown): string | null {
+export function toolDetailOf(rawArguments: unknown, toolName?: string): string | null {
   if (typeof rawArguments !== 'string' || rawArguments.trim() === '') return null
   let args: unknown
   try { args = JSON.parse(rawArguments) } catch { return null }
   if (typeof args !== 'object' || args === null) return null
   const o = args as Record<string, unknown>
+  if (isPatchTool(toolName)) {
+    for (const key of ['input', 'patch']) {
+      const p = patchDetail(o[key])
+      if (p) return p
+    }
+  }
   for (const key of DETAIL_KEYS) {
     const v = o[key]
     if (typeof v === 'string' && v.trim() !== '') {
@@ -200,12 +207,34 @@ export function toolDetailOf(rawArguments: unknown): string | null {
   return null
 }
 
+/** `exec` custom calls carry JS (`text(await tools.exec_command({cmd:"…"}))`): show the command, not the wrapper. */
+function execWrapperCommand(input: string): string | null {
+  // Literal forms only, never evaluated: "…", '…', and `…` without `${}`; the key may be quoted.
+  // The literal must be the WHOLE property value: followed by `,`, `}` or the end, never `+ expr`.
+  const m = /(?:\bcmd|"cmd"|'cmd')\s*:\s*(?:("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')|(`(?:[^`\\$]|\\.|\$(?!\{))*`))(?=\s*[,}]|\s*$)/.exec(input)
+  if (!m) return null
+  const unescape = (body: string): string => body.replace(/\\(u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|[\s\S])/g, (_, c: string) => {
+    if (c[0] === 'u' && c.length === 5) return String.fromCharCode(parseInt(c.slice(1), 16))
+    if (c[0] === 'x' && c.length === 3) return String.fromCharCode(parseInt(c.slice(1), 16))
+    return ({ n: '\n', t: '\t', r: '\r', '0': '\0' } as Record<string, string>)[c] ?? c
+  })
+  let cmd: string
+  if (m[1] !== undefined) {
+    try { cmd = JSON.parse(m[1]) as string } catch { return null }
+  } else {
+    cmd = unescape((m[2] ?? m[3]!).slice(1, -1))
+  }
+  return cmd.trim() !== '' ? commandSummary(cmd) : null
+}
+
 type Tool = NonNullable<ChatTurn['tools']>[number]
 
 function toolOf(payload: Record<string, unknown>, harness: HarnessId): Tool | null {
   const name = typeof payload.name === 'string' ? payload.name : ''
   if (name === '') return null
-  const detail = toolDetailOf(payload.arguments)
+  const detail = payload.type === 'custom_tool_call' && typeof payload.input === 'string'
+    ? ((isPatchTool(name) ? patchDetail(payload.input) : null) ?? toolDetailOf(payload.input) ?? execWrapperCommand(payload.input) ?? commandSummary(payload.input))
+    : toolDetailOf(payload.arguments, name)
   const canonical = canonicalTool(harness, name)
   return {
     // The harness's OWN name is what a conversation shows; `canonical` is the shared vocabulary
@@ -238,6 +267,7 @@ export function parseCodexChat(
   cwd?: string,
 ): ChatTurn[] {
   const turns: ChatTurn[] = []
+  const results = new Map<string, boolean>()
   /** Tool calls seen since the assistant message they belong to, in FILE order. */
   let pending: Tool[] = []
   let pendingAt: string | undefined
@@ -275,9 +305,19 @@ export function parseCodexChat(
     const at = typeof e.timestamp === 'string' ? e.timestamp : undefined
     const kind = typeof payload.type === 'string' ? payload.type : ''
 
-    if (kind === 'function_call') {
+    if (kind === 'function_call_output' || kind === 'custom_tool_call_output') {
+      if (typeof payload.call_id === 'string' && !results.has(payload.call_id)) {
+        results.set(payload.call_id, codexOutputFailed(payload.output) || codexOutputFailed(payload))
+      }
+      // Results settle calls but never split a batch of parallel requests.
+      newest = false
+      continue
+    }
+
+    if (kind === 'function_call' || kind === 'custom_tool_call') {
       const tool = toolOf(payload, harness)
       if (tool) {
+        if (typeof payload.call_id === 'string' && results.get(payload.call_id) === true) tool.failed = true
         if (pending.length === 0) { pendingAt = at; newestBatch = newest }
         // Backward walk, file order kept: the earliest call of the batch ends up first.
         pending.unshift(tool)
@@ -331,9 +371,7 @@ export function parseCodexChat(
       continue
     }
 
-    // `function_call_output` (the result, whose body is the whole stdout) and `ghost_snapshot` are
-    // not turns. The request above already said what ran — the same choice `antigravity-chat.ts`
-    // makes, and for the same reason.
+    // Snapshots and other bookkeeping are not conversation turns.
     flushTools()
     newest = false
   }
@@ -341,6 +379,32 @@ export function parseCodexChat(
   flushTools()
   turns.reverse()
   return turns
+}
+
+/** Only structured failure fields or Codex's own shell-result header are evidence. */
+function codexOutputFailed(output: unknown): boolean {
+  // Real Codex 0.161 `custom_tool_call_output.output`: an ARRAY of `{type:'input_text', text}`; the
+  // first part is the "Script completed" header, a later one is JSON carrying `exit_code` (usually
+  // under `value`). Any part that says failed makes the call failed.
+  if (Array.isArray(output)) {
+    return output.some(part => {
+      const text = part !== null && typeof part === 'object' ? (part as Record<string, unknown>).text : part
+      return typeof text === 'string' && text.trim().startsWith('{') && codexOutputFailed(text)
+    })
+  }
+  if (typeof output === 'string') {
+    try { return codexOutputFailed(JSON.parse(output)) } catch { /* shell envelope */ }
+    // Anchored to the metadata header, never arbitrary command stdout containing "error".
+    const header = output.split(/\n(?:Output|Final output):(?:\n|$)/, 1)[0]!
+    const exit = /^(?:Process exited with code|Exit code:)\s*(-?\d+)\s*$/m.exec(header)
+    return exit !== null && Number(exit[1]) !== 0
+  }
+  if (!output || typeof output !== 'object') return false
+  const o = output as Record<string, unknown>
+  if (o.value !== null && typeof o.value === 'object' && codexOutputFailed(o.value)) return true
+  return o.is_error === true || o.status === 'error' || o.status === 'failed'
+    || (typeof o.exit_code === 'number' && o.exit_code !== 0)
+    || (o.metadata !== null && typeof o.metadata === 'object' && codexOutputFailed(o.metadata))
 }
 
 /** One `message` that is not the assistant's, classified. `null` when there is nothing to draw. */

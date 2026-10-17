@@ -172,3 +172,23 @@ describe('the two caveats on the header count are rendered, not merely received'
     expect(code('// const shortfall = artifactShortfall({')).not.toContain('const shortfall =')
   })
 })
+
+describe('the subagent feed is settled (the independently fetched consumer)', () => {
+  const fn = src.slice(src.indexOf('function SubagentActivity('))
+  it('never feeds fetched turns to liveEvents unsettled', () => {
+    expect(fn).not.toMatch(/liveEvents\(\s*turns\b/)
+    expect(fn).toMatch(/liveEvents\(settleSubagentTurns\(turns \?\? \[\], status, state\)\)/)
+    expect(fn).toContain('resolveSubagentStatus([openedObs.current, listedObs.current, fetchedObs])')
+    expect(fn).not.toContain('Date.now() }\n  }')
+    expect(src).toContain('stampPage(subagentsStateOf(')
+    expect(fn).toContain('setFetchedObs(fetchedLocal)')
+    expect(fn).toContain('shouldPollSubagent(')
+    expect(fn).toMatch(/\}, \[sessionId, row\.agentId, pt, polling\]\)/)
+  })
+  it('receives the parent row state from the page', () => {
+    expect(fn.slice(0, 300)).toContain('state?: string')
+    expect(has('state={state}') || has('{...(state ? { state } : {})}')).toBe(true)
+    const page = readFileSync(new URL('../../pages/SessionsPage.tsx', import.meta.url), 'utf8')
+    expect(page).toContain("...(selected.state ? { state: selected.state } : {})")
+  })
+})
