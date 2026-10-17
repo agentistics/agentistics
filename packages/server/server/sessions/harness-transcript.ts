@@ -76,7 +76,7 @@ export interface HarnessTranscript {
   /** The absolute path to this conversation's transcript here, or `null` when there is none. */
   resolve(ref: TranscriptRef): Promise<string | null>
   /** The conversation, oldest first, capped at `max` turns from the end. */
-  read(path: string, max: number, opts?: { sessionEnded?: boolean }): Promise<TranscriptRead>
+  read(path: string, max: number, opts?: { sessionEnded?: boolean; maxBytes?: number }): Promise<TranscriptRead>
   /** The last `max` turns only, read from the END of the file. The fleet poll's budget. */
   readRecent(path: string, max: number, opts?: { sessionEnded?: boolean }): Promise<ChatTurn[]>
 }

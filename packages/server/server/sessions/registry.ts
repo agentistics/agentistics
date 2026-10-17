@@ -30,6 +30,7 @@ import { CONVERSATION_LINK_REASONS as LINK_REASONS, type ConversationLinkReason 
 import type { ManagedSession, RetireRequest } from './types'
 import { withFileLock } from './file-lock'
 import { BoundedKeys } from './bounded-keys'
+import { withIdentityPreferences } from './session-identity-prefs'
 
 /** Distinguishes two writes from the SAME process; the pid distinguishes the processes. */
 let writeSeq = 0
@@ -560,7 +561,7 @@ export function createSessionRegistry(file: string, deps: { lock?: typeof withFi
 }
 
 /** The registry this machine actually uses. */
-const defaultRegistry = createSessionRegistry(MANAGED_SESSIONS_FILE)
+const defaultRegistry = withIdentityPreferences(createSessionRegistry(MANAGED_SESSIONS_FILE))
 
 export const readRegistry = (): Promise<ManagedSession[]> => defaultRegistry.read()
 export const adoptSessionRecords = (rs: readonly ManagedSession[]): Promise<void> => defaultRegistry.adopt(rs)
