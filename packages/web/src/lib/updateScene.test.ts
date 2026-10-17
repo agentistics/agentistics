@@ -100,8 +100,12 @@ test('hive: the cell field is its own canvas beneath the one handed in (the hand
   scene.drawRunning({ p: 0.5, indet: false, now: 16, dt: 16 })
   expect(canvas.width).toBeLessThan(1001 * 1.5)
   expect(canvas.width).toBeGreaterThan(0)
+  const runW = canvas.width
   scene.drawFinale({ t: 0.2, now: 32, dt: 16 })
-  expect(canvas.width).toBeGreaterThanOrEqual(1001 * 1.5 - 2)
+  // the finale's layer is bounded by how far the rings and sparks reach (4.8 R), never the whole stage
+  const finaleW = canvas.width
+  expect(finaleW).toBeGreaterThan(runW)
+  expect(finaleW).toBeLessThan(1001 * 1.5)
   scene.dispose()
 })
 
