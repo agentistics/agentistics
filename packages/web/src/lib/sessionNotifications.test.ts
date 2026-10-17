@@ -5,7 +5,7 @@ import {
   fleetActivityStates, resetNotificationMemory, saveNotificationSettings, type SessionActivity,
 } from './sessionNotifications'
 import { setSessionMuted } from './mutedSessions'
-import { setMuteWorkers, setSessionRole } from './sessionRoles'
+import { setMuteWorkers, setSessionRole, __resetRoleChecksForTest } from './sessionRoles'
 import { readNayAlerts, releaseDue, snoozeAlert } from './nayNotifyStore'
 
 /**
@@ -332,6 +332,78 @@ describe('muted workers', () => {
     expect(readNayAlerts()).toEqual([])
     expect(sounds).toBe(0)
     setSessionRole('fresh-managed', null)
+  })
+
+  const withRolesFetch = (roles: Record<string, string>, counter: { n: number }, delay = 0) => {
+    const base = globalThis.fetch
+    ;(globalThis as Record<string, unknown>).fetch = async (url: unknown, init?: RequestInit) => {
+      if (String(url) === '/api/session-roles' && !init?.method) {
+        counter.n++
+        if (delay) await new Promise(r => setTimeout(r, delay))
+        return new Response(JSON.stringify({ roles }), { status: 200 })
+      }
+      return base(url as string, init)
+    }
+    return () => { ;(globalThis as Record<string, unknown>).fetch = base }
+  }
+
+  it('still mutes a fresh worker while a role write is pending', async () => {
+    __resetRoleChecksForTest()
+    setMuteWorkers(true)
+    const c = { n: 0 }
+    const restore = withRolesFetch({ 'pw-managed': 'worker' }, c)
+    setSessionRole('other-session', 'leader') // leaves a write pending
+    const row = { id: 'pw-managed', conversationId: 'pw-conv' }
+    let prev = notifyFleetTransitions(null, [{ ...row, state: 'working' }], 'en')
+    prev = notifyFleetTransitions(prev, [{ ...row, state: 'waiting' }], 'en')
+    prev = notifyFleetTransitions(prev, [{ ...row, state: 'waiting' }], 'en')
+    await new Promise(r => setTimeout(r, 30))
+    restore()
+    setSessionRole('other-session', null)
+    setMuteWorkers(false)
+    await new Promise(r => setTimeout(r, 10))
+    expect(captured).toHaveLength(0)
+    expect(sounds).toBe(0)
+  })
+
+  it('shares one GET across sessions and does not re-ask for a session already checked', async () => {
+    __resetRoleChecksForTest()
+    setMuteWorkers(true)
+    const c = { n: 0 }
+    const restore = withRolesFetch({}, c, 10)
+    const rows = ['a', 'b', 'c'].map(id => ({ id: `s-${id}`, conversationId: `c-${id}` }))
+    let prev = notifyFleetTransitions(null, rows.map(r => ({ ...r, state: 'working' })), 'en')
+    prev = notifyFleetTransitions(prev, rows.map(r => ({ ...r, state: 'waiting' })), 'en')
+    prev = notifyFleetTransitions(prev, rows.map(r => ({ ...r, state: 'waiting' })), 'en')
+    await new Promise(r => setTimeout(r, 60))
+    expect(c.n).toBe(1)
+    // later transitions of the same sessions do not ask again
+    prev = notifyFleetTransitions(prev, rows.map(r => ({ ...r, state: 'working' })), 'en')
+    prev = notifyFleetTransitions(prev, rows.map(r => ({ ...r, state: 'working' })), 'en')
+    prev = notifyFleetTransitions(prev, rows.map(r => ({ ...r, state: 'waiting' })), 'en')
+    prev = notifyFleetTransitions(prev, rows.map(r => ({ ...r, state: 'waiting' })), 'en')
+    await new Promise(r => setTimeout(r, 60))
+    restore()
+    setMuteWorkers(false)
+    expect(c.n).toBe(1)
+  })
+
+  it('drops a delivery whose session left waiting while the role was being fetched', async () => {
+    __resetRoleChecksForTest()
+    setMuteWorkers(true)
+    const c = { n: 0 }
+    const restore = withRolesFetch({}, c, 30)
+    const row = { id: 'late-managed', conversationId: 'late-conv' }
+    let prev = notifyFleetTransitions(null, [{ ...row, state: 'working' }], 'en')
+    prev = notifyFleetTransitions(prev, [{ ...row, state: 'waiting' }], 'en')
+    prev = notifyFleetTransitions(prev, [{ ...row, state: 'waiting' }], 'en')
+    // the session resumed work before the GET answered
+    prev = notifyFleetTransitions(prev, [{ ...row, state: 'working' }], 'en')
+    prev = notifyFleetTransitions(prev, [{ ...row, state: 'working' }], 'en')
+    await new Promise(r => setTimeout(r, 80))
+    restore()
+    expect(readNayAlerts().filter(a => a.sessionId === 'late-managed')).toEqual([])
+    expect(readNayAlerts()).toEqual([])
   })
 
   for (const conversationRole of ['leader', 'worker'] as const) {

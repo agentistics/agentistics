@@ -61,6 +61,37 @@ export async function refreshRoles(): Promise<void> {
   } catch { /* offline or no host power: keep what we have */ }
 }
 
+/**
+ * Ask the server for the roles NOW, whatever is being written: the pre-notify check must see a
+ * fresh answer, which `refreshRoles` (skipped while a write is pending) cannot promise. One GET is
+ * shared by every caller in flight; a pending local write keeps its optimistic entry, the server's
+ * answer fills in the rest. A session checked within `CHECKED_TTL_MS` is not asked about again.
+ */
+const CHECKED_TTL_MS = 10_000
+const checkedAt = new Map<string, number>()
+let freshInflight: Promise<boolean> | null = null
+async function fetchRolesFresh(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/session-roles')
+    if (!res.ok) return false
+    const body = (await res.json()) as { roles?: unknown; origins?: unknown }
+    const next = parseRoles(body.roles)
+    const nextOrigins = parseOrigins(body.origins)
+    const merged = pendingWrites > 0 ? { ...next, ...cache } : next
+    const mergedOrigins = pendingWrites > 0 ? { ...nextOrigins, ...originCache } : nextOrigins
+    if (JSON.stringify(merged) !== JSON.stringify(cache) || JSON.stringify(mergedOrigins) !== JSON.stringify(originCache)) { cache = merged; originCache = mergedOrigins; emit() }
+    return true
+  } catch { return false }
+}
+export async function ensureRoleFresh(id: string, now: number = Date.now()): Promise<void> {
+  const last = checkedAt.get(id)
+  if (last !== undefined && now - last < CHECKED_TTL_MS) return
+  freshInflight ??= fetchRolesFresh().finally(() => { freshInflight = null })
+  if (await freshInflight) checkedAt.set(id, now)
+}
+/** Test seam: forget which sessions were already checked. */
+export function __resetRoleChecksForTest(): void { checkedAt.clear(); freshInflight = null }
+
 let timer: ReturnType<typeof setInterval> | null = null
 const rolesStore = {
   get: (): SessionRoles => cache,

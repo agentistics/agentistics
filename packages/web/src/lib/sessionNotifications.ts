@@ -16,7 +16,7 @@ import { observeFleet, pushAlert, pushDemoAlert, requestShock, resetNayNotifySto
 import { isSessionMuted } from './mutedSessions'
 import { pushNotification, setMutedCategories, type NotificationType } from './notifications'
 import { isNotificationCategory } from './notificationCategories'
-import { getMuteWorkers, getSessionRole, isWorkerMuted, refreshRoles, registerSessionRoleAlias } from './sessionRoles'
+import { getMuteWorkers, getSessionRole, isWorkerMuted, ensureRoleFresh, registerSessionRoleAlias } from './sessionRoles'
 import { DEFAULT_QUIET_HOURS, readQuietHours, type QuietHours } from './checkinNotify'
 
 export type SessionActivity = 'working' | 'waiting' | 'waiting-approval' | 'exited'
@@ -512,11 +512,20 @@ function roleKnown(id: string): boolean {
   return getSessionRole(key) !== undefined || getSessionRole(id) !== undefined
 }
 
+/** The last snapshot's activity per session — what a delivery that waited on the server is re-checked against. */
+let latestSeen: Record<string, SessionActivity> = {}
+function stillTrue(d: Delivery): boolean {
+  const now = latestSeen[d.bell.id]
+  if (now === undefined) return false
+  if (d.event === 'stale') return now === 'waiting' || now === 'waiting-approval'
+  return now === d.event
+}
+
 function deliver(d: Delivery, settings: NotificationSettings): void {
   // A session spawned a moment ago may have its role on the server but not in this page's cache yet
   // (the cache refreshes on a timer). With mute on and no role known, ask the server before deciding.
   if (getMuteWorkers() && d.event !== 'exited' && !roleKnown(d.bell.id)) {
-    void refreshRoles().then(() => deliverNow(d, settings))
+    void ensureRoleFresh(d.bell.id).then(() => { if (stillTrue(d)) deliverNow(d, settings) })
     return
   }
   deliverNow(d, settings)
@@ -642,6 +651,7 @@ export function notifyFleetTransitions(
   lang: 'pt' | 'en',
 ): Record<string, SessionActivity> {
   const seen = fleetActivityStates(rows)
+  latestSeen = seen
   for (const r of rows) {
     const stableKey = r.conversationId ?? r.id
     muteKeyById.set(r.id, stableKey)
@@ -728,6 +738,7 @@ export function notifyFleetTransitions(
 
 /** Test seam: the confirmation memory is module state, and a test must be able to clear it. */
 export function resetNotificationMemory(): void {
+  latestSeen = {}
   unconfirmed = {}
   resetNayNotifyStore()
 }

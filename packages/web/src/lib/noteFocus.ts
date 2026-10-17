@@ -40,3 +40,8 @@ export function focusMissNotice(ref: string, pt: boolean): string {
     ? `“${ref}” foi usada nesta conversa e não está nesta lista.`
     : `“${ref}” was used in this conversation and is not in this list.`
 }
+
+/** A focus request is honoured ONCE: true only for a stamp not yet consumed (polls and "back" must not re-open it). */
+export function isFreshFocusAsk(consumed: number | undefined, askedAt: number | undefined): boolean {
+  return askedAt !== undefined && consumed !== askedAt
+}
