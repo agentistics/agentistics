@@ -4,7 +4,6 @@ import { Check, HardDrive, FolderClock, ExternalLink, DatabaseZap } from 'lucide
 import type { AppContext } from '../../lib/app-context'
 import type { ArchiveMode } from '../../components/ArchiveConsentModal'
 import { Divider, PrefRow, SectionHeader, Toggle } from './primitives'
-import SessionPresetsSection from './SessionPresetsSection'
 import AwaySection from './AwaySection'
 import CheckinDefaultsSection from './CheckinDefaultsSection'
 import { useIdlePrefs, setIdlePrefs } from '../../lib/idleSessionsPrefs'
@@ -259,13 +258,6 @@ export default function SessionsSettings() {
 
   return (
     <div>
-      {/* Presets are their own section, placed first: they are the most actionable thing on this
-          page — a saved template to fire from the Sessions workspace — while the rest below is
-          switches and a one-time preservation choice. */}
-      <SessionPresetsSection />
-
-      <Divider />
-
       <CheckinDefaultsSection pt={pt} isMobile={isMobile} />
 
       <Divider />
