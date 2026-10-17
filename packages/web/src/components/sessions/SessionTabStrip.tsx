@@ -196,6 +196,11 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
   const [notice, setNotice] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[]; pick: (a: string) => void } | null>(null)
 
+  useEffect(() => {
+    if (notice === null) return
+    const t = setTimeout(() => setNotice(null), 5000)
+    return () => clearTimeout(t)
+  }, [notice])
   // The previous-active anchors outlive a remount (split pane) but not the last strip.
   useEffect(() => trackStripMount(), [])
 
@@ -338,7 +343,7 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
   }
 
   return (
-    <div data-session-tabs style={{ flexShrink: 0, minWidth: 0, borderBottom: '1px solid var(--border-subtle)' }}>
+    <div data-session-tabs style={{ position: 'relative', flexShrink: 0, minWidth: 0, borderBottom: '1px solid var(--border-subtle)' }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, padding: 0 }}>
       <div
         ref={attach} className="tabscroll" role="tablist" aria-label={pt ? 'Sessões abertas' : 'Open sessions'} onScroll={measure}
@@ -379,7 +384,14 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
       )}
     </div>
     {notice !== null && (
-      <p role="status" style={{ margin: 0, padding: '0 10px 6px', fontSize: 11, color: 'var(--text-tertiary)' }}>{notice}</p>
+      <p
+        role="status" data-tab-notice
+        style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 5, margin: 0, padding: '6px 10px',
+          fontSize: 11, color: 'var(--text-secondary)', background: 'var(--bg-surface)',
+          border: '1px solid var(--border)', borderTop: 'none',
+        }}
+      >{notice}</p>
     )}
     </div>
   )

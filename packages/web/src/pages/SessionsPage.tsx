@@ -2859,7 +2859,10 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     )
     centre = (
       <>
-      {tabStripAboveTitle ? tabStripEl : null}
+      {tabStripAboveTitle ? (
+        // Installed as a PWA the strip is now the topmost row, so IT carries the status-bar band.
+        <div data-tabs-safe-top style={{ paddingTop: 'var(--safe-top)', background: 'var(--bg-surface)', flexShrink: 0 }}>{tabStripEl}</div>
+      ) : null}
       {/* ONE ICON AND THE TITLE (MOBILE.SESSION, owner-approved prototype v3, 2026-10-11).
           This bar carried seven things — back, links, title, task chip, bell, metrics, verbs — and
           the title, the one thing saying WHICH session this is, was squeezed to "[ LÍDER ] - M…".
@@ -2871,7 +2874,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         minHeight: 56, padding: '4px 14px 4px 4px', flexShrink: 0,
         // Installed as a PWA this is the topmost thing on the screen, so it carries the
         // status-bar band itself — see `--safe-top`.
-        paddingTop: 'calc(var(--safe-top) + 4px)',
+        paddingTop: tabStripAboveTitle && tabStripEl ? 4 : 'calc(var(--safe-top) + 4px)',
         borderBottom: '1px solid var(--border)', background: 'var(--bg-surface)',
         position: 'relative',
       }}>
