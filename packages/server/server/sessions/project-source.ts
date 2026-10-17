@@ -289,5 +289,11 @@ export async function newProjectParent(pt: boolean, home = homedir()): Promise<{
     return !path.startsWith(home) || !rel.some(seg => isHiddenFolder(seg, path))
   })
   const guess = defaultProjectParent(home, visible, pt)
-  return { path: guess.path, exists: guess.exists && await isDirectory(guess.path) }
+  return withExistence(guess.path, isDirectory)
+}
+
+/** Whether the default parent is there is read off the disk EVERY time — never off the guess, whose
+ *  `exists: false` for `<home>/projetos` stayed false after the first project created it. */
+export async function withExistence(path: string, isDir: (p: string) => Promise<boolean>): Promise<{ path: string; exists: boolean }> {
+  return { path, exists: await isDir(path) }
 }

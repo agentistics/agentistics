@@ -42,7 +42,19 @@ export function checkProjectName(raw: string): ProjectNameCheck {
 }
 
 /** The sentence for each refusal — said under the field, never as a disabled button with no why. */
-export function projectNameMessage(reason: ProjectNameRefusal | 'exists' | 'forbidden' | 'parent-missing' | 'failed', pt: boolean): string {
+/** Every code the create route can answer with. Anything else a client receives is reported as `failed`. */
+export type CreateFolderRefusal = ProjectNameRefusal | 'exists' | 'exists-other' | 'forbidden' | 'parent-missing' | 'failed'
+
+export const CREATE_FOLDER_REFUSALS: readonly CreateFolderRefusal[] = [
+  'empty', 'too-long', 'separator', 'reserved-char', 'dot-name', 'edge-space-or-dot', 'windows-reserved',
+  'exists', 'exists-other', 'forbidden', 'parent-missing', 'failed',
+]
+
+export function isCreateFolderRefusal(value: unknown): value is CreateFolderRefusal {
+  return typeof value === 'string' && (CREATE_FOLDER_REFUSALS as readonly string[]).includes(value)
+}
+
+export function projectNameMessage(reason: CreateFolderRefusal, pt: boolean): string {
   switch (reason) {
     case 'empty': return pt ? 'Dê um nome ao projeto.' : 'Give the project a name.'
     case 'too-long': return pt ? `Nome longo demais — até ${PROJECT_NAME_MAX} caracteres.` : `Name too long — up to ${PROJECT_NAME_MAX} characters.`
@@ -52,9 +64,10 @@ export function projectNameMessage(reason: ProjectNameRefusal | 'exists' | 'forb
     case 'edge-space-or-dot': return pt ? 'O nome não pode começar ou terminar com espaço, nem terminar com ponto.' : 'The name cannot start or end with a space, or end with a dot.'
     case 'windows-reserved': return pt ? 'Esse nome é reservado pelo Windows. Escolha outro.' : 'Windows reserves that name. Pick another.'
     case 'exists': return pt ? 'Já existe uma pasta com esse nome aqui.' : 'A folder with that name already exists here.'
+    case 'exists-other': return pt ? 'Já existe um arquivo ou atalho com esse nome aqui. Escolha outro nome.' : 'A file or shortcut with that name already exists here. Pick another name.'
     case 'forbidden': return pt ? 'Não posso criar pastas nesse local.' : 'I cannot create folders in that place.'
     case 'parent-missing': return pt ? 'O local escolhido não existe mais. Escolha outro.' : 'The chosen place no longer exists. Pick another.'
-    case 'failed': return pt ? 'Não consegui criar a pasta. Tente de novo.' : 'I could not create the folder. Try again.'
+    case 'failed': return pt ? 'Não consegui criar a pasta — o servidor recusou ou deu erro. Tente de novo.' : 'I could not create the folder — the server refused or failed. Try again.'
   }
 }
 

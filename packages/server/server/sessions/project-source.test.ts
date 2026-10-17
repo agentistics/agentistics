@@ -31,3 +31,12 @@ describe('project disk filtering', () => {
     expect(isExcludedProjectPath('/home/me/project', '/home/me', '/tmp')).toBe(false)
   })
 })
+
+it('newProjectParent existence is read every time, never off the guess (withExistence)', async () => {
+  const { withExistence } = await import('./project-source')
+  let there = false
+  const isDir = async () => there
+  expect(await withExistence('/h/projetos', isDir)).toEqual({ path: '/h/projetos', exists: false })
+  there = true
+  expect(await withExistence('/h/projetos', isDir)).toEqual({ path: '/h/projetos', exists: true })
+})

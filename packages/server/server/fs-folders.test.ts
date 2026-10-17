@@ -74,7 +74,7 @@ describe('allowlist', () => {
 describe('createProjectFolder', () => {
   const { mkdirSync: mk, existsSync, symlinkSync: ln, writeFileSync: wf } = require('node:fs') as typeof import('node:fs')
   const { createProjectFolder, createFolderStatus } = require('./fs-folders') as typeof import('./fs-folders')
-  const deps = { scanRoots: [] as string[], home, temporary }
+  const deps = { scanRoots: [] as string[], home, temporary, record: () => {} }
 
   test('creates the folder inside an allowed parent', async () => {
     const r = await createProjectFolder({ parent: home, name: 'meu-projeto' }, deps)
@@ -136,7 +136,7 @@ describe('createProjectFolder', () => {
     expect((await createProjectFolder({ parent: nested, name: 'x', createParent: true }, deps)).ok).toBe(false)
     expect(existsSync(join(home, 'projetos'))).toBe(false)
     const r = await createProjectFolder({ parent: join(home, 'projetos'), name: 'novo', createParent: true }, deps)
-    expect(r).toEqual({ ok: true, path: join(home, 'projetos', 'novo') })
+    expect(r).toEqual({ ok: true, path: join(home, 'projetos', 'novo'), createdParent: join(home, 'projetos') })
     expect((await createProjectFolder({ parent: join(home, 'projects'), name: 'novo' }, deps))).toEqual({ ok: false, reason: 'parent-missing' })
   })
   test('a parent that is a file is parent-missing', async () => {
@@ -162,5 +162,94 @@ describe('a created project is a valid cwd for every harness', () => {
       const out = planFleetSpawn({ harness: id, cwd: made.path }, [{ id, supportsModel: false, efforts: [] }])
       expect(out).toEqual({ ok: true, plan: { harness: id, cwd: made.path, attach: false } })
     }
+  })
+})
+
+describe('createProjectFolder — r1 security fixes', () => {
+  const fs = require('node:fs') as typeof import('node:fs')
+  const { createProjectFolder, foldsCase } = require('./fs-folders') as typeof import('./fs-folders')
+  const fresh = (tag: string) => {
+    const b = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), `fsf-${tag}-`))
+    const h = join(b, 'home'); const out = join(b, 'outside')
+    mkdirSync(h, { recursive: true }); mkdirSync(out, { recursive: true })
+    return { h, out, deps: { scanRoots: [] as string[], home: h, temporary: join(b, 'tmp'), record: () => {} } }
+  }
+
+  test('TOCTOU: a parent swapped for an outside symlink between check and mkdir is undone and refused', async () => {
+    const { h, out, deps } = fresh('swap')
+    const work = join(h, 'work'); mkdirSync(work)
+    const r = await createProjectFolder({ parent: work, name: 'evil' }, {
+      ...deps,
+      beforeMkdir: () => { fs.rmSync(work, { recursive: true }); symlinkSync(out, work) },
+    })
+    expect(r).toEqual({ ok: false, reason: 'forbidden' })
+    expect(fs.existsSync(join(out, 'evil'))).toBe(false)
+  })
+  test('a symlink component anywhere between the root and the parent is refused before any write', async () => {
+    const { h, out, deps } = fresh('chain')
+    mkdirSync(join(out, 'deep'))
+    symlinkSync(out, join(h, 'via'))
+    const r = await createProjectFolder({ parent: join(h, 'via', 'deep'), name: 'x' }, deps)
+    expect(r).toEqual({ ok: false, reason: 'forbidden' })
+    expect(fs.existsSync(join(out, 'deep', 'x'))).toBe(false)
+    // Even a symlink that stays INSIDE the home is not followed.
+    mkdirSync(join(h, 'real')); symlinkSync(join(h, 'real'), join(h, 'alias'))
+    expect(await createProjectFolder({ parent: join(h, 'alias'), name: 'y' }, deps)).toEqual({ ok: false, reason: 'forbidden' })
+    expect(fs.existsSync(join(h, 'real', 'y'))).toBe(false)
+  })
+  test('case is folded only on win32/darwin', () => {
+    expect(foldsCase('linux')).toBe(false)
+    expect(foldsCase('win32')).toBe(true)
+    expect(foldsCase('darwin')).toBe(true)
+  })
+  test('Linux: a case variant of the home is NOT the home — nothing is written there', async () => {
+    const { h, deps } = fresh('case')
+    const variant = h.replace(/home$/, 'HOME'); mkdirSync(variant)
+    const r = await createProjectFolder({ parent: join(variant, 'projects'), name: 'x', createParent: true }, { ...deps, platform: 'linux' })
+    expect(r).toEqual({ ok: false, reason: 'forbidden' })
+    expect(fs.existsSync(join(variant, 'projects'))).toBe(false)
+    expect(await createProjectFolder({ parent: join(h, 'Projetos'), name: 'x', createParent: true }, { ...deps, platform: 'linux' }))
+      .toEqual({ ok: false, reason: 'parent-missing' })
+    expect(fs.existsSync(join(h, 'Projetos'))).toBe(false)
+  })
+  test('createParent only under the HOME root, not an enabled disk', async () => {
+    const { h, deps } = fresh('disk')
+    const d = join(h, '..', 'disk'); mkdirSync(d)
+    const r = await createProjectFolder({ parent: join(d, 'projects'), name: 'x', createParent: true }, { ...deps, scanRoots: [d] })
+    expect(r).toEqual({ ok: false, reason: 'parent-missing' })
+  })
+  test('createParent creates the default parent then the project, and records both', async () => {
+    const { h, deps } = fresh('parent')
+    const seen: unknown[] = []
+    const r = await createProjectFolder({ parent: join(h, 'projetos'), name: 'loja', createParent: true }, { ...deps, record: e => seen.push(e) })
+    expect(r).toEqual({ ok: true, path: join(h, 'projetos', 'loja'), createdParent: join(h, 'projetos') })
+    expect(seen).toEqual([{ path: join(h, 'projetos', 'loja'), createdParent: join(h, 'projetos') }])
+  })
+  test('exists + path only for a real directory inside the roots; a file or symlink is exists-other', async () => {
+    const { h, out, deps } = fresh('exists')
+    mkdirSync(join(h, 'pasta'))
+    fs.writeFileSync(join(h, 'arquivo'), 'x')
+    symlinkSync(out, join(h, 'atalho'))
+    symlinkSync(join(h, 'pasta'), join(h, 'atalho-dentro'))
+    expect(await createProjectFolder({ parent: h, name: 'pasta' }, deps)).toEqual({ ok: false, reason: 'exists', path: join(h, 'pasta') })
+    for (const name of ['arquivo', 'atalho', 'atalho-dentro']) {
+      expect(await createProjectFolder({ parent: h, name }, deps)).toEqual({ ok: false, reason: 'exists-other' })
+    }
+  })
+  test('a successful creation is recorded once; a refusal records nothing', async () => {
+    const { h, out, deps } = fresh('audit')
+    const seen: unknown[] = []
+    const rec = { ...deps, record: (e: unknown) => seen.push(e) }
+    await createProjectFolder({ parent: h, name: 'ok' }, rec)
+    await createProjectFolder({ parent: h, name: 'ok' }, rec)
+    await createProjectFolder({ parent: out, name: 'no' }, rec)
+    expect(seen).toEqual([{ path: join(h, 'ok') }])
+  })
+  test('the default recorder writes one [audit] line', () => {
+    const { logFolderCreated } = require('./fs-folders') as typeof import('./fs-folders')
+    const orig = console.info; const lines: string[] = []
+    console.info = (s: string) => { lines.push(s) }
+    try { logFolderCreated({ path: '/h/x' }) } finally { console.info = orig }
+    expect(lines).toEqual(['[audit] fs.folder.create path="/h/x"'])
   })
 })
