@@ -9,7 +9,8 @@
 
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { isInsidePortalledMenu, type MenuEntry } from '../../lib/rowMenu'
+import { Pin } from 'lucide-react'
+import { isInsidePortalledMenu, menuMaxHeight, readUiZoom, type MenuEntry } from '../../lib/rowMenu'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { BetaTag } from '../BetaTag'
 import { SESSION_ROW_MENU_Z } from '../../lib/zLayers'
@@ -53,7 +54,8 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMen
   const left = x + w > window.innerWidth ? Math.max(4, x - w) : x
   // Capped to the viewport and scrollable: a long list (the tab strip's "all tabs") must never put
   // its last entries past the screen edge.
-  const maxH = Math.max(120, window.innerHeight - 8)
+  const zoom = readUiZoom()
+  const maxH = menuMaxHeight(window.innerHeight, zoom)
   const h = Math.min(entries.length * rowH + 12, maxH)
   const top = y + h > window.innerHeight ? Math.max(4, y - h) : y
 
@@ -89,6 +91,7 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMen
           onMouseEnter={ev => { if (e.enabled) ev.currentTarget.style.background = 'var(--bg-elevated)' }}
           onMouseLeave={ev => { ev.currentTarget.style.background = 'transparent' }}
         >
+          {e.pinned && <Pin aria-hidden size={11} style={{ flexShrink: 0, color: 'var(--anthropic-orange)' }} />}
           {e.color && <span aria-hidden style={{ flexShrink: 0, width: 8, height: 8, borderRadius: '50%', background: e.color }} />}
           <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.label}</span>
           {e.checked && <span aria-hidden style={{ marginLeft: 'auto', flexShrink: 0, width: 12, color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>✓</span>}

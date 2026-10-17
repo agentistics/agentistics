@@ -93,3 +93,12 @@ describe('rowMenuEntries — native store verbs', () => {
     expect(actions).toEqual(['rename', 'kill', 'resume', 'archive'])
   })
 })
+
+describe('menuMaxHeight', () => {
+  test('shrinks with the UI zoom so the last entries stay reachable', async () => {
+    const { menuMaxHeight } = await import('./rowMenu')
+    expect(menuMaxHeight(1000, 1)).toBe(992)
+    expect(menuMaxHeight(1000, 2)).toBe(492)
+    expect(menuMaxHeight(1000, NaN)).toBe(992)
+  })
+})

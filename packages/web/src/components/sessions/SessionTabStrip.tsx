@@ -137,6 +137,11 @@ function Tab({ k, row, active, pinned, mobile, pt, onPick, onClose, onMenu, onDr
   )
 }
 
+/** The previously active session per pane — outside the component because the right pane remounts
+ *  the strip on every navigation (`key={splitId}`), which would zero a ref. */
+const prevActiveByPane = new Map<string, { key: string; id: string }>()
+export function resetPrevActive(): void { prevActiveByPane.clear() }
+
 export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }: SessionTabStripProps) {
   const pt = lang === 'pt'
   const mobile = useIsMobile()
@@ -163,10 +168,9 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
 
   // Navigation IS "open a tab": whatever put a session on screen (aside, rail, `#` mention, reopen)
   // lands here, so there is exactly one place that adds one.
-  const prevActive = useRef<{ key: string; id: string } | null>(null)
   useEffect(() => {
-    const prev = prevActive.current
-    prevActive.current = { key: activeKey, id: active.id }
+    const prev = prevActiveByPane.get(pane) ?? null
+    prevActiveByPane.set(pane, { key: activeKey, id: active.id })
     updateOpenTabs(pane, cur => enterTab(cur, activeKey, prev, active.id, pins))
   }, [activeKey, active.id, pins, pane]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -280,7 +284,7 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
     const rowEntries: MenuEntry[] = order.map(k => {
       const row = byKey.get(k)
       const t = (row?.title ?? k.slice(0, 8)).replace(LEADER_PREFIX, '')
-      return { action: `go:${k}`, label: `${pins.includes(k) ? '📌 ' : ''}${t} · ${row?.stateLabel ?? ''}`, enabled: true, checked: k === activeKey, ...(row ? { color: STATE_COLOR[row.state] } : {}) }
+      return { action: `go:${k}`, label: `${t} · ${row?.stateLabel ?? ''}`, enabled: true, ...(pins.includes(k) ? { pinned: true } : {}), checked: k === activeKey, ...(row ? { color: STATE_COLOR[row.state] } : {}) }
     })
     const isEnded = (k: string) => { const row = byKey.get(k); return row ? ENDED.has(row.state) : false }
     setMenu({
