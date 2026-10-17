@@ -36,7 +36,7 @@ test('marked and legacy check-in user turns render collapsed system rows without
 
 test('expanded check-in row shows the checklist and its localized action', () => {
   const event = parseSystemEvent('[from agentistics · check-in]\nxyzzy-checklist-marker')!
-  const html = renderToStaticMarkup(<SystemEventRow event={event} pt defaultOpen />)
+  const html = renderToStaticMarkup(<SystemEventRow event={event} pt defaultOpen sessionId="leader-id" />)
   expect(html).toContain('Check-in da liderança · sistema')
   expect(html).toContain('Abrir check-in')
   expect(html).toContain('xyzzy-checklist-marker')
@@ -64,7 +64,7 @@ test('check-in controls have 44px touch targets at 390px', () => {
   const originalWidth = viewport.innerWidth
   viewport.innerWidth = 390
   try {
-    const html = renderToStaticMarkup(<SystemEventRow event={{ kind: 'checkin', body: 'checklist' }} pt={false} />)
+    const html = renderToStaticMarkup(<SystemEventRow event={{ kind: 'checkin', body: 'checklist' }} pt={false} sessionId="leader-id" />)
     // Two 44px buttons inside a 44px row with no padding and no negative margin: consecutive lines'
     // hit areas sit back to back and never overlap.
     expect(html.match(/<button[^>]*min-height:44px/g)).toHaveLength(2)
@@ -73,6 +73,11 @@ test('check-in controls have 44px touch targets at 390px', () => {
   } finally {
     viewport.innerWidth = originalWidth
   }
+})
+
+test('without a session id there is no dead "Open check-in" button', () => {
+  const html = renderToStaticMarkup(<SystemEventRow event={{ kind: 'checkin', body: 'checklist' }} pt={false} />)
+  expect(html).not.toContain('Open check-in')
 })
 
 test('injected away turn renders the event row, not a bubble', () => {

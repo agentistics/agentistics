@@ -14,7 +14,7 @@ import { Pill, type PillTone } from '../Pill'
 import { microLabel, surface } from '../tasks/board'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { closeCheckinModal, useCheckinModalRequest } from '../../lib/checkinModal'
-import { clockLabel, useCheckin, type CheckinHealthState, type CheckinRound } from '../../lib/checkin'
+import { useCheckin, type CheckinHealthState, type CheckinRound } from '../../lib/checkin'
 import { useTaskActivity, type TaskEvent } from '../../lib/tasks'
 import { useFleet } from '../../lib/fleet'
 import { sessionIdentityKey } from '../../lib/sessionIdentity'
@@ -22,7 +22,9 @@ import { sessionLinks } from '../../lib/sessionParent'
 
 const DOT: Record<CheckinHealthState, string> = { ok: 'var(--accent-green)', warn: 'var(--anthropic-orange)', bad: 'var(--accent-red)' }
 const TEXT: CSSProperties = { color: 'var(--text-primary)', fontSize: 13, lineHeight: 1.45, minWidth: 0, overflowWrap: 'anywhere' }
-const MUTED: CSSProperties = { color: 'var(--text-tertiary)' }
+// --text-tertiary is ~2.5:1 on the light card; labels here need AA (4.5:1), so they read from the primary ink.
+const LABEL = 'color-mix(in srgb, var(--text-primary) 68%, transparent)'
+const MUTED: CSSProperties = { color: LABEL }
 
 function copy(pt: boolean) {
   return pt
@@ -42,7 +44,7 @@ export function RoundStateChip({ state, pt }: { state: CheckinRound['state']; pt
 }
 
 export function Group({ label, children }: { label: string; children: ReactNode }) {
-  return <section style={{ display: 'grid', gap: 6 }}><div style={microLabel}>{label}</div>{children}</section>
+  return <section style={{ display: 'grid', gap: 6 }}><div style={{ ...microLabel, color: LABEL }}>{label}</div>{children}</section>
 }
 
 /** The facts of one round, grouped. `needs` leads, in the fault tint, when present. */
@@ -72,11 +74,14 @@ export function CheckinRoundBody({ round, pt }: { round: CheckinRound; pt: boole
       {next.length > 0 && <Group label={c.next}>{next.map((n, i) => <div key={i} style={TEXT}>{n.text}{n.when && <span style={MUTED}> · {n.when}</span>}</div>)}</Group>}
       {health.length > 0 && (
         <Group label={c.health}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 6 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 6 }}>
             {health.map((h, i) => (
-              <div key={i} style={{ ...surface, padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              <div key={i} title={`${h.label}: ${h.value}`} style={{ ...surface, padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                 <span role="img" aria-label={c.health3[h.state]} style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: DOT[h.state] }} />
-                <span title={`${h.label} ${h.value}`} style={{ ...TEXT, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}><span style={MUTED}>{h.label}</span> {h.value}</span>
+                <span style={{ minWidth: 0, display: 'grid', lineHeight: 1.3 }}>
+                  <span style={{ fontSize: 11, color: LABEL, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{h.label}</span>
+                  <span style={{ ...TEXT, fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{h.value}</span>
+                </span>
               </div>
             ))}
           </div>
@@ -136,7 +141,7 @@ export function CheckinTimeline({ history, pt, isMobile }: { history: TaskEvent[
 
 /** The modal's title row: "Check-in · 12h13" — the headline then stands alone below it. */
 export function checkinTitle(round: CheckinRound, pt: boolean): string {
-  return round.at ? `Check-in · ${clockLabel(round.at, pt)}` : 'Check-in'
+  return round.at ? `Check-in · ${roundWhen(round.at, pt)}` : 'Check-in'
 }
 
 export function CheckinModalView({ round, history, pt, isMobile, onClose }: { round: CheckinRound; history: TaskEvent[]; pt: boolean; isMobile: boolean; onClose: () => void }) {

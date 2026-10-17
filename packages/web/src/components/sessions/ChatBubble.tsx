@@ -345,7 +345,7 @@ function SystemNote({ note, noteRef, pt, sessionId }: { note: string; noteRef?: 
 
   // CHECKIN.PROMPT-SYSTEM is a notice, but its action belongs to the shared session header so
   // the same larger report view is used from both places.
-  if (note.includes('agentistics_checkin_report')) {
+  if (note.includes('agentistics_checkin_report') && sessionId) {
     return <SystemLine isMobile={isMobile}>
       <button type="button" onClick={() => openCheckinModal(sessionId)}
         style={{ ...sysLink, ...touch(isMobile) }}>
@@ -1292,7 +1292,7 @@ export function SystemEventRow({ event, pt, sessionId, titleOf, senderSessionId,
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}{title && <span style={{ color: 'var(--text-tertiary)' }}> · {title}</span>}</span>
         <ChevronDown size={12} style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : undefined }} />
       </button>
-      {event.kind === 'checkin' && <button
+      {event.kind === 'checkin' && sessionId && <button
         type="button"
         onClick={() => openCheckinModal(sessionId)}
         style={{ ...sysLink, ...touch(isMobile) }}

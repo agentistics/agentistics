@@ -31,6 +31,12 @@ test('state chip is dropped when the needs box is present, shown otherwise', () 
   expect(ok).toContain('tudo certo')
 })
 
+test('title uses the same time format as the rounds', () => {
+  const html = renderToStaticMarkup(<CheckinModalView round={{ ...round, at: Date.now() }} history={[]} pt isMobile={false} onClose={() => {}} />)
+  expect(html).not.toMatch(/Check-in · \d\dh\d\d/)
+  expect(html).toMatch(/Check-in · \d\d:\d\d/)
+})
+
 test('round times: today, yesterday, older', () => {
   const now = new Date(2026, 9, 17, 12, 0).getTime()
   expect(roundWhen(new Date(2026, 9, 17, 11, 43).getTime(), true, now)).toBe('11:43')
