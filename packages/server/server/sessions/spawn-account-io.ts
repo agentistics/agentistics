@@ -7,7 +7,7 @@
 import { featureOn, type HarnessId } from '@agentistics/core'
 import { readAccounts, type AccountsFile } from '../harness-accounts'
 import {
-  decideRecordedAccount, decideSpawnAccount, routerPicks, spawnAccountMessage, type SpawnAccountContext, type SpawnAccountDecision, type SpawnAccountRow,
+  decideRecordedAccount, decideSpawnAccount, routerPicks, spawnAccountMessage, type SpawnAccountContext, type SpawnAccountDecision, type SpawnAccountRefusal, type SpawnAccountRow,
 } from './spawn-account'
 
 /**
@@ -28,6 +28,19 @@ export function spawnRowsOf(file: Pick<AccountsFile, 'accounts' | 'bindings'>): 
     id: a.id, harness: a.harness, root: boundAt.get(a.id) ?? null, bound: boundAt.has(a.id), available: a.available,
     ...(a.retired ? { retired: true } : {}), firstSeen: a.firstSeen,
   }))
+}
+
+/**
+ * The newest registry row that drove `conversationId` — the trusted record a resume with no
+ * `replaces` (an external process, a closed conversation) inherits its account from. Same lookup as
+ * the CLI takeover. `undefined`: agentop never ran it, so it has no recorded account.
+ */
+export function newestRowOfConversation<T extends { conversationId?: string; harness: string; createdAt: string }>(
+  entries: readonly T[], conversationId: string, harness?: string,
+): T | undefined {
+  return entries
+    .filter(m => m.conversationId === conversationId && (harness === undefined || m.harness === harness))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
 }
 
 /** The registry as spawn rows. An unreadable registry is NO accounts (the default root), never a throw. */
@@ -80,13 +93,13 @@ export async function hostSpawnAccount(req: {
   accountDecided?: boolean
   login?: boolean
   callerVerified?: boolean
-}, lang: 'en' | 'pt'): Promise<{ ok: true; accountId?: string } | { ok: false; message: string }> {
+}, lang: 'en' | 'pt'): Promise<{ ok: true; accountId?: string } | { ok: false; message: string; reason: SpawnAccountRefusal }> {
   if (req.login || req.accountDecided || req.accountId !== undefined) {
     return { ok: true, ...(req.accountId ? { accountId: req.accountId } : {}) }
   }
   const decided = decideSpawnAccount({
     harness: req.harness, agentCaller: req.callerVerified === true, context: await spawnAccountContext([req.harness]),
   })
-  if (!decided.ok) return { ok: false, message: spawnAccountMessage(decided.reason, decided.detail, lang) }
+  if (!decided.ok) return { ok: false, message: spawnAccountMessage(decided.reason, decided.detail, lang), reason: decided.reason }
   return { ok: true, ...(decided.account ? { accountId: decided.account.id } : {}) }
 }

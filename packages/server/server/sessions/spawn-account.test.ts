@@ -105,6 +105,22 @@ describe('decideSpawnAccount — every harness alike', () => {
       expect(decideSpawnAccount({ harness: h, agentCaller: false, context: off })).toEqual({ ok: true })
       expect(decideSpawnAccount({ harness: h, agentCaller: true, context: { enabled: false, accounts: [home] } })).toEqual({ ok: true })
     })
+
+    test(`${h}: a retired account still bound to the default root is that root's login — agents refused, flag on and off`, () => {
+      // retire() sets retired + available:false and keeps the binding and the on-disk login.
+      const retiredHome = { ...home, retired: true, available: false }
+      for (const enabled of [true, false]) {
+        const ctx = { enabled, accounts: [retiredHome] }
+        expect(decideSpawnAccount({ harness: h, agentCaller: true, context: ctx }))
+          .toEqual({ ok: false, reason: 'account_unavailable', detail: home.id })
+        expect(decideSpawnAccount({ harness: h, agentCaller: false, context: ctx })).toEqual({ ok: true })
+      }
+      // A hand-edited file that left it available is still retired: refused.
+      expect(decideSpawnAccount({ harness: h, agentCaller: true, context: { enabled: false, accounts: [{ ...retiredHome, available: true }] } }).ok).toBe(false)
+      // A visible signed-in secondary still takes the automatic pick.
+      expect(decideSpawnAccount({ harness: h, agentCaller: true, context: on([retiredHome, second]) }))
+        .toEqual({ ok: true, account: { id: second.id, root: second.root } })
+    })
   }
 })
 
@@ -131,6 +147,12 @@ describe('decideRecordedAccount — a reopen keeps its account', () => {
       .toEqual({ ok: false, reason: 'account_unavailable', detail: 'acc_home' })
     expect(decideRecordedAccount(undefined, [homeOff], { harness: 'codex' })).toEqual({ ok: true })
     expect(decideRecordedAccount(undefined, [{ ...homeOff, available: true }], { agentCaller: true, harness: 'codex' })).toEqual({ ok: true })
+  })
+  test('a row with no account on a RETIRED default login: an agent is refused, the owner reopens', () => {
+    const retiredHome = row('codex', 'acc_home', null, { retired: true, available: false })
+    expect(decideRecordedAccount(undefined, [retiredHome], { agentCaller: true, harness: 'codex' }))
+      .toEqual({ ok: false, reason: 'account_unavailable', detail: 'acc_home' })
+    expect(decideRecordedAccount(undefined, [retiredHome], { harness: 'codex' })).toEqual({ ok: true })
   })
   test('retired → refused, unknown → refused (never the default root)', () => {
     expect(decideRecordedAccount('acc_a', [{ ...a, retired: true }])).toEqual({ ok: false, reason: 'account_retired', detail: 'acc_a' })

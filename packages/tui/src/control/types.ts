@@ -1269,7 +1269,16 @@ export interface ActionResult {
   confirm?: boolean
   /** A failed pane write classified from the post-write screen. */
   failure?: 'prompt' | 'ended' | 'unconfirmed'
+  /** PLAN.ACCOUNTS D3: refused by the account rule — the server maps it to an HTTP status. */
+  accountRefusal?: AccountRefusalCode
 }
+
+/**
+ * A structural copy of `spawn-account.ts`'s `SpawnAccountRefusal` (tui never imports the server):
+ * why a spawn or reopen was refused by the account rule.
+ */
+export type AccountRefusalCode =
+  | 'accounts_disabled' | 'unknown_account' | 'account_unavailable' | 'account_retired' | 'account_signed_out'
 
 /** What `ControlHost.selfCheck` answered. `message` is localized and present on every non-`none`. */
 export type SelfCheck =
@@ -1676,7 +1685,7 @@ export interface ControlHost {
    * list is a decision, and starting eight assistants because a list arrived empty is the accident
    * `selectFell` exists to make impossible.
    */
-  reopenFell?(ids?: readonly string[]): Promise<ActionResult>
+  reopenFell?(ids?: readonly string[], caller?: { callerVerified?: boolean }): Promise<ActionResult>
 
   /**
    * ONE PROMPT, SEVERAL SESSIONS.
@@ -2040,6 +2049,8 @@ export interface SpawnSessionResult {
    */
   overridden?: boolean
   note?: string
+  /** PLAN.ACCOUNTS D3: refused by the account rule (see `ActionResult.accountRefusal`). */
+  accountRefusal?: AccountRefusalCode
 }
 
 /**

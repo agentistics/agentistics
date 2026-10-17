@@ -27,6 +27,7 @@
  *   for agents is refused in words; the owner may still reopen it.
  */
 import { pickAccount, type AccountBudget, type HarnessId } from '@agentistics/core'
+import type { AccountRefusalCode } from '@agentistics/tui/control'
 
 /** What a spawn needs to know about one registered account — a structural subset of `HarnessAccount`. */
 export interface SpawnAccountRow {
@@ -62,6 +63,9 @@ export interface SpawnAccountContext {
 const REFUSALS: readonly string[] = [
   'accounts_disabled', 'unknown_account', 'account_unavailable', 'account_retired', 'account_signed_out',
 ] satisfies SpawnAccountRefusal[]
+// The tui's structural copy (`AccountRefusalCode`) must stay the same set, in both directions.
+const _sameRefusals: [SpawnAccountRefusal, AccountRefusalCode] = [] as unknown as [AccountRefusalCode, SpawnAccountRefusal]
+void _sameRefusals
 export const isAccountRefusal = (reason: string): reason is SpawnAccountRefusal => REFUSALS.includes(reason)
 
 const visible = (a: SpawnAccountRow) => a.available && !a.retired
@@ -69,14 +73,21 @@ const usable = (a: SpawnAccountRow) => visible(a) && a.bound
 const at = (a: SpawnAccountRow): SpawnAccount => ({ id: a.id, root: a.root })
 /** The account signed in to the harness's DEFAULT root, if the registry knows it. */
 const homeOf = (mine: readonly SpawnAccountRow[]) => mine.find(a => a.bound && a.root === null && !a.retired)
+/**
+ * The LOGIN a default-root process actually uses — retired accounts included. Retiring keeps the
+ * binding and the on-disk login, so a retired account still bound there is exactly who a spawn with
+ * no account would run as; it is not a selection candidate, but it is that root's identity.
+ */
+const defaultLoginOf = (mine: readonly SpawnAccountRow[]) => mine.find(a => a.bound && a.root === null)
 
 /**
  * The hidden-account rule for a spawn that names no account and runs in the default root (flag off,
- * or a row recorded before accounts): an agent is refused when that root's login is off for agents.
+ * a row recorded before accounts, or a flag-on pick that falls back to the default root): an agent is
+ * refused when that root's login is off for agents or retired.
  */
 function defaultRootCheck(mine: readonly SpawnAccountRow[], agentCaller: boolean): SpawnAccountDecision {
-  const home = homeOf(mine)
-  return agentCaller && home && !home.available ? { ok: false, reason: 'account_unavailable', detail: home.id } : { ok: true }
+  const login = defaultLoginOf(mine)
+  return agentCaller && login && !visible(login) ? { ok: false, reason: 'account_unavailable', detail: login.id } : { ok: true }
 }
 
 /**
@@ -103,7 +114,7 @@ export function decideSpawnAccount(input: {
     return { ok: true, account: at(found) }
   }
   const live = mine.filter(a => !a.retired)
-  if (!live.length) return { ok: true }
+  if (!live.length) return defaultRootCheck(mine, agentCaller)
   const picked = context.picks?.[harness]
   const routed = picked ? live.find(a => a.id === picked && usable(a)) : undefined
   if (routed) return { ok: true, account: at(routed) }

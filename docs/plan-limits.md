@@ -82,7 +82,9 @@ positional default for the `--session`s that follow) and every reopen.
   identity key; an engine DELEGATION is always an agent start.
 - With the flag OFF nothing is chosen or stamped and argv/env stay byte-identical, but the
   hidden-account rule still holds: an agent is refused when the default root's login is off for
-  agents.
+  agents. A RETIRED account still bound to the default root is that root's login (retiring keeps the
+  binding and the on-disk login): an agent's default launch on it is refused, flag on and off; the
+  owner may still launch there.
 - A named account that is off for agents is refused **403 `account_unavailable`** only when the
   request carries a verified session identity (an agent asking: the body's `session` proof on HTTP,
   `AGENTOP_MANAGED_ID` with the identity key on the CLI). The owner may still choose it. An unknown
@@ -93,7 +95,14 @@ positional default for the `--session`s that follow) and every reopen.
   account was retired reopens refused in words — checked BEFORE any holder process is ended. An
   AGENT reopening a row whose account is now off for agents is refused in words; the owner may still
   reopen it. A row with no `accountId` reopens in the default root, as before (an agent under the
-  default root's rule).
+  default root's rule). The group reopen ("reopen what fell", `/api/fleet/act` `reopenFell`) carries
+  the verified caller to every row's spawn. A resume with no row to replace — an external process's
+  conversation, a closed one — takes the account of the NEWEST registry row of that conversation (as
+  the CLI takeover does), so a signed-out recorded account refuses before the holder is ended; a
+  conversation agentop never ran keeps the default root.
+- An account refusal keeps its code through every host result (reopen, group reopen, external
+  continuation, Nay, the host's final recheck), and `/api/fleet/act`, `/new` and `/nay` answer it
+  with its status (403 / 409 / 422).
 - The boot MCP re-registration in claude/copilot roots runs `mcp remove` before `mcp add` (add refuses
   an existing name), so a stale entry in a root is repaired.
 - Antigravity and opencode have no isolation variable: an account root is refused for them in words

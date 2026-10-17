@@ -52,6 +52,9 @@ const windowsBackend: SessionBackend = {
  */
 let composite: SessionBackend | null = null
 
+/** Tests install a recording backend; never the owner's tmux. `null` restores the real one. */
+export function __setSessionBackendForTest(next: SessionBackend | null): void { composite = next }
+
 export async function resolveBackend(): Promise<SessionBackend> {
   if (process.platform === 'win32') return windowsBackend
   if (!composite) {

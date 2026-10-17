@@ -133,6 +133,11 @@ export interface FleetActionResponse {
   confirm?: boolean
   /** Present on a failed pane write; the browser offers the matching recovery action. */
   failure?: 'prompt' | 'ended' | 'unconfirmed'
+  /**
+   * PLAN.ACCOUNTS D3: refused by the account rule (a reopen, a group reopen, an external
+   * continuation); `index.ts` answers it with `spawnAccountStatus` (403/409/422).
+   */
+  code?: SpawnAccountRefusal
 }
 
 /**
@@ -147,6 +152,12 @@ const NO_TERMINAL = {
 }
 
 const HOSTS = new Map<CliLang, StartHost>()
+
+/** Tests install a recording host; `null` drops it so the next call builds the real one. */
+export function __setFleetHostForTest(lang: CliLang, host: StartHost | null): void {
+  if (host) HOSTS.set(lang, host)
+  else HOSTS.delete(lang)
+}
 
 /** Exported so sibling routes share the ONE host — building a second fires a second version check. */
 export async function hostForFleet(lang: CliLang): Promise<StartHost> {
@@ -662,7 +673,11 @@ async function runFleetActionOnce(
      */
     case 'reopenFell':
       if (!host.reopenFell) return { ok: false, message: s.sessionsNoHost }
-      return await host.reopenFell(ids)
+      // PLAN.ACCOUNTS D3: the verified caller reaches every spawn of the group, like `resume`.
+      {
+        const { accountRefusal, ...out } = await host.reopenFell(ids, req.callerVerified === true ? { callerVerified: true } : {})
+        return { ...out, ...(accountRefusal ? { code: accountRefusal } : {}) }
+      }
     /**
      * ONE PROMPT, SEVERAL SESSIONS. The ids narrow the fleet's own live rows, and every send still
      * goes through `promptSession`, which re-reads that session's screen as it types — see
@@ -729,7 +744,7 @@ async function runFleetActionOnce(
       // THE NEW ID TRAVELS. A reopen mints a new managed row and retires the old one, so a caller
       // that stays on the id it asked about is looking at a dead session — which is exactly how
       // "reopen does nothing" was reported, on an action the server had performed correctly.
-      return { ok: out.ok, message: out.message, ...(out.id ? { id: out.id } : {}) }
+      return { ok: out.ok, message: out.message, ...(out.id ? { id: out.id } : {}), ...(out.accountRefusal ? { code: out.accountRefusal } : {}) }
     }
   }
 }
@@ -1227,6 +1242,8 @@ export async function runFleetSpawn(
     // response already carries its own `message`, so nesting it again would give the client two
     // routes to the same sentence.
     ...(out.admission ? { code: out.admission.code, refusal: out.admission.refusal } : {}),
+    // The host's final account recheck (a root removed after planning) keeps its code too.
+    ...(out.accountRefusal ? { code: out.accountRefusal } : {}),
     ...(out.overridden ? { overridden: true as const, note: out.note } : {}),
     ...(out.queued ? { queued: out.queued } : {}),
   }
@@ -1548,5 +1565,5 @@ async function continueExternal(lang: CliLang, req: FleetActionRequest, text: st
     await recordComposerMessage(plan.conversationId, text)
     if (out.id) await recordComposerMessage(out.id, text)
   }
-  return { ok: out.ok, message: out.ok ? cli.sessContinuedHere : out.message, ...(out.id ? { id: out.id } : {}) }
+  return { ok: out.ok, message: out.ok ? cli.sessContinuedHere : out.message, ...(out.id ? { id: out.id } : {}), ...(out.accountRefusal ? { code: out.accountRefusal } : {}) }
 }

@@ -43,7 +43,7 @@ import { handoffTitle } from './handoff-inherit'
 import { addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession } from './registry'
 import { callerHoldsIdentity, callerProof, type CallerProof } from './session-identity'
 import { decideSpawnAccount, spawnAccountMessage } from './spawn-account'
-import { recordedSpawnAccount, spawnAccountContext } from './spawn-account-io'
+import { newestRowOfConversation, recordedSpawnAccount, spawnAccountContext } from './spawn-account-io'
 import { attachAfterSpawn, liveIdsOf, planSpawnFilingSafe } from './spawn-filing-io'
 import type { FilingPlan } from './spawn-filing'
 import { filingJson, filingRow, refusalText, spawnRole, WARNING_TEXT } from './spawn-row'
@@ -1292,9 +1292,7 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
   // PLAN.ACCOUNTS D3 — a conversation agentop ran before keeps that row's account (and its root);
   // one it never ran has no record and reopens in the default root, as before. Decided BEFORE the
   // holder is closed: a removed account must refuse while the user still has their assistant.
-  const previous = (await readRegistry())
-    .filter(m => m.conversationId === live.sessionId)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+  const previous = newestRowOfConversation(await readRegistry(), live.sessionId)
   const account = await recordedSpawnAccount(previous?.accountId, { agentCaller: await callerHoldsIdentity(callerSessionId()), harness: live.harness })
   if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, 'en', true)); return 1 }
   const planned = planSpawn({ harness: live.harness, cwd: live.cwd, resumeId: live.sessionId, ...(logFile ? { logFile } : {}), ...(account.account?.root ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(live.harness))
