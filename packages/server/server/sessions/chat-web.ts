@@ -36,7 +36,7 @@ import type { AttachmentMessage, AttachmentSend, HarnessId } from '@agentistics/
 import { ATTACHMENT_DIR, readAttachmentLog } from './attachment-web'
 import { transcriptReaderFor } from './harness-transcript'
 import { readChatMemo } from './chat-read-memo'
-import { conversationOfRow } from './row-conversation'
+import { conversationOfRow, foreignConversations } from './row-conversation'
 import { migratePrompts, pendingFor, type PendingPrompt } from './pending-prompts'
 import { HARNESS_PROCESS_TRANSCRIPTS } from './harness-session-file'
 import { transcriptAvailability, transcriptSentence, type TranscriptAvailability } from './transcript-availability'
@@ -316,6 +316,8 @@ async function readSessionChatCore(
       ...(row.cwd ? { cwd: row.cwd } : {}),
       // What was sent and is not echoed yet: the proof a transcript the conversation moved to is ours.
       pending: pendingFor(conversationId, []).map(p => p.text),
+      // Never follow into a sibling row's transcript — see `transcript-fork.ts` (CROSSBIND).
+      foreign: foreignConversations(fleet.sessions, row.id, conversationId),
     })
     .catch(() => null)
   if (!path) {

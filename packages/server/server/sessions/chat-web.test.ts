@@ -293,3 +293,30 @@ test('the row state decides sessionEnded for the reader (exited/lost/closed over
   }
   expect(seen).toEqual({ exited: true, lost: true, closed: true, waiting: false, working: false })
 })
+
+/**
+ * CROSSBIND — the chat read tells the reader which conversations OTHER rows own, so a fork-follow
+ * can never land in a sibling's transcript (`transcript-fork.ts`). Two rows in one folder, each
+ * linked to its own conversation: the read for one passes the other's id, and never its own.
+ */
+test('the reader is told the conversations the OTHER rows own, never its own', async () => {
+  const A = '733fde78-b310-4e23-8794-69e4243890ff'
+  const B = '606e75fb-d5e6-40ef-bb47-52f9f98364e8'
+  const host = {
+    sessions: async () => ({ sessions: [
+      { id: 'rowA', harness: 'claude', cwd: NO_PROJECT, conversationId: A, state: 'exited' },
+      { id: 'rowB', harness: 'claude', cwd: NO_PROJECT, conversationId: B, state: 'waiting' },
+      { id: `closed:${'c'.repeat(8)}`, harness: 'claude', cwd: NO_PROJECT, state: 'exited' },
+    ] }),
+  } as never
+  const seen: Array<{ conversationId: string; foreign?: ReadonlySet<string> }> = []
+  const readerFor = (() => ({
+    resolve: async (ref: { conversationId: string; foreign?: ReadonlySet<string> }) => { seen.push(ref); return null },
+    read: async () => ({ turns: [], older: false }),
+    readRecent: async () => [],
+  })) as never
+  await readSessionChat(host, 'en', 'rowA', readerFor)
+  expect(seen).toHaveLength(1)
+  expect(seen[0]!.conversationId).toBe(A)
+  expect([...(seen[0]!.foreign ?? [])]).toEqual([B])
+})

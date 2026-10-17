@@ -3,7 +3,7 @@ import type { ChatSourceRef, HarnessChat, HarnessChatDelta } from '@agentistics/
 import type { ChatTurn } from '@agentistics/core'
 import {
   adapterChatResponse, firstWindow, adapterRefused, clearAdapterRefusals, pickAdapterChat, readAdapterChat, refuseAdapter,
-  rowLive, sameAdapterSource, type AdapterChatDeps, type AdapterChatRow,
+  rowLive, sameAdapterSource, sourceForeign, type AdapterChatDeps, type AdapterChatRow,
 } from './adapter-chat'
 import type { ChatPayload } from './chat-web'
 import { onChatStreamsReset, resetChatStreams } from './chat-stream'
@@ -97,7 +97,7 @@ describe('pickAdapterChat — who takes the engine path', () => {
 })
 
 describe('adapterChatResponse', () => {
-  function open(f: ReturnType<typeof fakeChat>, o: { rowAt?: () => AdapterChatRow | null; composing?: AdapterChatDeps['composing']; current?: AdapterChatDeps['current']; onReset?: AdapterChatDeps['onReset'] } = {}) {
+  function open(f: ReturnType<typeof fakeChat>, o: { rowAt?: () => AdapterChatRow | null; composing?: AdapterChatDeps['composing']; current?: AdapterChatDeps['current']; onReset?: AdapterChatDeps['onReset']; foreign?: AdapterChatDeps['foreign'] } = {}) {
     const ticks = new Set<() => void>()
     const wakes = new Set<() => void>()
     let closedWith: boolean | null = null
@@ -112,9 +112,28 @@ describe('adapterChatResponse', () => {
       ...(o.composing ? { composing: o.composing } : {}),
       ...(o.current ? { current: o.current } : {}),
       ...(o.onReset ? { onReset: o.onReset } : {}),
+      ...(o.foreign ? { foreign: o.foreign } : {}),
     }, ctl.signal, failed => { closedWith = failed })
     return { res, ctl, tick: () => { for (const t of ticks) t() }, ticks, wakes, closedWith: () => closedWith }
   }
+
+  test('CROSSBIND: a resolved source another row owns closes the stream as a failure, unfollowed', async () => {
+    const f = fakeChat() // resolves to `/x/rollout.jsonl`
+    const s = open(f, { foreign: async () => new Set(['rollout']) })
+    await Bun.sleep(30)
+    expect(s.closedWith()).toBe(true)
+    expect(f.counts().follows).toBe(0)
+  })
+
+  test('CROSSBIND: a fork into another row\'s conversation closes the stream as a failure', async () => {
+    const f = fakeChat()
+    const s = open(f, { foreign: async () => new Set(['other-conv']) })
+    await Bun.sleep(20)
+    expect(f.counts().follows).toBe(1)
+    f.emit({ kind: 'fork', to: { harness: 'codex', conversationId: 'other-conv', sourceRef: '/x/other.jsonl' } })
+    await Bun.sleep(20)
+    expect(s.closedWith()).toBe(true)
+  })
 
   test('window → `chat` with source adapter; append → `chat-delta`; live and state pass through', async () => {
     const f = fakeChat()
@@ -370,5 +389,39 @@ describe('firstWindow — one read, then stop following', () => {
     await firstWindow(chat, src, 6, 50)
     await new Promise(r => setTimeout(r, 5))
     expect(calls.n).toBe(1)
+  })
+})
+
+/**
+ * CROSSBIND — two sessions in one folder showed each other's chat. The engine's fork-follow judges a
+ * sibling transcript by its content; the host refuses any source another row is linked to, and the
+ * legacy reader (which never follows into one) serves instead.
+ */
+describe('a source owned by ANOTHER row is refused (CROSSBIND)', () => {
+  const A = '733fde78-b310-4e23-8794-69e4243890ff'
+  const B = '606e75fb-d5e6-40ef-bb47-52f9f98364e8'
+  const toB: ChatSourceRef = { harness: 'claude', conversationId: B, sourceRef: `/p/-w/${B}.jsonl`, continuesFrom: `/p/-w/${A}.jsonl` }
+
+  test('sourceForeign reads the stated id and the file name; its own conversation is never foreign', () => {
+    expect(sourceForeign(toB, A, new Set([B]))).toBe(true)
+    expect(sourceForeign({ ...toB, conversationId: A }, A, new Set([B]))).toBe(true) // the FILE is B's
+    expect(sourceForeign({ harness: 'claude', conversationId: A, sourceRef: `/p/-w/${A}.jsonl` }, A, new Set([B]))).toBe(false)
+    expect(sourceForeign(toB, B, new Set([B]))).toBe(false)
+    expect(sourceForeign(toB, A, new Set())).toBe(false)
+  })
+
+  test('readAdapterChat: resolving into another row\'s file answers null and never follows it', async () => {
+    let follows = 0
+    const chat: HarnessChat = {
+      declares: { state: { from: 'markers' }, attention: { absent: 'no' }, live: { absent: 'no' }, fork: { from: 'file' } } as never,
+      resolve: async () => toB,
+      follow() { follows++; return () => {} },
+    }
+    const out = await readAdapterChat({
+      conversationId: A, chat, row: row({ harness: 'claude', conversationId: A, state: 'exited' }),
+      pending: [], max: 400, finish, foreign: async () => new Set([B]),
+    })
+    expect(out).toBeNull()
+    expect(follows).toBe(0)
   })
 })

@@ -123,8 +123,35 @@ export interface AdapterChatDeps {
   /** The chat-source switch moved (`resetChatStreams`): close (not as a failure) and let the client
    *  reconnect to whatever reader the switch names now. Absent = never told. */
   onReset?: (cb: () => void) => () => void
+  /**
+   * The conversations OTHER rows are linked to (CROSSBIND). A source the engine resolves or forks to
+   * that names one of them is another session's chat: the stream closes as a failure and the legacy
+   * reader — which never follows into one (`transcript-fork.ts`) — serves instead. Absent = not asked.
+   */
+  foreign?: () => Promise<ReadonlySet<string>>
   setTimer?: (f: () => void, ms: number) => unknown
   clearTimer?: (t: unknown) => void
+}
+
+/**
+ * PURE (CROSSBIND). Does this source belong to ANOTHER row? Its stated conversation, or the file it
+ * names (a Claude transcript is `<conversationId>.jsonl`), is one another row is linked to — and it is
+ * not the conversation this stream was opened for. The engine's fork-follow judges a sibling file by
+ * its content (shared uuids, a pending prompt), and two sessions in one folder can share both.
+ */
+export function sourceForeign(src: ChatSourceRef, own: string, foreign: ReadonlySet<string>): boolean {
+  const file = src.sourceRef.split(/[\\/]/).pop()?.replace(/\.jsonl$/, '') ?? ''
+  for (const c of [src.conversationId, file]) if (c && c !== own && foreign.has(c)) return true
+  return false
+}
+
+/** The warning, said once per pair, when a source is refused for belonging to another row. */
+const refusedForeign = new Set<string>()
+function logForeign(own: string, src: ChatSourceRef): void {
+  const key = `${own}\0${src.conversationId}\0${src.sourceRef}`
+  if (refusedForeign.has(key)) return
+  refusedForeign.add(key)
+  console.warn(`[sessions] refused the chat source ${src.sourceRef} for ${own}: another session is linked to that conversation`)
 }
 
 /** Which channel a stream follows: a structured session's own, or the engine's file channel for a conversation. */
@@ -242,8 +269,15 @@ export function adapterChatResponse(
         send('state', JSON.stringify({ working: d.working, ...(d.attention ? { attention: d.attention } : {}) }))
         return
       case 'fork':
-        // The engine follows the new source itself and a `window` of it follows; only the ref moves.
+        // The engine follows the new source itself and a `window` of it follows; only the ref moves —
+        // unless it moved into another row's conversation (CROSSBIND), checked before a frame is sent.
         src = d.to
+        if (deps.foreign) {
+          const to = d.to
+          void deps.foreign().then(f => {
+            if (!closed && sourceForeign(to, deps.conversationId, f)) { logForeign(deps.conversationId, to); close(true) }
+          }).catch(() => {})
+        }
         return
     }
   }
@@ -268,6 +302,11 @@ export function adapterChatResponse(
           if (!live) { close(true); return }
           schedule(); return // live, nothing written yet: the empty conversation, retried on ticks
         }
+        if (deps.foreign && sourceForeign(found, deps.conversationId, await deps.foreign())) {
+          logForeign(deps.conversationId, found)
+          close(true); return
+        }
+        if (closed) return
         src = found
         unfollow = deps.chat.follow(found, deps.max, onDelta)
       } catch {
@@ -339,6 +378,8 @@ export async function readAdapterChat(o: {
   max: number
   finish(read: { turns: ChatTurn[]; older: boolean }, live: boolean): Promise<ChatPayload>
   timeoutMs?: number
+  /** See `AdapterChatDeps.foreign`: a source owned by another row is refused (`null`, legacy serves). */
+  foreign?: () => Promise<ReadonlySet<string>>
 }): Promise<ChatPayload | null> {
   try {
     const live = rowLive(o.row)
@@ -350,6 +391,7 @@ export async function readAdapterChat(o: {
     // A live row that has not written yet is an empty conversation; a STOPPED row whose transcript
     // cannot be resolved is gone, and the legacy reader owns that diagnosis (retention, missing file).
     if (!src) return live ? adapterPayload(await o.finish({ turns: [], older: false }, live), o.row.link) : null
+    if (o.foreign && sourceForeign(src, o.conversationId, await o.foreign())) { logForeign(o.conversationId, src); return null }
     const window = await firstWindow(o.chat, src, o.max, o.timeoutMs)
     if (!window) return null
     return adapterPayload(await o.finish(window, live), o.row.link)

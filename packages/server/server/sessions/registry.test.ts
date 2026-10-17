@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createSessionRegistry, newSessionId, retireFallenSessions, retireSession } from './registry'
+import { conversationOwnedElsewhere, createSessionRegistry, newSessionId, retireFallenSessions, retireSession } from './registry'
 
 let dir = ''
 let file = ''
@@ -540,5 +540,48 @@ describe('the kept parse (PERF.IDLE)', () => {
     const rows = await reg.read()
     expect(rows.some(r => (r as { away?: boolean }).away)).toBe(false)
     expect(await reg.patchMany(['nope'], { away: null })).toBe(0)
+  })
+})
+
+/**
+ * CROSSBIND — a conversation is owned by at most one row. Two sessions started in one folder (one
+ * queued by the memory guard, one forced) are each born linked to the id agentop handed their CLI; a
+ * later link that would put the second row on the first one's conversation is refused and logged.
+ */
+describe('one conversation, one row (CROSSBIND)', () => {
+  const A = '733fde78-b310-4e23-8794-69e4243890ff'
+  const B = '606e75fb-d5e6-40ef-bb47-52f9f98364e8'
+  const born = (id: string, conversationId: string, extra: Record<string, unknown> = {}) => ({
+    ...session(id), conversationId, conversationLink: 'assigned' as const, conversationLinkVia: 'assigned-id' as const, ...extra,
+  })
+
+  it('a link onto a conversation another live row was born owning is refused, and nothing is written', async () => {
+    const r = createSessionRegistry(file)
+    await r.add(born('forced', A))
+    await r.add(born('queued', B))
+    expect(await r.link('queued', { conversationId: A, conversationLink: 'assigned', conversationLinkVia: 'harness-session-file' }))
+      .toEqual({ ok: false, heldBy: 'forced' })
+    const rows = await r.read()
+    expect(rows.find(x => x.id === 'queued')?.conversationId).toBe(B)
+    expect(rows.find(x => x.id === 'forced')?.conversationId).toBe(A)
+  })
+
+  it('a free conversation links as before', async () => {
+    const r = createSessionRegistry(file)
+    await r.add(born('forced', A))
+    await r.add(session('loose'))
+    expect(await r.link('loose', { conversationId: B, conversationLink: 'assigned', conversationLinkVia: 'process-log' })).toEqual({ ok: true })
+    expect((await r.read()).find(x => x.id === 'loose')?.conversationId).toBe(B)
+  })
+
+  it('an unknown row is not linked and not blamed on anybody', async () => {
+    expect(await createSessionRegistry(file).link('ghost', { conversationId: A })).toEqual({ ok: false })
+  })
+
+  it('the rule: an ENDED holder (a reopen\'s retired predecessor) and an inferred link never own it', () => {
+    expect(conversationOwnedElsewhere([born('old', A, { endedAt: '2026-10-17T00:00:00Z' })], 'new', A)).toBeNull()
+    expect(conversationOwnedElsewhere([born('x', A, { conversationLinkVia: 'first-sighting' })], 'y', A)).toBeNull()
+    expect(conversationOwnedElsewhere([born('x', A, { conversationLinkVia: 'protocol-stated' })], 'y', A)?.id).toBe('x')
+    expect(conversationOwnedElsewhere([born('x', A)], 'x', A)).toBeNull() // its own
   })
 })

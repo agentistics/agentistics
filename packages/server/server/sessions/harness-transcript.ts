@@ -36,6 +36,8 @@ import type { ChatTurn } from '@agentistics/core'
 import { readChatWindow, readRecentChatTurns, resolveChatTranscriptPath } from './chat-tail'
 import { readTailWindow } from './transcript-window'
 import { followFork } from './transcript-fork'
+import { readRegistry } from './registry'
+import { foreignConversations } from './row-conversation'
 import { createTranscriptPathMemo, resolveMemoizedPath } from './transcript-path-memo'
 import { parseChatName } from './gemini-family'
 import { listGeminiFamilies } from './gemini-family-io'
@@ -48,6 +50,11 @@ export interface TranscriptRef {
   cwd?: string
   /** Prompts this session was sent that may not be in the linked file yet — the proof a forked file is ours. */
   pending?: string[]
+  /**
+   * Conversation ids OTHER rows are linked to. A reader that follows a conversation into another file
+   * (claude's fork-follow) must never land in one of these — that is another session's chat.
+   */
+  foreign?: ReadonlySet<string>
 }
 
 /**
@@ -479,7 +486,14 @@ const CLAUDE: HarnessTranscript = {
   resolve: async ref => {
     if (ref.cwd === undefined) return null
     const linked = await resolveChatTranscriptPath(ref.cwd, ref.conversationId)
-    return linked ? followFork(linked, ref.pending ? { pending: ref.pending } : {}) : null
+    return linked
+      ? followFork(linked, {
+        ...(ref.pending ? { pending: ref.pending } : {}),
+        // A caller that did not say who owns what still never lands in another row's chat: the
+        // registry is asked, lazily, only when a newer sibling exists (CROSSBIND).
+        foreign: ref.foreign ?? (async () => foreignConversations(await readRegistry(), '', ref.conversationId)),
+      })
+      : null
   },
   read: (path, max, opts) => readChatWindow(path, max, opts),
   readRecent: (path, max, opts) => readRecentChatTurns(path, max, opts),

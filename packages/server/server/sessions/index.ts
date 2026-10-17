@@ -83,7 +83,8 @@ export async function resolveBackend(): Promise<SessionBackend> {
         void import('./registry').then(r => r.patchSession(id, { structuredDriver: driver })).catch(() => {})
       },
       onConversation(id, conversationId) {
-        void import('./registry').then(r => r.patchSession(id, {
+        // Refused (and logged) when another row owns that conversation — CROSSBIND, `registry.ts`.
+        void import('./registry').then(r => r.linkConversation(id, {
           conversationId, conversationLink: 'assigned', conversationLinkVia: 'protocol-stated',
         })).catch(() => {})
       },

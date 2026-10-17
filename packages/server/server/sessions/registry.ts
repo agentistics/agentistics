@@ -50,6 +50,30 @@ export function newSessionId(): string {
  * drifted: adding a field to the store meant finding each copy, and the one that was missed failed
  * as a type error at best and a silently dropped write at worst.
  */
+/** What `linkConversation` did: linked, refused because another row owns the conversation, or no such row. */
+export type LinkOutcome = { ok: true } | { ok: false; heldBy?: string }
+
+/**
+ * PURE (CROSSBIND). The OTHER row that owns `conversationId`, so that `id` may not be linked to it.
+ *
+ * Owning is narrower than "carries the id": the holder must still be in play (no `endedAt` — a reopen
+ * retires its predecessor on the same conversation, and that pair is one chat, not two) and its link
+ * must be one the conversation was CREATED under for it: the id agentop handed the CLI at spawn
+ * (`assigned-id`) or the id the protocol stated for its own session (`protocol-stated`). Nothing else
+ * can be writing that conversation as a fresh session, so a second row reaching it — by a harness
+ * file, a process log, a first sighting — is a mis-attribution, and showing it would put one
+ * session's chat under another's name. Measured 2026-10-17: two sessions in one folder each showed the
+ * other's conversation.
+ */
+export function conversationOwnedElsewhere(
+  list: readonly ManagedSession[],
+  id: string,
+  conversationId: string,
+): ManagedSession | null {
+  return list.find(s => s.id !== id && s.conversationId === conversationId && !s.endedAt
+    && (s.conversationLinkVia === 'assigned-id' || s.conversationLinkVia === 'protocol-stated')) ?? null
+}
+
 export interface SessionPatch {
   leader?: boolean
   handoffHintLevel?: number
@@ -112,6 +136,11 @@ export interface SessionRegistry {
   patch(id: string, patch: SessionPatch): Promise<boolean>
   /** The same patch on every id given, in ONE read-modify-write. Returns how many rows matched. */
   patchMany(ids: readonly string[], patch: SessionPatch): Promise<number>
+  /**
+   * Link a row to a conversation — REFUSED (`{ ok: false, heldBy }`) when another row already owns it
+   * (`conversationOwnedElsewhere`), decided inside the lock so two writers cannot both win.
+   */
+  link(id: string, patch: SessionPatch & { conversationId: string }): Promise<LinkOutcome>
   /**
    * Stamp `lastSeenMs` on every id given, in ONE write — the poller's heartbeat.
    *
@@ -438,6 +467,23 @@ export function createSessionRegistry(file: string): SessionRegistry {
         return true
       })
     },
+    link(id, patch) {
+      return enqueue(async (): Promise<LinkOutcome> => {
+        const list = await read()
+        const idx = list.findIndex(s => s.id === id)
+        if (idx === -1) return { ok: false }
+        const owner = conversationOwnedElsewhere(list, id, patch.conversationId)
+        if (owner) {
+          console.warn(`[sessions] refused to link ${id} to conversation ${patch.conversationId}: session ${owner.id} owns it`)
+          return { ok: false, heldBy: owner.id }
+        }
+        const next = { ...list[idx]!, ...patch } as Record<string, unknown>
+        for (const [k, v] of Object.entries(patch)) if (v === null) delete next[k]
+        list[idx] = next as unknown as ManagedSession
+        await write(list)
+        return { ok: true }
+      })
+    },
     patchMany(ids, patch) {
       return enqueue(async () => {
         const wanted = new Set(ids)
@@ -486,6 +532,11 @@ export const patchSession = (
   id: string,
   patch: SessionPatch,
 ): Promise<boolean> => defaultRegistry.patch(id, patch)
+/** Link a row to a conversation, refused when another row owns it — see `conversationOwnedElsewhere`. */
+export const linkConversation = (
+  id: string,
+  patch: SessionPatch & { conversationId: string },
+): Promise<LinkOutcome> => defaultRegistry.link(id, patch)
 export const patchSessions = (
   ids: readonly string[],
   patch: SessionPatch,
