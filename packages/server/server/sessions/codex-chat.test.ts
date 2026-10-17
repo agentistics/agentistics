@@ -329,12 +329,16 @@ describe('tool result pairing', () => {
       mk('a', "text(await tools.exec_command({cmd:'ls /tmp/a'}));"),
       mk('b', 'text(await tools.exec_command({cmd:`ls /tmp/b`}));'),
       mk('c', 'text(await tools.exec_command({"cmd":"ls /tmp/c"}));'),
+      mk('e', "text(await tools.exec_command({cmd:'ls ' + target}));"),
+      mk('f', 'text(await tools.exec_command({cmd:`ls ` + target}));'),
       mk('d', 'const r = paths.map(p => tools.exec_command({cmd:`sed -n 1,5p ${p}`,workdir:"/w"}));'),
     ]).flatMap(t => t.tools ?? [])
-    expect(tools[0]!.detail).toContain('ls /tmp/a')
-    expect(tools[1]!.detail).toContain('ls /tmp/b')
-    expect(tools[2]!.detail).toContain('ls /tmp/c')
-    expect(tools[3]!.detail).not.toContain('ls /tmp')
-    expect(tools[3]!.detail).toBeTruthy()
+    expect(tools[0]!.detail).toBe('ls /tmp/a')
+    expect(tools[1]!.detail).toBe('ls /tmp/b')
+    expect(tools[2]!.detail).toBe('ls /tmp/c')
+    // runtime-expression forms keep the wrapper fallback, not a truncated 'ls'
+    expect(tools[3]!.detail).toContain('tools.exec_command')
+    expect(tools[4]!.detail).toContain('tools.exec_command')
+    expect(tools[5]!.detail).toContain('tools.exec_command')
   })
 })

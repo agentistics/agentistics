@@ -135,6 +135,16 @@ export function settleTurns<T extends { pending?: boolean }>(turns: readonly T[]
  * flight, so a trailing `pending` call is history. Only `pending` is cleared: no outcome is invented,
  * so a call without a recorded result stays unmarked rather than reading as a success.
  */
+/**
+ * The CURRENT status of an open subagent. Sources: the row captured when the detail opened, the row
+ * the list poll last saw, and the status that came with the fetched activity. Running only goes one
+ * way, so ANY source that is not `running` wins; the freshest non-running answer is preferred.
+ */
+export function resolveSubagentStatus<S extends string>(opened: S, listed?: S, fetched?: S): S {
+  for (const s of [fetched, listed, opened]) if (s !== undefined && s !== 'running') return s
+  return opened
+}
+
 export function settleSubagentTurns<T extends { pending?: boolean }>(
   turns: readonly T[], status: string, parentState?: string,
 ): readonly T[] {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  artifactsPanelMax, ASIDE_DRAG_CENTRE_MIN, currentAction, edgeHint, settleTurns, settleSubagentTurns, PANEL_MIN_WIDTH, resolveArtifactLayout,
+  artifactsPanelMax, ASIDE_DRAG_CENTRE_MIN, currentAction, edgeHint, settleTurns, settleSubagentTurns, resolveSubagentStatus, PANEL_MIN_WIDTH, resolveArtifactLayout,
 } from './artifactLayout'
 
 const at = (o: Partial<Parameters<typeof resolveArtifactLayout>[0]>) =>
@@ -168,5 +168,25 @@ describe('settleSubagentTurns', () => {
   it('invents no outcome', () => {
     const out = settleSubagentTurns([{ pending: true, failed: undefined as boolean | undefined }], 'stopped')
     expect(out[0]!.failed).toBeUndefined()
+  })
+})
+
+describe('resolveSubagentStatus (a detail kept open through a transition)', () => {
+  const turns = [{ pending: true, text: 'a' }]
+  it('fetched terminal status beats the captured running row', () => {
+    for (const fetched of ['stopped', 'failed', 'unknown']) {
+      const st = resolveSubagentStatus('running', 'running', fetched)
+      expect(st).toBe(fetched)
+      // with live parent state AND with parent state missing
+      expect(settleSubagentTurns(turns, st, 'working').some(t => t.pending === true)).toBe(false)
+      expect(settleSubagentTurns(turns, st, undefined).some(t => t.pending === true)).toBe(false)
+    }
+  })
+  it('the refreshed list row also ends a captured running one', () => {
+    expect(resolveSubagentStatus('running', 'stopped', 'running')).toBe('stopped')
+  })
+  it('stays running only when every source says running', () => {
+    expect(resolveSubagentStatus('running', 'running', 'running')).toBe('running')
+    expect(resolveSubagentStatus('running')).toBe('running')
   })
 })

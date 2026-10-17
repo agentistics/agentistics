@@ -40,7 +40,7 @@ import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { asideCache, asideKey } from '../../lib/asideCache'
-import { settleSubagentTurns } from '../../lib/artifactLayout'
+import { resolveSubagentStatus, settleSubagentTurns } from '../../lib/artifactLayout'
 import { focusMissNotice, isFocusedRow, rowsCarry, ROW_FLASH } from '../../lib/noteFocus'
 import { BarChart3, Bot, Brain, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Eye, FileEdit, Loader, PanelRightClose, Pencil, Plug, Plus, Send, Sparkles, Terminal, Trash2, Workflow } from 'lucide-react'
 import { artifactShortfall, type Artifact } from '../../lib/sessionArtifacts'
@@ -61,7 +61,7 @@ import {
 import {
   SUBAGENT_PAGE, appendPage, runningCount, subagentCount, subagentStatusText, subagentsPollMs,
   subagentsStateOf, unmeasuredText, unpricedText,
-  type SubagentRow, type SubagentsPayload, type SubagentsState,
+  type SubagentRow, type SubagentStatus, type SubagentsPayload, type SubagentsState,
 } from '../../lib/subagents'
 import {
   agentDetailStateOf, agentDetailUrl, agentIsRunning, agentOpenable, agentOpensByDefault,
@@ -758,9 +758,13 @@ export function ArtifactsAside({
     // One open agent replaces the list, exactly as an open FILE does — 440px cannot hold a list and
     // a conversation side by side.
     if (openAgent) {
+      const listedStatus = agentsState?.phase === 'ready'
+        ? agentsState.rows.find(r => r.agentId === openAgent.agentId)?.status
+        : undefined
       return (
         <SubagentActivity
           sessionId={sessionId} row={openAgent} pt={pt} now={now} {...(state ? { state } : {})}
+          {...(listedStatus ? { listedStatus } : {})}
           onBack={() => setOpenAgent(null)}
         />
       )
@@ -2161,13 +2165,18 @@ function SubagentCard({ row, pt, now, onOpen }: {
  * read by one implementation rather than a second one that would drift. Its rows open the same way,
  * against the subagent's transcript (`stepUrl`'s `agentId`).
  */
-function SubagentActivity({ sessionId, row, pt, now, state, onBack }: {
-  sessionId: string; row: SubagentRow; pt: boolean; now: number; state?: string; onBack: () => void
+function SubagentActivity({ sessionId, row, pt, now, state, listedStatus, onBack }: {
+  sessionId: string; row: SubagentRow; pt: boolean; now: number; state?: string; listedStatus?: SubagentStatus; onBack: () => void
 }) {
   const [turns, setTurns] = useState<readonly LiveTurn[] | null>(null)
   /** The read stopped on its cap — this feed is a window, and says so. */
   const [older, setOlder] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
+  /** The status the fetched activity came with — the authoritative one, fresher than the opened row. */
+  const [fetchedStatus, setFetchedStatus] = useState<SubagentStatus | undefined>(undefined)
+  const status = resolveSubagentStatus(row.status, listedStatus, fetchedStatus)
+  const statusRef = useRef(status)
+  statusRef.current = status
   const tailRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -2179,27 +2188,28 @@ function SubagentActivity({ sessionId, row, pt, now, state, onBack }: {
           `/api/fleet/subagents?id=${encodeURIComponent(sessionId)}&agent=${encodeURIComponent(row.agentId)}&lang=${pt ? 'pt' : 'en'}`,
         )
         if (!alive) return
-        const body = await res.json() as { ok: boolean; turns?: LiveTurn[]; older?: boolean; message?: string }
+        const body = await res.json() as { ok: boolean; turns?: LiveTurn[]; older?: boolean; status?: SubagentStatus; message?: string }
         if (!alive) return
         if (!body.ok) { setFailed(body.message ?? (pt ? 'Não foi possível ler este subagente.' : 'This subagent could not be read.')); return }
         setFailed(null)
         setTurns(body.turns ?? [])
         setOlder(body.older === true)
+        if (typeof body.status === 'string') setFetchedStatus(body.status)
         // A RUNNING agent is still writing; a finished one cannot change, so it is read once.
-        if (row.status === 'running') timer = setTimeout(read, 3000)
+        if (resolveSubagentStatus(statusRef.current, undefined, body.status) === 'running') timer = setTimeout(read, 3000)
       } catch {
         if (alive) setFailed(pt ? 'Não foi possível ler este subagente.' : 'This subagent could not be read.')
       }
     }
     void read()
     return () => { alive = false; if (timer) clearTimeout(timer) }
-  }, [sessionId, row.agentId, row.status, pt])
+  }, [sessionId, row.agentId, pt])
 
-  const feed = useMemo(() => liveEvents(settleSubagentTurns(turns ?? [], row.status, state)), [turns, row.status, state])
+  const feed = useMemo(() => liveEvents(settleSubagentTurns(turns ?? [], status, state)), [turns, status, state])
   // Follow the tail while it is running — the newest step is the one being watched.
-  useEffect(() => { if (row.status === 'running') tailRef.current?.scrollIntoView({ block: 'end' }) }, [feed.length, row.status])
+  useEffect(() => { if (status === 'running') tailRef.current?.scrollIntoView({ block: 'end' }) }, [feed.length, status])
 
-  const st = subagentStatusText(row.status, pt)
+  const st = subagentStatusText(status, pt)
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <div style={{
@@ -2230,7 +2240,7 @@ function SubagentActivity({ sessionId, row, pt, now, state, onBack }: {
       ) : turns === null ? (
         <Note icon={<AgentisticsLoader size={16} />} text={pt ? 'Lendo…' : 'Reading…'} />
       ) : feed.length === 0 ? (
-        <Note icon={<Bot size={16} />} text={row.status === 'running'
+        <Note icon={<Bot size={16} />} text={status === 'running'
           ? (pt ? 'Este subagente começou e ainda não fez nada.' : 'This subagent has started and has not done anything yet.')
           : (pt ? 'Este subagente não registrou nenhuma ação.' : 'This subagent recorded no actions.')} />
       ) : (

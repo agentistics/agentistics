@@ -203,7 +203,8 @@ export function toolDetailOf(rawArguments: unknown): string | null {
 /** `exec` custom calls carry JS (`text(await tools.exec_command({cmd:"…"}))`): show the command, not the wrapper. */
 function execWrapperCommand(input: string): string | null {
   // Literal forms only, never evaluated: "…", '…', and `…` without `${}`; the key may be quoted.
-  const m = /(?:\bcmd|"cmd"|'cmd')\s*:\s*(?:("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')|(`(?:[^`\\$]|\\.|\$(?!\{))*`))/.exec(input)
+  // The literal must be the WHOLE property value: followed by `,`, `}` or the end, never `+ expr`.
+  const m = /(?:\bcmd|"cmd"|'cmd')\s*:\s*(?:("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')|(`(?:[^`\\$]|\\.|\$(?!\{))*`))(?=\s*[,}]|\s*$)/.exec(input)
   if (!m) return null
   const unescape = (body: string): string => body.replace(/\\(u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|[\s\S])/g, (_, c: string) => {
     if (c[0] === 'u' && c.length === 5) return String.fromCharCode(parseInt(c.slice(1), 16))
