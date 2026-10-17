@@ -157,6 +157,22 @@ export function sameLogin(
   return a.key === b.key
 }
 
+/**
+ * The account a detected identity belongs to, or none. Equal keys are not identity on their own (see
+ * `sameLogin`): the record this root is already bound to is kept when its key is unchanged — the
+ * binding is the evidence for THIS root, and claims nothing about another root holding the same key —
+ * and otherwise only a same-login record matches (the same login under an older key spelling). With
+ * no evidence the caller mints: a second row is acceptable, two people in one row is not.
+ */
+export function matchIdentity(
+  data: AccountsFile, harness: HarnessId, root: string | null, detected: AccountIdentity,
+): HarnessAccount | undefined {
+  const probe = { harness, key: detected.key, label: detected.label, root }
+  const bound = data.accounts.find(a => a.id === data.bindings[bindingKey(harness, root)])
+  if (bound && bound.harness === harness && (bound.key === detected.key || sameLogin(bound, probe))) return bound
+  return data.accounts.find(a => sameLogin(a, probe))
+}
+
 /** An id as the registry knows it now: an alias resolves to the account it was merged into. */
 export function canonicalAccountId(data: Pick<AccountsFile, 'aliases'>, id: string): string {
   let at = id
@@ -302,7 +318,9 @@ export function createHarnessAccounts(options: {
         if (!a || !HARNESS_ORDER.includes(a.harness) || !text(a.key) || !text(a.label)) continue
         const firstSeen = typeof a.firstSeen === 'number' ? a.firstSeen : now()
         const lastSeen = typeof a.lastSeen === 'number' ? a.lastSeen : now()
-        const same = data.accounts.find(x => x.harness === a.harness && x.key === a.key)
+        // Two entries are one account only on per-person evidence (`sameLogin`): an equal org-only
+        // key is shared by a whole team, so it never merges two people on its own.
+        const same = data.accounts.find(x => sameLogin(x, { harness: a.harness, key: a.key, label: a.label, root: null }))
         let account: HarnessAccount
         if (same) {
           // Duplicate (harness,key) entries are one account: keep the oldest start, newest sighting.
@@ -364,9 +382,7 @@ export function createHarnessAccounts(options: {
   function adopt(data: AccountsFile, harness: HarnessId, root: string | null, detected: AccountIdentity) {
     const key = bindingKey(harness, root)
     const previous = data.accounts.find(a => a.id === data.bindings[key])
-    let account = data.accounts.find(a => a.harness === harness && a.key === detected.key)
-      // The same login under an older spelling of its key: re-key it rather than mint a second account.
-      ?? data.accounts.find(a => sameLogin(a, { harness, key: detected.key, label: detected.label, root }))
+    let account = matchIdentity(data, harness, root, detected)
     if (account) account.key = detected.key
     if (!account) {
       account = { key: detected.key, label: detected.label, ...(detected.plan ? { plan: detected.plan } : {}),
@@ -375,7 +391,8 @@ export function createHarnessAccounts(options: {
     }
     if (previous && previous.id !== account.id && previous.root === root) previous.root = null
     account.root = root
-    account.label = detected.label
+    // An e-mail label is the evidence `sameLogin` needs later; a probe that named only the org keeps it.
+    if (!(harness === 'claude' && account.label.includes('@') && !detected.label.includes('@'))) account.label = detected.label
     if (detected.plan) account.plan = detected.plan
     account.lastSeen = now()
     account.retired = undefined
@@ -398,7 +415,7 @@ export function createHarnessAccounts(options: {
           if (bound) return legacy ? { ...bound, ...fallback(), plan: undefined } : bound
           return { ...fallback(), id: '', harness, root, available: true, firstSeen: now(), lastSeen: now() }
         }
-        if (!mutate) return data.accounts.find(a => a.harness === harness && a.key === found.key) ?? bound
+        if (!mutate) return matchIdentity(data, harness, root, found) ?? bound
           ?? { ...fallback(), id: '', harness, root, available: true, firstSeen: now(), lastSeen: now() }
         changed = true
         return adopt(data, harness, root, found).account

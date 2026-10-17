@@ -514,3 +514,57 @@ test('a writer holding an id that was folded away writes to the survivor', async
   expect(disk.accounts[0]).toMatchObject({ id: 'acc_gemroot00000', nickname: 'Home', available: false, retired: true })
   expect(disk.segments).toEqual({ acc_gemroot00000: 77 })
 })
+
+// Two people of one team org, each bound to their own root under the legacy org-only key.
+const TEAM_ORG = '00000000-0000-4000-8000-000000000006'
+async function writeTeammates(file: string) {
+  await writeFile(file, JSON.stringify({ version: 2, segments: {}, bindings: { 'claude:/tmp/ta': 'acc_team_a000000', 'claude:/tmp/tb': 'acc_team_b000000' }, accounts: [
+    { id: 'acc_team_a000000', root: '/tmp/ta', key: TEAM_ORG, harness: 'claude', label: 'a@example.invalid', nickname: 'Ana', available: true, firstSeen: 1, lastSeen: 2 },
+    { id: 'acc_team_b000000', root: '/tmp/tb', key: TEAM_ORG, harness: 'claude', label: 'b@example.invalid', available: false, firstSeen: 1, lastSeen: 3 },
+  ] }))
+}
+
+test('adoption never moves a teammate onto another person by an equal org-only key', async () => {
+  const file = join(dir, 'accounts.json')
+  await writeTeammates(file)
+  // The probe names the org and no e-mail: only the root's own binding says whose login it is.
+  const store = createHarnessAccounts({ file, probe: async () => ({ key: TEAM_ORG, label: TEAM_ORG }) })
+  expect((await store.current('claude', '/tmp/tb')).id).toBe('acc_team_b000000')
+  expect((await store.current('claude', '/tmp/ta')).id).toBe('acc_team_a000000')
+  // An unbound root with the same org-only key is nobody known: a new row, never A or B.
+  const other = await store.current('claude', '/tmp/tc')
+  expect(['acc_team_a000000', 'acc_team_b000000']).not.toContain(other.id)
+  expect((await store.current('claude', '/tmp/tc')).id).toBe(other.id)
+  const disk = JSON.parse(await readFile(file, 'utf8'))
+  const byId = Object.fromEntries(disk.accounts.map((a: { id: string }) => [a.id, a]))
+  expect(byId.acc_team_a000000).toMatchObject({ root: '/tmp/ta', label: 'a@example.invalid', nickname: 'Ana' })
+  expect(byId.acc_team_b000000).toMatchObject({ root: '/tmp/tb', label: 'b@example.invalid', available: false })
+  expect(disk.bindings['claude:/tmp/tb']).toBe('acc_team_b000000')
+})
+
+test('a direct bind of two teammates under one org-only key returns two accounts', async () => {
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json') })
+  const a = await store.bind('/tmp/ta', { harness: 'claude', key: TEAM_ORG, label: 'a@example.invalid' })
+  const b = await store.bind('/tmp/tb', { harness: 'claude', key: TEAM_ORG, label: 'b@example.invalid' })
+  expect(a.account.id).not.toBe(b.account.id)
+  // The same person again (same e-mail) is the same account.
+  expect((await store.bind('/tmp/ta2', { harness: 'claude', key: TEAM_ORG, label: 'a@example.invalid' })).account.id).toBe(a.account.id)
+})
+
+test('v1 migration keeps two teammates under one org-only key apart', async () => {
+  const file = join(dir, 'accounts.json')
+  await writeFile(file, JSON.stringify([
+    { harness: 'claude', key: TEAM_ORG, label: 'a@example.invalid', available: false, firstSeen: 1, lastSeen: 5 },
+    { harness: 'claude', key: TEAM_ORG, label: 'b@example.invalid', firstSeen: 2, lastSeen: 9 },
+    { harness: 'claude', key: TEAM_ORG, label: 'A@example.invalid', firstSeen: 3, lastSeen: 7 },
+  ]))
+  const data = await createHarnessAccounts({ file }).readAccounts()
+  const claude = data.accounts.filter(a => a.harness === 'claude')
+  expect(claude).toHaveLength(2)
+  const a = claude.find(x => x.label.toLowerCase() === 'a@example.invalid')!
+  const b = claude.find(x => x.label === 'b@example.invalid')!
+  expect(a).toMatchObject({ available: false, firstSeen: 1, lastSeen: 7 })
+  expect(b).toMatchObject({ available: true, firstSeen: 2, lastSeen: 9 })
+  const disk = JSON.parse(await readFile(file, 'utf8'))
+  expect(disk.accounts).toHaveLength(2)
+})
