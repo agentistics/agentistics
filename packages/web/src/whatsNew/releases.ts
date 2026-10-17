@@ -10,9 +10,21 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.140.4': {
+  '2.140.7': {
     features: [],
     fixes: [
+      {
+        pt: 'Buscar sessões não derruba mais a página, e a busca volta a achar sessões pelo nome antigo e pela primeira mensagem.',
+        en: 'Searching sessions no longer breaks the page, and search finds sessions by their former name and first message again.',
+      },
+      {
+        pt: 'Sessões encerradas aparecem no histórico com o nome que tinham, não com um resumo automático.',
+        en: 'Ended sessions show in the history under the name they had, not an automatic summary.',
+      },
+      {
+        pt: '"Só líderes" mostra apenas os líderes ativos, numa lista simples, e o número acompanha a busca e os filtros.',
+        en: '"Leaders only" shows just the active leaders in a plain list, and the count follows search and filters.',
+      },
       {
         pt: 'Abrir uma sessão encerrada não quebra mais a página.',
         en: 'Opening an ended session no longer breaks the page.',
@@ -48,6 +60,33 @@ export const RELEASES: Record<string, ReleaseNotes> = {
       {
         pt: 'Os presets de sessão foram removidos.',
         en: 'Session presets were removed.',
+      },
+    ],
+  },
+  '2.140.6': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O chat mostra melhor o que a sessão está fazendo: ferramentas, subagentes e alterações em arquivos.',
+        en: 'The chat shows better what a session is doing: tools, subagents and file changes.',
+      },
+    ],
+  },
+  '2.140.5': {
+    features: [
+      {
+        pt: 'Você pode cadastrar mais de uma conta por assistente.',
+        en: 'You can add more than one account per assistant.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.140.4': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Uma sessão nunca mais mostra a conversa de outra sessão.',
+        en: 'A session never shows another session\'s conversation again.',
       },
     ],
   },
