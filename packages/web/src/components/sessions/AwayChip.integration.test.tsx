@@ -40,8 +40,9 @@ beforeEach(() => { host = document.createElement('div'); document.body.appendChi
 afterEach(() => { act(() => root.unmount()); host.remove(); reset(); act(() => {}) })
 
 const dialogs = () => Array.from(document.querySelectorAll('[role="dialog"]'))
-const tab = (shift = false) => act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: shift, bubbles: true })) })
-const key = (k: string) => act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })) })
+/** Dispatches Tab and reports whether the page cancelled it (a real browser only moves focus when it is NOT cancelled). */
+const tab = (shift = false) => { const e = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: shift, bubbles: true, cancelable: true }); act(() => { document.activeElement!.dispatchEvent(e) }); return e.defaultPrevented }
+const key = (k: string) => act(() => { (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })) })
 const click = (el: Element) => act(() => { (el as HTMLElement).click() })
 const flush = () => act(async () => { await new Promise(r => setTimeout(r, 0)) })
 
@@ -74,11 +75,22 @@ describe.each([['desktop', 1280], ['mobile', 390]])('away dialog from the real â
     expect(document.getElementById(d.getAttribute('aria-labelledby')!)?.textContent).toMatch(/away mode|modo ausente/i)
   })
 
-  test('Tab and Shift+Tab stay inside the dialog', () => {
+  test('Tab on the last control wraps to the first, Shift+Tab on the first wraps to the last (and is cancelled)', () => {
     openFromMenu()
     const d = dialogs()[0]!
-    for (let i = 0; i < 8; i++) { tab(); expect(d.contains(document.activeElement)).toBe(true) }
-    for (let i = 0; i < 8; i++) { tab(true); expect(d.contains(document.activeElement)).toBe(true) }
+    const f = Array.from(d.querySelectorAll<HTMLElement>('button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'))
+    expect(f.length).toBeGreaterThan(1)
+    const first = f[0]!, last = f[f.length - 1]!
+    last.focus()
+    expect(tab()).toBe(true)
+    expect(document.activeElement).toBe(first)
+    expect(tab(true)).toBe(true)
+    expect(document.activeElement).toBe(last)
+    // focus that escaped the panel is pulled back in
+    ;(document.body as HTMLElement).focus()
+    expect(d.contains(document.activeElement)).toBe(false)
+    expect(tab()).toBe(true)
+    expect(d.contains(document.activeElement)).toBe(true)
   })
 
   test('Escape and Cancel give the focus back to the â‹¯ trigger', () => {
@@ -111,6 +123,28 @@ describe.each([['desktop', 1280], ['mobile', 390]])('away dialog from the real â
       await act(async () => { release(new Response(JSON.stringify({ ok: true }), { status: 200 })); await new Promise(r => setTimeout(r, 0)) })
       expect(dialogs()).toHaveLength(0)
     } finally { globalThis.fetch = real }
+  })
+})
+
+describe('mobile: the away dialog inside the real session Drawer', () => {
+  test('Escape closes ONLY the dialog; the drawer stays and the menu row gets the focus back', async () => {
+    const { Drawer } = await import('../../components/Drawer')
+    let drawerClosed = 0
+    mount(createElement(Drawer, { open: true, title: 'menu', side: 'left', onClose: () => { drawerClosed++ }, children: createElement('div', null,
+        createElement(SessionActions, { inline: true, row, lang: 'en', act: act0, extra: awayMenuItems({ id: row.id, actionable: true, away: true }, false, false) }),
+        createElement(AwayDialogHost)) }))
+    await flush()
+    const item = Array.from(host.querySelectorAll('button')).find(b => /away mode on this session/i.test(b.textContent ?? ''))!
+    expect(item).toBeTruthy()
+    item.focus()
+    click(item)
+    expect(dialogs()).toHaveLength(2) // the drawer + the away dialog
+    key('Escape')
+    await flush()
+    expect(dialogs()).toHaveLength(1) // only the drawer is left
+    expect(drawerClosed).toBe(0)
+    expect(item.isConnected).toBe(true)
+    expect(document.activeElement).toBe(item)
   })
 })
 

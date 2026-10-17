@@ -55,9 +55,11 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
   const armed = requireText === undefined || typed === requireText
   React.useEffect(() => {
     if (!open) return
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
-    document.addEventListener('keydown', h)
-    return () => document.removeEventListener('keydown', h)
+    // Capture on the window and stop there: the top-most modal owns Escape, so a Drawer (or any
+    // other dialog) underneath never sees the same keypress and closes with it.
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onCancel() } }
+    window.addEventListener('keydown', h, true)
+    return () => window.removeEventListener('keydown', h, true)
   }, [open, onCancel])
   const titleId = React.useId()
   const panelRef = React.useRef<HTMLDivElement>(null)
