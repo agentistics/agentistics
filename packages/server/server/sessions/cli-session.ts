@@ -39,7 +39,7 @@ import { rulesFor } from './attention-rules'
 import { renameInHarness, renameMessage } from './rename'
 import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefCandidate } from './session-ref'
 import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
-import { handoffTitle } from './handoff-inherit'
+import { handoffSpawnDefaults, handoffTitle } from './handoff-inherit'
 import { addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession } from './registry'
 import { callerHoldsIdentity, callerProof, type CallerProof } from './session-identity'
 import { attachAfterSpawn, liveIdsOf, planSpawnFilingSafe } from './spawn-filing-io'
@@ -412,6 +412,13 @@ export function callerSessionId(env: Record<string, string | undefined> = proces
   return id ? id : undefined
 }
 
+/**
+ * Said after a FAILED `--handoff` spawn. Measured 2026-10-17: a leader whose `--handoff` spawn failed
+ * retried WITHOUT the flag, and that successor came up with none of the predecessor's setup (no pin,
+ * no hand-off link, no relay) because a plain spawn inherits nothing.
+ */
+const HANDOFF_NOT_MADE = 'The hand-off was NOT made and nothing was inherited. Retry WITH --handoff once the cause is fixed — a spawn without it does not inherit the pin, folder, check-in agenda, mute or launch flags.'
+
 export async function start(
   cmd: Extract<SessionCommand, { kind: 'start' }>,
   backend: SessionBackend,
@@ -457,7 +464,10 @@ export async function start(
   const logFile = managedProcessLogPath(cmd.harness, id, AGENTISTICS_DATA_DIR)
   const parentLink = await parentLinkOf(callerSessionId())
   const parentSessionId = parentLink.parentSessionId
-  const parentVerified = await callerHoldsIdentity(parentSessionId)
+  // A hand-off already PROVED its caller by the pane above (stronger than the token check), so the
+  // predecessor's away mode and role origin are inherited on that proof.
+  const parentVerified = (cmd.handoff && !!parentSessionId && parentSessionId === parentSessionIdForPlan)
+    || await callerHoldsIdentity(parentSessionId)
   const registry0 = cmd.handoff ? await readRegistry().catch(() => [] as ManagedSession[]) : []
   // A name that already wears the leader prefix is a statement of intent: never let it silently become a worker.
   const wantedRole = cmd.handoff ? 'leader' as const : cmd.role ?? (cmd.label && hasRolePrefix(cmd.label) ? 'leader' as const : undefined)
@@ -468,12 +478,14 @@ export async function start(
   // HANDOFF: the successor keeps the predecessor's title and is briefed with the owner's last words to it.
   const handoffParentRow = cmd.handoff && parentSessionId ? registry0.find(m => m.id === parentSessionId) : undefined
   const label = cmd.handoff ? handoffTitle(handoffParentRow?.label, cmd.label) : cmd.label
+  // …and its launch flags when this hand-off did not name them (same harness only).
+  const launch = handoffParentRow ? handoffSpawnDefaults(handoffParentRow, cmd.harness, cmd) : { model: cmd.model, effort: cmd.effort }
   const relay = handoffParentRow
     ? await import('./handoff-relay-io').then(m => m.captureHandoffRelay(handoffParentRow)).catch(() => undefined)
     : undefined
   const ctx = buildSpawnContext({ ...(relay ? { handoffRelay: relay.section } : {}), ...(await resolveContextAway(away)), sessionId: id, cwd, harness: cmd.harness, lang, ...(await folderCtxFor(folderId)), ...(await resolveContextTaskByRef(filing.taskId, filing.subtaskId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
   const planned = planSpawn({
-    harness: cmd.harness, cwd, prompt: cmd.prompt, model: cmd.model, effort: cmd.effort,
+    harness: cmd.harness, cwd, prompt: cmd.prompt, model: launch.model, effort: launch.effort,
     ...(logFile ? { logFile } : {}),
     conversationId: offeredConversationId,
     context: ctx,
@@ -507,9 +519,10 @@ export async function start(
     harness: cmd.harness,
     cwd,
     createdAt: spawnedAt,
-    ...(cmd.model ? { model: cmd.model } : {}),
-    ...(cmd.effort ? { effort: cmd.effort } : {}),
+    ...(launch.model ? { model: launch.model } : {}),
+    ...(launch.effort ? { effort: launch.effort } : {}),
     ...(label ? { label } : {}),
+    ...(handoffParentRow?.note ? { note: handoffParentRow.note } : {}),
     // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
     ...filingRow(filing),
     ...(cmd.attemptId ? { attemptId: cmd.attemptId } : {}),
@@ -530,6 +543,7 @@ export async function start(
   } catch (e) {
     await removeSession(id).catch(() => {})
     console.error(`Could not start the session: ${e instanceof Error ? e.message : String(e)}`)
+    if (cmd.handoff) console.error(HANDOFF_NOT_MADE)
     return 1
   }
 
@@ -539,6 +553,7 @@ export async function start(
   const failed = await spawnFailure(backend, id, planned.plan.argv[0], cmd.harness)
   if (failed) {
     console.error(failed)
+    if (cmd.handoff) console.error(HANDOFF_NOT_MADE)
     await backend.kill(id).catch(() => {})
     await removeSession(id).catch(() => {})
     return 1

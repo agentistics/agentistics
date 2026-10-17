@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test'
 import { join, resolve } from 'path'
-import { userInfo } from 'node:os'
+import { accountHome } from './account-home'
 import { resolveDataDir } from './data-dir'
 import { AGENTISTICS_DATA_DIR, HOME_DIR } from './config'
 import { NOTIFICATIONS_FILE } from './notifications-store'
@@ -44,8 +44,13 @@ describe('this test process', () => {
   // The regression itself: a test that forgets to inject a notifier must still land somewhere
   // that is not the owner's bell.
   it('never resolves the data dir — or the notification store — to the real ~/.agentistics', () => {
-    const real = resolve(join(userInfo().homedir, '.agentistics'))
-    expect(resolve(AGENTISTICS_DATA_DIR)).not.toBe(resolve(join(HOME_DIR, '.agentistics')))
+    // The OWNER's store, read from the account database — under Bun `os.userInfo().homedir` follows
+    // `$HOME`, so under a throwaway (`agentop run --rm`, HOME = a sandbox) it named the sandbox's own,
+    // legitimately isolated `$HOME/.agentistics` and this assertion failed without any leak.
+    const real = resolve(join(accountHome() || HOME_DIR, '.agentistics'))
+    if (resolve(HOME_DIR) === resolve(accountHome() || HOME_DIR)) {
+      expect(resolve(AGENTISTICS_DATA_DIR)).not.toBe(resolve(join(HOME_DIR, '.agentistics')))
+    }
     expect(resolve(AGENTISTICS_DATA_DIR)).not.toBe(real)
     expect(resolve(NOTIFICATIONS_FILE).startsWith(real + '/')).toBe(false)
     expect(process.env.AGENTISTICS_DIR).toBe(AGENTISTICS_DATA_DIR)
