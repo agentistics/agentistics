@@ -205,8 +205,13 @@ function load(): Promise<void> {
   return loaded
 }
 
-/** Legacy `<harness>:default` keys re-keyed to an account id; the persist drops them from the file. */
-const migratedAway = new Set<string>()
+/**
+ * Keys re-keyed to another account (legacy `<harness>:default`, or an id the registry merged away):
+ * old key -> survivor account id. The persist folds whatever the FILE still holds under an old key
+ * into its survivor, newest reading winning — another process may have published a newer reading
+ * under the old key after this one moved its own, and deleting it unread would lose that reading.
+ */
+const migratedAway = new Map<string, string>()
 
 /**
  * Step 4 of C1: a meter recorded before accounts existed (`account: 'default'`) belongs to the
@@ -229,7 +234,7 @@ async function migrateDefaultRecords(registry?: AccountsFile): Promise<boolean> 
     const newKey = keyOf(next)
     state.limits[newKey] = state.limits[newKey] ? newerLimits(state.limits[newKey], next) : next
     delete state.limits[oldKey]
-    migratedAway.add(oldKey)
+    migratedAway.set(oldKey, id)
     for (const [k, v] of Object.entries(state.notices)) {
       if (!k.startsWith(`${oldKey}:`)) continue
       const nk = `${newKey}:${k.slice(oldKey.length + 1)}`
@@ -241,6 +246,26 @@ async function migrateDefaultRecords(registry?: AccountsFile): Promise<boolean> 
     moved = true
   }
   return moved
+}
+
+/**
+ * Every record under a key that no longer names its account is folded into the survivor's key:
+ * `moved` (this process's own migrations) first, then any account id the registry now aliases (a
+ * fold another process made). The newer reading per survivor wins — timestamps decide, never order.
+ */
+export function foldAliasedLimits(
+  limits: Record<string, PlanLimits>,
+  moved: ReadonlyMap<string, string>,
+  registry: Pick<AccountsFile, 'aliases'> | null,
+): void {
+  for (const [k, l] of Object.entries(limits)) {
+    const to = moved.get(k) ?? (registry && l.account !== 'default' ? canonicalAccountId(registry, l.account) : l.account)
+    if (to === l.account) continue
+    const next = { ...l, account: to }
+    const nk = keyOf(next)
+    delete limits[k]
+    limits[nk] = newerLimits(limits[nk], next)
+  }
 }
 
 let fileMtime = 0
@@ -256,7 +281,7 @@ function persistSoon(): void {
       const disk = await readFileState()
       const limits = { ...(disk?.limits ?? {}) }
       for (const [k, l] of Object.entries(state.limits)) limits[k] = newerLimits(limits[k], l)
-      for (const k of migratedAway) delete limits[k]
+      foldAliasedLimits(limits, migratedAway, await readAccounts().catch(() => null))
       const out: Persisted = { limits, notices: sink ? state.notices : (disk?.notices ?? state.notices) }
       const tmp = `${FILE()}.${process.pid}.tmp`
       await mkdir(dirname(FILE()), { recursive: true })

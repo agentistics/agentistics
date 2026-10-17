@@ -9,7 +9,7 @@ import { HARNESS_ORDER, routeRecommendation } from '@agentistics/core'
 import { noteFreshSpawn, resetHarnessSpawnability } from './sessions/harness-spawnable'
 import { spawnOutcome } from './sessions/spawn-outcome'
 import {
-  __resetPlanLimitsForTest, __setLiveTranscriptPathForTest, __setManagedLookupForTest, __settleCodexRolloutsForTest, ingestPlanLimits, latestCodexLimits, noteCodexRollout,
+  __resetPlanLimitsForTest, __setLiveTranscriptPathForTest, foldAliasedLimits, __setManagedLookupForTest, __settleCodexRolloutsForTest, ingestPlanLimits, latestCodexLimits, noteCodexRollout,
   noteStructuredLine, planLimitsPayload, planAccountKey, sampleLivePlanSessions, sessionAccountOf, setPlanLimitsSink, syncPlanLimitsFromFile,
   watchPlanLimitsFile,
 } from './plan-limits'
@@ -1049,3 +1049,34 @@ test('two real Claude Max accounts both keep capacity and routing, even when one
   expect(rec.account).toBe(b.id)
 })
 
+
+test('a newer reading published under a folded id while the move is pending is kept, not deleted', async () => {
+  const now = Date.now()
+  writeDuplicateRegistry(now)
+  const limitsFile = join(dir, 'plan-limits.json')
+  __resetPlanLimitsForTest(limitsFile)
+  __setHarnessAccountsForTest(createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => ({ key: `${ORG}:${EMAIL}`, label: EMAIL, plan: 'max' }) }))
+  // Loading moves the old id's meter to the survivor and schedules the persist.
+  await planLimitsPayload(undefined, now)
+  // Another process, which accepted a reading under the old id before the fold, publishes it now.
+  const disk = JSON.parse(readFileSync(limitsFile, 'utf8'))
+  disk.limits['claude:acc_old000000000'] = { harness: 'claude', account: 'acc_old000000000', plan: 'Claude Max 5x', source: 'claude-stream', updatedAt: now,
+    windows: [{ kind: '5h', usedPct: 77, resetsAt: now + 3_600_000 }] }
+  writeFileSync(limitsFile, JSON.stringify(disk))
+  await new Promise(r => setTimeout(r, 900))
+  const after = JSON.parse(readFileSync(limitsFile, 'utf8')).limits
+  expect(Object.keys(after).filter(k => k.startsWith('claude:'))).toEqual(['claude:acc_new000000000'])
+  expect(after['claude:acc_new000000000'].windows[0].usedPct).toBe(77)
+  expect(after['claude:acc_new000000000'].updatedAt).toBe(now)
+})
+
+test('foldAliasedLimits folds a registry alias into its survivor by timestamp, never by order', () => {
+  const meter = (account: string, at: number) => ({ harness: 'claude' as const, account, plan: 'Claude Max 5x', source: 'claude-usage-api' as const, updatedAt: at, windows: [] })
+  const limits: Record<string, ReturnType<typeof meter>> = { 'claude:old': meter('old', 50), 'claude:new': meter('new', 10), 'claude:other': meter('other', 1) }
+  foldAliasedLimits(limits, new Map(), { aliases: { old: 'new' } })
+  expect(Object.keys(limits).sort()).toEqual(['claude:new', 'claude:other'])
+  expect(limits['claude:new']).toMatchObject({ account: 'new', updatedAt: 50 })
+  const older: Record<string, ReturnType<typeof meter>> = { 'claude:new': meter('new', 90), 'claude:old': meter('old', 50) }
+  foldAliasedLimits(older, new Map(), { aliases: { old: 'new' } })
+  expect(older).toEqual({ 'claude:new': meter('new', 90) })
+})
