@@ -39,6 +39,8 @@ import { HarnessInstallDialog } from '../HarnessInstallDialog'
 import { ModelSelect, ModelId } from './ModelSelect'
 import { EffortPicker } from './EffortPicker'
 import { ProjectPicker } from './ProjectPicker'
+import { newProjectProto } from '../../lib/newProjectProto'
+import { defaultProjectParent } from '@agentistics/core'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { useEngineCaps } from '../../hooks/useEngineCaps'
 import { useNativeProviders } from '../../hooks/useNativeProviders'
@@ -180,6 +182,10 @@ export function NewSessionModal({
       ?? (harnesses.length === 1 ? harnesses[0]! : null))
   }, [harnesses])
   const [cwd, setCwd] = useState(restored?.cwd ?? '')
+  // PROTOTYPE: the default place is read off the FIRST, unfiltered list — a search must not move it.
+  // The real feature gets it from `/api/fleet/new` instead.
+  const protoParent = useRef<{ path: string; exists: boolean } | null>(null)
+  if (protoParent.current === null && projects.length > 0 && query === '') protoParent.current = defaultProjectParent(newProjectProto.home, projects.map(p => p.path), pt)
   const [task, setTask] = useState(restored?.task ?? initialTask ?? '')
   /**
    * The exact TASK (and, when the picker was used, SUBTASK) this session will be filed under, once
@@ -1007,6 +1013,10 @@ export function NewSessionModal({
               searching={searching}
               value={cwd}
               onChange={v => { setCwd(v); setDirty(true) }}
+              {...(newProjectProto.variant ? { newProject: {
+                variant: newProjectProto.variant,
+                defaultParent: protoParent.current ?? defaultProjectParent(newProjectProto.home, projects.map(p => p.path), pt),
+              } } : {})}
             />
           </Field>
 

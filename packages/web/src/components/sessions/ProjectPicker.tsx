@@ -16,12 +16,13 @@
  * tabs FILTER it, they never re-order it.
  */
 import { useMemo, useState } from 'react'
-import { FolderClock, FolderGit2, FolderOpen, FolderSymlink, Folder, Loader, Search, X } from 'lucide-react'
-import { projectKind, type ProjectKind } from '@agentistics/core'
+import { FolderClock, FolderGit2, FolderOpen, FolderPlus, FolderSymlink, Folder, Loader, Search, X } from 'lucide-react'
+import { nameFromQuery, projectKind, type ProjectKind } from '@agentistics/core'
 import {
   KIND_TABS, kindCount, kindEmpty, kindHint, kindLabel, kindMore, kindMoreText, type ProjectTab,
 } from '../../lib/projectTabs'
-import { Muted, inputStyle } from './formBits'
+import { Muted, TabStrip, inputStyle } from './formBits'
+import { NewProjectForm } from './NewProjectForm'
 import { diskLabel, shortPath } from '../../lib/folderBrowser'
 import { chooseFolderLabel } from '../../lib/projectPickerCopy'
 import { FolderBrowser } from './FolderBrowser'
@@ -56,16 +57,38 @@ export interface ProjectPickerProps {
   /** The chosen path, or `''` for "none chosen yet". */
   value: string
   onChange: (path: string) => void
+  /**
+   * PROTOTYPE (t-eab4751cb3) — "Novo projeto". A: its own tab beside "Pasta existente"; B: "+ Nova
+   * pasta aqui" inside the folder browser; C: a "+ Novo projeto" row at the top of the list, fed by
+   * the search box. Absent = today's picker, unchanged.
+   */
+  newProject?: { variant: 'A' | 'B' | 'C'; defaultParent: { path: string; exists: boolean } }
 }
 
 export function ProjectPicker({
-  lang, isMobile, projects, projectTotals, projectIndexing, projectIndexProgress, projectDisks, projectDisk, onProjectDiskChange, query, onQueryChange, searching, value, onChange,
+  lang, isMobile, projects, projectTotals, projectIndexing, projectIndexProgress, projectDisks, projectDisk, onProjectDiskChange, query, onQueryChange, searching, value, onChange, newProject,
 }: ProjectPickerProps) {
   const pt = lang === 'pt'
   /** Which kind of place the list is showing. `all` is the default — see `projectKind`. */
   const [kindTab, setKindTab] = useState<ProjectTab>('all')
   /** "Procurar pasta…" is open: the browser takes the list's place. */
   const [browsing, setBrowsing] = useState(false)
+  /** Option A's tab, option C's open form. */
+  const [mode, setMode] = useState<'existing' | 'new'>('existing')
+  const variant = newProject?.variant
+  const queryName = variant === 'C' ? nameFromQuery(query) : null
+  const created = (path: string) => { onChange(path); setMode('existing'); onQueryChange('') }
+  const form = newProject && (
+    <NewProjectForm
+      lang={lang}
+      isMobile={isMobile}
+      initialName={variant === 'C' ? queryName ?? '' : ''}
+      defaultParent={newProject.defaultParent}
+      disks={projectDisks}
+      onCreated={created}
+      {...(variant === 'C' ? { onCancel: () => setMode('existing') } : {})}
+    />
+  )
 
   /**
    * The rows, split by KIND, and the counts the tabs carry.
@@ -94,8 +117,22 @@ export function ProjectPicker({
     shownProjects.length > 0,
   )
 
+  if (variant === 'C' && mode === 'new') return <div>{form}</div>
+
   return (
     <div>
+      {variant === 'A' && (
+        <TabStrip
+          tabs={['existing', 'new'] as const}
+          value={mode}
+          onPick={setMode}
+          tap={isMobile ? 44 : undefined}
+          ariaLabel={pt ? 'Pasta' : 'Folder'}
+          icon={t => t === 'new' ? <FolderPlus size={13} /> : <FolderOpen size={13} />}
+          label={t => t === 'new' ? (pt ? 'Novo projeto' : 'New project') : (pt ? 'Pasta existente' : 'Existing folder')}
+        />
+      )}
+      {variant === 'A' && mode === 'new' ? form : (<>
       <div style={{ position: 'relative', marginBottom: 8 }}>
         <Search size={13} style={{
           position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
@@ -129,6 +166,7 @@ export function ProjectPicker({
           })()}
           onUse={path => { onChange(path); setBrowsing(false) }}
           onCancel={() => setBrowsing(false)}
+          allowCreate={variant === 'B'}
         />
       ) : (<>
       {projectDisks && projectDisks.length > 1 && (
@@ -227,6 +265,23 @@ export function ProjectPicker({
             }}><X size={14} /></button>
           </div>
         )}
+        {variant === 'C' && (
+          <button type="button" onClick={() => setMode('new')} style={{
+            display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', flexShrink: 0,
+            padding: '8px 10px', borderRadius: 8, border: '1px dashed var(--border)', minWidth: 0,
+            background: 'transparent', color: 'var(--anthropic-orange)', cursor: 'pointer', fontFamily: 'inherit',
+          }}>
+            <FolderPlus size={15} style={{ flexShrink: 0 }} />
+            <span style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {queryName ? (pt ? `Criar projeto novo “${queryName}”` : `Create new project “${queryName}”`) : (pt ? 'Criar projeto novo' : 'Create new project')}
+              </span>
+              <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {pt ? `Uma pasta nova em ${shortPath(newProject!.defaultParent.path)}` : `A new folder in ${shortPath(newProject!.defaultParent.path)}`}
+              </span>
+            </span>
+          </button>
+        )}
         {shownProjects.length === 0 && !value ? (
           /* A SENTENCE PER REASON. "Nothing matched this search" and "nothing of this kind is here"
              send a reader to two different actions — clear the box, or switch tab. */
@@ -284,9 +339,10 @@ export function ProjectPicker({
           }}
         >
           <FolderOpen size={15} style={{ flexShrink: 0 }} />
-          <span style={{ fontSize: 12.5 }}>{chooseFolderLabel(pt)}</span>
+          <span style={{ fontSize: 12.5 }}>{variant === 'B' ? (pt ? 'Não achou? Escolher ou criar pasta…' : 'Not here? Choose or create a folder…') : chooseFolderLabel(pt)}</span>
         </button>
       </div>
+      </>)}
       </>)}
     </div>
   )
