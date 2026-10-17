@@ -681,6 +681,10 @@ textarea,
 /* The working spinner. `lucide` ships a static glyph; the rotation is ours. */
 @keyframes ag-working-spin { to { transform: rotate(360deg); } }
 .ag-working-spin { animation: ag-working-spin 900ms linear infinite; }
+/* CHAT.ACTIVITY (proto): a step row lights up under the pointer and shows where it goes. */
+.ag-act-row:hover { background: var(--bg-card-hover); }
+.ag-act-row .ag-act-go { opacity: 0; transition: opacity 120ms; }
+.ag-act-row:hover .ag-act-go, .ag-act-row:focus-visible .ag-act-go { opacity: 1; }
 
 /* The microphone, while it is listening. A ring that breathes rather than a level meter: the Web
    Speech API gives no audio level, and opening a SECOND `getUserMedia` stream just to draw one
