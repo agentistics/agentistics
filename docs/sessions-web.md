@@ -343,7 +343,10 @@ Session handbacks, blocks and questions show localized event labels and a muted 
 without the sidebar's leader prefix. Unknown senders show no raw id. Both chat surfaces resolve full
 or unique short ids against the shared fleet and load its history for ended senders. Expanded notices
 render the same Markdown as assistant messages, stripping nested `pasted_content` wrappers. Session
-messages include a sender link, event kind and transcript time when available.
+messages include a sender link and transcript time when available; the event kind appears once in
+the collapsed line. Queued notices use the same collapsed system row. Only the person's queued
+messages offer **Send now** and contribute to its count; sending still submits the whole harness queue.
+Long unbroken links wrap inside an expanded notice.
 
 The aside's view-options menu starts with a collapsed **Hidden folders** section and its count.
 Expanding it reveals the existing Show controls. Expanded **Ended (N)** folder members use the rail

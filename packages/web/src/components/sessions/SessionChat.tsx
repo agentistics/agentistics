@@ -79,7 +79,7 @@ import {
 } from '../../lib/quoteCards'
 import { ROW_FLASH } from '../../lib/noteFocus'
 import { pendingEchoes, sessionIdentityKey } from '@agentistics/core'
-import { shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
+import { personQueuedCount, shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { CenteredLoader } from '../CenteredLoader'
@@ -2012,8 +2012,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const [sendNowRun, setSendNowRun] = useState<SendNowRun | null>(null)
   const queuedRef = useRef(queued)
   queuedRef.current = queued
+  const queuedPersonCount = useMemo(() => personQueuedCount(queued), [queued])
   const showSendNow = sendNowShown({
-    harness: session.harness, working, queuedCount: queued.length, dialogOpen: blocked,
+    harness: session.harness, working, queuedCount: queuedPersonCount, dialogOpen: blocked,
   }) && sendNowRun?.kind !== 'running'
   const sendNow = useCallback(async () => {
     setSendNowRun({ kind: 'running', startedAt: Date.now() })
@@ -2592,12 +2593,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
             />
           ))}
 
-          {/* SEND NOW, under the LAST queued bubble: the queue is one group and this acts on the
-              whole of it. Only while claude is working with something held (`sendNowShown`) — idle,
-              nothing is held, and elsewhere the keystroke does not exist. */}
+          {/* Only the person's queued messages offer send-now and contribute to its count.
+              The action still submits the harness's whole queue, including any system notices. */}
           <SendNowControl
             offered={showSendNow}
-            count={queued.length}
+            count={queuedPersonCount}
             run={sendNowRun}
             pt={pt}
             onSend={() => void sendNow()}

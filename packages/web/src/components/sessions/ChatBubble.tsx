@@ -1275,7 +1275,6 @@ export function SystemEventRow({ event, pt, sessionId, titleOf, senderSessionId,
             {title && (senderSessionId
               ? <a href={sessionPath(senderSessionId)} style={{ ...sysLink, ...touch(isMobile), whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{title}</a>
               : <span>{title}</span>)}
-            <span style={{ display: 'inline-flex', padding: '2px 6px', borderRadius: 4, border: '1px solid var(--border-subtle)', background: 'var(--bg-tertiary)', fontSize: 10.5, color: 'var(--text-secondary)' }}>{label}</span>
             {stamp && <time dateTime={new Date(at!).toISOString()} title={stamp.full} style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>{stamp.label}</time>}
           </div>}
           <div className="ag-chat-md"><ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{event.body || (pt ? '(sem texto)' : '(no text)')}</ReactMarkdown></div>

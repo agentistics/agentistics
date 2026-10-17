@@ -159,7 +159,7 @@ test('a composer-authored message merely mentioning the role notice stays the ow
 })
 
 
-test('expanded handback renders markdown, session link, kind and transcript time', () => {
+test('expanded handback renders markdown, session link and time without repeating the kind', () => {
   const event = parseSystemEvent('[from session ab12 · handback]\n<pasted_content id="outer">\n## Ready\n<pasted_content id="inner">\n- **Checked** `code`\n\n[Details](https://example.com)\n</pasted_content id="inner">\n</pasted_content id="outer">')!
   const html = renderToStaticMarkup(<SystemEventRow event={event} pt={false} titleOf={() => '[ LEADER ] - Review'} senderSessionId="ab12cdef" at="2026-10-17T12:00:00Z" defaultOpen />)
   expect(html).toContain('<h2>Ready</h2>')
@@ -168,7 +168,7 @@ test('expanded handback renders markdown, session link, kind and transcript time
   expect(html).toContain('<code>code</code>')
   expect(html).toContain('href="https://example.com"')
   expect(html).toContain('href="/sessions/ab12cdef"')
-  expect(html).toContain('Task handed back')
+  expect(html.match(/Task handed back/g)).toHaveLength(1)
   expect(html).toContain('<time')
   expect(html).not.toContain('pasted_content')
   expect(html).not.toContain('[ LEADER ]')
@@ -191,4 +191,31 @@ test('both chat paths resolve full, short and ended senders, and omit unknown id
       expect(html).not.toContain('body-marker')
     }
   }
+})
+
+
+test('queued handbacks use the collapsed system row without pending user chrome', () => {
+  for (const text of [
+    '[from session ab12 · handback]\nqueued-body-marker',
+    '<pasted_content id="queued">\n[from session ab12 · handback]\nqueued-body-marker\n</pasted_content id="queued">',
+  ]) {
+    const html = renderToStaticMarkup(<ChatBubble turn={{ role: 'user', text, pending: true }} sessionId="leader-id" lang="pt" harness="claude" awaiting awaitingWorking awaitingSinceMs={45000} />)
+    expect(html).toContain('Tarefa entregue')
+    expect(html).toContain(' · Leader Xyzzy')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain('queued-body-marker')
+    expect(html).not.toContain('lucide-user')
+    expect(html).not.toContain('role="status"')
+    expect(html).not.toContain('Enviar agora')
+  }
+})
+
+test('expanded long unbroken URLs inherit wrapping within the notice body', () => {
+  const url = `https://example.com/${'a'.repeat(500)}`
+  const html = renderToStaticMarkup(<SystemEventRow event={{ kind: 'handback', body: url }} pt={false} defaultOpen />)
+  expect(html).toContain(`href="${url}"`)
+  expect(html).toContain(`>${url}</a>`)
+  expect(html).toContain('overflow-wrap:anywhere')
+  expect(html).toContain('min-width:0')
+  expect(html).toContain('word-break:break-word')
 })
