@@ -33,6 +33,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'A tela de novidades volta a aparecer depois de atualizar.',
         en: 'The what\'s-new screen shows again after an update.',
       },
+      {
+        pt: 'Na passagem de líder, a nova sessão leva também as sessões silenciadas, o modelo, o esforço e a nota da anterior, e você fica sabendo quando a passagem não aconteceu.',
+        en: 'A leader hand-off now also carries the muted sessions, model, effort and note to the new session, and tells you when the hand-off did not happen.',
+      },
     ],
   },
   '2.140.3': {
