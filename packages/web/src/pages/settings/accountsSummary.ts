@@ -145,3 +145,8 @@ export function summarizeHarnesses(
 export function nextOpen(current: HarnessId | null, clicked: HarnessId): HarnessId | null {
   return current === clicked ? null : clicked
 }
+
+/** The detail modal's line: WHOSE login (even beside a nickname — the owner needs it), then the plan. */
+export function accountDetailLine(d: Pick<AccountRowData, 'label' | 'plan'>, pt: boolean, noPlan: string): string {
+  return `${accountWhose({ label: d.label }, pt) ?? d.label} · ${d.plan ?? noPlan}`
+}

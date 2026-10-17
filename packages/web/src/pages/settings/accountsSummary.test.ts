@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { PlanLimits } from '@agentistics/core'
-import { accountKey, accountState, accountTitle, accountWhose, nextOpen, summarizeHarnesses, worstBars, type AccountRowData } from './accountsSummary'
+import { accountDetailLine, accountKey, accountState, accountTitle, accountWhose, nextOpen, summarizeHarnesses, worstBars, type AccountRowData } from './accountsSummary'
 
 const NOW = 1_000_000
 const acc = (o: Partial<AccountRowData> & { id: string }): AccountRowData => ({
@@ -98,5 +98,12 @@ describe('nextOpen', () => {
     expect(nextOpen(null, 'claude')).toBe('claude')
     expect(nextOpen('claude', 'codex')).toBe('codex')
     expect(nextOpen('codex', 'codex')).toBeNull()
+  })
+})
+
+describe('L3 accountDetailLine', () => {
+  test('the detail modal still says whose login, beside the plan', () => {
+    expect(accountDetailLine({ label: 'a@b.c', plan: 'Max' }, false, 'no plan')).toBe('a@b.c · Max')
+    expect(accountDetailLine({ label: 'a@b.c' }, false, 'no plan')).toBe('a@b.c · no plan')
   })
 })
