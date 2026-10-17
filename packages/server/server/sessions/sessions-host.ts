@@ -49,6 +49,7 @@ import { backgroundWork } from './attention'
 import { adapterActivity, planScreen, type AdapterStateFeed } from './adapter-state'
 import { tailActivity, tailSkipsScreen, tailStateOf, type TailReading, type TailStateMemo } from './tail-state'
 import { linkDecision, liveLinks, moveAllowed } from './relink-policy'
+import { foreignConversations } from './row-conversation'
 
 function statQuiet(path: string): { size: number; mtimeMs: number } | null {
   try { const st = statSync(path); return { size: st.size, mtimeMs: st.mtimeMs } } catch { return null }
@@ -558,7 +559,8 @@ export function createSessionsPoller(o: {
         const transcript = (o.transcriptReader ?? transcriptReaderFor)(harnessOf.get(r.id))
         if (transcript && conversationId) {
           const path = await transcript
-            .resolve({ conversationId, ...(cwd ? { cwd } : {}) })
+            // Never followed into another row's transcript (CROSSBIND, `transcript-fork.ts`).
+            .resolve({ conversationId, ...(cwd ? { cwd } : {}), foreign: async () => foreignConversations(registry, r.id, conversationId) })
             .catch(() => null)
           if (path) {
             // PERF.IDLE: an unchanged transcript yields the same six turns, so a poll does not re-read

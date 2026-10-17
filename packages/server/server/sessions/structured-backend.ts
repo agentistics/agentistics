@@ -50,8 +50,12 @@ export interface StructuredProvider {
   flagOn?(): boolean
   /** The tmux spawn that resumes `conversationId` under the same managed id; null = no resume possible. */
   resumeSpawn?(req: BackendSpawn, conversationId: string): Promise<BackendSpawn | null>
-  /** The protocol stated the conversation id (once per session). */
-  onConversation?(id: string, conversationId: string): void
+  /**
+   * The protocol stated the conversation id. Reported once — unless it answers `'retry'` (the link
+   * was refused for a reason that can pass: a contended lock, a holder that may end), and then it is
+   * reported again on a later `list()`, after `retryMs` when given.
+   */
+  onConversation?(id: string, conversationId: string): void | Promise<void | { retry: true; retryMs?: number }>
   /** A session is now hosted over its protocol (route `structured` only). */
   onStarted?(id: string, driver: StructuredDriverId): void
   /** A structured session fell back to tmux (or could not), for the log / the row's note. */
@@ -260,6 +264,8 @@ interface Live {
   req: BackendSpawn
   declares: StructuredDeclaration | null
   reported: boolean
+  /** Not before this instant, a refused link is reported again (`onConversation` answered retry). */
+  retryAt?: number
   off: () => void
 }
 
@@ -287,10 +293,15 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
 
   const report = (id: string, l: Live) => {
     if (l.reported) return
+    if (l.retryAt !== undefined && Date.now() < l.retryAt) return
     const c = l.s.conversationId()
     if (!c) return
     l.reported = true
-    provider.onConversation?.(id, c)
+    void Promise.resolve(provider.onConversation?.(id, c)).then(r => {
+      if (!r || live.get(id) !== l) return
+      l.retryAt = Date.now() + (r.retryMs ?? 0)
+      l.reported = false
+    }, () => {})
   }
 
   const durable = provider.durable

@@ -26,6 +26,99 @@ describe('planScreen — when an adapter-stated row still needs its screen', () 
   })
 })
 
+describe('CROSSBIND: the state feed does not follow another row\'s conversation', () => {
+  it('a resolved source owned by another row is not followed', async () => {
+    const eng = fakeEngine()
+    const real = eng.chatOf('claude')!
+    const chat: HarnessChat = { ...real, async resolve() { return { harness: 'claude', conversationId: 'other-conv', sourceRef: '/x/other-conv.jsonl' } } }
+    const feed = createAdapterStateFeed({ chatOf: () => chat, foreign: async () => new Set(['other-conv']) })
+    feed.sync([{ id: 'r1', harness: 'claude', conversationId: 'conv-claude', cwd: '/repo' }])
+    await flush(); await Bun.sleep(5)
+    expect(eng.following('other-conv')).toBe(false)
+    feed.stop()
+  })
+})
+
+describe('CROSSBIND fix2: forks and ownership changes inside the subscription', () => {
+  const row = { id: 'r1', harness: 'claude', conversationId: 'conv-claude', cwd: '/repo' }
+  const to = (c: string) => ({ harness: 'claude' as const, conversationId: c, sourceRef: `/x/${c}.jsonl` })
+  const secret = { kind: 'window' as const, turns: [{ role: 'user' as const, text: 'SECRET of the other chat' }], older: false }
+  const tailText = (feed: AdapterStateFeed) => JSON.stringify(feed.tail('r1') ?? [])
+
+  it('HIGH-1: a fork into another row\'s conversation keeps NONE of its turns or state, and stops following', async () => {
+    const eng = fakeEngine()
+    const feed = createAdapterStateFeed({ chatOf: eng.chatOf, foreign: async () => new Set(['other-conv']) })
+    feed.sync([row])
+    await flush(); await Bun.sleep(5)
+    eng.emit('conv-claude', { kind: 'window', turns: [{ role: 'user', text: 'mine' }], older: false })
+    eng.emit('conv-claude', { kind: 'fork', to: to('other-conv') })
+    eng.emit('conv-claude', secret)
+    eng.emit('conv-claude', { kind: 'state', working: true })
+    expect(tailText(feed)).not.toContain('SECRET') // held aside while the check runs
+    await flush(); await Bun.sleep(5)
+    expect(tailText(feed)).not.toContain('SECRET')
+    expect(feed.reading('r1')).toBeUndefined()
+    expect(eng.following('conv-claude')).toBe(false)
+    feed.sync([row]) // refused for a while: not re-followed on the next poll
+    await flush()
+    expect(eng.following('conv-claude')).toBe(false)
+    feed.stop()
+  })
+
+  it('a fork into an UNOWNED source commits what it held once its check passes', async () => {
+    const eng = fakeEngine()
+    const feed = createAdapterStateFeed({ chatOf: eng.chatOf, foreign: async () => new Set(['other-conv']) })
+    feed.sync([row])
+    await flush(); await Bun.sleep(5)
+    eng.emit('conv-claude', { kind: 'fork', to: to('login-successor') })
+    eng.emit('conv-claude', { kind: 'window', turns: [{ role: 'user', text: 'continued' }], older: false })
+    eng.emit('conv-claude', { kind: 'state', working: true })
+    await flush(); await Bun.sleep(5)
+    expect(tailText(feed)).toContain('continued')
+    expect(feed.reading('r1')?.working).toBe(true)
+    feed.stop()
+  })
+
+  it('HIGH-2 (feed): an older fork\'s check passing never commits a newer, foreign fork\'s frames', async () => {
+    const eng = fakeEngine()
+    let call = 0
+    const feed = createAdapterStateFeed({
+      chatOf: eng.chatOf,
+      foreign: async () => { const n = ++call; await Bun.sleep(n === 2 ? 20 : n === 3 ? 80 : 0); return new Set(['other-conv']) },
+    })
+    feed.sync([row])
+    await flush(); await Bun.sleep(5)
+    eng.emit('conv-claude', { kind: 'fork', to: to('unowned') }) // check #2, 20 ms, allowed
+    eng.emit('conv-claude', { kind: 'window', turns: [{ role: 'user', text: 'fine' }], older: false })
+    eng.emit('conv-claude', { kind: 'fork', to: to('other-conv') }) // check #3, 80 ms, refused
+    eng.emit('conv-claude', secret)
+    await Bun.sleep(40) // #2 settled, #3 still pending
+    expect(tailText(feed)).not.toContain('SECRET')
+    await Bun.sleep(80)
+    expect(tailText(feed)).not.toContain('SECRET')
+    expect(eng.following('conv-claude')).toBe(false)
+    feed.stop()
+  })
+
+  it('HIGH-4 (feed): a source adopted before its owner registered is dropped on the next sync', async () => {
+    const eng = fakeEngine()
+    const real = eng.chatOf('claude')!
+    let owners = new Set<string>()
+    const chat: HarnessChat = { ...real, async resolve() { return to('other-conv') } }
+    const feed = createAdapterStateFeed({ chatOf: () => chat, foreign: async () => owners })
+    feed.sync([row])
+    await flush(); await Bun.sleep(5)
+    expect(eng.following('other-conv')).toBe(true) // nobody owned it yet
+    eng.emit('other-conv', secret)
+    owners = new Set(['other-conv']) // B registers with that conversation
+    feed.sync([row])
+    await flush(); await Bun.sleep(5)
+    expect(eng.following('other-conv')).toBe(false)
+    expect(feed.tail('r1')).toBeUndefined()
+    feed.stop()
+  })
+})
+
 describe('adapterActivity', () => {
   it('the harness says working / idle', () => {
     expect(adapterActivity({ ...idle, working: true }, undefined)).toBe('working')
