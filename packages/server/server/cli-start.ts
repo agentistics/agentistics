@@ -2049,6 +2049,8 @@ async function spawnManaged(req: {
   account?: { env: Record<string, string>; loginArgv?: string[] }
   /** PLAN.ACCOUNTS D3: see `SpawnSessionRequest.accountId`. A reopen (`inherit`) keeps the row's own. */
   accountId?: string
+  /** PLAN.ACCOUNTS D3: a VERIFIED agent is asking (see `SpawnSessionRequest.callerVerified`). */
+  callerVerified?: boolean
 }, s: CliStrings, lang: CliLang): Promise<SpawnSessionResult> {
   const backend = await resolveBackend()
   const blocked = await backend.unavailable()
@@ -2058,12 +2060,14 @@ async function spawnManaged(req: {
   // transcript exists only there), whatever the request or the flag says now. A fresh spawn's
   // account was chosen and checked by the caller (`spawn-account.ts`); it is re-read here so a
   // root removed in between refuses in words instead of starting somewhere else.
-  const accountId = req.inherit?.accountId ?? req.accountId
+  // An agent is held to the hidden-account rule here too, including a row with no account (the
+  // default root's login) — the one check every door ends in.
+  const accountId = req.inherit ? req.inherit.accountId : req.accountId
   let accountRoot: string | null = null
-  if (accountId) {
+  if (accountId || req.callerVerified) {
     const { recordedSpawnAccount } = await import('./sessions/spawn-account-io')
     const { spawnAccountMessage } = await import('./sessions/spawn-account')
-    const decided = await recordedSpawnAccount(accountId)
+    const decided = await recordedSpawnAccount(accountId, { agentCaller: req.callerVerified === true, harness: req.harness })
     if (!decided.ok) return { ok: false, message: spawnAccountMessage(decided.reason, decided.detail, lang === 'pt' ? 'pt' : 'en', !!req.inherit) }
     accountRoot = decided.account?.root ?? null
   }
@@ -2875,10 +2879,10 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
     if (plan.kind === 'refuse') return { ok: false, message: s.sessTakeoverRefused(plan.reason) }
     // PLAN.ACCOUNTS D3 — a removed account refuses BEFORE any holder is ended (`spawnManaged` would
     // refuse too, but only after the user's running assistant was already closed).
-    if (previous?.accountId) {
+    if (previous?.accountId || req.callerVerified) {
       const { recordedSpawnAccount } = await import('./sessions/spawn-account-io')
       const { spawnAccountMessage } = await import('./sessions/spawn-account')
-      const decided = await recordedSpawnAccount(previous.accountId)
+      const decided = await recordedSpawnAccount(previous?.accountId, { agentCaller: req.callerVerified === true, harness })
       if (!decided.ok) return { ok: false, message: spawnAccountMessage(decided.reason, decided.detail, lang === 'pt' ? 'pt' : 'en', true) }
     }
     if (plan.kind === 'takeover') {
@@ -2908,6 +2912,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       ...(plan.kind === 'takeover' ? { skipAdmission: true } : {}),
       // F2.0 — a web reopen of a row that ran STRUCTURED runs structured again; anything else is a TUI.
       ...(structuredReopenOrigin(req.origin, previous?.structuredDriver) ? { origin: 'web' as const } : {}),
+      ...(req.callerVerified ? { callerVerified: true } : {}),
     }, s, lang)
     if (spawned.ok) {
       // We handed this id to the CLI, so the new row KNOWS which conversation it drives — there
@@ -4577,6 +4582,17 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * than a session that starts and immediately dies with a usage error on a screen nobody sees.
      */
     async spawnSession(req: SpawnSessionRequest): Promise<SpawnSessionResult> {
+      // PLAN.ACCOUNTS D3 — the account, decided before anything is filed or spawned. A caller that
+      // already decided (`/api/fleet/new`) or a login session passes through untouched.
+      const { hostSpawnAccount } = await import('./sessions/spawn-account-io')
+      const chosen = await hostSpawnAccount({
+        harness: req.harness as HarnessId,
+        ...(req.accountId !== undefined ? { accountId: req.accountId } : {}),
+        ...(req.accountDecided ? { accountDecided: true } : {}),
+        ...(req.account ? { login: true } : {}),
+        ...(req.callerVerified ? { callerVerified: true } : {}),
+      }, lang === 'pt' ? 'pt' : 'en')
+      if (!chosen.ok) return { ok: false, message: chosen.message }
       // WHERE this session is filed is the one planner's answer (`spawn-filing.ts`), shared with
       // `session start` / `batch`: references resolved on the board, a group member filed on its
       // group, a hand-off inheriting its predecessor's filing, cwd and folder. A refusal spawns nothing.
@@ -4616,7 +4632,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.force ? { force: true } : {}),
         ...(req.origin ? { origin: req.origin } : {}),
         ...(req.account ? { account: req.account } : {}),
-        ...(req.accountId ? { accountId: req.accountId } : {}),
+        ...(chosen.accountId ? { accountId: chosen.accountId } : {}),
+        ...(req.callerVerified ? { callerVerified: true } : {}),
       }, S(), lang).then(async r => {
         let attachNote = ''
         // NW-02: a session started for a BOARD task is filed there by id, not only named after it.

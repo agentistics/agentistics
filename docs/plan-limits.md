@@ -67,18 +67,33 @@ positional default for the `--session`s that follow) and every reopen.
   `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME`, `GEMINI_CLI_HOME`, `KIMI_CODE_HOME`) through the
   spawn env, never the command line. The default root adds nothing: with the flag off, or on a
   single-account machine, argv and env are byte for byte what they were.
+- An account runs where it is SIGNED IN: its root is read from the registry's bindings, never from
+  `HarnessAccount.root` alone (a signed-out account reads `null` too, which is not the default
+  login). Naming a signed-out account, or reopening a row recorded on one, is refused in words
+  (**409 `account_signed_out`**) for the owner as well — it never runs under whatever login holds a
+  root now.
 - No `account` → the router's pick for that harness (C2's agent-visible budgets, `pickAccount`), else
-  the default root when its account is visible, else the oldest visible account. The automatic pick
-  is never an account that is off for agents.
+  the default root when its account is visible, else the oldest visible signed-in account (a
+  secondary-only account included), else the owner keeps the default root and an agent is refused.
+  The automatic pick is never an account that is off for agents. The cockpit wizard's own start goes
+  through the same decision on the host (`hostSpawnAccount`) and stamps the account it chose.
+- An agent is identified on every door: `/api/fleet/new`, `/api/fleet/nay` and `/api/fleet/act`
+  (reopen) read the body's `session` proof server-side; the CLI reads `AGENTOP_MANAGED_ID` with the
+  identity key; an engine DELEGATION is always an agent start.
+- With the flag OFF nothing is chosen or stamped and argv/env stay byte-identical, but the
+  hidden-account rule still holds: an agent is refused when the default root's login is off for
+  agents.
 - A named account that is off for agents is refused **403 `account_unavailable`** only when the
   request carries a verified session identity (an agent asking: the body's `session` proof on HTTP,
   `AGENTOP_MANAGED_ID` with the identity key on the CLI). The owner may still choose it. An unknown
   id is **422 `unknown_account`**, a retired one **409 `account_retired`**, and naming any account
   with the flag off is refused in words (`accounts_disabled`).
 - `ManagedSession.accountId` is stamped at spawn and is immutable: reopen, attach, restart and the
-  takeover of a running conversation inherit it and run in that root (the transcript exists only
-  there). A row whose account was retired reopens refused in words — checked BEFORE any holder
-  process is ended. A row with no `accountId` reopens in the default root, as before.
+  takeover of a running conversation inherit it and run in that account, never another. A row whose
+  account was retired reopens refused in words — checked BEFORE any holder process is ended. An
+  AGENT reopening a row whose account is now off for agents is refused in words; the owner may still
+  reopen it. A row with no `accountId` reopens in the default root, as before (an agent under the
+  default root's rule).
 - The boot MCP re-registration in claude/copilot roots runs `mcp remove` before `mcp add` (add refuses
   an existing name), so a stale entry in a root is repaired.
 - Antigravity and opencode have no isolation variable: an account root is refused for them in words

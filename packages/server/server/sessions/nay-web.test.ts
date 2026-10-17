@@ -25,6 +25,15 @@ describe('startNaySession', () => {
     expect(calls.filed).toBe('conv-of-m1')
   })
 
+  test('a Nay start by a VERIFIED agent carries that identity to the spawn (never owner privileges)', async () => {
+    const { d, calls } = deps()
+    await startNaySession('en', d, {}, { callerVerified: true })
+    expect(calls.spawned).toMatchObject({ callerVerified: true })
+    const owner = deps()
+    await startNaySession('en', owner.d, {}, { callerVerified: false })
+    expect(owner.calls.spawned).not.toHaveProperty('callerVerified')
+  })
+
   test('it starts with what the launch plan chose, and says so in the reply', async () => {
     const { d, calls } = deps({ launch: async () => ({ ok: true, harness: 'claude', model: 'claude-opus-5-5', effort: 'high' }) })
     const out = await startNaySession('en', d)

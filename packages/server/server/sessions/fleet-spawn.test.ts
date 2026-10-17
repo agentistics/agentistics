@@ -17,7 +17,7 @@ describe('planFleetSpawn', () => {
     const out = planFleetSpawn({ harness: 'claude', cwd: '/home/me/repo' }, HARNESSES)
     expect(out).toEqual({
       ok: true,
-      plan: { harness: 'claude', cwd: '/home/me/repo', attach: false },
+      plan: { harness: 'claude', cwd: '/home/me/repo', accountDecided: true, attach: false },
     })
   })
 
@@ -41,6 +41,7 @@ describe('planFleetSpawn', () => {
       model: 'gemini-3.6-flash',
       effort: 'high',
       label: 'docs pass',
+      accountDecided: true,
       attach: false,
     })
   })
@@ -237,17 +238,17 @@ describe('planFleetSpawn — the account (PLAN.ACCOUNTS D3)', () => {
   const accounts = {
     enabled: true,
     accounts: [
-      { id: 'acc_home', harness: 'claude' as const, root: null, available: true, firstSeen: 1 },
-      { id: 'acc_two', harness: 'claude' as const, root: '/data/accounts/claude/r_2', available: true, firstSeen: 2 },
-      { id: 'acc_off', harness: 'claude' as const, root: '/data/accounts/claude/r_3', available: false, firstSeen: 3 },
-      { id: 'acc_gone', harness: 'claude' as const, root: '/data/accounts/claude/r_4', available: true, retired: true, firstSeen: 4 },
+      { id: 'acc_home', harness: 'claude' as const, root: null, bound: true, available: true, firstSeen: 1 },
+      { id: 'acc_two', harness: 'claude' as const, root: '/data/accounts/claude/r_2', bound: true, available: true, firstSeen: 2 },
+      { id: 'acc_off', harness: 'claude' as const, root: '/data/accounts/claude/r_3', bound: true, available: false, firstSeen: 3 },
+      { id: 'acc_gone', harness: 'claude' as const, root: '/data/accounts/claude/r_4', bound: true, available: true, retired: true, firstSeen: 4 },
     ],
     picks: { claude: 'acc_two' },
   }
   const base = { harness: 'claude', cwd: '/home/me/repo' }
 
   it('flag off: the plan is exactly what it was, and an explicit account is refused in words', () => {
-    expect(planFleetSpawn(base, HARNESSES)).toEqual({ ok: true, plan: { harness: 'claude', cwd: '/home/me/repo', attach: false } })
+    expect(planFleetSpawn(base, HARNESSES)).toEqual({ ok: true, plan: { harness: 'claude', cwd: '/home/me/repo', accountDecided: true, attach: false } })
     expect(planFleetSpawn({ ...base, account: 'acc_two' }, HARNESSES)).toMatchObject({ ok: false, reason: 'accounts_disabled' })
   })
   it('an explicit account is carried by id', () => {
@@ -270,6 +271,18 @@ describe('planFleetSpawn — the account (PLAN.ACCOUNTS D3)', () => {
   })
   it('no account → the router pick', () => {
     expect(planFleetSpawn(base, HARNESSES, accounts)).toMatchObject({ ok: true, plan: { accountId: 'acc_two' } })
+  })
+  it('the verified identity travels to the host; the decision is marked made', () => {
+    expect(planFleetSpawn({ ...base, callerVerified: true }, HARNESSES, accounts))
+      .toMatchObject({ ok: true, plan: { accountId: 'acc_two', accountDecided: true, callerVerified: true } })
+    const plan = planFleetSpawn(base, HARNESSES, accounts)
+    expect(plan.ok && 'callerVerified' in plan.plan).toBe(false)
+  })
+  it('flag off: an agent is still refused the default root whose login is off for agents', () => {
+    const off = { enabled: false, accounts: [{ id: 'acc_home', harness: 'claude' as const, root: null, bound: true, available: false, firstSeen: 1 }] }
+    expect(planFleetSpawn({ ...base, callerVerified: true }, HARNESSES, off))
+      .toEqual({ ok: false, reason: 'account_unavailable', detail: 'acc_home' })
+    expect(planFleetSpawn(base, HARNESSES, off)).toMatchObject({ ok: true })
   })
   it('a usage error is reported before an account refusal', () => {
     expect(planFleetSpawn({ ...base, cwd: 'rel', account: 'acc_off', callerVerified: true }, HARNESSES, accounts))

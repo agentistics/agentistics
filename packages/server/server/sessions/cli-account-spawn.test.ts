@@ -93,3 +93,35 @@ describe('session start --account', () => {
     } finally { process.env.AGENTISTICS_MULTI_ACCOUNT = '1' }
   })
 })
+
+describe('the host door (the cockpit wizard) decides through the same rule', () => {
+  test('a fresh cockpit spawn takes the visible account and stamps it, never the hidden default', async () => {
+    const { hostSpawnAccount } = await import('./spawn-account-io')
+    expect(await hostSpawnAccount({ harness: 'claude' }, 'en')).toEqual({ ok: true, accountId: secondId })
+    expect(await hostSpawnAccount({ harness: 'claude', callerVerified: true }, 'en')).toEqual({ ok: true, accountId: secondId })
+  })
+  test('an already-decided request and a login session pass through untouched', async () => {
+    const { hostSpawnAccount } = await import('./spawn-account-io')
+    expect(await hostSpawnAccount({ harness: 'claude', accountDecided: true }, 'en')).toEqual({ ok: true })
+    expect(await hostSpawnAccount({ harness: 'claude', login: true }, 'en')).toEqual({ ok: true })
+    expect(await hostSpawnAccount({ harness: 'claude', accountId: homeId }, 'en')).toEqual({ ok: true, accountId: homeId })
+  })
+  test('flag off: an agent is still refused the hidden default login; the owner is not', async () => {
+    process.env.AGENTISTICS_MULTI_ACCOUNT = '0'
+    try {
+      const { hostSpawnAccount } = await import('./spawn-account-io')
+      const agent = await hostSpawnAccount({ harness: 'claude', callerVerified: true }, 'en')
+      expect(agent.ok).toBe(false)
+      if (!agent.ok) expect(agent.message).toContain('off for agents')
+      expect(await hostSpawnAccount({ harness: 'claude' }, 'en')).toEqual({ ok: true })
+    } finally { process.env.AGENTISTICS_MULTI_ACCOUNT = '1' }
+  })
+  test('an agent reopening a row whose account is off for agents is refused; the owner reopens it', async () => {
+    const { recordedSpawnAccount } = await import('./spawn-account-io')
+    expect(await recordedSpawnAccount(homeId, { agentCaller: true, harness: 'claude' }))
+      .toEqual({ ok: false, reason: 'account_unavailable', detail: homeId })
+    expect(await recordedSpawnAccount(homeId, { harness: 'claude' })).toEqual({ ok: true, account: { id: homeId, root: null } })
+    // A row recorded before accounts runs in the default root — whose login is off for agents.
+    expect((await recordedSpawnAccount(undefined, { agentCaller: true, harness: 'claude' })).ok).toBe(false)
+  })
+})

@@ -501,6 +501,20 @@ test('a hidden harness is absent from the harnesses map while a visible non-spaw
   expect(body.harnesses.gemini?.unavailableReason).toBeTruthy()
 })
 
+test('an all-OFF harness with no meter, no live session and no Billing profile is still not named', async () => {
+  const now = Date.now()
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), now: () => now, probe: async () => ({ key: 'gh:me', label: 'me' }) })
+  __setHarnessAccountsForTest(store)
+  await store.current(['copilot'])
+  await store.setAvailable('copilot', 'gh:me', false)
+  const body = await planLimitsPayload(undefined, now, [])
+  expect(body.limits).toEqual([])
+  expect(Object.keys(body.harnesses)).not.toContain('copilot')
+  expect(JSON.stringify(planLimitsTool({ kind: 'spec-impl' }, body))).not.toContain('copilot')
+  await store.setAvailable('copilot', 'gh:me', true)
+  expect(Object.keys((await planLimitsPayload(undefined, now, [])).harnesses)).toContain('copilot')
+})
+
 // ─── C1: meter attribution + switch detection (spec §5; D1–D3 of §1) ─────────────────────────
 
 const H = 3_600_000

@@ -123,6 +123,10 @@ export interface FleetSpawnPlan {
   force?: boolean
   /** PLAN.ACCOUNTS D3: the account decided by `decideSpawnAccount` (absent = the default root). */
   accountId?: string
+  /** PLAN.ACCOUNTS D3: always true — the host must not decide the account a second time. */
+  accountDecided: true
+  /** PLAN.ACCOUNTS D3: the request carried a verified session identity (server-set, see the body). */
+  callerVerified?: true
 }
 
 /** Why a request was refused. The caller turns it into the user's own language. */
@@ -259,6 +263,8 @@ export function planFleetSpawn(
       ...(away !== undefined ? { away } : {}),
       ...(force ? { force: true } : {}),
       ...(account.account ? { accountId: account.account.id } : {}),
+      accountDecided: true,
+      ...(body.callerVerified === true ? { callerVerified: true as const } : {}),
       attach: false,
     },
   }

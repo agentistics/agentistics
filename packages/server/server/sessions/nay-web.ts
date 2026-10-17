@@ -46,12 +46,17 @@ export async function startNaySession(
   lang: CliLang,
   deps: NaySpawnDeps,
   req: NayLaunchRequest = {},
+  /** PLAN.ACCOUNTS D3: the server's verdict on the request's session proof (`markCallerVerified`). */
+  caller: { callerVerified?: boolean } = {},
 ): Promise<FleetSpawnResponse & { launch?: NayLaunch }> {
   await deps.ensureDir()
   const plan = await deps.launch(req)
   if (!plan.ok) return { ok: false, message: LAUNCH_REFUSAL[plan.reason]![lang === 'pt' ? 'pt' : 'en'] }
   const { ok: _ok, ...launch } = plan
-  const out = await deps.spawn(lang, { cwd: NAY_CHAT_DIR, label: label(deps.now(), lang), ...launch })
+  const out = await deps.spawn(lang, {
+    cwd: NAY_CHAT_DIR, label: label(deps.now(), lang), ...launch,
+    ...(caller.callerVerified === true ? { callerVerified: true } : {}),
+  })
   if (!out.ok || !out.id) return out
   // Filing is a convenience on top of a session that already exists: a failed write must not turn a
   // started session into a reported failure the user would retry into a second one.

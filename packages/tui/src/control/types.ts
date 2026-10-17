@@ -1965,6 +1965,13 @@ export interface SpawnSessionRequest {
    * row (`ManagedSession.accountId`). Absent: the default root, exactly as before.
    */
   accountId?: string
+  /**
+   * PLAN.ACCOUNTS D3: the caller already ran `decideSpawnAccount` (`/api/fleet/new`), so an absent
+   * `accountId` is its answer. Without it the host decides — the cockpit wizard's own spawn.
+   */
+  accountDecided?: boolean
+  /** PLAN.ACCOUNTS D3: the request carries a VERIFIED session identity — an agent is asking. */
+  callerVerified?: boolean
 }
 
 export interface ResumeSessionRequest {
@@ -1995,6 +2002,8 @@ export interface ResumeSessionRequest {
    * did (`ManagedSession.structuredDriver`); a terminal-born row always reopens as a TUI.
    */
   origin?: 'web' | 'terminal'
+  /** PLAN.ACCOUNTS D3: a VERIFIED agent is reopening — refused when the row's account is off for agents. */
+  callerVerified?: boolean
 }
 
 export interface SpawnSessionResult {

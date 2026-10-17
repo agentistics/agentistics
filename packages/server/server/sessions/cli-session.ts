@@ -936,13 +936,15 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
 
   const started: string[] = []
   const skipped: string[] = [...plan.skipped]
+  // A verified agent may not reopen a row whose account is off for agents (the owner still may).
+  const agentCaller = plan.reopen.length > 0 && await callerHoldsIdentity(callerSessionId())
 
   for (const row of plan.reopen) {
     const m = row.entry
     const id = newSessionId()
     const logFile = managedProcessLogPath(m.harness, id, AGENTISTICS_DATA_DIR)
     // PLAN.ACCOUNTS D3 — the row's own account, in its own root; a removed account refuses in words.
-    const account = await recordedSpawnAccount(m.accountId)
+    const account = await recordedSpawnAccount(m.accountId, { agentCaller, harness: m.harness })
     if (!account.ok) { console.error(`${m.id}: ${spawnAccountMessage(account.reason, account.detail, 'en', true)}`); skipped.push(m.id); continue }
     const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...(logFile ? { logFile } : {}), ...inheritedLaunch(m, m.harness), ...(account.account?.root ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(m.harness))
     if (!planned.ok) { skipped.push(m.id); continue }
@@ -1293,7 +1295,7 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
   const previous = (await readRegistry())
     .filter(m => m.conversationId === live.sessionId)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
-  const account = await recordedSpawnAccount(previous?.accountId)
+  const account = await recordedSpawnAccount(previous?.accountId, { agentCaller: await callerHoldsIdentity(callerSessionId()), harness: live.harness })
   if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, 'en', true)); return 1 }
   const planned = planSpawn({ harness: live.harness, cwd: live.cwd, resumeId: live.sessionId, ...(logFile ? { logFile } : {}), ...(account.account?.root ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(live.harness))
   const plan = planTakeover({

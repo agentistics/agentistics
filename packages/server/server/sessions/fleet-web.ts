@@ -723,6 +723,8 @@ async function runFleetActionOnce(
         // where the harness has a driver (and the flag is on), a TUI resume otherwise.
         origin: 'web',
         attach: false,
+        // PLAN.ACCOUNTS D3: a verified agent may not reopen a row whose account is off for agents.
+        ...(req.callerVerified === true ? { callerVerified: true } : {}),
       })
       // THE NEW ID TRAVELS. A reopen mints a new managed row and retires the old one, so a caller
       // that stays on the id it asked about is looking at a dead session — which is exactly how
@@ -1538,6 +1540,7 @@ async function continueExternal(lang: CliLang, req: FleetActionRequest, text: st
     label: row.title,
     attach: false,
     prompt: text,
+    ...(req.callerVerified === true ? { callerVerified: true } : {}),
   })
   if (out.ok) {
     recordPrompt(plan.conversationId, text)
