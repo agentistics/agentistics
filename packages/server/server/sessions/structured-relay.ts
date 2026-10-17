@@ -44,6 +44,33 @@ export interface RelayLaunchSpec {
 }
 
 const KILL_GRACE_MS = 3000
+export const RELAY_DRAIN_GRACE_MS = 1000
+
+/** TERM must finish even when an escaped descendant holds stdout open forever. */
+export function drainTerminatedRelay(end: number, d: {
+  now(): number
+  groupAlive(): boolean
+  stdoutClosed(): boolean
+  kill(): void
+  finish(): void
+  exit(): void
+  schedule(tick: () => void, ms: number): void
+}): void {
+  const tick = (): void => {
+    const now = d.now()
+    if (!d.groupAlive() && d.stdoutClosed()) { d.exit(); return }
+    if (now >= end) {
+      d.kill()
+      if (d.stdoutClosed() || now >= end + RELAY_DRAIN_GRACE_MS) {
+        d.finish()
+        d.exit()
+        return
+      }
+    }
+    d.schedule(tick, 50)
+  }
+  tick()
+}
 
 export function runRelay(dir: string): void {
   const spec = JSON.parse(readFileSync(join(dir, RELAY_FILES.launch), 'utf8')) as RelayLaunchSpec
@@ -87,8 +114,8 @@ export function runRelay(dir: string): void {
   let termAt = 0
   let stdoutClosed = false
   let childExited = false
-  const finishOutput = (): void => {
-    if (!stdoutClosed || !childExited) return
+  const finishOutput = (force = false): void => {
+    if (ended || (!force && (!stdoutClosed || !childExited))) return
     if (partial !== '') { record(partial); partial = '' }
     ended = true
     writeFileSync(join(dir, RELAY_FILES.exit), JSON.stringify({ code: child.exitCode, at: Date.now() }), { mode: 0o600 })
@@ -111,12 +138,22 @@ export function runRelay(dir: string): void {
     if (pid === undefined) return false
     try { process.kill(-pid, 0); return true } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM' }
   }
+  let draining = false
+  const startTermDrain = (): void => {
+    if (draining) return
+    draining = true
+    drainTerminatedRelay(termAt + KILL_GRACE_MS + 50, {
+      now: () => Date.now(), groupAlive, stdoutClosed: () => stdoutClosed,
+      kill: () => killChild('SIGKILL'), finish: () => finishOutput(true),
+      exit: () => { process.exit(0) }, schedule: (tick, ms) => { setTimeout(tick, ms) },
+    })
+  }
   const endChild = (): void => {
     // A SIGTERM can arrive after the child exit event has already marked the relay ended. The relay
     // itself still owns a listening socket, so explicitly leave too; otherwise it survives until SIGKILL.
     if (ended) { process.exit(0); return }
-    if (child.exitCode !== null || child.signalCode !== null) return
     termAt ||= Date.now()
+    if (childExited) { startTermDrain(); return }
     killChild('SIGTERM')
     killTimer ??= setTimeout(() => { if (child.exitCode === null) killChild('SIGKILL') }, KILL_GRACE_MS)
   }
@@ -166,21 +203,8 @@ export function runRelay(dir: string): void {
     childExited = true
     finishOutput()
     if (killTimer) clearTimeout(killTimer)
-    const groupGrace = termAt ? Math.max(0, termAt + KILL_GRACE_MS - Date.now()) : 0
-    // Drain stdout before leaving. A descendant that ignored TERM still gets SIGKILL after the
-    // grace, even if it inherited stdout and keeps the pipe open after the direct child exits.
-    if (termAt) {
-      const end = Date.now() + groupGrace + 50
-      const tick = (): void => {
-        if (!groupAlive() && stdoutClosed) { process.exit(0); return }
-        if (Date.now() >= end) {
-          killChild('SIGKILL')
-          if (stdoutClosed) { process.exit(0); return }
-        }
-        setTimeout(tick, 50)
-      }
-      tick()
-    }
+    // Keep draining after child exit, but cap it if stdout belongs to an escaped descendant.
+    if (termAt) startTermDrain()
   })
   child.on('error', () => {
     if (ended) return
