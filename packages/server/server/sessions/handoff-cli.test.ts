@@ -2,7 +2,10 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { start } from './cli-session'
 import { parseSessionArgs } from './cli-parse'
 import { addSession, patchSession, readRegistry } from './registry'
-import { ancestorChain, callerRunsInSession, ensureSessionIdentityKey } from './session-identity'
+import { ancestorChain, callerProof, callerRunsInSession, ensureSessionIdentityKey, managedProcessPids } from './session-identity'
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { passPinForKill } from './handoff-relay-io'
 import { readPreferences, updatePreferences } from '../preferences'
 import type { ManagedSession, SessionBackend } from './types'
@@ -68,6 +71,34 @@ describe('caller proof', () => {
     expect(await ok(40)).toBe(true)
     expect(await ok(999)).toBe(false)
     expect(await callerRunsInSession('x', async () => new Map([['x', 40]]), { env: {}, pid: 50, readStatus: status })).toBe(false)
+  })
+})
+
+describe('caller proof — portable ancestry and pane-less sessions', () => {
+  const env = { AGENTOP_MANAGED_ID: 'x' }
+  const parents: Record<number, number> = { 50: 40, 40: 30, 30: 1 }
+  const parentOf = (pid: number) => parents[pid]
+  const none = async () => undefined
+
+  test('ps-style parent lookup (no /proc) proves a pane ancestor', async () => {
+    await ensureSessionIdentityKey()
+    expect(await callerProof('x', async () => new Map([['x', 30]]), { env, pid: 50, parentOf })).toBe('proven')
+    expect(await callerProof('x', async () => new Map([['x', 999]]), { env, pid: 50, parentOf })).toBe('bad-identity')
+  })
+
+  test('no way to read ancestry is "unavailable", not an invalid identity', async () => {
+    await ensureSessionIdentityKey()
+    expect(await callerProof('x', async () => new Map([['x', 30]]), { env, pid: 50, parentOf: () => undefined })).toBe('unavailable')
+  })
+
+  test('a structured session with no pane is proven by its recorded relay/child pid', async () => {
+    await ensureSessionIdentityKey()
+    const root = mkdtempSync(join(tmpdir(), 'ho-structured-'))
+    mkdirSync(join(root, 'x'))
+    writeFileSync(join(root, 'x', 'relay.pid'), JSON.stringify({ relay: 35, child: 40 }))
+    expect(managedProcessPids('x', root)).toEqual([35, 40])
+    expect(await callerProof('x', none, { env, pid: 50, parentOf, managedPids: id => managedProcessPids(id, root) })).toBe('proven')
+    expect(await callerProof('y', none, { env: { AGENTOP_MANAGED_ID: 'y' }, pid: 50, parentOf, managedPids: id => managedProcessPids(id, root) })).toBe('bad-identity')
   })
 })
 

@@ -41,7 +41,7 @@ import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefC
 import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
 import { handoffTitle } from './handoff-inherit'
 import { addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession } from './registry'
-import { callerHoldsIdentity, callerRunsInSession } from './session-identity'
+import { callerHoldsIdentity, callerProof, type CallerProof } from './session-identity'
 import { attachAfterSpawn, liveIdsOf, planSpawnFilingSafe } from './spawn-filing-io'
 import type { FilingPlan } from './spawn-filing'
 import { filingJson, filingRow, refusalText, spawnRole, WARNING_TEXT } from './spawn-row'
@@ -428,11 +428,17 @@ export async function start(
   // without one it is refused before anything starts (never quietly started as an ordinary session).
   // The proof is the PANE, not the environment: the pane pid agentop created for that session must be an
   // ancestor of this process (`callerRunsInSession`), so an exported AGENTOP_MANAGED_ID proves nothing.
-  const provesCaller = deps.provesCaller
-    ?? ((cid: string) => callerRunsInSession(cid, async () => (backend as { listPanePids?: () => Promise<Map<string, number>> }).listPanePids?.()))
-  if (cmd.handoff && !(parentSessionIdForPlan && await provesCaller(parentSessionIdForPlan))) {
-    console.error('--handoff needs a verified calling session (run it from inside the leader being replaced).')
-    return 1
+  const proof: (cid: string) => Promise<CallerProof> = deps.provesCaller
+    ? async cid => (await deps.provesCaller!(cid)) ? 'proven' : 'bad-identity'
+    : cid => callerProof(cid, async () => (backend as { listPanePids?: () => Promise<Map<string, number>> }).listPanePids?.())
+  if (cmd.handoff) {
+    const result = parentSessionIdForPlan ? await proof(parentSessionIdForPlan) : 'bad-identity'
+    if (result !== 'proven') {
+      console.error(result === 'unavailable'
+        ? 'Cannot verify the calling session on this system (no way to read process ancestry). Nothing was started; ask the person who runs agentistics to start the successor from the Sessions screen.'
+        : '--handoff needs a verified calling session: run it from inside the leader being replaced, in the terminal agentistics opened for it.')
+      return 1
+    }
   }
   const filing = await planSpawnFilingSafe({
     liveIds: await liveIdsOf(backend),
