@@ -55,3 +55,31 @@ only, so percentages from separate quotas are never added. Sessions attributed t
 retired account appear only in the owner's `hiddenFromAgents` rows; those accounts do not suppress
 unrelated external sessions. Sessions still unresolved remain in the live summary and affect no
 account's slots.
+
+## Spawning on an account (D3, experimental `multi-account`)
+
+With `AGENTISTICS_MULTI_ACCOUNT=1`, every door that starts a session picks the harness ACCOUNT it
+runs on, through one pure decision (`sessions/spawn-account.ts`): `POST /api/fleet/new` (`account`
+in the body), `agentop session start --account <acc_…>`, `agentop session batch` (`--account` is a
+positional default for the `--session`s that follow) and every reopen.
+
+- The account's root reaches the pane as its harness's one isolation variable (`ISOLATION_ENV`:
+  `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME`, `GEMINI_CLI_HOME`, `KIMI_CODE_HOME`) through the
+  spawn env, never the command line. The default root adds nothing: with the flag off, or on a
+  single-account machine, argv and env are byte for byte what they were.
+- No `account` → the router's pick for that harness (C2's agent-visible budgets, `pickAccount`), else
+  the default root when its account is visible, else the oldest visible account. The automatic pick
+  is never an account that is off for agents.
+- A named account that is off for agents is refused **403 `account_unavailable`** only when the
+  request carries a verified session identity (an agent asking: the body's `session` proof on HTTP,
+  `AGENTOP_MANAGED_ID` with the identity key on the CLI). The owner may still choose it. An unknown
+  id is **422 `unknown_account`**, a retired one **409 `account_retired`**, and naming any account
+  with the flag off is refused in words (`accounts_disabled`).
+- `ManagedSession.accountId` is stamped at spawn and is immutable: reopen, attach, restart and the
+  takeover of a running conversation inherit it and run in that root (the transcript exists only
+  there). A row whose account was retired reopens refused in words — checked BEFORE any holder
+  process is ended. A row with no `accountId` reopens in the default root, as before.
+- The boot MCP re-registration in claude/copilot roots runs `mcp remove` before `mcp add` (add refuses
+  an existing name), so a stale entry in a root is repaired.
+- Antigravity and opencode have no isolation variable: an account root is refused for them in words
+  (`account-unsupported`).

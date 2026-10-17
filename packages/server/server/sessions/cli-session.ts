@@ -42,6 +42,8 @@ import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
 import { handoffTitle } from './handoff-inherit'
 import { addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession } from './registry'
 import { callerHoldsIdentity, callerProof, type CallerProof } from './session-identity'
+import { decideSpawnAccount, spawnAccountMessage } from './spawn-account'
+import { recordedSpawnAccount, spawnAccountContext } from './spawn-account-io'
 import { attachAfterSpawn, liveIdsOf, planSpawnFilingSafe } from './spawn-filing-io'
 import type { FilingPlan } from './spawn-filing'
 import { filingJson, filingRow, refusalText, spawnRole, WARNING_TEXT } from './spawn-row'
@@ -85,7 +87,7 @@ function spawnPromptArg(plan: SpawnPlan, harness: HarnessId): { initialPrompt?: 
 const STARTABLE: HarnessId[] = HARNESS_ORDER.filter(h => SPAWN_SPECS[h] !== null)
 
 const USAGE = `Usage:
-  agentop session <harness> [-p "prompt"] [--bg] [--model <id>] [--effort <level>] [--cwd <path>] [--name "label"] [--notify on|off] [--folder <folder>] [--task <id|title>] [--subtask <id|title>] [--shared-cwd] [--away|--no-away] [--handoff] [--force]
+  agentop session <harness> [-p "prompt"] [--bg] [--model <id>] [--effort <level>] [--cwd <path>] [--name "label"] [--notify on|off] [--folder <folder>] [--task <id|title>] [--subtask <id|title>] [--shared-cwd] [--away|--no-away] [--handoff] [--account <acc_…>] [--force]
   agentop session ls     [--all] [--group ${GROUPINGS.join('|')}] [--json]
   agentop session list
   agentop session attach <id|name>
@@ -117,6 +119,12 @@ const USAGE = `Usage:
   nothing, even while the global switch is off); \`--no-away\` refuses to inherit it. Absent: a
   session started from inside a session that is itself in away mode inherits it. On \`batch\` it
   applies to every session.
+
+  \`--account <acc_…>\` (experimental \`multi-account\`) runs the session on that harness account, in
+  its own login folder. Absent: the account the plan router picks for the harness (never one that is
+  off for agents), else the default login. A session run from inside an agentop session cannot pick
+  an account that is off for agents. On \`batch\` it is a default for the \`--session\`s that follow.
+  A reopened session always stays on the account it was started on.
 
   \`--folder <ref>\` files the session into a sidebar folder AT SPAWN (also on \`batch\`, as a default for
   the \`--session\`s that follow, and on \`open\`). <ref> is a folder id, its exact name, or a
@@ -185,6 +193,8 @@ function explainPlanError(e: SpawnPlanError): string {
       return `${e.harness} does not accept effort "${e.value}". Accepted: ${e.accepted.join(', ')}.`
     case 'unknown-mode':
       return `"${e.value}" is not a mode ${e.harness} can start in. Modes: default, accept-edits, plan, no-questions.`
+    case 'account-unsupported':
+      return `${e.harness} keeps a single login per computer, so it cannot start in another account's folder.`
   }
 }
 
@@ -472,11 +482,20 @@ export async function start(
     ? await import('./handoff-relay-io').then(m => m.captureHandoffRelay(handoffParentRow)).catch(() => undefined)
     : undefined
   const ctx = buildSpawnContext({ ...(relay ? { handoffRelay: relay.section } : {}), ...(await resolveContextAway(away)), sessionId: id, cwd, harness: cmd.harness, lang, ...(await folderCtxFor(folderId)), ...(await resolveContextTaskByRef(filing.taskId, filing.subtaskId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
+  // PLAN.ACCOUNTS D3 — one decision for every door (`spawn-account.ts`). An agent is asking when
+  // this command runs inside a pane that can prove its identity.
+  const account = decideSpawnAccount({
+    harness: cmd.harness, ...(cmd.account ? { requested: cmd.account } : {}),
+    agentCaller: await callerHoldsIdentity(callerSessionId()),
+    context: await spawnAccountContext(cmd.account ? [] : [cmd.harness]),
+  })
+  if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, lang === 'pt' ? 'pt' : 'en')); return 1 }
   const planned = planSpawn({
     harness: cmd.harness, cwd, prompt: cmd.prompt, model: cmd.model, effort: cmd.effort,
     ...(logFile ? { logFile } : {}),
     conversationId: offeredConversationId,
     context: ctx,
+    ...(account.account?.root ? { account: { root: account.account.root } } : {}),
   }, await spawnCapabilities(cmd.harness))
   if (!planned.ok) { console.error(explainPlanError(planned.error)); return 1 }
 
@@ -510,6 +529,7 @@ export async function start(
     ...(cmd.model ? { model: cmd.model } : {}),
     ...(cmd.effort ? { effort: cmd.effort } : {}),
     ...(label ? { label } : {}),
+    ...(account.account ? { accountId: account.account.id } : {}),
     // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
     ...filingRow(filing),
     ...(cmd.attemptId ? { attemptId: cmd.attemptId } : {}),
@@ -745,6 +765,10 @@ export async function batch(
   const parentSessionId = parentLink.parentSessionId
   const parentVerified = await callerHoldsIdentity(parentSessionId)
   const away = await resolveSpawnAwayFor(cmd.away, parentSessionId, parentVerified)
+  // PLAN.ACCOUNTS D3 — read once for the whole batch; each session WITHOUT `account` takes the
+  // router's pick for its harness, which is never an account that is off for agents.
+  const agentCaller = await callerHoldsIdentity(callerId)
+  const accountContext = await spawnAccountContext([...new Set(cmd.specs.filter(sp => !sp.account).map(sp => sp.harness))])
 
   const filingJsons: Array<ReturnType<typeof filingJson>> = []
   for (const [index, spec] of cmd.specs.entries()) {
@@ -757,6 +781,10 @@ export async function batch(
     const batchRole = spec.name && hasRolePrefix(spec.name) ? 'leader' as const : parentSessionId ? 'worker' as const : undefined
     const role = batchRole ? await ensureSpawnRole([offeredConversationId, id], batchRole, undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) : undefined
     const ctx = buildSpawnContext({ ...(await resolveContextAway(away)), sessionId: id, cwd, harness: spec.harness, lang, ...(await folderCtxFor(filing.folderId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)), ...(await resolveContextTask(filing.taskId, filing.subtaskId, cmd.task)) })
+    const account = decideSpawnAccount({
+      harness: spec.harness, ...(spec.account ? { requested: spec.account } : {}), agentCaller, context: accountContext,
+    })
+    if (!account.ok) { failed.push({ harness: spec.harness, reason: spawnAccountMessage(account.reason, account.detail, lang === 'pt' ? 'pt' : 'en') }); continue }
     const planned = planSpawn({
       harness: spec.harness,
       cwd,
@@ -766,6 +794,7 @@ export async function batch(
       ...(spec.model ? { model: spec.model } : {}),
       ...(spec.effort ? { effort: spec.effort } : {}),
       conversationId: offeredConversationId,
+      ...(account.account?.root ? { account: { root: account.account.root } } : {}),
     }, await spawnCapabilities(spec.harness))
     if (!planned.ok) { failed.push({ harness: spec.harness, reason: explainPlanError(planned.error) }); continue }
 
@@ -797,6 +826,7 @@ export async function batch(
       ...(spec.model ? { model: spec.model } : {}),
       ...(spec.effort ? { effort: spec.effort } : {}),
       ...(spec.name ? { label: spec.name } : {}),
+      ...(account.account ? { accountId: account.account.id } : {}),
       ...(planned.plan.conversationId
         ? { conversationId: planned.plan.conversationId, conversationLink: 'assigned' as const, conversationLinkVia: 'assigned-id' as const }
         : {}),
@@ -911,11 +941,14 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
     const m = row.entry
     const id = newSessionId()
     const logFile = managedProcessLogPath(m.harness, id, AGENTISTICS_DATA_DIR)
-    const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...(logFile ? { logFile } : {}), ...inheritedLaunch(m, m.harness) }, await spawnCapabilities(m.harness))
+    // PLAN.ACCOUNTS D3 — the row's own account, in its own root; a removed account refuses in words.
+    const account = await recordedSpawnAccount(m.accountId)
+    if (!account.ok) { console.error(`${m.id}: ${spawnAccountMessage(account.reason, account.detail, 'en', true)}`); skipped.push(m.id); continue }
+    const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...(logFile ? { logFile } : {}), ...inheritedLaunch(m, m.harness), ...(account.account?.root ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(m.harness))
     if (!planned.ok) { skipped.push(m.id); continue }
     try {
       if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-      await backend.spawn({ id, cwd: m.cwd, argv: planned.plan.argv })
+      await backend.spawn({ id, cwd: m.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}) })
     } catch { skipped.push(m.id); continue }
     // The path the report came from. Claude refuses to resume a conversation that is already open
     // as a background agent, and the refusal is instant — so this reopen wrote a row for a process
@@ -1254,7 +1287,15 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
 
   const id = newSessionId()
   const logFile = managedProcessLogPath(live.harness, id, AGENTISTICS_DATA_DIR)
-  const planned = planSpawn({ harness: live.harness, cwd: live.cwd, resumeId: live.sessionId, ...(logFile ? { logFile } : {}) }, await spawnCapabilities(live.harness))
+  // PLAN.ACCOUNTS D3 — a conversation agentop ran before keeps that row's account (and its root);
+  // one it never ran has no record and reopens in the default root, as before. Decided BEFORE the
+  // holder is closed: a removed account must refuse while the user still has their assistant.
+  const previous = (await readRegistry())
+    .filter(m => m.conversationId === live.sessionId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+  const account = await recordedSpawnAccount(previous?.accountId)
+  if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, 'en', true)); return 1 }
+  const planned = planSpawn({ harness: live.harness, cwd: live.cwd, resumeId: live.sessionId, ...(logFile ? { logFile } : {}), ...(account.account?.root ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(live.harness))
   const plan = planTakeover({
     conversationId: live.sessionId,
     harness: live.harness,
@@ -1287,7 +1328,7 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
 
   try {
     if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-    await backend.spawn({ id, cwd: plan.cwd, argv: planned.plan.argv })
+    await backend.spawn({ id, cwd: plan.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}) })
   } catch (e) {
     console.error(`Closed it, but could not reopen: ${e instanceof Error ? e.message : String(e)}`)
     return 1
@@ -1297,9 +1338,6 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
 
   // The newest row of this conversation is the one being continued: its filing and name come
   // along, and the live harness name (if any) still wins for the label.
-  const previous = (await readRegistry())
-    .filter(m => m.conversationId === plan.conversationId)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
   const record: ManagedSession = {
     id, harness: live.harness, cwd: plan.cwd, createdAt: new Date().toISOString(),
     ...inheritedIdentity(previous),

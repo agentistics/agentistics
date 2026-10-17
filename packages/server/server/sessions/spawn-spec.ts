@@ -63,6 +63,7 @@
 import { isCanonicalMode, type CanonicalMode, type HarnessId } from '@agentistics/core'
 import { HARNESS_PROCESS_TRANSCRIPTS, HARNESS_SESSION_SOURCES } from './harness-session-file'
 import { prependContext } from './agentistics-context'
+import { ISOLATION_ENV } from '../account-isolation'
 import type { InitialPrompt, SpawnRequest, SpawnPlanResult, SpawnSpec } from './types'
 
 /** A canonical UUID. Local so this module stays free of the server's git helpers. */
@@ -416,6 +417,11 @@ export function planSpawn(req: SpawnRequest, capabilities: { codexNoDaemon?: boo
     return { ok: false, error: { code: 'resume-id-unusable', harness: req.harness, id: req.resumeId } }
   }
 
+  // PLAN.ACCOUNTS D3 — an account root is one environment variable; a harness without one cannot
+  // keep a second login apart, and starting it in the default root would be a different account.
+  const isolation = req.account ? ISOLATION_ENV[req.harness] : null
+  if (req.account && !isolation) return { ok: false, error: { code: 'account-unsupported', harness: req.harness } }
+
   const startupArgs = req.harness === 'codex' && !capabilities.codexNoDaemon ? [] : spec.startupArgs ?? []
   const argv: string[] = [spec.bin, ...startupArgs]
   // The resume argv goes FIRST because one of these is a subcommand (`codex resume <id>`), and a
@@ -463,6 +469,9 @@ export function planSpawn(req: SpawnRequest, capabilities: { codexNoDaemon?: boo
       contextVia = 'first-message'
     }
   }
+
+  // The account root rides the same env channel (a path, not a secret). The default root adds nothing.
+  if (req.account && isolation) env = { ...(env ?? {}), [isolation]: req.account.root }
 
   // How the initial prompt will be DELIVERED once the session is up — see `initial-prompt.ts`. A
   // `positional` prompt is in argv but may not have been auto-submitted (`submit`); a `send-keys`

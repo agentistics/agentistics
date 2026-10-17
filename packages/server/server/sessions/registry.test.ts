@@ -644,5 +644,18 @@ describe('one conversation, one row (CROSSBIND)', () => {
       for (let i = 0; i < 3; i++) await r.link('queued2', { conversationId: A })
     } finally { console.warn = orig }
     expect(warns.length).toBe(1)
+
+describe('PLAN.ACCOUNTS D3 — the account survives a round trip and the heartbeat rewrite', () => {
+  it('accountId is read back, and a patch of other fields keeps it', async () => {
+    const reg = createSessionRegistry(file)
+    await reg.add({ ...session('acct1'), accountId: 'acc_two' })
+    await reg.patch('acct1', { label: 'x' })
+    const [row] = await reg.read()
+    expect(row!.accountId).toBe('acc_two')
+  })
+  it('an empty or non-string accountId reads as absent', async () => {
+    await writeFile(file, JSON.stringify([{ ...session('a'), accountId: '' }, { ...session('b'), accountId: 7 }]))
+    const rows = await createSessionRegistry(file).read()
+    expect(rows.map(r => r.accountId)).toEqual([undefined, undefined])
   })
 })

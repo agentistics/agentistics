@@ -37,7 +37,8 @@
  * fleet routes load their implementation by dynamic import precisely so a machine that never opens
  * the Sessions page never pays for that graph.
  */
-import { hasRolePrefix, isCanonicalMode, readAwaySpawn, type AwaySpawnRequest, type CanonicalMode } from '@agentistics/core'
+import { hasRolePrefix, isCanonicalMode, readAwaySpawn, type AwaySpawnRequest, type CanonicalMode, type HarnessId } from '@agentistics/core'
+import { decideSpawnAccount, type SpawnAccountContext, type SpawnAccountRefusal } from './spawn-account'
 
 export interface SpawnHarness {
   id: string
@@ -84,6 +85,16 @@ export interface FleetSpawnBody {
    * must never read as consent nobody gave.
    */
   force?: unknown
+  /**
+   * PLAN.ACCOUNTS D3 (flag `multi-account`): the harness account id (`acc_…`) to run on. Absent →
+   * the router's pick for that harness, else the default root. See `spawn-account.ts`.
+   */
+  account?: unknown
+  /**
+   * SET BY THE SERVER ONLY (the route overwrites it): the request carries a VERIFIED session identity
+   * — an agent is asking. Only then is an account that is off for agents refused.
+   */
+  callerVerified?: unknown
 }
 
 /** An accepted request, in the shape `ControlHost.spawnSession` takes. */
@@ -110,6 +121,8 @@ export interface FleetSpawnPlan {
   attach: false
   /** See `FleetSpawnBody.force`. Always a genuine boolean, never merely truthy. */
   force?: boolean
+  /** PLAN.ACCOUNTS D3: the account decided by `decideSpawnAccount` (absent = the default root). */
+  accountId?: string
 }
 
 /** Why a request was refused. The caller turns it into the user's own language. */
@@ -121,6 +134,7 @@ export type FleetSpawnRefusal =
   | 'model_unsupported'
   | 'unknown_mode'
   | 'bad_away'
+  | SpawnAccountRefusal
 
 export type FleetSpawnDecision =
   | { ok: true; plan: FleetSpawnPlan }
@@ -170,6 +184,8 @@ function readForce(raw: unknown): boolean {
 export function planFleetSpawn(
   body: FleetSpawnBody,
   harnesses: readonly SpawnHarness[],
+  /** PLAN.ACCOUNTS D3: the registry + flag + router picks. Absent = flag off (no account ever). */
+  accounts: SpawnAccountContext = { enabled: false, accounts: [] },
 ): FleetSpawnDecision {
   const harness = text(body.harness)
   const spec = harnesses.find(h => h.id === harness)
@@ -201,6 +217,17 @@ export function planFleetSpawn(
   const away = readAwaySpawn(body.away)
   if (away === null) return { ok: false, reason: 'bad_away', detail: String(body.away) }
 
+  // The account comes LAST among the checks: it is the one that can name a 403, and a request with a
+  // plain usage error should hear about that first. A non-string `account` is a usage error too.
+  if (body.account !== undefined && typeof body.account !== 'string') return { ok: false, reason: 'unknown_account', detail: String(body.account) }
+  const account = decideSpawnAccount({
+    harness: harness as HarnessId,
+    ...(text(body.account) ? { requested: text(body.account)! } : {}),
+    agentCaller: body.callerVerified === true,
+    context: accounts,
+  })
+  if (!account.ok) return { ok: false, reason: account.reason, detail: account.detail }
+
   const task = text(body.task)
   const taskId = text(body.taskId)
   const subtaskId = taskId ? text(body.subtaskId) : undefined
@@ -231,6 +258,7 @@ export function planFleetSpawn(
       ...(role ? { role } : {}),
       ...(away !== undefined ? { away } : {}),
       ...(force ? { force: true } : {}),
+      ...(account.account ? { accountId: account.account.id } : {}),
       attach: false,
     },
   }

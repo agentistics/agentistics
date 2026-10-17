@@ -34,6 +34,8 @@ export function inheritedIdentity(prev: ManagedSession | undefined): Partial<Man
   if (prev.handoffFrom) out.handoffFrom = prev.handoffFrom
   if (prev.handoffTo) out.handoffTo = prev.handoffTo
   if (prev.away === true) out.away = true
+  // PLAN.ACCOUNTS D3: immutable — the conversation's transcript exists only in that account's root.
+  if (prev.accountId) out.accountId = prev.accountId
   if (prev.harnessName) {
     out.harnessName = prev.harnessName
     if (prev.harnessNameSince !== undefined) out.harnessNameSince = prev.harnessNameSince

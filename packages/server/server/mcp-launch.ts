@@ -118,6 +118,12 @@ export function staleAgentisticsMcps(claudeJson: unknown): StaleMcp[] {
 export const CANONICAL_MCP_NAME = 'agentistics'
 
 export interface RootMcpRegistration {
+  /**
+   * Run FIRST: `mcp add` refuses a name that already exists (claude's, see `chat-tty.ts`), so without
+   * it a stale entry (old launch path or port) in a root could never be repaired at boot. Read from
+   * each CLI's `mcp remove --help`; its failure (nothing to remove) is expected and ignored.
+   */
+  removeArgv: string[]
   argv: string[]
   /** Added to the child's environment so the harness writes into THAT root, not the default one. */
   env: Record<string, string>
@@ -139,10 +145,13 @@ export interface RootMcpRegistration {
  */
 export const ROOT_MCP: Record<HarnessId, ((root: string, launch: McpLaunch, apiUrl: string) => RootMcpRegistration) | null> = {
   claude: (root, launch, apiUrl) => ({
+    removeArgv: ['claude', 'mcp', 'remove', '-s', 'user', CANONICAL_MCP_NAME],
     argv: ['claude', 'mcp', 'add', '-s', 'user', CANONICAL_MCP_NAME, '-e', `AGENTISTICS_API=${apiUrl}`, '--', launch.command, ...launch.args],
     env: { CLAUDE_CONFIG_DIR: root },
   }),
   copilot: (root, launch, apiUrl) => ({
+    // `copilot mcp remove <name>` (user configuration, i.e. `$COPILOT_HOME/mcp-config.json`).
+    removeArgv: ['copilot', 'mcp', 'remove', CANONICAL_MCP_NAME],
     argv: ['copilot', 'mcp', 'add', '--env', `AGENTISTICS_API=${apiUrl}`, CANONICAL_MCP_NAME, '--', launch.command, ...launch.args],
     env: { COPILOT_HOME: root },
   }),
