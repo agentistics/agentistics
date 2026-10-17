@@ -307,8 +307,9 @@ const sysBtn: React.CSSProperties = {
 const SYS_TEXT = 'color-mix(in srgb, var(--text-primary) 72%, transparent)'
 const SYS_LINK = 'color-mix(in srgb, var(--anthropic-orange) 65%, var(--text-primary))'
 const sysLink: React.CSSProperties = { ...sysBtn, color: SYS_LINK, flexShrink: 0, whiteSpace: 'nowrap' }
-/** Touch target: the BUTTON is 44px tall on a phone, the negative margin gives the height back to the row. */
-const touch = (isMobile: boolean): React.CSSProperties => (isMobile ? { minHeight: 44, margin: '-8px 0' } : {})
+/** Touch target: the BUTTON is 44px tall on a phone and the row is exactly that tall (no padding), so
+ *  consecutive lines sit back to back without their hit areas overlapping. */
+const touch = (isMobile: boolean): React.CSSProperties => (isMobile ? { minHeight: 44 } : {})
 
 /**
  * A system event or notice as one inline line: muted small text centred between two hairlines
@@ -320,7 +321,8 @@ function SystemLine({ children, below, isMobile = false }: { children: React.Rea
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: 0 }}>
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '4px 0',
+        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+        ...(isMobile ? { minHeight: 44, padding: 0 } : { padding: '4px 0' }),
         fontSize: 11, lineHeight: 1.4, color: SYS_TEXT,
       }}>
         <span aria-hidden style={hair} />
