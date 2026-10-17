@@ -8,10 +8,12 @@
  * Matching is by SEGMENT boundary (same rule the old `modeOfPath` had): `/sessions-report` is not the
  * Sessions area.
  */
-export type AreaId = 'sessions' | 'tasks' | 'leadership' | 'usage' | 'metrics' | 'repositories' | 'vault'
+import { SETTINGS_SECTIONS } from './settingsSections'
+
+export type AreaId = 'sessions' | 'tasks' | 'leadership' | 'usage' | 'metrics' | 'repositories' | 'vault' | 'settings'
 
 /** lucide-react icon names; the components map them, so this module stays React-free. */
-export type AreaIcon = 'terminal' | 'clipboard' | 'crown' | 'gauge' | 'chart' | 'git' | 'lock'
+export type AreaIcon = 'terminal' | 'clipboard' | 'crown' | 'gauge' | 'chart' | 'git' | 'lock' | 'settings'
 
 export interface AreaPage {
   id: string
@@ -22,6 +24,8 @@ export interface AreaPage {
   labelPt: string
   labelEn: string
   beta?: boolean
+  /** Settings sections only: the heading the tree groups them under. */
+  group?: 'personal' | 'governance'
 }
 
 export interface Area {
@@ -69,10 +73,14 @@ export const APP_AREAS: readonly Area[] = [
     { id: 'workflows', path: '/workflows', labelPt: 'Workflows', labelEn: 'Workflows' },
   ] },
   { id: 'vault', icon: 'lock', labelPt: 'Cofre', labelEn: 'Vault', pages: [], root: '/vault' },
+  // Amendment A1: the settings sections ARE the tree's Ajustes subpages. Listed here unfiltered so
+  // routing/search know every path; the tree hides the ones `visibleSettingsSections(viewer)` hides.
+  { id: 'settings', icon: 'settings', labelPt: 'Ajustes', labelEn: 'Settings', root: '/settings',
+    pages: SETTINGS_SECTIONS.map(x => ({ id: x.id, path: '/settings/' + x.id, labelPt: x.labelPt, labelEn: x.labelEn, group: x.group })) },
 ]
 
 /** Routes that are deliberately in no area: redirects, the footer's settings, export. */
-export const UNLISTED_ROUTES: readonly string[] = ['projects', 'hardware', 'settings', 'export']
+export const UNLISTED_ROUTES: readonly string[] = ['projects', 'hardware', 'export']
 
 function under(pathname: string, prefix: string): boolean {
   if (prefix === '/') return pathname === '/'

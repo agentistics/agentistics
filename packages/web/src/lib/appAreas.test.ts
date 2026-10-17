@@ -27,8 +27,11 @@ describe('areaOfPath', () => {
     expect(areaOfPath('/costs')?.page?.id).toBe('costs')
     expect(areaOfPath('/tags/x')?.page?.id).toBe('tags')
   })
-  test('settings is not an area (it is the footer)', () => {
-    expect(areaOfPath('/settings/preferences')).toBeNull()
+  test('settings is an area whose subpages are the settings sections (A1)', () => {
+    expect(areaOfPath('/settings/preferences')?.area.id).toBe('settings')
+    expect(areaOfPath('/settings/pricing')?.page?.id).toBe('pricing')
+    expect(areaOfPath('/settings')?.area.id).toBe('settings')
+    expect(firstPath(APP_AREAS.find(a => a.id === 'settings')!)).toBe('/settings/preferences')
   })
 })
 
@@ -42,7 +45,7 @@ describe('registry shape', () => {
     }
   })
   test('order is the owner-approved one', () => {
-    expect(APP_AREAS.map(a => a.id)).toEqual(['sessions', 'tasks', 'leadership', 'usage', 'metrics', 'repositories', 'vault'])
+    expect(APP_AREAS.map(a => a.id)).toEqual(['sessions', 'tasks', 'leadership', 'usage', 'metrics', 'repositories', 'vault', 'settings'])
   })
 })
 

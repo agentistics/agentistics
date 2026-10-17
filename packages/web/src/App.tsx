@@ -93,6 +93,8 @@ import { isNoticeSnoozed, snoozeNotice } from './lib/noticeSnooze'
 import { ArchiveConsentModal, type ArchiveMode } from './components/ArchiveConsentModal'
 import { resolveArchiveChoice } from './lib/archive'
 import { ModeSwitch } from './components/nav/ModeSwitch'
+import { useEngineCaps } from './hooks/useEngineCaps'
+import { visibleSettingsSections } from './lib/settingsSections'
 import { AreaTree } from './components/nav/AreaTree'
 import { areaBadges } from './lib/areaBadges'
 import { MobilePillBar } from './components/nav/MobilePillBar'
@@ -1065,6 +1067,12 @@ function SideNav({
   // A resize in progress. Only used to suspend the collapse animation — see the aside's `transition`.
   const [dragging, setDragging] = useState(false)
 
+  const { nativeRuntime } = useEngineCaps()
+  const visibleSettings = useMemo(() => new Set(visibleSettingsSections({
+    central: !!isCentral,
+    ...(principal ? { role: principal.role === 'owner' ? 'owner' as const : 'member' as const, isManager: principal.memberships.some(m => m.role === 'manager') } : {}),
+    ...(nativeRuntime !== null ? { nativeRuntime } : {}),
+  }).map(x => x.id)), [isCentral, principal, nativeRuntime])
   const areaBadgeCounts = useMemo(() => areaBadges({ attention }), [attention])
   const footBtn: React.CSSProperties = {
     width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -1169,13 +1177,14 @@ function SideNav({
             <Download size={15} />
           </button>
         </CollapsedTip>
-        <CollapsedTip label={pt ? 'Configurações' : 'Settings'} show={collapsed}>
+        {/* The tree carries Ajustes (A1); this shortcut remains only where there is no tree yet. */}
+        {mode === 'sessions' && <CollapsedTip label={pt ? 'Configurações' : 'Settings'} show={collapsed}>
           <NavLink to="/settings" aria-label={pt ? 'Configurações' : 'Settings'} title={collapsed ? undefined : (pt ? 'Configurações' : 'Settings')} style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1, textDecoration: 'none' }}
             onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-primary)' }}
             onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-secondary)' }}>
             <SlidersHorizontal size={15} />
           </NavLink>
-        </CollapsedTip>
+        </CollapsedTip>}
         {!isCentral && <PlanUsageFootButton lang={pt ? 'pt' : 'en'} collapsed={collapsed} footBtn={footBtn} />}
       </div>
     </div>
@@ -1309,7 +1318,7 @@ function SideNav({
       ) : (
       <>
       <div className="ag-noscroll" style={{ overflowY: 'auto', overflowX: 'hidden', flex: 1, paddingTop: 4 }}>
-        <AreaTree lang={pt ? 'pt' : 'en'} pathname={location.pathname} collapsed={collapsed} badges={areaBadgeCounts} />
+        <AreaTree lang={pt ? 'pt' : 'en'} pathname={location.pathname} collapsed={collapsed} badges={areaBadgeCounts} visibleSettings={visibleSettings} />
       </div>
 
       {/* The resize handle. Unchanged — dashboard-mode keeps its plain edge-line resizer; the gap-

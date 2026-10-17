@@ -31,4 +31,17 @@ describe('AreaTree', () => {
     expect(html).toContain('min-height:46px')
     expect(html).toContain('min-height:44px')
   })
+  it('every area with pages has a chevron; the active one is expanded by default', () => {
+    const html = render({ at: '/usage' })
+    expect(html).toContain('aria-expanded="true"')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('aria-label="Recolher Uso"')
+  })
+  it('Ajustes lists only the visible sections, grouped', () => {
+    const html = render({ at: '/settings/pricing', visibleSettings: new Set(['preferences', 'pricing', 'users']) })
+    expect(html).toContain('Preços')
+    expect(html).toContain('Pessoal')
+    expect(html).toContain('Governança')
+    expect(html).not.toContain('Cobrança')
+  })
 })

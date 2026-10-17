@@ -96,6 +96,7 @@ export const USER_UI_PREF_REGISTRY = {
   whatsNewSeen: { machine: 'ui', maxBytes: SMALL },
   whatsNewAutoOpen: { machine: 'ui', maxBytes: SMALL },
   vaultKinds: { machine: 'ui', maxBytes: SMALL },
+  areaOpen: { machine: 'ui', maxBytes: SMALL },
 } as const satisfies Record<string, KeySpec>
 
 export type UserUiPrefKey = keyof typeof USER_UI_PREF_REGISTRY

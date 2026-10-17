@@ -5,16 +5,17 @@
  * same tree. Only the area holding the current URL is expanded; clicking another area goes to the page
  * last visited inside it (remembered per area in sessionStorage), else its first page.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { BarChart3, ClipboardList, Crown, Gauge, GitBranch, Lock, Terminal } from 'lucide-react'
+import { BarChart3, ChevronRight, ClipboardList, Crown, Gauge, GitBranch, Lock, SlidersHorizontal, Terminal } from 'lucide-react'
 import {
   APP_AREAS, areaOfPath, firstPath, pageLabel, searchAreas, type Area, type AreaIcon, type AreaId,
 } from '../../lib/appAreas'
 import { BetaTag } from '../BetaTag'
 import { FieldInput } from '../../pages/settings/primitives'
 import { ATTN_COUNT_CLASS } from './AttentionDot'
+import { areaOpenStore, isAreaOpen, toggledAreaOpen } from '../../lib/areaOpen'
 
 export const AREA_ICON: Record<AreaIcon, (size: number) => React.ReactNode> = {
   terminal: s => <Terminal size={s} />,
@@ -24,6 +25,7 @@ export const AREA_ICON: Record<AreaIcon, (size: number) => React.ReactNode> = {
   chart: s => <BarChart3 size={s} />,
   git: s => <GitBranch size={s} />,
   lock: s => <Lock size={s} />,
+  settings: s => <SlidersHorizontal size={s} />,
 }
 
 const LAST_KEY = 'ag-area-last:'
@@ -82,16 +84,22 @@ export interface AreaTreeProps {
   variant?: 'aside' | 'sheet'
   badges?: Partial<Record<AreaId, number>>
   onNavigate?: (to: string) => void
+  /** Settings section ids this viewer may see (`visibleSettingsSections`). Absent = all of them. */
+  visibleSettings?: ReadonlySet<string>
 }
 
-export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside', badges = {}, onNavigate }: AreaTreeProps) {
+const GROUP_HEADING = { personal: { pt: 'Pessoal', en: 'Personal' }, governance: { pt: 'Governança', en: 'Governance' } } as const
+
+export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside', badges = {}, onNavigate, visibleSettings }: AreaTreeProps) {
   const navigate = useNavigate()
   const go = (to: string) => { rememberAreaPath(to); (onNavigate ?? navigate)(to) }
   const sheet = variant === 'sheet'
   const pt = lang === 'pt'
   const current = areaOfPath(pathname)
+  const openMap = useSyncExternalStore(areaOpenStore.subscribe, areaOpenStore.get, areaOpenStore.serverSnapshot)
   const [query, setQuery] = useState('')
-  const results = searchAreas(query, lang)
+  const results = searchAreas(query, lang).filter(r => r.area.id !== 'settings' || !visibleSettings || visibleSettings.has(r.page.id))
+  const pagesOf = (area: Area) => area.id === 'settings' && visibleSettings ? area.pages.filter(p => visibleSettings.has(p.id)) : area.pages
   useEffect(() => { rememberAreaPath(pathname) }, [pathname])
 
   const areaRow = (area: Area) => {
@@ -99,15 +107,18 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
     const active = current?.area.id === area.id
     const n = badges[area.id]
     const to = firstPath(area, recalled(area.id))
+    const hasPages = pagesOf(area).length > 0
+    const expanded = hasPages && isAreaOpen(openMap, area.id, active)
     return (
       <Tip key={area.id} label={label} show={collapsed}>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
         <a
           href={to}
           aria-label={collapsed ? label : undefined}
           aria-current={active && !area.pages.length ? 'page' : undefined}
           onClick={e => { e.preventDefault(); go(to) }}
           style={{
-            display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, boxSizing: 'border-box',
+            display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, boxSizing: 'border-box', flex: 1,
             minHeight: sheet ? 46 : 40, padding: collapsed ? '0' : '0 12px',
             justifyContent: collapsed ? 'center' : 'flex-start', borderRadius: 10, textDecoration: 'none',
             fontSize: '0.8438rem', fontWeight: active ? 700 : 500, whiteSpace: 'nowrap',
@@ -123,6 +134,21 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
           {!collapsed && area.beta && <BetaTag what={label} style={{ marginLeft: 4 }} />}
           {!collapsed && n ? <Badge n={n} /> : null}
         </a>
+        {!collapsed && hasPages && (
+          <button
+            type="button" aria-expanded={expanded}
+            aria-label={(expanded ? (pt ? 'Recolher ' : 'Collapse ') : (pt ? 'Expandir ' : 'Expand ')) + label}
+            onClick={() => areaOpenStore.set(toggledAreaOpen(openMap, area.id, active))}
+            style={{
+              flexShrink: 0, width: sheet ? 44 : 28, height: sheet ? 44 : 28, display: 'flex', alignItems: 'center',
+              justifyContent: 'center', border: 'none', background: 'transparent', cursor: 'pointer',
+              color: 'var(--text-tertiary)', borderRadius: 8,
+            }}
+          >
+            <ChevronRight size={14} style={{ transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
+          </button>
+        )}
+        </div>
       </Tip>
     )
   }
@@ -155,25 +181,32 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
       {APP_AREAS.map(area => (
         <div key={area.id}>
           {areaRow(area)}
-          {!collapsed && current?.area.id === area.id && area.pages.length > 0 && (
+          {!collapsed && isAreaOpen(openMap, area.id, current?.area.id === area.id) && pagesOf(area).length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 1, margin: '2px 0 6px 22px', borderLeft: '1px solid var(--border)' }}>
-              {area.pages.map(page => {
-                const active = current.page?.id === page.id
+              {pagesOf(area).map((page, i, list) => {
+                const active = current?.area.id === area.id && current.page?.id === page.id
                 return (
-                  <NavLink
-                    key={page.id} to={page.path} end
-                    aria-current={active ? 'page' : undefined}
-                    onClick={() => rememberAreaPath(page.path)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 8, boxSizing: 'border-box',
-                      minHeight: sheet ? 44 : 32, padding: '0 12px', marginLeft: -1,
-                      borderLeft: `2px solid ${active ? 'var(--anthropic-orange)' : 'transparent'}`,
-                      textDecoration: 'none', fontSize: '0.8125rem', fontWeight: active ? 700 : 500,
-                      color: active ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
-                      background: active ? 'var(--anthropic-orange-dim)' : 'transparent',
-                      borderRadius: '0 8px 8px 0',
-                    }}
-                  >{pageLabel(page, lang)}</NavLink>
+                  <div key={page.id}>
+                    {page.group && page.group !== list[i - 1]?.group && (
+                      <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-tertiary)', padding: '8px 12px 3px' }}>
+                        {GROUP_HEADING[page.group][lang]}
+                      </div>
+                    )}
+                    <NavLink
+                      to={page.path} end
+                      aria-current={active ? 'page' : undefined}
+                      onClick={() => rememberAreaPath(page.path)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8, boxSizing: 'border-box',
+                        minHeight: sheet ? 44 : 32, padding: '0 12px', marginLeft: -1,
+                        borderLeft: `2px solid ${active ? 'var(--anthropic-orange)' : 'transparent'}`,
+                        textDecoration: 'none', fontSize: '0.8125rem', fontWeight: active ? 700 : 500,
+                        color: active ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
+                        background: active ? 'var(--anthropic-orange-dim)' : 'transparent',
+                        borderRadius: '0 8px 8px 0',
+                      }}
+                    >{pageLabel(page, lang)}</NavLink>
+                  </div>
                 )
               })}
             </div>

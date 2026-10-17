@@ -119,15 +119,12 @@ export default function SettingsPage() {
             : { display: 'flex', gap: 28, alignItems: 'flex-start' }
         }
       >
-        <aside
-          style={
-            isMobile
-              ? { width: '100%' }
-              : { width: 210, flexShrink: 0, position: 'sticky', top: 16 }
-          }
-        >
-          {menu}
-        </aside>
+        {/* Desktop: the area tree is the section menu (amendment A1). Mobile keeps this strip until the sheet carries the sections. */}
+        {isMobile && (
+          <aside style={{ width: '100%' }}>
+            {menu}
+          </aside>
+        )}
 
         <div style={{ flex: 1, minWidth: 0 }}>
           <Outlet context={ctx} />
