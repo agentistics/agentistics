@@ -2209,10 +2209,10 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const [chatActivityOn, setChatActivityOn] = useState(() => chatActivityStore.get())
   useEffect(() => chatActivityStore.subscribe(() => setChatActivityOn(chatActivityStore.get())), [])
   const activityItems: ChatItem<ChatTurn>[] = useMemo(
-    () => (chatActivityOn ? markTrailingRunning(groupConsecutive(turns.slice(firstShown)), showWorking) : []),
-    [chatActivityOn, turns, firstShown, showWorking],
+    () => (chatActivityOn ? markTrailingRunning(groupConsecutive(turns.slice(firstShown)), showWorking && !compacting && !composing) : []),
+    [chatActivityOn, turns, firstShown, showWorking, compacting, composing],
   )
-  const liveActivity = chatActivityOn && activityItems[activityItems.length - 1]?.type === 'activity' && showWorking
+  const liveActivity = chatActivityOn && activityItems[activityItems.length - 1]?.type === 'activity' && showWorking && !compacting && !composing
   // Rendered per turn exactly as before; shared by both paths so the flag changes grouping only.
   const renderTurn = (t: ChatTurn, i: number) => (
             <Fragment key={i}>

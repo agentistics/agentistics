@@ -20,7 +20,7 @@ export type ActivityKind =
   | 'read' | 'edit' | 'write' | 'run' | 'search' | 'web' | 'memory'
   | 'delegate' | 'plan' | 'skill' | 'mcp' | 'other'
 
-export type StepStatus = 'running' | 'done' | 'error'
+export type StepStatus = 'running' | 'done' | 'error' | 'unfinished'
 
 /** The fields of a `ChatTurn.tools` entry this module reads (plus the proposed `failed`). */
 export interface ToolCallLike {
@@ -203,6 +203,7 @@ const L = (pair: [string, string], pt: boolean) => (pt ? pair[0] : pair[1])
 export function stepVerb(step: ActivityStep, pt: boolean): string {
   const w = ACTIVITY_WORDS[step.kind]
   if (step.status === 'error') return pt ? 'Falhou' : 'Failed'
+  if (step.status === 'unfinished') return pt ? 'Sem resultado' : 'No result'
   return L(step.status === 'running' ? w.doing : w.done, pt)
 }
 
@@ -303,7 +304,7 @@ export function groupConsecutive<T extends TurnLike>(turns: readonly T[]): ChatI
       out.push({ type: 'turn', turn: t, index })
     }
     if (t.role === 'assistant' && (t.tools?.length ?? 0) > 0) {
-      cur ??= { key: `g${index}`, steps: [], ...(t.at ? { startedAt: t.at } : {}), running: false }
+      cur ??= { key: `g${t.tools?.[0]?.ref ?? t.at ?? `i${index}`}`, steps: [], ...(t.at ? { startedAt: t.at } : {}), running: false }
       cur.steps.push(...stepsOfTurn(t))
       cur.running = t.pending === true
       if (t.at) cur.endedAt = t.at
@@ -337,7 +338,7 @@ export function groupPerExchange<T extends TurnLike>(turns: readonly T[]): ChatI
     if (t.at) lastAt = t.at
     if (t.text.trim() !== '') said.push({ type: 'turn', turn: t, index })
     if ((t.tools?.length ?? 0) > 0) {
-      cur ??= { key: `x${slot}`, steps: [], ...(t.at ? { startedAt: t.at } : {}), running: false }
+      cur ??= { key: `x${turns[slot]?.at ?? slot}`, steps: [], ...(t.at ? { startedAt: t.at } : {}), running: false }
       cur.steps.push(...stepsOfTurn(t))
       cur.running = t.pending === true
     }
@@ -353,7 +354,12 @@ export function groupPerExchange<T extends TurnLike>(turns: readonly T[]): ChatI
  */
 export function markTrailingRunning<T extends TurnLike>(items: readonly ChatItem<T>[], working: boolean): ChatItem<T>[] {
   const last = items[items.length - 1]
-  if (!working || !last || last.type !== 'activity') return [...items]
+  if (!last || last.type !== 'activity') return [...items]
+  // Not working = nothing is live: a pending step is shown unfinished, with no spinner or clock.
+  if (!working) {
+    const steps = last.group.steps.map(s => (s.status === 'running' ? { ...s, status: 'unfinished' as const } : s))
+    return [...items.slice(0, -1), { type: 'activity', group: { ...last.group, steps, running: false } }]
+  }
   const steps = last.group.steps.map((s, i, all) => (i === all.length - 1 && s.status !== 'error' ? { ...s, status: 'running' as const } : s))
   const { endedAt: _drop, ...rest } = last.group
   return [...items.slice(0, -1), { type: 'activity', group: { ...rest, steps, running: true } }]

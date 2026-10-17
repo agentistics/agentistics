@@ -132,3 +132,28 @@ describe('CHAT.ACTIVITY wiring', () => {
     expect(calls.map(kindOf)).toEqual(['run', 'run', 'run', 'search', 'web', 'read'])
   })
 })
+
+describe('CHAT.ACTIVITY fix r1', () => {
+  const mk = (at: string, ref: string, pending = false): TurnLike => ({ at, role: 'assistant', text: '', pending, tools: [{ name: 'Bash', detail: 'ls', ref }] })
+  const user: TurnLike = { at: '2026-10-16T10:00:00Z', role: 'user', text: 'go' }
+
+  test('not working: a pending trailing run is collapsed — no running step, no spinner flag', () => {
+    const items = markTrailingRunning(groupConsecutive([user, mk('2026-10-16T10:00:01Z', 'a', true)]), false)
+    const g = (items.at(-1) as { type: 'activity'; group: import('./toolActivity').ActivityGroup }).group
+    expect(g.running).toBe(false)
+    expect(g.steps.map(s => s.status)).toEqual(['unfinished'])
+    expect(stepVerb(g.steps[0]!, false)).toBe('No result')
+  })
+
+  test('group keys are stable when earlier messages load (window shift)', () => {
+    const base = [user, mk('2026-10-16T10:00:01Z', 'a'), mk('2026-10-16T10:00:02Z', 'b')]
+    const older: TurnLike[] = [{ at: '2026-10-16T09:00:00Z', role: 'user', text: 'earlier' }, { at: '2026-10-16T09:00:01Z', role: 'assistant', text: 'hi' }]
+    const keys = (ts: TurnLike[]) => groupConsecutive(ts).filter(i => i.type === 'activity').map(i => (i as { group: { key: string } }).group.key)
+    expect(keys([...older, ...base])).toEqual(keys(base))
+  })
+
+  test('compacting after tools: treated as not working, the last tool is not running', () => {
+    const items = markTrailingRunning(groupConsecutive([user, mk('2026-10-16T10:00:01Z', 'a', true)]), false)
+    expect(JSON.stringify(items)).not.toContain('"status":"running"')
+  })
+})

@@ -13,8 +13,8 @@
  * click away.
  */
 
-import { useEffect, useState } from 'react'
-import { AlertTriangle, ArrowUpRight, Check, ChevronDown, Loader } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { AlertTriangle, ArrowUpRight, Check, ChevronDown, Loader, Minus } from 'lucide-react'
 import { SystemLine, SYS_LINK, SYS_TEXT } from './ChatBubble'
 import { openArtifacts } from '../../lib/artifactsStore'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -43,7 +43,9 @@ function StepRow({ step, pt }: { step: ActivityStep; pt: boolean }) {
     ? <Loader size={12} className="ag-working-spin" style={{ color: SYS_TEXT }} />
     : step.status === 'error'
       ? <AlertTriangle size={12} style={{ color: 'var(--accent-red)' }} />
-      : <Check size={12} style={{ color: 'var(--text-tertiary)' }} />
+      : step.status === 'unfinished'
+        ? <Minus size={12} style={{ color: 'var(--text-tertiary)' }} />
+        : <Check size={12} style={{ color: 'var(--text-tertiary)' }} />
   const body = (
     <>
       <span aria-hidden style={{ width: 14, display: 'inline-flex', justifyContent: 'center', flexShrink: 0 }}>{icon}</span>
@@ -101,6 +103,13 @@ export function ToolActivity({ group, lang, variant, defaultOpen = false, now: n
   const pt = lang === 'pt'
   const isMobile = useIsMobile()
   const [open, setOpen] = useState(defaultOpen)
+  // What the person opened during the live phase does not survive completion: on live → done the
+  // run falls back to its closed line (a click AFTER completion sticks).
+  const wasRunning = useRef(group.running)
+  useEffect(() => {
+    if (wasRunning.current && !group.running) setOpen(defaultOpen)
+    wasRunning.current = group.running
+  }, [group.running, defaultOpen])
   const ticking = useNow(group.running && nowProp === undefined)
   const now = nowProp ?? ticking
   const span = fmtSpan(groupSpanMs(group, now))
