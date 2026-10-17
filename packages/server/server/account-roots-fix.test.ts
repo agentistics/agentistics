@@ -45,10 +45,39 @@ describe('H1 — the roots routes ride the shell gate', () => {
 })
 
 describe('M1/M5 — registering the MCP in a root', () => {
-  test('the API url carries the configured PORT', async () => {
-    let argv: string[] = []
-    await registerRootMcp('claude', '/r', { spawn: (a) => { argv = a; return { exited: Promise.resolve(0), kill() {} } } })
-    expect(argv.join(' ')).toContain(`AGENTISTICS_API=http://localhost:${PORT}`)
+  test('the API url carries the configured PORT (a non-default one, in a child process)', async () => {
+    // In this process PORT is normally the default, so only a child with another PORT discriminates.
+    const script = `const { registerRootMcp } = await import(${JSON.stringify(join(import.meta.dir, 'account-roots.ts'))});`
+      + `let argv = []; await registerRootMcp('claude', '/r', { spawn: (a) => { argv = a; return { exited: Promise.resolve(0), kill() {} } } });`
+      + `console.log(argv.join(' ')); process.exit(0)`
+    const child = Bun.spawn([process.execPath, '-e', script], {
+      env: { ...process.env, PORT: '51234', AGENTISTICS_DATA_DIR: join(tmp, 'data') }, stdout: 'pipe', stderr: 'pipe',
+    })
+    const out = await new Response(child.stdout).text()
+    expect(await child.exited).toBe(0)
+    expect(out).toContain('AGENTISTICS_API=http://localhost:51234')
+    expect(PORT).not.toBe(51234)
+  }, 30_000)
+  test('M4: every root registration removes the old entry BEFORE adding (claude and copilot)', async () => {
+    for (const harness of ['claude', 'copilot'] as const) {
+      const seen: string[][] = []
+      const envs: Record<string, string>[] = []
+      await registerRootMcp(harness, '/r', { spawn: (a, env) => { seen.push(a); envs.push(env); return { exited: Promise.resolve(0), kill() {} } } })
+      expect(seen.map(a => a.slice(1, 3).join(' '))).toEqual(['mcp remove', 'mcp add'])
+      expect(seen[0]![0]).toBe(harness)
+      // Both children run inside the root, never the default one.
+      expect(envs.every(e => Object.values(e).includes('/r'))).toBe(true)
+    }
+  })
+  test('M4: a remove that hangs is killed and the add still runs', async () => {
+    const seen: string[] = []
+    let killed = 0
+    await registerRootMcp('claude', '/r', {
+      timeoutMs: 20,
+      spawn: (a) => { seen.push(a[2]!); return { exited: a[2] === 'remove' ? new Promise<number>(() => {}) : Promise.resolve(0), kill() { killed++ } } },
+    })
+    expect(seen).toEqual(['remove', 'add'])
+    expect(killed).toBe(1)
   })
   test('a CLI that never exits is killed after the timeout', async () => {
     let killed = false
@@ -89,9 +118,20 @@ describe('M2/M3 — harnesses without an identity probe', () => {
   })
   test('kimi: the login marker on disk binds, and survives a restart (no in-memory state needed)', async () => {
     const { out } = await pending('kimi', { probe: async () => ({ key: 'root:abc', label: 'l' }) })
-    await writeFile(join(out.root, 'config.toml'), '')
+    await mkdir(join(out.root, 'credentials'), { recursive: true })
+    await writeFile(join(out.root, 'credentials', 'kimi-code.json'), '{}')
     const restarted = make({ probe: async () => ({ key: 'root:abc', label: 'l' }) })
     expect(await restarted.roots.pollPending()).toHaveLength(1)
+  })
+  test('kimi: a default config.toml (written on first start) is not a login', async () => {
+    const { roots, out } = await pending('kimi', { probe: async () => ({ key: 'root:abc', label: 'l' }) })
+    await writeFile(join(out.root, 'config.toml'), '')
+    expect(await roots.pollPending()).toEqual([])
+  })
+  test('kimi: MCP OAuth state alone (credentials/mcp) is not a login', async () => {
+    const { roots, out } = await pending('kimi', { probe: async () => ({ key: 'root:abc', label: 'l' }) })
+    await mkdir(join(out.root, 'credentials', 'mcp'), { recursive: true })
+    expect(await roots.pollPending()).toEqual([])
   })
 })
 
@@ -133,10 +173,12 @@ describe('LOWs', () => {
     const elsewhere = join(tmp, 'elsewhere'); await mkdir(elsewhere)
     await mkdir(join(tmp, 'accounts'), { recursive: true })
     await symlink(elsewhere, join(tmp, 'accounts', 'claude'))
+    const before = (await lstat(elsewhere)).mode & 0o777
     const { roots } = make()
     const out = await roots.createRoot('claude')
     expect(out.ok).toBe(false)
-    expect((await lstat(elsewhere)).mode & 0o777).not.toBe(0o700 + 0) // untouched by chmod
+    expect(out.ok ? undefined : out.reason).toBe('unsafe_path')
+    expect((await lstat(elsewhere)).mode & 0o777).toBe(before) // untouched by chmod, whatever the umask
     await mkdir(join(elsewhere, 'r_x'))
     const r = await roots.removeRoot('r_x', { confirm: join(tmp, 'accounts', 'claude', 'r_x') })
     expect(r.ok).toBe(false)

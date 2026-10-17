@@ -633,6 +633,18 @@ describe('billingReadiness', () => {
     expect(r.gaps).toEqual([{ code: 'invalid_timeline', harness: 'claude' }])
   })
 
+  test('R1: an obsolete default that every account overrides is not validated', () => {
+    const bad = { periods: [sub('a', '2026-01-01', '2026-06-30', 100), sub('b', '2026-03-01', '2026-09-30', 20)] }
+    const ok = (id: string) => ({ periods: [sub(id, '2026-01-01', undefined, 100)] })
+    const s = normalizeBillingSettings({ profiles: { claude: bad }, accountProfiles: { x: ok('x'), y: ok('y') } })
+    const accounts = [{ id: 'x', harness: 'claude' as const }, { id: 'y', harness: 'claude' as const }]
+    expect(billingReadiness(s, ['claude'], accounts).ready).toBe(true)
+    // …but it still blocks when an account actually inherits it.
+    const inheriting = billingReadiness(s, ['claude'], [...accounts, { id: 'z', harness: 'claude' as const }])
+    expect(inheriting.ready).toBe(false)
+    expect(inheriting.gaps).toEqual([{ code: 'invalid_timeline', harness: 'claude' }])
+  })
+
   test('readyHarnesses follows HARNESS_ORDER', () => {
     const s = normalizeBillingSettings({
       profiles: {
@@ -641,6 +653,26 @@ describe('billingReadiness', () => {
       },
     })
     expect(billingReadiness(s, ['kimi', 'claude']).readyHarnesses).toEqual(['claude', 'kimi'])
+  })
+
+  test('account-only plans make the harness ready (no harness default timeline)', () => {
+    const s = normalizeBillingSettings({
+      profiles: {},
+      accountProfiles: { a1: { periods: [sub('a', '2026-01-01', undefined, 100)] }, b1: { periods: [sub('b', '2026-01-01', undefined, 20)] } },
+    })
+    const accounts = [{ id: 'a1', harness: 'claude' as const }, { id: 'b1', harness: 'claude' as const }]
+    expect(billingReadiness(s, ['claude']).ready).toBe(false)
+    const r = billingReadiness(s, ['claude'], accounts)
+    expect(r.ready).toBe(true)
+    expect(r.readyHarnesses).toEqual(['claude'])
+    expect(r.gaps).toEqual([])
+  })
+
+  test('an account timeline with a missing price keeps the harness not ready', () => {
+    const s = normalizeBillingSettings({ profiles: {}, accountProfiles: { a1: { periods: [sub('a', '2026-01-01', undefined, 0)] } } })
+    const r = billingReadiness(s, ['claude'], [{ id: 'a1', harness: 'claude' }])
+    expect(r.ready).toBe(false)
+    expect(r.gaps[0]?.code).toBe('incomplete_period')
   })
 
   test('an empty scope is not ready and asks for nothing', () => {
@@ -699,6 +731,24 @@ describe('per-account billing', () => {
     })
     expect(r.invalidTimeline).toBe(true)
     expect(r.unavailable).toBe(true)
+    // The empty shape: the healthy account's C must not leak into an unusable result.
+    expect(r.subscriptionCostUSD).toBe(0)
+    expect(r.coveredDays).toBe(0)
+    expect(r.coveredDayKeys.size).toBe(0)
+    expect(r.segments).toEqual([])
+  })
+
+  test('two codex accounts (non-claude) each price on their own timeline', () => {
+    const codex = ['acc_x', 'acc_y'].map((id) => ({ id, harness: 'codex' as const }))
+    const r = computePlanCost({
+      timeline: undefined,
+      window: april,
+      brlRate: 5,
+      accounts: codex,
+      accountProfiles: { acc_x: full('x', 20), acc_y: full('y', 200) },
+    })
+    expect(r.subscriptionCostUSD).toBeCloseTo((220 * 30) / AVG_DAYS_PER_MONTH, 9)
+    expect(r.segments).toHaveLength(2)
   })
 
   test('monthlyCommitment sums accounts, even with no harness default', () => {

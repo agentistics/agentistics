@@ -1269,7 +1269,18 @@ export interface ActionResult {
   confirm?: boolean
   /** A failed pane write classified from the post-write screen. */
   failure?: 'prompt' | 'ended' | 'unconfirmed'
+  /** PLAN.ACCOUNTS D3: refused by the account rule — the server maps it to an HTTP status. */
+  accountRefusal?: AccountRefusalCode
+  /** A group reopen's explicit partial result: rows opened, rows already running, and EVERY refused row. */
+  fell?: { opened: string[]; already: string[]; refused: { id: string; reason: AccountRefusalCode; message: string }[] }
 }
+
+/**
+ * A structural copy of `spawn-account.ts`'s `SpawnAccountRefusal` (tui never imports the server):
+ * why a spawn or reopen was refused by the account rule.
+ */
+export type AccountRefusalCode =
+  | 'accounts_disabled' | 'unknown_account' | 'account_unavailable' | 'account_retired' | 'account_signed_out'
 
 /** What `ControlHost.selfCheck` answered. `message` is localized and present on every non-`none`. */
 export type SelfCheck =
@@ -1676,7 +1687,7 @@ export interface ControlHost {
    * list is a decision, and starting eight assistants because a list arrived empty is the accident
    * `selectFell` exists to make impossible.
    */
-  reopenFell?(ids?: readonly string[]): Promise<ActionResult>
+  reopenFell?(ids?: readonly string[], caller?: { callerVerified?: boolean }): Promise<ActionResult>
 
   /**
    * ONE PROMPT, SEVERAL SESSIONS.
@@ -1959,6 +1970,19 @@ export interface SpawnSessionRequest {
    * it is NOT a field of the wire body (`FleetSpawnBody`), so a browser can never choose an env.
    */
   account?: { env: Record<string, string>; loginArgv?: string[] }
+  /**
+   * PLAN.ACCOUNTS D3: the harness account (`acc_…`) to run on, already chosen and checked by the
+   * server (`spawn-account.ts`); the host resolves its root from the registry and stamps it on the
+   * row (`ManagedSession.accountId`). Absent: the default root, exactly as before.
+   */
+  accountId?: string
+  /**
+   * PLAN.ACCOUNTS D3: the caller already ran `decideSpawnAccount` (`/api/fleet/new`), so an absent
+   * `accountId` is its answer. Without it the host decides — the cockpit wizard's own spawn.
+   */
+  accountDecided?: boolean
+  /** PLAN.ACCOUNTS D3: the request carries a VERIFIED session identity — an agent is asking. */
+  callerVerified?: boolean
 }
 
 export interface ResumeSessionRequest {
@@ -1989,6 +2013,8 @@ export interface ResumeSessionRequest {
    * did (`ManagedSession.structuredDriver`); a terminal-born row always reopens as a TUI.
    */
   origin?: 'web' | 'terminal'
+  /** PLAN.ACCOUNTS D3: a VERIFIED agent is reopening — refused when the row's account is off for agents. */
+  callerVerified?: boolean
 }
 
 export interface SpawnSessionResult {
@@ -2025,6 +2051,8 @@ export interface SpawnSessionResult {
    */
   overridden?: boolean
   note?: string
+  /** PLAN.ACCOUNTS D3: refused by the account rule (see `ActionResult.accountRefusal`). */
+  accountRefusal?: AccountRefusalCode
 }
 
 /**

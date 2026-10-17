@@ -261,6 +261,10 @@ function sanitize(raw: unknown): ManagedSession | null {
     // Per-session away mode. Missing here, a flag set at spawn or by the switch was wiped by the
     // first heartbeat rewrite — the session went on being told the owner was out, and the row said not.
     ...(s.away === true ? { away: true } : {}),
+    // PLAN.ACCOUNTS D3: the account this session runs on. Missing here, it was written at spawn and
+    // read back as absent, so a reopen fell back to the DEFAULT root — another account's login, where
+    // the conversation does not exist. Deliberately absent from `SessionPatch`: it is immutable.
+    ...(typeof s.accountId === 'string' && s.accountId ? { accountId: s.accountId } : {}),
     ...(typeof s.lastSeenMs === 'number' && Number.isFinite(s.lastSeenMs)
       ? { lastSeenMs: s.lastSeenMs }
       : {}),

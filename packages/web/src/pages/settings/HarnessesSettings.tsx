@@ -9,53 +9,35 @@ import { HarnessInstallDialog } from '../../components/HarnessInstallDialog'
 import { sessionPath } from '../../lib/sessionRoute'
 import { harnessSetupNote } from '../../lib/harnessNotes'
 import { CenteredLoader } from '../../components/CenteredLoader'
+import { Pill } from '../../components/Pill'
+
+export { Pill }
 
 export function HarnessStatusBadge({ h, pt = false }: { h: HarnessChatStatus; pt?: boolean }) {
   if (h.updateAvailable) {
-    return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: 'var(--anthropic-orange)', background: 'color-mix(in srgb, var(--anthropic-orange) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--anthropic-orange) 30%, transparent)', padding: '2px 8px', borderRadius: 20 }}>{pt ? 'Atualização disponível' : 'Update available'}</span>
+    return <Pill tone="warn">{pt ? 'Atualização disponível' : 'Update available'}</Pill>
   }
   if (h.ready) {
     return (
-      <span style={{
-        display: 'inline-flex', alignItems: 'center', gap: 4,
-        fontSize: 11, fontWeight: 700,
-        color: 'var(--accent-green)',
-        background: 'color-mix(in srgb, var(--accent-green) 12%, transparent)',
-        border: '1px solid color-mix(in srgb, var(--accent-green) 28%, transparent)',
-        padding: '2px 8px', borderRadius: 20,
-      }}>
+      <Pill tone="ok">
         <CircleDot size={10} />
         {h.version ? `${pt ? 'Instalado' : 'Installed'} · v${h.version}` : (pt ? 'Instalado' : 'Installed')}
-      </span>
+      </Pill>
     )
   }
   if (!h.installed) {
     return (
-      <span style={{
-        display: 'inline-flex', alignItems: 'center', gap: 4,
-        fontSize: 11, fontWeight: 700,
-        color: 'var(--text-tertiary)',
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--border)',
-        padding: '2px 8px', borderRadius: 20,
-      }}>
+      <Pill tone="muted">
         <AlertCircle size={10} />
         {pt ? 'Não instalado' : 'Not installed'}
-      </span>
+      </Pill>
     )
   }
   return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 4,
-      fontSize: 11, fontWeight: 700,
-      color: 'var(--anthropic-orange)',
-      background: 'color-mix(in srgb, var(--anthropic-orange) 12%, transparent)',
-      border: '1px solid color-mix(in srgb, var(--anthropic-orange) 30%, transparent)',
-      padding: '2px 8px', borderRadius: 20,
-    }}>
+    <Pill tone="warn">
       <AlertCircle size={10} />
-        {pt ? 'Precisa entrar na conta' : 'Needs sign-in'}{h.version ? ` · v${h.version}` : ''}
-    </span>
+      {pt ? 'Precisa entrar na conta' : 'Needs sign-in'}{h.version ? ` · v${h.version}` : ''}
+    </Pill>
   )
 }
 

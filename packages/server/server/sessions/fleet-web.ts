@@ -34,6 +34,7 @@ import type { ProjectSearchResult } from '@agentistics/tui/control'
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import { fleetRow, type FleetActionRequest, type FleetRow } from './fleet-row'
 import { planFleetSpawn, type FleetSpawnBody } from './fleet-spawn'
+import { isAccountRefusal, spawnAccountMessage, type SpawnAccountRefusal } from './spawn-account'
 import type { AdmissionRefusal } from './spawn-admission'
 import { arrangeFleet, type FleetArrangement, type FleetViewRequest } from './fleet-arrange'
 import { markFleetPhase, timeFleetPhase } from './fleet-profile'
@@ -45,7 +46,7 @@ import {
 import { cachedBaseline } from './fleet-baseline'
 import { loadConsolidated } from '../consolidate'
 import { readHarnessSkills, skillsReason, type HarnessSkill } from './harness-skills'
-import { type ModelOption, type Baseline } from '@agentistics/core'
+import { HARNESS_ORDER, type ModelOption, type Baseline } from '@agentistics/core'
 import { catalogFields } from '../model-catalog-fields'
 import { artifactPathsFromTurns, type AllowedArtifact } from './artifact-file'
 import type { ArtifactResponse } from './artifact-web'
@@ -132,6 +133,13 @@ export interface FleetActionResponse {
   confirm?: boolean
   /** Present on a failed pane write; the browser offers the matching recovery action. */
   failure?: 'prompt' | 'ended' | 'unconfirmed'
+  /**
+   * PLAN.ACCOUNTS D3: refused by the account rule (a reopen, a group reopen, an external
+   * continuation); `index.ts` answers it with `spawnAccountStatus` (403/409/422).
+   */
+  code?: SpawnAccountRefusal
+  /** A group reopen's partial result (opened / already running / every refused row with its code). */
+  fell?: { opened: string[]; already: string[]; refused: { id: string; reason: SpawnAccountRefusal; message: string }[] }
 }
 
 /**
@@ -146,6 +154,12 @@ const NO_TERMINAL = {
 }
 
 const HOSTS = new Map<CliLang, StartHost>()
+
+/** Tests install a recording host; `null` drops it so the next call builds the real one. */
+export function __setFleetHostForTest(lang: CliLang, host: StartHost | null): void {
+  if (host) HOSTS.set(lang, host)
+  else HOSTS.delete(lang)
+}
 
 /** Exported so sibling routes share the ONE host — building a second fires a second version check. */
 export async function hostForFleet(lang: CliLang): Promise<StartHost> {
@@ -661,7 +675,11 @@ async function runFleetActionOnce(
      */
     case 'reopenFell':
       if (!host.reopenFell) return { ok: false, message: s.sessionsNoHost }
-      return await host.reopenFell(ids)
+      // PLAN.ACCOUNTS D3: the verified caller reaches every spawn of the group, like `resume`.
+      {
+        const { accountRefusal, ...out } = await host.reopenFell(ids, req.callerVerified === true ? { callerVerified: true } : {})
+        return { ...out, ...(accountRefusal ? { code: accountRefusal } : {}) }
+      }
     /**
      * ONE PROMPT, SEVERAL SESSIONS. The ids narrow the fleet's own live rows, and every send still
      * goes through `promptSession`, which re-reads that session's screen as it types — see
@@ -722,11 +740,13 @@ async function runFleetActionOnce(
         // where the harness has a driver (and the flag is on), a TUI resume otherwise.
         origin: 'web',
         attach: false,
+        // PLAN.ACCOUNTS D3: a verified agent may not reopen a row whose account is off for agents.
+        ...(req.callerVerified === true ? { callerVerified: true } : {}),
       })
       // THE NEW ID TRAVELS. A reopen mints a new managed row and retires the old one, so a caller
       // that stays on the id it asked about is looking at a dead session — which is exactly how
       // "reopen does nothing" was reported, on an action the server had performed correctly.
-      return { ok: out.ok, message: out.message, ...(out.id ? { id: out.id } : {}) }
+      return { ok: out.ok, message: out.message, ...(out.id ? { id: out.id } : {}), ...(out.accountRefusal ? { code: out.accountRefusal } : {}) }
     }
   }
 }
@@ -1144,14 +1164,15 @@ export interface FleetSpawnResponse {
   /** The id of the session that was started, so the caller can attach to the very one it created. */
   id?: string
   /**
-   * Present ONLY on `ok: false` when this was refused by the memory budget — never on any other
-   * refusal (an unknown harness, a relative path, …), which are `ok: false` with `message` alone.
+   * Present ONLY on `ok: false` when this was refused by the memory budget — or (PLAN.ACCOUNTS D3) by
+   * the account check, whose code `index.ts` answers as 403/409/422 (`spawnAccountStatus`). Every
+   * other refusal (an unknown harness, a relative path, …) is `ok: false` with `message` alone.
    * `code` is fixed so a client can tell this refusal apart from every other one without parsing
    * `message`; `refusal` is the DATA behind it, so a client can offer "start anyway" (re-post with
    * `force: true`) without composing its own sentence. `index.ts` answers this shape with HTTP 409.
    * See `spawn-admission.ts`'s `AdmissionRefusalBody`.
    */
-  code?: 'memory_budget'
+  code?: 'memory_budget' | SpawnAccountRefusal
   refusal?: AdmissionRefusal
   /**
    * `ok: true` and this is set exactly when the request carried `force: true` and the budget had, in
@@ -1193,7 +1214,11 @@ export async function runFleetSpawn(
   const host = await hostFor(lang)
   if (!host.spawnSession || !host.startableHarnesses) return { ok: false, message: s.sessionsNoHost }
 
-  const decision = planFleetSpawn(body, await host.startableHarnesses())
+  // PLAN.ACCOUNTS D3 — the registry/flag/router context, read once (the router only when the asked
+  // harness has several accounts and none was named).
+  const { spawnAccountContext } = await import('./spawn-account-io')
+  const asked = HARNESS_ORDER.filter(h => h === body.harness && body.account === undefined)
+  const decision = planFleetSpawn(body, await host.startableHarnesses(), await spawnAccountContext(asked))
   // A harness refused as unknown because the host's PATH reaches NO assistant at all is the PATH's
   // fault, and "no spawn spec for it here" would send someone looking for a bug in agentop.
   const blindNotice = !decision.ok && decision.reason === 'unknown_harness' ? host.harnessNotice?.() : undefined
@@ -1207,8 +1232,9 @@ export async function runFleetSpawn(
       : decision.reason === 'unknown_effort' ? s.spawnUnknownEffort(detail)
       : decision.reason === 'unknown_mode' ? s.spawnUnknownMode(detail)
       : decision.reason === 'bad_away' ? (lang === 'pt' ? `"away" aceita true, false ou "inherit", não "${detail}".` : `"away" takes true, false or "inherit", not "${detail}".`)
+      : isAccountRefusal(decision.reason) ? spawnAccountMessage(decision.reason, detail, lang === 'pt' ? 'pt' : 'en')
       : s.spawnModelUnsupported(detail)
-    return { ok: false, message }
+    return { ok: false, message, ...(isAccountRefusal(decision.reason) ? { code: decision.reason } : {}) }
   }
 
   // F2.0: born in the browser — with `adapter-chat` on and a ready driver it runs structured.
@@ -1222,6 +1248,8 @@ export async function runFleetSpawn(
     // response already carries its own `message`, so nesting it again would give the client two
     // routes to the same sentence.
     ...(out.admission ? { code: out.admission.code, refusal: out.admission.refusal } : {}),
+    // The host's final account recheck (a root removed after planning) keeps its code too.
+    ...(out.accountRefusal ? { code: out.accountRefusal } : {}),
     ...(out.overridden ? { overridden: true as const, note: out.note } : {}),
     ...(out.queued ? { queued: out.queued } : {}),
   }
@@ -1535,6 +1563,7 @@ async function continueExternal(lang: CliLang, req: FleetActionRequest, text: st
     label: row.title,
     attach: false,
     prompt: text,
+    ...(req.callerVerified === true ? { callerVerified: true } : {}),
   })
   if (out.ok) {
     recordPrompt(plan.conversationId, text)
@@ -1542,5 +1571,5 @@ async function continueExternal(lang: CliLang, req: FleetActionRequest, text: st
     await recordComposerMessage(plan.conversationId, text)
     if (out.id) await recordComposerMessage(out.id, text)
   }
-  return { ok: out.ok, message: out.ok ? cli.sessContinuedHere : out.message, ...(out.id ? { id: out.id } : {}) }
+  return { ok: out.ok, message: out.ok ? cli.sessContinuedHere : out.message, ...(out.id ? { id: out.id } : {}), ...(out.accountRefusal ? { code: out.accountRefusal } : {}) }
 }

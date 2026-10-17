@@ -5,8 +5,8 @@ import {
   agentVisible, harnessAggregate, meterDiscontinuity, resetNoticesFor,
   alternativeWithRoom, bindingPct, currentUsedPct, effectiveWindow, forecastWindow, mostRoom, parseClaudeRateLimitEvent,
   parseCodexRateLimits, planBudget, planPace, planSlots, planThresholdNotices, registeredPlanLabel,
-  routeRecommendation, PLAN_WINDOW_MS,
-  type PlanLimits, type PlanNoticeState,
+  routeRecommendation, yieldStaleRows, PLAN_WINDOW_MS,
+  type AccountBudget, type PlanLimits, type PlanNoticeState,
 } from './planLimits'
 
 const fixture = (name: string) => readFileSync(join(import.meta.dir, '__fixtures__', name), 'utf8').trim()
@@ -404,6 +404,30 @@ describe('per-account primitives (B1)', () => {
     expect(harnessAggregate([held])[0]!.status).toBe('hold')
   })
 
+  test('Q6: of two accounts with room, drain the one whose week resets first; tie -> most room', () => {
+    const soon = row({ ...mk('claude', 'acc_soon', 40, 60), windows: [w('5h', 40, now + 3 * H), w('week', 60, now + 24 * H)] })
+    const late = row({ ...mk('claude', 'acc_late', 5, 10), windows: [w('5h', 5, now + 3 * H), w('week', 10, now + 120 * H)] })
+    // acc_late has far more room, but acc_soon's quota is lost first: it takes the work.
+    const r = routeRecommendation([late, soon], 'hard-bug')
+    expect(r.account).toBe('acc_soon')
+    expect(r.accountAlternatives).toEqual([{ harness: 'claude', account: 'acc_late' }])
+    // Same week reset -> the one with the most room.
+    const a = row(mk('claude', 'acc_a', 10, 45))
+    const b = row(mk('claude', 'acc_b', 10, 30))
+    expect(routeRecommendation([a, b], 'hard-bug').account).toBe('acc_b')
+    // A held account is never drained, however soon it resets.
+    const held = row({ ...mk('claude', 'acc_held', 10, 99), windows: [w('5h', 10, now + 3 * H), w('week', 99, now + 6 * H)] })
+    expect(routeRecommendation([held, late], 'hard-bug').account).toBe('acc_late')
+  })
+
+  test('Q6: a missing week window sorts after real weekly resets, then ties use room', () => {
+    const noWeek = row({ ...mk('claude', 'acc_no_week', 80, 0), windows: [w('5h', 80, now + 3 * H)] })
+    const weekly = row({ ...mk('claude', 'acc_week', 5, 10), windows: [w('5h', 5, now + 3 * H), w('week', 10, now + 120 * H)] })
+    expect(routeRecommendation([noWeek, weekly], 'hard-bug').account).toBe('acc_week')
+    const roomy = row({ ...mk('claude', 'acc_roomy', 5, 0), windows: [w('5h', 5, now + 3 * H)] })
+    expect(routeRecommendation([noWeek, roomy], 'hard-bug').account).toBe('acc_roomy')
+  })
+
   test('route picks the account with most room; ties go to the newest', () => {
     const a = row(mk('claude', 'acc_a', 10, 45))
     const b = row(mk('claude', 'acc_b', 10, 30))
@@ -438,5 +462,30 @@ describe('per-account primitives (B1)', () => {
     expect(meterDiscontinuity(prev, week(40, pw.resetsAt + 10 * 60_000))).toBe(false) // reset barely moved
     expect(meterDiscontinuity(prev, week(55, pw.resetsAt + 2 * H))).toBe(false) // drop < 15
     expect(meterDiscontinuity({ ...prev, windows: [w('week', 60, now - 1)] }, week(40, now + 2 * H))).toBe(false) // old renewed
+  })
+})
+
+test('registered plan label resolves per account, falling back to the harness default', () => {
+  const p = (label: string) => ({ periods: [{ id: label, mode: 'subscription' as const, planId: 'other', label, price: { amount: 1, currency: 'USD' as const }, from: '2026-01-01' }] })
+  const billing = { profiles: { claude: p('Pro') }, accountProfiles: { acc_a: p('Max 20x') } }
+  const now = Date.parse('2026-10-09T12:00:00Z')
+  expect(registeredPlanLabel(billing, 'claude', now, 'acc_a')).toBe('Max 20x')
+  expect(registeredPlanLabel(billing, 'claude', now, 'acc_b')).toBe('Pro')
+  expect(registeredPlanLabel(billing, 'claude', now)).toBe('Pro')
+})
+
+describe('yieldStaleRows', () => {
+  const row = (account: string, stale: boolean) =>
+    ({ harness: 'claude', plan: 'Claude Max 5x', account, stale, status: 'ok', freeSlots: 3, suggestedParallel: 3 }) as unknown as AccountBudget
+  test('a stale row yields only to the SAME login, never to a plan-name twin', () => {
+    const rows = [row('acc_a', false), row('acc_b', true)]
+    expect(yieldStaleRows(rows, () => false).map(r => r.yieldsTo)).toEqual([undefined, undefined])
+    expect(yieldStaleRows(rows, () => false)[1]!.freeSlots).toBe(3)
+    const same = yieldStaleRows(rows, (x, y) => [x, y].sort().join() === 'acc_a,acc_b')
+    expect(same[1]).toMatchObject({ yieldsTo: 'acc_a', freeSlots: 0, suggestedParallel: 0 })
+  })
+  test('a row outside the given list (hidden from agents) can never be named', () => {
+    const visible = [row('acc_b', true)]
+    expect(yieldStaleRows(visible, () => true)[0]!.yieldsTo).toBeUndefined()
   })
 })
