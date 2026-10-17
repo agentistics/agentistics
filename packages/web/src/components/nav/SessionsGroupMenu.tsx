@@ -91,6 +91,17 @@ export function groupMenuLayout(viewportWidth: number, isMobile: boolean): { wid
   return { width: TWO_COLUMN_WIDTH, columns: 2 }
 }
 
+/** One KIND of option per card — ordering, grouping, display, hidden folders. */
+const card: React.CSSProperties = {
+  display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 2, minWidth: 0, padding: 6, borderRadius: 10,
+  border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)',
+}
+const heading: React.CSSProperties = {
+  fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em',
+  color: 'var(--text-secondary)', padding: '4px 8px 2px',
+}
+const hint: React.CSSProperties = { margin: 0, padding: '2px 8px 4px', fontSize: 11, lineHeight: 1.45, color: 'var(--text-tertiary)' }
+
 export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
   const pt = p.lang === 'pt'
   const isMobile = useIsMobile()
@@ -140,16 +151,6 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
   const sectionLabel: React.CSSProperties = {
     fontSize: 10, fontWeight: 600, color: 'var(--text-tertiary)', padding: '6px 8px 3px',
   }
-  /** One KIND of option per card — ordering, grouping, display, hidden folders. */
-  const card: React.CSSProperties = {
-    display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 2, minWidth: 0, padding: 6, borderRadius: 10,
-    border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)',
-  }
-  const heading: React.CSSProperties = {
-    fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em',
-    color: 'var(--text-secondary)', padding: '4px 8px 2px',
-  }
-  const hint: React.CSSProperties = { margin: 0, padding: '2px 8px 4px', fontSize: 11, lineHeight: 1.45, color: 'var(--text-tertiary)' }
   const stepStyle = (off: boolean): React.CSSProperties => ({
     background: 'none', border: 'none', padding: 0, width: tap ?? 18, height: tap ?? 18,
     display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
@@ -207,6 +208,7 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
             boxShadow: 'var(--ag-shadow-menu)',
             maxHeight: `min(560px, calc(100vh / var(--ui-zoom, 1) - ${at.top + 12}px))`, overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain',
           }}>
+            <HiddenFoldersSection lang={p.lang} isMobile={isMobile} hiddenFolders={p.hiddenFolders} onShowFolder={p.onShowFolder} />
             {/* ORDERING — what comes first, inside each group and among the groups. */}
             <section style={card} aria-label={pt ? 'Ordenação' : 'Ordering'}>
               <div style={heading}>{pt ? 'Ordenação' : 'Ordering'}</div>
@@ -300,41 +302,47 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
                   {pt ? 'Expandir tudo' : 'Expand all'}
                 </button>
               </section>
-
-              {/* HIDDEN FOLDERS — the one place a hidden folder can be seen and brought back. */}
-              <section style={card} aria-label={pt ? 'Pastas ocultas' : 'Hidden folders'}>
-                <div style={heading}>
-                  {pt ? 'Pastas ocultas' : 'Hidden folders'}
-                  {p.hiddenFolders.length > 0 && <span style={{ marginLeft: 6, fontWeight: 600, opacity: 0.7 }}>{p.hiddenFolders.length}</span>}
-                </div>
-                {p.hiddenFolders.length === 0 ? (
-                  <p style={hint}>
-                    {pt
-                      ? 'Nenhuma. Oculte uma pasta pelo menu ⋮ dela; ela some da lista com o que tem dentro e volta por aqui.'
-                      : 'None. Hide a folder from its ⋮ menu; it leaves the list with what is inside it and comes back from here.'}
-                  </p>
-                ) : p.hiddenFolders.map(f => (
-                  <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', minHeight: tap, fontSize: 12, color: 'var(--text-secondary)' }}>
-                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
-                    <button
-                      onClick={() => p.onShowFolder(f.id)}
-                      aria-label={pt ? `Mostrar a pasta ${f.name}` : `Show folder ${f.name}`}
-                      style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0, minHeight: tap,
-                        padding: '3px 8px', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11.5,
-                        border: '1px solid var(--border-subtle)', background: 'transparent', color: 'var(--text-secondary)',
-                      }}
-                    >
-                      <Eye size={12} />{pt ? 'Mostrar' : 'Show'}
-                    </button>
-                  </div>
-                ))}
-              </section>
             </div>
           </div>
         </>,
         document.body,
       )}
     </>
+  )
+}
+
+/** Discoverable before the longer ordering/display controls, with the menu's existing card style. */
+export function HiddenFoldersSection(p: Pick<SessionsGroupMenuProps, 'lang' | 'hiddenFolders' | 'onShowFolder'> & { isMobile: boolean }) {
+  const pt = p.lang === 'pt'
+  const tap = p.isMobile ? 44 : undefined
+  return (
+    <details style={{ ...card, gridColumn: '1 / -1' }} aria-label={pt ? 'Pastas ocultas' : 'Hidden folders'}>
+      <summary style={{ ...heading, cursor: 'pointer', minHeight: tap, padding: '6px 8px' }}>
+        {pt ? 'Pastas ocultas' : 'Hidden folders'}
+        {p.hiddenFolders.length > 0 && <span style={{ marginLeft: 6, fontWeight: 600, opacity: 0.7 }}>{p.hiddenFolders.length}</span>}
+      </summary>
+      {p.hiddenFolders.length === 0 ? (
+        <p style={hint}>
+          {pt
+            ? 'Nenhuma. Oculte uma pasta pelo menu ⋮ dela; ela some da lista com o que tem dentro e volta por aqui.'
+            : 'None. Hide a folder from its ⋮ menu; it leaves the list with what is inside it and comes back from here.'}
+        </p>
+      ) : p.hiddenFolders.map(f => (
+        <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', minHeight: tap, fontSize: 12, color: 'var(--text-secondary)' }}>
+          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
+          <button
+            onClick={() => p.onShowFolder(f.id)}
+            aria-label={pt ? `Mostrar a pasta ${f.name}` : `Show folder ${f.name}`}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0, minHeight: tap,
+              padding: '3px 8px', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11.5,
+              border: '1px solid var(--border-subtle)', background: 'transparent', color: 'var(--text-secondary)',
+            }}
+          >
+            <Eye size={12} />{pt ? 'Mostrar' : 'Show'}
+          </button>
+        </div>
+      ))}
+    </details>
   )
 }
