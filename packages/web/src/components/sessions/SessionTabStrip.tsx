@@ -21,7 +21,7 @@ import {
 import {
   closeEnded, closeOthers, closeTab, closeToRight, enterTab, livePins, ownsTabShortcut, reconcileTabs, stepTab, stripOrder, tabAt,
 } from '../../lib/sessionTabs'
-import { setOpenTabs, updateOpenTabs, useOpenTabs } from '../../lib/sessionTabsStore'
+import { getPrevActive, setOpenTabs, setPrevActive, trackStripMount, updateOpenTabs, useOpenTabs } from '../../lib/sessionTabsStore'
 import { getActivePane, usePaneId } from '../../lib/paneScope'
 import { matchTabShortcut } from '../../lib/panelShortcuts'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -137,11 +137,6 @@ function Tab({ k, row, active, pinned, mobile, pt, onPick, onClose, onMenu, onDr
   )
 }
 
-/** The previously active session per pane — outside the component because the right pane remounts
- *  the strip on every navigation (`key={splitId}`), which would zero a ref. */
-const prevActiveByPane = new Map<string, { key: string; id: string }>()
-export function resetPrevActive(): void { prevActiveByPane.clear() }
-
 export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }: SessionTabStripProps) {
   const pt = lang === 'pt'
   const mobile = useIsMobile()
@@ -166,11 +161,14 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
   const [notice, setNotice] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[]; pick: (a: string) => void } | null>(null)
 
+  // The previous-active anchors outlive a remount (split pane) but not the last strip.
+  useEffect(() => trackStripMount(), [])
+
   // Navigation IS "open a tab": whatever put a session on screen (aside, rail, `#` mention, reopen)
   // lands here, so there is exactly one place that adds one.
   useEffect(() => {
-    const prev = prevActiveByPane.get(pane) ?? null
-    prevActiveByPane.set(pane, { key: activeKey, id: active.id })
+    const prev = getPrevActive(pane)
+    setPrevActive(pane, { key: activeKey, id: active.id })
     updateOpenTabs(pane, cur => enterTab(cur, activeKey, prev, active.id, pins))
   }, [activeKey, active.id, pins, pane]) // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -10,7 +10,7 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Pin } from 'lucide-react'
-import { isInsidePortalledMenu, menuMaxHeight, readUiZoom, type MenuEntry } from '../../lib/rowMenu'
+import { isInsidePortalledMenu, menuMaxHeight, type MenuEntry } from '../../lib/rowMenu'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { BetaTag } from '../BetaTag'
 import { SESSION_ROW_MENU_Z } from '../../lib/zLayers'
@@ -54,8 +54,7 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMen
   const left = x + w > window.innerWidth ? Math.max(4, x - w) : x
   // Capped to the viewport and scrollable: a long list (the tab strip's "all tabs") must never put
   // its last entries past the screen edge.
-  const zoom = readUiZoom()
-  const maxH = menuMaxHeight(window.innerHeight, zoom)
+  const maxH = menuMaxHeight(window.innerHeight)
   const h = Math.min(entries.length * rowH + 12, maxH)
   const top = y + h > window.innerHeight ? Math.max(4, y - h) : y
 

@@ -276,6 +276,9 @@ export function createSharedPref<T>(opts: {
     set: (next: T) => {
       if (sameValue(next, current)) return
       current = next
+      // A choice made here is owned here: a later reconcile against a server that does not know
+      // the key must not restore the fallback over it.
+      hadLocal = true
       writeLocal()
       if (armed.has(endpoint)) put()
       notify()

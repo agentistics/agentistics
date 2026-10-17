@@ -61,7 +61,34 @@ export function useOpenTabs(): string[] {
   return useSyncExternalStore(subscribeOpenTabs, () => read(pane), () => EMPTY)
 }
 
+/**
+ * The previously active session per pane, kept outside the component because the split pane
+ * remounts its strip on every navigation (`key={splitId}`). It lives with the store so it has the
+ * store's lifecycle: it is dropped when the last strip unmounts and when the store is reset, so a
+ * stale anchor can never place a tab in a strip that mounts later.
+ */
+const prevActive = new Map<string, { key: string; id: string }>()
+let mountedStrips = 0
+
+export function getPrevActive(pane: PaneId): { key: string; id: string } | null {
+  return prevActive.get(pane) ?? null
+}
+export function setPrevActive(pane: PaneId, v: { key: string; id: string }): void {
+  prevActive.set(pane, v)
+}
+
+/** Registers a mounted strip; returns its unmount. The last one out clears every anchor. */
+export function trackStripMount(): () => void {
+  mountedStrips++
+  return () => {
+    mountedStrips = Math.max(0, mountedStrips - 1)
+    if (mountedStrips === 0) prevActive.clear()
+  }
+}
+
 /** For tests: forget the in-memory copy so the next read goes to storage again. */
 export function resetOpenTabsCache(): void {
   cache.clear()
+  prevActive.clear()
+  mountedStrips = 0
 }
