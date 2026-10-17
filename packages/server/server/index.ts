@@ -1173,7 +1173,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const scanRoots = (await readPreferences()).scanRoots ?? []
         const made = await createProjectFolder(read.value, { scanRoots })
         if (made.ok) {
-          void writeAudit({ action: 'fs.mkdir', ip: clientIp, meta: { path: made.path } })
           return new Response(JSON.stringify({ path: made.path }), { status: 201, headers })
         }
         return new Response(JSON.stringify({ error: made.reason, ...(made.path ? { path: made.path } : {}) }), { status: createFolderStatus(made.reason), headers })

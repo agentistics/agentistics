@@ -1,7 +1,7 @@
 /**
  * newProject.ts — PURE: the rules for "Novo projeto" in the new-session wizard.
  *
- * PROTOTYPE (t-eab4751cb3). Shared by the browser (inline validation, the default location) and by
+ * (t-eab4751cb3.) Shared by the browser (inline validation, the default location) and by
  * the server (which re-checks every rule before it creates anything), so the two can never disagree
  * about what a valid name is.
  *
@@ -46,7 +46,7 @@ export function projectNameMessage(reason: ProjectNameRefusal | 'exists' | 'forb
   switch (reason) {
     case 'empty': return pt ? 'Dê um nome ao projeto.' : 'Give the project a name.'
     case 'too-long': return pt ? `Nome longo demais — até ${PROJECT_NAME_MAX} caracteres.` : `Name too long — up to ${PROJECT_NAME_MAX} characters.`
-    case 'separator': return pt ? 'O nome não pode ter / nem \\ — escolha o local em "Onde criar".' : 'The name cannot contain / or \\ — pick the place under "Create in".'
+    case 'separator': return pt ? 'O nome não pode ter / nem \\ — escolha o local em "Pasta".' : 'The name cannot contain / or \\ — pick the place under "Folder".'
     case 'reserved-char': return pt ? 'O nome não pode ter < > : " | ? *' : 'The name cannot contain < > : " | ? *'
     case 'dot-name': return pt ? 'Esse nome não é permitido.' : 'That name is not allowed.'
     case 'edge-space-or-dot': return pt ? 'O nome não pode começar ou terminar com espaço, nem terminar com ponto.' : 'The name cannot start or end with a space, or end with a dot.'

@@ -1,6 +1,6 @@
 /**
  * NewProjectForm — "Novo projeto": a name, a place (with a sensible default), and a confirmation.
- * PROTOTYPE (t-eab4751cb3), used by options A and C of the wizard's "Onde" step.
+ * Opened from the "Criar projeto novo" row of the wizard's "Onde" step (t-eab4751cb3).
  *
  * A non-technical person never types a path: the place is a row with "Trocar", which opens the same
  * `FolderBrowser` the picker already uses. The name is checked as it is typed (`checkProjectName`,
@@ -25,8 +25,8 @@ export interface NewProjectFormProps {
   defaultParent: { path: string; exists: boolean }
   disks?: readonly DiskInfo[]
   onCreated: (path: string) => void
-  /** Absent when the form is a tab of its own (option A) — there is nothing to go back to. */
-  onCancel?: () => void
+  /** Back to the search. */
+  onCancel: () => void
 }
 
 export function NewProjectForm({ lang, isMobile, initialName = '', defaultParent, disks, onCreated, onCancel }: NewProjectFormProps) {
@@ -74,7 +74,7 @@ export function NewProjectForm({ lang, isMobile, initialName = '', defaultParent
   const btn = dialogButtonStyle('primary', isMobile, !check.ok || busy)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <Field label={pt ? 'Nome do projeto' : 'Project name'}>
+      <Field label={pt ? 'Nome' : 'Name'}>
         <input
           autoFocus={!isMobile}
           value={name}
@@ -99,7 +99,7 @@ export function NewProjectForm({ lang, isMobile, initialName = '', defaultParent
         )}
       </Field>
 
-      <Field label={pt ? 'Onde criar' : 'Create in'}>
+      <Field label={pt ? 'Pasta' : 'Folder'}>
         <div style={{
           display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 9, minWidth: 0,
           border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)',
@@ -130,7 +130,7 @@ export function NewProjectForm({ lang, isMobile, initialName = '', defaultParent
           {target ? <>{pt ? 'Vai criar: ' : 'Will create: '}<span style={{ color: 'var(--text-secondary)' }}>{shortPath(target)}</span></> : ' '}
         </span>
         <span style={{ display: 'flex', gap: 8, flexDirection: isMobile ? 'column-reverse' : 'row' }}>
-          {onCancel && <button type="button" onClick={onCancel} style={dialogButtonStyle('secondary', isMobile)}>{pt ? 'Voltar à busca' : 'Back to search'}</button>}
+          <button type="button" onClick={onCancel} style={dialogButtonStyle('secondary', isMobile)}>{pt ? 'Voltar à busca' : 'Back to search'}</button>
           <button type="button" disabled={!check.ok || busy} onClick={() => setConfirming(true)} style={btn}>
             {busy ? <Loader size={13} className="ag-working-spin" /> : <FolderPlus size={13} />}
             {pt ? 'Criar projeto' : 'Create project'}

@@ -39,8 +39,6 @@ import { HarnessInstallDialog } from '../HarnessInstallDialog'
 import { ModelSelect, ModelId } from './ModelSelect'
 import { EffortPicker } from './EffortPicker'
 import { ProjectPicker } from './ProjectPicker'
-import { newProjectProto } from '../../lib/newProjectProto'
-import { defaultProjectParent } from '@agentistics/core'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { useEngineCaps } from '../../hooks/useEngineCaps'
 import { useNativeProviders } from '../../hooks/useNativeProviders'
@@ -147,7 +145,7 @@ export function NewSessionModal({
   // The wizard's own data source — harnesses, matching projects, and the search that drives them
   // both. Shared with `StagedSessionCompose`, which needs the same fetch for the same reason —
   // see `useFleetNewOptions`'s own header.
-  const { harnesses: fleetHarnesses, projects, projectTotals, projectIndexing, projectIndexProgress, projectDisks, projectDisk, setProjectDisk, query, setQuery, searching, unavailable, retry, retryable } = useFleetNewOptions(lang)
+  const { harnesses: fleetHarnesses, projects, projectTotals, projectIndexing, projectIndexProgress, projectDisks, projectDisk, setProjectDisk, query, setQuery, searching, unavailable, retry, retryable, newProjectParent } = useFleetNewOptions(lang)
   /**
    * The NATIVE harness (UI.2): offered only when the loaded engine provides the native runtime
    * (`GET /api/engine` — a community build has none). Its model list is the chosen PROVIDER's, so the
@@ -182,10 +180,8 @@ export function NewSessionModal({
       ?? (harnesses.length === 1 ? harnesses[0]! : null))
   }, [harnesses])
   const [cwd, setCwd] = useState(restored?.cwd ?? '')
-  // PROTOTYPE: the default place is read off the FIRST, unfiltered list — a search must not move it.
-  // The real feature gets it from `/api/fleet/new` instead.
-  const protoParent = useRef<{ path: string; exists: boolean } | null>(null)
-  if (protoParent.current === null && projects.length > 0 && query === '') protoParent.current = defaultProjectParent(newProjectProto.home, projects.map(p => p.path), pt)
+  /** The "Novo projeto" form has the list's place — the field is then named for what it is. */
+  const [creatingProject, setCreatingProject] = useState(false)
   const [task, setTask] = useState(restored?.task ?? initialTask ?? '')
   /**
    * The exact TASK (and, when the picker was used, SUBTASK) this session will be filed under, once
@@ -997,7 +993,7 @@ export function NewSessionModal({
           {/* STEP 2 — WHERE. The directory, and the task that files this session with its
               siblings. Both are about the WORK rather than about the assistant. */}
           {step === 'where' && (<>
-          <Field label={pt ? 'Onde' : 'Where'}>
+          <Field label={creatingProject ? (pt ? 'Novo projeto' : 'New project') : (pt ? 'Onde' : 'Where')}>
             <ProjectPicker
               lang={lang}
               isMobile={isMobile}
@@ -1013,10 +1009,8 @@ export function NewSessionModal({
               searching={searching}
               value={cwd}
               onChange={v => { setCwd(v); setDirty(true) }}
-              {...(newProjectProto.variant ? { newProject: {
-                variant: newProjectProto.variant,
-                defaultParent: protoParent.current ?? defaultProjectParent(newProjectProto.home, projects.map(p => p.path), pt),
-              } } : {})}
+              {...(newProjectParent ? { newProjectParent } : {})}
+              onCreatingChange={setCreatingProject}
             />
           </Field>
 

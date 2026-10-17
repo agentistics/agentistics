@@ -1,5 +1,5 @@
 /**
- * newProjectApi.ts — the one call that creates a project folder. PROTOTYPE (t-eab4751cb3).
+ * newProjectApi.ts — the one call that creates a project folder.
  *
  * `POST /api/fs/folders {parent, name}` — the same route that LISTS folders for the browser, so the
  * allowlist that decides what may be browsed is the one that decides where a folder may be created.

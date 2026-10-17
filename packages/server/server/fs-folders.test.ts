@@ -151,3 +151,16 @@ describe('createProjectFolder', () => {
   })
   void mk
 })
+
+describe('a created project is a valid cwd for every harness', () => {
+  test('the folder createProjectFolder made plans a spawn for a NON-Claude harness unchanged', async () => {
+    const { createProjectFolder } = await import('./fs-folders')
+    const { planFleetSpawn } = await import('./sessions/fleet-spawn')
+    const made = await createProjectFolder({ parent: home, name: 'projeto-codex' }, { scanRoots: [], home, temporary })
+    if (!made.ok) throw new Error('expected the folder to be created')
+    for (const id of ['codex', 'agy', 'kimi', 'claude']) {
+      const out = planFleetSpawn({ harness: id, cwd: made.path }, [{ id, supportsModel: false, efforts: [] }])
+      expect(out).toEqual({ ok: true, plan: { harness: id, cwd: made.path, attach: false } })
+    }
+  })
+})

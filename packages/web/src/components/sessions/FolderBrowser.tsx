@@ -26,7 +26,7 @@ export interface FolderBrowserProps {
   onCancel: () => void
   /** The primary button's words; "Usar esta pasta" by default. */
   useLabel?: string
-  /** PROTOTYPE option B (t-eab4751cb3): offer "+ Nova pasta aqui" in the folder being browsed; a
+  /** "Novo projeto" (t-eab4751cb3): offer "Nova pasta aqui" in the folder being browsed; a
    *  created folder is USED at once (`onUse`). Absent = today's browser, unchanged. */
   allowCreate?: boolean
 }

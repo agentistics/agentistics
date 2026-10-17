@@ -153,7 +153,7 @@ export function createFolderStatus(reason: CreateFolderRefusal): number {
  * symlink at the name is "exists"), and a `mkdir` that is not recursive.
  */
 export async function createProjectFolder(
-  input: { parent: unknown; name: unknown; createParent?: unknown },
+  input: { parent?: unknown; name?: unknown; createParent?: unknown },
   deps: { scanRoots: readonly string[]; home?: string; temporary?: string },
 ): Promise<CreateFolderResult> {
   const { parent, name: rawName } = input
