@@ -305,8 +305,8 @@ const sysBtn: React.CSSProperties = {
 }
 // Contrast (WCAG, measured): text = 72% --text-primary → ≥7:1 dark / ≥7:1 light. Link = orange mixed
 // 65/35 into --text-primary → ≈9:1 dark, ≈5.0:1 light on --bg-base (the bare orange is 2.8:1 in light).
-const SYS_TEXT = 'color-mix(in srgb, var(--text-primary) 72%, transparent)'
-const SYS_LINK = 'color-mix(in srgb, var(--anthropic-orange) 65%, var(--text-primary))'
+export const SYS_TEXT = 'color-mix(in srgb, var(--text-primary) 72%, transparent)'
+export const SYS_LINK = 'color-mix(in srgb, var(--anthropic-orange) 65%, var(--text-primary))'
 const sysLink: React.CSSProperties = { ...sysBtn, color: SYS_LINK, flexShrink: 0, whiteSpace: 'nowrap' }
 /** Touch target: the BUTTON is 44px tall on a phone and the row is exactly that tall (no padding), so
  *  consecutive lines sit back to back without their hit areas overlapping. */
@@ -317,7 +317,7 @@ const touch = (isMobile: boolean): React.CSSProperties => (isMobile ? { minHeigh
  * (the "joined the channel" divider), its action a text link at the END of the same line. One
  * definition so notes and event rows cannot drift.
  */
-function SystemLine({ children, below, isMobile = false }: { children: React.ReactNode; below?: React.ReactNode; isMobile?: boolean }) {
+export function SystemLine({ children, below, isMobile = false }: { children: React.ReactNode; below?: React.ReactNode; isMobile?: boolean }) {
   const hair: React.CSSProperties = { flex: 1, height: 1, background: 'var(--border)', minWidth: 12 }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: 0 }}>

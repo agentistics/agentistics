@@ -72,6 +72,9 @@ const TOOL_ALIASES: Record<string, string> = {
   run_shell_command: 'Bash',
   run_command: 'Bash',
   RUN_COMMAND: 'Bash',
+  // codex 0.161 names every shell call `exec` (454 of 455 calls in the last 40 rollouts); copilot `read_bash`
+  exec: 'Bash',
+  read_bash: 'Bash',
   // read
   view: 'Read',
   read_file: 'Read',
@@ -97,6 +100,19 @@ const TOOL_ALIASES: Record<string, string> = {
   glob_file_search: 'Glob',
   find_files: 'Glob',
   list_dir: 'Glob',
+  // names measured 2026-10-16 (copilot rg/apply_patch, gemini glob/web/plan, agy web/subagent/plan)
+  rg: 'Grep',
+  grep: 'Grep',
+  glob: 'Glob',
+  apply_patch: 'Edit',
+  google_web_search: 'WebSearch',
+  search_web: 'WebSearch',
+  web_fetch: 'WebFetch',
+  read_url_content: 'WebFetch',
+  invoke_subagent: 'Agent',
+  update_plan: 'TodoWrite',
+  update_topic: 'TodoWrite',
+  manage_task: 'TodoWrite',
 }
 
 /** The shared name for a harness's tool, or the name itself when nothing maps it. */

@@ -142,3 +142,13 @@ test('a Bash call with no detail is still a row', () => {
   expect(evs).toHaveLength(1)
   expect(evs[0]!.text).toBe('Bash')
 })
+
+describe('liveEvents reads the shared name first (CHAT.ACTIVITY)', () => {
+  test('a gemini run_shell_command is a ran row, an agy view_file a read row', () => {
+    const ev = liveEvents([{ tools: [
+      { name: 'run_shell_command', canonical: 'Bash', detail: 'ls' },
+      { name: 'view_file', canonical: 'Read', detail: '/a/b.ts' },
+    ] }])
+    expect(ev.map(e => e.kind)).toEqual(['ran', 'read'])
+  })
+})
