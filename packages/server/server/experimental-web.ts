@@ -85,16 +85,23 @@ export interface ExperimentalSetDeps {
  * change is immediate. Drop the cache and tell every SSE client to refetch.
  */
 async function refreshAfterSwitch(): Promise<void> {
-  const [{ invalidateCache }, { triggerSseNotification }] = await Promise.all([import('./data'), import('./sse')])
+  const [{ invalidateCache }, { triggerSseNotification }, { resetChatStreams }] = await Promise.all([
+    import('./data'), import('./sse'), import('./sessions/chat-stream'),
+  ])
   invalidateCache()
   triggerSseNotification()
+  // An open chat stream follows the reader it was opened on: close them all so each reconnects to
+  // the one `adapter-chat` names now (adapter -> legacy on OFF, legacy -> adapter on ON).
+  resetChatStreams()
 }
 
 /** The switch. Persists first, applies second, and answers with what the server now reports. */
 export async function setExperimental(enabled: boolean, deps: ExperimentalSetDeps = {}): Promise<ExperimentalReport> {
   const env = deps.env ?? process.env
   const prefs = await (deps.readPrefs ?? readPreferences)()
-  if ((prefs.experimental === true) !== enabled) await (deps.writePrefs ?? writePreferences)({ experimental: enabled })
+  // Compared EXACTLY: an absent preference and `false` mean different things (absent leaves a
+  // default-ON feature on, `false` turns it off at the next boot), so OFF from absent is written.
+  if (prefs.experimental !== enabled) await (deps.writePrefs ?? writePreferences)({ experimental: enabled })
   applyExperimentalLive(enabled, env)
   await (deps.onApplied ?? refreshAfterSwitch)()
   return buildExperimentalReport(enabled, env)

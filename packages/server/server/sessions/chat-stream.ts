@@ -92,6 +92,24 @@ export function onChatWake(id: string, cb: () => void): () => void {
 
 export function chatStreamCount(): number { return open }
 
+const resetters = new Set<() => void>()
+
+/**
+ * Be closed when the chat SOURCE switch moves (`adapter-chat` turned on or off). Both stream kinds
+ * register: an open stream keeps following the reader it was opened on, so without this a switch
+ * reached only NEW chats — a healthy stream with its pings never reconnects on its own.
+ */
+export function onChatStreamsReset(cb: () => void): () => void {
+  resetters.add(cb)
+  return () => { resetters.delete(cb) }
+}
+
+/** Close every open chat stream (not as a failure): each client reconnects and the route picks the
+ *  reader the switch names NOW. */
+export function resetChatStreams(): void {
+  for (const cb of [...resetters]) cb()
+}
+
 /**
  * One slot of the shared stream cap, for a chat stream built elsewhere (`adapter-chat.ts`): both kinds
  * count against `MAX_CHAT_STREAMS`. `false` = the cap is reached. Release exactly once.
@@ -203,8 +221,10 @@ export function chatStreamResponse(id: string, deps: ChatStreamDeps, signal: Abo
     const set = wakers.get(id)
     set?.delete(waker)
     if (set && set.size === 0) wakers.delete(id)
+    offReset()
     try { ctl.close() } catch { /* already */ }
   }
+  const offReset = onChatStreamsReset(() => close())
   let burst: unknown[] = []
   const waker = () => {
     schedule(true)

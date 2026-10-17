@@ -4,7 +4,9 @@ import { applyExperimentalLive, buildExperimentalReport, setExperimental } from 
 import { nativeExperimentalOn } from './native-gate'
 import { providerFlagOn } from './config'
 import { routeCapability } from './capability-guard'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { applyExperimentalFromDisk, readExperimentalPreference } from './experimental-boot'
 import { join } from 'node:path'
 
 type Env = Record<string, string | undefined>
@@ -120,8 +122,67 @@ describe('L1 — the switch refreshes what the server has cached', () => {
   })
   test('the default refresh drops the cached /api/data and notifies SSE clients', () => {
     const src = readFileSync(join(import.meta.dir, 'experimental-web.ts'), 'utf8')
+    expect(src).toMatch(/resetChatStreams\(\)/) // open chat streams reconnect to the reader the switch names now
     expect(src).toMatch(/invalidateCache\(\)/)
     expect(src).toMatch(/triggerSseNotification\(\)/)
     expect(src).toMatch(/deps\.onApplied \?\? refreshAfterSwitch/)
+  })
+})
+
+describe('F4 fix2 — OFF from an ABSENT preference is persisted', () => {
+  /** A preferences file the switch really writes and a fresh process really boots from. */
+  function store(initial: Record<string, unknown> = {}) {
+    const dir = mkdtempSync(join(tmpdir(), 'exp-persist-'))
+    const file = join(dir, 'preferences.json')
+    writeFileSync(file, JSON.stringify(initial))
+    const read = async () => JSON.parse(readFileSync(file, 'utf8')) as { experimental?: boolean }
+    const write = async (patch: { experimental: boolean }) => {
+      writeFileSync(file, JSON.stringify({ ...(await read()), ...patch }))
+    }
+    return { dir, file, read, write }
+  }
+
+  test('absent -> OFF writes `experimental: false`', async () => {
+    const st = store()
+    const writes: unknown[] = []
+    await setExperimental(false, { env: {}, readPrefs: st.read, writePrefs: async p => { writes.push(p); await st.write(p) }, onApplied })
+    expect(writes).toEqual([{ experimental: false }])
+    expect(readExperimentalPreference(st.file)).toBe(false)
+  })
+
+  test('a later GET (same process) still reports adapter-chat OFF', async () => {
+    const st = store()
+    const env: Env = {}
+    await setExperimental(false, { env, readPrefs: st.read, writePrefs: st.write, onApplied })
+    const report = buildExperimentalReport((await st.read()).experimental, env)
+    expect(report.features.find(f => f.id === 'adapter-chat')!.on).toBe(false)
+  })
+
+  test('a RESTART (fresh env, boot from disk) comes back OFF', async () => {
+    const st = store()
+    await setExperimental(false, { env: {}, readPrefs: st.read, writePrefs: st.write, onApplied })
+    const fresh: Env = { AGENTISTICS_DIR: st.dir }
+    applyExperimentalFromDisk(fresh)
+    expect(featureOn('adapter-chat', fresh)).toBe(false)
+    expect(buildExperimentalReport(readExperimentalPreference(st.file), fresh).features.find(f => f.id === 'adapter-chat')!.on).toBe(false)
+  })
+
+  test('re-enable after a restart turns it back ON and persists that too', async () => {
+    const st = store()
+    await setExperimental(false, { env: {}, readPrefs: st.read, writePrefs: st.write, onApplied })
+    const fresh: Env = { AGENTISTICS_DIR: st.dir }
+    applyExperimentalFromDisk(fresh)
+    await setExperimental(true, { env: fresh, readPrefs: st.read, writePrefs: st.write, onApplied })
+    expect(featureOn('adapter-chat', fresh)).toBe(true)
+    expect(readExperimentalPreference(st.file)).toBe(true)
+    const again: Env = { AGENTISTICS_DIR: st.dir }
+    applyExperimentalFromDisk(again)
+    expect(featureOn('adapter-chat', again)).toBe(true)
+  })
+
+  test('an explicit false is not written again', async () => {
+    const writes: unknown[] = []
+    await setExperimental(false, { env: {}, readPrefs: async () => ({ experimental: false }), writePrefs: async p => { writes.push(p) }, onApplied })
+    expect(writes).toEqual([])
   })
 })
