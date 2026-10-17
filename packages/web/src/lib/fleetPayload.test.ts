@@ -50,3 +50,19 @@ describe('the fleet answer the page reads', () => {
     })
   })
 })
+
+describe('search index on every row', () => {
+  const wireRow = { id: 'a1', title: 'Fix login', cwd: '/x/y', harness: 'claude', search: { n: 'Fix login Original title', p: 'hello' } }
+
+  test('a non-empty `rows` list also gets searchFields (the wire strips them)', () => {
+    const out = normalizeFleetPayload({ sessions: [wireRow], rows: [wireRow], tasks: [], finishedTasks: [] } as unknown as FleetPayload)
+    expect(out.rows[0]!.searchFields.name).toBe('Fix login Original title')
+    expect(out.rows[0]!.searchFields.prompt).toBe('hello')
+    expect((out.rows[0] as unknown as Record<string, unknown>).search).toBeUndefined()
+  })
+
+  test('matchesQuery never throws on a row without searchFields', async () => {
+    const { matchesQuery } = await import('../../../tui/src/control/search-scope')
+    expect(() => matchesQuery(undefined as never, 'abc')).not.toThrow()
+  })
+})

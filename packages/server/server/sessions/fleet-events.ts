@@ -77,12 +77,21 @@ export interface FleetFramePayload {
   baseline?: unknown
 }
 
+/** How much of the first prompt the search hint carries: some harnesses keep whole prompts, and ~800
+ *  rows of long opening prompts would bloat every payload and the cached copy. */
+export const SEARCH_PROMPT_MAX = 300
+
 /** One canonical wire row: the old protocol sent these facts twice as `sessions` and `rows`. */
 export function compactFleetSession(session: FleetRow, row: ControlSession): Record<string, unknown> {
   // Keep verbs and attachCommand long enough for compactFleetRows to catalogue them. They are
   // removed from the serialized row there, after the catalogue key has been assigned.
-  const { searchFields: _searchFields, ...withoutSearchFields } = row as ControlSession & { searchFields?: unknown }
-  return { ...session, ...withoutSearchFields }
+  const { searchFields, ...withoutSearchFields } = row as ControlSession & { searchFields?: { name?: string; prompt?: string } }
+  // The page rebuilds the rest of the index from displayed fields; send only what it cannot see:
+  // the names beyond the title (managed/harness/original) and the first prompt.
+  const search: { n?: string; p?: string } = {}
+  if (searchFields?.name && searchFields.name !== row.title) search.n = searchFields.name
+  if (searchFields?.prompt) search.p = searchFields.prompt.slice(0, SEARCH_PROMPT_MAX)
+  return { ...session, ...withoutSearchFields, ...(search.n !== undefined || search.p !== undefined ? { search } : {}) }
 }
 
 type WireVerb = Record<string, unknown>
