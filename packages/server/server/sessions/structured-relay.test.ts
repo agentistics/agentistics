@@ -3,7 +3,8 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { RELAY_FILES } from './structured-relay'
+import { PassThrough } from 'node:stream'
+import { drainTerminatedRelay, RELAY_DRAIN_GRACE_MS, RELAY_FILES } from './structured-relay'
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -119,4 +120,36 @@ while :; do :; done
       expect(existsSync(join(r.dir, RELAY_FILES.exit))).toBe(true)
     } finally { r.cleanup() }
   }, 10000)
+})
+
+
+describe('structured relay TERM hard cap', () => {
+  test('a fake stdout that never closes cannot hold the relay past the extra grace', () => {
+    const stdout = new PassThrough()
+    let closed = false
+    stdout.on('close', () => { closed = true })
+    let now = 0
+    let kills = 0
+    let finishes = 0
+    let exits = 0
+    let next: (() => void) | undefined
+    const end = 3000
+    drainTerminatedRelay(end, {
+      now: () => now, groupAlive: () => false, stdoutClosed: () => closed,
+      kill: () => { kills++ }, finish: () => { finishes++ }, exit: () => { exits++ },
+      schedule: tick => { next = tick },
+    })
+    for (now = 50; now < end + RELAY_DRAIN_GRACE_MS; now += 50) {
+      const tick = next!; next = undefined; tick()
+      expect(exits).toBe(0)
+      expect(finishes).toBe(0)
+    }
+    expect(kills).toBeGreaterThan(0)
+    const tick = next!; next = undefined; tick()
+    expect(closed).toBe(false)
+    expect(exits).toBe(1)
+    expect(finishes).toBe(1)
+    expect(next).toBeUndefined()
+    stdout.destroy()
+  })
 })

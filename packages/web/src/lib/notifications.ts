@@ -22,17 +22,24 @@ export interface AppNotification {
 
 type Localized = { title: string; message?: string }
 
+/** Retire plan reason codes, translated here alongside the notification that uses them. */
+export const RETIRE_REASON_TEXT: Record<string, { pt: string; en: string }> = {
+  working: { pt: 'ainda está trabalhando', en: 'still working' },
+  'waiting-approval': { pt: 'aguarda uma resposta no diálogo de permissão', en: 'waiting on a permission dialog' },
+  'activity-unknown': { pt: 'não foi possível ler seu estado', en: 'its state could not be read' },
+  'not-confirmed': { pt: 'a inatividade ainda não foi confirmada', en: 'idle has not been confirmed yet' },
+  'quiet-too-short': { pt: 'o período de inatividade foi curto demais', en: 'the quiet period was too short' },
+  'bg-tasks': { pt: 'há tarefas em segundo plano em execução', en: 'background tasks are still running' },
+  'bg-unknown': { pt: 'não foi possível ler as tarefas em segundo plano', en: 'its background tasks could not be read' },
+  'children-unreadable': { pt: 'não foi possível ler os processos filhos', en: 'its child processes could not be read' },
+  'successor-unknown': { pt: 'a sessão sucessora ainda não foi observada', en: 'its successor has not been observed yet' },
+  'work-child': { pt: 'há processos filhos em execução', en: 'child processes are still running' },
+  deadline: { pt: 'só ficou inativa após o prazo', en: 'it was quiet only after the deadline' },
+}
+
 /** Localized copy for server- and client-emitted notification codes. Resolved at
  *  render time by resolveNotification so switching the language re-translates. */
 export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }> = {
-  'handoff_pending': {
-    pt: { title: 'Transferência de liderança pendente', message: 'Já existe uma transferência pendente para outra sessão sucessora.' },
-    en: { title: 'Leader hand-off pending', message: 'A hand-off to another successor session is already pending.' },
-  },
-  'working': {
-    pt: { title: 'Sessão em andamento', message: 'A sessão ainda está trabalhando.' },
-    en: { title: 'Session working', message: 'The session is still working.' },
-  },
   'retire.done': {
     pt: { title: 'Sessão encerrada', message: 'A sessão {label} ({id}) foi encerrada.' },
     en: { title: 'Session retired', message: 'Session {label} ({id}) was retired.' },
@@ -466,6 +473,13 @@ export function resolveNotification(n: AppNotification, lang: 'pt' | 'en'): Loca
     message = message.replace('{more}', idleMoreSuffix(more, lang))
     const freed = typeof n.meta?.freed === 'string' ? n.meta.freed : null
     message = message.replace('{freed}', idleFreedSentence(freed, lang))
+  }
+
+  if (message && n.code === 'retire.expired') {
+    const reasons = Array.isArray(n.meta?.reasons) && n.meta.reasons.length
+      ? n.meta.reasons : [n.meta?.reason ?? 'deadline']
+    const fallback = lang === 'pt' ? 'não foi possível confirmar o encerramento seguro' : 'safe retirement could not be confirmed'
+    message = message.replace('{reason}', reasons.map(code => RETIRE_REASON_TEXT[String(code)]?.[lang] ?? fallback).join('; '))
   }
 
   // EVERY remaining {placeholder}, from `meta` under the same name.

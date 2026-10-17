@@ -16,6 +16,9 @@ import { NOTIFICATION_TEXT, resolveNotification } from './notifications'
 const SERVER = join(import.meta.dir, '../../../server/server')
 
 /** Codes that appear only inside tests and fixtures — they are not events this product raises. */
+// Pure retire-plan result/reason codes: never broadcast as notification codes.
+const PLAN_CODES = new Set(['handoff_pending', 'working'])
+
 const FIXTURES = new Set(['a', 'b', 'c', 'x', 'custom', 'ambiguous', 'missing_field', 'some.new_code_nobody_scoped'])
 
 function walk(dir: string, out: string[] = []): string[] {
@@ -30,14 +33,31 @@ function walk(dir: string, out: string[] = []): string[] {
 const emitted = (): Set<string> => {
   const found = new Set<string>()
   for (const file of walk(SERVER)) {
-    for (const m of readFileSync(file, 'utf8').matchAll(/code: '([a-z][a-z_.]*)'/g)) {
-      if (!FIXTURES.has(m[1]!)) found.add(m[1]!)
+    const source = readFileSync(file, 'utf8')
+    // The retire runner passes its code as notify's fourth argument. Cover that emitter too.
+    for (const pattern of [/code: '([a-z][a-z_.]*)'/g, /\bnotify\([^,\n]+,[^,\n]+,[^,\n]+,\s*'([a-z][a-z_.]*)'/g]) {
+      for (const m of source.matchAll(pattern)) {
+        if (!FIXTURES.has(m[1]!) && !PLAN_CODES.has(m[1]!)) found.add(m[1]!)
+      }
     }
   }
   return found
 }
 
 describe('notification coverage', () => {
+  it('plan codes do not ship unreachable notification copy', () => {
+    for (const code of PLAN_CODES) {
+      expect(emitted().has(code)).toBe(false)
+      expect(NOTIFICATION_TEXT[code]).toBeUndefined()
+    }
+  })
+
+  it('retire notifications are covered through the positional emitter', () => {
+    for (const code of ['retire.done', 'retire.cancelled', 'retire.expired']) {
+      expect(emitted().has(code)).toBe(true)
+    }
+  })
+
   it('every code the server emits has EN and PT text', () => {
     const missing: string[] = []
     for (const code of [...emitted()].sort()) {
