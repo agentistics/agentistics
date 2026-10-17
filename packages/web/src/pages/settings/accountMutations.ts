@@ -38,6 +38,6 @@ export function createAccountMutator<A>(
 }
 
 /** After a save: keep the user's newer edits, otherwise show what the server actually stored. */
-export function reconcileNickname(draft: string, submitted: string, stored: string | undefined): string {
-  return draft === submitted ? (stored ?? '') : draft
+export function reconcileNickname(draft: string, rawSubmittedDraft: string, stored: string | undefined): string {
+  return draft === rawSubmittedDraft ? (stored ?? '') : draft
 }

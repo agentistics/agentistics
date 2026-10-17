@@ -159,7 +159,7 @@ function AccountRow({ a, props, isMobile }: { a: AccountRowData; props: Accounts
       }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <b style={{ fontSize: 13, color: 'var(--text-primary)' }}>{title}</b>
-          {!unconfirmed && !a.available && !a.retired && <Pill tone="neutral">{t.hiddenChip}</Pill>}
+          {!unconfirmed && !a.available && !a.retired && <Pill tone="neutral" nowrap>{t.hiddenChip}</Pill>}
         </span>
         {whose && <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-tertiary)' }}>{whose}</span>}
         <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--text-tertiary)' }}>
@@ -220,6 +220,11 @@ export default function AccountsSection({ lang }: { lang: Lang }) {
   const [failedIds, setFailed] = useState<Set<string>>(new Set())
   const [detailKey, setDetailKey] = useState<string | null>(null)
   const [nick, setNick] = useState('')
+  const drawerSession = useRef(0)
+  const selectDetail = (key: string | null) => {
+    drawerSession.current++
+    setDetailKey(key)
+  }
   const mutator = useRef(createAccountMutator<ApiAccount>((id, body) =>
     fetch(`/api/accounts/${encodeURIComponent(id)}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -239,15 +244,19 @@ export default function AccountsSection({ lang }: { lang: Lang }) {
   useEffect(() => { setNick(detail?.nickname ?? '') }, [detailKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** One PATCH at a time per account; a second request for a busy account is dropped, never raced. */
-  const patch = async (a: AccountRowData, body: { available?: boolean; nickname?: string }) => {
+  const patch = async (a: AccountRowData, body: { available?: boolean; nickname?: string }, rawNicknameDraft?: string) => {
     if (isUnidentified(a) || mutator.has(a.id)) return
+    const submittedDrawer = drawerSession.current
     setPending(h => new Set(h).add(a.id))
     const res = await mutator.patch(a.id, body)
     setPending(h => { const n = new Set(h); n.delete(a.id); return n })
     if (res.status === 'ok') {
       setAccounts(h => (h ?? []).map(x => x.id === a.id ? res.account : x))
       setFailed(h => { const n = new Set(h); n.delete(a.id); return n })
-      if (body.nickname !== undefined) setNick(d => reconcileNickname(d, body.nickname!, res.account.nickname))
+      if (rawNicknameDraft !== undefined) setNick(d =>
+        drawerSession.current === submittedDrawer
+          ? reconcileNickname(d, rawNicknameDraft, res.account.nickname)
+          : d)
     } else if (res.status === 'failed') {
       setFailed(h => new Set(h).add(a.id))
     }
@@ -278,17 +287,17 @@ export default function AccountsSection({ lang }: { lang: Lang }) {
       {accounts !== null && accounts.length > 0 && (
         <AccountsView lang={lang} accounts={accounts} limits={limits} now={now} pendingIds={pendingIds} failedIds={failedIds}
           onToggle={a => { void patch(a, { available: !a.available }) }}
-          onDetail={a => setDetailKey(accountKey(a))}
+          onDetail={a => selectDetail(accountKey(a))}
           noSecondAccount={new Set<HarnessId>(['antigravity'])} />
       )}
-      <Drawer open={detail !== null} lang={lang} onClose={() => setDetailKey(null)}
+      <Drawer open={detail !== null} lang={lang} onClose={() => selectDetail(null)}
         title={detail ? accountTitle(detail, HARNESS_LABELS[detail.harness] ?? detail.harness, pt) : ''}
         dirty={detailEditable && nick.trim() !== (detail.nickname ?? '')}
         footer={detail && (
           <DialogActions>
             <button type="button" style={dialogButtonStyle('primary', false)}
               disabled={!detailEditable || pendingIds.has(detail.id) || nick.trim() === (detail.nickname ?? '')}
-              onClick={() => { void patch(detail, { nickname: nick.trim() }) }}>{pt ? 'Salvar apelido' : 'Save nickname'}</button>
+              onClick={() => { void patch(detail, { nickname: nick.trim() }, nick) }}>{pt ? 'Salvar apelido' : 'Save nickname'}</button>
           </DialogActions>
         )}>
         {detail && (
