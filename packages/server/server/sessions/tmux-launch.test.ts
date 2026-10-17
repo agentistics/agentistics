@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { planTmuxLaunch, planTmuxLiteral, tmuxSpawnError } from './tmux-launch'
+import { planTmuxLaunch, planTmuxLiteral, sweepStaleLaunchers, tmuxSpawnError } from './tmux-launch'
 import { planSpawn } from './spawn-spec'
 import { spawnArgs } from './tmux-cli'
 
@@ -29,7 +30,7 @@ describe('tmux launch payload transport', () => {
       expect(await child.exited).toBe(0)
       expect(err).toBe('')
       expect(out.split('\0')).toEqual([...argv.slice(1), ''])
-      expect(await readFile(launch.file!.path, 'utf8')).toBe(launch.file!.text)
+      expect(existsSync(launch.file!.path)).toBe(false)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -91,5 +92,28 @@ describe('tmux spawn diagnostics', () => {
   })
   test('keeps a useful fallback when both streams are empty', () => {
     expect(tmuxSpawnError(127, '', '')).toBe('tmux new-session failed (code 127)')
+  })
+})
+
+describe('launcher cleanup', () => {
+  test('sweep removes only old launcher-named files in session dirs', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tmux-sweep-'))
+    try {
+      await mkdir(join(root, 's1'))
+      const old = join(root, 's1', 'launch-abc-123.sh')
+      const fresh = join(root, 's1', 'launch-def-456.sh')
+      const other = join(root, 's1', 'context.md')
+      for (const f of [old, fresh, other]) await writeFile(f, 'x', { mode: 0o600 })
+      const past = new Date(Date.now() - 3_600_000)
+      await utimes(old, past, past)
+      await utimes(other, past, past)
+      expect(await sweepStaleLaunchers(root)).toBe(1)
+      expect(existsSync(old)).toBe(false)
+      expect(existsSync(fresh)).toBe(true)
+      expect(existsSync(other)).toBe(true)
+      expect(await sweepStaleLaunchers(join(root, 'missing'))).toBe(0)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })

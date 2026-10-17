@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
-import { planTmuxLaunch, planTmuxLiteral, tmuxSpawnError } from './tmux-launch'
+import { planTmuxLaunch, planTmuxLiteral, sweepStaleLaunchers, tmuxSpawnError } from './tmux-launch'
 import { ensureSessionIdentityKey } from './session-identity'
 import { FOCUS_ATTEMPTS, inputFocusOf } from './input-focus'
 import { highlightedRow, parseRewindMenu, REWIND_MAX_STEPS, rewindRowMatches } from './claude-rewind'
@@ -562,6 +562,7 @@ export const tmuxBackend: SessionBackend = {
     const dir = join(AGENTISTICS_DATA_DIR, 'session-context', req.id)
     const launch = planTmuxLaunch(req.argv, dir, randomUUID())
     if (launch.file) {
+      void sweepStaleLaunchers(join(AGENTISTICS_DATA_DIR, 'session-context'))
       await mkdir(dir, { recursive: true, mode: 0o700 })
       // A unique, private file: an existing launch is never overwritten while a pane reads it.
       await writeFile(launch.file.path, launch.file.text, { mode: 0o600, flag: 'wx' })
