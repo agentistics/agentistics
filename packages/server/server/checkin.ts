@@ -199,9 +199,11 @@ export function mergeConfig(base: CheckinConfig, patch: Partial<CheckinConfig>):
   const checklist = patch.checklist ? CHECKIN_ITEMS.map(id => ({ id, enabled: patch.checklist!.find(x => x.id === id)?.enabled ?? base.checklist.find(x => x.id === id)?.enabled ?? true })) : base.checklist
   return { intervalMin: intervalMin as CheckinConfig['intervalMin'], paused: patch.paused === undefined ? base.paused : patch.paused, checklist }
 }
+/** The report is read by the owner, who is not technical: the round is useless if it reads like a log. */
+export const PLAIN_REPORT = 'O relatório é lido pelo dono, que não é técnico: escreva como um recado curto em linguagem simples — o que ficou pronto, o que precisa dele (se algo) e o que vem a seguir. Sem ids de sessão, hashes, números de PR, portas, porcentagens de limite ou apelidos internos, a não ser que ele precise agir sobre um deles; chame cada coisa pelo que ela faz.'
 export function promptFor(c: CheckinConfig): string {
   const items = c.checklist.filter(x => x.enabled).map(x => `- ${labels[x.id]}`).join('\n')
-  return `[from agentistics · check-in]\nFaça o check-in da liderança agora.\n${items}\n\nQuando terminar, chame agentistics_checkin_report.`
+  return `[from agentistics · check-in]\nFaça o check-in da liderança agora.\n${items}\n\n${PLAIN_REPORT}\nQuando terminar, chame agentistics_checkin_report.`
 }
 async function promptForLeader(c: CheckinConfig): Promise<string> {
   const prompt = promptFor(c)
