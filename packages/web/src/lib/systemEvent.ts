@@ -1,4 +1,4 @@
-import { roleLine } from '@agentistics/core'
+import { parseInjectedHeader, roleLine, unwrapPasted } from '@agentistics/core'
 
 /**
  * systemEvent.ts — PURE: recognise a message agentistics itself injected into a session.
@@ -13,7 +13,7 @@ import { roleLine } from '@agentistics/core'
  * so the header is no longer the first line. One whole-message wrapper is unwrapped before matching;
  * a wrapper the person really pasted around ordinary text still finds no header and stays theirs.
  */
-export type SystemEventKind = 'away' | 'away-off' | 'question' | 'handback' | 'block' | 'session-question' | 'checkin' | 'role'
+export type SystemEventKind = 'away' | 'away-off' | 'question' | 'handback' | 'block' | 'session-question' | 'checkin' | 'role' | 'relay' | 'notice' | 'session-note'
 
 export interface SystemEvent {
   kind: SystemEventKind
@@ -21,15 +21,8 @@ export interface SystemEvent {
   sender?: string
   /** Everything after the header line, or the full legacy prompt. */
   body: string
-}
-
-const HEADER = /^\s*\[from (agentistics|session ([^\s\]·]+)) · ([a-z-]+)\]\s*(?:\r?\n|$)/
-const PASTED = /^\s*<pasted_content id="([^"]+)">[ \t]*\r?\n([\s\S]*?)(?:\r?\n)?<\/pasted_content id="\1">\s*$/
-
-/** The text inside ONE wrapper spanning the whole message, else the text unchanged. */
-function unwrapPasted(text: string): string {
-  const m = PASTED.exec(text)
-  return m ? m[2]! : text
+  /** The header's own kind word, for the generic kinds (`notice`, `session-note`). */
+  label?: string
 }
 
 // Before the producer added a header, these prompts were stored as ordinary user turns.
@@ -37,26 +30,27 @@ const LEGACY_CHECKIN = /^\s*(?:Faça o check-in da liderança agora\.|Run the le
 
 export function parseSystemEvent(raw: string): SystemEvent | null {
   const text = unwrapPasted(raw)
-  const m = HEADER.exec(text)
-  if (!m) {
+  const h = parseInjectedHeader(raw)
+  if (!h) {
     // Match the entire historical producer output, never a mention of its marker in typed prose.
     if ((['leader', 'worker', null] as const).some(role =>
       text.trim() === `[agentistics] your role is now ${role ? role.toUpperCase() : 'AUTO'} — ${roleLine(role)}`,
     )) return { kind: 'role', body: text.trim() }
     return LEGACY_CHECKIN.test(text) ? { kind: 'checkin', body: text } : null
   }
-  const what = m[3]!
-  const body = text.slice(m[0].length).trim()
-  if (m[1] === 'agentistics') {
+  const { kind: what, body } = h
+  if (h.origin === 'agentistics') {
     if (what === 'role') return { kind: 'role', body }
     if (what === 'check-in') return { kind: 'checkin', body }
     if (what === 'away') return { kind: /away mode is now OFF/i.test(body) ? 'away-off' : 'away', body }
     if (what === 'question') return { kind: 'question', body }
-    return null
+    if (what === 'relay') return { kind: 'relay', body }
+    // Fail closed: a header nobody listed is still agentistics talking, never the person.
+    return { kind: 'notice', label: what, body }
   }
-  if (what === 'handback' || what === 'block') return { kind: what, sender: m[2], body }
-  if (what === 'question') return { kind: 'session-question', sender: m[2], body }
-  return null
+  if (what === 'handback' || what === 'block') return { kind: what, sender: h.sender, body }
+  if (what === 'question') return { kind: 'session-question', sender: h.sender, body }
+  return { kind: 'session-note', sender: h.sender, label: what, body }
 }
 
 /** The one short localized line. `who` is the sender's title when known, else its id. */
@@ -70,6 +64,9 @@ export function systemEventLine(e: SystemEvent, pt: boolean, who?: string): stri
     case 'question': return pt ? 'Dica de passagem de contexto' : 'Context hand-off hint'
     case 'handback': return pt ? `Sessão ${name} entregou` : `Session ${name} handed back`
     case 'block': return pt ? `Sessão ${name} está bloqueada` : `Session ${name} is blocked`
+    case 'relay': return pt ? 'Mensagem encaminhada da sessão anterior' : 'Forwarded from the previous session'
+    case 'notice': return pt ? `agentistics (${e.label ?? 'aviso'})` : `agentistics (${e.label ?? 'notice'})`
+    case 'session-note': return pt ? `Sessão ${name} (${e.label ?? 'mensagem'})` : `Session ${name} (${e.label ?? 'message'})`
     case 'session-question': return pt ? `Sessão ${name} perguntou` : `Session ${name} asked a question`
   }
 }
