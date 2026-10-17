@@ -388,8 +388,8 @@ export default function BillingSettings() {
               {selectedEntry && !livePrice(selectedEntry.id) && selectedEntry.monthly && (
                 <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 6, lineHeight: 1.5 }}>
                   {pt
-                    ? `Valor da tabela interna, conferido em ${selectedEntry.monthly.verifiedAt}.`
-                    : `From the built-in table, checked on ${selectedEntry.monthly.verifiedAt}.`}
+                    ? `Preço de tabela de ${fmtDay(selectedEntry.monthly.verifiedAt)}.`
+                    : `List price as of ${fmtDay(selectedEntry.monthly.verifiedAt)}.`}
                 </div>
               )}
             </div>
@@ -441,10 +441,15 @@ export default function BillingSettings() {
                 </div>
                 {history.map(p => (
                   <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px 8px 14px', borderTop: '1px solid var(--border)', background: draft.id === p.id ? 'var(--bg-elevated)' : undefined }}>
-                    <div style={{ minWidth: 0, flex: 1, fontSize: 12, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      <b style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{periodName(p) || modeLabel(p.mode, pt ? 'pt' : 'en')}</b>
-                      {p.price && ` · ${currencySymbol(p.price.currency)} ${formatAmountDisplay(String(p.price.amount), p.price.currency)}`}
-                      {' · '}{fmtDay(p.from)} → {p.to ? fmtDay(p.to) : (pt ? 'em curso' : 'ongoing')}
+                    {/* On a phone the dates take their own line: name, price, range and two icons do not fit one. */}
+                    <div style={{ minWidth: 0, flex: 1, fontSize: 12, color: 'var(--text-tertiary)' }}>
+                      <span style={{ display: isMobile ? 'block' : 'inline', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        <b style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{periodName(p) || modeLabel(p.mode, pt ? 'pt' : 'en')}</b>
+                        {p.price && ` · ${currencySymbol(p.price.currency)} ${formatAmountDisplay(String(p.price.amount), p.price.currency)}`}
+                      </span>
+                      <span style={{ display: isMobile ? 'block' : 'inline', whiteSpace: 'nowrap', marginTop: isMobile ? 2 : 0 }}>
+                        {isMobile ? '' : ' · '}{fmtDay(p.from)} → {p.to ? fmtDay(p.to) : (pt ? 'em curso' : 'ongoing')}
+                      </span>
                     </div>
                     <button type="button" onClick={() => openDraft(draftFromPeriod(p), nick)} style={iconBtn} title={pt ? 'Editar' : 'Edit'} aria-label={pt ? 'Editar' : 'Edit'}><Pencil size={14} /></button>
                     <button type="button" onClick={() => setConfirmDelete(p)} style={{ ...iconBtn, color: 'var(--accent-red)' }} title={pt ? 'Remover' : 'Remove'} aria-label={pt ? 'Remover' : 'Remove'}><Trash2 size={14} /></button>
