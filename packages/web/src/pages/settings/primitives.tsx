@@ -565,7 +565,7 @@ export function StatusDot({ state, size = 8 }: {
  * included — adding an inline 16px here would be dead code that reads like a live requirement.
  */
 export function FieldInput({
-  label, sub, value, onChange, type = 'text', placeholder, disabled, autoComplete, maxLength, autoFocus, mono, inputMode, spellCheck,
+  label, sub, value, onChange, type = 'text', placeholder, disabled, autoComplete, maxLength, autoFocus, mono, inputMode, spellCheck, hideLabel,
 }: {
   label: string
   sub?: string
@@ -581,13 +581,15 @@ export function FieldInput({
   mono?: boolean
   inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']
   spellCheck?: boolean
+  /** Keep the label for screen readers only (the field already carries it as `aria-label`). */
+  hideLabel?: boolean
 }) {
   // A hidden field the user cannot proof-read is where a mistyped token or password becomes a
   // failure somewhere else entirely; the reveal is the same control every other form here uses.
   const [shown, setShown] = useState(false)
   return (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 2 }}>{label}</div>
+    <div style={{ marginBottom: hideLabel ? 0 : 14 }}>
+      {!hideLabel && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 2 }}>{label}</div>}
       {sub && <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 5 }}>{sub}</div>}
       <div style={{ position: 'relative', display: 'flex', flexDirection: 'column' }}>
       <input

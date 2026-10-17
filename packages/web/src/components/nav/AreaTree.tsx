@@ -221,7 +221,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
       {!collapsed && (
         <div
           id="ag-area-search"
-          style={{ margin: '0 2px -8px' }}
+          style={{ margin: '0 2px' }}
           onKeyDown={e => {
             if (e.key === 'Escape') { setQuery(''); return }
             if (e.key === 'Enter' && results[0]) { const to = results[0].page.path; setQuery(''); go(to) }
@@ -229,7 +229,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
         >
           <FieldInput
             label={pt ? 'Buscar página' : 'Find page'} value={query} onChange={setQuery}
-            placeholder={pt ? 'Buscar  Ctrl K' : 'Search  Ctrl K'} autoComplete="off" spellCheck={false}
+            hideLabel placeholder={pt ? 'Buscar  Ctrl K' : 'Search  Ctrl K'} autoComplete="off" spellCheck={false}
           />
         </div>
       )}

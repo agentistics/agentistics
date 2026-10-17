@@ -98,8 +98,6 @@ export function shouldHandlePanelShortcut(
   // checked FIRST: it is the more specific signal, and it is what lets `toggle-band` reach the
   // terminal at all despite the generic typing-target check below that would otherwise catch it.
   if (e.focusInTerminal) return shortcut === 'toggle-band' ? shortcut : null
-  // The search shortcut is how you LEAVE a text field for the tree, so it passes the typing guard.
-  if (shortcut === 'focus-search') return shortcut
   if (isOrdinaryTypingTarget(target)) return null
   return shortcut
 }

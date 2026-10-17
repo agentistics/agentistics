@@ -139,11 +139,13 @@ describe('session tab shortcuts', () => {
 })
 
 describe('focus-search', () => {
-  test('Ctrl/Cmd+K is focus-search, even from a text field, but not from a terminal', () => {
+  test('Ctrl/Cmd+K is focus-search, but not from a text field or a terminal', () => {
     const k = { ...base, key: 'k', code: 'KeyK', ctrl: true }
     expect(matchPanelShortcut(k)).toBe('focus-search')
     expect(matchPanelShortcut({ ...k, ctrl: false, meta: true })).toBe('focus-search')
-    expect(shouldHandlePanelShortcut(k, { tagName: 'TEXTAREA' })).toBe('focus-search')
+    expect(shouldHandlePanelShortcut(k, { tagName: 'DIV' })).toBe('focus-search')
+    expect(shouldHandlePanelShortcut(k, { tagName: 'TEXTAREA' })).toBeNull()
+    expect(shouldHandlePanelShortcut(k, { tagName: 'INPUT' })).toBeNull()
     expect(shouldHandlePanelShortcut({ ...k, focusInTerminal: true }, null)).toBeNull()
     expect(matchPanelShortcut({ ...k, shift: true })).toBeNull()
   })
