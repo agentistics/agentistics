@@ -23,7 +23,7 @@ describe('every "open limits" entry point asks for the modal, not the Nay tab', 
   test('App mounts the modal once, closing on esc/backdrop is in the modal', () => {
     expect(read('../App.tsx')).toContain('<PlanUsageModal')
     const m = read('../components/PlanUsageModal.tsx')
-    expect(m).toContain("e.key === 'Escape'")
+    expect(m).toContain('useEscapeOwner(true, onClose)')
     expect(m).toContain('onClick={onClose}')
     expect(m).toContain('aria-modal="true"')
   })

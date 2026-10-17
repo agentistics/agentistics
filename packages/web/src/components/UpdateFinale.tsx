@@ -25,6 +25,7 @@ import { UPDATE_ANIMATION } from '../lib/upgradeSteps'
 import { brandAsset } from '../lib/brand'
 import { prefersReducedMotion } from '../lib/nayNotifyAnim'
 import { INK_SOFT, StageText, TEXT_SHADOW, VersionTitle, canvasStyle, titleText, useStageRefs } from './UpdateStage'
+import { useEscapeOwner } from '../lib/overlayStack'
 
 export const FINALE_MS = 5600
 
@@ -45,10 +46,9 @@ export function UpdateFinale({ lang, version, from = '', onDone, isMobile = fals
     // timeline's own clock (`finaleClock.ts`) decides when to leave, so a boot stall cannot eat it.
     const t1 = reduced ? window.setTimeout(() => setLeaving(true), FINALE_MS - 450) : 0
     const t2 = reduced ? window.setTimeout(() => doneRef.current(), FINALE_MS) : 0
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') doneRef.current() }
-    window.addEventListener('keydown', key)
-    return () => { window.clearTimeout(t1); window.clearTimeout(t2); window.removeEventListener('keydown', key) }
+    return () => { window.clearTimeout(t1); window.clearTimeout(t2) }
   }, [reduced])
+  useEscapeOwner(true, () => doneRef.current())
 
   useEffect(() => {
     const cv = canvas.current

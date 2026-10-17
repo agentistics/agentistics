@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react'
 import { X } from 'lucide-react'
+import { useEscapeOwner } from '../lib/overlayStack'
 
 interface Props {
   title: React.ReactNode
@@ -8,11 +9,7 @@ interface Props {
 }
 
 export function ChartModal({ title, onClose, children }: Props) {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
-  }, [onClose])
+  useEscapeOwner(true, onClose)
 
   return (
     <div

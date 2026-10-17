@@ -5,6 +5,7 @@ import { HARNESS_LABELS, HARNESS_COLORS } from '../lib/harness'
 import { HarnessChat } from './HarnessChat'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { OVERLAY_TOP } from '../lib/mobileOverlay'
+import { useEscapeOwner } from '../lib/overlayStack'
 
 interface TranscriptTarget {
   harness: HarnessId
@@ -25,12 +26,7 @@ export function TranscriptModal({ lang }: { lang: 'pt' | 'en' }) {
     return () => window.removeEventListener('agentistics:open-transcript', handler)
   }, [])
 
-  useEffect(() => {
-    if (!target) return
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setTarget(null) }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
-  }, [target])
+  useEscapeOwner(!!target, () => setTarget(null))
 
   if (!target) return null
 

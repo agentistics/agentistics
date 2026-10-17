@@ -1,3 +1,4 @@
+import { useEscapeOwner } from '../lib/overlayStack'
 import React, { useState, useMemo, useEffect, useRef, useReducer, lazy, Suspense, useSyncExternalStore } from 'react'
 import type { SessionMeta } from '@agentistics/core'
 import { sessionTime } from '../lib/sessionTime'
@@ -2514,13 +2515,12 @@ function CardModal({ statusPill, harness, title, meta, lang, onClose, children }
   children: React.ReactNode
 }) {
   const isMobile = useIsMobile()
+  useEscapeOwner(true, onClose)
   useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => { document.body.style.overflow = prev; document.removeEventListener('keydown', onKey) }
-  }, [onClose])
+    return () => { document.body.style.overflow = prev }
+  }, [])
 
   return (
     <div

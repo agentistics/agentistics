@@ -39,6 +39,7 @@
  * conditional hook call — its hooks only ever run while it is actually mounted.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronLeft, ExternalLink, MoreHorizontal, Plus, Unlink, X } from 'lucide-react'
@@ -101,6 +102,7 @@ function usePopover(width: number) {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const boxRef = useRef<HTMLDivElement>(null)
 
+  useEscapeOwner(open, () => setOpen(false))
   useEffect(() => {
     if (!open) return
     const down = (e: MouseEvent) => {
@@ -108,12 +110,9 @@ function usePopover(width: number) {
       if (triggerRef.current?.contains(t)) return
       if (boxRef.current && !boxRef.current.contains(t)) setOpen(false)
     }
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
     document.addEventListener('mousedown', down)
-    document.addEventListener('keydown', key)
     return () => {
       document.removeEventListener('mousedown', down)
-      document.removeEventListener('keydown', key)
     }
   }, [open])
 

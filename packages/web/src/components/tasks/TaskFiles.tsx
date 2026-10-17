@@ -12,6 +12,7 @@
  * indistinguishable from a failed download.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -38,9 +39,9 @@ function Lightbox({ files, index, onIndex, onClose }: {
     onIndex((index + by + files.length) % files.length)
   }, [index, files.length, onIndex])
 
+  useEscapeOwner(true, onClose)
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
       if (e.key === 'ArrowRight') step(1)
       if (e.key === 'ArrowLeft') step(-1)
     }

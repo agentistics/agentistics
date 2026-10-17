@@ -9,6 +9,7 @@ import { Gauge, X } from 'lucide-react'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { OVERLAY_TOP } from '../lib/mobileOverlay'
 import { NayLimitsTab } from './nay/NayLimitsTab'
+import { useEscapeOwner } from '../lib/overlayStack'
 
 export function PlanUsageModal({ lang, onClose }: { lang: 'pt' | 'en'; onClose: () => void }) {
   const isMobile = useIsMobile()
@@ -18,7 +19,6 @@ export function PlanUsageModal({ lang, onClose }: { lang: 'pt' | 'en'; onClose: 
     const prev = document.activeElement as HTMLElement | null
     box.current?.querySelector<HTMLElement>('button')?.focus()
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); onClose(); return }
       if (e.key !== 'Tab' || !box.current) return
       const f = Array.from(box.current.querySelectorAll<HTMLElement>('button,a[href],[tabindex]:not([tabindex="-1"])'))
       if (f.length === 0) return
@@ -28,7 +28,8 @@ export function PlanUsageModal({ lang, onClose }: { lang: 'pt' | 'en'; onClose: 
     }
     window.addEventListener('keydown', onKey, true)
     return () => { window.removeEventListener('keydown', onKey, true); prev?.focus?.() }
-  }, [onClose])
+  }, [])
+  useEscapeOwner(true, onClose)
   return (
     <div onClick={onClose} role="dialog" aria-modal="true" aria-label={pt ? 'Uso dos planos' : 'Plan usage'} data-plan-usage-modal
       style={{ position: 'fixed', inset: 0, zIndex: 1100, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent: 'center', padding: isMobile ? OVERLAY_TOP : 24 }}>

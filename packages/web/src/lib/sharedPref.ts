@@ -242,7 +242,9 @@ export function createSharedPref<T>(opts: {
     prefKey,
     adopt: (raw: unknown, writable: boolean) => {
       // The first armed answer this BROWSER sees for this key — see THE ONE-TIME MIGRATION.
-      const first = writable && opts.adoptLocalWhenAbsent === true && firstReconcile(prefKey)
+      // Marked only when there is something to decide: server silent AND no local value means
+      // nothing was chosen, so no marker (a choice made later while offline must still migrate).
+      const first = writable && opts.adoptLocalWhenAbsent === true && !(raw === undefined && !hadLocal) && firstReconcile(prefKey)
       if (raw === undefined && first && hadLocal) {
         // The server has never heard of this key and this browser holds a real value: it becomes
         // the shared one. Once per browser — after that the server answers.
@@ -274,6 +276,9 @@ export function createSharedPref<T>(opts: {
     set: (next: T) => {
       if (sameValue(next, current)) return
       current = next
+      // A choice made here is owned here: a later reconcile against a server that does not know
+      // the key must not restore the fallback over it.
+      hadLocal = true
       writeLocal()
       if (armed.has(endpoint)) put()
       notify()

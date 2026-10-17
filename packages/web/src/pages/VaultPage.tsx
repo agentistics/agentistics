@@ -55,6 +55,7 @@ import { VAULT_TABS, parseVaultTab, type VaultTab } from './vault/vaultTabs'
 import { VaultFlowHost, useVaultControls } from './vault/useVaultControls'
 import { DevicesArea, MethodsArea, SettingsArea, type Gated } from './vault/VaultAreas'
 import { AreaHead, InfoBlocks, LearnMore, Pill, Rows, Sheet, TextButton, TextField, VaultRow, hotBtn, iconBtn, pageBtn } from './vault/vaultUi'
+import { useEscapeOwner } from '../lib/overlayStack'
 
 type Lang = 'en' | 'pt'
 type State = { kind: 'loading' } | { kind: 'locked' } | { kind: 'code'; error: string | null } | { kind: 'ready' } | { kind: 'failed' }
@@ -480,11 +481,7 @@ export function QuickVault({ lang, isMobile, onClose }: { lang: Lang; isMobile: 
   const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
   const [asking, setAsking] = useState(false)
   // Escape closes the sheet — but not while a code dialog on top of it is the one being answered.
-  useEffect(() => {
-    if (asking) return
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h)
-  }, [onClose, asking])
+  useEscapeOwner(!asking, onClose)
   // The same frame as the app's ConfirmModal (scrim, card tokens, radius, shadow); full-screen on a phone.
   const o: React.CSSProperties = {
     position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent: 'center',

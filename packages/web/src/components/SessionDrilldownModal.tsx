@@ -17,6 +17,7 @@ import { X } from 'lucide-react'
 import type { SessionMeta, Lang, WorkflowRun } from '@agentistics/core'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { OVERLAY_TOP } from '../lib/mobileOverlay'
+import { useEscapeOwner } from '../lib/overlayStack'
 import {
   SessionDrilldownBody, SessionDrilldownHead, type GlobalModelUsage,
 } from './SessionDrilldown'
@@ -35,11 +36,7 @@ interface Props {
 export function SessionDrilldownModal({ session, globalModelUsage, currency, brlRate, lang, workflows, onClose }: Props) {
   const isMobile = useIsMobile()
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
-  }, [onClose])
+  useEscapeOwner(true, onClose)
 
   return (
     <div

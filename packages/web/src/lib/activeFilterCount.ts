@@ -21,7 +21,7 @@ import type { Filters } from '@agentistics/core'
  * `Boolean(onActiveOnlyChange && activeOnly)` guard: every caller of this helper always wires the
  * switch through, so the callback is never the missing half.
  */
-export function countActiveFilters(filters: Filters, activeOnly: boolean): number {
+export function countActiveFilters(filters: Filters, activeOnly: boolean, leadersOnly = false): number {
   return [
     (filters.users?.length ?? 0) > 0,
     (filters.harnesses?.length ?? 0) > 0,
@@ -33,5 +33,7 @@ export function countActiveFilters(filters: Filters, activeOnly: boolean): numbe
     (filters.teams?.length ?? 0) > 0,
     (filters.machines?.length ?? 0) > 0,
     activeOnly,
+    // The aside's persisted "só líderes" switch (`leadersFilter.ts`) — a filter, so it counts here.
+    leadersOnly,
   ].filter(Boolean).length
 }

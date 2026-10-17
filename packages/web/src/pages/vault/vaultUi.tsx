@@ -11,6 +11,7 @@ import { card, overlay } from '../../components/MfaSetup'
 import { dialogButtonStyle } from '../settings/primitives'
 import { Field, inputStyle } from '../../components/sessions/formBits'
 import { REVEAL_PAD, RevealButton } from '../../components/PasswordReveal'
+import { useEscapeOwner } from '../../lib/overlayStack'
 
 /** The page's outlined button (elevated, 12px) — 44px on mobile. */
 export function pageBtn(isMobile: boolean): React.CSSProperties {
@@ -129,7 +130,7 @@ export function TextButton({ onClick, children, pressed }: { onClick: () => void
 export function Sheet({ closeLabel, isMobile, title, onClose, children, wide, footer }: {
   closeLabel: string; isMobile: boolean; title: string; onClose: () => void; children: React.ReactNode; wide?: boolean; footer?: React.ReactNode
 }) {
-  useEffect(() => { const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h) }, [onClose])
+  useEscapeOwner(true, onClose)
   const o: React.CSSProperties = isMobile ? { ...overlay, padding: 0, zIndex: 3000 } : { ...overlay, zIndex: 3000 }
   const frame: React.CSSProperties = { ...card, padding: 0, display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }
   const c: React.CSSProperties = isMobile

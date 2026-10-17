@@ -93,6 +93,7 @@
  * `lib/unsavedLeave.ts`) still resets without a question.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { createSharedPref } from '../../lib/sharedPref'
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import {
@@ -1324,17 +1325,7 @@ export function Studio({
    * every instance it creates, so this reads whichever of `EditorStack`'s several mounted editors
    * currently holds focus without reaching into any one editor's own JS handle.
    */
-  useEffect(() => {
-    if (!fullscreen || !onToggleFullscreen) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      const active = typeof document === 'undefined' ? null : document.activeElement
-      if (active instanceof Element && active.closest('.monaco-editor')) return
-      onToggleFullscreen()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [fullscreen, onToggleFullscreen])
+  useEscapeOwner(!!fullscreen && !!onToggleFullscreen, () => onToggleFullscreen?.())
 
   /**
    * THE GEAR MENU (§2 — replacing the header row; §3, 2026-09-19: now the Studio's ONE menu in
@@ -2357,6 +2348,7 @@ export function NewFileRow({ state, isMobile, lang, onChange, onSubmit, onCancel
   onCancel: () => void
 }) {
   const pt = lang === 'pt'
+  useEscapeOwner(true, onCancel)
   const ready = state.name.trim() !== '' && !state.busy
   const isFile = state.kind === 'file'
   // A nested create has nowhere of its own to sit — this is the one create slot this panel has —
@@ -2395,7 +2387,6 @@ export function NewFileRow({ state, isMobile, lang, onChange, onSubmit, onCancel
           onChange={ev => onChange(ev.target.value)}
           onKeyDown={ev => {
             if (ev.key === 'Enter') { ev.preventDefault(); if (ready) onSubmit() }
-            if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); onCancel() }
           }}
           aria-label={ariaLabel}
           placeholder={isFile ? (pt ? 'arquivo.ts' : 'file.ts') : (pt ? 'pasta' : 'folder')}
@@ -2509,11 +2500,7 @@ export function MoveToPicker({ sessionId, item, tree, isMobile, lang, onPick, on
   const pt = lang === 'pt'
   const [liveTree, setLiveTree] = useState(tree)
   useEffect(() => { setLiveTree(tree) }, [tree])
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', h)
-    return () => document.removeEventListener('keydown', h)
-  }, [onClose])
+  useEscapeOwner(true, onClose)
 
   const folders = flattenVisible(liveTree).filter(r => r.kind === 'dir')
   const rootOk = canMoveInto(item.path, '')

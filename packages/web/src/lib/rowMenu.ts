@@ -28,6 +28,14 @@ export interface RowVerb {
   reason?: string
   checked?: boolean
   color?: string
+  /** Draws the lucide Pin before the label (the tabs list marks its pinned sessions). */
+  pinned?: boolean
+}
+
+/** Tallest a fixed menu may be, in CSS px. `innerHeight` is ALREADY in CSS px: `zoomGeometry.ts`
+ *  divides it by the UI zoom, so compensating here again would double-count the zoom. */
+export function menuMaxHeight(innerHeight: number): number {
+  return Math.max(120, innerHeight - 8)
 }
 
 export type MenuEntry = RowVerb

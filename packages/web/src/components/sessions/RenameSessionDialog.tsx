@@ -7,6 +7,7 @@
  * its harness where that harness supports it — nothing here re-implements that.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useState } from 'react'
 
 export interface RenameSessionDialogProps {
@@ -22,6 +23,7 @@ export function RenameSessionDialog({ lang, title, onCancel, onSubmit }: RenameS
   const pt = lang === 'pt'
   const [draft, setDraft] = useState(title)
   const [busy, setBusy] = useState(false)
+  useEscapeOwner(true, onCancel)
   return (
     <div
       role="dialog"
@@ -56,7 +58,6 @@ export function RenameSessionDialog({ lang, title, onCancel, onSubmit }: RenameS
           autoFocus
           value={draft}
           onChange={e => setDraft(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Escape') onCancel() }}
           style={{
             width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 8,
             border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)',

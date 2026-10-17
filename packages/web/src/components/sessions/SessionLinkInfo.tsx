@@ -7,6 +7,7 @@
  * `scrollIsOutside` for scroll) whose rows navigate. The links themselves are decided by the pure
  * `sessionLinks`; where each row leads is `linkTargets`, so the click handlers hold no routing.
  */
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, ChevronRight, Clock3, Info, List, Moon, Play, Search, X, Maximize2 } from 'lucide-react'
@@ -235,6 +236,8 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
   const rowOf = (t: LinkTarget) => <Row key={t.key} t={t} pt={pt} onGo={onGo} touch={isMobile} />
   const searchLabel = pt ? 'Buscar nas sessões' : 'Search sessions'
   const close = () => { setSearching(false); setQuery('') }
+  useEscapeOwner(searching, close)
+  useEscapeOwner(rolePickerOpen, () => setRolePickerOpen(false))
   return (
     <div data-testid="session-link-panel">
       {sessionId && <div>
@@ -245,7 +248,7 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
           <button type="button" aria-label={pt ? 'Trocar tipo' : 'Change type'} aria-expanded={rolePickerOpen} onClick={() => setRolePickerOpen(open => !open)} style={{ all: 'unset', marginLeft: 'auto', color: 'var(--anthropic-orange)', cursor: 'pointer', fontSize: 11, padding: '3px 5px', borderRadius: 5, ...(isMobile ? { boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', minHeight: 44, minWidth: 44, justifyContent: 'center' } : {}) }}>{pt ? 'Trocar' : 'Change'}</button>
         </div>
         {rolePickerOpen && (
-          <div data-testid="session-role-picker" onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setRolePickerOpen(false) } }} style={{ padding: '2px 6px 8px', overflowX: 'auto' }}>
+          <div data-testid="session-role-picker" style={{ padding: '2px 6px 8px', overflowX: 'auto' }}>
             <TabSelect
               options={[{ value: 'automatic', label: pt ? 'Automático' : 'Automatic' }, { value: 'leader', label: pt ? 'Líder' : 'Leader' }, { value: 'worker', label: 'Worker' }]}
               value={role ?? 'automatic'}
@@ -277,7 +280,6 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
             </div>
             {searching && (
               <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)} data-testid="link-search"
-                onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); close() } }}
                 placeholder={searchLabel} aria-label={searchLabel}
                 style={{ ...inputStyle, paddingLeft: 10, marginBottom: 4, ...(isMobile ? { fontSize: 16, minHeight: 44 } : {}) }} />
             )}
@@ -320,6 +322,7 @@ export function SessionLinkInfo({ session, links, lang, onGo, isMobile = false }
   const btnRef = useRef<HTMLButtonElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
 
+  useEscapeOwner(open, () => { setOpen(false); btnRef.current?.focus() })
   useEffect(() => {
     if (!open) return
     const away = (e: Event) => {
@@ -327,14 +330,11 @@ export function SessionLinkInfo({ session, links, lang, onGo, isMobile = false }
       if (btnRef.current?.contains(t) || panelRef.current?.contains(t) || document.querySelector('[data-testid="checkin-modal"]')?.contains(t) || isInsidePortalledMenu(t)) return
       setOpen(false)
     }
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') { setOpen(false); btnRef.current?.focus() } }
     const scroll = (e: Event) => { if (scrollIsOutside(panelRef.current, e.target)) setOpen(false) }
     document.addEventListener('mousedown', away)
-    document.addEventListener('keydown', esc)
     window.addEventListener('scroll', scroll, true)
     return () => {
       document.removeEventListener('mousedown', away)
-      document.removeEventListener('keydown', esc)
       window.removeEventListener('scroll', scroll, true)
     }
   }, [open])

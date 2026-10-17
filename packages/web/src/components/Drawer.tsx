@@ -1,6 +1,7 @@
 import React from 'react'
 import { X } from 'lucide-react'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { useEscapeOwner } from '../lib/overlayStack'
 import { ConfirmModal } from '../pages/settings/primitives'
 import {
   drawerAfterFrame, drawerAfterTransition, drawerFrame, drawerMounted, drawerPhaseFor,
@@ -73,12 +74,7 @@ export function Drawer({ open, title, onClose, children, footer, dirty = false, 
     else onClose()
   }, [dirty, onClose])
 
-  React.useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') attemptClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open, attemptClose])
+  useEscapeOwner(open, attemptClose)
 
   React.useEffect(() => {
     if (!open || !dirty) return

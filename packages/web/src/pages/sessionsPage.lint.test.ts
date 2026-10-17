@@ -506,10 +506,15 @@ describe('the narrow-overlay click-outside/Esc effect never touches the bottom b
     expect(effectBody(SRC)).toContain('overlayOutsideAction(')
   })
 
-  test('both the click and the Esc branch route through the same minimize, gated on the same decision', () => {
+  test('both the click and the Esc branch are gated on the same decision', () => {
+    // The click lives in the effect; Esc rides the overlay stack (`useEscapeOwner`) right above it,
+    // gated on the very same `overlayOutsideAction` and minimizing the same way.
     const body = effectBody(SRC)
-    expect([...body.matchAll(/overlayOutsideAction\(/g)]).toHaveLength(2)
-    expect([...body.matchAll(/minimize\(\)/g)]).toHaveLength(2)
+    expect([...body.matchAll(/overlayOutsideAction\(/g)]).toHaveLength(1)
+    expect([...body.matchAll(/minimize\(\)/g)]).toHaveLength(1)
+    const esc = SRC.slice(SRC.indexOf("useEscapeOwner(artShell === 'overlay'"), SRC.indexOf(START))
+    expect(esc).toContain("overlayOutsideAction({ pinned: false, insideOverlay: false, insideRail: false }) !== 'minimize'")
+    expect(esc).toContain('closeSlotPanel(panel)')
   })
 
   // PLANTED-REVERT: a version of this effect with the early return removed would run on EVERY

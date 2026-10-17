@@ -36,6 +36,7 @@ import { HARNESS_LABELS } from '../lib/harness'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { ResourcesSection } from './ResourcesSection'
 import { OVERLAY_TOP } from '../lib/mobileOverlay'
+import { useEscapeOwner } from '../lib/overlayStack'
 import {
   metricsReasonText,
   serviceBadge,
@@ -608,13 +609,7 @@ export function HardwareModal({ lang, onClose }: { lang: Lang; onClose: () => vo
   // Whatever had the keyboard when this opened — the icon in the header, or the tile in the sheet.
   const opener = useRef<HTMLElement | null>(typeof document === 'undefined' ? null : (document.activeElement as HTMLElement))
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); onClose() }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  useEscapeOwner(true, onClose)
 
   // Focus goes back where it came from, whichever way the dialog was dismissed.
   useEffect(() => () => { opener.current?.focus?.() }, [])

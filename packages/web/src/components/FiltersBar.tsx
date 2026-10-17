@@ -1,3 +1,4 @@
+import { useEscapeOwner } from '../lib/overlayStack'
 import React, { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import type { Filters, DateRange, Project, Lang, SurfaceHarnessId } from '@agentistics/core'
 import { formatModel, formatProjectName, repoShortName } from '@agentistics/core'
@@ -673,25 +674,19 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
   useEffect(() => { if (activeFilterCount === 0) setActiveOpen(false) }, [activeFilterCount])
   // It overlays the page while it is down, so `esc` must put it away — the same key every other
   // dismissible surface in this app answers.
-  useEffect(() => {
-    if (!activeOpen) return
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setActiveOpen(false) }
-    document.addEventListener('keydown', esc)
-    return () => document.removeEventListener('keydown', esc)
-  }, [activeOpen])
+  useEscapeOwner(activeOpen, () => setActiveOpen(false))
 
   /** Open state of the compact date popover. Only ever reachable while `dateCompact`. */
   const [dateOpen, setDateOpen] = useState(false)
   const dateWrapRef = useRef<HTMLDivElement>(null)
+  useEscapeOwner(dateOpen, () => setDateOpen(false))
   useEffect(() => {
     if (!dateOpen) return
     const away = (e: MouseEvent) => {
       if (!dateWrapRef.current?.contains(e.target as Node)) setDateOpen(false)
     }
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setDateOpen(false) }
     document.addEventListener('mousedown', away)
-    document.addEventListener('keydown', esc)
-    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc) }
+    return () => { document.removeEventListener('mousedown', away) }
   }, [dateOpen])
   // A control that hides itself must not stay open across the change, or the popover is left
   // floating with nothing under it.

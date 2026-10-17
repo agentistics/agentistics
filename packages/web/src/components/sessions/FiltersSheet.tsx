@@ -16,6 +16,7 @@
  * clear.
  */
 
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useEffect, useRef } from 'react'
 import { X } from 'lucide-react'
 
@@ -34,13 +35,11 @@ export function FiltersSheet({ open, onClose, onClear, lang, children }: {
    * top of the page, several tab stops from the control they just used.
    */
   const opener = useRef<HTMLElement | null>(null)
+  useEscapeOwner(open, onClose)
   useEffect(() => {
     if (!open) return
     opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', key)
     return () => {
-      document.removeEventListener('keydown', key)
       opener.current?.focus()
     }
   }, [open, onClose])

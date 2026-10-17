@@ -1,3 +1,4 @@
+import { useEscapeOwner } from './lib/overlayStack'
 import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { Outlet, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { createPortal } from 'react-dom'
@@ -54,7 +55,8 @@ import { MagnifierButton } from './components/a11y/MagnifierButton'
 import { NotificationBell } from './components/NotificationBell'
 import { AgentisticsLoader } from './components/AgentisticsLoader'
 import { VaultHeaderButton } from './components/vault/VaultHeaderButton'
-import { AwayChip } from './components/sessions/AwayChip'
+import { AwayChip, AwayDialogHost, awayMenuItems } from './components/sessions/AwayChip'
+import { useAway } from './lib/awayMode'
 import AwayPill from './components/AwayPill'
 import { HardwareModal } from './components/HardwareModal'
 import { PlanUsageModal } from './components/PlanUsageModal'
@@ -129,6 +131,7 @@ import { ToggleSwitch } from './components/ToggleSwitch'
 import { fleetFilterOptions, filterFleet, SESSION_FILTER_DIMS } from './lib/fleetFilter'
 import { runningConversationIds } from './lib/activeConversations'
 import { countActiveFilters } from './lib/activeFilterCount'
+import { useLeadersOnly } from './lib/sessionsAsidePrefs'
 import {
   filtrosPanelInert, filtrosPanelOverflow, sessionsFiltersShouldReturnFocus, filtrosPanelBounds,
 } from './lib/sessionsFiltersPanel'
@@ -385,11 +388,7 @@ function ChartModal({ title, onClose, children }: {
   onClose: () => void
   children: React.ReactNode
 }) {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
-  }, [onClose])
+  useEscapeOwner(true, onClose)
 
   return (
     <div
@@ -471,11 +470,7 @@ function LiveSettingsModal({
   setHighlightUpdates: (v: boolean) => void
   onClose: () => void
 }) {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
-  }, [onClose])
+  useEscapeOwner(true, onClose)
 
   const allIntervals = [
     ...(riskyMode ? LIVE_INTERVAL_OPTIONS_RISKY : []),
@@ -1012,6 +1007,7 @@ function SideNav({
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null)
   const avatarRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  useEscapeOwner(menuOpen, () => setMenuOpen(false))
   useEffect(() => {
     if (!menuOpen) return
     const onDown = (e: MouseEvent) => {
@@ -1019,10 +1015,8 @@ function SideNav({
       if (menuRef.current?.contains(t) || avatarRef.current?.contains(t)) return
       setMenuOpen(false)
     }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false) }
     window.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey)
-    return () => { window.removeEventListener('mousedown', onDown); window.removeEventListener('keydown', onKey) }
+    return () => { window.removeEventListener('mousedown', onDown) }
   }, [menuOpen])
   const openMenu = () => {
     const r = avatarRef.current?.getBoundingClientRect()
@@ -2152,16 +2146,12 @@ export default function AppLayout() {
    * while open, on `document`, so it never competes with an Escape meaning something else inside a
    * DIFFERENT open surface (a modal, another popover) when this panel is collapsed.
    */
-  useEffect(() => {
-    if (!sessionsFiltersOpen) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeSessionsFilters() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [sessionsFiltersOpen, closeSessionsFilters])
+  useEscapeOwner(sessionsFiltersOpen, closeSessionsFilters)
   // The tab's own badge — the same count `FiltersBar` shows on its "Ver filtros ativos" chip once
   // the panel is open. See `activeFilterCount.ts` for why this cannot simply be read off the
   // component instead.
-  const sessionsActiveFilterCount = countActiveFilters(filters, activeOnly)
+  const leadersOnly = useLeadersOnly()
+  const sessionsActiveFilterCount = countActiveFilters(filters, activeOnly, leadersOnly)
 
   /**
    * WHERE THE FILTROS PANEL MAY SIT (design item 4, owner 2026-09-27: "Filtros na linha de botões
@@ -2261,6 +2251,7 @@ export default function AppLayout() {
   const headerSession = splitActive ? undefined : selectedFleetSession
   const headerSessionRow = splitActive ? undefined : selectedSessionRow
   const headerMuted = useSessionMuted(headerSession)
+  const awayGlobal = useAway()
 
   /**
    * THE TWO GLOBAL STUDIO SHORTCUTS (design items 8 and 11) — `Ctrl/Cmd+B` opens or closes the
@@ -3720,6 +3711,7 @@ export default function AppLayout() {
           row={headerSessionRow}
           lang={lang === 'pt' ? 'pt' : 'en'}
           act={headerFleetAct}
+          extra={awayMenuItems(headerSession, lang === 'pt', awayGlobal.active)}
           onGone={() => navigate('/sessions')}
           // A reopen mints a NEW session; going to it is what makes the verb visibly do something
           // — WITH the state that says it is on its way, or the page shows the fleet overview
@@ -4977,6 +4969,7 @@ export default function AppLayout() {
       {retryImportModal}
       {/* Global notification toasts (auto-dismiss with an exit animation; history in the bell) */}
       <NotificationToasts lang={lang} />
+      <AwayDialogHost />
 
       {/* VAULT.PERSONAL §10: the one unlock any screen can ask for (ensureVaultOpen), and — on this
           computer — the phones waiting for approval. A central has no vault of its own here. */}

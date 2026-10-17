@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { attachmentUrl } from '../../lib/attachmentUrl'
 import { attachmentKind } from '../../lib/messageAttachments'
+import { useEscapeOwner } from '../../lib/overlayStack'
 
 export interface AttachmentLightboxProps {
   paths: readonly string[]
@@ -47,13 +48,13 @@ export function AttachmentLightbox({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
-      else if (many && e.key === 'ArrowLeft') onIndexChange((index - 1 + paths.length) % paths.length)
+      if (many && e.key === 'ArrowLeft') onIndexChange((index - 1 + paths.length) % paths.length)
       else if (many && e.key === 'ArrowRight') onIndexChange((index + 1) % paths.length)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [index, many, paths.length, onIndexChange, onClose])
+  }, [index, many, paths.length, onIndexChange])
+  useEscapeOwner(true, onClose)
 
   const path = paths[index]
   if (path === undefined) return null

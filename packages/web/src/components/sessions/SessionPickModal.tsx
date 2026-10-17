@@ -37,6 +37,7 @@ import { attachmentUrl } from '../../lib/attachmentUrl'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { overlayPadding } from '../../lib/mobileOverlay'
 import { Field, Muted, TabStrip, inputStyle } from './formBits'
+import { useEscapeOwner } from '../../lib/overlayStack'
 
 /**
  * A MIRROR of the server's `MAX_BROADCAST`, kept so the client does not offer what will be refused
@@ -105,14 +106,10 @@ export function SessionPickModal({ kind, rows, lang, busy, forwardPreview, onClo
     })
   }, [rows])
 
-  useEffect(() => {
-    // Escape ALWAYS closes the whole wizard, on either step — it is the modal's own exit, not the
-    // step's. Going back one screen is a separate gesture (the Back button), because a person who
-    // has half-written a prompt and presses Escape expects to leave, not to lose the page.
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !busy) onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, busy])
+  // Escape ALWAYS closes the whole wizard, on either step — it is the modal's own exit, not the
+  // step's. Going back one screen is a separate gesture (the Back button), because a person who
+  // has half-written a prompt and presses Escape expects to leave, not to lose the page.
+  useEscapeOwner(true, onClose, () => !busy)
 
   const shown = useMemo(
     () => (needsText ? filterPickRows(rows, tab, query) : filterPickRows(rows, 'all', query)),

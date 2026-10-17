@@ -60,6 +60,7 @@ import { setSessionRole, type SessionRole } from '../../lib/sessionRoles'
 import { usePlanLimits } from '../../lib/planLimits'
 import { useAway } from '../../lib/awayMode'
 import { PlanLimitBars } from '../PlanLimitMeter'
+import { useEscapeOwner } from '../../lib/overlayStack'
 import {
   STEP_ORDER, modelDisplay, nextStep, prevStep, stepReady, toWizardHarness, unsetText,
   visibleQuestions, type HarnessAnswer, type MissingAnswer, type StepId, type WizardDraft,
@@ -359,18 +360,11 @@ export function NewSessionModal({
     review: pt ? 'Revisão' : 'Review',
   }
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      // Innermost first. Closing the whole wizard because a dropdown was open loses every answer
-      // already given, over a keypress the user meant for the dropdown.
-      if (modelOpen) setModelOpen(false)
-      else if (providerOpen) setProviderOpen(false)
-      else requestClose()
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [modelOpen, providerOpen, dirty])
+  // Innermost first: each open dropdown is an owner above the wizard's, so a keypress meant for
+  // it never closes the whole wizard and loses every answer already given.
+  useEscapeOwner(true, requestClose)
+  useEscapeOwner(providerOpen, () => setProviderOpen(false))
+  useEscapeOwner(modelOpen, () => setModelOpen(false))
 
   /**
    * Wait for the row to exist before handing the caller its id.
