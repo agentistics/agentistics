@@ -35,7 +35,7 @@ full CLI documentation.
 ## Alternative install
 
 ```bash
-curl -fsSL https://agentop.openvibes.tech/cli | bash
+curl -fsSL https://agentistics.com.br/cli | bash
 ```
 
 Both methods install the exact same binary.
