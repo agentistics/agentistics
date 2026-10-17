@@ -151,11 +151,18 @@ export function createHive(canvas: HTMLCanvasElement, logo: HTMLImageElement, re
   function setFx(big: boolean) {
     if (big === fxBig) return
     fxBig = big
-    // The finale's layer reaches as far as the rings and sparks do (4.8 R: the rings' last visible radius is ~4.2 R),
+    // The finale's layer reaches as far as the rings and sparks do (5.6 R: the rings' last visible radius is ~4.2 R),
     // not the whole stage — a full-stage layer is a full-stage upload every frame, and growing to it at the burst hitched.
-    const half = g.R * (big ? 4.8 : 2.35)
+    const half = g.R * (big ? 5.6 : 2.35)
     fxX = Math.max(0, g.cx - half); fxY = Math.max(0, g.cy - half)
     fxW = Math.min(g.W - fxX, 2 * half); fxH = Math.min(g.H - fxY, 2 * half)
+    if (big) {
+      // The finale's layer must sample exactly like the full-stage one it replaces: its origin and far edge sit on a
+      // 6 css px grid (a whole number of device pixels at DPR 1 and 1.5, and of the 4:3 resample to a DPR 2 screen), so
+      // every pixel is the same pixel the full-stage layer drew. A fractional origin shifts the resample: ±38 levels.
+      const G = 48, x1 = Math.min(g.W, Math.ceil((fxX + fxW) / G) * G), y1 = Math.min(g.H, Math.ceil((fxY + fxH) / G) * G)
+      fxX = Math.floor(fxX / G) * G; fxY = Math.floor(fxY / G) * G; fxW = x1 - fxX; fxH = y1 - fxY
+    }
     if (fx.style) Object.assign(fx.style, { inset: 'auto', left: `${fxX}px`, top: `${fxY}px`, width: `${fxW}px`, height: `${fxH}px` })
     fx.width = Math.round(fxW * DPR); fx.height = Math.round(fxH * DPR)
     ctx.setTransform(DPR, 0, 0, DPR, -fxX * DPR, -fxY * DPR)
@@ -182,6 +189,7 @@ export function createHive(canvas: HTMLCanvasElement, logo: HTMLImageElement, re
     cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR)
     cctx.setTransform(DPR, 0, 0, DPR, 0, 0)
     lastCells = -1e9; fxBig = null
+    // fieldEmpty stays valid across a resize: once ft >= SUCK_S every (rebuilt) cell has local >= 1 and is skipped too
     // the background is a CSS gradient on the cell canvas — composited, never redrawn
     if (cv.style) cv.style.background = `radial-gradient(circle ${Math.max(W, H) * 0.7}px at ${g.cx}px ${g.cy}px, #111118, #0a0a0f)`
     buildCells(); inksAt = -1e9
@@ -349,10 +357,7 @@ export function createHive(canvas: HTMLCanvasElement, logo: HTMLImageElement, re
     busyPrev = busy
     if (due) {
       lastCells = now; cctx.clearRect(0, 0, g.W, g.H)
-      rest.flushSprites(cctx, g.RC, DPR)
-      // Mid-flight cells all have their own radius, so a sprite blit would resample each one (bilinear, per cell, per
-      // frame); batched real paths cost a few strokes however many cells there are. Settled cells keep the sprites.
-      if (fin && !reduced) main.flush(cctx); else main.flushSprites(cctx, g.RC, DPR)
+      rest.flushSprites(cctx, g.RC, DPR); main.flushSprites(cctx, g.RC, DPR) // sprites in flight too: strokes would change the look
       if (edge.n || edge.hasFill()) { cctx.save(); cctx.clip(edgeClip!, 'evenodd'); edge.flush(cctx); cctx.restore() }
       if (fin && !reduced && ft >= SUCK_S && !main.n && !main.hasFill() && !edge.n && !edge.hasFill()) fieldEmpty = true
     }
