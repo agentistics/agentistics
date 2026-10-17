@@ -90,13 +90,17 @@ let liveTranscriptPath = resolveLiveTranscriptPath
 /** Tests only: avoid looking for transcripts in the owner's home. */
 export function __setLiveTranscriptPathForTest(f: typeof liveTranscriptPath | null): void { liveTranscriptPath = f ?? resolveLiveTranscriptPath }
 
-function accountAtPath(harness: HarnessId, path: string, bindings: Record<string, string>): string | undefined {
+function accountAtPath(harness: HarnessId, path: string, bindings: Record<string, string>, retired: ReadonlySet<string> = new Set()): string | undefined {
   const prefix = `${harness}:`
   const under = (root: string) => resolve(path).startsWith(`${resolve(root)}${sep}`)
   const root = Object.keys(bindings).filter(k => k.startsWith(prefix) && k.length > prefix.length)
     .map(k => k.slice(prefix.length)).filter(under).sort((a, b) => b.length - a.length)[0]
   if (root) return bindings[`${prefix}${root}`]
-  return under(sessionHomes[harness]) ? bindings[prefix] : undefined
+  if (!under(sessionHomes[harness])) return undefined
+  // The DEFAULT home's binding is a guess about whoever signed in there last: when it names an account
+  // that has since signed out it says nothing about this session, unlike an explicit per-root binding.
+  const dflt = bindings[prefix]
+  return dflt && retired.has(dflt) ? undefined : dflt
 }
 
 /** Turn the live fleet's rolling token deltas into percentages of each plan's measured burn. */
@@ -127,7 +131,7 @@ export async function sampleLivePlanSessions(
       if (known && known.harness === s.harness) account = known.account
       else {
         const path = await liveTranscriptPath(s, registry.bindings).catch(() => null)
-        if (path) account = accountAtPath(s.harness, path, registry.bindings)
+        if (path) account = accountAtPath(s.harness, path, registry.bindings, new Set(registry.accounts.filter(a => a.retired).map(a => a.id)))
         if (account) pathAccounts.set(s.session_id, { harness: s.harness, account })
       }
       const visible = registry.accounts.filter(a => a.harness === s.harness && a.available && !a.retired).map(a => a.id)

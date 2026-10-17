@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { CODEX_DIR } from './config'
 import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, renameSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -912,6 +913,22 @@ test('C2 LOW L3: a default binding on a retired account yields to the only visib
   expect(live[0]!.account).toBe(current.id)
 })
 
+test('C2 LOW L3b: a transcript RESOLVED under the default home, whose binding is a retired account, yields to the only visible one', async () => {
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
+  __setHarnessAccountsForTest(store)
+  const { account: old } = await store.bind(null, { harness: 'codex', key: 'old', label: 'Old' })
+  const { account: current } = await store.bind(join(dir, 'root-b'), { harness: 'codex', key: 'cur', label: 'Cur' })
+  const doc = await store.readAccounts()
+  writeFileSync(join(dir, 'accounts.json'), JSON.stringify({ ...doc, accounts: doc.accounts.map(a => a.id === old.id ? { ...a, retired: true } : a) }))
+  const home = CODEX_DIR // the module's own default home, fixed at import
+  __setLiveTranscriptPathForTest(async () => join(home, 'sessions', 'x.jsonl'))
+  const s = { session_id: 'dh', harness: 'codex', input_tokens: 1 }
+  await sampleLivePlanSessions([s], ['dh'], 0, {})
+  const live = await sampleLivePlanSessions([{ ...s, input_tokens: 2 }], ['dh'], 1000, {}, new Set(['dh']))
+  expect(live).toHaveLength(1)
+  expect(live[0]!.account).toBe(current.id)
+})
+
 test('C2 LOW L4: default-home transcripts take the default binding; several visible accounts and no binding stay unattributed', async () => {
   const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
   __setHarnessAccountsForTest(store)
@@ -931,5 +948,6 @@ test('C2 LOW L4: default-home transcripts take the default binding; several visi
   __setLiveTranscriptPathForTest(async () => null)
   await sampleLivePlanSessions([s], ['h'], 0, {})
   const amb = await sampleLivePlanSessions([{ ...s, input_tokens: 2 }], ['h'], 1000, {}, new Set(['h']))
-  expect(amb[0]?.account).toBeUndefined()
+  expect(amb).toHaveLength(1)
+  expect(amb[0]!.account).toBeUndefined()
 })

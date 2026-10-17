@@ -45,8 +45,7 @@ export function planSummary(
 /**
  * Accounts that raise the "which plan is this?" notice: no timeline of their own and nothing the
  * harness default can price for them (the default is counted ONCE — for the oldest account). A
- * lone account of a harness with no default and no detected plan is the ordinary empty state, not
- * a detection.
+ * first account with no default is the PRIMARY case: it is asked which plan it is.
  */
 export function accountsNeedingPlan<A extends BillingAccount>(accounts: readonly A[], billing: BillingSettings, harnesses: readonly HarnessId[]): A[] {
   const out: A[] = []
@@ -56,7 +55,6 @@ export function accountsNeedingPlan<A extends BillingAccount>(accounts: readonly
     mine.forEach((a, i) => {
       if (ownPeriods(billing, a.id).length > 0) return
       if (i === 0 && hasDefault) return
-      if (!hasDefault && mine.length === 1 && !a.plan) return
       out.push(a)
     })
   }
@@ -118,3 +116,29 @@ export function toggleAvailability<A>(
 
 /** Harnesses with a usage-limits reader (spec §6 sentence table). @harness-adapters-only: a reader table, adapters only. */
 export const REPORTS_LIMITS: ReadonlySet<HarnessId> = new Set<HarnessId>(['claude', 'codex'])
+
+/**
+ * The notices on screen: every account still needing a plan, plus the ones whose answer is being
+ * saved (or failed to save). An answer is never "gone" before it is stored — the notice stays, with
+ * its state, until the write is confirmed and the account no longer needs a plan.
+ */
+export function noticeAccounts<A extends BillingAccount>(
+  needPlan: readonly A[], billable: readonly A[], inFlight: ReadonlySet<string>,
+): A[] {
+  const ids = new Set(needPlan.map(a => a.id))
+  const extra = billable.filter(a => inFlight.has(a.id) && !ids.has(a.id))
+  return [...needPlan, ...extra]
+}
+
+export type CapabilityNote = 'noMeter' | 'noIdentity' | 'singleAccount'
+
+/** The per-harness sentences Billing owes the reader (spec §6). */
+// @harness-adapters-only: which ADAPTER harnesses cannot say who is signed in — a login fact of the vendor CLI
+const IDENTITYLESS: Partial<Record<HarnessId, true>> = { gemini: true, kimi: true, antigravity: true }
+export function capabilityNotes(harness: HarnessId): CapabilityNote[] {
+  const out: CapabilityNote[] = []
+  if (!REPORTS_LIMITS.has(harness)) out.push('noMeter')
+  if (IDENTITYLESS[harness]) out.push('noIdentity')
+  if (harness === 'antigravity') out.push('singleAccount')
+  return out
+}

@@ -643,6 +643,26 @@ describe('billingReadiness', () => {
     expect(billingReadiness(s, ['kimi', 'claude']).readyHarnesses).toEqual(['claude', 'kimi'])
   })
 
+  test('account-only plans make the harness ready (no harness default timeline)', () => {
+    const s = normalizeBillingSettings({
+      profiles: {},
+      accountProfiles: { a1: { periods: [sub('a', '2026-01-01', undefined, 100)] }, b1: { periods: [sub('b', '2026-01-01', undefined, 20)] } },
+    })
+    const accounts = [{ id: 'a1', harness: 'claude' as const }, { id: 'b1', harness: 'claude' as const }]
+    expect(billingReadiness(s, ['claude']).ready).toBe(false)
+    const r = billingReadiness(s, ['claude'], accounts)
+    expect(r.ready).toBe(true)
+    expect(r.readyHarnesses).toEqual(['claude'])
+    expect(r.gaps).toEqual([])
+  })
+
+  test('an account timeline with a missing price keeps the harness not ready', () => {
+    const s = normalizeBillingSettings({ profiles: {}, accountProfiles: { a1: { periods: [sub('a', '2026-01-01', undefined, 0)] } } })
+    const r = billingReadiness(s, ['claude'], [{ id: 'a1', harness: 'claude' }])
+    expect(r.ready).toBe(false)
+    expect(r.gaps[0]?.code).toBe('incomplete_period')
+  })
+
   test('an empty scope is not ready and asks for nothing', () => {
     expect(billingReadiness({ profiles: {} }, [])).toEqual({ ready: false, readyHarnesses: [], gaps: [] })
   })

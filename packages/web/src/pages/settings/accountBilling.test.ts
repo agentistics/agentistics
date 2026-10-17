@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { computePlanCost, normalizeBillingSettings, type BillingSettings } from '@agentistics/core'
 import { createAccountMutator } from './accountMutations'
 import {
-  accountsNeedingPlan, answerNotice, billableAccounts, matchDetectedPlan, planSummary, toggleAvailability, withAccountPeriods,
+  accountsNeedingPlan, answerNotice, billableAccounts, capabilityNotes, matchDetectedPlan, noticeAccounts, planSummary, toggleAvailability, withAccountPeriods,
   type BillingAccount,
 } from './accountBilling'
 
@@ -36,10 +36,23 @@ describe('accountsNeedingPlan', () => {
     expect(cost.subscriptionCostUSD).toBe(0)
   })
 
-  test('the harness default covers the oldest account only; a lone account with nothing detected is not a detection', () => {
+  test('the harness default covers the oldest account only', () => {
     const billing = normalizeBillingSettings({ profiles: { claude: { periods: [{ id: 'd', mode: 'subscription', planId: 'anthropic-pro', price: { amount: 20, currency: 'USD' }, from: '2026-01-01' }] } } })
     expect(accountsNeedingPlan([acc('a'), acc('b', { firstSeen: Date.parse('2026-09-05T00:00:00Z') })], billing, ['claude']).map(a => a.id)).toEqual(['b'])
-    expect(accountsNeedingPlan([acc('solo')], none, ['claude'])).toEqual([])
+  })
+
+  test('the PRIMARY case: a first account with no plan reported and no default asks which plan it is', () => {
+    expect(accountsNeedingPlan([acc('solo')], none, ['claude']).map(a => a.id)).toEqual(['solo'])
+  })
+
+  test('a notice stays listed while its answer is saving or failed, and goes once the account is priced', () => {
+    const a = acc('a'); const b = acc('b')
+    // answered optimistically (no longer "needing a plan") but still in flight: kept
+    expect(noticeAccounts([b], [a, b], new Set(['a'])).map(x => x.id)).toEqual(['b', 'a'])
+    // stored: neither needs a plan nor is in flight
+    expect(noticeAccounts([b], [a, b], new Set()).map(x => x.id)).toEqual(['b'])
+    // already listed once, never twice
+    expect(noticeAccounts([a], [a], new Set(['a'])).map(x => x.id)).toEqual(['a'])
   })
 
   test('hidden, retired and unidentified accounts are never priced here', () => {
@@ -89,4 +102,10 @@ describe('availability switch', () => {
 test('matchDetectedPlan prefills from the harness-reported plan, never guessing', () => {
   expect(matchDetectedPlan('claude', undefined)).toBe('')
   expect(matchDetectedPlan('claude', 'zzz-unknown')).toBe('')
+})
+
+test('capability sentences per harness', () => {
+  expect(capabilityNotes('claude')).toEqual([])
+  expect(capabilityNotes('gemini')).toEqual(['noMeter', 'noIdentity'])
+  expect(capabilityNotes('antigravity')).toEqual(['noMeter', 'noIdentity', 'singleAccount'])
 })

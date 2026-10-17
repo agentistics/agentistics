@@ -1,4 +1,4 @@
-import { expect, mock, test } from 'bun:test'
+import { afterAll, expect, mock, test } from 'bun:test'
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import * as realFleet from '../../lib/fleet'
@@ -7,6 +7,9 @@ import { parseSystemEvent } from '../../lib/systemEvent'
 const g = globalThis as Record<string, unknown>
 g.window ??= { innerWidth: 1200, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), addEventListener() {}, removeEventListener() {}, dispatchEvent: () => true }
 
+// A module mock outlives its file: put the real fleet module back so later files do not read the fixture.
+const realFleetSnapshot = { ...realFleet }
+afterAll(() => { mock.module('../../lib/fleet', () => realFleetSnapshot) })
 // Seed the fleet so the sender resolves to a title only through useFleet.
 mock.module('../../lib/fleet', () => ({
   ...realFleet,
