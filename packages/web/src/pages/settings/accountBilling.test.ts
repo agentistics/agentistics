@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { computePlanCost, normalizeBillingSettings, type BillingSettings } from '@agentistics/core'
 import { createAccountMutator } from './accountMutations'
 import {
+  saveThenClose,
   accountsNeedingPlan, answerNotice, billableAccounts, capabilityNotes, matchDetectedPlan, noticeAccounts, planSummary, toggleAvailability, withAccountPeriods,
   type BillingAccount,
 } from './accountBilling'
@@ -108,4 +109,14 @@ test('capability sentences per harness', () => {
   expect(capabilityNotes('claude')).toEqual([])
   expect(capabilityNotes('gemini')).toEqual(['noMeter', 'noIdentity'])
   expect(capabilityNotes('antigravity')).toEqual(['noMeter', 'noIdentity', 'singleAccount'])
+})
+
+describe('R3 saveThenClose', () => {
+  test('a refused write keeps the drawer (and its draft); a stored one closes it', async () => {
+    let closed = 0
+    expect(await saveThenClose(async () => false, () => { closed++ })).toBe(false)
+    expect(closed).toBe(0)
+    expect(await saveThenClose(async () => true, () => { closed++ })).toBe(true)
+    expect(closed).toBe(1)
+  })
 })

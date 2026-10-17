@@ -45,4 +45,25 @@ describe('billingSaver', () => {
     await saver.save(cur => withAcc(cur, 'a'))
     expect(saver.current().accountProfiles?.a).toBeDefined()
   })
+
+  test('R5: A fails while B is queued; B stores A+B, and onStored lets the caller settle A', async () => {
+    const gate = deferred()
+    let n = 0
+    const stored: BillingSettings[] = []
+    const saver = createBillingSaver({
+      initial: { profiles: {} },
+      put: async b => { if (n++ === 0) { await gate.p; return { ok: false } } return { ok: true } },
+      onChange: () => {},
+      onStored: b => stored.push(b),
+    })
+    const a = saver.save(cur => withAcc(cur, 'a'))
+    await Promise.resolve() // A's PUT is now in flight, alone
+    const b = saver.save(cur => withAcc(cur, 'b'))
+    gate.go()
+    await expect(a).rejects.toThrow()
+    await b
+    expect(stored).toHaveLength(1)
+    expect(Object.keys(stored[0]!.accountProfiles ?? {}).sort()).toEqual(['a', 'b'])
+    expect(Object.keys(saver.current().accountProfiles ?? {}).sort()).toEqual(['a', 'b'])
+  })
 })

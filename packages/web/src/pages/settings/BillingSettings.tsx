@@ -48,8 +48,9 @@ import {
   type PeriodDraft,
 } from './billingForm'
 import AccountsSection from './AccountsSection'
+import { billingNotices, useNoticeSaveState } from '../../lib/billingNotices'
 import { BillingAccountsView, FirstDetectionNotice } from './AccountRow'
-import { accountsNeedingPlan, answerNotice, billableAccounts, noticeAccounts, ownPeriods, toggleAvailability, unknownPeriod, withAccountPeriods, type BillingAccount } from './accountBilling'
+import { accountsNeedingPlan, answerNotice, billableAccounts, noticeAccounts, ownPeriods, saveThenClose, toggleAvailability, unknownPeriod, withAccountPeriods, type BillingAccount } from './accountBilling'
 import { accountTitle } from './accountsSummary'
 import { createAccountMutator } from './accountMutations'
 import { usePlanLimits } from '../../lib/planLimits'
@@ -113,7 +114,7 @@ export default function BillingSettings() {
   )
   // A notice stays until its answer is STORED: `saving` while the write is in flight, `failed` after a
   // refusal (the app has already put the settings back, so the account still needs a plan).
-  const [noticeState, setNoticeState] = useState<Record<string, 'saving' | 'failed'>>({})
+  const noticeState = useNoticeSaveState()
   const notices = useMemo(
     () => noticeAccounts(needPlan, allBillable, new Set(Object.keys(noticeState))),
     [needPlan, allBillable, noticeState],
@@ -130,14 +131,20 @@ export default function BillingSettings() {
       setFailed(h => { const n = new Set(h); n.delete(a.id); return n })
     } else if (res.status === 'failed') setFailed(h => new Set(h).add(a.id))
   }
-  const saveNotice = async (a: BillingAccount, change: (cur: BillingSettingsShape) => BillingSettingsShape) => {
-    setNoticeState(s => ({ ...s, [a.id]: 'saving' }))
+  /** Every account-plan write goes through here: the notice keeps its state until the write is stored. */
+  const saveTracked = async (id: string, change: (cur: BillingSettingsShape) => BillingSettingsShape): Promise<boolean> => {
+    billingNotices.mark(id, 'saving')
     try {
       await ctx.saveBilling(change)
-      setNoticeState(s => { const { [a.id]: _gone, ...rest } = s; return rest })
+      billingNotices.clear(id)
+      return true
     } catch {
-      setNoticeState(s => ({ ...s, [a.id]: 'failed' }))
+      billingNotices.mark(id, 'failed')
+      return false
     }
+  }
+  const saveNotice = async (a: BillingAccount, change: (cur: BillingSettingsShape) => BillingSettingsShape) => {
+    await saveTracked(a.id, change)
   }
   const answer = async (a: BillingAccount, planId: string) => {
     if (!answerNotice(ctx.billing, a, planId, today(), newPeriodId)) {
@@ -206,7 +213,7 @@ export default function BillingSettings() {
     return () => { cancelled = true }
   }, [])
 
-  const persist = useCallback(async (nextPeriods: BillingPeriod[]) => {
+  const persist = useCallback(async (nextPeriods: BillingPeriod[]): Promise<boolean> => {
     const change = (cur: BillingSettingsShape): BillingSettingsShape => {
       if (target) return withAccountPeriods(cur, target, nextPeriods)
       const profiles = { ...cur.profiles }
@@ -215,12 +222,11 @@ export default function BillingSettings() {
       return { ...cur, profiles }
     }
     setSaveError(null)
-    try {
-      await ctx.saveBilling(change)
-    } catch {
-      setSaveError(pt ? 'Não foi possível salvar. Tente de novo.' : 'Could not save. Try again.')
-    }
-  }, [ctx, harness, pt, target])
+    const tracked = target !== null && needPlan.some(a => a.id === target)
+    const ok = tracked ? await saveTracked(target, change) : await ctx.saveBilling(change).then(() => true, () => false)
+    if (!ok) setSaveError(pt ? 'Não foi possível salvar. Tente de novo.' : 'Could not save. Try again.')
+    return ok
+  }, [ctx, harness, pt, target, needPlan])
 
   const draftErrors = useMemo(
     () => (draft ? validateDraft(draft, periods, newPeriodId) : []),
@@ -302,9 +308,8 @@ export default function BillingSettings() {
           : p)
     }
 
-    await persist([...rest, period])
-    setDraft(null)
-    setChangingFrom(null)
+    // A refused write has already been rolled back; the draft stays so the user can retry.
+    await saveThenClose(() => persist([...rest, period]), () => { setDraft(null); setChangingFrom(null) })
   }
 
   // A live figure read from the vendor's page today beats the compiled-in one, which is only ever
@@ -570,6 +575,7 @@ export default function BillingSettings() {
       >
         {draft && (
           <div>
+            {saveError && <div role="alert" style={{ marginBottom: 10, fontSize: 12, color: 'var(--accent-red)' }}>{saveError}</div>}
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 }}>
                 {pt ? 'Plano' : 'Plan'}

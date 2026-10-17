@@ -39,8 +39,9 @@ let loaded: Promise<void> | null = null
 
 type LiveUsageSample = { tokens: number; at: number; model: string; harness: HarnessId; account?: string }
 const liveUsage = new Map<string, LiveUsageSample>()
-/** The account a transcript path resolved to, per session: one root scan per session, not per request. */
-const pathAccounts = new Map<string, { harness: HarnessId; account: string }>()
+/** The account a transcript path resolved to, per session: one root scan per session, not per request.
+ *  `viaDefault`: the account came from the default home's binding (a guess), not an explicit root. */
+const pathAccounts = new Map<string, { harness: HarnessId; account: string; viaDefault: boolean }>()
 const isHarnessId = (value: string): value is HarnessId => HARNESS_ORDER.some(harness => harness === value)
 
 /** One key for both the API's measured budgets and the sampler's resolved accounts. */
@@ -91,16 +92,20 @@ let liveTranscriptPath = resolveLiveTranscriptPath
 export function __setLiveTranscriptPathForTest(f: typeof liveTranscriptPath | null): void { liveTranscriptPath = f ?? resolveLiveTranscriptPath }
 
 function accountAtPath(harness: HarnessId, path: string, bindings: Record<string, string>, retired: ReadonlySet<string> = new Set()): string | undefined {
+  return attributeAtPath(harness, path, bindings, retired)?.account
+}
+
+function attributeAtPath(harness: HarnessId, path: string, bindings: Record<string, string>, retired: ReadonlySet<string> = new Set()): { account: string; viaDefault: boolean } | undefined {
   const prefix = `${harness}:`
   const under = (root: string) => resolve(path).startsWith(`${resolve(root)}${sep}`)
   const root = Object.keys(bindings).filter(k => k.startsWith(prefix) && k.length > prefix.length)
     .map(k => k.slice(prefix.length)).filter(under).sort((a, b) => b.length - a.length)[0]
-  if (root) return bindings[`${prefix}${root}`]
+  if (root) { const account = bindings[`${prefix}${root}`]; return account ? { account, viaDefault: false } : undefined }
   if (!under(sessionHomes[harness])) return undefined
   // The DEFAULT home's binding is a guess about whoever signed in there last: when it names an account
   // that has since signed out it says nothing about this session, unlike an explicit per-root binding.
   const dflt = bindings[prefix]
-  return dflt && retired.has(dflt) ? undefined : dflt
+  return dflt && !retired.has(dflt) ? { account: dflt, viaDefault: true } : undefined
 }
 
 /** Turn the live fleet's rolling token deltas into percentages of each plan's measured burn. */
@@ -127,12 +132,16 @@ export async function sampleLivePlanSessions(
     if (!wanted.has(s.session_id)) continue
     let account = managedAccounts.get(s.session_id) ?? (s.native_session_id ? managedAccounts.get(s.native_session_id) : undefined)
     if (!account) {
-      const known = pathAccounts.get(s.session_id)
+      const retiredIds = new Set(registry.accounts.filter(a => a.retired).map(a => a.id))
+      let known = pathAccounts.get(s.session_id)
+      // A default-home attribution cached while the account was active is stale once it retires.
+      if (known?.viaDefault && retiredIds.has(known.account)) { pathAccounts.delete(s.session_id); known = undefined }
       if (known && known.harness === s.harness) account = known.account
       else {
         const path = await liveTranscriptPath(s, registry.bindings).catch(() => null)
-        if (path) account = accountAtPath(s.harness, path, registry.bindings, new Set(registry.accounts.filter(a => a.retired).map(a => a.id)))
-        if (account) pathAccounts.set(s.session_id, { harness: s.harness, account })
+        const hit = path ? attributeAtPath(s.harness, path, registry.bindings, retiredIds) : undefined
+        account = hit?.account
+        if (hit) pathAccounts.set(s.session_id, { harness: s.harness, account: hit.account, viaDefault: hit.viaDefault })
       }
       const visible = registry.accounts.filter(a => a.harness === s.harness && a.available && !a.retired).map(a => a.id)
       const metered = Object.keys(burnByAccount).filter(k => k.startsWith(`${s.harness}:`)).map(k => k.slice(s.harness.length + 1))

@@ -633,6 +633,18 @@ describe('billingReadiness', () => {
     expect(r.gaps).toEqual([{ code: 'invalid_timeline', harness: 'claude' }])
   })
 
+  test('R1: an obsolete default that every account overrides is not validated', () => {
+    const bad = { periods: [sub('a', '2026-01-01', '2026-06-30', 100), sub('b', '2026-03-01', '2026-09-30', 20)] }
+    const ok = (id: string) => ({ periods: [sub(id, '2026-01-01', undefined, 100)] })
+    const s = normalizeBillingSettings({ profiles: { claude: bad }, accountProfiles: { x: ok('x'), y: ok('y') } })
+    const accounts = [{ id: 'x', harness: 'claude' as const }, { id: 'y', harness: 'claude' as const }]
+    expect(billingReadiness(s, ['claude'], accounts).ready).toBe(true)
+    // …but it still blocks when an account actually inherits it.
+    const inheriting = billingReadiness(s, ['claude'], [...accounts, { id: 'z', harness: 'claude' as const }])
+    expect(inheriting.ready).toBe(false)
+    expect(inheriting.gaps).toEqual([{ code: 'invalid_timeline', harness: 'claude' }])
+  })
+
   test('readyHarnesses follows HARNESS_ORDER', () => {
     const s = normalizeBillingSettings({
       profiles: {

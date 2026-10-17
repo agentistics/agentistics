@@ -20,6 +20,7 @@ import { useData, useDerivedStats, LIVE_INTERVAL_OPTIONS, LIVE_INTERVAL_OPTIONS_
 import { usePlanBasis } from './hooks/usePlanBasis'
 import { useBillingAccounts } from './hooks/useBillingAccounts'
 import { createBillingSaver } from './lib/billingSaver'
+import { billingNotices } from './lib/billingNotices'
 import { planScopeHarnesses, planScopeNote } from './lib/costBasis'
 import { planCostOf } from './lib/topUsage'
 import { bootLoading } from './lib/bootPhase'
@@ -1628,6 +1629,7 @@ export default function AppLayout() {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ billing: b }),
     }),
     onChange: b => setBilling(b),
+    onStored: b => billingNotices.reconcile(b),
   })).current
   const saveBilling = billingSaver.save
   const [brlRate, setBrlRate] = useState(5.70)

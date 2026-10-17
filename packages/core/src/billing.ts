@@ -332,14 +332,14 @@ export function billingReadiness(
   const gaps: BillingGap[] = []
 
   for (const harness of harnessesInScope) {
-    const timelines: BillingTimeline[] = []
     const def = settings.profiles[harness]
-    if (def && def.periods.length > 0) timelines.push(def)
-    for (const account of accounts ?? []) {
-      if (account.harness !== harness) continue
-      const own = settings.accountProfiles?.[account.id]
-      if (own && own.periods.length > 0) timelines.push(own)
-    }
+    const mine = (accounts ?? []).filter((a) => a.harness === harness)
+    // Validate exactly the timelines the arithmetic prices (`selectedTimelines`): an obsolete default
+    // that every account has overridden is never read, so its errors must not block the basis.
+    const picked = mine.length > 0 && settings.accountProfiles
+      ? selectedTimelines(def, mine, settings.accountProfiles)
+      : [def]
+    const timelines = picked.filter((t): t is BillingTimeline => !!t && t.periods.length > 0)
     if (timelines.length === 0) {
       gaps.push({ code: 'no_timeline', harness })
       continue
