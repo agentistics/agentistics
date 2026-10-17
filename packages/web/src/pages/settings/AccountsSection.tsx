@@ -6,6 +6,7 @@
  * `summarizeHarnesses`, over the same list the expanded rows draw.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+// @harness-adapters-only: accounts exist per ADAPTER harness (a login to a vendor's CLI); the native harness has none
 import { HARNESS_ORDER, type HarnessId, type PlanLimits } from '@agentistics/core'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { usePlanLimits } from '../../lib/planLimits'
@@ -154,7 +155,7 @@ function AccountRow({ a, props, isMobile }: { a: AccountRowData; props: Accounts
       padding: '12px 14px', borderTop: '1px solid var(--border)',
     }}>
       <button type="button" onClick={() => props.onDetail(a)} style={{
-        background: 'none', border: 'none', padding: isMobile ? 0 : '0 0 0 32px', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', minWidth: 0,
+        background: 'none', border: 'none', padding: isMobile ? '0 0 0 0' : '0 0 0 32px', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', minWidth: 0,
         minHeight: isMobile ? 44 : undefined, ...(isMobile ? {} : { gridColumn: '1 / 3' }),
       }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -190,6 +191,7 @@ export function AccountsView(props: AccountsViewProps) {
   const pt = props.lang === 'pt'
   const [open, setOpen] = useState<HarnessId | null>(props.initialOpen ?? null)
   const summaries = useMemo(
+    // @harness-adapters-only: accounts are a per-adapter fact
     () => summarizeHarnesses(props.accounts, props.limits, props.now, HARNESS_ORDER, props.failedIds),
     [props.accounts, props.limits, props.now, props.failedIds],
   )

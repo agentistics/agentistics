@@ -14,6 +14,7 @@ import { useMemo } from 'react'
 import {
   aggregatePlanBasis,
   computePlanCost,
+  type PlanAccountRef,
   resolvePlanBasis,
   resolveWindow,
   type AggregatePlanBasis,
@@ -66,6 +67,8 @@ export function computePlanBasisView(args: {
   /** This instance aggregates other machines — see `CENTRAL` above. */
   central?: boolean
   today?: string
+  /** The machine's billable accounts. Absent, every harness prices on its single timeline. */
+  accounts?: readonly PlanAccountRef[]
 }): PlanBasisView {
   const { apiCostByDay, billing, brlRate, filters } = args
   if (args.central) return CENTRAL
@@ -93,7 +96,11 @@ export function computePlanBasisView(args: {
     const harness = key as HarnessId
     if (!byDay) continue
 
-    const plan = computePlanCost({ timeline: billing.profiles[harness], window, brlRate })
+    const plan = computePlanCost({
+      timeline: billing.profiles[harness], window, brlRate,
+      accounts: args.accounts?.filter(a => a.harness === harness),
+      accountProfiles: billing.accountProfiles,
+    })
 
     let apiOnSubscriptionDays = 0
     let apiOnApiDays = 0
@@ -142,11 +149,12 @@ export function usePlanBasis(args: {
   brlRate: number
   filters: Filters
   central?: boolean
+  accounts?: readonly PlanAccountRef[]
 }): PlanBasisView {
-  const { apiCostByDay, billing, brlRate, filters, central } = args
+  const { apiCostByDay, billing, brlRate, filters, central, accounts } = args
   return useMemo(() => {
     if (central) return CENTRAL
     if (!apiCostByDay) return EMPTY
-    return computePlanBasisView({ apiCostByDay, billing, brlRate, filters })
-  }, [apiCostByDay, billing, brlRate, filters, central])
+    return computePlanBasisView({ apiCostByDay, billing, brlRate, filters, accounts })
+  }, [apiCostByDay, billing, brlRate, filters, central, accounts])
 }

@@ -699,6 +699,24 @@ describe('per-account billing', () => {
     })
     expect(r.invalidTimeline).toBe(true)
     expect(r.unavailable).toBe(true)
+    // The empty shape: the healthy account's C must not leak into an unusable result.
+    expect(r.subscriptionCostUSD).toBe(0)
+    expect(r.coveredDays).toBe(0)
+    expect(r.coveredDayKeys.size).toBe(0)
+    expect(r.segments).toEqual([])
+  })
+
+  test('two codex accounts (non-claude) each price on their own timeline', () => {
+    const codex = ['acc_x', 'acc_y'].map((id) => ({ id, harness: 'codex' as const }))
+    const r = computePlanCost({
+      timeline: undefined,
+      window: april,
+      brlRate: 5,
+      accounts: codex,
+      accountProfiles: { acc_x: full('x', 20), acc_y: full('y', 200) },
+    })
+    expect(r.subscriptionCostUSD).toBeCloseTo((220 * 30) / AVG_DAYS_PER_MONTH, 9)
+    expect(r.segments).toHaveLength(2)
   })
 
   test('monthlyCommitment sums accounts, even with no harness default', () => {

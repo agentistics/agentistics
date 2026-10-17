@@ -871,3 +871,65 @@ test('L8: MCP fallback sums free slots per harness and excludes held accounts', 
   expect(result.freeSlotsByHarness).toEqual({ claude: 5, codex: 4 })
   expect(result.freeSlots).toBe(5)
 })
+
+test('C2 LOW L1: a transcript that appears on the second poll does not drop that sample\'s burn', async () => {
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
+  __setHarnessAccountsForTest(store)
+  const { account } = await store.bind(join(dir, 'root-a'), { harness: 'codex', key: 'a', label: 'A' })
+  await store.bind(join(dir, 'root-b'), { harness: 'codex', key: 'b', label: 'B' })
+  const id = 'late'
+  const burn = { [planAccountKey('codex', account.id)]: 10 }
+  const session = (tokens: number) => ({ session_id: id, harness: 'codex', input_tokens: tokens })
+  await sampleLivePlanSessions([session(100)], [id], 0, burn) // two accounts, no transcript yet: unattributed
+  __setLiveTranscriptPathForTest(async () => join(dir, 'root-a', 'sessions', 't.jsonl'))
+  const live = await sampleLivePlanSessions([session(150)], [id], 30_000, burn, new Set([id]))
+  expect(live[0]).toMatchObject({ account: account.id, burnPctPerHour: 10 })
+})
+
+test('C2 LOW L2: an attributed session resolves its transcript once, not on every request', async () => {
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
+  __setHarnessAccountsForTest(store)
+  const { account } = await store.bind(join(dir, 'root-a'), { harness: 'codex', key: 'a', label: 'A' })
+  let lookups = 0
+  __setLiveTranscriptPathForTest(async () => { lookups++; return join(dir, 'root-a', 'sessions', 't.jsonl') })
+  const s = { session_id: 's', harness: 'codex', input_tokens: 1 }
+  for (let i = 0; i < 3; i++) await sampleLivePlanSessions([s], ['s'], i * 1000, {}, new Set(['s']))
+  expect(lookups).toBe(1)
+  const live = await sampleLivePlanSessions([s], ['s'], 4000, {}, new Set(['s']))
+  expect(live[0]!.account).toBe(account.id)
+})
+
+test('C2 LOW L3: a default binding on a retired account yields to the only visible one', async () => {
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
+  __setHarnessAccountsForTest(store)
+  const { account: old } = await store.bind(null, { harness: 'codex', key: 'old', label: 'Old' })
+  const { account: current } = await store.bind(join(dir, 'root-b'), { harness: 'codex', key: 'cur', label: 'Cur' })
+  const doc = await store.readAccounts()
+  writeFileSync(join(dir, 'accounts.json'), JSON.stringify({ ...doc, accounts: doc.accounts.map(a => a.id === old.id ? { ...a, retired: true } : a) }))
+  const s = { session_id: 'd', harness: 'codex', input_tokens: 1 }
+  await sampleLivePlanSessions([s], ['d'], 0, {})
+  const live = await sampleLivePlanSessions([{ ...s, input_tokens: 2 }], ['d'], 1000, {}, new Set(['d']))
+  expect(live[0]!.account).toBe(current.id)
+})
+
+test('C2 LOW L4: default-home transcripts take the default binding; several visible accounts and no binding stay unattributed', async () => {
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
+  __setHarnessAccountsForTest(store)
+  const { account: a } = await store.bind(null, { harness: 'codex', key: 'a', label: 'A' })
+  const home = process.env.CODEX_HOME ?? join(process.env.HOME ?? dir, '.codex')
+  __setLiveTranscriptPathForTest(async () => join(home, 'sessions', 'x.jsonl'))
+  const s = { session_id: 'h', harness: 'codex', input_tokens: 1 }
+  await sampleLivePlanSessions([s], ['h'], 0, {})
+  const bound = await sampleLivePlanSessions([{ ...s, input_tokens: 2 }], ['h'], 1000, {}, new Set(['h']))
+  expect(bound[0]!.account).toBe(a.id)
+
+  __resetPlanLimitsForTest()
+  const store2 = createHarnessAccounts({ file: join(dir, 'accounts2.json'), probe: async () => { throw new Error('No probe') } })
+  __setHarnessAccountsForTest(store2)
+  await store2.bind(join(dir, 'r1'), { harness: 'codex', key: 'one', label: 'One' })
+  await store2.bind(join(dir, 'r2'), { harness: 'codex', key: 'two', label: 'Two' })
+  __setLiveTranscriptPathForTest(async () => null)
+  await sampleLivePlanSessions([s], ['h'], 0, {})
+  const amb = await sampleLivePlanSessions([{ ...s, input_tokens: 2 }], ['h'], 1000, {}, new Set(['h']))
+  expect(amb[0]?.account).toBeUndefined()
+})

@@ -18,6 +18,7 @@ import {
 import { mutedTooltip, useSessionMuted } from './lib/notifyMenu'
 import { useData, useDerivedStats, LIVE_INTERVAL_OPTIONS, LIVE_INTERVAL_OPTIONS_RISKY } from './hooks/useData'
 import { usePlanBasis } from './hooks/usePlanBasis'
+import { useBillingAccounts } from './hooks/useBillingAccounts'
 import { planScopeHarnesses, planScopeNote } from './lib/costBasis'
 import { planCostOf } from './lib/topUsage'
 import { bootLoading } from './lib/bootPhase'
@@ -2854,11 +2855,13 @@ export default function AppLayout() {
   // ── the plan cost basis ──────────────────────────────────────────────────────────────────
   // Computed ONCE here and passed down: two surfaces each cutting A their own way would tell two
   // different stories about the same filter, and the point of the basis is that they agree.
+  const billingAccounts = useBillingAccounts(billing)
   const planBasis = usePlanBasis({
     apiCostByDay: derived?.apiCostByDay,
     billing,
     brlRate,
     filters,
+    accounts: billingAccounts,
     // The basis does not exist on a central, and refusing HERE is what makes it unreachable: the
     // surfaces that read `planBasis` directly (Home's plan panel, compare's per-side button) never
     // pass through the `costBasis` switch below.
@@ -2907,8 +2910,10 @@ export default function AppLayout() {
       profiles: billing.profiles,
       month: new Date().toISOString().slice(0, 10),
       brlRate,
+      accounts: billingAccounts,
+      accountProfiles: billing.accountProfiles,
     })),
-    [billing.profiles, brlRate, isCentral],
+    [billing.profiles, billing.accountProfiles, billingAccounts, brlRate, isCentral],
   )
 
   // The first-run invite returns after a week (snoozed on close) until dismissed for good — but only once preferences

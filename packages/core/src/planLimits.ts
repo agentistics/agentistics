@@ -17,7 +17,7 @@
  */
 import type { HarnessId } from './types'
 import type { BillingSettings } from './billing'
-import { dayFromMs } from './billing'
+import { accountTimeline, dayFromMs } from './billing'
 import { findPlan } from './plan-catalog'
 
 export type PlanWindowKind = '5h' | 'week'
@@ -278,9 +278,10 @@ export function registeredPlanLabel(
   billing: BillingSettings | undefined,
   harness: HarnessId,
   nowMs: number,
+  accountId?: string,
 ): string | undefined {
   const today = dayFromMs(nowMs)
-  const periods = billing?.profiles?.[harness]?.periods
+  const periods = accountTimeline(billing, harness, accountId)?.periods
   if (!today || !periods) return undefined
   const p = periods.find(x => x.from <= today && (!x.to || x.to >= today))
   if (!p || p.mode !== 'subscription') return undefined
@@ -289,7 +290,7 @@ export function registeredPlanLabel(
 }
 
 export function withPlanLabel(l: PlanLimits, billing: BillingSettings | undefined, nowMs: number): PlanLimits {
-  const plan = registeredPlanLabel(billing, l.harness, nowMs)
+  const plan = registeredPlanLabel(billing, l.harness, nowMs, l.account)
   return plan ? { ...l, plan } : l
 }
 
