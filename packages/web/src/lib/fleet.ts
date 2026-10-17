@@ -152,6 +152,19 @@ const EMPTY: FleetPayload = { sessions: [], rows: [], attention: 0, tasks: [], f
  * it, but a newer page can be served by an older server (a central, a stale binary) and read back
  * from this browser's cache, so the boundary is where absence becomes an empty list. PURE.
  */
+/** The search index of one row, derived from fields it already carries (the wire strips it). PURE. */
+export function withSearchFields<T extends Record<string, unknown>>(row: T): T {
+  if (row.searchFields) return row
+  return {
+    ...row,
+    searchFields: {
+      name: String(row.title ?? ''), folder: String(row.cwd ?? ''), harness: String(row.harness ?? ''),
+      note: String(row.note ?? ''), task: String(row.task ?? ''),
+      prompt: String(row.firstPrompt ?? row.first_prompt ?? row.prompt ?? ''),
+    },
+  }
+}
+
 export function normalizeFleetPayload(raw: FleetPayload): FleetPayload {
   const list = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : [])
   const verbCatalog = list<Record<string, unknown>[]>( (raw as unknown as { verbCatalog?: unknown }).verbCatalog)
@@ -169,18 +182,13 @@ export function normalizeFleetPayload(raw: FleetPayload): FleetPayload {
   // and derive the search index from fields already displayed instead of shipping ~186 KB of
   // repeated `searchFields` for the owner's 808-row fleet.
   const canonical = (rawRows.length > 0 ? rawRows : rawSessions) as Record<string, unknown>[]
-  const compact = canonical.map(row => row.searchFields ? row : {
-    ...row,
-    searchFields: {
-      name: String(row.title ?? ''), folder: String(row.cwd ?? ''), harness: String(row.harness ?? ''),
-      note: String(row.note ?? ''), task: String(row.task ?? ''),
-      prompt: String(row.firstPrompt ?? row.first_prompt ?? row.prompt ?? ''),
-    },
-  })
+  const compact = canonical.map(withSearchFields)
+  // `rows` is what the search filters; it needs the index whichever list the server filled.
+  const rows = compact
   return {
     ...raw,
     sessions: (rawRows.length > 0 ? rawSessions : compact) as unknown as FleetRow[],
-    rows: (rawRows.length > 0 ? rawRows : compact) as unknown as ControlSession[],
+    rows: rows as unknown as ControlSession[],
     attention: typeof raw.attention === 'number' ? raw.attention : 0,
     tasks: list(raw.tasks),
     finishedTasks: list(raw.finishedTasks),
