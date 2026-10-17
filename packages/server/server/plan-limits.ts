@@ -25,6 +25,7 @@ import { AGENTISTICS_DATA_DIR, ANTIGRAVITY_DIR, CLAUDE_DIR, CODEX_DIR, CODEX_SES
 import {
   bind, byId, canonicalAccountId, forceProbe, sameLogin, hasIdentityProbe, listHarnessAccounts, readAccounts, startSegment, type AccountsFile,
 } from './harness-accounts'
+import { withFileLock } from './sessions/file-lock'
 import { readTailBytes, windowLines } from './sessions/transcript-window'
 import { harnessSpawnabilities, type HarnessSpawnability } from './sessions/harness-spawnable'
 
@@ -249,23 +250,40 @@ async function migrateDefaultRecords(registry?: AccountsFile): Promise<boolean> 
 }
 
 /**
- * Every record under a key that no longer names its account is folded into the survivor's key:
- * `moved` (this process's own migrations) first, then any account id the registry now aliases (a
- * fold another process made). The newer reading per survivor wins — timestamps decide, never order.
+ * Every record under a key that no longer names its account is folded into its FINAL survivor's
+ * key: `moved` (this process's own migrations) and the registry's current aliases are followed
+ * together until they settle, because a destination this process cached may itself have been folded
+ * since (X→A cached, A→B now). Every record is then reduced into its final key from the ORIGINAL
+ * snapshot, newest `updatedAt` winning — an intermediate key is never read back after it was written
+ * to, so a stale snapshot of it can neither replace a newer reading nor be left behind.
  */
 export function foldAliasedLimits(
   limits: Record<string, PlanLimits>,
   moved: ReadonlyMap<string, string>,
   registry: Pick<AccountsFile, 'aliases'> | null,
 ): void {
-  for (const [k, l] of Object.entries(limits)) {
-    const to = moved.get(k) ?? (registry && l.account !== 'default' ? canonicalAccountId(registry, l.account) : l.account)
-    if (to === l.account) continue
-    const next = { ...l, account: to }
-    const nk = keyOf(next)
-    delete limits[k]
-    limits[nk] = newerLimits(limits[nk], next)
+  const finalAccount = (l: PlanLimits): string => {
+    let at = l.account
+    const seen = new Set<string>()
+    for (let i = 0; i < 16; i++) {
+      const k = keyOf({ harness: l.harness, account: at })
+      if (seen.has(k)) break
+      seen.add(k)
+      const next = moved.get(k) ?? (registry && at !== 'default' ? canonicalAccountId(registry, at) : at)
+      if (next === at) break
+      at = next
+    }
+    return at
   }
+  const out: Record<string, PlanLimits> = {}
+  for (const l of Object.values(limits)) {
+    const to = finalAccount(l)
+    const next = to === l.account ? l : { ...l, account: to }
+    const nk = keyOf(next)
+    out[nk] = newerLimits(out[nk], next)
+  }
+  for (const k of Object.keys(limits)) delete limits[k]
+  Object.assign(limits, out)
 }
 
 let fileMtime = 0
@@ -276,18 +294,28 @@ function persistSoon(): void {
   persistTimer = setTimeout(() => {
     persistTimer = null
     void (async () => {
-      // MERGE with what is on disk: another process may have written a newer record since we
-      // read. Records: newer wins per account. Notices: only the owner's memory is authoritative.
-      const disk = await readFileState()
-      const limits = { ...(disk?.limits ?? {}) }
-      for (const [k, l] of Object.entries(state.limits)) limits[k] = newerLimits(limits[k], l)
-      foldAliasedLimits(limits, migratedAway, await readAccounts().catch(() => null))
-      const out: Persisted = { limits, notices: sink ? state.notices : (disk?.notices ?? state.notices) }
-      const tmp = `${FILE()}.${process.pid}.tmp`
-      await mkdir(dirname(FILE()), { recursive: true })
-      await writeFile(tmp, JSON.stringify(out), { mode: 0o600 })
-      await rename(tmp, FILE())
-      try { fileMtime = (await stat(FILE())).mtimeMs } catch { /* raced */ }
+      // The registry is read BEFORE the limits lock: never hold one file's lock while waiting on
+      // another's. A registry a moment stale only folds less; the next persist folds the rest.
+      const registry = await readAccounts().catch(() => null)
+      // MERGE with what is on disk, under the lock every limits writer shares: a reading another
+      // process publishes between our read and our rename would otherwise be overwritten.
+      // Records: newer wins per account. Notices: only the owner's memory is authoritative.
+      const written = await withFileLock(FILE(), async ({ contended }) => {
+        if (contended) return false
+        const disk = await readFileState()
+        const limits = { ...(disk?.limits ?? {}) }
+        for (const [k, l] of Object.entries(state.limits)) limits[k] = newerLimits(limits[k], l)
+        foldAliasedLimits(limits, migratedAway, registry)
+        const out: Persisted = { limits, notices: sink ? state.notices : (disk?.notices ?? state.notices) }
+        const tmp = `${FILE()}.${process.pid}.tmp`
+        await mkdir(dirname(FILE()), { recursive: true })
+        await writeFile(tmp, JSON.stringify(out), { mode: 0o600 })
+        await rename(tmp, FILE())
+        try { fileMtime = (await stat(FILE())).mtimeMs } catch { /* raced */ }
+        return true
+      })
+      // A contended lock never writes unlocked: the persist is retried, so the reading is not lost.
+      if (!written) persistSoon()
     })().catch(() => { /* a lost write costs one record, re-read on the next turn */ })
   }, 500)
   persistTimer.unref?.()

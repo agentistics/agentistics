@@ -8,6 +8,7 @@ import { planLimitsTool } from '../../mcp/plan-limits-tool'
 import { HARNESS_ORDER, routeRecommendation } from '@agentistics/core'
 import { noteFreshSpawn, resetHarnessSpawnability } from './sessions/harness-spawnable'
 import { spawnOutcome } from './sessions/spawn-outcome'
+import { lockFile } from './sessions/file-lock'
 import {
   __resetPlanLimitsForTest, __setLiveTranscriptPathForTest, foldAliasedLimits, __setManagedLookupForTest, __settleCodexRolloutsForTest, ingestPlanLimits, latestCodexLimits, noteCodexRollout,
   noteStructuredLine, planLimitsPayload, planAccountKey, sampleLivePlanSessions, sessionAccountOf, setPlanLimitsSink, syncPlanLimitsFromFile,
@@ -1079,4 +1080,44 @@ test('foldAliasedLimits folds a registry alias into its survivor by timestamp, n
   const older: Record<string, ReturnType<typeof meter>> = { 'claude:new': meter('new', 90), 'claude:old': meter('old', 50) }
   foldAliasedLimits(older, new Map(), { aliases: { old: 'new' } })
   expect(older).toEqual({ 'claude:new': meter('new', 90) })
+})
+
+test('foldAliasedLimits follows a cached destination that was itself folded to the final survivor', () => {
+  const meter = (account: string, at: number) => ({ harness: 'claude' as const, account, plan: 'Claude Max 5x', source: 'claude-usage-api' as const, updatedAt: at, windows: [] })
+  // X→A cached by this process, A→B folded since: every record ends under B, the newest wins.
+  const limits: Record<string, ReturnType<typeof meter>> = { 'claude:X': meter('X', 30), 'claude:A': meter('A', 20), 'claude:B': meter('B', 10) }
+  foldAliasedLimits(limits, new Map([['claude:X', 'A'], ['claude:A', 'B']]), { aliases: { X: 'B', A: 'B' } })
+  expect(limits).toEqual({ 'claude:B': meter('B', 30) })
+  // The cached hop alone (registry not read) still lands on the final survivor.
+  const noRegistry: Record<string, ReturnType<typeof meter>> = { 'claude:X': meter('X', 30) }
+  foldAliasedLimits(noRegistry, new Map([['claude:X', 'A'], ['claude:A', 'B']]), null)
+  expect(noRegistry).toEqual({ 'claude:B': meter('B', 30) })
+  // And a stale cached target the registry has moved on from resolves through the current aliases.
+  const viaAlias: Record<string, ReturnType<typeof meter>> = { 'claude:X': meter('X', 30), 'claude:A': meter('A', 40) }
+  foldAliasedLimits(viaAlias, new Map([['claude:X', 'A']]), { aliases: { A: 'B' } })
+  expect(viaAlias).toEqual({ 'claude:B': meter('B', 40) })
+})
+
+test('a reading another process publishes between this one\'s read and rename survives the persist', async () => {
+  const limitsFile = join(dir, 'plan-limits.json')
+  __resetPlanLimitsForTest(limitsFile)
+  const now = Date.now()
+  const reading = (account: string, pct: number) => ({ harness: 'codex' as const, account, plan: 'Plus', source: 'codex-rollout' as const, updatedAt: now,
+    windows: [{ kind: '5h' as const, usedPct: pct, resetsAt: now + 3_600_000 }] })
+  // Another process (Q) holds the limits lock: it read the file before this one's reading existed.
+  const q = await lockFile(limitsFile)
+  expect(q.contended).toBe(false)
+  await ingestPlanLimits(reading('acc_p00000000000', 11))
+  await new Promise(r => setTimeout(r, 800))
+  // P's persist is due but must not have written while Q holds the lock.
+  let wrote = true
+  try { readFileSync(limitsFile, 'utf8') } catch { wrote = false }
+  expect(wrote).toBe(false)
+  // Q renames ITS file, built from a read that did not include P's reading, then releases.
+  writeFileSync(limitsFile, JSON.stringify({ limits: { 'codex:acc_q00000000000': reading('acc_q00000000000', 22) }, notices: {} }))
+  await q.release()
+  await new Promise(r => setTimeout(r, 900))
+  const after = JSON.parse(readFileSync(limitsFile, 'utf8')).limits
+  expect(after['codex:acc_q00000000000']?.windows[0].usedPct).toBe(22)
+  expect(after['codex:acc_p00000000000']?.windows[0].usedPct).toBe(11)
 })

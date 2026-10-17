@@ -159,8 +159,9 @@ export function sameLogin(
 
 /**
  * The account a detected identity belongs to, or none. Equal keys are not identity on their own (see
- * `sameLogin`): the record this root is already bound to is kept when its key is unchanged — the
- * binding is the evidence for THIS root, and claims nothing about another root holding the same key —
+ * `sameLogin`): the record this root is already bound to is kept when its key is unchanged and the
+ * probe brings no conflicting person evidence (another e-mail) — the binding is the evidence for THIS
+ * root, and claims nothing about another root holding the same key —
  * and otherwise only a same-login record matches (the same login under an older key spelling). With
  * no evidence the caller mints: a second row is acceptable, two people in one row is not.
  */
@@ -169,8 +170,23 @@ export function matchIdentity(
 ): HarnessAccount | undefined {
   const probe = { harness, key: detected.key, label: detected.label, root }
   const bound = data.accounts.find(a => a.id === data.bindings[bindingKey(harness, root)])
-  if (bound && bound.harness === harness && (bound.key === detected.key || sameLogin(bound, probe))) return bound
+  if (bound && bound.harness === harness
+    && (sameLogin(bound, probe) || (bound.key === detected.key && !conflictingPerson(bound, probe)))) return bound
   return data.accounts.find(a => sameLogin(a, probe))
+}
+
+/**
+ * Per-person evidence that two records name DIFFERENT people: two distinct claude e-mails. An equal
+ * org-only key says nothing about the person, so a probe naming another e-mail is another login even
+ * on a root already bound — rebinding it, never relabelling the old account into the new person.
+ */
+function conflictingPerson(
+  a: Pick<HarnessAccount, 'harness' | 'label'>, b: Pick<HarnessAccount, 'harness' | 'label'>,
+): boolean {
+  if (a.harness !== 'claude' || b.harness !== 'claude') return false
+  const email = (label: string) => { const l = label.trim().toLowerCase(); return l.includes('@') ? l : null }
+  const ea = email(a.label), eb = email(b.label)
+  return !!ea && !!eb && ea !== eb
 }
 
 /** An id as the registry knows it now: an alias resolves to the account it was merged into. */
