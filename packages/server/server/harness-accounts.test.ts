@@ -425,3 +425,43 @@ test('L1: a late older segment write never moves the persisted boundary backward
   await second.startSegment(account.id, 1000)
   expect((await second.readAccounts()).segments[account.id]).toBe(2000)
 })
+
+test('a login whose probe key changed spelling keeps its account instead of minting a twin', async () => {
+  const file = join(dir, 'accounts.json')
+  const org = '00000000-0000-4000-8000-000000000002'
+  await writeFile(file, JSON.stringify({ version: 2, segments: {}, bindings: { 'claude:': 'acc_legacy000000' },
+    accounts: [{ id: 'acc_legacy000000', root: null, key: org, harness: 'claude', label: 'a@example.invalid', available: true, firstSeen: 1, lastSeen: 2 }] }))
+  const store = createHarnessAccounts({ file, now: () => 10, probe: async () => ({ key: `${org}:a@example.invalid`, label: 'a@example.invalid' }) })
+  const account = await store.current('claude')
+  expect(account.id).toBe('acc_legacy000000')
+  expect(account.key).toBe(`${org}:a@example.invalid`)
+  expect((await store.readAccounts()).accounts).toHaveLength(1)
+})
+
+test('an org id alone never merges two people of one team', async () => {
+  const file = join(dir, 'accounts.json')
+  const org = '00000000-0000-4000-8000-000000000003'
+  await writeFile(file, JSON.stringify({ version: 2, segments: {}, bindings: {},
+    accounts: [{ id: 'acc_teammate0000', root: null, key: org, harness: 'claude', label: 'b@example.invalid', available: true, firstSeen: 1, lastSeen: 2 }] }))
+  const store = createHarnessAccounts({ file, probe: async () => ({ key: `${org}:a@example.invalid`, label: 'a@example.invalid' }) })
+  expect((await store.current('claude')).id).not.toBe('acc_teammate0000')
+  expect((await store.readAccounts()).accounts).toHaveLength(2)
+})
+
+test('registry twins are folded on read: bindings, segments and an alias follow the survivor', async () => {
+  const file = join(dir, 'accounts.json')
+  await writeFile(file, JSON.stringify({ version: 2, segments: { acc_gemlegacy0000: 50 }, bindings: { 'gemini:': 'acc_gemroot00000' },
+    accounts: [
+      { id: 'acc_gemlegacy0000', root: null, key: 'default', harness: 'gemini', label: 'Conta padrão', nickname: 'Home', available: true, firstSeen: 1, lastSeen: 5 },
+      { id: 'acc_gemroot00000', root: null, key: 'root:abcdef012345', harness: 'gemini', label: 'Default account', available: true, firstSeen: 3, lastSeen: 9 },
+    ] }))
+  const store = createHarnessAccounts({ file })
+  const data = await store.readAccounts()
+  expect(data.accounts).toHaveLength(1)
+  expect(data.accounts[0]).toMatchObject({ id: 'acc_gemroot00000', nickname: 'Home', firstSeen: 1, lastSeen: 9 })
+  expect(data.aliases).toEqual({ acc_gemlegacy0000: 'acc_gemroot00000' })
+  expect(data.segments).toEqual({ acc_gemroot00000: 50 })
+  expect((await store.byId('acc_gemlegacy0000'))?.id).toBe('acc_gemroot00000')
+  // The fold is persisted, so every process reads the same single record.
+  expect(JSON.parse(await readFile(file, 'utf8')).accounts).toHaveLength(1)
+})

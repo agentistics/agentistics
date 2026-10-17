@@ -471,7 +471,27 @@ const ROUTE_PREFERENCES: Record<RouteKind, readonly [HarnessId, string?][]> = {
 }
 
 /** A budget row, optionally attributed to one account of its harness. */
-export type AccountBudget = PlanBudget & Partial<PlanPace> & { account?: string; accountLabel?: string; updatedAt?: number }
+export type AccountBudget = PlanBudget & Partial<PlanPace> & {
+  account?: string; accountLabel?: string; updatedAt?: number
+  /** Set by `yieldStaleRows`: a stale reading of a plan another account of the harness reports fresh. */
+  yieldsTo?: string
+}
+
+/**
+ * A STALE row never drives routing or cadence while a FRESH row of the same harness and plan exists:
+ * its pace and slots describe a meter nobody has read for a while (in the reported case, the last
+ * reading of one login stored under a second account id), so they could only ever be wrong in the
+ * direction of "start more work". The row stays on screen; its slots go to zero, its pace is ignored
+ * by `harnessAggregate`/`routeRecommendation`, and `yieldsTo` names the fresh account.
+ */
+export function yieldStaleRows<T extends AccountBudget>(rows: readonly T[]): T[] {
+  return rows.map(r => {
+    if (!r.stale || r.plan === 'unregistered') return r
+    const fresh = rows.find(f => f !== r && !f.stale && f.harness === r.harness && f.plan === r.plan && f.account !== r.account)
+    if (!fresh) return r
+    return { ...r, freeSlots: 0, suggestedParallel: 0, yieldsTo: fresh.account ?? 'default' }
+  })
+}
 
 export interface HarnessAggregate {
   harness: HarnessId
@@ -492,7 +512,7 @@ export function harnessAggregate(rows: readonly AccountBudget[]): HarnessAggrega
   const by = new Map<HarnessId, AccountBudget[]>()
   for (const r of rows) by.set(r.harness, [...(by.get(r.harness) ?? []), r])
   return [...by].map(([harness, list]) => {
-    const live = list.filter(r => r.status !== 'hold')
+    const live = list.filter(r => r.status !== 'hold' && !r.yieldsTo)
     const status: PlanBudgetStatus = live.length
       ? live.reduce<PlanBudgetStatus>((best, r) => (STATUS_RANK[r.status] < STATUS_RANK[best] ? r.status : best), 'hold')
       : 'hold'
@@ -535,7 +555,7 @@ export function routeRecommendation(
   const eligibleHarness = (agg: HarnessAggregate) =>
     eligibleAccounts(agg.harness).length > 0 && agg.status !== 'hold' && (allowTight || agg.status !== 'tight') && agg.harness !== (kind === 'qa' ? authorHarness : undefined)
   const eligibleAccounts = (h: HarnessId) =>
-    budgets.filter(b => b.harness === h && b.spawnable !== false && b.plan !== 'unregistered' && b.status !== 'hold' && (allowTight || b.status !== 'tight'))
+    budgets.filter(b => b.harness === h && b.spawnable !== false && b.plan !== 'unregistered' && !b.yieldsTo && b.status !== 'hold' && (allowTight || b.status !== 'tight'))
   const harnesses = [...aggregates.values()].filter(eligibleHarness)
   const ordered = [...harnesses].sort((a, b) => {
     const ap = a.paceStatus === 'under' ? 0 : 1

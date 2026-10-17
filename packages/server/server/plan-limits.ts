@@ -17,13 +17,13 @@ import { basename, dirname, join, resolve, sep } from 'node:path'
 import { watch as fsWatch } from 'node:fs'
 import {
   agentVisible, alternativeWithRoom, harnessAggregate, HARNESS_LABELS, HARNESS_ORDER, meterDiscontinuity, newerLimits, parseClaudeRateLimitEvent,
-  parseCodexRateLimits, planBudget, planPace, planThresholdNotices, registeredPlanLabel, resetNoticesFor, withPlanLabel,
+  parseCodexRateLimits, planBudget, planPace, planThresholdNotices, registeredPlanLabel, resetNoticesFor, withPlanLabel, yieldStaleRows,
   type HarnessId,
   type LivePlanSession, type PlanLimits, type PlanNoticeState, type PlanThresholdNotice,
 } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, ANTIGRAVITY_DIR, CLAUDE_DIR, CODEX_DIR, CODEX_SESSIONS_DIR, COPILOT_DIR, GEMINI_DIR, KIMI_DIR, OPENCODE_DIR } from './config'
 import {
-  bind, byId, forceProbe, hasIdentityProbe, listHarnessAccounts, readAccounts, startSegment, type AccountsFile,
+  bind, byId, canonicalAccountId, forceProbe, hasIdentityProbe, listHarnessAccounts, readAccounts, startSegment, type AccountsFile,
 } from './harness-accounts'
 import { readTailBytes, windowLines } from './sessions/transcript-window'
 import { harnessSpawnabilities, type HarnessSpawnability } from './sessions/harness-spawnable'
@@ -120,8 +120,9 @@ export async function sampleLivePlanSessions(
   const managed = await managedLookup().catch(() => [])
   const managedAccounts = new Map<string, string>()
   for (const row of managed) if (row.accountId) {
-    managedAccounts.set(row.id, row.accountId)
-    if (row.conversationId) managedAccounts.set(row.conversationId, row.accountId)
+    const accountId = canonicalAccountId(registry, row.accountId)
+    managedAccounts.set(row.id, accountId)
+    if (row.conversationId) managedAccounts.set(row.conversationId, accountId)
   }
   const wanted = new Set(liveIds)
   for (const id of liveUsage.keys()) if (!wanted.has(id)) liveUsage.delete(id)
@@ -212,14 +213,17 @@ const migratedAway = new Set<string>()
  * account the DEFAULT root is bound to — a binding exists only after a CONFIRMED probe, so nothing
  * is re-keyed on a guess. With no binding the record stays where it is. Notice state moves with it.
  */
-async function migrateDefaultRecords(): Promise<boolean> {
-  const legacy = Object.entries(state.limits).filter(([, l]) => l.account === 'default')
+async function migrateDefaultRecords(registry?: AccountsFile): Promise<boolean> {
+  let file = registry
+  if (!file) try { file = await readAccounts() } catch { return false }
+  const { bindings } = file
+  // Also a meter under an id the registry MERGED into another (one login stored twice): it belongs
+  // to the survivor, where the newer of the two readings wins — never a second row for one plan.
+  const legacy = Object.entries(state.limits).filter(([, l]) => l.account === 'default' || canonicalAccountId(file, l.account) !== l.account)
   if (!legacy.length) return false
-  let bindings: Record<string, string>
-  try { bindings = (await readAccounts()).bindings } catch { return false }
   let moved = false
   for (const [oldKey, l] of legacy) {
-    const id = bindings[`${l.harness}:`]
+    const id = l.account === 'default' ? bindings[`${l.harness}:`] : canonicalAccountId(file, l.account)
     if (!id) continue
     const next = { ...l, account: id }
     const newKey = keyOf(next)
@@ -272,7 +276,8 @@ let lastMigrateCheck = 0
  * leaves the legacy record beside the account's own. Re-run the load migration then — throttled,
  * and only while a legacy record exists, so a machine with no binding never pays for it.
  */
-async function maybeMigrateDefault(): Promise<void> {
+async function maybeMigrateDefault(registry?: AccountsFile): Promise<void> {
+  if (registry) { if (await migrateDefaultRecords(registry)) persistSoon(); return }
   if (!Object.values(state.limits).some(l => l.account === 'default')) return
   const t = Date.now()
   if (t - lastMigrateCheck < 5_000) return
@@ -281,8 +286,14 @@ async function maybeMigrateDefault(): Promise<void> {
 }
 
 /** Store `l` when it is newer than what is held; notices and the SSE signal follow a real change. */
-export async function ingestPlanLimits(l: PlanLimits): Promise<boolean> {
+export async function ingestPlanLimits(reading: PlanLimits): Promise<boolean> {
   await load()
+  let l = reading
+  if (l.account !== 'default') {
+    // A tap may still name an id the registry merged away (a managed session started before): the
+    // reading is the survivor's.
+    try { const at = canonicalAccountId(await readAccounts(), l.account); if (at !== l.account) l = { ...l, account: at } } catch { /* as named */ }
+  }
   const key = keyOf(l)
   if (migratedAway.has(key)) {
     // The migration moved this key's record to the default root's account. Once that binding is
@@ -598,7 +609,7 @@ export async function seedPlanLimits(structuredDir: string): Promise<void> {
   }
 }
 
-export type AccountBudgetRow = ReturnType<typeof planBudget> & ReturnType<typeof planPace> & HarnessSpawnability & { account: string; accountLabel: string }
+export type AccountBudgetRow = ReturnType<typeof planBudget> & ReturnType<typeof planPace> & HarnessSpawnability & { account: string; accountLabel: string; yieldsTo?: string }
 
 export interface PlanLimitsPayload {
   /** Which harnesses can be spawned here; a harness hidden from agents is absent. */
@@ -619,13 +630,19 @@ export interface PlanLimitsPayload {
 
 /** What `GET /api/plan-limits` answers: one row per account observed, agent-visible ones in `budgets`. */
 export async function planLimitsPayload(
-  billing: Parameters<typeof withPlanLabel>[1],
+  billingIn: Parameters<typeof withPlanLabel>[1],
   nowMs = Date.now(),
   liveSessions: readonly LivePlanSession[] = [],
 ): Promise<PlanLimitsPayload> {
   await syncPlanLimitsFromFile()
-  await maybeMigrateDefault()
   const registry = await readAccounts().catch((): AccountsFile => ({ version: 2, accounts: [], bindings: {}, segments: {} }))
+  await maybeMigrateDefault(registry)
+  // A plan registered under an id the registry merged away is the survivor's (unless it has its own).
+  let billing = billingIn
+  const aliasedProfiles = Object.entries(registry.aliases ?? {})
+    .flatMap(([from]) => { const to = canonicalAccountId(registry, from), p = billingIn?.accountProfiles?.[from]
+      return p && !billingIn?.accountProfiles?.[to] ? [[to, p] as const] : [] })
+  if (billingIn && aliasedProfiles.length) billing = { ...billingIn, accountProfiles: { ...billingIn.accountProfiles, ...Object.fromEntries(aliasedProfiles) } }
   const registrySegments = registry.segments
   const segmentOf = (account: string): number | undefined => {
     const starts = [segmentStarts.get(account), registrySegments[account]].filter((v): v is number => v !== undefined)
@@ -675,7 +692,7 @@ export async function planLimitsPayload(
   }
   const belongsTo = (s: LivePlanSession, l: PlanLimits) =>
     (!s.harness || s.harness === l.harness) && s.account === l.account
-  const allBudgets: AccountBudgetRow[] = limits.map(l => {
+  const allBudgets: AccountBudgetRow[] = yieldStaleRows(limits.map(l => {
     const budget = planBudget(l, nowMs)
     // Only measured sessions enter planSlots' per-session average. Working sessions with no
     // billed tokens remain in the public live summary, without diluting the measured burn.
@@ -685,7 +702,7 @@ export async function planLimitsPayload(
       ...(!availability.spawnable ? { freeSlots: 0, suggestedParallel: 0 } : {}),
       account: l.account, accountLabel: labelOf(l.harness, l.account),
     }
-  })
+  }))
   const budgets = agentVisible(allBudgets, visibility)
   const shown = new Set(budgets)
   const hiddenFromAgents = allBudgets.filter(b => !shown.has(b))
