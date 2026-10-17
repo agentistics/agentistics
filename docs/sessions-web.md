@@ -16,6 +16,15 @@ about the web one specifically.
 - On a central: [architecture.md § Managing a machine's sessions](architecture.md) and
   [security.md § 8c](security.md)
 
+The aside's **N leaders** toggle counts only sessions in the fleet's active states that match the
+current search and harness/project/repository/model filters. When enabled, it displays those
+leaders in one flat list, including leaders that are pinned or filed in hidden folders. Pinned,
+folder, ended and summary-filter sections are suspended until the toggle is turned off; their
+settings are preserved. The toggle stays visible at zero while enabled so it can be turned off.
+The summary filter does not narrow this flat list; its selection is restored in the normal view.
+When no active leaders match, the list says **No active leaders** (**Nenhum líder ativo**), even
+when workers or ended leaders are pinned.
+
 ---
 
 ## The conversation
