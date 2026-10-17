@@ -8,7 +8,7 @@
  *  4. an account refusal keeps its code through host/fleet results (the route maps it to a status).
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createControlHost, reopenRowRequest, spawnManaged } from '../cli-start'
@@ -20,6 +20,7 @@ import { addSession, removeSession } from './registry'
 import { newestRowOfConversation } from './spawn-account-io'
 import { __setSpawnBudgetForTest } from './memory-probe'
 import { exactLinksOnDisk } from './reopen-link'
+import { resetHarnessAvailability } from './harness-available'
 import { spawnAccountStatus } from './spawn-account'
 import type { ManagedSession, SessionBackend } from './types'
 
@@ -235,6 +236,15 @@ describe('5 · a group reopen with mixed results keeps every typed refusal (D3 f
     } as unknown as SessionBackend
     __setSessionBackendForTest(live)
     __setSpawnBudgetForTest({ value: null })
+    // The reopen plans a real spawn, which needs the harness CLI on PATH: a stub, so the test does not
+    // depend on the machine having `claude` installed (CI does not).
+    const bin = join(dir, 'bin5')
+    mkdirSync(bin, { recursive: true })
+    writeFileSync(join(bin, 'claude'), '#!/bin/sh\nexit 0\n')
+    chmodSync(join(bin, 'claude'), 0o755)
+    const pathBefore = process.env.PATH
+    process.env.PATH = `${bin}:${pathBefore ?? ''}`
+    resetHarnessAvailability()
     try {
       const host = createControlHost('en', NO_TERMINAL)
       const out = await host.reopenFell!(undefined, { callerVerified: true })
@@ -246,6 +256,8 @@ describe('5 · a group reopen with mixed results keeps every typed refusal (D3 f
       expect(out.fell?.refused[0]!.message).toBeTruthy()
       expect(out.message).toContain(out.fell!.refused[0]!.message)
     } finally {
+      process.env.PATH = pathBefore
+      resetHarnessAvailability()
       __setSessionBackendForTest(backend)
       __setSpawnBudgetForTest(null)
       await removeSession(rowA.id)
