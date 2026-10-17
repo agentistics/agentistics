@@ -39,6 +39,36 @@ describe('createAccountMutator', () => {
 })
 
 describe('reconcileNickname', () => {
+  test('a successful PATCH replaces the unchanged raw draft with the sanitized server nickname', async () => {
+    const d = deferred()
+    let draft = ' Work\tLaptop '
+    const rawSubmittedDraft = draft
+    const m = createAccountMutator<A>(async (_id, body) => {
+      expect(body.nickname).toBe('Work\tLaptop')
+      return { ok: true, json: async () => ({ account: await d.p }) }
+    })
+    const pending = m.patch('a1', { nickname: rawSubmittedDraft.trim() })
+    d.res({ id: 'a1', nickname: 'Work Laptop', available: true })
+    const result = await pending
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') throw new Error('PATCH failed')
+    draft = reconcileNickname(draft, rawSubmittedDraft, result.account.nickname)
+    expect(draft).toBe('Work Laptop')
+    expect(draft.trim()).toBe(result.account.nickname!)
+  })
+  test('typing while the PATCH is pending survives the sanitized response', async () => {
+    const d = deferred()
+    let draft = ' Work\tLaptop '
+    const rawSubmittedDraft = draft
+    const m = createAccountMutator<A>(async () => ({ ok: true, json: async () => ({ account: await d.p }) }))
+    const pending = m.patch('a1', { nickname: rawSubmittedDraft.trim() })
+    draft = ' Work\tLaptop 2 '
+    d.res({ id: 'a1', nickname: 'Work Laptop', available: true })
+    const result = await pending
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') throw new Error('PATCH failed')
+    expect(reconcileNickname(draft, rawSubmittedDraft, result.account.nickname)).toBe(' Work\tLaptop 2 ')
+  })
   test('the normalized server value replaces the submitted draft; newer typing is kept', () => {
     expect(reconcileNickname('Work', 'Work', 'Work')).toBe('Work')
     expect(reconcileNickname('Work', 'Work', undefined)).toBe('')
