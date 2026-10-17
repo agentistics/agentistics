@@ -19,7 +19,6 @@ interface Props {
 
 export function InfoModal({ items, currentIndex, onClose, onNavigate, lang }: Props) {
   const item = items[currentIndex]
-  if (!item) return null
   const total = items.length
 
   const goLeft = useCallback(() => {
@@ -30,15 +29,19 @@ export function InfoModal({ items, currentIndex, onClose, onNavigate, lang }: Pr
     onNavigate((currentIndex + 1) % total)
   }, [currentIndex, total, onNavigate])
 
+  const open = !!item
   useEffect(() => {
+    if (!open) return
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'ArrowLeft') goLeft()
       else if (e.key === 'ArrowRight') goRight()
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [goLeft, goRight])
-  useEscapeOwner(true, onClose)
+  }, [open, goLeft, goRight])
+  useEscapeOwner(open, onClose)
+  // Every hook runs before this return (React #300).
+  if (!item) return null
 
   const t = {
     source: lang === 'pt' ? 'Fonte dos dados' : 'Data source',
