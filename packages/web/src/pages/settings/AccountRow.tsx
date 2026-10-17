@@ -123,7 +123,7 @@ export function BillingAccountList(p: BillingAccountListProps) {
                 <HarnessMark harness={r.harness} size={22} />
                 <span style={{ minWidth: 0 }}>
                   <b style={{ ...nowrap, fontSize: 13, color: 'var(--text-primary)' }}>{r.title}</b>
-                  <span style={{ ...nowrap, fontSize: 11.5, color: 'var(--text-tertiary)' }}>{r.sub}</span>
+                  <span style={{ display: 'block', overflowWrap: 'anywhere', fontSize: 11.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>{r.sub}</span>
                 </span>
               </span>
               <PlanCell r={r} t={t} />

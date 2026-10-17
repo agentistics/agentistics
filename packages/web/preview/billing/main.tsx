@@ -28,7 +28,8 @@ import { currencySymbol, formatAmountDisplay, periodName, splitTimeline } from '
 
 const q = new URLSearchParams(location.search)
 const view = q.get('view') ?? 'A'
-const n = Number(q.get('n') ?? '3')
+const REAL = q.get('n') === 'real'
+const n = REAL ? 3 : Number(q.get('n') ?? '3')
 const lang = (q.get('lang') ?? 'pt') as 'pt' | 'en'
 const pt = lang === 'pt'
 const drawerOpen = q.get('drawer') === '1'
@@ -43,15 +44,41 @@ const ALL_ACCOUNTS: BillingAccount[] = [
   { id: 'acc_c2', harness: 'claude', key: 'c2', label: 'lucas@empresa.com.br', nickname: 'Trabalho', root: '/home/u/.claude-work', available: false, firstSeen: Date.parse('2026-08-20T12:00:00Z') },
   { id: 'acc_x1', harness: 'codex', key: 'x1', label: 'zlucas@outlook.com', root: null, available: true, firstSeen: Date.parse('2026-09-15T12:00:00Z') },
 ]
-const ACCOUNTS = n === 1 ? ALL_ACCOUNTS.slice(0, 1) : ALL_ACCOUNTS
+// The owner's real shape (fix round 2): 8 registry rows for 6 accounts — gemini and antigravity each
+// registered twice under their `root:` fallback key, as a second home sees them.
+const SEEN = Date.parse('2026-10-13T12:00:00Z')
+const fb = (id: string, harness: HarnessId, root: string): BillingAccount =>
+  ({ id, harness, key: `root:${root}`, label: 'Default account', root: null, available: true, firstSeen: SEEN })
+const REAL_ACCOUNTS: BillingAccount[] = [
+  { id: 'acc_5dfb', harness: 'claude', key: 'd3c3:zlucason1@gmail.com', label: 'zlucason1@gmail.com', nickname: 'Principal', root: null, available: true, firstSeen: SEEN },
+  { id: 'acc_8933', harness: 'codex', key: '1a58', label: 'ChatGPT 1a583a5f', nickname: 'Principal', root: null, available: true, firstSeen: SEEN },
+  fb('acc_g1', 'gemini', '1721'), fb('acc_g2', 'gemini', '9a0b'),
+  { id: 'acc_e527', harness: 'copilot', key: 'gh:blpsoares', label: 'blpsoares', root: null, available: true, firstSeen: SEEN },
+  fb('acc_a1', 'antigravity', 'e317'), fb('acc_a2', 'antigravity', '77c1'),
+  fb('acc_k1', 'kimi', 'f5c6'),
+]
+const ACCOUNTS = REAL ? REAL_ACCOUNTS : n === 1 ? ALL_ACCOUNTS.slice(0, 1) : ALL_ACCOUNTS
 const win = (kind: '5h' | 'week', usedPct: number, inH: number) => ({ kind, usedPct, resetsAt: NOW + inH * H })
 const ALL_LIMITS: PlanLimits[] = [
   { harness: 'claude', account: 'acc_c1', windows: [win('5h', 47, 2.3), win('week', 58, 70)], updatedAt: NOW, source: 'claude-usage-api' },
   { harness: 'claude', account: 'acc_c2', windows: [win('5h', 12, 4), win('week', 31, 120)], updatedAt: NOW, source: 'claude-usage-api' },
   { harness: 'codex', account: 'acc_x1', windows: [win('5h', 8, 3.1), win('week', 22, 96)], updatedAt: NOW, source: 'codex-rollout' },
 ]
-const LIMITS = ALL_LIMITS.filter(l => ACCOUNTS.some(a => a.id === l.account))
-const BILLING: BillingShape = normalizeBillingSettings({
+const LIMITS = REAL ? [
+  { harness: 'claude', account: 'acc_5dfb', windows: [win('5h', 67, 2.3), win('week', 60, 70)], updatedAt: NOW, source: 'claude-usage-api' },
+  { harness: 'codex', account: 'acc_8933', windows: [win('5h', 56, 3.1), win('week', 62, 96)], updatedAt: NOW, source: 'codex-rollout' },
+] as PlanLimits[] : ALL_LIMITS.filter(l => ACCOUNTS.some(a => a.id === l.account))
+const unk = (id: string) => ({ periods: [{ id: `bp_${id}`, mode: 'unknown' as const, from: '2026-10-13' }] })
+const BILLING: BillingShape = REAL ? normalizeBillingSettings({
+  profiles: { claude: { periods: [{ id: 'bp_cl', mode: 'subscription', planId: 'anthropic-max-5x', price: { amount: 550, currency: 'BRL' }, from: '2026-10-01' }] } },
+  accountProfiles: {
+    acc_8933: { periods: [
+      { id: 'bp_x0', mode: 'subscription', planId: 'openai-plus', price: { amount: 20, currency: 'USD' }, from: '2026-10-04', to: '2026-10-16' },
+      { id: 'bp_x1', mode: 'subscription', planId: 'openai-plus', price: { amount: 110.5, currency: 'BRL' }, from: '2026-10-17' },
+    ] },
+    acc_g1: unk('g1'), acc_e527: unk('p'), acc_a1: unk('a1'), acc_k1: unk('k1'),
+  },
+}) : normalizeBillingSettings({
   profiles: { claude: { periods: [{ id: 'bp_def', mode: 'subscription', planId: 'anthropic-max-5x', price: { amount: 100, currency: 'USD' }, from: '2026-08-01' }] } },
   accountProfiles: n === 1 ? {} : {
     acc_c2: { periods: [
@@ -60,7 +87,7 @@ const BILLING: BillingShape = normalizeBillingSettings({
     ] },
   },
 })
-const HARNESSES: HarnessId[] = n === 1 ? ['claude'] : ['claude', 'codex']
+const HARNESSES: HarnessId[] = REAL ? ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi'] : n === 1 ? ['claude'] : ['claude', 'codex']
 
 // ── the row model every option draws from: ONE row per account ───────────────────────────────
 interface Row {

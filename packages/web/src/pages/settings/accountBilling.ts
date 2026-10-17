@@ -6,7 +6,7 @@
  * the SCREEN says about an account's plan and when to ask "which plan is this?".
  */
 import {
-  dayFromIndex, dayIndex, findPlan, plansForHarness, sortPeriods, validatePeriod,
+  dayFromIndex, dayIndex, findPlan, plansForHarness, sortPeriods, validatePeriod, SENTINEL_PLAN_IDS,
   type BillingPeriod, type BillingSettings, type HarnessId,
 } from '@agentistics/core'
 import { applyPlan, emptyDraft, periodFromDraft, periodName, splitTimeline, validateDraft } from './billingForm'
@@ -51,7 +51,7 @@ export function planSummary(
 export function accountsNeedingPlan<A extends BillingAccount>(accounts: readonly A[], billing: BillingSettings, harnesses: readonly HarnessId[]): A[] {
   const out: A[] = []
   for (const h of harnesses) {
-    const mine = billableAccounts(accounts, h)
+    const mine = foldUnnamed(billableAccounts(accounts, h), billing)
     for (const a of mine) if (rowScope(billing, mine, a).kind === 'none') out.push(a)
   }
   return out
@@ -217,17 +217,60 @@ export function billingRows(
       out.push({ key: `harness:${h}`, harness: h, account: null, title: label, sub: unknownWho, scope: { kind: 'default', harness: h } })
       continue
     }
-    const unnamed = mine.filter(a => !(a.nickname && !isPlaceholderName(a.nickname)) && isPlaceholderName(a.label))
-    for (const a of mine) {
+    const shown = foldUnnamed(mine, billing)
+    const unnamed = shown.filter(a => !(a.nickname && !isPlaceholderName(a.nickname)) && isPlaceholderName(a.label))
+    for (const a of shown) {
       const nick = a.nickname && !isPlaceholderName(a.nickname) ? a.nickname : null
       const login = isPlaceholderName(a.label) ? null : a.label
       const n = unnamed.indexOf(a)
       const title = nick ?? login ?? (unnamed.length > 1 ? `${label} #${n + 1}` : label)
       const sub = nick ? (login ? `${label} · ${login}` : label) : login ? label : unknownWho
-      out.push({ key: a.id, harness: h, account: a, title, sub, scope: rowScope(billing, mine, a) })
+      out.push({ key: a.id, harness: h, account: a, title, sub, scope: rowScope(billing, shown, a) })
     }
   }
   return out
+}
+
+/**
+ * The registry's fallback for a harness that reports no login: keyed by the harness's own data
+ * directory (`root:…`), placeholder label, no nickname. Two of them are the same sign-in seen from
+ * two homes, never two people. An unnamed account under a real identity key is NOT one of these.
+ */
+const fallback = (a: Pick<BillingAccount, 'key' | 'label' | 'nickname'>): boolean =>
+  (a.key ?? '').startsWith('root:') && isPlaceholderName(a.label) && !(a.nickname && !isPlaceholderName(a.nickname))
+
+/**
+ * The accounts that become rows. A fallback account (see `fallback`) is the same sign-in said again
+ * whenever there is something it could be: beside exactly ONE other account it folds into it; with
+ * no other account, several fallbacks are one login and only one row is kept — the one carrying a plan of its own, else the oldest. Beside two or more named
+ * others there is no telling which it is, so it stays a row of its own.
+ */
+export function foldUnnamed<A extends BillingAccount>(mine: readonly A[], billing: BillingSettings): A[] {
+  const withName = mine.filter(a => !fallback(a))
+  const without = mine.filter(fallback)
+  if (without.length === 0) return [...mine]
+  if (withName.length === 1) return withName
+  if (withName.length > 1) return [...mine]
+  const keep = without.find(a => ownPeriods(billing, a.id).length > 0) ?? without[0]
+  return keep ? [keep] : []
+}
+
+/** The plans a harness's picker offers: its own (plus the "other / I don't know" entries), and the
+ *  one already chosen even when it belongs elsewhere, so an existing period never loses its plan. */
+export function planOptionsFor(harness: HarnessId, keep?: string): ReturnType<typeof plansForHarness> {
+  return plansForHarness(harness).filter(p => p.suggestedHarnesses.includes(harness) || (SENTINEL_PLAN_IDS as readonly string[]).includes(p.id) || p.id === keep)
+}
+
+/** Where a new plan starts: the day after the last earlier plan ended, else today. */
+export function defaultStart(periods: readonly BillingPeriod[], today: string): string {
+  let last: number | null = null
+  for (const p of periods) {
+    const d = p.to ? dayIndex(p.to) : null
+    if (d !== null && (last === null || d > last)) last = d
+  }
+  if (last === null) return today
+  const next = dayFromIndex(last + 1)
+  return next > today ? today : next
 }
 
 /**

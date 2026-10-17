@@ -12,7 +12,6 @@ import { useOutletContext } from 'react-router-dom'
 import { Pencil, Trash2, AlertTriangle, Sparkles } from 'lucide-react'
 import {
   findPlan,
-  plansForHarness,
   sortPeriods,
   validateTimeline,
   type BillingDetection,
@@ -38,6 +37,7 @@ import {
   modeLabel,
   currencySymbol,
   formatAmountDisplay,
+  formatPrice,
   parseAmountInput,
   describeError,
   draftFromPeriod,
@@ -51,7 +51,7 @@ import {
 import { billingNotices, useNoticeSaveState } from '../../lib/billingNotices'
 import { BillingAccountList, type BillingRowView } from './AccountRow'
 import {
-  accountsNeedingPlan, billingRows, closeBefore, matchDetectedPlan, saveErrorPlace, saveThenClose, scopePeriods, toggleAvailability,
+  accountsNeedingPlan, billingRows, closeBefore, defaultStart, planOptionsFor, matchDetectedPlan, saveErrorPlace, saveThenClose, scopePeriods, toggleAvailability,
   unknownPeriod, withScopePeriods, type BillingAccount, type SaveError,
 } from './accountBilling'
 import { createAccountMutator } from './accountMutations'
@@ -71,10 +71,9 @@ const newPeriodId = (): string =>
 
 /** `yyyy-MM-dd` for the date picker's max — nobody is billed for the future. */
 const today = (): string => new Date().toISOString().slice(0, 10)
-const dayOf = (ms: number | undefined): string => (ms && Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : today())
 
 const priceText = (p: BillingPeriod, pt: boolean): string | null =>
-  p.price ? `${currencySymbol(p.price.currency)} ${formatAmountDisplay(String(p.price.amount), p.price.currency)}${pt ? '/mês' : '/mo'}` : null
+  p.price ? `${formatPrice(p.price.amount, p.price.currency)}${pt ? '/mês' : '/mo'}` : null
 
 export default function BillingSettings() {
   const ctx = useOutletContext<AppContext>()
@@ -208,7 +207,7 @@ export default function BillingSettings() {
     const detection = detections.find(d => d.harness === r.harness && d.source !== 'none' && d.mode !== 'unknown')
     const planId = (r.account ? matchDetectedPlan(r.harness, r.account.plan) : '') || detection?.planId || ''
     const entry = planId ? findPlan(planId) : undefined
-    const start = { ...emptyDraft(), from: r.account ? dayOf(r.account.firstSeen) : today(), ongoing: true }
+    const start = { ...emptyDraft(), from: defaultStart(own, today()), ongoing: true }
     openDraft(entry ? applyPlan(start, withLive(entry)) : start, r.account?.nickname ?? '')
     if (entry && !r.account?.plan && detection) setSeededFrom(pt ? detection.evidencePt : detection.evidenceEn)
   }
@@ -292,13 +291,13 @@ export default function BillingSettings() {
     await saveThenClose(() => writePeriods([unknownPeriod(today(), newPeriodId)]), close)
   }
 
-  const catalogOptions = useMemo(() => (row ? plansForHarness(row.harness) : []).map(entry => {
+  const catalogOptions = useMemo(() => (row ? planOptionsFor(row.harness, current?.planId) : []).map(entry => {
     const price = livePrice(entry.id) ?? entry.monthly
     return {
       value: entry.id, label: entry.label,
-      hint: price ? `${price.currency} ${price.amount}/${pt ? 'mês' : 'mo'}` : (pt ? 'sem valor publicado' : 'no published price'),
+      hint: price ? `${formatPrice(price.amount, price.currency)}/${pt ? 'mês' : 'mo'}` : (pt ? 'sem valor publicado' : 'no published price'),
     }
-  }), [row, pt, livePrice])
+  }), [row, pt, livePrice, current?.planId])
   const selectedEntry = draft?.planId ? findPlan(draft.planId) : undefined
   const errPlace = saveErrorPlace(saveError, noticeState, draft !== null)
   const editingPast = draft !== null && draft.id !== '' && draft.id !== current?.id
@@ -445,7 +444,7 @@ export default function BillingSettings() {
                     <div style={{ minWidth: 0, flex: 1, fontSize: 12, color: 'var(--text-tertiary)' }}>
                       <span style={{ display: isMobile ? 'block' : 'inline', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         <b style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{periodName(p) || modeLabel(p.mode, pt ? 'pt' : 'en')}</b>
-                        {p.price && ` · ${currencySymbol(p.price.currency)} ${formatAmountDisplay(String(p.price.amount), p.price.currency)}`}
+                        {p.price && ` · ${formatPrice(p.price.amount, p.price.currency)}`}
                       </span>
                       <span style={{ display: isMobile ? 'block' : 'inline', whiteSpace: 'nowrap', marginTop: isMobile ? 2 : 0 }}>
                         {isMobile ? '' : ' · '}{fmtDay(p.from)} → {p.to ? fmtDay(p.to) : (pt ? 'em curso' : 'ongoing')}

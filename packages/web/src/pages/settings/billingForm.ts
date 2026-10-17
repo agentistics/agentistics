@@ -44,7 +44,7 @@ export function draftFromPeriod(period: BillingPeriod): PeriodDraft {
     id: period.id,
     planId: period.planId ?? '',
     label: period.label ?? '',
-    amount: period.price ? String(period.price.amount) : '',
+    amount: period.price ? amountText(period.price.amount) : '',
     currency: period.price?.currency ?? 'USD',
     from: period.from,
     to: period.to ?? '',
@@ -271,6 +271,17 @@ export function formatAmountDisplay(canonical: string, currency: BillingCurrency
   const int = (intRaw || '0').replace(/\B(?=(\d{3})+(?!\d))/g, group)
   if (decRaw === undefined) return int
   return `${int}${decimal}${decRaw}`
+}
+
+/** A stored amount as text: whole amounts stay whole, anything else carries exactly two decimals
+ *  (110.5 → "110.50"), so a price never reads with its trailing zero dropped. */
+export function amountText(amount: number): string {
+  return Number.isInteger(amount) ? String(amount) : amount.toFixed(2)
+}
+
+/** A price as the page prints it, separators following the currency: `R$ 110,50`, `$ 20`. */
+export function formatPrice(amount: number, currency: BillingCurrency): string {
+  return `${currencySymbol(currency)} ${formatAmountDisplay(amountText(amount), currency)}`
 }
 
 /** The display name of a period: its own label, else the catalog's, else the raw id. */

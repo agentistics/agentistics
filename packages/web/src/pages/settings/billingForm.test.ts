@@ -5,6 +5,7 @@ import {
   modeLabel,
   currencySymbol,
   formatAmountDisplay,
+  formatPrice,
   parseAmountInput,
   describeError,
   draftFromPeriod,
@@ -313,5 +314,20 @@ describe('periodName', () => {
     expect(periodName({ id: 'a', mode: 'subscription', from: '2026-01-01', label: 'Mine' })).toBe('Mine')
     expect(periodName({ id: 'a', mode: 'subscription', from: '2026-01-01', planId: 'anthropic-pro' })).toBe('Claude Pro')
     expect(periodName({ id: 'a', mode: 'subscription', from: '2026-01-01', planId: 'from-the-future' })).toBe('from-the-future')
+  })
+})
+
+describe('formatPrice — a price never drops its cents', () => {
+  test('BRL in pt-BR form, two decimals', () => {
+    expect(formatPrice(110.5, 'BRL')).toBe('R$ 110,50')
+    expect(formatPrice(1234.5, 'BRL')).toBe('R$ 1.234,50')
+  })
+  test('USD with a dot; whole amounts stay whole', () => {
+    expect(formatPrice(19.9, 'USD')).toBe('$ 19.90')
+    expect(formatPrice(550, 'BRL')).toBe('R$ 550')
+  })
+  test('the drawer field opens on 110,50, not 110,5', () => {
+    const d = draftFromPeriod({ id: 'p', mode: 'subscription', from: '2026-10-01', price: { amount: 110.5, currency: 'BRL' } } as BillingPeriod)
+    expect(formatAmountDisplay(d.amount, 'BRL')).toBe('110,50')
   })
 })
