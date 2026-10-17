@@ -3,6 +3,7 @@ import { Children, isValidElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { CheckinPanel, CheckinRoundSections, SessionLinkInfo, SessionLinkPanel, linkTargets } from './SessionLinkInfo'
 import type { CheckinRound } from '../../lib/checkin'
+import { closeCheckinModal, readCheckinModalRequest } from '../../lib/checkinModal'
 import { sessionPath } from '../../lib/sessionRoute'
 import type { SessionLinks } from '../../lib/sessionParent'
 
@@ -80,13 +81,11 @@ describe('structured check-in sections', () => {
     expect(html).not.toContain('Delivered last')
     expect(html).not.toContain('In development')
   })
-  it.each([false, true])('opens the Sheet from the populated check-in panel (mobile=%s)', isMobile => {
+  it.each([false, true])('"Open larger" asks the standalone check-in modal for this session (mobile=%s)', isMobile => {
     env.window!.innerWidth = isMobile ? 390 : 1280
-    let modalOpen = false
     let click: (() => void) | undefined
-    // Capture the real button handler while SSR renders the panel with its hooks.
     function Panel() {
-      const tree = CheckinPanel({ state: { session: 'leader', paused: null, intervalMin: 30, checklist: [], nextRunAt: 1, lastRunAt: 1, last: round }, pt: false, isMobile, onGo: () => {}, update: async () => {}, runNow: async () => true, taskPath: null, modalOpen, onModalChange: open => { modalOpen = open } })
+      const tree = CheckinPanel({ state: { session: 'leader', paused: null, intervalMin: 30, checklist: [], nextRunAt: 1, lastRunAt: 1, last: round }, pt: false, isMobile, onGo: () => {}, update: async () => {}, runNow: async () => true, taskPath: null })
       function visit(node: ReactNode) {
         Children.forEach(node, child => {
           if (!isValidElement<{ children?: ReactNode; 'data-testid'?: string; onClick?: () => void }>(child)) return
@@ -97,17 +96,13 @@ describe('structured check-in sections', () => {
       visit(tree)
       return tree
     }
-    const closed = renderToStaticMarkup(<Panel />)
-    expect(closed).toContain('data-testid="checkin-open-larger"')
-    expect(closed).not.toContain('data-testid="checkin-modal"')
-    expect(click).toBeFunction()
+    const html = renderToStaticMarkup(<Panel />)
+    expect(html).toContain('data-testid="checkin-open-larger"')
+    expect(html).not.toContain('data-testid="checkin-modal"')
+    closeCheckinModal()
     click!()
-    expect(modalOpen).toBe(true)
-    const opened = renderToStaticMarkup(<Panel />)
-    expect(opened).toContain('data-testid="checkin-modal"')
-    expect(opened).toContain('role="dialog"')
-    expect(opened).toContain('aria-modal="true"')
-    expect(opened).toContain('aria-label="Check-in details"')
+    expect(readCheckinModalRequest()).toEqual({ sessionId: 'leader' })
+    closeCheckinModal()
   })
   it.each([
     [false, ['Healthy', 'Warning', 'Critical']],

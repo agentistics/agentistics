@@ -127,15 +127,17 @@ export function TextButton({ onClick, children, pressed }: { onClick: () => void
  * The page's dialog shell (the prototype's modal): the app's card with a title row and × over a
  * hairline, the body, and the `DialogActions` footer over another hairline. Full screen on a phone.
  */
-export function Sheet({ closeLabel, isMobile, title, onClose, children, wide, footer }: {
+export function Sheet({ closeLabel, isMobile, title, onClose, children, wide, footer, maxWidth }: {
   closeLabel: string; isMobile: boolean; title: string; onClose: () => void; children: React.ReactNode; wide?: boolean; footer?: React.ReactNode
+  /** Overrides the desktop width (default 500, 640 with `wide`). */
+  maxWidth?: number
 }) {
   useEscapeOwner(true, onClose)
   const o: React.CSSProperties = isMobile ? { ...overlay, padding: 0, zIndex: 3000 } : { ...overlay, zIndex: 3000 }
   const frame: React.CSSProperties = { ...card, padding: 0, display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }
   const c: React.CSSProperties = isMobile
     ? { ...frame, maxWidth: 'none', width: '100%', height: 'calc(100dvh / var(--ui-zoom, 1))', maxHeight: 'calc(100dvh / var(--ui-zoom, 1))', borderRadius: 0, border: 'none' }
-    : { ...frame, maxWidth: wide ? 640 : 500, maxHeight: 'calc(90vh / var(--ui-zoom, 1))', boxShadow: '0 20px 60px rgba(0,0,0,0.55)' }
+    : { ...frame, maxWidth: maxWidth ?? (wide ? 640 : 500), maxHeight: 'calc(90vh / var(--ui-zoom, 1))', boxShadow: '0 20px 60px rgba(0,0,0,0.55)' }
   return (
     <div style={o} role="dialog" aria-modal="true" aria-label={title} onClick={onClose}>
       <div style={c} onClick={e => e.stopPropagation()}>

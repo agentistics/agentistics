@@ -18,6 +18,7 @@
  * than the bubble, and letting it set the width is how a message ends up outside its own card.
  */
 
+import { openCheckinModal } from '../../lib/checkinModal'
 import { useEscapeOwner } from '../../lib/overlayStack'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { stripDictatedMark } from '../../lib/dictationMark'
@@ -336,7 +337,7 @@ export function SystemLine({ children, below, isMobile = false }: { children: Re
   )
 }
 
-function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt: boolean }) {
+function SystemNote({ note, noteRef, pt, sessionId }: { note: string; noteRef?: string; pt: boolean; sessionId?: string }) {
   const { label, help, tab } = chatNote(note, pt)
   const [shown, setShown] = useState(false)
   const isMobile = useIsMobile()
@@ -346,7 +347,7 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
   // the same larger report view is used from both places.
   if (note.includes('agentistics_checkin_report')) {
     return <SystemLine isMobile={isMobile}>
-      <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('agentistics:open-checkin'))}
+      <button type="button" onClick={() => openCheckinModal(sessionId)}
         style={{ ...sysLink, ...touch(isMobile) }}>
         {pt ? 'Abrir check-in' : 'Open check-in'}
       </button>
@@ -604,7 +605,7 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
   }
 
   if (turn.system) {
-    return <SystemNote note={turn.system} noteRef={turn.systemRef} pt={pt} />
+    return <SystemNote note={turn.system} noteRef={turn.systemRef} pt={pt} {...(sessionId ? { sessionId } : {})} />
   }
 
   const color = (HARNESS_COLORS as Record<string, string>)[harness] ?? 'var(--text-secondary)'
@@ -1293,7 +1294,7 @@ export function SystemEventRow({ event, pt, sessionId, titleOf, senderSessionId,
       </button>
       {event.kind === 'checkin' && <button
         type="button"
-        onClick={() => window.dispatchEvent(new CustomEvent('agentistics:open-checkin', { detail: { sessionId } }))}
+        onClick={() => openCheckinModal(sessionId)}
         style={{ ...sysLink, ...touch(isMobile) }}
       >{pt ? 'Abrir check-in' : 'Open check-in'}</button>}
     </SystemLine>

@@ -1,4 +1,5 @@
 import { roleChangeNote } from '@agentistics/core'
+import { closeCheckinModal, readCheckinModalRequest } from '../../lib/checkinModal'
 import { afterAll, expect, mock, test } from 'bun:test'
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -44,27 +45,18 @@ test('expanded check-in row shows the checklist and its localized action', () =>
   expect(html).toContain('height:1px')
 })
 
-test('open check-in dispatches the existing session-scoped UI event', () => {
-  const hadOwn = Object.prototype.hasOwnProperty.call(window, 'dispatchEvent')
-  const originalDispatch = window.dispatchEvent
-  const received: CustomEvent<{ sessionId: string }>[] = []
-  window.dispatchEvent = ((event: Event) => { received.push(event as CustomEvent<{ sessionId: string }>); return true })
-  try {
-    function Row() {
-      const tree = SystemEventRow({ event: { kind: 'checkin', body: 'checklist' }, pt: false, sessionId: 'leader-id' })
-      React.Children.forEach(tree.props.children, child => {
-        if (React.isValidElement<{ children?: React.ReactNode; onClick?: () => void }>(child) && child.type === 'button' && child.props.children === 'Open check-in') child.props.onClick!()
-      })
-      return tree
-    }
-    renderToStaticMarkup(<Row />)
-    expect(received).toHaveLength(1)
-    expect(received[0]?.type).toBe('agentistics:open-checkin')
-    expect(received[0]?.detail).toEqual({ sessionId: 'leader-id' })
-  } finally {
-    if (hadOwn) window.dispatchEvent = originalDispatch
-    else delete (window as { dispatchEvent?: unknown }).dispatchEvent
+test('open check-in asks the standalone modal store for this session', () => {
+  closeCheckinModal()
+  function Row() {
+    const tree = SystemEventRow({ event: { kind: 'checkin', body: 'checklist' }, pt: false, sessionId: 'leader-id' })
+    React.Children.forEach(tree.props.children, child => {
+      if (React.isValidElement<{ children?: React.ReactNode; onClick?: () => void }>(child) && child.type === 'button' && child.props.children === 'Open check-in') child.props.onClick!()
+    })
+    return tree
   }
+  renderToStaticMarkup(<Row />)
+  expect(readCheckinModalRequest()).toEqual({ sessionId: 'leader-id' })
+  closeCheckinModal()
 })
 
 test('check-in controls have 44px touch targets at 390px', () => {
