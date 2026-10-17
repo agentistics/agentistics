@@ -35,7 +35,9 @@ test('expanded check-in row shows the checklist and its localized action', () =>
   expect(html).toContain('Check-in da liderança · sistema')
   expect(html).toContain('Abrir check-in')
   expect(html).toContain('xyzzy-checklist-marker')
-  expect(html).toContain('min-height:24px')
+  // an inline line, not a capsule: no radius/fill on the row, the action sits on the same line
+  expect(html).not.toContain('border-radius:999px')
+  expect(html).toContain('height:1px')
 })
 
 test('open check-in dispatches the existing session-scoped UI event', () => {
