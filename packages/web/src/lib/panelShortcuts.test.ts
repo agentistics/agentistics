@@ -65,7 +65,7 @@ describe('matchPanelShortcut', () => {
   })
 
   test('an unrelated key matches nothing', () => {
-    expect(matchPanelShortcut({ ...base, key: 'k', code: 'KeyK', ctrl: true })).toBeNull()
+    expect(matchPanelShortcut({ ...base, key: 'j', code: 'KeyJ', ctrl: true })).toBeNull()
   })
 
   test('the browser bookmarks-bar combo (Ctrl+Shift+B) is exactly what this module must be able '
@@ -135,5 +135,16 @@ describe('session tab shortcuts', () => {
     expect(matchTabShortcut({ ...base, shift: true, key: 'ArrowRight', code: 'ArrowRight' })).toBeNull()
     expect(matchTabShortcut({ ...base, focusInTerminal: true, key: 'ArrowRight', code: 'ArrowRight' })).toBeNull()
     expect(matchTabShortcut({ ...base, isComposing: true, key: 'ArrowRight', code: 'ArrowRight' })).toBeNull()
+  })
+})
+
+describe('focus-search', () => {
+  test('Ctrl/Cmd+K is focus-search, even from a text field, but not from a terminal', () => {
+    const k = { ...base, key: 'k', code: 'KeyK', ctrl: true }
+    expect(matchPanelShortcut(k)).toBe('focus-search')
+    expect(matchPanelShortcut({ ...k, ctrl: false, meta: true })).toBe('focus-search')
+    expect(shouldHandlePanelShortcut(k, { tagName: 'TEXTAREA' })).toBe('focus-search')
+    expect(shouldHandlePanelShortcut({ ...k, focusInTerminal: true }, null)).toBeNull()
+    expect(matchPanelShortcut({ ...k, shift: true })).toBeNull()
   })
 })

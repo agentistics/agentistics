@@ -93,6 +93,8 @@ import { isNoticeSnoozed, snoozeNotice } from './lib/noticeSnooze'
 import { ArchiveConsentModal, type ArchiveMode } from './components/ArchiveConsentModal'
 import { resolveArchiveChoice } from './lib/archive'
 import { ModeSwitch } from './components/nav/ModeSwitch'
+import { AreaTree } from './components/nav/AreaTree'
+import { areaBadges } from './lib/areaBadges'
 import { MobilePillBar } from './components/nav/MobilePillBar'
 import { TopBar } from './components/nav/TopBar'
 import { COST_BASIS_W, FULL_BAR_W, MIN_BAR_W, headerFit, stripPadding } from './lib/headerFit'
@@ -1063,28 +1065,7 @@ function SideNav({
   // A resize in progress. Only used to suspend the collapse animation — see the aside's `transition`.
   const [dragging, setDragging] = useState(false)
 
-  const items: {
-    to: string; labelPt: string; labelEn: string; icon: React.ReactNode
-    /** Still being tried out — see `BetaTag`. Marked HERE so the rail and the sheet agree. */
-    beta?: boolean
-  }[] = [
-    { to: '/',          labelPt: 'Home',         labelEn: 'Home',         icon: <Home size={17} /> },
-    { to: '/costs',     labelPt: 'Custos',       labelEn: 'Costs',        icon: <DollarSign size={17} /> },
-    { to: '/top',       labelPt: 'Top de uso',   labelEn: 'Top usage',    icon: <Trophy size={17} /> },
-    // No Projects entry. Its two panels — top projects and languages — are on Home, and the
-    // repository is the dimension that survives a different path on every machine, so what the
-    // page answered is answered by Repositories. `/projects` redirects there (see `AppRouter`).
-    { to: '/repositories', labelPt: 'Repositórios', labelEn: 'Repositories', icon: <GitBranch size={17} /> },
-    // Members/machines only exist on a central — a solo machine has exactly one of each.
-    ...(isCentral ? [{ to: '/members', labelPt: 'Membros', labelEn: 'Members', icon: <Users size={17} /> }] : []),
-    { to: '/tasks',     labelPt: 'Agentask',  labelEn: 'Agentask',    icon: <ClipboardList size={17} />, beta: true },
-    { to: '/tags',      labelPt: 'Tags',         labelEn: 'Tags',         icon: <TagIcon size={17} /> },
-    // Cofre is NOT here: it lives in the fixed header's action group (VaultHeaderButton), owner 2026-10-04. The route stays.
-    { to: '/tools',     labelPt: 'Ferramentas',  labelEn: 'Tools',        icon: <Wrench size={17} /> },
-    { to: '/custom',    labelPt: 'Personalizado',labelEn: 'Custom',       icon: <Layers size={17} /> },
-    // Unconditional — see the mobile tile: comparing two filter scopes needs no second harness.
-    { to: '/compare', labelPt: 'Comparar', labelEn: 'Compare', icon: <GitCompare size={17} /> },
-  ]
+  const areaBadgeCounts = useMemo(() => areaBadges({ attention }), [attention])
   const footBtn: React.CSSProperties = {
     width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center',
     borderRadius: 8, border: '1px solid var(--border)', background: 'transparent',
@@ -1238,10 +1219,11 @@ function SideNav({
           this row is FRAME chrome (the mockup's own titlebar), never inside the panel below it. */}
       <AsideHeader lang={lang === 'pt' ? 'pt' : 'en'} height={TOPBAR_H} collapsed={collapsed} onToggle={onToggle} />
       {/* The workspace switch, PINNED above the scrolling body — frame chrome too, same reason. */}
-      <div style={{ padding: '0 2px 10px' }}>
-        <ModeSwitch lang={lang} collapsed={collapsed} attention={attention} />
-        {/* Member machine: live connection status + latency to the central. Null unless connected. */}
-      </div>
+      {mode === 'sessions' && (
+        <div style={{ padding: '0 2px 10px' }}>
+          <ModeSwitch lang={lang} collapsed={collapsed} attention={attention} />
+        </div>
+      )}
 
       {/* ONE aside, two bodies — never two asides. The shell above is shared; only what sits below
           it changes. Collapsed, the sessions workspace draws the RAIL — sessions, not the
@@ -1326,44 +1308,9 @@ function SideNav({
         </div>
       ) : (
       <>
-      <nav className="ag-noscroll" style={{ display: 'flex', flexDirection: 'column', gap: 5, overflowY: 'auto', overflowX: 'hidden', flex: 1, paddingTop: 4 }}>
-        {items.map(item => {
-          const active = item.to === '/'
-            ? location.pathname === '/'
-            : item.to === '/repositories'
-              ? inReposSection
-              : location.pathname.startsWith(item.to)
-          const label = pt ? item.labelPt : item.labelEn
-          return (
-            <CollapsedTip key={item.to} label={label} show={collapsed}>
-              <NavLink
-                to={item.to}
-                end={item.to === '/'}
-                aria-label={collapsed ? label : undefined}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 12, minWidth: 0,
-                  // 40px of row. The list was laid out at 10px vertical padding and read as cramped
-                  // — a nav item is a target as well as a label, and 36px is the floor for one.
-                  padding: collapsed ? '11px 0' : '11px 12px', justifyContent: collapsed ? 'center' : 'flex-start',
-                  borderRadius: 10, textDecoration: 'none',
-                  fontSize: '0.8438rem', fontWeight: active ? 700 : 500, fontFamily: 'inherit', whiteSpace: 'nowrap',
-                  color: active ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
-                  background: active ? 'var(--anthropic-orange-dim)' : 'transparent',
-                  transition: 'background 0.15s, color 0.15s',
-                }}
-                onMouseEnter={e => { if (!active) { const t = e.currentTarget as HTMLAnchorElement; t.style.color = 'var(--text-primary)'; t.style.background = 'var(--bg-elevated)' } }}
-                onMouseLeave={e => { if (!active) { const t = e.currentTarget as HTMLAnchorElement; t.style.color = 'var(--text-secondary)'; t.style.background = 'transparent' } }}
-              >
-                <span style={{ flexShrink: 0, display: 'flex' }}>{item.icon}</span>
-                {!collapsed && label}
-                {/* Collapsed, the rail has no room for the word — a dot in the same colour carries
-                    it, and the tooltip says what it means. Never colour alone anywhere it fits. */}
-                {item.beta && <BetaTag what={label} compact={collapsed} style={collapsed ? { marginLeft: 2 } : { marginLeft: 'auto' }} />}
-              </NavLink>
-            </CollapsedTip>
-          )
-        })}
-      </nav>
+      <div className="ag-noscroll" style={{ overflowY: 'auto', overflowX: 'hidden', flex: 1, paddingTop: 4 }}>
+        <AreaTree lang={pt ? 'pt' : 'en'} pathname={location.pathname} collapsed={collapsed} badges={areaBadgeCounts} />
+      </div>
 
       {/* The resize handle. Unchanged — dashboard-mode keeps its plain edge-line resizer; the gap-
           as-handle model is the sessions workspace's alone. Only while the sidebar is open: there is
@@ -2310,6 +2257,25 @@ export default function AppLayout() {
     return () => document.removeEventListener('keydown', onKey)
   }, [inSessionsWorkspace, selectedFleetSession])
 
+  // Ctrl/Cmd+K — focus the area tree's search on any desktop page; opens the aside first if folded.
+  useEffect(() => {
+    if (isMobile) return
+    const onKey = (e: KeyboardEvent) => {
+      const focusInTerminal = document.activeElement instanceof Element
+        && document.activeElement.closest('.xterm') !== null
+      const shortcut = shouldHandlePanelShortcut({
+        key: e.key, code: e.code, ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey, alt: e.altKey,
+        isComposing: e.isComposing, focusInTerminal,
+      }, e.target as { tagName?: string; isContentEditable?: boolean } | null)
+      if (shortcut !== 'focus-search') return
+      e.preventDefault()
+      setSidebarCollapsed(false)
+      window.setTimeout(() => document.querySelector<HTMLInputElement>('#ag-area-search input')?.focus(), 0)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [isMobile])
+
   /**
    * THE THREE WORKSPACE PANEL SHORTCUTS (owner addition, VS-Code style) — `Ctrl/Cmd+B` toggles the
    * LEFT sessions list (the same `sidebarCollapsed` state `AsideHeader`'s own collapse button already
@@ -2339,7 +2305,7 @@ export default function AppLayout() {
         key: e.key, code: e.code, ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey, alt: e.altKey,
         isComposing: e.isComposing, focusInTerminal,
       }, e.target as { tagName?: string; isContentEditable?: boolean } | null)
-      if (shortcut === null) return
+      if (shortcut === null || shortcut === 'focus-search') return
       // `Ctrl+Shift+B` is Chrome's own bookmarks-bar toggle — the page must win it.
       e.preventDefault()
       if (shortcut === 'toggle-left') { setSidebarCollapsed(c => !c); return }
