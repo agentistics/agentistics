@@ -584,4 +584,23 @@ describe('one conversation, one row (CROSSBIND)', () => {
     expect(conversationOwnedElsewhere([born('x', A, { conversationLinkVia: 'protocol-stated' })], 'y', A)?.id).toBe('x')
     expect(conversationOwnedElsewhere([born('x', A)], 'x', A)).toBeNull() // its own
   })
+
+  it('LOW-2: a LOST holder (stale heartbeat, no endedAt) does not refuse a reopened row\'s relink', () => {
+    const now = 1_000_000_000
+    expect(conversationOwnedElsewhere([born('old', A, { lastSeenMs: now - 10 * 60_000 })], 'new', A, now)).toBeNull()
+    expect(conversationOwnedElsewhere([born('old', A, { lastSeenMs: now - 30_000 })], 'new', A, now)?.id).toBe('old')
+  })
+
+  it('LOW-1: the same refusal is logged once, not on every poll', async () => {
+    const r = createSessionRegistry(file)
+    await r.add(born('forced', A))
+    await r.add(born('queued2', B))
+    const warns: string[] = []
+    const orig = console.warn
+    console.warn = (m: string) => { warns.push(String(m)) }
+    try {
+      for (let i = 0; i < 3; i++) await r.link('queued2', { conversationId: A })
+    } finally { console.warn = orig }
+    expect(warns.length).toBe(1)
+  })
 })

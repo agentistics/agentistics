@@ -135,6 +135,19 @@ describe('adapterChatResponse', () => {
     expect(s.closedWith()).toBe(true)
   })
 
+  test('CROSSBIND MED-1: a forked foreign source emits ZERO frames, even with a slow foreign check', async () => {
+    const f = fakeChat()
+    const s = open(f, { foreign: async () => { await Bun.sleep(60); return new Set(['other-conv']) } })
+    await Bun.sleep(100)
+    f.emit({ kind: 'fork', to: { harness: 'codex', conversationId: 'other-conv', sourceRef: '/x/other.jsonl' } })
+    f.emit({ kind: 'window', turns: [{ role: 'user', text: 'SECRET of the other chat' }], older: false })
+    f.emit({ kind: 'live', text: 'foreign live' })
+    f.emit({ kind: 'state', working: true })
+    const got = await events(s.res, e => e.some(x => x.event === 'chat' && x.data.includes('SECRET')) || e.some(x => x.event === 'live' && x.data.includes('foreign')), 400)
+    expect(got.some(x => x.data.includes('SECRET') || x.data.includes('foreign live'))).toBe(false)
+    expect(s.closedWith()).toBe(true)
+  })
+
   test('window → `chat` with source adapter; append → `chat-delta`; live and state pass through', async () => {
     const f = fakeChat()
     const s = open(f)

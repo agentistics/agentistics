@@ -56,7 +56,7 @@ export type LinkOutcome = { ok: true } | { ok: false; heldBy?: string }
 /**
  * PURE (CROSSBIND). The OTHER row that owns `conversationId`, so that `id` may not be linked to it.
  *
- * Owning is narrower than "carries the id": the holder must still be in play (no `endedAt` — a reopen
+ * Owning is narrower than "carries the id": the holder must still be in play (no `endedAt`, and a heartbeat within 5 min — a `lost` row after a reboot has none ended; a reopen
  * retires its predecessor on the same conversation, and that pair is one chat, not two) and its link
  * must be one the conversation was CREATED under for it: the id agentop handed the CLI at spawn
  * (`assigned-id`) or the id the protocol stated for its own session (`protocol-stated`). Nothing else
@@ -65,12 +65,22 @@ export type LinkOutcome = { ok: true } | { ok: false; heldBy?: string }
  * session's chat under another's name. Measured 2026-10-17: two sessions in one folder each showed the
  * other's conversation.
  */
+/** A holder whose heartbeat stopped (a reboot leaves `lost` rows with no `endedAt`) is not in play. */
+const OWNER_STALE_MS = 5 * 60_000
+function staleOwner(s: ManagedSession, nowMs: number): boolean {
+  return s.lastSeenMs !== undefined && nowMs - s.lastSeenMs > OWNER_STALE_MS
+}
+
+/** Refusals already logged — the poller retries every 5 s. */
+const warnedRefusals = new Set<string>()
+
 export function conversationOwnedElsewhere(
   list: readonly ManagedSession[],
   id: string,
   conversationId: string,
+  nowMs: number = Date.now(),
 ): ManagedSession | null {
-  return list.find(s => s.id !== id && s.conversationId === conversationId && !s.endedAt
+  return list.find(s => s.id !== id && s.conversationId === conversationId && !s.endedAt && !staleOwner(s, nowMs)
     && (s.conversationLinkVia === 'assigned-id' || s.conversationLinkVia === 'protocol-stated')) ?? null
 }
 
@@ -474,7 +484,11 @@ export function createSessionRegistry(file: string): SessionRegistry {
         if (idx === -1) return { ok: false }
         const owner = conversationOwnedElsewhere(list, id, patch.conversationId)
         if (owner) {
-          console.warn(`[sessions] refused to link ${id} to conversation ${patch.conversationId}: session ${owner.id} owns it`)
+          const key = `${id}\0${patch.conversationId}`
+          if (!warnedRefusals.has(key)) {
+            warnedRefusals.add(key)
+            console.warn(`[sessions] refused to link ${id} to conversation ${patch.conversationId}: session ${owner.id} owns it`)
+          }
           return { ok: false, heldBy: owner.id }
         }
         const next = { ...list[idx]!, ...patch } as Record<string, unknown>

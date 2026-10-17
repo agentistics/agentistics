@@ -26,6 +26,19 @@ describe('planScreen — when an adapter-stated row still needs its screen', () 
   })
 })
 
+describe('CROSSBIND: the state feed does not follow another row\'s conversation', () => {
+  it('a resolved source owned by another row is not followed', async () => {
+    const eng = fakeEngine()
+    const real = eng.chatOf('claude')!
+    const chat: HarnessChat = { ...real, async resolve() { return { harness: 'claude', conversationId: 'other-conv', sourceRef: '/x/other-conv.jsonl' } } }
+    const feed = createAdapterStateFeed({ chatOf: () => chat, foreign: async () => new Set(['other-conv']) })
+    feed.sync([{ id: 'r1', harness: 'claude', conversationId: 'conv-claude', cwd: '/repo' }])
+    await flush(); await Bun.sleep(5)
+    expect(eng.following('other-conv')).toBe(false)
+    feed.stop()
+  })
+})
+
 describe('adapterActivity', () => {
   it('the harness says working / idle', () => {
     expect(adapterActivity({ ...idle, working: true }, undefined)).toBe('working')

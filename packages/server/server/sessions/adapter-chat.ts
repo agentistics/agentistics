@@ -205,6 +205,8 @@ export function adapterChatResponse(
   let emitting = false
   let emitAgain = false
   let debounce: unknown = null
+  // A fork's foreign check (CROSSBIND): until it settles NOTHING of the new source is emitted.
+  let forkGate: Promise<void> | null = null
   let keepalive: unknown = null
   const offs: Array<() => void> = []
   let ctl!: ReadableStreamDefaultController<Uint8Array>
@@ -232,6 +234,8 @@ export function adapterChatResponse(
     if (emitting) { emitAgain = true; return }
     emitting = true
     try {
+      if (forkGate) await forkGate
+      if (closed) return
       const p = adapterPayload(await deps.finish({ turns: [...held.turns], older: held.older }, live), link)
       if (closed) return
       const { turns, ...meta } = p
@@ -262,21 +266,26 @@ export function adapterChatResponse(
         held = applyHarnessChatDeltas(held, [d], deps.max)
         schedule()
         return
-      case 'live':
-        send('live', JSON.stringify({ text: d.text, ...(d.reasoning !== undefined ? { reasoning: d.reasoning } : {}) }))
+      case 'live': {
+        const out = () => send('live', JSON.stringify({ text: d.text, ...(d.reasoning !== undefined ? { reasoning: d.reasoning } : {}) }))
+        if (forkGate) void forkGate.then(out); else out()
         return
-      case 'state':
-        send('state', JSON.stringify({ working: d.working, ...(d.attention ? { attention: d.attention } : {}) }))
+      }
+      case 'state': {
+        const out = () => send('state', JSON.stringify({ working: d.working, ...(d.attention ? { attention: d.attention } : {}) }))
+        if (forkGate) void forkGate.then(out); else out()
         return
+      }
       case 'fork':
         // The engine follows the new source itself and a `window` of it follows; only the ref moves —
         // unless it moved into another row's conversation (CROSSBIND), checked before a frame is sent.
         src = d.to
         if (deps.foreign) {
           const to = d.to
-          void deps.foreign().then(f => {
+          const gate: Promise<void> = deps.foreign().then(f => {
             if (!closed && sourceForeign(to, deps.conversationId, f)) { logForeign(deps.conversationId, to); close(true) }
-          }).catch(() => {})
+          }).catch(() => { close(true) }).finally(() => { if (forkGate === gate) forkGate = null })
+          forkGate = gate
         }
         return
     }

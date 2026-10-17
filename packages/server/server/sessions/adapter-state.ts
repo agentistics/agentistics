@@ -24,6 +24,7 @@
  * Pure decisions (`planScreen`, `adapterActivity`) are exported and tested; the feed holds one engine
  * subscription per conversation and drops it when the row stops running.
  */
+import { sourceForeign } from './adapter-chat'
 import { applyHarnessChatDeltas, type ChatSourceRef, type EngineChatTurn, type HarnessChat } from '@agentistics/engine-api'
 import type { SessionActivity } from './types'
 
@@ -101,6 +102,8 @@ export interface AdapterStateFeed {
 export function createAdapterStateFeed(o: {
   /** The engine's chat channel for a harness, or `undefined` (no engine / a declared absence). */
   chatOf(harness: string): HarnessChat | undefined
+  /** Conversations OTHER rows own for this row (CROSSBIND); a source in it is not followed. */
+  foreign?(row: AdapterStateRow): Promise<ReadonlySet<string>>
   setTimer?: (f: () => void, ms: number) => unknown
   clearTimer?: (t: unknown) => void
 }): AdapterStateFeed {
@@ -144,6 +147,8 @@ export function createAdapterStateFeed(o: {
       try {
         src = await chat.resolve({ conversationId: row.conversationId, ...(row.cwd ? { cwd: row.cwd } : {}) })
       } catch { src = null }
+      if (!e.alive) return
+      if (src && o.foreign && sourceForeign(src, row.conversationId, await o.foreign(row))) src = null
       if (!e.alive) return
       if (!src) {
         // Nothing written yet: the screen decides, and the next sync tries again.
