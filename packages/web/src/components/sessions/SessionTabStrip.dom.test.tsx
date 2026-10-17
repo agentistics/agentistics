@@ -58,7 +58,10 @@ describe('desktop', () => {
     expect(opacity(close('b')!)).toBe('0')
     act(() => { tab('b').dispatchEvent(new window.MouseEvent('mouseover', { bubbles: true })) })
     expect(opacity(close('b')!)).toBe('1')
-    for (const id of ['a', 'b', 'c']) expect(tab(id).querySelector('[title]:not([role="button"]) , img, svg')).not.toBeNull()
+    for (const [id, h] of [['a', 'claude'], ['b', 'codex'], ['c', 'gemini']] as const) {
+      const mark = tab(id).querySelector('[data-harness-mark]') ?? tab(id).querySelector(`[aria-label*="${h}" i], [title*="${h}" i]`)
+      expect(mark).not.toBeNull()
+    }
   })
 
   test('clicking × closes that tab, and the neighbour is not opened by the click', () => {
@@ -98,5 +101,50 @@ describe('narrow / touch', () => {
       expect(x.style.width).toBe('32px')
       expect(x.style.height).toBe('32px')
     }
+  })
+})
+
+describe('keyboard and coarse pointer', () => {
+  const key = (el: HTMLElement, k: string) => act(() => { el.dispatchEvent(new window.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })) })
+
+  test('the × and the pin are real buttons in the tab order', () => {
+    act(() => { pins.togglePinnedSession('b') })
+    render()
+    expect(close('a')!.tagName).toBe('BUTTON')
+    expect(tab('b').querySelector('[aria-label="Unpin"]')!.tagName).toBe('BUTTON')
+  })
+
+  test.each(['Enter', ' '])('%j on × closes the tab without activating it', k => {
+    render()
+    key(close('b')!, k)
+    expect(went).toEqual([]) // the key did not reach the tab's own Enter/Space handler
+    act(() => { close('b')!.click() }) // a browser turns Enter/Space on a <button> into this click; happy-dom does not
+    expect(store.getOpenTabs('main')).not.toContain('b')
+    expect(went).toEqual([])
+  })
+
+  test.each(['Enter', ' '])('%j on the pin unpins without activating the tab', k => {
+    act(() => { pins.togglePinnedSession('b') })
+    render()
+    key(tab('b').querySelector('[aria-label="Unpin"]') as HTMLElement, k)
+    // a real <button> turns Enter/Space into a click in a browser; happy-dom does not, so click too
+    act(() => { (tab('b').querySelector('[aria-label="Unpin"]') as HTMLElement).click() })
+    expect(pins.getPinnedIds()).not.toContain('b')
+    expect(went).toEqual([])
+  })
+
+  test('a coarse pointer at 1024px shows a 32px × on every unpinned tab', () => {
+    ;(window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width: 1024, height: 800 })
+    const prev = window.matchMedia
+    window.matchMedia = ((q: string) => ({ matches: q.includes('pointer: coarse'), addEventListener() {}, removeEventListener() {} })) as never
+    try {
+      render()
+      for (const id of ['a', 'b', 'c']) {
+        const x = close(id)!
+        expect(opacity(x)).toBe('1')
+        expect(x.style.width).toBe('32px')
+        expect(x.style.height).toBe('32px')
+      }
+    } finally { window.matchMedia = prev }
   })
 })

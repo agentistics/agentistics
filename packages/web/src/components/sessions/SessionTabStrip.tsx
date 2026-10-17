@@ -24,7 +24,7 @@ import {
 import { getPrevActive, setOpenTabs, setPrevActive, trackStripMount, updateOpenTabs, useOpenTabs } from '../../lib/sessionTabsStore'
 import { getActivePane, usePaneId } from '../../lib/paneScope'
 import { matchTabShortcut } from '../../lib/panelShortcuts'
-import { useIsMobile } from '../../hooks/useIsMobile'
+import { useIsMobile, useIsCoarsePointer } from '../../hooks/useIsMobile'
 import { SessionRowMenu } from './SessionRowMenu'
 import { HarnessMark } from './HarnessMark'
 import type { MenuEntry } from '../../lib/rowMenu'
@@ -71,6 +71,8 @@ interface TabProps {
   active: boolean
   pinned: boolean
   mobile: boolean
+  /** Coarse pointer (touch): sizing/visibility of the × follow it, not only the width. */
+  touch: boolean
   pt: boolean
   onPick: () => void
   onClose: () => void
@@ -80,10 +82,16 @@ interface TabProps {
   setRef: (el: HTMLDivElement | null) => void
 }
 
-function Tab({ k, row, active, pinned, mobile, pt, onPick, onClose, onUnpin, onMenu, onDropOn, setRef }: TabProps) {
+const FOCUS_RING = '2px solid var(--anthropic-orange)'
+/** Enter/Space on the inner controls act on THEM; they must not reach the tab's own handler (which would activate it). */
+const stopKeys = (e: { key: string; stopPropagation(): void }) => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation() }
+
+function Tab({ k, row, active, pinned, mobile, touch, pt, onPick, onClose, onUnpin, onMenu, onDropOn, setRef }: TabProps) {
   const role = useSessionRole(k)
   const [hover, setHover] = useState(false)
   const [focus, setFocus] = useState(false)
+  const [btnFocus, setBtnFocus] = useState(false)
+  const big = mobile || touch
   const press = useRef<ReturnType<typeof setTimeout> | null>(null)
   const state = row?.state ?? 'unknown'
   const label = row?.stateLabel ?? (pt ? 'sem estado' : 'no state')
@@ -91,6 +99,10 @@ function Tab({ k, row, active, pinned, mobile, pt, onPick, onClose, onUnpin, onM
   const needs = row !== undefined && needsAttention(row)
   const title = (row?.title ?? k.slice(0, 8)).replace(LEADER_PREFIX, '')
   const clear = () => { if (press.current !== null) { clearTimeout(press.current); press.current = null } }
+  const btn: CSSProperties = {
+    display: 'flex', width: big ? 32 : 20, height: big ? 32 : 20, alignItems: 'center', justifyContent: 'center',
+    borderRadius: 4, flexShrink: 0, padding: 0, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+  }
   const style: CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, cursor: 'pointer', fontFamily: 'inherit',
     height: mobile ? 44 : 34, padding: '0 6px 0 12px', borderRadius: 0, boxSizing: 'border-box',
@@ -131,24 +143,29 @@ function Tab({ k, row, active, pinned, mobile, pt, onPick, onClose, onUnpin, onM
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>{title}</span>
       {pinned
         ? (
-          <span
-            role="button" aria-label={pt ? 'Desafixar' : 'Unpin'} title={pt ? 'Desafixar' : 'Unpin'}
+          <button
+            type="button" aria-label={pt ? 'Desafixar' : 'Unpin'} title={pt ? 'Desafixar' : 'Unpin'}
+            data-tab-unpin
             onClick={e => { e.stopPropagation(); onUnpin() }}
-            style={{ display: 'flex', width: mobile ? 32 : 20, height: mobile ? 32 : 20, alignItems: 'center', justifyContent: 'center', borderRadius: 4, flexShrink: 0 }}
-          ><Pin size={12} style={{ color: 'var(--anthropic-orange)' }} /></span>
+            onKeyDown={stopKeys}
+            onFocus={() => setBtnFocus(true)} onBlur={() => setBtnFocus(false)}
+            style={{ ...btn, background: 'transparent', outline: btnFocus ? FOCUS_RING : 'none' }}
+          ><Pin size={12} style={{ color: 'var(--anthropic-orange)' }} /></button>
         )
         : (
-          <span
-            role="button" aria-label={pt ? 'Fechar aba' : 'Close tab'} title={pt ? 'Fechar aba' : 'Close tab'}
+          <button
+            type="button" aria-label={pt ? 'Fechar aba' : 'Close tab'} title={pt ? 'Fechar aba' : 'Close tab'}
             data-tab-close
             onClick={e => { e.stopPropagation(); onClose() }}
+            onKeyDown={stopKeys}
+            onFocus={() => setBtnFocus(true)} onBlur={() => setBtnFocus(false)}
             style={{
-              display: 'flex', width: mobile ? 32 : 20, height: mobile ? 32 : 20, alignItems: 'center', justifyContent: 'center',
-              borderRadius: 4, color: 'var(--text-secondary)', flexShrink: 0,
+              ...btn, color: 'var(--text-secondary)',
               background: hover ? 'var(--bg-elevated)' : 'transparent',
-              opacity: active || hover || focus || mobile ? 1 : 0,
+              opacity: active || hover || focus || btnFocus || big ? 1 : 0,
+              outline: btnFocus ? FOCUS_RING : 'none',
             }}
-          ><X size={13} /></span>
+          ><X size={13} /></button>
         )}
     </div>
   )
@@ -157,6 +174,7 @@ function Tab({ k, row, active, pinned, mobile, pt, onPick, onClose, onUnpin, onM
 export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }: SessionTabStripProps) {
   const pt = lang === 'pt'
   const mobile = useIsMobile()
+  const touch = useIsCoarsePointer()
   const pane = usePaneId()
   const open = useOpenTabs()
   const allPins = useSyncExternalStore(subscribePinnedSessions, getPinnedIds, pinnedServerSnapshot)
@@ -336,7 +354,7 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
               <span aria-hidden style={{ width: 2, alignSelf: 'stretch', background: 'var(--border)', flexShrink: 0 }} />
             )}
             <Tab
-              k={k} row={byKey.get(k)} active={k === activeKey} pinned={pins.includes(k)} mobile={mobile} pt={pt}
+              k={k} row={byKey.get(k)} active={k === activeKey} pinned={pins.includes(k)} mobile={mobile} touch={touch} pt={pt}
               onPick={() => { if (k !== activeKey) goTo(k) }}
               onClose={() => close(k)}
               onUnpin={() => togglePin(k)}
