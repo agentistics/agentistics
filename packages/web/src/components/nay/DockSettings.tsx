@@ -4,7 +4,7 @@
  * two places show the same groups, the same words and the same values (owner, 2026-09-30).
  */
 
-import { useEffect } from 'react'
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, ArrowUpRight, Settings2 } from 'lucide-react'
 import { NaySettingsPanel, type ChatSoundCtx } from './NaySettingsPanel'
@@ -58,15 +58,8 @@ export function DockSettings({ pt, isMobile, open, onToggle }: DockSettingsButto
 export function DockSettingsScreen({ pt, isMobile, chat, onLeave, onBack }: DockSettingsProps & { onBack: () => void }) {
   const navigate = useNavigate()
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      if (document.querySelector('[role="listbox"]')) return
-      e.stopPropagation(); onBack()
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [onBack])
+  // A `Select` list open inside closes itself first; the top-most overlay owns Escape.
+  useEscapeOwner(true, onBack, () => !document.querySelector('[role="listbox"]'))
 
   return (
     <div role="region" aria-label={pt ? 'Ajustes do chat' : 'Chat settings'}

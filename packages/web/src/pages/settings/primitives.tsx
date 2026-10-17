@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Pencil, Check, AlertTriangle, Info, ChevronDown, Download } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { useEscapeOwner } from '../../lib/overlayStack'
 import { RevealButton, REVEAL_PAD } from '../../components/PasswordReveal'
 
 // ScopeNote
@@ -53,14 +54,8 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
   // Reset between openings, otherwise the previous answer would pre-arm the next delete.
   React.useEffect(() => { if (open) setTyped('') }, [open])
   const armed = requireText === undefined || typed === requireText
-  React.useEffect(() => {
-    if (!open) return
-    // Capture on the window and stop there: the top-most modal owns Escape, so a Drawer (or any
-    // other dialog) underneath never sees the same keypress and closes with it.
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onCancel() } }
-    window.addEventListener('keydown', h, true)
-    return () => window.removeEventListener('keydown', h, true)
-  }, [open, onCancel])
+  // The top-most overlay owns Escape (lib/overlayStack): a Drawer or screen underneath stays open.
+  useEscapeOwner(open, onCancel)
   const titleId = React.useId()
   const panelRef = React.useRef<HTMLDivElement>(null)
   // The opener is read DURING the render that first shows the dialog: an effect is too late, because a
