@@ -42,7 +42,8 @@ test('the last strip unmounting clears the anchors even without a store reset', 
   expect(getPrevActive('main')).toBeNull()
 })
 
-test('rectangular tabs, no pill', () => {
-  expect(src).toContain('borderRadius: 0')
+test('rounded tabs in a segmented track, no full pill', () => {
+  expect(src).toContain('borderRadius: 8')
+  expect(src).toContain('borderRadius: 10')
   expect(src).not.toContain('borderRadius: 999')
 })
