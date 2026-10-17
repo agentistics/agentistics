@@ -10,7 +10,7 @@ import { roleLine } from '@agentistics/core'
  *
  * The session-message route types the prompt into the harness's terminal, and Claude Code wraps a
  * typed-in block like that as `<pasted_content id="…">…</pasted_content id="…">` before storing it,
- * so the header is no longer the first line. One whole-message wrapper is unwrapped before matching;
+ * so the header is no longer the first line. Whole-message wrappers are unwrapped before matching;
  * a wrapper the person really pasted around ordinary text still finds no header and stays theirs.
  */
 export type SystemEventKind = 'away' | 'away-off' | 'question' | 'handback' | 'block' | 'session-question' | 'checkin' | 'role'
@@ -36,7 +36,8 @@ function unwrapPasted(text: string): string {
 const LEGACY_CHECKIN = /^\s*(?:Faça o check-in da liderança agora\.|Run the leadership check-in now\.)/
 
 export function parseSystemEvent(raw: string): SystemEvent | null {
-  const text = unwrapPasted(raw)
+  let text = raw
+  while (unwrapPasted(text) !== text) text = unwrapPasted(text)
   const m = HEADER.exec(text)
   if (!m) {
     // Match the entire historical producer output, never a mention of its marker in typed prose.
@@ -46,7 +47,8 @@ export function parseSystemEvent(raw: string): SystemEvent | null {
     return LEGACY_CHECKIN.test(text) ? { kind: 'checkin', body: text } : null
   }
   const what = m[3]!
-  const body = text.slice(m[0].length).trim()
+  const body = text.slice(m[0].length)
+    .replace(/<\/?pasted_content(?:\s+id="[^"]*")?\s*>/gi, '').trim()
   if (m[1] === 'agentistics') {
     if (what === 'role') return { kind: 'role', body }
     if (what === 'check-in') return { kind: 'checkin', body }
@@ -59,17 +61,31 @@ export function parseSystemEvent(raw: string): SystemEvent | null {
   return null
 }
 
-/** The one short localized line. `who` is the sender's title when known, else its id. */
+/** Session titles are shown without the role prefix used by the sidebar. */
+export function systemEventTitle(title?: string): string | undefined {
+  return title?.replace(/^\[\s*(?:LÍDER|LEADER)\s*\]\s*-\s*/i, '').trim() || undefined
+}
+
+/** Resolve against all fleet rows, including ended sessions; never guess an ambiguous prefix. */
+export function systemEventSender<T extends { id: string; conversationId?: string }>(rows: readonly T[], id: string): T | undefined {
+  const exact = rows.find(row => row.id === id || row.conversationId === id)
+  if (exact) return exact
+  const matches = rows.filter(row => row.id.startsWith(id) || row.conversationId?.startsWith(id))
+  return matches.length === 1 ? matches[0] : undefined
+}
+
+/** The one short localized line. Unknown senders are omitted, never shown as raw ids. */
 export function systemEventLine(e: SystemEvent, pt: boolean, who?: string): string {
-  const name = who || e.sender || ''
+  const title = systemEventTitle(who)
+  const suffix = title ? ` · ${title}` : ''
   switch (e.kind) {
     case 'role': return pt ? 'Papel da sessão atualizado' : 'Session role updated'
     case 'checkin': return pt ? 'Check-in da liderança · sistema' : 'Leadership check-in · system'
     case 'away-off': return pt ? 'Modo ausente desligado nesta sessão' : 'Away mode turned off for this session'
     case 'away': return pt ? 'Modo ausente atualizado' : 'Away mode updated'
     case 'question': return pt ? 'Dica de passagem de contexto' : 'Context hand-off hint'
-    case 'handback': return pt ? `Sessão ${name} entregou` : `Session ${name} handed back`
-    case 'block': return pt ? `Sessão ${name} está bloqueada` : `Session ${name} is blocked`
-    case 'session-question': return pt ? `Sessão ${name} perguntou` : `Session ${name} asked a question`
+    case 'handback': return (pt ? 'Tarefa entregue' : 'Task handed back') + suffix
+    case 'block': return (pt ? 'Sessão bloqueada' : 'Session blocked') + suffix
+    case 'session-question': return (pt ? 'Pergunta de uma sessão' : 'Question from a session') + suffix
   }
 }
