@@ -129,6 +129,7 @@ import { ToggleSwitch } from './components/ToggleSwitch'
 import { fleetFilterOptions, filterFleet, SESSION_FILTER_DIMS } from './lib/fleetFilter'
 import { runningConversationIds } from './lib/activeConversations'
 import { countActiveFilters } from './lib/activeFilterCount'
+import { useLeadersOnly } from './lib/sessionsAsidePrefs'
 import {
   filtrosPanelInert, filtrosPanelOverflow, sessionsFiltersShouldReturnFocus, filtrosPanelBounds,
 } from './lib/sessionsFiltersPanel'
@@ -2161,7 +2162,8 @@ export default function AppLayout() {
   // The tab's own badge — the same count `FiltersBar` shows on its "Ver filtros ativos" chip once
   // the panel is open. See `activeFilterCount.ts` for why this cannot simply be read off the
   // component instead.
-  const sessionsActiveFilterCount = countActiveFilters(filters, activeOnly)
+  const leadersOnly = useLeadersOnly()
+  const sessionsActiveFilterCount = countActiveFilters(filters, activeOnly, leadersOnly)
 
   /**
    * WHERE THE FILTROS PANEL MAY SIT (design item 4, owner 2026-09-27: "Filtros na linha de botões

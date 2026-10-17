@@ -9,7 +9,8 @@
 
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { isInsidePortalledMenu, type MenuEntry } from '../../lib/rowMenu'
+import { Pin } from 'lucide-react'
+import { isInsidePortalledMenu, menuMaxHeight, type MenuEntry } from '../../lib/rowMenu'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { BetaTag } from '../BetaTag'
 import { SESSION_ROW_MENU_Z } from '../../lib/zLayers'
@@ -51,9 +52,11 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMen
   const w = 210
   const rowH = isMobile ? 44 : 34
   const left = x + w > window.innerWidth ? Math.max(4, x - w) : x
-  const top = y + entries.length * rowH + 12 > window.innerHeight
-    ? Math.max(4, y - (entries.length * rowH + 12))
-    : y
+  // Capped to the viewport and scrollable: a long list (the tab strip's "all tabs") must never put
+  // its last entries past the screen edge.
+  const maxH = menuMaxHeight(window.innerHeight)
+  const h = Math.min(entries.length * rowH + 12, maxH)
+  const top = y + h > window.innerHeight ? Math.max(4, y - h) : y
 
   return createPortal(
     <div
@@ -62,6 +65,7 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMen
       data-portalled-menu
       style={{
         position: 'fixed', top, left, width: w, zIndex: SESSION_ROW_MENU_Z,
+        maxHeight: maxH, overflowY: 'auto', overscrollBehavior: 'contain',
         background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10,
         padding: 4, boxShadow: 'var(--ag-shadow-pop)',
       }}
@@ -86,6 +90,7 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMen
           onMouseEnter={ev => { if (e.enabled) ev.currentTarget.style.background = 'var(--bg-elevated)' }}
           onMouseLeave={ev => { ev.currentTarget.style.background = 'transparent' }}
         >
+          {e.pinned && <Pin aria-hidden size={11} style={{ flexShrink: 0, color: 'var(--anthropic-orange)' }} />}
           {e.color && <span aria-hidden style={{ flexShrink: 0, width: 8, height: 8, borderRadius: '50%', background: e.color }} />}
           <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.label}</span>
           {e.checked && <span aria-hidden style={{ marginLeft: 'auto', flexShrink: 0, width: 12, color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>✓</span>}

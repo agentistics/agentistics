@@ -32,7 +32,7 @@ import { TaskProgressChip } from '../components/tasks/TaskProgressChip'
 import { requestPlanUsageModal } from '../lib/planUsageModalRequests'
 import { drawerEntryOnTop, sessionDrawerDot, SESSION_DRAWER_STATE } from '../lib/sessionDrawer'
 import {
-  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
+  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore,
   type CSSProperties, type ReactElement, type ReactNode,
 } from 'react'
 import { useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
@@ -59,6 +59,10 @@ import {
 } from '../lib/floatingPanels'
 import { FloatingPanelLayer } from '../components/sessions/FloatingPanelLayer'
 import { sessionIdentityKey } from '../lib/sessionIdentity'
+import { sessionTabsStore } from '../lib/appFlags'
+import { getOpenTabs, setOpenTabs } from '../lib/sessionTabsStore'
+import { replaceTab } from '../lib/sessionTabs'
+import { SessionTabStrip } from '../components/sessions/SessionTabStrip'
 import { panelTitle } from '../lib/panelMeta'
 import { tabStripEdgeFade, tabStripFadeMask } from '../lib/tabStripEdge'
 import { PanelRail, panelTile } from '../components/sessions/PanelRail'
@@ -636,6 +640,11 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    * makes the wait a wait instead of the fleet overview; the row it came FROM is what names it.
    */
   const goToReopened = (id: string) => {
+    // SESSION TABS: a row with no conversation id is keyed by its managed id, which the reopen is
+    // about to retire — the new id takes that tab's PLACE, so no dead tab is left behind.
+    if (tabsOn && selected && selected.conversationId === undefined) {
+      setOpenTabs(pane, replaceTab(getOpenTabs(pane), selected.id, id))
+    }
     const r = reopenedSessionRoute(id, selected
       ? { id: selected.id, harness: selected.harness, title: selected.title }
       : undefined)
@@ -653,6 +662,14 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const closeThisPane = () => {
     if (splitRoute) navigate(splitHref(closePane(splitRoute, pane), viewParams))
     else navigate('/sessions')
+  }
+
+  /** SESSION TABS (flag `sessionTabs`, off by default): a tab is picked by going to its session the
+   *  way the aside does — in a split, only THIS pane follows. */
+  const tabsOn = useSyncExternalStore(sessionTabsStore.subscribe, sessionTabsStore.get, sessionTabsStore.serverSnapshot)
+  const goToTab = (id: string) => {
+    if (splitRoute) navigate(splitHref(replaceInPane(splitRoute, pane, id), viewParams))
+    else navigate(sessionPath(id))
   }
 
   /**
@@ -2052,6 +2069,18 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       // Follow a reopen to the row it created. Without it the panel keeps an id the fleet no longer
       // carries — see `SessionPanel`'s own `onOpened`.
       onOpened={goToReopened}
+      {...(tabsOn ? {
+        tabStrip: (
+          <SessionTabStrip
+            lang={pt ? 'pt' : 'en'}
+            rows={fleet.rows}
+            fleetReady={!loading && !pollUnsupported}
+            active={selected}
+            onGo={goToTab}
+            onNone={closeThisPane}
+          />
+        ),
+      } : {})}
       {...(composerMetrics ? { metrics: composerMetrics } : {})}
       // CONTROLLED on both layouts now. Passing `onViewChange` is what suppresses SessionPanel's
       // own header, and mobile draws the same three things in the row that already holds the back

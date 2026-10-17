@@ -93,3 +93,17 @@ describe('rowMenuEntries — native store verbs', () => {
     expect(actions).toEqual(['rename', 'kill', 'resume', 'archive'])
   })
 })
+
+describe('menuMaxHeight', () => {
+  test('uses the CSS-px viewport as-is, so a long menu fits at every UI zoom', async () => {
+    const { menuMaxHeight } = await import('./rowMenu')
+    expect(menuMaxHeight(1000)).toBe(992)
+    // zoomGeometry reports innerHeight already divided by the zoom; the menu must not divide again.
+    for (const zoom of [0.85, 1, 1.25]) {
+      const reported = 1000 / zoom
+      const maxH = menuMaxHeight(reported)
+      expect(maxH).toBeLessThanOrEqual(reported)
+      expect(maxH).toBe(reported - 8)
+    }
+  })
+})

@@ -1,5 +1,6 @@
 import { expect, test, describe } from 'bun:test'
 import {
+  matchTabShortcut,
   matchPanelShortcut, shouldHandlePanelShortcut, type PanelShortcutInput,
 } from './panelShortcuts'
 
@@ -114,5 +115,25 @@ describe('shouldHandlePanelShortcut', () => {
 
   test('nothing fires during IME composition, regardless of focus', () => {
     expect(shouldHandlePanelShortcut({ ...base, ctrl: true, isComposing: true }, div)).toBeNull()
+  })
+})
+
+describe('session tab shortcuts', () => {
+  const base = { key: '', code: '', ctrl: true, meta: false, shift: false, alt: true, isComposing: false, focusInTerminal: false }
+  test('Ctrl+Alt+→/← step', () => {
+    expect(matchTabShortcut({ ...base, key: 'ArrowRight', code: 'ArrowRight' })).toEqual({ kind: 'step', by: 1 })
+    expect(matchTabShortcut({ ...base, key: 'ArrowLeft', code: 'ArrowLeft' })).toEqual({ kind: 'step', by: -1 })
+  })
+  test('Ctrl+Alt+1..9 jump, by physical key', () => {
+    expect(matchTabShortcut({ ...base, key: '¡', code: 'Digit1' })).toEqual({ kind: 'jump', n: 1 })
+    expect(matchTabShortcut({ ...base, key: '9', code: 'Digit9' })).toEqual({ kind: 'jump', n: 9 })
+    expect(matchTabShortcut({ ...base, key: '0', code: 'Digit0' })).toBeNull()
+  })
+  test('needs Ctrl/Cmd AND Alt, no Shift, never from a terminal or while composing', () => {
+    expect(matchTabShortcut({ ...base, alt: false, key: 'ArrowRight', code: 'ArrowRight' })).toBeNull()
+    expect(matchTabShortcut({ ...base, ctrl: false, key: 'ArrowRight', code: 'ArrowRight' })).toBeNull()
+    expect(matchTabShortcut({ ...base, shift: true, key: 'ArrowRight', code: 'ArrowRight' })).toBeNull()
+    expect(matchTabShortcut({ ...base, focusInTerminal: true, key: 'ArrowRight', code: 'ArrowRight' })).toBeNull()
+    expect(matchTabShortcut({ ...base, isComposing: true, key: 'ArrowRight', code: 'ArrowRight' })).toBeNull()
   })
 })

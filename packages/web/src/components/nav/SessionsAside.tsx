@@ -14,7 +14,7 @@ import { loadClosedFleet } from '../../lib/fleet'
  */
 
 import { applySummaryFilter, capacityText, summaryCounts, summaryParts, toggleSummaryPart, type SummaryPart } from '../../lib/asideSummary'
-import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { blurAfterDrag } from '../../lib/dragCleanup'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -23,7 +23,7 @@ import { getActivePane } from '../../lib/paneScope'
 import { openBeside, openInPane, readSplitRoute, splitHref } from '../../lib/splitRoute'
 
 import {
-  BellOff, ChevronDown, ChevronRight, Clock, Filter, Folder, FolderPlus, GripVertical, MoreVertical, Pin,
+  BellOff, ChevronDown, ChevronRight, Clock, Crown, Filter, Folder, FolderPlus, GripVertical, MoreVertical, Pin,
   PinOff, Plus, RotateCcw, Search, Send, SquareArrowOutUpRight, X,
 } from 'lucide-react'
 import type { Filters } from '@agentistics/core'
@@ -33,7 +33,7 @@ import {
 } from '@agentistics/tui/control/session-fleet'
 import { asideGroups, showsGroupHeadings } from '../../lib/fleetGroups'
 import {
-  bandCollapseKey, collapseKey, readAsideGroupPrefs, writeAsideGroupPrefs, subscribeAsideGroupPrefs, arrangeChangedCount,
+  bandCollapseKey, collapseKey, readAsideGroupPrefs, useLeadersOnly, writeAsideGroupPrefs, subscribeAsideGroupPrefs, arrangeChangedCount,
   type AsideBandId, type AsideCardColor, type AsideGroupBy,
 } from '../../lib/sessionsAsidePrefs'
 import { sessionCardStyle, STATE_COLOR } from '../../lib/sessionCardStyle'
@@ -92,7 +92,8 @@ import { ConfirmModal } from '../../pages/settings/primitives'
 import { CLUSTER_ACCENT, CLUSTER_TINT } from '../tasks/subtaskGroups'
 import { NAY_UNDOCK_SESSION, requestUndockSession, withUndockEntry } from '../../lib/nayDockBridge'
 import { AgentisticsLoader } from '../AgentisticsLoader'
-import { getSessionRole, registerSessionRoleAlias, setSessionRole, useMuteWorkers, useSessionRole, type SessionRole } from '../../lib/sessionRoles'
+import { getSessionRole, registerSessionRoleAlias, setSessionRole, useMuteWorkers, useSessionRole, useSessionRoles, type SessionRole } from '../../lib/sessionRoles'
+import { applyLeadersOnly, countLeaders, leadersBanner, leadersText } from '../../lib/leadersFilter'
 
 /** The row menu's client-side "open beside" entry — see `openSessionBeside`. */
 const OPEN_BESIDE = '__open_beside__'
@@ -304,6 +305,10 @@ export function SessionsAside({
   }, [mutedPopover])
   /** The summary line's own filter ("3 ativas · 2 trabalhando · 1 precisa de você"). Memory only. */
   const [summaryFilter, setSummaryFilter] = useState<SummaryPart | null>(null)
+  /** "Só líderes" — PERSISTED with the rest of how this person reads the list (`leadersFilter.ts`). */
+  const leadersOnly = useLeadersOnly()
+  const sessionRoles = useSessionRoles()
+  const roleOfRow = useCallback((r: ControlSession) => getSessionRole(pinKeyOf(r)), [sessionRoles]) // eslint-disable-line react-hooks/exhaustive-deps
   const [creating, setCreating] = useState(false)
   // A layout swap unmounted the open wizard: take it over (see `newSessionWizardStore`).
   useEffect(() => {
@@ -738,10 +743,13 @@ export function SessionsAside({
   // Native sessions are ordinary fleet rows now (UI.UNIFY, `nativeFleetRow.ts`): they are in
   // `searched` like every other harness, so the summary counts them through the same rule.
   const summaryNumbers = useMemo(() => summaryCounts(searched), [searched])
-  const matched = useMemo(
+  const beforeLeaders = useMemo(
     () => applySummaryFilter(activeOnly ? searched.filter(r => active.has(r.state)) : searched, summaryFilter),
     [searched, activeOnly, active, summaryFilter],
   )
+  const matched = useMemo(() => applyLeadersOnly(beforeLeaders, leadersOnly, roleOfRow), [beforeLeaders, leadersOnly, roleOfRow])
+  const leaderCount = useMemo(() => countLeaders(searched, roleOfRow), [searched, roleOfRow])
+  const leadersHidden = leadersOnly ? beforeLeaders.length - matched.length : 0
   /** How many rows the switch is withholding, so the row can say what turning it off would show. */
   const hidden = useMemo(
     () => (activeOnly ? searched.filter(r => !active.has(r.state)).length : 0),
@@ -754,7 +762,7 @@ export function SessionsAside({
    * the list (value filters → search → active only); `groupRowsResolved` stays whole for the TOTAL
    * in the header (`3/61`) and for the menu's attention count.
    */
-  const narrowing = summaryFilter !== null || listNarrowed({ activeOnly, query, valueFiltered: valueFiltered.length, total: rows.length })
+  const narrowing = summaryFilter !== null || leadersOnly || listNarrowed({ activeOnly, query, valueFiltered: valueFiltered.length, total: rows.length })
   const groupRowsShown = useMemo(() => {
     if (!narrowing) return groupRowsResolved
     const ids = new Set(matched.map(r => r.id))
@@ -1312,6 +1320,30 @@ export function SessionsAside({
             </button>
           </span>
         ))}
+        {(leaderCount > 0 || leadersOnly) && (
+          <span style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center' }}>
+            <span aria-hidden>·</span>
+            <button
+              type="button"
+              data-leaders-only
+              onClick={() => writeAsideGroupPrefs({ leadersOnly: !leadersOnly })}
+              aria-pressed={leadersOnly}
+              title={leadersOnly ? (pt ? 'Mostrar todas as sessões' : 'Show all sessions') : (pt ? 'Mostrar só os líderes' : 'Show leaders only')}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                border: 'none', background: leadersOnly ? 'var(--bg-elevated)' : 'transparent',
+                color: leadersOnly ? 'var(--accent-purple)' : 'inherit',
+                font: 'inherit', cursor: 'pointer', borderRadius: 6,
+                padding: isMobile ? '12px 5px' : '2px 4px', minHeight: tap,
+                fontWeight: leadersOnly ? 600 : 400,
+              }}
+            >
+              <Crown size={11} aria-hidden />
+              {leadersText(leaderCount, pt)}
+              {leadersOnly && <X size={11} aria-hidden />}
+            </button>
+          </span>
+        )}
         {capacityLabel && (<><span aria-hidden>·</span><span data-testid="aside-capacity">{capacityLabel}</span></>)}
       </div>
 
@@ -1653,6 +1685,21 @@ export function SessionsAside({
           teams, machines) is said here, above the scroller — the same placement `stale` uses, and
           for the same reason: a caveat about every row below must be readable wherever the reader
           has scrolled. Silence here reads as a broken filter, not an honest one. */}
+      {leadersOnly && (
+        <p role="status" data-leaders-banner style={{
+          margin: '0 2px', padding: '7px 9px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+          background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+          fontSize: 10.5, lineHeight: 1.45, color: 'var(--text-tertiary)',
+        }}>
+          <Crown size={11} aria-hidden style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />
+          <span>{leadersBanner(leadersHidden, pt)}</span>
+          <button
+            type="button" onClick={() => writeAsideGroupPrefs({ leadersOnly: false })}
+            style={{ border: 'none', background: 'transparent', padding: isMobile ? '12px 4px' : 0, minHeight: tap, font: 'inherit', fontWeight: 600, color: 'var(--text-secondary)', cursor: 'pointer', textDecoration: 'underline' }}
+          >{pt ? 'mostrar todas' : 'show all'}</button>
+        </p>
+      )}
+
       {ignoredNote && (
         <p role="status" style={{
           margin: '0 2px', padding: '7px 9px', borderRadius: 8,
