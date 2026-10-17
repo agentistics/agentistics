@@ -81,7 +81,7 @@ export function toolDetailOf(args: unknown): string | null {
   return null
 }
 
-function toolsOf(data: Record<string, unknown>, harness: HarnessId): ChatTurn['tools'] {
+function toolsOf(data: Record<string, unknown>, harness: HarnessId, results: ReadonlyMap<string, boolean>): ChatTurn['tools'] {
   const reqs = data.toolRequests
   if (!Array.isArray(reqs)) return undefined
   const out: NonNullable<ChatTurn['tools']> = []
@@ -95,6 +95,7 @@ function toolsOf(data: Record<string, unknown>, harness: HarnessId): ChatTurn['t
     out.push({
       // Copilot's own name for display; the shared one beside it. See `ChatTurn.tools`.
       name,
+      ...(typeof r.toolCallId === 'string' && results.get(r.toolCallId) === true ? { failed: true } : {}),
       ...(canonical !== name ? { canonical } : {}),
       ...(detail ? { detail } : {}),
     })
@@ -114,6 +115,7 @@ export function parseCopilotChat(
   max = 400,
 ): ChatTurn[] {
   const turns: ChatTurn[] = []
+  const results = new Map<string, boolean>()
   let newest = true
 
   for (let i = lines.length - 1; i >= 0 && turns.length < max; i--) {
@@ -128,6 +130,13 @@ export function parseCopilotChat(
     const at = typeof e.timestamp === 'string' ? e.timestamp : undefined
     const stamp = (t: ChatTurn): ChatTurn => (at ? { ...t, at } : t)
 
+    if (type === 'tool.execution_complete') {
+      if (typeof data.toolCallId === 'string' && !results.has(data.toolCallId)) {
+        results.set(data.toolCallId, data.success === false)
+      }
+      continue
+    }
+
     if (type === 'user.message') {
       newest = false
       // `content`, NEVER `transformedContent` — see the header.
@@ -141,7 +150,7 @@ export function parseCopilotChat(
       const isNewest = newest
       newest = false
       const text = typeof data.content === 'string' ? data.content.trim() : ''
-      const tools = toolsOf(data, harness)
+      const tools = toolsOf(data, harness, results)
       // Only `reasoningText` is readable. `reasoningOpaque` and `encryptedContent` are not thoughts
       // anything here can show, and an absent thought is absent.
       const thinking = typeof data.reasoningText === 'string' ? data.reasoningText.trim() : ''

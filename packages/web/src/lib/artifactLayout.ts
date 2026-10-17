@@ -116,7 +116,9 @@ export interface EdgeHint {
  */
 export function currentAction(
   events: readonly { kind: EdgeHint['kind']; text: string; live?: boolean; ref?: string }[],
+  state?: string,
 ): EdgeHint | null {
+  if (state === 'ended' || state === 'exited' || state === 'lost' || state === 'closed') return null
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]!
     // The `ref` travels with it so the press can open that exact row. Omitted rather than
@@ -128,8 +130,9 @@ export function currentAction(
 }
 
 export function edgeHint(
-  { open, events, isMobile }: {
+  { open, events, isMobile, state }: {
     open: boolean
+    state?: string | undefined
     events: readonly { kind: EdgeHint['kind']; text: string; live?: boolean; ref?: string }[]
     isMobile: boolean
   },
@@ -137,7 +140,7 @@ export function edgeHint(
   // On a phone the panel is full-screen; a tab on the edge would be a control promising to cover
   // the conversation somebody is reading.
   if (open || isMobile) return null
-  return currentAction(events)
+  return currentAction(events, state)
 }
 
 /**

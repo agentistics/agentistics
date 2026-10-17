@@ -1092,7 +1092,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       // carries the turns of the conversation that is actually mounted: reading `artifactTurns`
       // state in an effect would publish the PREVIOUS session's turns under the new one's id for
       // the first poll after a switch.
-      setArtifactLive(selected.id, currentAction(liveEvents(a.turns)))
+      setArtifactLive(selected.id, currentAction(liveEvents(a.turns), selected.state))
     }
   }, [selected])
   /**
@@ -1107,9 +1107,9 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const selectedId = selected?.id
   useEffect(() => {
     if (selectedId === undefined) return
-    if (sessionView !== 'chat') setArtifactLive(selectedId, null)
+    if (sessionView !== 'chat' || ['exited', 'lost', 'closed'].includes(selected?.state ?? '')) setArtifactLive(selectedId, null)
     return () => setArtifactLive(selectedId, null)
-  }, [selectedId, sessionView])
+  }, [selectedId, selected?.state, sessionView])
 
   /**
    * NOTHING OPENS THIS PANEL BUT A PERSON.
@@ -1241,6 +1241,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     // see what is happening, so the hint has nothing left to announce.
     open: rightIsTab || bottomIsTab,
     events: liveEvents(artifactTurns),
+    state: selected?.state,
     isMobile,
   })
   const HINT_VERB: Record<string, string> = {

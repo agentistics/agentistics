@@ -40,6 +40,8 @@
 
 import type { ChatTurn } from '@agentistics/core'
 import { parseGeminiShell } from './bash-mode'
+import { canonicalTool } from '../harness-activity'
+import { commandSummary } from './shell-writes'
 
 /** The bootstrap block gemini writes under the user role on startup. Not a person talking. */
 const SESSION_CONTEXT = /^<session_context>/
@@ -68,6 +70,20 @@ function textOf(msg: Record<string, unknown>): string {
   return ''
 }
 
+/** Gemini stores structured args on the tool call, beside its explicit status. */
+function toolDetailOf(args: unknown): string | undefined {
+  if (!args || typeof args !== 'object') return undefined
+  const input = args as Record<string, unknown>
+  for (const key of ['command', 'file_path', 'path', 'dir_path', 'pattern', 'query', 'url']) {
+    const value = input[key]
+    if (typeof value !== 'string' || !value.trim()) continue
+    if (key === 'command') return commandSummary(value)
+    const line = value.trim().split('\n')[0]!
+    return line.length > 200 ? `${line.slice(0, 200)}…` : line
+  }
+  return undefined
+}
+
 /**
  * The conversation, oldest first, capped at `max` turns FROM THE END.
  *
@@ -94,13 +110,28 @@ export function parseGeminiChatTurns(lines: readonly string[], max: number): Cha
     const role = roleOf(msg.type)
     if (!role) return
     const text = textOf(msg).trim()
-    if (!text) return
+    const tools: NonNullable<ChatTurn['tools']> = []
+    if (role === 'assistant' && Array.isArray(msg.toolCalls)) {
+      for (const raw of msg.toolCalls) {
+        if (!raw || typeof raw !== 'object' || typeof raw.name !== 'string' || !raw.name) continue
+        const canonical = canonicalTool('gemini', raw.name)
+        const detail = toolDetailOf(raw.args)
+        tools.push({
+          name: raw.name,
+          ...(canonical !== raw.name ? { canonical } : {}),
+          ...(detail ? { detail } : {}),
+          ...(raw.status === 'error' ? { failed: true } : {}),
+        })
+      }
+    }
+    if (!text && tools.length === 0) return
     if (role === 'user' && SESSION_CONTEXT.test(text)) return
     // A `!` the person ran in the CLI: one entry holding the command AND what it printed.
     const shell = role === 'user' ? parseGeminiShell(text) : null
     const injected = role === 'user' && INJECTED.test(text)
     turns.push({
       role,
+      ...(tools.length > 0 ? { tools } : {}),
       text: shell ? `!${shell.command}` : text,
       ...(injected ? { system: 'an injected note' } : {}),
       ...(shell ? { shell } : {}),

@@ -802,3 +802,26 @@ describe('background task settle (P4)', () => {
     })
   }
 })
+
+describe('Claude per-tool failures', () => {
+  let root: string
+  beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'chat-tool-errors-')) })
+  afterEach(async () => { await rm(root, { recursive: true, force: true }) })
+
+  test('pairs is_error by tool_use_id and keeps successful and missing results unset', async () => {
+    const path = join(root, 'tools.jsonl')
+    await writeFile(path, [
+      line({ type: 'assistant', message: { content: [
+        { type: 'tool_use', id: 'bad', name: 'Bash', input: { command: 'false' } },
+        { type: 'tool_use', id: 'ok', name: 'Read', input: { file_path: '/a' } },
+        { type: 'tool_use', id: 'pending', name: 'Read', input: { file_path: '/b' } },
+      ] } }),
+      line({ type: 'user', message: { content: [
+        { type: 'tool_result', tool_use_id: 'ok', is_error: false, content: 'error is text' },
+        { type: 'tool_result', tool_use_id: 'bad', is_error: true, content: 'failed' },
+      ] } }),
+    ].join('\n'))
+    const { turns } = await readChatWindow(path)
+    expect(turns.flatMap(t => t.tools ?? []).map(t => t.failed)).toEqual([true, undefined, undefined])
+  })
+})

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  artifactsPanelMax, ASIDE_DRAG_CENTRE_MIN, edgeHint, PANEL_MIN_WIDTH, resolveArtifactLayout,
+  artifactsPanelMax, ASIDE_DRAG_CENTRE_MIN, currentAction, edgeHint, PANEL_MIN_WIDTH, resolveArtifactLayout,
 } from './artifactLayout'
 
 const at = (o: Partial<Parameters<typeof resolveArtifactLayout>[0]>) =>
@@ -123,5 +123,20 @@ describe('artifactsPanelMax', () => {
   it('an unmeasured or nonsense viewport is the same safe floor', () => {
     expect(artifactsPanelMax(Number.NaN)).toBe(PANEL_MIN_WIDTH)
     expect(artifactsPanelMax(-100)).toBe(PANEL_MIN_WIDTH)
+  })
+})
+
+
+describe('ended sessions have no running strip, regardless of chatActivity', () => {
+  const events = [{ kind: 'ran' as const, text: 'unfinished command', live: true, ref: 'tool-1' }]
+  for (const state of ['ended', 'exited', 'lost', 'closed']) {
+    it(`suppresses stale pending tools for ${state}`, () => {
+      expect(currentAction(events, state)).toBeNull()
+      expect(edgeHint({ open: false, isMobile: false, events, state })).toBeNull()
+    })
+  }
+  it('keeps the strip for a live session and clears it on exit without a new transcript', () => {
+    expect(edgeHint({ open: false, isMobile: false, events, state: 'working' })).toMatchObject({ text: 'unfinished command' })
+    expect(edgeHint({ open: false, isMobile: false, events, state: 'exited' })).toBeNull()
   })
 })

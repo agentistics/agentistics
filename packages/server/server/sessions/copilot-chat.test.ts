@@ -142,3 +142,16 @@ describe('parseCopilotChat', () => {
     expect(turn!.at).toBeUndefined()
   })
 })
+
+it('pairs execution_complete.success by toolCallId rather than completion order', () => {
+  const turns = parseCopilotChat([
+    JSON.stringify({ type: 'assistant.message', data: { content: 'Checking', toolRequests: [
+      { name: 'bash', toolCallId: 'bad', arguments: { command: 'false' } },
+      { name: 'view', toolCallId: 'ok', arguments: { path: 'a' } },
+      { name: 'view', toolCallId: 'pending', arguments: { path: 'b' } },
+    ] } }),
+    JSON.stringify({ type: 'tool.execution_complete', data: { toolCallId: 'ok', success: true } }),
+    JSON.stringify({ type: 'tool.execution_complete', data: { toolCallId: 'bad', success: false } }),
+  ])
+  expect(turns[0]!.tools!.map(t => t.failed)).toEqual([true, undefined, undefined])
+})

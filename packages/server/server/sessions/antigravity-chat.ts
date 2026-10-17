@@ -58,6 +58,8 @@ interface AgyStep {
   content?: unknown
   thinking?: unknown
   error?: unknown
+  exit_code?: unknown
+  status?: unknown
   tool_calls?: unknown
 }
 
@@ -223,6 +225,7 @@ export function parseAntigravityChat(
    * seen first — which is the one to keep.
    */
   const seen = new Set<number>()
+  let executions: AgyStep[] = []
   let newest = true
   for (let i = lines.length - 1; i >= 0 && turns.length < max; i--) {
     const line = (lines[i] ?? '').trim()
@@ -236,9 +239,26 @@ export function parseAntigravityChat(
       seen.add(idx)
     }
 
+    // Executions belong to the preceding planner response, not to a later request.
+    // Without ids, only a unique exact tool-name/type match is attributable.
+    if (EXECUTION_TYPES.has(str(step.type))) executions.push(step)
+    if (str(step.type) === 'USER_INPUT') executions = []
     const isNewest = newest
     newest = false
     const turn = turnOf(step, harness, isNewest)
+    if (str(step.type) === 'PLANNER_RESPONSE') {
+      for (const tool of turn?.tools ?? []) {
+        const name = tool.name.toUpperCase()
+        const matches = executions.filter(e => e.type === name)
+        const calls = turn!.tools!.filter(t => t.name.toUpperCase() === name)
+        if (matches.length === 1 && calls.length === 1) {
+          const result = matches[0]!
+          if ((typeof result.exit_code === 'number' && result.exit_code !== 0)
+            || result.status === 'ERROR' || result.status === 'FAILED') tool.failed = true
+        }
+      }
+      executions = []
+    }
     if (turn) turns.push(turn)
   }
   turns.reverse()

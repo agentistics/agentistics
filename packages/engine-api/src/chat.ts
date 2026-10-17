@@ -42,6 +42,7 @@ export interface EngineChatTurn {
   tools?: Array<{
     name: string
     canonical?: string
+    failed?: boolean
     detail?: string
     writes?: string[]
     opaqueWrite?: boolean

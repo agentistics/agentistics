@@ -205,7 +205,9 @@ type Tool = NonNullable<ChatTurn['tools']>[number]
 function toolOf(payload: Record<string, unknown>, harness: HarnessId): Tool | null {
   const name = typeof payload.name === 'string' ? payload.name : ''
   if (name === '') return null
-  const detail = toolDetailOf(payload.arguments)
+  const detail = payload.type === 'custom_tool_call' && typeof payload.input === 'string'
+    ? (toolDetailOf(payload.input) ?? commandSummary(payload.input))
+    : toolDetailOf(payload.arguments)
   const canonical = canonicalTool(harness, name)
   return {
     // The harness's OWN name is what a conversation shows; `canonical` is the shared vocabulary
@@ -238,6 +240,7 @@ export function parseCodexChat(
   cwd?: string,
 ): ChatTurn[] {
   const turns: ChatTurn[] = []
+  const results = new Map<string, boolean>()
   /** Tool calls seen since the assistant message they belong to, in FILE order. */
   let pending: Tool[] = []
   let pendingAt: string | undefined
@@ -275,9 +278,19 @@ export function parseCodexChat(
     const at = typeof e.timestamp === 'string' ? e.timestamp : undefined
     const kind = typeof payload.type === 'string' ? payload.type : ''
 
-    if (kind === 'function_call') {
+    if (kind === 'function_call_output' || kind === 'custom_tool_call_output') {
+      if (typeof payload.call_id === 'string' && !results.has(payload.call_id)) {
+        results.set(payload.call_id, codexOutputFailed(payload.output) || codexOutputFailed(payload))
+      }
+      // Results settle calls but never split a batch of parallel requests.
+      newest = false
+      continue
+    }
+
+    if (kind === 'function_call' || kind === 'custom_tool_call') {
       const tool = toolOf(payload, harness)
       if (tool) {
+        if (typeof payload.call_id === 'string' && results.get(payload.call_id) === true) tool.failed = true
         if (pending.length === 0) { pendingAt = at; newestBatch = newest }
         // Backward walk, file order kept: the earliest call of the batch ends up first.
         pending.unshift(tool)
@@ -331,9 +344,7 @@ export function parseCodexChat(
       continue
     }
 
-    // `function_call_output` (the result, whose body is the whole stdout) and `ghost_snapshot` are
-    // not turns. The request above already said what ran — the same choice `antigravity-chat.ts`
-    // makes, and for the same reason.
+    // Snapshots and other bookkeeping are not conversation turns.
     flushTools()
     newest = false
   }
@@ -341,6 +352,22 @@ export function parseCodexChat(
   flushTools()
   turns.reverse()
   return turns
+}
+
+/** Only structured failure fields or Codex's own shell-result header are evidence. */
+function codexOutputFailed(output: unknown): boolean {
+  if (typeof output === 'string') {
+    try { return codexOutputFailed(JSON.parse(output)) } catch { /* shell envelope */ }
+    // Anchored to the metadata header, never arbitrary command stdout containing "error".
+    const header = output.split(/\n(?:Output|Final output):(?:\n|$)/, 1)[0]!
+    const exit = /^(?:Process exited with code|Exit code:)\s*(-?\d+)\s*$/m.exec(header)
+    return exit !== null && Number(exit[1]) !== 0
+  }
+  if (!output || typeof output !== 'object') return false
+  const o = output as Record<string, unknown>
+  return o.is_error === true || o.status === 'error' || o.status === 'failed'
+    || (typeof o.exit_code === 'number' && o.exit_code !== 0)
+    || (o.metadata !== null && typeof o.metadata === 'object' && codexOutputFailed(o.metadata))
 }
 
 /** One `message` that is not the assistant's, classified. `null` when there is nothing to draw. */

@@ -257,3 +257,44 @@ describe('`!` shell commands (P-24)', () => {
     expect(turn!.shell!.output).toBeUndefined()
   })
 })
+
+describe('tool result pairing', () => {
+  it('reads custom exec input and pairs interleaved outputs by call_id across both families', () => {
+    const turns = parseCodexChat([
+      msg('assistant', 'Checking'),
+      line({ type: 'custom_tool_call', name: 'exec', call_id: 'bad', input: 'ls missing' }),
+      line({ type: 'function_call', name: 'exec_command', call_id: 'good', arguments: '{"cmd":"pwd"}' }),
+      line({ type: 'function_call_output', call_id: 'good', output: 'Process exited with code 0\nFinal output:\nerror is just stdout' }),
+      line({ type: 'custom_tool_call_output', call_id: 'bad', output: 'Wall time: 0.1 seconds\nProcess exited with code 2\nFinal output:\nmissing' }),
+      msg('assistant', 'Done'),
+    ])
+    expect(turns[0]!.tools).toMatchObject([
+      { name: 'exec', detail: 'ls missing', failed: true },
+      { name: 'exec_command', detail: 'pwd' },
+    ])
+    expect(turns[0]!.tools![1]!.failed).toBeUndefined()
+    expect(turns).toHaveLength(2)
+  })
+
+  it('reads JSON custom input, structured output errors, and leaves unknown or unmatched results unset', () => {
+    const turns = parseCodexChat([
+      line({ type: 'custom_tool_call', name: 'exec', call_id: 'bad', input: '{"cmd":"false"}' }),
+      line({ type: 'function_call', name: 'wait', call_id: 'unknown', arguments: '{}' }),
+      line({ type: 'function_call_output', call_id: 'other', output: { status: 'error' } }),
+      line({ type: 'custom_tool_call_output', call_id: 'bad', output: '{"metadata":{"exit_code":1}}' }),
+    ])
+    expect(turns.flatMap(t => t.tools ?? [])).toMatchObject([
+      { name: 'exec', detail: 'false', failed: true }, { name: 'wait' },
+    ])
+    expect(turns.flatMap(t => t.tools ?? [])[1]!.failed).toBeUndefined()
+  })
+
+  it('does not infer failure from ordinary stdout or a missing output', () => {
+    const turns = parseCodexChat([
+      line({ type: 'function_call', name: 'exec_command', call_id: 'ok', arguments: '{"cmd":"echo error"}' }),
+      line({ type: 'function_call_output', call_id: 'ok', output: 'Process exited with code 0\nFinal output:\nProcess exited with code 9' }),
+      line({ type: 'custom_tool_call', name: 'exec', call_id: 'pending', input: 'pwd' }),
+    ])
+    expect(turns.flatMap(t => t.tools ?? []).every(t => t.failed === undefined)).toBe(true)
+  })
+})
