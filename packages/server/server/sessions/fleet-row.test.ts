@@ -112,6 +112,13 @@ describe('fleetRow — the verbs a web row is offered', () => {
     expect(verbReason(row({ state: 'closed' }), 'kill', S)).toBeUndefined()
   })
 
+  it('Reopen without a target always says why, preferring the harness-specific sentence', () => {
+    expect(verbReason(row({ state: 'exited' }), 'resume', S)).toBe(S.sessionsNoReopenTarget)
+    expect(verbReason(row({ state: 'closed' }), 'resume', S)).toBe(S.sessionsNoReopenTarget)
+    expect(verbReason(row({ state: 'exited', conversationBlind: 'blind' }), 'resume', S)).toBe('blind')
+    expect(verbReason(row({ state: 'exited', resume: { conversationId: 'c-1' } as never }), 'resume', S)).toBeUndefined()
+  })
+
   it('the handle is what `agentop session attach` resolves', () => {
     expect(sessionHandleOf('agentop-abcdef123456')).toBe('agentop-abcd')
     expect(sessionHandleOf('short')).toBe('short')

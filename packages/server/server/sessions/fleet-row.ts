@@ -273,7 +273,7 @@ export function verbReason(
   if (isNativeRow(row)) return action === 'resume' || action === 'kill' ? undefined : s.sessionsNativeNote
   if (row.state === 'unknown' && action !== 'resume') return s.sessionsExternalNote
   if (action === 'approve') return row.dialogBlind ?? row.chooseBlind ?? row.approveBlind ?? row.approvalBlind
-  if (action === 'resume' && !row.resume) return row.conversationBlind
+  if (action === 'resume' && !row.resume) return row.conversationBlind ?? s.sessionsNoReopenTarget
   return undefined
 }
 
