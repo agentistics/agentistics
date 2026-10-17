@@ -192,7 +192,7 @@ import { withResumeLock } from './sessions/resume-lock'
 import { liveConversationHolders } from './sessions/live-claims'
 import type { ManagedSession, SessionBackend, SpawnPlanError } from './sessions/types'
 import {
-  addSession, adoptSessionRecords, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession, touchSessions,
+  addSession, adoptSessionRecords, newSessionId, linkConversationVerified, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession, touchSessions,
 } from './sessions/registry'
 import {
   createSessionsPoller, linkProcessConversation, sampleProcessLinks, SESSION_POLL_MS, type SessionsPoller,
@@ -1575,16 +1575,9 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
     // The link kind travels WITH the id. Dropping it here would persist a first-sighting claim as
     // though the CLI had been handed that conversation, which is the one thing the field exists to
     // keep apart — see `ManagedSession.conversationLink`.
-    recordConversation: (id, conversationId, conversationLink, conversationLinkVia) =>
-      patchSession(id, { conversationId, conversationLink, ...(conversationLinkVia ? { conversationLinkVia } : {}) })
-        // A mute made at spawn is keyed by the managed id until the conversation is known.
-        .then(async r => {
-          await rekeyMutedSession(id, conversationId).catch(() => {})
-          await rekeyFolderMember(id, conversationId).catch(() => {})
-          await rekeyCheckinSession(id, conversationId, updatePreferences).catch(() => {})
-          await rekeyStoredRole([id], [id, conversationId]).catch(() => {})
-          return r
-        }),
+    // Through `recordProcessLink`, so a conversation another row owns is refused (CROSSBIND) on
+    // every link this poller writes, not only on the process route.
+    recordConversation: recordProcessLink,
     // The per-process log link — antigravity's only exact answer, and the reason its chat view was
     // permanently empty while its terminal worked. Wired HERE and deliberately not on
     // `cli-session.ts`'s poller: that one is a one-shot command and writes nothing, exactly as it
@@ -1763,9 +1756,23 @@ async function sampleLinksFor(harness: HarnessId, deadline: () => number, onlyId
 }
 
 /** The one write a process-transcript link makes, wherever it was found. */
-function recordProcessLink(sid: string, conversationId: string, link: 'assigned', via?: ConversationLinkReason): Promise<unknown> {
-  return patchSession(sid, { conversationId, conversationLink: link, ...(via ? { conversationLinkVia: via } : {}) })
-    .then(async r => {
+/**
+ * Write a conversation link the poller found, and carry the mute/folder/check-in/role keyed by the
+ * managed id over to it. REFUSED — and thrown, so every caller reads it as "not linked" — when another
+ * row already owns that conversation (`conversationOwnedElsewhere`, CROSSBIND): a second row on one
+ * conversation is one session's chat shown under another's name.
+ */
+function recordProcessLink(sid: string, conversationId: string, link: 'assigned' | 'observed', via?: ConversationLinkReason): Promise<unknown> {
+  return linkConversationVerified(
+    sid,
+    { conversationId, conversationLink: link, ...(via ? { conversationLinkVia: via } : {}) },
+    async () => (await resolveBackend()).list(),
+  )
+    .then(async outcome => {
+      if (!outcome.ok && outcome.heldBy) throw new Error(`conversation ${conversationId} is owned by session ${outcome.heldBy}`)
+      // Not written: the registry lock could not be taken, so the ownership check never ran. Retried next poll.
+      if (!outcome.ok && outcome.contended) throw new Error(`conversation ${conversationId} not linked: registry lock contended`)
+      const r = outcome.ok
       await rekeyMutedSession(sid, conversationId).catch(() => {})
       await rekeyFolderMember(sid, conversationId).catch(() => {})
       await rekeyCheckinSession(sid, conversationId, updatePreferences).catch(() => {})

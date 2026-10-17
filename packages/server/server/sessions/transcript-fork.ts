@@ -18,12 +18,23 @@
  * Anything that cannot be shown to continue the conversation is left alone: a sibling transcript in
  * the same directory is, far more often, ANOTHER session's.
  *
+ * **A file ANOTHER ROW IS LINKED TO is never a successor** (`foreign`), whatever its content says.
+ * Measured 2026-10-17 (QA chat-activity-live-1): two sessions started in one folder — one queued by
+ * the memory guard, the same one started with `force` — each born linked to its own `--session-id`,
+ * and each chat showed the OTHER's conversation. The registry was right; this follow was not. Two
+ * sessions that replayed the same history carry the same uuids, and two sessions sent the same prompt
+ * both "contain the pending prompt", so the newer sibling passed both tests above while being a live
+ * conversation of its own — and the memo then held the wrong file for the life of the process. The
+ * file name IS the conversation id for Claude, so the caller names the ids other rows own and they
+ * are skipped at every hop, remembered successors included. A refusal is logged once per pair.
+ *
  * PURE decisions here (`continuesByUuids`, `containsPending`, `tailUuids`); the directory walk is the
  * only IO and takes its file system through `FsLike` so tests need no real project tree.
  */
 
 import { readFile, readdir, stat } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
+import { BoundedKeys } from './bounded-keys'
 
 /** How many of the linked file's last uuids a successor must carry (or all of them, if fewer). */
 export const FORK_MIN_SHARED = 3
@@ -79,8 +90,27 @@ const successors = new Map<string, string>()
 /** candidate path -> when a negative verdict expires. */
 const negatives = new Map<string, number>()
 
+/** `from -> to` pairs already logged as refused, so a refusal is said once, not once per poll. */
+const refusedLogged = new BoundedKeys(512)
+
 /** Forget everything. Tests only. */
-export function forgetForks(): void { successors.clear(); negatives.clear() }
+export function forgetForks(): void { successors.clear(); negatives.clear(); refusedLogged.clear() }
+
+/** The conversation id a Claude transcript path names: its file name without `.jsonl`. */
+export function conversationOfPath(path: string): string {
+  return basename(path, '.jsonl')
+}
+
+/** PURE: may `candidate` be followed from `from`? Never when another row owns its conversation. */
+export function followAllowed(candidate: string, foreign: ReadonlySet<string> | undefined): boolean {
+  return !foreign || !foreign.has(conversationOfPath(candidate))
+}
+
+function logRefused(from: string, to: string): void {
+  const key = `${from}\0${to}`
+  if (!refusedLogged.add(key)) return
+  console.warn(`[sessions] refused to follow ${conversationOfPath(from)} into ${conversationOfPath(to)}: another session is linked to that conversation`)
+}
 
 /**
  * The newest transcript that continues the one at `path`, or `path` itself. Follows a chain
@@ -88,16 +118,35 @@ export function forgetForks(): void { successors.clear(); negatives.clear() }
  */
 export async function followFork(
   path: string,
-  opts: { pending?: readonly string[]; fs?: FsLike; now?: number } = {},
+  opts: {
+    pending?: readonly string[]
+    /**
+     * Conversation ids OTHER rows are linked to — never a successor. See the header. A function is
+     * asked once, and only when a newer sibling exists to be judged (it may read the registry).
+     */
+    foreign?: ReadonlySet<string> | (() => Promise<ReadonlySet<string>>)
+    fs?: FsLike
+    now?: number
+  } = {},
 ): Promise<string> {
   const fs = opts.fs ?? realFs
   const now = opts.now ?? Date.now()
+  let foreign: ReadonlySet<string> | undefined = typeof opts.foreign === 'function' ? undefined : opts.foreign
+  const lazy = typeof opts.foreign === 'function' ? opts.foreign : null
+  const owners = async (): Promise<ReadonlySet<string> | undefined> => {
+    if (lazy && !foreign) foreign = await lazy().catch(() => new Set<string>())
+    return foreign
+  }
   let current = path
   for (let hop = 0; hop < 5; hop++) {
     const remembered = successors.get(current)
-    if (remembered && await fs.stat(remembered)) { current = remembered; continue }
+    if (remembered) {
+      const allowed = followAllowed(remembered, await owners())
+      if (allowed && await fs.stat(remembered)) { current = remembered; continue }
+      if (!allowed) logRefused(current, remembered)
+    }
     successors.delete(current)
-    const next = await findSuccessor(current, opts.pending ?? [], fs, now)
+    const next = await findSuccessor(current, opts.pending ?? [], owners, fs, now)
     if (!next) break
     successors.set(current, next)
     current = next
@@ -105,7 +154,13 @@ export async function followFork(
   return current
 }
 
-async function findSuccessor(path: string, pending: readonly string[], fs: FsLike, now: number): Promise<string | null> {
+async function findSuccessor(
+  path: string,
+  pending: readonly string[],
+  owners: () => Promise<ReadonlySet<string> | undefined>,
+  fs: FsLike,
+  now: number,
+): Promise<string | null> {
   const self = await fs.stat(path)
   if (!self) return null
   const dir = dirname(path)
@@ -122,8 +177,11 @@ async function findSuccessor(path: string, pending: readonly string[], fs: FsLik
   let linkedText: string
   try { linkedText = await fs.readFile(path) } catch { return null }
   const tail = tailUuids(linkedText)
+  const foreign = await owners()
   for (const c of found.slice(0, MAX_CANDIDATES)) {
     if ((negatives.get(c.p) ?? 0) > now) continue
+    // Not remembered as a negative: who owns a conversation can change, what a file holds cannot.
+    if (!followAllowed(c.p, foreign)) { logRefused(path, c.p); continue }
     let text: string
     try { text = await fs.readFile(c.p) } catch { continue }
     if (continuesByUuids(tail, text) || containsPending(pending, text, linkedText)) return c.p

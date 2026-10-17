@@ -63,9 +63,10 @@ describe('check-in', () => {
   })
   it('both conversation-link paths migrate check-in alongside folder membership', async () => {
     const src = await Bun.file(new URL('../cli-start.ts', import.meta.url)).text()
-    for (const id of ['id', 'sid']) {
-      expect(src).toContain(`await rekeyCheckinSession(${id}, conversationId, updatePreferences)`)
-    }
+    // ONE writer since CROSSBIND: the poller's `recordConversation` IS `recordProcessLink`, which
+    // also refuses a conversation another row owns — so the migration cannot exist on one path only.
+    expect(src).toContain('recordConversation: recordProcessLink,')
+    expect(src).toContain('await rekeyCheckinSession(sid, conversationId, updatePreferences)')
   })
   it('does nothing without an agenda, or when the successor already has one', () => {
     expect(handoffCheckinPatch(prefs({}), parent, child)).toBeUndefined()
