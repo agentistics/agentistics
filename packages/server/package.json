@@ -1,6 +1,6 @@
 {
   "name": "@agentistics/server",
-  "version": "2.140.6",
+  "version": "2.140.7",
   "license": "FSL-1.1-ALv2",
   "private": true,
   "type": "module",
