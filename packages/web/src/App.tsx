@@ -1,5 +1,5 @@
 import { useEscapeOwner } from './lib/overlayStack'
-import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
+import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback, useSyncExternalStore } from 'react'
 import { Outlet, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { version } from '../../../package.json'
@@ -107,7 +107,8 @@ import { loadSharedPrefs, loadPersonalPrefs, putPersonal, migrateLocalOnce } fro
 import { applyTextScale, clampTextScale, readLocalTextScale, writeLocalTextScale } from './lib/textScale'
 import { journalBackfillPollMs } from './lib/journalBackfill'
 import { initialLang } from './lib/lang'
-import { fleetOpenStore, sessionsFiltersOpenStore, studioSeenStore } from './lib/appFlags'
+import { fleetOpenStore, sessionsFiltersOpenStore, sessionTabsStore, studioSeenStore } from './lib/appFlags'
+import { SessionTabStrip } from './components/sessions/SessionTabStrip'
 import { pageMaxWidth } from './lib/pageWidth'
 import {
   DEFAULT_ORDER, sortSessions, type ControlSession,
@@ -927,6 +928,8 @@ function MobileBottomNav({
  * height and its header row (`AsideHeader`) has this same height, so the two bands stay level.
  */
 const TOPBAR_H = 44
+/** The session tab strip's row above the title line (`SessionTabStrip` is 34px + its hairline). */
+const TABS_ROW_H = 35
 const SIDEBAR_W = 248
 const SIDEBAR_W_COLLAPSED = 64
 /** Room kept between the Filtros / stats tabs and the right-hand aside they hang beside. */
@@ -1961,9 +1964,7 @@ export default function AppLayout() {
    * — but the variable stays, because the sidebar and the page shell read it now and one place
    * deciding where the header ends is the point of it.
    */
-  useEffect(() => {
-    document.documentElement.style.setProperty('--ag-topbar-h', `${isMobile ? 0 : TOPBAR_H}px`)
-  }, [isMobile])
+  // (the `--ag-topbar-h` effect itself sits after `topbarExtra`, below)
 
   /**
    * How much width the DASHBOARD's own inline `FiltersBar` actually has in its strip, and what it
@@ -2242,6 +2243,17 @@ export default function AppLayout() {
   const headerSession = splitActive ? undefined : selectedFleetSession
   const headerSessionRow = splitActive ? undefined : selectedSessionRow
   const headerMuted = useSessionMuted(headerSession)
+  /**
+   * SESSION TABS, desktop single pane: the strip is the FIRST row of the top area, above the title
+   * line (owner 2026-10-17, VS Code order). Flag OFF, a phone, a split (each pane carries its own
+   * strip above its own header, `SessionsPage`) and every other page: no row, `--ag-topbar-h` as ever.
+   */
+  const sessionTabsOn = useSyncExternalStore(sessionTabsStore.subscribe, sessionTabsStore.get, sessionTabsStore.serverSnapshot)
+  const tabsRowOn = sessionTabsOn && !isMobile && headerSession !== undefined
+  const topbarExtra = tabsRowOn ? TABS_ROW_H : 0
+  useEffect(() => {
+    document.documentElement.style.setProperty('--ag-topbar-h', `${isMobile ? 0 : TOPBAR_H + topbarExtra}px`)
+  }, [isMobile, topbarExtra])
   const awayGlobal = useAway()
 
   /**
@@ -4450,6 +4462,19 @@ export default function AppLayout() {
           // carries its own top border 5px below this strip — see `SessionsPage.tsx`'s
           // `CENTRAL_PANE` and `TopBar`'s own doc comment on `noBottomBorder`.
           noBottomBorder
+          {...(tabsRowOn && headerSession ? {
+            aboveHeight: TABS_ROW_H,
+            above: (
+              <SessionTabStrip
+                lang={lang === 'pt' ? 'pt' : 'en'}
+                rows={headerFleet.rows}
+                fleetReady={!headerFleetUnsupported && headerFleet.rows.length > 0}
+                active={headerSession}
+                onGo={id => navigate(sessionPath(id))}
+                onNone={() => navigate('/sessions')}
+              />
+            ),
+          } : {})}
           {...(stripTrailing ? { trailing: stripTrailing, trailingFlush: true } : {})}
         />
       )}
