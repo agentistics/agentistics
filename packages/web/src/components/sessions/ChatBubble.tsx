@@ -302,7 +302,13 @@ const sysBtn: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 4, padding: 0, border: 'none', background: 'none',
   font: 'inherit', color: 'inherit', cursor: 'pointer', minWidth: 0,
 }
-const sysLink: React.CSSProperties = { ...sysBtn, color: 'var(--anthropic-orange)', flexShrink: 0, whiteSpace: 'nowrap' }
+// Contrast (WCAG, measured): text = 72% --text-primary → ≥7:1 dark / ≥7:1 light. Link = orange mixed
+// 65/35 into --text-primary → ≈9:1 dark, ≈5.0:1 light on --bg-base (the bare orange is 2.8:1 in light).
+const SYS_TEXT = 'color-mix(in srgb, var(--text-primary) 72%, transparent)'
+const SYS_LINK = 'color-mix(in srgb, var(--anthropic-orange) 65%, var(--text-primary))'
+const sysLink: React.CSSProperties = { ...sysBtn, color: SYS_LINK, flexShrink: 0, whiteSpace: 'nowrap' }
+/** Touch target: the BUTTON is 44px tall on a phone, the negative margin gives the height back to the row. */
+const touch = (isMobile: boolean): React.CSSProperties => (isMobile ? { minHeight: 44, margin: '-8px 0' } : {})
 
 /**
  * A system event or notice as one inline line: muted small text centred between two hairlines
@@ -310,12 +316,12 @@ const sysLink: React.CSSProperties = { ...sysBtn, color: 'var(--anthropic-orange
  * definition so notes and event rows cannot drift.
  */
 function SystemLine({ children, below, isMobile = false }: { children: React.ReactNode; below?: React.ReactNode; isMobile?: boolean }) {
-  const hair: React.CSSProperties = { flex: 1, height: 1, background: 'var(--border-subtle)', minWidth: 12 }
+  const hair: React.CSSProperties = { flex: 1, height: 1, background: 'var(--border)', minWidth: 12 }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: 0 }}>
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: isMobile ? '6px 0' : '4px 0',
-        fontSize: 11, lineHeight: 1.4, color: 'var(--text-tertiary)',
+        display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '4px 0',
+        fontSize: 11, lineHeight: 1.4, color: SYS_TEXT,
       }}>
         <span aria-hidden style={hair} />
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, maxWidth: '88%', minWidth: 0 }}>{children}</span>
@@ -337,7 +343,7 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
   if (note.includes('agentistics_checkin_report')) {
     return <SystemLine isMobile={isMobile}>
       <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('agentistics:open-checkin'))}
-        style={{ ...sysLink, minHeight: isMobile ? 44 : undefined }}>
+        style={{ ...sysLink, ...touch(isMobile) }}>
         {pt ? 'Abrir check-in' : 'Open check-in'}
       </button>
     </SystemLine>
@@ -351,10 +357,10 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
           // searched — the limitation CLAUDE.md records — and the body named the thing all along.
           onClick={() => openArtifacts(tab satisfies ChatNoteTab, noteRef)}
           {...(help ? { title: help, 'aria-label': `${label} — ${help}` } : {})}
-          style={{ ...sysBtn, minHeight: isMobile ? 44 : undefined }}
+          style={{ ...sysBtn, ...touch(isMobile) }}
         >
           <span style={text}>{label}</span>
-          <ArrowUpRight size={13} style={{ flexShrink: 0, color: 'var(--anthropic-orange)' }} />
+          <ArrowUpRight size={13} style={{ flexShrink: 0, color: SYS_LINK }} />
         </button>
       </SystemLine>
     )
@@ -367,7 +373,7 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
       isMobile={isMobile}
       below={shown && help !== null && (
         <span role="note" style={{
-          fontSize: 11, lineHeight: 1.45, color: 'var(--text-tertiary)', maxWidth: '80%', textAlign: 'center', paddingBottom: 4,
+          fontSize: 11, lineHeight: 1.45, color: SYS_TEXT, maxWidth: '80%', textAlign: 'center', paddingBottom: 4,
         }}>{help}</span>
       )}
     >
@@ -376,7 +382,7 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
         aria-expanded={shown}
         disabled={help === null}
         {...(help ? { title: help } : {})}
-        style={{ ...sysBtn, cursor: help === null ? 'default' : 'help', minHeight: isMobile ? 44 : undefined }}
+        style={{ ...sysBtn, cursor: help === null ? 'default' : 'help', ...touch(isMobile) }}
       >
         <span style={text}>{label}{help !== null && ' ⓘ'}</span>
       </button>
@@ -1270,7 +1276,7 @@ export function SystemEventRow({ event, pt, sessionId, titleOf, defaultOpen = fa
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        style={{ ...sysBtn, gap: 5, minHeight: isMobile ? 44 : undefined }}
+        style={{ ...sysBtn, gap: 5, ...touch(isMobile) }}
       >
         <Info size={14} style={{ flexShrink: 0 }} />
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{systemEventLine(event, pt, event.sender ? titleOf?.(event.sender) : undefined)}</span>
@@ -1279,7 +1285,7 @@ export function SystemEventRow({ event, pt, sessionId, titleOf, defaultOpen = fa
       {event.kind === 'checkin' && <button
         type="button"
         onClick={() => window.dispatchEvent(new CustomEvent('agentistics:open-checkin', { detail: { sessionId } }))}
-        style={{ ...sysLink, minHeight: isMobile ? 44 : undefined }}
+        style={{ ...sysLink, ...touch(isMobile) }}
       >{pt ? 'Abrir check-in' : 'Open check-in'}</button>}
     </SystemLine>
   )
