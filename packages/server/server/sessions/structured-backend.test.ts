@@ -161,12 +161,41 @@ describe('structuredRegistry / stubDriver / answerFits (engine-api, pure)', () =
 })
 
 describe('withStructured — routing', () => {
+  test('a refused conversation link is reported again on a later list(), then never once it links', async () => {
+    const base = fakeBase()
+    const eng = fakeEngine()
+    const answers: Array<{ retry: true } | undefined> = [{ retry: true }, undefined]
+    const conv: string[] = []
+    const b = withStructured(base, provider(eng.reg, { onConversation: async (id, c) => { conv.push(`${id}:${c}`); return answers.shift() } }))
+    await b.spawn(web('gemini'))
+    await new Promise(r => setTimeout(r, 0))
+    expect(conv).toEqual(['m-1:offered'])
+    await b.list()
+    await new Promise(r => setTimeout(r, 0))
+    expect(conv).toEqual(['m-1:offered', 'm-1:offered'])
+    await b.list()
+    await new Promise(r => setTimeout(r, 0))
+    expect(conv).toEqual(['m-1:offered', 'm-1:offered'])
+  })
+
+  test('a refused link with retryMs waits that long before reporting again', async () => {
+    const base = fakeBase()
+    const eng = fakeEngine()
+    const conv: string[] = []
+    const b = withStructured(base, provider(eng.reg, { onConversation: async (id) => { conv.push(id); return { retry: true, retryMs: 60_000 } } }))
+    await b.spawn(web('gemini'))
+    await new Promise(r => setTimeout(r, 0))
+    await b.list()
+    await new Promise(r => setTimeout(r, 0))
+    expect(conv).toEqual(['m-1'])
+  })
+
   test('flag ON + web-born + ready driver: started over the protocol with everything the intent carries', async () => {
     const base = fakeBase()
     const eng = fakeEngine()
     const conv: Array<[string, string]> = []
     const startedAs: Array<[string, string]> = []
-    const b = withStructured(base, provider(eng.reg, { onConversation: (id, c) => conv.push([id, c]), onStarted: (id, d) => startedAs.push([id, d]) }))
+    const b = withStructured(base, provider(eng.reg, { onConversation: (id, c) => { conv.push([id, c]) }, onStarted: (id, d) => startedAs.push([id, d]) }))
     await b.spawn(web('gemini'))
     expect(base.calls.map(c => c[0])).not.toContain('spawn')
     expect(eng.started).toEqual([{

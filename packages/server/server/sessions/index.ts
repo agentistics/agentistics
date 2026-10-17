@@ -82,11 +82,16 @@ export async function resolveBackend(): Promise<SessionBackend> {
       onStarted(id, driver) {
         void import('./registry').then(r => r.patchSession(id, { structuredDriver: driver })).catch(() => {})
       },
-      onConversation(id, conversationId) {
-        // Refused (and logged) when another row owns that conversation — CROSSBIND, `registry.ts`.
-        void import('./registry').then(r => r.linkConversationVerified(id, {
+      async onConversation(id, conversationId) {
+        // Refused (and logged) when another row owns that conversation — CROSSBIND, `registry.ts`. A
+        // contended lock is retried on the next poll; a live holder later, in case it ends.
+        const r = await import('./registry')
+        const out = await r.linkConversationVerified(id, {
           conversationId, conversationLink: 'assigned', conversationLinkVia: 'protocol-stated',
-        }, () => composite ? composite.list() : Promise.reject(new Error('no backend')))).catch(() => {})
+        }, () => composite ? composite.list() : Promise.reject(new Error('no backend'))).catch(() => null)
+        if (!out) return { retry: true, retryMs: 30_000 }
+        if (out.ok) return
+        return out.contended ? { retry: true } : { retry: true, retryMs: 30_000 }
       },
       async prepare() {
         const { ensureSessionIdentityKey } = await import('./session-identity')
