@@ -163,7 +163,7 @@ export function withSearchFields<T extends Record<string, unknown>>(row: T): T {
       note: String(row.note ?? ''), task: String(row.task ?? ''),
       prompt: String(wire?.p ?? ''),
     },
-  }
+  } as unknown as T
 }
 
 export function normalizeFleetPayload(raw: FleetPayload): FleetPayload {

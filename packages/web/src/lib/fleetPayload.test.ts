@@ -56,8 +56,8 @@ describe('search index on every row', () => {
 
   test('a non-empty `rows` list also gets searchFields (the wire strips them)', () => {
     const out = normalizeFleetPayload({ sessions: [wireRow], rows: [wireRow], tasks: [], finishedTasks: [] } as unknown as FleetPayload)
-    expect(out.rows[0].searchFields.name).toBe('Fix login Original title')
-    expect(out.rows[0].searchFields.prompt).toBe('hello')
+    expect(out.rows[0]!.searchFields.name).toBe('Fix login Original title')
+    expect(out.rows[0]!.searchFields.prompt).toBe('hello')
     expect((out.rows[0] as unknown as Record<string, unknown>).search).toBeUndefined()
   })
 
