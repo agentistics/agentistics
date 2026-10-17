@@ -128,23 +128,33 @@ const normRoot = (root: string | null | undefined): string | null => root == nul
  * probe keyed by `orgId` (or the e-mail) alone before it keyed by `orgId:email`, and a harness with no
  * identity probe recorded `default` before the default root got its `root:<hash>` key. A changed
  * spelling minted a second account for one login, whose last meter then showed as a second plan.
- * Claude also needs the same label (the e-mail): an org id alone is shared by a team's members.
+ * Equal keys are NOT proof on their own: claude's legacy org-only key is shared by every member of a
+ * team, so it also needs the same meaningful e-mail label, and the probe-less `default` key names no
+ * login at all, so it also needs the same root. Claude's other spellings need the same e-mail too.
  */
 export function sameLogin(
   a: Pick<HarnessAccount, 'harness' | 'key' | 'label' | 'root'>,
   b: Pick<HarnessAccount, 'harness' | 'key' | 'label' | 'root'>,
 ): boolean {
   if (a.harness !== b.harness) return false
-  if (a.key === b.key) return true
+  if (a.key === 'default' || b.key === 'default') {
+    // The unknown identity: only the same directory can say it is the same login.
+    if (a.key === b.key) return normRoot(a.root) === normRoot(b.root)
+    if (a.harness === 'claude' || IDENTITY_PROBES[a.harness] !== null) return false
+    const [legacy, rooted] = a.key === 'default' ? [a, b] : [b, a]
+    return legacy.root === null && rooted.root === null && rooted.key.startsWith('root:')
+  }
   if (a.harness === 'claude') {
-    if (a.key === 'default' || b.key === 'default') return false
-    if (a.label.trim().toLowerCase() !== b.label.trim().toLowerCase()) return false
+    const email = (label: string) => { const l = label.trim().toLowerCase(); return l.includes('@') ? l : null }
+    // A key carrying the e-mail (`org:email` or the e-mail alone) names the person by itself.
+    if (a.key === b.key && a.key.includes('@')) return true
+    const ea = email(a.label)
+    if (!ea || ea !== email(b.label)) return false
+    if (a.key === b.key) return true
     const parts = (k: string) => { const i = k.indexOf(':'); return i < 0 ? [k] : [k.slice(0, i), k.slice(i + 1)] }
     return parts(a.key).includes(b.key) || parts(b.key).includes(a.key)
   }
-  if (IDENTITY_PROBES[a.harness] !== null) return false
-  const [legacy, rooted] = a.key === 'default' ? [a, b] : [b, a]
-  return legacy.key === 'default' && legacy.root === null && rooted.root === null && rooted.key.startsWith('root:')
+  return a.key === b.key
 }
 
 /** An id as the registry knows it now: an alias resolves to the account it was merged into. */
@@ -414,7 +424,8 @@ export function createHarnessAccounts(options: {
   async function update(id: string, patch: { available?: boolean; nickname?: string }): Promise<HarnessAccount | null> {
     return serial(async () => {
       const data = await read()
-      const account = data.accounts.find(a => a.id === id)
+      const at = canonicalAccountId(data, id)
+      const account = data.accounts.find(a => a.id === at)
       if (!account) return null
       if (patch.available !== undefined) account.available = patch.available
       if (patch.nickname !== undefined) {
@@ -444,8 +455,9 @@ export function createHarnessAccounts(options: {
     async startSegment(id: string, ms: number): Promise<void> {
       return serial(async () => {
         const data = await read()
-        if (!data.accounts.some(a => a.id === id)) return
-        data.segments[id] = Math.max(data.segments[id] ?? 0, ms)
+        const at = canonicalAccountId(data, id)
+        if (!data.accounts.some(a => a.id === at)) return
+        data.segments[at] = Math.max(data.segments[at] ?? 0, ms)
         await write(data)
       })
     },
@@ -454,7 +466,8 @@ export function createHarnessAccounts(options: {
     async retire(id: string): Promise<HarnessAccount | null> {
       return serial(async () => {
         const data = await read()
-        const account = data.accounts.find(a => a.id === id)
+        const at = canonicalAccountId(data, id)
+        const account = data.accounts.find(a => a.id === at)
         if (!account) return null
         account.retired = true
         account.available = false

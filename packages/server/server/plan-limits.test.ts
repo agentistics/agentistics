@@ -1021,7 +1021,7 @@ test('one login stored under two account ids shows ONE plan row, the live one, w
   expect(after.budgets.filter(b => b.harness === 'claude').map(b => [b.account, b.fiveHourPct])).toEqual([['acc_new000000000', 20]])
 })
 
-test('genuinely different accounts each carry their own label; a stale one never drives routing', async () => {
+test('two real Claude Max accounts both keep capacity and routing, even when one meter is stale', async () => {
   const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async (_h, root) => root === null
     ? { key: `${ORG}:a@example.invalid`, label: 'a@example.invalid' }
     : { key: `${ORG}:b@example.invalid`, label: 'b@example.invalid' } })
@@ -1031,8 +1031,9 @@ test('genuinely different accounts each carry their own label; a stale one never
   await store.setNickname(b.id, 'Work')
   expect(a.id).not.toBe(b.id)
   const now = Date.now()
+  // A is fresh and at its limit; B was read hours ago and has room. Same plan name, different people.
   await ingestPlanLimits({ harness: 'claude', account: a.id, plan: 'Claude Max 5x', source: 'claude-usage-api', updatedAt: now - 60_000,
-    windows: [{ kind: '5h', usedPct: 80, resetsAt: now + 3_600_000 }, { kind: 'week', usedPct: 70, resetsAt: now + 86_400_000 }] })
+    windows: [{ kind: '5h', usedPct: 100, resetsAt: now + 3_600_000 }, { kind: 'week', usedPct: 70, resetsAt: now + 86_400_000 }] })
   await ingestPlanLimits({ harness: 'claude', account: b.id, plan: 'Claude Max 5x', source: 'claude-usage-api', updatedAt: now - 3 * 3_600_000,
     windows: [{ kind: '5h', usedPct: 0, resetsAt: now + 3_600_000 }, { kind: 'week', usedPct: 5, resetsAt: now + 86_400_000 }] })
   const body = await planLimitsPayload(undefined, now)
@@ -1041,10 +1042,10 @@ test('genuinely different accounts each carry their own label; a stale one never
   expect(JSON.stringify(rows)).not.toContain('@example.invalid')
   const stale = rows.find(r => r.account === b.id)!
   expect(stale.stale).toBe(true)
-  expect(stale.yieldsTo).toBe(a.id)
-  expect(stale.suggestedParallel).toBe(0)
-  expect(stale.freeSlots).toBe(0)
+  expect(stale.yieldsTo).toBeUndefined()
+  expect(stale.freeSlots).toBeGreaterThan(0)
+  expect(body.freeSlotsByAccount[b.id]).toBeGreaterThan(0)
   const rec = routeRecommendation(body.budgets, 'lead')
-  expect(rec.account).toBe(a.id)
-  expect(rec.accountAlternatives.some(x => x.account === b.id)).toBe(false)
+  expect(rec.account).toBe(b.id)
 })
+

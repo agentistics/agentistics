@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile, stat, chmod, symlink } from 'n
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readdir } from 'node:fs/promises'
-import { codexIdentity, createHarnessAccounts, probeAccountIdentity, __setHarnessAccountsForTest, IDENTITY_PROBES, ISOLATION_ENV } from './harness-accounts'
+import { codexIdentity, createHarnessAccounts, probeAccountIdentity, sameLogin, __setHarnessAccountsForTest, IDENTITY_PROBES, ISOLATION_ENV } from './harness-accounts'
 import { handleAccountsRequest } from './accounts-web'
 import { routeCapability } from './capability-guard'
 
@@ -464,4 +464,53 @@ test('registry twins are folded on read: bindings, segments and an alias follow 
   expect((await store.byId('acc_gemlegacy0000'))?.id).toBe('acc_gemroot00000')
   // The fold is persisted, so every process reads the same single record.
   expect(JSON.parse(await readFile(file, 'utf8')).accounts).toHaveLength(1)
+})
+
+test('equal keys alone never fold: an org-only key needs the same e-mail, `default` the same root', () => {
+  const org = '00000000-0000-4000-8000-000000000004'
+  const rec = (key: string, label: string, root: string | null = null, harness: 'claude' | 'gemini' = 'claude') => ({ harness, key, label, root })
+  // Two people of one team org, recorded under the legacy org-only key.
+  expect(sameLogin(rec(org, 'a@example.invalid'), rec(org, 'b@example.invalid'))).toBe(false)
+  expect(sameLogin(rec(org, org), rec(org, org))).toBe(false)
+  expect(sameLogin(rec(org, 'A@example.invalid'), rec(org, 'a@example.invalid'))).toBe(true)
+  expect(sameLogin(rec(`${org}:a@example.invalid`, 'a@example.invalid'), rec(`${org}:a@example.invalid`, 'a@example.invalid'))).toBe(true)
+  expect(sameLogin(rec('default', 'Conta padrão'), rec('default', 'Conta padrão'))).toBe(true)
+  expect(sameLogin(rec('default', 'Conta padrão', '/x'), rec('default', 'Conta padrão', '/y'))).toBe(false)
+  // Probe-less `default`: only a compatible root says it is one login.
+  expect(sameLogin(rec('default', 'Conta padrão', '/home/a/.gemini', 'gemini'), rec('default', 'Conta padrão', '/home/b/.gemini', 'gemini'))).toBe(false)
+  expect(sameLogin(rec('default', 'Conta padrão', '/home/a/.gemini', 'gemini'), rec('default', 'Conta padrão', '/home/a/.gemini/', 'gemini'))).toBe(true)
+})
+
+test('a registry holding two teammates under one org-only key keeps both on read', async () => {
+  const file = join(dir, 'accounts.json')
+  const org = '00000000-0000-4000-8000-000000000005'
+  await writeFile(file, JSON.stringify({ version: 2, segments: {}, bindings: {}, accounts: [
+    { id: 'acc_mate_a000000', root: null, key: org, harness: 'claude', label: 'a@example.invalid', available: true, firstSeen: 1, lastSeen: 2 },
+    { id: 'acc_mate_b000000', root: '/tmp/b', key: org, harness: 'claude', label: 'b@example.invalid', available: true, firstSeen: 1, lastSeen: 3 },
+    { id: 'acc_gem_a0000000', root: '/tmp/ga', key: 'default', harness: 'gemini', label: 'Conta padrão', available: true, firstSeen: 1, lastSeen: 2 },
+    { id: 'acc_gem_b0000000', root: '/tmp/gb', key: 'default', harness: 'gemini', label: 'Conta padrão', available: true, firstSeen: 1, lastSeen: 3 },
+  ] }))
+  const data = await createHarnessAccounts({ file }).readAccounts()
+  expect(data.accounts.map(a => a.id).sort()).toEqual(['acc_gem_a0000000', 'acc_gem_b0000000', 'acc_mate_a000000', 'acc_mate_b000000'])
+  expect(data.aliases).toBeUndefined()
+})
+
+test('a writer holding an id that was folded away writes to the survivor', async () => {
+  const file = join(dir, 'accounts.json')
+  await writeFile(file, JSON.stringify({ version: 2, segments: {}, bindings: { 'gemini:': 'acc_gemroot00000' }, accounts: [
+    { id: 'acc_gemlegacy0000', root: null, key: 'default', harness: 'gemini', label: 'Conta padrão', available: true, firstSeen: 1, lastSeen: 5 },
+    { id: 'acc_gemroot00000', root: null, key: 'root:abcdef012345', harness: 'gemini', label: 'Default account', available: true, firstSeen: 3, lastSeen: 9 },
+  ] }))
+  // Its own locked read performs the fold: the nickname still lands.
+  const writer = createHarnessAccounts({ file })
+  expect((await writer.update('acc_gemlegacy0000', { nickname: 'Home' }))?.id).toBe('acc_gemroot00000')
+  // Another store folded it long ago; this one still holds the old id.
+  await createHarnessAccounts({ file }).readAccounts()
+  expect((await writer.update('acc_gemlegacy0000', { available: false }))?.available).toBe(false)
+  await writer.startSegment('acc_gemlegacy0000', 77)
+  expect((await writer.retire('acc_gemlegacy0000'))?.id).toBe('acc_gemroot00000')
+  const disk = JSON.parse(await readFile(file, 'utf8'))
+  expect(disk.accounts).toHaveLength(1)
+  expect(disk.accounts[0]).toMatchObject({ id: 'acc_gemroot00000', nickname: 'Home', available: false, retired: true })
+  expect(disk.segments).toEqual({ acc_gemroot00000: 77 })
 })

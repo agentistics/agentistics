@@ -23,7 +23,7 @@ import {
 } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, ANTIGRAVITY_DIR, CLAUDE_DIR, CODEX_DIR, CODEX_SESSIONS_DIR, COPILOT_DIR, GEMINI_DIR, KIMI_DIR, OPENCODE_DIR } from './config'
 import {
-  bind, byId, canonicalAccountId, forceProbe, hasIdentityProbe, listHarnessAccounts, readAccounts, startSegment, type AccountsFile,
+  bind, byId, canonicalAccountId, forceProbe, sameLogin, hasIdentityProbe, listHarnessAccounts, readAccounts, startSegment, type AccountsFile,
 } from './harness-accounts'
 import { readTailBytes, windowLines } from './sessions/transcript-window'
 import { harnessSpawnabilities, type HarnessSpawnability } from './sessions/harness-spawnable'
@@ -692,7 +692,7 @@ export async function planLimitsPayload(
   }
   const belongsTo = (s: LivePlanSession, l: PlanLimits) =>
     (!s.harness || s.harness === l.harness) && s.account === l.account
-  const allBudgets: AccountBudgetRow[] = yieldStaleRows(limits.map(l => {
+  const allBudgets: AccountBudgetRow[] = limits.map(l => {
     const budget = planBudget(l, nowMs)
     // Only measured sessions enter planSlots' per-session average. Working sessions with no
     // billed tokens remain in the public live summary, without diluting the measured burn.
@@ -702,10 +702,19 @@ export async function planLimitsPayload(
       ...(!availability.spawnable ? { freeSlots: 0, suggestedParallel: 0 } : {}),
       account: l.account, accountLabel: labelOf(l.harness, l.account),
     }
-  }))
-  const budgets = agentVisible(allBudgets, visibility)
-  const shown = new Set(budgets)
+  })
+  const visibleBudgets = agentVisible(allBudgets, visibility)
+  const shown = new Set(visibleBudgets)
   const hiddenFromAgents = allBudgets.filter(b => !shown.has(b))
+  // Only rows agents may see compete, and only an account the registry says is the same login.
+  const recordOf = (id: string) => registry.accounts.find(a => a.id === id)
+  const sameAccount = (x: string, y: string) => {
+    const cx = canonicalAccountId(registry, x), cy = canonicalAccountId(registry, y)
+    if (cx === cy) return true
+    const rx = recordOf(cx), ry = recordOf(cy)
+    return !!rx && !!ry && sameLogin(rx, ry)
+  }
+  const budgets = yieldStaleRows(visibleBudgets, sameAccount)
   // Plans registered in Settings → Billing whose account has reported no window yet: listed by
   // name with NO meters (nothing observed is not nothing used). Hidden accounts are absent.
   const registered: PlanLimitsPayload['registered'] = []
