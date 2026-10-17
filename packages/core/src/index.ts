@@ -101,3 +101,4 @@ export { applyDataPatch, planDataPatch, dataSessionKey, type DataPatch } from '.
 export * from './planLimits'
 export * from './awayMode'
 export * from './newProject'
+export * from './injectedHeader'

@@ -79,7 +79,7 @@ import {
 } from '../../lib/quoteCards'
 import { ROW_FLASH } from '../../lib/noteFocus'
 import { pendingEchoes, sessionIdentityKey } from '@agentistics/core'
-import { shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
+import { personQueuedCount, shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { CenteredLoader } from '../CenteredLoader'
@@ -2012,8 +2012,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const [sendNowRun, setSendNowRun] = useState<SendNowRun | null>(null)
   const queuedRef = useRef(queued)
   queuedRef.current = queued
+  const queuedPersonCount = useMemo(() => personQueuedCount(queued), [queued])
   const showSendNow = sendNowShown({
-    harness: session.harness, working, queuedCount: queued.length, dialogOpen: blocked,
+    harness: session.harness, working, queuedCount: queuedPersonCount, dialogOpen: blocked,
   }) && sendNowRun?.kind !== 'running'
   const sendNow = useCallback(async () => {
     setSendNowRun({ kind: 'running', startedAt: Date.now() })
@@ -2459,6 +2460,22 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     if (!out.confirm) setNotice(out.message)
   }
 
+  // Hooks stay ABOVE the `unavailable` early return: an ended session with no transcript renders that
+  // branch, and a hook below it changes the hook count between renders (React #300).
+  // ESCAPE, ONE STEP AT A TIME, through the overlay stack: each picker (/ skills, @ tools, # sessions)
+  // and answering mode closes first, so dismissing a list opened by accident never also reaches the
+  // stop verb — which stays the composer's own, and only sees Escape when nothing here is open.
+  useEscapeOwner(skillPickerOpen && !payload?.unavailable, () => setSlashDismissed(true))
+  useEscapeOwner(hashOpen && !payload?.unavailable, () => setHashDismissed(true))
+  useEscapeOwner(atOpen && !payload?.unavailable, () => {
+    setAtDismissed(true)
+    // Closing the picker ends the pick, so the open `@server:` it left for the NEXT one is
+    // scaffolding now — see `dropEmptyAtTrigger`.
+    setDraft(d => dropEmptyAtTrigger(d))
+  })
+  // ANSWERING MODE LETS GO FIRST: "I am not answering with my own words after all" — the draft is kept.
+  useEscapeOwner(answeringNow && !payload?.unavailable, () => setAnswering(null))
+
   if (payload?.unavailable) {
     return (
       <Centered>
@@ -2475,20 +2492,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       </Centered>
     )
   }
-
-  // ESCAPE, ONE STEP AT A TIME, through the overlay stack: each picker (/ skills, @ tools, # sessions)
-  // and answering mode closes first, so dismissing a list opened by accident never also reaches the
-  // stop verb — which stays the composer's own, and only sees Escape when nothing here is open.
-  useEscapeOwner(skillPickerOpen, () => setSlashDismissed(true))
-  useEscapeOwner(hashOpen, () => setHashDismissed(true))
-  useEscapeOwner(atOpen, () => {
-    setAtDismissed(true)
-    // Closing the picker ends the pick, so the open `@server:` it left for the NEXT one is
-    // scaffolding now — see `dropEmptyAtTrigger`.
-    setDraft(d => dropEmptyAtTrigger(d))
-  })
-  // ANSWERING MODE LETS GO FIRST: "I am not answering with my own words after all" — the draft is kept.
-  useEscapeOwner(answeringNow, () => setAnswering(null))
 
   return (
     <div
@@ -2592,12 +2595,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
             />
           ))}
 
-          {/* SEND NOW, under the LAST queued bubble: the queue is one group and this acts on the
-              whole of it. Only while claude is working with something held (`sendNowShown`) — idle,
-              nothing is held, and elsewhere the keystroke does not exist. */}
+          {/* Only the person's queued messages offer send-now and contribute to its count.
+              The action still submits the harness's whole queue, including any system notices. */}
           <SendNowControl
             offered={showSendNow}
-            count={queued.length}
+            count={queuedPersonCount}
             run={sendNowRun}
             pt={pt}
             onSend={() => void sendNow()}

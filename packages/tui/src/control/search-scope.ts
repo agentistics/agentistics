@@ -185,7 +185,7 @@ export function matchScopes(
 
   const hit: SearchScope[] = []
   for (const scope of OWN_SCOPES) {
-    if (on(scope) && fields[scope].toLowerCase().includes(q)) hit.push(scope)
+    if (on(scope) && (fields?.[scope] ?? '').toLowerCase().includes(q)) hit.push(scope)
   }
   if (found.transcript && on('transcript')) hit.push('transcript')
   return hit

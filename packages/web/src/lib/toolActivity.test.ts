@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { fmtSpan, groupConsecutive, groupPerExchange, groupSpanMs, kindOf, markTrailingRunning, objectOf, stepVerb, stepsOfTurn, summarize, type TurnLike } from './toolActivity'
+import { fmtSpan, groupConsecutive, groupPerExchange, groupSpanMs, kindOf, markTrailingRunning, objectOf, stepVerb, stepsOfTurn, summarize, type ActivityKind, type ActivityStep, type TurnLike } from './toolActivity'
 
 describe('kindOf — one rule for every harness', () => {
   test.each([
@@ -155,5 +155,127 @@ describe('CHAT.ACTIVITY fix r1', () => {
   test('compacting after tools: treated as not working, the last tool is not running', () => {
     const items = markTrailingRunning(groupConsecutive([user, mk('2026-10-16T10:00:01Z', 'a', true)]), false)
     expect(JSON.stringify(items)).not.toContain('"status":"running"')
+  })
+})
+
+
+describe('CHAT.ACTIVITY P3 — generic tool grammar', () => {
+  const cases = ([true, false] as const).flatMap(pt => [true, false].flatMap(running =>
+    [0, 1, 2].flatMap(commands => [0, 1, 2].flatMap(mcp => [0, 1, 2].map(other => {
+      const calls = [
+        ...Array.from({ length: commands }, () => ({ name: 'Bash' })),
+        ...Array.from({ length: mcp }, () => ({ name: 'mcp__test__call' })),
+        ...Array.from({ length: other }, () => ({ name: 'unknown_tool' })),
+      ]
+      // Explicit singular/plural wording, including a generic-only run and an empty run.
+      const runWords = pt
+        ? (running ? ['', 'executando um comando', 'executando 2 comandos'] : ['', 'executou um comando', 'executou 2 comandos'])
+        : (running ? ['', 'running a command', 'running 2 commands'] : ['', 'ran a command', 'ran 2 commands'])
+      const mcpWords = pt
+        ? (running ? ['', 'usando uma ferramenta MCP', 'usando 2 ferramentas MCP'] : ['', 'usou uma ferramenta MCP', 'usou 2 ferramentas MCP'])
+        : (running ? ['', 'using an MCP tool', 'using 2 MCP tools'] : ['', 'used an MCP tool', 'used 2 MCP tools'])
+      const genericWords = commands + mcp > 0
+        ? (pt ? ['', 'mais 1 ferramenta', 'mais 2 ferramentas'] : ['', '1 other tool', '2 other tools'])
+        : pt
+          ? (running ? ['', 'usando uma ferramenta', 'usando 2 ferramentas'] : ['', 'usou uma ferramenta', 'usou 2 ferramentas'])
+          : (running ? ['', 'using a tool', 'using 2 tools'] : ['', 'used a tool', 'used 2 tools'])
+      const phrases = [runWords[commands], mcpWords[mcp], genericWords[other]].filter(Boolean) as string[]
+      const joined = phrases.length < 2 ? (phrases[0] ?? '')
+        : phrases.length === 2 ? phrases.join(pt ? ' e ' : ' and ')
+          : `${phrases[0]}, ${phrases[1]} ${pt ? 'e' : 'and'} ${phrases[2]}`
+      return { pt, running, commands, mcp, other, calls, expected: joined ? joined[0]!.toUpperCase() + joined.slice(1) : '' }
+    })))))
+
+  test.each(cases)('$pt / $running: $commands commands, $mcp MCP, $other generic', ({ pt, running, calls, expected }) => {
+    const steps = stepsOfTurn({ role: 'assistant', text: '', tools: calls })
+    expect(summarize(steps, running, pt)).toBe(expected)
+  })
+
+  test.each([
+    [true, 'Criou um arquivo, executou um comando, fez uma busca, mais 2 ações e mais 2 ferramentas'],
+    [false, 'Created a file, ran a command, ran a search, 2 more actions and 2 other tools'],
+  ] as const)('generic counts survive the phrase limit (%s)', (pt, expected) => {
+    const steps = stepsOfTurn({ role: 'assistant', text: '', tools: [
+      { name: 'Write' }, { name: 'Bash' }, { name: 'Grep' }, { name: 'Read' }, { name: 'Read' },
+      { name: 'unknown_tool' }, { name: 'another_tool' },
+    ] })
+    expect(summarize(steps, false, pt)).toBe(expected)
+  })
+})
+
+describe('CHAT.ACTIVITY P3 — step verbs', () => {
+  const words: [ActivityKind, string, string, string, string][] = [
+    ['read', 'Leu', 'Read', 'Lendo', 'Reading'],
+    ['edit', 'Editou', 'Edited', 'Editando', 'Editing'],
+    ['write', 'Criou', 'Created', 'Criando', 'Creating'],
+    ['run', 'Executou', 'Ran', 'Executando', 'Running'],
+    ['search', 'Buscou', 'Searched', 'Buscando', 'Searching'],
+    ['web', 'Consultou', 'Looked up', 'Consultando', 'Looking up'],
+    ['memory', 'Atualizou memória', 'Memory updated', 'Atualizando memória', 'Updating memory'],
+    ['delegate', 'Delegou', 'Delegated', 'Delegando', 'Delegating'],
+    ['plan', 'Atualizou o plano', 'Plan updated', 'Atualizando o plano', 'Updating the plan'],
+    ['skill', 'Carregou skill', 'Skill loaded', 'Carregando skill', 'Loading skill'],
+    ['mcp', 'Usou', 'Used', 'Usando', 'Using'],
+    ['other', 'Usou', 'Used', 'Usando', 'Using'],
+  ]
+  test.each(words)('%s uses active past in pt and preserves en', (kind, pastPt, pastEn, doingPt, doingEn) => {
+    const step: ActivityStep = { kind, name: kind, object: 'target', status: 'done' }
+    expect(stepVerb(step, true)).toBe(pastPt)
+    expect(stepVerb(step, false)).toBe(pastEn)
+    expect(stepVerb({ ...step, status: 'running' }, true)).toBe(doingPt)
+    expect(stepVerb({ ...step, status: 'running' }, false)).toBe(doingEn)
+    expect(stepVerb({ ...step, status: 'unfinished' }, true)).toBe('Sem resultado')
+    expect(stepVerb({ ...step, status: 'unfinished' }, false)).toBe('No result')
+    expect(stepVerb({ ...step, status: 'error' }, true)).toBe('Falhou')
+    expect(stepVerb({ ...step, status: 'error' }, false)).toBe('Failed')
+  })
+})
+
+describe('CHAT.ACTIVITY P3 — patch targets across harnesses', () => {
+  test.each([
+    ['apply_patch', undefined, '*** Begin Patch\n*** Update File: src/a.ts\n@@\n-old\n+new\n*** End Patch', 'a.ts'],
+    ['apply_patch', 'Edit', '*** Begin Patch\n*** Add File: src/new file.ts\n+content\n*** End Patch', 'new file.ts'],
+    ['apply_patch', undefined, '*** Begin Patch\n*** Delete File: src/old.ts\n*** End Patch', 'old.ts'],
+    ['apply_patch', undefined, '*** Begin Patch\r\n*** Update File: src/a.ts\r\n*** Add File: src/b.ts\r\n*** Delete File: src/c.ts\r\n*** Update File: src/a.ts\r\n*** End Patch', 'a.ts, b.ts, c.ts'],
+    ['exec', undefined, "apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: src/a.ts\n*** Add File: src/b.ts\n*** End Patch\nPATCH", 'a.ts, b.ts'],
+    ['apply_patch', undefined, undefined, 'apply_patch'],
+    ['Edit', undefined, '/repo/src/plain.ts', 'plain.ts'],
+  ] as const)('%s / %s extracts %s', (name, canonical, detail, expected) => {
+    const step = stepsOfTurn({ role: 'assistant', text: '', tools: [{ name, canonical, detail }] })[0]!
+    expect(step.kind).toBe('edit')
+    expect(step.object).toBe(expected)
+    expect(step.detail).toBe(detail)
+    for (const pt of [true, false]) {
+      expect(stepVerb(step, pt)).toBe(pt ? 'Editou' : 'Edited')
+    }
+  })
+})
+
+describe('CHAT.ACTIVITY P3 — unanswered steps are separate from completed activity', () => {
+  test.each([
+    [false, false, 0, 1, '1 step without a result'],
+    [true, false, 0, 1, '1 passo sem resultado'],
+    [false, false, 0, 2, '2 steps without a result'],
+    [true, false, 0, 2, '2 passos sem resultado'],
+    [false, false, 1, 1, 'Read a file · 1 step without a result'],
+    [true, false, 1, 1, 'Leu um arquivo · 1 passo sem resultado'],
+    [false, false, 2, 2, 'Read 2 files · 2 steps without a result'],
+    [true, false, 2, 2, 'Leu 2 arquivos · 2 passos sem resultado'],
+    [false, true, 1, 1, 'Reading a file · 1 step without a result'],
+    [true, true, 1, 1, 'Lendo um arquivo · 1 passo sem resultado'],
+  ] as const)('%s / running %s / %s read / %s unanswered', (pt, running, reads, unanswered, expected) => {
+    const steps = stepsOfTurn({ role: 'assistant', text: '', tools: Array.from({ length: reads }, () => ({ name: 'Read' })) })
+    const pending: ActivityStep[] = Array.from({ length: unanswered }, () => ({ kind: 'run', name: 'Bash', object: 'ls', status: 'unfinished' }))
+    expect(summarize([...steps, ...pending], running, pt)).toBe(expected)
+  })
+
+  test.each([
+    [true, 'Usou uma ferramenta MCP · 1 passo sem resultado'],
+    [false, 'Used an MCP tool · 1 step without a result'],
+  ] as const)('unfinished generic tool does not inflate other-tool counts (%s)', (pt, expected) => {
+    const steps = stepsOfTurn({ role: 'assistant', text: '', tools: [{ name: 'mcp__test__call' }, { name: 'unknown_tool' }], pending: true })
+    const items = markTrailingRunning([{ type: 'activity', group: { key: 'pending', steps, running: true } }], false)
+    const group = (items[0] as { type: 'activity'; group: import('./toolActivity').ActivityGroup }).group
+    expect(summarize(group.steps, group.running, pt)).toBe(expected)
   })
 })

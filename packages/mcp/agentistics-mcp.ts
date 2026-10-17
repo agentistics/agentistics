@@ -632,7 +632,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "agentistics_checkin_report",
-    description: "Report the leadership check-in round. Include a concise headline (<=140 chars), delivered items, in-progress items with stage and expected release, next steps, and health rows (sessions/memory, limits, releases, MCP, handoff). Keep summary as the fallback for older/short rounds. The server records the round, updates the agenda, and adds a checkin activity event to the filed task.",
+    description: "Report the leadership check-in round. The owner reads it and is NOT technical: every field is a short plain-language sentence naming things by what they do — no session ids, commit hashes, PR numbers, ports, limit percentages or internal codenames unless the owner must act on one; a health row only when something needs attention, said in words. Include a concise headline (<=140 chars), delivered items, in-progress items with stage and expected release, next steps, and health rows (sessions/memory, limits, releases, MCP, handoff). Keep summary as the fallback for older/short rounds. The server records the round, updates the agenda, and adds a checkin activity event to the filed task.",
     inputSchema: {
       type: "object",
       properties: {

@@ -1,7 +1,7 @@
 import { test, expect, beforeEach } from 'bun:test'
 import {
   getArtifacts,
-  getArtifactsOf, getPanelFocusRequest, openArtifacts, resetArtifacts, setArtifactCount,
+  getArtifactsOf, getPanelFocusRequest, consumePanelFocusRequest, openArtifacts, resetArtifacts, setArtifactCount,
   setArtifactLive,
 } from './artifactsStore'
 import { resetUnsaved } from './unsavedBuffers'
@@ -79,11 +79,12 @@ test('asking for the same tab/ref twice is still two distinct requests — the s
   expect(second).not.toBe(first)
 })
 
-test('opening without a ref leaves any previous focus request as it was', () => {
+test('opening without a ref still publishes a request (an open panel must visibly respond), with no ref', () => {
   openArtifacts('live', 'step-1')
   const asked = getPanelFocusRequest()
   openArtifacts('live')
-  expect(getPanelFocusRequest()).toBe(asked)
+  expect(getPanelFocusRequest()).not.toBe(asked)
+  expect(getPanelFocusRequest()?.ref).toBeUndefined()
 })
 
 test('resetArtifacts clears both the count and the focus request', () => {
@@ -130,4 +131,14 @@ test('a new count for the same session keeps what it is doing', () => {
   setArtifactLive('a', { kind: 'delegated', text: 'Explore', ref: 'r' })
   setArtifactCount('a', 5)
   expect(getArtifacts().live).toEqual({ kind: 'delegated', text: 'Explore', ref: 'r' })
+})
+
+test('a consumed focus request stays consumed for a remounted reader', () => {
+  openArtifacts('live', 'agent-1')
+  const req = getPanelFocusRequest()!
+  expect(req.consumed).toBeUndefined()
+  consumePanelFocusRequest(req.at)
+  expect(getPanelFocusRequest()!.consumed).toBe(true)
+  openArtifacts('live', 'agent-1')
+  expect(getPanelFocusRequest()!.consumed).toBeUndefined()
 })

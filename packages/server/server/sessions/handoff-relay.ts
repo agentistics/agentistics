@@ -17,7 +17,7 @@
  * agentistics typed in (`[from session …]`, `[from agentistics …]`), nor the context block. Those
  * share the user's role in every transcript and must not be relayed as if the owner had said them.
  */
-import type { ChatTurn } from '@agentistics/core'
+import { parseInjectedHeader, type ChatTurn } from '@agentistics/core'
 
 /** At most this many owner messages travel; older ones are named by count. */
 export const RELAY_MAX_OWNER_MESSAGES = 10
@@ -30,7 +30,24 @@ const NOT_OWNER = /^(?:\[from session\b|\[from agentistics\b|<agentistics-contex
 export function isOwnerTurn(turn: Pick<ChatTurn, 'role' | 'text' | 'system'>): boolean {
   if (turn.role !== 'user' || turn.system) return false
   const text = turn.text.trim()
-  return text.length > 0 && !NOT_OWNER.test(text)
+  // A header makes it someone else's even inside the harness's `<pasted_content>` wrapper.
+  return text.length > 0 && !NOT_OWNER.test(text) && !parseInjectedHeader(text)
+}
+
+/** "Sessão <id> (handback)" for a message another session typed in; null for everything else. */
+export function injectedLabel(turn: Pick<ChatTurn, 'role' | 'text' | 'system'>): string | null {
+  if (turn.role !== 'user' || turn.system) return null
+  const h = parseInjectedHeader(turn.text)
+  return h && h.origin === 'session' ? `Sessão ${h.sender ?? '?'} (${h.kind})` : null
+}
+function injectedMessages(turns: readonly ChatTurn[]): RelayMessage[] {
+  const out: RelayMessage[] = []
+  for (const t of turns) {
+    const label = injectedLabel(t)
+    if (!label) continue
+    out.push({ ...(t.at ? { at: t.at } : {}), text: head(parseInjectedHeader(t.text)!.body, RELAY_MAX_CHARS), label })
+  }
+  return out.slice(-RELAY_MAX_OWNER_MESSAGES)
 }
 
 function after(turn: Pick<ChatTurn, 'at'>, since: string | undefined): boolean {
@@ -50,11 +67,13 @@ function tail(text: string, max: number): string {
   return t.length > max ? `[…] ${t.slice(t.length - max)}` : t
 }
 
-export interface RelayMessage { at?: string; text: string }
+export interface RelayMessage { at?: string; text: string; /** Set on a message another session sent — never the owner. */ label?: string }
 
 export interface HandoffRelay {
   /** Owner messages, oldest first (capped). */
   owner: RelayMessage[]
+  /** Messages other sessions typed in (handbacks, blocks…), labelled with their sender. */
+  injected: RelayMessage[]
   /** Owner messages older than the cap, counted, never silently dropped. */
   omitted: number
   /** The predecessor's reply after the owner's latest message — all its assistant text there. */
@@ -113,6 +132,7 @@ export function planRelay(turns: readonly ChatTurn[], since?: string): HandoffRe
   const cursor = lastTurnAt(turns)
   return {
     owner,
+    injected: injectedMessages(turns.filter(t => after(t, since))),
     omitted: ownerIdx.length - kept.length,
     ...(reply ? { reply } : {}),
     unanswered: last !== undefined && !reply,
@@ -122,6 +142,7 @@ export function planRelay(turns: readonly ChatTurn[], since?: string): HandoffRe
 
 export interface RelayForward {
   owner: RelayMessage[]
+  injected: RelayMessage[]
   reply?: RelayMessage
   /** Where the cursor moves once this was delivered. */
   cursor?: string
@@ -146,14 +167,16 @@ export function planForward(turns: readonly ChatTurn[], cursor: string | undefin
   const nextCursor = lastTurnAt(fresh) ?? cursor
   if (owner.length === 0 && !reply) {
     // Only the predecessor's own chatter moved: advance past it, nothing to deliver.
-    return { owner: [], awaiting: nextAwaiting, ...(nextCursor ? { cursor: nextCursor } : {}) }
+    const injected = injectedMessages(fresh)
+    if (injected.length > 0) return { owner: [], injected, awaiting: nextAwaiting, ...(nextCursor ? { cursor: nextCursor } : {}) }
+    return { owner: [], injected: [], awaiting: nextAwaiting, ...(nextCursor ? { cursor: nextCursor } : {}) }
   }
-  return { owner, ...(reply ? { reply } : {}), awaiting: nextAwaiting, ...(nextCursor ? { cursor: nextCursor } : {}) }
+  return { owner, injected: injectedMessages(fresh), ...(reply ? { reply } : {}), awaiting: nextAwaiting, ...(nextCursor ? { cursor: nextCursor } : {}) }
 }
 
 /** A forward with something in it (as opposed to a cursor move only). */
 export function forwardHasContent(f: RelayForward | null): f is RelayForward {
-  return !!f && (f.owner.length > 0 || f.reply !== undefined)
+  return !!f && (f.owner.length > 0 || f.injected.length > 0 || f.reply !== undefined)
 }
 
 function quote(text: string): string {
@@ -186,6 +209,7 @@ export function relaySection(predecessorId: string, relay: HandoffRelay | null, 
     if (relay.omitted > 0) lines.push(`(${relay.omitted} mensagem(ns) mais antiga(s) do dono omitida(s).)`)
     for (const m of relay.owner) lines.push(`Dono${stamp(m.at)}:`, quote(m.text))
   }
+  for (const m of relay.injected) lines.push(`${m.label}${stamp(m.at)}:`, quote(m.text))
   if (relay.reply) lines.push(`Última resposta do antecessor${stamp(relay.reply.at)}:`, quote(relay.reply.text))
   else if (relay.unanswered) lines.push('A última mensagem do dono ficou SEM resposta na sessão anterior.')
   if (relay.owner.length > 0) {
@@ -202,8 +226,11 @@ export function relaySection(predecessorId: string, relay: HandoffRelay | null, 
 export function forwardText(predecessorId: string, f: RelayForward): string {
   const lines = [`[from agentistics · relay]`, `Chegou na sessão anterior (${predecessorId}) depois da passagem:`]
   for (const m of f.owner) lines.push(`Dono${stamp(m.at)}:`, quote(m.text))
+  for (const m of f.injected) lines.push(`${m.label}${stamp(m.at)}:`, quote(m.text))
   if (f.reply) lines.push(`Resposta do antecessor${stamp(f.reply.at)}:`, quote(f.reply.text))
-  lines.push(f.owner.length > 0
+  lines.push(f.owner.length === 0 && !f.reply
+    ? 'São mensagens de outras sessões, não do dono: trate-as como tal; não há pergunta do dono a responder.'
+    : f.owner.length > 0
     ? 'Responda ao dono aqui (reafirme a resposta do antecessor, se houver) — ele pode não ter visto a sessão anterior.'
     : 'Reafirme esta resposta ao dono aqui — ele pode não tê-la visto na sessão anterior.')
   return lines.join('\n')

@@ -1,4 +1,5 @@
 /** Keep prompt/context payloads out of tmux's command message, independent of the harness. */
+import { lstat, readdir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pasteBufferName, TMUX_SOCKET, tmuxName } from './tmux-cli'
 
@@ -35,7 +36,47 @@ export function planTmuxLaunch(argv: string[], dir: string, nonce: string): {
   const path = join(dir, `launch-${nonce}.sh`)
   // exec preserves the pane pid, signals, terminal and exit status. The script is data on disk;
   // tmux only sees /bin/sh and its short path, never the payload, even for first-message channels.
-  return { argv: ['/bin/sh', path], file: { path, text: `#!/bin/sh\nexec ${argv.map(quote).join(' ')}\n` } }
+  // The launcher deletes itself before anything else: the shell already holds the open file, so the
+  // rest is still read, while the context never outlives the one read tmux's pane makes of it.
+  // Done by the script rather than by the backend because the backend cannot know when the pane
+  // has read it (`new-session` returns before the shell does).
+  return { argv: ['/bin/sh', path], file: { path, text: `#!/bin/sh\nrm -f -- "$0"\nexec ${argv.map(quote).join(' ')}\n` } }
+}
+
+const LAUNCHER_NAME = /^launch-[0-9a-f-]+\.sh$/i
+export const STALE_LAUNCHER_MS = 10 * 60_000
+const SWEEP_MAX_DIRS = 500
+// Where the next sweep starts, so a root holding more than SWEEP_MAX_DIRS directories is covered
+// over successive sweeps instead of the same first slice every time.
+let sweepCursor = 0
+
+/**
+ * Remove launchers a crashed spawn left behind (written, never run). Only files named like the
+ * ones `planTmuxLaunch` makes, directly inside `<root>/<session-id>/`, older than `maxAgeMs`.
+ * Symlinks are never followed — a linked directory or file is skipped, so nothing outside `root` is
+ * touched. Never throws; bounded by `SWEEP_MAX_DIRS` per call, rotating through the rest across calls.
+ * Returns how many were removed.
+ */
+export async function sweepStaleLaunchers(root: string, now = Date.now(), maxAgeMs = STALE_LAUNCHER_MS): Promise<number> {
+  let removed = 0
+  const all = (await readdir(root, { withFileTypes: true }).catch(() => []))
+    .filter(e => e.isDirectory())
+    .map(e => e.name)
+    .sort()
+  if (sweepCursor >= all.length) sweepCursor = 0
+  const dirs = all.slice(sweepCursor, sweepCursor + SWEEP_MAX_DIRS)
+  sweepCursor += dirs.length
+  for (const d of dirs) {
+    const dir = join(root, d)
+    for (const f of await readdir(dir).catch(() => [] as string[])) {
+      if (!LAUNCHER_NAME.test(f)) continue
+      const path = join(dir, f)
+      const st = await lstat(path).catch(() => null)
+      if (!st?.isFile() || now - st.mtimeMs < maxAgeMs) continue
+      if (await unlink(path).then(() => true, () => false)) removed++
+    }
+  }
+  return removed
 }
 
 export function tmuxSpawnError(code: number, out: string, err: string): string {

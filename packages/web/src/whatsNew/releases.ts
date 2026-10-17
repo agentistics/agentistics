@@ -10,6 +10,208 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.140.7': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Buscar sessões não derruba mais a página, e a busca volta a achar sessões pelo nome antigo e pela primeira mensagem.',
+        en: 'Searching sessions no longer breaks the page, and search finds sessions by their former name and first message again.',
+      },
+      {
+        pt: 'Sessões encerradas aparecem no histórico com o nome que tinham, não com um resumo automático.',
+        en: 'Ended sessions show in the history under the name they had, not an automatic summary.',
+      },
+      {
+        pt: '"Só líderes" mostra apenas os líderes ativos, numa lista simples, e o número acompanha a busca e os filtros.',
+        en: '"Leaders only" shows just the active leaders in a plain list, and the count follows search and filters.',
+      },
+      {
+        pt: 'Um worker recém-aberto não toca mais aviso quando "Silenciar workers" está ligado.',
+        en: 'A freshly opened worker no longer rings when "Mute active workers" is on.',
+      },
+      {
+        pt: 'Mensagens enviadas pelo agentistics ou por outra sessão nunca aparecem como se fossem suas, inclusive as repassadas na passagem de líder.',
+        en: 'Messages sent by agentistics or by another session never show as yours, including those forwarded in a leader hand-off.',
+      },
+      {
+        pt: 'Avisos com seta no chat, como "tarefa em segundo plano respondeu", abrem o que mencionam.',
+        en: 'Chat notes with an arrow, like "background task replied", open what they mention.',
+      },
+      {
+        pt: 'A animação de atualização ficou mais leve e não engasga no final.',
+        en: 'The update animation is lighter and no longer stutters at the end.',
+      },
+      {
+        pt: 'Abrir uma sessão encerrada não quebra mais a página.',
+        en: 'Opening an ended session no longer breaks the page.',
+      },
+      {
+        pt: 'Esc fecha o menu de visualização da lista; sessões encerradas oferecem Reabrir em vez de Parar e dizem por que não dá para reabrir quando for o caso.',
+        en: 'Esc closes the list view menu; ended sessions offer Reopen instead of Stop and say why when they cannot be reopened.',
+      },
+      {
+        pt: 'Pastas ocultas abrem e fecham como as outras seções da lateral.',
+        en: 'Hidden folders open and close like the other sidebar sections.',
+      },
+      {
+        pt: 'Arquivos temporários de início de sessão não ficam mais no disco.',
+        en: 'Temporary session start files no longer stay on disk.',
+      },
+      {
+        pt: 'A tela de novidades volta a aparecer depois de atualizar.',
+        en: 'The what\'s-new screen shows again after an update.',
+      },
+      {
+        pt: 'Na passagem de líder, a nova sessão leva também as sessões silenciadas, o modelo, o esforço e a nota da anterior, e você fica sabendo quando a passagem não aconteceu.',
+        en: 'A leader hand-off now also carries the muted sessions, model, effort and note to the new session, and tells you when the hand-off did not happen.',
+      },
+      {
+        pt: 'Quando uma sessão entrega, o chat mostra "Tarefa entregue" com o nome dela; ao abrir, o texto aparece formatado. Avisos assim não oferecem mais "Enviar agora".',
+        en: 'When a session hands back, the chat says "Task handed back" with its name; open it to read the text formatted. Such notices no longer offer "Send now".',
+      },
+      {
+        pt: 'Os check-ins dos líderes passam a ser escritos em linguagem simples.',
+        en: 'Leader check-ins are now written in plain language.',
+      },
+      {
+        pt: 'Os presets de sessão foram removidos.',
+        en: 'Session presets were removed.',
+      },
+    ],
+  },
+  '2.140.6': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O chat mostra melhor o que a sessão está fazendo: ferramentas, subagentes e alterações em arquivos.',
+        en: 'The chat shows better what a session is doing: tools, subagents and file changes.',
+      },
+    ],
+  },
+  '2.140.5': {
+    features: [
+      {
+        pt: 'Você pode cadastrar mais de uma conta por assistente.',
+        en: 'You can add more than one account per assistant.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.140.4': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Uma sessão nunca mais mostra a conversa de outra sessão.',
+        en: 'A session never shows another session\'s conversation again.',
+      },
+    ],
+  },
+  '2.140.3': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O aviso de papel da sessão aparece como uma linha de sistema, não como mensagem sua.',
+        en: 'The session role notice shows as a system row, not as a message from you.',
+      },
+      {
+        pt: 'O cofre bloqueado deixou de consultar o servidor sem parar.',
+        en: 'A locked vault no longer keeps polling the server.',
+      },
+      {
+        pt: 'Pastas ocultas ficam no topo da lista e sessões encerradas ocupam menos espaço.',
+        en: 'Hidden folders sit at the top of the list and ended sessions take less room.',
+      },
+    ],
+  },
+  '2.140.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'A passagem de líder não falha mais quando o resumo para o sucessor é longo.',
+        en: 'A leader hand-off no longer fails when the summary for the successor is long.',
+      },
+    ],
+  },
+  '2.140.1': {
+    features: [
+      {
+        pt: 'No assistente de nova sessão dá para criar um projeto novo na hora.',
+        en: 'The new-session wizard can create a brand-new project on the spot.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.140.0': {
+    features: [
+      {
+        pt: 'A passagem de líder pela linha de comando leva ao sucessor o título, a pasta, o fixado, o check-in, o papel e o modo ausente.',
+        en: 'A leader hand-off from the command line gives the successor its title, folder, pin, check-in, role and away mode.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.139.0': {
+    features: [
+      {
+        pt: 'O novo chat das sessões vem ativado por padrão nos assistentes compatíveis.',
+        en: 'The new session chat is on by default for supported assistants.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.138.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O botão de modo ausente ficou mais claro e Esc fecha a camada aberta por cima, uma de cada vez.',
+        en: 'The away toggle looks clearer and Esc closes the top overlay, one at a time.',
+      },
+      {
+        pt: 'Linhas de sistema no chat ficaram mais discretas.',
+        en: 'System lines in the chat are quieter.',
+      },
+    ],
+  },
+  '2.138.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Mensagens entre sessões aparecem como eventos do sistema, não como se fossem suas.',
+        en: 'Messages between sessions show as system events, not as if you had written them.',
+      },
+    ],
+  },
+  '2.138.0': {
+    features: [
+      {
+        pt: 'O início de uma sessão agora segue um fluxo numerado.',
+        en: 'Starting a session now follows a numbered flow.',
+      },
+      {
+        pt: 'A contagem de sessões em modo ausente atualiza ao vivo.',
+        en: 'The away-session count updates live.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.137.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Sessões encerradas deixam de aparecer como ativas na lateral.',
+        en: 'Ended sessions no longer linger as active in the side list.',
+      },
+    ],
+  },
+  '2.137.0': {
+    features: [
+      {
+        pt: 'A passagem de líder entre sessões ficou mais confiável, e uma sessão não fica pela metade se algo falhar ao abrir.',
+        en: 'Leader hand-off between sessions is more reliable, and a session is never left half-open when something fails at start.',
+      },
+    ],
+    fixes: [],
+  },
   '2.136.1': {
     features: [],
     fixes: [

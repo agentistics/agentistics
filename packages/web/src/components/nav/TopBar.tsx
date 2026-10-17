@@ -36,14 +36,20 @@ export interface TopBarProps {
    * ONE caller in the sessions workspace passes `true`; every other screen keeps its border.
    */
   noBottomBorder?: boolean
+  /**
+   * A full-width row ABOVE the strip proper (the session tab strip, VS Code order: tabs first, then
+   * the title line). `height` is the strip's own; the fixed box grows by `aboveHeight` on top.
+   */
+  above?: React.ReactNode
+  aboveHeight?: number
 }
 
-export function TopBar({ height, asideWidth, trailing, trailingFlush = false, noBottomBorder = false }: TopBarProps) {
+export function TopBar({ height, asideWidth, trailing, trailingFlush = false, noBottomBorder = false, above, aboveHeight = 0 }: TopBarProps) {
   return (
     <div
       style={{
-        position: 'fixed', top: 0, left: asideWidth, right: 0, height, zIndex: 300,
-        display: 'flex', alignItems: 'center', padding: 0, boxSizing: 'border-box',
+        position: 'fixed', top: 0, left: asideWidth, right: 0, height: height + (above ? aboveHeight : 0), zIndex: 300,
+        display: 'flex', flexDirection: 'column', padding: 0, boxSizing: 'border-box',
         // On the Sessions board (`noBottomBorder`) the bar is FRAME, not a panel: the same ground
         // colour as the gaps and the icon rail, so the board reads as one surface.
         background: noBottomBorder ? 'var(--bg-base)' : 'var(--bg-surface)',
@@ -56,9 +62,10 @@ export function TopBar({ height, asideWidth, trailing, trailingFlush = false, no
           window — the one thing a fixed full-width bar must never do. 9px, not 4: the title starts
           on the same vertical line as the content inside the session below it. FLUSH drops even
           that. */}
+      {above ? <div style={{ height: aboveHeight, flexShrink: 0, minWidth: 0 }}>{above}</div> : null}
       {trailing && (
         <div style={{
-          flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10,
+          height, flexShrink: 0, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10,
           paddingLeft: trailingFlush ? 0 : 9,
         }}>
           {trailing}

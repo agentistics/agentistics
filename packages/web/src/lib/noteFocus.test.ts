@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { focusMissNotice, isFocusedRow, rowsCarry } from './noteFocus'
+import { focusMissNotice, isFocusedRow, rowsCarry, isFreshFocusAsk } from './noteFocus'
 
 test('the row the chip named is the focused one, and only it', () => {
   expect(isFocusedRow('superpowers:brainstorming', 'superpowers:brainstorming')).toBe(true)
@@ -28,4 +28,11 @@ test('a reference no row carries is REPORTED, not silently ignored', () => {
 
 test('with no reference there is nothing to miss', () => {
   expect(rowsCarry(['a'], undefined)).toBe(true)
+})
+
+test('a focus request is consumed once: the same stamp never re-opens, a new one does', () => {
+  expect(isFreshFocusAsk(undefined, 5)).toBe(true)
+  expect(isFreshFocusAsk(5, 5)).toBe(false)
+  expect(isFreshFocusAsk(5, 9)).toBe(true)
+  expect(isFreshFocusAsk(undefined, undefined)).toBe(false)
 })

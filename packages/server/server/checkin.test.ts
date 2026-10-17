@@ -64,6 +64,7 @@ describe('check-in agenda', () => {
     expect(prompt.startsWith('[from agentistics · check-in]\nFaça o check-in da liderança agora.\n')).toBe(true)
     expect(prompt).toContain('\n- ')
     expect(prompt).toEndWith('Quando terminar, chame agentistics_checkin_report.')
+    expect(prompt).toContain('linguagem simples')
   })
 
   test('manual check-in uses the same system event header', async () => {

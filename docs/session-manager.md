@@ -8,8 +8,11 @@ Large or multiline launch arguments (including hand-off context and initial brie
 a private `0600` shell launcher under `session-context/<session-id>/` in the agentistics data
 directory. tmux receives only the launcher path; the launcher execs the harness with the complete
 original arguments, preserving quotes, accents and trailing newlines. Short single-line launches
-keep their existing invocation. Launchers remain alongside the session's context files; failed
-tmux starts remove their launcher. Harnesses whose context travels in a typed first message load
+keep their existing invocation. The launcher deletes itself as its first line (the shell already
+holds it open, so the rest still runs) — the backend cannot tell when the pane has read it, so the
+script does it. A failed tmux start removes its launcher, and each launching spawn sweeps launchers
+a crashed spawn left behind (`launch-*.sh` older than 10 minutes, directly under
+`session-context/<id>/`, bounded to 500 dirs). Harnesses whose context travels in a typed first message load
 large or multiline text into a tmux buffer through stdin, then paste the original bytes and delete
 the buffer. Spawn errors include tmux's stderr and exit code.
 

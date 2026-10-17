@@ -128,8 +128,10 @@ export function objectOf(call: ToolCallLike, kind: ActivityKind): string {
   switch (kind) {
     case 'read': case 'edit': case 'write': {
       // A patch names its file inside the patch text (`*** Update File: <path>`), not as the first word.
-      const patched = /\*\*\* (?:Update|Add|Delete) File:\s*(\S+)/.exec(d)?.[1]
-      return patched ? basename(patched) : d ? basename(d.split(/\s+/)[0]!) : call.name
+      const patched = [...d.matchAll(/^\*\*\* (?:Update|Add|Delete) File:[ \t]*(.+?)\r?$/gm)]
+        .map(match => match[1]!.trim()).filter(Boolean)
+      const targets = [...new Set(patched)]
+      return targets.length ? targets.map(basename).join(', ') : d ? basename(d.split(/\s+/)[0]!) : call.name
     }
     case 'memory':
       return d ? memoryTitle(d) : call.name
@@ -159,40 +161,40 @@ type Words = {
 
 /** [pt, en]. Kept in ONE table so a kind cannot gain a verb in one language and not the other. */
 export const ACTIVITY_WORDS: Record<ActivityKind, Words> = {
-  read:     { doing: ['Lendo', 'Reading'], done: ['Lido', 'Read'],
+  read:     { doing: ['Lendo', 'Reading'], done: ['Leu', 'Read'],
               gerund1: ['lendo um arquivo', 'reading a file'], gerundN: ['lendo # arquivos', 'reading # files'],
               past1: ['leu um arquivo', 'read a file'], pastN: ['leu # arquivos', 'read # files'] },
-  edit:     { doing: ['Editando', 'Editing'], done: ['Editado', 'Edited'],
+  edit:     { doing: ['Editando', 'Editing'], done: ['Editou', 'Edited'],
               gerund1: ['editando um arquivo', 'editing a file'], gerundN: ['editando # arquivos', 'editing # files'],
               past1: ['editou um arquivo', 'edited a file'], pastN: ['editou # arquivos', 'edited # files'] },
-  write:    { doing: ['Criando', 'Creating'], done: ['Criado', 'Created'],
+  write:    { doing: ['Criando', 'Creating'], done: ['Criou', 'Created'],
               gerund1: ['criando um arquivo', 'creating a file'], gerundN: ['criando # arquivos', 'creating # files'],
               past1: ['criou um arquivo', 'created a file'], pastN: ['criou # arquivos', 'created # files'] },
-  run:      { doing: ['Executando', 'Running'], done: ['Executado', 'Ran'],
+  run:      { doing: ['Executando', 'Running'], done: ['Executou', 'Ran'],
               gerund1: ['executando um comando', 'running a command'], gerundN: ['executando # comandos', 'running # commands'],
               past1: ['executou um comando', 'ran a command'], pastN: ['executou # comandos', 'ran # commands'] },
-  search:   { doing: ['Buscando', 'Searching'], done: ['Buscado', 'Searched'],
+  search:   { doing: ['Buscando', 'Searching'], done: ['Buscou', 'Searched'],
               gerund1: ['buscando no código', 'searching the code'], gerundN: ['fazendo # buscas', 'running # searches'],
               past1: ['fez uma busca', 'ran a search'], pastN: ['fez # buscas', 'ran # searches'] },
-  web:      { doing: ['Consultando', 'Looking up'], done: ['Consultado', 'Looked up'],
+  web:      { doing: ['Consultando', 'Looking up'], done: ['Consultou', 'Looked up'],
               gerund1: ['consultando a web', 'looking something up'], gerundN: ['consultando # páginas', 'looking up # pages'],
               past1: ['consultou a web', 'looked something up'], pastN: ['consultou # páginas', 'looked up # pages'] },
-  memory:   { doing: ['Atualizando memória', 'Updating memory'], done: ['Memória atualizada', 'Memory updated'],
+  memory:   { doing: ['Atualizando memória', 'Updating memory'], done: ['Atualizou memória', 'Memory updated'],
               gerund1: ['atualizando uma memória', 'updating a memory'], gerundN: ['atualizando # memórias', 'updating # memories'],
               past1: ['atualizou uma memória', 'updated a memory'], pastN: ['atualizou # memórias', 'updated # memories'] },
-  delegate: { doing: ['Delegando', 'Delegating'], done: ['Delegado', 'Delegated'],
+  delegate: { doing: ['Delegando', 'Delegating'], done: ['Delegou', 'Delegated'],
               gerund1: ['delegando uma tarefa', 'delegating a task'], gerundN: ['delegando # tarefas', 'delegating # tasks'],
               past1: ['delegou uma tarefa', 'delegated a task'], pastN: ['delegou # tarefas', 'delegated # tasks'] },
-  plan:     { doing: ['Atualizando o plano', 'Updating the plan'], done: ['Plano atualizado', 'Plan updated'],
+  plan:     { doing: ['Atualizando o plano', 'Updating the plan'], done: ['Atualizou o plano', 'Plan updated'],
               gerund1: ['atualizando o plano', 'updating the plan'], gerundN: ['atualizando o plano', 'updating the plan'],
               past1: ['atualizou o plano', 'updated the plan'], pastN: ['atualizou o plano', 'updated the plan'] },
-  skill:    { doing: ['Carregando skill', 'Loading skill'], done: ['Skill carregada', 'Skill loaded'],
+  skill:    { doing: ['Carregando skill', 'Loading skill'], done: ['Carregou skill', 'Skill loaded'],
               gerund1: ['carregando uma skill', 'loading a skill'], gerundN: ['carregando # skills', 'loading # skills'],
               past1: ['carregou uma skill', 'loaded a skill'], pastN: ['carregou # skills', 'loaded # skills'] },
-  mcp:      { doing: ['Usando', 'Using'], done: ['Usado', 'Used'],
+  mcp:      { doing: ['Usando', 'Using'], done: ['Usou', 'Used'],
               gerund1: ['usando uma ferramenta MCP', 'using an MCP tool'], gerundN: ['usando # ferramentas MCP', 'using # MCP tools'],
               past1: ['usou uma ferramenta MCP', 'used an MCP tool'], pastN: ['usou # ferramentas MCP', 'used # MCP tools'] },
-  other:    { doing: ['Usando', 'Using'], done: ['Usado', 'Used'],
+  other:    { doing: ['Usando', 'Using'], done: ['Usou', 'Used'],
               gerund1: ['usando uma ferramenta', 'using a tool'], gerundN: ['usando # ferramentas', 'using # tools'],
               past1: ['usou uma ferramenta', 'used a tool'], pastN: ['usou # ferramentas', 'used # tools'] },
 }
@@ -225,7 +227,9 @@ export const IMPACT: readonly ActivityKind[] = ['write', 'memory', 'edit', 'dele
 export function summarize(steps: readonly ActivityStep[], running: boolean, pt: boolean): string {
   const order: ActivityKind[] = []
   const count = new Map<ActivityKind, number>()
+  let unfinished = 0
   for (const s of steps) {
+    if (s.status === 'unfinished') { unfinished++; continue }
     if (!count.has(s.kind)) order.push(s.kind)
     count.set(s.kind, (count.get(s.kind) ?? 0) + 1)
   }
@@ -236,12 +240,20 @@ export function summarize(steps: readonly ActivityStep[], running: boolean, pt: 
     return L(pair, pt).replace('#', String(n))
   }
   order.sort((a, b) => IMPACT.indexOf(a) - IMPACT.indexOf(b))
+  // A generic tool alongside named activity adds a count, not another "used a tool" clause.
+  const other = order.length > 1 ? (count.get('other') ?? 0) : 0
+  if (other) order.splice(order.indexOf('other'), 1)
   const shown = order.slice(0, MAX_PHRASES).map(phrase)
   const rest = order.slice(MAX_PHRASES).reduce((a, k) => a + count.get(k)!, 0)
   if (rest > 0) shown.push(pt ? `mais ${rest} ${rest === 1 ? 'ação' : 'ações'}` : `${rest} more ${rest === 1 ? 'action' : 'actions'}`)
+  if (other > 0) shown.push(pt ? `mais ${other} ${other === 1 ? 'ferramenta' : 'ferramentas'}` : `${other} other ${other === 1 ? 'tool' : 'tools'}`)
   const joined = shown.length <= 1 ? (shown[0] ?? '')
     : `${shown.slice(0, -1).join(', ')} ${pt ? 'e' : 'and'} ${shown[shown.length - 1]}`
-  return joined ? joined[0]!.toUpperCase() + joined.slice(1) : ''
+  const noResult = unfinished > 0
+    ? (pt ? `${unfinished} ${unfinished === 1 ? 'passo' : 'passos'} sem resultado` : `${unfinished} ${unfinished === 1 ? 'step' : 'steps'} without a result`)
+    : ''
+  const summary = [joined, noResult].filter(Boolean).join(' · ')
+  return summary ? summary[0]!.toUpperCase() + summary.slice(1) : ''
 }
 
 /** "1 min 20 s", "45 s", "2 h 03 min" — the same shape in both languages. `null` when unknown. */

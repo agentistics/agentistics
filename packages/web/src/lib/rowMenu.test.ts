@@ -25,6 +25,16 @@ describe('rowMenuEntries', () => {
     expect(resume.reason).toBe('No conversation to reopen.')
   })
 
+  it('offers no Stop on an ended row — Reopen is the verb that applies', () => {
+    for (const state of ['exited', 'closed']) {
+      expect(rowMenuEntries(verbs, state).map(e => e.action)).toEqual(['rename', 'resume'])
+    }
+  })
+
+  it('keeps Stop on a lost row — its backend may still be running', () => {
+    expect(rowMenuEntries(verbs, 'lost').map(e => e.action)).toContain('kill')
+  })
+
   it('omits a verb the row does not carry at all', () => {
     expect(rowMenuEntries([{ action: 'rename', label: 'Rename', enabled: true }], 'lost')
       .map(e => e.action)).toEqual(['rename'])
@@ -90,7 +100,7 @@ describe('rowMenuEntries — native store verbs', () => {
       { action: 'delete', label: 'Delete', enabled: true },
     ]
     const actions = rowMenuEntries(verbs, 'closed').map(e => e.action)
-    expect(actions).toEqual(['rename', 'kill', 'resume', 'archive'])
+    expect(actions).toEqual(['rename', 'resume', 'archive'])
   })
 })
 

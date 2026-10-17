@@ -10,7 +10,8 @@ describe('MessageBubble', () => {
     const content = '\n\n<pasted_content id="a245">\n[from session 0bcf21c173 · handback]\nfix ready\n</pasted_content id="a245">\n'
     const html = renderToStaticMarkup(<MessageBubble msg={{ role: 'user', content } as never} harness="claude" pt />)
     expect(html).not.toContain('Você')
-    expect(html).toContain('0bcf21c173')
+    expect(html).toContain('Tarefa entregue')
+    expect(html).not.toContain('0bcf21c173') // unknown senders are named by kind, never by a raw id
   })
   test('ordinary user text stays the person\'s bubble', () => {
     const html = renderToStaticMarkup(<MessageBubble msg={{ role: 'user', content: 'oi' } as never} harness="claude" pt />)

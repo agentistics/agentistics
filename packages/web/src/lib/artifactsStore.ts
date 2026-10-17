@@ -133,6 +133,8 @@ export interface PanelFocusRequest {
   /** The stamp that makes this a REQUEST rather than a setting — see `openArtifacts`'s own header
    *  on why. */
   at: number
+  /** Set once an opener acted on the request, so a remounted panel never replays it. */
+  consumed?: boolean
 }
 
 let focus: PanelFocusRequest | null = null
@@ -151,6 +153,11 @@ export function usePanelFocusRequest(): PanelFocusRequest | null {
     () => (focus !== null && focus.pane === pane ? focus : null),
     () => null,
   )
+}
+
+/** Mark the request stamped `at` as acted on — in the STORE, so no later mount repeats it. */
+export function consumePanelFocusRequest(at: number): void {
+  if (focus !== null && focus.at === at) focus.consumed = true
 }
 
 function setPanelFocusRequest(next: PanelFocusRequest): void {
@@ -172,7 +179,9 @@ function setPanelFocusRequest(next: PanelFocusRequest): void {
 export function openArtifacts(tab?: string, ref?: string, pane: PaneId = getActivePane()): void {
   const panel: PanelId = isPanelId(tab) ? tab : 'live'
   showPanel(panel, pane)
-  if (ref !== undefined) setPanelFocusRequest({ tab: panel, pane, ref, at: Date.now() })
+  // Always published, ref or not: a panel that is already open shows nothing new by itself, and a
+  // click that visibly does nothing is the defect this answers (the panel pulses on every request).
+  setPanelFocusRequest({ tab: panel, pane, ...(ref !== undefined ? { ref } : {}), at: Date.now() })
 }
 
 /** For tests: forget everything. */
