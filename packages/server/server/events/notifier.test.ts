@@ -68,3 +68,14 @@ describe('worker mute across delivery channels', () => {
     })
   }
 })
+
+import { isWorkerMutedEvent } from './notifier'
+describe('isWorkerMutedEvent identities', () => {
+  const e = (kind: SessionEvent['kind']) => ({ id: 'managed1', conversationId: 'conv1', kind })
+  test('a role stored only under the managed id mutes; leader audible; exited announces', () => {
+    expect(isWorkerMutedEvent(e('waiting'), { managed1: 'worker' }, true)).toBe(true)
+    expect(isWorkerMutedEvent(e('waiting'), { managed1: 'leader' }, true)).toBe(false)
+    expect(isWorkerMutedEvent(e('exited'), { managed1: 'worker' }, true)).toBe(false)
+    expect(isWorkerMutedEvent(e('waiting'), { managed1: 'worker' }, false)).toBe(false)
+  })
+})

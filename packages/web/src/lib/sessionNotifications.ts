@@ -16,7 +16,7 @@ import { observeFleet, pushAlert, pushDemoAlert, requestShock, resetNayNotifySto
 import { isSessionMuted } from './mutedSessions'
 import { pushNotification, setMutedCategories, type NotificationType } from './notifications'
 import { isNotificationCategory } from './notificationCategories'
-import { isWorkerMuted, registerSessionRoleAlias } from './sessionRoles'
+import { getMuteWorkers, getSessionRole, isWorkerMuted, refreshRoles, registerSessionRoleAlias } from './sessionRoles'
 import { DEFAULT_QUIET_HOURS, readQuietHours, type QuietHours } from './checkinNotify'
 
 export type SessionActivity = 'working' | 'waiting' | 'waiting-approval' | 'exited'
@@ -501,10 +501,28 @@ function isMutedId(id: string): boolean {
 function isWorkerMutedId(id: string, event: NotifyEvent): boolean {
   // Match server roleOfRow: the conversation role wins; its registered alias falls back to the
   // managed id when only that identity has a role. Checking the managed id first reverses this.
-  return isWorkerMuted(muteKeyById.get(id) ?? id, event)
+  // Either identity may carry the role (a spawn stores it under the managed id), and the alias is
+  // only registered once a fleet snapshot has listed the row — so ask both explicitly.
+  const key = muteKeyById.get(id) ?? id
+  // The conversation role wins when it has one (server roleOfRow); otherwise the managed id's.
+  return getSessionRole(key) !== undefined ? isWorkerMuted(key, event) : isWorkerMuted(id, event)
+}
+function roleKnown(id: string): boolean {
+  const key = muteKeyById.get(id) ?? id
+  return getSessionRole(key) !== undefined || getSessionRole(id) !== undefined
 }
 
 function deliver(d: Delivery, settings: NotificationSettings): void {
+  // A session spawned a moment ago may have its role on the server but not in this page's cache yet
+  // (the cache refreshes on a timer). With mute on and no role known, ask the server before deciding.
+  if (getMuteWorkers() && d.event !== 'exited' && !roleKnown(d.bell.id)) {
+    void refreshRoles().then(() => deliverNow(d, settings))
+    return
+  }
+  deliverNow(d, settings)
+}
+
+function deliverNow(d: Delivery, settings: NotificationSettings): void {
   // MUTE SUPPRESSES DELIVERY ONLY — bell, card, shock, sound. The session's state (`waiting`) is
   // computed upstream of here and never touched. The observer still sees it: it is the decision log.
   if (isMutedId(d.bell.id)) return

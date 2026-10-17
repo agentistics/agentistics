@@ -48,7 +48,7 @@ let pendingWrites = 0
 const listeners = new Set<() => void>()
 const emit = () => { for (const l of listeners) l() }
 
-async function refreshRoles(): Promise<void> {
+export async function refreshRoles(): Promise<void> {
   if (pendingWrites > 0) return
   try {
     const res = await fetch('/api/session-roles')
@@ -107,6 +107,8 @@ export function setSessionRole(id: string, role: SessionRole | null): void {
     finally { pendingWrites--; void refreshRoles() }
   })()
 }
+/** Test seam: replace the cache the way a server answer would. */
+export function __setRolesForTest(next: SessionRoles): void { cache = next }
 export function getMuteWorkers(): boolean { return muted.get() }
 export function setMuteWorkers(value: boolean): void { muted.set(value) }
 export function isWorkerMuted(id: string, state?: string): boolean {

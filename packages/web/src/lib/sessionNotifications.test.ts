@@ -316,6 +316,24 @@ describe('muted workers', () => {
     expect(sounds).toBe(0)
   })
 
+  it('mutes a fresh worker whose role is only on the server, under the managed id, when the cache is stale', async () => {
+    setMuteWorkers(true)
+    const base = globalThis.fetch
+    ;(globalThis as Record<string, unknown>).fetch = async (url: unknown, init?: RequestInit) =>
+      String(url) === '/api/session-roles' && !init?.method
+        ? new Response(JSON.stringify({ roles: { 'fresh-managed': 'worker' } }), { status: 200 })
+        : base(url as string, init)
+    const row = { id: 'fresh-managed', conversationId: 'fresh-conversation' }
+    let prev = notifyFleetTransitions(null, [{ ...row, state: 'working' }], 'en')
+    prev = notifyFleetTransitions(prev, [{ ...row, state: 'waiting' }], 'en')
+    prev = notifyFleetTransitions(prev, [{ ...row, state: 'waiting' }], 'en')
+    await new Promise(r => setTimeout(r, 20))
+    expect(captured).toHaveLength(0)
+    expect(readNayAlerts()).toEqual([])
+    expect(sounds).toBe(0)
+    setSessionRole('fresh-managed', null)
+  })
+
   for (const conversationRole of ['leader', 'worker'] as const) {
     const managedRole = conversationRole === 'leader' ? 'worker' : 'leader'
     const muted = conversationRole === 'worker'
@@ -381,7 +399,7 @@ describe('muted workers', () => {
     })
   }
 
-  it('still notifies leaders and untyped sessions', () => {
+  it('still notifies leaders and untyped sessions', async () => {
     setSessionRole('mute-leader', 'leader')
     setMuteWorkers(true)
     let prev = notifyFleetTransitions(null, [
@@ -396,6 +414,7 @@ describe('muted workers', () => {
       { id: 'mute-leader', state: 'waiting' },
       { id: 'mute-untyped', state: 'waiting' },
     ], 'en')
+    await new Promise(r => setTimeout(r, 20)) // an untyped session asks the server for its role first
     expect(captured).toHaveLength(2)
     expect(bells).toHaveLength(2)
     expect(readNayAlerts()).toHaveLength(2)
