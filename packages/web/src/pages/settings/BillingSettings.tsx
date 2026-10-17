@@ -48,8 +48,8 @@ import {
   type PeriodDraft,
 } from './billingForm'
 import AccountsSection from './AccountsSection'
-import { AccountPlans, FirstDetectionNotice } from './AccountRow'
-import { accountsNeedingPlan, answerNotice, billableAccounts, ownPeriods, toggleAvailability, unknownPeriod, withAccountPeriods, type BillingAccount } from './accountBilling'
+import { BillingAccountsView, FirstDetectionNotice } from './AccountRow'
+import { accountsNeedingPlan, answerNotice, billableAccounts, noticeAccounts, ownPeriods, toggleAvailability, unknownPeriod, withAccountPeriods, type BillingAccount } from './accountBilling'
 import { accountTitle } from './accountsSummary'
 import { createAccountMutator } from './accountMutations'
 import { usePlanLimits } from '../../lib/planLimits'
@@ -106,10 +106,20 @@ export default function BillingSettings() {
   const harnessAccounts = useMemo(() => billableAccounts(accounts, harness), [accounts, harness])
   const targetAccount = target ? harnessAccounts.find(a => a.id === target) ?? null : null
   useEffect(() => { if (target && !targetAccount) setTarget(null) }, [target, targetAccount])
+  const allBillable = useMemo(() => harnesses.flatMap(h => billableAccounts(accounts, h)), [accounts, harnesses])
   const needPlan = useMemo(
     () => accountsNeedingPlan(accounts, ctx.billing, harnesses),
     [accounts, ctx.billing, harnesses],
   )
+  // A notice stays until its answer is STORED: `saving` while the write is in flight, `failed` after a
+  // refusal (the app has already put the settings back, so the account still needs a plan).
+  const [noticeState, setNoticeState] = useState<Record<string, 'saving' | 'failed'>>({})
+  const notices = useMemo(
+    () => noticeAccounts(needPlan, allBillable, new Set(Object.keys(noticeState))),
+    [needPlan, allBillable, noticeState],
+  )
+  const [openHarness, setOpenHarness] = useState<HarnessId | null>(harness)
+  useEffect(() => { setOpenHarness(harness) }, [harness])
   const toggleAccount = async (a: BillingAccount) => {
     if (mutator.has(a.id)) return
     setPending(h => new Set(h).add(a.id))
@@ -120,13 +130,31 @@ export default function BillingSettings() {
       setFailed(h => { const n = new Set(h); n.delete(a.id); return n })
     } else if (res.status === 'failed') setFailed(h => new Set(h).add(a.id))
   }
-  const answer = async (a: BillingAccount, planId: string) => {
-    const next = answerNotice(ctx.billing, a, planId, today(), newPeriodId)
-    if (next) await ctx.saveBilling(next)
-    else { setHarness(a.harness); setTarget(a.id); openDraft({ ...emptyDraft(), planId, from: today(), ongoing: true }) }
+  const saveNotice = async (a: BillingAccount, change: (cur: BillingSettingsShape) => BillingSettingsShape) => {
+    setNoticeState(s => ({ ...s, [a.id]: 'saving' }))
+    try {
+      await ctx.saveBilling(change)
+      setNoticeState(s => { const { [a.id]: _gone, ...rest } = s; return rest })
+    } catch {
+      setNoticeState(s => ({ ...s, [a.id]: 'failed' }))
+    }
   }
-  const dismiss = async (a: BillingAccount) => {
-    await ctx.saveBilling(withAccountPeriods(ctx.billing, a.id, [unknownPeriod(today(), newPeriodId)]))
+  const answer = async (a: BillingAccount, planId: string) => {
+    if (!answerNotice(ctx.billing, a, planId, today(), newPeriodId)) {
+      setHarness(a.harness); setTarget(a.id); openDraft({ ...emptyDraft(), planId, from: today(), ongoing: true })
+      return
+    }
+    // Built against the CURRENT settings at write time, so two answers merge instead of overwriting.
+    await saveNotice(a, cur => answerNotice(cur, a, planId, today(), newPeriodId) ?? cur)
+  }
+  const dismiss = (a: BillingAccount) =>
+    saveNotice(a, cur => withAccountPeriods(cur, a.id, [unknownPeriod(today(), newPeriodId)]))
+  /** "Edit plan": the existing period drawer, on this account's own timeline. */
+  const editAccountPlan = (a: BillingAccount) => {
+    setHarness(a.harness)
+    setTarget(a.id)
+    const cur = splitTimeline(sortPeriods(ownPeriods(ctx.billing, a.id)), today()).current
+    openDraft(cur ? draftFromPeriod(cur) : emptyDraft())
   }
 
   const timeline: BillingTimeline = target
@@ -179,17 +207,16 @@ export default function BillingSettings() {
   }, [])
 
   const persist = useCallback(async (nextPeriods: BillingPeriod[]) => {
-    let next: BillingSettingsShape
-    if (target) next = withAccountPeriods(ctx.billing, target, nextPeriods)
-    else {
-      const profiles = { ...ctx.billing.profiles }
+    const change = (cur: BillingSettingsShape): BillingSettingsShape => {
+      if (target) return withAccountPeriods(cur, target, nextPeriods)
+      const profiles = { ...cur.profiles }
       if (nextPeriods.length > 0) profiles[harness] = { periods: nextPeriods }
       else delete profiles[harness]
-      next = { ...ctx.billing, profiles }
+      return { ...cur, profiles }
     }
     setSaveError(null)
     try {
-      await ctx.saveBilling(next)
+      await ctx.saveBilling(change)
     } catch {
       setSaveError(pt ? 'Não foi possível salvar. Tente de novo.' : 'Could not save. Try again.')
     }
@@ -300,7 +327,7 @@ export default function BillingSettings() {
   }), [harness, pt, planPrices])
 
   const selectedEntry = draft?.planId ? findPlan(draft.planId) : undefined
-  const readiness = billingReadiness(ctx.billing, harnesses)
+  const readiness = billingReadiness(ctx.billing, harnesses, allBillable)
 
   return (
     <div>
@@ -337,14 +364,16 @@ export default function BillingSettings() {
         </div>
       )}
 
-      {needPlan.map(a => (
-        <FirstDetectionNotice key={a.id} lang={ctx.lang} account={a} onAnswer={answer} onDismiss={dismiss} />
+      {notices.map(a => (
+        <FirstDetectionNotice key={a.id} lang={ctx.lang} account={a} status={noticeState[a.id]}
+          onAnswer={(x, planId) => { void answer(x, planId) }} onDismiss={x => { void dismiss(x) }} />
       ))}
 
-      <AccountPlans
-        lang={ctx.lang} harness={harness} accounts={harnessAccounts} billing={ctx.billing}
+      <BillingAccountsView
+        lang={ctx.lang} harnesses={harnesses} accounts={allBillable} billing={ctx.billing}
         limits={planLimits} now={limitsNow} today={today()} pendingIds={pendingIds} failedIds={failedIds}
-        selectedId={target} onToggle={a => { void toggleAccount(a) }} onEdit={a => setTarget(a.id)}
+        openHarness={openHarness} onOpen={h => { setOpenHarness(h); if (h) { setHarness(h); setTarget(null) } }}
+        selectedId={target} onToggle={a => { void toggleAccount(a) }} onEdit={editAccountPlan}
       />
       {targetAccount && (
         <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: '0 0 10px' }}>
