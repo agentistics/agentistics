@@ -21,9 +21,9 @@ describe('experimental-boot', () => {
     expect(applyExperimentalFromDisk(on).length).toBeGreaterThan(0)
     expect(on.AGENTISTICS_JOURNAL).toBe('1')
     const off: Record<string, string | undefined> = { AGENTISTICS_DIR: dirWith('{"experimental":false}') }
-    const before = JSON.stringify(off)
     expect(applyExperimentalFromDisk(off)).toEqual([])
-    expect(JSON.stringify(off)).toBe(before)
+    expect(off.AGENTISTICS_ADAPTER_CHAT).toBe('0') // the only default-ON row the switch can turn off
+    expect(off.AGENTISTICS_JOURNAL).toBeUndefined()
   })
   test('CLI: preference ON + no env turns the feature on; explicit =0 stays off; preference OFF changes nothing', () => {
     const on: Record<string, string | undefined> = { AGENTISTICS_DIR: dirWith('{"experimental":true}') }

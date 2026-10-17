@@ -120,6 +120,9 @@ export interface AdapterChatDeps {
    * message while the TUI answered (AGY.CHAT.REPLIES, 2026-10-10). Absent = never re-asked.
    */
   current?: () => Promise<boolean>
+  /** The chat-source switch moved (`resetChatStreams`): close (not as a failure) and let the client
+   *  reconnect to whatever reader the switch names now. Absent = never told. */
+  onReset?: (cb: () => void) => () => void
   setTimer?: (f: () => void, ms: number) => unknown
   clearTimer?: (t: unknown) => void
 }
@@ -172,7 +175,6 @@ export function adapterChatResponse(
   let src: ChatSourceRef | null = null
   let unfollow: (() => void) | null = null
   let cwd: string | undefined
-  let resolving = false
   let emitting = false
   let emitAgain = false
   let debounce: unknown = null
@@ -197,6 +199,9 @@ export function adapterChatResponse(
 
   async function emit(): Promise<void> {
     if (closed) return
+    // A STOPPED row with no source is either still resolving or about to hand over to the legacy
+    // reader: an empty frame now would read as "this conversation is empty" (MED-2). Nothing is sent.
+    if (!src && !live) return
     if (emitting) { emitAgain = true; return }
     emitting = true
     try {
@@ -243,24 +248,33 @@ export function adapterChatResponse(
     }
   }
 
-  async function resolveAndFollow(): Promise<void> {
-    if (closed || src || resolving) return
-    resolving = true
-    try {
-      const found = await deps.chat.resolve({
-        conversationId: deps.conversationId,
-        ...(cwd ? { cwd } : {}),
-        pending: deps.pending(),
-      })
-      if (closed) return
-      if (!found) { schedule(); return } // nothing written yet: the empty conversation, retried on ticks
-      src = found
-      unfollow = deps.chat.follow(found, deps.max, onDelta)
-    } catch {
-      close(true)
-    } finally {
-      resolving = false
-    }
+  // ONE resolution in flight, and every caller waits for IT: startup used to find `resolving` set by
+  // the tick it had just run, return at once and schedule the first frame — so a stopped row whose
+  // resolve was slower than the debounce got an empty SUCCESSFUL frame before its legacy hand-over.
+  let resolution: Promise<void> | null = null
+  function resolveAndFollow(): Promise<void> {
+    if (closed || src) return Promise.resolve()
+    if (resolution) return resolution
+    resolution = (async () => {
+      try {
+        const found = await deps.chat.resolve({
+          conversationId: deps.conversationId,
+          ...(cwd ? { cwd } : {}),
+          pending: deps.pending(),
+        })
+        if (closed) return
+        if (!found) {
+          // Stopped row, transcript unresolvable: hand over to the legacy stream and its diagnosis.
+          if (!live) { close(true); return }
+          schedule(); return // live, nothing written yet: the empty conversation, retried on ticks
+        }
+        src = found
+        unfollow = deps.chat.follow(found, deps.max, onDelta)
+      } catch {
+        close(true)
+      }
+    })().finally(() => { resolution = null })
+    return resolution
   }
 
   async function onTick(): Promise<void> {
@@ -289,6 +303,7 @@ export function adapterChatResponse(
       keepalive = setTimer(ping, ADAPTER_KEEPALIVE_MS)
       offs.push(deps.onFleetTick(() => { void onTick() }))
       offs.push(deps.onWake(() => schedule()))
+      if (deps.onReset) offs.push(deps.onReset(() => close(false)))
       if (deps.composing) {
         const say = (c: 'question' | null) => send('composing', JSON.stringify({ what: c }))
         if (deps.composing.now()) say(deps.composing.now())
@@ -332,27 +347,42 @@ export async function readAdapterChat(o: {
       ...(o.row.cwd ? { cwd: o.row.cwd } : {}),
       pending: o.pending,
     })
-    if (!src) return adapterPayload(await o.finish({ turns: [], older: false }, live), o.row.link)
-    const window = await new Promise<{ turns: ChatTurn[]; older: boolean } | null>(resolve => {
-      let done = false
-      let unfollow: (() => void) | null = null
-      const finish = (v: { turns: ChatTurn[]; older: boolean } | null) => {
-        if (done) return
-        done = true
-        clearTimeout(timer)
-        // `follow` may deliver the window synchronously, before it has returned its unsubscribe.
-        queueMicrotask(() => { try { unfollow?.() } catch { /* total by contract */ } })
-        resolve(v)
-      }
-      const timer = setTimeout(() => finish(null), o.timeoutMs ?? ADAPTER_FIRST_WINDOW_MS)
-      unfollow = o.chat.follow(src, o.max, d => {
-        if (d.kind === 'window') finish(applyHarnessChatDeltas({ turns: [], older: false }, [d], o.max))
-      })
-      if (done) { try { unfollow() } catch { /* total */ } }
-    })
+    // A live row that has not written yet is an empty conversation; a STOPPED row whose transcript
+    // cannot be resolved is gone, and the legacy reader owns that diagnosis (retention, missing file).
+    if (!src) return live ? adapterPayload(await o.finish({ turns: [], older: false }, live), o.row.link) : null
+    const window = await firstWindow(o.chat, src, o.max, o.timeoutMs)
     if (!window) return null
     return adapterPayload(await o.finish(window, live), o.row.link)
   } catch {
     return null
   }
+}
+
+/**
+ * Follow a source until its first `window`, then stop following: one read of the last `max` turns.
+ * `null` when no window arrived within `timeoutMs` (the channel could not answer in time).
+ */
+export function firstWindow(
+  chat: HarnessChat,
+  src: ChatSourceRef,
+  max: number,
+  timeoutMs: number = ADAPTER_FIRST_WINDOW_MS,
+): Promise<{ turns: ChatTurn[]; older: boolean } | null> {
+  return new Promise(resolve => {
+    let done = false
+    let unfollow: (() => void) | null = null
+    const finish = (v: { turns: ChatTurn[]; older: boolean } | null) => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      // `follow` may deliver the window synchronously, before it has returned its unsubscribe: the
+      // microtask runs after `unfollow` is assigned, so it is the ONE release on either path.
+      queueMicrotask(() => { try { unfollow?.() } catch { /* total by contract */ } })
+      resolve(v)
+    }
+    const timer = setTimeout(() => finish(null), timeoutMs)
+    unfollow = chat.follow(src, max, d => {
+      if (d.kind === 'window') finish(applyHarnessChatDeltas({ turns: [], older: false }, [d], max))
+    })
+  })
 }

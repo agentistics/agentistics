@@ -13,8 +13,20 @@ describe('experimental features table', () => {
   })
 })
 
+describe('applyExperimental — an explicit false only turns the default-ON switchable rows off', () => {
+  test('writes AGENTISTICS_ADAPTER_CHAT=0 and nothing else; an exported value is kept', () => {
+    const env: Record<string, string | undefined> = { PATH: '/bin' }
+    expect(applyExperimental(false, env)).toEqual([])
+    expect(env.AGENTISTICS_ADAPTER_CHAT).toBe('0')
+    expect(env.AGENTISTICS_JOURNAL).toBeUndefined()
+    const kept: Record<string, string | undefined> = { AGENTISTICS_ADAPTER_CHAT: '1' }
+    applyExperimental(false, kept)
+    expect(kept.AGENTISTICS_ADAPTER_CHAT).toBe('1')
+  })
+})
+
 describe('applyExperimental — off is byte-identical', () => {
-  for (const pref of [undefined, false]) {
+  for (const pref of [undefined]) {
     test(`preference ${String(pref)} touches nothing`, () => {
       const env: Record<string, string | undefined> = { PATH: '/bin', AGENTISTICS_JOURNAL: '0' }
       const before = JSON.stringify(env)

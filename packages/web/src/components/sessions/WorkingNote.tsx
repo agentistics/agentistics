@@ -20,30 +20,17 @@ export interface WorkingNoteProps {
   /** True when the assistant recorded reasoning but no text on the newest turn. */
   thinking?: boolean
   /**
-   * Claude Code is running its OWN compaction right now — read off the live terminal frame (see
-   * `detectCompacting`), because nothing about it reaches the transcript until it finishes. It
-   * outranks `tools`/`thinking`: those describe the newest COMMITTED turn, which is necessarily the
-   * one before compaction started, so a caller that also has tools from that stale turn must not
-   * have them win. `percent` is `null` when the frame shows the caption but not yet a number.
-   */
-  compacting?: { percent: number | null } | null
-  /**
    * The assistant is FORMULATING a question — its question tool has started streaming and the card is
-   * on its way (`structured-composing.ts`). Outranks `tools`/`thinking` (those are the previous turn's);
-   * compaction still outranks it.
+   * on its way (`structured-composing.ts`). Outranks `tools`/`thinking` (those are the previous turn's).
    */
   composing?: 'question' | null
 }
 
-export function WorkingNote({ lang, tools, thinking, compacting, composing }: WorkingNoteProps) {
+export function WorkingNote({ lang, tools, thinking, composing }: WorkingNoteProps) {
   const pt = lang === 'pt'
   const names = (tools ?? []).map(t => t.name)
 
-  const what = compacting
-    ? (compacting.percent === null
-        ? (pt ? 'compactando a conversa' : 'compacting the conversation')
-        : (pt ? `compactando a conversa · ${compacting.percent}%` : `compacting the conversation · ${compacting.percent}%`))
-    : composing === 'question'
+  const what = composing === 'question'
     ? (pt ? 'formulando perguntas…' : 'formulating questions…')
     : names.length > 0
     // Named, but only up to two: a turn can invoke eight tools and the line is not a manifest.
@@ -70,9 +57,9 @@ export function WorkingNote({ lang, tools, thinking, compacting, composing }: Wo
       </span>
       {/* The first tool's own detail, when there is one and there is room. The line stays one line:
           a command is routinely longer than the pane and this is a status, not content. Withheld
-          while compacting: `tools` here is still the PREVIOUS turn's, and a stale command sitting
-          next to "compacting the conversation" reads as something happening right now. */}
-      {!compacting && !composing && tools?.[0]?.detail && (
+          while formulating a question: `tools` here is still the PREVIOUS turn's, and a stale command
+          reads as something happening right now. */}
+      {!composing && tools?.[0]?.detail && (
         <code style={{
           minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           fontFamily: "'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace",

@@ -2,22 +2,27 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import type { ChatSourceRef, HarnessChat, HarnessChatDelta } from '@agentistics/engine-api'
 import type { ChatTurn } from '@agentistics/core'
 import {
-  adapterChatResponse, adapterRefused, clearAdapterRefusals, pickAdapterChat, readAdapterChat, refuseAdapter,
+  adapterChatResponse, firstWindow, adapterRefused, clearAdapterRefusals, pickAdapterChat, readAdapterChat, refuseAdapter,
   rowLive, sameAdapterSource, type AdapterChatDeps, type AdapterChatRow,
 } from './adapter-chat'
 import type { ChatPayload } from './chat-web'
+import { onChatStreamsReset, resetChatStreams } from './chat-stream'
 
 afterEach(() => clearAdapterRefusals())
 
 /** A channel the test drives by hand. */
-function fakeChat(o: { resolves?: boolean; throwsOnFollow?: boolean } = {}) {
+function fakeChat(o: { resolves?: boolean; throwsOnFollow?: boolean; resolveDelayMs?: number } = {}) {
   let emit: ((d: HarnessChatDelta) => void) | null = null
   let follows = 0, unfollows = 0, resolves = 0
   let resolvable = o.resolves ?? true
   const src: ChatSourceRef = { harness: 'codex', conversationId: 'c1', sourceRef: '/x/rollout.jsonl' }
   const chat: HarnessChat = {
     declares: { state: { from: 'markers' }, attention: { absent: 'no' }, live: { absent: 'no' }, fork: { absent: 'no' } },
-    async resolve() { resolves++; return resolvable ? src : null },
+    async resolve() {
+      resolves++
+      if (o.resolveDelayMs) await Bun.sleep(o.resolveDelayMs)
+      return resolvable ? src : null
+    },
     follow(_s, _max, on) {
       if (o.throwsOnFollow) throw new Error('broken source')
       follows++; emit = on
@@ -92,7 +97,7 @@ describe('pickAdapterChat — who takes the engine path', () => {
 })
 
 describe('adapterChatResponse', () => {
-  function open(f: ReturnType<typeof fakeChat>, o: { rowAt?: () => AdapterChatRow | null; composing?: AdapterChatDeps['composing']; current?: AdapterChatDeps['current'] } = {}) {
+  function open(f: ReturnType<typeof fakeChat>, o: { rowAt?: () => AdapterChatRow | null; composing?: AdapterChatDeps['composing']; current?: AdapterChatDeps['current']; onReset?: AdapterChatDeps['onReset'] } = {}) {
     const ticks = new Set<() => void>()
     const wakes = new Set<() => void>()
     let closedWith: boolean | null = null
@@ -106,6 +111,7 @@ describe('adapterChatResponse', () => {
       onWake: cb => { wakes.add(cb); return () => wakes.delete(cb) },
       ...(o.composing ? { composing: o.composing } : {}),
       ...(o.current ? { current: o.current } : {}),
+      ...(o.onReset ? { onReset: o.onReset } : {}),
     }, ctl.signal, failed => { closedWith = failed })
     return { res, ctl, tick: () => { for (const t of ticks) t() }, ticks, wakes, closedWith: () => closedWith }
   }
@@ -173,6 +179,68 @@ describe('adapterChatResponse', () => {
     await Bun.sleep(30)
     expect(f.counts().follows).toBe(1)
     s.ctl.abort()
+  })
+
+  test('a STOPPED row with no resolvable source closes the stream as FAILED (legacy diagnosis)', async () => {
+    const f = fakeChat({ resolves: false })
+    const s = open(f, { rowAt: () => row({ state: 'exited' }) })
+    await events(s.res, () => false, 200)
+    expect(s.closedWith()).toBe(true)
+  })
+
+  test('MED-2: a STOPPED row whose resolve is SLOWER than the debounce sends no frame before handing over', async () => {
+    // Startup used to find the tick's resolve in flight, return at once and schedule the first frame:
+    // an empty SUCCESSFUL `chat` went out before the null arrived and the stream closed as failed.
+    const f = fakeChat({ resolves: false, resolveDelayMs: 120 })
+    const s = open(f, { rowAt: () => row({ state: 'exited' }) })
+    const got = await events(s.res, () => false, 400)
+    expect(got.filter(x => x.event === 'chat' || x.event === 'chat-delta')).toEqual([])
+    expect(s.closedWith()).toBe(true)
+    expect(f.counts().resolves).toBe(1)
+  })
+
+  test('MED-2: a STOPPED row woken while its slow resolve is in flight still sends nothing', async () => {
+    const f = fakeChat({ resolves: false, resolveDelayMs: 120 })
+    const s = open(f, { rowAt: () => row({ state: 'exited' }) })
+    await Bun.sleep(10)
+    for (const w of s.wakes) w()
+    const got = await events(s.res, () => false, 400)
+    expect(got.filter(x => x.event === 'chat' || x.event === 'chat-delta')).toEqual([])
+    expect(s.closedWith()).toBe(true)
+  })
+
+  test('MED-2: a LIVE row with a slow, empty resolve still gets its empty first frame', async () => {
+    const f = fakeChat({ resolves: false, resolveDelayMs: 60 })
+    const s = open(f)
+    const got = await events(s.res, e => e.some(x => x.event === 'chat'))
+    expect(JSON.parse(got.find(x => x.event === 'chat')!.data).turns).toEqual([])
+    expect(s.closedWith()).toBeNull()
+    s.ctl.abort()
+  })
+
+  test('the chat-source switch moving (onReset) closes the stream, NOT as failed', async () => {
+    const f = fakeChat()
+    const resets = new Set<() => void>()
+    const s = open(f, { onReset: cb => { resets.add(cb); return () => resets.delete(cb) } })
+    await Bun.sleep(20)
+    f.emit({ kind: 'window', turns: [{ role: 'user', text: 'hi' }], older: false })
+    await events(s.res, e => e.some(x => x.event === 'chat'))
+    expect(resets.size).toBe(1)
+    for (const r of [...resets]) r()
+    expect(s.closedWith()).toBe(false)
+    expect(resets.size).toBe(0)
+    expect(f.counts().unfollows).toBe(1)
+  })
+
+  test('resetChatStreams (the experimental switch) closes an open adapter stream, NOT as failed', async () => {
+    const f = fakeChat()
+    const s = open(f, { onReset: onChatStreamsReset })
+    await Bun.sleep(20)
+    resetChatStreams()
+    expect(s.closedWith()).toBe(false)
+    expect(f.counts().unfollows).toBe(1)
+    resetChatStreams() // already closed and unregistered: nothing happens twice
+    expect(s.closedWith()).toBe(false)
   })
 
   test('an engine error closes the stream as FAILED', async () => {
@@ -248,6 +316,11 @@ describe('readAdapterChat — the one-shot GET', () => {
     expect(out).toEqual({ turns: [], live: true, source: 'adapter' })
   })
 
+  test('a STOPPED row with no resolvable source: null, so the legacy reader gives its diagnosis', async () => {
+    const out = await readAdapterChat({ conversationId: 'c1', chat: fakeChat({ resolves: false }).chat, row: row({ state: 'lost' }), pending: [], max: 400, finish })
+    expect(out).toBeNull()
+  })
+
   test('no window in time: null, so the caller serves the legacy read', async () => {
     const out = await readAdapterChat({ conversationId: 'c1', chat: fakeChat().chat, row: row(), pending: [], max: 400, finish, timeoutMs: 20 })
     expect(out).toBeNull()
@@ -266,5 +339,36 @@ describe('sameAdapterSource — is the opened channel still the row\'s (AGY.CHAT
     expect(sameAdapterSource({ structured: false, conversationId: 'c1' }, { structured: false, conversationId: 'c2' })).toBe(false)
     expect(sameAdapterSource({ structured: false, conversationId: 'c1' }, null)).toBe(false)
     expect(sameAdapterSource({ structured: false, conversationId: 'c1' }, { structured: true })).toBe(false)
+  })
+})
+
+describe('firstWindow — one read, then stop following', () => {
+  const src = { sourceRef: 's1' } as unknown as ChatSourceRef
+  const synchronous = (calls: { n: number }): HarnessChat => ({
+    follow: (_s: ChatSourceRef, _max: number, on: (d: HarnessChatDelta) => void) => {
+      on({ kind: 'window', turns: [{ role: 'assistant', text: 'hi' }], older: false } as HarnessChatDelta)
+      return () => { calls.n++ }
+    },
+  }) as unknown as HarnessChat
+
+  test('a window delivered synchronously unsubscribes exactly once', async () => {
+    const calls = { n: 0 }
+    const w = await firstWindow(synchronous(calls), src, 6, 50)
+    await new Promise(r => setTimeout(r, 0))
+    expect(w?.turns.map(t => t.text)).toEqual(['hi'])
+    expect(calls.n).toBe(1)
+  })
+
+  test('a window delivered later unsubscribes exactly once', async () => {
+    const calls = { n: 0 }
+    const chat = {
+      follow: (_s: ChatSourceRef, _max: number, on: (d: HarnessChatDelta) => void) => {
+        setTimeout(() => on({ kind: 'window', turns: [], older: false } as HarnessChatDelta), 1)
+        return () => { calls.n++ }
+      },
+    } as unknown as HarnessChat
+    await firstWindow(chat, src, 6, 50)
+    await new Promise(r => setTimeout(r, 5))
+    expect(calls.n).toBe(1)
   })
 })

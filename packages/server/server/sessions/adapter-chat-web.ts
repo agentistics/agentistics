@@ -13,13 +13,14 @@ import { cliStrings } from '../cli-i18n'
 import { toControlSession } from './control-session'
 import type { SessionHub } from './session-hub'
 import type { SessionSnapshot } from './sessions-host'
+import { featureOn } from '@agentistics/core'
 import { engine } from '../engine/load'
 import {
   adapterChatResponse, pickAdapterChat, readAdapterChat, refuseAdapter, sameAdapterSource,
   type AdapterChatRow, type AdapterSourceKind,
 } from './adapter-chat'
 import { finishChatRead, MAX_TURNS } from './chat-web'
-import { acquireChatSlot, onChatWake, releaseChatSlot } from './chat-stream'
+import { acquireChatSlot, onChatStreamsReset, onChatWake, releaseChatSlot } from './chat-stream'
 import { pendingFor } from './pending-prompts'
 import { fleetSessionHub } from './fleet-web'
 import { composingOf, onComposing } from './structured-composing'
@@ -89,9 +90,13 @@ export async function openAdapterChatStream(
     finish: (read, live) => finishChatRead(id, conversationId, read, live, lang, row.id),
     onFleetTick: cb => hub.subscribe(() => cb()),
     onWake: cb => onChatWake(id, cb),
+    onReset: onChatStreamsReset,
     // A structured session turned into a TUI (open in terminal) keeps its row: re-pick on every tick,
     // and let the client reconnect when this channel is no longer the row's (AGY.CHAT.REPLIES).
     current: async () => {
+      // The switch was turned off (the global experimental OFF, or the variable): the route would now
+      // open the legacy reader, so this stream is no longer the row's.
+      if (!featureOn('adapter-chat')) return false
       const r = await findRow(hub, lang, id).catch(() => null)
       if (!r) return true // a row that left is the tick's own close, said in the legacy words
       const s = await structuredChatOf(id)
