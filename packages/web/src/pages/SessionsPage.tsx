@@ -101,6 +101,7 @@ import { fullscreenModeFor, panelMinimizeAction } from '../lib/panelMenu'
 import {
   artifactsPanelMax, ASIDE_ANIM_MS, ASIDE_EASE, currentAction, edgeHint, PANEL_MIN_WIDTH, panelWidth,
   resolveArtifactLayout, type ArtifactLayout,
+  settleTurns,
 } from '../lib/artifactLayout'
 import {
   openArtifacts, setArtifactCount, setArtifactLive, useArtifactLive, usePanelFocusRequest,
@@ -751,6 +752,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const [artifactsOlder, setArtifactsOlder] = useState<string | undefined>(undefined)
   /** The conversation's turns, for the LIVE tab — the same ones the chat renders. */
   const [artifactTurns, setArtifactTurns] = useState<readonly LiveTurn[]>([])
+  // Ended rows have no step in flight: every liveEvents consumer reads the settled turns.
+  const shownArtifactTurns = useMemo(() => settleTurns(artifactTurns, selected?.state), [artifactTurns, selected?.state])
   /**
    * The session wrote through commands whose paths cannot be read AT ALL, so those files are in no
    * count anywhere.
@@ -1005,7 +1008,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       // carries the turns of the conversation that is actually mounted: reading `artifactTurns`
       // state in an effect would publish the PREVIOUS session's turns under the new one's id for
       // the first poll after a switch.
-      setArtifactLive(selected.id, currentAction(liveEvents(a.turns)))
+      setArtifactLive(selected.id, currentAction(liveEvents(a.turns), selected.state))
     }
   }, [selected])
   /**
@@ -1020,9 +1023,9 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const selectedId = selected?.id
   useEffect(() => {
     if (selectedId === undefined) return
-    if (sessionView !== 'chat') setArtifactLive(selectedId, null)
+    if (sessionView !== 'chat' || ['exited', 'lost', 'closed'].includes(selected?.state ?? '')) setArtifactLive(selectedId, null)
     return () => setArtifactLive(selectedId, null)
-  }, [selectedId, sessionView])
+  }, [selectedId, selected?.state, sessionView])
 
   /**
    * NOTHING OPENS THIS PANEL BUT A PERSON.
@@ -1154,6 +1157,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     // see what is happening, so the hint has nothing left to announce.
     open: rightIsTab || bottomIsTab,
     events: liveEvents(artifactTurns),
+    state: selected?.state,
     isMobile,
   })
   const HINT_VERB: Record<string, string> = {
@@ -1338,7 +1342,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       // claim. `outsideNote` is the server's sentence, passed through untouched.
       unlistedWrites={artifactsUnlisted}
       {...(outsideNote ? { outsideNote } : {})}
-      turns={artifactTurns}
+      turns={shownArtifactTurns}
+      {...(selected.state ? { state: selected.state } : {})}
       // A REQUEST for a DIFFERENT tab than `id` is not this mount's concern — see
       // `artifactsStore.ts`'s own `PanelFocusRequest` header.
       focusRequest={panelFocus && panelFocus.tab === id
@@ -2907,7 +2912,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               all: 'unset', boxSizing: 'border-box', display: 'block', width: '100%', cursor: 'pointer',
             }}
           >
-            <PlanUsageSummary limits={planLimits.limits} registered={planLimits.registered} now={planLimits.now} lang={tPt} />
+            <PlanUsageSummary limits={planLimits.limits} registered={planLimits.registered} accountLabels={planLimits.accountLabels} now={planLimits.now} lang={tPt} />
           </button>
         ), { open: drawerLimitsOpen, toggle: () => setDrawerLimitsOpen(v => !v) })}
 
@@ -3466,7 +3471,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         sessionId: selected.id,
         lang: pt ? 'pt' : 'en',
         autosave: editorAutosave === true,
-        turns: artifactTurns,
+        turns: shownArtifactTurns,
         // `Studio.tsx`'s own bar is a bare close control now (W1-A): `onExit` closes the panel
         // outright, the closest reading of "leave" the slots model has — displacing it never asks,
         // closing it does.

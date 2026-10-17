@@ -10,6 +10,8 @@ import { featureOn } from '@agentistics/core'
 import type { HarnessChat } from '@agentistics/engine-api'
 import { engine } from '../engine/load'
 import { createAdapterStateFeed, type AdapterStateFeed } from './adapter-state'
+import { readRegistry } from './registry'
+import { foreignConversations } from './row-conversation'
 import { createTailStateMemo, type TailStateMemo } from './tail-state'
 
 let feed: AdapterStateFeed | null = null
@@ -28,7 +30,10 @@ export function hostAdapterState(): AdapterStateFeed | null {
   }
   if (!engine()) return null
   if (!feed) {
-    feed = createAdapterStateFeed({ chatOf })
+    feed = createAdapterStateFeed({
+      chatOf,
+      foreign: async row => foreignConversations(await readRegistry(), row.id, row.conversationId ?? ''),
+    })
     feed.onChange(() => { for (const l of listeners) l() })
   }
   return feed

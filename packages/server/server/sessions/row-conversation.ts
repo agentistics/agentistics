@@ -41,3 +41,25 @@ export function conversationOfRow(row: { id: string; conversationId?: string }):
   const rest = row.id.slice(CLOSED_ROW_PREFIX.length)
   return rest === '' ? null : rest
 }
+
+/**
+ * The conversations OTHER rows are linked to — what a read for `own` must never follow into.
+ *
+ * Only a row's recorded `conversationId` counts — the ids of CLOSED rows (store conversations with
+ * nothing running, `closed:` prefix, no `conversationId` field) are not collected, so a `/login`
+ * successor file landing there is still followed. Every row passed that carries one counts, ended or
+ * not: another row's chat is another chat. `own` is never in the answer: rows
+ * that legitimately share one conversation (a reopen and the row it retired) are the same chat.
+ */
+export function foreignConversations(
+  rows: ReadonlyArray<{ id: string; conversationId?: string }>,
+  ownRowId: string,
+  own: string,
+): Set<string> {
+  const out = new Set<string>()
+  for (const r of rows) {
+    if (r.id === ownRowId || !r.conversationId || r.conversationId === own) continue
+    out.add(r.conversationId)
+  }
+  return out
+}

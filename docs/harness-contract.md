@@ -319,3 +319,18 @@ for such a harness is honestly ALL-false (no surface can ever receive its data),
 genuinely produces to `partial` — the two tables answer different questions ("what can today's
 surfaces show" vs "what can the canonical model produce"), and this is the case that shows they can
 disagree in this specific direction.
+
+
+### Chat tool result status
+
+`ChatTurn.tools[].failed` (also mirrored by `EngineChatTurn`) is `true` only when the
+transcript explicitly marks that call as failed. Successful calls and calls with no failure
+signal omit the field. Claude pairs `tool_use.id` with `tool_result.tool_use_id`; Codex pairs
+both `function_call` and `custom_tool_call` with their outputs by `call_id`; Kimi and Copilot
+use `toolCallId`. Gemini carries status on each `toolCalls` entry. Antigravity has no call id
+in its execution records: only a unique exact name/type match between a planner's requests
+and its following execution batch can propagate an exit/status failure. Repeated tool names,
+unmatched results and standalone `ERROR_MESSAGE` records remain unattributed.
+
+The web activity strip suppresses pending transcript activity for ended, exited, lost and
+closed sessions independently of experimental chat preferences.

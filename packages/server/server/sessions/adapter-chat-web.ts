@@ -23,6 +23,8 @@ import { finishChatRead, MAX_TURNS } from './chat-web'
 import { acquireChatSlot, onChatStreamsReset, onChatWake, releaseChatSlot } from './chat-stream'
 import { pendingFor } from './pending-prompts'
 import { fleetSessionHub } from './fleet-web'
+import { foreignConversations } from './row-conversation'
+import { readRegistry } from './registry'
 import { composingOf, onComposing } from './structured-composing'
 
 /** The engine's chat channel for a harness, or `undefined` (no engine, or a declared absence). */
@@ -63,6 +65,18 @@ async function findRow(hub: SessionHub, lang: CliLang, id: string): Promise<Adap
   return adapterRowOf(snap, id, lang)
 }
 
+/**
+ * The conversations the OTHER rows are linked to NOW (CROSSBIND): the hub's snapshot AND the registry
+ * as it is at this moment — a row registered after the last poll (a concurrent spawn) is an owner the
+ * snapshot cannot know yet (HIGH-4). The registry read is a cached parse per file version.
+ */
+function foreignOf(hub: SessionHub, id: string, conversationId: string): () => Promise<ReadonlySet<string>> {
+  return async () => {
+    const snap = hub.last() ?? await hub.read()
+    return foreignConversations([...(snap?.sessions ?? []), ...await readRegistry()], id, conversationId)
+  }
+}
+
 /** `GET /api/fleet/chat-stream` through the engine's channel, or `null` for the legacy stream. */
 export async function openAdapterChatStream(
   host: StartHost,
@@ -88,6 +102,7 @@ export async function openAdapterChatStream(
     row: () => findRow(hub, lang, id),
     pending: () => pendingFor(conversationId, []).map(p => p.text),
     finish: (read, live) => finishChatRead(id, conversationId, read, live, lang, row.id),
+    foreign: foreignOf(hub, id, conversationId),
     onFleetTick: cb => hub.subscribe(() => cb()),
     onWake: cb => onChatWake(id, cb),
     onReset: onChatStreamsReset,
@@ -126,6 +141,7 @@ export async function readAdapterChatPayload(host: StartHost, lang: CliLang, id:
     pending: pendingFor(conversationId, []).map(p => p.text),
     max: MAX_TURNS,
     finish: (read, live) => finishChatRead(id, conversationId, read, live, lang, row.id),
+    foreign: foreignOf(hub, id, conversationId),
   })
   if (!out) refuseAdapter(row.harness ?? '', conversationId)
   return out

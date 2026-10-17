@@ -16,8 +16,11 @@ import * as realPreferences from '../preferences'
 // settings, and two suites running at once raced on it. The scan roots come from an in-memory
 // preferences module instead.
 let fakeRoots: string[] = []
+// A bun module mock outlives its file: without putting the real module back in `afterAll`, every
+// later file of the same run (handoff-cli, the pin tests) read `{ scanRoots }` as the preferences.
+const realSnapshot = { ...realPreferences }
 mock.module('../preferences', () => ({
-  ...realPreferences,
+  ...realSnapshot,
   readPreferences: async () => ({ scanRoots: fakeRoots }),
 }))
 const { findProjects, forgetProjects } = await import('./project-source')
@@ -51,6 +54,7 @@ beforeAll(async () => {
 }, 30_000)
 
 afterAll(async () => {
+  mock.module('../preferences', () => realSnapshot)
   if (realHome === undefined) delete process.env.HOME; else process.env.HOME = realHome
   forgetProjects()
   await rm(base, { recursive: true, force: true })

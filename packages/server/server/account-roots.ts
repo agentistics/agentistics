@@ -73,14 +73,28 @@ export const LOGIN_START: Record<HarnessId, { argv: string[] } | null> = {
 /**
  * A file whose EXISTENCE (never its content) shows a harness without an identity probe has been
  * signed in. A harness with neither a probe nor a marker never binds a root by itself: "the login
- * session ended" is not a login (someone can close the pane). kimi: `config.toml` is not in its
- * `ROOT_SHARED`, so it appears in a root only once kimi wrote its own configuration there. Being on
- * disk, the evidence survives a server restart.
+ * session ended" is not a login (someone can close the pane). Being on disk, the evidence survives a
+ * server restart.
  */
-const LOGIN_MARKER: Record<HarnessId, string | null> = {
+const LOGIN_MARKER: Record<HarnessId, { path: string; anyEntryBut?: string[] } | null> = {
   claude: null, codex: null, copilot: null, antigravity: null, opencode: null,
-  kimi: 'config.toml',
-  gemini: join('.gemini', 'oauth_creds.json'),
+  // kimi writes `config.toml` with its DEFAULT text on first start (so it is no evidence of a login)
+  // and keeps the device-code login's token in `<KIMI_CODE_HOME>/credentials/` (its toolkit's
+  // `FileTokenStorage(join(homeDir, 'credentials'))`, read from the kimi 0.41 bundle, 2026-10-16).
+  // That folder also holds MCP OAuth state under `mcp/`, which is not a kimi login, so the marker is
+  // "credentials/ has an entry other than mcp". Names only; no file in it is ever read.
+  kimi: { path: 'credentials', anyEntryBut: ['mcp'] },
+  gemini: { path: join('.gemini', 'oauth_creds.json') },
+}
+
+/** Does the root show a login? Existence (and, for a folder marker, entry NAMES) only — never content. */
+async function hasLoginMarker(harness: HarnessId, root: string): Promise<boolean> {
+  const marker = LOGIN_MARKER[harness]
+  if (!marker) return false
+  const at = join(root, marker.path)
+  if (!marker.anyEntryBut) return stat(at).then(() => true, () => false)
+  const names = await readdir(at).catch(() => [] as string[])
+  return names.some(n => !marker.anyEntryBut!.includes(n))
 }
 
 const DEFAULT_CONFIG_DIR: Record<HarnessId, () => string> = {
@@ -147,8 +161,8 @@ export interface AccountRootsDeps {
   audit?: typeof writeAudit
 }
 
-// The trailing slash is deliberate: `backup-plan.ts` excludes `.agentistics/accounts/` (credentials live
-// inside) without also catching the `accounts.json` registry, which a bare prefix would.
+// `<data>/accounts`. The backup exclusion of the roots (credentials live inside) is its own row in
+// `backup-plan.ts`, whose pattern is what keeps `accounts.json` (the registry) out of that rule.
 const defaultBase = () => join(resolve(AGENTISTICS_DATA_DIR), 'accounts')
 
 /** PURE. The env a session of this root gets (and the login session needs). */
@@ -309,9 +323,7 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
         if (found && found.key !== 'default') identity = found
       } else {
         // No probe: only the harness's own marker on disk shows a login, and the fallback key is never an identity.
-        const marker = LOGIN_MARKER[dir.harness]
-        const signedIn = marker ? await stat(join(dir.root, marker)).then(() => true, () => false) : false
-        if (signedIn) {
+        if (await hasLoginMarker(dir.harness, dir.root)) {
           const found = await probe(dir.harness, dir.root).catch(() => null)
           if (found && found.key !== 'default') identity = found
         }
@@ -406,9 +418,16 @@ export async function registerRootMcp(
   const spawn = opts.spawn ?? ((argv, env) => Bun.spawn(argv, {
     stdin: 'ignore', stdout: 'ignore', stderr: 'ignore', env: { ...process.env, ...env },
   }) as unknown as McpChild)
-  const child = spawn(reg.argv, reg.env)
-  const timer = setTimeout(() => child.kill('SIGKILL'), opts.timeoutMs ?? 10_000)
-  try { await Promise.race([child.exited, new Promise<void>(done => setTimeout(done, (opts.timeoutMs ?? 10_000) + 50))]) } finally { clearTimeout(timer) }
+  const timeoutMs = opts.timeoutMs ?? 10_000
+  // Each child gets its own kill: a remove that hangs must not leave the add unbounded either.
+  const run = async (argv: string[]) => {
+    const child = spawn(argv, reg.env)
+    const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs)
+    try { await Promise.race([child.exited, new Promise<void>(done => setTimeout(done, timeoutMs + 50))]) } finally { clearTimeout(timer) }
+  }
+  // Remove, then add: `mcp add` refuses an existing name, so this is what repairs a stale entry.
+  await run(reg.removeArgv)
+  await run(reg.argv)
 }
 const defaultRegisterMcp = (harness: HarnessId, root: string) => registerRootMcp(harness, root)
 

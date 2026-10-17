@@ -368,3 +368,16 @@ describe('--handoff (leader hand-off from the CLI)', () => {
     expect(parseSessionArgs(['claude'])).not.toHaveProperty('handoff')
   })
 })
+
+describe('--account (PLAN.ACCOUNTS D3)', () => {
+  it('start takes an account id', () => {
+    expect(parseSessionArgs(['codex', '--account', 'acc_1', '--bg'])).toMatchObject({ kind: 'start', harness: 'codex', account: 'acc_1', background: true })
+  })
+  it('a missing value is refused', () => {
+    expect(parseSessionArgs(['codex', '--account'])).toMatchObject({ kind: 'error' })
+  })
+  it('batch: a positional default for the --session entries that follow it', () => {
+    const c = parseSessionArgs(['batch', '--task', 't', '--session', 'claude: a', '--account', 'acc_2', '--session', 'claude: b'])
+    expect(c.kind === 'batch' && c.specs.map(s => s.account)).toEqual([undefined, 'acc_2'])
+  })
+})

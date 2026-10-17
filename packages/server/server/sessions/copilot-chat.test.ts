@@ -11,6 +11,15 @@ const line = (type: string, data: Record<string, unknown>): string =>
   JSON.stringify({ type, data, id: 'x', timestamp: AT })
 
 describe('toolDetailOf', () => {
+  it('keeps the patch of an apply_patch call', () => {
+    const patch = '*** Begin Patch\n*** Update File: packages/a/src/x.ts\n@@\n-old\n+new\n*** Add File: packages/a/src/y.ts\n+hello\n*** End Patch'
+    const d = toolDetailOf({ input: patch }, 'apply_patch')!
+    expect(d).toContain('*** Update File: packages/a/src/x.ts')
+    expect(d).toContain('*** Add File: packages/a/src/y.ts')
+    expect(toolDetailOf({ patch }, 'apply_patch')).toBe(d)
+    // a write tool carrying patch-shaped content still shows its path
+    expect(toolDetailOf({ path: '/repo/change.patch', content: patch }, 'create')).toBe('/repo/change.patch')
+  })
   it('a shell command is summarised past its `cd`', () => {
     expect(toolDetailOf({ command: 'cd /repo && bun test', description: 'run tests' }))
       .toBe('bun test')
@@ -141,4 +150,17 @@ describe('parseCopilotChat', () => {
     })])
     expect(turn!.at).toBeUndefined()
   })
+})
+
+it('pairs execution_complete.success by toolCallId rather than completion order', () => {
+  const turns = parseCopilotChat([
+    JSON.stringify({ type: 'assistant.message', data: { content: 'Checking', toolRequests: [
+      { name: 'bash', toolCallId: 'bad', arguments: { command: 'false' } },
+      { name: 'view', toolCallId: 'ok', arguments: { path: 'a' } },
+      { name: 'view', toolCallId: 'pending', arguments: { path: 'b' } },
+    ] } }),
+    JSON.stringify({ type: 'tool.execution_complete', data: { toolCallId: 'ok', success: true } }),
+    JSON.stringify({ type: 'tool.execution_complete', data: { toolCallId: 'bad', success: false } }),
+  ])
+  expect(turns[0]!.tools!.map(t => t.failed)).toEqual([true, undefined, undefined])
 })

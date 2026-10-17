@@ -75,6 +75,7 @@ import type {
   SessionViewPrefs,
   SpawnSessionRequest,
   SpawnSessionResult,
+  AccountRefusalCode,
   ProjectOption,
   ProjectSearchResult,
   ResumeSessionRequest,
@@ -192,7 +193,7 @@ import { withResumeLock } from './sessions/resume-lock'
 import { liveConversationHolders } from './sessions/live-claims'
 import type { ManagedSession, SessionBackend, SpawnPlanError } from './sessions/types'
 import {
-  addSession, adoptSessionRecords, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession, touchSessions,
+  addSession, adoptSessionRecords, newSessionId, linkConversationVerified, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession, touchSessions,
 } from './sessions/registry'
 import {
   createSessionsPoller, linkProcessConversation, sampleProcessLinks, SESSION_POLL_MS, type SessionsPoller,
@@ -1575,16 +1576,9 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
     // The link kind travels WITH the id. Dropping it here would persist a first-sighting claim as
     // though the CLI had been handed that conversation, which is the one thing the field exists to
     // keep apart — see `ManagedSession.conversationLink`.
-    recordConversation: (id, conversationId, conversationLink, conversationLinkVia) =>
-      patchSession(id, { conversationId, conversationLink, ...(conversationLinkVia ? { conversationLinkVia } : {}) })
-        // A mute made at spawn is keyed by the managed id until the conversation is known.
-        .then(async r => {
-          await rekeyMutedSession(id, conversationId).catch(() => {})
-          await rekeyFolderMember(id, conversationId).catch(() => {})
-          await rekeyCheckinSession(id, conversationId, updatePreferences).catch(() => {})
-          await rekeyStoredRole([id], [id, conversationId]).catch(() => {})
-          return r
-        }),
+    // Through `recordProcessLink`, so a conversation another row owns is refused (CROSSBIND) on
+    // every link this poller writes, not only on the process route.
+    recordConversation: recordProcessLink,
     // The per-process log link — antigravity's only exact answer, and the reason its chat view was
     // permanently empty while its terminal worked. Wired HERE and deliberately not on
     // `cli-session.ts`'s poller: that one is a one-shot command and writes nothing, exactly as it
@@ -1693,6 +1687,7 @@ function explainSpawnError(e: SpawnPlanError, s: CliStrings): string {
     case 'effort-unsupported': return s.sessSpawnNoEffort(e.harness)
     case 'unknown-effort': return s.sessSpawnBadEffort(e.harness, e.value, e.accepted)
     case 'unknown-mode': return s.sessSpawnBadMode(e.harness, e.value)
+    case 'account-unsupported': return s.sessSpawnNoAccount(e.harness)
   }
 }
 
@@ -1763,9 +1758,23 @@ async function sampleLinksFor(harness: HarnessId, deadline: () => number, onlyId
 }
 
 /** The one write a process-transcript link makes, wherever it was found. */
-function recordProcessLink(sid: string, conversationId: string, link: 'assigned', via?: ConversationLinkReason): Promise<unknown> {
-  return patchSession(sid, { conversationId, conversationLink: link, ...(via ? { conversationLinkVia: via } : {}) })
-    .then(async r => {
+/**
+ * Write a conversation link the poller found, and carry the mute/folder/check-in/role keyed by the
+ * managed id over to it. REFUSED — and thrown, so every caller reads it as "not linked" — when another
+ * row already owns that conversation (`conversationOwnedElsewhere`, CROSSBIND): a second row on one
+ * conversation is one session's chat shown under another's name.
+ */
+function recordProcessLink(sid: string, conversationId: string, link: 'assigned' | 'observed', via?: ConversationLinkReason): Promise<unknown> {
+  return linkConversationVerified(
+    sid,
+    { conversationId, conversationLink: link, ...(via ? { conversationLinkVia: via } : {}) },
+    async () => (await resolveBackend()).list(),
+  )
+    .then(async outcome => {
+      if (!outcome.ok && outcome.heldBy) throw new Error(`conversation ${conversationId} is owned by session ${outcome.heldBy}`)
+      // Not written: the registry lock could not be taken, so the ownership check never ran. Retried next poll.
+      if (!outcome.ok && outcome.contended) throw new Error(`conversation ${conversationId} not linked: registry lock contended`)
+      const r = outcome.ok
       await rekeyMutedSession(sid, conversationId).catch(() => {})
       await rekeyFolderMember(sid, conversationId).catch(() => {})
       await rekeyCheckinSession(sid, conversationId, updatePreferences).catch(() => {})
@@ -1923,9 +1932,11 @@ async function spawnRow(a: {
   away?: boolean
   model?: string
   effort?: string
+  /** PLAN.ACCOUNTS D3: the account this session runs on, stamped once (immutable). */
+  accountId?: string
   bornLink: Partial<ManagedSession> | null | undefined
 }): Promise<ManagedSession> {
-  const { id, spawnedAt, req, model, effort, bornLink, pendingContext, away } = a
+  const { id, spawnedAt, req, model, effort, bornLink, pendingContext, away, accountId } = a
   return {
     id,
     harness: req.harness,
@@ -1950,6 +1961,7 @@ async function spawnRow(a: {
     // Resolved by the caller; `false` drops an `away` the replaced row carried (an explicit off).
     ...(away === true ? { away: true } : {}),
     ...(away === false ? { away: undefined } : {}),
+    ...(accountId ? { accountId } : {}),
     // Recorded at the one moment it is certain — the harness was just handed this id, or we asked
     // it to reopen this conversation.
     ...(bornLink ?? {}),
@@ -1988,7 +2000,7 @@ function queuedSentence(position: number, lang: CliLang): string {
     : `No room right now — the session is queued (position ${position}) and starts by itself when memory frees; cancel it in Hardware → Resources.`
 }
 
-async function spawnManaged(req: {
+export async function spawnManaged(req: {
   harness: HarnessId
   cwd: string
   attach: boolean
@@ -2053,10 +2065,30 @@ async function spawnManaged(req: {
   afterStart?: (r: SpawnSessionResult) => Promise<SpawnSessionResult>
   /** multi-account: see `SpawnSessionRequest.account`. */
   account?: { env: Record<string, string>; loginArgv?: string[] }
+  /** PLAN.ACCOUNTS D3: see `SpawnSessionRequest.accountId`. A reopen (`inherit`) keeps the row's own. */
+  accountId?: string
+  /** PLAN.ACCOUNTS D3: a VERIFIED agent is asking (see `SpawnSessionRequest.callerVerified`). */
+  callerVerified?: boolean
 }, s: CliStrings, lang: CliLang): Promise<SpawnSessionResult> {
   const backend = await resolveBackend()
   const blocked = await backend.unavailable()
   if (blocked) return { ok: false, message: blocked }
+
+  // PLAN.ACCOUNTS D3 — the account is IMMUTABLE: a reopen runs in the replaced row's root (its
+  // transcript exists only there), whatever the request or the flag says now. A fresh spawn's
+  // account was chosen and checked by the caller (`spawn-account.ts`); it is re-read here so a
+  // root removed in between refuses in words instead of starting somewhere else.
+  // An agent is held to the hidden-account rule here too, including a row with no account (the
+  // default root's login) — the one check every door ends in.
+  const accountId = req.inherit ? req.inherit.accountId : req.accountId
+  let accountRoot: string | null = null
+  if (accountId || req.callerVerified) {
+    const { recordedSpawnAccount } = await import('./sessions/spawn-account-io')
+    const { spawnAccountMessage } = await import('./sessions/spawn-account')
+    const decided = await recordedSpawnAccount(accountId, { agentCaller: req.callerVerified === true, harness: req.harness })
+    if (!decided.ok) return { ok: false, message: spawnAccountMessage(decided.reason, decided.detail, lang === 'pt' ? 'pt' : 'en', !!req.inherit), accountRefusal: decided.reason }
+    accountRoot = decided.account?.root ?? null
+  }
 
   // THE GATE — before anything is spawned or written to the registry. A session that has already
   // been started cannot be un-started, so this has to run first, not merely early.
@@ -2146,6 +2178,7 @@ async function spawnManaged(req: {
     // Offered for a FRESH session; `planSpawn` applies it only where the CLI accepts one and reports
     // back what it actually did. A resume ignores it — that conversation already has an id.
     conversationId: offeredConversationId,
+    ...(accountRoot ? { account: { root: accountRoot } } : {}),
   }, await spawnCapabilities(req.harness))
   if (!planned.ok) return { ok: false, message: explainSpawnError(planned.error, s) }
   if (req.account) applyAccountToPlan(planned.plan, req.account)
@@ -2171,7 +2204,7 @@ async function spawnManaged(req: {
   // <id>" for seconds — the placeholder `control-session.ts` keeps for sessions started OUTSIDE
   // agentop. Born linked — see `born-link.ts` for the window a patch-afterwards left open.
   const bornLink = bornConversationLink(planned.plan.conversationId, req.resumeId)
-  await addSession(await spawnRow({ id, spawnedAt, req: { ...req, ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}) }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx), away }))
+  await addSession(await spawnRow({ id, spawnedAt, req: { ...req, ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}) }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx), away, ...(accountId ? { accountId } : {}) }))
   if (req.inherit) {
     await rekeyStoredRole(
       [req.inherit.id, req.inherit.conversationId, req.resumeId],
@@ -2351,17 +2384,47 @@ async function endProcess(pid: number): Promise<boolean> {
   return waitFor(ADOPT_KILL_MS)
 }
 
+/**
+ * The spawn one row of a group/task reopen asks for. Exported for its test: the caller's identity
+ * MUST reach every spawn (PLAN.ACCOUNTS D3) — an agent may not reopen a row whose account is off for
+ * agents, nor a row with no account on the default root's off/retired login; the owner may.
+ */
+export function reopenRowRequest(
+  m: ManagedSession,
+  row: { resumeId: string; label: string },
+  caller: { callerVerified?: boolean } = {},
+): Parameters<typeof spawnManaged>[0] {
+  return {
+    harness: m.harness,
+    cwd: m.cwd,
+    resumeId: row.resumeId,
+    label: row.label,
+    // The record pins the account: `spawnManaged` reads `inherit.accountId`, never a new choice.
+    inherit: m,
+    attach: false,
+    // The task travels with the session, whichever set this reopen was chosen from: a fall does
+    // not un-file the work someone filed.
+    ...(m.task ? { task: m.task } : {}),
+    // Already gated by the caller, for the whole batch at once — re-checking per row here would
+    // refuse partway through a set already admitted, or double-count the same budget row by row.
+    skipAdmission: true,
+    ...(caller.callerVerified ? { callerVerified: true } : {}),
+  }
+}
+
 async function reopenEntries(
   entries: readonly ManagedSession[],
   s: CliStrings,
   lang: CliLang,
-): Promise<{ plan: TaskReopenPlan; opened: number; skipped: number; admissionRefusal?: AdmissionRefusal; backendUnreadable?: true }> {
+  /** PLAN.ACCOUNTS D3: a VERIFIED agent is reopening — each row is held to the account rule. */
+  caller: { callerVerified?: boolean } = {},
+): Promise<{ plan: TaskReopenPlan; opened: number; skipped: number; admissionRefusal?: AdmissionRefusal; backendUnreadable?: true; accountRefusals: { id: string; reason: AccountRefusalCode; message: string }[]; openedIds: string[] }> {
   const backend = await resolveBackend()
   // A backend that cannot be LISTED is not one with nothing running: reading it as empty made every
   // live row of the set look fallen, and a reopen started a second assistant inside each live
   // conversation (2026-10-03). Refuse the whole set instead.
   const listed = await backend.list().catch(() => null)
-  if (!listed) return { plan: planTaskReopen({ entries: [], liveIds: new Set(), conversationFor: () => null }), opened: 0, skipped: 0, backendUnreadable: true }
+  if (!listed) return { plan: planTaskReopen({ entries: [], liveIds: new Set(), conversationFor: () => null }), opened: 0, skipped: 0, backendUnreadable: true, accountRefusals: [], openedIds: [] }
   const conversations = await loadConversations()
   const live = new Set(listed.filter(b => b.alive).map(b => b.id))
   // What is already being driven, so a task reopen cannot put a second assistant into a conversation
@@ -2389,10 +2452,12 @@ async function reopenEntries(
   if (plan.reopen.length > 0) {
     const admission = admitSpawn(await readSpawnBudget(), plan.reopen.length)
     if (!admission.admit) {
-      return { plan, opened: 0, skipped: plan.skipped.length, admissionRefusal: admission.refusal }
+      return { plan, opened: 0, skipped: plan.skipped.length, admissionRefusal: admission.refusal, accountRefusals: [], openedIds: [] }
     }
   }
 
+  const accountRefusals: { id: string; reason: AccountRefusalCode; message: string }[] = []
+  const openedIds: string[] = []
   let opened = 0
   let skipped = plan.skipped.length
   for (const row of plan.reopen) {
@@ -2430,21 +2495,10 @@ async function reopenEntries(
       },
       holderOf: async () =>
         conversationHeldBy(await liveConversationHolders(await resolveBackend()), row.resumeId, m.id),
-      spawn: () => spawnManaged({
-        harness: m.harness,
-        cwd: m.cwd,
-        resumeId: row.resumeId,
-        label: row.label,
-        inherit: m,
-        attach: false,
-        // The task travels with the session, whichever set this reopen was chosen from: a fall does
-        // not un-file the work someone filed.
-        ...(m.task ? { task: m.task } : {}),
-        // Already gated ABOVE, for the whole batch at once — re-checking per row here would refuse
-        // partway through a set this call already admitted, or double-count the same budget row by
-        // row.
-        skipAdmission: true,
-      }, s, lang),
+      spawn: () => spawnManaged(reopenRowRequest(m, row, caller), s, lang).then(r => {
+        if (!r.ok && r.accountRefusal) accountRefusals.push({ id: m.id, reason: r.accountRefusal, message: r.message })
+        return r
+      }),
       onSpawned: async newId => {
         if (newId) await patchSession(newId, { conversationId: row.resumeId })
         // Retired, so a laptop closed and opened twice does not leave two dead twins and one live
@@ -2453,7 +2507,7 @@ async function reopenEntries(
         if (m.note && newId) await patchSession(newId, { note: m.note })
       },
     }))
-    if (outcome.kind === 'opened') opened++
+    if (outcome.kind === 'opened') { opened++; openedIds.push(m.id) }
     else if (outcome.kind === 'held') {
       // Somebody else's attempt for this exact conversation landed first, in the time between the
       // plan being built and this row's turn under the lock. Reported the same way `planTaskReopen`
@@ -2465,7 +2519,7 @@ async function reopenEntries(
     }
   }
   forgetConversations()
-  return { plan, opened, skipped }
+  return { plan, opened, skipped, accountRefusals, openedIds }
 }
 
 /**
@@ -2862,6 +2916,21 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       cwd: req.cwd,
     })
     if (plan.kind === 'refuse') return { ok: false, message: s.sessTakeoverRefused(plan.reason) }
+    // PLAN.ACCOUNTS D3 — a removed account refuses BEFORE any holder is ended (`spawnManaged` would
+    // refuse too, but only after the user's running assistant was already closed).
+    // The account is the RECORD's: the replaced row's, or — for a conversation reached through an
+    // external process or a closed row (no `replaces`) — the newest registry row that drove this very
+    // conversation, exactly as `agentop session` takeover finds it (`cli-session.ts`). A conversation
+    // agentop never ran has no record and keeps the default root, as before.
+    const { newestRowOfConversation } = await import('./sessions/spawn-account-io')
+    const recorded = previous ?? newestRowOfConversation(await readRegistry(), req.sessionId, harness)
+    const recordedAccountId = recorded?.accountId
+    if (recordedAccountId || req.callerVerified) {
+      const { recordedSpawnAccount } = await import('./sessions/spawn-account-io')
+      const { spawnAccountMessage } = await import('./sessions/spawn-account')
+      const decided = await recordedSpawnAccount(recordedAccountId, { agentCaller: req.callerVerified === true, harness })
+      if (!decided.ok) return { ok: false, message: spawnAccountMessage(decided.reason, decided.detail, lang === 'pt' ? 'pt' : 'en', true), accountRefusal: decided.reason }
+    }
     if (plan.kind === 'takeover') {
       // A pid is not an identity — see `isAssistantPid`. Confirmed against the live scan in the
       // moment before signalling, or the takeover is abandoned: the cost of being wrong here is
@@ -2879,7 +2948,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       resumeId: req.sessionId,
       ...(req.prompt ? { prompt: req.prompt } : {}),
       ...(req.label ? { label: req.label } : {}),
-      ...(previous ? { inherit: previous } : {}),
+      ...(previous ? { inherit: previous } : recordedAccountId ? { accountId: recordedAccountId } : {}),
       attach: req.attach,
       ...(previous?.task ? { task: previous.task } : {}),
       // A TAKEOVER just ENDED the process this spawn replaces (`endProcess` above) — the net memory
@@ -2889,6 +2958,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       ...(plan.kind === 'takeover' ? { skipAdmission: true } : {}),
       // F2.0 — a web reopen of a row that ran STRUCTURED runs structured again; anything else is a TUI.
       ...(structuredReopenOrigin(req.origin, previous?.structuredDriver) ? { origin: 'web' as const } : {}),
+      ...(req.callerVerified ? { callerVerified: true } : {}),
     }, s, lang)
     if (spawned.ok) {
       // We handed this id to the CLI, so the new row KNOWS which conversation it drives — there
@@ -4068,7 +4138,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * registry read and one `tmux list-sessions`, and it is the difference between reopening what
      * fell and reopening what fell as of a moment ago.
      */
-    async reopenFell(ids?: readonly string[]): Promise<ActionResult> {
+    async reopenFell(ids?: readonly string[], caller: { callerVerified?: boolean } = {}): Promise<ActionResult> {
       const s = S()
       const backend = await resolveBackend()
       const blocked = await backend.unavailable()
@@ -4091,12 +4161,26 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         return { ok: false, message: unknown.length > 0 ? s.sessFellGone(unknown.length) : s.sessFellNonePicked }
       }
 
-      const { plan, opened, skipped, admissionRefusal, backendUnreadable } = await reopenEntries(chosen, s, lang)
+      const { plan, opened, skipped, admissionRefusal, backendUnreadable, accountRefusals, openedIds } = await reopenEntries(chosen, s, lang, caller)
       if (backendUnreadable) return { ok: false, message: s.sessBackendUnreadable }
       if (admissionRefusal) return { ok: false, message: admissionMessage(admissionRefusal, lang) }
-      return taskReopenSucceeded(plan, opened)
-        ? { ok: true, message: s.sessFellOpened(opened, skipped + unknown.length, plan.heldElsewhere.length) }
-        : { ok: false, message: s.sessFellNoneOpened(skipped + unknown.length) }
+      const base = s.sessFellOpened(opened, skipped + unknown.length, plan.heldElsewhere.length)
+      if (accountRefusals.length === 0) {
+        return taskReopenSucceeded(plan, opened)
+          ? { ok: true, message: base }
+          : { ok: false, message: s.sessFellNoneOpened(skipped + unknown.length) }
+      }
+      // PLAN.ACCOUNTS D3 — EXPLICIT PARTIAL RESULT. Every refused row keeps its typed reason and its
+      // own sentence beside the rows that opened (and the ones already running, which are NOT
+      // "opened"), and the whole answer carries the refusal's code so the HTTP boundary maps its
+      // status. A group with one refused row is never reported as a plain success.
+      const lead = accountRefusals.find(r => r.reason === 'account_unavailable') ?? accountRefusals[0]!
+      return {
+        ok: false,
+        message: (opened > 0 ? base : s.sessFellNoneOpened(skipped + unknown.length)) + accountRefusals.map(r => ` ${r.message}`).join(''),
+        accountRefusal: lead.reason,
+        fell: { opened: openedIds, already: [...plan.already], refused: accountRefusals.map(r => ({ id: r.id, reason: r.reason, message: r.message })) },
+      }
     },
 
     /**
@@ -4558,6 +4642,17 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * than a session that starts and immediately dies with a usage error on a screen nobody sees.
      */
     async spawnSession(req: SpawnSessionRequest): Promise<SpawnSessionResult> {
+      // PLAN.ACCOUNTS D3 — the account, decided before anything is filed or spawned. A caller that
+      // already decided (`/api/fleet/new`) or a login session passes through untouched.
+      const { hostSpawnAccount } = await import('./sessions/spawn-account-io')
+      const chosen = await hostSpawnAccount({
+        harness: req.harness as HarnessId,
+        ...(req.accountId !== undefined ? { accountId: req.accountId } : {}),
+        ...(req.accountDecided ? { accountDecided: true } : {}),
+        ...(req.account ? { login: true } : {}),
+        ...(req.callerVerified ? { callerVerified: true } : {}),
+      }, lang === 'pt' ? 'pt' : 'en')
+      if (!chosen.ok) return { ok: false, message: chosen.message, accountRefusal: chosen.reason }
       // WHERE this session is filed is the one planner's answer (`spawn-filing.ts`), shared with
       // `session start` / `batch`: references resolved on the board, a group member filed on its
       // group, a hand-off inheriting its predecessor's filing, cwd and folder. A refusal spawns nothing.
@@ -4641,6 +4736,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.force ? { force: true } : {}),
         ...(req.origin ? { origin: req.origin } : {}),
         ...(req.account ? { account: req.account } : {}),
+        ...(chosen.accountId ? { accountId: chosen.accountId } : {}),
+        ...(req.callerVerified ? { callerVerified: true } : {}),
       }, S(), lang).then(afterStart)
     },
   }

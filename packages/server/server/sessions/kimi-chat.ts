@@ -131,6 +131,7 @@ export function parseKimiChat(
   max = 400,
 ): ChatTurn[] {
   const turns: ChatTurn[] = []
+  const results = new Map<string, boolean>()
   /** Tool calls seen since the assistant text they belong to, in FILE order. */
   let pending: Tool[] = []
   let pendingAt: string | undefined
@@ -164,9 +165,19 @@ export function parseKimiChat(
         ? e.event as Record<string, unknown>
         : null
       if (!event) continue
+      if (event.type === 'tool.result') {
+        if (typeof event.toolCallId === 'string' && !results.has(event.toolCallId)) {
+          const r = event.result as Record<string, unknown> | null
+          results.set(event.toolCallId, event.isError === true || r?.isError === true
+            || event.status === 'error' || event.status === 'failed'
+            || (typeof event.exitCode === 'number' && event.exitCode !== 0))
+        }
+        continue
+      }
       if (event.type === 'tool.call') {
         const tool = toolOf(event, harness)
         if (tool) {
+          if (typeof event.toolCallId === 'string' && results.get(event.toolCallId) === true) tool.failed = true
           if (pending.length === 0) { pendingAt = at; newestBatch = newest }
           pending.unshift(tool)
           newest = false

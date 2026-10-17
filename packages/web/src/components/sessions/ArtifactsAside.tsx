@@ -40,6 +40,7 @@ import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { asideCache, asideKey } from '../../lib/asideCache'
+import { resolveSubagentStatus, settleSubagentTurns, shouldPollSubagent, type StatusObservation } from '../../lib/artifactLayout'
 import { focusMissNotice, isFocusedRow, rowsCarry, ROW_FLASH } from '../../lib/noteFocus'
 import { BarChart3, Bot, Brain, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Eye, FileEdit, Loader, PanelRightClose, Pencil, Plug, Plus, Send, Sparkles, Terminal, Trash2, Workflow } from 'lucide-react'
 import { artifactShortfall, type Artifact } from '../../lib/sessionArtifacts'
@@ -58,9 +59,9 @@ import {
   type StepPayload, type StepState,
 } from '../../lib/stepDetail'
 import {
-  SUBAGENT_PAGE, appendPage, runningCount, subagentCount, subagentStatusText, subagentsPollMs,
+  SUBAGENT_PAGE, appendPage, listedObservation, stampPage, runningCount, subagentCount, subagentStatusText, subagentsPollMs,
   subagentsStateOf, unmeasuredText, unpricedText,
-  type SubagentRow, type SubagentsPayload, type SubagentsState,
+  type SubagentRow, type SubagentStatus, type SubagentsPayload, type SubagentsState,
 } from '../../lib/subagents'
 import {
   agentDetailStateOf, agentDetailUrl, agentIsRunning, agentOpenable, agentOpensByDefault,
@@ -227,6 +228,8 @@ export interface ArtifactsAsideProps {
    * promise is "this is what is happening".
    */
   turns?: readonly LiveTurn[]
+  /** The row's state, so a subagent feed of an ended parent settles too. */
+  state?: string
   /**
    * EVERYTHING THE STORE KNOWS ABOUT THIS CONVERSATION — the METRICS tab.
    *
@@ -249,7 +252,7 @@ export interface ArtifactsAsideProps {
 
 
 export function ArtifactsAside({
-  sessionId, cwd, lang, artifacts, loading, unavailable, older, turns, onClose,
+  sessionId, cwd, lang, artifacts, loading, unavailable, older, turns, state, onClose,
   unlistedWrites, outsideNote, hideCloseButton, headerControls,
   activeTab, focusRequest, session, onOpenTask, onTaskChanged, metrics, onHandedToChat,
 }: ArtifactsAsideProps) {
@@ -616,7 +619,7 @@ export function ArtifactsAside({
         // Both counts ride every answer, so the OTHER tab's badge is right without it having been
         // opened — and the Forks tab only exists at all once this says there is one.
         if (body.counts) setAgentKinds(body.counts)
-        const fresh = subagentsStateOf(body)
+        const fresh = stampPage(subagentsStateOf(body), Date.now())
         // Merge onto what is already on screen, so a poll never drops the pages somebody loaded.
         const next: SubagentsState = fresh.phase === 'ready'
           ? { ...fresh, rows: appendPage(hit.value?.phase === 'ready' ? hit.value.rows : [], fresh.rows) }
@@ -703,7 +706,7 @@ export function ArtifactsAside({
         `/api/fleet/subagents?id=${encodeURIComponent(sessionId)}&offset=${st.rows.length}&limit=${SUBAGENT_PAGE}&lang=${pt ? 'pt' : 'en'}`,
       )
       if (!res.ok) return
-      const page = subagentsStateOf(await res.json() as SubagentsPayload)
+      const page = stampPage(subagentsStateOf(await res.json() as SubagentsPayload), Date.now())
       if (page.phase !== 'ready') return
       const next: SubagentsState = { ...page, rows: appendPage(st.rows, page.rows) }
       asideCache.write(asideKey(sessionId, 'subagents'), next)
@@ -755,9 +758,13 @@ export function ArtifactsAside({
     // One open agent replaces the list, exactly as an open FILE does — 440px cannot hold a list and
     // a conversation side by side.
     if (openAgent) {
+      const listed = agentsState?.phase === 'ready'
+        ? listedObservation(agentsState.rows.find(r => r.agentId === openAgent.agentId))
+        : undefined
       return (
         <SubagentActivity
-          sessionId={sessionId} row={openAgent} pt={pt} now={now}
+          sessionId={sessionId} row={openAgent} pt={pt} now={now} {...(state ? { state } : {})}
+          {...(listed ? { listed } : {})}
           onBack={() => setOpenAgent(null)}
         />
       )
@@ -2158,45 +2165,56 @@ function SubagentCard({ row, pt, now, onOpen }: {
  * read by one implementation rather than a second one that would drift. Its rows open the same way,
  * against the subagent's transcript (`stepUrl`'s `agentId`).
  */
-function SubagentActivity({ sessionId, row, pt, now, onBack }: {
-  sessionId: string; row: SubagentRow; pt: boolean; now: number; onBack: () => void
+function SubagentActivity({ sessionId, row, pt, now, state, listed, onBack }: {
+  sessionId: string; row: SubagentRow; pt: boolean; now: number; state?: string; listed?: StatusObservation<SubagentStatus>; onBack: () => void
 }) {
   const [turns, setTurns] = useState<readonly LiveTurn[] | null>(null)
   /** The read stopped on its cap — this feed is a window, and says so. */
   const [older, setOlder] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
+  /** Each source of the status carries the instant it was observed; the newest one wins. */
+  const [fetchedObs, setFetchedObs] = useState<StatusObservation<SubagentStatus> | undefined>(undefined)
+  const openedObs = useRef<StatusObservation<SubagentStatus>>({ status: row.status, at: Date.now() })
+  // The list observation arrives stamped with when its RESPONSE was received (`stampRows`);
+  // a re-render or a cached row reuse carries the same stamp, a newer response a newer one.
+  const listedObs = useRef(listed)
+  listedObs.current = listed
+  const status = resolveSubagentStatus([openedObs.current, listedObs.current, fetchedObs]) ?? row.status
+  const polling = shouldPollSubagent(status)
   const tailRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     let alive = true
     let timer: ReturnType<typeof setTimeout> | undefined
+    let fetchedLocal: StatusObservation<SubagentStatus> | undefined
     const read = async () => {
       try {
         const res = await fetch(
           `/api/fleet/subagents?id=${encodeURIComponent(sessionId)}&agent=${encodeURIComponent(row.agentId)}&lang=${pt ? 'pt' : 'en'}`,
         )
         if (!alive) return
-        const body = await res.json() as { ok: boolean; turns?: LiveTurn[]; older?: boolean; message?: string }
+        const body = await res.json() as { ok: boolean; turns?: LiveTurn[]; older?: boolean; status?: SubagentStatus; message?: string }
         if (!alive) return
         if (!body.ok) { setFailed(body.message ?? (pt ? 'Não foi possível ler este subagente.' : 'This subagent could not be read.')); return }
         setFailed(null)
         setTurns(body.turns ?? [])
         setOlder(body.older === true)
+        if (typeof body.status === 'string') { fetchedLocal = { status: body.status, at: Date.now() }; setFetchedObs(fetchedLocal) }
         // A RUNNING agent is still writing; a finished one cannot change, so it is read once.
-        if (row.status === 'running') timer = setTimeout(read, 3000)
+        if (shouldPollSubagent(resolveSubagentStatus([openedObs.current, listedObs.current, fetchedLocal]))) timer = setTimeout(read, 3000)
       } catch {
         if (alive) setFailed(pt ? 'Não foi possível ler este subagente.' : 'This subagent could not be read.')
       }
     }
     void read()
     return () => { alive = false; if (timer) clearTimeout(timer) }
-  }, [sessionId, row.agentId, row.status, pt])
+  }, [sessionId, row.agentId, pt, polling])
 
-  const feed = useMemo(() => liveEvents(turns ?? []), [turns])
+  const feed = useMemo(() => liveEvents(settleSubagentTurns(turns ?? [], status, state)), [turns, status, state])
   // Follow the tail while it is running — the newest step is the one being watched.
-  useEffect(() => { if (row.status === 'running') tailRef.current?.scrollIntoView({ block: 'end' }) }, [feed.length, row.status])
+  useEffect(() => { if (status === 'running') tailRef.current?.scrollIntoView({ block: 'end' }) }, [feed.length, status])
 
-  const st = subagentStatusText(row.status, pt)
+  const st = subagentStatusText(status, pt)
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <div style={{
@@ -2227,7 +2245,7 @@ function SubagentActivity({ sessionId, row, pt, now, onBack }: {
       ) : turns === null ? (
         <Note icon={<AgentisticsLoader size={16} />} text={pt ? 'Lendo…' : 'Reading…'} />
       ) : feed.length === 0 ? (
-        <Note icon={<Bot size={16} />} text={row.status === 'running'
+        <Note icon={<Bot size={16} />} text={status === 'running'
           ? (pt ? 'Este subagente começou e ainda não fez nada.' : 'This subagent has started and has not done anything yet.')
           : (pt ? 'Este subagente não registrou nenhuma ação.' : 'This subagent recorded no actions.')} />
       ) : (

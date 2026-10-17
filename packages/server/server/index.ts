@@ -784,22 +784,23 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // PLAN.LIMITS — the 5-hour and weekly windows each harness account last reported, with the
     // plan registered in Settings → Billing. Reads only what the host already stored.
     if (url.pathname === '/api/plan-limits' && req.method === 'GET') {
-      const [{ planLimitsPayload, sampleLivePlanSessions }, prefs] = await Promise.all([import('./plan-limits'), readPreferences()])
+      const [{ planLimitsPayload, sampleLivePlanSessions, planAccountKey }, prefs] = await Promise.all([import('./plan-limits'), readPreferences()])
       const now = Date.now()
       let liveSessions: import('@agentistics/core').LivePlanSession[] = []
       if (!TEAM_CENTRAL) {
         const data = await buildApiResponse()
         const live = await readLocalLiveSnapshot(data.sessions)
         const latest = await planLimitsPayload(prefs.billing, now)
-        const burnByHarness = Object.fromEntries(latest.budgets.map(b => [b.harness, b.burnPctPerHour])) as Partial<Record<import('@agentistics/core').HarnessId, number>>
+        const burnByAccount: Record<string, number> = {}
+        for (const b of [...latest.budgets, ...latest.hiddenFromAgents]) burnByAccount[planAccountKey(b.harness, b.account)] = b.burnPctPerHour
         const { processSessionHub } = await import('./sessions/session-hub')
         // Peek only: plan reads must not start fleet polls or extend the hub's demand lease.
         const working = new Set((processSessionHub()?.last()?.sessions ?? [])
           .filter(s => s.activity === 'working')
           .flatMap(s => [s.id, ...(s.conversationId ? [s.conversationId] : []), ...(s.conversationStoreId ? [s.conversationStoreId] : [])]))
-        liveSessions = sampleLivePlanSessions(data.sessions, live.liveSessionIds, now, burnByHarness, working)
+        liveSessions = await sampleLivePlanSessions(data.sessions, live.liveSessionIds, now, burnByAccount, working)
       }
-      const body = TEAM_CENTRAL ? { limits: [], registered: [], budgets: [], freeSlots: 0, freeSlotsByHarness: {}, liveSessions: [], now } : await planLimitsPayload(prefs.billing, now, liveSessions)
+      const body = TEAM_CENTRAL ? { limits: [], registered: [], budgets: [], freeSlots: 0, freeSlotsByHarness: {}, freeSlotsByAccount: {}, liveSessions: [], now } : await planLimitsPayload(prefs.billing, now, liveSessions)
       return new Response(JSON.stringify(body), { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
     }
     if (url.pathname === '/api/events' && req.method === 'GET') {
@@ -2836,8 +2837,15 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
           })
         }
+        // PLAN.ACCOUNTS D3: a reopen by a VERIFIED agent is held to the account rule; overwritten here.
+        const { markCallerVerified } = await import('./sessions/session-roles')
+        const { verifySessionIdentity } = await import('./sessions/session-identity')
+        await markCallerVerified(body.value, verifySessionIdentity)
         const out = await runFleetAction(fleetLang(url.searchParams.get('lang')), body.value)
+        // An account refusal (reopen, group reopen, external continuation) keeps its status.
+        const { spawnAccountStatus } = await import('./sessions/spawn-account')
         return new Response(JSON.stringify(out), {
+          status: out.code ? spawnAccountStatus(out.code) : 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
@@ -2973,15 +2981,22 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       try {
         const { fleetLang } = await import('./sessions/fleet-web')
         const { startNaySession, defaultNayDeps } = await import('./sessions/nay-web')
+        const { spawnAccountStatus } = await import('./sessions/spawn-account')
         // The create picker's choice, if any. Shape-checked by `planNayLaunch`; an absent body reads as
         // "use the Settings -> Chat defaults".
         const read = await readJsonLimited<Record<string, unknown> | null>(req, 4096).catch(() => null)
         const body = read && read.ok && read.value && typeof read.value === 'object' ? read.value : null
+        // PLAN.ACCOUNTS D3: a Nay conversation started by a VERIFIED agent carries that identity, so
+        // it meets the same account rule as `/api/fleet/new` — never the owner's.
+        const { markCallerVerified } = await import('./sessions/session-roles')
+        const { verifySessionIdentity } = await import('./sessions/session-identity')
+        const proof: { session?: unknown; callerVerified?: unknown } = { session: body?.session }
+        const callerVerified = await markCallerVerified(proof, verifySessionIdentity)
         const out = await startNaySession(fleetLang(url.searchParams.get('lang')), defaultNayDeps(PORT), {
           harness: body?.harness, model: body?.model, effort: body?.effort,
-        })
+        }, { callerVerified })
         return new Response(JSON.stringify(out), {
-          status: out.code === 'memory_budget' ? 409 : 200,
+          status: out.code === 'memory_budget' ? 409 : out.code ? spawnAccountStatus(out.code) : 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
@@ -3016,6 +3031,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname === '/api/fleet/new' && req.method === 'POST') {
       try {
         const { runFleetSpawn, fleetLang } = await import('./sessions/fleet-web')
+        const { spawnAccountStatus } = await import('./sessions/spawn-account')
         const body = await readJsonLimited<FleetSpawnBody>(req, LIMITS.bodyBytes)
         if (!body.ok) {
           return new Response(JSON.stringify({ ok: false, message: 'bad_request' }), {
@@ -3026,16 +3042,18 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // `parentVerified` is the SERVER's statement, never the wire's: overwrite whatever arrived, then set
         // it only when the body's `session` proof is valid and names the `parent` it claims.
         const spawnBody = body.value as FleetSpawnBody & { session?: { id?: unknown; token?: unknown } }
-        const { markParentVerified } = await import('./sessions/session-roles')
+        const { markParentVerified, markCallerVerified } = await import('./sessions/session-roles')
         const { verifySessionIdentity } = await import('./sessions/session-identity')
         await markParentVerified(spawnBody, verifySessionIdentity)
+        // PLAN.ACCOUNTS D3: an agent is asking only when the body carries a VALID session proof.
+        await markCallerVerified(spawnBody, verifySessionIdentity)
         const out = await runFleetSpawn(fleetLang(url.searchParams.get('lang')), spawnBody)
         // A memory-budget refusal is a DISTINCT status, not the plain `ok: false` every other
         // `planFleetSpawn` refusal answers with (an unknown harness, a relative path, …) — 409
         // Conflict, because the request is well-formed and refused only by the state of the machine
         // right now, which a retry with `force: true` or fewer sessions can resolve.
         return new Response(JSON.stringify(out), {
-          status: out.code === 'memory_budget' ? 409 : 200,
+          status: out.code === 'memory_budget' ? 409 : out.code ? spawnAccountStatus(out.code) : 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {

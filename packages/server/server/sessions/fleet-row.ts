@@ -170,6 +170,10 @@ export interface FleetActionRequest {
    * Without it a `prompt` to an external row answers `confirm` and changes nothing.
    */
   confirm?: boolean
+  /** PLAN.ACCOUNTS D3: an agent's session proof; the server reads it into `callerVerified`. */
+  session?: { id?: unknown; token?: unknown }
+  /** Server-set (`markCallerVerified`), never trusted from the wire: a verified agent is asking. */
+  callerVerified?: boolean
 }
 
 /** How a verb is offered to the page: performable, present-but-refused, or absent. */

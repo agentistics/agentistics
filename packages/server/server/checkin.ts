@@ -50,18 +50,27 @@ export function checkinActivity(events: readonly TaskEvent[], leader: string): u
   })
 }
 
-export function checkinLimitInputs(limits: readonly PlanLimits[], now: number, budgets?: readonly (PlanBudget & PlanPace)[]): unknown {
+export function checkinLimitInputs(limits: readonly PlanLimits[], now: number, budgets?: readonly (PlanBudget & PlanPace & { accountLabel?: string })[]): unknown {
   return limits.map((l, index) => {
     // Payload budgets follow the limits order, including separate accounts of one harness.
     const budget = budgets?.[index] ?? { ...planBudget(l, now), ...planPace(l, now) }
     return {
-      harness: l.harness, account: l.account, plan: l.plan, sourcePlan: l.sourcePlan,
+      harness: l.harness, account: l.account, ...(budget.accountLabel ? { accountLabel: budget.accountLabel } : {}), plan: l.plan, sourcePlan: l.sourcePlan,
       status: budget.status, paceStatus: budget.paceStatus, hold: budget.status === 'hold',
       pause: budget.pauseUntil !== undefined && budget.pauseUntil > now,
       // Retain renewal identity, including a zero-usage renewal, without raw usage.
       windows: l.windows.map(w => ({ kind: w.kind, resetsAt: w.resetsAt, renewed: windowRenewed(w, now) })),
     }
   })
+}
+
+/** One line per VISIBLE account: an account the owner switched off has no budget row and is absent. */
+export function checkinAccountLimits(limits: readonly PlanLimits[], budgets: readonly (PlanBudget & PlanPace & { account?: string; accountLabel?: string })[], now: number): unknown {
+  const rows = limits.flatMap(l => {
+    const budget = budgets.find(b => b.harness === l.harness && b.account === l.account)
+    return budget ? [{ l, budget }] : []
+  })
+  return checkinLimitInputs(rows.map(r => r.l), now, rows.map(r => r.budget))
 }
 
 const defaultCheckinActivity: CheckinDeps['readCheckinActivity'] = async (_since, leader) => checkinActivity((await deps.loadTaskWorld()).book.events, leader)
@@ -82,7 +91,7 @@ const defaultDeps: CheckinDeps = {
   readCheckinLimits: async now => {
     const { planLimitsPayload } = await import('./plan-limits')
     const { limits, registered, budgets } = await planLimitsPayload((await deps.readPreferences()).billing, now)
-    return { registered, limits: checkinLimitInputs(limits, now, budgets) }
+    return { registered, limits: checkinAccountLimits(limits, budgets, now) }
   },
   readCheckinRelease: async () => {
     try {

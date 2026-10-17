@@ -48,6 +48,8 @@ export type SessionCommand =
       /** `--handoff`: a LEADER hand-off — the new session is the verified caller's successor and
        *  inherits what the API hand-off inherits (folder, pin, title, check-in, role, away, relay). */
       handoff?: boolean
+      /** `--account <acc_…>` (flag `multi-account`): the harness account to run on. See `spawn-account.ts`. */
+      account?: string
       /** A refusal is machine-readable too — see `admissionRefusalBody`. */
       json?: boolean
     }
@@ -135,6 +137,8 @@ export interface BatchSpec {
   notify?: NotifySwitch
   /** See `start.folder`. */
   folder?: string
+  /** See `start.account`. Absent → the router's pick for the harness, never an account off for agents. */
+  account?: string
 }
 
 export type NotifySwitch = 'on' | 'off'
@@ -146,6 +150,7 @@ function notifyValue(v: string): NotifySwitch | null {
 
 const VALUE_FLAGS = new Set([
   '-p', '--prompt', '--model', '--effort', '--cwd', '--name', '--task', '--subtask', '--session', '--attempt', '--notify', '--role', '--folder',
+  '--account',
 ])
 
 /** Pull `--folder <ref>` out of an argument list (open / kill take it anywhere). */
@@ -323,6 +328,7 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
       continue
     }
     if (arg === '--folder') { cmd.folder = value; continue }
+    if (arg === '--account') { cmd.account = value; continue }
     if (arg === '--role') {
       if (value !== 'leader' && value !== 'worker') return { kind: 'error', message: '--role takes "leader" or "worker".' }
       cmd.role = value
@@ -413,7 +419,7 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
   let task = ''
   let subtask: string | undefined
   const specs: BatchSpec[] = []
-  const shared: { cwd?: string; model?: string; effort?: string; attempt?: string; notify?: NotifySwitch; folder?: string } = {}
+  const shared: { cwd?: string; model?: string; effort?: string; attempt?: string; notify?: NotifySwitch; folder?: string; account?: string } = {}
 
   let force = false
   let sharedCwd = false
@@ -459,6 +465,8 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
     // A positional default like `--notify`: it applies to the `--session`s that FOLLOW it, and a
     // later `--folder` overrides it for the ones after that.
     if (arg === '--folder') { shared.folder = value; continue }
+    // A positional default too: the `--session`s that follow run on this account.
+    if (arg === '--account') { shared.account = value; continue }
     if (arg === '--session') {
       const spec = parseBatchSpec(value, shared)
       if ('error' in spec) return { kind: 'error', message: spec.error }
@@ -476,7 +484,7 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
 /** `<harness>[@<cwd>]: <prompt>` — the one string that describes a session in a batch. */
 export function parseBatchSpec(
   value: string,
-  shared: { cwd?: string; model?: string; effort?: string; attempt?: string; notify?: NotifySwitch; folder?: string } = {},
+  shared: { cwd?: string; model?: string; effort?: string; attempt?: string; notify?: NotifySwitch; folder?: string; account?: string } = {},
 ): { spec: BatchSpec } | { error: string } {
   const colon = value.indexOf(':')
   const head = (colon === -1 ? value : value.slice(0, colon)).trim()
@@ -499,6 +507,7 @@ export function parseBatchSpec(
       ...(shared.attempt ? { attempt: shared.attempt } : {}),
       ...(shared.notify ? { notify: shared.notify } : {}),
       ...(shared.folder ? { folder: shared.folder } : {}),
+      ...(shared.account ? { account: shared.account } : {}),
     },
   }
 }

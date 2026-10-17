@@ -70,7 +70,12 @@ export async function readRss(pids: readonly number[]): Promise<{ bytes: number;
  * source that throws costs its pids, never the measurement: the budget then falls back to the
  * `assumed` cost, which the result says.
  */
+/** Tests only: a fixed answer (null = unmeasured, which admits) instead of this machine's memory. */
+let budgetForTest: { value: SpawnBudget | null } | null = null
+export function __setSpawnBudgetForTest(v: { value: SpawnBudget | null } | null): void { budgetForTest = v }
+
 export async function readSpawnBudget(): Promise<SpawnBudget | null> {
+  if (budgetForTest) return budgetForTest.value
   const sample = await readMemory()
   if (!sample) return null
 

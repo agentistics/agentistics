@@ -152,6 +152,12 @@ export interface SpawnRequest {
   /** See `ManagedSession.taskId`: recorded at spawn, the one moment it is a fact. */
   taskId?: string
   attemptId?: string
+  /**
+   * PLAN.ACCOUNTS D3: the account root to run in (`ManagedSession.accountId`'s root). Its isolation
+   * variable (`ISOLATION_ENV`) joins `SpawnPlan.env`; absent (the default root) adds NOTHING, so a
+   * single-account machine spawns byte for byte as before.
+   */
+  account?: { root: string }
 }
 
 /**
@@ -205,6 +211,8 @@ export type SpawnPlanError =
   | { code: 'effort-unsupported'; harness: HarnessId }
   | { code: 'unknown-effort'; harness: HarnessId; value: string; accepted: string[] }
   | { code: 'unknown-mode'; harness: HarnessId; value: string }
+  /** An account root was asked for on a harness with no isolation variable. */
+  | { code: 'account-unsupported'; harness: HarnessId }
 
 export type SpawnPlanResult =
   | { ok: true; plan: SpawnPlan }
@@ -331,8 +339,10 @@ export interface ManagedSession {
   effort?: string
   /**
    * PLAN.ACCOUNTS: the harness account (`acc_…`, `harness-accounts.ts`) this session runs on. Set
-   * at spawn (D3); read by the plan-limits taps so a meter is filed under the account that produced
-   * it. Absent on a session started before accounts existed: the default root's account.
+   * at spawn (D3, `spawn-account.ts`) and IMMUTABLE: a reopen/attach/restart inherits it and runs in
+   * that account's root, because the conversation's transcript exists only there. Read by the
+   * plan-limits taps so a meter is filed under the account that produced it. Absent on a session
+   * started before accounts existed (or with `multi-account` off): the default root.
    */
   accountId?: string
   /** Explicit leader role, used by the context handoff hint. */

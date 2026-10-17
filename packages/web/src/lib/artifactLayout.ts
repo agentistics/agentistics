@@ -114,9 +114,64 @@ export interface EdgeHint {
  * on both — a phone has no strip but still has a session that is running a command. One reading
  * of `live` and `ref`, so the two surfaces can never disagree about what "in flight" means.
  */
+/** A row whose process is over: nothing on it can be "in flight". */
+export function isEndedState(state?: string): boolean {
+  return state === 'ended' || state === 'exited' || state === 'lost' || state === 'closed'
+}
+
+/**
+ * The turns every `liveEvents` consumer (feed, Studio agent badge, subagent feed) should read:
+ * on an ended row a trailing `pending` turn is history, not a running step. Same helper and same
+ * states `currentAction` gates on. Returns the SAME array when nothing changes.
+ */
+export function settleTurns<T extends { pending?: boolean }>(turns: readonly T[], state?: string): readonly T[] {
+  if (!isEndedState(state) || !turns.some(t => t?.pending === true)) return turns
+  return turns.map(t => (t?.pending === true ? { ...t, pending: false } : t))
+}
+
+/**
+ * The turns ONE SUBAGENT's own feed should read. A running subagent of a live parent is unchanged
+ * (same array); one that stopped, failed or finished — or whose parent row is over — has no step in
+ * flight, so a trailing `pending` call is history. Only `pending` is cleared: no outcome is invented,
+ * so a call without a recorded result stays unmarked rather than reading as a success.
+ */
+/** One reading of a subagent's status and the instant it was taken. */
+export interface StatusObservation<S extends string = string> { status: S; at: number }
+
+/**
+ * The CURRENT status of an open subagent: the MOST RECENT observation wins. Sources are the row the
+ * detail opened with, the row the list poll last saw and the status that came with the fetched
+ * activity, each stamped with when it was observed. Nothing is assumed monotonic — an agent can
+ * stop and be resumed, and a parent can come back live — so a stale stopped/unknown never beats a
+ * newer running one, and a newer terminal one still ends a running one. A tie is read as the
+ * terminal answer (the conservative one). Returns `undefined` for an empty list.
+ */
+export function resolveSubagentStatus<S extends string>(observations: readonly (StatusObservation<S> | undefined)[]): S | undefined {
+  let best: StatusObservation<S> | undefined
+  for (const o of observations) {
+    if (!o) continue
+    if (!best || o.at > best.at || (o.at === best.at && best.status === 'running' && o.status !== 'running')) best = o
+  }
+  return best?.status
+}
+
+/** Whether the activity feed keeps being re-read: only while the resolved status is running. */
+export function shouldPollSubagent(status: string | undefined): boolean {
+  return status === 'running'
+}
+
+export function settleSubagentTurns<T extends { pending?: boolean }>(
+  turns: readonly T[], status: string, parentState?: string,
+): readonly T[] {
+  const over = status !== 'running' || isEndedState(parentState)
+  return over ? settleTurns(turns, 'ended') : turns
+}
+
 export function currentAction(
   events: readonly { kind: EdgeHint['kind']; text: string; live?: boolean; ref?: string }[],
+  state?: string,
 ): EdgeHint | null {
+  if (isEndedState(state)) return null
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]!
     // The `ref` travels with it so the press can open that exact row. Omitted rather than
@@ -128,8 +183,9 @@ export function currentAction(
 }
 
 export function edgeHint(
-  { open, events, isMobile }: {
+  { open, events, isMobile, state }: {
     open: boolean
+    state?: string | undefined
     events: readonly { kind: EdgeHint['kind']; text: string; live?: boolean; ref?: string }[]
     isMobile: boolean
   },
@@ -137,7 +193,7 @@ export function edgeHint(
   // On a phone the panel is full-screen; a tab on the edge would be a control promising to cover
   // the conversation somebody is reading.
   if (open || isMobile) return null
-  return currentAction(events)
+  return currentAction(events, state)
 }
 
 /**

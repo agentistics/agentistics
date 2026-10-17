@@ -17,7 +17,7 @@
  */
 import type { HarnessId } from './types'
 import type { BillingSettings } from './billing'
-import { dayFromMs } from './billing'
+import { accountTimeline, dayFromMs } from './billing'
 import { findPlan } from './plan-catalog'
 
 export type PlanWindowKind = '5h' | 'week'
@@ -49,6 +49,8 @@ export interface PlanLimits {
   plan?: string
   /** A plan name the harness itself reported (codex `plan_type`), the fallback for `plan`. */
   sourcePlan?: string
+  /** Owner-only: the login label the registry holds for the account. Never forwarded to agents. */
+  label?: string
   windows: PlanLimitWindow[]
   /** Epoch ms of the record the windows were read from. */
   updatedAt: number
@@ -127,6 +129,8 @@ export interface LivePlanSession {
   burnPctPerHour: number
   /** Internal routing hint; API responses omit it. */
   harness?: HarnessId
+  /** The account the session runs on; burn is shared among sessions of the same account. */
+  account?: string
 }
 
 export interface PlanSlotInput {
@@ -165,8 +169,10 @@ export interface RouteRecommendation {
   harness: HarnessId | null
   model?: string
   reason: string
-  /** The account of `harness` with the most room, when the rows named accounts. */
+  /** The account of `harness` that takes the work (week resets first, then most room), when the rows named accounts. */
   account?: string
+  /** Display label of `account` (nickname or "<Harness> #n"), never an email. */
+  accountLabel?: string
   alternatives: HarnessId[]
   /** Every other routable `{harness, account}`, same-harness accounts included. */
   accountAlternatives: { harness: HarnessId; account: string }[]
@@ -272,9 +278,10 @@ export function registeredPlanLabel(
   billing: BillingSettings | undefined,
   harness: HarnessId,
   nowMs: number,
+  accountId?: string,
 ): string | undefined {
   const today = dayFromMs(nowMs)
-  const periods = billing?.profiles?.[harness]?.periods
+  const periods = accountTimeline(billing, harness, accountId)?.periods
   if (!today || !periods) return undefined
   const p = periods.find(x => x.from <= today && (!x.to || x.to >= today))
   if (!p || p.mode !== 'subscription') return undefined
@@ -283,7 +290,7 @@ export function registeredPlanLabel(
 }
 
 export function withPlanLabel(l: PlanLimits, billing: BillingSettings | undefined, nowMs: number): PlanLimits {
-  const plan = registeredPlanLabel(billing, l.harness, nowMs)
+  const plan = registeredPlanLabel(billing, l.harness, nowMs, l.account)
   return plan ? { ...l, plan } : l
 }
 
@@ -464,7 +471,34 @@ const ROUTE_PREFERENCES: Record<RouteKind, readonly [HarnessId, string?][]> = {
 }
 
 /** A budget row, optionally attributed to one account of its harness. */
-export type AccountBudget = PlanBudget & Partial<PlanPace> & { account?: string; updatedAt?: number }
+export type AccountBudget = PlanBudget & Partial<PlanPace> & {
+  account?: string; accountLabel?: string; updatedAt?: number
+  /** Set by `yieldStaleRows`: a stale reading of a plan another account of the harness reports fresh. */
+  yieldsTo?: string
+}
+
+/**
+ * A STALE row never drives routing or cadence while a FRESH row of the SAME LOGIN exists: its pace and
+ * slots describe a meter nobody has read for a while (in the reported case, the last reading of one
+ * login stored under a second account id), so they could only ever be wrong in the direction of
+ * "start more work". Equivalence is the ACCOUNT's identity, decided by the caller (`sameAccount`: an
+ * alias, or the registry's same-login rule) — never the harness and plan name, which two real
+ * accounts on one plan share. Call it on the rows agents may see, so a hidden or retired account can
+ * never suppress a visible one. The row stays on screen; its slots go to zero, its pace is ignored by
+ * `harnessAggregate`/`routeRecommendation`, and `yieldsTo` names the fresh account.
+ */
+export function yieldStaleRows<T extends AccountBudget>(
+  rows: readonly T[],
+  sameAccount: (a: string, b: string) => boolean,
+): T[] {
+  return rows.map(r => {
+    if (!r.stale || r.plan === 'unregistered') return r
+    const fresh = rows.find(f => f !== r && !f.stale && f.harness === r.harness && f.account !== r.account
+      && sameAccount(r.account ?? 'default', f.account ?? 'default'))
+    if (!fresh) return r
+    return { ...r, freeSlots: 0, suggestedParallel: 0, yieldsTo: fresh.account ?? 'default' }
+  })
+}
 
 export interface HarnessAggregate {
   harness: HarnessId
@@ -485,7 +519,7 @@ export function harnessAggregate(rows: readonly AccountBudget[]): HarnessAggrega
   const by = new Map<HarnessId, AccountBudget[]>()
   for (const r of rows) by.set(r.harness, [...(by.get(r.harness) ?? []), r])
   return [...by].map(([harness, list]) => {
-    const live = list.filter(r => r.status !== 'hold')
+    const live = list.filter(r => r.status !== 'hold' && !r.yieldsTo)
     const status: PlanBudgetStatus = live.length
       ? live.reduce<PlanBudgetStatus>((best, r) => (STATUS_RANK[r.status] < STATUS_RANK[best] ? r.status : best), 'hold')
       : 'hold'
@@ -501,6 +535,20 @@ export function harnessAggregate(rows: readonly AccountBudget[]): HarnessAggrega
 
 const roomOf = (b: AccountBudget): number => Math.max(b.fiveHourPct, b.weekPct)
 
+/**
+ * Which of one harness's eligible accounts takes the work (Q6, decided): the one whose WEEK resets
+ * first — its remaining quota is lost soonest, so drain it first — then the one with the most room
+ * (lowest binding %), then the newest reading. The ONE place this policy lives.
+ */
+export function pickAccount<T extends AccountBudget>(candidates: readonly T[]): T | undefined {
+  return candidates
+    .map((b, i) => ({ b, i }))
+    .sort((x, y) => (x.b.daysToWeekReset > 0 ? x.b.weekResetsAt : Infinity) - (y.b.daysToWeekReset > 0 ? y.b.weekResetsAt : Infinity)
+      || roomOf(x.b) - roomOf(y.b)
+      || (y.b.updatedAt ?? 0) - (x.b.updatedAt ?? 0)
+      || y.i - x.i)[0]?.b
+}
+
 export function routeRecommendation(
   /** The flat `{ ...planBudget, ...planPace }` row `/api/plan-limits` serves; pace fields are optional. */
   budgets: readonly AccountBudget[],
@@ -514,7 +562,7 @@ export function routeRecommendation(
   const eligibleHarness = (agg: HarnessAggregate) =>
     eligibleAccounts(agg.harness).length > 0 && agg.status !== 'hold' && (allowTight || agg.status !== 'tight') && agg.harness !== (kind === 'qa' ? authorHarness : undefined)
   const eligibleAccounts = (h: HarnessId) =>
-    budgets.filter(b => b.harness === h && b.spawnable !== false && b.plan !== 'unregistered' && b.status !== 'hold' && (allowTight || b.status !== 'tight'))
+    budgets.filter(b => b.harness === h && b.spawnable !== false && b.plan !== 'unregistered' && !b.yieldsTo && b.status !== 'hold' && (allowTight || b.status !== 'tight'))
   const harnesses = [...aggregates.values()].filter(eligibleHarness)
   const ordered = [...harnesses].sort((a, b) => {
     const ap = a.paceStatus === 'under' ? 0 : 1
@@ -536,12 +584,9 @@ export function routeRecommendation(
     return { harness: null, reason: `all plans on hold until ${reset}`, alternatives: [], accountAlternatives: [], cadence: { parallel: 0, note: 'Wait for a plan to renew.' } }
   }
   if (!pickAgg) return noRoute()
-  // The account with the most room (lowest binding %); ties go to the newest reading.
   const candidates = eligibleAccounts(pickAgg.harness)
-  if (!candidates.length) return noRoute()
-  const indexed = candidates.map((b, i) => ({ b, i }))
-  indexed.sort((x, y) => roomOf(x.b) - roomOf(y.b) || (y.b.updatedAt ?? 0) - (x.b.updatedAt ?? 0) || y.i - x.i)
-  const pick = indexed[0]!.b
+  const pick = pickAccount(candidates)
+  if (!pick) return noRoute()
   const selected = preference.find(([h]) => h === pick.harness)
   const alternatives = ordered.filter(a => a.harness !== pick.harness).map(a => a.harness)
   const accountAlternatives = ordered.flatMap(a =>
@@ -556,6 +601,7 @@ export function routeRecommendation(
   return {
     harness: pick.harness,
     ...(pick.account ? { account: pick.account } : {}),
+    ...(pick.accountLabel ? { accountLabel: pick.accountLabel } : {}),
     ...(selected?.[1] ? { model: selected[1] } : {}),
     reason: `${pick.harness} is the preferred eligible plan for ${kind}.${paceText}`,
     alternatives,

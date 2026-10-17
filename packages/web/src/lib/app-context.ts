@@ -82,7 +82,8 @@ export interface AppContext {
   saveComparisons: (next: SavedComparison[]) => Promise<void>
   /** Persists the COMPLETE settings object. `writePreferencesTo` merges shallowly, so a partial
    *  save would replace the whole timeline with the fragment. */
-  saveBilling: (next: BillingSettings) => Promise<void>
+  /** Serialized; resolves once PERSISTED and rejects when the write failed (the settings are then rolled back). */
+  saveBilling: (next: BillingSettings | ((cur: BillingSettings) => BillingSettings)) => Promise<void>
 
   /** Which basis every cost figure is expressed in. Plumbed exactly like `currency`.
    *  Always `'api'` on a central, which cannot price a fleet from one operator's timeline. */

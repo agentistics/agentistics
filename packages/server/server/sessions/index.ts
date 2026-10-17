@@ -52,6 +52,9 @@ const windowsBackend: SessionBackend = {
  */
 let composite: SessionBackend | null = null
 
+/** Tests install a recording backend; never the owner's tmux. `null` restores the real one. */
+export function __setSessionBackendForTest(next: SessionBackend | null): void { composite = next }
+
 export async function resolveBackend(): Promise<SessionBackend> {
   if (process.platform === 'win32') return windowsBackend
   if (!composite) {
@@ -77,15 +80,27 @@ export async function resolveBackend(): Promise<SessionBackend> {
           ...(i.mode ? { mode: i.mode } : {}),
         }, await spawnCapabilities(i.harness))
         if (!planned.ok) return null
-        return { id: req.id, cwd: req.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}) }
+        // PLAN.ACCOUNTS D3 — the TUI that continues a structured session stays in its account root:
+        // only the isolation variable is carried over from the original spawn's env.
+        const { ISOLATION_ENV } = await import('../account-isolation')
+        const isolation = ISOLATION_ENV[i.harness]
+        const root = isolation ? req.env?.[isolation] : undefined
+        const env = { ...(planned.plan.env ?? {}), ...(isolation && root ? { [isolation]: root } : {}) }
+        return { id: req.id, cwd: req.cwd, argv: planned.plan.argv, ...(Object.keys(env).length ? { env } : {}) }
       },
       onStarted(id, driver) {
         void import('./registry').then(r => r.patchSession(id, { structuredDriver: driver })).catch(() => {})
       },
-      onConversation(id, conversationId) {
-        void import('./registry').then(r => r.patchSession(id, {
+      async onConversation(id, conversationId) {
+        // Refused (and logged) when another row owns that conversation — CROSSBIND, `registry.ts`. A
+        // contended lock is retried on the next poll; a live holder later, in case it ends.
+        const r = await import('./registry')
+        const out = await r.linkConversationVerified(id, {
           conversationId, conversationLink: 'assigned', conversationLinkVia: 'protocol-stated',
-        })).catch(() => {})
+        }, () => composite ? composite.list() : Promise.reject(new Error('no backend'))).catch(() => null)
+        if (!out) return { retry: true, retryMs: 30_000 }
+        if (out.ok) return
+        return out.contended ? { retry: true } : { retry: true, retryMs: 30_000 }
       },
       async prepare() {
         const { ensureSessionIdentityKey } = await import('./session-identity')

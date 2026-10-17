@@ -207,6 +207,7 @@ export type {
   SessionViewPrefs,
   SpawnSessionRequest,
   SpawnSessionResult,
+  AccountRefusalCode,
   ProjectOption,
   ProjectSearchResult,
   RestoreCandidate,

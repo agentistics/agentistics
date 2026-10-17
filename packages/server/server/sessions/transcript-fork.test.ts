@@ -129,3 +129,68 @@ describe('the claude reader follows through resolve()', () => {
     expect(typeof transcriptReaderFor('claude')?.resolve).toBe('function')
   })
 })
+
+/**
+ * CROSSBIND (2026-10-17, QA chat-activity-live-1): two sessions in ONE folder showed EACH OTHER's
+ * conversation. Both were claude, each born linked to its own `--session-id`, so the registry was
+ * right; the READ was not. `followFork` takes any NEWER sibling in the project directory that
+ * replays the linked file's last uuids OR carries a prompt this session was sent — and a sibling
+ * that is ANOTHER ROW'S OWN conversation satisfies both as soon as the two sessions share history
+ * (both resumed or replayed the same conversation) or were sent the same prompt (a spawn queued by
+ * the memory guard plus the same spawn started with `force`). The row then read the other row's
+ * file, for good, through the successor memo.
+ */
+describe('followFork never walks into another row\'s conversation', () => {
+  const A = '733fde78-b310-4e23-8794-69e4243890ff'
+  const B = '606e75fb-d5e6-40ef-bb47-52f9f98364e8'
+  // Two sessions replaying the same history: identical uuids, each under its own session id.
+  const replay = (sid: string, n: number) => Array.from({ length: n }, (_, i) =>
+    i % 2 === 0 ? user(id(100 + i), sid, `step ${i}`, 't') : asst(id(100 + i), sid, `did ${i}`, 't'))
+
+  test('REPRODUCTION: a newer same-folder file sharing the uuids is the OTHER row\'s — not followed', async () => {
+    const a = write(`${A}.jsonl`, replay(A, 30), 1000) // the session that stopped early
+    const b = write(`${B}.jsonl`, replay(B, 46), 2000) // its sibling, still writing
+    // Without knowing who owns B, the old rule took it (this is what the user saw).
+    expect(await followFork(a)).toBe(b)
+    forgetForks()
+    expect(await followFork(a, { foreign: new Set([B]) })).toBe(a)
+  })
+
+  test('the queued + forced spawn: the same prompt in the sibling is not proof the file is ours', async () => {
+    const prompt = 'review the chat activity branch please'
+    const a = write(`${A}.jsonl`, [user(id(1), A, 'hello there', 't')], 1000)
+    write(`${B}.jsonl`, [user(id(9), B, prompt, 't')], 2000)
+    expect(await followFork(a, { pending: [prompt], foreign: new Set([B]) })).toBe(a)
+  })
+
+  test('a successor remembered BEFORE it was known to be another row\'s is dropped', async () => {
+    const a = write(`${A}.jsonl`, replay(A, 30), 1000)
+    const b = write(`${B}.jsonl`, replay(B, 46), 2000)
+    expect(await followFork(a)).toBe(b)
+    expect(await followFork(a, { foreign: new Set([B]) })).toBe(a)
+  })
+
+  test('a foreign file is skipped, and a real successor further down the list is still found', async () => {
+    const a = write(`${OLD_ID}.jsonl`, oldLines, 1000)
+    const mine = write(`${NEW_ID}.jsonl`, newLines, 2000)
+    write(`${B}.jsonl`, newLines.map(l => l.replace(NEW_ID, B)), 3000)
+    expect(await followFork(a, { foreign: new Set([B]) })).toBe(mine)
+  })
+
+  test('the owners may be asked lazily — once, and only when a newer sibling exists', async () => {
+    let asked = 0
+    const lazy = async () => { asked++; return new Set([B]) }
+    const alone = write(`${A}.jsonl`, replay(A, 30), 1000)
+    expect(await followFork(alone, { foreign: lazy })).toBe(alone)
+    expect(asked).toBe(0) // nothing newer in the folder: the registry is never read
+    write(`${B}.jsonl`, replay(B, 46), 2000)
+    expect(await followFork(alone, { foreign: lazy })).toBe(alone)
+    expect(asked).toBe(1)
+  })
+
+  test('the /login fork is still followed when nobody else owns the new file', async () => {
+    const oldP = write(`${OLD_ID}.jsonl`, oldLines, 1000)
+    const newP = write(`${NEW_ID}.jsonl`, newLines, 2000)
+    expect(await followFork(oldP, { foreign: new Set([B]) })).toBe(newP)
+  })
+})

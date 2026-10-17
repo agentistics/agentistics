@@ -143,3 +143,17 @@ describe('parseKimiChat', () => {
     expect(turn!.at).toBeUndefined()
   })
 })
+
+it('pairs Kimi result.isError by toolCallId, leaving successes and unmatched calls unset', () => {
+  const turns = parseKimiChat([
+    say('Checking'),
+    loop({ type: 'tool.call', toolCallId: 'bad', name: 'Bash', args: { command: 'false' } }),
+    loop({ type: 'tool.call', toolCallId: 'ok', name: 'Read', args: { path: 'a' } }),
+    loop({ type: 'tool.call', toolCallId: 'pending', name: 'Read', args: { path: 'b' } }),
+    loop({ type: 'tool.result', toolCallId: 'ok', result: { isError: false, output: 'error is text' } }),
+    loop({ type: 'tool.result', toolCallId: 'bad', result: { isError: true, output: 'failed' } }),
+  ])
+  const tools = turns.flatMap(t => t.tools ?? [])
+  expect(tools).toHaveLength(3)
+  expect(tools.map(t => t.failed)).toEqual([true, undefined, undefined])
+})
