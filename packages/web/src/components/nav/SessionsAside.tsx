@@ -64,6 +64,7 @@ import { RenameSessionDialog } from '../sessions/RenameSessionDialog'
 import { SessionFiling } from '../tasks/SessionFiling'
 import { boardCopy } from '../tasks/copy'
 import { attachSession, detachSession } from '../../lib/tasks'
+import { CompactSessionFacts } from '../sessions/CompactSessionFacts'
 import { SessionFacts } from '../sessions/SessionFacts'
 import { RoleChip } from '../sessions/RoleChip'
 import { reopenedSessionRoute, sessionPath } from '../../lib/sessionRoute'
@@ -1149,7 +1150,7 @@ export function SessionsAside({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 12, paddingRight: 4, minWidth: 0 }}>
                   {(() => {
                   const { live, ended } = splitFolderRows(gRows, r => active.has(r.state), sortOrder, sortExplicit)
-                  const renderRow = (s: ControlSession) => {
+                  const renderRow = (s: ControlSession, compact = false) => {
                     const key = pinKeyOf(s)
                     return (
                       <div
@@ -1188,6 +1189,7 @@ export function SessionsAside({
                       >
                         <SessionRow
                           session={s}
+                          compact={compact}
                           selected={rowSelected(s, sessionId)}
                           {...(tap ? { tap } : {})}
                           onPin={() => flip(s)}
@@ -1204,7 +1206,7 @@ export function SessionsAside({
                   const endedOpen = expandedEnded.has(group.id) || endedAutoOpen(searching, ended, entry.rows)
                   return (
                     <>
-                      {live.map(renderRow)}
+                      {live.map(s => renderRow(s))}
                       {ended.length > 0 && (
                         <button
                           onClick={() => toggleEnded(group.id)}
@@ -1219,7 +1221,7 @@ export function SessionsAside({
                           {pt ? `Encerradas (${ended.length})` : `Ended (${ended.length})`}
                         </button>
                       )}
-                      {endedOpen && ended.map(renderRow)}
+                      {endedOpen && ended.map(s => renderRow(s, true))}
                     </>
                   )
                   })()}
@@ -2573,8 +2575,9 @@ function EmptyReason({
 }
 
 
-function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, verbs, onOpenMenu, onFile, lang, cardColor }: {
+export function SessionRow({ session, selected, compact = false, pinned, tap, onPin, onOpen, onMoveBy, verbs, onOpenMenu, onFile, lang, cardColor }: {
   session: ControlSession; selected: boolean
+  compact?: boolean
   /** Minimum row height on mobile — 44px, and undefined on desktop. */
   tap?: number
   pinned?: boolean
@@ -2615,7 +2618,7 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
         display: 'flex', alignItems: 'center', gap: 8, width: '100%',
         // Left padding is deliberately wider than the right: a live row carries a state edge on its left
         // and the text needs air beside it (the row's own dot used to provide it).
-        padding: '9px 9px 9px 18px', borderRadius: 9, border: 'none', textAlign: 'left', minHeight: tap,
+        padding: compact ? '6px 8px' : '9px 9px 9px 18px', borderRadius: 9, border: 'none', textAlign: 'left', minHeight: tap,
         // SELECTED is NOT orange. Orange is already the state colour for a row that needs a person
         // (`STATE_COLOR.waiting`), so the selected row wore the same tint as the alarm and the two
         // became one signal: selecting a working session made it look like it was asking for you.
@@ -2671,12 +2674,26 @@ function SessionRow({ session, selected, pinned, tap, onPin, onOpen, onMoveBy, v
           {reopeningLabel(lang !== 'en')}
         </span>
       )}
-      <SessionFacts
+      {compact ? <CompactSessionFacts session={session} /> : <SessionFacts
         session={session}
         selected={selected}
         {...(lang ? { lang } : {})}
         {...(cardStyle.stateTextColor ? { metaColor: cardStyle.stateTextColor } : {})}
-      />
+      />}
+      {compact && verbs && verbs.length > 0 && onOpenMenu && (
+        <span role="button" tabIndex={0}
+          aria-label={lang === 'en' ? `Options for ${session.title}` : `Opções de ${session.title}`}
+          aria-haspopup="menu"
+          onClick={e => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); onOpenMenu(r.left, r.bottom, verbs) }}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault(); e.stopPropagation()
+              const r = e.currentTarget.getBoundingClientRect(); onOpenMenu(r.left, r.bottom, verbs)
+            }
+          }}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: tap ?? 22, height: tap ?? 22 }}
+        ><MoreVertical size={13} /></span>
+      )}
       {role && <RoleChip role={role} pt={lang === 'pt'} />}
       {/* The assistant, NAMED. It was a 5px dot, which carries the fact in colour alone — and a
           colour is not a name. The model sits with it on the meta line below. */}

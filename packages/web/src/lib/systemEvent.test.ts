@@ -1,3 +1,4 @@
+import { roleChangeNote, roleLine } from '@agentistics/core'
 import { describe, expect, test } from 'bun:test'
 import { parseSystemEvent, systemEventLine } from './systemEvent'
 
@@ -74,4 +75,23 @@ test('r2: header-like prose does not match', () => {
   expect(parseSystemEvent('please see [from session x · handback] text')).toBeNull()
   expect(parseSystemEvent('[from session x · handback] same line')).toBeNull()
   expect(parseSystemEvent('hello\n[from agentistics · away]\nx')).toBeNull()
+})
+
+
+test('role notices: marked and exact historical output, wrapped or plain', () => {
+  for (const role of ['leader', 'worker', null] as const) {
+    const legacy = `[agentistics] your role is now ${role ? role.toUpperCase() : 'AUTO'} — ${roleLine(role)}`
+    for (const text of [roleChangeNote(role), legacy]) {
+      expect(parseSystemEvent(text)?.kind).toBe('role')
+      expect(parseSystemEvent(`<pasted_content id="r">\n${text}\n</pasted_content id="r">`)?.kind).toBe('role')
+    }
+  }
+  expect(systemEventLine({ kind: 'role', body: '' }, false)).toBe('Session role updated')
+  expect(systemEventLine({ kind: 'role', body: '' }, true)).toBe('Papel da sessão atualizado')
+})
+
+test('typed prose merely containing the agentistics marker remains ordinary text', () => {
+  for (const text of ['Please explain [agentistics]', '[agentistics] is the app name', '[agentistics] your role is now LEADER', `Please review:\n${roleChangeNote('leader')}`]) {
+    expect(parseSystemEvent(text)).toBeNull()
+  }
 })

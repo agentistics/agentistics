@@ -10,7 +10,7 @@
  *   1. the title prefix — "[ LEADER ] - <title>" / "[ LÍDER ] - <title>" for a leader, stripped otherwise —
  *      through the same `rename` fleet action `agentop session rename` uses (idempotent: the title is
  *      computed from the prefix-free base, so a second call changes nothing);
- *   2. a background note typed into the session ("[agentistics] your role is now …") through the
+ *   2. a background note typed into the session ("[from agentistics · role] …") through the
  *      composer's own send path — skipped when the session changes ITS OWN role (the tool answer
  *      carries the line instead of typing into the pane that is running the tool);
  *   3. nothing else. The role grants no power; it is what the briefing tells the model.

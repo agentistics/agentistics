@@ -1,3 +1,4 @@
+import { roleChangeNote } from '@agentistics/core'
 import { expect, mock, test } from 'bun:test'
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -139,4 +140,20 @@ test('clicking the chip toggles the body', () => {
   const again = renderToStaticMarkup(<Row />)
   expect(again).toContain('aria-expanded="false"')
   expect(again).not.toContain('xyzzy-body-marker')
+})
+
+
+test('role notices use the same system row for every harness', () => {
+  for (const harness of ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi'] as const) {
+    const html = renderToStaticMarkup(<ChatBubble turn={{ role: 'user', text: roleChangeNote('leader'), composer: true }} lang="en" harness={harness} />)
+    expect(html).toContain('Session role updated')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain('lucide-user')
+  }
+})
+
+test('a composer-authored message merely mentioning the role notice stays the owner’s', () => {
+  const html = renderToStaticMarkup(<ChatBubble turn={{ role: 'user', text: `Please explain this notice: ${roleChangeNote('leader')}`, composer: true }} lang="en" harness="claude" />)
+  expect(html).not.toContain('Session role updated')
+  expect(html).toContain('your role is now LEADER')
 })

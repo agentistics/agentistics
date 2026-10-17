@@ -331,3 +331,20 @@ MCP configuration includes the leader's project directory and enabled harnesses.
 fingerprint and delivery time. While explicitly assigned workers remain live, the next round is
 bounded by two hours after delivery, including after late reports; closed, exited and lost workers
 do not sustain heartbeats.
+
+### Injected notices and ended folder members
+
+Role changes use the same collapsed system row as away and check-in notices. The producer prefixes
+new notes with `[from agentistics · role]`; the classifier also recognizes the complete historical
+role-change text, including a whole-message `pasted_content` wrapper. Merely mentioning
+`[agentistics]` in a person's message does not make it a system event.
+
+The aside's view-options menu starts with a collapsed **Hidden folders** section and its count.
+Expanding it reveals the existing Show controls. Expanded **Ended (N)** folder members use the rail
+folder list's single-line identity (harness mark and title), while keeping opening, pinning, and the
+session action menu, including reopening when the server offers it.
+
+The pending vault-use card follows the shared vault watcher: it polls use requests only while the
+vault is open. A 401/403 clears the card and parks polling until a lock-state transition restarts it;
+the shared watcher continues checking vault state, so unlocking resumes requests. Unmounting or
+locking cancels the timer and ignores any older in-flight result.

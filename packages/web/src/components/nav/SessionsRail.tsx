@@ -21,6 +21,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { HarnessMark } from '../sessions/HarnessMark'
+import { CompactSessionFacts } from '../sessions/CompactSessionFacts'
 import { SessionFacts } from '../sessions/SessionFacts'
 import { sessionPath } from '../../lib/sessionRoute'
 import { NewSessionModal } from '../sessions/NewSessionModal'
@@ -367,11 +368,7 @@ export function SessionsRail({
                     onMouseEnter={e => { if (r.id !== selectedId) e.currentTarget.style.background = 'var(--bg-elevated)' }}
                     onMouseLeave={e => { if (r.id !== selectedId) e.currentTarget.style.background = 'transparent' }}
                   >
-                    <HarnessMark harness={r.harness} size={15} />
-                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {r.title}
-                    </span>
-                    {d && <span aria-hidden style={{ width: 7, height: 7, borderRadius: 4, background: d, flexShrink: 0 }} />}
+                    <CompactSessionFacts session={r} dot={d} />
                   </button>
                 )
               })}

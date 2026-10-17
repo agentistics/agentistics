@@ -3,6 +3,8 @@ import { ConfirmModal, DialogActions, dialogButtonStyle } from '../../pages/sett
 import { decideVaultUse, pendingVaultUseRequests, type VaultUseRequest } from '../../lib/vaultApi'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { phoneGesture } from '../../lib/passkey'
+import { refreshVaultWatch, useVaultWatch } from '../../lib/vaultWatch'
+import { pollVaultUseRequests } from '../../lib/vaultUsePolling'
 
 /** The words of one request — pure, so the card can be read in both languages without a browser. */
 export function useRequestWords(request: VaultUseRequest, lang: 'pt' | 'en', busy = false) {
@@ -34,15 +36,16 @@ export function UseRequestDialog({ request, lang, busy, onDecide, onClose }: { r
 export function VaultUseRequestCard({ lang }: { lang: 'pt' | 'en' }) {
   const [requests, setRequests] = useState<VaultUseRequest[]>([])
   const [busy, setBusy] = useState(false)
-  useEffect(() => {
-    let alive = true
-    const load = () => { void pendingVaultUseRequests().then(r => { if (alive && r.ok) setRequests(r.requests ?? []) }) }
-    load(); const timer = window.setInterval(load, 2_000)
-    return () => { alive = false; window.clearInterval(timer) }
-  }, [])
+  const { lock } = useVaultWatch(true)
+  useEffect(() => pollVaultUseRequests({
+    open: lock === 'open',
+    load: pendingVaultUseRequests,
+    onRequests: setRequests,
+    onRefused: () => { void refreshVaultWatch() },
+  }), [lock])
   const [hidden, setHidden] = useState<Record<string, number>>({})
   const request = requests.find(r => !((hidden[r.id] ?? 0) > Date.now()))
-  if (!request) return null
+  if (lock !== 'open' || !request) return null
   const rid = request.id
   const decide = async (approve: boolean) => {
     setBusy(true)

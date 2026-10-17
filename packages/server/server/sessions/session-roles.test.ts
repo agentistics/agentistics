@@ -214,6 +214,7 @@ describe('roleOp (the agentistics_session_role handler)', () => {
     const out = await roleOp(null, { ref: 'm1', role: 'leader', lang: 'pt' }, deps)
     expect(out).toMatchObject({ ok: true, role: 'leader', changed: true, renamed: true, notified: true })
     expect(renames).toEqual([['m1', '[ LÍDER ] - Fix login']])
+    expect(prompts[0]![1]).toStartWith('[from agentistics · role]\n')
     expect(prompts[0]![1]).toContain('your role is now LEADER')
     expect((await loadRoles(deps)).roles).toEqual({ c1: 'leader' })
   })
