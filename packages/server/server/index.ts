@@ -2837,6 +2837,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
           })
         }
+        // PLAN.ACCOUNTS D3: a reopen by a VERIFIED agent is held to the account rule; overwritten here.
+        const { markCallerVerified } = await import('./sessions/session-roles')
+        const { verifySessionIdentity } = await import('./sessions/session-identity')
+        await markCallerVerified(body.value, verifySessionIdentity)
         const out = await runFleetAction(fleetLang(url.searchParams.get('lang')), body.value)
         return new Response(JSON.stringify(out), {
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
@@ -2979,9 +2983,15 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // "use the Settings -> Chat defaults".
         const read = await readJsonLimited<Record<string, unknown> | null>(req, 4096).catch(() => null)
         const body = read && read.ok && read.value && typeof read.value === 'object' ? read.value : null
+        // PLAN.ACCOUNTS D3: a Nay conversation started by a VERIFIED agent carries that identity, so
+        // it meets the same account rule as `/api/fleet/new` — never the owner's.
+        const { markCallerVerified } = await import('./sessions/session-roles')
+        const { verifySessionIdentity } = await import('./sessions/session-identity')
+        const proof: { session?: unknown; callerVerified?: unknown } = { session: body?.session }
+        const callerVerified = await markCallerVerified(proof, verifySessionIdentity)
         const out = await startNaySession(fleetLang(url.searchParams.get('lang')), defaultNayDeps(PORT), {
           harness: body?.harness, model: body?.model, effort: body?.effort,
-        })
+        }, { callerVerified })
         return new Response(JSON.stringify(out), {
           status: out.code === 'memory_budget' ? 409 : out.code ? spawnAccountStatus(out.code) : 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },

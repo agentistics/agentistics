@@ -5,19 +5,34 @@
  * reads its context here, so none of them can grow a second idea of which accounts exist.
  */
 import { featureOn, type HarnessId } from '@agentistics/core'
-import { readAccounts } from '../harness-accounts'
+import { readAccounts, type AccountsFile } from '../harness-accounts'
 import {
-  decideRecordedAccount, routerPicks, type SpawnAccountContext, type SpawnAccountDecision, type SpawnAccountRow,
+  decideRecordedAccount, decideSpawnAccount, routerPicks, spawnAccountMessage, type SpawnAccountContext, type SpawnAccountDecision, type SpawnAccountRow,
 } from './spawn-account'
+
+/**
+ * The registry as spawn rows. WHERE an account runs is read from the BINDINGS (`<harness>:<root>` →
+ * id), never from `HarnessAccount.root` alone: a signed-out account's root reads `null` too, and that
+ * is not the default login. An account no binding names is `bound: false`.
+ */
+export function spawnRowsOf(file: Pick<AccountsFile, 'accounts' | 'bindings'>): SpawnAccountRow[] {
+  const boundAt = new Map<string, string | null>()
+  for (const [key, id] of Object.entries(file.bindings)) {
+    const account = file.accounts.find(a => a.id === id)
+    if (!account || !key.startsWith(`${account.harness}:`)) continue
+    const root = key.slice(account.harness.length + 1) || null
+    // Two bindings for one account (a stale one): the account's own recorded root wins.
+    if (!boundAt.has(id) || root === account.root) boundAt.set(id, root)
+  }
+  return file.accounts.map(a => ({
+    id: a.id, harness: a.harness, root: boundAt.get(a.id) ?? null, bound: boundAt.has(a.id), available: a.available,
+    ...(a.retired ? { retired: true } : {}), firstSeen: a.firstSeen,
+  }))
+}
 
 /** The registry as spawn rows. An unreadable registry is NO accounts (the default root), never a throw. */
 export async function spawnAccountRows(): Promise<SpawnAccountRow[]> {
-  try {
-    return (await readAccounts()).accounts.map(a => ({
-      id: a.id, harness: a.harness, root: a.root, available: a.available,
-      ...(a.retired ? { retired: true } : {}), firstSeen: a.firstSeen,
-    }))
-  } catch { return [] }
+  try { return spawnRowsOf(await readAccounts()) } catch { return [] }
 }
 
 /**
@@ -28,8 +43,9 @@ export async function spawnAccountRows(): Promise<SpawnAccountRow[]> {
 export async function spawnAccountContext(
   needPicksFor: readonly HarnessId[] = [],
 ): Promise<SpawnAccountContext> {
-  if (!featureOn('multi-account')) return { enabled: false, accounts: [] }
+  // Read with the flag off too: the hidden-account rule for an agent's default-root spawn is not a flag.
   const accounts = await spawnAccountRows()
+  if (!featureOn('multi-account')) return { enabled: false, accounts }
   const several = needPicksFor.filter(h => accounts.filter(a => a.harness === h && !a.retired).length > 1)
   if (!several.length) return { enabled: true, accounts }
   try {
@@ -41,8 +57,36 @@ export async function spawnAccountContext(
   }
 }
 
-/** A reopen's account: the record's own. No record → the default root, with no registry read. */
-export async function recordedSpawnAccount(accountId: string | undefined): Promise<SpawnAccountDecision> {
-  if (!accountId) return { ok: true }
-  return decideRecordedAccount(accountId, await spawnAccountRows())
+/**
+ * A reopen's account: the record's own. No record and no agent caller → the default root, with no
+ * registry read. `agentCaller` is true only for a VERIFIED session identity.
+ */
+export async function recordedSpawnAccount(
+  accountId: string | undefined,
+  caller: { agentCaller?: boolean; harness?: HarnessId } = {},
+): Promise<SpawnAccountDecision> {
+  if (!accountId && !caller.agentCaller) return { ok: true }
+  return decideRecordedAccount(accountId, await spawnAccountRows(), caller)
+}
+
+/**
+ * The account of a spawn that reached the HOST without one decided — the cockpit wizard's own start.
+ * `/api/fleet/new` decides in `planFleetSpawn` and says so (`accountDecided`); a LOGIN session carries
+ * its own root (`account`) and is never re-decided. Same rule as every other door: `decideSpawnAccount`.
+ */
+export async function hostSpawnAccount(req: {
+  harness: HarnessId
+  accountId?: string
+  accountDecided?: boolean
+  login?: boolean
+  callerVerified?: boolean
+}, lang: 'en' | 'pt'): Promise<{ ok: true; accountId?: string } | { ok: false; message: string }> {
+  if (req.login || req.accountDecided || req.accountId !== undefined) {
+    return { ok: true, ...(req.accountId ? { accountId: req.accountId } : {}) }
+  }
+  const decided = decideSpawnAccount({
+    harness: req.harness, agentCaller: req.callerVerified === true, context: await spawnAccountContext([req.harness]),
+  })
+  if (!decided.ok) return { ok: false, message: spawnAccountMessage(decided.reason, decided.detail, lang) }
+  return { ok: true, ...(decided.account ? { accountId: decided.account.id } : {}) }
 }

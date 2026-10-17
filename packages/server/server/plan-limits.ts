@@ -817,8 +817,12 @@ export async function planLimitsPayload(
     .filter(sessionVisible)
     .map(({ harness: _harness, account: _account, ...s }) => s)
   // Hidden-from-agents wins over spawnability: a harness whose every account is off is not named.
+  // Read from the REGISTRY as well as the observed rows: a harness with no meter, no live session and
+  // no Billing profile reads no accounts above, and an all-OFF harness must still not be named.
   const hiddenOutright = (h: HarnessId) => {
-    const live = visibility.filter(a => a.harness === h && !a.retired)
+    const ids = new Set(visibility.map(a => a.id))
+    const live = [...visibility, ...registry.accounts.filter(a => !ids.has(a.id))]
+      .filter(a => a.harness === h && !a.retired)
     return live.length > 0 && live.every(a => !a.available)
   }
   const publicHarnesses = Object.fromEntries(Object.entries(spawnability).filter(([h]) => !hiddenOutright(h as HarnessId))) as Partial<Record<HarnessId, HarnessSpawnability>>
