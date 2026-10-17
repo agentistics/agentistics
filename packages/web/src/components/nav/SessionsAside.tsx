@@ -864,7 +864,7 @@ export function SessionsAside({
     return [...seen.entries()].map(([key, label]) => ({ key, label }))
   }, [bands])
 
-  const total = bands.reduce(
+  const total = leadersOnly ? activeLeaders.length : bands.reduce(
     (n, b) => n + b.groups.reduce((m, g) => m + g.sessions.length, 0),
     0,
   ) + pinnedRows.length + groupRowsShown.reduce((n, g) => n + g.rows.length, 0)
@@ -1732,6 +1732,7 @@ export function SessionsAside({
         }}
       >
         {leadersOnly ? (
+          <>
           <div data-leaders-list style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {activeLeaders.map(s => (
               <SessionRow
@@ -1750,6 +1751,13 @@ export function SessionsAside({
               />
             ))}
           </div>
+          {total === 0 && (
+            <EmptyReason
+              pt={pt} loading={loading} unsupported={unsupported} unavailable={unavailable}
+              leadersOnly searching={false} withheld={0} filterNarrowed={false}
+            />
+          )}
+          </>
         ) : (
           <>
         {/* The pinned band, above everything — that is what pinning is for: the two or three
@@ -2548,9 +2556,10 @@ function SessionBand({
  * since the real one already sits in the header this list scrolls under.
  */
 function EmptyReason({
-  pt, loading, unsupported, unavailable, searching, withheld, filterNarrowed,
+  pt, loading, unsupported, unavailable, searching, withheld, filterNarrowed, leadersOnly = false,
 }: {
   pt: boolean; loading: boolean; unsupported: boolean; unavailable?: string; searching: boolean
+  leadersOnly?: boolean
   /** How many rows the "active only" switch (now in the shared header) is holding back. */
   withheld: number
   /** The shared header's harness/project/repo/model filter hid every row — a SEPARATE fact from
@@ -2567,6 +2576,8 @@ function EmptyReason({
           : 'This install lists no sessions of its own — a central aggregates many machines and hosts none of their sessions.')
       : unavailable
         ? unavailable
+        : leadersOnly
+          ? (pt ? 'Nenhum líder ativo' : 'No active leaders')
         : filterNarrowed
           ? (pt ? 'Nenhuma sessão corresponde aos filtros no topo.' : 'No session matches the filters above.')
           : withheld > 0

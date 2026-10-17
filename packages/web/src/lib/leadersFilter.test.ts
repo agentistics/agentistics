@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { applyLeadersOnly, countLeaders, leadersBanner, leadersText } from './leadersFilter'
+import { applyLeadersOnly, countLeaders, leadersText } from './leadersFilter'
 import { arrangeChangedCount, DEFAULT_ASIDE_GROUP_PREFS, parseAsideGroupPrefs } from './sessionsAsidePrefs'
 import { countActiveFilters } from './activeFilterCount'
 import { ACTIVE_STATES, filterSessions, type ControlSession } from '@agentistics/tui/control/session-fleet'
@@ -20,8 +20,6 @@ describe('leaders filter', () => {
     expect(countLeaders(rows, roleOf)).toBe(2)
     expect(leadersText(1, true)).toBe('1 líder')
     expect(leadersText(2, true)).toBe('2 líderes')
-    expect(leadersBanner(3, true)).toBe('Mostrando só líderes ativos · 3 sessões ocultas')
-    expect(leadersBanner(1, false)).toBe('Showing active leaders only · 1 session hidden')
   })
   test('all live states count, while exited, closed and lost leaders never do', () => {
     const states = [...ACTIVE_STATES, 'exited', 'closed', 'lost']

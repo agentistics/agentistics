@@ -77,9 +77,10 @@ for (const width of [1280, 390]) test(`leaders-only is flat and restores the nor
     expect(host.textContent).toContain('Visible folder marker')
     expect(host.textContent).toContain('Title ended')
     // Leave a summary filter selected: it must neither change the count nor cut the flat list.
-    const needs = [...host.querySelectorAll<HTMLButtonElement>('[aria-label="Sessions summary"] button')]
+    const needs = Array.from(host.querySelectorAll<HTMLButtonElement>('[aria-label="Sessions summary"] button'))
       .find(b => b.textContent?.includes('needs you'))!
     act(() => needs.click())
+    expect(needs.getAttribute('aria-pressed')).toBe('true')
     const normal = host.textContent
     expect(chip().textContent).toBe('3 leaders')
     act(() => chip().click())
@@ -96,12 +97,15 @@ for (const width of [1280, 390]) test(`leaders-only is flat and restores the nor
     act(() => chip().click())
     expect(host.querySelector('[data-leaders-list]')).toBeNull()
     expect(host.textContent).toBe(normal)
+    expect(Array.from(host.querySelectorAll<HTMLButtonElement>('[aria-label="Sessions summary"] button'))
+      .find(b => b.textContent?.includes('needs you'))!.getAttribute('aria-pressed')).toBe('true')
 
     // Value filters affect both the count and list, including pinned and hidden-folder leaders.
     act(() => writePrefs({ leadersOnly: true }))
     render(rows, { ...filters, harnesses: ['claude'] })
     expect(chip().textContent).toBe('0 leaders')
     expect(host.querySelector('[data-leaders-list]')!.children).toHaveLength(0)
+    expect(host.textContent).toContain('No active leaders')
     act(() => chip().click())
     expect(host.querySelector('[data-leaders-only]')).toBeNull()
     render(rows.filter(r => r.state === 'exited'))
@@ -112,3 +116,46 @@ for (const width of [1280, 390]) test(`leaders-only is flat and restores the nor
     host.remove()
   }
 })
+
+for (const width of [1280, 390]) for (const lang of ['en', 'pt'] as const) {
+  test(`leaders-only explains an empty list despite raw pins (${lang}, ${width}px)`, async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+    window.matchMedia = (() => ({ matches: width < 768, addEventListener() {}, removeEventListener() {} })) as never
+    await loadSharedPrefs()
+    act(() => writePrefs({ leadersOnly: true }))
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const root = createRoot(host)
+    const emptyText = lang === 'pt' ? 'Nenhum líder ativo' : 'No active leaders'
+    const render = (fleet: ControlSession[], valueFilters = filters, loading = false) => act(() => root.render(
+      <MemoryRouter><SessionsAside lang={lang} rows={fleet} filters={valueFilters} activeOnly
+        loading={loading} unsupported={false} finishedTasks={[]} hideNew />
+      </MemoryRouter>,
+    ))
+    try {
+      // A raw pinned worker or ended leader must never mask the leaders-only empty state.
+      for (const fleet of [rows.filter(r => r.id === 'worker'), rows.filter(r => r.id === 'ended'), []]) {
+        render(fleet)
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+        expect(host.querySelector('[data-leaders-list]')!.children).toHaveLength(0)
+        expect(host.textContent).toContain(emptyText)
+        expect(host.querySelector('[data-leaders-only]')!.textContent).toContain('0')
+      }
+      // The value filters hide every leader while pins still resolve from the raw fleet.
+      render(rows, { ...filters, harnesses: ['claude'] })
+      expect(host.querySelector('[data-leaders-list]')!.children).toHaveLength(0)
+      expect(host.textContent).toContain(emptyText)
+      // Loading takes precedence over a confident empty result.
+      render([], filters, true)
+      expect(host.textContent).not.toContain(emptyText)
+      expect(host.textContent).toContain(lang === 'pt' ? 'Lendo as sessões' : 'Reading this machine')
+      render(rows)
+      expect(host.querySelector('[data-leaders-list]')!.children).toHaveLength(3)
+      expect(host.textContent).not.toContain(emptyText)
+    } finally {
+      act(() => root.unmount())
+      act(() => writePrefs({ leadersOnly: false }))
+      host.remove()
+    }
+  })
+}

@@ -25,11 +25,3 @@ export function applyLeadersOnly<T extends { state: string }>(rows: readonly T[]
 export function leadersText(n: number, pt: boolean): string {
   return pt ? `${n} ${n === 1 ? 'líder' : 'líderes'}` : `${n} ${n === 1 ? 'leader' : 'leaders'}`
 }
-
-/** The banner under the verbs row while the switch is on — said, so a short list is never a mystery. */
-export function leadersBanner(hidden: number, pt: boolean): string {
-  const h = pt
-    ? `${hidden} ${hidden === 1 ? 'sessão oculta' : 'sessões ocultas'}`
-    : `${hidden} ${hidden === 1 ? 'session' : 'sessions'} hidden`
-  return pt ? `Mostrando só líderes ativos · ${h}` : `Showing active leaders only · ${h}`
-}
