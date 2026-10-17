@@ -8,9 +8,12 @@
  * says its refusals in words, never as an empty list.
  */
 import { useEffect, useRef, useState } from 'react'
-import { ChevronRight, Folder, HardDrive, Loader } from 'lucide-react'
-import { breadcrumbs, fetchFolders, rootLabels, startFolderPath, type DiskInfo, type FolderListing } from '../../lib/folderBrowser'
-import { Muted } from './formBits'
+import { ChevronRight, Folder, FolderPlus, HardDrive, Loader } from 'lucide-react'
+import { checkProjectName, joinProjectPath, projectNameMessage } from '@agentistics/core'
+import { breadcrumbs, fetchFolders, rootLabels, shortPath, startFolderPath, type DiskInfo, type FolderListing } from '../../lib/folderBrowser'
+import { createProjectFolder, type CreateFolderRefusal } from '../../lib/newProjectApi'
+import { ConfirmModal } from '../../pages/settings/primitives'
+import { Muted, inputStyle } from './formBits'
 
 export interface FolderBrowserProps {
   lang: 'pt' | 'en'
@@ -21,15 +24,25 @@ export interface FolderBrowserProps {
   disks?: readonly DiskInfo[]
   onUse: (path: string) => void
   onCancel: () => void
+  /** The primary button's words; "Usar esta pasta" by default. */
+  useLabel?: string
+  /** "Novo projeto" (t-eab4751cb3): offer "Nova pasta aqui" in the folder being browsed; a
+   *  created folder is USED at once (`onUse`). Absent = today's browser, unchanged. */
+  allowCreate?: boolean
 }
 
-export function FolderBrowser({ lang, isMobile, startDisk, disks = [], onUse, onCancel }: FolderBrowserProps) {
+export function FolderBrowser({ lang, isMobile, startDisk, disks = [], onUse, onCancel, useLabel, allowCreate }: FolderBrowserProps) {
   const pt = lang === 'pt'
   const [roots, setRoots] = useState<string[]>([])
   const [listing, setListing] = useState<FolderListing | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const rootsRef = useRef<string[]>([])
+  // Option B's inline "new folder" row: closed (null) or the name being typed.
+  const [newName, setNewName] = useState<string | null>(null)
+  const [createError, setCreateError] = useState<{ reason: CreateFolderRefusal; path?: string } | null>(null)
+  const [confirming, setConfirming] = useState(false)
+  const [creating, setCreating] = useState(false)
 
   async function go(path: string, signal?: AbortSignal) {
     setLoading(true); setError(null)
@@ -91,6 +104,77 @@ export function FolderBrowser({ lang, isMobile, startDisk, disks = [], onUse, on
         maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4,
         border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 6,
       }}>
+        {allowCreate && here && newName === null && (
+          <button type="button" onClick={() => { setNewName(''); setCreateError(null) }} style={{
+            display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', minHeight: rowH,
+            padding: '6px 10px', borderRadius: 8, border: '1px dashed var(--border)', minWidth: 0, flexShrink: 0,
+            background: 'transparent', color: 'var(--anthropic-orange)', cursor: 'pointer', fontFamily: 'inherit',
+          }}>
+            <FolderPlus size={15} style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: 12.5, fontWeight: 600 }}>{pt ? 'Nova pasta aqui' : 'New folder here'}</span>
+          </button>
+        )}
+        {allowCreate && here && newName !== null && (() => {
+          const check = checkProjectName(newName)
+          const err = createError?.reason ?? (!check.ok && check.reason !== 'empty' ? check.reason : null)
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 6, borderRadius: 8, flexShrink: 0, background: 'var(--anthropic-orange-dim)' }}>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexDirection: isMobile ? 'column' : 'row' }}>
+                <input autoFocus value={newName} spellCheck={false} autoComplete="off"
+                  aria-invalid={err ? true : undefined}
+                  placeholder={pt ? 'Nome da nova pasta' : 'New folder name'}
+                  onChange={e => { setNewName(e.target.value); setCreateError(null) }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && check.ok) { e.preventDefault(); setConfirming(true) }
+                    if (e.key === 'Escape') { e.stopPropagation(); setNewName(null) }
+                  }}
+                  style={{ ...inputStyle, paddingLeft: 12, flex: 1, ...(err ? { borderColor: 'var(--accent-red)' } : {}) }} />
+                <span style={{ display: 'flex', gap: 6, width: isMobile ? '100%' : undefined }}>
+                  <button type="button" onClick={() => setNewName(null)} style={{
+                    minHeight: isMobile ? 44 : 34, padding: '0 12px', borderRadius: 9, cursor: 'pointer', flex: isMobile ? 1 : undefined,
+                    border: '1px solid var(--border-subtle)', background: 'transparent', color: 'var(--text-secondary)', fontFamily: 'inherit', fontSize: 12.5,
+                  }}>{pt ? 'Cancelar' : 'Cancel'}</button>
+                  <button type="button" disabled={!check.ok || creating} onClick={() => setConfirming(true)} style={{
+                    minHeight: isMobile ? 44 : 34, padding: '0 12px', borderRadius: 9, border: 'none', flex: isMobile ? 1 : undefined,
+                    cursor: check.ok ? 'pointer' : 'not-allowed', opacity: check.ok ? 1 : 0.5,
+                    background: 'var(--anthropic-orange)', color: '#fff', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 650,
+                  }}>{pt ? 'Criar' : 'Create'}</button>
+                </span>
+              </div>
+              {err && (
+                <span role="alert" style={{ fontSize: 11.5, color: 'var(--accent-red)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {projectNameMessage(err, pt)}
+                  {createError?.reason === 'exists' && createError.path && (
+                    <button type="button" onClick={() => onUse(createError.path!)} style={{
+                      border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', fontFamily: 'inherit',
+                      fontSize: 11.5, fontWeight: 650, color: 'var(--anthropic-orange)', textDecoration: 'underline',
+                    }}>{pt ? 'Usar a pasta que já existe' : 'Use the existing folder'}</button>
+                  )}
+                </span>
+              )}
+              <ConfirmModal
+                open={confirming && check.ok}
+                tone="default"
+                icon={<FolderPlus size={17} />}
+                title={pt ? `Criar a pasta “${newName.trim()}”?` : `Create the folder “${newName.trim()}”?`}
+                message={pt
+                  ? `Vou criar ${shortPath(joinProjectPath(here, newName.trim()))} e abrir a sessão dentro dela.`
+                  : `I will create ${shortPath(joinProjectPath(here, newName.trim()))} and start the session inside it.`}
+                confirmLabel={pt ? 'Criar pasta' : 'Create folder'}
+                cancelLabel={pt ? 'Cancelar' : 'Cancel'}
+                onCancel={() => setConfirming(false)}
+                onConfirm={() => {
+                  setConfirming(false); setCreating(true)
+                  void createProjectFolder(here, newName.trim()).then(out => {
+                    setCreating(false)
+                    if (out.ok) onUse(out.path)
+                    else setCreateError({ reason: out.reason, ...(out.path ? { path: out.path } : {}) })
+                  })
+                }}
+              />
+            </div>
+          )
+        })()}
         {loading && !listing ? (
           <Muted text={pt ? 'Lendo as pastas…' : 'Reading folders…'} />
         ) : error ? (
@@ -131,7 +215,7 @@ export function FolderBrowser({ lang, isMobile, startDisk, disks = [], onUse, on
           minHeight: isMobile ? 44 : 32, padding: '0 14px', borderRadius: 9, border: 'none',
           cursor: here ? 'pointer' : 'not-allowed', opacity: here ? 1 : 0.5,
           background: 'var(--anthropic-orange)', color: '#fff', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 650,
-        }}>{pt ? 'Usar esta pasta' : 'Use this folder'}</button>
+        }}>{useLabel ?? (pt ? 'Usar esta pasta' : 'Use this folder')}</button>
       </div>
     </div>
   )

@@ -146,7 +146,7 @@ import { getAccount } from './accounts'
 import { getTeam } from './teams'
 import { stateFor as checkinState, putState as putCheckin, reportFromIdentity as reportCheckin, runNow as runCheckin, startCheckinTimer, validateCheckinRound } from './checkin'
 import { discoverProjectDisks } from './disk-picker'
-import { allowedRoots, listFolders, rootListing } from './fs-folders'
+import { allowedRoots, createFolderStatus, createProjectFolder, listFolders, rootListing } from './fs-folders'
 import { forgetProjects } from './sessions/project-source'
 import { startAwayDigestTimer } from './away-digest'
 
@@ -1160,6 +1160,26 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), { status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } })
+      }
+    }
+
+    // "Novo projeto": create ONE folder in the wizard. Same path as the listing, so it is already
+    // `localShell` in the capability guard (refused on a central) and behind the auth gate.
+    if (url.pathname === '/api/fs/folders' && req.method === 'POST') {
+      const headers = { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+      try {
+        const read = await readJsonLimited<{ parent?: unknown; name?: unknown; createParent?: unknown }>(req, LIMITS.bodyBytes)
+        if (!read.ok) return new Response(JSON.stringify({ error: read.error === 'too_large' ? 'too-large' : 'bad-request' }), { status: read.error === 'too_large' ? 413 : 400, headers })
+        const scanRoots = (await readPreferences()).scanRoots ?? []
+        const made = await createProjectFolder(read.value, { scanRoots })
+        if (made.ok) {
+          return new Response(JSON.stringify({ path: made.path }), { status: 201, headers })
+        }
+        return new Response(JSON.stringify({ error: made.reason, ...(made.path ? { path: made.path } : {}) }), { status: createFolderStatus(made.reason), headers })
+      } catch (err) {
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        console.error(safe.logLine)
+        return new Response(JSON.stringify(safe.body), { status: 500, headers })
       }
     }
 

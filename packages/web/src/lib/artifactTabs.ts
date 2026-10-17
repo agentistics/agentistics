@@ -68,7 +68,7 @@ export interface LiveTurn {
   thinking?: string
   pending?: boolean
   /** `ref` is the harness's `tool_use` id — the exact key `/api/fleet/step` opens the call with. */
-  tools?: { name: string; detail?: string; writes?: string[]; ref?: string }[]
+  tools?: { name: string; canonical?: string; detail?: string; writes?: string[]; ref?: string }[]
 }
 
 /** Tools that READ rather than change anything. */
@@ -126,17 +126,19 @@ export function liveEvents(turns: readonly LiveTurn[]): LiveEvent[] {
       // Every event a call produces carries THAT call's id, so opening the `wrote` row of a shell
       // command shows the command that wrote it — the two rows are one step seen from both ends.
       const ref = c.ref ? { ref: c.ref } : undefined
+      // The shared name first: a gemini `run_shell_command` is a shell call, not a generic `used`.
+      const name = c.canonical ?? c.name
       // A command that writes is BOTH events, in the order they happen: it ran, and then the file
       // appeared. Collapsing them would lose either what was run or what it produced, and the feed
       // is asked for both.
       const before = out.length
-      if (c.name === 'Bash' && c.detail) out.push(ev('ran', c.detail, ref))
+      if (name === 'Bash' && c.detail) out.push(ev('ran', c.detail, ref))
       for (const w of c.writes ?? []) out.push(ev('wrote', w, ref))
-      if (WRITE_TOOLS.has(c.name) && c.detail) out.push(ev('wrote', c.detail, ref))
-      else if (READ_TOOLS.has(c.name) && c.detail) out.push(ev('read', c.detail, ref))
+      if (WRITE_TOOLS.has(name) && c.detail) out.push(ev('wrote', c.detail, ref))
+      else if (READ_TOOLS.has(name) && c.detail) out.push(ev('read', c.detail, ref))
       // A subagent is a delegation, not a command — it is the one tool call that starts more work
       // somewhere else, and reading it as "ran" hides that.
-      else if (c.name === 'Agent' || c.name === 'Task') out.push(ev('delegated', c.detail ?? c.name, ref))
+      else if (name === 'Agent' || name === 'Task') out.push(ev('delegated', c.detail ?? c.name, ref))
       /*
        * A CALL THAT MATCHED NOTHING ABOVE IS STILL SOMETHING THAT HAPPENED.
        *

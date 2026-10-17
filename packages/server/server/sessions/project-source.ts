@@ -18,10 +18,11 @@
 
 import { homedir } from 'node:os'
 import { tmpdir } from 'node:os'
-import { countPerKind, pathForHost, PROJECTS_PER_KIND, projectKind, projectPathKey, takePerKind, type ProjectKind } from '@agentistics/core'
+import { countPerKind, defaultProjectParent, pathForHost, PROJECTS_PER_KIND, projectKind, projectPathKey, takePerKind, type ProjectKind } from '@agentistics/core'
 import { loadConsolidated } from '../consolidate'
 import { isDirectory, isWholeDiskRoot, isWorktreeDir, scanDirectories, type ScanOptions } from './dir-scan'
 import { DiskIndex, type DiskIndexProgress } from './disk-index'
+import { isHiddenFolder } from '../fs-folders'
 import { discoverProjectDisks, type ProjectDisk } from '../disk-picker'
 import { readPreferences } from '../preferences'
 import {
@@ -271,4 +272,28 @@ export function diskIndexProgress(): DiskIndexProgress[] {
 function baseName(path: string): string {
   const parts = path.replace(/\\/g, '/').replace(/\/+$/, '').split('/')
   return parts[parts.length - 1] ?? path
+}
+
+/**
+ * Where "Novo projeto" puts a folder by default: the folder that already holds most of this
+ * person's projects, else `<home>/projetos|projects` (created together with the project).
+ * Read off the FULL visible list — never the search-filtered rows the wizard holds, or typing
+ * would move it.
+ */
+export async function newProjectParent(pt: boolean, home = homedir()): Promise<{ path: string; exists: boolean }> {
+  const { candidates } = await allCandidates()
+  // A place the browser would not show back (dot-folders such as ~/.gemini, the prune list, the temp
+  // tree) is never a habit worth copying: judged on the project's parent, segment by segment.
+  const visible = candidates.map(c => c.path).filter(path => {
+    const rel = path.slice(0, Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))).slice(home.length).split(/[\\/]/).filter(Boolean)
+    return !path.startsWith(home) || !rel.some(seg => isHiddenFolder(seg, path))
+  })
+  const guess = defaultProjectParent(home, visible, pt)
+  return withExistence(guess.path, isDirectory)
+}
+
+/** Whether the default parent is there is read off the disk EVERY time — never off the guess, whose
+ *  `exists: false` for `<home>/projetos` stayed false after the first project created it. */
+export async function withExistence(path: string, isDir: (p: string) => Promise<boolean>): Promise<{ path: string; exists: boolean }> {
+  return { path, exists: await isDir(path) }
 }

@@ -1024,6 +1024,8 @@ export interface FleetNewOptions {
   projectIndexProgress?: { root: string; visited: number; queued: number; candidates: number; complete: boolean }[]
   projectDisks?: { id: string; label: string; letter?: string; install: boolean; count: number }[]
   projectDisk?: string
+  /** Where "Novo projeto" creates a folder by default (`exists: false` = made along with the project). */
+  newProjectParent?: { path: string; exists: boolean }
   /** The tasks that already exist here, so filing the new session is a pick, not a spelling test. */
   tasks: string[]
   /**
@@ -1049,12 +1051,13 @@ export async function readNewOptions(lang: CliLang, query: string, disk?: string
     }
     const { readHarnessDefaults } = await import('./harness-defaults')
     type Defaults = Awaited<ReturnType<typeof readHarnessDefaults>>
-    const [harnesses, projects, tasks] = await Promise.all([
+    const [harnesses, projects, tasks, newParent] = await Promise.all([
       bounded(host.startableHarnesses(), NEW_OPTIONS_BUDGET_MS * 2, [] as Awaited<ReturnType<NonNullable<typeof host.startableHarnesses>>>),
       host.searchProjects
         ? bounded(host.searchProjects(query, disk), NEW_OPTIONS_BUDGET_MS, EMPTY_PROJECT_SEARCH)
         : Promise.resolve(EMPTY_PROJECT_SEARCH),
       host.sessionTasks ? bounded(host.sessionTasks(), NEW_OPTIONS_BUDGET_MS, []) : Promise.resolve([]),
+      import('./project-source').then(m => bounded(m.newProjectParent(lang === 'pt'), NEW_OPTIONS_BUDGET_MS, undefined)).catch(() => undefined),
     ])
     // What each CLI will actually do here with no flags, read from THIS MACHINE's own settings
     // files. `spawn-spec.ts` publishes none — no CLI prints its default in `--help` — but the
@@ -1119,6 +1122,7 @@ export async function readNewOptions(lang: CliLang, query: string, disk?: string
       ...(projects.indexProgress ? { projectIndexProgress: projects.indexProgress } : {}),
       ...(projects.disks ? { projectDisks: projects.disks } : {}),
       ...(disk !== undefined ? { projectDisk: disk } : {}),
+      ...(newParent ? { newProjectParent: newParent } : {}),
       tasks,
     }
   } catch (e) {
