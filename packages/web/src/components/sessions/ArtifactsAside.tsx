@@ -317,6 +317,14 @@ export function ArtifactsAside({
    * afterwards, which a `[focusRequest.ref]` dependency would take away.
    */
   const askedAt = focusRequest?.at
+  // A request pulses the panel body for a moment: an already-open panel otherwise shows nothing.
+  const [pulse, setPulse] = useState(false)
+  useEffect(() => {
+    if (askedAt === undefined) return
+    setPulse(true)
+    const t = setTimeout(() => setPulse(false), 1200)
+    return () => clearTimeout(t)
+  }, [askedAt])
   useEffect(() => {
     setFocusStep(focusRequest?.ref)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -751,6 +759,15 @@ export function ArtifactsAside({
     )
   }
 
+  // A background-task note carries the tool-use / task id it answers: open that agent directly.
+  useEffect(() => {
+    const ref = focusRequest?.ref
+    if (ref === undefined || agentsState === null || agentsState.phase !== 'ready') return
+    const hit = agentsState.rows.find(r => r.agentId === ref || r.toolUseId === ref)
+    if (hit) setOpenAgent(hit)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [askedAt, agentsState])
+
   const agentsBody = (): React.ReactNode => {
     // One open agent replaces the list, exactly as an open FILE does — 440px cannot hold a list and
     // a conversation side by side.
@@ -781,7 +798,7 @@ export function ArtifactsAside({
         : (pt ? 'Esta conversa não delegou nada a um subagente.' : 'This conversation has not delegated anything to a subagent.')} />
     }
     return (
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', padding: '6px 6px 10px' }}>
+      <div data-testid="agents-list" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', padding: '6px 6px 10px', ...(pulse ? { outline: '2px solid var(--anthropic-orange)', outlineOffset: -2, borderRadius: 8 } : {}) }}>
         {/* A PAGE SAYS IT IS A PAGE. Newest first, by each agent's last activity. */}
         {st.total > st.rows.length && (
           <p style={{ margin: '0 8px 6px', fontSize: 10, lineHeight: 1.5, color: 'var(--text-tertiary)' }}>

@@ -172,7 +172,9 @@ function setPanelFocusRequest(next: PanelFocusRequest): void {
 export function openArtifacts(tab?: string, ref?: string, pane: PaneId = getActivePane()): void {
   const panel: PanelId = isPanelId(tab) ? tab : 'live'
   showPanel(panel, pane)
-  if (ref !== undefined) setPanelFocusRequest({ tab: panel, pane, ref, at: Date.now() })
+  // Always published, ref or not: a panel that is already open shows nothing new by itself, and a
+  // click that visibly does nothing is the defect this answers (the panel pulses on every request).
+  setPanelFocusRequest({ tab: panel, pane, ...(ref !== undefined ? { ref } : {}), at: Date.now() })
 }
 
 /** For tests: forget everything. */

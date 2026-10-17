@@ -218,3 +218,12 @@ test('a skill directory outside every declared source loads WITHOUT a reference'
   expect(classifyUserEntry({ text: 'Base directory for this skill: /opt/elsewhere/thing', isMeta: true }))
     .toEqual({ kind: 'system', note: 'a skill was loaded' })
 })
+
+import { classifyUserText as classifyNote } from './chat-envelope'
+test('a task-notification note carries the tool-use id it answers (falling back to the task id)', () => {
+  expect(classifyNote('<task-notification>\n<task-id>t9</task-id>\n<tool-use-id>toolu_01X</tool-use-id>\n</task-notification>'))
+    .toEqual({ kind: 'system', note: 'background task reported back', noteRef: 'toolu_01X' })
+  expect(classifyNote('<task-notification><task-id>t9</task-id></task-notification>'))
+    .toEqual({ kind: 'system', note: 'background task reported back', noteRef: 't9' })
+  expect(classifyNote('<task-notification>x</task-notification>')).toEqual({ kind: 'system', note: 'background task reported back' })
+})

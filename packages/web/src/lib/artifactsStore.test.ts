@@ -79,11 +79,12 @@ test('asking for the same tab/ref twice is still two distinct requests — the s
   expect(second).not.toBe(first)
 })
 
-test('opening without a ref leaves any previous focus request as it was', () => {
+test('opening without a ref still publishes a request (an open panel must visibly respond), with no ref', () => {
   openArtifacts('live', 'step-1')
   const asked = getPanelFocusRequest()
   openArtifacts('live')
-  expect(getPanelFocusRequest()).toBe(asked)
+  expect(getPanelFocusRequest()).not.toBe(asked)
+  expect(getPanelFocusRequest()?.ref).toBeUndefined()
 })
 
 test('resetArtifacts clears both the count and the focus request', () => {
