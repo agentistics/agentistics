@@ -289,35 +289,55 @@ export function foldAliasedLimits(
 let fileMtime = 0
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 let persistOff = false
+/** State not yet covered by a successful write: set on every change, cleared only by a write that covers it. */
+let persistDirty = false
+let persistFailures = 0
+const PERSIST_BASE_MS = 500
+const PERSIST_MAX_MS = 30_000
+/** Test seams: the lock, the file operations and the base delay (production uses the real ones). */
+const persistHooks = { lock: withFileLock, write: writeFile, rename, baseMs: PERSIST_BASE_MS }
+export function __setPersistHooksForTest(h: Partial<typeof persistHooks> | null): void {
+  Object.assign(persistHooks, { lock: withFileLock, write: writeFile, rename, baseMs: PERSIST_BASE_MS }, h ?? {})
+}
 function persistSoon(): void {
+  persistDirty = true
   if (persistTimer || persistOff) return
+  // Bounded exponential backoff after a failed attempt (error or contended lock).
+  const delay = Math.min(persistHooks.baseMs * 2 ** persistFailures, Math.max(PERSIST_MAX_MS, persistHooks.baseMs))
   persistTimer = setTimeout(() => {
     persistTimer = null
     void (async () => {
-      // The registry is read BEFORE the limits lock: never hold one file's lock while waiting on
-      // another's. A registry a moment stale only folds less; the next persist folds the rest.
-      const registry = await readAccounts().catch(() => null)
-      // MERGE with what is on disk, under the lock every limits writer shares: a reading another
-      // process publishes between our read and our rename would otherwise be overwritten.
-      // Records: newer wins per account. Notices: only the owner's memory is authoritative.
-      const written = await withFileLock(FILE(), async ({ contended }) => {
-        if (contended) return false
-        const disk = await readFileState()
-        const limits = { ...(disk?.limits ?? {}) }
-        for (const [k, l] of Object.entries(state.limits)) limits[k] = newerLimits(limits[k], l)
-        foldAliasedLimits(limits, migratedAway, registry)
-        const out: Persisted = { limits, notices: sink ? state.notices : (disk?.notices ?? state.notices) }
-        const tmp = `${FILE()}.${process.pid}.tmp`
-        await mkdir(dirname(FILE()), { recursive: true })
-        await writeFile(tmp, JSON.stringify(out), { mode: 0o600 })
-        await rename(tmp, FILE())
-        try { fileMtime = (await stat(FILE())).mtimeMs } catch { /* raced */ }
-        return true
-      })
-      // A contended lock never writes unlocked: the persist is retried, so the reading is not lost.
-      if (!written) persistSoon()
-    })().catch(() => { /* a lost write costs one record, re-read on the next turn */ })
-  }, 500)
+      // Taken BEFORE the snapshot: a change arriving during the write sets it again and is retried.
+      persistDirty = false
+      let ok = false
+      try {
+        // The registry is read BEFORE the limits lock: never hold one file's lock while waiting on
+        // another's. A registry a moment stale only folds less; the next persist folds the rest.
+        const registry = await readAccounts().catch(() => null)
+        // MERGE with what is on disk, under the lock every limits writer shares: a reading another
+        // process publishes between our read and our rename would otherwise be overwritten.
+        // Records: newer wins per account. Notices: only the owner's memory is authoritative.
+        ok = await persistHooks.lock(FILE(), async ({ contended }) => {
+          if (contended) return false
+          const disk = await readFileState()
+          const limits = { ...(disk?.limits ?? {}) }
+          for (const [k, l] of Object.entries(state.limits)) limits[k] = newerLimits(limits[k], l)
+          foldAliasedLimits(limits, migratedAway, registry)
+          const out: Persisted = { limits, notices: sink ? state.notices : (disk?.notices ?? state.notices) }
+          const tmp = `${FILE()}.${process.pid}.tmp`
+          await mkdir(dirname(FILE()), { recursive: true })
+          await persistHooks.write(tmp, JSON.stringify(out), { mode: 0o600 })
+          await persistHooks.rename(tmp, FILE())
+          try { fileMtime = (await stat(FILE())).mtimeMs } catch { /* raced */ }
+          return true
+        })
+      } catch { /* a failed write is retried below, never abandoned */ }
+      if (ok) { persistFailures = 0; return }
+      // A contended lock never writes unlocked, and an I/O error keeps the reading pending: both retry.
+      persistFailures++
+      persistSoon()
+    })()
+  }, delay)
   persistTimer.unref?.()
 }
 
@@ -358,7 +378,11 @@ export async function ingestPlanLimits(reading: PlanLimits): Promise<boolean> {
   }
   if (l.account !== 'default') await maybeMigrateDefault()
   const held = state.limits[key]
-  if (held && newerLimits(held, l) === held) return false
+  if (held && newerLimits(held, l) === held) {
+    // An identical repeat of a reading that has not reached disk yet must not lose its persist.
+    if (persistDirty) persistSoon()
+    return false
+  }
   let newSegment = false
   if (held && l.account !== 'default' && meterDiscontinuity(held, l)) {
     const switched = await accountSwitch(l)
@@ -816,6 +840,11 @@ export function __resetPlanLimitsForTest(file: string | null = null): void {
   liveUsage.clear()
   pathAccounts.clear()
   fileMtime = 0
+  if (persistTimer) clearTimeout(persistTimer)
+  persistTimer = null
+  persistDirty = false
+  persistFailures = 0
+  __setPersistHooksForTest(null)
   loaded = file ? null : Promise.resolve()
   persistOff = file === null
 }

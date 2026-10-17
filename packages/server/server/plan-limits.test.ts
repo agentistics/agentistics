@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { CODEX_DIR } from './config'
-import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, renameSync, unlinkSync } from 'node:fs'
+import { existsSync, chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, renameSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHarnessAccounts, probeAccountIdentity, __setHarnessAccountsForTest } from './harness-accounts'
@@ -12,7 +12,7 @@ import { lockFile } from './sessions/file-lock'
 import {
   __resetPlanLimitsForTest, __setLiveTranscriptPathForTest, foldAliasedLimits, __setManagedLookupForTest, __settleCodexRolloutsForTest, ingestPlanLimits, latestCodexLimits, noteCodexRollout,
   noteStructuredLine, planLimitsPayload, planAccountKey, sampleLivePlanSessions, sessionAccountOf, setPlanLimitsSink, syncPlanLimitsFromFile,
-  watchPlanLimitsFile,
+  watchPlanLimitsFile, __setPersistHooksForTest,
 } from './plan-limits'
 import type { PlanThresholdNotice } from '@agentistics/core'
 
@@ -1120,4 +1120,43 @@ test('a reading another process publishes between this one\'s read and rename su
   const after = JSON.parse(readFileSync(limitsFile, 'utf8')).limits
   expect(after['codex:acc_q00000000000']?.windows[0].usedPct).toBe(22)
   expect(after['codex:acc_p00000000000']?.windows[0].usedPct).toBe(11)
+})
+
+test('a failed write is retried: the pending reading reaches disk with no newer ingest', async () => {
+  const limitsFile = join(dir, 'plan-limits.json')
+  __resetPlanLimitsForTest(limitsFile)
+  __setPersistHooksForTest({ baseMs: 10 })
+  const real = await import('node:fs/promises')
+  let fail = true
+  __setPersistHooksForTest({ baseMs: 10, rename: async (a, b) => { if (fail) { fail = false; throw new Error('ENOSPC') } return real.rename(a, b) } })
+  const now = Date.now()
+  const r = { harness: 'codex' as const, account: 'acc_r00000000000', plan: 'Plus', source: 'codex-rollout' as const, updatedAt: now,
+    windows: [{ kind: '5h' as const, usedPct: 33, resetsAt: now + 3_600_000 }] }
+  await ingestPlanLimits(r)
+  // an identical repeat while dirty keeps a persist scheduled
+  await ingestPlanLimits(r)
+  for (let i = 0; i < 200 && !existsSync(limitsFile); i++) await new Promise(res => setTimeout(res, 20))
+  expect(fail).toBe(false)
+  expect(JSON.parse(readFileSync(limitsFile, 'utf8')).limits['codex:acc_r00000000000'].windows[0].usedPct).toBe(33)
+})
+
+test('a lock that times out once never writes unlocked, then the reading persists on the retry', async () => {
+  const limitsFile = join(dir, 'plan-limits.json')
+  __resetPlanLimitsForTest(limitsFile)
+  let calls = 0
+  let wroteWhileContended = false
+  const real = await import('node:fs/promises')
+  __setPersistHooksForTest({
+    baseMs: 10,
+    // First acquisition reports a timed-out wait (contended), the second a real one.
+    lock: async (file, fn) => { calls++; return fn({ contended: calls === 1 }) },
+    write: async (...a: Parameters<typeof real.writeFile>) => { if (calls === 1) wroteWhileContended = true; return real.writeFile(...a) },
+  })
+  const now = Date.now()
+  await ingestPlanLimits({ harness: 'codex' as const, account: 'acc_c00000000000', plan: 'Plus', source: 'codex-rollout' as const, updatedAt: now,
+    windows: [{ kind: '5h' as const, usedPct: 44, resetsAt: now + 3_600_000 }] })
+  for (let i = 0; i < 200 && !existsSync(limitsFile); i++) await new Promise(res => setTimeout(res, 20))
+  expect(wroteWhileContended).toBe(false)
+  expect(calls).toBeGreaterThanOrEqual(2)
+  expect(JSON.parse(readFileSync(limitsFile, 'utf8')).limits['codex:acc_c00000000000'].windows[0].usedPct).toBe(44)
 })
