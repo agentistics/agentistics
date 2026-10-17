@@ -19,10 +19,10 @@ import {
   MAX_PINNED, getPinnedIds, movePinnedSession, pinnedServerSnapshot, subscribePinnedSessions, togglePinnedSession,
 } from '../../lib/pinnedSessions'
 import {
-  closeEnded, closeOthers, closeTab, closeToRight, openTab, pruneTabs, stepTab, stripOrder, tabAt,
+  closeEnded, closeOthers, closeTab, closeToRight, enterTab, livePins, ownsTabShortcut, reconcileTabs, stepTab, stripOrder, tabAt,
 } from '../../lib/sessionTabs'
-import { setOpenTabs, useOpenTabs } from '../../lib/sessionTabsStore'
-import { usePaneId } from '../../lib/paneScope'
+import { setOpenTabs, updateOpenTabs, useOpenTabs } from '../../lib/sessionTabsStore'
+import { getActivePane, usePaneId } from '../../lib/paneScope'
 import { matchTabShortcut } from '../../lib/panelShortcuts'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { SessionRowMenu } from './SessionRowMenu'
@@ -142,8 +142,16 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
   const mobile = useIsMobile()
   const pane = usePaneId()
   const open = useOpenTabs()
-  const pins = useSyncExternalStore(subscribePinnedSessions, getPinnedIds, pinnedServerSnapshot)
+  const allPins = useSyncExternalStore(subscribePinnedSessions, getPinnedIds, pinnedServerSnapshot)
   const activeKey = keyOf(active)
+  const knownKeys = useMemo(() => {
+    if (!fleetReady || rows.length === 0) return null
+    const k = new Set<string>([activeKey])
+    for (const r of rows) k.add(keyOf(r))
+    return k
+  }, [fleetReady, rows, activeKey])
+  // A pin whose session left the fleet outright is not a tab (the aside drops it the same way).
+  const pins = useMemo(() => livePins(allPins, knownKeys), [allPins, knownKeys])
   const order = useMemo(() => stripOrder(open, pins), [open, pins])
   const byKey = useMemo(() => {
     const m = new Map<string, ControlSession>()
@@ -155,20 +163,18 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
 
   // Navigation IS "open a tab": whatever put a session on screen (aside, rail, `#` mention, reopen)
   // lands here, so there is exactly one place that adds one.
+  const prevActive = useRef<{ key: string; id: string } | null>(null)
   useEffect(() => {
-    const cur = open
-    const next = openTab(cur, activeKey, activeKey, pins)
-    if (next.length !== cur.length || next.some((x, i) => x !== cur[i])) setOpenTabs(pane, next)
-  }, [activeKey, pane]) // eslint-disable-line react-hooks/exhaustive-deps
+    const prev = prevActive.current
+    prevActive.current = { key: activeKey, id: active.id }
+    updateOpenTabs(pane, cur => enterTab(cur, activeKey, prev, active.id, pins))
+  }, [activeKey, active.id, pins, pane]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // A session that left the fleet outright takes its tab with it; an ENDED one stays (reopenable).
   useEffect(() => {
     if (!fleetReady || rows.length === 0) return
-    const known = new Set<string>([activeKey])
-    for (const r of rows) { known.add(keyOf(r)); known.add(r.id) }
-    const kept = pruneTabs(open, known)
-    if (kept.length !== open.length) setOpenTabs(pane, kept)
-  }, [fleetReady, rows, open, pane, activeKey])
+    const list = rows.map(r => ({ id: r.id, key: keyOf(r) }))
+    updateOpenTabs(pane, cur => reconcileTabs(cur, list, activeKey))
+  }, [fleetReady, rows, pane, activeKey])
 
   const goTo = useCallback((key: string) => {
     const r = byKey.get(key)
@@ -210,6 +216,7 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
   // ── keyboard: Ctrl+Alt+→/← step, Ctrl+Alt+1..9 jump (Ctrl+W is the browser's) ──────────────────
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (!ownsTabShortcut(pane, getActivePane(), e.defaultPrevented)) return
       const el = e.target as Element | null
       const hit = matchTabShortcut({
         key: e.key, code: e.code, ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey, alt: e.altKey,

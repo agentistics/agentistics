@@ -51,9 +51,11 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMen
   const w = 210
   const rowH = isMobile ? 44 : 34
   const left = x + w > window.innerWidth ? Math.max(4, x - w) : x
-  const top = y + entries.length * rowH + 12 > window.innerHeight
-    ? Math.max(4, y - (entries.length * rowH + 12))
-    : y
+  // Capped to the viewport and scrollable: a long list (the tab strip's "all tabs") must never put
+  // its last entries past the screen edge.
+  const maxH = Math.max(120, window.innerHeight - 8)
+  const h = Math.min(entries.length * rowH + 12, maxH)
+  const top = y + h > window.innerHeight ? Math.max(4, y - h) : y
 
   return createPortal(
     <div
@@ -62,6 +64,7 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMen
       data-portalled-menu
       style={{
         position: 'fixed', top, left, width: w, zIndex: SESSION_ROW_MENU_Z,
+        maxHeight: maxH, overflowY: 'auto', overscrollBehavior: 'contain',
         background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10,
         padding: 4, boxShadow: 'var(--ag-shadow-pop)',
       }}

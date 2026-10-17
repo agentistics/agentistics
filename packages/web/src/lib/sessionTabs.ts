@@ -105,3 +105,51 @@ export function parseTabs(raw: unknown): string[] {
   for (const x of raw) if (typeof x === 'string' && x !== '' && !out.includes(x)) out.push(x)
   return out
 }
+
+/**
+ * One atomic reconcile of the stored tabs against the fleet: an id that now has an identity key
+ * (a session that discovered its conversation) becomes that key IN PLACE, duplicates collapse to the
+ * first position, and whatever no row resolves goes. `activeKey` is always kept. Done as one step
+ * so opening and pruning can never overwrite each other.
+ */
+export function reconcileTabs(
+  open: readonly string[], rows: readonly { id: string; key: string }[], activeKey: string,
+): string[] {
+  const alias = new Map<string, string>()
+  const known = new Set<string>([activeKey])
+  for (const r of rows) { known.add(r.key); if (r.id !== r.key) alias.set(r.id, r.key) }
+  const out: string[] = []
+  for (const raw of open) {
+    const k = known.has(raw) ? raw : alias.get(raw) ?? raw
+    if (!known.has(k) || out.includes(k)) continue
+    out.push(k)
+  }
+  return out
+}
+
+/** Pins that still resolve to a fleet row; before the fleet is known every pin stands. */
+export function livePins(pins: readonly string[], known: ReadonlySet<string> | null): string[] {
+  return known === null ? [...pins] : pins.filter(p => known.has(p))
+}
+
+/**
+ * Entering `next` from `prev`: the same session under a new key (its conversation was discovered)
+ * takes the old tab's place; any other session opens right after the tab it came from.
+ */
+export function enterTab(
+  open: readonly string[], next: string, prev: { key: string; id: string } | null, nextId: string,
+  pins: readonly string[],
+): string[] {
+  if (prev !== null && prev.key !== next && prev.id === nextId) {
+    const from = open.includes(prev.key) ? prev.key : prev.id
+    const swapped = replaceTab(open, from, next)
+    if (pins.includes(next)) return swapped.filter(x => x !== next)
+    return open.includes(from) ? swapped : openTab(open, next, prev.key, pins)
+  }
+  return openTab(open, next, prev?.key ?? null, pins)
+}
+
+/** A tab shortcut belongs to the pane the person is working in, and to no one who already took it. */
+export function ownsTabShortcut(pane: string, activePane: string, defaultPrevented: boolean): boolean {
+  return pane === activePane && !defaultPrevented
+}

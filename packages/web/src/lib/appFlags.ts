@@ -32,5 +32,7 @@ export const studioSeenStore = createSharedPref<boolean>({
 /** Are the session TABS (a strip of open conversations above the chat) on? Experimental: absent = off. */
 export const sessionTabsStore = createSharedPref<boolean>({
   key: 'agentistics-session-tabs-on', prefKey: 'sessionTabs', fallback: false,
-  adoptLocalWhenAbsent: true, parse: asBool, decode: flag, encode: bit,
+  // No `adoptLocalWhenAbsent`: that stamps a migrated marker in localStorage on load, and flag OFF
+  // (the default) must write nothing. There is no older copy of this flag to migrate.
+  parse: asBool, decode: flag, encode: bit,
 })

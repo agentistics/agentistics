@@ -45,6 +45,11 @@ export function setOpenTabs(pane: PaneId, next: readonly string[]): void {
   for (const l of listeners) l()
 }
 
+/** Read-modify-write against the CURRENT list, so two effects in one commit cannot clobber each other. */
+export function updateOpenTabs(pane: PaneId, fn: (cur: string[]) => readonly string[]): void {
+  setOpenTabs(pane, fn(read(pane)))
+}
+
 export function subscribeOpenTabs(fn: () => void): () => void {
   listeners.add(fn)
   return () => { listeners.delete(fn) }

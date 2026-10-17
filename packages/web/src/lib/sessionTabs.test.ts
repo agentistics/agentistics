@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  closeEnded, closeOthers, closeTab, closeToRight, MAX_OPEN_TABS, openTab, parseTabs, pruneTabs,
+  closeEnded, closeOthers, closeTab, closeToRight, enterTab, livePins, MAX_OPEN_TABS, openTab, ownsTabShortcut, reconcileTabs, parseTabs, pruneTabs,
   replaceTab, stepTab, stripOrder, tabAt,
 } from './sessionTabs'
 
@@ -110,5 +110,56 @@ describe('parseTabs', () => {
     expect(parseTabs('x')).toEqual([])
     expect(parseTabs(null)).toEqual([])
     expect(parseTabs(['a', 3, '', 'a', 'b'])).toEqual(['a', 'b'])
+  })
+})
+
+describe('enterTab', () => {
+  test('a new session opens right after the tab it came from, not at the end', () => {
+    expect(enterTab(['a', 'b'], 'c', { key: 'a', id: 'a' }, 'c', [])).toEqual(['a', 'c', 'b'])
+  })
+  test('the same session discovering its conversation REPLACES its old tab (no duplicate)', () => {
+    expect(enterTab(['x', 'm1', 'y'], 'conv-1', { key: 'm1', id: 'm1' }, 'm1', [])).toEqual(['x', 'conv-1', 'y'])
+  })
+  test('unpinning the open session adds its tab back', () => {
+    expect(enterTab(['a'], 'p', { key: 'p', id: 'p' }, 'p', [])).toEqual(['a', 'p'])
+  })
+  test('the cap never drops the tab just left', () => {
+    const open = Array.from({ length: MAX_OPEN_TABS }, (_, i) => `t${i}`)
+    const next = enterTab(open, 'new', { key: 't5', id: 't5' }, 'new', [])
+    expect(next).toContain('t5')
+    expect(next).toContain('new')
+  })
+})
+
+describe('reconcileTabs', () => {
+  test('an old id tab whose row now has a conversation key is migrated in place and deduped', () => {
+    const rows = [{ id: 'm1', key: 'conv-1' }, { id: 'm2', key: 'm2' }]
+    expect(reconcileTabs(['m1', 'm2', 'conv-1'], rows, 'conv-1')).toEqual(['conv-1', 'm2'])
+  })
+  test('what no row resolves goes, but the active key stays', () => {
+    expect(reconcileTabs(['gone', 'a'], [{ id: 'a', key: 'a' }], 'new')).toEqual(['a'])
+    expect(reconcileTabs(['new'], [{ id: 'a', key: 'a' }], 'new')).toEqual(['new'])
+  })
+  test('applied after an open in ONE update, the open tab survives (no lost write)', () => {
+    let store: string[] = ['dead']
+    const update = (fn: (c: string[]) => string[]) => { store = fn(store) }
+    update(cur => enterTab(cur, 'fresh', null, 'fresh', []))
+    update(cur => reconcileTabs(cur, [{ id: 'fresh', key: 'fresh' }], 'fresh'))
+    expect(store).toEqual(['fresh'])
+  })
+})
+
+describe('livePins', () => {
+  test('a pin whose session left the fleet is not a tab; before the fleet is known all stand', () => {
+    expect(livePins(['a', 'gone'], new Set(['a']))).toEqual(['a'])
+    expect(livePins(['a', 'gone'], null)).toEqual(['a', 'gone'])
+  })
+})
+
+describe('ownsTabShortcut', () => {
+  test('only the active pane acts, and never on an already-handled key', () => {
+    expect(ownsTabShortcut('main', 'main', false)).toBe(true)
+    expect(ownsTabShortcut('split', 'main', false)).toBe(false)
+    expect(ownsTabShortcut('main', 'main', true)).toBe(false)
   })
 })

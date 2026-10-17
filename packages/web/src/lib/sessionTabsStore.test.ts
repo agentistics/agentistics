@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
-import { getOpenTabs, resetOpenTabsCache, setOpenTabs, SESSION_TABS_KEY, subscribeOpenTabs } from './sessionTabsStore'
+import { getOpenTabs, resetOpenTabsCache, setOpenTabs, SESSION_TABS_KEY, subscribeOpenTabs, updateOpenTabs } from './sessionTabsStore'
 
 const mem = new Map<string, string>()
 let broken = false
@@ -41,5 +41,11 @@ describe('sessionTabsStore', () => {
     setOpenTabs('main', ['a'])
     off()
     expect(n).toBe(1)
+  })
+  test('updateOpenTabs applies each change to the CURRENT list, so two updates in a row both land', () => {
+    setOpenTabs('main', ['dead'])
+    updateOpenTabs('main', cur => [...cur, 'fresh'])
+    updateOpenTabs('main', cur => cur.filter(x => x !== 'dead'))
+    expect(getOpenTabs('main')).toEqual(['fresh'])
   })
 })
