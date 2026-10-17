@@ -38,10 +38,19 @@ export type AccountIdentity = Pick<HarnessAccount, 'key' | 'label' | 'plan'>
 const fallback = (): AccountIdentity => ({ key: 'default', label: 'Conta padrão' })
 const text = (value: unknown): string | undefined => typeof value === 'string' && value.trim() ? value : undefined
 
-/** Whitelist identity metadata; never inspect token fields or decode credentials. */
+/**
+ * Whitelist identity metadata; never inspect token VALUES or decode credentials. A ChatGPT login
+ * writes its account id INSIDE `tokens` (`{auth_mode, tokens: {id_token, access_token,
+ * refresh_token, account_id}, last_refresh}`, measured on codex 0.161) — reading only the top
+ * level found nothing, every probe answered `default`, and the login was never bound. Only
+ * `tokens.account_id` is read; the three token fields beside it are never touched.
+ */
 export function codexIdentity(raw: unknown): AccountIdentity {
-  const key = text((raw as { account_id?: unknown } | null)?.account_id)
-    ?? ((raw as { auth_mode?: unknown } | null)?.auth_mode === 'apikey' ? 'apikey' : undefined)
+  const doc = raw as { account_id?: unknown; auth_mode?: unknown; tokens?: unknown } | null
+  const tokens = doc?.tokens && typeof doc.tokens === 'object' ? doc.tokens as { account_id?: unknown } : null
+  const nested = text(tokens?.account_id)
+  if (nested) return { key: nested, label: `ChatGPT ${nested.slice(0, 8)}` }
+  const key = text(doc?.account_id) ?? (doc?.auth_mode === 'apikey' ? 'apikey' : undefined)
   return key ? { key, label: key } : fallback()
 }
 
@@ -208,26 +217,49 @@ export function mergeDuplicateAccounts(data: AccountsFile): boolean {
       const aWins = bound.has(a.id) !== bound.has(b.id) ? bound.has(a.id)
         : a.lastSeen !== b.lastSeen ? a.lastSeen > b.lastSeen : a.key.length >= b.key.length
       const [keep, drop] = aWins ? [a, b] : [b, a]
-      keep.firstSeen = Math.min(keep.firstSeen, drop.firstSeen)
-      keep.lastSeen = Math.max(keep.lastSeen, drop.lastSeen)
-      if (!keep.nickname && drop.nickname) keep.nickname = drop.nickname
-      if (!keep.plan && drop.plan) keep.plan = drop.plan
-      keep.available = keep.available && drop.available
-      if (keep.retired && !drop.retired) keep.retired = undefined
-      for (const [k, v] of Object.entries(data.bindings)) if (v === drop.id) data.bindings[k] = keep.id
-      if (drop.id in data.segments) {
-        data.segments[keep.id] = Math.max(data.segments[keep.id] ?? 0, data.segments[drop.id]!)
-        delete data.segments[drop.id]
-      }
-      data.aliases = { ...(data.aliases ?? {}), [drop.id]: keep.id }
-      for (const [k, v] of Object.entries(data.aliases)) if (v === drop.id) data.aliases[k] = keep.id
-      data.accounts.splice(data.accounts.indexOf(drop), 1)
+      foldAccount(data, keep, drop)
       changed = true
       i = -1
       break
     }
   }
   return changed
+}
+
+/** `drop` becomes an alias of `keep`: bindings, segments and older aliases follow the survivor. */
+function foldAccount(data: AccountsFile, keep: HarnessAccount, drop: HarnessAccount): void {
+  keep.firstSeen = Math.min(keep.firstSeen, drop.firstSeen)
+  keep.lastSeen = Math.max(keep.lastSeen, drop.lastSeen)
+  if (!keep.nickname && drop.nickname) keep.nickname = drop.nickname
+  if (!keep.plan && drop.plan) keep.plan = drop.plan
+  keep.available = keep.available && drop.available
+  if (keep.retired && !drop.retired) keep.retired = undefined
+  for (const [k, v] of Object.entries(data.bindings)) if (v === drop.id) data.bindings[k] = keep.id
+  if (drop.id in data.segments) {
+    data.segments[keep.id] = Math.max(data.segments[keep.id] ?? 0, data.segments[drop.id]!)
+    delete data.segments[drop.id]
+  }
+  data.aliases = { ...(data.aliases ?? {}), [drop.id]: keep.id }
+  for (const [k, v] of Object.entries(data.aliases)) if (v === drop.id) data.aliases[k] = keep.id
+  data.accounts.splice(data.accounts.indexOf(drop), 1)
+}
+
+/**
+ * A `default` record of a harness WITH an identity probe is the login on a root that could not be
+ * identified yet (a v1 list, or a probe that read nothing). The first CONFIRMED identity bound to
+ * that same root is that login, so the placeholder folds into it — exactly one placeholder, never
+ * one another root is bound to. Without this the placeholder outlives the fix that identifies the
+ * login and shows as a second, never-read plan beside the real one.
+ */
+function foldPlaceholder(data: AccountsFile, account: HarnessAccount, displaced?: HarnessAccount): boolean {
+  if (account.key === 'default' || IDENTITY_PROBES[account.harness] === null) return false
+  const bound = new Set(Object.values(data.bindings))
+  // `displaced` was bound to this root a moment ago; `adopt` has already cleared its root.
+  const placeholders = data.accounts.filter(a => a !== account && a.harness === account.harness
+    && a.key === 'default' && !bound.has(a.id) && (a === displaced || normRoot(a.root) === normRoot(account.root)))
+  if (placeholders.length !== 1) return false
+  foldAccount(data, account, placeholders[0]!)
+  return true
 }
 
 /** Display names only: no control characters or newlines, at most 40 characters. */
@@ -410,7 +442,9 @@ export function createHarnessAccounts(options: {
     account.lastSeen = now()
     account.retired = undefined
     data.bindings[key] = account.id
-    return { account, ...(previous && previous.id !== account.id ? { previous } : {}) }
+    const folded = previous && previous.id !== account.id && foldPlaceholder(data, account, previous)
+    if (!folded) foldPlaceholder(data, account)
+    return { account, ...(previous && previous.id !== account.id && !folded ? { previous } : {}) }
   }
   function current(harness: HarnessId, root?: string | null): Promise<HarnessAccount>
   function current(harnesses: readonly HarnessId[]): Promise<HarnessAccount[]>
@@ -509,8 +543,10 @@ export function createHarnessAccounts(options: {
     async list(harnesses: readonly HarnessId[] = HARNESS_ORDER): Promise<HarnessAccount[]> {
       const currentAccounts = await current(harnesses)
       const accounts = (await snapshot()).accounts
-      // Preserve slice-1's unknown rows before any identity has been confirmed.
-      return [...accounts, ...currentAccounts.filter(a => !a.id)]
+      // Preserve slice-1's unknown rows ONLY before any identity of that harness was recorded: an
+      // id-less row beside a recorded account is the same login a second time (an id nobody can
+      // PATCH, shown as another account with no meter).
+      return [...accounts, ...currentAccounts.filter(a => !a.id && !accounts.some(x => x.harness === a.harness))]
     },
     async setAvailable(harness: HarnessId, key: string, available: boolean): Promise<HarnessAccount | null> {
       return serial(async () => {

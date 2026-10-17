@@ -32,7 +32,8 @@ test('registers identities, caches probes for 60 seconds, preserves availability
 test('codex reader touches only account_id and returns no credential fields', () => {
   const raw = { account_id: 'sample-account' }
   // Accessors fail if the whitelist starts reading credential fields; no secret fixture values.
-  for (const key of ['tokens', 'access_token', 'refresh_token', 'id_token', 'OPENAI_API_KEY']) {
+  // (`tokens` itself is read for its `account_id` only — pinned by the ChatGPT-login test below.)
+  for (const key of ['access_token', 'refresh_token', 'id_token', 'OPENAI_API_KEY']) {
     Object.defineProperty(raw, key, { get() { throw new Error('Credential field accessed') } })
   }
   expect(codexIdentity(raw)).toEqual({ key: 'sample-account', label: 'sample-account' })
@@ -590,4 +591,68 @@ test('v1 migration keeps two teammates under one org-only key apart', async () =
   expect(b).toMatchObject({ available: true, firstSeen: 2, lastSeen: 9 })
   const disk = JSON.parse(await readFile(file, 'utf8'))
   expect(disk.accounts).toHaveLength(2)
+})
+
+// The shape codex 0.161 really writes: the account id sits INSIDE `tokens`, beside three credentials.
+const realCodexAuth = () => {
+  const tokens = { account_id: '11111111-2222-3333-4444-555555555555' }
+  for (const key of ['id_token', 'access_token', 'refresh_token']) {
+    Object.defineProperty(tokens, key, { enumerable: true, get() { throw new Error('Credential field accessed') } })
+  }
+  const raw = { auth_mode: 'chatgpt', tokens, last_refresh: '2026-10-17T00:00:00Z' }
+  Object.defineProperty(raw, 'OPENAI_API_KEY', { get() { throw new Error('Credential field accessed') } })
+  return raw
+}
+
+test('codex: a ChatGPT login is identified by tokens.account_id, touching no token value', async () => {
+  expect(codexIdentity(realCodexAuth())).toEqual({ key: '11111111-2222-3333-4444-555555555555', label: 'ChatGPT 11111111' })
+  await writeFile(join(dir, 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', OPENAI_API_KEY: null,
+    tokens: { id_token: 'FAKE', access_token: 'FAKE', refresh_token: 'FAKE', account_id: 'nested-account' }, last_refresh: 'x' }))
+  expect(await probeAccountIdentity('codex', dir)).toEqual({ key: 'nested-account', label: 'ChatGPT nested-a' })
+  // `tokens` that is not an object, or carries no id, still falls back without throwing.
+  expect(codexIdentity({ tokens: 'oops' })).toEqual({ key: 'default', label: 'Conta padrão' })
+  expect(codexIdentity({ tokens: {} })).toEqual({ key: 'default', label: 'Conta padrão' })
+})
+
+test('a stale unbound `default` record folds into the login the probe now identifies on its root', async () => {
+  const file = join(dir, 'accounts.json')
+  await writeFile(file, JSON.stringify({ version: 2, bindings: { 'claude:': 'acc_claude00000' }, segments: { acc_stale000000: 5 },
+    accounts: [
+      { id: 'acc_stale000000', root: null, key: 'default', harness: 'codex', label: 'Conta padrão', nickname: 'Meu Codex', available: true, firstSeen: 100, lastSeen: 100 },
+      { id: 'acc_claude00000', root: null, key: 'org:a@b.c', harness: 'claude', label: 'a@b.c', available: true, firstSeen: 100, lastSeen: 100 },
+    ] }))
+  let now = 5000
+  const store = createHarnessAccounts({ file, now: () => now, probe: async () => codexIdentity(realCodexAuth()) })
+  const bound = await store.current('codex')
+  const data = await store.readAccounts()
+  const codex = data.accounts.filter(a => a.harness === 'codex')
+  expect(codex).toHaveLength(1)
+  expect(codex[0]).toMatchObject({ id: bound.id, key: '11111111-2222-3333-4444-555555555555', nickname: 'Meu Codex', firstSeen: 100, lastSeen: 5000 })
+  expect(data.bindings['codex:']).toBe(bound.id)
+  expect(data.aliases).toEqual({ acc_stale000000: bound.id })
+  expect(data.segments).toEqual({ [bound.id]: 5 })
+  expect(await store.byId('acc_stale000000')).toMatchObject({ id: bound.id })
+  // Refreshed on the next sighting, and listed once: no id-less row beside it.
+  now += 120_000
+  const listed = (await store.list(['codex'])).filter(a => a.harness === 'codex')
+  expect(listed.map(a => a.id)).toEqual([bound.id])
+  expect(listed[0]!.lastSeen).toBe(now)
+})
+
+test('a `default` placeholder bound to ANOTHER root is never folded', async () => {
+  const file = join(dir, 'accounts.json')
+  await writeFile(file, JSON.stringify({ version: 2, bindings: { 'codex:/elsewhere': 'acc_other000000' }, segments: {},
+    accounts: [{ id: 'acc_other000000', root: '/elsewhere', key: 'default', harness: 'codex', label: 'Conta padrão', available: true, firstSeen: 1, lastSeen: 1 }] }))
+  const store = createHarnessAccounts({ file, probe: async () => codexIdentity(realCodexAuth()) })
+  await store.current('codex')
+  expect((await store.readAccounts()).accounts.map(a => a.id)).toContain('acc_other000000')
+})
+
+test('an unconfirmed probe adds an id-less row only while the harness has no recorded account', async () => {
+  const file = join(dir, 'accounts.json')
+  const store = createHarnessAccounts({ file, probe: async () => ({ key: 'default', label: 'Conta padrão' }) })
+  expect((await store.list(['codex'])).map(a => a.id)).toEqual([''])
+  await writeFile(file, JSON.stringify({ version: 2, bindings: {}, segments: {},
+    accounts: [{ id: 'acc_known000000', root: null, key: 'k', harness: 'codex', label: 'k', available: true, firstSeen: 1, lastSeen: 1 }] }))
+  expect((await store.list(['codex'])).map(a => a.id)).toEqual(['acc_known000000'])
 })
