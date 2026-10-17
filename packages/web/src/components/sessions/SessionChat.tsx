@@ -2464,16 +2464,16 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   // ESCAPE, ONE STEP AT A TIME, through the overlay stack: each picker (/ skills, @ tools, # sessions)
   // and answering mode closes first, so dismissing a list opened by accident never also reaches the
   // stop verb — which stays the composer's own, and only sees Escape when nothing here is open.
-  useEscapeOwner(skillPickerOpen, () => setSlashDismissed(true))
-  useEscapeOwner(hashOpen, () => setHashDismissed(true))
-  useEscapeOwner(atOpen, () => {
+  useEscapeOwner(skillPickerOpen && !payload?.unavailable, () => setSlashDismissed(true))
+  useEscapeOwner(hashOpen && !payload?.unavailable, () => setHashDismissed(true))
+  useEscapeOwner(atOpen && !payload?.unavailable, () => {
     setAtDismissed(true)
     // Closing the picker ends the pick, so the open `@server:` it left for the NEXT one is
     // scaffolding now — see `dropEmptyAtTrigger`.
     setDraft(d => dropEmptyAtTrigger(d))
   })
   // ANSWERING MODE LETS GO FIRST: "I am not answering with my own words after all" — the draft is kept.
-  useEscapeOwner(answeringNow, () => setAnswering(null))
+  useEscapeOwner(answeringNow && !payload?.unavailable, () => setAnswering(null))
 
   if (payload?.unavailable) {
     return (

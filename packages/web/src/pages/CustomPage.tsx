@@ -591,6 +591,10 @@ export default function CustomPage() {
     setImportState(null)
   }
 
+  // Hooks stay above every early return (loading, empty, mobile) — React #300.
+  useEscapeOwner(renaming, () => setRenaming(false))
+  useEscapeOwner(dupModal !== null, () => setDupModal(null))
+
   if (!loaded) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300, color: 'var(--text-tertiary)', fontSize: 13 }}>
@@ -631,10 +635,6 @@ export default function CustomPage() {
   }
 
   // Mobile view: render items as a vertical list, no drag/resize
-  // Hooks stay above the mobile early return (React #300).
-  useEscapeOwner(renaming, () => setRenaming(false))
-  useEscapeOwner(dupModal !== null, () => setDupModal(null))
-
   if (isMobile) {
     const sortedItems = [...items].sort((a, b) => a.y !== b.y ? a.y - b.y : a.x - b.x)
     return (

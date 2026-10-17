@@ -117,7 +117,8 @@ export function BudgetPanel({ statsCache, budgetUSD, onBudgetChange, currency, b
   // Showing it for a non-claude harness would mislead the user into thinking
   // they're seeing that harness's spend. Show N/A for any non-claude harness.
   // Above the non-claude early return (React #300); `cancel` is a hoisted declaration.
-  useEscapeOwner(editing, cancel)
+  // Only while the editor is actually shown: a non-Claude harness renders N/A with `editing` still true.
+  useEscapeOwner(editing && !(harness && harness !== 'claude'), cancel)
 
   if (harness && harness !== 'claude') {
     return <NAtag harness={harness} label="Budget & forecast" />
