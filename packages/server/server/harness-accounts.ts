@@ -26,6 +26,12 @@ export interface AccountsFile {
   accounts: HarnessAccount[]
   bindings: Record<string, string>
   segments: Record<string, number>
+  /**
+   * Ids merged into another because they were the SAME login (a probe whose key format changed, or a
+   * pre-root-hash `default` record): old id -> survivor. Readers keyed by an account id (meters,
+   * managed sessions, billing) resolve through it, so nothing recorded under the old id is orphaned.
+   */
+  aliases?: Record<string, string>
 }
 export type AccountIdentity = Pick<HarnessAccount, 'key' | 'label' | 'plan'>
 const fallback = (): AccountIdentity => ({ key: 'default', label: 'Conta padrão' })
@@ -117,6 +123,74 @@ const mintId = () => `acc_${randomBytes(6).toString('hex')}`
 const emptyFile = (): AccountsFile => ({ version: 2, accounts: [], bindings: {}, segments: {} })
 /** One spelling per directory: absolute, no trailing slash. Applied at the store's boundary. */
 const normRoot = (root: string | null | undefined): string | null => root == null ? null : resolve(root)
+/**
+ * Two records of one harness that are the SAME login. Keys used to be spelled differently: claude's
+ * probe keyed by `orgId` (or the e-mail) alone before it keyed by `orgId:email`, and a harness with no
+ * identity probe recorded `default` before the default root got its `root:<hash>` key. A changed
+ * spelling minted a second account for one login, whose last meter then showed as a second plan.
+ * Claude also needs the same label (the e-mail): an org id alone is shared by a team's members.
+ */
+export function sameLogin(
+  a: Pick<HarnessAccount, 'harness' | 'key' | 'label' | 'root'>,
+  b: Pick<HarnessAccount, 'harness' | 'key' | 'label' | 'root'>,
+): boolean {
+  if (a.harness !== b.harness) return false
+  if (a.key === b.key) return true
+  if (a.harness === 'claude') {
+    if (a.key === 'default' || b.key === 'default') return false
+    if (a.label.trim().toLowerCase() !== b.label.trim().toLowerCase()) return false
+    const parts = (k: string) => { const i = k.indexOf(':'); return i < 0 ? [k] : [k.slice(0, i), k.slice(i + 1)] }
+    return parts(a.key).includes(b.key) || parts(b.key).includes(a.key)
+  }
+  if (IDENTITY_PROBES[a.harness] !== null) return false
+  const [legacy, rooted] = a.key === 'default' ? [a, b] : [b, a]
+  return legacy.key === 'default' && legacy.root === null && rooted.root === null && rooted.key.startsWith('root:')
+}
+
+/** An id as the registry knows it now: an alias resolves to the account it was merged into. */
+export function canonicalAccountId(data: Pick<AccountsFile, 'aliases'>, id: string): string {
+  let at = id
+  for (let i = 0; i < 8 && data.aliases?.[at]; i++) at = data.aliases[at]!
+  return at
+}
+
+/**
+ * Fold every same-login pair into one record (spec: one row per account). The survivor is the one a
+ * binding points at, else the one seen last; it keeps its id and key, takes the oldest `firstSeen`,
+ * a nickname/plan it lacks, and stays visible to agents only if both were. Returns whether it changed.
+ */
+export function mergeDuplicateAccounts(data: AccountsFile): boolean {
+  const bound = new Set(Object.values(data.bindings))
+  let changed = false
+  for (let i = 0; i < data.accounts.length; i++) {
+    for (let j = i + 1; j < data.accounts.length; j++) {
+      const a = data.accounts[i]!, b = data.accounts[j]!
+      if (!sameLogin(a, b)) continue
+      const aWins = bound.has(a.id) !== bound.has(b.id) ? bound.has(a.id)
+        : a.lastSeen !== b.lastSeen ? a.lastSeen > b.lastSeen : a.key.length >= b.key.length
+      const [keep, drop] = aWins ? [a, b] : [b, a]
+      keep.firstSeen = Math.min(keep.firstSeen, drop.firstSeen)
+      keep.lastSeen = Math.max(keep.lastSeen, drop.lastSeen)
+      if (!keep.nickname && drop.nickname) keep.nickname = drop.nickname
+      if (!keep.plan && drop.plan) keep.plan = drop.plan
+      keep.available = keep.available && drop.available
+      if (keep.retired && !drop.retired) keep.retired = undefined
+      for (const [k, v] of Object.entries(data.bindings)) if (v === drop.id) data.bindings[k] = keep.id
+      if (drop.id in data.segments) {
+        data.segments[keep.id] = Math.max(data.segments[keep.id] ?? 0, data.segments[drop.id]!)
+        delete data.segments[drop.id]
+      }
+      data.aliases = { ...(data.aliases ?? {}), [drop.id]: keep.id }
+      for (const [k, v] of Object.entries(data.aliases)) if (v === drop.id) data.aliases[k] = keep.id
+      data.accounts.splice(data.accounts.indexOf(drop), 1)
+      changed = true
+      i = -1
+      break
+    }
+  }
+  return changed
+}
+
 /** Display names only: no control characters or newlines, at most 40 characters. */
 export function sanitizeNickname(value: string): string {
   return value.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').trim().slice(0, 40).trim()
@@ -204,7 +278,7 @@ export function createHarnessAccounts(options: {
    * unknown-version content). With `persist` (under the lock) that rewrite happens, after a backup
    * of anything that is not a v1 list; without it nothing is touched, so readers never need the lock.
    */
-  async function load(persist: boolean): Promise<{ data: AccountsFile; dirty: boolean }> {
+  async function load(persist: boolean): Promise<{ data: AccountsFile; dirty: boolean; minted?: boolean }> {
     let text_: string
     try { text_ = await readFile(options.file, 'utf8') } catch { return { data: emptyFile(), dirty: false } }
     let raw: unknown
@@ -241,10 +315,11 @@ export function createHarnessAccounts(options: {
         const previous = data.accounts.find(x => x.id === data.bindings[key])
         if (account.key !== 'default' && (!previous || account.lastSeen >= previous.lastSeen)) data.bindings[key] = account.id
       }
+      mergeDuplicateAccounts(data)
       if (persist) await write(data)
-      return { data, dirty: !persist }
+      return { data, dirty: !persist, minted: true }
     }
-    const doc = raw as { version?: unknown; accounts?: unknown; bindings?: unknown; segments?: unknown } | null
+    const doc = raw as { version?: unknown; accounts?: unknown; bindings?: unknown; segments?: unknown; aliases?: unknown } | null
     if (!doc || typeof doc !== 'object' || doc.version !== 2) {
       if (persist) await backup(text_)
       return { data: emptyFile(), dirty: !persist }
@@ -255,7 +330,13 @@ export function createHarnessAccounts(options: {
     for (const [k, v] of Object.entries(plainRecord(doc.bindings))) if (typeof v === 'string' && ids.has(v)) bindings[k] = v
     const segments: Record<string, number> = {}
     for (const [k, v] of Object.entries(plainRecord(doc.segments))) if (typeof v === 'number' && Number.isFinite(v)) segments[k] = v
-    return { data: { version: 2, accounts, bindings, segments }, dirty: false }
+    const aliases: Record<string, string> = {}
+    for (const [k, v] of Object.entries(plainRecord(doc.aliases))) if (typeof v === 'string' && k !== v) aliases[k] = v
+    const data: AccountsFile = { version: 2, accounts, bindings, segments, ...(Object.keys(aliases).length ? { aliases } : {}) }
+    // A registry holding one login twice (see `sameLogin`) is folded on read; a writer persists it.
+    if (!mergeDuplicateAccounts(data)) return { data, dirty: false }
+    if (persist) await write(data)
+    return { data, dirty: !persist }
   }
   /** Called only under the file lock: migration mints and persists ids exactly once. */
   const read = async (): Promise<AccountsFile> => (await load(true)).data
@@ -265,7 +346,8 @@ export function createHarnessAccounts(options: {
     if (!first.dirty) return first.data
     try { return await serial(read) } catch (error) {
       // Never expose ids minted from an unpersisted v1 list: they would differ from the real ones.
-      if (error instanceof LockContended) return emptyFile()
+      // A folded v2 registry is deterministic: the unpersisted fold is safe to show.
+      if (error instanceof LockContended) return first.minted ? emptyFile() : first.data
       throw error
     }
   }
@@ -273,6 +355,9 @@ export function createHarnessAccounts(options: {
     const key = bindingKey(harness, root)
     const previous = data.accounts.find(a => a.id === data.bindings[key])
     let account = data.accounts.find(a => a.harness === harness && a.key === detected.key)
+      // The same login under an older spelling of its key: re-key it rather than mint a second account.
+      ?? data.accounts.find(a => sameLogin(a, { harness, key: detected.key, label: detected.label, root }))
+    if (account) account.key = detected.key
     if (!account) {
       account = { key: detected.key, label: detected.label, ...(detected.plan ? { plan: detected.plan } : {}),
         id: mintId(), harness, root, available: true, firstSeen: now(), lastSeen: now() }
@@ -344,7 +429,7 @@ export function createHarnessAccounts(options: {
   return {
     current,
     readAccounts: () => snapshot(),
-    byId: async (id: string) => (await snapshot()).accounts.find(a => a.id === id) ?? null,
+    byId: async (id: string) => { const data = await snapshot(); const at = canonicalAccountId(data, id); return data.accounts.find(a => a.id === at) ?? null },
     async bind(root: string | null, detected: AccountIdentity & { harness: HarnessId }) {
       return serial(async () => {
         const data = await read()

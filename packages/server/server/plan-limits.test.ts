@@ -933,3 +933,83 @@ test('C2 LOW L4: default-home transcripts take the default binding; several visi
   const amb = await sampleLivePlanSessions([{ ...s, input_tokens: 2 }], ['h'], 1000, {}, new Set(['h']))
   expect(amb[0]?.account).toBeUndefined()
 })
+
+// The duplicate plan row the owner saw on v2.140.0: claude's identity probe changed its key from
+// `orgId` to `orgId:email`, the registry minted a SECOND account for the same login, and the first
+// account's last meter (stale, frozen at that moment) was listed as a second "Claude Max 5x".
+const ORG = '00000000-0000-4000-8000-000000000001'
+const EMAIL = 'fixture@example.invalid'
+function writeDuplicateRegistry(now: number) {
+  writeFileSync(join(dir, 'accounts.json'), JSON.stringify({
+    version: 2, segments: {},
+    accounts: [
+      { id: 'acc_old000000000', root: null, key: ORG, harness: 'claude', label: EMAIL, plan: 'max', available: true, firstSeen: now - 9e8, lastSeen: now - 6 * 3_600_000 },
+      { id: 'acc_new000000000', root: null, key: `${ORG}:${EMAIL}`, harness: 'claude', label: EMAIL, plan: 'max', available: true, firstSeen: now - 6 * 3_600_000 + 6000, lastSeen: now },
+    ],
+    bindings: { 'claude:': 'acc_new000000000' },
+  }))
+  const meter = (account: string, five: number, week: number, at: number, resetMs: number) => ({
+    harness: 'claude', account, plan: 'Claude Max 5x', source: 'claude-usage-api', updatedAt: at,
+    windows: [{ kind: '5h', usedPct: five, resetsAt: now + 3_600_000 + resetMs }, { kind: 'week', usedPct: week, resetsAt: now + 3 * 86_400_000 + resetMs }],
+  })
+  writeFileSync(join(dir, 'plan-limits.json'), JSON.stringify({ notices: {}, limits: {
+    'claude:acc_old000000000': meter('acc_old000000000', 0, 32, now - 6 * 3_600_000, 753),
+    'claude:acc_new000000000': meter('acc_new000000000', 14, 43, now - 60_000, 0),
+  } }))
+}
+
+test('one login stored under two account ids shows ONE plan row, the live one, with no e-mail', async () => {
+  const now = Date.now()
+  writeDuplicateRegistry(now)
+  __resetPlanLimitsForTest(join(dir, 'plan-limits.json'))
+  __setHarnessAccountsForTest(createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => ({ key: `${ORG}:${EMAIL}`, label: EMAIL, plan: 'max' }) }))
+  const body = await planLimitsPayload(undefined, now)
+  const claude = body.budgets.filter(b => b.harness === 'claude')
+  expect(claude).toHaveLength(1)
+  expect(claude[0]!.account).toBe('acc_new000000000')
+  expect(claude[0]!.fiveHourPct).toBe(14)
+  expect(claude[0]!.weekPct).toBe(43)
+  expect(claude[0]!.stale).toBe(false)
+  expect(body.limits.filter(l => l.harness === 'claude')).toHaveLength(1)
+  expect(body.hiddenFromAgents).toEqual([])
+  const agent = JSON.stringify(planLimitsTool({ kind: 'spec-impl' }, body))
+  expect(agent).not.toContain(EMAIL)
+  expect(agent).not.toContain('acc_old000000000')
+  // The registry folded the twin and remembers where it went.
+  const registry = JSON.parse(readFileSync(join(dir, 'accounts.json'), 'utf8'))
+  expect(registry.accounts.filter((a: { harness: string }) => a.harness === 'claude')).toHaveLength(1)
+  expect(registry.aliases).toEqual({ acc_old000000000: 'acc_new000000000' })
+  // A tap that still names the old id (a session started before the merge) feeds the survivor.
+  expect(await ingestPlanLimits({ harness: 'claude', account: 'acc_old000000000', plan: 'Claude Max 5x', source: 'claude-stream', updatedAt: now,
+    windows: [{ kind: '5h', usedPct: 20, resetsAt: now + 3_600_000 }] })).toBe(true)
+  const after = await planLimitsPayload(undefined, now)
+  expect(after.budgets.filter(b => b.harness === 'claude').map(b => [b.account, b.fiveHourPct])).toEqual([['acc_new000000000', 20]])
+})
+
+test('genuinely different accounts each carry their own label; a stale one never drives routing', async () => {
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async (_h, root) => root === null
+    ? { key: `${ORG}:a@example.invalid`, label: 'a@example.invalid' }
+    : { key: `${ORG}:b@example.invalid`, label: 'b@example.invalid' } })
+  __setHarnessAccountsForTest(store)
+  const a = await store.current('claude')
+  const b = (await store.bind('/tmp/second-root', { harness: 'claude', key: `${ORG}:b@example.invalid`, label: 'b@example.invalid' })).account
+  await store.setNickname(b.id, 'Work')
+  expect(a.id).not.toBe(b.id)
+  const now = Date.now()
+  await ingestPlanLimits({ harness: 'claude', account: a.id, plan: 'Claude Max 5x', source: 'claude-usage-api', updatedAt: now - 60_000,
+    windows: [{ kind: '5h', usedPct: 80, resetsAt: now + 3_600_000 }, { kind: 'week', usedPct: 70, resetsAt: now + 86_400_000 }] })
+  await ingestPlanLimits({ harness: 'claude', account: b.id, plan: 'Claude Max 5x', source: 'claude-usage-api', updatedAt: now - 3 * 3_600_000,
+    windows: [{ kind: '5h', usedPct: 0, resetsAt: now + 3_600_000 }, { kind: 'week', usedPct: 5, resetsAt: now + 86_400_000 }] })
+  const body = await planLimitsPayload(undefined, now)
+  const rows = body.budgets.filter(r => r.harness === 'claude')
+  expect(rows.map(r => r.accountLabel).sort()).toEqual(['Claude Code #1', 'Work'])
+  expect(JSON.stringify(rows)).not.toContain('@example.invalid')
+  const stale = rows.find(r => r.account === b.id)!
+  expect(stale.stale).toBe(true)
+  expect(stale.yieldsTo).toBe(a.id)
+  expect(stale.suggestedParallel).toBe(0)
+  expect(stale.freeSlots).toBe(0)
+  const rec = routeRecommendation(body.budgets, 'lead')
+  expect(rec.account).toBe(a.id)
+  expect(rec.accountAlternatives.some(x => x.account === b.id)).toBe(false)
+})
