@@ -2065,8 +2065,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    * THE TAB STRIP SITS ABOVE THE SESSION'S TITLE (owner 2026-10-17, VS Code: tabs first, then the
    * title line, then the conversation). Where this page draws that title itself — the phone's bar
    * and a split pane's header — the strip is hoisted above it (`tabStripAboveTitle`). On a single
-   * desktop pane the title is `App.tsx`'s global top strip, already above everything, so the strip
-   * stays the first row inside the conversation card.
+   * desktop pane the title is `App.tsx`'s global top strip, and `App.tsx` itself draws the strip as
+   * the first row of that top area — this page renders none there.
    */
   const tabStripAboveTitle = tabsOn && (isMobile || splitRoute !== null)
   const tabStripEl = tabsOn && selected ? (
@@ -2091,8 +2091,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       // Follow a reopen to the row it created. Without it the panel keeps an id the fleet no longer
       // carries — see `SessionPanel`'s own `onOpened`.
       onOpened={goToReopened}
-      {...(tabsOn && !tabStripAboveTitle ? { tabStrip: tabStripEl } : {})}
-      {...(composerMetrics ? { metrics: composerMetrics } : {})}
+            {...(composerMetrics ? { metrics: composerMetrics } : {})}
       // CONTROLLED on both layouts now. Passing `onViewChange` is what suppresses SessionPanel's
       // own header, and mobile draws the same three things in the row that already holds the back
       // button — one bar instead of two stacked ones saying overlapping things.

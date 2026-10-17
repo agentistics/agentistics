@@ -21,7 +21,12 @@ describe('session tab strip sits above the session title', () => {
     expect(hoist).toBeLessThan(at('<SplitPaneHeader'))
     expect(hoist).toBeGreaterThan(at('{splitRoute && selected ? ('))
   })
-  test('the panel only hosts the strip when it is not hoisted (no double strip)', () => {
-    expect(src).toContain('{...(tabsOn && !tabStripAboveTitle ? { tabStrip: tabStripEl } : {})}')
+  test('the panel never hosts the strip (App draws it on a desktop single pane)', () => {
+    expect(src).not.toContain('tabStrip: tabStripEl')
+  })
+  test('App.tsx draws the strip as the first row of the top area, flag-gated, desktop single pane only', () => {
+    const app = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8')
+    expect(app).toContain('const tabsRowOn = sessionTabsOn && !isMobile && headerSession !== undefined')
+    expect(app).toMatch(/\{\.\.\.\(tabsRowOn && headerSession \? \{\s*aboveHeight: TABS_ROW_H,/)
   })
 })
