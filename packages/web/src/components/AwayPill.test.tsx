@@ -16,15 +16,24 @@ describe('top-bar away pill', () => {
   test('is absent while away is off', () => {
     withWidth(1440, () => { __setAwayForTest(AWAY_OFF); expect(renderToStaticMarkup(<AwayPill lang="en" enabled />)).toBe('') })
   })
-  test('default variant A is a quiet chip whose copy never reads "você voltar"', () => {
-    expect(AWAY_PILL_VARIANT).toBe('A')
+  test('default variant B is the 32px rounded square of its neighbours, accent outlined, moon only', () => {
+    expect(AWAY_PILL_VARIANT).toBe('B')
     withWidth(1440, () => {
       __setAwayForTest({ ...AWAY_OFF, on: true })
       const pt = renderToStaticMarkup(<AwayPill lang="pt" enabled />)
+      expect(pt).toContain('width:32px'); expect(pt).toContain('height:32px'); expect(pt).toContain('border-radius:8px')
+      expect(pt).toContain('border:1px solid currentColor'); expect(pt).toContain('color:var(--anthropic-orange)')
+      expect(pt).not.toContain('>Ausente<'); expect(pt).toContain('até você voltar')
+    })
+  })
+  test('variant A is a quiet chip whose copy never reads "você voltar"', () => {
+    withWidth(1440, () => {
+      __setAwayForTest({ ...AWAY_OFF, on: true })
+      const pt = renderToStaticMarkup(<AwayPill lang="pt" enabled variant="A" />)
       expect(pt).toContain('>Ausente<'); expect(pt).not.toContain('você voltar<')
       expect(pt).toContain('até você voltar')
       expect(pt).toContain('border:1px solid currentColor')
-      expect(renderToStaticMarkup(<AwayPill lang="en" enabled />)).toContain('>Away<')
+      expect(renderToStaticMarkup(<AwayPill lang="en" enabled variant="A" />)).toContain('>Away<')
     })
   })
   test.each(['A', 'B', 'C'] as const)('variant %s renders at both widths', v => {
