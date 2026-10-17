@@ -356,3 +356,15 @@ describe('spawn filing flags (S4)', () => {
     expect(parseSessionArgs(['claude'])).not.toHaveProperty('sharedCwd')
   })
 })
+
+describe('--handoff (leader hand-off from the CLI)', () => {
+  it('start takes --handoff as a switch', () => {
+    expect(parseSessionArgs(['claude', '--bg', '--handoff', '--name', 'x'])).toMatchObject({ kind: 'start', handoff: true, label: 'x' })
+  })
+  it('a value flag followed by --handoff is a missing value', () => {
+    expect(parseSessionArgs(['claude', '--name', '--handoff'])).toMatchObject({ kind: 'error' })
+  })
+  it('without the switch there is no handoff key', () => {
+    expect(parseSessionArgs(['claude'])).not.toHaveProperty('handoff')
+  })
+})

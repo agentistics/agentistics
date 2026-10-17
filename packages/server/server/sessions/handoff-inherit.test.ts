@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { handoffCheckinPatch, handoffInheritPatch, handoffPinPatch, handoffTitle, inheritHandoffPrefs, nextHandoffSeq, rekeyCheckinSession } from './handoff-inherit'
+import { handoffCheckinPatch, handoffInheritPatch, handoffPinPatch, handoffTitle, inheritHandoffPrefs, passPinToSuccessor, nextHandoffSeq, rekeyCheckinSession } from './handoff-inherit'
 import type { Preferences } from '../preferences'
 
 const parent = { id: 'p1', conversationId: 'conv-p' }
@@ -90,5 +90,52 @@ describe('combined', () => {
     expect(ok).toBe(true)
     expect(seen?.pinnedSessions).toEqual(['conv-c'])
     expect(await inheritHandoffPrefs(parent, child, async () => { throw new Error('x') })).toBe(false)
+  })
+})
+
+describe('CLI hand-off end to end (preferences)', () => {
+  const mkPrefs = () => prefs({
+    sessionGroups: { groups: [{ id: 'g1', name: 'Leaders', sessionKeys: ['conv-p'] }] },
+    pinnedSessions: ['a', 'conv-p', 'b'],
+    checkin: { 'conv-p': { intervalMin: 30, session: 'conv-p', pending: 'x' } },
+  })
+  const upd = (p: Preferences) => async (mutate: (c: Preferences) => Partial<Preferences> | undefined | void | Promise<Partial<Preferences> | undefined | void>) => {
+    const patch = await mutate(p)
+    if (patch) Object.assign(p, patch)
+    return p
+  }
+
+  it('successor gets folder, pin at the same index and the check-in agenda', async () => {
+    const p = mkPrefs()
+    expect(await inheritHandoffPrefs(parent, child, upd(p))).toBe(true)
+    expect(p.pinnedSessions).toEqual(['a', 'conv-c', 'b'])
+    expect(p.sessionGroups?.groups[0]?.sessionKeys).toContain('conv-c')
+    expect((p.checkin as Record<string, unknown>)['conv-c']).toMatchObject({ intervalMin: 30, session: 'conv-c' })
+  })
+
+  it('filing (moving) the predecessor afterwards leaves the successor pinned', async () => {
+    const { fileInFolder } = await import('./cli-folder')
+    const p = mkPrefs()
+    ;(p as unknown as { sessionGroups: { groups: unknown[] } }).sessionGroups.groups.push({ id: 'fin', name: 'Finalizadas', sessionKeys: [] })
+    await inheritHandoffPrefs(parent, child, upd(p))
+    await passPinToSuccessor(parent, child, upd(p))
+    await fileInFolder('fin', parent, { read: async () => p, update: upd(p) as never })
+    expect(p.pinnedSessions).toEqual(['a', 'conv-c', 'b'])
+  })
+
+  it('a successor that did NOT take the pin gets it before the predecessor is filed', async () => {
+    const { fileInFolder } = await import('./cli-folder')
+    const p = mkPrefs()
+    ;(p as unknown as { sessionGroups: { groups: unknown[] } }).sessionGroups.groups.push({ id: 'fin', name: 'Finalizadas', sessionKeys: [] })
+    expect(await passPinToSuccessor(parent, child, upd(p))).toBe(true)
+    await fileInFolder('fin', parent, { read: async () => p, update: upd(p) as never })
+    expect(p.pinnedSessions).toEqual(['a', 'conv-c', 'b'])
+  })
+
+  it('no successor or no pin: nothing changes', async () => {
+    const p = mkPrefs()
+    expect(await passPinToSuccessor(parent, undefined, upd(p))).toBe(false)
+    expect(await passPinToSuccessor({ id: 'zz' }, child, upd(p))).toBe(false)
+    expect(p.pinnedSessions).toEqual(['a', 'conv-p', 'b'])
   })
 })

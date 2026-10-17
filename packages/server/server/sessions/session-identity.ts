@@ -21,9 +21,12 @@
  */
 
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
+import { RELAY_FILES } from './structured-relay'
 
 /** The variable every agentop pane carries (set by the tmux backend at spawn). */
 export const SESSION_ID_ENV = 'AGENTOP_MANAGED_ID'
@@ -89,4 +92,81 @@ export async function verifySessionIdentity(id: unknown, token: unknown): Promis
   if (typeof id !== 'string' || typeof token !== 'string') return null
   const key = await loadKey(false).catch(() => null)
   return key && tokenProves(key, id, token) ? id : null
+}
+
+/** Pure: the ancestor chain (self first) of `startPid`, given a way to read a parent pid. Bounded; stops at pid 1. */
+export function ancestorChainBy(startPid: number, parentOf: (pid: number) => number | undefined): number[] {
+  const out: number[] = []
+  let pid = startPid
+  for (let depth = 0; depth < 32 && pid > 1 && !out.includes(pid); depth++) {
+    out.push(pid)
+    const next = parentOf(pid)
+    if (next === undefined || !Number.isInteger(next)) break
+    pid = next
+  }
+  return out
+}
+
+/** Pure: the same chain read from `/proc/<pid>/status` `PPid:`. */
+export function ancestorChain(startPid: number, readStatus: (pid: number) => string | undefined): number[] {
+  return ancestorChainBy(startPid, pid => {
+    const m = /^PPid:\s*(\d+)/m.exec(readStatus(pid) ?? '')
+    return m ? Number(m[1]) : undefined
+  })
+}
+
+/** Parent pid from `/proc` (Linux) or, where there is none (macOS/BSD), `ps -o ppid= -p <pid>` — argv, never a shell. */
+const parentOfDefault = (pid: number): number | undefined => {
+  try {
+    if (existsSync('/proc/self/status')) {
+      const m = /^PPid:\s*(\d+)/m.exec(readFileSync(`/proc/${pid}/status`, 'utf8'))
+      return m ? Number(m[1]) : undefined
+    }
+    const r = spawnSync('ps', ['-o', 'ppid=', '-p', String(pid)], { encoding: 'utf8', timeout: 2000 })
+    const n = Number(String(r.stdout ?? '').trim())
+    return r.status === 0 && Number.isInteger(n) && n > 0 ? n : undefined
+  } catch { return undefined }
+}
+
+/**
+ * The processes agentop recorded for a session with NO tmux pane (web-started adapter-chat / structured
+ * driver): its relay and the harness child it holds, from `<data dir>/structured/<id>/relay.pid`. The
+ * harness (and the MCP / CLI it runs) descends from the child, so either is a valid ancestor anchor.
+ */
+export function managedProcessPids(id: string, root = join(AGENTISTICS_DATA_DIR, 'structured')): number[] {
+  try {
+    const raw = JSON.parse(readFileSync(join(root, id.replace(/[^A-Za-z0-9._-]/g, '_'), RELAY_FILES.pid), 'utf8')) as { relay?: unknown; child?: unknown }
+    return [raw.relay, raw.child].filter((p): p is number => typeof p === 'number' && p > 1)
+  } catch { return [] }
+}
+
+/** Why a caller is (not) proven: `unavailable` = this platform gave no way to read ancestors, not a bad identity. */
+export type CallerProof = 'proven' | 'bad-identity' | 'unavailable'
+
+export async function callerProof(
+  id: string | undefined,
+  panePids: () => Promise<ReadonlyMap<string, number> | undefined>,
+  opts: { env?: Record<string, string | undefined>; pid?: number; parentOf?: (pid: number) => number | undefined; managedPids?: (id: string) => number[] } = {},
+): Promise<CallerProof> {
+  if (!id || !(await callerHoldsIdentity(id, opts.env))) return 'bad-identity'
+  const pane = (await panePids().catch(() => undefined))?.get(id)
+  const anchors = [...(pane ? [pane] : []), ...(opts.managedPids ?? managedProcessPids)(id)]
+  if (anchors.length === 0) return 'bad-identity'
+  const chain = ancestorChainBy(opts.pid ?? process.pid, opts.parentOf ?? parentOfDefault)
+  if (chain.length < 2 && !anchors.includes(chain[0]!)) return 'unavailable'
+  return anchors.some(a => chain.includes(a)) ? 'proven' : 'bad-identity'
+}
+
+/**
+ * The CLI's proof that it runs INSIDE session `id`: the environment claim (`callerHoldsIdentity`, which an
+ * outside process can forge by exporting the variable) AND a process agentop itself created for `id` — its tmux
+ * pane, or the relay/child of a structured session — being an ANCESTOR of this process.
+ */
+export async function callerRunsInSession(
+  id: string | undefined,
+  panePids: () => Promise<ReadonlyMap<string, number> | undefined>,
+  opts: { env?: Record<string, string | undefined>; pid?: number; readStatus?: (pid: number) => string | undefined; parentOf?: (pid: number) => number | undefined; managedPids?: (id: string) => number[] } = {},
+): Promise<boolean> {
+  const parentOf = opts.parentOf ?? (opts.readStatus ? (pid: number) => { const m = /^PPid:\s*(\d+)/m.exec(opts.readStatus!(pid) ?? ''); return m ? Number(m[1]) : undefined } : undefined)
+  return (await callerProof(id, panePids, { ...opts, ...(parentOf ? { parentOf } : {}) })) === 'proven'
 }

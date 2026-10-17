@@ -16,7 +16,7 @@ import { stat } from 'node:fs/promises'
 import { cliStrings } from '../cli-i18n'
 import { patchSession, readRegistry } from './registry'
 import type { ManagedSession } from './types'
-import { nextHandoffSeq } from './handoff-inherit'
+import { nextHandoffSeq, passPinToSuccessor } from './handoff-inherit'
 
 /** Turns read from the predecessor — wide enough for a long leader turn, bounded for a poll. */
 const RELAY_READ_TURNS = 400
@@ -319,4 +319,18 @@ async function defaultComment(taskRef: string, body: string, subtaskId?: string)
   const { addComment } = await import('./task-web')
   const res = await addComment(taskRef, { author: 'agentistics · relay', body, ...(subtaskId ? { subtaskId } : {}) })
   return res.ok
+}
+
+/**
+ * Killing a predecessor into a folder is a MOVE and unpins it: first hand its pin slot to its successor, but
+ * only to a LIVE one — an ended successor must not inherit a pin the predecessor got after the hand-off.
+ */
+export async function passPinForKill(
+  dying: ManagedSession | undefined,
+  registry: readonly ManagedSession[],
+  update: Parameters<typeof passPinToSuccessor>[2],
+): Promise<boolean> {
+  if (!dying?.handoffTo) return false
+  const successor = successorRow(registry, dying.handoffTo)
+  return passPinToSuccessor(dying, successor && successorAlive(successor) ? successor : undefined, update)
 }
