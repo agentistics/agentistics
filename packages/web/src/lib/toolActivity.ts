@@ -345,3 +345,16 @@ export function groupPerExchange<T extends TurnLike>(turns: readonly T[]): ChatI
   flush(lastAt)
   return out
 }
+
+/**
+ * `ChatTurn` carries no per-turn `pending`, so "is the trailing run still going" comes from the
+ * SESSION: when it is working and the conversation ends on a run, that run is live and its last
+ * step is the one in flight. Returns new items; the input is untouched.
+ */
+export function markTrailingRunning<T extends TurnLike>(items: readonly ChatItem<T>[], working: boolean): ChatItem<T>[] {
+  const last = items[items.length - 1]
+  if (!working || !last || last.type !== 'activity') return [...items]
+  const steps = last.group.steps.map((s, i, all) => (i === all.length - 1 && s.status !== 'error' ? { ...s, status: 'running' as const } : s))
+  const { endedAt: _drop, ...rest } = last.group
+  return [...items.slice(0, -1), { type: 'activity', group: { ...rest, steps, running: true } }]
+}

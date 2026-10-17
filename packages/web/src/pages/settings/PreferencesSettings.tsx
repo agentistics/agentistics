@@ -6,7 +6,7 @@ import type { AppContext, PrefsDraft } from '../../lib/app-context'
 import { SectionHeader, Divider, TabSelect, PrefRow, Toggle, Checkbox } from './primitives'
 import { DEFAULT_CARD_ORDER, type CardId } from '../../lib/cardOrder'
 import ProjectDisksSection from './ProjectDisksSection'
-import { sessionTabsStore } from '../../lib/appFlags'
+import { chatActivityStore, sessionTabsStore } from '../../lib/appFlags'
 
 /** One label per `CardId`. Typed as the Record so the build fails if a card is added and this is
  *  not — the same reason `HARNESS_CAPABILITIES` is a Record rather than a list. */
@@ -41,6 +41,8 @@ export default function PreferencesSettings() {
   const ctx = useOutletContext<AppContext>()
   const [sessionTabsOn, setSessionTabsOn] = useState(() => sessionTabsStore.get())
   useEffect(() => sessionTabsStore.subscribe(() => setSessionTabsOn(sessionTabsStore.get())), [])
+  const [chatActivityOn, setChatActivityOn] = useState(() => chatActivityStore.get())
+  useEffect(() => chatActivityStore.subscribe(() => setChatActivityOn(chatActivityStore.get())), [])
   // Central-wide delete policy. Owner-only AND central-only: it is not a personal preference —
   // turning it off removes a safety net for everyone on this central. null until read, so the row
   // never flashes a wrong state.
@@ -182,6 +184,13 @@ export default function PreferencesSettings() {
         sub={pt ? 'Mostra as conversas abertas como abas no topo da conversa, com fixar e o estado de cada uma.' : 'Shows the open conversations as tabs at the top of the chat, with pinning and each one’s state.'}
       >
         <Toggle on={sessionTabsOn} onToggle={() => sessionTabsStore.set(!sessionTabsOn)} />
+      </PrefRow>
+      <Divider />
+      <PrefRow
+        label={pt ? 'Atividade resumida no chat (experimental)' : 'Summarised activity in chat (experimental)'}
+        sub={pt ? 'Agrupa os passos de uma sessão numa linha recolhível, como “Criou um arquivo, atualizou 3 memórias · 1 min 20 s”.' : 'Groups a session’s steps into one collapsible line, like “Created a file, updated 3 memories · 1 min 20 s”.'}
+      >
+        <Toggle on={chatActivityOn} onToggle={() => chatActivityStore.set(!chatActivityOn)} />
       </PrefRow>
       <Divider />
       {/*  Display  */}

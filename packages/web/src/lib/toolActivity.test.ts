@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { fmtSpan, groupConsecutive, groupPerExchange, kindOf, objectOf, stepsOfTurn, summarize, type TurnLike } from './toolActivity'
+import { fmtSpan, groupConsecutive, groupPerExchange, groupSpanMs, kindOf, markTrailingRunning, objectOf, stepVerb, stepsOfTurn, summarize, type TurnLike } from './toolActivity'
 
 describe('kindOf — one rule for every harness', () => {
   test.each([
@@ -74,5 +74,61 @@ describe('steps and groups', () => {
     expect(fmtSpan(80_000)).toBe('1 min 20 s')
     expect(fmtSpan(45_000)).toBe('45 s')
     expect(fmtSpan(null)).toBeNull()
+  })
+})
+
+describe('CHAT.ACTIVITY wiring', () => {
+  type G = import('./toolActivity').ActivityGroup
+  const groupOf = (i: unknown) => (i as { type: 'activity'; group: G }).group
+  const t = (over: Partial<TurnLike>): TurnLike => ({ role: 'assistant', text: '', ...over })
+  const turns: TurnLike[] = [
+    t({ role: 'user', text: 'go', at: '2026-10-16T10:00:00Z' }),
+    t({ text: 'vou ler', at: '2026-10-16T10:00:05Z' }),
+    t({ at: '2026-10-16T10:00:10Z', tools: [{ name: 'Read', detail: '/a/x.ts' }, { name: 'Bash', detail: 'ls' }] }),
+    t({ at: '2026-10-16T10:01:30Z', tools: [{ name: 'Write', detail: '/a/y.ts' }] }),
+    t({ text: 'pronto', at: '2026-10-16T10:01:40Z' }),
+  ]
+
+  test('consecutive tool turns between two texts are one group, with its span', () => {
+    const items = groupConsecutive(turns)
+    expect(items.map(i => i.type)).toEqual(['turn', 'turn', 'activity', 'turn'])
+    const g = groupOf(items[2])
+    expect(g.steps).toHaveLength(3)
+    expect(fmtSpan(groupSpanMs(g, 0))).toBe('1 min 30 s')
+  })
+
+  test('summary reads in the past when done, the gerund while running, in pt and en', () => {
+    const g = groupOf(groupConsecutive(turns)[2])
+    expect(summarize(g.steps, false, true)).toBe('Criou um arquivo, executou um comando e leu um arquivo')
+    expect(summarize(g.steps, false, false)).toBe('Created a file, ran a command and read a file')
+    expect(summarize(g.steps, true, true)).toBe('Criando um arquivo, executando um comando e lendo um arquivo')
+  })
+
+  test('live → collapsed: the trailing run is running only while the session works', () => {
+    const open = groupConsecutive(turns.slice(0, 4))
+    const live = markTrailingRunning(open, true)
+    const done = markTrailingRunning(open, false)
+    const gl = groupOf(live[live.length - 1])
+    const gd = groupOf(done[done.length - 1])
+    expect(gl.running).toBe(true)
+    expect(gl.steps.map(s => s.status)).toEqual(['done', 'done', 'running'])
+    expect(gl.endedAt).toBeUndefined()
+    expect(gd.running).toBe(false)
+    expect(markTrailingRunning(groupConsecutive(turns), true).at(-1)?.type).toBe('turn')
+  })
+
+  test('a failed step renders "Falhou"/"Failed" (TODO engine: readers do not set tools[].failed yet)', () => {
+    const steps = stepsOfTurn(t({ tools: [{ name: 'Bash', detail: 'false', failed: true }] }))
+    expect(steps[0]!.status).toBe('error')
+    expect(stepVerb(steps[0]!, true)).toBe('Falhou')
+    expect(stepVerb(steps[0]!, false)).toBe('Failed')
+  })
+
+  test('every harness name resolves to a kind (claude, codex, gemini, copilot, agy, kimi)', () => {
+    const calls = [
+      { name: 'Bash' }, { name: 'exec' }, { name: 'run_shell_command', canonical: 'Bash' },
+      { name: 'rg' }, { name: 'search_web' }, { name: 'Read' },
+    ]
+    expect(calls.map(kindOf)).toEqual(['run', 'run', 'run', 'search', 'web', 'read'])
   })
 })

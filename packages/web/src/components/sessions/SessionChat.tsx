@@ -53,6 +53,9 @@ import { approvalIdentity } from '../../lib/approvalQuestion'
 import { dialogAnswersToRetire } from '../../lib/dialogAnswerEcho'
 import { ChatBubble, type ChatTurn } from './ChatBubble'
 import { WorkingNote } from './WorkingNote'
+import { ToolActivity } from './ToolActivity'
+import { chatActivityStore } from '../../lib/appFlags'
+import { groupConsecutive, markTrailingRunning, type ChatItem } from '../../lib/toolActivity'
 import { useTerminalStream } from '../../hooks/useTerminalStream'
 import { isImagePath, openComposerLightbox, previousPersonTurnMs } from '../../lib/attachmentPreview'
 import { promptCountLabel } from '../../lib/promptCount'
@@ -2202,6 +2205,53 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    */
   const showWorking = working && !loading
 
+  // CHAT.ACTIVITY — flag off = the historic render, untouched.
+  const [chatActivityOn, setChatActivityOn] = useState(() => chatActivityStore.get())
+  useEffect(() => chatActivityStore.subscribe(() => setChatActivityOn(chatActivityStore.get())), [])
+  const activityItems: ChatItem<ChatTurn>[] = useMemo(
+    () => (chatActivityOn ? markTrailingRunning(groupConsecutive(turns.slice(firstShown)), showWorking) : []),
+    [chatActivityOn, turns, firstShown, showWorking],
+  )
+  const liveActivity = chatActivityOn && activityItems[activityItems.length - 1]?.type === 'activity' && showWorking
+  // Rendered per turn exactly as before; shared by both paths so the flag changes grouping only.
+  const renderTurn = (t: ChatTurn, i: number) => (
+            <Fragment key={i}>
+            {(placedAttention.before.get(i) ?? []).map((m, k) => <AttentionMarkLine key={`am-${i}-${k}`} mark={m} pt={pt} />)}
+            <ChatBubble
+              turn={t}
+              sessionId={session.id}
+              lang={lang}
+              harness={session.harness}
+              {...(payload?.attachmentSends ? { attachmentSends: payload.attachmentSends } : {})}
+              {...(payload?.attachmentMessages
+                ? { attachmentMessages: payload.attachmentMessages, markerSinceMs: previousPersonTurnMs(turns, i) }
+                : {})}
+              {...(turnAnchors[i] ? { anchorId: turnAnchors[i]! } : {})}
+              {...(t.role === 'user' ? (() => { const grant = vaultGrantMessage(t.text, sessionGrants, pt); return grant ? { vaultGrant: grant } : {} })() : {})}
+              {...(t.role === 'user' ? { onQuoteClick: onSentQuote } : {})}
+              {...(canPrompt && selecting === null ? { onReply: onReplyToTurn } : {})}
+              {
+                // Forwarding and selecting READ this conversation, so they need nothing from the
+                // session's state — only a message that says something.
+                ...(forwardable(t) && !t.system && !t.task
+                  ? {
+                    onForward: onForwardTurn,
+                    onSelectStart,
+                    ...(selecting !== null
+                      ? { selectMode: true, selected: selecting.has(turnKeyOf(t)), onToggleSelect }
+                      : {}),
+                  }
+                  : {})
+              }
+              {
+                // Only on the assistant's side: quoting a fragment of your OWN message back at the
+                // session says nothing it did not already read from you a moment ago.
+                ...(canPrompt && t.role === 'assistant' ? { onReplyExcerpt: onReplyToExcerpt } : {})
+              }
+            />
+            </Fragment>
+  )
+
   async function upload(files: readonly File[]): Promise<void> {
     if (files.length === 0) return
     setUploading(true)
@@ -2553,41 +2603,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
             }}>{payload.older}</p>
           )}
 
-          {turns.slice(firstShown).map((t, j) => { const i = firstShown + j; return (<Fragment key={i}>
-            {(placedAttention.before.get(i) ?? []).map((m, k) => <AttentionMarkLine key={`am-${i}-${k}`} mark={m} pt={pt} />)}
-            <ChatBubble
-              turn={t}
-              sessionId={session.id}
-              lang={lang}
-              harness={session.harness}
-              {...(payload?.attachmentSends ? { attachmentSends: payload.attachmentSends } : {})}
-              {...(payload?.attachmentMessages
-                ? { attachmentMessages: payload.attachmentMessages, markerSinceMs: previousPersonTurnMs(turns, i) }
-                : {})}
-              {...(turnAnchors[i] ? { anchorId: turnAnchors[i]! } : {})}
-              {...(t.role === 'user' ? (() => { const grant = vaultGrantMessage(t.text, sessionGrants, pt); return grant ? { vaultGrant: grant } : {} })() : {})}
-              {...(t.role === 'user' ? { onQuoteClick: onSentQuote } : {})}
-              {...(canPrompt && selecting === null ? { onReply: onReplyToTurn } : {})}
-              {
-                // Forwarding and selecting READ this conversation, so they need nothing from the
-                // session's state — only a message that says something.
-                ...(forwardable(t) && !t.system && !t.task
-                  ? {
-                    onForward: onForwardTurn,
-                    onSelectStart,
-                    ...(selecting !== null
-                      ? { selectMode: true, selected: selecting.has(turnKeyOf(t)), onToggleSelect }
-                      : {}),
-                  }
-                  : {})
-              }
-              {
-                // Only on the assistant's side: quoting a fragment of your OWN message back at the
-                // session says nothing it did not already read from you a moment ago.
-                ...(canPrompt && t.role === 'assistant' ? { onReplyExcerpt: onReplyToExcerpt } : {})
-              }
-            />
-          </Fragment>)})}
+          {chatActivityOn
+            ? activityItems.map(item => item.type === 'turn'
+              ? renderTurn(item.turn, firstShown + item.index)
+              : <ToolActivity key={item.group.key} group={item.group} lang={lang} variant="live" />)
+            : turns.slice(firstShown).map((t, j) => renderTurn(t, firstShown + j))}
           {placedAttention.after.map((m, j) => <AttentionMarkLine key={`am-end-${j}`} mark={m} pt={pt} />)}
 
           {/* An echo IS an unread message by definition — it is retired the instant the transcript
@@ -2650,7 +2670,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
             <ChatBubble turn={{ role: 'assistant', text: structuredText ?? '', ...(structuredReasoning ? { reasoning: structuredReasoning } : {}) }} lang={lang} harness={session.harness} sessionId={session.id} />
           )}
 
-          {showWorking && (
+          {showWorking && !liveActivity && (
             <WorkingNote
               lang={lang}
               {...(source?.runningTools?.length ? { tools: source.runningTools } : newestAssistant?.tools ? { tools: newestAssistant.tools } : {})}
