@@ -41,3 +41,13 @@ test('the last strip unmounting clears the anchors even without a store reset', 
   u()
   expect(getPrevActive('main')).toBeNull()
 })
+
+test('VS Code tabs: rectangular, close × visible on active/hover/focus/touch, pin glyph unpins, middle click closes', () => {
+  expect(src).toContain('borderRadius: 0')
+  expect(src).not.toContain('borderRadius: 999')
+  expect(src).toContain('opacity: active || hover || focus || mobile ? 1 : 0')
+  expect(src).toContain("aria-label={pt ? 'Desafixar' : 'Unpin'}")
+  expect(src).toContain('onUnpin={() => togglePin(k)}')
+  expect(src).toContain('e.button === 1')
+  expect(src).toContain('mobile ? 32 : 20')
+})
