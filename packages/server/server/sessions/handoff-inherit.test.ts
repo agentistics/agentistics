@@ -66,7 +66,12 @@ describe('check-in', () => {
     // ONE writer since CROSSBIND: the poller's `recordConversation` IS `recordProcessLink`, which
     // also refuses a conversation another row owns — so the migration cannot exist on one path only.
     expect(src).toContain('recordConversation: recordProcessLink,')
-    expect(src).toContain('await rekeyCheckinSession(sid, conversationId, updatePreferences)')
+    // The migration itself lives at the registry boundary (`withIdentityPreferences`), which also
+    // wraps `link` — so every conversation link carries check-in with folder membership.
+    const reg = await Bun.file(new URL('./registry.ts', import.meta.url)).text()
+    expect(reg).toContain('withIdentityPreferences(createSessionRegistry(')
+    const prefs = await Bun.file(new URL('./session-identity-prefs.ts', import.meta.url)).text()
+    expect(prefs).toContain('async link(id, patch, opts)')
   })
   it('does nothing without an agenda, or when the successor already has one', () => {
     expect(handoffCheckinPatch(prefs({}), parent, child)).toBeUndefined()

@@ -755,3 +755,13 @@ lines and unterminated output while retaining process-group termination after th
 Known limitation (S5 QA L3, deferred to S6): configured MCP commands are read only for Claude.
 For other harnesses, an extra MCP server can conservatively count as a work child and delay
 retirement until expiry. The shared `agentop mcp` exclusion still applies to every harness.
+
+### Conversation identity and saved preferences
+
+When a managed session learns its conversation id, its sidebar identity changes from the managed
+id to the conversation id. The production registry carries folder membership, pins, notification
+mutes, check-in agendas, stored roles and floating-panel layouts across that transition for every
+harness. The first registry read also repairs saved managed-id entries for already linked rows,
+using one preferences update for the batch. Preference failures do not reject a recorded link;
+restarting the server retries orphan repair. Open session tabs remain browser-local; the server's
+`ui.sessionTabs` preference is only the feature flag.

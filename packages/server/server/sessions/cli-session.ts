@@ -48,7 +48,7 @@ import { attachAfterSpawn, liveIdsOf, planSpawnFilingSafe } from './spawn-filing
 import type { FilingPlan } from './spawn-filing'
 import { filingJson, filingRow, refusalText, spawnRole, WARNING_TEXT } from './spawn-row'
 import { loadConversations } from './conversations'
-import { callerIsLeader, fileInFolder, rekeyFolderMember, folderLineText, folderTree, NO_FOLDER_WARNING, resolveFolders } from './cli-folder'
+import { callerIsLeader, fileInFolder, folderLineText, folderTree, NO_FOLDER_WARNING, resolveFolders } from './cli-folder'
 import { exactLinksOnDisk } from './reopen-link'
 import { reopenTargetFor } from './reopen-target'
 import { resolveBackend } from './index'
@@ -1081,7 +1081,6 @@ async function pollFleet(backend: SessionBackend): Promise<SessionSnapshot> {
   const poller = createSessionsPoller({
     backend, readRegistry, scanProcesses, loadConversations, loadHarnessSessions,
     findExactLinks: exactLinksOnDisk,
-    rekeyRole: async (managedId, conversationId) => { await rekeyFolderMember(managedId, conversationId).catch(() => {}); return rekeyStoredRole([managedId], [managedId, conversationId]) },
   })
   // Poll TWICE, and return the second. The cockpit debounces the noisy per-frame reading by
   // confirming a `waiting` state across two polls (`attention-confirm.ts`), but a one-shot command
