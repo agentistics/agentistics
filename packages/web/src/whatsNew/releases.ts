@@ -26,6 +26,22 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: '"Leaders only" shows just the active leaders in a plain list, and the count follows search and filters.',
       },
       {
+        pt: 'Um worker recém-aberto não toca mais aviso quando "Silenciar workers" está ligado.',
+        en: 'A freshly opened worker no longer rings when "Mute active workers" is on.',
+      },
+      {
+        pt: 'Mensagens enviadas pelo agentistics ou por outra sessão nunca aparecem como se fossem suas, inclusive as repassadas na passagem de líder.',
+        en: 'Messages sent by agentistics or by another session never show as yours, including those forwarded in a leader hand-off.',
+      },
+      {
+        pt: 'Avisos com seta no chat, como "tarefa em segundo plano respondeu", abrem o que mencionam.',
+        en: 'Chat notes with an arrow, like "background task replied", open what they mention.',
+      },
+      {
+        pt: 'A animação de atualização ficou mais leve e não engasga no final.',
+        en: 'The update animation is lighter and no longer stutters at the end.',
+      },
+      {
         pt: 'Abrir uma sessão encerrada não quebra mais a página.',
         en: 'Opening an ended session no longer breaks the page.',
       },
