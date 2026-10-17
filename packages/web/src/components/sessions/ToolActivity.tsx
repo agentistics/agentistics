@@ -114,6 +114,7 @@ export function ToolActivity({ group, lang, variant, defaultOpen = false, now: n
   const now = nowProp ?? ticking
   const span = fmtSpan(groupSpanMs(group, now))
   const errors = group.steps.filter(s => s.status === 'error').length
+  const unfinished = group.steps.some(s => s.status === 'unfinished')
   const summary = summarize(group.steps, group.running, pt)
   const count = group.steps.length
 
@@ -121,8 +122,9 @@ export function ToolActivity({ group, lang, variant, defaultOpen = false, now: n
     <>
       {group.running
         ? <Loader size={12} className="ag-working-spin" style={{ flexShrink: 0 }} />
-        : errors > 0 ? <AlertTriangle size={12} style={{ flexShrink: 0, color: 'var(--accent-red)' }} /> : null}
-      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</span>
+        : errors > 0 ? <AlertTriangle size={12} style={{ flexShrink: 0, color: 'var(--accent-red)' }} />
+          : unfinished ? <Minus size={12} style={{ flexShrink: 0 }} /> : null}
+      <span title={summary} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</span>
       <span style={{ flexShrink: 0, whiteSpace: 'nowrap', opacity: 0.8 }}>
         {' · '}{count} {pt ? (count === 1 ? 'passo' : 'passos') : (count === 1 ? 'step' : 'steps')}
         {errors > 0 && <span style={{ color: 'var(--accent-red)' }}>{' · '}{errors} {pt ? (errors === 1 ? 'falhou' : 'falharam') : 'failed'}</span>}
