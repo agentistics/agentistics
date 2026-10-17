@@ -2,14 +2,14 @@ import { describe, expect, test } from 'bun:test'
 import { applyLeadersOnly, countLeaders, leadersBanner, leadersText } from './leadersFilter'
 import { arrangeChangedCount, DEFAULT_ASIDE_GROUP_PREFS, parseAsideGroupPrefs } from './sessionsAsidePrefs'
 import { countActiveFilters } from './activeFilterCount'
-import { resolvePinnedRows } from './pinnedSessions'
-import { folderFold } from './folderFold'
-import { folderSessionCount } from './sessionUserGroups'
+import { ACTIVE_STATES, filterSessions, type ControlSession } from '@agentistics/tui/control/session-fleet'
+import { filterFleet } from './fleetFilter'
+import type { Filters } from '@agentistics/core'
 import type { SessionRole } from './sessionRoles'
 
-type R = { id: string; role?: SessionRole }
+type R = { id: string; state: string; role?: SessionRole }
 const roleOf = (r: R) => r.role
-const rows: R[] = [{ id: 'L1', role: 'leader' }, { id: 'W1', role: 'worker' }, { id: 'X' }, { id: 'L2', role: 'leader' }]
+const rows: R[] = [{ id: 'L1', state: 'working', role: 'leader' }, { id: 'W1', state: 'working', role: 'worker' }, { id: 'X', state: 'waiting' }, { id: 'L2', state: 'waiting', role: 'leader' }]
 
 describe('leaders filter', () => {
   test('off leaves every row, on keeps only leaders (a row with no role is not one)', () => {
@@ -20,28 +20,33 @@ describe('leaders filter', () => {
     expect(countLeaders(rows, roleOf)).toBe(2)
     expect(leadersText(1, true)).toBe('1 líder')
     expect(leadersText(2, true)).toBe('2 líderes')
-    expect(leadersBanner(3, true)).toBe('Mostrando só líderes · 3 sessões ocultas')
-    expect(leadersBanner(1, false)).toBe('Showing leaders only · 1 session hidden')
+    expect(leadersBanner(3, true)).toBe('Mostrando só líderes ativos · 3 sessões ocultas')
+    expect(leadersBanner(1, false)).toBe('Showing active leaders only · 1 session hidden')
   })
-  test('the pinned band is resolved from the unfiltered rows, so a pinned worker stays', () => {
-    const shown = applyLeadersOnly(rows, true, roleOf)
-    expect(resolvePinnedRows(['W1'], rows, r => r.id).map(r => r.id)).toEqual(['W1'])
-    expect(shown.some(r => r.id === 'W1')).toBe(false)
+  test('all live states count, while exited, closed and lost leaders never do', () => {
+    const states = [...ACTIVE_STATES, 'exited', 'closed', 'lost']
+    const fleet = states.map(state => ({ id: state, state, role: 'leader' as const }))
+    expect(countLeaders(fleet, roleOf)).toBe(ACTIVE_STATES.length)
+    expect(applyLeadersOnly(fleet, true, roleOf).map(r => r.state)).toEqual([...ACTIVE_STATES])
+    expect(applyLeadersOnly(fleet, false, roleOf)).toEqual(fleet)
+    expect(countLeaders([], roleOf)).toBe(0)
   })
-  test('a folder with no leader left keeps its place, dimmed and not removed — the search rule', () => {
-    const groups = [
-      { group: { id: 'g1', name: 'Líderes', sessionKeys: ['L1'] }, rows: [{ id: 'L1' }] },
-      { group: { id: 'g2', name: 'Workers', sessionKeys: ['W1'] }, rows: [{ id: 'W1' }] },
-    ]
-    const keep = new Set(applyLeadersOnly(rows, true, roleOf).map(r => r.id))
-    const shown = groups.map(e => ({ ...e, rows: e.rows.filter(r => keep.has(r.id)) }))
-    expect(shown).toHaveLength(2)
-    const n1 = folderSessionCount('g1', shown as never)
-    const n2 = folderSessionCount('g2', shown as never)
-    const fold = (n: number) => folderFold({ storedFolded: false, openedDimmed: false, narrowing: true, searching: false, shownCount: n })
-    expect([n1, n2]).toEqual([1, 0])
-    expect(fold(n1).dimmed).toBe(false)
-    expect(fold(n2).dimmed).toBe(true)
+  test('the count and selected rows use the same search and value filters', () => {
+    const fleet = [
+      { id: 'match', title: 'Release leader', state: 'working', harness: 'codex', project: 'app', repo: 'org/app', model: 'm1' },
+      { id: 'ended', title: 'Release ended', state: 'exited', harness: 'codex', project: 'app', repo: 'org/app', model: 'm1' },
+      { id: 'search', title: 'Other leader', state: 'waiting', harness: 'codex', project: 'app', repo: 'org/app', model: 'm1' },
+      { id: 'harness', title: 'Release harness', state: 'working', harness: 'claude', project: 'app', repo: 'org/app', model: 'm1' },
+      { id: 'project', title: 'Release project', state: 'working', harness: 'codex', project: 'other', repo: 'org/app', model: 'm1' },
+      { id: 'repo', title: 'Release repo', state: 'working', harness: 'codex', project: 'app', repo: 'org/other', model: 'm1' },
+      { id: 'model', title: 'Release model', state: 'working', harness: 'codex', project: 'app', repo: 'org/app', model: 'm2' },
+    ].map(r => ({ ...r, searchFields: { name: r.title, folder: '', harness: '', note: '', task: '', prompt: '' } })) as ControlSession[]
+    const filters = { harnesses: ['codex'], projects: ['app'], repos: ['org/app'], models: ['m1'] } as Filters
+    const searched = filterSessions(filterFleet({ rows: fleet, filters, activeOnly: false }).rows, 'Release')
+    const leader = () => 'leader' as const
+    expect(countLeaders(searched, leader)).toBe(1)
+    expect(applyLeadersOnly(searched, true, leader).map(r => r.id)).toEqual(['match'])
+    expect(countLeaders(filterSessions(searched, 'absent'), leader)).toBe(0)
   })
 })
 

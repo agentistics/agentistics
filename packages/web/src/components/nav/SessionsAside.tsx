@@ -29,7 +29,7 @@ import {
 } from 'lucide-react'
 import type { Filters } from '@agentistics/core'
 import {
-  ACTIVE_STATES, filterSessions, sessionNotify, sessionRunning,
+  ACTIVE_STATES, filterSessions, sessionNotify, sessionRunning, sortSessions,
   type ControlSession, type SessionGroup, type SessionState,
 } from '@agentistics/tui/control/session-fleet'
 import { asideGroups, showsGroupHeadings } from '../../lib/fleetGroups'
@@ -95,7 +95,7 @@ import { CLUSTER_ACCENT, CLUSTER_TINT } from '../tasks/subtaskGroups'
 import { NAY_UNDOCK_SESSION, requestUndockSession, withUndockEntry } from '../../lib/nayDockBridge'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { getSessionRole, registerSessionRoleAlias, setSessionRole, useMuteWorkers, useSessionRole, useSessionRoles, type SessionRole } from '../../lib/sessionRoles'
-import { applyLeadersOnly, countLeaders, leadersBanner, leadersText } from '../../lib/leadersFilter'
+import { applyLeadersOnly, countLeaders, leadersText } from '../../lib/leadersFilter'
 
 /** The row menu's client-side "open beside" entry — see `openSessionBeside`. */
 const OPEN_BESIDE = '__open_beside__'
@@ -749,9 +749,14 @@ export function SessionsAside({
     () => applySummaryFilter(activeOnly ? searched.filter(r => active.has(r.state)) : searched, summaryFilter),
     [searched, activeOnly, active, summaryFilter],
   )
-  const matched = useMemo(() => applyLeadersOnly(beforeLeaders, leadersOnly, roleOfRow), [beforeLeaders, leadersOnly, roleOfRow])
+  // Leaders-only is a flat view of the active leaders matching search/value filters. Summary
+  // and arrangement choices stay stored for when the person switches back to the normal view.
+  const activeLeaders = useMemo(
+    () => sortSessions(applyLeadersOnly(searched, true, roleOfRow), sortOrder),
+    [searched, roleOfRow, sortOrder],
+  )
+  const matched = leadersOnly ? activeLeaders : beforeLeaders
   const leaderCount = useMemo(() => countLeaders(searched, roleOfRow), [searched, roleOfRow])
-  const leadersHidden = leadersOnly ? beforeLeaders.length - matched.length : 0
   /** How many rows the switch is withholding, so the row can say what turning it off would show. */
   const hidden = useMemo(
     () => (activeOnly ? searched.filter(r => !active.has(r.state)).length : 0),
@@ -1306,7 +1311,7 @@ export function SessionsAside({
         aria-label={pt ? 'Resumo das sessões' : 'Sessions summary'}
         style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '2px 0', padding: '0 2px', fontSize: 11, color: 'var(--text-tertiary)' }}
       >
-        {summaryParts(summaryNumbers, pt).map((v, i) => (
+        {!leadersOnly && summaryParts(summaryNumbers, pt).map((v, i) => (
           <span key={v.part} style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center' }}>
             {i > 0 && <span aria-hidden>·</span>}
             <button
@@ -1327,7 +1332,7 @@ export function SessionsAside({
         ))}
         {(leaderCount > 0 || leadersOnly) && (
           <span style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center' }}>
-            <span aria-hidden>·</span>
+            {!leadersOnly && <span aria-hidden>·</span>}
             <button
               type="button"
               data-leaders-only
@@ -1439,7 +1444,7 @@ export function SessionsAside({
           )}
         </button>
         )}
-        <SessionsGroupMenu
+        {!leadersOnly && <SessionsGroupMenu
           fill
           lang={lang}
           groupBy={groupBy}
@@ -1462,7 +1467,7 @@ export function SessionsAside({
             groupBy, sort: sortOrder, cardColor,
             order: groupOrder[groupBy] ?? [], hiddenFolders: hiddenFoldersOf(groupsValue).length,
           })}
-        />
+        />}
         {mutedRows.length > 0 && (
           <button
             ref={mutedButtonRef}
@@ -1690,21 +1695,6 @@ export function SessionsAside({
           teams, machines) is said here, above the scroller — the same placement `stale` uses, and
           for the same reason: a caveat about every row below must be readable wherever the reader
           has scrolled. Silence here reads as a broken filter, not an honest one. */}
-      {leadersOnly && (
-        <p role="status" data-leaders-banner style={{
-          margin: '0 2px', padding: '7px 9px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-          background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-          fontSize: 10.5, lineHeight: 1.45, color: 'var(--text-tertiary)',
-        }}>
-          <Crown size={11} aria-hidden style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />
-          <span>{leadersBanner(leadersHidden, pt)}</span>
-          <button
-            type="button" onClick={() => writeAsideGroupPrefs({ leadersOnly: false })}
-            style={{ border: 'none', background: 'transparent', padding: isMobile ? '12px 4px' : 0, minHeight: tap, font: 'inherit', fontWeight: 600, color: 'var(--text-secondary)', cursor: 'pointer', textDecoration: 'underline' }}
-          >{pt ? 'mostrar todas' : 'show all'}</button>
-        </p>
-      )}
-
       {ignoredNote && (
         <p role="status" style={{
           margin: '0 2px', padding: '7px 9px', borderRadius: 8,
@@ -1741,6 +1731,27 @@ export function SessionsAside({
           setDraggingGroupId(null)
         }}
       >
+        {leadersOnly ? (
+          <div data-leaders-list style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {activeLeaders.map(s => (
+              <SessionRow
+                key={s.id}
+                session={s}
+                selected={rowSelected(s, sessionId)}
+                pinned={pinned.has(pinKeyOf(s))}
+                tap={tap}
+                onPin={() => flip(s)}
+                onOpen={() => (onOpenRow ? onOpenRow(s) : openSessionRoute(s.id))}
+                {...(rowsById?.get(s.id) ? { verbs: rowsById.get(s.id)!.verbs } : {})}
+                onOpenMenu={(x, y, verbs) => openMenu(s, x, y, verbs)}
+                onFile={(x, y) => setLinking({ id: s.id, x, y })}
+                lang={lang}
+                cardColor={cardColor}
+              />
+            ))}
+          </div>
+        ) : (
+          <>
         {/* The pinned band, above everything — that is what pinning is for: the two or three
             sessions that must not move when the arrangement changes. */}
         {pinnedRows.length > 0 && (
@@ -1922,6 +1933,8 @@ export function SessionsAside({
               />
             ))}
           </div>
+        )}
+          </>
         )}
       </div>
 

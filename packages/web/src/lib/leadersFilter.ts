@@ -1,27 +1,24 @@
 /**
- * leadersFilter.ts — PURE: the aside's "só líderes" switch.
- *
- * A PERSISTED arrangement choice (`AsideGroupPrefs.leadersOnly`), not the transient `summaryFilter`:
- * a fleet is mostly workers, and the person who wants only the leaders wants it on the next visit
- * too. It is a FILTER, so it narrows the same pipeline the summary filter does and counts on the
- * Filtros badge — never on the arrange button.
- *
- * What it does NOT touch: the pinned band (a pin is "always in sight", the rule `activeOnly` already
- * keeps) and the folder TREE — a folder with no leader left keeps its place, dimmed, by the same
- * `narrowing` rule a search uses.
+ * The aside's persisted leaders-only view uses active fleet states, after search and value
+ * filters. It bypasses the normal pinned/folder/band arrangement and the summary filter.
  */
+import { ACTIVE_STATES } from '@agentistics/tui/control/session-fleet'
 import type { SessionRole } from './sessionRoles'
 
-/** How many of these rows are leaders (the count the summary part wears). */
-export function countLeaders<T>(rows: readonly T[], roleOf: (row: T) => SessionRole | undefined): number {
+const active = new Set<string>(ACTIVE_STATES)
+const isActiveLeader = <T extends { state: string }>(row: T, roleOf: (row: T) => SessionRole | undefined) =>
+  active.has(row.state) && roleOf(row) === 'leader'
+
+/** Count active leaders in the search/value-filtered rows, before summary filtering. */
+export function countLeaders<T extends { state: string }>(rows: readonly T[], roleOf: (row: T) => SessionRole | undefined): number {
   let n = 0
-  for (const r of rows) if (roleOf(r) === 'leader') n++
+  for (const r of rows) if (isActiveLeader(r, roleOf)) n++
   return n
 }
 
-/** The rows when the switch is off; only the leaders when it is on. */
-export function applyLeadersOnly<T>(rows: readonly T[], on: boolean, roleOf: (row: T) => SessionRole | undefined): T[] {
-  return on ? rows.filter(r => roleOf(r) === 'leader') : [...rows]
+/** Off preserves every row; on keeps only active leaders. */
+export function applyLeadersOnly<T extends { state: string }>(rows: readonly T[], on: boolean, roleOf: (row: T) => SessionRole | undefined): T[] {
+  return on ? rows.filter(r => isActiveLeader(r, roleOf)) : [...rows]
 }
 
 /** The summary part's words: "2 líderes". */
@@ -34,5 +31,5 @@ export function leadersBanner(hidden: number, pt: boolean): string {
   const h = pt
     ? `${hidden} ${hidden === 1 ? 'sessão oculta' : 'sessões ocultas'}`
     : `${hidden} ${hidden === 1 ? 'session' : 'sessions'} hidden`
-  return pt ? `Mostrando só líderes · ${h}` : `Showing leaders only · ${h}`
+  return pt ? `Mostrando só líderes ativos · ${h}` : `Showing active leaders only · ${h}`
 }
