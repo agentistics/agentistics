@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile, stat, chmod, symlink } from 'n
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readdir } from 'node:fs/promises'
-import { codexIdentity, createHarnessAccounts, probeAccountIdentity, __setHarnessAccountsForTest, IDENTITY_PROBES, ISOLATION_ENV } from './harness-accounts'
+import { codexIdentity, createHarnessAccounts, probeAccountIdentity, sameLogin, __setHarnessAccountsForTest, IDENTITY_PROBES, ISOLATION_ENV } from './harness-accounts'
 import { handleAccountsRequest } from './accounts-web'
 import { routeCapability } from './capability-guard'
 
@@ -413,4 +413,181 @@ test('backup name collisions are retried, then exhaustion throws and the origina
   })
   await bindOnce(retry)
   expect(calls).toBe(2)
+})
+
+
+test('L1: a late older segment write never moves the persisted boundary backwards', async () => {
+  const file = join(dir, 'accounts.json')
+  const first = createHarnessAccounts({ file })
+  const second = createHarnessAccounts({ file })
+  const { account } = await first.bind('/first', { ...identity, harness: 'codex' })
+  await first.startSegment(account.id, 2000)
+  await second.startSegment(account.id, 1000)
+  expect((await second.readAccounts()).segments[account.id]).toBe(2000)
+})
+
+test('a login whose probe key changed spelling keeps its account instead of minting a twin', async () => {
+  const file = join(dir, 'accounts.json')
+  const org = '00000000-0000-4000-8000-000000000002'
+  await writeFile(file, JSON.stringify({ version: 2, segments: {}, bindings: { 'claude:': 'acc_legacy000000' },
+    accounts: [{ id: 'acc_legacy000000', root: null, key: org, harness: 'claude', label: 'a@example.invalid', available: true, firstSeen: 1, lastSeen: 2 }] }))
+  const store = createHarnessAccounts({ file, now: () => 10, probe: async () => ({ key: `${org}:a@example.invalid`, label: 'a@example.invalid' }) })
+  const account = await store.current('claude')
+  expect(account.id).toBe('acc_legacy000000')
+  expect(account.key).toBe(`${org}:a@example.invalid`)
+  expect((await store.readAccounts()).accounts).toHaveLength(1)
+})
+
+test('an org id alone never merges two people of one team', async () => {
+  const file = join(dir, 'accounts.json')
+  const org = '00000000-0000-4000-8000-000000000003'
+  await writeFile(file, JSON.stringify({ version: 2, segments: {}, bindings: {},
+    accounts: [{ id: 'acc_teammate0000', root: null, key: org, harness: 'claude', label: 'b@example.invalid', available: true, firstSeen: 1, lastSeen: 2 }] }))
+  const store = createHarnessAccounts({ file, probe: async () => ({ key: `${org}:a@example.invalid`, label: 'a@example.invalid' }) })
+  expect((await store.current('claude')).id).not.toBe('acc_teammate0000')
+  expect((await store.readAccounts()).accounts).toHaveLength(2)
+})
+
+test('registry twins are folded on read: bindings, segments and an alias follow the survivor', async () => {
+  const file = join(dir, 'accounts.json')
+  await writeFile(file, JSON.stringify({ version: 2, segments: { acc_gemlegacy0000: 50 }, bindings: { 'gemini:': 'acc_gemroot00000' },
+    accounts: [
+      { id: 'acc_gemlegacy0000', root: null, key: 'default', harness: 'gemini', label: 'Conta padrão', nickname: 'Home', available: true, firstSeen: 1, lastSeen: 5 },
+      { id: 'acc_gemroot00000', root: null, key: 'root:abcdef012345', harness: 'gemini', label: 'Default account', available: true, firstSeen: 3, lastSeen: 9 },
+    ] }))
+  const store = createHarnessAccounts({ file })
+  const data = await store.readAccounts()
+  expect(data.accounts).toHaveLength(1)
+  expect(data.accounts[0]).toMatchObject({ id: 'acc_gemroot00000', nickname: 'Home', firstSeen: 1, lastSeen: 9 })
+  expect(data.aliases).toEqual({ acc_gemlegacy0000: 'acc_gemroot00000' })
+  expect(data.segments).toEqual({ acc_gemroot00000: 50 })
+  expect((await store.byId('acc_gemlegacy0000'))?.id).toBe('acc_gemroot00000')
+  // The fold is persisted, so every process reads the same single record.
+  expect(JSON.parse(await readFile(file, 'utf8')).accounts).toHaveLength(1)
+})
+
+test('equal keys alone never fold: an org-only key needs the same e-mail, `default` the same root', () => {
+  const org = '00000000-0000-4000-8000-000000000004'
+  const rec = (key: string, label: string, root: string | null = null, harness: 'claude' | 'gemini' = 'claude') => ({ harness, key, label, root })
+  // Two people of one team org, recorded under the legacy org-only key.
+  expect(sameLogin(rec(org, 'a@example.invalid'), rec(org, 'b@example.invalid'))).toBe(false)
+  expect(sameLogin(rec(org, org), rec(org, org))).toBe(false)
+  expect(sameLogin(rec(org, 'A@example.invalid'), rec(org, 'a@example.invalid'))).toBe(true)
+  expect(sameLogin(rec(`${org}:a@example.invalid`, 'a@example.invalid'), rec(`${org}:a@example.invalid`, 'a@example.invalid'))).toBe(true)
+  expect(sameLogin(rec('default', 'Conta padrão'), rec('default', 'Conta padrão'))).toBe(true)
+  expect(sameLogin(rec('default', 'Conta padrão', '/x'), rec('default', 'Conta padrão', '/y'))).toBe(false)
+  // Probe-less `default`: only a compatible root says it is one login.
+  expect(sameLogin(rec('default', 'Conta padrão', '/home/a/.gemini', 'gemini'), rec('default', 'Conta padrão', '/home/b/.gemini', 'gemini'))).toBe(false)
+  expect(sameLogin(rec('default', 'Conta padrão', '/home/a/.gemini', 'gemini'), rec('default', 'Conta padrão', '/home/a/.gemini/', 'gemini'))).toBe(true)
+})
+
+test('a registry holding two teammates under one org-only key keeps both on read', async () => {
+  const file = join(dir, 'accounts.json')
+  const org = '00000000-0000-4000-8000-000000000005'
+  await writeFile(file, JSON.stringify({ version: 2, segments: {}, bindings: {}, accounts: [
+    { id: 'acc_mate_a000000', root: null, key: org, harness: 'claude', label: 'a@example.invalid', available: true, firstSeen: 1, lastSeen: 2 },
+    { id: 'acc_mate_b000000', root: '/tmp/b', key: org, harness: 'claude', label: 'b@example.invalid', available: true, firstSeen: 1, lastSeen: 3 },
+    { id: 'acc_gem_a0000000', root: '/tmp/ga', key: 'default', harness: 'gemini', label: 'Conta padrão', available: true, firstSeen: 1, lastSeen: 2 },
+    { id: 'acc_gem_b0000000', root: '/tmp/gb', key: 'default', harness: 'gemini', label: 'Conta padrão', available: true, firstSeen: 1, lastSeen: 3 },
+  ] }))
+  const data = await createHarnessAccounts({ file }).readAccounts()
+  expect(data.accounts.map(a => a.id).sort()).toEqual(['acc_gem_a0000000', 'acc_gem_b0000000', 'acc_mate_a000000', 'acc_mate_b000000'])
+  expect(data.aliases).toBeUndefined()
+})
+
+test('a writer holding an id that was folded away writes to the survivor', async () => {
+  const file = join(dir, 'accounts.json')
+  await writeFile(file, JSON.stringify({ version: 2, segments: {}, bindings: { 'gemini:': 'acc_gemroot00000' }, accounts: [
+    { id: 'acc_gemlegacy0000', root: null, key: 'default', harness: 'gemini', label: 'Conta padrão', available: true, firstSeen: 1, lastSeen: 5 },
+    { id: 'acc_gemroot00000', root: null, key: 'root:abcdef012345', harness: 'gemini', label: 'Default account', available: true, firstSeen: 3, lastSeen: 9 },
+  ] }))
+  // Its own locked read performs the fold: the nickname still lands.
+  const writer = createHarnessAccounts({ file })
+  expect((await writer.update('acc_gemlegacy0000', { nickname: 'Home' }))?.id).toBe('acc_gemroot00000')
+  // Another store folded it long ago; this one still holds the old id.
+  await createHarnessAccounts({ file }).readAccounts()
+  expect((await writer.update('acc_gemlegacy0000', { available: false }))?.available).toBe(false)
+  await writer.startSegment('acc_gemlegacy0000', 77)
+  expect((await writer.retire('acc_gemlegacy0000'))?.id).toBe('acc_gemroot00000')
+  const disk = JSON.parse(await readFile(file, 'utf8'))
+  expect(disk.accounts).toHaveLength(1)
+  expect(disk.accounts[0]).toMatchObject({ id: 'acc_gemroot00000', nickname: 'Home', available: false, retired: true })
+  expect(disk.segments).toEqual({ acc_gemroot00000: 77 })
+})
+
+// Two people of one team org, each bound to their own root under the legacy org-only key.
+const TEAM_ORG = '00000000-0000-4000-8000-000000000006'
+async function writeTeammates(file: string) {
+  await writeFile(file, JSON.stringify({ version: 2, segments: {}, bindings: { 'claude:/tmp/ta': 'acc_team_a000000', 'claude:/tmp/tb': 'acc_team_b000000' }, accounts: [
+    { id: 'acc_team_a000000', root: '/tmp/ta', key: TEAM_ORG, harness: 'claude', label: 'a@example.invalid', nickname: 'Ana', available: true, firstSeen: 1, lastSeen: 2 },
+    { id: 'acc_team_b000000', root: '/tmp/tb', key: TEAM_ORG, harness: 'claude', label: 'b@example.invalid', available: false, firstSeen: 1, lastSeen: 3 },
+  ] }))
+}
+
+test('adoption never moves a teammate onto another person by an equal org-only key', async () => {
+  const file = join(dir, 'accounts.json')
+  await writeTeammates(file)
+  // The probe names the org and no e-mail: only the root's own binding says whose login it is.
+  const store = createHarnessAccounts({ file, probe: async () => ({ key: TEAM_ORG, label: TEAM_ORG }) })
+  expect((await store.current('claude', '/tmp/tb')).id).toBe('acc_team_b000000')
+  expect((await store.current('claude', '/tmp/ta')).id).toBe('acc_team_a000000')
+  // An unbound root with the same org-only key is nobody known: a new row, never A or B.
+  const other = await store.current('claude', '/tmp/tc')
+  expect(['acc_team_a000000', 'acc_team_b000000']).not.toContain(other.id)
+  expect((await store.current('claude', '/tmp/tc')).id).toBe(other.id)
+  const disk = JSON.parse(await readFile(file, 'utf8'))
+  const byId = Object.fromEntries(disk.accounts.map((a: { id: string }) => [a.id, a]))
+  expect(byId.acc_team_a000000).toMatchObject({ root: '/tmp/ta', label: 'a@example.invalid', nickname: 'Ana' })
+  expect(byId.acc_team_b000000).toMatchObject({ root: '/tmp/tb', label: 'b@example.invalid', available: false })
+  expect(disk.bindings['claude:/tmp/tb']).toBe('acc_team_b000000')
+})
+
+test('a direct bind of two teammates under one org-only key returns two accounts', async () => {
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json') })
+  const a = await store.bind('/tmp/ta', { harness: 'claude', key: TEAM_ORG, label: 'a@example.invalid' })
+  const b = await store.bind('/tmp/tb', { harness: 'claude', key: TEAM_ORG, label: 'b@example.invalid' })
+  expect(a.account.id).not.toBe(b.account.id)
+  // The same person again (same e-mail) is the same account.
+  expect((await store.bind('/tmp/ta2', { harness: 'claude', key: TEAM_ORG, label: 'a@example.invalid' })).account.id).toBe(a.account.id)
+})
+
+test('a bound root switching between two e-mails of one org rebinds, never relabels', async () => {
+  const file = join(dir, 'accounts.json')
+  await writeTeammates(file)
+  const store = createHarnessAccounts({ file })
+  await store.update('acc_team_b000000', { nickname: 'Bia' })
+  // B's root now reports A's e-mail under the same org-only key: that is A, not B renamed.
+  const toA = await store.bind('/tmp/tb', { harness: 'claude', key: TEAM_ORG, label: 'a@example.invalid' })
+  expect(toA.account.id).toBe('acc_team_a000000')
+  // A third e-mail on the same root is a new person: a new row, A untouched.
+  const toC = await store.bind('/tmp/tb', { harness: 'claude', key: TEAM_ORG, label: 'c@example.invalid' })
+  expect(['acc_team_a000000', 'acc_team_b000000']).not.toContain(toC.account.id)
+  // And back to B.
+  expect((await store.bind('/tmp/tb', { harness: 'claude', key: TEAM_ORG, label: 'b@example.invalid' })).account.id).toBe('acc_team_b000000')
+  // A probe with no person evidence keeps the bound account.
+  expect((await store.bind('/tmp/tb', { harness: 'claude', key: TEAM_ORG, label: TEAM_ORG })).account.id).toBe('acc_team_b000000')
+  const data = await createHarnessAccounts({ file }).readAccounts()
+  const byId = Object.fromEntries(data.accounts.map(a => [a.id, a]))
+  expect(byId.acc_team_a000000).toMatchObject({ label: 'a@example.invalid', nickname: 'Ana' })
+  expect(byId.acc_team_b000000).toMatchObject({ label: 'b@example.invalid', nickname: 'Bia', available: false })
+  expect(data.accounts.filter(a => a.harness === 'claude')).toHaveLength(3)
+  expect(data.aliases ?? {}).toEqual({})
+})
+
+test('v1 migration keeps two teammates under one org-only key apart', async () => {
+  const file = join(dir, 'accounts.json')
+  await writeFile(file, JSON.stringify([
+    { harness: 'claude', key: TEAM_ORG, label: 'a@example.invalid', available: false, firstSeen: 1, lastSeen: 5 },
+    { harness: 'claude', key: TEAM_ORG, label: 'b@example.invalid', firstSeen: 2, lastSeen: 9 },
+    { harness: 'claude', key: TEAM_ORG, label: 'A@example.invalid', firstSeen: 3, lastSeen: 7 },
+  ]))
+  const data = await createHarnessAccounts({ file }).readAccounts()
+  const claude = data.accounts.filter(a => a.harness === 'claude')
+  expect(claude).toHaveLength(2)
+  const a = claude.find(x => x.label.toLowerCase() === 'a@example.invalid')!
+  const b = claude.find(x => x.label === 'b@example.invalid')!
+  expect(a).toMatchObject({ available: false, firstSeen: 1, lastSeen: 7 })
+  expect(b).toMatchObject({ available: true, firstSeen: 2, lastSeen: 9 })
+  const disk = JSON.parse(await readFile(file, 'utf8'))
+  expect(disk.accounts).toHaveLength(2)
 })

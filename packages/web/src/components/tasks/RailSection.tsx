@@ -16,8 +16,8 @@
  * the same reason the board's columns and folds are remembered.
  */
 
-import { ChevronDown, ChevronRight } from 'lucide-react'
-import { useIsMobile } from '../../hooks/useIsMobile'
+import { useId } from 'react'
+import { Disclosure } from '../Disclosure'
 import { microLabel, numeric, surface } from './board'
 import { setRailOpen, useBoardPrefs } from './boardPrefs'
 
@@ -30,31 +30,28 @@ export function RailSection({ id, title, badge, defaultOpen = false, children }:
   defaultOpen?: boolean
   children: React.ReactNode
 }) {
-  const isMobile = useIsMobile()
+  const panelId = `rail-${useId()}`
   const stored = useBoardPrefs().rail[id]
   const open = typeof stored === 'boolean' ? stored : defaultOpen
   return (
     <div style={{ ...surface, overflow: 'hidden' }}>
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setRailOpen(id, !open)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
-          background: 'none', border: 'none', cursor: 'pointer',
-          padding: isMobile ? '12px 14px' : '10px 14px',
-          minHeight: isMobile ? 44 : undefined,
-        }}
-      >
-        {open
-          ? <ChevronDown size={13} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
-          : <ChevronRight size={13} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />}
-        <span style={{ ...microLabel, flex: 1 }}>{title}</span>
-        {!open && badge !== undefined && badge !== '' && (
-          <span style={{ ...numeric, fontSize: 11.5, color: 'var(--text-tertiary)' }}>{badge}</span>
+      <Disclosure
+        open={open}
+        onToggle={() => setRailOpen(id, !open)}
+        panelId={panelId}
+        panelStyle={{ padding: '0 14px 14px', display: 'grid', gap: 10 }}
+        header={chevron => (
+          <>
+            {chevron}
+            <span style={{ ...microLabel, flex: 1 }}>{title}</span>
+            {!open && badge !== undefined && badge !== '' && (
+              <span style={{ ...numeric, fontSize: 11.5, color: 'var(--text-tertiary)' }}>{badge}</span>
+            )}
+          </>
         )}
-      </button>
-      {open && <div style={{ padding: '0 14px 14px', display: 'grid', gap: 10 }}>{children}</div>}
+      >
+        {children}
+      </Disclosure>
     </div>
   )
 }

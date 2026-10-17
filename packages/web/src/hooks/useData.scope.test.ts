@@ -15,7 +15,7 @@
  * useDerivedStats is a hook (a single useMemo), so `react` is stubbed to run the memo body
  * eagerly. No React renderer, no new dependency.
  */
-import { describe, test, expect, mock } from 'bun:test'
+import { afterAll, describe, test, expect, mock } from 'bun:test'
 import * as React from 'react'
 import { emptyStatsCache } from '@agentistics/core'
 import type { AppData, Filters, SessionMeta, StatsCache } from '@agentistics/core'
@@ -37,6 +37,9 @@ import type { TagDef } from '../lib/tagMatch'
  * component the function itself as its state — `useTerminalSize` does `useState(currentSize)`, so
  * every Ink surface rendered after this file came out at a width of `undefined`.
  */
+// Snapshot BEFORE mocking: `afterAll` puts exactly this back, so no later file of the run sees the stub.
+const realReact = { ...React, default: (React as { default?: unknown }).default ?? React }
+afterAll(() => { mock.module('react', () => realReact) })
 mock.module('react', () => ({
   ...React,
   default: (React as { default?: unknown }).default ?? React,

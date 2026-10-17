@@ -26,6 +26,10 @@ describe('inheritedIdentity', () => {
     for (const k of ['id', 'createdAt', 'endedAt', 'lastSeenMs', 'conversationId']) expect(k in r).toBe(false)
   })
   it('is empty without a previous row', () => expect(inheritedIdentity(undefined)).toEqual({}))
+  it('PLAN.ACCOUNTS D3: a reopen keeps the account (immutable), and a row without one gains none', () => {
+    expect(inheritedIdentity({ ...prev, accountId: 'acc_two' }).accountId).toBe('acc_two')
+    expect('accountId' in inheritedIdentity(prev)).toBe(false)
+  })
   it('carries the per-session away flag across a reopen', () => {
     expect(inheritedIdentity({ ...prev, away: true }).away).toBe(true)
     expect('away' in inheritedIdentity(prev)).toBe(false)
@@ -41,7 +45,8 @@ describe('every reopen path inherits identity', () => {
     const src = await read('../cli-start.ts')
     expect(src).toContain('...inheritedIdentity(req.inherit)')
     expect(src).toContain('inherit: m,')
-    expect(src).toContain('...(previous ? { inherit: previous } : {})')
+    expect(src).toContain('spawnManaged(reopenRowRequest(m, row, caller), s, lang)')
+    expect(src).toContain('...(previous ? { inherit: previous } : recordedAccountId ? { accountId: recordedAccountId } : {})')
   })
   it('openTask and takeover use it too', async () => {
     const src = await read('./cli-session.ts')

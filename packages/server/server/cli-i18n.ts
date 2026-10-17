@@ -370,6 +370,7 @@ export interface CliStrings {
   sessSpawnNoEffort: (harness: string) => string
   sessSpawnBadEffort: (harness: string, value: string, accepted: string[]) => string
   sessSpawnBadMode: (harness: string, value: string) => string
+  sessSpawnNoAccount: (harness: string) => string
 
   /**
    * What `agentop session ls` says AROUND the table. The table's own chrome — its column headings
@@ -829,6 +830,8 @@ const EN: CliStrings = {
     `${harness} does not accept effort "${value}". Accepted: ${accepted.join(', ')}.`,
   sessSpawnBadMode: (harness: string, value: string) =>
     `"${value}" is not a mode ${harness} can start in. Modes: default, accept-edits, plan, no-questions.`,
+  sessSpawnNoAccount: (harness: string) =>
+    `${harness} keeps a single login per computer, so it cannot start in another account's folder.`,
 
   sessLs: {
     none: 'No sessions.',
@@ -1244,6 +1247,8 @@ const PT: CliStrings = {
     `${harness} não aceita o effort "${value}". Aceitos: ${accepted.join(', ')}.`,
   sessSpawnBadMode: (harness: string, value: string) =>
     `"${value}" não é um modo em que o ${harness} possa iniciar. Modos: default, accept-edits, plan, no-questions.`,
+  sessSpawnNoAccount: (harness: string) =>
+    `O ${harness} mantém um único login por computador, então não pode iniciar na pasta de outra conta.`,
 
   sessLs: {
     none: 'Nenhuma sessão.',

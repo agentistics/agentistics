@@ -52,6 +52,9 @@ const windowsBackend: SessionBackend = {
  */
 let composite: SessionBackend | null = null
 
+/** Tests install a recording backend; never the owner's tmux. `null` restores the real one. */
+export function __setSessionBackendForTest(next: SessionBackend | null): void { composite = next }
+
 export async function resolveBackend(): Promise<SessionBackend> {
   if (process.platform === 'win32') return windowsBackend
   if (!composite) {
@@ -77,7 +80,13 @@ export async function resolveBackend(): Promise<SessionBackend> {
           ...(i.mode ? { mode: i.mode } : {}),
         }, await spawnCapabilities(i.harness))
         if (!planned.ok) return null
-        return { id: req.id, cwd: req.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}) }
+        // PLAN.ACCOUNTS D3 — the TUI that continues a structured session stays in its account root:
+        // only the isolation variable is carried over from the original spawn's env.
+        const { ISOLATION_ENV } = await import('../account-isolation')
+        const isolation = ISOLATION_ENV[i.harness]
+        const root = isolation ? req.env?.[isolation] : undefined
+        const env = { ...(planned.plan.env ?? {}), ...(isolation && root ? { [isolation]: root } : {}) }
+        return { id: req.id, cwd: req.cwd, argv: planned.plan.argv, ...(Object.keys(env).length ? { env } : {}) }
       },
       onStarted(id, driver) {
         void import('./registry').then(r => r.patchSession(id, { structuredDriver: driver })).catch(() => {})

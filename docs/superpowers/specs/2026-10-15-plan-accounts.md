@@ -347,7 +347,7 @@ sessions + measured burn 2 %/h → `liveSessions = []`, `freeSlots` from the pla
   Provisional: yes; revisit if a rented account's history beyond 30 days matters.
 - **Q5** Shared config by symlink (skills, settings, MCP the same in every account) vs. a clean
   root per account. Provisional: shared.
-- **Q6** When two accounts of one harness have room, the router picks the one with the most room;
-  alternative policy "drain the account whose week resets first" (use it before it is lost) was
-  considered and is a one-function change. Provisional: most room; recommend revisiting after a
-  week of data.
+- **Q6** Decided (leader s40, 16/10): drain the account that resets first; tie → most room.
+  Of one harness's eligible accounts the router picks the one whose WEEK resets first (its quota
+  is lost soonest); equal resets → the most room (lowest binding %), then the newest reading. One
+  function, `pickAccount` in `core/planLimits.ts`.

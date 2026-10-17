@@ -21,6 +21,13 @@ function deps(over: Partial<DelegateDeps> = {}): DelegateDeps & { log: string[] 
 const req = { harness: 'claude' as const, cwd: '/w', prompt: 'brief', model: 'claude-sonnet-5-5', label: 'worker', requestedBy: 'native:ses_1' }
 
 describe('delegation members', () => {
+  test('PLAN.ACCOUNTS D3: a delegated start is an AGENT start (held to the account rule)', async () => {
+    let body: unknown
+    const d = deps({ spawn: async b => { body = b; return { ok: true, message: 'started', id: 'm-1' } } })
+    await createDelegateMembers(d).delegateSpawn(req)
+    expect(body).toMatchObject({ callerVerified: true })
+  })
+
   test('the harnesses offered are installed AND allowed', async () => {
     expect(await createDelegateMembers(deps()).delegateHarnesses()).toEqual(['claude', 'codex'])
     expect(await createDelegateMembers(deps({ allowed: async () => [] })).delegateHarnesses()).toEqual([])

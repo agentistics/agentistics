@@ -324,45 +324,56 @@ export interface BillingReadiness {
 export function billingReadiness(
   settings: BillingSettings,
   harnessesInScope: readonly HarnessId[],
+  /** The accounts the arithmetic prices. An account's OWN timeline counts like the harness default:
+   *  a machine that answered only per-account notices has `accountProfiles` and no `profiles`. */
+  accounts?: readonly PlanAccountRef[],
 ): BillingReadiness {
   const readyHarnesses: HarnessId[] = []
   const gaps: BillingGap[] = []
 
   for (const harness of harnessesInScope) {
-    const timeline = settings.profiles[harness]
-    if (!timeline || timeline.periods.length === 0) {
+    const def = settings.profiles[harness]
+    const mine = (accounts ?? []).filter((a) => a.harness === harness)
+    // Validate exactly the timelines the arithmetic prices (`selectedTimelines`): an obsolete default
+    // that every account has overridden is never read, so its errors must not block the basis.
+    const picked = mine.length > 0 && settings.accountProfiles
+      ? selectedTimelines(def, mine, settings.accountProfiles)
+      : [def]
+    const timelines = picked.filter((t): t is BillingTimeline => !!t && t.periods.length > 0)
+    if (timelines.length === 0) {
       gaps.push({ code: 'no_timeline', harness })
       continue
     }
 
-    const errorsById = validateTimeline(timeline)
-    if (errorsById.size === 0) {
-      readyHarnesses.push(harness)
-      continue
-    }
+    const before = gaps.length
+    for (const timeline of timelines) {
+      const errorsById = validateTimeline(timeline)
+      if (errorsById.size === 0) continue
 
-    // An overlap is a property of the timeline, not of one period — reporting it per row would
-    // ask the user to fix the same fact twice.
-    const overlapping = [...errorsById.values()].some((errors) =>
-      errors.some((e) => e.code === 'overlap'),
-    )
-    if (overlapping) {
-      gaps.push({ code: 'invalid_timeline', harness })
-      continue
-    }
+      // An overlap is a property of the timeline, not of one period — reporting it per row would
+      // ask the user to fix the same fact twice.
+      const overlapping = [...errorsById.values()].some((errors) =>
+        errors.some((e) => e.code === 'overlap'),
+      )
+      if (overlapping) {
+        gaps.push({ code: 'invalid_timeline', harness })
+        continue
+      }
 
-    for (const period of sortPeriods(timeline.periods)) {
-      const errors = errorsById.get(period.id)
-      if (!errors || errors.length === 0) continue
-      gaps.push({
-        code: 'incomplete_period',
-        harness,
-        periodId: period.id,
-        planId: period.planId,
-        label: period.label,
-        errors,
-      })
+      for (const period of sortPeriods(timeline.periods)) {
+        const errors = errorsById.get(period.id)
+        if (!errors || errors.length === 0) continue
+        gaps.push({
+          code: 'incomplete_period',
+          harness,
+          periodId: period.id,
+          planId: period.planId,
+          label: period.label,
+          errors,
+        })
+      }
     }
+    if (gaps.length === before) readyHarnesses.push(harness)
   }
 
   return {
@@ -553,8 +564,26 @@ function mergePlanCosts(parts: readonly PlanCostResult[]): PlanCostResult {
     segments.push(...part.segments)
   }
   const invalidTimeline = parts.some((p) => p.invalidTimeline)
-  const coveredDays = coveredDayKeys.size
   const windowDays = first.windowDays
+  // One account's hand-edited overlap makes the whole sum unusable: return the empty shape (no cost, no
+  // covered days), exactly what a single invalid timeline returns, never the other accounts' partial C.
+  if (invalidTimeline) {
+    return {
+      subscriptionCostUSD: 0,
+      windowDays,
+      coveredDays: 0,
+      uncoveredDays: windowDays,
+      coverageRatio: 0,
+      coveredDayKeys: new Set(),
+      apiDayKeys: new Set(),
+      segments: [],
+      usedBrlRate: first.usedBrlRate,
+      brlRateUnusable: false,
+      invalidTimeline: true,
+      unavailable: true,
+    }
+  }
+  const coveredDays = coveredDayKeys.size
   return {
     subscriptionCostUSD,
     windowDays,

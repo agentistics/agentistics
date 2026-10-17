@@ -12,16 +12,20 @@ import {
 import { subscribeEvent } from './eventStream'
 import { HARNESS_LABELS } from './harness'
 
+export type RegisteredPlan = { harness: PlanLimits['harness']; plan: string; account?: string }
+
 export interface PlanLimitsSnapshot {
   /** `null` until the first answer — never an empty list standing in for "not asked yet". */
   limits: PlanLimits[] | null
   /** Plans registered in Settings → Billing whose harness has reported no window yet. */
-  registered: { harness: PlanLimits['harness']; plan: string }[]
+  registered: RegisteredPlan[]
+  /** `account id → "<Harness> #n"` (or nickname), from the agent-visible and hidden budget rows. */
+  accountLabels: Record<string, string>
   /** A clock that ticks once a minute while anything is subscribed, for "in X min" / "X min ago". */
   now: number
 }
 
-let snap: PlanLimitsSnapshot = { limits: null, registered: [], now: Date.now() }
+let snap: PlanLimitsSnapshot = { limits: null, registered: [], accountLabels: {}, now: Date.now() }
 const listeners = new Set<() => void>()
 let stop: (() => void) | null = null
 
@@ -34,8 +38,11 @@ async function refresh(): Promise<void> {
   try {
     const r = await fetch('/api/plan-limits', { cache: 'no-store' })
     if (!r.ok) return
-    const body = await r.json() as { limits?: PlanLimits[]; registered?: PlanLimitsSnapshot['registered'] }
+    const body = await r.json() as { limits?: PlanLimits[]; registered?: PlanLimitsSnapshot['registered']; budgets?: { account?: string; accountLabel?: string }[]; hiddenFromAgents?: { account?: string; accountLabel?: string }[] }
+    const accountLabels: Record<string, string> = {}
+    for (const b of [...(body.budgets ?? []), ...(body.hiddenFromAgents ?? [])]) if (b.account && b.accountLabel) accountLabels[b.account] = b.accountLabel
     emit({
+      accountLabels,
       limits: Array.isArray(body.limits) ? body.limits : [],
       registered: Array.isArray(body.registered) ? body.registered : [],
       now: Date.now(),
@@ -163,15 +170,28 @@ export function limitLevelWord(level: LimitLevel, lang: Lang): string {
   return lang === 'pt' ? 'com folga' : 'room to spare'
 }
 
-export interface SubscriptionRow { harness: PlanLimits['harness']; plan: string | undefined; limits: PlanLimits | null }
+export interface SubscriptionRow {
+  harness: PlanLimits['harness']; plan: string | undefined; limits: PlanLimits | null
+  /** Set only when the harness has several accounts on screen: which one this row is. */
+  accountLabel?: string
+}
 
 /** "All subscriptions": every reading, plus every registered plan that has none yet (no ring, no zero). */
-export function subscriptionRows(limits: PlanLimits[] | null, registered: { harness: PlanLimits['harness']; plan: string }[]): SubscriptionRow[] {
+export function subscriptionRows(limits: PlanLimits[] | null, registered: RegisteredPlan[], labels: Record<string, string> = {}): SubscriptionRow[] {
   const found = new Set((limits ?? []).map(l => l.harness))
-  return [
-    ...(limits ?? []).map(l => ({ harness: l.harness, plan: l.plan ?? l.sourcePlan, limits: l })),
-    ...registered.filter(r => !found.has(r.harness)).map(r => ({ harness: r.harness, plan: r.plan as string | undefined, limits: null })),
+  const foundAccount = new Set((limits ?? []).map(l => `${l.harness}:${l.account}`))
+  const rows: (SubscriptionRow & { account?: string })[] = [
+    ...(limits ?? []).map(l => ({ harness: l.harness, plan: l.plan ?? l.sourcePlan, limits: l, account: l.account })),
+    ...registered
+      .filter(r => (r.account ? !foundAccount.has(`${r.harness}:${r.account}`) : !found.has(r.harness)))
+      .map(r => ({ harness: r.harness, plan: r.plan as string | undefined, limits: null, ...(r.account ? { account: r.account } : {}) })),
   ]
+  const perHarness = new Map<string, number>()
+  for (const r of rows) perHarness.set(r.harness, (perHarness.get(r.harness) ?? 0) + 1)
+  return rows.map(({ account, ...r }) => {
+    const label = account ? labels[account] : undefined
+    return (perHarness.get(r.harness) ?? 0) > 1 && label ? { ...r, accountLabel: label } : r
+  })
 }
 
 export { currentUsedPct, forecastWindow }

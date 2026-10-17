@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, markRoleDelivered, migrateLegacyRoles, parseRoles, rekeyStoredRole, roleOfRow, originOfRow, listRoleOrigins, spawnRoleOrigin, roleSenderFromBody, markParentVerified, roleOp, roleStatus, writeRolesDoc, type RoleDeps,
+  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, markRoleDelivered, migrateLegacyRoles, parseRoles, rekeyStoredRole, roleOfRow, originOfRow, listRoleOrigins, spawnRoleOrigin, roleSenderFromBody, markParentVerified, markCallerVerified, roleOp, roleStatus, writeRolesDoc, type RoleDeps,
 } from './session-roles'
 
 let dir = ''
@@ -389,5 +389,24 @@ describe('markParentVerified (the wire never states it)', () => {
     const body = { parent: ' p1 ', parentVerified: false, session: { id: 'p1', token: 'ok' } }
     await markParentVerified(body, verify)
     expect(body.parentVerified).toBe(true)
+  })
+})
+
+describe('markCallerVerified (PLAN.ACCOUNTS D3 — the wire never states it either)', () => {
+  const verify = async (id: unknown, token: unknown) => (id === 'p1' && token === 'ok' ? 'p1' : null)
+  test('a forged callerVerified without a proof is overwritten', async () => {
+    const body: { session?: unknown; callerVerified?: unknown } = { callerVerified: true }
+    expect(await markCallerVerified(body, verify)).toBe(false)
+    expect(body.callerVerified).toBe(false)
+  })
+  test('a bad token is not an agent identity', async () => {
+    const body: { session?: unknown; callerVerified?: unknown } = { session: { id: 'p1', token: 'bad' }, callerVerified: true }
+    await markCallerVerified(body, verify)
+    expect(body.callerVerified).toBe(false)
+  })
+  test('any valid proof marks the caller as an agent, whatever parent it names', async () => {
+    const body: { session?: unknown; callerVerified?: unknown; parent?: unknown } = { parent: 'other', session: { id: 'p1', token: 'ok' } }
+    await markCallerVerified(body, verify)
+    expect(body.callerVerified).toBe(true)
   })
 })
