@@ -155,12 +155,13 @@ const EMPTY: FleetPayload = { sessions: [], rows: [], attention: 0, tasks: [], f
 /** The search index of one row, derived from fields it already carries (the wire strips it). PURE. */
 export function withSearchFields<T extends Record<string, unknown>>(row: T): T {
   if (row.searchFields) return row
+  const { search: wire, ...rest } = row as Record<string, unknown> & { search?: { n?: string; p?: string } }
   return {
-    ...row,
+    ...rest,
     searchFields: {
-      name: String(row.title ?? ''), folder: String(row.cwd ?? ''), harness: String(row.harness ?? ''),
+      name: String(wire?.n ?? row.title ?? ''), folder: String(row.cwd ?? ''), harness: String(row.harness ?? ''),
       note: String(row.note ?? ''), task: String(row.task ?? ''),
-      prompt: String(row.firstPrompt ?? row.first_prompt ?? row.prompt ?? ''),
+      prompt: String(wire?.p ?? ''),
     },
   }
 }
