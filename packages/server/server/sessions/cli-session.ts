@@ -39,6 +39,7 @@ import { rulesFor } from './attention-rules'
 import { renameInHarness, renameMessage } from './rename'
 import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefCandidate } from './session-ref'
 import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
+import { handoffTitle } from './handoff-inherit'
 import { addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession } from './registry'
 import { callerHoldsIdentity } from './session-identity'
 import { attachAfterSpawn, liveIdsOf, planSpawnFilingSafe } from './spawn-filing-io'
@@ -84,7 +85,7 @@ function spawnPromptArg(plan: SpawnPlan, harness: HarnessId): { initialPrompt?: 
 const STARTABLE: HarnessId[] = HARNESS_ORDER.filter(h => SPAWN_SPECS[h] !== null)
 
 const USAGE = `Usage:
-  agentop session <harness> [-p "prompt"] [--bg] [--model <id>] [--effort <level>] [--cwd <path>] [--name "label"] [--notify on|off] [--folder <folder>] [--task <id|title>] [--subtask <id|title>] [--shared-cwd] [--away|--no-away] [--force]
+  agentop session <harness> [-p "prompt"] [--bg] [--model <id>] [--effort <level>] [--cwd <path>] [--name "label"] [--notify on|off] [--folder <folder>] [--task <id|title>] [--subtask <id|title>] [--shared-cwd] [--away|--no-away] [--handoff] [--force]
   agentop session ls     [--all] [--group ${GROUPINGS.join('|')}] [--json]
   agentop session list
   agentop session attach <id|name>
@@ -122,6 +123,10 @@ const USAGE = `Usage:
   "Parent/Child" path (case-insensitive). An unknown or ambiguous ref is refused before anything
   starts and lists the candidates — a folder is never created for you. \`kill --folder\` ends the
   session and moves it (e.g. to "…/Finalizadas") in one step. \`folders\` prints the tree to pick from.
+
+  \`--handoff\` (from inside a leader) starts that leader's SUCCESSOR: the same folder, pin position, title,
+  check-in agenda, leader role, away mode and last-answer relay the web hand-off gives. Refused without a
+  verified calling session. \`kill\` of the predecessor then leaves the successor pinned.
 
   \`--task <id|title>\` / \`--subtask <id|title>\` file the session on the BOARD at spawn, with the task's real
   title on the row. A reference that matches nothing (or two things) is refused before anything starts and
@@ -418,10 +423,17 @@ export async function start(
   const lang = await resolveLang()
   // WHERE this session is filed is decided once, BEFORE the memory gate: a refusal spawns nothing.
   const parentSessionIdForPlan = callerSessionId()
+  // `--handoff` is the API's `handoff: true`: only a VERIFIED calling session can have a successor, so
+  // without one it is refused before anything starts (never quietly started as an ordinary session).
+  if (cmd.handoff && !(parentSessionIdForPlan && await callerHoldsIdentity(parentSessionIdForPlan))) {
+    console.error('--handoff needs a verified calling session (run it from inside the leader being replaced).')
+    return 1
+  }
   const filing = await planSpawnFilingSafe({
     liveIds: await liveIdsOf(backend),
     // A person with no parent session is neither: only a parent (or an explicit role) makes a worker.
-    role: spawnRole({ explicit: cmd.role, leaderPrefix: !!cmd.label && hasRolePrefix(cmd.label), hasParent: !!parentSessionIdForPlan }),
+    role: cmd.handoff ? 'leader' : spawnRole({ explicit: cmd.role, leaderPrefix: !!cmd.label && hasRolePrefix(cmd.label), hasParent: !!parentSessionIdForPlan }),
+    ...(cmd.handoff ? { handoffOf: parentSessionIdForPlan } : {}),
     taskRef: cmd.taskId ?? cmd.task, subtaskRef: cmd.subtask, folderRef: cmd.folder,
     cwd: cmd.cwd, sharedCwd: cmd.sharedCwd, callerSessionId: parentSessionIdForPlan,
   })
@@ -435,13 +447,20 @@ export async function start(
   const parentLink = await parentLinkOf(callerSessionId())
   const parentSessionId = parentLink.parentSessionId
   const parentVerified = await callerHoldsIdentity(parentSessionId)
+  const registry0 = cmd.handoff ? await readRegistry().catch(() => [] as ManagedSession[]) : []
   // A name that already wears the leader prefix is a statement of intent: never let it silently become a worker.
-  const wantedRole = cmd.role ?? (cmd.label && hasRolePrefix(cmd.label) ? 'leader' as const : undefined)
+  const wantedRole = cmd.handoff ? 'leader' as const : cmd.role ?? (cmd.label && hasRolePrefix(cmd.label) ? 'leader' as const : undefined)
   const role = wantedRole
     ? await ensureSpawnRole([offeredConversationId, id], wantedRole, undefined, await spawnRoleOriginFor(parentSessionId, parentVerified))
     : parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker', undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) : undefined
   const away = await resolveSpawnAwayFor(cmd.away, parentSessionId, parentVerified)
-  const ctx = buildSpawnContext({ ...(await resolveContextAway(away)), sessionId: id, cwd, harness: cmd.harness, lang, ...(await folderCtxFor(folderId)), ...(await resolveContextTaskByRef(filing.taskId, filing.subtaskId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
+  // HANDOFF: the successor keeps the predecessor's title and is briefed with the owner's last words to it.
+  const handoffParentRow = cmd.handoff && parentSessionId ? registry0.find(m => m.id === parentSessionId) : undefined
+  const label = cmd.handoff ? handoffTitle(handoffParentRow?.label, cmd.label) : cmd.label
+  const relay = handoffParentRow
+    ? await import('./handoff-relay-io').then(m => m.captureHandoffRelay(handoffParentRow)).catch(() => undefined)
+    : undefined
+  const ctx = buildSpawnContext({ ...(relay ? { handoffRelay: relay.section } : {}), ...(await resolveContextAway(away)), sessionId: id, cwd, harness: cmd.harness, lang, ...(await folderCtxFor(folderId)), ...(await resolveContextTaskByRef(filing.taskId, filing.subtaskId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
   const planned = planSpawn({
     harness: cmd.harness, cwd, prompt: cmd.prompt, model: cmd.model, effort: cmd.effort,
     ...(logFile ? { logFile } : {}),
@@ -479,7 +498,7 @@ export async function start(
     createdAt: spawnedAt,
     ...(cmd.model ? { model: cmd.model } : {}),
     ...(cmd.effort ? { effort: cmd.effort } : {}),
-    ...(cmd.label ? { label: cmd.label } : {}),
+    ...(label ? { label } : {}),
     // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
     ...filingRow(filing),
     ...(cmd.attemptId ? { attemptId: cmd.attemptId } : {}),
@@ -515,9 +534,17 @@ export async function start(
   }
   if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
 
-  if (role) await applyRoleTitle(id, cmd.label ?? id, role, lang).catch(() => false)
+  if (role) await applyRoleTitle(id, label ?? id, role, lang).catch(() => false)
   await fileAtSpawnPlanned(folderId, { id, conversationId: planned.plan.conversationId })
   const attachFailed = await attachFiling(filing, id)
+  if (handoffParentRow) {
+    await import('./handoff-relay-io').then(m => m.recordHandoffLink(handoffParentRow.id, id, relay, handoffParentRow.handoffSeq)).catch(() => {})
+    // Pin (same position), check-in agenda and, idempotently, the folder — never fails the spawn.
+    await import('./handoff-inherit').then(async m => {
+      const { updatePreferences } = await import('../preferences')
+      await m.inheritHandoffPrefs(handoffParentRow, { id, conversationId: planned.plan.conversationId }, updatePreferences)
+    }).catch(() => {})
+  }
   // Muted at birth: keyed by the conversation we assigned, else by the managed id (re-keyed when the
   // poller links the conversation). Delivery only — the session still reads as waiting.
   if (cmd.notify === 'off') await muteAtSpawn(planned.plan.conversationId ?? id).catch(() => {})
@@ -533,9 +560,9 @@ export async function start(
   })
 
   if (cmd.background) {
-    if (cmd.json) console.log(JSON.stringify({ id, harness: cmd.harness, label: cmd.label ?? null, ...filingJson(filing), ...(attachFailed ? { attachFailed } : {}) }, null, 2))
+    if (cmd.json) console.log(JSON.stringify({ id, harness: cmd.harness, label: label ?? null, ...filingJson(filing), ...(attachFailed ? { attachFailed } : {}) }, null, 2))
     else {
-      console.log(`Started ${cmd.harness} session ${id}${cmd.label ? ` (${cmd.label})` : ''} in ${cwd}`)
+      console.log(`Started ${cmd.harness} session ${id}${label ? ` (${label})` : ''} in ${cwd}`)
       console.log(`Attach with: agentop session attach ${id}`)
     }
     return 0
@@ -1384,6 +1411,15 @@ async function kill(ref: string, backend: SessionBackend, folder?: string): Prom
   console.log(`Killed ${id}.`)
   const f = folder ? folderByRef.get(folder) : undefined
   if (f) {
+    // `fileInFolder` is a MOVE and unpins. If this session handed off and the successor does not hold
+    // its pin yet (the hand-off inheritance did not run, or the pin was added afterwards), give the
+    // slot to the successor first so filing the predecessor never silently drops it.
+    const dying = registry.find(m => m.id === id)
+    if (dying?.handoffTo) {
+      const { updatePreferences } = await import('../preferences')
+      const successor = (await import('./handoff-relay-io')).successorRow(registry, dying.handoffTo)
+      await (await import('./handoff-inherit')).passPinToSuccessor(dying, successor, updatePreferences)
+    }
     const conv = registry.find(m => m.id === id)?.conversationId
     const moved = await fileInFolder(f.id, { id, conversationId: conv }).catch(() => false)
     console.log(moved ? `Moved ${id} to ${f.path}.` : `Could not move ${id} to ${f.path}.`)
