@@ -2,6 +2,17 @@ import { describe, expect, test } from 'bun:test'
 import { parseSystemEvent, systemEventLine } from './systemEvent'
 
 describe('parseSystemEvent', () => {
+  test('a session message wrapped as pasted content by the harness is still a system event', () => {
+    const wrapped = '\n\n<pasted_content id="a245">\n[from session 0bcf21c173 · handback]\nfix ready @ fc61e0d4\n- tests 6671 pass\n</pasted_content id="a245">\n'
+    expect(parseSystemEvent(wrapped)).toEqual({ kind: 'handback', sender: '0bcf21c173', body: 'fix ready @ fc61e0d4\n- tests 6671 pass' })
+    expect(parseSystemEvent('<pasted_content id="x1">\n[from agentistics · away]\nAway on\n</pasted_content id="x1">')?.kind).toBe('away')
+  })
+  test('pasted ordinary text, or a wrapper that does not span the whole message, stays the person\'s', () => {
+    expect(parseSystemEvent('<pasted_content id="a">\nsome log\n</pasted_content id="a">')).toBeNull()
+    expect(parseSystemEvent('look at this\n<pasted_content id="a">\n[from session abc · handback]\nx\n</pasted_content id="a">')).toBeNull()
+    expect(parseSystemEvent('<pasted_content id="a">\n[from session abc · handback]\nx\n</pasted_content id="a">\nmy comment')).toBeNull()
+    expect(parseSystemEvent('<pasted_content id="a">\n[from session abc · handback]\nx\n</pasted_content id="b">')).toBeNull()
+  })
   test('marked check-in keeps the checklist and away instructions as the body', () => {
     const body = 'Faça o check-in da liderança agora.\n- Review sessions\nAWAY MODE — decide within the authorisations.'
     expect(parseSystemEvent(`[from agentistics · check-in]\n${body}`)).toEqual({ kind: 'checkin', body })
