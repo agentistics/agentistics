@@ -20,6 +20,11 @@ describe('openTab', () => {
   test('a new tab lands right after the active one', () => {
     expect(openTab(['a', 'b', 'c'], 'n', 'a', [])).toEqual(['a', 'n', 'b', 'c'])
   })
+  test('from a pinned tab the new tab leads the unpinned segment', () => {
+    expect(openTab(['b', 'c'], 'd', 'a', ['a'])).toEqual(['d', 'b', 'c'])
+    expect(stripOrder(openTab(['b', 'c'], 'd', 'a', ['a']), ['a'])).toEqual(['a', 'd', 'b', 'c'])
+    expect(openTab([], 'd', 'a', ['a'])).toEqual(['d'])
+  })
   test('with no active tab it is appended', () => {
     expect(openTab(['a', 'b'], 'n', null, [])).toEqual(['a', 'b', 'n'])
   })

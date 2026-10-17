@@ -20,7 +20,7 @@ export function stripOrder(open: readonly string[], pins: readonly string[]): st
 
 /**
  * Opening a session: already open (or pinned, which is always a tab) → unchanged; else inserted
- * right after the active tab. Past the cap the oldest UNPINNED, non-active tab is dropped — never a
+ * right after the active tab (from a pinned tab: first among the unpinned ones). Past the cap the oldest UNPINNED, non-active tab is dropped — never a
  * pinned one.
  */
 export function openTab(
@@ -28,7 +28,12 @@ export function openTab(
 ): string[] {
   if (open.includes(id) || pins.includes(id)) return [...open]
   const at = active !== null ? open.indexOf(active) : -1
-  const next = at >= 0 ? [...open.slice(0, at + 1), id, ...open.slice(at + 1)] : [...open, id]
+  // Coming from a pinned tab (pins lead the strip): the new tab starts the unpinned segment.
+  const fromPin = at < 0 && active !== null && pins.includes(active)
+  const head = fromPin ? open.findIndex(x => !pins.includes(x)) : -1
+  const next = at >= 0 ? [...open.slice(0, at + 1), id, ...open.slice(at + 1)]
+    : fromPin && head >= 0 ? [...open.slice(0, head), id, ...open.slice(head)]
+      : [...open, id]
   while (next.filter(x => !pins.includes(x)).length > max) {
     const drop = next.find(x => !pins.includes(x) && x !== id && x !== active)
     if (drop === undefined) break
