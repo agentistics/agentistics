@@ -10,6 +10,137 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.140.4': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Abrir uma sessão encerrada não quebra mais a página.',
+        en: 'Opening an ended session no longer breaks the page.',
+      },
+      {
+        pt: 'Esc fecha o menu de visualização da lista; sessões encerradas oferecem Reabrir em vez de Parar e dizem por que não dá para reabrir quando for o caso.',
+        en: 'Esc closes the list view menu; ended sessions offer Reopen instead of Stop and say why when they cannot be reopened.',
+      },
+      {
+        pt: 'Pastas ocultas abrem e fecham como as outras seções da lateral.',
+        en: 'Hidden folders open and close like the other sidebar sections.',
+      },
+      {
+        pt: 'Arquivos temporários de início de sessão não ficam mais no disco.',
+        en: 'Temporary session start files no longer stay on disk.',
+      },
+      {
+        pt: 'A tela de novidades volta a aparecer depois de atualizar.',
+        en: 'The what\'s-new screen shows again after an update.',
+      },
+    ],
+  },
+  '2.140.3': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O aviso de papel da sessão aparece como uma linha de sistema, não como mensagem sua.',
+        en: 'The session role notice shows as a system row, not as a message from you.',
+      },
+      {
+        pt: 'O cofre bloqueado deixou de consultar o servidor sem parar.',
+        en: 'A locked vault no longer keeps polling the server.',
+      },
+      {
+        pt: 'Pastas ocultas ficam no topo da lista e sessões encerradas ocupam menos espaço.',
+        en: 'Hidden folders sit at the top of the list and ended sessions take less room.',
+      },
+    ],
+  },
+  '2.140.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'A passagem de líder não falha mais quando o resumo para o sucessor é longo.',
+        en: 'A leader hand-off no longer fails when the summary for the successor is long.',
+      },
+    ],
+  },
+  '2.140.1': {
+    features: [
+      {
+        pt: 'No assistente de nova sessão dá para criar um projeto novo na hora.',
+        en: 'The new-session wizard can create a brand-new project on the spot.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.140.0': {
+    features: [
+      {
+        pt: 'A passagem de líder pela linha de comando leva ao sucessor o título, a pasta, o fixado, o check-in, o papel e o modo ausente.',
+        en: 'A leader hand-off from the command line gives the successor its title, folder, pin, check-in, role and away mode.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.139.0': {
+    features: [
+      {
+        pt: 'O novo chat das sessões vem ativado por padrão nos assistentes compatíveis.',
+        en: 'The new session chat is on by default for supported assistants.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.138.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O botão de modo ausente ficou mais claro e Esc fecha a camada aberta por cima, uma de cada vez.',
+        en: 'The away toggle looks clearer and Esc closes the top overlay, one at a time.',
+      },
+      {
+        pt: 'Linhas de sistema no chat ficaram mais discretas.',
+        en: 'System lines in the chat are quieter.',
+      },
+    ],
+  },
+  '2.138.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Mensagens entre sessões aparecem como eventos do sistema, não como se fossem suas.',
+        en: 'Messages between sessions show as system events, not as if you had written them.',
+      },
+    ],
+  },
+  '2.138.0': {
+    features: [
+      {
+        pt: 'O início de uma sessão agora segue um fluxo numerado.',
+        en: 'Starting a session now follows a numbered flow.',
+      },
+      {
+        pt: 'A contagem de sessões em modo ausente atualiza ao vivo.',
+        en: 'The away-session count updates live.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.137.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Sessões encerradas deixam de aparecer como ativas na lateral.',
+        en: 'Ended sessions no longer linger as active in the side list.',
+      },
+    ],
+  },
+  '2.137.0': {
+    features: [
+      {
+        pt: 'A passagem de líder entre sessões ficou mais confiável, e uma sessão não fica pela metade se algo falhar ao abrir.',
+        en: 'Leader hand-off between sessions is more reliable, and a session is never left half-open when something fails at start.',
+      },
+    ],
+    fixes: [],
+  },
   '2.136.1': {
     features: [],
     fixes: [
