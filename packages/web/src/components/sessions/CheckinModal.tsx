@@ -58,14 +58,13 @@ export function CheckinRoundBody({ round, pt }: { round: CheckinRound; pt: boole
           {needs.map((n, i) => <div key={i} style={TEXT}><strong>{n.subject}</strong> — {n.text}</div>)}
         </div>
       )}
-      {delivered.length > 0 && <Group label={c.delivered}>{delivered.map((d, i) => <div key={i} style={TEXT}>{d.text}{d.ref && <span style={MUTED}> · {d.ref}</span>}</div>)}</Group>}
+      {delivered.length > 0 && <Group label={c.delivered}>{delivered.map((d, i) => <div key={i} style={TEXT}>{d.text}</div>)}</Group>}
       {progress.length > 0 && (
         <Group label={c.progress}>
           {progress.map((p, i) => (
             <div key={i} style={{ ...TEXT, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
               <strong>{p.item}</strong><Pill tone="neutral" nowrap>{p.stage}</Pill>
               {p.release && <Pill tone="warn" nowrap>{c.release} {p.release}</Pill>}
-              {p.session && <span style={MUTED}>{p.session}</span>}
             </div>
           ))}
         </Group>
@@ -73,11 +72,11 @@ export function CheckinRoundBody({ round, pt }: { round: CheckinRound; pt: boole
       {next.length > 0 && <Group label={c.next}>{next.map((n, i) => <div key={i} style={TEXT}>{n.text}{n.when && <span style={MUTED}> · {n.when}</span>}</div>)}</Group>}
       {health.length > 0 && (
         <Group label={c.health}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 6 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 6 }}>
             {health.map((h, i) => (
               <div key={i} style={{ ...surface, padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                 <span role="img" aria-label={c.health3[h.state]} style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: DOT[h.state] }} />
-                <span style={{ ...TEXT, fontSize: 12 }}><span style={MUTED}>{h.label}</span> {h.value}</span>
+                <span title={`${h.label} ${h.value}`} style={{ ...TEXT, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}><span style={MUTED}>{h.label}</span> {h.value}</span>
               </div>
             ))}
           </div>
@@ -86,6 +85,17 @@ export function CheckinRoundBody({ round, pt }: { round: CheckinRound; pt: boole
       {empty && <div style={{ ...TEXT, ...MUTED }}>{round.summary || c.empty}</div>}
     </div>
   )
+}
+
+/** Time only for today, "ontem 18:02" for yesterday, "16/10 18:02" for older. */
+export function roundWhen(ms: number, pt: boolean, now = Date.now()): string {
+  const d = new Date(ms), n = new Date(now)
+  const hm = d.toLocaleTimeString(pt ? 'pt-BR' : 'en-GB', { hour: '2-digit', minute: '2-digit' })
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const diff = Math.round((day(n) - day(d)) / 86_400_000)
+  if (diff === 0) return hm
+  if (diff === 1) return `${pt ? 'ontem' : 'yesterday'} ${hm}`
+  return `${d.toLocaleDateString(pt ? 'pt-BR' : 'en-GB', { day: '2-digit', month: '2-digit' })} ${hm}`
 }
 
 function roundOf(event: TaskEvent): CheckinRound {
@@ -104,7 +114,7 @@ export function CheckinTimeline({ history, pt, isMobile }: { history: TaskEvent[
       <ol data-testid="checkin-timeline" style={{ listStyle: 'none', margin: 0, padding: 0, ...surface, overflow: 'hidden' }}>
         {history.map((event, i) => {
           const open = openId === event.id
-          const when = event.at ? new Date(event.at).toLocaleString(pt ? 'pt-BR' : 'en-GB', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : `#${i + 1}`
+          const when = event.at ? roundWhen(new Date(event.at).getTime(), pt) : `#${i + 1}`
           const tone = event.state === 'needs_you' ? 'var(--accent-red)' : 'var(--accent-green)'
           return (
             <li key={event.id} style={{ borderTop: i ? '1px solid var(--border)' : 'none' }}>
@@ -113,7 +123,7 @@ export function CheckinTimeline({ history, pt, isMobile }: { history: TaskEvent[
                 {open ? <ChevronDown size={13} style={MUTED} /> : <ChevronRight size={13} style={MUTED} />}
                 <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: tone }} />
                 <span style={{ ...MUTED, fontSize: 12, flexShrink: 0 }}>{when}</span>
-                <span style={{ ...TEXT, fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{event.headline ?? event.summary ?? ''}</span>
+                <span style={{ ...TEXT, fontSize: 12.5, ...(isMobile ? { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' } : { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }) }}>{event.headline ?? event.summary ?? ''}</span>
               </button>
               {open && <div style={{ padding: '4px 12px 12px 32px' }}><CheckinRoundBody round={roundOf(event)} pt={pt} /></div>}
             </li>
@@ -124,18 +134,23 @@ export function CheckinTimeline({ history, pt, isMobile }: { history: TaskEvent[
   )
 }
 
+/** The modal's title row: "Check-in · 12h13" — the headline then stands alone below it. */
+export function checkinTitle(round: CheckinRound, pt: boolean): string {
+  return round.at ? `Check-in · ${clockLabel(round.at, pt)}` : 'Check-in'
+}
+
 export function CheckinModalView({ round, history, pt, isMobile, onClose }: { round: CheckinRound; history: TaskEvent[]; pt: boolean; isMobile: boolean; onClose: () => void }) {
   const c = copy(pt)
   const earlier = useMemo(() => history.filter(e => !e.at || !round.at || new Date(e.at).getTime() !== round.at).slice(0, 8), [history, round.at])
+  // The "needs you" box already says it; the chip only speaks when the state is something else.
+  const chip = !(round.state === 'needs_you' && (round.needs?.length ?? 0) > 0)
   return (
     <div data-testid="checkin-modal">
-      <Sheet closeLabel={c.close} isMobile={isMobile} title={c.title} onClose={onClose} maxWidth={720}>
+      <Sheet closeLabel={c.close} isMobile={isMobile} title={checkinTitle(round, pt)} onClose={onClose} maxWidth={720}>
         <div style={{ display: 'grid', gap: 18 }}>
-          <header style={{ display: 'grid', gap: 6 }}>
+          <header style={{ display: 'grid', gap: 6, justifyItems: 'start' }}>
             <div style={{ color: 'var(--text-primary)', fontSize: 16, fontWeight: 650, lineHeight: 1.35 }}>{round.headline ?? round.summary}</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, ...MUTED }}>
-              <RoundStateChip state={round.state} pt={pt} />{round.at && <span>{clockLabel(round.at, pt)}</span>}
-            </div>
+            {chip && <RoundStateChip state={round.state} pt={pt} />}
           </header>
           <CheckinRoundBody round={round} pt={pt} />
           <CheckinTimeline history={earlier} pt={pt} isMobile={isMobile} />

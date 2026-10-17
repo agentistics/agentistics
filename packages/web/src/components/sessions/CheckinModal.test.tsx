@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { CheckinModalView } from './CheckinModal'
+import { CheckinModalView, roundWhen } from './CheckinModal'
 import type { CheckinRound } from '../../lib/checkin'
 
 const round: CheckinRound = {
@@ -21,4 +21,19 @@ test.each([false, true])('modal shows needs first, then sections, chip and timel
   expect(html).toContain(isMobile ? 'border-radius:0' : 'max-width:720px')
   // past rounds start collapsed: their body is not rendered
   expect(html).toContain('aria-expanded="false"')
+})
+
+test('state chip is dropped when the needs box is present, shown otherwise', () => {
+  const withBox = renderToStaticMarkup(<CheckinModalView round={round} history={[]} pt isMobile={false} onClose={() => {}} />)
+  expect(withBox.match(/precisa de você/g)).toBeNull()
+  expect(withBox).toContain('Precisa de você')
+  const ok = renderToStaticMarkup(<CheckinModalView round={{ ...round, state: 'ok', needs: [] }} history={[]} pt isMobile={false} onClose={() => {}} />)
+  expect(ok).toContain('tudo certo')
+})
+
+test('round times: today, yesterday, older', () => {
+  const now = new Date(2026, 9, 17, 12, 0).getTime()
+  expect(roundWhen(new Date(2026, 9, 17, 11, 43).getTime(), true, now)).toBe('11:43')
+  expect(roundWhen(new Date(2026, 9, 16, 18, 2).getTime(), true, now)).toBe('ontem 18:02')
+  expect(roundWhen(new Date(2026, 9, 15, 18, 2).getTime(), true, now)).toBe('15/10 18:02')
 })
