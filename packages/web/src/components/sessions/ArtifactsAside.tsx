@@ -39,9 +39,10 @@ import { AgentisticsLoader } from '../../components/AgentisticsLoader'
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { consumePanelFocusRequest } from '../../lib/artifactsStore'
 import { asideCache, asideKey } from '../../lib/asideCache'
 import { resolveSubagentStatus, settleSubagentTurns, shouldPollSubagent, type StatusObservation } from '../../lib/artifactLayout'
-import { focusMissNotice, isFocusedRow, rowsCarry, ROW_FLASH } from '../../lib/noteFocus'
+import { focusMissNotice, isFreshFocusAsk, isFocusedRow, rowsCarry, ROW_FLASH } from '../../lib/noteFocus'
 import { BarChart3, Bot, Brain, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Eye, FileEdit, Loader, PanelRightClose, Pencil, Plug, Plus, Send, Sparkles, Terminal, Trash2, Workflow } from 'lucide-react'
 import { artifactShortfall, type Artifact } from '../../lib/sessionArtifacts'
 import {
@@ -158,7 +159,7 @@ export interface ArtifactsAsideProps {
    * asked. `null`/absent when nothing was asked; a request for a DIFFERENT tab than `activeTab` is
    * simply not this mount's concern (the caller already filters by tab before passing it down).
    */
-  focusRequest?: { ref?: string; at: number } | null
+  focusRequest?: { ref?: string; at: number; consumed?: boolean } | null
   sessionId: string
   lang: 'pt' | 'en'
   /**
@@ -320,6 +321,14 @@ export function ArtifactsAside({
    * afterwards, which a `[focusRequest.ref]` dependency would take away.
    */
   const askedAt = focusRequest?.at
+  // A request pulses the panel body for a moment: an already-open panel otherwise shows nothing.
+  const [pulse, setPulse] = useState(false)
+  useEffect(() => {
+    if (askedAt === undefined) return
+    setPulse(true)
+    const t = setTimeout(() => setPulse(false), 1200)
+    return () => clearTimeout(t)
+  }, [askedAt])
   useEffect(() => {
     setFocusStep(focusRequest?.ref)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -754,6 +763,18 @@ export function ArtifactsAside({
     )
   }
 
+  const consumedAgentAsk = useRef<number | undefined>(undefined)
+  // A background-task note carries the tool-use / task id it answers: open that agent directly.
+  useEffect(() => {
+    const ref = focusRequest?.ref
+    if (ref === undefined || focusRequest?.consumed || agentsState === null || agentsState.phase !== 'ready') return
+    // Consume the request once: later polls (and "back to the list") must not re-open the agent.
+    if (!isFreshFocusAsk(consumedAgentAsk.current, askedAt)) return
+    const hit = agentsState.rows.find(r => r.agentId === ref || r.toolUseId === ref)
+    if (hit) { consumedAgentAsk.current = askedAt; if (askedAt !== undefined) consumePanelFocusRequest(askedAt); setOpenAgent(hit) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [askedAt, agentsState])
+
   const agentsBody = (): React.ReactNode => {
     // One open agent replaces the list, exactly as an open FILE does — 440px cannot hold a list and
     // a conversation side by side.
@@ -788,7 +809,7 @@ export function ArtifactsAside({
         : (pt ? 'Esta conversa não delegou nada a um subagente.' : 'This conversation has not delegated anything to a subagent.')} />
     }
     return (
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', padding: '6px 6px 10px' }}>
+      <div data-testid="agents-list" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', padding: '6px 6px 10px', ...(pulse ? { outline: '2px solid var(--anthropic-orange)', outlineOffset: -2, borderRadius: 8 } : {}) }}>
         {/* A PAGE SAYS IT IS A PAGE. Newest first, by each agent's last activity. */}
         {st.total > st.rows.length && (
           <p style={{ margin: '0 8px 6px', fontSize: 10, lineHeight: 1.5, color: 'var(--text-tertiary)' }}>

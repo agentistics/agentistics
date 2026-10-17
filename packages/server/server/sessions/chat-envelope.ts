@@ -151,7 +151,12 @@ export function classifyUserText(text: string): UserEntry {
   // "<Foo /> renders twice") is the person's, and hiding it would be the expensive mistake.
   if (env === undefined) return { kind: 'person', text: trimmed }
 
-  if (!env.unwrap) return { kind: 'system', note: env.note }
+  if (!env.unwrap) {
+    // A background task's notification names the tool call / task it answers; the Agents panel can
+    // land on that row, so the note's link goes to the thing and not to the top of a list.
+    const ref = tag === 'task-notification' ? (/<tool-use-id>\s*([^<\s]+)\s*</.exec(trimmed)?.[1] ?? /<task-id>\s*([^<\s]+)\s*</.exec(trimmed)?.[1]) : undefined
+    return { kind: 'system', note: env.note, ...(ref ? { noteRef: ref } : {}) }
+  }
 
   // A `!` line reads back as the `!` line the person TYPED — the prefix is part of what they did,
   // and it is what the composer's echo holds, so dropping it left that echo unreconcilable forever.

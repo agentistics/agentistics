@@ -1347,7 +1347,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       // A REQUEST for a DIFFERENT tab than `id` is not this mount's concern — see
       // `artifactsStore.ts`'s own `PanelFocusRequest` header.
       focusRequest={panelFocus && panelFocus.tab === id
-        ? { ...(panelFocus.ref ? { ref: panelFocus.ref } : {}), at: panelFocus.at } : null}
+        ? { ...(panelFocus.ref ? { ref: panelFocus.ref } : {}), at: panelFocus.at, ...(panelFocus.consumed ? { consumed: true } : {}) } : null}
       // The session itself, for the TASKS tab: what it is filed under, and the composer that files
       // it somewhere new without leaving the session you are sitting in.
       session={{

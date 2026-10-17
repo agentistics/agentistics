@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import type { ChatTurn } from '@agentistics/core'
-import { forwardHasContent, forwardText, isOwnerTurn, planForward, planRelay, relaySection } from './handoff-relay'
+import { forwardHasContent, forwardText, injectedLabel, isOwnerTurn, planForward, planRelay, relaySection } from './handoff-relay'
 import { captureHandoffRelay, flushAllHandoffRelays, flushBeforeKill, flushHandoffRelay, successorRow } from './handoff-relay-io'
 import { ownerWaitingFresh } from './handoff-relay'
 import { parseGeminiChatTurns } from './gemini-chat'
@@ -53,7 +53,8 @@ describe('HANDOFF.RELAY — the briefing snapshot', () => {
     expect(section).toContain('> o release saiu? qual versão?')
     expect(section).toContain('v2.136.1')
     expect(section).toContain('PRIMEIRA resposta')
-    expect(section).not.toContain('worker done')
+    expect(section).toContain('Sessão abc (handback)') // labelled as the session that sent it, not as Dono
+    expect(section).not.toContain('Dono (2026-10-16 14:40')
   })
 
   it('an owner message with no reply is said to be unanswered', () => {
@@ -394,4 +395,27 @@ describe('HANDOFF.RELAY — injected prompts are not the owner (fix1 M2), in eve
     } finally { await rm(dir, { recursive: true, force: true }) }
   })
 
+})
+
+describe('HANDOFF.RELAY — injected session messages are labelled, never the owner', () => {
+  const wrapped = '<pasted_content id="a1">\n[from session e2fa75878c · handback]\nfeito @ abc\n</pasted_content id="a1">'
+  it('a pasted-wrapped handback is not an owner turn and is labelled with its sender', () => {
+    const turn = t('user', wrapped, 1)
+    expect(isOwnerTurn(turn)).toBe(false)
+    expect(injectedLabel(turn)).toBe('Sessão e2fa75878c (handback)')
+    expect(isOwnerTurn(t('user', '[from agentistics · whatever]\nx', 1))).toBe(false)
+  })
+  it('snapshot and forward show it under its label and not as "Dono"', () => {
+    const turns = [t('user', wrapped, 1), t('assistant', 'ok', 2)]
+    const r = planRelay(turns)
+    expect(r.owner).toHaveLength(0)
+    const sec = relaySection('lead-1', r)
+    expect(sec).toContain('Sessão e2fa75878c (handback)')
+    expect(sec).not.toContain('Dono')
+    const f = planForward(turns, undefined, false)!
+    expect(f.owner).toHaveLength(0)
+    const txt = forwardText('lead-1', f)
+    expect(txt).toContain('Sessão e2fa75878c (handback)')
+    expect(txt).not.toContain('Responda ao dono')
+  })
 })
