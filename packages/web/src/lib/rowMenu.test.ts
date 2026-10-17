@@ -26,9 +26,13 @@ describe('rowMenuEntries', () => {
   })
 
   it('offers no Stop on an ended row — Reopen is the verb that applies', () => {
-    for (const state of ['exited', 'lost', 'closed']) {
+    for (const state of ['exited', 'closed']) {
       expect(rowMenuEntries(verbs, state).map(e => e.action)).toEqual(['rename', 'resume'])
     }
+  })
+
+  it('keeps Stop on a lost row — its backend may still be running', () => {
+    expect(rowMenuEntries(verbs, 'lost').map(e => e.action)).toContain('kill')
   })
 
   it('omits a verb the row does not carry at all', () => {

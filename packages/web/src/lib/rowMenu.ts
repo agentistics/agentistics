@@ -47,8 +47,9 @@ export function isInsidePortalledMenu(target: EventTarget | null): boolean {
 
 /** States where the session is mid-turn, so "stop" means the TURN and not the session. */
 const MID_TURN = new Set(['working'])
-/** States where nothing is running, so there is nothing to stop — Reopen is the verb that applies. */
-const ENDED = new Set(['exited', 'lost', 'closed'])
+/** States where nothing is running, so there is nothing to stop — Reopen is the verb that applies.
+ *  `lost` is NOT here: a backend still running whose activity could not be read wears it too. */
+const ENDED = new Set(['exited', 'closed'])
 
 export function rowMenuEntries(
   verbs: readonly RowVerb[],
