@@ -309,14 +309,20 @@ test('the reader is told the conversations the OTHER rows own, never its own', a
       { id: `closed:${'c'.repeat(8)}`, harness: 'claude', cwd: NO_PROJECT, state: 'exited' },
     ] }),
   } as never
-  const seen: Array<{ conversationId: string; foreign?: ReadonlySet<string> }> = []
+  type Foreign = ReadonlySet<string> | (() => Promise<ReadonlySet<string>>)
+  const seen: Array<{ conversationId: string; foreign?: Foreign }> = []
   const readerFor = (() => ({
-    resolve: async (ref: { conversationId: string; foreign?: ReadonlySet<string> }) => { seen.push(ref); return null },
+    resolve: async (ref: { conversationId: string; foreign?: Foreign }) => { seen.push(ref); return null },
     read: async () => ({ turns: [], older: false }),
     readRecent: async () => [],
   })) as never
   await readSessionChat(host, 'en', 'rowA', readerFor)
   expect(seen).toHaveLength(1)
   expect(seen[0]!.conversationId).toBe(A)
-  expect([...(seen[0]!.foreign ?? [])]).toEqual([B])
+  // Lazy (LOW-1) and current: the snapshot's rows plus whatever the registry holds now.
+  const f = seen[0]!.foreign
+  expect(typeof f).toBe('function')
+  const owners = await (f as () => Promise<ReadonlySet<string>>)()
+  expect(owners.has(B)).toBe(true)
+  expect(owners.has(A)).toBe(false)
 })

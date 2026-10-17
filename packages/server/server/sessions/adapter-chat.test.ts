@@ -148,6 +148,53 @@ describe('adapterChatResponse', () => {
     expect(s.closedWith()).toBe(true)
   })
 
+  test('CROSSBIND HIGH-2: overlapping forks — an older fork\'s check passing never releases a newer, foreign fork\'s frames', async () => {
+    const f = fakeChat()
+    let call = 0
+    const s = open(f, {
+      foreign: async () => {
+        const n = ++call // #1 the initial resolve, #2 fork → unowned (40 ms), #3 fork → owned (200 ms)
+        await Bun.sleep(n === 2 ? 40 : n === 3 ? 200 : 0)
+        return new Set(['other-conv'])
+      },
+    })
+    await Bun.sleep(20)
+    f.emit({ kind: 'fork', to: { harness: 'codex', conversationId: 'unowned', sourceRef: '/x/unowned.jsonl' } })
+    f.emit({ kind: 'window', turns: [{ role: 'user', text: 'fine' }], older: false })
+    await Bun.sleep(5) // the debounced emission is now waiting on check #2
+    f.emit({ kind: 'fork', to: { harness: 'codex', conversationId: 'other-conv', sourceRef: '/x/other.jsonl' } })
+    f.emit({ kind: 'window', turns: [{ role: 'user', text: 'SECRET of the other chat' }], older: false })
+    f.emit({ kind: 'live', text: 'foreign live' })
+    const got = await events(s.res, e => e.some(x => x.data.includes('SECRET')), 400)
+    expect(got.some(x => x.data.includes('SECRET') || x.data.includes('foreign live'))).toBe(false)
+    expect(s.closedWith()).toBe(true)
+  })
+
+  test('a fork into an UNOWNED source is emitted once its check passes', async () => {
+    const f = fakeChat()
+    const s = open(f, { foreign: async () => { await Bun.sleep(30); return new Set(['other-conv']) } })
+    await Bun.sleep(60)
+    f.emit({ kind: 'fork', to: { harness: 'codex', conversationId: 'next', sourceRef: '/x/next.jsonl' } })
+    f.emit({ kind: 'window', turns: [{ role: 'user', text: 'continued' }], older: false })
+    const got = await events(s.res, e => e.some(x => x.event === 'chat' && x.data.includes('continued')), 400)
+    expect(got.some(x => x.event === 'chat' && x.data.includes('continued'))).toBe(true)
+    expect(s.closedWith()).toBeNull()
+    s.ctl.abort()
+  })
+
+  test('CROSSBIND HIGH-4: a source whose owner registers AFTER it was adopted closes the stream on the next tick', async () => {
+    const f = fakeChat() // resolves to `/x/rollout.jsonl`
+    let owners = new Set<string>()
+    const s = open(f, { foreign: async () => owners })
+    await Bun.sleep(20)
+    expect(f.counts().follows).toBe(1)
+    owners = new Set(['rollout']) // B registered, linked to that conversation
+    s.tick()
+    await Bun.sleep(20)
+    expect(s.closedWith()).toBe(true)
+    expect(f.counts().unfollows).toBe(1)
+  })
+
   test('window → `chat` with source adapter; append → `chat-delta`; live and state pass through', async () => {
     const f = fakeChat()
     const s = open(f)
@@ -421,6 +468,42 @@ describe('a source owned by ANOTHER row is refused (CROSSBIND)', () => {
     expect(sourceForeign({ harness: 'claude', conversationId: A, sourceRef: `/p/-w/${A}.jsonl` }, A, new Set([B]))).toBe(false)
     expect(sourceForeign(toB, B, new Set([B]))).toBe(false)
     expect(sourceForeign(toB, A, new Set())).toBe(false)
+  })
+
+  test('MED-1 readAdapterChat: a fork to another row\'s source before the first window answers null', async () => {
+    const own: ChatSourceRef = { harness: 'claude', conversationId: A, sourceRef: `/p/-w/${A}.jsonl` }
+    const chat: HarnessChat = {
+      declares: { state: { from: 'markers' }, attention: { absent: 'no' }, live: { absent: 'no' }, fork: { from: 'file' } } as never,
+      resolve: async () => own,
+      follow(_s, _m, on) {
+        on({ kind: 'fork', to: toB })
+        on({ kind: 'window', turns: [{ role: 'user', text: 'SECRET of B' }], older: false })
+        return () => {}
+      },
+    }
+    const out = await readAdapterChat({
+      conversationId: A, chat, row: row({ harness: 'claude', conversationId: A, state: 'exited' }),
+      pending: [], max: 400, finish, foreign: async () => new Set([B]),
+    })
+    expect(out).toBeNull()
+  })
+
+  test('readAdapterChat: a fork to an unowned source is read', async () => {
+    const own: ChatSourceRef = { harness: 'claude', conversationId: A, sourceRef: `/p/-w/${A}.jsonl` }
+    const chat: HarnessChat = {
+      declares: { state: { from: 'markers' }, attention: { absent: 'no' }, live: { absent: 'no' }, fork: { from: 'file' } } as never,
+      resolve: async () => own,
+      follow(_s, _m, on) {
+        on({ kind: 'fork', to: toB })
+        on({ kind: 'window', turns: [{ role: 'user', text: 'continued' }], older: false })
+        return () => {}
+      },
+    }
+    const out = await readAdapterChat({
+      conversationId: A, chat, row: row({ harness: 'claude', conversationId: A, state: 'exited' }),
+      pending: [], max: 400, finish, foreign: async () => new Set(),
+    })
+    expect(out?.turns).toEqual([{ role: 'user', text: 'continued' }])
   })
 
   test('readAdapterChat: resolving into another row\'s file answers null and never follows it', async () => {

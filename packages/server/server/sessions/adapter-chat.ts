@@ -24,6 +24,7 @@ import { chatDelta, type ChatTurn, type SessionConversationLink } from '@agentis
 import type { ChatPayload } from './chat-web'
 import { conversationOfRow } from './row-conversation'
 import { isExternalRowId } from './external-continue'
+import { BoundedKeys } from './bounded-keys'
 
 /** How long a conversation whose channel failed is served by the legacy readers instead. */
 export const ADAPTER_REFUSAL_MS = 5 * 60_000
@@ -146,11 +147,9 @@ export function sourceForeign(src: ChatSourceRef, own: string, foreign: Readonly
 }
 
 /** The warning, said once per pair, when a source is refused for belonging to another row. */
-const refusedForeign = new Set<string>()
-function logForeign(own: string, src: ChatSourceRef): void {
-  const key = `${own}\0${src.conversationId}\0${src.sourceRef}`
-  if (refusedForeign.has(key)) return
-  refusedForeign.add(key)
+const refusedForeign = new BoundedKeys(512)
+export function logForeign(own: string, src: ChatSourceRef): void {
+  if (!refusedForeign.add(`${own}\0${src.conversationId}\0${src.sourceRef}`)) return
   console.warn(`[sessions] refused the chat source ${src.sourceRef} for ${own}: another session is linked to that conversation`)
 }
 
@@ -194,7 +193,16 @@ export function adapterChatResponse(
   const clearTimer = deps.clearTimer ?? (t => clearTimeout(t as ReturnType<typeof setTimeout>))
   const enc = new TextEncoder()
   let closed = false
-  let held: { turns: ChatTurn[]; older: boolean } = { turns: [], older: false }
+  // CROSSBIND — every source the stream follows has a GENERATION (`gen`, bumped by each adoption: the
+  // initial resolve and every fork). `approved` is the newest generation whose ownership check passed.
+  // Frames are held per generation and nothing is emitted unless the held frames, the followed source
+  // and the approval are the SAME generation — re-checked after every await, so a check that settles
+  // for an older fork can never release a newer fork's frames (HIGH-2).
+  let held: { turns: ChatTurn[]; older: boolean; gen: number } = { turns: [], older: false, gen: 0 }
+  let gen = 0
+  let approved = 0
+  let heldLive: { gen: number; data: string } | null = null
+  let heldState: { gen: number; data: string } | null = null
   let sentTurns: string[] | null = null
   let sentMeta = ''
   let live = false
@@ -205,8 +213,6 @@ export function adapterChatResponse(
   let emitting = false
   let emitAgain = false
   let debounce: unknown = null
-  // A fork's foreign check (CROSSBIND): until it settles NOTHING of the new source is emitted.
-  let forkGate: Promise<void> | null = null
   let keepalive: unknown = null
   const offs: Array<() => void> = []
   let ctl!: ReadableStreamDefaultController<Uint8Array>
@@ -231,13 +237,17 @@ export function adapterChatResponse(
     // A STOPPED row with no source is either still resolving or about to hand over to the legacy
     // reader: an empty frame now would read as "this conversation is empty" (MED-2). Nothing is sent.
     if (!src && !live) return
+    // A source whose ownership check has not passed yet emits nothing; its approval schedules.
+    if (src && approved !== gen) return
     if (emitting) { emitAgain = true; return }
     emitting = true
     try {
-      if (forkGate) await forkGate
+      const g = gen
+      const frame = held.gen === g ? held : { turns: [], older: false }
+      const p = adapterPayload(await deps.finish({ turns: [...frame.turns], older: frame.older }, live), link)
       if (closed) return
-      const p = adapterPayload(await deps.finish({ turns: [...held.turns], older: held.older }, live), link)
-      if (closed) return
+      // The source moved while the payload was built: these frames are not the current source's.
+      if (g !== gen || approved !== gen) return
       const { turns, ...meta } = p
       const metaJson = JSON.stringify(meta)
       const d = chatDelta(sentTurns, turns)
@@ -262,33 +272,57 @@ export function adapterChatResponse(
   function onDelta(d: HarnessChatDelta) {
     if (closed) return
     switch (d.kind) {
-      case 'window': case 'append': case 'grow':
-        held = applyHarnessChatDeltas(held, [d], deps.max)
+      case 'window': case 'append': case 'grow': {
+        const base = held.gen === gen ? held : { turns: [], older: false }
+        held = { ...applyHarnessChatDeltas(base, [d], deps.max), gen }
         schedule()
         return
+      }
       case 'live': {
-        const out = () => send('live', JSON.stringify({ text: d.text, ...(d.reasoning !== undefined ? { reasoning: d.reasoning } : {}) }))
-        if (forkGate) void forkGate.then(out); else out()
+        const data = JSON.stringify({ text: d.text, ...(d.reasoning !== undefined ? { reasoning: d.reasoning } : {}) })
+        if (approved === gen) send('live', data); else heldLive = { gen, data }
         return
       }
       case 'state': {
-        const out = () => send('state', JSON.stringify({ working: d.working, ...(d.attention ? { attention: d.attention } : {}) }))
-        if (forkGate) void forkGate.then(out); else out()
+        const data = JSON.stringify({ working: d.working, ...(d.attention ? { attention: d.attention } : {}) })
+        if (approved === gen) send('state', data); else heldState = { gen, data }
         return
       }
       case 'fork':
-        // The engine follows the new source itself and a `window` of it follows; only the ref moves —
-        // unless it moved into another row's conversation (CROSSBIND), checked before a frame is sent.
-        src = d.to
-        if (deps.foreign) {
-          const to = d.to
-          const gate: Promise<void> = deps.foreign().then(f => {
-            if (!closed && sourceForeign(to, deps.conversationId, f)) { logForeign(deps.conversationId, to); close(true) }
-          }).catch(() => { close(true) }).finally(() => { if (forkGate === gate) forkGate = null })
-          forkGate = gate
-        }
+        // The engine follows the new source itself and a `window` of it follows — none of which is
+        // emitted until the new source is shown not to be another row's conversation (CROSSBIND).
+        adopt(d.to, true)
         return
     }
+  }
+
+  /** Follow `to` as a new generation; with `check`, nothing of it is emitted until its owner check passes. */
+  function adopt(to: ChatSourceRef, check: boolean) {
+    const g = ++gen
+    src = to
+    heldLive = null
+    heldState = null
+    if (!check || !deps.foreign) { approve(g); return }
+    void verify(to, g)
+  }
+
+  /** Is `to` (generation `g`) another row's? Close as a failure if so; approve it if still current. */
+  async function verify(to: ChatSourceRef, g: number): Promise<void> {
+    let owners: ReadonlySet<string>
+    try { owners = await deps.foreign!() } catch { close(true); return }
+    if (closed) return
+    if (sourceForeign(to, deps.conversationId, owners)) { logForeign(deps.conversationId, to); close(true); return }
+    if (g === gen) approve(g)
+  }
+
+  function approve(g: number) {
+    if (closed || g !== gen || approved === g) return
+    approved = g
+    if (heldLive?.gen === g) send('live', heldLive.data)
+    if (heldState?.gen === g) send('state', heldState.data)
+    heldLive = null
+    heldState = null
+    schedule()
   }
 
   // ONE resolution in flight, and every caller waits for IT: startup used to find `resolving` set by
@@ -316,7 +350,7 @@ export function adapterChatResponse(
           close(true); return
         }
         if (closed) return
-        src = found
+        adopt(found, false) // checked just above, against the owners of this moment
         unfollow = deps.chat.follow(found, deps.max, onDelta)
       } catch {
         close(true)
@@ -337,7 +371,11 @@ export function adapterChatResponse(
       link = row.link
       const nowLive = rowLive(row)
       if (nowLive !== live) { live = nowLive; schedule() }
-      if (!src) void resolveAndFollow()
+      if (!src) { void resolveAndFollow(); return }
+      // Ownership can change under the followed source — a row registered after it was adopted (its
+      // check could only see the owners of that moment). Re-asked on every tick: a source another row
+      // now owns closes the stream and the legacy reader serves (HIGH-4).
+      if (deps.foreign && approved === gen) await verify(src, gen)
     } catch {
       close(true)
     }
@@ -400,8 +438,16 @@ export async function readAdapterChat(o: {
     // A live row that has not written yet is an empty conversation; a STOPPED row whose transcript
     // cannot be resolved is gone, and the legacy reader owns that diagnosis (retention, missing file).
     if (!src) return live ? adapterPayload(await o.finish({ turns: [], older: false }, live), o.row.link) : null
-    if (o.foreign && sourceForeign(src, o.conversationId, await o.foreign())) { logForeign(o.conversationId, src); return null }
-    const window = await firstWindow(o.chat, src, o.max, o.timeoutMs)
+    // Every source this read adopts — the resolved one, and any the follower forks to before its first
+    // window — is checked against the CURRENT owners; a foreign one makes the read `null` (MED-1).
+    const allowed = async (to: ChatSourceRef): Promise<boolean> => {
+      if (!o.foreign) return true
+      if (!sourceForeign(to, o.conversationId, await o.foreign())) return true
+      logForeign(o.conversationId, to)
+      return false
+    }
+    if (!await allowed(src)) return null
+    const window = await firstWindow(o.chat, src, o.max, o.timeoutMs, allowed)
     if (!window) return null
     return adapterPayload(await o.finish(window, live), o.row.link)
   } catch {
@@ -418,6 +464,8 @@ export function firstWindow(
   src: ChatSourceRef,
   max: number,
   timeoutMs: number = ADAPTER_FIRST_WINDOW_MS,
+  /** Asked of every source a `fork` moves to before the window arrives; `false` makes the read `null`. */
+  forkAllowed?: (to: ChatSourceRef) => Promise<boolean>,
 ): Promise<{ turns: ChatTurn[]; older: boolean } | null> {
   return new Promise(resolve => {
     let done = false
@@ -432,8 +480,19 @@ export function firstWindow(
       resolve(v)
     }
     const timer = setTimeout(() => finish(null), timeoutMs)
+    // Every fork so far, checked in order: a window is taken only once the checks of every source that
+    // led to it have passed, so a window of a foreign source is never returned.
+    let gate: Promise<boolean> = Promise.resolve(true)
     unfollow = chat.follow(src, max, d => {
-      if (d.kind === 'window') finish(applyHarnessChatDeltas({ turns: [], older: false }, [d], max))
+      if (done) return
+      if (d.kind === 'fork') {
+        const to = d.to
+        gate = gate.then(ok => ok && (forkAllowed ? forkAllowed(to).catch(() => false) : true))
+        return
+      }
+      if (d.kind !== 'window') return
+      const w = applyHarnessChatDeltas({ turns: [], older: false }, [d], max)
+      void gate.then(ok => finish(ok ? w : null))
     })
   })
 }

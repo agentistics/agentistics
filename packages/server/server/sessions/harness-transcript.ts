@@ -54,7 +54,7 @@ export interface TranscriptRef {
    * Conversation ids OTHER rows are linked to. A reader that follows a conversation into another file
    * (claude's fork-follow) must never land in one of these — that is another session's chat.
    */
-  foreign?: ReadonlySet<string>
+  foreign?: ReadonlySet<string> | (() => Promise<ReadonlySet<string>>)
 }
 
 /**

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { conversationOwnedElsewhere, createSessionRegistry, newSessionId, retireFallenSessions, retireSession } from './registry'
+import { conversationOwnedElsewhere, createSessionRegistry, linkConversationVerified, newSessionId, retireFallenSessions, retireSession } from './registry'
 
 let dir = ''
 let file = ''
@@ -585,10 +585,52 @@ describe('one conversation, one row (CROSSBIND)', () => {
     expect(conversationOwnedElsewhere([born('x', A)], 'x', A)).toBeNull() // its own
   })
 
-  it('LOW-2: a LOST holder (stale heartbeat, no endedAt) does not refuse a reopened row\'s relink', () => {
+  it('HIGH-3: a live owner with an OLD heartbeat still owns it — heartbeat age never frees a conversation', async () => {
     const now = 1_000_000_000
-    expect(conversationOwnedElsewhere([born('old', A, { lastSeenMs: now - 10 * 60_000 })], 'new', A, now)).toBeNull()
-    expect(conversationOwnedElsewhere([born('old', A, { lastSeenMs: now - 30_000 })], 'new', A, now)?.id).toBe('old')
+    expect(conversationOwnedElsewhere([born('old', A, { lastSeenMs: now - 60 * 60_000 })], 'new', A)?.id).toBe('old')
+    const r = createSessionRegistry(file)
+    await r.add(born('slowpoll', A, { lastSeenMs: Date.now() - 60 * 60_000 }))
+    await r.add(session('other'))
+    expect(await r.link('other', { conversationId: A, conversationLinkVia: 'protocol-stated' })).toEqual({ ok: false, heldBy: 'slowpoll' })
+  })
+
+  it('HIGH-3: only a VERIFIED not-running holder (or endedAt) frees it', async () => {
+    expect(conversationOwnedElsewhere([born('lost', A)], 'new', A, { notRunning: new Set(['lost']) })).toBeNull()
+    const r = createSessionRegistry(file)
+    await r.add(born('lost', A))
+    await r.add(session('taker'))
+    // The backend lists the holder alive: refused.
+    expect(await linkConversationVerified('taker', { conversationId: A }, async () => [{ id: 'lost', alive: true }], r))
+      .toEqual({ ok: false, heldBy: 'lost' })
+    // The listing fails: still refused.
+    expect(await linkConversationVerified('taker', { conversationId: A }, async () => { throw new Error('tmux down') }, r))
+      .toEqual({ ok: false, heldBy: 'lost' })
+    // The backend no longer has it: the takeover links.
+    expect(await linkConversationVerified('taker', { conversationId: A }, async () => [], r)).toEqual({ ok: true })
+  })
+
+  it('MED-2: every exact provenance owns it (process-log, harness-session-file, resumed-id, legacy assigned)', () => {
+    for (const via of ['process-log', 'harness-session-file', 'resumed-id', 'assigned-id', 'protocol-stated'] as const) {
+      expect(conversationOwnedElsewhere([born('x', A, { conversationLinkVia: via })], 'y', A)?.id).toBe('x')
+    }
+    const legacy = { ...session('x'), conversationId: A }
+    expect(conversationOwnedElsewhere([legacy], 'y', A)?.id).toBe('x')
+    expect(conversationOwnedElsewhere([{ ...legacy, conversationLink: 'observed' as const }], 'y', A)).toBeNull()
+  })
+
+  it('MED-2: a process-log owner refuses a second row through the registry', async () => {
+    const r = createSessionRegistry(file)
+    await r.add(born('codex', A, { conversationLinkVia: 'process-log' }))
+    await r.add(session('second'))
+    expect(await r.link('second', { conversationId: A, conversationLinkVia: 'process-log' })).toEqual({ ok: false, heldBy: 'codex' })
+  })
+
+  it('MED-4: a link whose file lock was not really acquired is refused and writes nothing', async () => {
+    const r = createSessionRegistry(file, { lock: (_f, fn) => fn({ contended: true }) })
+    const ok = createSessionRegistry(file)
+    await ok.add(session('free'))
+    expect(await r.link('free', { conversationId: A })).toEqual({ ok: false, contended: true })
+    expect((await ok.read()).find(x => x.id === 'free')?.conversationId).toBeUndefined()
   })
 
   it('LOW-1: the same refusal is logged once, not on every poll', async () => {

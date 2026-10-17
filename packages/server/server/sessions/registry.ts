@@ -29,6 +29,7 @@ import { MANAGED_SESSIONS_FILE } from '../config'
 import { CONVERSATION_LINK_REASONS as LINK_REASONS, type ConversationLinkReason } from '@agentistics/core'
 import type { ManagedSession, RetireRequest } from './types'
 import { withFileLock } from './file-lock'
+import { BoundedKeys } from './bounded-keys'
 
 /** Distinguishes two writes from the SAME process; the pid distinguishes the processes. */
 let writeSeq = 0
@@ -50,39 +51,52 @@ export function newSessionId(): string {
  * drifted: adding a field to the store meant finding each copy, and the one that was missed failed
  * as a type error at best and a silently dropped write at worst.
  */
-/** What `linkConversation` did: linked, refused because another row owns the conversation, or no such row. */
-export type LinkOutcome = { ok: true } | { ok: false; heldBy?: string }
+/**
+ * What `linkConversation` did: linked; refused because another row owns the conversation (`heldBy`);
+ * refused because the cross-process lock was not really held (`contended` — the caller retries on the
+ * next poll); or no such row.
+ */
+export type LinkOutcome = { ok: true } | { ok: false; heldBy?: string; contended?: true }
+
+/**
+ * The links that say EXACTLY which conversation a row drives (CROSSBIND): the id agentop handed the
+ * CLI (`assigned-id`, `resumed-id`), the id the protocol stated (`protocol-stated`), and the harness's
+ * own statement read out of the process we spawned (`process-log`, `harness-session-file`). A
+ * first-sighting claim (time + directory) is an inference and owns nothing. A row with no recorded
+ * reason reads by the legacy field, as `conversationLinkOf` does: `observed` is a first sighting,
+ * anything else an assigned id.
+ */
+const EXACT_LINKS: ReadonlySet<ConversationLinkReason> = new Set<ConversationLinkReason>([
+  'assigned-id', 'resumed-id', 'protocol-stated', 'process-log', 'harness-session-file',
+])
+function exactLink(s: ManagedSession): boolean {
+  if (s.conversationLinkVia) return EXACT_LINKS.has(s.conversationLinkVia)
+  return s.conversationLink !== 'observed'
+}
 
 /**
  * PURE (CROSSBIND). The OTHER row that owns `conversationId`, so that `id` may not be linked to it.
  *
- * Owning is narrower than "carries the id": the holder must still be in play (no `endedAt`, and a heartbeat within 5 min — a `lost` row after a reboot has none ended; a reopen
- * retires its predecessor on the same conversation, and that pair is one chat, not two) and its link
- * must be one the conversation was CREATED under for it: the id agentop handed the CLI at spawn
- * (`assigned-id`) or the id the protocol stated for its own session (`protocol-stated`). Nothing else
- * can be writing that conversation as a fresh session, so a second row reaching it — by a harness
- * file, a process log, a first sighting — is a mis-attribution, and showing it would put one
- * session's chat under another's name. Measured 2026-10-17: two sessions in one folder each showed the
- * other's conversation.
+ * An owner is any row carrying the conversation through an EXACT link (`EXACT_LINKS`) that is not
+ * known to be over. Over means one of exactly three things: it has an `endedAt` (finished, or a
+ * reopen's retired predecessor — that pair is one chat, not two); the caller VERIFIED its backend is
+ * gone (`notRunning`, from tmux/the process list); or it is the row the caller is retiring. A
+ * heartbeat's age is NEVER one of them: `lastSeenMs` is a poller's timestamp, and a stalled or stopped
+ * poller would otherwise hand a live session's conversation to a second row. Measured 2026-10-17: two
+ * sessions in one folder each showed the other's conversation.
  */
-/** A holder whose heartbeat stopped (a reboot leaves `lost` rows with no `endedAt`) is not in play. */
-const OWNER_STALE_MS = 5 * 60_000
-function staleOwner(s: ManagedSession, nowMs: number): boolean {
-  return s.lastSeenMs !== undefined && nowMs - s.lastSeenMs > OWNER_STALE_MS
-}
-
-/** Refusals already logged — the poller retries every 5 s. */
-const warnedRefusals = new Set<string>()
-
 export function conversationOwnedElsewhere(
   list: readonly ManagedSession[],
   id: string,
   conversationId: string,
-  nowMs: number = Date.now(),
+  opts: { notRunning?: ReadonlySet<string> } = {},
 ): ManagedSession | null {
-  return list.find(s => s.id !== id && s.conversationId === conversationId && !s.endedAt && !staleOwner(s, nowMs)
-    && (s.conversationLinkVia === 'assigned-id' || s.conversationLinkVia === 'protocol-stated')) ?? null
+  return list.find(s => s.id !== id && s.conversationId === conversationId && !s.endedAt
+    && !opts.notRunning?.has(s.id) && exactLink(s)) ?? null
 }
+
+/** Refusals already logged — the poller retries every 5 s. Bounded, and dropped with the row. */
+const warnedRefusals = new BoundedKeys(512)
 
 export interface SessionPatch {
   leader?: boolean
@@ -148,9 +162,11 @@ export interface SessionRegistry {
   patchMany(ids: readonly string[], patch: SessionPatch): Promise<number>
   /**
    * Link a row to a conversation — REFUSED (`{ ok: false, heldBy }`) when another row already owns it
-   * (`conversationOwnedElsewhere`), decided inside the lock so two writers cannot both win.
+   * (`conversationOwnedElsewhere`), decided inside the lock so two writers cannot both win — and
+   * REFUSED (`contended`) when that lock could not really be taken, because a check run without it is
+   * not one. `notRunning` = rows the caller verified have no backend (they own nothing).
    */
-  link(id: string, patch: SessionPatch & { conversationId: string }): Promise<LinkOutcome>
+  link(id: string, patch: SessionPatch & { conversationId: string }, opts?: { notRunning?: ReadonlySet<string> }): Promise<LinkOutcome>
   /**
    * Stamp `lastSeenMs` on every id given, in ONE write — the poller's heartbeat.
    *
@@ -306,7 +322,8 @@ function sanitizeRepo(raw: unknown): { repo?: ManagedSession['repo'] } {
   }
 }
 
-export function createSessionRegistry(file: string): SessionRegistry {
+export function createSessionRegistry(file: string, deps: { lock?: typeof withFileLock } = {}): SessionRegistry {
+  const lock = deps.lock ?? withFileLock
   // One in-process writer. Each write appends to this chain, so read-modify-write sequences run
   // strictly one after another even when several requests land at once.
   let queue: Promise<unknown> = Promise.resolve()
@@ -421,8 +438,8 @@ export function createSessionRegistry(file: string): SessionRegistry {
   // because both records had been erased and re-created by adoption, which cannot know a name.
   // That is the one bug behind "the title I typed was ignored" and "rename does not rename".
   // See `file-lock.ts` for why the lock can never wedge the product.
-  function enqueue<T>(fn: () => Promise<T>): Promise<T> {
-    const next = queue.then(() => withFileLock(file, fn))
+  function enqueue<T>(fn: (held: { contended: boolean }) => Promise<T>): Promise<T> {
+    const next = queue.then(() => lock(file, fn))
     queue = next.catch(() => undefined)
     return next
   }
@@ -453,6 +470,7 @@ export function createSessionRegistry(file: string): SessionRegistry {
       })
     },
     remove(id) {
+      warnedRefusals.dropWhere(k => k.startsWith(`${id}\0`))
       return enqueue(async () => {
         const list = await read()
         // Nothing to remove: writing anyway would touch the file (and pointlessly clear a pending
@@ -477,16 +495,18 @@ export function createSessionRegistry(file: string): SessionRegistry {
         return true
       })
     },
-    link(id, patch) {
-      return enqueue(async (): Promise<LinkOutcome> => {
+    link(id, patch, opts = {}) {
+      return enqueue(async (held): Promise<LinkOutcome> => {
+        // The ownership check is only a check while no other process can write between it and the
+        // write below. `withFileLock` proceeds WITHOUT the lock after a contended wait (by design, so
+        // the product never wedges) — fine for a label, not for "one conversation, one row".
+        if (held.contended) return { ok: false, contended: true }
         const list = await read()
         const idx = list.findIndex(s => s.id === id)
         if (idx === -1) return { ok: false }
-        const owner = conversationOwnedElsewhere(list, id, patch.conversationId)
+        const owner = conversationOwnedElsewhere(list, id, patch.conversationId, opts)
         if (owner) {
-          const key = `${id}\0${patch.conversationId}`
-          if (!warnedRefusals.has(key)) {
-            warnedRefusals.add(key)
+          if (warnedRefusals.add(`${id}\0${patch.conversationId}`)) {
             console.warn(`[sessions] refused to link ${id} to conversation ${patch.conversationId}: session ${owner.id} owns it`)
           }
           return { ok: false, heldBy: owner.id }
@@ -550,7 +570,26 @@ export const patchSession = (
 export const linkConversation = (
   id: string,
   patch: SessionPatch & { conversationId: string },
-): Promise<LinkOutcome> => defaultRegistry.link(id, patch)
+  opts?: { notRunning?: ReadonlySet<string> },
+): Promise<LinkOutcome> => defaultRegistry.link(id, patch, opts)
+/**
+ * `linkConversation`, plus the one legitimate way past an owner: the caller's backend VERIFIES the
+ * holder is not running (absent from `alive()`, or listed dead) — a `lost` row after a reboot, whose
+ * conversation a new session really did take over. Only asked on a refusal, so the common link costs
+ * no listing; a listing that fails keeps the refusal.
+ */
+export async function linkConversationVerified(
+  id: string,
+  patch: SessionPatch & { conversationId: string },
+  alive: () => Promise<ReadonlyArray<{ id: string; alive: boolean }>>,
+  reg: Pick<SessionRegistry, 'link'> = defaultRegistry,
+): Promise<LinkOutcome> {
+  const first = await reg.link(id, patch)
+  if (first.ok || !first.heldBy) return first
+  const listed = await alive().catch(() => null)
+  if (!listed || listed.some(b => b.id === first.heldBy && b.alive)) return first
+  return reg.link(id, patch, { notRunning: new Set([first.heldBy]) })
+}
 export const patchSessions = (
   ids: readonly string[],
   patch: SessionPatch,

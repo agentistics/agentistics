@@ -37,6 +37,7 @@ import { ATTACHMENT_DIR, readAttachmentLog } from './attachment-web'
 import { transcriptReaderFor } from './harness-transcript'
 import { readChatMemo } from './chat-read-memo'
 import { conversationOfRow, foreignConversations } from './row-conversation'
+import { readRegistry } from './registry'
 import { migratePrompts, pendingFor, type PendingPrompt } from './pending-prompts'
 import { HARNESS_PROCESS_TRANSCRIPTS } from './harness-session-file'
 import { transcriptAvailability, transcriptSentence, type TranscriptAvailability } from './transcript-availability'
@@ -317,7 +318,9 @@ async function readSessionChatCore(
       // What was sent and is not echoed yet: the proof a transcript the conversation moved to is ours.
       pending: pendingFor(conversationId, []).map(p => p.text),
       // Never follow into a sibling row's transcript — see `transcript-fork.ts` (CROSSBIND).
-      foreign: foreignConversations(fleet.sessions, row.id, conversationId),
+      // The snapshot AND the registry as it is now: a row registered since the snapshot is an owner too.
+      // Built lazily — only when a newer sibling transcript exists to be judged.
+      foreign: async () => foreignConversations([...fleet.sessions, ...await readRegistry().catch(() => [])], row.id, conversationId),
     })
     .catch(() => null)
   if (!path) {

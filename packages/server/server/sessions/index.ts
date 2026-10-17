@@ -84,9 +84,9 @@ export async function resolveBackend(): Promise<SessionBackend> {
       },
       onConversation(id, conversationId) {
         // Refused (and logged) when another row owns that conversation — CROSSBIND, `registry.ts`.
-        void import('./registry').then(r => r.linkConversation(id, {
+        void import('./registry').then(r => r.linkConversationVerified(id, {
           conversationId, conversationLink: 'assigned', conversationLinkVia: 'protocol-stated',
-        })).catch(() => {})
+        }, () => composite ? composite.list() : Promise.reject(new Error('no backend')))).catch(() => {})
       },
       async prepare() {
         const { ensureSessionIdentityKey } = await import('./session-identity')

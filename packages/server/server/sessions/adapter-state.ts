@@ -24,7 +24,7 @@
  * Pure decisions (`planScreen`, `adapterActivity`) are exported and tested; the feed holds one engine
  * subscription per conversation and drops it when the row stops running.
  */
-import { sourceForeign } from './adapter-chat'
+import { ADAPTER_REFUSAL_MS, logForeign, sourceForeign } from './adapter-chat'
 import { applyHarnessChatDeltas, type ChatSourceRef, type EngineChatTurn, type HarnessChat } from '@agentistics/engine-api'
 import type { SessionActivity } from './types'
 
@@ -106,7 +106,9 @@ export function createAdapterStateFeed(o: {
   foreign?(row: AdapterStateRow): Promise<ReadonlySet<string>>
   setTimer?: (f: () => void, ms: number) => unknown
   clearTimer?: (t: unknown) => void
+  now?: () => number
 }): AdapterStateFeed {
+  const now = o.now ?? Date.now
   const setTimer = o.setTimer ?? ((f, ms) => setTimeout(f, ms))
   const clearTimer = o.clearTimer ?? (t => clearTimeout(t as ReturnType<typeof setTimeout>))
   interface Entry {
@@ -115,6 +117,19 @@ export function createAdapterStateFeed(o: {
     reading: AdapterReading | undefined
     turns: { turns: EngineChatTurn[]; older: boolean } | undefined
     alive: boolean
+    /**
+     * CROSSBIND — the source being followed and its GENERATION. A `fork` moves to a new source (a new
+     * generation) whose ownership is checked before anything it says is kept: until the check for the
+     * CURRENT generation passes, its turns and state are held aside (`held*`), and a check that settles
+     * for an older generation commits nothing.
+     */
+    src: ChatSourceRef | null
+    gen: number
+    approved: number
+    heldTurns?: { turns: EngineChatTurn[]; older: boolean } | undefined
+    heldReading?: AdapterReading | undefined
+    /** The source turned out to be another row's: followed no more until this moment (then retried). */
+    refusedUntil?: number
   }
   const entries = new Map<string, Entry>()
   const forced = new Set<string>()
@@ -137,9 +152,49 @@ export function createAdapterStateFeed(o: {
     forced.delete(id)
   }
 
+  function setReading(e: Entry, next: AdapterReading) {
+    const prev = e.reading
+    e.reading = next
+    if (!prev || prev.working !== next.working || prev.attention !== next.attention) changed()
+  }
+
+  /** The followed source belongs to another row: drop everything it said and stop following it. */
+  function refuse(e: Entry, own: string, src: ChatSourceRef) {
+    if (!e.alive || e.refusedUntil !== undefined) return
+    logForeign(own, src)
+    try { e.unfollow?.() } catch { /* total by contract */ }
+    e.unfollow = null
+    e.src = null
+    e.turns = undefined
+    e.heldTurns = undefined
+    e.heldReading = undefined
+    e.refusedUntil = now() + ADAPTER_REFUSAL_MS
+    if (e.reading) { e.reading = undefined; changed() }
+  }
+
+  /** Check `src` (generation `g`) against the CURRENT owners; commit what it held only if still current. */
+  function check(e: Entry, row: AdapterStateRow & { conversationId: string }, src: ChatSourceRef, g: number) {
+    if (!o.foreign) { if (e.gen === g) commit(e, g); return }
+    void o.foreign(row).then(f => {
+      if (!e.alive) return
+      if (sourceForeign(src, row.conversationId, f)) { refuse(e, row.conversationId, src); return }
+      if (e.gen === g) commit(e, g)
+    }, () => { if (e.gen === g) refuse(e, row.conversationId, src) })
+  }
+
+  function commit(e: Entry, g: number) {
+    if (e.approved === g || e.refusedUntil !== undefined) return
+    e.approved = g
+    if (e.heldTurns) e.turns = e.heldTurns
+    const r = e.heldReading
+    e.heldTurns = undefined
+    e.heldReading = undefined
+    if (r) setReading(e, r)
+  }
+
   function follow(row: AdapterStateRow & { harness: string; conversationId: string }, chat: HarnessChat) {
     const key = `${row.harness}\0${row.conversationId}`
-    const e: Entry = { key, unfollow: null, reading: undefined, turns: undefined, alive: true }
+    const e: Entry = { key, unfollow: null, reading: undefined, turns: undefined, alive: true, src: null, gen: 0, approved: 0 }
     entries.set(row.id, e)
     const coversAttention = chat.declares.attention.from !== undefined
     void (async () => {
@@ -148,24 +203,42 @@ export function createAdapterStateFeed(o: {
         src = await chat.resolve({ conversationId: row.conversationId, ...(row.cwd ? { cwd: row.cwd } : {}) })
       } catch { src = null }
       if (!e.alive) return
-      if (src && o.foreign && sourceForeign(src, row.conversationId, await o.foreign(row))) src = null
+      if (src && o.foreign) {
+        const owners = await o.foreign(row).catch(() => null)
+        if (!owners || sourceForeign(src, row.conversationId, owners)) src = null
+      }
       if (!e.alive) return
       if (!src) {
         // Nothing written yet: the screen decides, and the next sync tries again.
         entries.delete(row.id)
         return
       }
+      // Checked once already (above), against the owners of that moment: generation 1 is adopted.
+      e.src = src
+      e.gen = 1
+      e.approved = 1
       e.unfollow = chat.follow(src, TAIL_WINDOW, d => {
-        if (!e.alive) return
+        if (!e.alive || e.refusedUntil !== undefined) return
+        if (d.kind === 'fork') {
+          // A fork is followed by the NEW source's window and state: none of it is kept until that
+          // source is shown not to be another row's (HIGH-1).
+          const g = ++e.gen
+          e.src = d.to
+          e.heldTurns = undefined
+          e.heldReading = undefined
+          check(e, row, d.to, g)
+          return
+        }
+        const current = e.approved === e.gen
         if (d.kind === 'window' || d.kind === 'append' || d.kind === 'grow') {
-          e.turns = applyHarnessChatDeltas(e.turns ?? { turns: [], older: false }, [d], TAIL_WINDOW)
+          const base = (current ? e.turns : e.heldTurns) ?? { turns: [], older: false }
+          const next = applyHarnessChatDeltas(base, [d], TAIL_WINDOW)
+          if (current) e.turns = next; else e.heldTurns = next
           return
         }
         if (d.kind !== 'state') return
         const next: AdapterReading = { working: d.working, attention: d.attention !== undefined, coversAttention }
-        const prev = e.reading
-        e.reading = next
-        if (!prev || prev.working !== next.working || prev.attention !== next.attention) changed()
+        if (current) setReading(e, next); else e.heldReading = next
       })
     })()
   }
@@ -182,7 +255,15 @@ export function createAdapterStateFeed(o: {
         live.add(row.id)
         const key = `${row.harness}\0${row.conversationId}`
         const cur = entries.get(row.id)
-        if (cur && cur.key === key) continue
+        if (cur && cur.key === key) {
+          if (cur.refusedUntil === undefined) {
+            // Ownership can change under a followed source (a row registered since it was adopted):
+            // re-asked on every sync, so a newly registered owner ends the follow (HIGH-4).
+            if (cur.src && cur.approved === cur.gen) check(cur, { ...row, conversationId: row.conversationId }, cur.src, cur.gen)
+            continue
+          }
+          if (now() < cur.refusedUntil) continue
+        }
         if (cur) release(row.id) // the row moved to another conversation (a reopen, a /clear)
         follow({ ...row, harness: row.harness, conversationId: row.conversationId }, chat)
       }

@@ -560,7 +560,7 @@ export function createSessionsPoller(o: {
         if (transcript && conversationId) {
           const path = await transcript
             // Never followed into another row's transcript (CROSSBIND, `transcript-fork.ts`).
-            .resolve({ conversationId, ...(cwd ? { cwd } : {}), foreign: foreignConversations(registry, r.id, conversationId) })
+            .resolve({ conversationId, ...(cwd ? { cwd } : {}), foreign: async () => foreignConversations(registry, r.id, conversationId) })
             .catch(() => null)
           if (path) {
             // PERF.IDLE: an unchanged transcript yields the same six turns, so a poll does not re-read

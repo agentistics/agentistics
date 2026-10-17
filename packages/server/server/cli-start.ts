@@ -192,7 +192,7 @@ import { withResumeLock } from './sessions/resume-lock'
 import { liveConversationHolders } from './sessions/live-claims'
 import type { ManagedSession, SessionBackend, SpawnPlanError } from './sessions/types'
 import {
-  addSession, adoptSessionRecords, newSessionId, linkConversation, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession, touchSessions,
+  addSession, adoptSessionRecords, newSessionId, linkConversationVerified, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession, touchSessions,
 } from './sessions/registry'
 import {
   createSessionsPoller, linkProcessConversation, sampleProcessLinks, SESSION_POLL_MS, type SessionsPoller,
@@ -1763,9 +1763,15 @@ async function sampleLinksFor(harness: HarnessId, deadline: () => number, onlyId
  * conversation is one session's chat shown under another's name.
  */
 function recordProcessLink(sid: string, conversationId: string, link: 'assigned' | 'observed', via?: ConversationLinkReason): Promise<unknown> {
-  return linkConversation(sid, { conversationId, conversationLink: link, ...(via ? { conversationLinkVia: via } : {}) })
+  return linkConversationVerified(
+    sid,
+    { conversationId, conversationLink: link, ...(via ? { conversationLinkVia: via } : {}) },
+    async () => (await resolveBackend()).list(),
+  )
     .then(async outcome => {
       if (!outcome.ok && outcome.heldBy) throw new Error(`conversation ${conversationId} is owned by session ${outcome.heldBy}`)
+      // Not written: the registry lock could not be taken, so the ownership check never ran. Retried next poll.
+      if (!outcome.ok && outcome.contended) throw new Error(`conversation ${conversationId} not linked: registry lock contended`)
       const r = outcome.ok
       await rekeyMutedSession(sid, conversationId).catch(() => {})
       await rekeyFolderMember(sid, conversationId).catch(() => {})
