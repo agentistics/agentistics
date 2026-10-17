@@ -119,6 +119,28 @@ test('claude: a relayed stream line is stored; older records never replace newer
   expect(await ingestPlanLimits(older)).toBe(false)
 })
 
+test('payload exposes ordered account readings with missing windows as null, only to the owner', async () => {
+  const now = Date.now()
+  await ingestPlanLimits({ harness: 'codex', account: 'default', windows: [
+    { kind: 'week', usedPct: 20, resetsAt: now + 3 * 86_400_000 },
+  ], updatedAt: now - 60_000, source: 'codex-rollout' })
+  await ingestPlanLimits({ harness: 'codex', account: 'default', windows: [
+    { kind: '5h', usedPct: 11, resetsAt: now + 3_600_000 },
+  ], updatedAt: now, source: 'codex-rollout' })
+  const body = await planLimitsPayload({ profiles: { gemini: { periods: [
+    { id: 'bp_test', mode: 'subscription', planId: 'other', label: 'Pro', from: '2020-01-01', price: { amount: 20, currency: 'USD' } },
+  ] } } }, now)
+  expect(body.registered.some(r => r.harness === 'gemini')).toBe(true)
+  expect(body.readings).toEqual([{
+    harness: 'codex', account: body.limits[0]!.account,
+    points: [
+      { at: now - 60_000, weekPct: 20, fiveHourPct: null },
+      { at: now, weekPct: null, fiveHourPct: 11 },
+    ],
+  }])
+  expect(planLimitsTool(undefined, body)).not.toHaveProperty('readings')
+})
+
 test('payload exposes pacing budgets alongside limits', async () => {
   const now = Date.now()
   await ingestPlanLimits({ harness: 'codex', account: 'default', plan: 'Plus', windows: [
@@ -354,6 +376,7 @@ test('unavailable current accounts disappear from agent budgets, slots, sessions
   expect(body.limits.every(l => l.account.startsWith('acc_'))).toBe(true)
   expect(body.budgets.map(b => b.harness)).toEqual(['codex'])
   expect(body.hiddenFromAgents.map(b => b.harness)).toEqual(['claude'])
+  expect(body.readings.map(r => r.harness).sort()).toEqual(['claude', 'codex'])
   expect(body.freeSlotsByHarness.claude).toBeUndefined()
   expect(body.freeSlots).toBe(body.freeSlotsByHarness.codex!)
   expect(body.liveSessions).toEqual([])
