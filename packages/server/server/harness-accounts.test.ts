@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtemp, mkdir, readFile, rm, writeFile, stat, chmod, symlink } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readdir } from 'node:fs/promises'
 import { codexIdentity, createHarnessAccounts, probeAccountIdentity, sameLogin, __setHarnessAccountsForTest, IDENTITY_PROBES, ISOLATION_ENV } from './harness-accounts'
@@ -627,16 +627,30 @@ test('a stale unbound `default` record folds into the login the probe now identi
   const data = await store.readAccounts()
   const codex = data.accounts.filter(a => a.harness === 'codex')
   expect(codex).toHaveLength(1)
-  expect(codex[0]).toMatchObject({ id: bound.id, key: '11111111-2222-3333-4444-555555555555', nickname: 'Meu Codex', firstSeen: 100, lastSeen: 5000 })
-  expect(data.bindings['codex:']).toBe(bound.id)
-  expect(data.aliases).toEqual({ acc_stale000000: bound.id })
-  expect(data.segments).toEqual({ [bound.id]: 5 })
-  expect(await store.byId('acc_stale000000')).toMatchObject({ id: bound.id })
+  expect(bound.id).toBe('acc_stale000000')
+  expect(codex[0]).toMatchObject({ id: 'acc_stale000000', key: '11111111-2222-3333-4444-555555555555', nickname: 'Meu Codex', firstSeen: 100, lastSeen: 5000 })
+  expect(data.bindings['codex:']).toBe('acc_stale000000')
+  expect(Object.values(data.aliases ?? {})).toEqual(['acc_stale000000'])
+  expect(data.segments).toEqual({ acc_stale000000: 5 })
   // Refreshed on the next sighting, and listed once: no id-less row beside it.
   now += 120_000
   const listed = (await store.list(['codex'])).filter(a => a.harness === 'codex')
   expect(listed.map(a => a.id)).toEqual([bound.id])
   expect(listed[0]!.lastSeen).toBe(now)
+})
+
+test('a v1 placeholder that wrote the default root out as a path still folds (the owner\'s real file)', async () => {
+  const file = join(dir, 'accounts.json')
+  const home = process.env.CODEX_HOME ?? join(homedir(), '.codex')
+  await writeFile(file, JSON.stringify({ version: 2, bindings: {}, segments: {},
+    accounts: [{ id: 'acc_89331eb494e4', root: home, key: 'default', harness: 'codex', label: 'Conta padrão', nickname: 'Principal', available: true, firstSeen: 1, lastSeen: 1 }] }))
+  const store = createHarnessAccounts({ file, probe: async () => codexIdentity(realCodexAuth()) })
+  const bound = await store.current('codex')
+  const codex = (await store.readAccounts()).accounts.filter(a => a.harness === 'codex')
+  expect(bound.id).toBe('acc_89331eb494e4')
+  expect(codex).toHaveLength(1)
+  expect(codex[0]).toMatchObject({ id: 'acc_89331eb494e4', nickname: 'Principal', key: '11111111-2222-3333-4444-555555555555' })
+  expect((await store.list(['codex'])).filter(a => a.harness === 'codex').map(a => a.id)).toEqual(['acc_89331eb494e4'])
 })
 
 test('a `default` placeholder bound to ANOTHER root is never folded', async () => {

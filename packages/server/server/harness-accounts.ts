@@ -129,6 +129,9 @@ const mintId = () => `acc_${randomBytes(6).toString('hex')}`
 const emptyFile = (): AccountsFile => ({ version: 2, accounts: [], bindings: {}, segments: {} })
 /** One spelling per directory: absolute, no trailing slash. Applied at the store's boundary. */
 const normRoot = (root: string | null | undefined): string | null => root == null ? null : resolve(root)
+/** Two roots of one harness are the same folder: `null` IS the default root (a v1 record wrote the path out). */
+const sameRoot = (harness: HarnessId, a: string | null | undefined, b: string | null | undefined): boolean =>
+  resolve(a ?? DEFAULT_ROOTS[harness]()) === resolve(b ?? DEFAULT_ROOTS[harness]())
 /**
  * Two records of one harness that are the SAME login. Keys used to be spelled differently: claude's
  * probe keyed by `orgId` (or the e-mail) alone before it keyed by `orgId:email`, and a harness with no
@@ -256,9 +259,15 @@ function foldPlaceholder(data: AccountsFile, account: HarnessAccount, displaced?
   const bound = new Set(Object.values(data.bindings))
   // `displaced` was bound to this root a moment ago; `adopt` has already cleared its root.
   const placeholders = data.accounts.filter(a => a !== account && a.harness === account.harness
-    && a.key === 'default' && !bound.has(a.id) && (a === displaced || normRoot(a.root) === normRoot(account.root)))
+    && a.key === 'default' && !bound.has(a.id) && (a === displaced || sameRoot(account.harness, a.root, account.root)))
   if (placeholders.length !== 1) return false
-  foldAccount(data, account, placeholders[0]!)
+  // The identified login takes the placeholder's id: Billing profiles, session rows and nicknames the
+  // owner already keyed by it keep resolving with no alias lookup; the fresh id becomes the alias.
+  const placeholder = placeholders[0]!
+  const freshId = account.id
+  account.id = placeholder.id
+  placeholder.id = freshId
+  foldAccount(data, account, placeholder)
   return true
 }
 
