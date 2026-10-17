@@ -166,3 +166,21 @@ describe('ConfirmModal restores the opener even when a child autofocuses', () =>
     expect(document.activeElement).toBe(opener)
   })
 })
+
+describe('the scope Select inside the away dialog', () => {
+  test('Escape closes only the open listbox; a second Escape closes the dialog', async () => {
+    openFromMenu()
+    expect(dialogs()).toHaveLength(1)
+    const sel = dialogs()[0]!.querySelector<HTMLButtonElement>('button[aria-haspopup="listbox"]')!
+    expect(sel).toBeTruthy()
+    click(sel)
+    expect(document.querySelector('[role="listbox"]')).toBeTruthy()
+    key('Escape')
+    await flush()
+    expect(document.querySelector('[role="listbox"]')).toBeNull()
+    expect(dialogs()).toHaveLength(1)
+    key('Escape')
+    await flush()
+    expect(dialogs()).toHaveLength(0)
+  })
+})

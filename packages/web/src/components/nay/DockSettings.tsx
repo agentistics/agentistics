@@ -59,7 +59,7 @@ export function DockSettingsScreen({ pt, isMobile, chat, onLeave, onBack }: Dock
   const navigate = useNavigate()
 
   // A `Select` list open inside closes itself first; the top-most overlay owns Escape.
-  useEscapeOwner(true, onBack, () => !document.querySelector('[role="listbox"]'))
+  useEscapeOwner(true, onBack)
 
   return (
     <div role="region" aria-label={pt ? 'Ajustes do chat' : 'Chat settings'}

@@ -3,6 +3,7 @@ import { X, ArrowUpCircle, ExternalLink } from 'lucide-react'
 import type { Lang } from '@agentistics/core'
 import { ut } from '../lib/updateI18n'
 import { startUpgrade } from '../lib/upgradeFlow'
+import { useEscapeOwner } from '../lib/overlayStack'
 
 interface Props {
   current: string
@@ -28,15 +29,7 @@ interface Props {
  * is no fallback to explain.
  */
 export function UpdateModal({ current, latest, critical, lang, onLater, onClose }: Props) {
-  const handleKey = useCallback(
-    (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() },
-    [onClose],
-  )
-
-  useEffect(() => {
-    window.addEventListener('keydown', handleKey)
-    return () => window.removeEventListener('keydown', handleKey)
-  }, [handleKey])
+  useEscapeOwner(true, onClose)
 
   const install = () => {
     onClose()

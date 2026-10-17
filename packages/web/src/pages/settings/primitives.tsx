@@ -953,6 +953,9 @@ export function Select({ value, onChange, options, placeholder, disabled, search
     }
   }, [open])
 
+  // An open list is an overlay of its own: it owns Escape above the dialog/drawer it sits in.
+  useEscapeOwner(open, () => setOpen(false))
+
   // Keep the keyboard-highlighted option scrolled into view.
   React.useEffect(() => {
     if (!open || activeIndex < 0) return
@@ -1225,7 +1228,6 @@ export function MultiPicker({
     const onDown = (e: MouseEvent) => {
       if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) close()
     }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
     // Same reason as Select — and the same over-broad fix: this capture-phase listener also fires
     // when the panel's OWN checkbox list scrolls (it has to, to fit more than a handful of
     // options), which closed the whole picker the moment a user scrolled to reach — let alone
@@ -1234,16 +1236,15 @@ export function MultiPicker({
       if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) close()
     }
     document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
     window.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', onScroll)
     return () => {
       document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
       window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', onScroll)
     }
   }, [open, close])
+  useEscapeOwner(open, close)
 
   const openPanel = () => {
     if (disabled) return

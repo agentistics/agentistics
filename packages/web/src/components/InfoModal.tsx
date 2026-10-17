@@ -1,5 +1,6 @@
 import React, { useEffect, useCallback } from 'react'
 import { X, ChevronLeft, ChevronRight, FolderOpen } from 'lucide-react'
+import { useEscapeOwner } from '../lib/overlayStack'
 
 interface InfoItem {
   label: string
@@ -31,13 +32,13 @@ export function InfoModal({ items, currentIndex, onClose, onNavigate, lang }: Pr
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-      else if (e.key === 'ArrowLeft') goLeft()
+      if (e.key === 'ArrowLeft') goLeft()
       else if (e.key === 'ArrowRight') goRight()
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [onClose, goLeft, goRight])
+  }, [goLeft, goRight])
+  useEscapeOwner(true, onClose)
 
   const t = {
     source: lang === 'pt' ? 'Fonte dos dados' : 'Data source',

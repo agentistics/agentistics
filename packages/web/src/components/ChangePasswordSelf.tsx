@@ -7,6 +7,7 @@ function Field({ label, type, value, onChange, inputRef, disabled }: { label: st
 }
 import { PasswordHint } from './PasswordHint'
 import { stepUpFetch } from '../lib/stepup'
+import { useEscapeOwner } from '../lib/overlayStack'
 
 /** Self-service, dismissible change-password modal (requires the current password, and — through
  *  `stepUpFetch` — a fresh step-up grant: for an MFA-enrolled account that means the CODE, which
@@ -24,11 +25,7 @@ export function ChangePasswordSelf({ lang, onClose }: { lang: Lang; onClose: () 
   const [done, setDone] = useState(false)
   const ref = useRef<HTMLInputElement>(null)
   useEffect(() => { ref.current?.focus() }, [])
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  useEscapeOwner(true, onClose)
 
   const tooShort = password.length < 8
   const mismatch = confirm.length > 0 && password !== confirm
