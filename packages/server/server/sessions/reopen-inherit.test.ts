@@ -45,7 +45,8 @@ describe('every reopen path inherits identity', () => {
     const src = await read('../cli-start.ts')
     expect(src).toContain('...inheritedIdentity(req.inherit)')
     expect(src).toContain('inherit: m,')
-    expect(src).toContain('...(previous ? { inherit: previous } : {})')
+    expect(src).toContain('spawnManaged(reopenRowRequest(m, row, caller), s, lang)')
+    expect(src).toContain('...(previous ? { inherit: previous } : recordedAccountId ? { accountId: recordedAccountId } : {})')
   })
   it('openTask and takeover use it too', async () => {
     const src = await read('./cli-session.ts')

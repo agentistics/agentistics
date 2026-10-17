@@ -2842,7 +2842,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const { verifySessionIdentity } = await import('./sessions/session-identity')
         await markCallerVerified(body.value, verifySessionIdentity)
         const out = await runFleetAction(fleetLang(url.searchParams.get('lang')), body.value)
+        // An account refusal (reopen, group reopen, external continuation) keeps its status.
+        const { spawnAccountStatus } = await import('./sessions/spawn-account')
         return new Response(JSON.stringify(out), {
+          status: out.code ? spawnAccountStatus(out.code) : 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
