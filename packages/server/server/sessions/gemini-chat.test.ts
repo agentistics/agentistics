@@ -122,3 +122,17 @@ describe('`!` shell commands (P-24)', () => {
     expect(turn!.shell).toBeUndefined()
   })
 })
+
+it('emits tool-only Gemini turns and uses only explicit error status', () => {
+  const turns = parseGeminiChatTurns([JSON.stringify({
+    id: 'tools', type: 'gemini', content: '', toolCalls: [
+      { id: 'bad', name: 'run_shell_command', args: { command: 'false' }, status: 'error' },
+      { id: 'ok', name: 'read_file', args: { file_path: 'a' }, status: 'success' },
+      { id: 'unknown', name: 'read_file', args: { file_path: 'b' } },
+      { id: 'cancelled', name: 'read_file', args: { file_path: 'c' }, status: 'cancelled' },
+    ],
+  })], 50)
+  expect(turns).toHaveLength(1)
+  expect(turns[0]!.tools![0]).toMatchObject({ name: 'run_shell_command', detail: 'false', failed: true })
+  expect(turns[0]!.tools!.map(t => t.failed)).toEqual([true, undefined, undefined, undefined])
+})

@@ -37,6 +37,7 @@
  * CLI…" and runs for pages.
  */
 
+import { isPatchTool, patchDetail } from './patch-detail'
 import type { HarnessId } from '@agentistics/core'
 import { canonicalTool } from '../harness-activity'
 import type { ChatTurn } from '@agentistics/core'
@@ -66,9 +67,15 @@ const EVENT_NOTES: Record<string, string> = {
 
 const DETAIL_KEYS = ['command', 'path', 'file_path', 'filePath', 'pattern', 'query', 'url', 'intent', 'description']
 
-export function toolDetailOf(args: unknown): string | null {
+export function toolDetailOf(args: unknown, toolName?: string): string | null {
   if (typeof args !== 'object' || args === null) return null
   const o = args as Record<string, unknown>
+  if (isPatchTool(toolName)) {
+    for (const key of ['patch', 'input', 'content']) {
+      const p = patchDetail(o[key])
+      if (p) return p
+    }
+  }
   for (const key of DETAIL_KEYS) {
     const v = o[key]
     if (typeof v === 'string' && v.trim() !== '') {
@@ -81,7 +88,7 @@ export function toolDetailOf(args: unknown): string | null {
   return null
 }
 
-function toolsOf(data: Record<string, unknown>, harness: HarnessId): ChatTurn['tools'] {
+function toolsOf(data: Record<string, unknown>, harness: HarnessId, results: ReadonlyMap<string, boolean>): ChatTurn['tools'] {
   const reqs = data.toolRequests
   if (!Array.isArray(reqs)) return undefined
   const out: NonNullable<ChatTurn['tools']> = []
@@ -90,11 +97,12 @@ function toolsOf(data: Record<string, unknown>, harness: HarnessId): ChatTurn['t
     const r = raw as Record<string, unknown>
     const name = typeof r.name === 'string' ? r.name : ''
     if (name === '') continue
-    const detail = toolDetailOf(r.arguments)
+    const detail = toolDetailOf(r.arguments, name)
     const canonical = canonicalTool(harness, name)
     out.push({
       // Copilot's own name for display; the shared one beside it. See `ChatTurn.tools`.
       name,
+      ...(typeof r.toolCallId === 'string' && results.get(r.toolCallId) === true ? { failed: true } : {}),
       ...(canonical !== name ? { canonical } : {}),
       ...(detail ? { detail } : {}),
     })
@@ -114,6 +122,7 @@ export function parseCopilotChat(
   max = 400,
 ): ChatTurn[] {
   const turns: ChatTurn[] = []
+  const results = new Map<string, boolean>()
   let newest = true
 
   for (let i = lines.length - 1; i >= 0 && turns.length < max; i--) {
@@ -128,6 +137,13 @@ export function parseCopilotChat(
     const at = typeof e.timestamp === 'string' ? e.timestamp : undefined
     const stamp = (t: ChatTurn): ChatTurn => (at ? { ...t, at } : t)
 
+    if (type === 'tool.execution_complete') {
+      if (typeof data.toolCallId === 'string' && !results.has(data.toolCallId)) {
+        results.set(data.toolCallId, data.success === false)
+      }
+      continue
+    }
+
     if (type === 'user.message') {
       newest = false
       // `content`, NEVER `transformedContent` — see the header.
@@ -141,7 +157,7 @@ export function parseCopilotChat(
       const isNewest = newest
       newest = false
       const text = typeof data.content === 'string' ? data.content.trim() : ''
-      const tools = toolsOf(data, harness)
+      const tools = toolsOf(data, harness, results)
       // Only `reasoningText` is readable. `reasoningOpaque` and `encryptedContent` are not thoughts
       // anything here can show, and an absent thought is absent.
       const thinking = typeof data.reasoningText === 'string' ? data.reasoningText.trim() : ''

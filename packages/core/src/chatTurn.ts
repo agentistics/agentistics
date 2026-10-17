@@ -63,6 +63,8 @@ export interface ChatTurn {
      * where the harness's own name already is the shared one.
      */
     canonical?: string
+    /** The harness explicitly reported that this call failed; absent when unknown. */
+    failed?: boolean
     detail?: string
     /**
      * For a SHELL call, the paths that command writes — read by the pure `shell-writes.ts`.

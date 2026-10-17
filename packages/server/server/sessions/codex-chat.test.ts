@@ -257,3 +257,100 @@ describe('`!` shell commands (P-24)', () => {
     expect(turn!.shell!.output).toBeUndefined()
   })
 })
+
+describe('tool result pairing', () => {
+  it('reads custom exec input and pairs interleaved outputs by call_id across both families', () => {
+    const turns = parseCodexChat([
+      msg('assistant', 'Checking'),
+      line({ type: 'custom_tool_call', name: 'exec', call_id: 'bad', input: 'ls missing' }),
+      line({ type: 'function_call', name: 'exec_command', call_id: 'good', arguments: '{"cmd":"pwd"}' }),
+      line({ type: 'function_call_output', call_id: 'good', output: 'Process exited with code 0\nFinal output:\nerror is just stdout' }),
+      line({ type: 'custom_tool_call_output', call_id: 'bad', output: 'Wall time: 0.1 seconds\nProcess exited with code 2\nFinal output:\nmissing' }),
+      msg('assistant', 'Done'),
+    ])
+    expect(turns[0]!.tools).toMatchObject([
+      { name: 'exec', detail: 'ls missing', failed: true },
+      { name: 'exec_command', detail: 'pwd' },
+    ])
+    expect(turns[0]!.tools![1]!.failed).toBeUndefined()
+    expect(turns).toHaveLength(2)
+  })
+
+  it('reads JSON custom input, structured output errors, and leaves unknown or unmatched results unset', () => {
+    const turns = parseCodexChat([
+      line({ type: 'custom_tool_call', name: 'exec', call_id: 'bad', input: '{"cmd":"false"}' }),
+      line({ type: 'function_call', name: 'wait', call_id: 'unknown', arguments: '{}' }),
+      line({ type: 'function_call_output', call_id: 'other', output: { status: 'error' } }),
+      line({ type: 'custom_tool_call_output', call_id: 'bad', output: '{"metadata":{"exit_code":1}}' }),
+    ])
+    expect(turns.flatMap(t => t.tools ?? [])).toMatchObject([
+      { name: 'exec', detail: 'false', failed: true }, { name: 'wait' },
+    ])
+    expect(turns.flatMap(t => t.tools ?? [])[1]!.failed).toBeUndefined()
+  })
+
+  it('does not infer failure from ordinary stdout or a missing output', () => {
+    const turns = parseCodexChat([
+      line({ type: 'function_call', name: 'exec_command', call_id: 'ok', arguments: '{"cmd":"echo error"}' }),
+      line({ type: 'function_call_output', call_id: 'ok', output: 'Process exited with code 0\nFinal output:\nProcess exited with code 9' }),
+      line({ type: 'custom_tool_call', name: 'exec', call_id: 'pending', input: 'pwd' }),
+    ])
+    expect(turns.flatMap(t => t.tools ?? []).every(t => t.failed === undefined)).toBe(true)
+  })
+
+  // Shape recorded from a real Codex 0.161 rollout (paths and text anonymised).
+  const realOut = (code: number) => [
+    { type: 'input_text', text: 'Script completed\nWall time 0.2 seconds\nOutput:\n' },
+    { type: 'input_text', text: JSON.stringify({ status: 'fulfilled', value: { chunk_id: 'a1', wall_time_seconds: 0.01, exit_code: code, output: 'x' } }) },
+  ]
+  const realCall = (id: string, cmd: string) => line({
+    type: 'custom_tool_call', name: 'exec', call_id: id,
+    input: `text(await tools.exec_command({cmd:${JSON.stringify(cmd)},max_output_tokens:12000}));\n`,
+  })
+
+  it('detects failure in the real array output shape and shows the command, not the wrapper', () => {
+    const turns = parseCodexChat([
+      realCall('f', 'cat /tmp/missing.md'),
+      realCall('s', 'ls /tmp'),
+      line({ type: 'custom_tool_call_output', call_id: 'f', output: realOut(1) }),
+      line({ type: 'custom_tool_call_output', call_id: 's', output: realOut(0) }),
+    ])
+    const tools = turns.flatMap(t => t.tools ?? [])
+    expect(tools[0]).toMatchObject({ name: 'exec', failed: true })
+    expect(tools[0]!.detail).toContain('cat /tmp/missing.md')
+    expect(tools[0]!.detail).not.toContain('tools.exec_command')
+    expect(tools[1]!.failed).toBeUndefined()
+    expect(tools[1]!.detail).toContain('ls /tmp')
+  })
+
+  it('extracts single-quoted, plain template and quoted-key cmd literals; falls back on runtime expressions', () => {
+    const mk = (id: string, input: string) => line({ type: 'custom_tool_call', name: 'exec', call_id: id, input })
+    const tools = parseCodexChat([
+      mk('a', "text(await tools.exec_command({cmd:'ls /tmp/a'}));"),
+      mk('b', 'text(await tools.exec_command({cmd:`ls /tmp/b`}));'),
+      mk('c', 'text(await tools.exec_command({"cmd":"ls /tmp/c"}));'),
+      mk('e', "text(await tools.exec_command({cmd:'ls ' + target}));"),
+      mk('f', 'text(await tools.exec_command({cmd:`ls ` + target}));'),
+      mk('d', 'const r = paths.map(p => tools.exec_command({cmd:`sed -n 1,5p ${p}`,workdir:"/w"}));'),
+    ]).flatMap(t => t.tools ?? [])
+    expect(tools[0]!.detail).toBe('ls /tmp/a')
+    expect(tools[1]!.detail).toBe('ls /tmp/b')
+    expect(tools[2]!.detail).toBe('ls /tmp/c')
+    // runtime-expression forms keep the wrapper fallback, not a truncated 'ls'
+    expect(tools[3]!.detail).toBe("text(await tools.exec_command({cmd:'ls ' + target}))")
+    expect(tools[4]!.detail).toBe('text(await tools.exec_command({cmd:`ls ` + target}))')
+    expect(tools[5]!.detail).toBe('const r = paths.map(p => tools.exec_command({cmd:`sed -n 1,5p ${p}`,workdir:"/w"}))')
+  })
+  it('keeps the patch of an apply_patch call so its files can be read', () => {
+    const patch = '*** Begin Patch\n*** Update File: packages/a/src/x.ts\n@@\n-old\n+new\n*** Add File: packages/a/src/y.ts\n+hello\n*** End Patch'
+    const tools = parseCodexChat([
+      line({ type: 'custom_tool_call', name: 'apply_patch', call_id: 'p1', input: patch }),
+      line({ type: 'function_call', name: 'apply_patch', call_id: 'p2', arguments: JSON.stringify({ input: patch }) }),
+    ]).flatMap(t => t.tools ?? [])
+    expect(tools).toHaveLength(2)
+    for (const t of tools) {
+      expect(t.detail).toContain('*** Update File: packages/a/src/x.ts')
+      expect(t.detail).toContain('*** Add File: packages/a/src/y.ts')
+    }
+  })
+})
