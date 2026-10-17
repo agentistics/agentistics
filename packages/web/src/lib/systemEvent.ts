@@ -1,3 +1,5 @@
+import { roleLine } from '@agentistics/core'
+
 /**
  * systemEvent.ts — PURE: recognise a message agentistics itself injected into a session.
  *
@@ -11,7 +13,7 @@
  * so the header is no longer the first line. One whole-message wrapper is unwrapped before matching;
  * a wrapper the person really pasted around ordinary text still finds no header and stays theirs.
  */
-export type SystemEventKind = 'away' | 'away-off' | 'question' | 'handback' | 'block' | 'session-question' | 'checkin'
+export type SystemEventKind = 'away' | 'away-off' | 'question' | 'handback' | 'block' | 'session-question' | 'checkin' | 'role'
 
 export interface SystemEvent {
   kind: SystemEventKind
@@ -36,10 +38,17 @@ const LEGACY_CHECKIN = /^\s*(?:Faça o check-in da liderança agora\.|Run the le
 export function parseSystemEvent(raw: string): SystemEvent | null {
   const text = unwrapPasted(raw)
   const m = HEADER.exec(text)
-  if (!m) return LEGACY_CHECKIN.test(text) ? { kind: 'checkin', body: text } : null
+  if (!m) {
+    // Match the entire historical producer output, never a mention of its marker in typed prose.
+    if ((['leader', 'worker', null] as const).some(role =>
+      text.trim() === `[agentistics] your role is now ${role ? role.toUpperCase() : 'AUTO'} — ${roleLine(role)}`,
+    )) return { kind: 'role', body: text.trim() }
+    return LEGACY_CHECKIN.test(text) ? { kind: 'checkin', body: text } : null
+  }
   const what = m[3]!
   const body = text.slice(m[0].length).trim()
   if (m[1] === 'agentistics') {
+    if (what === 'role') return { kind: 'role', body }
     if (what === 'check-in') return { kind: 'checkin', body }
     if (what === 'away') return { kind: /away mode is now OFF/i.test(body) ? 'away-off' : 'away', body }
     if (what === 'question') return { kind: 'question', body }
@@ -54,6 +63,7 @@ export function parseSystemEvent(raw: string): SystemEvent | null {
 export function systemEventLine(e: SystemEvent, pt: boolean, who?: string): string {
   const name = who || e.sender || ''
   switch (e.kind) {
+    case 'role': return pt ? 'Papel da sessão atualizado' : 'Session role updated'
     case 'checkin': return pt ? 'Check-in da liderança · sistema' : 'Leadership check-in · system'
     case 'away-off': return pt ? 'Modo ausente desligado nesta sessão' : 'Away mode turned off for this session'
     case 'away': return pt ? 'Modo ausente atualizado' : 'Away mode updated'

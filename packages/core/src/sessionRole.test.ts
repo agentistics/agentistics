@@ -46,7 +46,7 @@ describe('role lines', () => {
     expect(roleLine('leader')).not.toContain('agentistics_session_role')
   })
   test('the change note quotes the role line', () => {
-    expect(roleChangeNote('leader')).toBe(`[agentistics] your role is now LEADER — ${roleLine('leader')}`)
+    expect(roleChangeNote('leader')).toBe(`[from agentistics · role]\n[agentistics] your role is now LEADER — ${roleLine('leader')}`)
     expect(roleChangeNote(null)).toContain('AUTO')
   })
 })

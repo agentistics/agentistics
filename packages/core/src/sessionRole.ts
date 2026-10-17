@@ -62,5 +62,5 @@ export function roleLine(role: SessionRole | null | undefined): string {
 
 /** The background note delivered into a session whose role just changed. */
 export function roleChangeNote(role: SessionRole | null): string {
-  return `[agentistics] your role is now ${role ? role.toUpperCase() : 'AUTO'} — ${roleLine(role)}`
+  return `[from agentistics · role]\n[agentistics] your role is now ${role ? role.toUpperCase() : 'AUTO'} — ${roleLine(role)}`
 }
