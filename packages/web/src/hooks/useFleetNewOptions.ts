@@ -51,6 +51,8 @@ export interface FleetNewOptions {
   projectIndexProgress: { root: string; visited: number; queued: number; complete: boolean }[]
   projectDisks: { id: string; label: string; letter?: string; install: boolean; count: number }[]
   projectDisk: string
+  /** Where "Novo projeto" creates a folder by default; `undefined` = this server does not say. */
+  newProjectParent: { path: string; exists: boolean } | undefined
   setProjectDisk: (disk: string) => void
   /** The field's own value — answers instantly, one keystroke behind the actual search. */
   query: string
@@ -71,6 +73,7 @@ export function useFleetNewOptions(lang: 'pt' | 'en'): FleetNewOptions {
   const [projectIndexProgress, setProjectIndexProgress] = useState<{ root: string; visited: number; queued: number; complete: boolean }[]>([])
   const projectDisk = useSyncExternalStore(projectDiskPref.subscribe, projectDiskPref.get, projectDiskPref.serverSnapshot)
   const [projectDisks, setProjectDisks] = useState<{ id: string; label: string; letter?: string; install: boolean; count: number }[]>([])
+  const [newProjectParent, setNewProjectParent] = useState<{ path: string; exists: boolean } | undefined>(undefined)
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [searching, setSearching] = useState(false)
@@ -114,12 +117,14 @@ export function useFleetNewOptions(lang: 'pt' | 'en'): FleetNewOptions {
           projectIndexProgress?: { root: string; visited: number; queued: number; complete: boolean }[]
           projectDisks?: { id: string; label: string; letter?: string; install: boolean; count: number }[]
           projectDisk?: string
+          newProjectParent?: { path: string; exists: boolean }
           unavailable?: string
         }>(`/api/fleet/new?lang=${lang}&q=${encodeURIComponent(debouncedQuery)}${projectDisk ? `&disk=${encodeURIComponent(projectDisk)}` : ''}`, { signal: controller.signal })
         if (!alive) return
         setHarnesses(json.harnesses)
         setProjects(json.projects)
         setProjectTotals(json.projectTotals)
+        setNewProjectParent(json.newProjectParent)
         setProjectIndexing(json.projectIndexing === true)
         setProjectIndexProgress(json.projectIndexProgress ?? [])
         // The first response establishes the install-disk default when no personal choice exists.
@@ -150,7 +155,7 @@ export function useFleetNewOptions(lang: 'pt' | 'en'): FleetNewOptions {
     return () => { alive = false; controller.abort() }
   }, [lang, debouncedQuery, retryNumber, projectDisk, indexTick])
 
-  return { harnesses, projects, projectTotals, projectIndexing, projectIndexProgress, projectDisks, projectDisk,
+  return { harnesses, projects, projectTotals, projectIndexing, projectIndexProgress, projectDisks, projectDisk, newProjectParent,
     setProjectDisk: (disk: string) => projectDiskPref.set(disk), query, setQuery, searching, unavailable,
     retry: () => setRetryNumber(n => n + 1), retryable }
 }
