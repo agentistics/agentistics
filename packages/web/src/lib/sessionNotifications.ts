@@ -525,7 +525,7 @@ function deliver(d: Delivery, settings: NotificationSettings): void {
   // A session spawned a moment ago may have its role on the server but not in this page's cache yet
   // (the cache refreshes on a timer). With mute on and no role known, ask the server before deciding.
   if (getMuteWorkers() && d.event !== 'exited' && !roleKnown(d.bell.id)) {
-    void ensureRoleFresh(d.bell.id).then(() => { if (stillTrue(d)) deliverNow(d, settings) })
+    void ensureRoleFresh(d.bell.id, Date.now(), d.bell.sinceMs).then(() => { if (stillTrue(d)) deliverNow(d, settings) })
     return
   }
   deliverNow(d, settings)

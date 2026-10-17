@@ -109,4 +109,32 @@ describe('ensureRoleFresh', () => {
       expect(gets).toBeGreaterThan(before)
     } finally { globalThis.fetch = realFetch; setSessionRole('rf-other', null) }
   })
+  it('a role written by another process: only a GET sent after the need is joined', async () => {
+    __resetRoleChecksForTest()
+    const realFetch = globalThis.fetch
+    let gets = 0
+    const resolvers: Array<() => void> = []
+    globalThis.fetch = (async (_u: unknown, init?: { method?: string }) => {
+      if (init?.method === 'POST') return new Response('{}')
+      gets++
+      const n = gets
+      await new Promise<void>(r => resolvers.push(r))
+      // GET #1 predates the server-side write (spawn/CLI/MCP); GET #2 sees it.
+      return new Response(JSON.stringify({ roles: n === 1 ? {} : { 'rf-srv': 'worker' } }))
+    }) as typeof fetch
+    try {
+      const sentBefore = Date.now()
+      const a = ensureRoleFresh('rf-x', sentBefore, sentBefore - 1)
+      await new Promise(r => setTimeout(r, 2))
+      const early = ensureRoleFresh('rf-y', Date.now(), sentBefore - 1) // need older than GET #1: joins it
+      await new Promise(r => setTimeout(r, 0))
+      expect(gets).toBe(1)
+      const b = ensureRoleFresh('rf-srv', Date.now(), Date.now()) // need arose after GET #1 was sent
+      await new Promise(r => setTimeout(r, 0))
+      expect(gets).toBe(2)
+      while (resolvers.length) resolvers.shift()!()
+      await Promise.all([a, early, b])
+      expect(getSessionRole('rf-srv')).toBe('worker')
+    } finally { globalThis.fetch = realFetch }
+  })
 })

@@ -73,6 +73,9 @@ let freshInflight: Promise<boolean> | null = null
 /** Bumped by every role write / refresh; a GET started before the bump cannot answer a later need. */
 let roleGen = 0
 let freshInflightGen = 0
+/** When the shared GET was sent: a role written by ANOTHER process (spawn, CLI, MCP) bumps no local
+ *  counter, so a caller may only join a GET sent after its need arose (`needSince`). */
+let freshInflightAt = 0
 let warnedFailOpen = false
 async function fetchRolesFresh(): Promise<boolean> {
   try {
@@ -87,13 +90,14 @@ async function fetchRolesFresh(): Promise<boolean> {
     return true
   } catch { return false }
 }
-export async function ensureRoleFresh(id: string, now: number = Date.now()): Promise<void> {
+export async function ensureRoleFresh(id: string, now: number = Date.now(), needSince: number = now): Promise<void> {
   const last = checkedAt.get(id)
   if (last !== undefined && now - last < CHECKED_TTL_MS) return
   const gen = roleGen
   // Join only a GET that started at or after this need; otherwise it may predate our write.
-  if (!freshInflight || freshInflightGen < gen) {
+  if (!freshInflight || freshInflightGen < gen || freshInflightAt < needSince) {
     freshInflightGen = gen
+    freshInflightAt = Date.now()
     const p: Promise<boolean> = fetchRolesFresh().finally(() => { if (freshInflight === p) freshInflight = null })
     freshInflight = p
   }
@@ -102,7 +106,7 @@ export async function ensureRoleFresh(id: string, now: number = Date.now()): Pro
   else if (!warnedFailOpen) { warnedFailOpen = true; console.warn('[roles] pre-notify role check failed; delivering without it') }
 }
 /** Test seam: forget which sessions were already checked. */
-export function __resetRoleChecksForTest(): void { checkedAt.clear(); freshInflight = null; roleGen = 0; freshInflightGen = 0; warnedFailOpen = false }
+export function __resetRoleChecksForTest(): void { checkedAt.clear(); freshInflight = null; roleGen = 0; freshInflightGen = 0; freshInflightAt = 0; warnedFailOpen = false }
 
 let timer: ReturnType<typeof setInterval> | null = null
 const rolesStore = {
