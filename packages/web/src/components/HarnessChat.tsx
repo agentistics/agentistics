@@ -8,6 +8,8 @@ import type { HarnessId } from '@agentistics/core'
 import { HARNESS_LABELS, HARNESS_COLORS } from '../lib/harness'
 import { splitInlinedHistory } from '../lib/transcriptSplit'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { parseSystemEvent } from '../lib/systemEvent'
+import { SystemEventRow } from './sessions/ChatBubble'
 
 interface HarnessChatProps {
   harness: HarnessId
@@ -84,6 +86,9 @@ function ToolsBlock({ tools, pt }: { tools: string[]; pt: boolean }) {
 
 export function MessageBubble({ msg, harness, pt }: { msg: TranscriptMessage; harness: HarnessId; pt: boolean }) {
   const isUser = msg.role === 'user'
+  // A prompt agentistics injected (another session's handback, away, check-in) is not the person's.
+  const event = isUser ? parseSystemEvent(msg.content) : null
+  if (event) return <SystemEventRow event={event} pt={pt} />
   const color = HARNESS_COLORS[harness]
   return (
     <div style={{
