@@ -43,6 +43,36 @@ describe('agentop session --handoff — the CLI flow', () => {
     expect((await readPreferences()).pinnedSessions).toEqual(['other', child.conversationId!])
   }, 60_000)
 
+  test('inherits everything the predecessor was set up with', async () => {
+    await addSession({
+      id: 'ho-all', harness: 'claude', cwd: process.cwd(), createdAt: new Date().toISOString(), label: 'Leader all',
+      conversationId: 'conv-ho-all', model: 'claude-opus-5-5', effort: 'high', note: 'keep going', away: true,
+    })
+    await updatePreferences(() => ({
+      pinnedSessions: ['a', 'conv-ho-all', 'b'],
+      mutedSessions: ['conv-ho-all'],
+      checkin: { 'conv-ho-all': { session: 'conv-ho-all', intervalMin: 120 } },
+      sessionGroups: { groups: [{ id: 'g-lead', name: 'Leaders', sessionKeys: ['conv-ho-all'] }] },
+    }) as never)
+    expect(await runHandoff('ho-all', 'claude', mkBackend(), async () => true)).toBe(0)
+    const child = (await successorOf('ho-all'))!
+    const key = child.conversationId!
+    expect(child.label).toContain("Leader all")
+    expect(child.model).toBe('claude-opus-5-5')
+    expect(child.effort).toBe('high')
+    expect(child.note).toBe('keep going')
+    expect(child.away).toBe(true)
+    const p = await readPreferences()
+    expect(p.pinnedSessions).toEqual(['a', key, 'b'])
+    expect(p.mutedSessions).toContain(key)
+    expect((p.checkin as Record<string, { intervalMin?: number }>)[key]?.intervalMin).toBe(120)
+    expect(p.sessionGroups?.groups.find(g => g.id === 'g-lead')?.sessionKeys).toContain(key)
+    const parentRow = (await readRegistry()).find(r => r.id === 'ho-all')!
+    expect(parentRow.handoffTo).toBe(child.id)
+    expect(child.handoffSeq).toBe(2)
+    expect(await (await import('./session-roles')).storedRoleFor([key, child.id])).toBe('leader')
+  }, 60_000)
+
   test('a forged AGENTOP_MANAGED_ID without the pane is refused, nothing starts', async () => {
     await addLeader('ho-p2', 'conv-ho-p2')
     const before = (await readRegistry()).length

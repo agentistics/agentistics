@@ -4561,19 +4561,21 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // Leader hand-off: the successor keeps the predecessor's title (generation counter in the ⓘ panel).
       let label = req.label
       let handoffParent: ManagedSession | undefined
+      let launch: { model?: string | undefined; effort?: string | undefined } = { model: req.model, effort: req.effort }
       if (req.handoff && req.parentSessionId) {
         const { readRegistry } = await import('./sessions/registry')
         handoffParent = (await readRegistry()).find(m => m.id === req.parentSessionId)
-        const { handoffTitle } = await import('./sessions/handoff-inherit')
+        const { handoffSpawnDefaults, handoffTitle } = await import('./sessions/handoff-inherit')
         label = handoffTitle(handoffParent?.label, req.label)
+        launch = handoffSpawnDefaults(handoffParent, req.harness, req)
       }
       return spawnManaged({
         harness: req.harness as HarnessId,
         cwd: filing.cwd,
         attach: req.attach,
         ...(req.prompt ? { prompt: req.prompt } : {}),
-        ...(req.model ? { model: req.model } : {}),
-        ...(req.effort ? { effort: req.effort } : {}),
+        ...(launch.model ? { model: launch.model } : {}),
+        ...(launch.effort ? { effort: launch.effort } : {}),
         ...(req.mode ? { mode: req.mode } : {}),
         ...(label ? { label } : {}),
         ...(rowFiling.task ? { task: rowFiling.task } : {}),
@@ -4617,6 +4619,10 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
               const { inheritHandoffPrefs } = await import('./sessions/handoff-inherit')
               const { updatePreferences } = await import('./preferences')
               await inheritHandoffPrefs(parent, child, updatePreferences)
+              if (parent.note && !('note' in child && child.note)) {
+                const { patchSession } = await import('./sessions/registry')
+                await patchSession(r.id, { note: parent.note })
+              }
             }
           } catch { /* a folder is a convenience, not the spawn */ }
         }
