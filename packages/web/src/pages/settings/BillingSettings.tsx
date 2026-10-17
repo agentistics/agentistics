@@ -33,6 +33,7 @@ import { HarnessMark } from '../../components/sessions/HarnessMark'
 import { Checkbox, ConfirmModal, FieldInput, SectionHeader, Select, TabSelect, dialogButtonStyle } from './primitives'
 import {
   applyPlan,
+  catalogPlanName,
   splitTimeline,
   modeLabel,
   currencySymbol,
@@ -122,7 +123,7 @@ export default function BillingSettings() {
     const cur = splitTimeline(sortPeriods(periods), today()).current
     return {
       ...r,
-      plan: cur ? { name: periodName(cur) || modeLabel(cur.mode, pt ? 'pt' : 'en'), price: priceText(cur, pt) } : null,
+      plan: cur ? { name: periodName(cur, ctx.lang) || modeLabel(cur.mode, pt ? 'pt' : 'en'), price: priceText(cur, pt), mode: cur.mode } : null,
       problem: validateTimeline({ periods }).size > 0,
       limits: r.account ? planLimits?.find(l => l.account === r.account!.id) ?? null : null,
     }
@@ -157,8 +158,8 @@ export default function BillingSettings() {
   const [planPrices, setPlanPrices] = useState<ScrapedPlanPrice[]>([])
   /**
    * "I changed plan", folded into the plan picker: choosing ANOTHER plan while the one in force is
-   * open starts a new period today and, on save, closes the old one the day before — the seam is
-   * exact by construction, so a plan change can leave neither a gap nor an overlap.
+   * open starts a new period today and, on save, closes the old one the day before (or replaces
+   * it if it also started today), leaving neither a gap nor an overlap.
    */
   const [changingFrom, setChangingFrom] = useState<BillingPeriod | null>(null)
   const [seededFrom, setSeededFrom] = useState<string | null>(null)
@@ -242,7 +243,7 @@ export default function BillingSettings() {
     const hit = draftErrors.find(e => codes.includes(e.code))
     if (!hit) return null
     const other = hit.code === 'overlap' ? others.find(p => p.id === (hit as { withId: string }).withId) : undefined
-    return describeError(hit, pt ? 'pt' : 'en', other ? periodName(other) : undefined)
+    return describeError(hit, pt ? 'pt' : 'en', other ? periodName(other, ctx.lang) : undefined)
   }
 
   /** Every plan write: the row's own scope, tracked while its account still needs a plan. */
@@ -294,7 +295,7 @@ export default function BillingSettings() {
   const catalogOptions = useMemo(() => (row ? planOptionsFor(row.harness, current?.planId) : []).map(entry => {
     const price = livePrice(entry.id) ?? entry.monthly
     return {
-      value: entry.id, label: entry.label,
+      value: entry.id, label: catalogPlanName(entry, pt ? 'pt' : 'en'),
       hint: price ? `${formatPrice(price.amount, price.currency)}/${pt ? 'mês' : 'mo'}` : (pt ? 'sem valor publicado' : 'no published price'),
     }
   }), [row, pt, livePrice, current?.planId])
@@ -371,9 +372,11 @@ export default function BillingSettings() {
               )}
               {changingFrom && (
                 <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 6, lineHeight: 1.5 }}>
-                  {pt
-                    ? `Troca de plano: ${periodName(changingFrom) || modeLabel(changingFrom.mode, 'pt')} termina na véspera da data de início abaixo.`
-                    : `Plan change: ${periodName(changingFrom) || modeLabel(changingFrom.mode, 'en')} ends the day before the start date below.`}
+                  {draft.from === changingFrom.from
+                    ? (pt ? 'Troca de plano: substitui o plano de hoje.' : 'Plan change: replaces today’s plan.')
+                    : (pt
+                        ? `Troca de plano: ${periodName(changingFrom, 'pt') || modeLabel(changingFrom.mode, 'pt')} termina na véspera da data de início abaixo.`
+                        : `Plan change: ${periodName(changingFrom, 'en') || modeLabel(changingFrom.mode, 'en')} ends the day before the start date below.`)}
                 </div>
               )}
               {/* Provenance, always: a prefilled amount with no stated origin reads as invented. */}
@@ -443,7 +446,7 @@ export default function BillingSettings() {
                     {/* On a phone the dates take their own line: name, price, range and two icons do not fit one. */}
                     <div style={{ minWidth: 0, flex: 1, fontSize: 12, color: 'var(--text-tertiary)' }}>
                       <span style={{ display: isMobile ? 'block' : 'inline', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        <b style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{periodName(p) || modeLabel(p.mode, pt ? 'pt' : 'en')}</b>
+                        <b style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{periodName(p, ctx.lang) || modeLabel(p.mode, pt ? 'pt' : 'en')}</b>
                         {p.price && ` · ${formatPrice(p.price.amount, p.price.currency)}`}
                       </span>
                       <span style={{ display: isMobile ? 'block' : 'inline', whiteSpace: 'nowrap', marginTop: isMobile ? 2 : 0 }}>
@@ -464,8 +467,8 @@ export default function BillingSettings() {
         open={confirmDelete !== null}
         title={pt ? 'Remover plano' : 'Remove plan'}
         message={pt
-          ? `Remover "${confirmDelete ? periodName(confirmDelete) || modeLabel(confirmDelete.mode, 'pt') : ''}"? Os dias que ele cobria deixam de contar para o custo do plano.`
-          : `Remove “${confirmDelete ? periodName(confirmDelete) || modeLabel(confirmDelete.mode, 'en') : ''}”? The days it covered will stop counting towards the plan cost.`}
+          ? `Remover "${confirmDelete ? periodName(confirmDelete, 'pt') || modeLabel(confirmDelete.mode, 'pt') : ''}"? Os dias que ele cobria deixam de contar para o custo do plano.`
+          : `Remove “${confirmDelete ? periodName(confirmDelete, 'en') || modeLabel(confirmDelete.mode, 'en') : ''}”? The days it covered will stop counting towards the plan cost.`}
         confirmLabel={pt ? 'Remover' : 'Remove'}
         cancelLabel={pt ? 'Cancelar' : 'Cancel'}
         onConfirm={async () => {

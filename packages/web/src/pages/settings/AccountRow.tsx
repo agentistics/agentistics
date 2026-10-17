@@ -7,13 +7,13 @@
  * Reuses the app's pieces only: RecordCard, Toggle, Pill, PlanLimitBars, HarnessMark, dialogButtonStyle.
  */
 import React from 'react'
-import type { PlanLimits } from '@agentistics/core'
+import type { BillingMode, PlanLimits } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { PlanLimitBars } from '../../components/PlanLimitMeter'
 import { Pill } from '../../components/Pill'
 import { HarnessMark } from '../../components/sessions/HarnessMark'
 import { RecordCard, RecordCardAction, Toggle, dialogButtonStyle } from './primitives'
-import { REPORTS_LIMITS, type BillingAccount, type BillingRow } from './accountBilling'
+import { planCoverageText, REPORTS_LIMITS, type BillingAccount, type BillingRow } from './accountBilling'
 
 type Lang = 'pt' | 'en'
 
@@ -29,14 +29,13 @@ const T = (pt: boolean) => ({
   problem: pt ? 'Períodos com problema' : 'Periods need fixing',
   noMeter: pt ? 'Não informado' : 'Not reported',
   noMeterYet: pt ? 'Sem leitura ainda' : 'No reading yet',
-  withPlan: (n: number, total: number) => (pt ? `${n} de ${total} com plano` : `${n} of ${total} with a plan`),
   saveFailed: (n: string) => (pt ? `Não foi possível salvar a conta “${n}”. Tente de novo.` : `Could not save the account “${n}”. Try again.`),
 })
 
 /** A row as drawn: the pure row plus what the page resolved for it. */
 export interface BillingRowView extends BillingRow {
   /** The plan in force today, or `null` when nothing prices this row. */
-  plan: { name: string; price: string | null } | null
+  plan: { name: string; price: string | null; mode: BillingMode } | null
   /** Its timeline has overlapping or broken periods: it cannot be priced until they are fixed. */
   problem: boolean
   limits: PlanLimits | null
@@ -54,7 +53,7 @@ export interface BillingAccountListProps {
   onEdit: (row: BillingRowView) => void
 }
 
-const GRID = 'minmax(0,1.5fr) minmax(0,1.1fr) minmax(170px,1fr) 64px 118px'
+const GRID = 'minmax(0,2.2fr) minmax(150px,1fr) minmax(130px,.8fr) 64px 118px'
 const nowrap: React.CSSProperties = { display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
 
 function PlanCell({ r, t }: { r: BillingRowView; t: ReturnType<typeof T> }) {
@@ -79,7 +78,6 @@ export function BillingAccountList(p: BillingAccountListProps) {
   const pt = p.lang === 'pt'
   const t = T(pt)
   const isMobile = useIsMobile()
-  const priced = p.rows.filter(r => r.plan && !r.problem).length
   const toggle = (r: BillingRowView) => r.account && (
     <Toggle on={r.account.available} disabled={p.pendingIds.has(r.account.id)} label={`${t.agents} · ${r.title}`}
       onToggle={() => r.account && p.onToggle(r.account)} />
@@ -89,7 +87,7 @@ export function BillingAccountList(p: BillingAccountListProps) {
   )
   return (
     <div>
-      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 10px' }}>{t.withPlan(priced, p.rows.length)}</div>
+      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 10px' }}>{planCoverageText(p.rows, p.lang)}</div>
       {isMobile ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {p.rows.map(r => (
@@ -123,7 +121,7 @@ export function BillingAccountList(p: BillingAccountListProps) {
                 <HarnessMark harness={r.harness} size={22} />
                 <span style={{ minWidth: 0 }}>
                   <b style={{ ...nowrap, fontSize: 13, color: 'var(--text-primary)' }}>{r.title}</b>
-                  <span style={{ display: 'block', overflowWrap: 'anywhere', fontSize: 11.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>{r.sub}</span>
+                  <span title={r.sub} style={{ ...nowrap, fontSize: 11.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>{r.sub}</span>
                 </span>
               </span>
               <PlanCell r={r} t={t} />
