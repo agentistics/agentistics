@@ -11,7 +11,7 @@ g.window ??= { innerWidth: 1200, matchMedia: () => ({ matches: false, addEventLi
 // Seed the fleet so the sender resolves to a title only through useFleet.
 mock.module('../../lib/fleet', () => ({
   ...realFleet,
-  useFleet: () => ({ fleet: { rows: [{ id: 'ab12cdef', conversationId: 'c1', title: 'Leader Xyzzy' }] } }),
+  useFleet: () => ({ fleet: { rows: [{ id: 'ab12cdef', conversationId: 'c1', title: '[ LEADER ] - Leader Xyzzy' }, { id: 'closed:claude:ended-conversation', conversationId: 'ended-conversation', title: '[ LÍDER ] - Ended Xyzzy', state: 'closed' }] } }),
 }))
 const { ChatBubble, SystemEventRow } = await import('./ChatBubble')
 
@@ -90,7 +90,7 @@ test('open row shows body', () => {
   const ev = parseSystemEvent('[from session abc · handback]\nline1\nline2')!
   const html = renderToStaticMarkup(<SystemEventRow event={ev} pt={false} defaultOpen />)
   expect(html).toContain('aria-expanded="true"')
-  expect(html).toContain('line1\nline2')
+  expect(html).toContain('line1<br/>\nline2')
 })
 test('normal user turn is not an event row', () => {
   const html = renderToStaticMarkup(<ChatBubble turn={turn('hello there')} lang="en" harness="claude" />)
@@ -156,4 +156,66 @@ test('a composer-authored message merely mentioning the role notice stays the ow
   const html = renderToStaticMarkup(<ChatBubble turn={{ role: 'user', text: `Please explain this notice: ${roleChangeNote('leader')}`, composer: true }} lang="en" harness="claude" />)
   expect(html).not.toContain('Session role updated')
   expect(html).toContain('your role is now LEADER')
+})
+
+
+test('expanded handback renders markdown, session link and time without repeating the kind', () => {
+  const event = parseSystemEvent('[from session ab12 · handback]\n<pasted_content id="outer">\n## Ready\n<pasted_content id="inner">\n- **Checked** `code`\n\n[Details](https://example.com)\n</pasted_content id="inner">\n</pasted_content id="outer">')!
+  const html = renderToStaticMarkup(<SystemEventRow event={event} pt={false} titleOf={() => '[ LEADER ] - Review'} senderSessionId="ab12cdef" at="2026-10-17T12:00:00Z" defaultOpen />)
+  expect(html).toContain('<h2>Ready</h2>')
+  expect(html).toContain('<ul>')
+  expect(html).toContain('<strong>Checked</strong>')
+  expect(html).toContain('<code>code</code>')
+  expect(html).toContain('href="https://example.com"')
+  expect(html).toContain('href="/sessions/ab12cdef"')
+  expect(html.match(/Task handed back/g)).toHaveLength(1)
+  expect(html).toContain('<time')
+  expect(html).not.toContain('pasted_content')
+  expect(html).not.toContain('[ LEADER ]')
+})
+
+test('both chat paths resolve full, short and ended senders, and omit unknown ids', async () => {
+  const { MessageBubble } = await import('../HarnessChat')
+  for (const [sender, title] of [['ab12cdef', 'Leader Xyzzy'], ['ab12', 'Leader Xyzzy'], ['ended-conv', 'Ended Xyzzy'], ['unknown-id', null]] as const) {
+    const content = `[from session ${sender} · handback]\nbody-marker`
+    for (const html of [
+      renderToStaticMarkup(<ChatBubble turn={turn(content)} lang="pt" harness="claude" />),
+      renderToStaticMarkup(<MessageBubble msg={{ role: 'user', content }} harness="claude" pt />),
+    ]) {
+      expect(html).toContain('Tarefa entregue')
+      if (title) expect(html).toContain(` · ${title}`)
+      else expect(html).not.toContain(' · ')
+      expect(html).not.toContain(sender)
+      expect(html).not.toContain('[ LEADER ]')
+      expect(html).not.toContain('[ LÍDER ]')
+      expect(html).not.toContain('body-marker')
+    }
+  }
+})
+
+
+test('queued handbacks use the collapsed system row without pending user chrome', () => {
+  for (const text of [
+    '[from session ab12 · handback]\nqueued-body-marker',
+    '<pasted_content id="queued">\n[from session ab12 · handback]\nqueued-body-marker\n</pasted_content id="queued">',
+  ]) {
+    const html = renderToStaticMarkup(<ChatBubble turn={{ role: 'user', text, pending: true }} sessionId="leader-id" lang="pt" harness="claude" awaiting awaitingWorking awaitingSinceMs={45000} />)
+    expect(html).toContain('Tarefa entregue')
+    expect(html).toContain(' · Leader Xyzzy')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain('queued-body-marker')
+    expect(html).not.toContain('lucide-user')
+    expect(html).not.toContain('role="status"')
+    expect(html).not.toContain('Enviar agora')
+  }
+})
+
+test('expanded long unbroken URLs inherit wrapping within the notice body', () => {
+  const url = `https://example.com/${'a'.repeat(500)}`
+  const html = renderToStaticMarkup(<SystemEventRow event={{ kind: 'handback', body: url }} pt={false} defaultOpen />)
+  expect(html).toContain(`href="${url}"`)
+  expect(html).toContain(`>${url}</a>`)
+  expect(html).toContain('overflow-wrap:anywhere')
+  expect(html).toContain('min-width:0')
+  expect(html).toContain('word-break:break-word')
 })

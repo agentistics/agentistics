@@ -1,6 +1,6 @@
 import { roleChangeNote, roleLine } from '@agentistics/core'
 import { describe, expect, test } from 'bun:test'
-import { parseSystemEvent, systemEventLine } from './systemEvent'
+import { parseSystemEvent, systemEventLine, systemEventSender, systemEventTitle } from './systemEvent'
 
 describe('parseSystemEvent', () => {
   test('a session message wrapped as pasted content by the harness is still a system event', () => {
@@ -62,8 +62,8 @@ describe('parseSystemEvent', () => {
   })
   test('lines are localized', () => {
     const e = parseSystemEvent('[from session s1 · block]\nx')!
-    expect(systemEventLine(e, true)).toBe('Sessão s1 está bloqueada')
-    expect(systemEventLine(e, false, 'Title')).toBe('Session Title is blocked')
+    expect(systemEventLine(e, true)).toBe('Sessão bloqueada')
+    expect(systemEventLine(e, false, 'Title')).toBe('Session blocked · Title')
   })
 })
 
@@ -94,4 +94,40 @@ test('typed prose merely containing the agentistics marker remains ordinary text
   for (const text of ['Please explain [agentistics]', '[agentistics] is the app name', '[agentistics] your role is now LEADER', `Please review:\n${roleChangeNote('leader')}`]) {
     expect(parseSystemEvent(text)).toBeNull()
   }
+})
+
+
+test('session kind labels in both languages never fall back to sender ids', () => {
+  for (const [kind, pt, en] of [
+    ['handback', 'Tarefa entregue', 'Task handed back'],
+    ['block', 'Sessão bloqueada', 'Session blocked'],
+    ['session-question', 'Pergunta de uma sessão', 'Question from a session'],
+  ] as const) {
+    const event = { kind, sender: 'raw-session-id', body: '' }
+    expect(systemEventLine(event, true)).toBe(pt)
+    expect(systemEventLine(event, false)).toBe(en)
+    expect(systemEventLine(event, true, '[ LÍDER ] - Revisão')).toBe(`${pt} · Revisão`)
+    expect(systemEventLine(event, false, '[ LEADER ] - Review')).toBe(`${en} · Review`)
+  }
+  expect(systemEventTitle('[ LEADER ] - ')).toBeUndefined()
+})
+
+test('sender resolution includes ended rows and full or short conversation ids', () => {
+  const active = { id: 'ab123456', conversationId: 'conv-active', title: 'Active' }
+  const ended = { id: 'closed:claude:conv-ended', conversationId: 'conv-ended', title: 'Ended', state: 'closed' }
+  const rows = [active, ended]
+  for (const id of [active.id, 'ab12', active.conversationId]) expect(systemEventSender(rows, id)).toBe(active)
+  for (const id of [ended.id, 'conv-ended', 'conv-end']) expect(systemEventSender(rows, id)).toBe(ended)
+  expect(systemEventSender(rows, 'unknown')).toBeUndefined()
+  expect(systemEventSender(rows, 'conv-')).toBeUndefined()
+  expect(systemEventSender([...rows, { id: 'ab12', conversationId: 'exact' }], 'ab12')?.id).toBe('ab12')
+})
+
+test('nested whole-message and body pasted wrappers are stripped without losing markdown', () => {
+  const raw = '<pasted_content id="outer">\n<pasted_content id="inner">\n[from session abc · handback]\n<pasted_content id="body">\n## Ready\n<pasted_content id="nested">\n- **Verified**\n</pasted_content id="nested">\n</pasted_content id="body">\n</pasted_content id="inner">\n</pasted_content id="outer">'
+  const event = parseSystemEvent(raw)!
+  expect(event.kind).toBe('handback')
+  expect(event.body).toContain('## Ready')
+  expect(event.body).toContain('- **Verified**')
+  expect(event.body).not.toContain('pasted_content')
 })

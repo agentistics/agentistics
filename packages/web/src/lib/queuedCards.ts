@@ -1,6 +1,12 @@
 import { pendingEchoes } from '@agentistics/core'
+import { parseSystemEvent } from './systemEvent'
 
 export interface QueuedCard { text: string; at?: number }
+
+/** Only the person's messages offer send-now; injected notices still appear in the queue. */
+export function personQueuedCount(queued: readonly QueuedCard[]): number {
+  return queued.filter(q => parseSystemEvent(q.text) === null).length
+}
 
 /**
  * Which "delivered — not read yet" cards to draw.

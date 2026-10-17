@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { visibleQueued } from './queuedCards'
+import { personQueuedCount, visibleQueued } from './queuedCards'
 
 const q = [{ text: 'hello there', at: 1 }]
 
@@ -44,5 +44,30 @@ describe('visibleQueued restored echoes', () => {
     const q = [{ text: 'sent earlier, maybe consumed' }, { text: 'sent now' }]
     expect(visibleQueued(q, [], false, new Set(), new Set(['sent now']))).toEqual([{ text: 'sent now' }])
     expect(visibleQueued(q, ['sent earlier, maybe consumed'], true, new Set(), new Set(['sent now']))).toEqual([{ text: 'sent now' }])
+  })
+})
+
+
+describe('personQueuedCount', () => {
+  const notice = { text: '[from session ab12 · handback]\nready', at: 1 }
+  test('system notices stay visible but never offer send-now', () => {
+    const queued = visibleQueued([notice], [], true)
+    expect(queued).toEqual([notice])
+    expect(personQueuedCount(queued)).toBe(0)
+  })
+  test('mixed queues count only the person’s messages', () => {
+    expect(personQueuedCount([notice, { text: 'Please review' }, { text: 'Then publish' }])).toBe(2)
+  })
+  test('ordinary messages and mentions retain their count', () => {
+    expect(personQueuedCount([{ text: 'hello' }, { text: 'Explain [from session ab12 · handback]' }])).toBe(2)
+    expect(personQueuedCount([])).toBe(0)
+  })
+  test('wrapped and other recognized notices are excluded', () => {
+    expect(personQueuedCount([
+      { text: '<pasted_content id="q">\n[from session ab12 · handback]\nready\n</pasted_content id="q">' },
+      { text: '[from session ab12 · block]\nblocked' },
+      { text: '[from agentistics · away]\naway' },
+      { text: 'Run the leadership check-in now.' },
+    ])).toBe(0)
   })
 })

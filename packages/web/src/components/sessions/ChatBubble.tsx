@@ -29,8 +29,8 @@ import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { ArrowUpRight, Info, Check, ChevronDown, Clock, Copy, CornerUpLeft, Ellipsis, ExternalLink, Forward, Image as ImageIcon, KeyRound, Link2, ListChecks, Loader, Mic, User } from 'lucide-react'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
-import { useFleet } from '../../lib/fleet'
-import { parseSystemEvent, systemEventLine, type SystemEvent } from '../../lib/systemEvent'
+import { loadClosedFleet, useFleet } from '../../lib/fleet'
+import { parseSystemEvent, systemEventLine, systemEventTitle, systemEventSender, type SystemEvent } from '../../lib/systemEvent'
 import type { ChatTaskEnd } from '@agentistics/core'
 import { chatNote, type ChatNoteTab } from '../../lib/chatNote'
 import { openArtifacts } from '../../lib/artifactsStore'
@@ -43,6 +43,7 @@ import { copyText } from '../../lib/clipboard'
 import { linkHrefFrom } from '../../lib/linkTarget'
 import { bubbleMenuHeight, bubbleMenuTop } from '../../lib/bubbleMenu'
 import { echoStatus } from '../../lib/echoStatus'
+import { sessionPath } from '../../lib/sessionRoute'
 import { messageTime } from '../../lib/messageTime'
 import { attachmentUrl, sessionViewedUrl } from '../../lib/attachmentUrl'
 import { AttachmentLightbox } from './AttachmentLightbox'
@@ -1254,19 +1255,30 @@ function ShellRunBlock({ run, pt }: { run: NonNullable<ChatTurn['shell']>; pt: b
 }
 
 /** A message agentistics injected: one compact row, full text on click. No bubble, no echo chrome. */
-export function SystemEventRow({ event, pt, sessionId, titleOf, defaultOpen = false, open: controlledOpen, onOpenChange }: { event: SystemEvent; pt: boolean; sessionId?: string; titleOf?: (id: string) => string | undefined; defaultOpen?: boolean; open?: boolean; onOpenChange?: (open: boolean) => void }) {
+export function SystemEventRow({ event, pt, sessionId, titleOf, senderSessionId, at, defaultOpen = false, open: controlledOpen, onOpenChange }: { event: SystemEvent; pt: boolean; sessionId?: string; titleOf?: (id: string) => string | undefined; senderSessionId?: string; at?: string | number; defaultOpen?: boolean; open?: boolean; onOpenChange?: (open: boolean) => void }) {
   const [innerOpen, setInnerOpen] = useState(defaultOpen)
   const open = controlledOpen ?? innerOpen
   const setOpen = (v: boolean) => { if (controlledOpen === undefined) setInnerOpen(v); onOpenChange?.(v) }
   const isMobile = useIsMobile()
+  const title = systemEventTitle(event.sender ? titleOf?.(event.sender) : undefined)
+  const stamp = messageTime(typeof at === 'number' ? new Date(at).toString() : at, pt ? 'pt' : 'en')
+  const label = systemEventLine(event, pt)
   return (
     <SystemLine
       isMobile={isMobile}
       below={open && (
         <div style={{
           margin: '2px 0 6px', padding: '6px 10px', borderRadius: 6, maxWidth: '92%', background: 'var(--bg-base)',
-          color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-        }}>{event.body || (pt ? '(sem texto)' : '(no text)')}</div>
+          color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.45, wordBreak: 'break-word', minWidth: 0, overflowWrap: 'anywhere', overflow: 'hidden',
+        }}>
+          {event.sender && <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+            {title && (senderSessionId
+              ? <a href={sessionPath(senderSessionId)} style={{ ...sysLink, ...touch(isMobile), whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{title}</a>
+              : <span>{title}</span>)}
+            {stamp && <time dateTime={new Date(at!).toISOString()} title={stamp.full} style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>{stamp.label}</time>}
+          </div>}
+          <div className="ag-chat-md"><ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{event.body || (pt ? '(sem texto)' : '(no text)')}</ReactMarkdown></div>
+        </div>
       )}
     >
       <button
@@ -1276,7 +1288,7 @@ export function SystemEventRow({ event, pt, sessionId, titleOf, defaultOpen = fa
         style={{ ...sysBtn, gap: 5, ...touch(isMobile) }}
       >
         <Info size={14} style={{ flexShrink: 0 }} />
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{systemEventLine(event, pt, event.sender ? titleOf?.(event.sender) : undefined)}</span>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}{title && <span style={{ color: 'var(--text-tertiary)' }}> · {title}</span>}</span>
         <ChevronDown size={12} style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : undefined }} />
       </button>
       {event.kind === 'checkin' && <button
@@ -1288,19 +1300,21 @@ export function SystemEventRow({ event, pt, sessionId, titleOf, defaultOpen = fa
   )
 }
 
-function FleetSystemEventRow({ event, lang }: { event: SystemEvent; lang: ChatBubbleProps['lang'] }) {
-  const rows = useFleet(lang).fleet.rows
-  const titleOf = useCallback((id: string) => {
-    const r = rows.find(x => x.id === id || x.id.startsWith(id) || x.conversationId === id)
-    return r?.title || undefined
-  }, [rows])
-  return <SystemEventRow event={event} pt={lang === 'pt'} titleOf={titleOf} />
+export function FleetSystemEventRow({ event, lang, at }: { event: SystemEvent; lang: ChatBubbleProps['lang']; at?: string | number }) {
+  const { fleet, loading } = useFleet(lang)
+  const sender = event.sender ? systemEventSender(fleet.rows, event.sender) : undefined
+  // The shared stream starts with active rows. Ask its existing history loader for ended senders.
+  useEffect(() => {
+    if (event.sender && !sender && !loading) loadClosedFleet()
+  }, [event.sender, sender, loading])
+  const titleOf = useCallback(() => sender?.title || undefined, [sender?.title])
+  return <SystemEventRow event={event} pt={lang === 'pt'} titleOf={titleOf} senderSessionId={sender?.id} at={at} />
 }
 
 export const ChatBubble = memo(function ChatBubble(props: ChatBubbleProps) {
   const event = props.turn.role === 'user' ? parseSystemEvent(props.turn.text) : null
   if (event) return event.sender
-    ? <FleetSystemEventRow event={event} lang={props.lang} />
+    ? <FleetSystemEventRow event={event} lang={props.lang} at={props.turn.at} />
     : <SystemEventRow event={event} pt={props.lang === 'pt'} sessionId={props.sessionId} />
   return <ChatBubbleInner {...props} />
 })
