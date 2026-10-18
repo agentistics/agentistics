@@ -17,7 +17,7 @@ import { conversationsInUse, type ClaimingSession, type ConversationHolder } fro
 import { emptyHarnessSessionIndex, loadHarnessSessions } from './harness-sessions'
 import { readRegistry } from './registry'
 import { externalId } from './session-view'
-import { parseHarnessAgents, type HarnessAgent } from './harness-agents'
+import { readHarnessAgents } from './harness-agents-io'
 import type { ManagedSession, SessionBackend } from './types'
 
 /**
@@ -102,16 +102,6 @@ export async function liveConversationHolders(
     })
   }
   return conversationsInUse(claims)
-}
-
-/** `claude agents --json`, or nothing. Best-effort: a machine without the CLI behaves as before. */
-async function readHarnessAgents(): Promise<HarnessAgent[]> {
-  try {
-    const out = Bun.spawnSync(['claude', 'agents', '--json'])
-    return out.success ? parseHarnessAgents(out.stdout.toString()) : []
-  } catch {
-    return []
-  }
 }
 
 /** Signal 0 asks the kernel whether the pid exists without touching the process. */

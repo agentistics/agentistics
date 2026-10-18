@@ -66,7 +66,7 @@ import { liveConversationHolders } from './live-claims'
 import { codexStartupFailure, execFailed } from './spawn-outcome'
 import { spawnDeath } from './spawn-check'
 import { reportFreshSpawn } from './spawn-report'
-import { parseHarnessAgents } from './harness-agents'
+import { readHarnessAgents } from './harness-agents-io'
 import { planTakeover, type TakeoverRefusal } from './takeover'
 import { applyRoleTitle, deliverStoredRole, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor } from './session-roles'
 import type { BackendInitialPrompt, ManagedSession, SessionBackend, SpawnPlan, SpawnPlanError } from './types'
@@ -398,8 +398,8 @@ async function nativeCliVerb(kind: 'kill' | 'rename' | 'archive' | 'unarchive' |
   return 0
 }
 
-async function spawnFailure(backend: SessionBackend, id: string, bin?: string, freshHarness?: HarnessId): Promise<string | undefined> {
-  const outcome = await spawnDeath(backend, id, undefined, freshHarness, reportFreshSpawn)
+async function spawnFailure(backend: SessionBackend, id: string, bin?: string, freshHarness?: HarnessId, settleMs?: number): Promise<string | undefined> {
+  const outcome = await spawnDeath(backend, id, settleMs, freshHarness, reportFreshSpawn)
   if (!outcome) return undefined
   // A binary that could not be EXECUTED says nothing on the way out (see `execFailed`), and the
   // only thing that fixes it is the PATH — so name it rather than print a bare status.
@@ -432,7 +432,11 @@ const HANDOFF_NOT_MADE = 'The hand-off was NOT made and nothing was inherited. R
 export async function start(
   cmd: Extract<SessionCommand, { kind: 'start' }>,
   backend: SessionBackend,
-  deps: { provesCaller?: (id: string) => Promise<boolean> } = {},
+  deps: {
+    provesCaller?: (id: string) => Promise<boolean>
+    /** How long a healthy spawn is watched before it counts as up (`SETTLE_MS`). Tests shorten it. */
+    settleMs?: number
+  } = {},
 ): Promise<number> {
   // A relative --cwd must resolve against the CALLER's directory: passed through unresolved it
   // reaches `tmux new-session -c` and is interpreted by the tmux SERVER's own cwd instead, and it
@@ -570,7 +574,7 @@ export async function start(
   // `spawn` returning is not evidence anything is RUNNING — tmux's contract is "I made you a
   // session". A harness that refuses its arguments has already exited by now, and registering a row
   // for it is what produced three dead rows called MAIN. See `spawn-outcome.ts`.
-  const failed = await spawnFailure(backend, id, planned.plan.argv[0], cmd.harness)
+  const failed = await spawnFailure(backend, id, planned.plan.argv[0], cmd.harness, deps.settleMs)
   if (failed) {
     console.error(failed)
     if (cmd.handoff) console.error(HANDOFF_NOT_MADE)
@@ -1418,10 +1422,8 @@ async function liveAgentFor(ref: string): Promise<
   { sessionId: string; harness: HarnessId; cwd: string; pid?: number; name?: string } | null
 > {
   try {
-    const out = Bun.spawnSync(['claude', 'agents', '--json'])
-    if (!out.success) return null
     const needle = ref.trim().toLowerCase()
-    const hits = parseHarnessAgents(out.stdout.toString()).filter(a =>
+    const hits = (await readHarnessAgents()).filter(a =>
       a.sessionId.toLowerCase().startsWith(needle)
       || (a.name ?? '').toLowerCase() === needle)
     const only = hits.length === 1 ? hits[0]! : undefined
