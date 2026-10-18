@@ -16,10 +16,11 @@
  * fact nobody can recover, and reporting it as zero would be the very defect this fixes.
  */
 
+import { iterLines } from './jsonl-lines'
 import { readFile, readdir, stat } from 'fs/promises'
 import { dirname, join } from 'path'
 import type { AgentInvocation, SessionAgentMetrics } from '@agentistics/core'
-import { agentNumbers, claimSessionUsage, summarizeSubagentTranscript, totalsOf, type SubagentSummary } from './subagent-parse'
+import { agentNumbers, claimSessionUsage, summarizeSubagentTranscriptYielding, totalsOf, type SubagentSummary } from './subagent-parse'
 import { FileVersionCache } from './file-version-cache'
 import { describedFrom, parseAgentMeta, planAgentJoin, planSubtrees, type AgentEntry } from './subagent-join'
 
@@ -64,7 +65,7 @@ async function summaryFor(file: string): Promise<SubagentSummary | null> {
   let content: string
   try { content = await readFile(file, 'utf-8') } catch { return null }
 
-  const summary = summarizeSubagentTranscript(content.split('\n'))
+  const summary = await summarizeSubagentTranscriptYielding(iterLines(content))
   CACHE.set(file, version, summary)
   return summary
 }
