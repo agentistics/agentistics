@@ -358,8 +358,20 @@ async function maybeMigrateDefault(registry?: AccountsFile): Promise<void> {
   if (await migrateDefaultRecords()) persistSoon()
 }
 
+/** One lane per harness:account: a reading waits for the one before it, so readings in flight at
+ * once are judged in arrival order instead of in whichever order their awaits happen to finish. */
+const ingestLanes = new Map<string, Promise<unknown>>()
+
 /** Store `l` when it is newer than what is held; notices and the SSE signal follow a real change. */
-export async function ingestPlanLimits(reading: PlanLimits): Promise<boolean> {
+export function ingestPlanLimits(reading: PlanLimits): Promise<boolean> {
+  const lane = `${reading.harness}:${reading.account}`
+  const run = (ingestLanes.get(lane) ?? Promise.resolve()).catch(() => {}).then(() => ingestPlanLimitsNow(reading))
+  ingestLanes.set(lane, run)
+  void run.finally(() => { if (ingestLanes.get(lane) === run) ingestLanes.delete(lane) }).catch(() => {})
+  return run
+}
+
+async function ingestPlanLimitsNow(reading: PlanLimits): Promise<boolean> {
   await load()
   let l = reading
   if (l.account !== 'default') {
@@ -388,7 +400,8 @@ export async function ingestPlanLimits(reading: PlanLimits): Promise<boolean> {
     const switched = await accountSwitch(l)
     // Signal 1: the root now holds ANOTHER login — the reading is that account's; the held one
     // (and its hold) is left exactly as it was.
-    if (switched) return ingestPlanLimits({ ...l, account: switched })
+    // Called directly: waiting on a lane from inside one could wait on itself.
+    if (switched) return ingestPlanLimitsNow({ ...l, account: switched })
     // The awaits above let another reading land: judge against what is held NOW, so an older
     // reading never overwrites a newer one and one discontinuity opens one segment.
     const fresh = state.limits[key]
