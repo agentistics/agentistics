@@ -19,7 +19,7 @@ function session(start: string, id = start): SessionMeta {
   return { session_id: id, harness: 'claude', project_path: '/repo', model: 'claude-opus-5',
     start_time: start, end_time: start, user_message_timestamps: [start],
     user_message_count: 1, assistant_message_count: 0, tool_counts: {}, message_hours: [],
-  } as SessionMeta
+  } as unknown as SessionMeta
 }
 
 function data(sessions: SessionMeta[]): AppData {
