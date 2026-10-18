@@ -7,6 +7,7 @@ import type { HarnessId } from '@agentistics/core'
 export type Lang = 'pt' | 'en'
 
 /** Assistants that cannot keep a second login apart (the server's `LOGIN_START` is `null` for them). */
+// @harness-adapters-only: a second login is a per-adapter fact (each vendor CLI's own login dir)
 export const NO_SECOND_ACCOUNT: ReadonlySet<HarnessId> = new Set<HarnessId>(['antigravity', 'opencode'])
 
 /** A row of `GET /api/accounts/roots`; declared here because the web never imports `packages/server`. */
