@@ -52,6 +52,22 @@ export function addErrorText(body: unknown, pt: boolean): string {
 export const loginTarget = (r: RootRowView): string | null =>
   r.loginSessionId ? `/sessions/${encodeURIComponent(r.loginSessionId)}` : null
 
+/** The body the CLI's switch sends (`PUT /api/experimental`): the master experimental switch. */
+export const TURN_ON_BODY = { enabled: true } as const
+
+/** Is `multi-account` on in a `GET/PUT /api/experimental` report? Anything unreadable reads as off. */
+export function multiAccountOn(report: unknown): boolean {
+  const f = report && typeof report === 'object' ? (report as { features?: unknown }).features : undefined
+  return Array.isArray(f) && f.some(x => x && typeof x === 'object' && (x as { id?: unknown }).id === 'multi-account' && (x as { on?: unknown }).on === true)
+}
+
+/** The server's sentence when it sent one; a fixed one otherwise (that route only answers a code). */
+export function turnOnErrorText(body: unknown, pt: boolean): string {
+  const msg = body && typeof body === 'object' ? (body as { message?: unknown }).message : undefined
+  if (typeof msg === 'string' && msg.trim()) return msg
+  return pt ? 'Não foi possível ligar as várias contas. Tente de novo.' : 'Could not turn on multiple accounts. Try again.'
+}
+
 export const ADD_COPY = (pt: boolean) => ({
   add: pt ? 'Adicionar conta' : 'Add account',
   addTo: (label: string) => (pt ? `Adicionar conta · ${label}` : `Add account · ${label}`),
@@ -66,7 +82,14 @@ export const ADD_COPY = (pt: boolean) => ({
   openLogin: pt ? 'Abrir login' : 'Open sign-in',
   cancelPending: pt ? 'Cancelar' : 'Cancel',
   noSecond: (labels: string) => (pt ? `${labels}: ainda não permite manter uma segunda conta separada.` : `${labels}: cannot keep a second account apart yet.`),
+  turnOn: pt ? 'Ligar várias contas' : 'Turn on multiple accounts',
+  turnOnTitle: pt ? 'Ligar várias contas?' : 'Turn on multiple accounts?',
+  turnOnMessage: pt
+    ? 'Isso liga os recursos experimentais do app, entre eles o de manter mais de uma conta do mesmo assistente. Nada é apagado e você pode desligar depois, em Configurações. Os botões de adicionar conta aparecem aqui em seguida.'
+    : 'This turns on the app\'s experimental features, including keeping more than one account of the same assistant. Nothing is deleted and you can turn it off later in Settings. The add-account buttons appear here right after.',
+  turnOnConfirm: pt ? 'Ligar' : 'Turn on',
+  stillOff: pt ? 'Ligado, mas uma configuração desta máquina mantém as várias contas desligadas.' : 'Turned on, but a setting on this machine keeps multiple accounts off.',
   flagOff: pt
-    ? 'Para adicionar uma segunda conta, ligue “várias contas” em Configurações → Experimental.'
-    : 'To add a second account, turn on “several accounts” in Settings → Experimental.',
+    ? 'Para adicionar uma segunda conta, ligue as várias contas.'
+    : 'To add a second account, turn on multiple accounts.',
 })
