@@ -19,6 +19,7 @@ for (const width of [1440, 390]) test(`settings sections fit their scrolling slo
     expect(h).toContain('scroll-snap-type:x mandatory')
     expect(h).toContain('flex:0 0 100%')
     expect(h).toContain('scroll-snap-stop:always')
+    expect(h).toContain('min-height:44px')
     expect(h).toContain('aria-current="page"')
   } else expect(h).not.toContain('scroll-snap-type')
 })

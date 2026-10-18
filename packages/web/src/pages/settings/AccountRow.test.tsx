@@ -99,3 +99,12 @@ for (const width of [1440, 390]) test(`renewed Codex usage wraps within its own 
     expect(usage).not.toContain('text-overflow:ellipsis')
   } finally { g.window = { innerWidth: 1280 } }
 })
+
+test('making room for usage preserves full plan names and account subtitles', () => {
+  g.window = { innerWidth: 1440 }
+  const h = renderToStaticMarkup(<BillingAccountList {...view([acc('c1', { label: 'principal@exemplo.com' })], ['claude'], () => ({ plan: { name: 'Cobrança desconhecida', price: null, mode: 'unknown' } }))} lang="pt" />)
+  expect(h).toContain('Cobrança desconhecida')
+  expect(h).toContain('principal@exemplo.com')
+  expect(h).toContain('minmax(150px,.8fr)')
+  expect(h).not.toContain('text-overflow:ellipsis')
+})

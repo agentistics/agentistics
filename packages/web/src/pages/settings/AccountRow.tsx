@@ -53,16 +53,16 @@ export interface BillingAccountListProps {
   onEdit: (row: BillingRowView) => void
 }
 
-const GRID = 'minmax(100px,1.3fr) minmax(95px,.8fr) minmax(190px,1.8fr) 54px 90px'
-const nowrap: React.CSSProperties = { display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
+const GRID = 'minmax(100px,1.3fr) minmax(150px,.8fr) minmax(190px,1.8fr) 54px 90px'
+const cellText: React.CSSProperties = { display: 'block', whiteSpace: 'normal', overflowWrap: 'break-word' }
 
 function PlanCell({ r, t }: { r: BillingRowView; t: ReturnType<typeof T> }) {
   if (r.problem) return <span style={{ justifySelf: 'start' }}><Pill tone="error" nowrap>{t.problem}</Pill></span>
   if (!r.plan) return <span style={{ justifySelf: 'start' }}><Pill tone="warn" nowrap>{t.noPlan}</Pill></span>
   return (
     <div style={{ minWidth: 0 }}>
-      <span style={{ ...nowrap, fontSize: 12.5, color: 'var(--text-primary)' }}>{r.plan.name}</span>
-      {r.plan.price && <span style={{ ...nowrap, fontSize: 11.5, color: 'var(--text-tertiary)' }}>{r.plan.price}</span>}
+      <span style={{ ...cellText, fontSize: 12.5, color: 'var(--text-primary)' }}>{r.plan.name}</span>
+      {r.plan.price && <span style={{ ...cellText, fontSize: 11.5, color: 'var(--text-tertiary)' }}>{r.plan.price}</span>}
     </div>
   )
 }
@@ -120,8 +120,8 @@ export function BillingAccountList(p: BillingAccountListProps) {
               <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                 <HarnessMark harness={r.harness} size={22} />
                 <span style={{ minWidth: 0 }}>
-                  <b style={{ ...nowrap, fontSize: 13, color: 'var(--text-primary)' }}>{r.title}</b>
-                  <span title={r.sub} style={{ ...nowrap, fontSize: 11.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>{r.sub}</span>
+                  <b style={{ ...cellText, fontSize: 13, color: 'var(--text-primary)' }}>{r.title}</b>
+                  <span title={r.sub} style={{ ...cellText, fontSize: 11.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>{r.sub}</span>
                 </span>
               </span>
               <PlanCell r={r} t={t} />
