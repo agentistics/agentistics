@@ -42,7 +42,7 @@
 .clean-table td:not(:nth-child(2)):not(:last-child) { color: var(--text-secondary); }
 .clean-folder { display: flex; align-items: center; gap: 7px; }
 .clean-table tr[data-kept=true] { color: var(--text-tertiary); }
-.clean-selected { white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; }
+.clean-selected { font-size: 12px; font-variant-numeric: tabular-nums; }
 .clean-selected b { color: var(--anthropic-orange); }
 .clean-mobile-select { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 10px; background: var(--bg-elevated); border-radius: 10px; font-size: 12px; }
 .clean-mobile-sort { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
@@ -76,5 +76,10 @@
 .clean-close { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; flex-shrink: 0; border: 0; border-radius: 10px; color: var(--text-secondary); background: transparent; cursor: pointer; }
 
 .clean-mobile-rows > div { flex-shrink: 0; }
-.clean-mobile-rows > div > div > div { gap: 3px !important; }
+.clean-mobile-rows > div > div > div { gap: 14px !important; }
+/* Keep the 44px hit area without reserving its empty right side before the name. */
+.clean-mobile-rows [role=checkbox] { margin-right: -26px; }
 .clean-card-name, .clean-card-subtitle { display: block; white-space: normal; overflow-wrap: anywhere; }
+
+.clean-folder-label { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.clean-folder-label b, .clean-folder-label small { display: block; }

@@ -17,10 +17,10 @@ test('the same state is readable in English, and first render has no stale progr
   expect(initial).toContain('estimating time')
   expect(initial).not.toContain('completed-name')
 })
-test('unknown scan labels degrade to a localized discovery step', () => {
+test('unknown scan labels show a localized generic checking step', () => {
   for (const lang of ['pt', 'en'] as const) {
     const html = renderToStaticMarkup(<CleanScanView scan={{ ...scan, label: 'unexpected-step' as CleanScanState['label'] }} lang={lang} />)
-    expect(html).toContain(lang === 'pt' ? 'localizando os projetos' : 'finding projects')
+    expect(html).toContain(lang === 'pt' ? 'Verificando…' : 'Checking…')
     expect(html).toContain('46%')
   }
 })

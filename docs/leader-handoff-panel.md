@@ -73,3 +73,7 @@ Unit tests are in `core/src/handoffConfig.test.ts`, `server/sessions/handoff-pan
 `web/src/components/sessions/HandoffWarning.test.tsx`, and `web/src/lib/handoffPanelState.test.ts`. The delivery owner runs tests/typechecking
 and desktop/mobile light/dark visual QA in an isolated `agentop run --rm` environment before
 accepting the change.
+
+The cost panel opens with focus on the dialog container and its summary visible at the top,
+including on mobile. The simulation percentage input receives focus through keyboard navigation
+or a click, rather than automatically when the panel opens.

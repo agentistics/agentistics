@@ -6,7 +6,8 @@ const item = (overrides: Partial<CleanWebItem> = {}): CleanWebItem => ({ id: 'a'
 describe('cleanup presentation', () => {
   test('uses the leaf name instead of truncating the path before the worktree name', () => {
     expect(cleanName(item())).toBe('worktree-name')
-    expect(cleanName(item({ name: '', path: 'C:\\repo\\.worktrees\\important-name', kind: 'node-modules' }))).toBe('important-name/node_modules')
+    expect(cleanName(item({ name: 'important-name/node_modules', kind: 'node-modules' }))).toBe('important-name')
+    expect(cleanName(item({ name: '', path: 'C:\\repo\\.worktrees\\important-name', kind: 'node-modules' }))).toBe('important-name')
   })
   test('localizes decimal sizes, zero bytes, unknown activity and future timestamps', () => {
     expect(cleanSize(1.5 * 1024 ** 3, 'pt')).toBe('1,5 GB')
@@ -47,4 +48,10 @@ describe('cleanup selection', () => {
     expect([...current]).toEqual(['remove'])
     expect([...toggleCleanVisible(current, [rows[3]!])]).toEqual(['remove'])
   })
+})
+
+test('default all view groups selectable rows before protected rows, each by descending size', () => {
+  const rows = [item({ id: 'dirty-big', kind: 'keep', bytes: 900 }), item({ id: 'remove', bytes: 50 }), item({ id: 'active', kind: 'keep', bytes: 400 }), item({ id: 'nm', kind: 'node-modules', bytes: 200 }), item({ id: 'prune', kind: 'prune', bytes: 0 })]
+  expect(sortCleanItems(rows, 'bytes', true, true).map(i => i.id)).toEqual(['nm', 'remove', 'prune', 'dirty-big', 'active'])
+  expect(sortCleanItems(rows, 'bytes', false).map(i => i.id)).toEqual(['prune', 'remove', 'nm', 'active', 'dirty-big'])
 })

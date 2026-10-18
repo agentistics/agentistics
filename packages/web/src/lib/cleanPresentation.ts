@@ -8,7 +8,8 @@ export function cleanSize(bytes: number, lang: 'pt' | 'en'): string {
   return `${new Intl.NumberFormat(lang, { maximumFractionDigits: unit === 'GB' ? 1 : 0 }).format(n / divisor)} ${unit}`
 }
 export function cleanName(item: Pick<CleanWebItem, 'name' | 'path' | 'kind'>): string {
-  return item.name || (item.path.replace(/\\/g, '/').replace(/\/$/, '').split('/').pop() || item.path) + (item.kind === 'node-modules' ? '/node_modules' : '')
+  const name = item.name || (item.path.replace(/\\/g, '/').replace(/\/$/, '').split('/').pop() || item.path)
+  return item.kind === 'node-modules' ? name.replace(/\/node_modules$/, '') : name
 }
 export function cleanIdle(ms: number | null, now: number, lang: 'pt' | 'en'): string {
   if (ms === null) return '—'
@@ -37,8 +38,9 @@ export function cleanMatches(item: CleanWebItem, filter: CleanFilter, now: numbe
   if (filter === 'idle') return item.lastActivityMs !== null && now - item.lastActivityMs > 7 * 86_400_000
   return true
 }
-export function sortCleanItems(items: readonly CleanWebItem[], sort: CleanSort, descending: boolean): CleanWebItem[] {
+export function sortCleanItems(items: readonly CleanWebItem[], sort: CleanSort, descending: boolean, selectableFirst = false): CleanWebItem[] {
   return [...items].sort((a, b) => {
+    if (selectableFirst && (a.kind === 'keep') !== (b.kind === 'keep')) return a.kind === 'keep' ? 1 : -1
     const value = sort === 'bytes' ? a.bytes - b.bytes : sort === 'idle' ? (a.lastActivityMs ?? Infinity) - (b.lastActivityMs ?? Infinity)
       : sort === 'name' ? cleanName(a).localeCompare(cleanName(b)) : a.project.localeCompare(b.project)
     return (descending ? -value : value) || a.id.localeCompare(b.id)

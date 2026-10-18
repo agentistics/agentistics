@@ -5,8 +5,8 @@ import { DEFAULT_HANDOFF_CONFIG, type CleanWebPlan, type HandoffPanel } from '@a
 
 const plan: CleanWebPlan = { scanId: 'regression', scannedAt: Date.now(), elapsedMs: 100, reclaimable: { bytes: 606 * 1024 ** 2, count: 3 }, items: [
   { id: 'a', repo: '/repo', project: 'repo', path: '/repo/a', name: 'a', kind: 'remove', bytes: 50 * 1024 ** 2, reason: 'merged and clean', lastActivityMs: 0 },
-  { id: 'b', repo: '/repo', project: 'repo', path: '/repo/b', name: 'b', kind: 'node-modules', bytes: 556 * 1024 ** 2, reason: '', lastActivityMs: Date.now() },
-  { id: 'c', repo: '/repo', project: 'repo', path: '/repo/c', name: 'c', kind: 'keep', bytes: 0, reason: 'dirty', lastActivityMs: Date.now() },
+  { id: 'b', repo: '/repo', project: 'repo', path: '/repo/b', name: 'b/node_modules', kind: 'node-modules', bytes: 556 * 1024 ** 2, reason: '', lastActivityMs: Date.now() },
+  { id: 'c', repo: '/repo', project: 'repo', path: '/repo/c', name: 'c', kind: 'keep', bytes: 900 * 1024 ** 2, reason: 'dirty', lastActivityMs: Date.now() },
 ] }
 const panel: HandoffPanel = { version: 1, sessionId: 'leader-regression', updatedAt: 0, config: DEFAULT_HANDOFF_CONFIG, cutTokens: 250000, contextTokens: 310000, contextWindow: 1000000, level: 'overdue', spentUSD: 18, replies: 84, nextReplyUSD: .39, successorReplyUSD: .15, successorBaseTokens: 40000, handoffOverheadUSD: 1.2, breakEvenReplies: 5, projectionReplies: 20, projections: [], quotaEstimated: true, workInFlight: [], handoffPath: null }
 let createRoot: typeof import('react-dom/client').createRoot
@@ -32,11 +32,20 @@ for (const width of [1280, 390]) for (const lang of ['pt', 'en'] as const) test(
   try {
     await act(async () => { root.render(<CleanDialog lang={lang} open onClose={() => {}} />) })
     expect(host.querySelector('.clean-summary')!.textContent).toContain('606 MB')
+    expect(document.activeElement).toBe(host.querySelector('[role=dialog]'))
+    const names = Array.from(host.querySelectorAll(width < 768 ? '.clean-card-name' : '.clean-folder-label > b')).map(n => n.textContent)
+    expect(names).toEqual(['b', 'a', 'c'])
+    expect(host.querySelector('.clean-selected')!.textContent).not.toContain(lang === 'pt' ? 'fora deste filtro' : 'outside this filter')
     await act(async () => button('node_modules 1').click())
     expect(host.textContent).not.toContain('merged')
+    expect(host.querySelector('.clean-selected')!.textContent).toContain(lang === 'pt' ? '1 fora deste filtro' : '1 outside this filter')
+    const name = host.querySelector(width < 768 ? '.clean-card-name' : '.clean-folder-label > b')!
+    expect(name.textContent).toBe('b')
+    expect(width < 768 ? host.querySelector('.clean-card-subtitle')!.textContent : name.parentElement!.textContent).toContain('/node_modules')
     expect(host.querySelectorAll(width < 768 ? '.clean-mobile-rows > div' : 'tbody tr')).toHaveLength(1)
     await act(async () => button(lang === 'pt' ? 'Parados há +7 dias 1' : 'Idle for 7+ days 1').click())
     expect(host.querySelectorAll(width < 768 ? '.clean-mobile-rows > div' : 'tbody tr')).toHaveLength(1)
+    expect(host.querySelector('.clean-selected')!.textContent).not.toContain(lang === 'pt' ? 'fora deste filtro' : 'outside this filter')
     if (width < 768) expect(host.querySelector('.clean-mobile-select')!.textContent).not.toContain('50 MB')
     await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="clean-apply"]')!.click())
     expect(host.querySelector('.clean-number')!.textContent).toBe('50 MB')
@@ -50,6 +59,10 @@ for (const pt of [true, false]) test(`handoff explanation occurs once; confirmat
   try {
     await act(async () => root.render(<HandoffLivePanel panel={panel} open pt={pt} act={async () => ({ ok: true }) as never} />))
     const dialog = document.querySelector('.handoff-dialog')!
+    expect(document.activeElement).toBe(dialog)
+    expect(document.activeElement).not.toBe(dialog.querySelector('input'))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(dialog.querySelector('.handoff-panel-footer .primary'))
     expect(dialog.textContent!.match(new RegExp(pt ? 'O líder prepara' : 'The leader prepares', 'g'))).toHaveLength(1)
     expect(dialog.querySelector('.handoff-live-panel > small')!.textContent).not.toContain('10%')
     const footer = dialog.querySelector('.handoff-panel-footer')!

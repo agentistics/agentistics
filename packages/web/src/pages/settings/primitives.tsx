@@ -26,7 +26,7 @@ export function ScopeNote({ children }: { children: React.ReactNode }) {
 // ConfirmModal
 // Centered confirmation dialog for destructive actions (delete/revoke/remove). Renders nothing
 // when `open` is false. Backdrop click + Escape = cancel. The confirm button is red (danger).
-export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, children, footer, tone = 'danger', icon, busy, maxWidth = 420, mobileSheet = false, className, headerAction }: {
+export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, focusPanel = false, children, footer, tone = 'danger', icon, busy, maxWidth = 420, mobileSheet = false, className, headerAction }: {
   /** Optional wider content and phone bottom-sheet presentation; defaults preserve confirmations. */
   maxWidth?: number
   mobileSheet?: boolean
@@ -44,6 +44,8 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
   requireText?: string
   /** Prompt shown above the input, e.g. `Type "Client X" to confirm`. */
   requireTextHint?: string
+  /** Keep long content at the top instead of scrolling to its first input. */
+  focusPanel?: boolean
   focusCancel?: boolean
   children?: React.ReactNode
   /** Optional replacement for the standard two-button footer. */
@@ -78,13 +80,13 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
     const panel = panelRef.current
     const focusables = () => Array.from(panel?.querySelectorAll<HTMLElement>(
       'button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])') ?? [])
-    if (panel && !panel.contains(document.activeElement)) (focusables()[0] ?? panel).focus()
+    if (panel && !panel.contains(document.activeElement)) (focusPanel ? panel : focusables()[0] ?? panel).focus({ preventScroll: true })
     const trap = (e: KeyboardEvent) => {
       if (e.key !== 'Tab' || !panel) return
       const f = focusables()
       if (f.length === 0) { e.preventDefault(); panel.focus(); return }
       const first = f[0]!, last = f[f.length - 1]!
-      if (!panel.contains(document.activeElement)) { e.preventDefault(); first.focus() }
+      if (!panel.contains(document.activeElement) || document.activeElement === panel) { e.preventDefault(); (e.shiftKey ? last : first).focus() }
       else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
     }
@@ -93,7 +95,7 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
       document.removeEventListener('keydown', trap)
       if (prev && prev.isConnected) prev.focus()
     }
-  }, [open])
+  }, [open, focusPanel])
   if (!open) return null
   return (
     <div className={className ? `${className}-backdrop` : undefined} onClick={onCancel} style={{

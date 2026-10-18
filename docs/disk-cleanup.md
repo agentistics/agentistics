@@ -56,3 +56,9 @@ The confirmation shows the selected byte total and count once. Scan logs show ti
 seconds and sizes only after measurement; unfamiliar scan steps fall back to discovery wording.
 Cleanup completion replaces the bell’s earlier progress row, with localized singular/plural counts
 and no empty removal categories. Escape closes the notification bell through the shared overlay stack.
+
+The default All view lists selectable items first, then protected items, descending by size within
+each group. Other sort controls still work. Worktree names wrap in full; dependency rows put
+`/node_modules` on a secondary line. The selection footer includes the number of selected items
+outside the active filter. Opening the dialog focuses its container; keyboard navigation retains
+visible focus rings. Unknown scan phases show a generic “Checking…” label.
