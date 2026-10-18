@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from 'react'
 /**
  * TopBar — the fixed strip along the top of the PAGE, to the right of the aside.
  *
@@ -42,13 +43,25 @@ export interface TopBarProps {
    */
   above?: React.ReactNode
   aboveHeight?: number
+  below?: React.ReactNode
+  onBelowHeight?: (height: number) => void
 }
 
-export function TopBar({ height, asideWidth, trailing, trailingFlush = false, noBottomBorder = false, above, aboveHeight = 0 }: TopBarProps) {
+export function TopBar({ height, asideWidth, trailing, trailingFlush = false, noBottomBorder = false, above, aboveHeight = 0, below, onBelowHeight }: TopBarProps) {
+  const belowRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = belowRef.current
+    if (!el) { onBelowHeight?.(0); return }
+    const measure = () => onBelowHeight?.(el.getBoundingClientRect().height)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [below, onBelowHeight])
   return (
     <div
       style={{
-        position: 'fixed', top: 0, left: asideWidth, right: 0, height: height + (above ? aboveHeight : 0), zIndex: 300,
+        position: 'fixed', top: 0, left: asideWidth, right: 0, minHeight: height + (above ? aboveHeight : 0), zIndex: 300,
         display: 'flex', flexDirection: 'column', padding: 0, boxSizing: 'border-box',
         // On the Sessions board (`noBottomBorder`) the bar is FRAME, not a panel: the same ground
         // colour as the gaps and the icon rail, so the board reads as one surface.
@@ -71,6 +84,7 @@ export function TopBar({ height, asideWidth, trailing, trailingFlush = false, no
           {trailing}
         </div>
       )}
+      {below ? <div ref={belowRef} style={{ flexShrink: 0, minWidth: 0 }}>{below}</div> : null}
     </div>
   )
 }

@@ -251,7 +251,7 @@ for (const width of [1280, 390]) test(`sleeping and pinned leader names wrap, ba
       expect(open.textContent).toContain('Reabrindo…')
       const badge = Array.from(open.querySelectorAll<HTMLElement>('span')).find(el => el.textContent === 'Líder' && el.style.whiteSpace === 'nowrap')!
       expect(badge.style.flexShrink).toBe('0')
-      expect(card.style.flexWrap).toBe('wrap')
+      expect(card.style.flexWrap).toBe(compact ? 'nowrap' : 'wrap')
       await act(async () => clearReopening(session.id))
     }
     expect(opened).toBe(2); expect(pinned).toBe(2); expect(resumed).toBe(2)
@@ -269,7 +269,7 @@ for (const width of [1280, 390]) test(`ended-only groups suppress the false empt
   expect(name.nextElementSibling?.getAttribute('style')).toContain('flex-shrink: 0')
 })
 
-test('action feedback uses the session title, floats over the list, and expires in five seconds', async () => {
+test('action feedback uses the session title, reserves space, and can be dismissed', async () => {
   const session = { ...row('b4f46fa8d9-session', 'waiting'), title: '[ LÍDER ] - Maestro' }
   await act(async () => root.render(<MemoryRouter><SessionsAside rows={[session]} lang="pt" filters={filters} activeOnly={false}
     loading={false} unsupported={false} finishedTasks={[]} hideNew={false}
@@ -281,8 +281,41 @@ test('action feedback uses the session title, floats over the list, and expires 
   await click(kill)
   const notice = Array.from(host.querySelectorAll<HTMLElement>('[role="status"]')).find(el => el.textContent === 'Maestro encerrada.')!
   expect(notice).toBeDefined()
-  expect(notice.style.position).toBe('absolute')
+  expect(notice.closest<HTMLElement>('[data-action-notice]')!.style.position).toBe('')
   expect(notice.textContent).not.toContain('b4f46fa8d9')
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 5100)) })
+  await click(host.querySelector<HTMLElement>('[aria-label="Fechar aviso"]')!)
   expect(notice.isConnected).toBe(false)
 }, 10000)
+
+for (const width of [1440, 390]) test(`pinned intent survives active/status filters and search narrows sleeping pins at ${width}px`, async () => {
+  await render(fleet, width, 'pt', { ...filters, harnesses: ['claude'] }, true)
+  const sleeping = () => Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === 'Dormindo1')!
+  expect(sleeping()).toBeDefined()
+  expect(sleeping().getAttribute('aria-expanded')).toBe('false')
+  const status = Array.from(host.querySelectorAll<HTMLButtonElement>('[aria-label] button')).find(b => b.textContent?.includes('trabalhando'))
+  if (status) await click(status)
+  expect(sleeping()).toBeDefined()
+  await click(sleeping())
+  expect(host.textContent).toContain('Title pin-ended')
+  const input = host.querySelector<HTMLInputElement>('input[type="search"], input[placeholder]')!
+  const nativeSet = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+  await act(async () => {
+    nativeSet.call(input, 'no-such-title')
+    input.dispatchEvent(new window.Event('input', { bubbles: true }))
+    input.dispatchEvent(new window.Event('change', { bubbles: true }))
+  })
+  expect(host.textContent).not.toContain('Title pin-ended')
+  expect(sleeping()).toBeUndefined()
+})
+
+test('folder totals count saved membership even for pinned or not-yet-loaded ended sessions', async () => {
+  await act(async () => {
+    groups.addSessionToGroup('archived', 'pin-ended')
+  })
+  await render(fleet.filter(r => r.id !== 'archived-direct'), 1440, 'en', filters, true)
+  await click(ended('root'))
+  const header = folder('archived')!.querySelector('button[aria-expanded]')!
+  // Two direct memberships (one deferred, one pinned) plus the nested ended member.
+  expect(header.textContent).toContain('0/3')
+  expect(folder('archived')!.querySelector('[title="Title pin-ended"]')).toBeNull()
+})

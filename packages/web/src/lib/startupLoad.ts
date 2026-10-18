@@ -137,8 +137,8 @@ export function loadErrorText(e: LoadError, lang: 'pt' | 'en', origin: string): 
   switch (e.kind) {
     case 'unreachable':
       return pt
-        ? { title: 'Não foi possível falar com o agentistics', body: `O servidor em ${origin} não está respondendo. Verifique se o computador que roda o agentistics está ligado e na mesma rede — num celular, ele precisa estar acordado.` }
-        : { title: "Can't reach agentistics", body: `The server at ${origin} isn't answering. Check that the computer running agentistics is on and on the same network — from a phone, it needs to be awake.` }
+        ? { title: 'Não foi possível falar com o agentistics', body: `O servidor em ${origin} não está respondendo. Logo após uma atualização, a primeira abertura lê todo o histórico e pode levar alguns minutos. Continuamos tentando. Se demorar mais, confira se o computador está ligado e na mesma rede.` }
+        : { title: "Can't reach agentistics", body: `The server at ${origin} isn't answering. Right after an update, the first start reads your whole history and can take a few minutes. We keep retrying. If it takes longer, check that the computer is on and on the same network.` }
     case 'timeout':
       return pt
         ? { title: 'O servidor está demorando demais', body: 'Ele respondeu à conexão, mas não terminou de enviar seus dados a tempo. Isso costuma passar sozinho em instantes.' }

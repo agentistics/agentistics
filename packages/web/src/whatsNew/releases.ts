@@ -23,6 +23,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     ],
     fixes: [
       {
+        pt: 'As conversas fixadas continuam visíveis com “Só ativas”. Avisos longos ficam em “Detalhes”, e a primeira abertura após atualizar explica a leitura do histórico enquanto tenta novamente.',
+        en: 'Pinned conversations stay visible with “Active only”. Long notices have a “Details” disclosure, and the first start after updating explains history loading while retrying.',
+      },
+      {
         pt: 'A sequência e o recorde de dias usam o mesmo dia local: atividade entre 21h e meia-noite não pula mais para o dia seguinte.',
         en: 'The day streak and the record use the same local day: late-evening activity no longer jumps to the next day.',
       },

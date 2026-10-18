@@ -12,7 +12,7 @@ test('ended row reuses the rail’s wrapping identity without the full card meta
   const html = renderToStaticMarkup(<SessionRow session={session} compact selected={false} cardColor="wash" onOpen={() => {}} lang="en" />)
   expect(html).toContain('Finished work')
   expect(html).toContain('white-space:normal')
-  expect(html).not.toContain('ellipsis')
+  expect(html).not.toContain('text-overflow:ellipsis')
   expect(html).toContain('padding:6px 8px')
   expect(html).not.toContain('Delivery marker')
   // The full model is still in the row tooltip, not a second line.
@@ -32,7 +32,7 @@ test('compact row still opens, pins and exposes its resume actions on mobile and
     return row
   }
   const html = renderToStaticMarkup(<Row />)
-  expect(html).toContain('min-height:44px')
+  expect(html).toContain('min-height:56px')
   expect(html).toContain('Options for Finished work')
   expect(html).toContain('aria-haspopup="menu"')
   const event = { stopPropagation() {}, preventDefault() {}, key: 'Enter', currentTarget: { getBoundingClientRect: () => ({ left: 10, bottom: 20 }) } }
@@ -50,4 +50,20 @@ test('expanded ended members select compact rows while live members keep full ro
   expect(src).toContain('{live.map(s => renderRow(s))}')
   expect(src).toContain('{endedOpen && ended.map(s => renderRow(s, true))}')
   expect(src).toContain('compact={compact}')
+})
+
+test('compact sleeping rows reserve one line for controls and keep the last word with its badge', () => {
+  const html = renderToStaticMarkup(<SessionRow session={{ ...session, title: '[ LÍDER ] - Maestro (superskill)' }} compact pinned
+    selected={false} cardColor="wash" onOpen={() => {}} onPin={() => {}} onReopen={() => {}} reopenVerb={resume}
+    onOpenMenu={() => {}} verbs={[resume]} lang="pt" />)
+  expect(html).toContain('flex-wrap:nowrap')
+  expect(html).toContain('flex:1 1 0')
+  expect(html).toContain('white-space:nowrap">(superskill)')
+  expect(html).toContain('Reabrir')
+  expect(html).toContain('lucide-pin-off')
+  expect(html).not.toContain('text-overflow:ellipsis')
+  const unpinned = renderToStaticMarkup(<SessionRow session={session} compact selected={false} cardColor="wash" onOpen={() => {}} onPin={() => {}} lang="pt" />)
+  expect(unpinned).toContain('aria-label="Fixar"')
+  expect(unpinned).toContain('lucide-pin"')
+  expect(unpinned).not.toContain('lucide-pin-off')
 })

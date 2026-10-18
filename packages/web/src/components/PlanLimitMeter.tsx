@@ -234,7 +234,7 @@ export function PlanLimitArcs({ limits, now, size }: { limits: PlanLimits; now: 
 export function PlanLimitBars({ limits, now, lang }: { limits: PlanLimits; now: number; lang: Lang }) {
   const warn = limits.windows.map(w => warnForecast(w, now)).find(Boolean) ?? null
   return (
-    <div data-plan-limits={limits.harness} data-plan-compact style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', columnGap: 6, rowGap: 3, fontSize: 10.5, minWidth: 0 }}>
+    <div data-plan-limits={limits.harness} data-plan-compact style={{ display: 'grid', gridTemplateColumns: 'auto minmax(16px, 1fr) minmax(0, 2fr)', alignItems: 'center', columnGap: 6, rowGap: 3, fontSize: 10.5, minWidth: 0 }}>
       {limits.windows.map(w => {
         const pct = currentUsedPct(w, now)
         const renewed = windowRenewed(w, now)
@@ -246,13 +246,13 @@ export function PlanLimitBars({ limits, now, lang }: { limits: PlanLimits; now: 
             style={{ height: 3, minWidth: 16, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
             <div style={{ width: `${Math.min(100, Math.max(0, pct))}%`, height: '100%', background: limitTone(pct), borderRadius: 2 }} />
           </div>,
-          <span key={`${w.kind}v`} data-plan-window={w.kind} style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+          <span key={`${w.kind}v`} data-plan-window={w.kind} style={{ color: 'var(--text-secondary)', whiteSpace: 'normal', overflowWrap: 'anywhere', minWidth: 0, fontVariantNumeric: 'tabular-nums' }}>
             {renewed ? '–' : `${Math.round(pct)}%`} · {renewed ? windowResetPhrase(w, now, lang) : shortWhen(w.resetsAt, now, lang, w.kind)}
           </span>,
         ]
       })}
       {warn && (
-        <span data-plan-forecast style={{ gridColumn: '1 / -1', color: LIMIT_WARN, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <span data-plan-forecast style={{ gridColumn: '1 / -1', color: LIMIT_WARN, fontWeight: 600, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
           {forecastPhrase(warn, now, lang)}
         </span>
       )}

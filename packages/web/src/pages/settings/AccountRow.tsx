@@ -68,7 +68,7 @@ function PlanCell({ r, t }: { r: BillingRowView; t: ReturnType<typeof T> }) {
 }
 
 function Usage({ r, now, lang, t }: { r: BillingRowView; now: number; lang: Lang; t: ReturnType<typeof T> }) {
-  if (r.limits) return <PlanLimitBars limits={r.limits} now={now} lang={lang} />
+  if (r.limits) return <div data-billing-usage style={{ minWidth: 0, overflowWrap: 'anywhere' }}><PlanLimitBars limits={r.limits} now={now} lang={lang} /></div>
   return <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{REPORTS_LIMITS.has(r.harness) ? t.noMeterYet : t.noMeter}</span>
 }
 

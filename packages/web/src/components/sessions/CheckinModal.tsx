@@ -153,7 +153,7 @@ export function CheckinModalView({ round, history, pt, isMobile, onClose }: { ro
   return (
     <div data-testid="checkin-modal" className="ag-checkin-modal" style={{ overflowWrap: 'anywhere' }}>
       <style>{`
-        .ag-checkin-health-row { grid-template-columns: 8px fit-content(40%) minmax(0, 1fr); }
+        .ag-checkin-health-row { grid-template-columns: 8px 150px minmax(0, 1fr); }
         .ag-checkin-modal [data-checkin-progress] > span { flex-shrink: 0; max-width: 100%; box-sizing: border-box; }
         @media (max-width: 480px) {
           .ag-checkin-health-row { grid-template-columns: 8px minmax(0, 1fr); }

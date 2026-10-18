@@ -1,3 +1,4 @@
+import { ActionNotice } from '../components/sessions/ActionNotice'
 /**
  * SessionsPage — the CENTRE of the sessions workspace.
  *
@@ -1987,9 +1988,12 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    * desktop pane the title is `App.tsx`'s global top strip, and `App.tsx` itself draws the strip as
    * the first row of that top area — this page renders none there.
    */
+  const [tabNotice, setTabNotice] = useState<string | null>(null)
+  const tabNoticeEl = tabNotice ? <ActionNotice message={tabNotice} lang={lang} onDismiss={() => setTabNotice(null)} /> : null
   const tabStripAboveTitle = tabsOn && (isMobile || splitRoute !== null)
   const tabStripEl = tabsOn && selected ? (
     <SessionTabStrip
+      onNoticeChange={setTabNotice}
       lang={pt ? 'pt' : 'en'}
       rows={fleet.rows}
       fleetReady={!loading && !pollUnsupported}
@@ -2818,6 +2822,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         </div>
         {selected.actionable && <AwayChip id={selected.id} away={selected.away === true} pt={pt} compact />}
       </div>
+      {tabNoticeEl}
       {/* `display: flex` is the load-bearing part, not `flex: 1`.
           This div had `flex: 1, minHeight: 0` and no display, so it was a BLOCK. Its child —
           SessionPanel's own `flex: 1 1 0%` column — was therefore not a flex item at all, and
@@ -3260,6 +3265,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         view={sessionView}
         onViewChange={setSessionView}
       />
+      {tabNoticeEl}
       </>
     ) : null}
     {/* IDLE SESSIONS (Task 6) — the offer itself is `IdleReviewCard`, mounted inside `SessionsAside`

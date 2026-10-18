@@ -92,7 +92,7 @@ test('health wraps below its label on small screens and earlier rounds expand do
       expect(pill.textContent).toBe('Em andamento')
       expect(getComputedStyle(pill).whiteSpace).toBe('nowrap')
       expect(getComputedStyle(pill).flexShrink).toBe('0')
-      expect(getComputedStyle(health).gridTemplateColumns).toBe(width <= 480 ? '8px minmax(0, 1fr)' : '8px fit-content(40%) minmax(0, 1fr)')
+      expect(getComputedStyle(health).gridTemplateColumns).toBe(width <= 480 ? '8px minmax(0, 1fr)' : '8px 150px minmax(0, 1fr)')
       expect(getComputedStyle(health.querySelector('.ag-checkin-health-value')!).gridColumn).toBe(width <= 480 ? '2' : '')
       const timeline = host.querySelector('[data-testid="checkin-timeline"]')!
       const button = timeline.querySelector<HTMLButtonElement>('button')!

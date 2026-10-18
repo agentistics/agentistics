@@ -1,3 +1,4 @@
+import { ActionNotice } from './ActionNotice'
 /**
  * SessionTabStrip — the open conversations as tabs, in their own row at the top of the conversation
  * panel (rounded tabs in a segmented track; flag `sessionTabs`). The header above it is unchanged.
@@ -32,6 +33,7 @@ import type { MenuEntry } from '../../lib/rowMenu'
 import { sessionDisplayTitle, hasLeaderTitle } from '../../lib/sessionDisplayTitle'
 
 export interface SessionTabStripProps {
+  onNoticeChange?: (notice: string | null) => void
   lang: 'pt' | 'en'
   /** The fleet rows tabs resolve against (the whole fleet, ended rows included). */
   rows: readonly ControlSession[]
@@ -177,7 +179,7 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
   )
 }
 
-export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen, onNone }: SessionTabStripProps) {
+export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen, onNone, onNoticeChange }: SessionTabStripProps) {
   const pt = lang === 'pt'
   const mobile = useIsMobile()
   const touch = useIsCoarsePointer()
@@ -205,6 +207,7 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
   const drawnPins = pins.filter(k => order.includes(k))
   const [focusedKey, setFocusedKey] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  useEffect(() => { onNoticeChange?.(notice) }, [notice, onNoticeChange])
   const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[]; below?: boolean; pick: (a: string) => void } | null>(null)
 
   useEffect(() => {
@@ -411,16 +414,7 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
         <SessionRowMenu sessionList={menu.below} below={menu.below} x={menu.x} y={menu.y} entries={menu.entries} onPick={menu.pick} onClose={() => setMenu(null)} />
       )}
     </div>
-    {notice !== null && (
-      <p
-        role="status" data-tab-notice
-        style={{
-          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 5, margin: 0, padding: '6px 10px',
-          fontSize: 11, color: 'var(--text-secondary)', background: 'var(--bg-surface)',
-          border: '1px solid var(--border)', borderTop: 'none',
-        }}
-      >{notice}</p>
-    )}
+    {notice !== null && !onNoticeChange && <ActionNotice message={notice} lang={lang} onDismiss={() => setNotice(null)} />}
     </div>
   )
 }

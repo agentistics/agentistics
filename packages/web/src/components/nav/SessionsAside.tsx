@@ -1,6 +1,7 @@
+import { ActionNotice } from '../sessions/ActionNotice'
 import { hasLeaderTitle, sessionDisplayTitle } from '../../lib/sessionDisplayTitle'
 import { useEscapeOwner } from '../../lib/overlayStack'
-import { loadClosedFleet } from '../../lib/fleet'
+import { loadClosedFleet, needsClosedFleet } from '../../lib/fleet'
 /**
  * SessionsAside — the fleet, in the sidebar's body.
  *
@@ -272,7 +273,6 @@ export function SessionsAside({
   onOpenRow, hideNew, rowsById, act, filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
   onCreated, selectedId, onGoToSession,
 }: SessionsAsideProps) {
-  useEffect(() => { if (!activeOnly) loadClosedFleet() }, [activeOnly, rows])
   const pt = lang === 'pt'
   const mutedKeys = useMutedKeys()
   const mutedRows = useMemo(() => mutedSessionRows(rows, mutedKeys), [rows, mutedKeys])
@@ -438,6 +438,8 @@ export function SessionsAside({
    * swapped) live there and are not re-decided here.
    */
   const pins = useSyncExternalStore(subscribePinnedSessions, getPinnedIds, pinnedServerSnapshot)
+  // Sleeping pins live in the deferred closed fleet, even when the list only shows active rows.
+  useEffect(() => { if (needsClosedFleet(activeOnly, pins.length)) loadClosedFleet() }, [activeOnly, rows, pins])
   const pinned = useMemo(() => new Set(pins), [pins])
   const flip = (row: ControlSession) => {
     const out = togglePinnedSession(pinKeyOf(row))
@@ -451,11 +453,6 @@ export function SessionsAside({
   }
   /** No longer only about pins — the row menu's action results land here too. */
   const [notice, setNotice] = useState<string | null>(null)
-  useEffect(() => {
-    if (!notice) return
-    const timer = setTimeout(() => setNotice(null), 5000)
-    return () => clearTimeout(timer)
-  }, [notice])
   // Action replies may name a managed-id prefix; show the same session name as its row.
   const noticeText = useMemo(() => {
     let text = notice ?? ''
@@ -488,14 +485,15 @@ export function SessionsAside({
    * A session that is BOTH pinned and grouped shows ONCE, in the Pinned band — pinning is the
    * stronger "always in sight, always first" promise, and showing it twice would leave two bands
    * each claiming to be where it lives. It stays stored in the group; unpinning it brings it back
-   * here on its own, with no action needed on the group.
+   * here on its own, with no action needed on the group. Resolution retains those memberships
+   * for activity/counts; renderGroupBand omits their cards.
    */
   const groupRowsResolved = useMemo(
     () => groupsValue.groups.map(g => ({
       group: g,
-      rows: resolveGroupRows(g, rows, pinKeyOf).filter(r => !pinned.has(pinKeyOf(r))),
+      rows: resolveGroupRows(g, rows, pinKeyOf),
     })),
-    [groupsValue, rows, pinned],
+    [groupsValue, rows],
   )
   /** Which user-group bands are folded on THIS screen — per viewer, alongside the aside's other
    *  arrangement prefs (see `sessionsAsidePrefs.ts`). Membership itself is shared/server-side. */
@@ -817,12 +815,12 @@ export function SessionsAside({
 
   /** The pinned rows, in the order they were pinned. Their own band, above everything. */
   // Resolved from the RAW `rows`, never from `matched` — a filter, a search or "active only" must
-  // never remove a row from the pinned band (see the header comment, and `resolvePinnedRows`'s
+  // never remove a row from the pinned band; only text search narrows it (`resolvePinnedRows`'s
   // own). Reading from `matched` was the bug: it is already cut by `activeOnly` (on by default
   // here), so a pinned session that finished while the person was away vanished from the band the
   // moment its state left `ACTIVE_STATES` — no reload needed, just the ordinary case of a pinned
   // session finishing.
-  const allPinnedRows = useMemo(() => resolvePinnedRows(pins, rows, pinKeyOf), [pins, rows])
+  const allPinnedRows = useMemo(() => filterSessions(resolvePinnedRows(pins, rows, pinKeyOf), query), [pins, rows, query])
   const { pinnedRows, sleepingRows } = useMemo(() => {
     const byKey = new Map(allPinnedRows.map(row => [pinKeyOf(row), row]))
     const split = splitSleepingTabs([...byKey.keys()], pins, k => byKey.get(k)?.state)
@@ -966,9 +964,10 @@ export function SessionsAside({
     const noMatches = fold.dimmed
     const folded = fold.folded
     const source = fold.showAll || parentDimmed ? groupRowsResolved : groupRowsShown
-    const gRows = fold.showAll || parentDimmed
+    const folderRows = fold.showAll || parentDimmed
       ? (groupRowsResolved.find(g => g.group.id === group.id)?.rows ?? entry.rows)
       : entry.rows
+    const gRows = folderRows.filter(r => !pinned.has(pinKeyOf(r)))
     const isDropTarget = dragOverGroupId === group.id
     const isReorderTarget = groupReorderOver === group.id
     const nestHover = nestOverGroupId?.id === group.id ? nestOverGroupId : null
@@ -1162,7 +1161,7 @@ export function SessionsAside({
                 >
                   {group.name}
                 </span>
-                <span style={{ flexShrink: 0, whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 600, opacity: 0.65 }}>{folderCountLabel(shownInFolder, folderSessionCount(group.id, groupRowsResolved), narrowing)}</span>
+                <span style={{ flexShrink: 0, whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 600, opacity: 0.65 }}>{folderCountLabel(shownInFolder, folderSessionCount(group.id, groupsValue.groups.map(group => ({ group, rows: group.sessionKeys }))), narrowing)}</span>
               </button>
               <button
                 onClick={e => {
@@ -1715,13 +1714,7 @@ export function SessionsAside({
         />
       )}
 
-      {notice && (
-        <p role="status" style={{
-          position: 'absolute', top: 0, left: 4, right: 4, zIndex: 5, margin: 0, padding: '6px 8px', borderRadius: 6, background: 'var(--bg-card)', fontSize: 11, lineHeight: 1.45, color: 'var(--anthropic-orange)',
-        }}>
-          {noticeText}
-        </p>
-      )}
+      {notice && <ActionNotice message={noticeText} lang={lang} onDismiss={() => setNotice(null)} />}
 
       {/* The list is real but not current — either the machine stopped answering, or these rows
           came out of the stored snapshot and no poll has confirmed them yet. `fleetStale.ts` owns
@@ -2732,14 +2725,39 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
   const clearLongPress = () => {
     if (longPress.current !== null) { clearTimeout(longPress.current); longPress.current = null }
   }
+  const pinControl = onPin && (
+    <button type="button"
+      tabIndex={0}
+      aria-label={pinned ? (lang === 'en' ? 'Unpin' : 'Desafixar') : (lang === 'en' ? 'Pin' : 'Fixar')}
+      title={pinned ? (lang === 'en' ? 'Unpin' : 'Desafixar') : (lang === 'en' ? 'Pin' : 'Fixar')}
+      onClick={e => { e.stopPropagation(); onPin() }}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onPin() }
+      }}
+      style={{
+        border: 'none', background: 'transparent', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        width: tap ?? 20, height: tap ?? 20, borderRadius: 6, cursor: 'pointer',
+        color: pinned ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
+        // A pin nobody set is faint until the row is hovered: a column of pin glyphs down an
+        // unpinned list is noise beside the titles they sit next to.
+        // There is no hover on a touch screen, so the pin is always visible there. On desktop
+        // it appears with the row — see `.ag-row-pin` in index.css.
+        opacity: pinned || tap ? 1 : 0,
+        transition: 'opacity 0.15s',
+      }}
+      className="ag-row-pin"
+    >
+      {pinned ? <PinOff size={12} /> : <Pin size={12} />}
+    </button>
+  )
   return (
     <div
       data-session-row
       style={{
-        display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, width: '100%', boxSizing: 'border-box',
+        display: 'flex', flexWrap: compact ? 'nowrap' : 'wrap', alignItems: 'center', gap: compact ? 2 : 8, width: '100%', boxSizing: 'border-box',
         // Left padding is deliberately wider than the right: a live row carries a state edge on its left
         // and the text needs air beside it (the row's own dot used to provide it).
-        padding: compact ? '6px 8px' : '9px 9px 9px 18px', borderRadius: 9, border: 'none', textAlign: 'left', minHeight: tap,
+        padding: compact ? '6px 8px' : '9px 9px 9px 18px', borderRadius: 9, border: 'none', textAlign: 'left', minHeight: compact ? 56 : tap,
         // SELECTED is NOT orange. Orange is already the state colour for a row that needs a person
         // (`STATE_COLOR.waiting`), so the selected row wore the same tint as the alarm and the two
         // became one signal: selecting a working session made it look like it was asking for you.
@@ -2789,8 +2807,9 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
       aria-current={selected ? 'true' : undefined}
       title={session.model ? `${session.title}\n${session.model}` : session.title}
     >
+      {compact && pinned && pinControl}
       <button type="button" onClick={onOpen} data-session-open
-        style={{ flex: '1 1 130px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, padding: 0,
+        style={{ flex: compact ? '1 1 0' : '1 1 130px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, padding: 0,
           border: 'none', background: 'transparent', color: 'inherit', font: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
       {reopening && (
         <span role="status" style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: 11, color: 'var(--anthropic-orange)' }}>
@@ -2799,7 +2818,7 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
         </span>
       )}
       <span style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', minWidth: 0 }}>
-      {compact ? <CompactSessionFacts session={session} titleBadge={role ? <RoleChip role={role} pt={lang !== 'en'} /> : undefined} /> : <SessionFacts
+      {compact ? <CompactSessionFacts showHarness={!pinned} session={session} titleBadge={role ? <RoleChip role={role} pt={lang !== 'en'} /> : undefined} /> : <SessionFacts
         titleBadge={role ? <RoleChip role={role} pt={lang !== 'en'} /> : undefined}
         session={session}
         selected={selected}
@@ -2877,31 +2896,7 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
       {muteWorkers && role === 'worker' && sessionRunning(session) && !mutedKeys.includes(pinKeyOf(session)) && (
         <span role="img" aria-label={lang === 'en' ? 'Workers muted' : 'Workers silenciados'} title={lang === 'en' ? 'Workers muted' : 'Workers silenciados'} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: 18, height: 20, color: 'var(--text-tertiary)' }}><BellOff size={12} /></span>
       )}
-      {onPin && (
-        <button type="button"
-          tabIndex={0}
-          aria-label={pinned ? (lang === 'en' ? 'Unpin' : 'Desafixar') : (lang === 'en' ? 'Pin' : 'Fixar')}
-          title={pinned ? (lang === 'en' ? 'Unpin' : 'Desafixar') : (lang === 'en' ? 'Pin' : 'Fixar')}
-          onClick={e => { e.stopPropagation(); onPin() }}
-          onKeyDown={e => {
-            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onPin() }
-          }}
-          style={{
-            border: 'none', background: 'transparent', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-            width: tap ?? 20, height: tap ?? 20, borderRadius: 6, cursor: 'pointer',
-            color: pinned ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
-            // A pin nobody set is faint until the row is hovered: a column of pin glyphs down an
-            // unpinned list is noise beside the titles they sit next to.
-            // There is no hover on a touch screen, so the pin is always visible there. On desktop
-            // it appears with the row — see `.ag-row-pin` in index.css.
-            opacity: pinned || tap ? 1 : 0,
-            transition: 'opacity 0.15s',
-          }}
-          className="ag-row-pin"
-        >
-          {pinned ? <Pin size={12} /> : <PinOff size={12} />}
-        </button>
-      )}
+      {!(compact && pinned) && pinControl}
     </div>
   )
 }

@@ -33,7 +33,8 @@ moon when any pinned session sleeps. Its **Sleeping** entries reopen through the
 
 In the aside, those same pinned ended sessions appear under **Sleeping** at the end of **Pinned**.
 This row starts collapsed and remembers expansion with the existing ended-section preferences.
-The Pinned header counts both live and sleeping pins. Sleeping cards can still be opened for reading,
+The Pinned header counts both live and sleeping pins. Pins load their deferred ended sessions even
+with Active only enabled; status/value filters leave them visible, while search narrows them. Sleeping cards can still be opened for reading,
 reopened, or unpinned; sleeping never removes the pin. Leader names omit the role prefix and keep
 an explicit Líder/Leader badge in cards and the tabs menu. Titles wrap without ellipses; the menu
 can grow to the viewport gutter. On phones each tab fits the scrolling track, with mandatory scroll
@@ -41,8 +42,10 @@ snapping and the active tab scrolled into view. Arrow keys, Home and End move th
 Enter or Space opens the focused tab. Row pin/open/reopen controls are separate buttons.
 
 The notification panel keeps its title, Clear all action and Mute active workers switch together
-in one sticky header while notifications scroll below. Aside action feedback overlays the list for
-five seconds, using session names in place of managed-id fragments.
+in one sticky header while notifications scroll below. Aside action feedback reserves space and uses
+session names in place of managed-id fragments. Long diagnostics live in a Details disclosure;
+the compact notice can be dismissed. Tab action feedback occupies its own row below the session
+header, including on mobile and in split panes.
 
 Folders with no `working`, `waiting` or `waiting-approval` session in their visible subtree move
 under **Ended** (**Encerradas**) at the end of their parent. The same section also holds that
@@ -403,3 +406,12 @@ The pending vault-use card follows the shared vault watcher: it polls use reques
 vault is open. A 401/403 clears the card and parks polling until a lock-state transition restarts it;
 the shared watcher continues checking vault state, so unlocking resumes requests. Unmounting or
 locking cancels the timer and ignores any older in-flight result.
+
+Folder header totals count saved membership, including pinned members drawn in Pinned and ended
+sessions whose history page has not loaded yet. Under filters, `shown/total` counts matching
+resolved members over saved members (including nested folders); an ended-only folder holding one
+session therefore reads `0/1` under Active only, whether that session is pinned or deferred.
+
+If the server is unreachable at first start, the retry screen explains that the first opening
+after an update reads the whole history and can take a few minutes. The existing loader stays
+visible while automatic retries continue.

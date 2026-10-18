@@ -85,3 +85,16 @@ describe('BillingAccountList — every fact once', () => {
     expect(h).not.toContain('Claude Max 5x')
   })
 })
+
+for (const width of [1440, 390]) test(`renewed Codex usage wraps within its own cell at ${width}px`, () => {
+  g.window = { innerWidth: width }
+  try {
+    const limits: PlanLimits = { ...reading('x1'), harness: 'codex', source: 'codex-rollout', windows: [{ kind: '5h', usedPct: 70, resetsAt: 1 }] }
+    const h = renderToStaticMarkup(<BillingAccountList {...view([acc('x1', { harness: 'codex' })], ['codex'], () => ({ limits }))} now={100000} lang="pt" />)
+    const usage = h.slice(h.indexOf('data-billing-usage'), h.indexOf('data-billing-usage') + 3000)
+    expect(usage).toContain('renovado')
+    expect(usage).toContain('white-space:normal')
+    expect(usage).toContain('minmax(0, 2fr)')
+    expect(usage).not.toContain('text-overflow:ellipsis')
+  } finally { g.window = { innerWidth: 1280 } }
+})
