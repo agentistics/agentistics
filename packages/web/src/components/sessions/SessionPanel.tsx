@@ -24,6 +24,7 @@
 import { ClosingRing } from './ClosingRing'
 import { inactiveBandLabel } from '../../lib/sessionBandLabels'
 import { useIsClosing } from '../../lib/closingSessions'
+import { SessionStateText } from './SessionStateText'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { BellOff, ChevronDown, ChevronUp } from 'lucide-react'
 import { mutedTooltip, useSessionMuted } from '../../lib/notifyMenu'
@@ -431,7 +432,7 @@ export function SessionPanel({
             margin: '2px 0 0', fontSize: 11.5, color: 'var(--text-tertiary)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>
-            {session.stateLabel}
+            <SessionStateText id={session.id} label={session.stateLabel} pt={pt} />
             {session.task ? ` · ${session.task}` : ''}
             {session.project ? ` · ${session.project}` : ''}
           </p>

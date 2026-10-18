@@ -136,6 +136,16 @@ export function SessionActions({
     .filter((v): v is FleetVerb => v !== undefined)
 
   async function run(action: FleetActionId, text?: string) {
+    // Ending is slow and its pending state is shown by the row, tab and bar — so the confirmation
+    // goes away on confirm instead of lingering over the close, and a refusal is a toast, never text
+    // inside a popover that is no longer there.
+    if (action === 'kill') {
+      setConfirming(false); setOpen(false); setNotice(null)
+      const out = await act({ id: row.id, action })
+      if (!out.ok) pushNotification({ type: 'warning', title: pt ? 'Encerrar sessão' : 'End session', message: out.message })
+      else onGone?.()
+      return
+    }
     setBusy(true)
     const call = () => act({ id: row.id, action, ...(text !== undefined ? { text } : {}) })
     const out = await (action === 'resume' ? withReopening([row.id], call) : call())
@@ -148,7 +158,7 @@ export function SessionActions({
     if (!out.ok) { setConfirmingTerminal(false); return }
     setAsking(null); setDraft(''); setConfirming(false); setConfirmingDelete(false); setConfirmingTerminal(false); setOpen(false)
     // An archived or deleted session leaves the list exactly as an ended one does.
-    if (action === 'kill' || action === 'archive' || action === 'delete') onGone?.()
+    if (action === 'archive' || action === 'delete') onGone?.()
     // A REOPEN LANDS SOMEWHERE. It mints a NEW row and retires the one it was asked about, so
     // staying put leaves the reader on a dead session with a success message over it — reported as
     // "the reopen did nothing". The server hands back the new id precisely so this can follow it.

@@ -2750,7 +2750,9 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
         opacity: pinned || tap ? 1 : 0,
         transition: 'opacity 0.15s',
       }}
-      className="ag-row-pin"
+      // An unpinned pin on desktop floats over the row's end (see `.ag-row-pin-float`) instead of
+      // reserving 20px that the title could use.
+      className={!pinned && !tap ? 'ag-row-pin ag-row-pin-float' : 'ag-row-pin'}
     >
       {pinned ? <PinOff size={12} /> : <Pin size={12} />}
     </button>

@@ -13,6 +13,7 @@ import type React from 'react'
 import { sessionNotify, type ControlSession } from '@agentistics/tui/control/session-fleet'
 import { sessionDisplayTitle } from '../../lib/sessionDisplayTitle'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
+import { SessionStateText } from './SessionStateText'
 
 /**
  * A model id, shortened for a narrow column.
@@ -49,7 +50,7 @@ export interface SessionFactsProps {
   withEffort?: boolean
 }
 
-export function SessionFacts({ session, selected = false, metaColor, withEffort = false, titleBadge }: SessionFactsProps) {
+export function SessionFacts({ session, selected = false, metaColor, withEffort = false, titleBadge, lang }: SessionFactsProps) {
   const wants = sessionNotify(session)
   return (
     <span style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -76,7 +77,7 @@ export function SessionFacts({ session, selected = false, metaColor, withEffort 
         display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: 10, rowGap: 3, minWidth: 0,
         fontSize: 10.5, color: wants ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
       }}>
-        <span style={{ minWidth: 0, overflowWrap: 'anywhere', color: metaColor }}>{session.stateLabel}</span>
+        <span style={{ minWidth: 0, overflowWrap: 'anywhere', color: metaColor }}><SessionStateText id={session.id} label={session.stateLabel} pt={lang !== 'en'} /></span>
         <span style={{
           color: (HARNESS_COLORS as Record<string, string>)[session.harness] ?? 'var(--text-tertiary)',
           fontWeight: 650, minWidth: 0, flexShrink: 1,

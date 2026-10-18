@@ -142,6 +142,7 @@ import { openInTerminalFor } from '../components/sessions/OpenInTerminalPane'
 import { targetLabel } from '../lib/terminalTarget'
 import { sessionPlanFactor } from '../lib/costBasis'
 import { FadeText } from '../components/sessions/FadeText'
+import { SessionStateText } from '../components/sessions/SessionStateText'
 
 /** The dimensions a live fleet row can be narrowed by — the same set on both layouts. */
 const FLEET_FILTER_DIMS: Array<'harnesses' | 'repos' | 'projects' | 'models'> =
@@ -2634,7 +2635,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               fontSize: 10.5, color: 'var(--text-tertiary)',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}>
-              {selected.stateLabel}
+              <SessionStateText id={selected.id} label={selected.stateLabel} pt={pt} />
               {selected.project ? ` · ${selected.project}` : ''}
             </div>
           </div>
@@ -2840,7 +2841,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         {/* The drawer covers the bar, so the drawer names the session (the bar hides its own copy while this is open: once per screen). */}
         <FadeText as="div" data-drawer-session-title style={{ fontSize: 15, fontWeight: 650, lineHeight: 1.3, color: 'var(--text-primary)', padding: '0 2px' }}>{selected.title}</FadeText>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: 12.5, color: 'var(--text-secondary)', padding: '0 2px' }}>
-          <span>{selected.stateLabel}</span>
+          <span><SessionStateText id={selected.id} label={selected.stateLabel} pt={tPt !== 'en'} /></span>
           {selected.project && <><span aria-hidden>·</span><span>{selected.project}</span></>}
           {selected.harness && (
             <><span aria-hidden>·</span>

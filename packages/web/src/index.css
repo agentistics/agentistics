@@ -770,6 +770,11 @@ textarea,
 button:hover .ag-row-pin,
 button:focus-within .ag-row-pin,
 .ag-row-pin:focus-visible { opacity: 1 !important; }
+/* A not-yet-pinned row's pin overlays the row's end (the row is `position: relative`) so the title takes
+   all the free width and the state word sits at the row's end padding; on hover the state word yields. */
+.ag-row-pin-float { position: absolute !important; right: 4px; top: 50%; transform: translateY(-50%); background: var(--bg-elevated) !important; }
+[data-session-row]:hover:has(.ag-row-pin-float) [data-row-tail],
+[data-session-row]:focus-within:has(.ag-row-pin-float) [data-row-tail] { visibility: hidden; }
 
 /* ---------------------------------------------------------------------------
    Elevation and scrim, per theme.
