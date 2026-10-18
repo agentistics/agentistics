@@ -97,8 +97,8 @@ interface TabProps {
 }
 
 /** Long titles fade out at the right edge instead of an ellipsis. */
-const TITLE_FADE = 'linear-gradient(to right, #000 calc(100% - 18px), transparent)'
-const SWITCHER_FADE = 'linear-gradient(to right, #000 calc(100% - 28px), transparent)'
+const TITLE_FADE = 'linear-gradient(to right, #000 calc(100% - 28px), transparent calc(100% - 4px))'
+const SWITCHER_FADE = 'linear-gradient(to right, #000 calc(100% - 28px), transparent calc(100% - 3px))'
 const FOCUS_RING = '2px solid var(--anthropic-orange)'
 /** Enter/Space on the inner controls act on THEM; they must not reach the tab's own handler (which would activate it). */
 const stopKeys = (e: { key: string; stopPropagation(): void }) => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation() }

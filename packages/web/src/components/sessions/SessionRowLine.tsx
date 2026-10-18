@@ -16,7 +16,7 @@ import { ClosingRing } from './ClosingRing'
 import { SessionFacts } from './SessionFacts'
 import { ENDED } from '../../lib/sessionTabs'
 
-const FADE = 'linear-gradient(to right, #000 calc(100% - 18px), transparent)'
+const FADE = 'linear-gradient(to right, #000 calc(100% - 28px), transparent calc(100% - 4px))'
 
 /** The short state at the right of a row. */
 export function rowTail(s: Pick<ControlSession, 'state'>, pt: boolean, closing: boolean): { text: string; accent: boolean } | null {

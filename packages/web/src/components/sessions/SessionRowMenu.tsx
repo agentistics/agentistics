@@ -39,7 +39,7 @@ const TASK_ENTRIES = new Set<string>(['link-task', 'unlink-task'])
 
 /** The tabs list never stretches: it is as wide as its longest line, up to this. */
 const SESSION_LIST_MAX_W = 340
-const TITLE_FADE = 'linear-gradient(to right, #000 calc(100% - 18px), transparent)'
+const TITLE_FADE = 'linear-gradient(to right, #000 calc(100% - 28px), transparent calc(100% - 4px))'
 
 export function SessionRowMenu({ x, y, entries, onPick, onClose, below = false, sessionList = false }: SessionRowMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
