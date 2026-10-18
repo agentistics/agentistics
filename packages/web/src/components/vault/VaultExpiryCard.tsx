@@ -11,7 +11,7 @@ import { X } from 'lucide-react'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { pushNotification } from '../../lib/notifications'
 import { WARN_INITIAL, nextWarn, type WarnState } from '../../lib/vaultExpiry'
-import { extendVaultOpen, lockVaultFromCard } from '../../lib/vaultApi'
+import { extendVaultOpen, lockVaultFromCard, stepUpGesture } from '../../lib/vaultApi'
 import { refreshVaultWatch, useVaultWatch } from '../../lib/vaultWatch'
 import { VaultGlyph } from './VaultGlyph'
 
@@ -40,7 +40,13 @@ export function VaultExpiryCard({ lang, isMobile, zIndex, enabled = true }: { la
 
   const run = async (what: 'extend' | 'lock') => {
     setBusy(what); setError(null)
-    const r = await (what === 'extend' ? extendVaultOpen() : lockVaultFromCard())
+    let r = await (what === 'extend' ? extendVaultOpen() : lockVaultFromCard())
+    // The page lost its read grant (a reload): ask Hello/biometrics, never the authenticator code.
+    if (!r.ok && what === 'extend' && r.code === 'stepup-required') {
+      const g = await stepUpGesture()
+      if (g.ok) r = await extendVaultOpen()
+      else r = g
+    }
     setBusy(null)
     if (r.ok) { setShown(false); await refreshVaultWatch(); return }
     // Never an authenticator-code prompt here: the code is only for unlocking a fully locked vault.

@@ -167,6 +167,10 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     if (!str(b.code, 16)) return bad()
     return reply(await gate.stepUpForRead(b.code, session))
   }
+  if (path === '/api/vault/stepup/gesture' && req.method === 'POST') {
+    await req.body?.cancel().catch(() => {})
+    return reply(await gate.stepUpByGesture({ session, loopback }))
+  }
   if (path === '/api/vault/extend' && req.method === 'POST') {
     // Extending can arm the same heartbeat token as /activity/arm: require its local-page trust.
     if (!loopback) {
@@ -223,7 +227,10 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     const binding = typeof b.for === 'string' && FRESH_BINDING.test(b.for) ? b.for : null
     const wasOpen = vaultIsOpen()
     const u = await unlockWithGesture(undefined, binding ? { session, binding } : undefined)
-    const response = reply(u.ok ? { ok: true, state: u.state, ...(u.fresh ? { fresh: u.fresh } : {}) } : u)
+    // A Hello that just opened the vault (inside the 24 h code window) also hands the page its 'read' grant,
+    // so "keep open" works with no code. Only when THIS call opened it: an already-open vault proves nothing.
+    const grantNow = u.ok && u.state === 'open' && !wasOpen ? { grant: gate.mintGrant(session, 'read') } : {}
+    const response = reply(u.ok ? { ok: true, state: u.state, ...(u.fresh ? { fresh: u.fresh } : {}), ...grantNow } : u)
     return u.ok && u.state === 'open' && !wasOpen ? addHeartbeatCookie(response, rotateVaultHeartbeatToken()) : response
   }
   if (path === '/api/vault/unlock/code' && req.method === 'POST') {

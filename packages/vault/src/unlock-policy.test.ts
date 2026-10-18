@@ -15,6 +15,11 @@ describe('the unlock policy (owner decision 2026-10-02)', () => {
       expect(unlockNeedsCode({ mode: 'hello-only', hours: 12 }, anchor, 1)).toBe(false)
     }
   })
+  it('the default policy owes the code only with no code in the last 24 h', () => {
+    expect(DEFAULT_UNLOCK_POLICY.hours).toBe(24)
+    expect(unlockNeedsCode(DEFAULT_UNLOCK_POLICY, 0, 24 * H - 1)).toBe(false)
+    expect(unlockNeedsCode(DEFAULT_UNLOCK_POLICY, 0, 24 * H)).toBe(true)
+  })
   it('daily → the code with no window, none inside it, the code again at N hours exactly', () => {
     const p = { mode: 'daily' as const, hours: 12 }
     expect(unlockNeedsCode(p, null, 5)).toBe(true)

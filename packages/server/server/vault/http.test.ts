@@ -476,6 +476,29 @@ describe('the routes that already existed keep their gate (stepup, lock, auto-lo
     }
   })
 
+  test('unlock by Hello hands the page a read grant, so keep-open needs no code; an already-open vault mints none', async () => {
+    lockVault('user')
+    const u = await http('POST', '/api/vault/unlock', {})
+    expect(u.json.state).toBe('open')
+    expect(typeof u.json.grant).toBe('string')
+    const ext = await http('POST', '/api/vault/extend', {}, u.json.grant)
+    expect(ext.json.ok).toBe(true)
+    const again = await http('POST', '/api/vault/unlock', {})
+    expect(again.json.grant).toBeUndefined()
+  })
+
+  test('stepup/gesture: a remote peer gets no grant (never the authenticator code, never a Hello on an empty desk)', async () => {
+    lockVault('user')
+    await http('POST', '/api/vault/unlock', {})
+    const req = new Request('http://localhost:47292/api/vault/stepup/gesture', {
+      method: 'POST', headers: { host: 'localhost:47292', origin: 'http://localhost:47292', 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' }, body: '{}',
+    })
+    const res = await handleVaultHttp(req, new URL(req.url), { cors: {}, session: 'session-A', peer: '192.0.2.10' })
+    const j = await res!.json() as J
+    expect(j.ok).toBe(false)
+    expect(j.grant).toBeUndefined()
+  })
+
   test('extend: a bare local curl is refused (window unchanged, no token); with the page\'s grant it works, throttled', async () => {
     lockVault('user')
     await http('POST', '/api/vault/unlock', {})

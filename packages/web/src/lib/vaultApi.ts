@@ -155,6 +155,8 @@ export async function loadVault(): Promise<LoadResult> {
 }
 
 export const stepUp = (code: string) => call('POST', '/api/vault/stepup', { code }).then(r => reply<{ grant: string }>(r))
+/** Regain the page's read grant with Hello/biometrics on this computer — never the authenticator code. */
+export const stepUpGesture = () => call('POST', '/api/vault/stepup/gesture', {}).then(r => reply<{ grant: string }>(r))
 export const lockNow = (code?: string) => call('POST', '/api/vault/lock', code ? { code } : {}).then(r => reply(r))
 /** Phase 1: raises the gesture IN THE SERVICE. `pending-stepup` = a code is owed (§2.2). */
 export const unlockGesture = () => call('POST', '/api/vault/unlock', _unlockFor ? { for: _unlockFor } : {}).then(r => reply<{ state: string }>(r))

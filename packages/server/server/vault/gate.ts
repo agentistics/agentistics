@@ -582,6 +582,24 @@ export async function stepUpForRead(code: string, session: string): Promise<Gate
   return requireVaultStepUp('set-auto-lock', { code, session })
 }
 
+/**
+ * Owner rule 2026-10-18: a page that lost its 'read' grant (a reload) regains it with the PRESENCE gesture
+ * (Windows Hello on this computer) — never the authenticator code, which is only for unlocking a fully
+ * locked vault once per 24 h. Loopback/socket only: the service never raises Hello for a remote request.
+ */
+export async function stepUpByGesture(ctx: { session: string; loopback: boolean }): Promise<GateResult> {
+  if (!ctx.loopback && !fromSocket(ctx)) return refused('unlock-not-here', sentence('stepup-required'))
+  if (recoveryTodo()) return refused('recovery-mode', sentence('recovery-mode'))
+  if ((await loadState()).frozen) return refused('stepup-frozen', sentence('stepup-frozen'))
+  const o = await ensureVaultOpen({ create: false, migrate: false })
+  if (!o) return refused('locked', sentence('locked'))
+  if (!hasPresence(o.vault)) return refused('stepup-required', sentence('stepup-required'))
+  const g = await proveGesture(o)
+  if (!g.ok) return g
+  noteVaultActivity()
+  return { ok: true, grant: mintGrant(ctx.session, 'read') }
+}
+
 /** VAULT.PERSONAL §10: what refuses a phone unlock before anything is unwrapped (recovery mode, frozen). */
 export async function phoneUnlockGuard(): Promise<Refusal | null> {
   if (recoveryTodo()) return refused('recovery-mode', sentence('recovery-mode'))
