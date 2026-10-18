@@ -10,6 +10,10 @@ const UsageNowPage = lazy(() => import('./pages/usage/UsageNowPage'))
 const UsagePlanPage = lazy(() => import('./pages/usage/UsagePlanPage'))
 const UsageLimitsPage = lazy(() => import('./pages/usage/UsageLimitsPage'))
 const UsageHistoryPage = lazy(() => import('./pages/usage/UsageHistoryPage'))
+const LeadersPage = lazy(() => import('./pages/leadership/LeadersPage'))
+const CheckinsPage = lazy(() => import('./pages/leadership/CheckinsPage'))
+const HandoffsPage = lazy(() => import('./pages/leadership/HandoffsPage'))
+const AwayPage = lazy(() => import('./pages/leadership/AwayPage'))
 const CostsPage = lazy(() => import('./pages/CostsPage'))
 const TopUsagePage = lazy(() => import('./pages/TopUsagePage'))
 const RepositoriesPage = lazy(() => import('./pages/RepositoriesPage'))
@@ -70,6 +74,10 @@ export default function AppRouter() {
           <Route path="usage/plan" element={<Suspense fallback={<PageFallback />}><UsagePlanPage /></Suspense>} />
           <Route path="usage/limits" element={<Suspense fallback={<PageFallback />}><UsageLimitsPage /></Suspense>} />
           <Route path="usage/history" element={<Suspense fallback={<PageFallback />}><UsageHistoryPage /></Suspense>} />
+          <Route path="leadership" element={<Suspense fallback={<PageFallback />}><LeadersPage /></Suspense>} />
+          <Route path="leadership/checkins" element={<Suspense fallback={<PageFallback />}><CheckinsPage /></Suspense>} />
+          <Route path="leadership/handoffs" element={<Suspense fallback={<PageFallback />}><HandoffsPage /></Suspense>} />
+          <Route path="leadership/away" element={<Suspense fallback={<PageFallback />}><AwayPage /></Suspense>} />
           <Route path="costs" element={<Suspense fallback={<PageFallback />}><CostsPage /></Suspense>} />
           <Route path="top" element={<Suspense fallback={<PageFallback />}><TopUsagePage /></Suspense>} />
           {/* The sessions WORKSPACE. `:sessionId` is optional because the workspace has a landing

@@ -15,3 +15,22 @@ including its session drilldown, without fleet controls.
 
 Both pages read their labels from the area registry through `PageHeader`. Existing board
 (`/tasks`, `/tasks/:id`) and repository (`/repositories`, `/repo/:id`) routes remain available.
+
+
+Leadership lives at `/leadership` (leaders), `/leadership/checkins`,
+`/leadership/handoffs` and `/leadership/away`. Leaders use the shared fleet and role
+stores and the active-leaders filter. Their record cards show the task when known,
+state, elapsed time when known, and direct children resolved by managed or conversation
+identity. Loading, unavailable and stale fleet states never claim an empty fleet.
+
+Check-ins read `GET /api/checkin` for each leader's latest round and follow check-in
+and reconnect events. `/api/checkin/report` is the authenticated POST ingestion route,
+not a report listing. Status pills distinguish OK, resolved and needs-you rounds;
+the existing global defaults editor follows the reports. Individual agenda controls
+remain in each session's check-in panel.
+
+Hand-offs reserves its page for HANDOFF.CONFIG (`t-49f70edb75`) with a plain explanatory
+sentence and no configuration controls. Away mode composes the existing settings
+switch, activation dialog, return confirmation and fleet impact. The top-bar away pill
+links to this page. Existing settings URLs remain usable; digest offers and their
+answers remain in the notification bell, using the existing away digest flow.
