@@ -15,7 +15,7 @@ import { HARNESS_LABELS } from '../lib/harness'
 import { HarnessMark } from './sessions/HarnessMark'
 import {
   currentUsedPct, forecastPhrase, LIMIT_WARN, limitTone, resetPhrase, shortWhen, SOURCE_LABEL, stalePhrase,
-  updatedPhrase, warnForecast, windowLabel, windowShort, fmtWhen, limitLevel, limitLevelWord, subscriptionRows, type RegisteredPlan,
+  updatedPhrase, warnForecast, windowLabel, windowShort, fmtWhen, limitLevel, limitLevelWord, subscriptionName, subscriptionRows, type RegisteredPlan,
 } from '../lib/planLimits'
 
 type Lang = 'pt' | 'en'
@@ -56,7 +56,7 @@ export function PlanUsageSummary({ limits, registered = [], accountLabels, now, 
     <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '2px 4px 8px', fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-secondary)' }}>◉ <span id="plan-usage-summary-title">{lang === 'pt' ? 'Uso dos planos' : 'Plan usage'}</span><span style={{ marginLeft: 'auto', fontWeight: 500, letterSpacing: 0 }}>{lang === 'pt' ? '% usado' : '% used'}</span></div>
     {rows.map((row, i) => <div key={`${row.harness}:${i}`} data-plan-row={row.harness} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', alignItems: 'center', gap: 8, padding: '8px 4px', borderTop: '1px solid var(--border)' }}>
       <HarnessMark harness={row.harness} size={20} />
-      <div style={{ minWidth: 0 }}><b style={{ display: 'block', fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{HARNESS_LABELS[row.harness]}{row.accountLabel ? ` · ${row.accountLabel}` : ''}</b><span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.plan ?? (lang === 'pt' ? 'plano não registrado' : 'plan not registered')}</span></div>
+      <div style={{ minWidth: 0 }}><b style={{ display: 'block', fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{subscriptionName(row.harness, row.accountLabel)}</b><span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.plan ?? (lang === 'pt' ? 'plano não registrado' : 'plan not registered')}</span></div>
       {row.limits ? row.limits.windows.map(w => <div key={w.kind} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}><PlanUsageRing pct={currentUsedPct(w, now)} size={36}>{Math.round(currentUsedPct(w, now))}</PlanUsageRing><span style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{windowLabel(w.kind, lang)}</span></div>) : <span style={{ gridColumn: '3 / -1', fontSize: 11.5, color: 'var(--text-secondary)' }}>{lang === 'pt' ? 'aguardando leitura' : 'waiting for the first reading'}</span>}
     </div>)}
     {rows.some(r => r.limits?.windows.some(w => currentUsedPct(w, now) >= 75)) && <div style={{ padding: '7px 4px', fontSize: 11.5, color: 'var(--text-secondary)' }}>{rows.flatMap(r => (r.limits?.windows ?? []).filter(w => currentUsedPct(w, now) >= 75).slice(0, 1).map(w => <span key={`${r.harness}:${w.kind}`} style={{ display: 'flex', alignItems: 'center', gap: 5 }}><LimitLevelIcon pct={currentUsedPct(w, now)} lang={lang} />{HARNESS_LABELS[r.harness]}: {windowLabel(w.kind, lang)} {lang === 'pt' ? 'em' : 'at'} {Math.round(currentUsedPct(w, now))}% · {lang === 'pt' ? 'renova' : 'resets'} {fmtWhen(w.resetsAt, now, lang)}</span>))}</div>}
@@ -105,7 +105,7 @@ export function PlanUsageCard({ limits, pending, accountLabel, now, lang }: { ac
   return <div data-plan-usage-card={harness} style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, borderRadius: 12, background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <HarnessMark harness={harness} size={24} />
-      <div style={{ minWidth: 0 }}><b style={{ display: 'block', fontSize: 14 }}>{HARNESS_LABELS[harness]}{accountLabel ? ` · ${accountLabel}` : ''}</b><span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{plan ?? (pt ? 'plano não registrado' : 'plan not registered')}</span></div>
+      <div style={{ minWidth: 0 }}><b style={{ display: 'block', fontSize: 14 }}>{subscriptionName(harness, accountLabel)}</b><span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{plan ?? (pt ? 'plano não registrado' : 'plan not registered')}</span></div>
       <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, whiteSpace: 'nowrap', color: !limits ? 'var(--text-tertiary)' : level === 'critical' ? 'var(--accent-red)' : level === 'attention' ? 'var(--anthropic-orange)' : 'var(--accent-green)' }}><LimitLevelIcon pct={worst} size={14} lang={lang} />{state}</span>
     </div>
     {limits && <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{limits.windows.map(w => <div key={w.kind} style={{ padding: 10, borderRadius: 10, background: 'var(--ag-tint-2)' }}><WindowRow w={w} now={now} lang={lang} ring={48} /></div>)}</div>}
