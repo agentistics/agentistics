@@ -88,6 +88,8 @@ interface TabProps {
   setRef: (el: HTMLDivElement | null) => void
 }
 
+/** Long titles fade out at the right edge instead of an ellipsis. */
+const TITLE_FADE = 'linear-gradient(to right, #000 calc(100% - 18px), transparent)'
 const FOCUS_RING = '2px solid var(--anthropic-orange)'
 /** Enter/Space on the inner controls act on THEM; they must not reach the tab's own handler (which would activate it). */
 const stopKeys = (e: { key: string; stopPropagation(): void }) => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation() }
@@ -109,17 +111,20 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
     display: 'flex', width: big ? 32 : 20, height: big ? 32 : 20, alignItems: 'center', justifyContent: 'center',
     borderRadius: 4, flexShrink: 0, padding: 0, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
   }
+  // VS Code classic: tabs touch, a 1px separator between them; the active one merges with the
+  // conversation below (its background, no bottom edge) and carries a thin accent line on TOP only.
+  // "Needs you" is the status dot alone — no second marker on the tab.
   const style: CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, cursor: 'pointer', fontFamily: 'inherit',
-    minHeight: mobile ? 44 : 30, padding: '5px 6px 5px 12px', borderRadius: 8, boxSizing: 'border-box',
-    fontSize: 12, scrollSnapAlign: 'center', scrollSnapStop: 'always',
+    minHeight: mobile ? 44 : 32, padding: '0 6px 0 12px', borderRadius: 0, boxSizing: 'border-box',
+    fontSize: 12, scrollSnapAlign: 'center', scrollSnapStop: 'always', position: 'relative',
     minWidth: mobile ? 132 : 110, width: mobile ? '100%' : 'max-content', maxWidth: mobile ? '100%' : 360,
     fontWeight: active || needs ? 650 : 500,
     color: active ? 'var(--text-primary)' : 'var(--text-tertiary)',
-    background: active ? 'var(--bg-elevated)' : hover ? 'color-mix(in srgb, var(--bg-elevated) 50%, transparent)' : 'transparent',
+    background: active ? 'var(--bg-base)' : hover ? 'color-mix(in srgb, var(--bg-elevated) 60%, transparent)' : 'transparent',
     border: 'none',
-    boxShadow: active ? 'var(--ag-shadow-seg), 0 0 0 1px var(--border)'
-      : needs ? 'inset 0 -2px 0 color-mix(in srgb, var(--anthropic-orange) 55%, transparent)' : 'none',
+    borderRight: '1px solid var(--border-subtle)',
+    boxShadow: active ? 'inset 0 1px 0 var(--anthropic-orange)' : 'none',
   }
   return (
     <div
@@ -148,7 +153,7 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
       <TabStatus state={state} label={label} />
       {row && <span style={{ display: 'inline-flex', flexShrink: 0, opacity: active ? 1 : 0.6 }}><HarnessMark harness={row.harness} size={14} /></span>}
       {(role === 'leader' || hasLeaderTitle(row?.title ?? '')) && <Crown size={11} aria-label={pt ? 'Líder' : 'Leader'} style={{ color: 'var(--accent-purple)', flexShrink: 0, opacity: active ? 1 : 0.6 }} />}
-      <span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', flex: 1, minWidth: 0, lineHeight: 1.35, opacity: ended && !active ? 0.7 : 1 }}>{title}</span>
+      <span data-tab-title style={{ whiteSpace: 'nowrap', overflow: 'hidden', flex: 1, minWidth: 0, lineHeight: 1.35, opacity: ended && !active ? 0.7 : 1, maskImage: TITLE_FADE, WebkitMaskImage: TITLE_FADE }}>{title}</span>
       {pinned
         ? (
           <button
@@ -367,22 +372,22 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
   }
 
   return (
-    <div data-session-tabs style={{ position: 'relative', flexShrink: 0, minWidth: 0, borderBottom: '1px solid var(--border-subtle)' }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, padding: 0 }}>
+    <div data-session-tabs style={{ position: 'relative', flexShrink: 0, minWidth: 0 }}>
+    <div style={{ display: 'flex', alignItems: 'stretch', gap: 0, minWidth: 0, padding: 0, background: 'var(--bg-elevated)' }}>
       <button
         type="button" aria-haspopup="menu" aria-label={pt ? 'Abas abertas e dormindo' : 'Open and sleeping tabs'}
         onClick={e => listMenu(e.currentTarget)}
         style={{
-          display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, height: mobile ? 44 : 30, minWidth: mobile ? 44 : 0, justifyContent: 'center',
-          padding: '0 8px', marginLeft: 6, boxSizing: 'border-box', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-tertiary)',
+          display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, height: mobile ? 44 : 32, minWidth: mobile ? 44 : 0, justifyContent: 'center',
+          padding: '0 8px', marginLeft: 0, boxSizing: 'border-box', borderRadius: 0, border: 'none', borderRight: '1px solid var(--border-subtle)', boxShadow: 'inset 0 -1px 0 var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-tertiary)',
           cursor: 'pointer', fontFamily: 'inherit', fontSize: 11,
         }}
       ><List size={13} aria-hidden />{order.length}{sleeping.length > 0 && <Moon size={10} fill="currentColor" aria-hidden style={{ color: 'var(--text-tertiary)' }} />}<ChevronDown size={12} aria-hidden /></button>
       <div
         ref={attach} className="tabscroll" role="tablist" aria-label={pt ? 'Sessões abertas' : 'Open sessions'} onScroll={measure}
         style={{
-          display: 'flex', alignItems: 'stretch', gap: 3, overflowX: 'auto', flex: 1, minWidth: 0,
-          background: 'var(--bg-base)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 3, margin: '4px 6px',
+          display: 'flex', alignItems: 'stretch', gap: 0, overflowX: 'auto', flex: 1, minWidth: 0,
+          background: 'var(--bg-elevated)', border: 'none', borderRadius: 0, padding: 0, margin: 0, boxShadow: 'inset 0 -1px 0 var(--border-subtle)',
           WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory',
           ...(!mobile && fade !== null ? { maskImage: fade, WebkitMaskImage: fade } : null),
         }}

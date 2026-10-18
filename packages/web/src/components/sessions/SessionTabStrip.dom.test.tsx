@@ -193,7 +193,7 @@ describe('sleeping tabs', () => {
     expect(button.textContent).toBe('2')
     expect(button.querySelector('.lucide-moon')).not.toBeNull()
     expect(button.style.flexShrink).toBe('0')
-    expect(button.style.height).toBe(width === 390 ? '44px' : '30px')
+    expect(button.style.height).toBe(width === 390 ? '44px' : '32px')
     button.getBoundingClientRect = () => ({ left: 12, right: 88, bottom: 70 } as DOMRect)
     act(() => button.click())
     const menu = document.querySelector('[role="menu"]') as HTMLElement

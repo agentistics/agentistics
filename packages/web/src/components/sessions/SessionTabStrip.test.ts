@@ -42,8 +42,20 @@ test('the last strip unmounting clears the anchors even without a store reset', 
   expect(getPrevActive('main')).toBeNull()
 })
 
-test('rounded tabs in a segmented track, no full pill', () => {
-  expect(src).toContain('borderRadius: 8')
-  expect(src).toContain('borderRadius: 10')
+test('VS Code classic tabs: flush, separated, active merged with a top accent line', () => {
   expect(src).not.toContain('borderRadius: 999')
+  expect(src).not.toContain('borderRadius: 10')
+  expect(src).toContain("borderRight: '1px solid var(--border-subtle)'")
+  expect(src).toContain("boxShadow: active ? 'inset 0 1px 0 var(--anthropic-orange)'")
+})
+
+test('needs-attention tabs carry no orange bottom inset (the status dot says it)', () => {
+  expect(src).not.toContain('inset 0 -2px 0')
+})
+
+test('titles stay on one line and fade out instead of an ellipsis', () => {
+  expect(src).toContain("whiteSpace: 'nowrap'")
+  expect(src).not.toContain("whiteSpace: 'normal'")
+  expect(src).not.toContain('textOverflow')
+  expect(src).toContain('maskImage: TITLE_FADE')
 })
