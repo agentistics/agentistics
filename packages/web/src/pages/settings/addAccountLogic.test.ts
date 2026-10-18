@@ -49,7 +49,9 @@ describe('copy', () => {
   test('pending row and flag-off line exist in both languages', () => {
     expect(ADD_COPY(true).waiting).toBe('Aguardando login')
     expect(ADD_COPY(false).waiting).toBe('Waiting for sign-in')
-    expect(ADD_COPY(true).flagOff).toContain('várias contas')
+    expect(ADD_COPY(true).flagOff).toBe('Várias contas é uma função experimental e está desligada neste computador.')
+    expect(ADD_COPY(false).flagOff).toContain('turned off')
+    for (const pt of [true, false]) expect(ADD_COPY(pt).flagOff).not.toMatch(/Configura|Settings|Experimental →/)
   })
 })
 

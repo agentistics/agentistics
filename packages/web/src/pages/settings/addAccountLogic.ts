@@ -67,6 +67,6 @@ export const ADD_COPY = (pt: boolean) => ({
   cancelPending: pt ? 'Cancelar' : 'Cancel',
   noSecond: (labels: string) => (pt ? `${labels}: ainda não permite manter uma segunda conta separada.` : `${labels}: cannot keep a second account apart yet.`),
   flagOff: pt
-    ? 'Para adicionar uma segunda conta, ligue “várias contas” em Configurações → Experimental.'
-    : 'To add a second account, turn on “several accounts” in Settings → Experimental.',
+    ? 'Várias contas é uma função experimental e está desligada neste computador.'
+    : 'Multiple accounts is an experimental feature and is turned off on this computer.',
 })
