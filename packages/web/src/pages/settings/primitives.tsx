@@ -565,13 +565,14 @@ export function StatusDot({ state, size = 8 }: {
  * included — adding an inline 16px here would be dead code that reads like a live requirement.
  */
 export function FieldInput({
-  label, sub, value, onChange, type = 'text', placeholder, disabled, autoComplete, maxLength, autoFocus, mono, inputMode, spellCheck, hideLabel,
+  label, sub, value, onChange, type = 'text', placeholder, disabled, autoComplete, maxLength, autoFocus, mono, inputMode, spellCheck, hideLabel, isMobile = false,
 }: {
   label: string
   sub?: string
   value: string
   onChange: (v: string) => void
-  type?: 'text' | 'password'
+  type?: 'text' | 'password' | 'number'
+  isMobile?: boolean
   placeholder?: string
   disabled?: boolean
   autoComplete?: string
@@ -606,7 +607,7 @@ export function FieldInput({
         spellCheck={spellCheck}
         aria-label={label}
         style={{
-          width: '100%', boxSizing: 'border-box',
+          width: '100%', boxSizing: 'border-box', minHeight: isMobile ? 44 : undefined,
           padding: '7px 10px',
           ...(type === 'password' ? { paddingRight: REVEAL_PAD } : null),
           background: 'var(--bg-elevated)',

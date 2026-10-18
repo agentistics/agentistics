@@ -6,6 +6,10 @@ import { CenteredLoader } from './components/CenteredLoader'
 import { bootReleased, useBootHold } from './lib/bootSplash'
 
 const HomePage = lazy(() => import('./pages/HomePage'))
+const UsageNowPage = lazy(() => import('./pages/usage/UsageNowPage'))
+const UsagePlanPage = lazy(() => import('./pages/usage/UsagePlanPage'))
+const UsageLimitsPage = lazy(() => import('./pages/usage/UsageLimitsPage'))
+const UsageHistoryPage = lazy(() => import('./pages/usage/UsageHistoryPage'))
 const CostsPage = lazy(() => import('./pages/CostsPage'))
 const TopUsagePage = lazy(() => import('./pages/TopUsagePage'))
 const RepositoriesPage = lazy(() => import('./pages/RepositoriesPage'))
@@ -62,6 +66,10 @@ export default function AppRouter() {
       <Routes>
         <Route element={<AppLayout />}>
           <Route index element={<Suspense fallback={<PageFallback />}><HomePage /></Suspense>} />
+          <Route path="usage" element={<Suspense fallback={<PageFallback />}><UsageNowPage /></Suspense>} />
+          <Route path="usage/plan" element={<Suspense fallback={<PageFallback />}><UsagePlanPage /></Suspense>} />
+          <Route path="usage/limits" element={<Suspense fallback={<PageFallback />}><UsageLimitsPage /></Suspense>} />
+          <Route path="usage/history" element={<Suspense fallback={<PageFallback />}><UsageHistoryPage /></Suspense>} />
           <Route path="costs" element={<Suspense fallback={<PageFallback />}><CostsPage /></Suspense>} />
           <Route path="top" element={<Suspense fallback={<PageFallback />}><TopUsagePage /></Suspense>} />
           {/* The sessions WORKSPACE. `:sessionId` is optional because the workspace has a landing
