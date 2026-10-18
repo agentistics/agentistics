@@ -121,7 +121,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
             display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, boxSizing: 'border-box', flex: 1,
             minHeight: sheet ? 46 : 40, padding: collapsed ? '0' : '0 12px',
             justifyContent: collapsed ? 'center' : 'flex-start', borderRadius: 10, textDecoration: 'none',
-            fontSize: '0.8438rem', fontWeight: active ? 700 : 500, whiteSpace: 'nowrap',
+            fontSize: sheet ? 15 : '0.8438rem', fontWeight: active ? 700 : 500, whiteSpace: 'nowrap',
             color: active ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
             background: active && !area.pages.length ? 'var(--anthropic-orange-dim)' : 'transparent',
           }}
@@ -166,7 +166,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
           onClick={e => { e.preventDefault(); setQuery(''); go(page.path) }}
           style={{
             display: 'flex', alignItems: 'center', gap: 10, minHeight: sheet ? 44 : 34, padding: '0 12px',
-            borderRadius: 8, textDecoration: 'none', fontSize: '0.8125rem', color: 'var(--text-secondary)',
+            borderRadius: 8, textDecoration: 'none', fontSize: sheet ? 14 : '0.8125rem', color: 'var(--text-secondary)',
           }}
         >
           <span style={{ display: 'flex', flexShrink: 0 }}>{AREA_ICON[area.icon](15)}</span>
@@ -195,12 +195,15 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
                     <NavLink
                       to={page.path} end
                       aria-current={active ? 'page' : undefined}
-                      onClick={() => rememberAreaPath(page.path)}
+                      onClick={e => {
+                        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+                        if (onNavigate) { e.preventDefault(); go(page.path) } else rememberAreaPath(page.path)
+                      }}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 8, boxSizing: 'border-box',
                         minHeight: sheet ? 44 : 32, padding: '0 12px', marginLeft: -1,
                         borderLeft: `2px solid ${active ? 'var(--anthropic-orange)' : 'transparent'}`,
-                        textDecoration: 'none', fontSize: '0.8125rem', fontWeight: active ? 700 : 500,
+                        textDecoration: 'none', fontSize: sheet ? 14 : '0.8125rem', fontWeight: active ? 700 : 500,
                         color: active ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
                         background: active ? 'var(--anthropic-orange-dim)' : 'transparent',
                         borderRadius: '0 8px 8px 0',

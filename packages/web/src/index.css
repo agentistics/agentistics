@@ -1165,3 +1165,15 @@ tr:focus-within .ag-row-actions,
     flex-shrink: 0;
   }
 }
+
+/* Phone shell chrome: full 44px targets in layout, including shared header icons and tabs.
+   Wrapping the header preserves those targets when all optional status controls are present. */
+@media (max-width: 767px) {
+  .ag-mobile-shell-header button,
+  .ag-mobile-shell-header a,
+  .ag-mobile-shell-tabs button {
+    min-height: 44px;
+    min-width: 44px;
+    box-sizing: border-box;
+  }
+}

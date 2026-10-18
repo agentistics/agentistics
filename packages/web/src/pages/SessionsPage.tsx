@@ -2840,7 +2840,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         </div>
 
         {drawerSection('view', pt ? 'Vista' : 'View', null, (
-          <div role="tablist" style={{
+          <div className="ag-mobile-shell-tabs" role="tablist" style={{
             display: 'grid', gridTemplateColumns: `repeat(${viewTabs.length}, 1fr)`, gap: 3, padding: 3,
             borderRadius: 10, background: 'var(--bg-elevated)',
           }}>
@@ -3014,8 +3014,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           here — two or three rows of controls that are consulted occasionally and read never,
           out of a 664px viewport — so they moved into a sheet that costs nothing until it is
           asked for and has the whole screen once it is. */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8,
+      <div className="ag-mobile-shell-header" style={{
+        display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8,
         minHeight: 44, padding: '0 10px', flexShrink: 0,
         // Same reason as the open-session bar: the shared header is hidden on this layout, so
         // this row IS the top of the screen and owns the status-bar band.
@@ -3046,7 +3046,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           rows would make the list unreachable on the screen whose whole problem is height. Both
           read the SAME `overviewRows` the desktop uses, so the two layouts can never count
           different sets — the defect this page has already hit twice. */}
-      <div role="tablist" style={{
+      <div className="ag-mobile-shell-tabs" role="tablist" style={{
         display: 'flex', gap: 2, padding: '6px 12px 0', flexShrink: 0,
       }}>
         {([
@@ -3059,7 +3059,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             aria-selected={mobileTab === id}
             onClick={() => setMobileTab(id)}
             style={{
-              flex: 1, minHeight: 40, borderRadius: 9, border: 'none', cursor: 'pointer',
+              flex: 1, minHeight: 44, borderRadius: 9, border: 'none', cursor: 'pointer',
               background: mobileTab === id ? 'var(--bg-elevated)' : 'transparent',
               color: mobileTab === id ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
               fontFamily: 'inherit', fontSize: 13,

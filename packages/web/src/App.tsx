@@ -97,6 +97,8 @@ import { useEngineCaps } from './hooks/useEngineCaps'
 import { visibleSettingsSections } from './lib/settingsSections'
 import { AreaTree } from './components/nav/AreaTree'
 import { areaBadges } from './lib/areaBadges'
+import { MobileAreaBar, MobileActionTile } from './components/nav/MobileAreaBar'
+import { usePlanLimits } from './lib/planLimits'
 import { MobilePillBar } from './components/nav/MobilePillBar'
 import { TopBar } from './components/nav/TopBar'
 import { COST_BASIS_W, FULL_BAR_W, MIN_BAR_W, headerFit, stripPadding } from './lib/headerFit'
@@ -863,43 +865,7 @@ function MobileBottomNav({
           gridTemplateColumns: 'repeat(3, 1fr)',
           gap: 8,
         }}>
-          {allTiles.map(tile => {
-            const Icon = tile.icon
-            const lit = tile.active || tile.accent
-            return (
-              <button
-                key={tile.key}
-                onClick={tile.onClick}
-                style={{
-                  position: 'relative',
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                  gap: 6, padding: '11px 4px',
-                  borderRadius: 12,
-                  border: `1px solid ${lit ? orange : 'var(--border)'}`,
-                  background: lit ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
-                  color: lit ? orange : 'var(--text-primary)',
-                  cursor: 'pointer', fontFamily: 'inherit',
-                  fontSize: '0.6875rem', fontWeight: 600,
-                  transition: 'all 0.15s',
-                }}
-              >
-                <Icon size={19} strokeWidth={1.8} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{tile.label}</span>
-                {/* Top-LEFT, so it cannot collide with the count badge on the right. */}
-                {tile.beta && <BetaTag what={tile.label} style={{ position: 'absolute', top: 4, left: 5 }} />}
-                {tile.badge && (
-                  <span style={{
-                    position: 'absolute', top: 4, right: 5,
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    minWidth: 15, height: 15, padding: '0 4px', borderRadius: 8,
-                    background: orange, color: '#fff', fontSize: '0.5625rem', fontWeight: 700,
-                  }}>
-                    {tile.badge}
-                  </span>
-                )}
-              </button>
-            )
-          })}
+          {allTiles.map(tile => <MobileActionTile key={tile.key} tile={tile} />)}
         </div>
         </>
         )}
@@ -2173,6 +2139,13 @@ export default function AppLayout() {
   // because the poller is module-scoped and every surface reads the same snapshot.
   useEffect(() => { setFleetSourceCentral(isCentral) }, [isCentral])
   const { fleet: headerFleet, act: headerFleetAct, unsupported: headerFleetUnsupported } = useFleet(lang === 'pt' ? 'pt' : 'en')
+  const mobilePlanLimits = usePlanLimits()
+  const { nativeRuntime: mobileNativeRuntime } = useEngineCaps()
+  const mobileVisibleSettings = new Set(visibleSettingsSections({
+    central: !!isCentral,
+    ...(iam?.account ? { role: iam.account.role, isManager: iam.account.memberships.some(m => m.role === 'manager') } : {}),
+    ...(mobileNativeRuntime !== null ? { nativeRuntime: mobileNativeRuntime } : {}),
+  }).map(section => section.id))
   /**
    * "Active only" needs a fleet to intersect against, on EITHER page. An exposed profile with no
    * host power, or a central with no machine chosen, both report `unsupported` here — offering the
@@ -4501,7 +4474,7 @@ export default function AppLayout() {
           and the collapsible filter band, both sized for a viewport the strip's row would not fit
           in. Nothing about mobile changed. */}
       {!inSessionsWorkspace && isMobile && (
-      <header style={{
+      <header className="ag-mobile-shell-header" style={{
         background: 'var(--bg-surface)',
         position: 'sticky',
         // Beneath the fixed strip, never at the viewport top: one is window chrome and the other is
@@ -4525,12 +4498,12 @@ export default function AppLayout() {
             live/alerts, so there are no longer two stacked header rows. */}
         {isMobile && (
           <div style={{
-            maxWidth: 1400, margin: '0 auto', padding: '0 16px', height: 48,
+            maxWidth: 1400, margin: '0 auto', padding: '0 12px', minHeight: 48, flexWrap: 'wrap',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           }}>
             {/* 60% of the 48px band, the same proportion the desktop strip uses. */}
             <img src={brandAsset('/minimalistLogo.png')} alt="agentistics" style={{ height: 28, width: 'auto' }} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
               <MagnifierButton ctx={appCtx} />
               <HideLensesButton ctx={appCtx} />
               {data?.healthIssues && data.healthIssues.length > 0 && (
@@ -4925,22 +4898,27 @@ export default function AppLayout() {
           while they are in it. The root's height drops the matching subtraction — see its note.
  */}
       {isMobile && !sessionOpen && (
-        <MobileBottomNav
+        <MobileAreaBar
           lang={lang}
-          harnesses={data.harnesses}
-            onRefresh={refetch}
-          onOpenHardware={() => setHardwareOpen(true)}
-          liveUpdates={liveUpdates}
-          onToggleLive={() => setLiveUpdates(v => !v)}
-          updateInterval={updateInterval}
-          healthIssues={data.healthIssues}
-          isCentral={isCentral}
-          hasWorkflows={(data.workflows?.length ?? 0) > 0}
+          pathname={location.pathname}
+          onNavigate={navigate}
+          attention={headerFleetUnsupported ? undefined : headerFleet.attention}
+          badges={areaBadges({ attention: headerFleetUnsupported ? undefined : headerFleet.attention, usageRows: mobilePlanLimits.budgets })}
+          visibleSettings={mobileVisibleSettings}
           principal={iam?.account}
-          theme={theme}
-          onToggleTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          onToggleLang={() => { const next = lang === 'pt' ? 'en' : 'pt'; setLang(next); if (next === 'pt') setCurrency('BRL'); else if (currency === 'BRL') setCurrency('USD') }}
-          a11yEnabled={a11y.prefs.enabled}
+          actions={[
+            ...(isCentral ? [] : [{
+              key: 'live', label: lang === 'pt' ? 'Ao vivo' : 'Live', icon: Activity,
+              onClick: () => setLiveUpdates(v => !v), accent: liveUpdates, keepOpen: true,
+              badge: liveUpdates ? (updateInterval >= 60 ? `${updateInterval / 60}m` : `${updateInterval}s`) : undefined,
+            }]),
+            { key: 'refresh', label: lang === 'pt' ? 'Atualizar' : 'Refresh', icon: RefreshCw, onClick: refetch },
+            { key: 'hardware', label: 'Hardware', icon: Cpu, onClick: () => setHardwareOpen(true) },
+            { key: 'theme', label: lang === 'pt' ? 'Tema' : 'Theme', icon: theme === 'dark' ? Sun : Moon,
+              onClick: () => setTheme(theme === 'dark' ? 'light' : 'dark'), keepOpen: true },
+            { key: 'lang', label: lang === 'pt' ? 'Idioma' : 'Language', icon: Globe, badge: lang === 'pt' ? 'PT' : 'EN', keepOpen: true,
+              onClick: () => { const next = lang === 'pt' ? 'en' : 'pt'; setLang(next); if (next === 'pt') setCurrency('BRL'); else if (currency === 'BRL') setCurrency('USD') } },
+          ]}
         />
       )}
 

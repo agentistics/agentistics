@@ -16,81 +16,19 @@
  * clear.
  */
 
-import { useEscapeOwner } from '../../lib/overlayStack'
-import { useEffect, useRef } from 'react'
-import { X } from 'lucide-react'
+import { BottomSheet } from '../BottomSheet'
 
 export function FiltersSheet({ open, onClose, onClear, lang, children }: {
   open: boolean
   onClose: () => void
-  /** Absent when nothing is set — a control that cannot change anything is not offered. */
   onClear?: () => void
   lang: 'pt' | 'en'
   children: React.ReactNode
 }) {
-  /**
-   * Focus goes back where it came from.
-   *
-   * A sheet that closes leaving focus on `document.body` strands a keyboard or switch user at the
-   * top of the page, several tab stops from the control they just used.
-   */
-  const opener = useRef<HTMLElement | null>(null)
-  useEscapeOwner(open, onClose)
-  useEffect(() => {
-    if (!open) return
-    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    return () => {
-      opener.current?.focus()
-    }
-  }, [open, onClose])
-
-  if (!open) return null
   const pt = lang === 'pt'
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={pt ? 'Filtros' : 'Filters'}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 400, background: 'var(--ag-scrim)',
-        display: 'flex', alignItems: 'flex-end',
-      }}
-    >
-      <div style={{
-        width: '100%', maxHeight: 'calc(88vh / var(--ui-zoom, 1))', display: 'flex', flexDirection: 'column',
-        background: 'var(--bg-surface)', borderTopLeftRadius: 16, borderTopRightRadius: 16,
-        borderTop: '1px solid var(--border)',
-        // The sheet reaches the bottom edge of the screen, so it owns the home-indicator band —
-        // the same inset `.mobile-bottom-nav` pads itself with.
-        paddingBottom: 'var(--mobile-nav-inset)',
-        boxSizing: 'border-box',
-      }}>
-        <header style={{
-          display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', flexShrink: 0,
-          borderBottom: '1px solid var(--border)',
-        }}>
-          <h2 style={{ margin: 0, flex: 1, fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
-            {pt ? 'Filtros' : 'Filters'}
-          </h2>
-          <button
-            onClick={onClose}
-            aria-label={pt ? 'Fechar' : 'Close'}
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              width: 44, height: 44, marginRight: -8, border: 'none', background: 'transparent',
-              color: 'var(--text-tertiary)', cursor: 'pointer',
-            }}
-          >
-            <X size={18} />
-          </button>
-        </header>
-
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '12px 0 16px' }}>
-          {children}
-        </div>
-
-        <footer style={{
+    <BottomSheet open={open} onClose={onClose} title={pt ? 'Filtros' : 'Filters'} lang={lang} footer={
+      <footer style={{
           display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', flexShrink: 0,
           borderTop: '1px solid var(--border)',
         }}>
@@ -119,8 +57,9 @@ export function FiltersSheet({ open, onClose, onClear, lang, children }: {
           >
             {pt ? 'Pronto' : 'Done'}
           </button>
-        </footer>
-      </div>
-    </div>
+      </footer>
+    }>
+      {children}
+    </BottomSheet>
   )
 }
