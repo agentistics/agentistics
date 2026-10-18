@@ -26,7 +26,9 @@ export function ScopeNote({ children }: { children: React.ReactNode }) {
 // ConfirmModal
 // Centered confirmation dialog for destructive actions (delete/revoke/remove). Renders nothing
 // when `open` is false. Backdrop click + Escape = cancel. The confirm button is red (danger).
-export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, children, footer, tone = 'danger', icon }: {
+export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, children, footer, tone = 'danger', icon, className, headerAction }: {
+  className?: string
+  headerAction?: React.ReactNode
   open: boolean
   title: string
   message: string
@@ -89,11 +91,11 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
   }, [open])
   if (!open) return null
   return (
-    <div onClick={onCancel} style={{
+    <div className={className ? `${className}-backdrop` : undefined} onClick={onCancel} style={{
       position: 'fixed', inset: 0, zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)', padding: 16,
     }}>
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
+      <div className={className} ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
         onClick={e => e.stopPropagation()} style={{ outline: 'none',
         width: '100%', maxWidth: 420, background: 'var(--bg-card)', border: '1px solid var(--border)',
         borderRadius: 12, padding: 22, boxShadow: '0 12px 48px rgba(0,0,0,0.5)',
@@ -105,7 +107,8 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
             : { display: 'inline-flex', padding: 8, borderRadius: 9, background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)' }}>
             {icon ?? (tone === 'danger' ? <AlertTriangle size={17} /> : <Download size={17} />)}
           </span>
-          <span id={titleId} style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
+          <span id={titleId} style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', ...(headerAction ? { flex: 1, minWidth: 0 } : {}) }}>{title}</span>
+          {headerAction}
         </div>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, margin: 0 }}>{message}</p>
         {children}
@@ -362,16 +365,18 @@ export function Divider() {
 }
 
 export function TabSelect<T extends string>({
-  options, value, onChange, accent = 'var(--anthropic-orange)', buttonMinHeight,
+  options, value, onChange, accent = 'var(--anthropic-orange)', buttonMinHeight, wrap = false,
 }: {
   options: { value: T; label: string }[]
   value: T
   onChange: (v: T) => void
   accent?: string
   buttonMinHeight?: number
+  /** Independent wrapping chips when options cannot fit in a single segmented row. */
+  wrap?: boolean
 }) {
   return (
-    <div style={{ display: 'inline-flex', width: 'fit-content', border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
+    <div style={{ display: 'inline-flex', width: 'fit-content', ...(wrap ? { maxWidth: '100%' } : {}), flexWrap: wrap ? 'wrap' : 'nowrap', gap: wrap ? 6 : 0, border: wrap ? 'none' : '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
       {options.map((opt, i) => {
         const active = opt.value === value
         return (
@@ -385,6 +390,7 @@ export function TabSelect<T extends string>({
               color: active ? accent : 'var(--text-secondary)',
               border: 'none',
               borderRight: i < options.length - 1 ? '1px solid var(--border)' : 'none',
+              ...(wrap ? { border: `1px solid ${active ? accent : 'var(--border)'}`, borderRadius: 7 } : {}),
               cursor: active ? 'default' : 'pointer',
               fontFamily: 'inherit',
               transition: 'background 0.15s, color 0.15s',

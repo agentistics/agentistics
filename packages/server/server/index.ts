@@ -88,7 +88,7 @@ import { validateSecret, ensureSessionSecret } from './secret-store'
 import { requiresStepUp, verifyStepUp, STEPUP_HEADER } from './stepup'
 import { writeAudit, ensureAuditIndexes, listAudit } from './audit'
 import { safeError } from './errors'
-import { cleanPlanResponse, applyCleanSelection, cleanJob } from './clean/clean-web'
+import { cleanPlanResponse, applyCleanSelection, cleanJob, cleanScanState, backgroundCleanScan, cancelCleanScan, finalizeCleanScan } from './clean/clean-web'
 import { LIMITS, readJsonLimited } from './limits'
 // Type only, and from the LEAF: `sessions/fleet-web.ts` reaches `cli-start.ts` and through it Ink
 // and React, so this server names only `fleet-row.ts` — the two handlers load the implementation by
@@ -1059,6 +1059,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         return json(result)
       } catch (err) { return json({ error: String(err) }, 500) }
     }
+    if (url.pathname === '/api/clean/scan' && req.method === 'GET') return json(cleanScanState())
+    if (url.pathname === '/api/clean/background' && req.method === 'POST') return json(backgroundCleanScan())
+    if (url.pathname === '/api/clean/cancel' && req.method === 'POST') return json(cancelCleanScan())
+    if (url.pathname === '/api/clean/finalize' && req.method === 'POST') { finalizeCleanScan(); return json({ ok: true }) }
     if (url.pathname === '/api/clean/apply' && req.method === 'POST') {
       try {
         const body = await req.json() as { ids?: unknown }

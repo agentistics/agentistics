@@ -1,12 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, BellOff, AlertCircle, AlertTriangle, Info, CheckCircle2, Trash2, X, Download } from 'lucide-react'
+import { Bell, BellOff, AlertCircle, AlertTriangle, Info, CheckCircle2, Trash2, X, Download, Search } from 'lucide-react'
 import { useNotifications, markAllRead, clearNotifications, dismissNotification, pushLocalNotification, resolveNotification, notificationLink, type NotificationType } from '../lib/notifications'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { openWhatsNew } from '../whatsNew/open'
 import { requestIdleReview } from '../lib/idleReviewRequest'
 import { muteSessionWithToast, SESSION_MUTED_CODE } from '../lib/notifyMenu'
 import { setMuteWorkers, useMuteWorkers } from '../lib/sessionRoles'
+import { useCleanScan } from '../lib/cleanScan'
+import { cleanSize } from '../lib/cleanPresentation'
 import { usePendingUpdate } from '../lib/pendingUpdate'
 import { ToggleSwitch } from './ToggleSwitch'
 import { answerAwayDigest } from '../lib/awayDigest'
@@ -57,7 +59,8 @@ export function AwayDigestActions({ pt, busy, onAnswer }: { pt: boolean; busy: b
 }
 
 /** The text column of a bell row: title, message, then the actions on their own rows BELOW the message. */
-export function NotificationRowBody({ pt, title, message, isJournalFailed, isClean, isAwayDigest, digestBusy, onAnswer, onRetryJournal, onClean }: {
+export function NotificationRowBody({ pt, title, message, isJournalFailed, isClean, isAwayDigest, digestBusy, onAnswer, onRetryJournal, onClean, progress, cleanReady }: {
+  progress?: number; cleanReady?: boolean
   pt: boolean; title: React.ReactNode; message?: React.ReactNode; isJournalFailed: boolean; isClean: boolean; isAwayDigest: boolean
   digestBusy: boolean; onAnswer: (a: 'yes' | 'no') => void; onRetryJournal: () => void; onClean: () => void
 }) {
@@ -69,6 +72,7 @@ export function NotificationRowBody({ pt, title, message, isJournalFailed, isCle
           {message}
         </div>
       )}
+      {progress !== undefined && <progress data-testid="bell-clean-progress" aria-label={pt ? 'Progresso da varredura' : 'Scan progress'} max={1} value={progress} style={{ width: '100%', height: 7, accentColor: 'var(--anthropic-orange)', marginTop: 8 }} />}
       {isJournalFailed && (
         <button data-testid="bell-journal-retry" onClick={e => { e.stopPropagation(); onRetryJournal() }} style={{ marginTop: 8, padding: '4px 7px', borderRadius: 6, border: '1px solid var(--anthropic-orange)60', background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)', cursor: 'pointer', font: 'inherit', fontSize: 11 }}>
           {pt ? 'Tentar importar de novo' : 'Retry the import'}
@@ -79,7 +83,7 @@ export function NotificationRowBody({ pt, title, message, isJournalFailed, isCle
         data-testid="bell-clean-action"
         onClick={e => { e.stopPropagation(); onClean() }}
         style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', font: 'inherit', fontSize: 11 }}
-      >{pt ? 'Ver o que dá para limpar' : 'See what can be cleaned'}</button></div>}
+      >{cleanReady ? (pt ? 'Ver e limpar' : 'Review and clean') : (pt ? 'Ver o que dá para limpar' : 'See what can be cleaned')}</button></div>}
       {isAwayDigest && <AwayDigestActions pt={pt} busy={digestBusy} onAnswer={onAnswer} />}
     </>
   )
@@ -89,6 +93,8 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
   const pt = lang === 'pt'
   const allNotes = useNotifications()
   const pinnedUpd = usePendingUpdate()
+  const { scan: cleanScan } = useCleanScan()
+  const pinnedClean = cleanScan?.background && (cleanScan.state === 'scanning' || cleanScan.state === 'ready' || cleanScan.state === 'error') ? cleanScan : null
   // The pinned row IS the update news; the popup's own persisted copy would be the same news twice.
   const notes = pinnedUpd ? allNotes.filter(n => n.code !== 'app.update_available') : allNotes
   const isMobile = useIsMobile()
@@ -133,7 +139,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
           }}>{unread > 9 ? '9+' : unread}</span>
         )}
-        {pinnedUpd && unread === 0 && (
+        {(pinnedUpd || pinnedClean) && unread === 0 && (
           <span data-testid="bell-pinned-dot" style={{ position: 'absolute', top: -2, right: -2, width: 9, height: 9, borderRadius: 5, background: 'var(--anthropic-orange)', border: '2px solid var(--bg-card)', boxSizing: 'border-box' }} />
         )}
         {!label && unread > 0 && (
@@ -200,6 +206,20 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
             <ToggleSwitch on={muteWorkers} onToggle={() => setMuteWorkers(!muteWorkers)} label={pt ? 'Silenciar workers ativos' : 'Mute active workers'} />
           </div>
 
+          {pinnedClean && <div data-testid="bell-pinned-clean" role="button" tabIndex={0}
+            onClick={() => { setOpen(false); window.dispatchEvent(new CustomEvent('agentistics:open-clean')) }}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(false); window.dispatchEvent(new CustomEvent('agentistics:open-clean')) } }}
+            style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '10px 12px', borderBottom: '1px solid var(--border)', background: 'var(--anthropic-orange-dim)', cursor: 'pointer' }}>
+            <Search size={15} color="var(--anthropic-orange)" style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <NotificationRowBody pt={pt}
+                title={pinnedClean.state === 'error' ? (pt ? 'A varredura falhou · tentar novamente' : 'Scan failed · retry') : pinnedClean.state === 'ready' ? (pt ? 'Varredura pronta · ver e limpar' : 'Scan ready · review and clean') : (pt ? 'Procurando o que dá para limpar' : 'Looking for cleanup options')}
+                message={`${Math.round(pinnedClean.progress * 100)}% · ${cleanSize(pinnedClean.foundBytes, lang)} · ${pinnedClean.itemCount} ${pt ? 'itens' : 'items'}`}
+                progress={pinnedClean.progress} cleanReady={pinnedClean.state === 'ready'} isClean isJournalFailed={false} isAwayDigest={false} digestBusy={false}
+                onAnswer={() => {}} onRetryJournal={() => {}} onClean={() => { setOpen(false); window.dispatchEvent(new CustomEvent('agentistics:open-clean')) }} />
+            </div>
+          </div>}
+
           {pinnedUpd && (
             <div
               data-testid="bell-pinned-update"
@@ -219,7 +239,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
               </div>
             </div>
           )}
-          {notes.length === 0 ? (
+          {notes.length === 0 && !pinnedClean ? (
             <div style={{ padding: '24px 12px', textAlign: 'center', fontSize: 12, color: 'var(--text-tertiary)' }}>
               {pt ? 'Nenhuma notificação.' : 'No notifications.'}
             </div>
