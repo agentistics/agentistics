@@ -1204,6 +1204,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname === '/api/preferences' && req.method === 'PUT') {
       try {
         let body = await req.json() as Preferences
+        if (body.handoffConfig !== undefined) {
+          const { normalizeHandoffConfig } = await import('@agentistics/core')
+          body.handoffConfig = normalizeHandoffConfig(body.handoffConfig)
+        }
         // C1: never let a PUT wipe `connections[]`. An old cached tab still PUTs a full flat solo
         // `team` object to disconnect (the current UI uses DELETE /api/team/connections/:id), and
         // that payload carries `connections: []` — which mergeTeamPayload honours as an explicit
@@ -2772,6 +2776,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const body = await readFleetBody(fleetLang(url.searchParams.get('lang')), readFleetView(url))
       return new Response(body, {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const handoffPanel = url.pathname.match(/^\/api\/sessions\/([^/]+)\/handoff-panel$/)
+    if (handoffPanel && req.method === 'GET') {
+      const { readHandoffPanel, fleetLang } = await import('./sessions/fleet-web')
+      const extra = url.searchParams.get('extraPercent')
+      const out = await readHandoffPanel(fleetLang(url.searchParams.get('lang')), decodeURIComponent(handoffPanel[1]!), extra !== null && extra.trim() !== '' ? Number(extra) : undefined)
+      return new Response(JSON.stringify(out ?? { error: 'not_found' }), {
+        status: out ? 200 : 404,
+        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
       })
     }
 

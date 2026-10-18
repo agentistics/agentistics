@@ -1,4 +1,5 @@
 import { ActionNotice } from './components/sessions/ActionNotice'
+import { HandoffMeter } from './components/sessions/HandoffWarning'
 import { useEscapeOwner } from './lib/overlayStack'
 import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback, useSyncExternalStore } from 'react'
 import { Outlet, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -3724,6 +3725,8 @@ export default function AppLayout() {
           copies of it agreeing by convention. The header is left with only the title, the
           magnifier and the "⋯" session-actions menu, per the owner's drawing: "the top bar becomes
           clean and dedicated to the title etc." */}
+
+      {headerSessionRow && <HandoffMeter id={headerSessionRow.id} pt={lang === 'pt'} act={headerFleetAct} />}
 
       {headerSessionRow && (
         <SessionActions

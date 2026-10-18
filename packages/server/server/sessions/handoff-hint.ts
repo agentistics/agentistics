@@ -10,6 +10,8 @@ export interface HandoffHintRow {
   id: string
   title: string
   leader?: boolean
+  /** Owner setting, shared with the visible meter/panel. */
+  cutTokens?: number
   contextTokens?: number
   contextWindow?: number
   hintedLevel?: number
@@ -206,7 +208,7 @@ export function computeHandoffWhy(row: HandoffHintRow, deps: HandoffWhyDeps = {}
   out.growthPerCall = Math.round(g)
   out.growthMeasured = gMeasured
   out.targetTokens = Math.round(handoffTargetTokens(base.tokens, g, c))
-  out.thresholdTokens = Math.round(handoffThreshold(base.tokens, g, c, row.contextWindow))
+  out.thresholdTokens = Math.round(row.cutTokens ?? handoffThreshold(base.tokens, g, c, row.contextWindow))
   const gain = c - base.tokens
   if (gain > 0) {
     out.gainPerCallTokens = Math.round(gain)
@@ -239,7 +241,7 @@ export function planHandoffHints(rows: readonly HandoffHintRow[]): HandoffHint[]
     const tokens = row.contextTokens!
     const fraction = row.contextWindow && row.contextWindow > 0 ? tokens / row.contextWindow : 0
     const base = successorBase(row.baseSamples).tokens
-    const threshold = handoffThreshold(base, growthPerCall(row).g, tokens, row.contextWindow)
+    const threshold = row.cutTokens ?? handoffThreshold(base, growthPerCall(row).g, tokens, row.contextWindow)
     if (tokens < threshold) return []
     const inFlight = row.workInFlight?.length || row.activity === 'working' || row.state === 'working'
     if (inFlight || row.ownerWaiting) return []
