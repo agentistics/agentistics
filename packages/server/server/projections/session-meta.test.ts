@@ -606,7 +606,8 @@ describe('turn time (D25) — active_minutes and user_response_times', () => {
 
 
 test('response daily tokens follow the machine-local BRT calendar', () => {
-  const previous = process.env.TZ
+  // bun test runs in UTC without setting TZ, so `delete` would fall back to the host zone
+  const previous = process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone
   process.env.TZ = 'America/Sao_Paulo'
   try {
     const main = mainAgentIdOf(CONV)
@@ -618,7 +619,6 @@ test('response daily tokens follow the machine-local BRT calendar', () => {
     expect(Object.keys(result.meta.daily_tokens!)).toEqual(['2026-10-17'])
     expect(result.meta.daily_tokens!['2026-10-17']!.input).toBe(30)
   } finally {
-    if (previous === undefined) delete process.env.TZ
-    else process.env.TZ = previous
+    process.env.TZ = previous
   }
 })

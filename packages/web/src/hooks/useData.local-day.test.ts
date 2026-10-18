@@ -6,12 +6,12 @@ import { activeInWindow, dayKey, dayKeyOfMs, daysBetween } from '../lib/sessionD
 const filters: Filters = { dateRange: 'all', customStart: '', customEnd: '', projects: [], models: [] }
 
 function inSaoPaulo(run: () => void): void {
-  const previous = process.env.TZ
+  // bun test runs in UTC without setting TZ, so `delete` would fall back to the host zone
+  const previous = process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone
   process.env.TZ = 'America/Sao_Paulo'
   try { run() } finally {
     setSystemTime()
-    if (previous === undefined) delete process.env.TZ
-    else process.env.TZ = previous
+    process.env.TZ = previous
   }
 }
 
