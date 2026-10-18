@@ -71,7 +71,7 @@ describe('header state while closing', () => {
     expect(host.textContent).toBe('encerrando')
   })
   test('every header that prints the state goes through it', () => {
-    for (const f of ['./SessionPanel.tsx', '../../pages/SessionsPage.tsx', './SessionFacts.tsx']) {
+    for (const f of ['./SessionPanel.tsx', '../../pages/SessionsPage.tsx', './SessionFacts.tsx', '../../App.tsx']) {
       expect(readFileSync(new URL(f, import.meta.url), 'utf8')).toContain('<SessionStateText')
     }
   })

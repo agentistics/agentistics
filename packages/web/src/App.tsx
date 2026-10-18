@@ -155,6 +155,7 @@ import { initialSessionView } from './lib/sessionView'
 import { SessionTitleFlag } from './components/sessions/SessionTitleFlag'
 import { SessionLinkInfo } from './components/sessions/SessionLinkInfo'
 import { FadeText } from './components/sessions/FadeText'
+import { SessionStateText } from './components/sessions/SessionStateText'
 import { CheckinModalHost } from './components/sessions/CheckinModal'
 import { sessionLinks } from './lib/sessionParent'
 import { ChatSelectionOverlay } from './components/sessions/ChatSelectionBar'
@@ -3665,7 +3666,7 @@ export default function AppLayout() {
           {/* Gives up before the title does: the name is what identifies the session, and the state
               is repeated on its own row in the aside two centimetres away. */}
           <FadeText data-header-state style={{ fontSize: '0.6875rem', color: 'var(--text-tertiary)', flexShrink: 1000000, minWidth: 0 }}>
-            {headerSession.stateLabel}
+            <SessionStateText id={headerSession.id} label={headerSession.stateLabel} pt={lang === 'pt'} />
             {headerSession.project ? ` · ${headerSession.project}` : ''}
           </FadeText>
         </div>

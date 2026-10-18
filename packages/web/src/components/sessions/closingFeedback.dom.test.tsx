@@ -47,7 +47,7 @@ test('row: one line, task only in the hover card; closing dims it, shows the rin
   expect(card?.textContent).toContain('A very long task title')
   // closing
   await act(async () => { store.beginClosing('x1') })
-  expect(row.style.opacity).toBe('0.55')
+  expect(row.style.opacity).toBe('0.75')
   expect(row.querySelector('[data-closing-ring]')).not.toBeNull()
   expect(row.querySelector('[data-row-tail]')!.textContent).toBe('closing')
   await act(async () => { open.click() })

@@ -2765,7 +2765,7 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
         display: 'flex', flexWrap: 'nowrap', alignItems: 'center', gap: tap ? 2 : 4, fontSize: 12.5, width: '100%', boxSizing: 'border-box',
         // Left padding is deliberately wider than the right: a live row carries a state edge on its left
         // and the text needs air beside it (the row's own dot used to provide it).
-        padding: '0 6px 0 10px', borderRadius: 7, border: 'none', textAlign: 'left', minHeight: tap ?? 32, position: 'relative', opacity: closing ? 0.55 : 1,
+        padding: '0 6px 0 10px', borderRadius: 7, border: 'none', textAlign: 'left', minHeight: tap ?? 32, position: 'relative', opacity: closing ? 0.75 : 1,
         // SELECTED is NOT orange. Orange is already the state colour for a row that needs a person
         // (`STATE_COLOR.waiting`), so the selected row wore the same tint as the alarm and the two
         // became one signal: selecting a working session made it look like it was asking for you.

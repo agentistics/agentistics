@@ -135,7 +135,7 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
     border: 'none',
     borderRight: '1px solid var(--border-subtle)',
     boxShadow: active ? 'inset 0 1px 0 var(--anthropic-orange)' : 'none',
-    opacity: closing ? 0.55 : 1,
+    opacity: closing ? 0.75 : 1,
   }
   return (
     <div
