@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   closeEnded, closeOthers, closeTab, closeToRight, enterTab, livePins, MAX_OPEN_TABS, openTab, ownsTabShortcut, reconcileTabs, parseTabs, pruneTabs,
-  replaceTab, stepTab, stripOrder, tabAt,
+  replaceTab, splitSleepingTabs, stepTab, stripOrder, tabAt,
 } from './sessionTabs'
 
 describe('stripOrder', () => {
@@ -166,5 +166,29 @@ describe('ownsTabShortcut', () => {
     expect(ownsTabShortcut('main', 'main', false)).toBe(true)
     expect(ownsTabShortcut('split', 'main', false)).toBe(false)
     expect(ownsTabShortcut('main', 'main', true)).toBe(false)
+  })
+})
+
+
+describe('splitSleepingTabs — shared by the strip and pinned aside', () => {
+  const states: Record<string, string> = { p: 'closed', live: 'working', ended: 'exited' }
+  const stateOf = (key: string) => states[key]
+  test.each(['exited', 'closed', 'lost', 'unknown'])('pinned %s sleeps without becoming an open tab', state => {
+    const pins = ['p', 'live']
+    const split = splitSleepingTabs(stripOrder(['ended', 'p'], pins), pins, k => k === 'p' ? state : stateOf(k))
+    expect(split).toEqual({ drawn: ['live', 'ended'], sleeping: ['p'] })
+    expect(pins).toEqual(['p', 'live'])
+  })
+  test('an unpinned ended session stays drawn; live and unresolved pins stay drawn', () => {
+    expect(splitSleepingTabs(['live', 'missing', 'ended'], ['live', 'missing'], stateOf))
+      .toEqual({ drawn: ['live', 'missing', 'ended'], sleeping: [] })
+  })
+  test('aside count excludes sleeping pins, and the sleeping row is absent at zero', () => {
+    const split = splitSleepingTabs(['p', 'live'], ['p', 'live'], stateOf)
+    expect(split.drawn.length).toBe(1)
+    expect(split.sleeping.length > 0).toBe(true)
+    const awake = splitSleepingTabs(['p', 'live'], ['p', 'live'], () => 'working')
+    expect(awake.drawn.length).toBe(2)
+    expect(awake.sleeping.length > 0).toBe(false) // no sleeping row or moon
   })
 })

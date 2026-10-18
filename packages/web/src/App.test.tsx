@@ -55,3 +55,24 @@ test('writeStudioSeen tolerates a throwing setItem, never throwing itself', () =
   const throwing = { setItem: () => { throw new Error('SecurityError: denied') } }
   expect(() => writeStudioSeen(throwing)).not.toThrow()
 })
+
+test('the unreachable screen shows the existing animated loader while retrying', async () => {
+  const React = await import('react')
+  const { renderToStaticMarkup } = await import('react-dom/server')
+  const { ServerProblem } = await import('./App')
+  for (const lang of ['pt', 'en']) {
+    const h = renderToStaticMarkup(React.createElement(ServerProblem, { lang, problem: { kind: 'unreachable', detail: '' }, autoRetry: true, onRetry() {} }))
+    expect(h).toContain('role="status"')
+    expect(h).toContain(lang === 'pt' ? 'Tentando novamente' : 'Retrying')
+    expect(h).toContain('<svg')
+    expect(h).toContain('var(--anthropic-orange)')
+    expect(h).toContain('opacity="0.8"')
+    expect(h).toContain(lang === 'pt' ? 'a cada poucos segundos' : 'every few seconds')
+  }
+})
+
+test('Settings keeps the statistics pull-tab out of its card area', async () => {
+  const { readFileSync } = await import('node:fs')
+  const src = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
+  expect(src).toContain("{!location.pathname.startsWith('/settings') && (() => {")
+})

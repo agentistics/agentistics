@@ -39,8 +39,15 @@ describe('session tab strip sits above the session title', () => {
     expect(bar.indexOf('{above ?')).toBeGreaterThan(-1)
     expect(bar.indexOf('{above ?')).toBeLessThan(bar.indexOf('{trailing &&'))
   })
-  test('the pin-limit notice overlays the strip instead of growing it', () => {
+  test('tab feedback reserves a row below the session header', () => {
     const strip = readFileSync(new URL('../components/sessions/SessionTabStrip.tsx', import.meta.url), 'utf8')
-    expect(strip).toMatch(/data-tab-notice\s+style=\{\{\s+position: 'absolute'/)
+    const app = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8')
+    const bar = readFileSync(new URL('../components/nav/TopBar.tsx', import.meta.url), 'utf8')
+    expect(strip).toContain('onNoticeChange?.(notice)')
+    expect(strip).not.toContain("top: '100%'")
+    expect(app).toContain('TABS_ROW_H + tabNoticeHeight')
+    expect(app).toContain('onBelowHeight={setTabNoticeHeight}')
+    expect(bar.indexOf('{below ?')).toBeGreaterThan(bar.indexOf('{trailing &&'))
+    expect(src).toContain('{tabNoticeEl}')
   })
 })

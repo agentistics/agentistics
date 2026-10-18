@@ -13,6 +13,7 @@
 
 import { useNavigate, useLocation } from 'react-router-dom'
 import { LayoutDashboard, MessagesSquare } from 'lucide-react'
+import './ModeSwitch.css'
 import {
   WORKSPACE_MODES, modeLabel, modeOfPath, pathForMode, type WorkspaceMode,
 } from '../../lib/workspaceMode'
@@ -72,12 +73,11 @@ export function ModeSwitch({ lang, collapsed = false, attention = 0, onNavigate 
   return (
     <div
       role="tablist"
+      className="ag-mode-switch"
       aria-label={lang === 'pt' ? 'Área de trabalho' : 'Workspace'}
       style={{
-        // `minWidth: 0` on BOTH the strip and its buttons. A flex item defaults to
-        // `min-width: auto`, which refuses to shrink below its content — so icon + label + badge
-        // pushed the second segment straight out through the aside's right edge. Reported as
-        // "o botao de sessions ta passando pra fora"; it is the default, not the styling.
+        // Query this control's width: the aside can be narrow on a wide desktop.
+        containerType: 'inline-size', containerName: 'workspace-mode',
         // COLLAPSED IT STACKS. The rail leaves about 36px of inner width, and two segments side
         // by side there is not a tight fit, it is an impossible one — the icons piled on top of
         // each other. A segmented control that cannot fit its segments becomes a list of them.
@@ -94,18 +94,19 @@ export function ModeSwitch({ lang, collapsed = false, attention = 0, onNavigate 
         return (
           <button
             key={mode}
+            className={collapsed ? undefined : 'ag-mode-segment'}
             role="tab"
             aria-selected={on}
             aria-label={collapsed ? label : undefined}
             title={collapsed ? label : undefined}
             onClick={() => { navigate(pathForMode(mode, back, sessionsBack)); onNavigate?.() }}
             style={{
-              flex: '1 1 0', minWidth: 0, boxSizing: 'border-box',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              flex: '1 1 auto', minWidth: 0, boxSizing: 'border-box',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--mode-gap, 6px)',
               position: 'relative',
               // 36px is the desktop figure. The mobile form of this control is rendered by
               // MobileBottomNav, which carries the 44px touch target its own rows use.
-              minHeight: 34, padding: collapsed ? '0' : '0 8px',
+              minHeight: 34, padding: collapsed ? '0' : '0 var(--mode-padding, 8px)',
               borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
               fontSize: 12.5, fontWeight: on ? 700 : 500, whiteSpace: 'nowrap',
               background: on ? 'var(--bg-surface)' : 'transparent',
@@ -114,11 +115,9 @@ export function ModeSwitch({ lang, collapsed = false, attention = 0, onNavigate 
               transition: 'background 0.15s, color 0.15s',
             }}
           >
-            <span style={{ display: 'flex', flexShrink: 0 }}>{ICON[mode]}</span>
+            <span style={{ display: collapsed ? 'flex' : 'var(--mode-icon-display, flex)', flexShrink: 0 }}>{ICON[mode]}</span>
             {!collapsed && (
-              // The label is the one part allowed to give way. It truncates rather than pushing the
-              // badge out of the aside — a count nobody can see is worse than a clipped word.
-              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+              <span style={{ flexShrink: 0 }}>{label}</span>
             )}
             {badge && (
               <span

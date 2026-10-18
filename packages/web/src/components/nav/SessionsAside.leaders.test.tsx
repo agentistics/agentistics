@@ -10,9 +10,10 @@ let MemoryRouter: typeof import('react-router-dom').MemoryRouter
 let SessionsAside: typeof import('./SessionsAside').SessionsAside
 let loadSharedPrefs: typeof import('../../lib/sharedPref').loadSharedPrefs
 let writePrefs: typeof import('../../lib/sessionsAsidePrefs').writeAsideGroupPrefs
-const originalFetch = globalThis.fetch
-const originalEventSource = globalThis.EventSource
-const originalActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT
+let originalFetch: typeof globalThis.fetch
+let originalEventSource: typeof globalThis.EventSource
+let originalActEnvironment: boolean | undefined
+let svgAnimate: PropertyDescriptor | undefined
 const roles = { 'live-pin': 'leader', 'live-folder': 'leader', 'live-hidden': 'leader', ended: 'leader' }
 const prefs = {
   sessionsAside: { leadersOnly: false },
@@ -30,9 +31,16 @@ const row = (id: string, state: ControlSession['state']): ControlSession => ({
 const rows = [row('live-pin', 'working'), row('live-folder', 'waiting'), row('live-hidden', 'unknown'), row('worker', 'working'), row('ended', 'exited')]
 
 beforeAll(async () => {
+  originalFetch = globalThis.fetch
+  originalEventSource = globalThis.EventSource
+  originalActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT
   GlobalRegistrator.register({ width: 1280, height: 900 })
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   globalThis.EventSource = class { close() {} addEventListener() {} removeEventListener() {} } as never
+  // This suite checks rows and reopen actions, not Web Animations. Happy DOM rejects unfinished
+  // animation promises on cancel; a busy loader must not leak those rejections into later tests.
+  svgAnimate = Object.getOwnPropertyDescriptor(SVGElement.prototype, 'animate')
+  Object.defineProperty(SVGElement.prototype, 'animate', { configurable: true, value: undefined })
   window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
@@ -49,6 +57,9 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
+  await new Promise(resolve => setTimeout(resolve, 50))
+  if (svgAnimate) Object.defineProperty(SVGElement.prototype, 'animate', svgAnimate)
+  else delete (SVGElement.prototype as unknown as { animate?: unknown }).animate
   globalThis.fetch = originalFetch
   globalThis.EventSource = originalEventSource
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = originalActEnvironment
@@ -75,7 +86,8 @@ for (const width of [1280, 390]) test(`leaders-only is flat and restores the nor
     expect(chip().textContent).toBe('3 leaders')
     expect(host.textContent).toContain('Pinned')
     expect(host.textContent).toContain('Visible folder marker')
-    expect(host.textContent).toContain('Title ended')
+    expect(host.textContent).toContain('Sleeping')
+    expect(host.textContent).not.toContain('Title ended')
     // Leave a summary filter selected: it must neither change the count nor cut the flat list.
     const needs = Array.from(host.querySelectorAll<HTMLButtonElement>('[aria-label="Sessions summary"] button'))
       .find(b => b.textContent?.includes('needs you'))!
@@ -86,13 +98,16 @@ for (const width of [1280, 390]) test(`leaders-only is flat and restores the nor
     act(() => chip().click())
     const list = host.querySelector('[data-leaders-list]')!
     expect(list).toBeTruthy()
-    expect(list.children).toHaveLength(3)
-    for (const id of ['live-pin', 'live-folder', 'live-hidden']) expect(list.textContent).toContain(`Title ${id}`)
-    for (const text of ['Pinned', 'Groups', 'Visible folder marker', 'Hidden folder marker', 'Title worker', 'Title ended', 'Inactive']) {
+    expect(list.children).toHaveLength(2)
+    for (const id of ['live-folder', 'live-hidden']) expect(list.textContent).toContain(`Title ${id}`)
+    expect(host.textContent).toContain('Pinned')
+    expect(host.textContent).toContain('Sleeping')
+    expect(host.querySelectorAll('[title="Title live-pin"]')).toHaveLength(1)
+    for (const text of ['Groups', 'Visible folder marker', 'Hidden folder marker', 'Title ended', 'Inactive']) {
       expect(host.textContent).not.toContain(text)
     }
     expect(host.querySelectorAll('[aria-label="Sessions summary"] button')).toHaveLength(1)
-    act(() => (list.children[0] as HTMLButtonElement).click())
+    act(() => list.children[0]!.querySelector<HTMLButtonElement>('[data-session-open]')!.click())
     expect(opened).toBeDefined()
     act(() => chip().click())
     expect(host.querySelector('[data-leaders-list]')).toBeNull()
@@ -111,7 +126,7 @@ for (const width of [1280, 390]) test(`leaders-only is flat and restores the nor
     render(rows.filter(r => r.state === 'exited'))
     expect(host.querySelector('[data-leaders-only]')).toBeNull()
   } finally {
-    act(() => root.unmount())
+    await act(async () => root.unmount())
     writePrefs({ leadersOnly: false })
     host.remove()
   }
@@ -150,12 +165,63 @@ for (const width of [1280, 390]) for (const lang of ['en', 'pt'] as const) {
       expect(host.textContent).not.toContain(emptyText)
       expect(host.textContent).toContain(lang === 'pt' ? 'Lendo as sessões' : 'Reading this machine')
       render(rows)
-      expect(host.querySelector('[data-leaders-list]')!.children).toHaveLength(3)
+      expect(host.querySelector('[data-leaders-list]')!.children).toHaveLength(2)
       expect(host.textContent).not.toContain(emptyText)
     } finally {
-      act(() => root.unmount())
+      await act(async () => root.unmount())
       act(() => writePrefs({ leadersOnly: false }))
       host.remove()
     }
   })
 }
+
+
+for (const width of [1280, 390]) test(`sleeping pins collapse, remember expansion and reuse reopen/unpin at ${width}px`, async () => {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+  window.matchMedia = (() => ({ matches: width < 768, addEventListener() {}, removeEventListener() {} })) as never
+  await loadSharedPrefs()
+  act(() => writePrefs({ leadersOnly: false, foldedPinned: false, expandedEndedGroups: [] }))
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  let root = createRoot(host)
+  let opened = ''
+  const actions: unknown[] = []
+  const render = () => act(() => root.render(
+    <MemoryRouter><SessionsAside lang="en" rows={rows} filters={filters} activeOnly={false}
+      loading={false} unsupported={false} finishedTasks={[]} hideNew onOpenRow={s => { opened = s.id }}
+      rowsById={new Map([['ended', { verbs: [{ action: 'resume', enabled: true, label: 'Reopen' }] }]])}
+      act={async req => { actions.push(req); return { ok: true, message: 'Opened' } }} />
+    </MemoryRouter>,
+  ))
+  const sleeping = () => Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === 'Sleeping1')!
+  try {
+    render()
+    expect(sleeping().getAttribute('aria-expanded')).toBe('false')
+    expect(host.textContent).not.toContain('Title ended')
+    const pinned = Array.from(host.querySelectorAll('button')).find(b => b.textContent === 'Pinned3')
+    expect(pinned).toBeDefined()
+    act(() => sleeping().click())
+    expect(sleeping().getAttribute('aria-expanded')).toBe('true')
+    const card = host.querySelector<HTMLElement>('[data-session-row][title="Title ended"]')!
+    expect(card.querySelector('[aria-label="Reopen"]')).not.toBeNull()
+    act(() => card.querySelector<HTMLButtonElement>('[data-session-open]')!.click())
+    expect(opened).toBe('ended')
+    await act(async () => {
+      const reopen = Array.from(card.querySelectorAll<HTMLButtonElement>('button')).find(e => e.getAttribute('aria-label') === 'Reopen')!
+      reopen.click()
+    })
+    expect(actions).toEqual([{ id: 'ended', action: 'resume' }])
+    await act(async () => root.unmount())
+    root = createRoot(host)
+    render()
+    expect(sleeping().getAttribute('aria-expanded')).toBe('true')
+    expect(host.textContent).toContain('Title ended')
+    const restored = host.querySelector<HTMLElement>('[data-session-row][title="Title ended"]')!
+    act(() => restored.querySelector<HTMLElement>('[aria-label="Unpin"]')!.click())
+    expect(sleeping()).toBeUndefined()
+  } finally {
+    await act(async () => root.unmount())
+    act(() => writePrefs({ expandedEndedGroups: [] }))
+    host.remove()
+  }
+})

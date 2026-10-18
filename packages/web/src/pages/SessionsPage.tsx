@@ -1,3 +1,4 @@
+import { ActionNotice } from '../components/sessions/ActionNotice'
 /**
  * SessionsPage — the CENTRE of the sessions workspace.
  *
@@ -72,6 +73,7 @@ import { MENTION_ADDED_TOAST } from '../lib/mentionInsert'
 import type { HarnessId } from '@agentistics/core'
 import { freedBytes } from '@agentistics/core'
 import type { AppContext } from '../lib/app-context'
+import { reopenSession } from '../lib/reopeningStore'
 import { loadClosedFleet, useFleet, useFleetIndex, type FleetActionId } from '../lib/fleet'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { FleetOverview } from '../components/sessions/FleetOverview'
@@ -556,14 +558,14 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    * in the URL leaves the reader on a session the next poll drops. The state it carries is what
    * makes the wait a wait instead of the fleet overview; the row it came FROM is what names it.
    */
-  const goToReopened = (id: string) => {
+  const goToReopened = (id: string, from = selected) => {
     // SESSION TABS: a row with no conversation id is keyed by its managed id, which the reopen is
     // about to retire — the new id takes that tab's PLACE, so no dead tab is left behind.
-    if (tabsOn && selected && selected.conversationId === undefined) {
-      setOpenTabs(pane, replaceTab(getOpenTabs(pane), selected.id, id))
+    if (tabsOn && from && from.conversationId === undefined) {
+      setOpenTabs(pane, replaceTab(getOpenTabs(pane), from.id, id))
     }
-    const r = reopenedSessionRoute(id, selected
-      ? { id: selected.id, harness: selected.harness, title: selected.title }
+    const r = reopenedSessionRoute(id, from
+      ? { id: from.id, harness: from.harness, title: from.title }
       : undefined)
     // SPLIT: only THIS pane follows the new id; the other side is left exactly where it is. The
     // arrival state rides along for the main pane, whose route it describes.
@@ -1986,14 +1988,22 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    * desktop pane the title is `App.tsx`'s global top strip, and `App.tsx` itself draws the strip as
    * the first row of that top area — this page renders none there.
    */
+  const [tabNotice, setTabNotice] = useState<string | null>(null)
+  const tabNoticeEl = tabNotice ? <ActionNotice message={tabNotice} lang={lang} onDismiss={() => setTabNotice(null)} /> : null
   const tabStripAboveTitle = tabsOn && (isMobile || splitRoute !== null)
   const tabStripEl = tabsOn && selected ? (
     <SessionTabStrip
+      onNoticeChange={setTabNotice}
       lang={pt ? 'pt' : 'en'}
       rows={fleet.rows}
       fleetReady={!loading && !pollUnsupported}
       active={selected}
       onGo={goToTab}
+      onReopen={async row => {
+        const out = await reopenSession(row.id, act)
+        if (out.ok && out.id) goToReopened(out.id, row)
+        return out
+      }}
       onNone={closeThisPane}
     />
   ) : null
@@ -2812,6 +2822,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         </div>
         {selected.actionable && <AwayChip id={selected.id} away={selected.away === true} pt={pt} compact />}
       </div>
+      {tabNoticeEl}
       {/* `display: flex` is the load-bearing part, not `flex: 1`.
           This div had `flex: 1, minHeight: 0` and no display, so it was a BLOCK. Its child —
           SessionPanel's own `flex: 1 1 0%` column — was therefore not a flex item at all, and
@@ -3254,6 +3265,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         view={sessionView}
         onViewChange={setSessionView}
       />
+      {tabNoticeEl}
       </>
     ) : null}
     {/* IDLE SESSIONS (Task 6) — the offer itself is `IdleReviewCard`, mounted inside `SessionsAside`

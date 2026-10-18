@@ -1,3 +1,4 @@
+import { ActionNotice } from './components/sessions/ActionNotice'
 import { useEscapeOwner } from './lib/overlayStack'
 import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback, useSyncExternalStore } from 'react'
 import { Outlet, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -112,6 +113,9 @@ import { journalBackfillPollMs } from './lib/journalBackfill'
 import { initialLang } from './lib/lang'
 import { fleetOpenStore, sessionsFiltersOpenStore, sessionTabsStore, studioSeenStore } from './lib/appFlags'
 import { SessionTabStrip } from './components/sessions/SessionTabStrip'
+import { reopenSession } from './lib/reopeningStore'
+import { replaceTab } from './lib/sessionTabs'
+import { getOpenTabs, setOpenTabs } from './lib/sessionTabsStore'
 import { pageMaxWidth } from './lib/pageWidth'
 import {
   DEFAULT_ORDER, sortSessions, type ControlSession,
@@ -263,7 +267,7 @@ function useBootWatchdog(): BootVerdict {
 
 /** A failure, said in words a person can act on, with the way out: retry now, and a note that it is
  *  already retrying by itself when it is. */
-function ServerProblem({ lang, problem, onRetry, autoRetry }: { lang: string; problem: LoadError; onRetry: () => void; autoRetry: boolean }) {
+export function ServerProblem({ lang, problem, onRetry, autoRetry }: { lang: string; problem: LoadError; onRetry: () => void; autoRetry: boolean }) {
   const { title, body } = loadErrorText(problem, lang === 'pt' ? 'pt' : 'en', typeof location !== 'undefined' ? location.host : '')
   return (
     <div role="alert" style={{ minHeight: 'calc(100vh / var(--ui-zoom, 1))', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '40px 16px', textAlign: 'center', background: 'var(--bg-base)', boxSizing: 'border-box' }}>
@@ -278,7 +282,8 @@ function ServerProblem({ lang, problem, onRetry, autoRetry }: { lang: string; pr
         {lang === 'pt' ? 'Tentar novamente' : 'Try again'}
       </button>
       {autoRetry && (
-        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
+        <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
+          <AgentisticsLoader size={18} accent="var(--anthropic-orange)" baseOpacity={0.8} label={lang === 'pt' ? 'Tentando novamente' : 'Retrying'} />
           {lang === 'pt' ? 'Tentando de novo sozinho a cada poucos segundos.' : 'Also retrying on its own every few seconds.'}
         </div>
       )}
@@ -2256,7 +2261,9 @@ export default function AppLayout() {
    */
   const sessionTabsOn = useSyncExternalStore(sessionTabsStore.subscribe, sessionTabsStore.get, sessionTabsStore.serverSnapshot)
   const tabsRowOn = sessionTabsOn && !isMobile && headerSession !== undefined
-  const topbarExtra = tabsRowOn ? TABS_ROW_H : 0
+  const [tabNotice, setTabNotice] = useState<string | null>(null)
+  const [tabNoticeHeight, setTabNoticeHeight] = useState(0)
+  const topbarExtra = tabsRowOn ? TABS_ROW_H + tabNoticeHeight : 0
   useEffect(() => {
     document.documentElement.style.setProperty('--ag-topbar-h', `${isMobile ? 0 : TOPBAR_H + topbarExtra}px`)
   }, [isMobile, topbarExtra])
@@ -4122,7 +4129,7 @@ export default function AppLayout() {
           page panel. Dashboard only — these are STORED metrics, and a live fleet already states its own
           "Connected · last sync" in the aside. */}
       {/* Guarded by this row's own condition — see `dashboardTopBar`. */}
-      {(() => {
+      {!location.pathname.startsWith('/settings') && (() => {
         return (
           // It hangs from the PAGE PANEL's top edge now, not from the strip: the panel sits
           // `OUTER_GAP` below the strip with a 1px border, and the tab starts right inside that
@@ -4467,6 +4474,8 @@ export default function AppLayout() {
       {/* The fixed strip above the aside — desktop only. */}
       {!isMobile && (
         <TopBar
+          below={tabsRowOn && tabNotice ? <ActionNotice message={tabNotice} lang={lang} onDismiss={() => setTabNotice(null)} /> : null}
+          onBelowHeight={setTabNoticeHeight}
           height={TOPBAR_H}
           asideWidth={sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth}
           // Owner-approved central-pane inset (2026-09-26): the sessions workspace's pane now
@@ -4477,11 +4486,23 @@ export default function AppLayout() {
             aboveHeight: TABS_ROW_H,
             above: (
               <SessionTabStrip
+                onNoticeChange={setTabNotice}
                 lang={lang === 'pt' ? 'pt' : 'en'}
                 rows={headerFleet.rows}
                 fleetReady={!headerFleetUnsupported && headerFleet.rows.length > 0}
                 active={headerSession}
                 onGo={id => navigate(sessionPath(id))}
+                onReopen={async row => {
+                  const out = await reopenSession(row.id, headerFleetAct)
+                  if (out.ok && out.id) {
+                    if (row.conversationId === undefined) {
+                      setOpenTabs('main', replaceTab(getOpenTabs('main'), row.id, out.id))
+                    }
+                    const r = reopenedSessionRoute(out.id, { id: row.id, harness: row.harness, title: row.title })
+                    navigate(r.path, r.options)
+                  }
+                  return out
+                }}
                 onNone={() => navigate('/sessions')}
               />
             ),

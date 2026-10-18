@@ -8,10 +8,11 @@ import { SessionRow } from './SessionsAside'
 const resume = { action: 'resume', label: 'Reopen', enabled: true }
 const session = { id: 'ended-row', title: 'Finished work', harness: 'codex', state: 'exited', stateLabel: 'Ended', task: 'Delivery marker', model: 'model-marker' } as ControlSession
 
-test('ended row reuses the rail’s single-line identity without the full card metadata', () => {
+test('ended row reuses the rail’s wrapping identity without the full card metadata', () => {
   const html = renderToStaticMarkup(<SessionRow session={session} compact selected={false} cardColor="wash" onOpen={() => {}} lang="en" />)
   expect(html).toContain('Finished work')
-  expect(html).toContain('white-space:nowrap')
+  expect(html).toContain('white-space:normal')
+  expect(html).not.toContain('text-overflow:ellipsis')
   expect(html).toContain('padding:6px 8px')
   expect(html).not.toContain('Delivery marker')
   // The full model is still in the row tooltip, not a second line.
@@ -31,13 +32,13 @@ test('compact row still opens, pins and exposes its resume actions on mobile and
     return row
   }
   const html = renderToStaticMarkup(<Row />)
-  expect(html).toContain('min-height:44px')
+  expect(html).toContain('min-height:56px')
   expect(html).toContain('Options for Finished work')
   expect(html).toContain('aria-haspopup="menu"')
-  row.props.onClick()
   const event = { stopPropagation() {}, preventDefault() {}, key: 'Enter', currentTarget: { getBoundingClientRect: () => ({ left: 10, bottom: 20 }) } }
   React.Children.forEach(row.props.children, child => {
-    if (!React.isValidElement<{ 'aria-label'?: string; onClick?: (e: typeof event) => void; onKeyDown?: (e: typeof event) => void }>(child)) return
+    if (!React.isValidElement<{ 'aria-label'?: string; 'data-session-open'?: boolean; onClick?: (e: typeof event) => void; onKeyDown?: (e: typeof event) => void }>(child)) return
+    if (child.props['data-session-open']) child.props.onClick!(event)
     if (child.props['aria-label'] === 'Options for Finished work') child.props.onKeyDown!(event)
     if (child.props['aria-label'] === 'Pin') child.props.onClick!(event)
   })
@@ -49,4 +50,47 @@ test('expanded ended members select compact rows while live members keep full ro
   expect(src).toContain('{live.map(s => renderRow(s))}')
   expect(src).toContain('{endedOpen && ended.map(s => renderRow(s, true))}')
   expect(src).toContain('compact={compact}')
+})
+
+test('compact sleeping rows reserve one line for controls and keep the last word with its badge', () => {
+  const html = renderToStaticMarkup(<SessionRow session={{ ...session, title: '[ LÍDER ] - Maestro (superskill)' }} compact pinned
+    selected={false} cardColor="wash" onOpen={() => {}} onPin={() => {}} onReopen={() => {}} reopenVerb={resume}
+    onOpenMenu={() => {}} verbs={[resume]} lang="pt" />)
+  expect(html).toContain('flex-wrap:nowrap')
+  expect(html).toContain('flex:1 1 0')
+  expect(html).toContain('white-space:nowrap">(superskill)')
+  expect(html).toContain('aria-label="Reabrir"')
+  expect(html).toContain('lucide-pin-off')
+  expect(html).not.toContain('text-overflow:ellipsis')
+  const unpinned = renderToStaticMarkup(<SessionRow session={session} compact selected={false} cardColor="wash" onOpen={() => {}} onPin={() => {}} lang="pt" />)
+  expect(unpinned).toContain('aria-label="Fixar"')
+  expect(unpinned).toContain('lucide-pin"')
+  expect(unpinned).not.toContain('lucide-pin-off')
+})
+
+test('reopen is an icon control with a full label, foreground contrast and native disabled state', () => {
+  for (const enabled of [true, false]) {
+    const h = renderToStaticMarkup(<SessionRow session={session} compact pinned selected={false} cardColor="wash" lang="pt"
+      onOpen={() => {}} onPin={() => {}} onReopen={() => {}} reopenVerb={{ ...resume, enabled }} />)
+    const button = h.match(/<button[^>]*aria-label="Reabrir"[\s\S]*?<\/button>/)![0]
+    expect(button).toContain('title="Reabrir"')
+    expect(button).toContain('var(--text-primary)')
+    expect(button).toContain('lucide-rotate-ccw')
+    expect(button.replace(/<[^>]+>/g, '')).toBe('')
+    expect(button.includes('disabled=""')).toBe(!enabled)
+  }
+})
+
+
+test('sleeping reopen icons explain the server refusal in both languages', () => {
+  for (const lang of ['pt', 'en'] as const) {
+    const reason = lang === 'pt'
+      ? 'Não dá para reabrir esta sessão daqui: nenhuma conversa retomável foi encontrada para ela.'
+      : 'This session cannot be reopened from here: no resumable conversation was found for it.'
+    const html = renderToStaticMarkup(<SessionRow session={session} compact pinned selected={false} cardColor="wash" lang={lang}
+      onOpen={() => {}} onReopen={() => {}} reopenVerb={{ ...resume, enabled: false, reason }} />)
+    expect(html).toContain(`aria-label="${reason}"`)
+    expect(html).toContain(`title="${reason}"`)
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*aria-label=/)
+  }
 })

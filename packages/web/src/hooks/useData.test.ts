@@ -121,29 +121,27 @@ describe('getDateRangeFilter', () => {
     expect(diffDays).toBeLessThan(91.1)
   })
 
-  test('"all" com datas customizadas → usa as datas fornecidas (dia calendário em UTC)', () => {
-    // UTC, não fuso local — ver o comentário em getDateRangeFilter: precisa bater com sessionDay(),
-    // que fatia a string ISO crua (`.slice(0, 10)`, sempre UTC).
+  test('"all" com datas customizadas → usa as datas fornecidas (dia calendário local)', () => {
     const { start, end } = getDateRangeFilter('all', '2026-01-01', '2026-03-31')
-    expect(start.getUTCFullYear()).toBe(2026)
-    expect(start.getUTCMonth()).toBe(0) // janeiro
-    expect(start.getUTCDate()).toBe(1)
-    expect(start.getUTCHours()).toBe(0)
-    expect(end.getUTCMonth()).toBe(2)   // março
-    expect(end.getUTCDate()).toBe(31)
-    expect(end.getUTCHours()).toBe(23)
+    expect(start.getFullYear()).toBe(2026)
+    expect(start.getMonth()).toBe(0) // janeiro
+    expect(start.getDate()).toBe(1)
+    expect(start.getHours()).toBe(0)
+    expect(end.getMonth()).toBe(2)   // março
+    expect(end.getDate()).toBe(31)
+    expect(end.getHours()).toBe(23)
   })
 
   test('customStart sem customEnd → end é agora', () => {
     const { start, end } = getDateRangeFilter('all', '2025-01-01')
-    expect(start.getUTCFullYear()).toBe(2025)
+    expect(start.getFullYear()).toBe(2025)
     expect(end.getTime()).toBeGreaterThan(Date.now() - 1000)
   })
 
-  test('um dia customizado (start === end) cobre exatamente esse dia calendário UTC', () => {
+  test('um dia customizado (start === end) cobre exatamente esse dia calendário local', () => {
     const { start, end } = getDateRangeFilter('all', '2026-07-23', '2026-07-23')
-    expect(start.toISOString()).toBe('2026-07-23T00:00:00.000Z')
-    expect(end.toISOString()).toBe('2026-07-23T23:59:59.999Z')
+    expect(start.getTime()).toBe(new Date(2026, 6, 23).getTime())
+    expect(end.getTime()).toBe(new Date(2026, 6, 23, 23, 59, 59, 999).getTime())
   })
 
   test('start sempre antes de end', () => {

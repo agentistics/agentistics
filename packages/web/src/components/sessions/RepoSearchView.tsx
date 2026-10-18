@@ -474,15 +474,18 @@ function HitRow({ hit, isMobile, lang, onOpen }: {
 }
 
 /** A control that is only an icon still has to be a 44px target on a phone, and still has a name. */
-export function IconButton({ label, size, onClick, children }: {
+export function IconButton({ label, size, onClick, children, disabled = false, color = 'var(--text-tertiary)' }: {
   label: string
   size: number
-  onClick: () => void
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void
   children: ReactNode
+  disabled?: boolean
+  color?: string
 }) {
   return (
     <button
       type="button"
+      disabled={disabled}
       aria-label={label}
       title={label}
       onClick={onClick}
@@ -490,7 +493,7 @@ export function IconButton({ label, size, onClick, children }: {
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         width: size, height: size, flexShrink: 0, boxSizing: 'border-box',
         padding: 0, background: 'transparent', border: 'none', borderRadius: 6,
-        cursor: 'pointer', color: 'var(--text-tertiary)',
+        cursor: disabled ? 'default' : 'pointer', color, opacity: disabled ? 0.65 : 1,
       }}
     >
       {children}

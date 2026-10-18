@@ -482,6 +482,11 @@ function openFleetStream(): void {
   })
 }
 
+/** Pins are explicit intent: their sleeping rows need history even in an active-only view. */
+export function needsClosedFleet(activeOnly: boolean, pinnedCount: number): boolean {
+  return !activeOnly || pinnedCount > 0
+}
+
 /** History is loaded in pages when an existing list asks to draw inactive sessions. */
 export function loadClosedFleet(): void { void fleetStream?.loadClosed() }
 

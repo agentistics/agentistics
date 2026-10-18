@@ -711,7 +711,7 @@ test('current Anthropic models are priced as themselves, not as the fallback', (
 test('sessionDay tolerates a start_time an adapter got wrong', () => {
   expect(sessionDay('2026-08-05T10:00:00.000Z')).toBe('2026-08-05')
   // Kimi wrote an epoch number; one such session used to 500 the whole /api/data response.
-  expect(sessionDay(1785939883717)).toBe(new Date(1785939883717).toISOString().slice(0, 10))
+  expect(sessionDay(1785939883717)).toBe(sessionDay(new Date(1785939883717).toISOString()))
   expect(sessionDay(undefined)).toBe('')
   expect(sessionDay(null)).toBe('')
   expect(sessionDay({})).toBe('')
