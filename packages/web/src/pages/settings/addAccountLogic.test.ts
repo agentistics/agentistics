@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { ADD_COPY, TURN_ON_BODY, multiAccountOn, turnOnErrorText, addAccountView, addErrorText, anyResolved, loginTarget, pendingRoots, type RootRowView } from './addAccountLogic'
+import { ADD_COPY, addAccountView, addErrorText, anyResolved, loginTarget, pendingRoots, type RootRowView } from './addAccountLogic'
 
 const root = (o: Partial<RootRowView>): RootRowView => ({ harness: 'claude', root: '/r', status: 'pending', pendingId: 'p1', ...o })
 
@@ -65,34 +65,5 @@ describe('wiring', () => {
     expect(comp).not.toContain('position: \'fixed\'')
     expect(comp).toContain("'/api/accounts/roots'")
     expect(comp).toContain("method: 'DELETE'")
-  })
-})
-
-describe('turn on multiple accounts', () => {
-  test('flag off renders the button, not the add buttons', () => {
-    const comp = readFileSync(new URL('./AddAccount.tsx', import.meta.url), 'utf8')
-    expect(comp).toContain('t.turnOn}</button>')
-    expect(comp).toContain('<ConfirmModal')
-    expect(ADD_COPY(true).turnOn).toBe('Ligar várias contas')
-    expect(ADD_COPY(false).turnOn).toBe('Turn on multiple accounts')
-  })
-  test('confirm sends the same body as the CLI switch', () => {
-    expect(TURN_ON_BODY).toEqual({ enabled: true })
-    const comp = readFileSync(new URL('./AddAccount.tsx', import.meta.url), 'utf8')
-    expect(comp).toContain("method: 'PUT'")
-    expect(comp).toContain('JSON.stringify(TURN_ON_BODY)')
-  })
-  test('the flag is refetched from the report after success', () => {
-    const report = { enabled: true, features: [{ id: 'multi-account', on: true }] }
-    expect(multiAccountOn(report)).toBe(true)
-    expect(multiAccountOn({ features: [{ id: 'multi-account', on: false }] })).toBe(false)
-    expect(multiAccountOn(null)).toBe(false)
-  })
-  test('error text: server message when sent, fixed sentence otherwise, never the code', () => {
-    expect(turnOnErrorText({ message: 'Nope.' }, true)).toBe('Nope.')
-    const t = turnOnErrorText({ error: 'bad_request' }, false)
-    expect(t).toContain('Try again')
-    expect(t).not.toContain('bad_request')
-    expect(turnOnErrorText(null, true)).toContain('Tente de novo')
   })
 })

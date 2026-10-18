@@ -13,7 +13,7 @@ import { HarnessMark } from '../../components/sessions/HarnessMark'
 import { MetricNote } from '../../components/MetricNote'
 import { Pill } from '../../components/Pill'
 import { ConfirmModal, StatusDot, dialogButtonStyle } from './primitives'
-import { ADD_COPY, TURN_ON_BODY, addAccountView, addErrorText, anyResolved, loginTarget, multiAccountOn, pendingRoots, turnOnErrorText, type Lang, type RootRowView } from './addAccountLogic'
+import { ADD_COPY, addAccountView, addErrorText, anyResolved, loginTarget, pendingRoots, type Lang, type RootRowView } from './addAccountLogic'
 
 const POLL_MS = 4000
 
@@ -34,38 +34,16 @@ export default function AddAccount({ lang, harnesses, onBound }: {
   const [error, setError] = useState<string | null>(null)
   const rootsRef = useRef<RootRowView[]>([])
 
-  const [turning, setTurning] = useState(false)
-  const [turnBusy, setTurnBusy] = useState(false)
-  const [turnError, setTurnError] = useState<string | null>(null)
-
-  const readFlag = useCallback(async (): Promise<boolean> => {
-    try {
-      const r = await fetch('/api/experimental')
-      const on = r.ok && multiAccountOn(await r.json())
-      setFlagOn(on)
-      return on
-    } catch { return false /* unknown reads as off */ }
-  }, [])
-  useEffect(() => { void readFlag() }, [readFlag])
-
-  const turnOn = async () => {
-    if (turnBusy) return
-    setTurnBusy(true)
-    setTurnError(null)
-    try {
-      const r = await fetch('/api/experimental', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(TURN_ON_BODY),
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/experimental')
+      .then(r => (r.ok ? r.json() : null))
+      .then((b: { features?: { id: string; on: boolean }[] } | null) => {
+        if (!cancelled) setFlagOn(b?.features?.find(f => f.id === 'multi-account')?.on === true)
       })
-      const body: unknown = await r.json().catch(() => null)
-      if (!r.ok) { setTurnError(turnOnErrorText(body, pt)); return }
-      if (await readFlag()) setTurning(false)
-      else setTurnError(t.stillOff)
-    } catch {
-      setTurnError(turnOnErrorText(null, pt))
-    } finally {
-      setTurnBusy(false)
-    }
-  }
+      .catch(() => { /* unknown reads as off */ })
+    return () => { cancelled = true }
+  }, [])
 
   const refresh = useCallback(async (): Promise<RootRowView[]> => {
     try {
@@ -122,26 +100,7 @@ export default function AddAccount({ lang, harnesses, onBound }: {
     }
   }
 
-  if (view.kind === 'off') {
-    return (
-      <div data-add-account-off style={{ marginTop: 14, display: 'flex', flexDirection: 'column', alignItems: isMobile ? 'stretch' : 'flex-start', gap: 8 }}>
-        <MetricNote>{t.flagOff}</MetricNote>
-        <button type="button" style={dialogButtonStyle('secondary', isMobile)} onClick={() => { setTurnError(null); setTurning(true) }}>{t.turnOn}</button>
-        <ConfirmModal
-          open={turning}
-          tone="default"
-          title={t.turnOnTitle}
-          message={t.turnOnMessage}
-          confirmLabel={turnBusy ? t.working : t.turnOnConfirm}
-          cancelLabel={t.cancel}
-          onConfirm={() => { void turnOn() }}
-          onCancel={() => { if (!turnBusy) setTurning(false) }}
-        >
-          {turnError && <p role="alert" style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--accent-red)' }}>{turnError}</p>}
-        </ConfirmModal>
-      </div>
-    )
-  }
+  if (view.kind === 'off') return <MetricNote>{t.flagOff}</MetricNote>
   return (
     <div data-add-account style={{ marginTop: 14 }}>
       {waiting.length > 0 && (
