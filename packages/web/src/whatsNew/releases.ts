@@ -10,6 +10,27 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.140.9': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Configurações → Cobrança mostra uma linha por conta e um só lugar para editar o plano; contas repetidas sumiram.',
+        en: 'Settings → Billing shows one row per account and a single place to edit the plan; repeated accounts are gone.',
+      },
+      {
+        pt: 'Valores aparecem com os centavos (R$ 110,50), a lista de planos mostra só os do assistente certo e a data inicial já vem certa.',
+        en: "Prices keep their cents (R$ 110.50), the plan list shows only that assistant's plans and the start date comes pre-filled correctly.",
+      },
+      {
+        pt: 'A janela do check-in da liderança abre sozinha, em duas colunas, sem informações repetidas e também no celular.',
+        en: 'The leadership check-in window opens on its own, in two columns, without repeated details, on phones too.',
+      },
+      {
+        pt: 'O modo Ausente virou um botão quadrado com uma lua laranja, igual aos outros botões do cabeçalho.',
+        en: 'Away mode is now a square button with an orange moon, matching the other header buttons.',
+      },
+    ],
+  },
   '2.140.8': {
     features: [],
     fixes: [

@@ -18,6 +18,7 @@
  * than the bubble, and letting it set the width is how a message ends up outside its own card.
  */
 
+import { OpenCheckinButton } from './CheckinModal'
 import { useEscapeOwner } from '../../lib/overlayStack'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { stripDictatedMark } from '../../lib/dictationMark'
@@ -336,7 +337,7 @@ export function SystemLine({ children, below, isMobile = false }: { children: Re
   )
 }
 
-function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt: boolean }) {
+function SystemNote({ note, noteRef, pt, sessionId }: { note: string; noteRef?: string; pt: boolean; sessionId?: string }) {
   const { label, help, tab } = chatNote(note, pt)
   const [shown, setShown] = useState(false)
   const isMobile = useIsMobile()
@@ -344,12 +345,9 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
 
   // CHECKIN.PROMPT-SYSTEM is a notice, but its action belongs to the shared session header so
   // the same larger report view is used from both places.
-  if (note.includes('agentistics_checkin_report')) {
+  if (note.includes('agentistics_checkin_report') && sessionId) {
     return <SystemLine isMobile={isMobile}>
-      <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('agentistics:open-checkin'))}
-        style={{ ...sysLink, ...touch(isMobile) }}>
-        {pt ? 'Abrir check-in' : 'Open check-in'}
-      </button>
+      <OpenCheckinButton sessionId={sessionId} lang={pt ? 'pt' : 'en'} style={{ ...sysLink, ...touch(isMobile) }} fallback={<span>{label}</span>} />
     </SystemLine>
   }
 
@@ -604,7 +602,7 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
   }
 
   if (turn.system) {
-    return <SystemNote note={turn.system} noteRef={turn.systemRef} pt={pt} />
+    return <SystemNote note={turn.system} noteRef={turn.systemRef} pt={pt} {...(sessionId ? { sessionId } : {})} />
   }
 
   const color = (HARNESS_COLORS as Record<string, string>)[harness] ?? 'var(--text-secondary)'
@@ -1291,11 +1289,7 @@ export function SystemEventRow({ event, pt, sessionId, titleOf, senderSessionId,
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}{title && <span style={{ color: 'var(--text-tertiary)' }}> · {title}</span>}</span>
         <ChevronDown size={12} style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : undefined }} />
       </button>
-      {event.kind === 'checkin' && <button
-        type="button"
-        onClick={() => window.dispatchEvent(new CustomEvent('agentistics:open-checkin', { detail: { sessionId } }))}
-        style={{ ...sysLink, ...touch(isMobile) }}
-      >{pt ? 'Abrir check-in' : 'Open check-in'}</button>}
+      {event.kind === 'checkin' && sessionId && <OpenCheckinButton sessionId={sessionId} lang={pt ? 'pt' : 'en'} style={{ ...sysLink, ...touch(isMobile) }} />}
     </SystemLine>
   )
 }
